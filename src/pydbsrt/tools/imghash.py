@@ -8,6 +8,10 @@ from imagehash import ImageHash
 import numpy as np
 
 
+def imghash_to_bitarray(imghash: ImageHash) -> BitArray:
+    return BitArray(f'0x{str(imghash)}')
+
+
 def imghash_to_64bits(imghash: ImageHash) -> str:
     """
 

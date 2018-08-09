@@ -35,7 +35,9 @@ setup(
         "distance==0.1.3",
         "ImageHash==4.0",
         "imageio==2.3.0",
-        "pysrt==1.1.1",        
+        "prettyprint==0.1.5"
+        "pysrt==1.1.1",
+        "tqdm==4.24.0",
     ],
     extras_require={},
     entry_points={
