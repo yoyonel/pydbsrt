@@ -1,6 +1,7 @@
 """
 
 """
+import binascii
 import bitstring
 from collections import defaultdict
 from hashlib import md5
@@ -17,7 +18,7 @@ from pydbsrt.tools.subreader import SubReader
 from pydbsrt.tools.subfingerprint import SubFingerprints
 from pydbsrt.tools.importantframefingerprint import ImportantFrameFingerprints
 from pydbsrt.tools.ffmpeg_tools.ffmeg_extract_frame import ffmpeg_imghash_generator
-from pydbsrt.tools.imghash import imghash_to_bitarray
+from pydbsrt.tools.imghash import imghash_to_bitarray, imghash_to_64bits
 
 
 def show_fingerprints(vreader):
@@ -71,17 +72,23 @@ def entropy2(labels, base=None):
     return ent
 
 
-def show_important_frames_fingerprints(vreader):
+def show_important_frames_fingerprints(
+    vreader,
+    threshold_distance: int=32,
+    threshold_nonzero: int=16,
+):
     """
     Compute Important Frames (from fingerprint analyze) and extract frames images from them.
 
     :param vreader:
+    :param threshold_distance:
+    :param threshold_nonzero:
     :return:
     """
     gen_if_fingerprint = ImportantFrameFingerprints(
         VideoFingerprint(vreader),
-        threshold_distance=32,
-        threshold_nonzero=16,   # for removing blank (black) frames
+        threshold_distance=threshold_distance,
+        threshold_nonzero=threshold_nonzero,   # for removing blank (black) frames
     )
 
     # try:
@@ -106,9 +113,7 @@ def show_important_frames_fingerprints(vreader):
         imageio.imwrite(export_path.joinpath(f'{id_frame}.jpg'), frame)
 
 
-def export_fingerprints(
-        input_media_path: Path
-):
+def export_fingerprints(input_media_path: Path) -> Path:
     """
 
     :param input_media_path:
@@ -128,11 +133,10 @@ def export_fingerprints(
         for imghash in tqdm(ffmpeg_imghash_generator(str(input_media_path))):
             ba_imghash = imghash_to_bitarray(imghash)
             fp.write(ba_imghash.bytes)
+    return export_fp
 
 
-def import_fingerprints(
-        input_fingerprints_path: Path
-):
+def import_fingerprints(input_fingerprints_path: Path) -> hex:
     """
 
     :param input_fingerprints_path:
@@ -161,24 +165,41 @@ def main():
     # media_path = root_path.joinpath('extract_2038_20170802_231535.mp4')
     root_path = Path("/home/latty/Vidéos/Mission Impossible Rogue Nation (2015) [1080p]/")
     media_path = root_path.joinpath("Mission.Impossible.Rogue.Nation.2015.1080p.BluRay.x264.YIFY.[YTS.AG].mp4")
+    st_path = root_path.joinpath('Mission.Impossible.Rogue.Nation.2015.1080p.BluRay.x264.YIFY.[YTS.AG].srt')
 
     vreader = VideoReader(media_path)
     print(vreader.metadatas)
 
     # show_fingerprints(vreader)
     #
-    # show_subtitles_fingerprints(vreader, srt_path=root_path.joinpath('subtitles.srt'))
+    # show_subtitles_fingerprints(vreader, srt_path=st_path)
 
-    # show_important_frames_fingerprints(vreader)
+    show_important_frames_fingerprints(vreader, threshold_distance=4)
 
-    # export_fingerprints(media_path)
+    # fp_exported = export_fingerprints(media_path)
+    # print(f"Fingerprints exported: {fp_exported}")
 
-    map_imghash_occurency = defaultdict(int)
-    for i, imghash in tqdm(enumerate(import_fingerprints(Path("/tmp/imghash/2cf8d538818fef16a65925ad55d0b1bf.ba")))):
-        print(f"#{i} - {imghash}")
-        map_imghash_occurency[imghash] += 1
-    # print(pformat(map_imghash_occurency))
-    print(f"Nb distinct imghash: {len(list(map_imghash_occurency.keys()))}")
+    fp_exported = Path("/tmp/imghash/2cf8d538818fef16a65925ad55d0b1bf.ba")
+
+    # map_imghash_occurency = defaultdict(int)
+    # for i, imghash in tqdm(enumerate(import_fingerprints(fp_exported))):
+    #     print(f"#{i} - {imghash}")
+    #     map_imghash_occurency[imghash] += 1
+    # # print(pformat(map_imghash_occurency))
+    # print(f"Nb distinct imghash: {len(list(map_imghash_occurency.keys()))}")
+
+    # instance.opt
+    nb_fingerprints = 25 * 2   # 1 minute
+    with open("/tmp/imghash/instance.opt", "w") as fp:
+        imghashs = set(islice(import_fingerprints(fp_exported), nb_fingerprints))
+        print(
+            "2\n"
+            f"{len(imghashs)}\n"
+            "64\n"
+            "0\n"
+            "1", file=fp)
+        for imghash in imghashs:
+            print(bin(int(imghash, 16))[2:], file=fp)
 
 
 if __name__ == '__main__':
