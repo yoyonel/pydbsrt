@@ -87,3 +87,17 @@ def imghash_count_nonzero(imghash: ImageHash) -> int:
     5
     """
     return np.count_nonzero(imghash.hash.flatten())
+
+
+def imghash_hexstr_to_binstr(imghash_hex: hex) -> str:
+    """
+
+    :param imghash_hex:
+    :return:
+
+
+    >>> imghash_hexstr_to_binstr("c165924de35876d9")
+    '1100000101100101100100100100110111100011010110000111011011011001'
+
+    """
+    return bin(int(imghash_hex, 16))[2:]

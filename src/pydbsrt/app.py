@@ -18,7 +18,7 @@ from pydbsrt.tools.subreader import SubReader
 from pydbsrt.tools.subfingerprint import SubFingerprints
 from pydbsrt.tools.importantframefingerprint import ImportantFrameFingerprints
 from pydbsrt.tools.ffmpeg_tools.ffmeg_extract_frame import ffmpeg_imghash_generator
-from pydbsrt.tools.imghash import imghash_to_bitarray, imghash_to_64bits
+from pydbsrt.tools.imghash import imghash_to_bitarray, imghash_to_64bits, imghash_hexstr_to_binstr
 
 
 def show_fingerprints(vreader):
@@ -174,32 +174,33 @@ def main():
     #
     # show_subtitles_fingerprints(vreader, srt_path=st_path)
 
-    show_important_frames_fingerprints(vreader, threshold_distance=4)
+    # show_important_frames_fingerprints(vreader, threshold_distance=4)
 
     # fp_exported = export_fingerprints(media_path)
     # print(f"Fingerprints exported: {fp_exported}")
 
     fp_exported = Path("/tmp/imghash/2cf8d538818fef16a65925ad55d0b1bf.ba")
 
-    # map_imghash_occurency = defaultdict(int)
-    # for i, imghash in tqdm(enumerate(import_fingerprints(fp_exported))):
-    #     print(f"#{i} - {imghash}")
-    #     map_imghash_occurency[imghash] += 1
-    # # print(pformat(map_imghash_occurency))
-    # print(f"Nb distinct imghash: {len(list(map_imghash_occurency.keys()))}")
+    map_imghash_occurency = defaultdict(int)
+    for i, imghash in tqdm(enumerate(import_fingerprints(fp_exported))):
+        # print(f"#{i} - {imghash}")
+        map_imghash_occurency[imghash] += 1
+    # print(pformat(map_imghash_occurency))
+    print(f"Nb distinct imghash: {len(list(map_imghash_occurency.keys()))}")
 
     # instance.opt
-    nb_fingerprints = 25 * 2   # 1 minute
-    with open("/tmp/imghash/instance.opt", "w") as fp:
-        imghashs = set(islice(import_fingerprints(fp_exported), nb_fingerprints))
-        print(
-            "2\n"
-            f"{len(imghashs)}\n"
-            "64\n"
-            "0\n"
-            "1", file=fp)
-        for imghash in imghashs:
-            print(bin(int(imghash, 16))[2:], file=fp)
+    # nb_fingerprints = 25 * 2   # 1 minute
+    # with open("/tmp/imghash/instance.opt", "w") as fp:
+    #     imghashs = set(islice(import_fingerprints(fp_exported), nb_fingerprints))
+    #     print(
+    #         "2\n"
+    #         f"{len(imghashs)}\n"
+    #         "64\n"
+    #         "0\n"
+    #         "1", file=fp)
+    #     for imghash in imghashs:
+    #         # https://stackoverflow.com/questions/1425493/convert-hex-to-binary
+    #         print(bin(int(imghash, 16))[2:], file=fp)
 
 
 if __name__ == '__main__':
