@@ -1,6 +1,6 @@
 [submodule "py-googletrans"]
 	path = py-googletrans
-	url = https://github.com/ssut/py-googletrans.git
+	url = https://github.com/yoyonel/py-googletrans.git
 [submodule "py_translator"]
 	path = py_translator
 	url = https://github.com/markolofsen/py_translator.git
