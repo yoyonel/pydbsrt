@@ -163,8 +163,8 @@ def import_fingerprints(input_fingerprints_path: Path) -> hex:
 
 def main():
     bbbt = medias_path['big_buck_bunny_trailer_480p']
-    media_path = bbbt['media']
-    st_path = bbbt['subtitles']
+    media_path = bbbt['media']      # type: Path
+    st_path = bbbt['subtitles']     # type: Path
 
     logger.info(f"media path: {media_path}")
     logger.info(f"subtitles path: {st_path}")
@@ -178,31 +178,27 @@ def main():
 
     show_important_frames_fingerprints(vreader, threshold_distance=4)
 
-    # fp_exported = export_fingerprints(media_path)
-    # print(f"Fingerprints exported: {fp_exported}")
+    fp_exported = export_fingerprints(media_path)
+    logger.info(f"Fingerprints exported: {fp_exported}")
 
-    # fp_exported = Path("/tmp/imghash/2cf8d538818fef16a65925ad55d0b1bf.ba")
-    #
-    # map_imghash_occurency = defaultdict(int)
-    # for i, imghash in tqdm(enumerate(import_fingerprints(fp_exported))):
-    #     # print(f"#{i} - {imghash}")
-    #     map_imghash_occurency[imghash] += 1
-    # # print(pformat(map_imghash_occurency))
-    # print(f"Nb distinct imghash: {len(list(map_imghash_occurency.keys()))}")
+    map_imghash_occurency = defaultdict(int)
+    for imghash in import_fingerprints(fp_exported):
+        map_imghash_occurency[imghash] += 1
+    logger.info(f"Nb distinct imghash: {len(list(map_imghash_occurency.keys()))}")
 
     # instance.opt
-    # nb_fingerprints = 25 * 2   # 1 minute
-    # with open("/tmp/imghash/instance.opt", "w") as fp:
-    #     imghashs = set(islice(import_fingerprints(fp_exported), nb_fingerprints))
-    #     print(
-    #         "2\n"
-    #         f"{len(imghashs)}\n"
-    #         "64\n"
-    #         "0\n"
-    #         "1", file=fp)
-    #     for imghash in imghashs:
-    #         # https://stackoverflow.com/questions/1425493/convert-hex-to-binary
-    #         print(bin(int(imghash, 16))[2:], file=fp)
+    nb_fingerprints = 25 * 2   # 1 minute
+    with open("/tmp/imghash/instance.opt", "w") as fp:
+        imghashs = set(islice(import_fingerprints(fp_exported), nb_fingerprints))
+        print(
+            "2\n"
+            f"{len(imghashs)}\n"
+            "64\n"
+            "0\n"
+            "1", file=fp)
+        for imghash in imghashs:
+            # https://stackoverflow.com/questions/1425493/convert-hex-to-binary
+            print(bin(int(imghash, 16))[2:], file=fp)
 
 
 def init_logger():
