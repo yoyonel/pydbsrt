@@ -1,7 +1,6 @@
 """
-
 """
-import attr
+from dataclasses import dataclass
 from pysrt.srtitem import SubRipTime
 #
 from pydbsrt.tools.videofingerprint import VideoFingerprint
@@ -13,13 +12,12 @@ def subriptime_to_frame(srt: SubRipTime) -> int:
     return int(total_seconds * 25)
 
 
-@attr.s()
+@dataclass(init=True, repr=False, eq=False, order=False, unsafe_hash=False, frozen=True)
 class SubFingerprints:
     """
-
-    """
-    subreader = attr.ib(type=SubReader)
-    vfp = attr.ib(type=VideoFingerprint)
+"""
+    subreader: SubReader
+    vfp: VideoFingerprint
 
     def __iter__(self):
         # we suppose subtitles generator in order

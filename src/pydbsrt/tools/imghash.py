@@ -1,5 +1,4 @@
 """
-
 """
 # import binascii
 from bitstring import BitArray

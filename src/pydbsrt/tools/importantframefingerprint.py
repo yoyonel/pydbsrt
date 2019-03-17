@@ -1,25 +1,24 @@
 """
-
 """
-import attr
-#
+from dataclasses import dataclass, field
+from typing import Iterator
+
 from pydbsrt.tools.videofingerprint import VideoFingerprint
 from pydbsrt.tools.imghash import imghash_distance, imghash_count_nonzero
 
 
-@attr.s()
+@dataclass
 class ImportantFrameFingerprints:
     """
-
-    """
-    vfp = attr.ib(type=VideoFingerprint)
+"""
+    vfp: VideoFingerprint
     # THRESHOLDS
-    threshold_distance = attr.ib(default=8)
-    threshold_nonzero = attr.ib(default=0)
+    threshold_distance: int = 8
+    threshold_nonzero: int = 0
 
-    vfp_iterator = attr.ib(init=False)
+    vfp_iterator: Iterator = field(init=False)
 
-    def __attrs_post_init__(self):
+    def __post_init__(self):
         self.vfp_iterator = iter(self.vfp)
 
     def __iter__(self):

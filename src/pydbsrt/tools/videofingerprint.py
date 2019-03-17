@@ -1,27 +1,34 @@
 """
-
 """
-import attr
+from dataclasses import dataclass, field
 import imagehash
 import imageio
+import logging
 import numpy as np
 from PIL import Image
+from typing import Iterator
 #
 from pydbsrt.tools.videoreader import VideoReader
 
+logger = logging.getLogger(__name__)
 
-@attr.s()
+
+@dataclass
 class VideoFingerprint:
     """
+"""
 
-    """
-    vreader = attr.ib(type=VideoReader)
+    @staticmethod
+    def _default_hash(f):
+        return imagehash.phash(f)
+
+    vreader: VideoReader
     #
-    func_for_hash = attr.ib(default=lambda f: imagehash.phash(f))
+    func_for_hash = _default_hash
 
-    frame_reader = attr.ib(init=False)
+    frame_reader: Iterator = field(init=False)
 
-    def __attrs_post_init__(self):
+    def __post_init__(self):
         self.frame_reader = iter(self.vreader.reader)
 
     def __iter__(self):
@@ -36,6 +43,11 @@ class VideoFingerprint:
                 img = Image.fromarray(np.uint8(frame))
                 return self.func_for_hash(img)
             except imageio.core.format.CannotReadFrameError as e:
+                # TODO: refactor this !
+                logger.error(repr(e))
                 raise StopIteration
-        except StopIteration:
+            except Exception as e:
+                logger.error(repr(e))
+                raise RuntimeError(e)
+        except StopIteration as e:
             raise StopIteration

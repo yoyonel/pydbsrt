@@ -1,5 +1,4 @@
 """
-
 """
 import imagehash
 import logging
