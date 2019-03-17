@@ -1,24 +1,34 @@
 """
-
 """
-import binascii
 import bitstring
 from collections import defaultdict
 from hashlib import md5
 import imageio
 from itertools import islice
+import logging
 from math import log, e
 import numpy as np
 from pathlib import Path
 from tqdm import tqdm
 #
+from pydbsrt.tools.tqdm_with_logger import TqdmLoggingHandler
 from pydbsrt.tools.videoreader import VideoReader
 from pydbsrt.tools.videofingerprint import VideoFingerprint
 from pydbsrt.tools.subreader import SubReader
 from pydbsrt.tools.subfingerprint import SubFingerprints
 from pydbsrt.tools.importantframefingerprint import ImportantFrameFingerprints
 from pydbsrt.tools.ffmpeg_tools.ffmeg_extract_frame import ffmpeg_imghash_generator
-from pydbsrt.tools.imghash import imghash_to_bitarray, imghash_to_64bits, imghash_hexstr_to_binstr
+from pydbsrt.tools.imghash import imghash_to_bitarray
+
+logger = logging.getLogger(__name__)
+
+medias_root_path = Path('data/')
+medias_path = defaultdict(
+    lambda: {
+        'media': medias_root_path.joinpath('big_buck_bunny_trailer_480p.webm'),
+        'subtitles': medias_root_path.joinpath('subtitles.srt'),
+    }
+)
 
 
 def show_fingerprints(vreader):
@@ -47,7 +57,7 @@ def show_subtitles_fingerprints(vreader, srt_path):
         map_index_subtitles[index_subtitle] += 1
 
 
-def entropy2(labels, base=None):
+def entropy2(labels, base=e):
     """ Computes entropy of label distribution. """
 
     n_labels = len(labels)
@@ -65,7 +75,6 @@ def entropy2(labels, base=None):
     ent = 0.
 
     # Compute entropy
-    base = e if base is None else base
     for i in probs:
         ent -= i * log(i, base)
 
@@ -73,9 +82,9 @@ def entropy2(labels, base=None):
 
 
 def show_important_frames_fingerprints(
-    vreader,
-    threshold_distance: int=32,
-    threshold_nonzero: int=16,
+        vreader,
+        threshold_distance: int = 32,
+        threshold_nonzero: int = 16,
 ):
     """
     Compute Important Frames (from fingerprint analyze) and extract frames images from them.
@@ -88,29 +97,22 @@ def show_important_frames_fingerprints(
     gen_if_fingerprint = ImportantFrameFingerprints(
         VideoFingerprint(vreader),
         threshold_distance=threshold_distance,
-        threshold_nonzero=threshold_nonzero,   # for removing blank (black) frames
+        threshold_nonzero=threshold_nonzero,  # for removing blank (black) frames
     )
 
-    # try:
-    #     for i, (fp, id_frame) in enumerate(islice(gen_if_fingerprint, 16)):
-    #         print(
-    #             f"import frame #{i}"
-    #             f" - id_frame: {id_frame}"
-    #             f" - fingerprint: {fp}"
-    #             f" - Shannon's entropy: {entropy2(list(str(fp)))}"
-    #         )
-    # except:
-    #     pass
     export_path = Path('/tmp/important_frames_fingerprints')
     export_path.mkdir(exist_ok=True)
     for fp, id_frame in gen_if_fingerprint:
-        print(
+        logger.info(
             f" - id_frame: {id_frame}"
             f" - fingerprint: {fp}"
             f" - Shannon's entropy: {entropy2(list(str(fp)))}"
         )
+        #
         frame = vreader.reader.get_data(id_frame)
-        imageio.imwrite(export_path.joinpath(f'{id_frame}.jpg'), frame)
+        frame_export = export_path.joinpath(f'{id_frame}.jpg')
+        logger.info(f"Export frame.id={id_frame} to '{frame_export}'")
+        imageio.imwrite(frame_export, frame)
 
 
 def export_fingerprints(input_media_path: Path) -> Path:
@@ -143,10 +145,11 @@ def import_fingerprints(input_fingerprints_path: Path) -> hex:
     :return:
     """
     chunk_nb_frames = 2048  # for 8k of fingerprints
-    chunk_nb_bytes_to_read = chunk_nb_frames << 3   # * 8
+    chunk_nb_bytes_to_read = chunk_nb_frames << 3  # * 8
     # https://stackoverflow.com/questions/1035340/reading-binary-file-and-looping-over-each-byte
     print(f"Reading imghash file: {input_fingerprints_path} ...")
-    with open(input_fingerprints_path, "rb") as f:
+    # with open(input_fingerprints_path, "rb") as f:
+    with input_fingerprints_path.open('rb') as f:
         while True:
             chunk = f.read(chunk_nb_bytes_to_read)
             chunk_nb_imghash = len(chunk) >> 3  # // 8
@@ -159,34 +162,33 @@ def import_fingerprints(input_fingerprints_path: Path) -> hex:
 
 
 def main():
-    # root_path = Path('data/')
-    # media_path = root_path.joinpath('big_buck_bunny_trailer_480p.webm')
-    # root_path = Path("/opt/screenpulse_backup/data/backup/CHANNEL_2038")
-    # media_path = root_path.joinpath('extract_2038_20170802_231535.mp4')
-    root_path = Path("/home/latty/Vidéos/Mission Impossible Rogue Nation (2015) [1080p]/")
-    media_path = root_path.joinpath("Mission.Impossible.Rogue.Nation.2015.1080p.BluRay.x264.YIFY.[YTS.AG].mp4")
-    st_path = root_path.joinpath('Mission.Impossible.Rogue.Nation.2015.1080p.BluRay.x264.YIFY.[YTS.AG].srt')
+    bbbt = medias_path['big_buck_bunny_trailer_480p']
+    media_path = bbbt['media']
+    st_path = bbbt['subtitles']
+
+    logger.info(f"media path: {media_path}")
+    logger.info(f"subtitles path: {st_path}")
 
     vreader = VideoReader(media_path)
-    print(vreader.metadatas)
+    logger.info(f"Video reader meta datas: {vreader.metadatas}")
 
     # show_fingerprints(vreader)
     #
     # show_subtitles_fingerprints(vreader, srt_path=st_path)
 
-    # show_important_frames_fingerprints(vreader, threshold_distance=4)
+    show_important_frames_fingerprints(vreader, threshold_distance=4)
 
     # fp_exported = export_fingerprints(media_path)
     # print(f"Fingerprints exported: {fp_exported}")
 
-    fp_exported = Path("/tmp/imghash/2cf8d538818fef16a65925ad55d0b1bf.ba")
-
-    map_imghash_occurency = defaultdict(int)
-    for i, imghash in tqdm(enumerate(import_fingerprints(fp_exported))):
-        # print(f"#{i} - {imghash}")
-        map_imghash_occurency[imghash] += 1
-    # print(pformat(map_imghash_occurency))
-    print(f"Nb distinct imghash: {len(list(map_imghash_occurency.keys()))}")
+    # fp_exported = Path("/tmp/imghash/2cf8d538818fef16a65925ad55d0b1bf.ba")
+    #
+    # map_imghash_occurency = defaultdict(int)
+    # for i, imghash in tqdm(enumerate(import_fingerprints(fp_exported))):
+    #     # print(f"#{i} - {imghash}")
+    #     map_imghash_occurency[imghash] += 1
+    # # print(pformat(map_imghash_occurency))
+    # print(f"Nb distinct imghash: {len(list(map_imghash_occurency.keys()))}")
 
     # instance.opt
     # nb_fingerprints = 25 * 2   # 1 minute
@@ -203,5 +205,14 @@ def main():
     #         print(bin(int(imghash, 16))[2:], file=fp)
 
 
+def init_logger():
+    logger.setLevel(logging.INFO)
+    tqdm_logging_handler = TqdmLoggingHandler()
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    tqdm_logging_handler.setFormatter(formatter)
+    logger.addHandler(tqdm_logging_handler)
+
+
 if __name__ == '__main__':
+    init_logger()
     main()

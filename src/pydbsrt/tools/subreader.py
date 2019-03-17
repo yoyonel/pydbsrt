@@ -1,22 +1,20 @@
 """
-
 """
-import attr
 import codecs
+from dataclasses import dataclass, field
 from pathlib import Path
 import pysrt
 
 
-@attr.s
+@dataclass
 class SubReader:
-    path = attr.ib(type=Path)
+    path: Path
+    encoding: str = 'utf-8'
+    #
+    file: codecs.StreamReaderWriter = field(init=False)
+    stream: pysrt.SubRipFile = field(init=False)
 
-    file = attr.ib(init=False, type=codecs.StreamReaderWriter)
-    encoding = attr.ib(type=str, default='utf-8')
-
-    stream = attr.ib(init=False, type=pysrt.SubRipFile)
-
-    def __attrs_post_init__(self):
+    def __post_init__(self):
         self.file = codecs.open(str(self.path), encoding=self.encoding)
         self.stream = pysrt.stream(self.file)
 

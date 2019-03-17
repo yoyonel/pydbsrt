@@ -30,7 +30,6 @@ setup(
 
     ],
     install_requires=[
-        "attrs==17.4.0",
         "bitstring==3.1.5",
         "distance==0.1.3",
         "fuzzywuzzy==0.17.0",
@@ -49,6 +48,6 @@ setup(
             # 'pydbsrt = pydbsrt.11.app:main'
         ]
     },
-    python_requires='>=3.6'
+    python_requires='>=3.7'
 )
 
