@@ -1,34 +1,39 @@
 """
 """
-import bitstring
+import logging
 from collections import defaultdict
 from hashlib import md5
-import imageio
 from itertools import islice
-import logging
 from math import log, e
-import numpy as np
 from pathlib import Path
+from typing import Dict, Any, Union
+
+import bitstring
+import imageio
+import numpy as np
 from tqdm import tqdm
+
+from pydbsrt.tools.ffmpeg_tools.ffmeg_extract_frame import (
+    ffmpeg_imghash_generator
+)
+from pydbsrt.tools.imghash import imghash_to_bitarray
+from pydbsrt.tools.importantframefingerprint import ImportantFrameFingerprints
+from pydbsrt.tools.subfingerprint import SubFingerprints
+from pydbsrt.tools.subreader import SubReader
 #
 from pydbsrt.tools.tqdm_with_logger import TqdmLoggingHandler
-from pydbsrt.tools.videoreader import VideoReader
 from pydbsrt.tools.videofingerprint import VideoFingerprint
-from pydbsrt.tools.subreader import SubReader
-from pydbsrt.tools.subfingerprint import SubFingerprints
-from pydbsrt.tools.importantframefingerprint import ImportantFrameFingerprints
-from pydbsrt.tools.ffmpeg_tools.ffmeg_extract_frame import ffmpeg_imghash_generator
-from pydbsrt.tools.imghash import imghash_to_bitarray
+from pydbsrt.tools.videoreader import VideoReader
 
 logger = logging.getLogger(__name__)
 
 medias_root_path = Path('data/')
 medias_path = defaultdict(
     lambda: {
-        'media': medias_root_path.joinpath('big_buck_bunny_trailer_480p.webm'),
-        'subtitles': medias_root_path.joinpath('subtitles.srt'),
+        'media': medias_root_path / 'big_buck_bunny_trailer_480p.webm',
+        'subtitles': medias_root_path / 'subtitles.srt',
     }
-)
+)  # type: Dict[str, Union[Any, Path]]
 
 
 def show_fingerprints(vreader):
@@ -49,7 +54,9 @@ def show_subtitles_fingerprints(vreader, srt_path):
             vfp=VideoFingerprint(vreader),
     ):
         if map_index_subtitles[index_subtitle] == 0:
-            print(f"\nindex subtitle: {index_subtitle} - first frame: {id_frame}", end='')
+            print(
+                f"\nindex subtitle: {index_subtitle} - first frame: {id_frame}",
+                end='')
         if map_index_subtitles[index_subtitle] % 8 == 0:
             print("")
         # https://stackoverflow.com/questions/493386/how-to-print-without-newline-or-space
@@ -97,7 +104,8 @@ def show_important_frames_fingerprints(
     gen_if_fingerprint = ImportantFrameFingerprints(
         VideoFingerprint(vreader),
         threshold_distance=threshold_distance,
-        threshold_nonzero=threshold_nonzero,  # for removing blank (black) frames
+        threshold_nonzero=threshold_nonzero,
+        # for removing blank (black) frames
     )
 
     export_path = Path('/tmp/important_frames_fingerprints')
@@ -130,7 +138,8 @@ def export_fingerprints(input_media_path: Path) -> Path:
     export_path = Path('/tmp/imghash')
     export_path.mkdir(exist_ok=True)
     # https://stackoverflow.com/questions/38175170/python-md5-cracker-typeerror-object-supporting-the-buffer-api-required
-    export_fp = export_path.joinpath(f"{md5(str(input_media_path).encode()).hexdigest()}.ba")
+    export_fp = export_path.joinpath(
+        f"{md5(str(input_media_path).encode()).hexdigest()}.ba")
     with open(export_fp, 'wb') as fp:
         for imghash in tqdm(ffmpeg_imghash_generator(str(input_media_path))):
             ba_imghash = imghash_to_bitarray(imghash)
@@ -155,7 +164,8 @@ def import_fingerprints(input_fingerprints_path: Path) -> hex:
             chunk_nb_imghash = len(chunk) >> 3  # // 8
             if chunk_nb_imghash:
                 # https://pythonhosted.org/bitstring/packing.html#compact-format
-                for int64_imghash in bitstring.BitArray(chunk).unpack(fmt=f'>{chunk_nb_imghash}Q'):
+                for int64_imghash in bitstring.BitArray(chunk).unpack(
+                        fmt=f'>{chunk_nb_imghash}Q'):
                     yield hex(int64_imghash)
             else:
                 break
@@ -174,9 +184,9 @@ def main():
 
     # show_fingerprints(vreader)
     #
-    # show_subtitles_fingerprints(vreader, srt_path=st_path)
+    show_subtitles_fingerprints(vreader, srt_path=st_path)
 
-    show_important_frames_fingerprints(vreader, threshold_distance=4)
+    # show_important_frames_fingerprints(vreader, threshold_distance=4)
 
     fp_exported = export_fingerprints(media_path)
     logger.info(f"Fingerprints exported: {fp_exported}")
@@ -204,7 +214,8 @@ def main():
 def init_logger():
     logger.setLevel(logging.INFO)
     tqdm_logging_handler = TqdmLoggingHandler()
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     tqdm_logging_handler.setFormatter(formatter)
     logger.addHandler(tqdm_logging_handler)
 

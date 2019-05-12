@@ -12,7 +12,8 @@ def subriptime_to_frame(srt: SubRipTime) -> int:
     return int(total_seconds * 25)
 
 
-@dataclass(init=True, repr=False, eq=False, order=False, unsafe_hash=False, frozen=True)
+@dataclass(init=True, repr=False, eq=False, order=False, unsafe_hash=False,
+           frozen=True)
 class SubFingerprints:
     """
 """
@@ -29,12 +30,11 @@ class SubFingerprints:
         for subtitle in self.subreader:
             # get start, end timecodes
             tc_start, tc_end = subtitle.start, subtitle.end
-            frame_start, frame_end = subriptime_to_frame(tc_start), subriptime_to_frame(tc_end)
+            frame_start, frame_end = subriptime_to_frame(
+                tc_start), subriptime_to_frame(tc_end)
 
-            # print(frame_start, frame_end)
             try:
-                while not(id_frame <= frame_start <= id_frame + 1):
-                    # print(id_frame, frame_start, frame_end)
+                while not (id_frame <= frame_start <= id_frame + 1):
                     fp = next(self.vfp)
                     id_frame += 1
 
