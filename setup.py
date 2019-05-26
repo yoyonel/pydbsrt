@@ -41,6 +41,7 @@ setup(
         "python-Levenshtein>=0.12.0",
         "python-opensubtitles>=0.2.dev0",
         "py-translator>=1.8.9",
+        "py-googletrans",
         "tqdm>=4.24.0",
     ],
     extras_require={},
