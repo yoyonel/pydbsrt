@@ -10,7 +10,7 @@ from itertools import zip_longest
 from operator import is_not
 from pathlib import Path
 from pprint import PrettyPrinter, pformat
-from typing import Generator, Tuple
+from typing import Generator, List, Tuple
 from urllib.parse import quote
 
 import pysrt
@@ -203,39 +203,86 @@ def translate_with_google_translate_webapi(querystr, to_l="zh", from_l="en"):
     return target
 
 
-def translate_srt_with_google_translate_webapi(
-        srt_en_path,
-        it_func=lambda it, *args, **kwargs: it
-):
-    srt_en = pysrt.open(srt_en_path)
+def translate_subtitles_with_google_translate_webapi(
+        srt_from_path,
+        str_from_lang: str = 'en',
+        str_to_lang: str = 'fr',
+        chunk_size: int = 10,
+        split_tokens: List[str] = [' ¶ '],
+        it_func=lambda it, *args, **kwargs: it,
+) -> Generator[Tuple[SubRipItem, str], None, None]:
+    """
 
-    # big chunk
-    # TODO: need to find the maximum size allowed to transfer
-    # Pb: hard to control the separation (and reconstruction) of blob text for
-    # translation ... google translate seems to do strange things
-    # (unification, interpretation) with the split_token ...
-    # This behaviours disturbed the translation and introduce offsets on (block of)
-    # translations reduce chuck to unit => very slow but working :-/
-    chunk_size = 10
-    # TODO: Trying to find a better split-token
-    split_token = ' ¶ '
+    Pb: hard to control the separation (and reconstruction) of blob text for
+    translation ... google translate seems to do strange things
+    (unification, interpretation) with the split_token ...
+    This behaviours disturbed the translation and introduce offsets on (block of)
+    translations reduce chuck to unit => very slow but working :-/
 
-    gen_slice_srt_text = map(
-        lambda g: split_token.join(map(lambda s: ''.join(clean_html(s)), g)),
-        grouper_without_fill(map(lambda srt: srt.text, srt_en), chunk_size)
-    )
-    for slice_srt_text in it_func(gen_slice_srt_text, total=len(srt_en) // chunk_size):
-        try:
-            t_slice_srt_text = unescape(
-                translate_with_google_translate_webapi(slice_srt_text, from_l='en', to_l='fr'))
-        except Exception as e:
-            break
+    Bugs:
+        - chunk_size=4
+        => Le log/srt 40 semble disparaitre ...
+            2019-05-30 18:12:21,866 - __main__ - INFO - 39
+            00:10:35,498 --> 00:10:39,764
+            <i>Now you can talk with the tortoises.</i>
+            <i>Excuse me.</i>
+                -> Je vous remercie. C'était Chandler Jarrell.
+
+            2019-05-30 18:12:22,033 - __main__ - INFO - 41
+
+        - chunk_size=5
+            00:10:35,498 --> 00:10:39,764
+            <i>Now you can talk with the tortoises.</i>
+            <i>Excuse me.</i>
+                -> Je vous remercie. C'était Chandler Jarrell.
+
+    Args:
+        srt_from_path:
+        str_from_lang:
+        str_to_lang:
+        chunk_size: (TODO: need to find the maximum size allowed to transfer)
+        split_token: (TODO: Trying to find a better split-token)
+        it_func:
+
+    Returns:
+
+    """
+    srt_from = pysrt.open(srt_from_path)
+    gen_grp_srt_from = grouper_without_fill(srt_from, chunk_size)
+    gen_grp_srt_from = list(gen_grp_srt_from)
+    nb_srt_from = len(srt_from)
+    id_chunk = 0
+    for grp_srt_from in it_func(gen_grp_srt_from, total=len(srt_from) // chunk_size):
+        nb_chunk_to_find = min(chunk_size, nb_srt_from - id_chunk * chunk_size)
+
+        # https://docs.python.org/2/library/itertools.html#itertools.tee
+        # (grp_srt_from_for_translation,
+        #  grp_srt_from_for_zip) = itertools.tee(grp_srt_from)
+        grp_srt_from = list(grp_srt_from)
+        grp_srt_from_for_translation, grp_srt_from_for_zip = grp_srt_from, grp_srt_from
+        t_grp_srt_from = []
+        split_token = split_tokens[0]
+        for split_token in split_tokens:
+            t_grp_srt_from = unescape(
+                translate_with_google_translate_webapi(
+                    split_token.join(
+                        map(lambda s: clean_html(
+                            s.text_without_tags.replace('\n', ' ')),
+                            grp_srt_from_for_translation)
+                    ),
+                    from_l=str_from_lang, to_l=str_to_lang))
+            nb_chunks_produced = len(t_grp_srt_from.split(split_token))
+            if nb_chunks_produced == nb_chunk_to_find:
+                break
+            logger.warning(f'split token=\'{split_token}\' '
+                           f'produce {nb_chunks_produced} chunks (!= {chunk_size})')
+        if len(t_grp_srt_from.split(split_token)) == nb_chunk_to_find:
+            for t_srt_from, srt_from in zip(t_grp_srt_from.split(split_token),
+                                            grp_srt_from_for_zip):
+                yield srt_from, t_srt_from
         else:
-            # https://stackoverflow.com/questions/44780357/how-to-use-newline-n-in-f-string-to-format-output-in-python-3-6
-            #         t_srt_text = "\n¶ ".join(t_slice_srt_text.split('¶'))
-            #         print(f"{t_srt_text}")
-            pp.pprint(list(zip(slice_srt_text.split(split_token),
-                               t_slice_srt_text.split(split_token))))
+            logger.error("Can't find valid token to split the subtitles")
+        id_chunk += 1
 
 
 def main():
@@ -246,10 +293,14 @@ def main():
     # )
 
     # logger.info(translate("Salut le monde", to_l='en', from_l='fr'))
-    translate_srt_with_google_translate_webapi(
-        medias_root_path / "The Golden Child (1986) 1080p web.en.srt",
-        it_func=tqdm
-    )
+    for srt_from, t_srt_from in translate_subtitles_with_google_translate_webapi(
+            medias_root_path / "The Golden Child (1986) 1080p web.en.srt",
+            chunk_size=70,
+            split_tokens=[' ¶ ', ' ** ', ' @ ', ' @_ '],
+            it_func=tqdm
+    ):
+        # logger.info(f"\n{str(srt_from)}-> {t_srt_from}\n")
+        pass
 
 
 def init_logger():
