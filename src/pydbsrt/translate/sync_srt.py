@@ -299,8 +299,7 @@ def main():
             split_tokens=[' ¶ ', ' ** ', ' @ ', ' @_ '],
             it_func=tqdm
     ):
-        # logger.info(f"\n{str(srt_from)}-> {t_srt_from}\n")
-        pass
+        logger.info(f"\n{str(srt_from)}-> {t_srt_from}\n")
 
 
 def init_logger():
