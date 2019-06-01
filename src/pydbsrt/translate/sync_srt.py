@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 """
 """
 import logging
@@ -293,13 +294,62 @@ def main():
     # )
 
     # logger.info(translate("Salut le monde", to_l='en', from_l='fr'))
+
+    srt_to_path = medias_root_path / "The Golden Child.DVD_PAL.fre.srt"
+    srt_to = pysrt.open(srt_to_path)
+
     for srt_from, t_srt_from in translate_subtitles_with_google_translate_webapi(
             medias_root_path / "The Golden Child (1986) 1080p web.en.srt",
             chunk_size=70,
             split_tokens=[' ¶ ', ' ** ', ' @ ', ' @_ '],
-            it_func=tqdm
+            # it_func=tqdm
     ):
         logger.info(f"\n{str(srt_from)}-> {t_srt_from}\n")
+
+        # srt_scores_matching = [fuzz.partial_ratio(s_to.text, t_srt_from)
+        #                        for s_to in srt_to]
+
+        # try:
+        #     best_match = max(
+        #         [
+        #             (s[0], [w for w in s[1] if len(w) >= 4])
+        #             for s in filter(
+        #             lambda s: s[1] != set(),
+        #             [
+        #                 (i, set(t_srt_from.split()).intersection(s_to.text.split()))
+        #                 for i, s_to in enumerate(srt_to)
+        #             ],
+        #         )
+        #         ],
+        #         key=lambda s: len("".join(s[1]))
+        #     )
+        #     logger.info(f"best match found: {best_match}\n->{srt_to[best_match[0]]}")
+        # except ValueError:
+        #     logger.warning(f"No match found for: {t_srt_from}")
+
+        # best_matchs = [
+        #     f"{srt_to[match[0]]}"
+        #     for match in filter(
+        #         lambda i_s: i_s[1] > 20,
+        #         enumerate([fuzz.ratio(t_srt_from, s.text_without_tags)
+        #                    for s in srt_to])
+        #     )
+        # ]
+        best_matchs = max(
+            filter(
+                lambda i_s: i_s[1] > 20,
+                enumerate(
+                    [
+                        fuzz.ratio(t_srt_from, s.text_without_tags)
+                        for s in srt_to
+                    ]
+                )
+            ),
+            key=lambda m: m[1]
+        )
+        logger.info(
+            f"best matchs for '{t_srt_from}':"
+            f"\n{srt_to[best_matchs[0]]} - score = {best_matchs[1]}")
 
 
 def init_logger():
