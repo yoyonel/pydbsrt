@@ -36,9 +36,9 @@ medias_path = defaultdict(
 )  # type: Dict[str, Union[Any, Path]]
 
 
-def show_fingerprints(vreader):
+def show_fingerprints(video_reader):
     #
-    gen_fingerprint = VideoFingerprint(vreader)
+    gen_fingerprint = VideoFingerprint(video_reader)
     try:
         for i, fp in enumerate(islice(gen_fingerprint, 10)):
             print(f"id frame: {i} - fingerprint: {fp}")
@@ -46,12 +46,12 @@ def show_fingerprints(vreader):
         pass
 
 
-def show_subtitles_fingerprints(vreader, srt_path):
+def show_subtitles_fingerprints(video_reader, srt_path):
     # map to group fingerprints by index subtitles (for convenience)
     map_index_subtitles = defaultdict(int)
     for index_subtitle, id_frame, fp in SubFingerprints(
             subreader=SubReader(srt_path),
-            vfp=VideoFingerprint(vreader),
+            vfp=VideoFingerprint(video_reader),
     ):
         if map_index_subtitles[index_subtitle] == 0:
             print(
@@ -89,20 +89,20 @@ def entropy2(labels, base=e):
 
 
 def show_important_frames_fingerprints(
-        vreader,
+        video_reader,
         threshold_distance: int = 32,
         threshold_nonzero: int = 16,
 ):
     """
     Compute Important Frames (from fingerprint analyze) and extract frames images from them.
 
-    :param vreader:
+    :param video_reader:
     :param threshold_distance:
     :param threshold_nonzero:
     :return:
     """
     gen_if_fingerprint = ImportantFrameFingerprints(
-        VideoFingerprint(vreader),
+        VideoFingerprint(video_reader),
         threshold_distance=threshold_distance,
         threshold_nonzero=threshold_nonzero,
         # for removing blank (black) frames
@@ -117,7 +117,7 @@ def show_important_frames_fingerprints(
             f" - Shannon's entropy: {entropy2(list(str(fp)))}"
         )
         #
-        frame = vreader.reader.get_data(id_frame)
+        frame = video_reader.reader.get_data(id_frame)
         frame_export = export_path.joinpath(f'{id_frame}.jpg')
         logger.info(f"Export frame.id={id_frame} to '{frame_export}'")
         imageio.imwrite(frame_export, frame)
@@ -173,20 +173,20 @@ def import_fingerprints(input_fingerprints_path: Path) -> hex:
 
 def main():
     bbbt = medias_path['big_buck_bunny_trailer_480p']
-    media_path = bbbt['media']      # type: Path
-    st_path = bbbt['subtitles']     # type: Path
+    media_path = bbbt['media']  # type: Path
+    st_path = bbbt['subtitles']  # type: Path
 
     logger.info(f"media path: {media_path}")
     logger.info(f"subtitles path: {st_path}")
 
-    vreader = VideoReader(media_path)
-    logger.info(f"Video reader meta datas: {vreader.metadatas}")
+    video_reader = VideoReader(media_path)
+    logger.info(f"Video reader meta datas: {video_reader.metadatas}")
 
-    # show_fingerprints(vreader)
+    # show_fingerprints(video_reader)
     #
-    show_subtitles_fingerprints(vreader, srt_path=st_path)
+    show_subtitles_fingerprints(video_reader, srt_path=st_path)
 
-    # show_important_frames_fingerprints(vreader, threshold_distance=4)
+    # show_important_frames_fingerprints(video_reader, threshold_distance=4)
 
     fp_exported = export_fingerprints(media_path)
     logger.info(f"Fingerprints exported: {fp_exported}")
@@ -197,7 +197,7 @@ def main():
     logger.info(f"Nb distinct imghash: {len(list(map_imghash_occurency.keys()))}")
 
     # instance.opt
-    nb_fingerprints = 25 * 2   # 1 minute
+    nb_fingerprints = 25 * 2  # 1 minute
     with open("/tmp/imghash/instance.opt", "w") as fp:
         imghashs = set(islice(import_fingerprints(fp_exported), nb_fingerprints))
         print(

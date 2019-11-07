@@ -12,7 +12,7 @@ from pydbsrt.tools.ffmpeg_wrapper import FFException
 
 binary_path = None
 
-signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+# signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
 def initialize():
     """

@@ -40,9 +40,9 @@ setup(
         "pysrt>=1.1.1",
         "python-Levenshtein>=0.12.0",
         "python-opensubtitles>=0.2.dev0",
-        "py-translator>=1.8.9",
         "googletrans>=2.4.0",
         "tqdm>=4.24.0",
+        "Pillow",
     ],
     extras_require={},
     entry_points={

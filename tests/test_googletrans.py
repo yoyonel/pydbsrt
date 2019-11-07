@@ -1,7 +1,13 @@
+import pytest
 from googletrans import Translator
 
 
-def test_googletrans():
+@pytest.mark.parametrize(
+    "text,dest,src,expected",
+    [(u"Hello", "French", "ENGLISH", "Salut"),
+     (u"Good Morning", "French", "ENGLISH", "Bonjour")]
+)
+def test_googletrans(text, dest, src, expected):
     translator = Translator()
-    result = translator.translate(u'Hello', src='ENGLISH', dest='French')
-    assert result.text == u'Bonjour'
+    result = translator.translate(text, src=src, dest=dest)
+    assert result.text == expected
