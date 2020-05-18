@@ -29,8 +29,13 @@ setup(
     keywords=[
 
     ],
+    setup_requires=[
+        "setuptools>=40.8.0",
+        "cython~=0.27.0",   # TODO: make cbktree package compatible with >=0.28.0
+    ],
     install_requires=[
         "bitstring>=3.1.5",
+        "cbktree>=0.3.1"
         "distance>=0.1.3",
         "fuzzywuzzy>=0.17.0",
         "ImageHash>=4.0",
