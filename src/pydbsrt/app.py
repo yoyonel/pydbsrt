@@ -20,6 +20,8 @@ from tqdm import tqdm
 from pydbsrt.tools.ffmpeg_tools.ffmeg_extract_frame import ffmpeg_imghash_generator
 from pydbsrt.tools.imghash import imghash_to_bitarray
 from pydbsrt.tools.importantframefingerprint import ImportantFrameFingerprints
+from pydbsrt.tools.srt_fp_item import SubFingerPrintRipItem
+from pydbsrt.tools.str_fp_file import SubFingerPrintRipFile
 from pydbsrt.tools.subfingerprint import SubFingerprints
 from pydbsrt.tools.subreader import SubReader
 #
@@ -48,9 +50,10 @@ def show_fingerprints(video_reader):
         pass
 
 
-def show_subtitles_fingerprints(video_reader: VideoReader, srt_path: Path) -> None:
+def show_subtitles_fingerprints(video_reader: VideoReader, subtitles_path: Path) -> None:
     nb_fingerprints_by_chunk = 5
-    it_subfingerprints = SubFingerprints(subreader=SubReader(srt_path), vfp=VideoFingerprint(video_reader))
+    it_subfingerprints = SubFingerprints(sub_reader=SubReader(subtitles_path),
+                                         video_fingerprint=VideoFingerprint(video_reader))
     gb_subfingerprints = itertools.groupby(it_subfingerprints, key=operator.itemgetter(0))
     for index_subtitle, it_indexed_subfingerprints in gb_subfingerprints:
         _, id_frame, fingerprint = next(it_indexed_subfingerprints)
@@ -59,6 +62,29 @@ def show_subtitles_fingerprints(video_reader: VideoReader, srt_path: Path) -> No
         for chunk_fingerprints in grouper((fingerprint for _, __, fingerprint in it_indexed_subfingerprints),
                                           nb_fingerprints_by_chunk):
             print(" ".join(map(str, filter(None, chunk_fingerprints))))
+
+
+def export_subtitles_fingerprints(video_reader: VideoReader, subtitles_path: Path, export_path: Path) -> None:
+    it_subfingerprints = SubFingerprints(sub_reader=SubReader(subtitles_path),
+                                         video_fingerprint=VideoFingerprint(video_reader))
+    # SubFingerPrintRipItem
+    it_items = (
+        SubFingerPrintRipItem(index, id_frame, fingerprint)
+        for index, id_frame, fingerprint in tqdm(it_subfingerprints,
+                                                 unit=" subfingerprints",
+                                                 desc="join subtitle and frame fingerprint")
+    )
+    logger.info("Export Subtitles+Fingerprints into: %s", export_path)
+    # consumed by Parent class: `UserList`
+    SubFingerPrintRipFile(items=it_items, path=export_path).save()
+
+
+def import_subtitles_fingerprints(import_path: Path):
+    sub_fingerprint_rip_file = SubFingerPrintRipFile.open(import_path)
+    for sub_fingerprint_rip in sub_fingerprint_rip_file:
+        logger.info("subtitle.index: %d - frame.index: %d - frame.hash: %s",
+                    sub_fingerprint_rip.srt_index,
+                    sub_fingerprint_rip.frame_index, hex(sub_fingerprint_rip.fingerprint))
 
 
 def entropy2(labels, base=e):
@@ -135,12 +161,14 @@ def export_fingerprints(input_media_path: Path) -> Path:
     export_path = Path('/tmp/img_hash')
     export_path.mkdir(exist_ok=True)
     # https://stackoverflow.com/questions/38175170/python-md5-cracker-typeerror-object-supporting-the-buffer-api-required
-    export_fp = export_path.joinpath(
-        f"{md5(str(input_media_path).encode()).hexdigest()}.ba")
+    export_fp = export_path.joinpath(f"{md5(str(input_media_path).encode()).hexdigest()}.ba")
     with open(export_fp, 'wb') as fp:
+        nb_img_hash_written = 0
         for img_hash in tqdm(ffmpeg_imghash_generator(str(input_media_path))):
             ba_img_hash = imghash_to_bitarray(img_hash)
             fp.write(ba_img_hash.bytes)
+            nb_img_hash_written += 1
+        logger.info("Nb image hash written: %d", nb_img_hash_written)
     return export_fp
 
 
@@ -176,12 +204,14 @@ def main():
     logger.info(f"subtitles path: {srt_path}")
 
     video_reader = VideoReader(media_path)
-    logger.info(f"Video reader meta data:\n{pformat(video_reader.metadatas)}")
+    logger.info(f"Video reader meta data:\n{pformat(video_reader.metadata)}")
 
     # show_fingerprints(video_reader)
     #
-    show_subtitles_fingerprints(video_reader, srt_path=srt_path)
-
+    # show_subtitles_fingerprints(video_reader, subtitles_path=srt_path)
+    export_path = (Path("/tmp/") / srt_path.stem).with_suffix(".srt_fingerprint")
+    export_subtitles_fingerprints(video_reader, subtitles_path=srt_path, export_path=export_path)
+    import_subtitles_fingerprints(import_path=export_path)
     # show_important_frames_fingerprints(video_reader, threshold_distance=4)
 
     fp_exported = export_fingerprints(media_path)

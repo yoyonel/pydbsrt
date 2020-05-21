@@ -22,17 +22,17 @@ class VideoFingerprint:
     def _default_hash(f):
         return imagehash.phash(f)
 
-    vreader: VideoReader
+    video_reader: VideoReader
     #
     func_for_hash = _default_hash
 
     frame_reader: Iterator = field(init=False)
 
     def __post_init__(self):
-        self.frame_reader = iter(self.vreader.reader)
+        self.frame_reader = iter(self.video_reader.reader)
 
     def __iter__(self):
-        self.frame_reader = iter(self.vreader.reader)
+        self.frame_reader = iter(self.video_reader.reader)
         return self
 
     def __next__(self):

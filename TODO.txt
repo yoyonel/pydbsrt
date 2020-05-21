@@ -3,11 +3,11 @@
 ## Intégration d'un arbre BKTree de recherche
 
 - Rajouter le BKTree
-- Mettre en place une sauvegarde/chargement simple d'un BKTree
 - Effectuer des recherches/correspondances via le BKTree
 - Mettre en place un système de cache/indexage simple sur l'arbre et les méta-données associées [POC]
 - Tester la mise à l'échelle (avec des données factices) de l'arbre en terme de taille et vitesse de réponse sur la recherche
 - Mettre en place une DB (NoSQL ou SQL ... à voir) pour l'indexage des méta-données en lien avec l'arbre (64bits words -> index -> méta-data)
+- Mettre en place une sauvegarde/chargement simple d'un BKTree
 
 Dans un 1er temps, on place tout coté CPU et RAM => modèle de données Python/C++.
 On voit par la suite (ou en même temps) pour intégrer un modèle full DB (PostGreSQL via un indexage "custom" supportant le BKTree, VPTree).
