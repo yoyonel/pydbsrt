@@ -28,11 +28,6 @@ des sous titres, on est extrait:
 Comment construire l'arbre de recherche ?
 Que rechercher, quel type de requetes ?
 
-## Construction de l'arbre de recherche
-À partir d'un fichier de couplage entre un fichier de sous-titres et les hashs de frames correspondantes.
-On peut récupérer l'ensemble des frames (fingerprints) pour ce sous-titre.
-On peut alors associer pour chaque fingerprint l'id du sous-titre (relatif au média)
-
 
 # Usecase
 

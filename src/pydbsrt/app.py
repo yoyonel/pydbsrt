@@ -3,15 +3,18 @@
 import itertools
 import logging
 import operator
+import uuid
 from collections import defaultdict
+from functools import lru_cache
 from hashlib import md5
 from itertools import islice
 from math import log, e
 from pathlib import Path
 from pprint import pformat
-from typing import Dict, Any, Union
+from typing import Dict, Any, Union, Iterable, Tuple
 
 import bitstring
+import cbktree as hamDb
 import imageio
 import numpy as np
 from more_itertools import grouper
@@ -38,6 +41,17 @@ medias_path = defaultdict(
         'subtitles': medias_root_path / 'subtitles.srt',
     }
 )  # type: Dict[str, Union[Any, Path]]
+
+
+@lru_cache()
+def in_debug_mode():
+    """
+    https://stackoverflow.com/a/38637774
+    """
+    import sys
+
+    gettrace = getattr(sys, 'gettrace', None)
+    return gettrace() if gettrace else False
 
 
 def show_fingerprints(video_reader):
@@ -195,6 +209,55 @@ def import_fingerprints(input_fingerprints_path: Path) -> hex:
                 break
 
 
+def build_search_tree(srt_fp_path: Path, uuid_srt: int) -> Tuple[hamDb.BkHammingTree, Dict]:
+    """
+    Build a search (bK)Tree from a single subtitles+fingerprints dump
+    """
+    # load fingerprints from srt coupling
+    sub_fingerprint_rip_file = SubFingerPrintRipFile.open(srt_fp_path)
+    gb_subfingerprints = itertools.groupby(sub_fingerprint_rip_file,
+                                           key=lambda sub_fingerprint: sub_fingerprint.srt_index)
+    fingerprints_for_srt = set.union(*(
+        set([subfingerprints.fingerprint for subfingerprints in it_indexed_subfingerprints])
+        for index_subtitle, it_indexed_subfingerprints in gb_subfingerprints
+    ))
+    set_fingerprints = [hex(fingerprint) for fingerprint in fingerprints_for_srt]
+    if in_debug_mode():
+        logger.info(
+            "List of fingerprints for srt\n%s\nnb fingerprints: %d",
+            pformat(set_fingerprints, compact=True, indent=4),
+            len(set_fingerprints),
+        )
+
+    # build bkTree with this fingerprints and associated uuid srt
+    tree = hamDb.BkHammingTree()
+    map_node_id_to_srt_uuid = defaultdict(set)
+    for node_id, fingerprint in tqdm(enumerate(set_fingerprints), unit=" fingerprints",
+                                     desc="Build bkTree from fingerprints"):
+        node_hash = hamDb.explicitSignCast(int(fingerprint, 16))
+        tree.unlocked_insert(node_hash, node_id)
+        # associate node is to match attributes
+        # here: we just map all node id to the uuid srt
+        map_node_id_to_srt_uuid[node_id].add(uuid_srt)
+    assert len(tree.getWithinDistance(hamDb.explicitSignCast(int(set_fingerprints[16], 16)), 2)) == 1
+    return tree, map_node_id_to_srt_uuid
+
+
+def perform_search(
+        search_tree: hamDb.BkHammingTree,
+        map_node_value: Dict,
+        gen_fingerprint: VideoFingerprint,
+        search_dist: int = 4
+):
+    matching_results = defaultdict(set)
+    for id_fingerprint, fingerprint in enumerate(gen_fingerprint):
+        matches_id_node, _nb_tree_nodes_touched = search_tree.getWithinDistance(fingerprint, search_dist)
+        for match_id_node in matches_id_node:
+            matching_results[map_node_value[match_id_node]].add(id_fingerprint)
+    logger.info("matching_results: %s", matching_results)
+
+
+
 def main():
     media = medias_path['big_buck_bunny_trailer_480p']
     media_path = media['media']  # type: Path
@@ -211,8 +274,13 @@ def main():
     # show_subtitles_fingerprints(video_reader, subtitles_path=srt_path)
     export_path = (Path("/tmp/") / srt_path.stem).with_suffix(".srt_fingerprint")
     export_subtitles_fingerprints(video_reader, subtitles_path=srt_path, export_path=export_path)
-    import_subtitles_fingerprints(import_path=export_path)
+    # import_subtitles_fingerprints(import_path=export_path)
     # show_important_frames_fingerprints(video_reader, threshold_distance=4)
+    search_tree, map_node_value = build_search_tree(export_path, uuid_srt=uuid.uuid4().int & (1 << 64) - 1)
+
+    it_subfingerprints = SubFingerprints(sub_reader=SubReader(srt_path),
+                                         video_fingerprint=VideoFingerprint(video_reader))
+    perform_search(search_tree, map_node_value, it_subfingerprints)
 
     fp_exported = export_fingerprints(media_path)
     logger.info(f"Fingerprints exported: {fp_exported}")

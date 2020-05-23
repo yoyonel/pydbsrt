@@ -1,4 +1,5 @@
 from itertools import chain
+from typing import Iterator
 
 from pysrt import ERROR_PASS
 from pysrt.srtexc import Error
@@ -22,7 +23,7 @@ class SubFingerPrintRipFile(SubRipFile):
         raise NotImplementedError
 
     @classmethod
-    def stream(cls, source_file, error_handling=ERROR_PASS):
+    def stream(cls, source_file, error_handling=ERROR_PASS) -> Iterator[SubFingerPrintRipItem]:
         """ """
         string_buffer = []
         for index, line in enumerate(chain(source_file, '\n')):
