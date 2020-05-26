@@ -36,6 +36,7 @@ setup(
     install_requires=[
         "bitstring>=3.1.5",
         "cbktree>=0.3.1"
+        "contexttimer>=0.3.3",
         "distance>=0.1.3",
         "fuzzywuzzy>=0.17.0",
         "ImageHash>=4.0",

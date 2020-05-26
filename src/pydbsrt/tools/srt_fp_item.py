@@ -30,6 +30,9 @@ class SubFingerPrintRipItem(ComparableMixin):
     def __str__(self):
         return self.ITEM_PATTERN % (self.srt_index, self.frame_index, str(self.fingerprint))
 
+    def __hash__(self):
+        return hash(str(self))
+
     if is_py2:
         __unicode__ = __str__
 
