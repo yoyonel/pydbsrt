@@ -38,6 +38,9 @@ SQLAlchemy = "^1.3.20"
 imohash = "1.0.4"
 sqltap = "0.3.11"
 contexttimer = "^0.3.3"
+rich = "^9.3.0"
+click = "^7.1.2"
+click-pathlib = "^2020.3.13"
 
 [tool.poetry.dev-dependencies]
 
