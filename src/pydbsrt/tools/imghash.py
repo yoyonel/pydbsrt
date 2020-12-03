@@ -1,10 +1,33 @@
 """
 """
+import distance
+import numpy as np
 # import binascii
 from bitstring import BitArray
-import distance
 from imagehash import ImageHash
-import numpy as np
+
+
+class ImgHashExtended(ImageHash):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.hash = self.hash.hash
+
+    def __len__(self):
+        return self.hash.size
+
+    def __int__(self):
+        ret = 0
+        mask = 1 << len(self) - 1
+        for bit in np.nditer(self.hash, order='C'):  # Specify memory order, so we're (theoretically) platform agnostic
+            if bit:
+                ret |= mask
+            mask >>= 1
+
+        # Convert to signed representation
+        VALSIZE = 64
+        if ret >= 2 ** (VALSIZE - 1):
+            ret -= 2 ** VALSIZE
+        return ret
 
 
 def imghash_to_bitarray(imghash: ImageHash) -> BitArray:
@@ -31,6 +54,22 @@ def imghash_to_64bits(imghash: ImageHash) -> str:
     # binascii.b2a_hex(imghash.hash.flatten())[:64] -> b'0101000100010001000000000000000000000000000000000000000000000000'
     # binascii.a2b_hex(str(imghash)) -> b'\xd5\x00\x00\x00\x00\x00\x00\x00'
     return BitArray(f'0x{str(imghash)}').bin  # -> '1101010100000000000000000000000000000000000000000000000000000000'
+
+
+def imghash_to_signed_int64(imghash: ImageHash) -> int:
+    """
+    >>> imghash_to_signed_int64(ImageHash(np.array([\
+        np.array([ True,  True, False,  True, False,  True, False,  True]), \
+        np.array([False, False, False, False, False, False, False, False]), \
+        np.array([False, False, False, False, False, False, False, False]), \
+        np.array([False, True, False, False, False, False, False, False]), \
+        np.array([False, False, False, True, False, False, False, False]), \
+        np.array([False, False, False, False, False, False, False, False]), \
+        np.array([False, False, False, True, False, False, False, False]), \
+        np.array([False, False, False, False, False, False, False, True])])))
+    -3098476268484554751
+    """
+    return int(ImgHashExtended(imghash))
 
 
 def imghash_distance(
