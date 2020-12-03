@@ -84,7 +84,6 @@ def ffmpeg_frame_generator(
         frame_data = proc.stdout.read(frame_size)
         while len(frame_data) > 0:
             nb_frames += 1
-            # frames.append(frame)
             yield frame_data
             frame_data = proc.stdout.read(frame_size)
 

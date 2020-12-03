@@ -43,6 +43,11 @@ setup(
         "googletrans>=2.4.0",
         "tqdm>=4.24.0",
         "Pillow",
+        "psycopg2",
+        "python-sql",
+        "sqlalchemy",
+        "imohash==1.0.4",
+        "sqltap==0.3.11",
     ],
     extras_require={},
     entry_points={
