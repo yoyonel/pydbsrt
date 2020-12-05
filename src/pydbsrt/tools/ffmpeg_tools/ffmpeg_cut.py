@@ -35,7 +35,6 @@ def set_select_expression(
         >>> set_select_expression('BEGIN', 'END')
         'gte(n\\\,0)'
         >>> set_select_expression('BEGIN', 500)
-        'gte(n\\\,0)*lte(n\\\,500)'
         >>> set_select_expression(50, 500)
         'gte(n\\\,50)*lte(n\\\,500)'
         >>> set_select_expression(200, 50)

@@ -1,0 +1,33 @@
+version: '3'
+
+volumes:
+  bktreedb-data:
+
+services:
+  bktreedb:
+    build:
+      context: pg-spgist_hamming/9.6-3.0-develop/.
+      dockerfile: Dockerfile
+    volumes:
+      - bktreedb-data:/var/lib/postgresql/data
+    ports:
+      - 5432:5432
+    environment:
+      - POSTGRES_DATABASE=bktreedb
+      - POSTGRES_DB=bktreedb
+      - POSTGRES_USER=docker
+      - POSTGRES_PASSWORD=docker
+    restart: on-failure
+
+  postgres_exporter:
+    image: wrouesnel/postgres_exporter
+    environment:
+      - DATA_SOURCE_NAME=postgresql://docker:docker@bdktreedb:5432/postgres?sslmode=disable
+    ports:
+      - 9187:9187
+
+  adminer:
+    image: adminer
+    restart: always
+    ports:
+      - 8080:8080

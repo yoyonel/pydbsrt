@@ -1,8 +1,9 @@
 """
 """
+import binascii
+
 import distance
 import numpy as np
-# import binascii
 from bitstring import BitArray
 from imagehash import ImageHash
 
@@ -28,6 +29,22 @@ class ImgHashExtended(ImageHash):
         if ret >= 2 ** (VALSIZE - 1):
             ret -= 2 ** VALSIZE
         return ret
+
+
+def imghash_to_binary(imghash: ImageHash) -> bytes:
+    """
+    >>> imghash_to_binary(ImageHash(np.array([\
+        np.array([ True,  True, False,  True, False,  True, False,  True]), \
+        np.array([False, False, False, False, False, False, False, False]), \
+        np.array([False, False, False, False, False, False, False, False]), \
+        np.array([False, False, False, False, False, False, False, False]), \
+        np.array([False, False, False, False, False, False, False, False]), \
+        np.array([False, False, False, False, False, False, False, False]), \
+        np.array([False, False, False, False, False, False, False, False]), \
+        np.array([False, False, False, False, False, False, False, False])])))
+    b'\\xd5\\x00\\x00\\x00\\x00\\x00\\x00\\x00'
+    """
+    return binascii.a2b_hex(str(imghash))
 
 
 def imghash_to_bitarray(imghash: ImageHash) -> BitArray:
@@ -56,18 +73,27 @@ def imghash_to_64bits(imghash: ImageHash) -> str:
     return BitArray(f'0x{str(imghash)}').bin  # -> '1101010100000000000000000000000000000000000000000000000000000000'
 
 
+def binary_to_signed_int64(binary_signed_int64: bytes, byteorder: str = "big") -> int:
+    """
+    >>> binary_to_signed_int64(b'\\xd5\\x00\\x00\\x00\\x00\\x00\\x00\\x00')
+    -3098476543630901248
+    """
+    # https://docs.python.org/3/library/stdtypes.html#int.from_bytes
+    return int.from_bytes(binary_signed_int64, byteorder, signed=True)
+
+
 def imghash_to_signed_int64(imghash: ImageHash) -> int:
     """
     >>> imghash_to_signed_int64(ImageHash(np.array([\
         np.array([ True,  True, False,  True, False,  True, False,  True]), \
         np.array([False, False, False, False, False, False, False, False]), \
         np.array([False, False, False, False, False, False, False, False]), \
-        np.array([False, True, False, False, False, False, False, False]), \
-        np.array([False, False, False, True, False, False, False, False]), \
         np.array([False, False, False, False, False, False, False, False]), \
-        np.array([False, False, False, True, False, False, False, False]), \
-        np.array([False, False, False, False, False, False, False, True])])))
-    -3098476268484554751
+        np.array([False, False, False, False, False, False, False, False]), \
+        np.array([False, False, False, False, False, False, False, False]), \
+        np.array([False, False, False, False, False, False, False, False]), \
+        np.array([False, False, False, False, False, False, False, False])])))
+    -3098476543630901248
     """
     return int(ImgHashExtended(imghash))
 
@@ -81,6 +107,7 @@ def imghash_distance(
 
     :param imghash0:
     :param imghash1:
+    :param distance_func:
     :return:
 
     >>> ih0 = ImageHash(np.array([\
