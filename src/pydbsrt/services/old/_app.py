@@ -43,9 +43,6 @@ medias_path = defaultdict(
 )  # type: Dict[str, Union[Any, Path]]
 
 
-<<<<<<< Updated upstream
-=======
-@lru_cache()
 def in_debug_mode():
     """
     https://stackoverflow.com/a/38637774
@@ -56,7 +53,6 @@ def in_debug_mode():
     return gettrace() if gettrace else False
 
 
->>>>>>> Stashed changes
 def show_fingerprints(video_reader):
     #
     gen_fingerprint = VideoFingerprint(video_reader)
@@ -186,7 +182,6 @@ def import_fingerprints(input_fingerprints_path: Path) -> hex:
                 break
 
 
-<<<<<<< Updated upstream
 def main():
     media = medias_path['big_buck_bunny_trailer_480p']
     media_path = media['media']  # type: Path
@@ -197,7 +192,7 @@ def main():
 
     video_reader = VideoReader(media_path)
     logger.info(f"Video reader meta data:\n{pformat(video_reader.metadatas)}")
-=======
+
 def build_search_tree(srt_fp_path: Path, uuid_srt: int) -> Tuple[hamDb.BkHammingTree, Dict, int]:
     """
     Build a search (bK)Tree from a single subtitles+fingerprints dump
@@ -438,8 +433,6 @@ def main():
 
     # frame_reader = ffmpeg_frame_generator(str(media_path))
     # frames = list(frame_reader)
->>>>>>> Stashed changes
-
     # show_fingerprints(video_reader)
     #
     show_subtitles_fingerprints(video_reader, srt_path=srt_path)

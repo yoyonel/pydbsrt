@@ -21,7 +21,6 @@ def ffmpeg_frame_generator(
         frame_width: int = 32,
         frame_height: int = 32,
 ) -> Generator[bytes, None, None]:
-
     """
 
     :param input: path or url of the media to read frames from
@@ -98,8 +97,8 @@ def ffmpeg_frame_generator(
 
 def rawframe_to_imghash(
         raw_frame: bytes,
-        frame_width: int=32,
-        frame_height: int=32,
+        frame_width: int = 32,
+        frame_height: int = 32,
 ) -> imagehash.ImageHash:
     return imagehash.phash(
         Image.fromarray(
@@ -124,6 +123,7 @@ def ffmpeg_imghash_generator(
 
 if __name__ == '__main__':
     from pathlib import Path
+
     # root_path = Path('data/')
     # media_path = root_path.joinpath('big_buck_bunny_trailer_480p.webm')
     root_path = Path("/home/latty/Vidéos/Mission Impossible Rogue Nation (2015) [1080p]/")
@@ -141,7 +141,7 @@ if __name__ == '__main__':
         if not i % 25:
             t1 = time.time()
             sum_speed += 1.0 / (t1 - t0)
-            print(f"New frames: {i} - {i/25}s - {imghash}", end='')
+            print(f"New frames: {i} - {i / 25}s - {imghash}", end='')
             if not i % (25 * nb_mesures_for_timing):
                 speed = sum_speed / float(nb_mesures_for_timing)
                 sum_speed = 0

@@ -34,7 +34,7 @@ class FFmpeg(object):
     """
 
     def __init__(self):
-        self.input_file = list()
+        self.input_file = []
         self.input_format = None
 
         self.output_file = None
@@ -47,7 +47,7 @@ class FFmpeg(object):
 
         self.video_decoder = None
         self.video_encoder = None
-        self.video_filters = list()
+        self.video_filters = []
 
         self.audio_decoder = None
         self.audio_encoder = None
@@ -222,11 +222,7 @@ class FFmpeg(object):
         # Output
         if self.output_format:
             cmd += ['-f', self.output_format]
-        if self.output_file:
-            cmd += [self.output_file]
-        else:
-            cmd += ['-']
-
+        cmd += [self.output_file] if self.output_file else ['-']
         self.built_cmd = cmd
         return self
 
@@ -234,6 +230,7 @@ class FFmpeg(object):
         """
         Runner
         """
-        child_process = subprocess.Popen(self.built_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        return child_process
+        return subprocess.Popen(
+            self.built_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
 
