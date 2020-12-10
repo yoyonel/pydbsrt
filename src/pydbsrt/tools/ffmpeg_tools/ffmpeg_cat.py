@@ -1,19 +1,16 @@
 #!/usr/bin/env python3
 
-import os
-import sys
 import argparse
-import tempfile
 import json
 import logging
+import os
 import subprocess
+import sys
+import tempfile
 
-from pydbsrt.tools.ffmpeg_wrapper import FFException
-from pydbsrt.tools.ffmpeg_wrapper import FFprobe
-from pydbsrt.tools.ffmpeg_wrapper import FFMedia
-from pydbsrt.tools.ffmpeg_wrapper import FFmpeg
+from pydbsrt.tools.ffmpeg_wrapper import FFException, FFMedia, FFmpeg, FFprobe
 
-logger = logging.getLogger('ffmpegtools.cat')
+logger = logging.getLogger("ffmpegtools.cat")
 
 
 def get_video_scale(media_fp):
@@ -29,15 +26,15 @@ def get_video_scale(media_fp):
         media = FFMedia.FFMedia(media_fp)
         width = media.stream_entry("v:0", "width")
         height = media.stream_entry("v:0", "height")
-        return '{}x{}'.format(width, height)
+        return "{}x{}".format(width, height)
     except subprocess.CalledProcessError as e:
-        logger.error('FFprobe failed.')
+        logger.error("FFprobe failed.")
         raise e
     except json.JSONDecodeError as e:
-        logger.error('Unable to decode json from FFprobe output.')
+        logger.error("Unable to decode json from FFprobe output.")
         raise e
     except ValueError as e:
-        logger.error('FFprobe \'r_frame_rate\' entry does not seem valid')
+        logger.error("FFprobe 'r_frame_rate' entry does not seem valid")
         raise e
 
 
@@ -55,13 +52,13 @@ def get_audio_codec(media_fp):
         codec = media.stream_entry("a:0", "codec_name")
         return codec
     except subprocess.CalledProcessError as e:
-        logger.error('FFprobe failed.')
+        logger.error("FFprobe failed.")
         raise e
     except json.JSONDecodeError as e:
-        logger.error('Unable to decode json from FFprobe output.')
+        logger.error("Unable to decode json from FFprobe output.")
         raise e
     except ValueError as e:
-        logger.error('FFprobe \'r_frame_rate\' entry does not seem valid')
+        logger.error("FFprobe 'r_frame_rate' entry does not seem valid")
         raise e
 
 
@@ -79,13 +76,13 @@ def get_video_codec(media_fp):
         codec = media.stream_entry("v:0", "codec_name")
         return codec
     except subprocess.CalledProcessError as e:
-        logger.error('FFprobe failed.')
+        logger.error("FFprobe failed.")
         raise e
     except json.JSONDecodeError as e:
-        logger.error('Unable to decode json from FFprobe output.')
+        logger.error("Unable to decode json from FFprobe output.")
         raise e
     except ValueError as e:
-        logger.error('FFprobe \'r_frame_rate\' entry does not seem valid')
+        logger.error("FFprobe 'r_frame_rate' entry does not seem valid")
         raise e
 
 
@@ -102,26 +99,26 @@ def cat(out_media_fp, l_in_media_fp):
     ref_vscale = get_video_scale(l_in_media_fp[0])
     for f in l_in_media_fp:
         if ref_vcodec != get_video_codec(f):
-            logger.error('Video Codecs are different.')
+            logger.error("Video Codecs are different.")
             return -1
         if ref_acodec != get_audio_codec(f):
-            logger.error('Audio Codecs are different.')
+            logger.error("Audio Codecs are different.")
             return -1
         if ref_vscale != get_video_scale(f):
-            logger.error('Video Scales are different.')
+            logger.error("Video Scales are different.")
             return -1
 
     ffmpeg = FFmpeg.FFmpeg()
     ffmpeg.set_output_file(out_media_fp)
-    ffmpeg.set_input_format('concat')
-    ffmpeg.set_video_encoder('copy')
-    ffmpeg.set_audio_encoder('copy')
+    ffmpeg.set_input_format("concat")
+    ffmpeg.set_video_encoder("copy")
+    ffmpeg.set_audio_encoder("copy")
     ffmpeg.set_safe(0)
     try:
         fpath = tempfile.mkstemp()[1]
-        with open(fpath, 'w') as fp:
+        with open(fpath, "w") as fp:
             for media_fp in l_in_media_fp:
-                fp.write('file \'{}\'\n'.format(os.path.abspath(media_fp)))
+                fp.write("file '{}'\n".format(os.path.abspath(media_fp)))
 
         ffmpeg.add_input_file(fpath)
 
@@ -132,7 +129,7 @@ def cat(out_media_fp, l_in_media_fp):
         os.remove(fpath)
         return proc.returncode
     except subprocess.CalledProcessError:
-        logger.error('FFmpeg failed.')
+        logger.error("FFmpeg failed.")
 
 
 def process(args):
@@ -145,7 +142,7 @@ def process(args):
 
     """
     if len(args.l_in_media_fp) < 2:
-        logger.error('Too few input media.')
+        logger.error("Too few input media.")
         return -1
     try:
         FFmpeg.initialize()
@@ -169,20 +166,13 @@ def build_parser(parser=None, **argparse_options):
     if parser is None:
         parser = argparse.ArgumentParser(
             **argparse_options,
-            description="""Search files recursively starting at 'base_directory' 
+            description="""Search files recursively starting at 'base_directory'
             and count the differents codecs found"""
         )
 
-    parser.add_argument('-i', '--input',
-                        nargs='+',
-                        required=True,
-                        dest='l_in_media_fp'
-                        )
+    parser.add_argument("-i", "--input", nargs="+", required=True, dest="l_in_media_fp")
 
-    parser.add_argument('-o', '--output',
-                        required=True,
-                        dest='out_media_fp'
-                        )
+    parser.add_argument("-o", "--output", required=True, dest="out_media_fp")
     return parser
 
 
@@ -200,5 +190,5 @@ def main():
     sys.exit(process(args))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

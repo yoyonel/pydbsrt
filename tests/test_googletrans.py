@@ -4,8 +4,10 @@ from googletrans import Translator
 
 @pytest.mark.parametrize(
     "text,dest,src,expected",
-    [(u"Hello", "French", "ENGLISH", "Salut"),
-     (u"Good Morning", "French", "ENGLISH", "Bonjour")]
+    [
+        (u"Hello", "French", "ENGLISH", "Salut"),
+        (u"Good Morning", "French", "ENGLISH", "Bonjour"),
+    ],
 )
 def test_googletrans(text, dest, src, expected):
     translator = Translator()

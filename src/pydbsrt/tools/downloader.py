@@ -2,26 +2,22 @@
 A rudimentary URL downloader (like wget or curl) to demonstrate Rich progress bars.
 """
 
-from concurrent.futures import ThreadPoolExecutor
-from datetime import timedelta
-from functools import partial
 import os.path
 import sys
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 from typing import Iterable
 from urllib.request import urlopen
 
 from rich.progress import (
     BarColumn,
     DownloadColumn,
-    TextColumn,
-    TransferSpeedColumn,
-    TimeRemainingColumn,
     Progress,
-    TaskID, ProgressColumn,
+    TaskID,
+    TextColumn,
+    TimeRemainingColumn,
+    TransferSpeedColumn,
 )
-from rich.text import Text
-
-
 
 progress = Progress(
     TextColumn("[bold blue]{task.fields[filename]}", justify="right"),

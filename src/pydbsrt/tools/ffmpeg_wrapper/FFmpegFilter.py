@@ -36,6 +36,8 @@ class FFmpegFilter(object):
         """
         built_string = self.name
         if self.opts:
-            built_string += '='
-            built_string += ':'.join('{0}={1}'.format(opt, val) for opt, val in self.opts.items())
+            built_string += "="
+            built_string += ":".join(
+                "{0}={1}".format(opt, val) for opt, val in self.opts.items()
+            )
         return built_string

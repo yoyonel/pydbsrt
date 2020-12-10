@@ -1,6 +1,7 @@
 """
 """
 import logging
+
 import tqdm
 
 
@@ -15,14 +16,14 @@ class TqdmLoggingHandler(logging.Handler):
             self.flush()
         except (KeyboardInterrupt, SystemExit):
             raise
-        except:
+        except:  # noqa: E722
             self.handleError(record)
 
 
 def config_logger(
-        logger: logging.Logger,
-        formatter: str = '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        level_name: str = 'INFO'
+    logger: logging.Logger,
+    formatter: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level_name: str = "INFO",
 ):
     logger.setLevel(logging._nameToLevel[level_name])
     tqdm_logging_handler = TqdmLoggingHandler()

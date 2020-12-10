@@ -6,10 +6,10 @@ import operator
 from collections import defaultdict
 from hashlib import md5
 from itertools import islice
-from math import log, e
+from math import e, log
 from pathlib import Path
 from pprint import pformat
-from typing import Dict, Any, Union
+from typing import Dict
 
 import bitstring
 import imageio
@@ -23,6 +23,7 @@ from pydbsrt.tools.imghash import imghash_to_bitarray
 from pydbsrt.tools.importantframefingerprint import ImportantFrameFingerprints
 from pydbsrt.tools.subfingerprint import SubFingerprints
 from pydbsrt.tools.subreader import SubReader
+
 #
 from pydbsrt.tools.timer_profiling import _Timer
 from pydbsrt.tools.tqdm_with_logger import TqdmLoggingHandler
@@ -34,11 +35,11 @@ SrtUUID = str
 
 logger = logging.getLogger(__name__)
 
-medias_root_path = Path('data/')
+medias_root_path = Path("data/")
 medias_path = defaultdict(
     lambda: {
-        'media': medias_root_path / 'big_buck_bunny_trailer_480p.webm',
-        'subtitles': medias_root_path / 'subtitles.srt',
+        "media": medias_root_path / "big_buck_bunny_trailer_480p.webm",
+        "subtitles": medias_root_path / "subtitles.srt",
     }
 )  # type: Dict[str, Union[Any, Path]]
 
@@ -49,7 +50,7 @@ def in_debug_mode():
     """
     import sys
 
-    gettrace = getattr(sys, 'gettrace', None)
+    gettrace = getattr(sys, "gettrace", None)
     return gettrace() if gettrace else False
 
 
@@ -65,14 +66,22 @@ def show_fingerprints(video_reader):
 
 def show_subtitles_fingerprints(video_reader: VideoReader, srt_path: Path) -> None:
     nb_fingerprints_by_chunk = 5
-    it_subfingerprints = SubFingerprints(subreader=SubReader(srt_path), vfp=VideoFingerprint(video_reader))
-    gb_subfingerprints = itertools.groupby(it_subfingerprints, key=operator.itemgetter(0))
+    it_subfingerprints = SubFingerprints(
+        subreader=SubReader(srt_path), vfp=VideoFingerprint(video_reader)
+    )
+    gb_subfingerprints = itertools.groupby(
+        it_subfingerprints, key=operator.itemgetter(0)
+    )
     for index_subtitle, it_indexed_subfingerprints in gb_subfingerprints:
         _, id_frame, fingerprint = next(it_indexed_subfingerprints)
-        it_indexed_subfingerprints = itertools.chain(((index_subtitle, id, fingerprint),), it_indexed_subfingerprints)
+        it_indexed_subfingerprints = itertools.chain(
+            ((index_subtitle, id, fingerprint),), it_indexed_subfingerprints
+        )
         print(f"* index subtitle: {index_subtitle} - first frame: {id_frame}")
-        for chunk_fingerprints in grouper((fingerprint for _, __, fingerprint in it_indexed_subfingerprints),
-                                          nb_fingerprints_by_chunk):
+        for chunk_fingerprints in grouper(
+            (fingerprint for _, __, fingerprint in it_indexed_subfingerprints),
+            nb_fingerprints_by_chunk,
+        ):
             print(" ".join(map(str, filter(None, chunk_fingerprints))))
 
 
@@ -91,7 +100,7 @@ def entropy2(labels, base=e):
     if n_classes <= 1:
         return 0
 
-    ent = 0.
+    ent = 0.0
 
     # Compute entropy
     for i in probs:
@@ -101,9 +110,7 @@ def entropy2(labels, base=e):
 
 
 def show_important_frames_fingerprints(
-        video_reader,
-        threshold_distance: int = 32,
-        threshold_nonzero: int = 16,
+    video_reader, threshold_distance: int = 32, threshold_nonzero: int = 16,
 ):
     """
     Compute Important Frames (from fingerprint analyze) and extract frames images from them.
@@ -120,7 +127,7 @@ def show_important_frames_fingerprints(
         # for removing blank (black) frames
     )
 
-    export_path = Path('/tmp/important_frames_fingerprints')
+    export_path = Path("/tmp/important_frames_fingerprints")
     export_path.mkdir(exist_ok=True)
     for fp, id_frame in gen_if_fingerprint:
         logger.info(
@@ -130,7 +137,7 @@ def show_important_frames_fingerprints(
         )
         #
         frame = video_reader.reader.get_data(id_frame)
-        frame_export = export_path.joinpath(f'{id_frame}.jpg')
+        frame_export = export_path.joinpath(f"{id_frame}.jpg")
         logger.info(f"Export frame.id={id_frame} to '{frame_export}'")
         imageio.imwrite(frame_export, frame)
 
@@ -147,12 +154,13 @@ def export_fingerprints(input_media_path: Path) -> Path:
     => ~ x25.675
 
     """
-    export_path = Path('/tmp/img_hash')
+    export_path = Path("/tmp/img_hash")
     export_path.mkdir(exist_ok=True)
     # https://stackoverflow.com/questions/38175170/python-md5-cracker-typeerror-object-supporting-the-buffer-api-required
     export_fp = export_path.joinpath(
-        f"{md5(str(input_media_path).encode()).hexdigest()}.ba")
-    with open(export_fp, 'wb') as fp:
+        f"{md5(str(input_media_path).encode()).hexdigest()}.ba"
+    )
+    with open(export_fp, "wb") as fp:
         for img_hash in tqdm(ffmpeg_imghash_generator(str(input_media_path))):
             ba_img_hash = imghash_to_bitarray(img_hash)
             fp.write(ba_img_hash.bytes)
@@ -165,27 +173,29 @@ def import_fingerprints(input_fingerprints_path: Path) -> hex:
     :param input_fingerprints_path:
     :return:
     """
-    chunk_nb_frames = 2048  # for 8k of fingerprints
-    chunk_nb_bytes_to_read = chunk_nb_frames << 3  # * 8
     # https://stackoverflow.com/questions/1035340/reading-binary-file-and-looping-over-each-byte
     print(f"Reading img_hash file: {input_fingerprints_path} ...")
     # with open(input_fingerprints_path, "rb") as f:
-    with input_fingerprints_path.open('rb') as f:
+    with input_fingerprints_path.open("rb") as f:
+        chunk_nb_frames = 2048  # for 8k of fingerprints
+        chunk_nb_bytes_to_read = chunk_nb_frames << 3  # * 8
         while True:
             chunk = f.read(chunk_nb_bytes_to_read)
             chunk_nb_img_hash = len(chunk) >> 3  # // 8
             if chunk_nb_img_hash:
                 # https://pythonhosted.org/bitstring/packing.html#compact-format
-                for int64_img_hash in bitstring.BitArray(chunk).unpack(fmt=f'>{chunk_nb_img_hash}Q'):
+                for int64_img_hash in bitstring.BitArray(chunk).unpack(
+                    fmt=f">{chunk_nb_img_hash}Q"
+                ):
                     yield hex(int64_img_hash)
             else:
                 break
 
 
 def main():
-    media = medias_path['big_buck_bunny_trailer_480p']
-    media_path = media['media']  # type: Path
-    srt_path = media['subtitles']  # type: Path
+    media = medias_path["big_buck_bunny_trailer_480p"]
+    media_path = media["media"]  # type: Path
+    srt_path = media["subtitles"]  # type: Path
 
     logger.info(f"media path: {media_path}")
     logger.info(f"subtitles path: {srt_path}")
@@ -193,14 +203,18 @@ def main():
     video_reader = VideoReader(media_path)
     logger.info(f"Video reader meta data:\n{pformat(video_reader.metadatas)}")
 
-def build_search_tree(srt_fp_path: Path, uuid_srt: int) -> Tuple[hamDb.BkHammingTree, Dict, int]:
+
+def build_search_tree(
+    srt_fp_path: Path, uuid_srt: int
+) -> Tuple[hamDb.BkHammingTree, Dict, int]:
     """
     Build a search (bK)Tree from a single subtitles+fingerprints dump
     """
     # load fingerprints from srt coupling
     sub_fingerprint_rip_file = SubFingerPrintRipFile.open(srt_fp_path)
-    gb_sub_fingerprints = itertools.groupby(sub_fingerprint_rip_file,
-                                            key=lambda sub_fingerprint: sub_fingerprint.srt_index)
+    gb_sub_fingerprints = itertools.groupby(
+        sub_fingerprint_rip_file, key=lambda sub_fingerprint: sub_fingerprint.srt_index
+    )
     # fingerprints_for_srt = set.union(*(
     #     set([sub_fingerprints.fingerprint for sub_fingerprints in it_indexed_sub_fingerprints])
     #     for index_subtitle, it_indexed_sub_fingerprints in gb_sub_fingerprints
@@ -226,29 +240,44 @@ def build_search_tree(srt_fp_path: Path, uuid_srt: int) -> Tuple[hamDb.BkHamming
     # build bkTree with this fingerprints and associated uuid srt
     tree = hamDb.BkHammingTree()
     map_node_id_to_srt_uuid = defaultdict(int)
-    for node_id, fingerprint in tqdm(enumerate(set_fingerprints), unit=" fingerprints",
-                                     desc="Build bkTree from fingerprints"):
+    for node_id, fingerprint in tqdm(
+        enumerate(set_fingerprints),
+        unit=" fingerprints",
+        desc="Build bkTree from fingerprints",
+    ):
         node_hash = hamDb.explicitSignCast(int(fingerprint, 16))
         tree.unlocked_insert(node_hash, node_id)
         # associate node is to match attributes
         # here: we just map all node id to the uuid srt
         map_node_id_to_srt_uuid[node_id] = uuid_srt
-    assert len(tree.getWithinDistance(hamDb.explicitSignCast(int(set_fingerprints[16], 16)), search_distance=2)) == 1
+    assert (
+        len(
+            tree.getWithinDistance(
+                hamDb.explicitSignCast(int(set_fingerprints[16], 16)), search_distance=2
+            )
+        )
+        == 1
+    )
     return tree, map_node_id_to_srt_uuid, nb_fingerprints_in_srt
 
 
 def perform_search(
-        search_tree: hamDb.BkHammingTree,
-        map_node_value: Dict,
-        gen_fingerprint: VideoFingerprint,
-        search_dist: int = 4
+    search_tree: hamDb.BkHammingTree,
+    map_node_value: Dict,
+    gen_fingerprint: VideoFingerprint,
+    search_dist: int = 4,
 ):
     matching_results = defaultdict(list)
-    for id_fingerprint, fingerprint in tqdm(enumerate(gen_fingerprint),
-                                            unit=" fingerprints", desc="search fingerprint"):
+    for id_fingerprint, fingerprint in tqdm(
+        enumerate(gen_fingerprint), unit=" fingerprints", desc="search fingerprint"
+    ):
         searched_node_hash = hamDb.explicitSignCast(int(str(fingerprint), 16))
-        matches_id_node = list(search_tree.getWithinDistance(searched_node_hash, search_dist))
-        for uuid_srt_found in set(map_node_value[match_id_node] for match_id_node in matches_id_node):
+        matches_id_node = list(
+            search_tree.getWithinDistance(searched_node_hash, search_dist)
+        )
+        for uuid_srt_found in {
+            map_node_value[match_id_node] for match_id_node in matches_id_node
+        }:
             matching_results[uuid_srt_found].append(id_fingerprint)
     return matching_results
 
@@ -257,7 +286,9 @@ def perform_search(
 class SearchTree:
     srt_uuid = set()
     tree: hamDb.BkHammingTree = field(init=False)
-    map_node_value_to_data: Dict[NodeHash, Dict[SrtUUID, Set[SubFingerPrintRipItem]]] = field(init=False)
+    map_node_value_to_data: Dict[
+        NodeHash, Dict[SrtUUID, Set[SubFingerPrintRipItem]]
+    ] = field(init=False)
 
     def __post_init__(self):
         self.tree = hamDb.BkHammingTree()
@@ -269,14 +300,20 @@ class SearchTree:
         """
         # load fingerprints from SRT/Fingerprints coupling
         with _Timer("load fingerprints from SRT/Fingerprints coupling"):
-            sub_fingerprint_rip_file = SubFingerPrintRipFile.open(sub_fingerprint_rip_file_path)
-            gb_sub_fingerprints: Iterator[Tuple[int, Iterator[SubFingerPrintRipItem]]] = itertools.groupby(
+            sub_fingerprint_rip_file = SubFingerPrintRipFile.open(
+                sub_fingerprint_rip_file_path
+            )
+            gb_sub_fingerprints: Iterator[
+                Tuple[int, Iterator[SubFingerPrintRipItem]]
+            ] = itertools.groupby(
                 sub_fingerprint_rip_file,
-                key=lambda sub_fingerprint: sub_fingerprint.srt_index
+                key=lambda sub_fingerprint: sub_fingerprint.srt_index,
             )
 
         with _Timer("build mapping node hash to data"):
-            map_node_hash_to_data: Dict[NodeHash, Set[SubFingerPrintRipItem]] = defaultdict(set)
+            map_node_hash_to_data: Dict[
+                NodeHash, Set[SubFingerPrintRipItem]
+            ] = defaultdict(set)
             for _index_subtitle, it_sub_fingerprint_rip_item in gb_sub_fingerprints:
                 for fingerprint_rip_item in it_sub_fingerprint_rip_item:
                     node_hash = hamDb.explicitSignCast(fingerprint_rip_item.fingerprint)
@@ -300,21 +337,39 @@ class SearchTree:
                 if not self.map_node_value_to_data[node_value]:
                     self.tree.unlocked_insert(node_hash, node_value)
                     nb_node_inserted += 1
-                self.map_node_value_to_data[node_value][srt_uuid].update(list_fingerprint_rip_item)
+                self.map_node_value_to_data[node_value][srt_uuid].update(
+                    list_fingerprint_rip_item
+                )
 
         if in_debug_mode():
             # each subtitle+fingerprint has 1 unique result search mapping in the tree
             assert all(
-                [len(self.tree.getWithinDistance(hamDb.explicitSignCast(sub_fingerprint_rip_item.fingerprint), 0)) == 1
-                 for sub_fingerprint_rip_item in sub_fingerprint_rip_file]
+                len(
+                    self.tree.getWithinDistance(
+                        hamDb.explicitSignCast(sub_fingerprint_rip_item.fingerprint), 0,
+                    )
+                )
+                == 1
+                for sub_fingerprint_rip_item in sub_fingerprint_rip_file
             )
 
             # for each result search for subtitle+fingerprint, the index frame of request subtitle+fingerprint is in the
             # result search list (store (indirectly ~ by mapping) in the search tree)
             for sub_fingerprint_rip_item in sub_fingerprint_rip_file:
                 node_value = next(
-                    iter(self.tree.getWithinDistance(hamDb.explicitSignCast(sub_fingerprint_rip_item.fingerprint), 0)))
-                for response_uuid_srt, list_fingerprint_rip_item in self.map_node_value_to_data[node_value].items():
+                    iter(
+                        self.tree.getWithinDistance(
+                            hamDb.explicitSignCast(
+                                sub_fingerprint_rip_item.fingerprint
+                            ),
+                            0,
+                        )
+                    )
+                )
+                for (
+                    response_uuid_srt,
+                    list_fingerprint_rip_item,
+                ) in self.map_node_value_to_data[node_value].items():
                     assert response_uuid_srt in self.srt_uuid
                     # assert sub_fingerprint_rip_item.frame_index in [
                     #     fingerprint_rip_item.frame_index
@@ -334,34 +389,40 @@ map_srt_uuid_to_media: Dict[SrtUUID, Media] = dict()
 
 
 def update_search_tree(
-        search_tree: SearchTree,
-        media_path: Path,
-        srt_path: Path,
-        export_root_dir: Path = Path("/tmp/"),
-        force_export: bool = False,
+    search_tree: SearchTree,
+    media_path: Path,
+    srt_path: Path,
+    export_root_dir: Path = Path("/tmp/"),
+    force_export: bool = False,
 ):
     logger.info(f"media path: {media_path}")
     logger.info(f"subtitles path: {srt_path}")
 
     srt_md5_hexdigest = md5_file(srt_path)
-    export_path = (export_root_dir / srt_path.stem).with_suffix(".{}.srt_fingerprint".format(srt_md5_hexdigest))
+    export_path = (export_root_dir / srt_path.stem).with_suffix(
+        ".{}.srt_fingerprint".format(srt_md5_hexdigest)
+    )
 
     if force_export or not export_path.exists():
         it_imghash = ffmpeg_imghash_generator(str(media_path))
         with _Timer("export subtitles join with fingerprints"):
-            export_subtitles_fingerprints(it_imghash, subtitles_path=srt_path, export_path=export_path)
+            export_subtitles_fingerprints(
+                it_imghash, subtitles_path=srt_path, export_path=export_path
+            )
 
     with _Timer("update search tree"):
         nb_nodes_inserted = search_tree.update(export_path, srt_md5_hexdigest)
         map_srt_uuid_to_media[srt_md5_hexdigest] = Media(media_path, srt_path)
         logger.info("nb_nodes_inserted: %d", nb_nodes_inserted)
-        logger.info("nb subtitles (file) inserted in search tree: %d", len(search_tree.srt_uuid))
+        logger.info(
+            "nb subtitles (file) inserted in search tree: %d", len(search_tree.srt_uuid)
+        )
 
 
 def find_video_sequence_in_tree(
-        search_tree: SearchTree,
-        it_imghash: Iterator[imagehash.ImageHash],
-        search_dist: int = 2
+    search_tree: SearchTree,
+    it_imghash: Iterator[imagehash.ImageHash],
+    search_dist: int = 2,
 ):
     """
     https://trac.ffmpeg.org/wiki/Seeking
@@ -377,22 +438,38 @@ def find_video_sequence_in_tree(
         return
 
     with _Timer("Fingerprinting request media"):
-        it_id_imghash_imghash = list(tqdm(enumerate(it_imghash),
-                                          unit=" image hash", desc="build img hash from request media"))
+        it_id_imghash_imghash = list(
+            tqdm(
+                enumerate(it_imghash),
+                unit=" image hash",
+                desc="build img hash from request media",
+            )
+        )
 
     with _Timer("Processing search (in tree)"):
         for id_imghash, imghash in it_id_imghash_imghash:
             searched_node_hash = hamDb.explicitSignCast(int(str(imghash), 16))
-            for node_hash in search_tree.tree.getWithinDistance(searched_node_hash, search_dist):
-                for srt_uuid, sub_fingerprint_rip_items in search_tree.map_node_value_to_data[node_hash].items():
+            for node_hash in search_tree.tree.getWithinDistance(
+                searched_node_hash, search_dist
+            ):
+                for (
+                    srt_uuid,
+                    sub_fingerprint_rip_items,
+                ) in search_tree.map_node_value_to_data[node_hash].items():
                     gb_sub_fingerprint_rip_item = itertools.groupby(
                         sub_fingerprint_rip_items,
-                        key=lambda sub_fingerprint_rip_item: sub_fingerprint_rip_item.srt_index
+                        key=lambda sub_fingerprint_rip_item: sub_fingerprint_rip_item.srt_index,
                     )
-                    for srt_index, it_sub_fingerprint_rip_items in gb_sub_fingerprint_rip_item:
+                    for (
+                        srt_index,
+                        it_sub_fingerprint_rip_items,
+                    ) in gb_sub_fingerprint_rip_item:
                         matching_results[srt_uuid][srt_index].update(
-                            [sub_fingerprint_rip_item.frame_index
-                             for sub_fingerprint_rip_item in it_sub_fingerprint_rip_items])
+                            [
+                                sub_fingerprint_rip_item.frame_index
+                                for sub_fingerprint_rip_item in it_sub_fingerprint_rip_items
+                            ]
+                        )
     return matching_results
 
 
@@ -412,17 +489,23 @@ def main():
                 srt_path = list(root_media_path.glob(media_path.stem + ".en.srt"))[0]
             except IndexError:
                 continue
-            update_search_tree(search_tree, media_path, srt_path, export_root_dir=export_root_dir)
+            update_search_tree(
+                search_tree, media_path, srt_path, export_root_dir=export_root_dir
+            )
 
     media_path = export_root_dir / "cut.mkv"
     logger.info("media_path: %s", media_path)
     it_imghash = ffmpeg_imghash_generator(str(media_path))
-    matching_results = find_video_sequence_in_tree(search_tree, it_imghash, search_dist=4)
+    matching_results = find_video_sequence_in_tree(
+        search_tree, it_imghash, search_dist=4
+    )
     results = {
         uuid_srt: {
             "nb_srt_matched": len(srt_matched.keys()),
-            "total_fp_matched": len(list(itertools.chain.from_iterable(srt_matched.values()))),
-            "media": map_srt_uuid_to_media[uuid_srt]
+            "total_fp_matched": len(
+                list(itertools.chain.from_iterable(srt_matched.values()))
+            ),
+            "media": map_srt_uuid_to_media[uuid_srt],
         }
         for uuid_srt, srt_matched in matching_results.items()
     }
@@ -461,11 +544,12 @@ def init_logger():
     logger.setLevel(logging.DEBUG)
     tqdm_logging_handler = TqdmLoggingHandler()
     formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    )
     tqdm_logging_handler.setFormatter(formatter)
     logger.addHandler(tqdm_logging_handler)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     init_logger()
     main()

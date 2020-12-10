@@ -28,15 +28,17 @@ logger = logging.getLogger(__name__)
 
 def connect():
     try:
-        conn = psycopg2.connect(dbname=psqlDbName,
-                                user=psqlUserName,
-                                password=psqlUserPass)
+        conn = psycopg2.connect(
+            dbname=psqlDbName, user=psqlUserName, password=psqlUserPass
+        )
 
     except psycopg2.OperationalError:
-        conn = psycopg2.connect(host=psqlDbIpAddr,
-                                dbname=psqlDbName,
-                                user=psqlUserName,
-                                password=psqlUserPass)
+        conn = psycopg2.connect(
+            host=psqlDbIpAddr,
+            dbname=psqlDbName,
+            user=psqlUserName,
+            password=psqlUserPass,
+        )
     return conn
 
 
@@ -64,19 +66,24 @@ def init_db(conn):
     table_name = "frameitems"
 
     with transaction(conn) as cursor:
-        cursor.execute("SELECT * FROM information_schema.tables WHERE table_name=%s", (table_name,))
+        cursor.execute(
+            "SELECT * FROM information_schema.tables WHERE table_name=%s", (table_name,)
+        )
         have = cursor.fetchall()
         main_table_exists = bool(have)
     if not main_table_exists:
         logger.info("Need to create table!")
-        cursor.execute(f"""
+        cursor.execute(
+            f"""
 CREATE TABLE IF NOT EXISTS {table_name} (
     dbId            SERIAL PRIMARY KEY,
     pHash           BIGINT
 );"""
-                       )
+        )
         logger.info("Creating indexes")
-        cursor.execute(f"CREATE        INDEX {table_name}_phash_index  ON {table_name} USING spgist (pHash bktree_ops)")
+        cursor.execute(
+            f"CREATE        INDEX {table_name}_phash_index  ON {table_name} USING spgist (pHash bktree_ops)"
+        )
         logger.info("Done!")
     return sql.Table(table_name.lower())
 
@@ -84,7 +91,10 @@ CREATE TABLE IF NOT EXISTS {table_name} (
 def insert_img_hashes_into_db(input_media_path: Path, conn, table: sql.Table):
     """
     """
-    signed_int64_img_hashes = [imghash_to_signed_int64(img_hash) for img_hash in tqdm(ffmpeg_imghash_generator(str(input_media_path)))]
+    signed_int64_img_hashes = [
+        imghash_to_signed_int64(img_hash)
+        for img_hash in tqdm(ffmpeg_imghash_generator(str(input_media_path)))
+    ]
     with transaction(conn) as cursor:
         insert = """
     insert into frameitems (pHash)
@@ -104,5 +114,5 @@ def main():
     insert_img_hashes_into_db(media_path, conn, table)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

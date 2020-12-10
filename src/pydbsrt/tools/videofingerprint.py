@@ -1,12 +1,14 @@
 """
 """
+import logging
 from dataclasses import dataclass, field
+from typing import Iterator
+
 import imagehash
 import imageio
-import logging
 import numpy as np
 from PIL import Image
-from typing import Iterator
+
 #
 from pydbsrt.tools.videoreader import VideoReader
 
@@ -49,5 +51,5 @@ class VideoFingerprint:
             except Exception as e:
                 logger.error(repr(e))
                 raise RuntimeError(e)
-        except StopIteration as e:
-            raise StopIteration
+        except StopIteration:
+            raise
