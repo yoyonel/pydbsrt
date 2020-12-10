@@ -51,6 +51,9 @@ ujson = "^4.0.1"
 async_lru = "^1.0.2"
 
 [tool.poetry.dev-dependencies]
+unimport = "^0.6.8"
+pytest = "^6.1.2"
+pre-commit = "^2.9.3"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
