@@ -24,10 +24,10 @@ from pydbsrt.tools.tqdm_with_logger import TqdmLoggingHandler
 
 logger = logging.getLogger(__name__)
 
-medias_root_path = Path('data/')
+medias_root_path = Path("data/")
 
 typ = sys.getfilesystemencoding()
-clean_r = re.compile('<.*?>')
+clean_r = re.compile("<.*?>")
 
 pp = PrettyPrinter(indent=4)
 
@@ -51,20 +51,18 @@ def grouper_without_fill(iterable, n):
     # https://stackoverflow.com/questions/16096754/remove-none-value-from-a-list-without-removing-the-0-value
     # https://stackoverflow.com/questions/40137950/possible-to-run-python-doctest-on-a-jupyter-cell-function
     # return map(lambda g: list(filter(lambda e: e is not None, g)),
-    return map(lambda g: filter(partial(is_not, None), g),
-               grouper(iterable, n, fillvalue=None))
+    return map(
+        lambda g: filter(partial(is_not, None), g), grouper(iterable, n, fillvalue=None)
+    )
 
 
 def clean_html(raw_html):
-    clean_text = re.sub(clean_r, '', raw_html)
+    clean_text = re.sub(clean_r, "", raw_html)
     return clean_text
 
 
 def gen_translate_srt(
-        subs_src,
-        src='en',
-        dest='fr',
-        it_func=lambda it: it,
+    subs_src, src="en", dest="fr", it_func=lambda it: it,
 ) -> Generator[Tuple[SubRipItem, str], None, None]:
     translator = Translator()
     for sub in it_func(subs_src):
@@ -80,7 +78,7 @@ def test_with_google_translate():
 
     translator = Translator()
     subs_en_fr = [
-        (sub, translator.translate(text=sub.text, src='en', dest='fr').text)
+        (sub, translator.translate(text=sub.text, src="en", dest="fr").text)
         for sub in tqdm(subs_en[:10])
     ]
 
@@ -91,14 +89,15 @@ def test_with_google_translate():
 
     # be sure to validate the synchronization
     if fuzz.partial_ratio(subs_en_fr[0][1], subs_fr[0].text) <= 60:
-        logger.error(f"SRTs (en: {fn_subs_en}, fr: {fn_subs_fr}) "
-                     f"seems to be not synchronize")
+        logger.error(
+            f"SRTs (en: {fn_subs_en}, fr: {fn_subs_fr}) " f"seems to be not synchronize"
+        )
 
     # Process synchronization
     if subs_en[0].start >= subs_fr[0].start:
-        shift = (subs_en[0].start - subs_fr[0].start)
+        shift = subs_en[0].start - subs_fr[0].start
     else:
-        shift = (subs_fr[0].start - subs_en[0].start)
+        shift = subs_fr[0].start - subs_en[0].start
     logger.info(f"shift: {shift}")
     # subs_fr_shifted = subs_fr.copy()
     # subs_fr_shifted.shift(minutes=shift.minutes, seconds=shift.seconds,
@@ -118,9 +117,7 @@ def test_with_google_translate():
 
 
 def translate_subtitles_with_google(
-        srt_path: Path,
-        srt_src: str = 'en',
-        srt_dest: str = 'fr',
+    srt_path: Path, srt_src: str = "en", srt_dest: str = "fr",
 ):
     """
 
@@ -156,9 +153,7 @@ def test_synchronize_subtitles():
 
     # but ... we see the shifting over the time
     diff_starts = [
-        (srt_fr[i + 2].text,
-         srt_en[i].text,
-         srt_fr[i + 2].start - srt_en[i].start)
+        (srt_fr[i + 2].text, srt_en[i].text, srt_fr[i + 2].start - srt_en[i].start)
         for i in range(100)
     ]
     logger.info(pformat(diff_starts))
@@ -169,13 +164,7 @@ def test_synchronize_subtitles():
         srt_en_fr.append(srt_translated)
         #
         srt_from, srt_to = srt_translated
-        pp.pprint(
-            (
-                i,
-                srt_from.text,
-                srt_to
-            )
-        )
+        pp.pprint((i, srt_from.text, srt_to))
 
 
 def translate_with_google_translate_webapi(querystr, to_l="zh", from_l="en"):
@@ -191,26 +180,28 @@ def translate_with_google_translate_webapi(querystr, to_l="zh", from_l="en"):
     :return:
     """
     c_agent = {
-        'User-Agent': "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, "
-                      "like Gecko) Chrome/31.0.165063 Safari/537.36 AppEngine-Google."}
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, "
+        "like Gecko) Chrome/31.0.165063 Safari/537.36 AppEngine-Google."
+    }
     flag = 'class="t0">'
     translate_google_url = "http://translate.google.cn"
     tar_url = f"m?hl={to_l}&sl={from_l}&q={quote(querystr, safe='')}"
-    request = urllib.request.Request(f"{translate_google_url}/{tar_url}",
-                                     headers=c_agent)
+    request = urllib.request.Request(
+        f"{translate_google_url}/{tar_url}", headers=c_agent
+    )
     page = str(urllib.request.urlopen(request).read().decode(typ))
-    target = page[page.find(flag) + len(flag):]
+    target = page[page.find(flag) + len(flag) :]
     target = target.split("<")[0]
     return target
 
 
 def translate_subtitles_with_google_translate_webapi(
-        srt_from_path,
-        str_from_lang: str = 'en',
-        str_to_lang: str = 'fr',
-        chunk_size: int = 10,
-        split_tokens: List[str] = [' ¶ '],
-        it_func=lambda it, *args, **kwargs: it,
+    srt_from_path,
+    str_from_lang: str = "en",
+    str_to_lang: str = "fr",
+    chunk_size: int = 10,
+    split_tokens: List[str] = [" ¶ "],
+    it_func=lambda it, *args, **kwargs: it,
 ) -> Generator[Tuple[SubRipItem, str], None, None]:
     """
 
@@ -267,19 +258,28 @@ def translate_subtitles_with_google_translate_webapi(
             t_grp_srt_from = unescape(
                 translate_with_google_translate_webapi(
                     split_token.join(
-                        map(lambda s: clean_html(
-                            s.text_without_tags.replace('\n', ' ')),
-                            grp_srt_from_for_translation)
+                        map(
+                            lambda s: clean_html(
+                                s.text_without_tags.replace("\n", " ")
+                            ),
+                            grp_srt_from_for_translation,
+                        )
                     ),
-                    from_l=str_from_lang, to_l=str_to_lang))
+                    from_l=str_from_lang,
+                    to_l=str_to_lang,
+                )
+            )
             nb_chunks_produced = len(t_grp_srt_from.split(split_token))
             if nb_chunks_produced == nb_chunk_to_find:
                 break
-            logger.warning(f'split token=\'{split_token}\' '
-                           f'produce {nb_chunks_produced} chunks (!= {chunk_size})')
+            logger.warning(
+                f"split token='{split_token}' "
+                f"produce {nb_chunks_produced} chunks (!= {chunk_size})"
+            )
         if len(t_grp_srt_from.split(split_token)) == nb_chunk_to_find:
-            for t_srt_from, srt_from in zip(t_grp_srt_from.split(split_token),
-                                            grp_srt_from_for_zip):
+            for t_srt_from, srt_from in zip(
+                t_grp_srt_from.split(split_token), grp_srt_from_for_zip
+            ):
                 yield srt_from, t_srt_from
         else:
             logger.error("Can't find valid token to split the subtitles")
@@ -299,10 +299,10 @@ def main():
     srt_to = pysrt.open(srt_to_path)
 
     for srt_from, t_srt_from in translate_subtitles_with_google_translate_webapi(
-            medias_root_path / "The Golden Child (1986) 1080p web.en.srt",
-            chunk_size=70,
-            split_tokens=[' ¶ ', ' ** ', ' @ ', ' @_ '],
-            # it_func=tqdm
+        medias_root_path / "The Golden Child (1986) 1080p web.en.srt",
+        chunk_size=70,
+        split_tokens=[" ¶ ", " ** ", " @ ", " @_ "],
+        # it_func=tqdm
     ):
         logger.info(f"\n{str(srt_from)}-> {t_srt_from}\n")
 
@@ -339,28 +339,27 @@ def main():
             filter(
                 lambda i_s: i_s[1] > 20,
                 enumerate(
-                    [
-                        fuzz.ratio(t_srt_from, s.text_without_tags)
-                        for s in srt_to
-                    ]
-                )
+                    [fuzz.ratio(t_srt_from, s.text_without_tags) for s in srt_to]
+                ),
             ),
-            key=lambda m: m[1]
+            key=lambda m: m[1],
         )
         logger.info(
             f"best matchs for '{t_srt_from}':"
-            f"\n{srt_to[best_matchs[0]]} - score = {best_matchs[1]}")
+            f"\n{srt_to[best_matchs[0]]} - score = {best_matchs[1]}"
+        )
 
 
 def init_logger():
     logger.setLevel(logging.INFO)
     tqdm_logging_handler = TqdmLoggingHandler()
     formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    )
     tqdm_logging_handler.setFormatter(formatter)
     logger.addHandler(tqdm_logging_handler)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     init_logger()
     main()

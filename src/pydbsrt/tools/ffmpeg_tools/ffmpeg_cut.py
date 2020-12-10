@@ -1,26 +1,26 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""
-"""
+# flake8: noqa
 import argparse
-import logging
-import subprocess
-import re
-import sys
 import json
+import logging
+import re
+import subprocess
+import sys
 
-from pydbsrt.tools.ffmpeg_wrapper import FFException
-from pydbsrt.tools.ffmpeg_wrapper import FFmpeg
-from pydbsrt.tools.ffmpeg_wrapper import FFmpegFilter
-from pydbsrt.tools.ffmpeg_wrapper import FFprobe
-from pydbsrt.tools.ffmpeg_wrapper import FFMedia
+from pydbsrt.tools.ffmpeg_wrapper import (
+    FFException,
+    FFMedia,
+    FFmpeg,
+    FFmpegFilter,
+    FFprobe,
+)
 
-logger = logging.getLogger('ffmpegtools.cut')
+logger = logging.getLogger("ffmpegtools.cut")
 
 
 def set_select_expression(
-        frame_start,
-        frame_stop,
+    frame_start, frame_stop,
 ):
     """
 
@@ -35,6 +35,7 @@ def set_select_expression(
         >>> set_select_expression('BEGIN', 'END')
         'gte(n\\\,0)'
         >>> set_select_expression('BEGIN', 500)
+        'gte(n\\\,0)*lte(n\\\,500)'
         >>> set_select_expression(50, 500)
         'gte(n\\\,50)*lte(n\\\,500)'
         >>> set_select_expression(200, 50)
@@ -49,8 +50,8 @@ def set_select_expression(
     """
     select_expression = ""
 
-    if frame_start == 'BEGIN':
-        frame_start = '0'
+    if frame_start == "BEGIN":
+        frame_start = "0"
     try:
         i_frame_start = int(frame_start)
     except ValueError as e:
@@ -58,28 +59,26 @@ def set_select_expression(
         raise e
     else:
         if int(frame_start) < 0:
-            raise ValueError('Invalid start frame [{0}].'.format(frame_start))
-        select_expression += 'gte(n\,{0})'.format(i_frame_start)
+            raise ValueError("Invalid start frame [{0}].".format(frame_start))
+        select_expression += "gte(n\,{0})".format(i_frame_start)
 
-    if frame_stop != 'END':
+    if frame_stop != "END":
         try:
             i_frame_stop = int(frame_stop)
         except ValueError as e:
-            logger.error("Error when trying to cast [{}] to integer.".format(frame_stop))
+            logger.error(
+                "Error when trying to cast [{}] to integer.".format(frame_stop)
+            )
             raise e
         else:
             if i_frame_stop < 0:
-                raise ValueError('Invalid stop frame [{0}].'.format(frame_stop))
-            select_expression += '*lte(n\,{0})'.format(i_frame_stop)
+                raise ValueError("Invalid stop frame [{0}].".format(frame_stop))
+            select_expression += "*lte(n\,{0})".format(i_frame_stop)
 
     return select_expression
 
 
-def set_aselect_expression(
-        frame_start,
-        frame_stop,
-        input_file
-):
+def set_aselect_expression(frame_start, frame_stop, input_file):
     """
 
     Args:
@@ -104,37 +103,42 @@ def set_aselect_expression(
     """
     aselect_expression = ""
 
-    if frame_start == 'BEGIN':
-        aselect_expression += 'gte(t\,0)'
+    if frame_start == "BEGIN":
+        aselect_expression += "gte(t\,0)"
     else:
         try:
             i_frame_start = int(frame_start)
         except ValueError as e:
-            logger.error("Error when trying to cast [{}] to integer.".format(frame_start))
+            logger.error(
+                "Error when trying to cast [{}] to integer.".format(frame_start)
+            )
             raise e
         else:
             if int(frame_start) < 0:
-                raise ValueError('Invalid start frame [{0}].'.format(frame_start))
-            aselect_expression += 'gte(t\,{0})'.format(calculate_frame_pts_time(i_frame_start, input_file))
+                raise ValueError("Invalid start frame [{0}].".format(frame_start))
+            aselect_expression += "gte(t\,{0})".format(
+                calculate_frame_pts_time(i_frame_start, input_file)
+            )
 
-    if frame_stop != 'END':
+    if frame_stop != "END":
         try:
             i_frame_stop = int(frame_stop)
         except ValueError as e:
-            logger.error("Error when trying to cast [{}] to integer.".format(frame_stop))
+            logger.error(
+                "Error when trying to cast [{}] to integer.".format(frame_stop)
+            )
             raise e
         else:
             if i_frame_stop < 0:
-                raise ValueError('Invalid stop frame [{0}].'.format(frame_stop))
-            aselect_expression += '*lte(t\,{0})'.format(calculate_frame_pts_time(i_frame_stop, input_file))
+                raise ValueError("Invalid stop frame [{0}].".format(frame_stop))
+            aselect_expression += "*lte(t\,{0})".format(
+                calculate_frame_pts_time(i_frame_stop, input_file)
+            )
 
     return aselect_expression
 
 
-def calculate_frame_pts_time(
-        n,
-        media_fp
-):
+def calculate_frame_pts_time(n, media_fp):
     """
 
         Args:
@@ -144,7 +148,7 @@ def calculate_frame_pts_time(
         Returns:
             pts_time(float): Presentation Time Stamp in seconds
     """
-    regex = re.compile('(\d+)/(\d+)')
+    regex = re.compile(r"(\d+)/(\d+)")
 
     try:
         m = FFMedia.FFMedia(media_fp)
@@ -158,23 +162,23 @@ def calculate_frame_pts_time(
     except FFException.InvalidMedia as e:
         logger.error("Invalid media [{}].".format(e.media_path))
     except subprocess.CalledProcessError as e:
-        logger.error('FFprobe failed.')
+        logger.error("FFprobe failed.")
         raise e
     except json.JSONDecodeError as e:
-        logger.error('Unable to decode json from FFprobe output.')
+        logger.error("Unable to decode json from FFprobe output.")
         raise e
     except ValueError as e:
-        logger.error('FFprobe \'r_frame_rate\' entry does not seem valid')
+        logger.error("FFprobe 'r_frame_rate' entry does not seem valid")
         raise e
 
 
 def cut(
-        input_file,
-        output_file,
-        frame_start="BEGIN",
-        frame_stop="END",
-        decoder="",
-        encoder="",
+    input_file,
+    output_file,
+    frame_start="BEGIN",
+    frame_stop="END",
+    decoder="",
+    encoder="",
 ):
     """
 
@@ -203,20 +207,20 @@ def cut(
         ffmpeg.set_video_decoder(decoder)
         ffmpeg.set_video_encoder(encoder)
 
-        f_select = FFmpegFilter.FFmpegFilter('select')
-        f_select.set_option('expr', select_expression)
+        f_select = FFmpegFilter.FFmpegFilter("select")
+        f_select.set_option("expr", select_expression)
         ffmpeg.add_video_filter(f_select)
 
-        f_setpts = FFmpegFilter.FFmpegFilter('setpts')
-        f_setpts.set_option('expr', 'PTS-STARTPTS')
+        f_setpts = FFmpegFilter.FFmpegFilter("setpts")
+        f_setpts.set_option("expr", "PTS-STARTPTS")
         ffmpeg.add_video_filter(f_setpts)
 
-        f_aselect = FFmpegFilter.FFmpegFilter('aselect')
-        f_aselect.set_option('expr', aselect_expression)
+        f_aselect = FFmpegFilter.FFmpegFilter("aselect")
+        f_aselect.set_option("expr", aselect_expression)
         ffmpeg.add_audio_filter(f_aselect)
 
-        f_asetpts = FFmpegFilter.FFmpegFilter('asetpts')
-        f_asetpts.set_option('expr', 'N/SR/TB')
+        f_asetpts = FFmpegFilter.FFmpegFilter("asetpts")
+        f_asetpts.set_option("expr", "N/SR/TB")
         ffmpeg.add_audio_filter(f_asetpts)
 
         with ffmpeg.build().run() as proc:
@@ -226,7 +230,7 @@ def cut(
             logger.error(err.decode("utf-8"))
         return proc.returncode
     except subprocess.CalledProcessError:
-        logger.error('FFmpeg failed.')
+        logger.error("FFmpeg failed.")
 
 
 def process(args):
@@ -273,39 +277,65 @@ def build_parser(parser=None, **argparse_options):
         )
 
     # config file
-    parser.add_argument("-i", '--input-file', dest="input_file",
-                        required=True,
-                        help="", metavar="FILE")
-    parser.add_argument("-o", '--output-file', dest="output_file",
-                        required=True,
-                        help="", metavar="FILE")
+    parser.add_argument(
+        "-i", "--input-file", dest="input_file", required=True, help="", metavar="FILE"
+    )
+    parser.add_argument(
+        "-o",
+        "--output-file",
+        dest="output_file",
+        required=True,
+        help="",
+        metavar="FILE",
+    )
 
-    parser.add_argument("-fstart", '--frame-start', dest="frame_start",
-                        type=str,
-                        default='BEGIN',
-                        required=False,
-                        help="")
+    parser.add_argument(
+        "-fstart",
+        "--frame-start",
+        dest="frame_start",
+        type=str,
+        default="BEGIN",
+        required=False,
+        help="",
+    )
 
-    parser.add_argument("-fstop", '--frame-stop', dest="frame_stop",
-                        type=str,
-                        default='END',
-                        required=False,
-                        help="")
+    parser.add_argument(
+        "-fstop",
+        "--frame-stop",
+        dest="frame_stop",
+        type=str,
+        default="END",
+        required=False,
+        help="",
+    )
 
-    parser.add_argument("-dec", '--decoder', dest="decoder",
-                        type=str,
-                        default="",
-                        required=False,
-                        help="")
+    parser.add_argument(
+        "-dec",
+        "--decoder",
+        dest="decoder",
+        type=str,
+        default="",
+        required=False,
+        help="",
+    )
 
-    parser.add_argument("-enc", '--encoder', dest="encoder",
-                        type=str,
-                        default="",
-                        required=False,
-                        help="")
+    parser.add_argument(
+        "-enc",
+        "--encoder",
+        dest="encoder",
+        type=str,
+        default="",
+        required=False,
+        help="",
+    )
     #
-    parser.add_argument("-v", "--verbose", action="store_true", default=False,
-                        help="increase output verbosity")
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        default=False,
+        help="increase output verbosity",
+    )
     # return parsing
     return parser
 
@@ -324,5 +354,5 @@ def main():
     sys.exit(process(args))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

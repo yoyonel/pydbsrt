@@ -3,14 +3,15 @@
 from dataclasses import dataclass, field
 from typing import Iterator
 
+from pydbsrt.tools.imghash import imghash_count_nonzero, imghash_distance
 from pydbsrt.tools.videofingerprint import VideoFingerprint
-from pydbsrt.tools.imghash import imghash_distance, imghash_count_nonzero
 
 
 @dataclass
 class ImportantFrameFingerprints:
     """
 """
+
     vfp: VideoFingerprint
     # THRESHOLDS
     threshold_distance: int = 8
@@ -43,8 +44,13 @@ class ImportantFrameFingerprints:
             while True:
                 # tests on thresholds
                 thresholds_pass_for_exit = True
-                thresholds_pass_for_exit &= imghash_distance(self.last_vfp, self.cur_vfp) >= self.threshold_distance
-                thresholds_pass_for_exit &= imghash_count_nonzero(self.cur_vfp) >= self.threshold_nonzero
+                thresholds_pass_for_exit &= (
+                    imghash_distance(self.last_vfp, self.cur_vfp)
+                    >= self.threshold_distance
+                )
+                thresholds_pass_for_exit &= (
+                    imghash_count_nonzero(self.cur_vfp) >= self.threshold_nonzero
+                )
                 if thresholds_pass_for_exit:
                     break
                 # next frame

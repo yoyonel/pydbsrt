@@ -4,15 +4,15 @@ FFmpeg Wrapper
 
 """
 
-import subprocess
 import os
-import signal
+import subprocess
 
 from pydbsrt.tools.ffmpeg_wrapper import FFException
 
 binary_path = None
 
 # signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+
 
 def initialize():
     """
@@ -22,8 +22,8 @@ def initialize():
     global binary_path
 
     for path in os.environ["PATH"].split(os.pathsep):
-        if os.path.exists(os.path.join(path, 'ffmpeg')):
-            binary_path = os.path.join(path, 'ffmpeg')
+        if os.path.exists(os.path.join(path, "ffmpeg")):
+            binary_path = os.path.join(path, "ffmpeg")
     if not binary_path:
         raise FFException.BinaryNotFound("ffmpeg")
 
@@ -109,7 +109,7 @@ class FFmpeg(object):
         No Video
         :return:
         """
-        self.no_video = value;
+        self.no_video = value
 
     # No Audio
     def set_no_audio(self, value=True):
@@ -117,7 +117,7 @@ class FFmpeg(object):
         No Audio
         :return:
         """
-        self.no_audio = value;
+        self.no_audio = value
 
     # Video
     def set_video_decoder(self, video_decoder):
@@ -175,54 +175,54 @@ class FFmpeg(object):
         """
         Builder
         """
-        cmd = ['ffmpeg', '-y', '-hide_banner']
+        cmd = ["ffmpeg", "-y", "-hide_banner"]
 
         # Hardware Acceleration
         if self.hw_acceleration:
-            cmd += ['-hwaccel', self.hw_acceleration]
+            cmd += ["-hwaccel", self.hw_acceleration]
 
         # Safe
         if self.safe is not None:
-            cmd += ['-safe', str(self.safe)]
+            cmd += ["-safe", str(self.safe)]
 
         # Input
         if self.input_format:
-            cmd += ['-f', self.input_format]
+            cmd += ["-f", self.input_format]
         if self.input_file:
             for infile in self.input_file:
-                cmd += ['-i', infile]
+                cmd += ["-i", infile]
 
         # Video Decoder
         if self.video_decoder:
-            cmd += ['-c:v', self.video_decoder]
+            cmd += ["-c:v", self.video_decoder]
 
         # Audio Decoder
         if self.audio_decoder:
-            cmd += ['-c:a', self.audio_decoder]
+            cmd += ["-c:a", self.audio_decoder]
 
         # Video filters
         if self.video_filters:
-            cmd += ['-vf', ','.join(vf.build() for vf in self.video_filters)]
+            cmd += ["-vf", ",".join(vf.build() for vf in self.video_filters)]
 
         # Audio filters
         if self.audio_filters:
-            cmd += ['-af', ','.join(af.build() for af in self.audio_filters)]
+            cmd += ["-af", ",".join(af.build() for af in self.audio_filters)]
 
         # Video Encoder
         if self.video_encoder:
-            cmd += ['-vcodec', self.video_encoder]
+            cmd += ["-vcodec", self.video_encoder]
 
         # Audio Encoder
         if self.audio_encoder:
-            cmd += ['-acodec', self.audio_encoder]
+            cmd += ["-acodec", self.audio_encoder]
 
         if self.pixel_format:
-            cmd += ['-pix_fmt', self.pixel_format]
+            cmd += ["-pix_fmt", self.pixel_format]
 
         # Output
         if self.output_format:
-            cmd += ['-f', self.output_format]
-        cmd += [self.output_file] if self.output_file else ['-']
+            cmd += ["-f", self.output_format]
+        cmd += [self.output_file] if self.output_file else ["-"]
         self.built_cmd = cmd
         return self
 
@@ -233,4 +233,3 @@ class FFmpeg(object):
         return subprocess.Popen(
             self.built_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE
         )
-

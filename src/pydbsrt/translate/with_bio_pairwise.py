@@ -15,7 +15,7 @@ from pydbsrt.translate.sync_srt import grouper_without_fill
 
 logger = logging.getLogger(__name__)
 
-medias_root_path = Path('data/')
+medias_root_path = Path("data/")
 pp = PrettyPrinter(indent=4)
 
 
@@ -35,16 +35,16 @@ def main():
             hours=t.hour,
             minutes=t.minute,
             seconds=t.second,
-            milliseconds=t.microsecond / 1000
+            milliseconds=t.microsecond / 1000,
         )
 
     def _clustering_srt_by_durations(
-            durations: List[SubRipTime],
-            bandwidth=None,
-            quantile=0.50,
+        durations: List[SubRipTime], bandwidth=None, quantile=0.50,
     ) -> Tuple[List[int], float]:
-        x = [_time_to_timedelta(duration.to_time()).total_seconds()
-             for duration in durations]
+        x = [
+            _time_to_timedelta(duration.to_time()).total_seconds()
+            for duration in durations
+        ]
         X = np.array(list(zip(x, np.zeros(len(x)))), dtype=float)
         if bandwidth is None:
             bandwidth = estimate_bandwidth(X, quantile=quantile)
@@ -62,21 +62,20 @@ def main():
         #     print("cluster {0}: {1}".format(k, X[my_members, 0]))
         return labels, bandwidth
 
-    acgt = defaultdict(lambda: '*', ((0, 'A'), (1, 'C'), (2, 'G'), (3, 'T')))
+    acgt = defaultdict(lambda: "*", ((0, "A"), (1, "C"), (2, "G"), (3, "T")))
 
     srt_from_labels, srt_from_bandwith = _clustering_srt_by_durations(
-        srt_from_durations, quantile=0.20)
-    srt_from_sequence_acgt = "".join(
-        [acgt[label] for label in srt_from_labels])
-    s = '\n'.join(''.join(g) for g in grouper_without_fill(srt_from_sequence_acgt, 140))
+        srt_from_durations, quantile=0.20
+    )
+    srt_from_sequence_acgt = "".join([acgt[label] for label in srt_from_labels])
+    s = "\n".join("".join(g) for g in grouper_without_fill(srt_from_sequence_acgt, 140))
     logger.info(f"srt_from_sequence_acgt:\n{s}")
 
     srt_to_labels, _ = _clustering_srt_by_durations(srt_to_durations, quantile=0.40)
-    srt_to_sequence_acgt = "".join(
-        [acgt[label] for label in srt_to_labels])
-    s = '\n'.join(''.join(g) for g in grouper_without_fill(srt_to_sequence_acgt, 140))
+    srt_to_sequence_acgt = "".join([acgt[label] for label in srt_to_labels])
+    s = "\n".join("".join(g) for g in grouper_without_fill(srt_to_sequence_acgt, 140))
     logger.info(f"srt_to_sequence_acgt:\n{s}")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

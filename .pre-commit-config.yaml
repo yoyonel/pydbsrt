@@ -1,0 +1,30 @@
+---
+repos:
+  - repo: https://gitlab.com/pycqa/flake8
+    rev: 3.8.3
+    hooks:
+      - id: flake8
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v3.1.0
+    hooks:
+      - id: check-ast
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: end-of-file-fixer
+        types: [ python ]
+      - id: trailing-whitespace
+        types: [ python ]
+  - repo: https://github.com/ambv/black
+    rev: 19.10b0
+    hooks:
+      - id: black
+  - repo: https://github.com/gruntwork-io/pre-commit
+    rev: v0.1.10
+    hooks:
+      - id: shellcheck
+  - repo: https://github.com/hakancelik96/unimport
+    rev: stable
+    hooks:
+      - id: unimport
+        args: [ --remove, --requirements, --include-star-import ]

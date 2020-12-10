@@ -1,10 +1,7 @@
-import os
 import subprocess
 from urllib.parse import urlparse
 
-from pydbsrt.tools.ffmpeg_wrapper import FFException
-from pydbsrt.tools.ffmpeg_wrapper import FFprobe
-from pydbsrt.tools.ffmpeg_wrapper import FFStream
+from pydbsrt.tools.ffmpeg_wrapper import FFException, FFprobe
 
 
 class FFMedia(object):
@@ -21,13 +18,18 @@ class FFMedia(object):
         self.streams = dict()
 
         try:
-            subprocess.check_call([FFprobe.binary_path,
-                                   '-loglevel', 'quiet',
-                                   '-i', self.parsed_url.geturl()],
-                                  stdin=None,
-                                  stdout=None,
-                                  stderr=None,
-                                  )
+            subprocess.check_call(
+                [
+                    FFprobe.binary_path,
+                    "-loglevel",
+                    "quiet",
+                    "-i",
+                    self.parsed_url.geturl(),
+                ],
+                stdin=None,
+                stdout=None,
+                stderr=None,
+            )
         except subprocess.CalledProcessError:
             raise FFException.InvalidMedia(self.parsed_url.geturl())
 

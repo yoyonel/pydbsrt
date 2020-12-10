@@ -3,11 +3,9 @@
 FFprobe Wrapper
 
 """
-
-import subprocess
-import io
-import os
 import json
+import os
+import subprocess
 
 from pydbsrt.tools.ffmpeg_wrapper import FFException
 
@@ -22,8 +20,8 @@ def initialize():
     global binary_path
 
     for path in os.environ["PATH"].split(os.pathsep):
-        if os.path.exists(os.path.join(path, 'ffprobe')):
-            binary_path = os.path.join(path, 'ffprobe')
+        if os.path.exists(os.path.join(path, "ffprobe")):
+            binary_path = os.path.join(path, "ffprobe")
     if not binary_path:
         raise FFException.BinaryNotFound("ffprobe")
 
@@ -35,9 +33,7 @@ def streams(media):
     :return:
     """
     try:
-        output = run(['-i', media.geturl(),
-                      '-print_format', 'json',
-                      '-show_streams'])
+        output = run(["-i", media.geturl(), "-print_format", "json", "-show_streams"])
         return json.loads(output)
     except FFException.BinaryCallFailed:
         return None
@@ -52,10 +48,17 @@ def stream(media, index):
     """
     global binary_path
     try:
-        output = run(['-i', media.geturl(),
-                      '-print_format', 'json',
-                      '-show_streams',
-                      '-select_streams', str(index)])
+        output = run(
+            [
+                "-i",
+                media.geturl(),
+                "-print_format",
+                "json",
+                "-show_streams",
+                "-select_streams",
+                str(index),
+            ]
+        )
         return json.loads(output)["streams"][0]
     except FFException.BinaryCallFailed:
         return None
@@ -69,8 +72,8 @@ def run(opts):
     """
     global binary_path
     try:
-        cmd = [binary_path, '-v', 'error'] + opts
+        cmd = [binary_path, "-v", "error"] + opts
         stdout = subprocess.check_output(cmd, stderr=None)
-        return stdout.decode('utf-8')
-    except subprocess.CalledProcessError as e:
+        return stdout.decode("utf-8")
+    except subprocess.CalledProcessError:
         raise FFException.BinaryCallFailed
