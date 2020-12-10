@@ -2,6 +2,7 @@ import pytest
 from googletrans import Translator
 
 
+@pytest.mark.skip
 @pytest.mark.parametrize(
     "text,dest,src,expected",
     [

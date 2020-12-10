@@ -54,6 +54,10 @@ async_lru = "^1.0.2"
 unimport = "^0.6.8"
 pytest = "^6.1.2"
 pre-commit = "^2.9.3"
+sh = "^1.14.1"
+pytest-shell = "^0.2.3"
+pytest-click = "^1.0.2"
+pytest-postgresql = "^2.5.2"
 
 [tool.unimport]
 sources = ["src"]

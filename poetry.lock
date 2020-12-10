@@ -403,6 +403,21 @@ optional = false
 python-versions = ">=2.7,!=3.0.*,!=3.1.*,!=3.2.*,!=3.3.*"
 
 [[package]]
+name = "mirakuru"
+version = "2.3.0"
+description = "Process executor for tests."
+category = "dev"
+optional = false
+python-versions = ">=3.6"
+
+[package.dependencies]
+psutil = {version = ">=4.0.0", markers = "sys_platform != \"cygwin\""}
+
+[package.extras]
+docs = ["sphinx"]
+tests = ["pytest", "pytest-cov", "python-daemon"]
+
+[[package]]
 name = "mmh3"
 version = "2.5.1"
 description = "Python wrapper for MurmurHash (MurmurHash3), a set of fast and robust hash functions."
@@ -505,6 +520,14 @@ python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*"
 dev = ["pre-commit", "tox"]
 
 [[package]]
+name = "port-for"
+version = "0.4"
+description = "Utility that helps with local TCP ports managment. It can find an unused TCP localhost port and remember the association."
+category = "dev"
+optional = false
+python-versions = "*"
+
+[[package]]
 name = "pre-commit"
 version = "2.9.3"
 description = "A framework for managing and maintaining multi-language pre-commit hooks."
@@ -527,6 +550,17 @@ description = "prettyprint print list/dict/tuple object prettily"
 category = "main"
 optional = false
 python-versions = "*"
+
+[[package]]
+name = "psutil"
+version = "5.7.3"
+description = "Cross-platform lib for process and system monitoring in Python."
+category = "dev"
+optional = false
+python-versions = ">=2.6, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*"
+
+[package.extras]
+test = ["ipaddress", "mock", "unittest2", "enum34", "pywin32", "wmi"]
 
 [[package]]
 name = "psycopg2"
@@ -592,6 +626,43 @@ toml = "*"
 [package.extras]
 checkqa_mypy = ["mypy (==0.780)"]
 testing = ["argcomplete", "hypothesis (>=3.56)", "mock", "nose", "requests", "xmlschema"]
+
+[[package]]
+name = "pytest-click"
+version = "1.0.2"
+description = "Py.test plugin for Click"
+category = "dev"
+optional = false
+python-versions = "*"
+
+[package.dependencies]
+click = ">=6.0"
+pytest = ">=5.0"
+
+[[package]]
+name = "pytest-postgresql"
+version = "2.5.2"
+description = "Postgresql fixtures and fixture factories for Pytest."
+category = "dev"
+optional = false
+python-versions = ">=3.6"
+
+[package.dependencies]
+mirakuru = ">=2.3.0"
+port-for = "*"
+pytest = ">=3.0.0"
+
+[package.extras]
+docs = ["sphinx"]
+tests = ["pytest-cov", "pytest-xdist"]
+
+[[package]]
+name = "pytest-shell"
+version = "0.2.3"
+description = "A pytest plugin for testing shell scripts and line-based processes"
+category = "dev"
+optional = false
+python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*"
 
 [[package]]
 name = "python-dateutil"
@@ -696,6 +767,14 @@ python-versions = ">=3.6"
 
 [package.dependencies]
 numpy = ">=1.14.5"
+
+[[package]]
+name = "sh"
+version = "1.14.1"
+description = "Python subprocess replacement"
+category = "dev"
+optional = false
+python-versions = "*"
 
 [[package]]
 name = "six"
@@ -877,7 +956,7 @@ testing = ["pytest (>=3.5,!=3.7.3)", "pytest-checkdocs (>=1.2.3)", "pytest-flake
 [metadata]
 lock-version = "1.1"
 python-versions = "^3.8"
-content-hash = "872bfc104f3710714f07bd1b9d9d84a2dd7258f386f208433218832848dbe9f1"
+content-hash = "e412030f3c3a0fcdfd30c02a06f64d5db8ffffcf7f4a5bf62a02396db8cb3d33"
 
 [metadata.files]
 aiocache = [
@@ -1083,6 +1162,10 @@ markupsafe = [
     {file = "MarkupSafe-1.1.1-cp38-cp38-win_amd64.whl", hash = "sha256:e8313f01ba26fbbe36c7be1966a7b7424942f670f38e666995b88d012765b9be"},
     {file = "MarkupSafe-1.1.1.tar.gz", hash = "sha256:29872e92839765e546828bb7754a68c418d927cd064fd4708fab9fe9c8bb116b"},
 ]
+mirakuru = [
+    {file = "mirakuru-2.3.0-py3-none-any.whl", hash = "sha256:1f89b9e5f23cec4181aa0225622b1996786848d830f51a12aa9c863bbfc2acc6"},
+    {file = "mirakuru-2.3.0.tar.gz", hash = "sha256:cb90f587ebd2ca5b8c9c61ce025be86ec123522a8b100b2a419bc7e8d28259f0"},
+]
 mmh3 = [
     {file = "mmh3-2.5.1.tar.gz", hash = "sha256:185209a217c52afe43e079e5b232d0ef0f3a262601eaaf4371326ab6dcbec508"},
 ]
@@ -1222,6 +1305,10 @@ pluggy = [
     {file = "pluggy-0.13.1-py2.py3-none-any.whl", hash = "sha256:966c145cd83c96502c3c3868f50408687b38434af77734af1e9ca461a4081d2d"},
     {file = "pluggy-0.13.1.tar.gz", hash = "sha256:15b2acde666561e1298d71b523007ed7364de07029219b604cf808bfa1c765b0"},
 ]
+port-for = [
+    {file = "port-for-0.4.tar.gz", hash = "sha256:47b5cb48f8e036497cd73b96de305cecb4070e9ecbc908724afcbd2224edccde"},
+    {file = "port_for-0.4-py2.py3-none-any.whl", hash = "sha256:247b4db1901aa3d9906258308e40dfbadf65275b27ca77faa0b9a876b7284970"},
+]
 pre-commit = [
     {file = "pre_commit-2.9.3-py2.py3-none-any.whl", hash = "sha256:6c86d977d00ddc8a60d68eec19f51ef212d9462937acf3ea37c7adec32284ac0"},
     {file = "pre_commit-2.9.3.tar.gz", hash = "sha256:ee784c11953e6d8badb97d19bc46b997a3a9eded849881ec587accd8608d74a4"},
@@ -1229,6 +1316,19 @@ pre-commit = [
 prettyprint = [
     {file = "prettyprint-0.1.5-py2.6.egg", hash = "sha256:ee3fdb0a463b421d326ba3ed2891f1927eb4193abedf81c9937bc1deae0f958a"},
     {file = "prettyprint-0.1.5.tar.gz", hash = "sha256:7423210b62adfb3777677914cd25db4919f1c2b0afba0454365ffbfa3f7e3731"},
+]
+psutil = [
+    {file = "psutil-5.7.3-cp27-none-win32.whl", hash = "sha256:1cd6a0c9fb35ece2ccf2d1dd733c1e165b342604c67454fd56a4c12e0a106787"},
+    {file = "psutil-5.7.3-cp27-none-win_amd64.whl", hash = "sha256:e02c31b2990dcd2431f4524b93491941df39f99619b0d312dfe1d4d530b08b4b"},
+    {file = "psutil-5.7.3-cp35-cp35m-win32.whl", hash = "sha256:56c85120fa173a5d2ad1d15a0c6e0ae62b388bfb956bb036ac231fbdaf9e4c22"},
+    {file = "psutil-5.7.3-cp35-cp35m-win_amd64.whl", hash = "sha256:fa38ac15dbf161ab1e941ff4ce39abd64b53fec5ddf60c23290daed2bc7d1157"},
+    {file = "psutil-5.7.3-cp36-cp36m-win32.whl", hash = "sha256:01bc82813fbc3ea304914581954979e637bcc7084e59ac904d870d6eb8bb2bc7"},
+    {file = "psutil-5.7.3-cp36-cp36m-win_amd64.whl", hash = "sha256:6a3e1fd2800ca45083d976b5478a2402dd62afdfb719b30ca46cd28bb25a2eb4"},
+    {file = "psutil-5.7.3-cp37-cp37m-win32.whl", hash = "sha256:fbcac492cb082fa38d88587d75feb90785d05d7e12d4565cbf1ecc727aff71b7"},
+    {file = "psutil-5.7.3-cp37-cp37m-win_amd64.whl", hash = "sha256:5d9106ff5ec2712e2f659ebbd112967f44e7d33f40ba40530c485cc5904360b8"},
+    {file = "psutil-5.7.3-cp38-cp38-win32.whl", hash = "sha256:ade6af32eb80a536eff162d799e31b7ef92ddcda707c27bbd077238065018df4"},
+    {file = "psutil-5.7.3-cp38-cp38-win_amd64.whl", hash = "sha256:2cb55ef9591b03ef0104bedf67cc4edb38a3edf015cf8cf24007b99cb8497542"},
+    {file = "psutil-5.7.3.tar.gz", hash = "sha256:af73f7bcebdc538eda9cc81d19db1db7bf26f103f91081d780bbacfcb620dee2"},
 ]
 psycopg2 = [
     {file = "psycopg2-2.8.6-cp27-cp27m-win32.whl", hash = "sha256:068115e13c70dc5982dfc00c5d70437fe37c014c808acce119b5448361c03725"},
@@ -1265,6 +1365,17 @@ pysrt = [
 pytest = [
     {file = "pytest-6.1.2-py3-none-any.whl", hash = "sha256:4288fed0d9153d9646bfcdf0c0428197dba1ecb27a33bb6e031d002fa88653fe"},
     {file = "pytest-6.1.2.tar.gz", hash = "sha256:c0a7e94a8cdbc5422a51ccdad8e6f1024795939cc89159a0ae7f0b316ad3823e"},
+]
+pytest-click = [
+    {file = "pytest_click-1.0.2-py3-none-any.whl", hash = "sha256:ac298e15a31d8892d9d063c3be82bb9877aaa11a4944e05e541ecc753258e474"},
+    {file = "pytest_click-1.0.2.tar.gz", hash = "sha256:b40b8435adde7a0d931352036a3882b13cd424fce2ffd7be6c87665050259be5"},
+]
+pytest-postgresql = [
+    {file = "pytest_postgresql-2.5.2-py3-none-any.whl", hash = "sha256:3677dfd5d9380dd81a3a34d5406a4934bba7c008b5c0b5aa45b7711f024dfb4d"},
+]
+pytest-shell = [
+    {file = "pytest-shell-0.2.3.tar.gz", hash = "sha256:535178a527450371defbc00e542511300b6a8e3199abe537b31aae6eb3c94ded"},
+    {file = "pytest_shell-0.2.3-py2.py3-none-any.whl", hash = "sha256:aa396d5e8f4b3faa20fc28b66abe088139bef1c02a5d0674a5a2f2aacf778b1a"},
 ]
 python-dateutil = [
     {file = "python-dateutil-2.8.1.tar.gz", hash = "sha256:73ebfe9dbf22e832286dafa60473e4cd239f8592f699aa5adaf10050e6e1823c"},
@@ -1365,6 +1476,10 @@ scipy = [
     {file = "scipy-1.5.4-cp39-cp39-win32.whl", hash = "sha256:d84cadd7d7998433334c99fa55bcba0d8b4aeff0edb123b2a1dfcface538e474"},
     {file = "scipy-1.5.4-cp39-cp39-win_amd64.whl", hash = "sha256:cc1f78ebc982cd0602c9a7615d878396bec94908db67d4ecddca864d049112f2"},
     {file = "scipy-1.5.4.tar.gz", hash = "sha256:4a453d5e5689de62e5d38edf40af3f17560bfd63c9c5bd228c18c1f99afa155b"},
+]
+sh = [
+    {file = "sh-1.14.1-py2.py3-none-any.whl", hash = "sha256:75e86a836f47de095d4531718fe8489e6f7446c75ddfa5596f632727b919ffae"},
+    {file = "sh-1.14.1.tar.gz", hash = "sha256:39aa9af22f6558a0c5d132881cf43e34828ca03e4ae11114852ca6a55c7c1d8e"},
 ]
 six = [
     {file = "six-1.15.0-py2.py3-none-any.whl", hash = "sha256:8b74bedcbbbaca38ff6d7491d76f2b06b3592611af620f8426e82dddb04a5ced"},

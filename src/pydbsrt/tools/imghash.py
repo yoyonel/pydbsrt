@@ -72,9 +72,7 @@ def imghash_to_64bits(imghash: ImageHash) -> str:
     """
     # binascii.b2a_hex(imghash.hash.flatten())[:64] -> b'0101000100010001000000000000000000000000000000000000000000000000'
     # binascii.a2b_hex(str(imghash)) -> b'\xd5\x00\x00\x00\x00\x00\x00\x00'
-    return BitArray(
-        f"0x{str(imghash)}"
-    ).bin  # -> '1101010100000000000000000000000000000000000000000000000000000000'
+    return BitArray(f"0x{str(imghash)}").bin
 
 
 def binary_to_signed_int64(binary_signed_int64: bytes, byteorder: str = "big") -> int:
@@ -100,6 +98,21 @@ def imghash_to_signed_int64(imghash: ImageHash) -> int:
     -3098476543630901248
     """
     return int(ImgHashExtended(imghash))
+
+
+def signed_int64_to_str_binary(imghash_signed_int64: int) -> str:
+    """
+    >>> signed_int64_to_str_binary(-3098476543630901248)
+    '1101010100000000000000000000000000000000000000000000000000000000'
+    >>> signed_int64_to_str_binary(0)
+    '0000000000000000000000000000000000000000000000000000000000000000'
+    """
+    # TODO: benchmark these alternatives
+    # https://docs.scipy.org/doc/numpy-1.15.0/reference/generated/numpy.binary_repr.html#numpy-binary-repr
+    # return np.binary_repr(imghash_signed_int64 & 0xffffffffffffffff, width=64)
+    # https://stackoverflow.com/a/20766900 (How to convert signed to unsigned integer in python)
+    # https://stackoverflow.com/questions/339007/how-to-pad-zeroes-to-a-string
+    return bin(imghash_signed_int64 & 0xFFFFFFFFFFFFFFFF)[2:].zfill(64)
 
 
 def imghash_distance(
@@ -156,14 +169,14 @@ def imghash_count_nonzero(imghash: ImageHash) -> int:
     return np.count_nonzero(imghash.hash.flatten())
 
 
-def imghash_hexstr_to_binstr(imghash_hex: hex) -> str:
+def imghash_str_hex_to_str_binary(imghash_hex: hex) -> str:
     """
 
     :param imghash_hex:
     :return:
 
 
-    >>> imghash_hexstr_to_binstr("c165924de35876d9")
+    >>> imghash_str_hex_to_str_binary("c165924de35876d9")
     '1100000101100101100100100100110111100011010110000111011011011001'
 
     """
