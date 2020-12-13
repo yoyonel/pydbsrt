@@ -2,10 +2,10 @@
 https://stackoverflow.com/questions/8290397/how-to-split-an-iterable-in-constant-size-chunks
 """
 from itertools import chain, islice
-from typing import Generator, Iterator, List
+from typing import Generator, Iterator, Any
 
 
-def chunks(iterable, size) -> Generator[Iterator[List], None, None]:
+def chunks(iterable: Iterator[Any], size) -> Generator[Iterator[Any], None, None]:
     """
 
     Args:

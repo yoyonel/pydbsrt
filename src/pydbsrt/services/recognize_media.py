@@ -186,8 +186,8 @@ async def build_results(
 )
 def recognize_media(media: Path, search_distance: int, nb_seconds_to_extract: float):
     loop = asyncio.get_event_loop()
-    results_from_search_imghash_in_db: search_imghash_in_db.ResultRun = loop.run_until_complete(
-        run(media, search_distance, nb_seconds_to_extract)
+    results_from_search_imghash_in_db: search_imghash_in_db.ResultRun = (
+        loop.run_until_complete(run(media, search_distance, nb_seconds_to_extract))
     )
     results: List[BuildResult] = loop.run_until_complete(
         build_results(media, results_from_search_imghash_in_db)

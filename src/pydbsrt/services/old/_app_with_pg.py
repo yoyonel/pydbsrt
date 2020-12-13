@@ -89,8 +89,7 @@ CREATE TABLE IF NOT EXISTS {table_name} (
 
 
 def insert_img_hashes_into_db(input_media_path: Path, conn, table: sql.Table):
-    """
-    """
+    """"""
     signed_int64_img_hashes = [
         imghash_to_signed_int64(img_hash)
         for img_hash in tqdm(ffmpeg_imghash_generator(str(input_media_path)))

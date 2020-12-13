@@ -9,8 +9,7 @@ from pydbsrt.tools.videofingerprint import VideoFingerprint
 
 @dataclass
 class ImportantFrameFingerprints:
-    """
-"""
+    """"""
 
     vfp: VideoFingerprint
     # THRESHOLDS

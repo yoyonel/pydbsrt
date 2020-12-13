@@ -8,6 +8,7 @@ import imagehash
 import imageio
 import numpy as np
 from PIL import Image
+from imagehash import ImageHash
 
 #
 from pydbsrt.tools.videoreader import VideoReader
@@ -17,27 +18,26 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class VideoFingerprint:
-    """
-"""
+    """"""
 
     @staticmethod
     def _default_hash(f):
         return imagehash.phash(f)
 
-    vreader: VideoReader
+    video_reader: VideoReader
     #
     func_for_hash = _default_hash
 
     frame_reader: Iterator = field(init=False)
 
     def __post_init__(self):
-        self.frame_reader = iter(self.vreader.reader)
+        self.frame_reader = iter(self.video_reader.reader)
 
-    def __iter__(self):
-        self.frame_reader = iter(self.vreader.reader)
+    def __iter__(self) -> Iterator[ImageHash]:
+        self.frame_reader = iter(self.video_reader.reader)
         return self
 
-    def __next__(self):
+    def __next__(self) -> ImageHash:
         try:
             cur_frame = next(self.frame_reader)
             try:

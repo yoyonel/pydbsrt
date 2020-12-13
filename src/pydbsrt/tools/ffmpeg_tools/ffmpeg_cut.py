@@ -141,12 +141,12 @@ def set_aselect_expression(frame_start, frame_stop, input_file):
 def calculate_frame_pts_time(n, media_fp):
     """
 
-        Args:
-            n (int): Frame indice
-            media_fp (str): Media file path
+    Args:
+        n (int): Frame indice
+        media_fp (str): Media file path
 
-        Returns:
-            pts_time(float): Presentation Time Stamp in seconds
+    Returns:
+        pts_time(float): Presentation Time Stamp in seconds
     """
     regex = re.compile(r"(\d+)/(\d+)")
 

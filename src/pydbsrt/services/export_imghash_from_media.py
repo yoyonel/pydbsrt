@@ -38,6 +38,9 @@ console = Console()
     "--output-file", "-o", default=None, help="File where to write images hashes."
 )
 def export_imghash_from_media(media, output_file):
+    ################################################################
+    # PROCESSING                                                   #
+    ################################################################
     # Read a video file
     reader = read_frames(
         media,
@@ -54,6 +57,9 @@ def export_imghash_from_media(media, output_file):
     chunk_nb_seconds = 15
     chunk_size = int(meta["fps"] * chunk_nb_seconds)
     console.print(f"Chunk size (nb frames): {chunk_size}")
+    ################################################################
+    # EXPORT                                                       #
+    ################################################################
     output_file = (
         Path(output_file)
         if output_file

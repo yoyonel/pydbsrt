@@ -39,7 +39,7 @@ medias_root_path = Path("data/")
 medias_path = defaultdict(
     lambda: {
         "media": medias_root_path / "big_buck_bunny_trailer_480p.webm",
-        "subtitles": medias_root_path / "subtitles.srt",
+        "subtitles": medias_root_path / "big_buck_bunny_trailer_480p.en.srt",
     }
 )  # type: Dict[str, Union[Any, Path]]
 
@@ -201,7 +201,7 @@ def main():
     logger.info(f"subtitles path: {srt_path}")
 
     video_reader = VideoReader(media_path)
-    logger.info(f"Video reader meta data:\n{pformat(video_reader.metadatas)}")
+    logger.info(f"Video reader meta data:\n{pformat(video_reader.metadata)}")
 
 
 def build_search_tree(
