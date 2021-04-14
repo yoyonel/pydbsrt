@@ -20,6 +20,5 @@ class SubReader:
         self.stream = pysrt.stream(self.file)
 
     def __iter__(self):
-        for sub in self.stream:
-            yield sub
+        yield from self.stream
         return

@@ -20,7 +20,8 @@ logger = logging.getLogger("ffmpegtools.cut")
 
 
 def set_select_expression(
-    frame_start, frame_stop,
+    frame_start,
+    frame_stop,
 ):
     """
 
@@ -223,7 +224,7 @@ def cut(
         f_asetpts.set_option("expr", "N/SR/TB")
         ffmpeg.add_audio_filter(f_asetpts)
 
-        with ffmpeg.build().run() as proc:
+        with ffmpeg.build().search_phash_stream() as proc:
             out, err = proc.communicate()
 
         if proc.returncode != 0:

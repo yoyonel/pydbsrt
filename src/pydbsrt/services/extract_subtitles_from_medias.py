@@ -14,16 +14,19 @@ Options:
 Outil permettant d'extraire les streams de sous-titres des medias/vidéos MKV
 L'outil est concu pour fonctionner en batch, en fournissant un répertoire racine et une pattern (glob) de recherche
 
-# Exemples
+# Examples
 ## Bach mode
 `extract-subtitles-from-medias "/home/latty/NAS/tvshow" "**/*.mkv"`
 par défaut enregistre les sous-titres dans le répertoire "/home/latty/NAS/tvshow/SRT",
 au format: `<file stem du media>_<lang>_<index>.srt`
 """
+import sys
+
 # https://chrisdown.name/2016/09/04/cleaning-up-muxing-extracting-subtitles-using-ffmpeg-srt-tools.html
 from collections import defaultdict
 from functools import partial
 from pathlib import Path
+from signal import signal, SIGINT, SIGHUP, SIGTERM, SIGUSR1, SIGUSR2
 from typing import Optional, List, Tuple
 
 import click
@@ -48,8 +51,21 @@ from rich.progress import Progress
 
 from yaspin import yaspin
 
+ALL_HANDLING_SIGNALS = [
+    SIGINT,
+    SIGHUP,
+    SIGTERM,
+    SIGUSR1,
+    SIGUSR2,
+]
+
 custom_theme = Theme({"info": "dim cyan", "warning": "magenta", "danger": "bold red"})
 console = Console(theme=custom_theme)
+
+proc_sh_cmd = {
+    "ffmpeg": None,
+    "ffprobe": None,
+}
 
 progress = Progress(
     TextColumn("[bold blue]{task.fields[filename]}", justify="right"),
@@ -63,6 +79,19 @@ progress = Progress(
     TimeElapsedOverRemainingColumn(),
     console=console,
 )
+
+
+def sh_shutdown(_sig, _):
+    print("SHUTDOWN ...")
+
+    # deactivate signals (handling) during shutdown
+    def _signal_handler(_sig, _trace):
+        pass
+
+    for sig in ALL_HANDLING_SIGNALS:
+        signal(sig, _signal_handler)
+
+    sys.exit()
 
 
 @click.command(
@@ -96,6 +125,9 @@ def extract_subtitles_from_medias(
     root_dir_export_subtitles: Optional[Path],
     default_relative_path_export_for_subtitles: str,
 ):
+    for sig in ALL_HANDLING_SIGNALS:
+        signal(sig, sh_shutdown)
+
     if root_dir_export_subtitles is None:
         root_dir_export_subtitles = (
             root_dir_for_finding_medias / default_relative_path_export_for_subtitles
@@ -148,7 +180,7 @@ def extract_subtitles_from_medias(
                 # "Extract all subtitles from a movie using ffprobe & ffmpeg"
                 # https://gist.github.com/kowalcj0/ae0bdc43018e2718fb75290079b8839a
                 # https://ffmpeg.org/ffprobe.html
-                sh.ffprobe(
+                proc_sh_cmd["ffprobe"] = sh.ffprobe(
                     *(
                         "-loglevel error "
                         "-select_streams s -show_entries stream=index:stream_tags=language:stream_tags=title "
@@ -156,9 +188,11 @@ def extract_subtitles_from_medias(
                         str(media_path),
                     ),
                     _out=partial(extract_stream_subtitles_informations, media_path),
-                    _bg=False,
+                    _bg=True,
                 )
-            # TODO: Need better exceptions handling
+                proc_sh_cmd["ffprobe"].wait()
+                proc_sh_cmd["ffprobe"] = None
+                # TODO: Need better exceptions handling
             except (sh.ErrorReturnCode_1, Exception):
                 console.print_exception()
             progress.update(task_id, advance=1, refresh=False)
@@ -188,22 +222,25 @@ def extract_subtitles_from_medias(
                     f"▶️ Extract {len(streams_srt)} subtitles from {media_path.name}"
                 )
                 try:
-                    sh.ffmpeg(
+                    proc_sh_cmd["ffmpeg"] = sh.ffmpeg(
                         *(
-                            "-y -nostdin -hide_banner -loglevel quiet -i".split(" "),
+                            # -loglevel quiet
+                            "-y -nostdin -hide_banner -i".split(" "),
                             str(media_path),
                             *ffmpeg_map_cmd_for_srt,
                         ),
-                        _bg=False,
+                        _bg=True,
                     )
+                    proc_sh_cmd["ffmpeg"].wait()
+                    proc_sh_cmd["ffmpeg"] = None
                 # TODO: Need better exceptions handling
                 except (sh.ErrorReturnCode_1, Exception):
-                    console.print_exception()
+                    # console.print_exception()
                     console.print(
                         f":cross_mark: Can't extract subtitles (streams) from {media_path.name}",
                         style="danger",
                     )
-                    raise
+                    # raise
 
     console.print(
         f"ℹ️ map_media_srt_streams: #keys={len(map_media_srt_streams)=}, "

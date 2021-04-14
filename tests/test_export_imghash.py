@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from pydbsrt.services.export_imghash_from_media import export_imghash_from_media
+from pydbsrt.applications.export_imghash_from_media import export_imghash_from_media
 from pydbsrt.tools.imghash import (
     binary_to_signed_int64,
     signed_int64_to_str_binary,

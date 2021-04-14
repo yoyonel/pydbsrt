@@ -1,3 +1,22 @@
+# -*- coding: utf-8 -*-
+"""
+➜ poetry run python src/pydbsrt/app_cli.py import-images-hashes-into-db --help
+Usage: app_cli.py import-images-hashes-into-db [OPTIONS]
+
+Options:
+  -r, --binary_img_hash_file PATH
+                                  Path to media  [required]
+  -h, --help                      Show this message and exit.
+
+# Description
+Import l'ensemble des images hashes (des frames d'un média) d'un fichier .phash (output du script `export_imghash_from_media`)
+dans BKTreeDB la base de donnée PostgreSQL (avec index) spécialisé·e pour le stockage (et recherche) de perceptives hashes.
+
+# Example
+➜ /usr/bin/ls -1 /tmp/*.phash | \
+    xargs -I {} poetry run python app_cli.py import-images-hashes-into-db -r "{}"
+
+"""
 import asyncio
 from pathlib import Path
 from typing import Iterator, Tuple
