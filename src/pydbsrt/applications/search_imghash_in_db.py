@@ -24,7 +24,7 @@ import click_pathlib
 from rich.console import Console
 
 from pydbsrt import settings
-from pydbsrt.services.database_services import ResultSearch, search_phash_stream
+from pydbsrt.services.matching import ResultSearch, search_phash_stream
 
 psqlDbIpAddr = settings.PSQL_IP
 psqlDbName = settings.PSQL_DB_NAME

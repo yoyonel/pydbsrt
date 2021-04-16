@@ -36,7 +36,7 @@ from rich.progress import (
 )
 
 from pydbsrt import settings
-from pydbsrt.services.database_services import create_tables, create_indexes
+from pydbsrt.services.database import create_tables, create_indexes
 from pydbsrt.tools.imghash import binary_to_signed_int64
 from pydbsrt.tools.rich_colums import TimeElapsedOverRemainingColumn
 
