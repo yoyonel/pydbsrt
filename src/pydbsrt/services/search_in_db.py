@@ -39,7 +39,9 @@ class BuildSearchResult:
 async def search_media_in_db(
     search_media: Path, search_distance: int, nb_seconds_to_extract: float
 ) -> search_imghash_in_db.ResultSearch:
-    reader, _ = build_reader_frames(search_media, nb_seconds_to_extract, True)
+    reader, _ = build_reader_frames(
+        search_media, nb_seconds_to_extract, seek_to_middle=True
+    )
     gen_frame_hash = map(rawframe_to_imghash, reader)
     gen_signed_int64_hash = map(imghash_to_signed_int64, gen_frame_hash)
     return await search_imghash_in_db.search_phash_stream(

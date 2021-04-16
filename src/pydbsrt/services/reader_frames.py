@@ -25,16 +25,16 @@ def build_iframe_selection(pict_type: str = "I") -> str:
 def build_reader_frames(
     media: Path,
     nb_seconds_to_extract: float = 0,
-    seek_to_middle: bool = True,
-    ffmpeg_reduce_verbose: bool = True,
+    seek_to_middle: bool = False,
+    ffmpeg_reduce_verbosity: bool = True,
 ) -> Tuple[Iterator[bytes], Dict]:
     meta = {}
-    if ffmpeg_reduce_verbose or seek_to_middle:
+    if ffmpeg_reduce_verbosity or seek_to_middle:
         meta = next(read_frames(str(media)))
     # extract a (frame's) chunk around/in middle of the media
     # https://trac.ffmpeg.org/wiki/Seeking#Cuttingsmallsections
     ffmpeg_seek_input_cmd = []
-    if ffmpeg_reduce_verbose:
+    if ffmpeg_reduce_verbosity:
         ffmpeg_seek_input_cmd = "-hide_banner -nostats -nostdin".split(" ")
     if seek_to_middle:
         ffmpeg_seek_input_cmd = [
