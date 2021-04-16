@@ -36,7 +36,6 @@ import click
 
 # https://pypi.org/project/click-pathlib/
 import click_pathlib
-from imageio_ffmpeg import read_frames
 from numpy.ma import floor
 from rich.console import Console
 from rich.progress import (
@@ -47,6 +46,7 @@ from rich.progress import (
     TransferSpeedColumn,
 )
 
+from pydbsrt.services.reader_frames import build_reader_frames
 from pydbsrt.tools.chunk import chunks
 from pydbsrt.tools.ffmpeg_tools.ffmeg_extract_frame import rawframe_to_imghash
 from pydbsrt.tools.imghash import imghash_to_binary
@@ -73,12 +73,7 @@ def export_imghash_from_media(media, output_file):
     # PROCESSING                                                   #
     ################################################################
     # Read a video file
-    reader = read_frames(
-        media,
-        output_params=["-vf", "scale=width=32:height=32", "-pix_fmt", "gray"],
-        bits_per_pixel=8,
-    )
-    meta = reader.__next__()  # meta data, e.g. meta["size"] -> (width, height)
+    reader, meta = build_reader_frames(media)
     console.print(meta)
     nb_frames_to_read = int(floor(meta["fps"] * meta["duration"]))
     gen_frame_hash = map(rawframe_to_imghash, reader)

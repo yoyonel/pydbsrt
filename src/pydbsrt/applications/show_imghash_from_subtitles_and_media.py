@@ -37,10 +37,10 @@ import click
 
 # https://pypi.org/project/click-pathlib/
 import click_pathlib
-from imageio_ffmpeg import read_frames
 from rich.console import Console
 
 from pydbsrt.services.extended_subtitles import show_subtitles_fingerprints
+from pydbsrt.services.reader_frames import build_reader_frames
 from pydbsrt.tools.ffmpeg_tools.ffmeg_extract_frame import rawframe_to_imghash
 
 console = Console()
@@ -66,13 +66,6 @@ console = Console()
     help="Path to media",
 )
 def show_imghash_from_subtitles_and_media(subtitles, media):
-    # Read a video file
-    reader = read_frames(
-        media,
-        input_params="-hide_banner -nostats -nostdin".split(" "),
-        output_params=["-vf", "scale=width=32:height=32", "-pix_fmt", "gray"],
-        bits_per_pixel=8,
-    )
-    reader.__next__()
+    reader, _ = build_reader_frames(media)
     gen_frame_hash = map(rawframe_to_imghash, reader)
     show_subtitles_fingerprints(subtitles, gen_frame_hash)

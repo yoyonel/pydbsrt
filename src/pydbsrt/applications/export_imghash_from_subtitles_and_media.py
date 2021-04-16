@@ -40,9 +40,9 @@ import click
 
 # https://pypi.org/project/click-pathlib/
 import click_pathlib
-from imageio_ffmpeg import read_frames
 
 from pydbsrt.services.extended_subtitles import export_extended_subtitles
+from pydbsrt.services.reader_frames import build_reader_frames
 from pydbsrt.tools.ffmpeg_tools.ffmeg_extract_frame import rawframe_to_imghash
 
 
@@ -69,13 +69,6 @@ from pydbsrt.tools.ffmpeg_tools.ffmeg_extract_frame import rawframe_to_imghash
     "--output-file", "-o", default=None, help="File where to write images hashes."
 )
 def export_imghash_from_subtitles_and_media(subtitles, media, output_file):
-    # Read a video file
-    reader = read_frames(
-        media,
-        input_params="-hide_banner -nostats -nostdin".split(" "),
-        output_params=["-vf", "scale=width=32:height=32", "-pix_fmt", "gray"],
-        bits_per_pixel=8,
-    )
-    reader.__next__()
+    reader, _ = build_reader_frames(media)
     gen_frame_hash = map(rawframe_to_imghash, reader)
     export_extended_subtitles(subtitles, gen_frame_hash, output_file)
