@@ -29,21 +29,23 @@ def build_reader_frames(
     ffmpeg_reduce_verbosity: bool = True,
 ) -> Tuple[Iterator[bytes], Dict]:
     meta = {}
+    ffmpeg_seek_input_cmd = []
+    ffmpeg_seek_output_cmd = []
+
     if ffmpeg_reduce_verbosity or seek_to_middle:
         meta = next(read_frames(str(media)))
+
     # extract a (frame's) chunk around/in middle of the media
     # https://trac.ffmpeg.org/wiki/Seeking#Cuttingsmallsections
-    ffmpeg_seek_input_cmd = []
     if ffmpeg_reduce_verbosity:
-        ffmpeg_seek_input_cmd = "-hide_banner -nostats -nostdin".split(" ")
+        ffmpeg_seek_input_cmd += "-hide_banner -nostats -nostdin".split(" ")
     if seek_to_middle:
-        ffmpeg_seek_input_cmd = [
-            "-ss",
-            str(datetime.timedelta(seconds=meta["duration"] // 2)),
-        ]
-    ffmpeg_seek_output_cmd = []
+        ffmpeg_seek_input_cmd += (
+            f"-ss {str(datetime.timedelta(seconds=meta['duration'] // 2))}".split(" ")
+        )
+
     if nb_seconds_to_extract:
-        ffmpeg_seek_output_cmd = [
+        ffmpeg_seek_output_cmd += [
             "-frames:v",
             str(round(nb_seconds_to_extract * meta["fps"])),
         ]
@@ -58,10 +60,8 @@ def build_reader_frames(
         input_params=[*ffmpeg_seek_input_cmd],
         output_params=[
             *ffmpeg_seek_output_cmd,
-            "-vf",
-            video_filters,
-            "-pix_fmt",
-            "gray",
+            *f"-vf {video_filters}".split(" "),
+            *"-pix_fmt gray".split(" "),
         ],
         bits_per_pixel=8,
     )
