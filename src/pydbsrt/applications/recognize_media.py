@@ -39,7 +39,7 @@ import click_pathlib
 import pandas as pd
 from rich.console import Console
 
-from pydbsrt.services import search_imghash_in_db
+from pydbsrt.applications import search_imghash_in_db
 from pydbsrt.services.search_in_db import (
     search_media_in_db,
     BuildSearchResult,

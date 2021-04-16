@@ -1,8 +1,11 @@
+from itertools import groupby, chain
+from operator import itemgetter
 from pathlib import Path
 from typing import Iterator
 
 # https://pypi.org/project/click-pathlib/
 from imagehash import ImageHash
+from more_itertools import grouper
 from rich.console import Console
 from yaspin import yaspin
 from yaspin.spinners import Spinners
@@ -46,3 +49,24 @@ def export_extended_subtitles(
             with output_file.open("ab") as fo:
                 fo.write(b"".join(chunk_binary_imghash))
     spinner.ok("✅ ")
+
+
+def show_subtitles_fingerprints(
+    srt_path: Path, it_imghash: Iterator[ImageHash], chunk_size: int = 25
+) -> None:
+    it_sub_fingerprints = SubFingerprints(
+        sub_reader=SubReader(srt_path), imghash_reader=it_imghash
+    )
+    gb_sub_fingerprints = groupby(it_sub_fingerprints, key=itemgetter("index"))
+    nb_fingerprints_by_chunk = 4
+    for index_subtitle, it_indexed_sub_fingerprints in gb_sub_fingerprints:
+        _, id_frame, fingerprint = next(it_indexed_sub_fingerprints)
+        it_indexed_sub_fingerprints = chain(
+            ((index_subtitle, id, fingerprint),), it_indexed_sub_fingerprints
+        )
+        console.print(f"* index subtitle: {index_subtitle} - first frame: {id_frame}")
+        for chunk_fingerprints in grouper(
+            (fingerprint for _, __, fingerprint in it_indexed_sub_fingerprints),
+            nb_fingerprints_by_chunk,
+        ):
+            console.print(" ".join(map(str, filter(None, chunk_fingerprints))))

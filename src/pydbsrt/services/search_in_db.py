@@ -7,7 +7,7 @@ import asyncpg
 from asyncpg import Connection
 
 from pydbsrt import settings
-from pydbsrt.services import search_imghash_in_db
+from pydbsrt.applications import search_imghash_in_db
 from pydbsrt.services.reader_frames import build_reader_frames
 from pydbsrt.tools.ffmpeg_tools.ffmeg_extract_frame import rawframe_to_imghash
 from pydbsrt.tools.imghash import imghash_to_signed_int64
@@ -38,7 +38,7 @@ class BuildSearchResult:
 
 async def search_media_in_db(
     search_media: Path, search_distance: int, nb_seconds_to_extract: float
-) -> search_imghash_in_db.ResultRun:
+) -> search_imghash_in_db.ResultSearch:
     reader = build_reader_frames(search_media, nb_seconds_to_extract)
     gen_frame_hash = map(rawframe_to_imghash, reader)
     gen_signed_int64_hash = map(imghash_to_signed_int64, gen_frame_hash)
@@ -56,7 +56,7 @@ async def search_media_name_into_db(conn: Connection, media_id: int) -> str:
 
 
 async def build_search_media_results(
-    media: Path, results: search_imghash_in_db.ResultRun
+    media: Path, results: search_imghash_in_db.ResultSearch
 ) -> List[BuildSearchResult]:
     map_media_id_to_offsets_matched: Dict[int, List[PairedMatchedFrame]] = defaultdict(
         list

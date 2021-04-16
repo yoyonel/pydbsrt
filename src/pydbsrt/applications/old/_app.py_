@@ -110,7 +110,9 @@ def entropy2(labels, base=e):
 
 
 def show_important_frames_fingerprints(
-    video_reader, threshold_distance: int = 32, threshold_nonzero: int = 16,
+    video_reader,
+    threshold_distance: int = 32,
+    threshold_nonzero: int = 16,
 ):
     """
     Compute Important Frames (from fingerprint analyze) and extract frames images from them.
@@ -346,7 +348,8 @@ class SearchTree:
             assert all(
                 len(
                     self.tree.getWithinDistance(
-                        hamDb.explicitSignCast(sub_fingerprint_rip_item.fingerprint), 0,
+                        hamDb.explicitSignCast(sub_fingerprint_rip_item.fingerprint),
+                        0,
                     )
                 )
                 == 1

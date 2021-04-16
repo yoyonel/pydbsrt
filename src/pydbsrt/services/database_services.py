@@ -1,29 +1,7 @@
-# -*- coding: utf-8 -*-
-"""
-➜ poetry run python src/pydbsrt/app_cli.py search-imghash-in-db --help
-Usage: app_cli.py search-imghash-in-db [OPTIONS]
-
-Options:
-  -p, --phash_file PATH   PHash stream to search in db  [required]
-  -d, --distance INTEGER  Search distance to use
-  -h, --help              Show this message and exit.
-
-# Description
-
-# Example
-
-➜ poetry run python src/pydbsrt/search-imghash-in-db --phash_file /tmp/searching_phash.txt
-
-"""
-import asyncio
-import sys
 from dataclasses import dataclass
-from pathlib import Path
 from typing import List, Iterable
 
 import asyncpg
-import click
-import click_pathlib
 from async_lru import alru_cache
 from contexttimer import Timer
 from rich.console import Console
@@ -46,16 +24,66 @@ class MatchedFrame:
 
 
 @dataclass(frozen=True)
-class ResultRecord:
+class ResultSearchRecord:
     search_phash: int
     search_offset: int
     matches: List[MatchedFrame]
 
 
 @dataclass(frozen=True)
-class ResultRun:
-    records: List[ResultRecord]
+class ResultSearch:
+    records: List[ResultSearchRecord]
     timer: Timer
+
+
+async def drop_tables(conn):
+    for table_name in ("frames", "medias"):
+        await conn.execute(f"""DROP TABLE IF EXISTS {table_name} CASCADE;""")
+
+
+async def create_tables(conn):
+    """
+    one-to-many: media ->* frames
+    """
+    await conn.execute(
+        """
+                CREATE TABLE IF NOT EXISTS medias (
+                    id              SERIAL PRIMARY KEY,
+                    media_hash      CHAR(32) UNIQUE,
+                    -- https://www.postgresqltutorial.com/postgresql-char-varchar-text/
+                    name            TEXT
+                )"""
+    )
+    await conn.execute(
+        """
+                CREATE TABLE IF NOT EXISTS frames (
+                    id              SERIAL PRIMARY KEY,
+                    p_hash          BIGINT,
+                    frame_offset    INT,
+                    media_id        INT,
+                    FOREIGN KEY (media_id) REFERENCES medias(id) ON DELETE CASCADE
+                )"""
+    )
+
+
+async def create_indexes(conn):
+    await conn.execute(
+        """
+                CREATE INDEX IF NOT EXISTS frames_phash_bk_tree_index ON frames
+                USING spgist ( p_hash bktree_ops );"""
+    )
+
+
+async def search_img_hash(conn, search_phash=-6023947298048657955, search_distance=1):
+    values = await conn.fetch(
+        f"""
+                SELECT "id", "p_hash", "frame_offset", "media_id"
+                FROM "frames"
+                WHERE "p_hash" <@ ({search_phash}, {search_distance})"""
+    )
+    console.print(
+        f"count(searching(phash={search_phash}, search_distance={search_distance}))={len(values)}"
+    )
 
 
 @alru_cache
@@ -73,7 +101,7 @@ WHERE "p_hash" <@ ({phash}, {distance})"""
 
 async def search_phash_stream(
     phash_stream: Iterable[str], search_distance: int
-) -> ResultRun:
+) -> ResultSearch:
     """"""
     async with asyncpg.create_pool(
         user=psqlUserName,
@@ -86,7 +114,7 @@ async def search_phash_stream(
             with _Timer("search_img_hash", func_to_log=lambda s: None) as timer:
                 # PEP 530 -- Asynchronous Comprehensions: https://www.python.org/dev/peps/pep-0530/
                 records = [
-                    ResultRecord(
+                    ResultSearchRecord(
                         phash,
                         offset,
                         await search_phash_in_db(conn, phash, search_distance),
@@ -95,24 +123,4 @@ async def search_phash_stream(
                         int(str_phash.rstrip()) for str_phash in phash_stream
                     )
                 ]
-    return ResultRun(records, timer)
-
-
-@click.command(short_help="")
-@click.option(
-    "--phash_file",
-    "-p",
-    required=True,
-    type=click_pathlib.Path(
-        exists=True, readable=True, resolve_path=True, allow_dash=True
-    ),
-    help="PHash stream to search in db",
-)
-@click.option("--distance", "-d", default=1, type=int, help="Search distance to use")
-def search_imghash_in_db(phash_file, distance):
-    phash_stream = sys.stdin if phash_file == Path("-") else phash_file.open("r")
-    loop = asyncio.get_event_loop()
-    result_run: ResultRun = loop.run_until_complete(
-        search_phash_stream(phash_stream, distance)
-    )
-    console.print(result_run.timer)
+    return ResultSearch(records, timer)
