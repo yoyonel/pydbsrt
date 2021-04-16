@@ -3,12 +3,14 @@ import logging
 import click
 
 from pydbsrt.applications.export_imghash_from_media import export_imghash_from_media
-from pydbsrt.services.export_imghash_from_subtitles_and_media import (
+from pydbsrt.applications.export_imghash_from_subtitles_and_media import (
     export_imghash_from_subtitles_and_media,
 )
 
 # https://pypi.org/project/click-pathlib/
-from pydbsrt.services.extract_subtitles_from_medias import extract_subtitles_from_medias
+from pydbsrt.applications.extract_subtitles_from_medias import (
+    extract_subtitles_from_medias,
+)
 from pydbsrt.services.import_imghash_into_db import import_images_hashes_into_db
 from pydbsrt.applications.recognize_media import recognize_media
 from pydbsrt.services.search_imghash_in_db import search_imghash_in_db
