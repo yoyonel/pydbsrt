@@ -15,6 +15,7 @@ psqlUserName = settings.PSQL_USER
 psqlUserPass = settings.PSQL_PASS
 
 console = Console()
+error_console = Console(stderr=True, style="bold red")
 
 
 async def drop_tables(conn):
@@ -69,14 +70,19 @@ async def create_indexes(conn):
     )
 
 
-async def search_img_hash(conn, search_phash=-6023947298048657955, search_distance=1):
-    values = await conn.fetch(
-        """
+async def search_img_hash(
+    conn, search_phash: int = -6023947298048657955, search_distance: int = 1
+):
+    values = (
+        await conn.fetch(
+            """
                 SELECT "id", "p_hash", "frame_offset", "media_id"
                 FROM "frames"
                 WHERE "p_hash" <@ ($1, $2)""",
-        search_phash,
-        search_distance,
+            search_phash,
+            search_distance,
+        )
+        or []
     )
     console.print(
         f"count(searching(phash={search_phash}, search_distance={search_distance}))={len(values)}"
@@ -129,6 +135,11 @@ async def import_binary_img_hash_to_db(
         media_hash,
         binary_img_hash_file.stem,
     )
+    if media_id is None:
+        error_console.print(
+            f"Problem when inserting media (media_hash={media_hash}, name={binary_img_hash_file.stem}) into DB!"
+        )
+        raise RuntimeError("DB: Problem when inserting media")
 
     await conn.copy_records_to_table(
         "frames",
@@ -136,8 +147,11 @@ async def import_binary_img_hash_to_db(
         columns=["p_hash", "frame_offset", "media_id"],
     )
 
-    nb_frames_inserted = await conn.fetchval(
-        "SELECT COUNT(*) FROM frames WHERE frames.media_id = $1", media_id
+    nb_frames_inserted = (
+        await conn.fetchval(
+            "SELECT COUNT(*) FROM frames WHERE frames.media_id = $1", media_id
+        )
+        or 0
     )
 
     # await search_img_hash(conn)
