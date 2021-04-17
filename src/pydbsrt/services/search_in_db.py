@@ -51,9 +51,10 @@ async def search_media_in_db(
 
 async def search_media_name_into_db(conn: Connection, media_id: int) -> str:
     return await conn.fetchval(
-        f"""SELECT "name"
+        """SELECT "name"
             FROM "medias"
-            WHERE medias.id = {media_id}"""
+            WHERE medias.id = $1""",
+        media_id,
     )
 
 

@@ -38,10 +38,12 @@ async def search_phash_in_db(conn, phash: int, distance: int) -> List[MatchedFra
     return [
         MatchedFrame(*record)
         for record in await conn.fetch(
-            f"""
+            """
 SELECT "frame_offset", "media_id"
 FROM "frames"
-WHERE "p_hash" <@ ({phash}, {distance})"""
+WHERE "p_hash" <@ ($1, $2)""",
+            phash,
+            distance,
         )
     ]
 

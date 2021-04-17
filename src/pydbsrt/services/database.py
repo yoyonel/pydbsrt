@@ -19,7 +19,7 @@ console = Console()
 
 async def drop_tables(conn):
     for table_name in ("frames", "medias"):
-        await conn.execute(f"""DROP TABLE IF EXISTS {table_name} CASCADE;""")
+        await conn.execute("DROP TABLE IF EXISTS $1 CASCADE;", table_name)
 
 
 async def create_tables(conn):
@@ -71,10 +71,12 @@ async def create_indexes(conn):
 
 async def search_img_hash(conn, search_phash=-6023947298048657955, search_distance=1):
     values = await conn.fetch(
-        f"""
+        """
                 SELECT "id", "p_hash", "frame_offset", "media_id"
                 FROM "frames"
-                WHERE "p_hash" <@ ({search_phash}, {search_distance})"""
+                WHERE "p_hash" <@ ($1, $2)""",
+        search_phash,
+        search_distance,
     )
     console.print(
         f"count(searching(phash={search_phash}, search_distance={search_distance}))={len(values)}"
@@ -82,6 +84,9 @@ async def search_img_hash(conn, search_phash=-6023947298048657955, search_distan
 
 
 async def reindex_tables(conn):
+    """
+    https://www.postgresql.org/docs/9.4/sql-reindex.html
+    """
     await conn.execute(
         """
                 REINDEX TABLE medias;
@@ -132,7 +137,7 @@ async def import_binary_img_hash_to_db(
     )
 
     nb_frames_inserted = await conn.fetchval(
-        f"SELECT COUNT(*) FROM frames WHERE frames.media_id = {media_id}",
+        "SELECT COUNT(*) FROM frames WHERE frames.media_id = $1", media_id
     )
 
     # await search_img_hash(conn)
