@@ -6,16 +6,16 @@ from typing import Dict, List, Set
 import asyncpg
 from asyncpg import Connection
 
-from pydbsrt import settings
 from pydbsrt.applications import search_imghash_in_db
+from pydbsrt.services.database import (
+    psqlUserName,
+    psqlUserPass,
+    psqlDbName,
+    psqlDbIpAddr,
+)
 from pydbsrt.services.reader_frames import build_reader_frames
 from pydbsrt.tools.ffmpeg_tools.ffmeg_extract_frame import rawframe_to_imghash
 from pydbsrt.tools.imghash import imghash_to_signed_int64
-
-psqlDbIpAddr = settings.PSQL_IP
-psqlDbName = settings.PSQL_DB_NAME
-psqlUserName = settings.PSQL_USER
-psqlUserPass = settings.PSQL_PASS
 
 
 @dataclass(frozen=True)

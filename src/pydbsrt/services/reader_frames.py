@@ -1,8 +1,15 @@
 import datetime
 from pathlib import Path
-from typing import Iterator, Dict, Tuple
+from typing import Dict, Optional
+from typing import Iterator, Tuple
 
 from imageio_ffmpeg import read_frames
+from rich.progress import Progress
+
+from pydbsrt.tools.imghash import binary_to_signed_int64
+
+
+SIZE_IMG_HASH = 8
 
 
 def build_iframe_selection(pict_type: str = "I") -> str:
@@ -68,3 +75,27 @@ def build_reader_frames(
     meta = next(reader)
 
     return reader, meta
+
+
+def gen_read_binary_img_hash_file(
+    binary_img_hash_file: Path,
+    media_id: int,
+    progress: Optional[Progress],
+):
+    with binary_img_hash_file.open("rb") as fo:
+        task_id = progress.add_task(
+            "insert img_hash into db", filename=binary_img_hash_file.name, start=True
+        )
+        progress.update(
+            task_id, total=binary_img_hash_file.stat().st_size // SIZE_IMG_HASH
+        )
+
+        with progress:
+            # TODO: maybe trying to read more bytes (packed chunk) to optimize (need to profile/evaluate)
+            ba_img_hex = fo.read(SIZE_IMG_HASH)
+            offset_frame = 0
+            while ba_img_hex:
+                yield binary_to_signed_int64(ba_img_hex), offset_frame, media_id
+                ba_img_hex = fo.read(SIZE_IMG_HASH)
+                offset_frame += 1
+                progress.update(task_id, advance=1, refresh=False)

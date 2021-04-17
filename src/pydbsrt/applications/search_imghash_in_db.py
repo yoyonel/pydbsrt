@@ -23,13 +23,8 @@ import click
 import click_pathlib
 from rich.console import Console
 
-from pydbsrt import settings
 from pydbsrt.services.matching import ResultSearch, search_phash_stream
 
-psqlDbIpAddr = settings.PSQL_IP
-psqlDbName = settings.PSQL_DB_NAME
-psqlUserName = settings.PSQL_USER
-psqlUserPass = settings.PSQL_PASS
 
 console = Console()
 

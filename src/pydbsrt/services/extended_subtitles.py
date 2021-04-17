@@ -52,13 +52,12 @@ def export_extended_subtitles(
 
 
 def show_subtitles_fingerprints(
-    srt_path: Path, it_imghash: Iterator[ImageHash], chunk_size: int = 25
+    srt_path: Path, it_imghash: Iterator[ImageHash], nb_fingerprints_by_chunk: int = 4
 ) -> None:
     it_sub_fingerprints = SubFingerprints(
         sub_reader=SubReader(srt_path), imghash_reader=it_imghash
     )
     gb_sub_fingerprints = groupby(it_sub_fingerprints, key=itemgetter("index"))
-    nb_fingerprints_by_chunk = 4
     for index_subtitle, it_indexed_sub_fingerprints in gb_sub_fingerprints:
         _, id_frame, fingerprint = next(it_indexed_sub_fingerprints)
         it_indexed_sub_fingerprints = chain(

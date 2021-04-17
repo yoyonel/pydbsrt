@@ -19,13 +19,9 @@ dans BKTreeDB la base de donnée PostgreSQL (avec index) spécialisé·e pour le
 """
 import asyncio
 from pathlib import Path
-from typing import Iterator, Tuple
 
-import asyncpg
 import click
 import click_pathlib
-from asyncpg import Connection
-from imohash import hashfile
 from rich.console import Console
 from rich.progress import (
     BarColumn,
@@ -35,15 +31,8 @@ from rich.progress import (
     TransferSpeedColumn,
 )
 
-from pydbsrt import settings
-from pydbsrt.services.database import create_tables, create_indexes
-from pydbsrt.tools.imghash import binary_to_signed_int64
+from pydbsrt.services.database import import_binary_img_hash_to_db
 from pydbsrt.tools.rich_colums import TimeElapsedOverRemainingColumn
-
-psqlDbIpAddr = settings.PSQL_IP
-psqlDbName = settings.PSQL_DB_NAME
-psqlUserName = settings.PSQL_USER
-psqlUserPass = settings.PSQL_PASS
 
 console = Console()
 
@@ -61,73 +50,18 @@ progress = Progress(
 )
 
 
-async def run(binary_img_hash_file: Path):
-    """"""
-    media_hash = hashfile(binary_img_hash_file, hexdigest=True)
-    console.print(f"media_hash='{media_hash}'")
-
-    conn: Connection = await asyncpg.connect(
-        user=psqlUserName, password=psqlUserPass, database=psqlDbName, host=psqlDbIpAddr
+async def run(binary_img_hash_file: Path) -> None:
+    media_id, nb_frames_inserted = await import_binary_img_hash_to_db(
+        binary_img_hash_file, progress
     )
-
-    # await drop_tables(conn)
-    await create_tables(conn)
-    await create_indexes(conn)
-
-    # Test if this media is already in DB
-    # https://magicstack.github.io/asyncpg/current/api/index.html?highlight=returning#asyncpg.connection.Connection.fetchval
-    found_media_id = await conn.fetchval(
-        f"SELECT id FROM medias WHERE medias.media_hash = '{media_hash}'"
-    )
-    if found_media_id:
+    if nb_frames_inserted:
         console.print(
-            f"binary_img_hash_file={str(binary_img_hash_file)} already in DB (medias.id={found_media_id})"
+            f"count(frames where frames.media_id = {media_id})={nb_frames_inserted}"
         )
-        return
-
-    # await create_tables(conn)
-    # await create_indexes(conn)
-
-    # Insert Media
-    media_id = await conn.fetchval(
-        """
-            INSERT INTO medias (media_hash, name)
-            VALUES ($1, $2) RETURNING id""",
-        media_hash,
-        binary_img_hash_file.stem,
-    )
-
-    with binary_img_hash_file.open("rb") as fo:
-        task_id = progress.add_task(
-            "insert img_hash into db", filename=binary_img_hash_file.name, start=True
+    else:
+        console.print(
+            f"binary_img_hash_file={str(binary_img_hash_file)} already in DB (medias.id={media_id})"
         )
-        progress.update(task_id, total=binary_img_hash_file.stat().st_size // 8)
-
-        def gen_records() -> Iterator[Tuple]:
-            with progress:
-                # TODO: maybe trying to read more bytes (chunk) to optimize (need to profile)
-                ba_img_hex = fo.read(8)
-                offset_frame = 0
-                while ba_img_hex:
-                    yield binary_to_signed_int64(ba_img_hex), offset_frame, media_id
-                    ba_img_hex = fo.read(8)
-                    offset_frame += 1
-                    progress.update(task_id, advance=1, refresh=False)
-
-        await conn.copy_records_to_table(
-            "frames",
-            records=gen_records(),
-            columns=["p_hash", "frame_offset", "media_id"],
-        )
-
-        values = await conn.fetch(
-            f"SELECT COUNT(*) FROM frames WHERE frames.media_id = {media_id}",
-        )
-        console.print(f"count(frames)={values}")
-
-        # await search_img_hash(conn)
-
-    await conn.close()
 
 
 @click.command(short_help="")
