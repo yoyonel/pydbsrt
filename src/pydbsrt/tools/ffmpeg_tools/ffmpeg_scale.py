@@ -36,7 +36,7 @@ def scale(
 
     ffmpeg.add_video_filter(f_scale)
     try:
-        with ffmpeg.build().search_phash_stream() as proc:
+        with ffmpeg.build().run() as proc:
             out, err = proc.communicate()
             logger.error(err.decode("utf-8"))
         return proc.returncode

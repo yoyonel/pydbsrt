@@ -78,7 +78,7 @@ def ffmpeg_frame_generator(
     try:
         nb_frames = 0
 
-        proc = ffmpeg.build().search_phash_stream()
+        proc = ffmpeg.build().run()
 
         frame_data = proc.stdout.read(frame_size)
         while len(frame_data) > 0:

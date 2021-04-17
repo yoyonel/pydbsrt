@@ -224,7 +224,7 @@ def cut(
         f_asetpts.set_option("expr", "N/SR/TB")
         ffmpeg.add_audio_filter(f_asetpts)
 
-        with ffmpeg.build().search_phash_stream() as proc:
+        with ffmpeg.build().run() as proc:
             out, err = proc.communicate()
 
         if proc.returncode != 0:

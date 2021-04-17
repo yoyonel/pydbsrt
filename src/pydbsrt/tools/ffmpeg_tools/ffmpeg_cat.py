@@ -122,7 +122,7 @@ def cat(out_media_fp, l_in_media_fp):
 
         ffmpeg.add_input_file(fpath)
 
-        with ffmpeg.build().search_phash_stream() as proc:
+        with ffmpeg.build().run() as proc:
             out, err = proc.communicate()
             logger.error(err.decode("utf-8"))
 
