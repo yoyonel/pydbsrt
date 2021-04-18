@@ -37,11 +37,14 @@ class SubFingerprints:
     """"""
 
     sub_reader: SubReader
-    imghash_reader: Union[VideoFingerprint, Iterator[ImageHash]]
+    imghash_reader: Union[VideoFingerprint, Iterator[ImageHash], Iterator[int]]
 
     def __iter__(self) -> Iterator[SubFingerprint]:
         # we suppose subtitles generator in order
-        img_hash = next(self.imghash_reader)
+        try:
+            img_hash = next(self.imghash_reader)
+        except StopIteration:
+            return
         offset_frame = 0
         # iter on subtitles generator
         for subtitle in self.sub_reader:
@@ -52,14 +55,20 @@ class SubFingerprints:
                 subriptime_to_frame(tc_end),
             )
             try:
-                while not (offset_frame <= frame_start <= offset_frame + 1):
-                    img_hash = next(self.imghash_reader)
+                # go to the first subtitle frame offset
+                for img_hash in self.imghash_reader:
                     offset_frame += 1
+                    if offset_frame >= frame_start:
+                        break
+                # yield the first frame+phash
                 yield SubFingerprint(subtitle.index, offset_frame, img_hash)
-                while not (offset_frame <= frame_end <= offset_frame + 1):
-                    img_hash = next(self.imghash_reader)
+                # (loop ...) iterate on images hashes frames
+                for img_hash in self.imghash_reader:
                     offset_frame += 1
+                    # yield the frame+phash
                     yield SubFingerprint(subtitle.index, offset_frame, img_hash)
-                yield SubFingerprint(subtitle.index, offset_frame, img_hash)
+                    # (loop ...) until the last subtitle frame offset
+                    if offset_frame >= frame_end:
+                        break
             except StopIteration:
                 break

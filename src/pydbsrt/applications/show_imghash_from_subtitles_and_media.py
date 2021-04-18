@@ -40,6 +40,8 @@ import click_pathlib
 from rich.console import Console
 
 from pydbsrt.services.extended_subtitles import show_subtitles_fingerprints
+from pydbsrt.services.reader_frames import build_reader_frames
+from pydbsrt.tools.ffmpeg_tools.ffmeg_extract_frame import rawframe_to_imghash
 
 console = Console()
 
@@ -64,4 +66,6 @@ console = Console()
     help="Path to media",
 )
 def show_imghash_from_subtitles_and_media(subtitles, media):
-    show_subtitles_fingerprints(subtitles, media)
+    reader, _ = build_reader_frames(media)
+    it_img_hash = map(rawframe_to_imghash, reader)
+    show_subtitles_fingerprints(subtitles, it_img_hash)

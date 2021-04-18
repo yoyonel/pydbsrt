@@ -84,7 +84,7 @@ def recognize_media(
     output_format: OUTPUT_FORMAT,
 ):
     loop = asyncio.get_event_loop()
-    results_from_search_imghash_in_db: search_imghash_in_db.ResultRun = (
+    results_from_search_imghash_in_db: search_imghash_in_db.ResultSearch = (
         loop.run_until_complete(
             search_media_in_db(media, search_distance, nb_seconds_to_extract)
         )

@@ -1,3 +1,4 @@
+import contextlib
 import datetime
 from pathlib import Path
 from typing import Dict, Optional
@@ -80,17 +81,20 @@ def build_reader_frames(
 def gen_read_binary_img_hash_file(
     binary_img_hash_file: Path,
     media_id: int,
-    progress: Optional[Progress],
-):
-    with binary_img_hash_file.open("rb") as fo:
-        task_id = progress.add_task(
-            "insert img_hash into db", filename=binary_img_hash_file.name, start=True
-        )
-        progress.update(
-            task_id, total=binary_img_hash_file.stat().st_size // SIZE_IMG_HASH
-        )
+    progress: Optional[Progress] = None,
+) -> Iterator[Tuple[int, int, int]]:
 
-        with progress:
+    with binary_img_hash_file.open("rb") as fo:
+        if progress:
+            task_id = progress.add_task(
+                "insert img_hash into db",
+                filename=binary_img_hash_file.name,
+                start=True,
+            )
+            progress.update(
+                task_id, total=binary_img_hash_file.stat().st_size // SIZE_IMG_HASH
+            )
+        with progress or contextlib.nullcontext():
             # TODO: maybe trying to read more bytes (packed chunk) to optimize (need to profile/evaluate)
             ba_img_hex = fo.read(SIZE_IMG_HASH)
             offset_frame = 0
@@ -98,4 +102,5 @@ def gen_read_binary_img_hash_file(
                 yield binary_to_signed_int64(ba_img_hex), offset_frame, media_id
                 ba_img_hex = fo.read(SIZE_IMG_HASH)
                 offset_frame += 1
-                progress.update(task_id, advance=1, refresh=False)
+                if progress:
+                    progress.update(task_id, advance=1, refresh=False)

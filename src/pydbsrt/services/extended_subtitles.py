@@ -1,7 +1,9 @@
 from itertools import groupby, chain
 from operator import itemgetter
 from pathlib import Path
+from typing import Iterator
 
+from imagehash import ImageHash
 from more_itertools import grouper
 from rich.console import Console
 from yaspin import yaspin
@@ -55,17 +57,16 @@ def export_extended_subtitles(
 
 
 def show_subtitles_fingerprints(
-    srt_path: Path, media: Path, nb_fingerprints_by_row: int = 4
+    srt_path: Path, it_img_hash: Iterator[ImageHash], nb_fingerprints_by_row: int = 4
 ) -> None:
-    reader, _ = build_reader_frames(media)
     it_sub_fingerprints = SubFingerprints(
-        sub_reader=SubReader(srt_path), imghash_reader=map(rawframe_to_imghash, reader)
+        sub_reader=SubReader(srt_path), imghash_reader=it_img_hash
     )
     gb_sub_fingerprints = groupby(it_sub_fingerprints, key=itemgetter("index"))
     for index_subtitle, it_indexed_sub_fingerprints in gb_sub_fingerprints:
         _, id_frame, fingerprint = next(it_indexed_sub_fingerprints)
         it_indexed_sub_fingerprints = chain(
-            ((index_subtitle, id, fingerprint),), it_indexed_sub_fingerprints
+            ((index_subtitle, id_frame, fingerprint),), it_indexed_sub_fingerprints
         )
         console.print(f"* index subtitle: {index_subtitle} - first frame: {id_frame}")
         for chunk_fingerprints in grouper(
