@@ -12,6 +12,7 @@ from pydbsrt.services.database import (
     psqlUserPass,
     psqlDbName,
     psqlDbIpAddr,
+    console,
 )
 from pydbsrt.services.reader_frames import build_reader_frames
 from pydbsrt.tools.ffmpeg_tools.ffmeg_extract_frame import rawframe_to_imghash
@@ -109,3 +110,22 @@ async def build_search_media_results(
                 for media_id, paired_matched_frames in map_media_id_to_offsets_matched.items()
             ]
     return results
+
+
+async def search_img_hash(
+    conn, search_phash: int = -6023947298048657955, search_distance: int = 1
+):
+    values = (
+        await conn.fetch(
+            """
+                SELECT "id", "p_hash", "frame_offset", "media_id"
+                FROM "frames"
+                WHERE "p_hash" <@ ($1, $2)""",
+            search_phash,
+            search_distance,
+        )
+        or []
+    )
+    console.print(
+        f"count(searching(phash={search_phash}, search_distance={search_distance}))={len(values)}"
+    )

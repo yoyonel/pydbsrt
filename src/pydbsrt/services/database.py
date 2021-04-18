@@ -70,25 +70,6 @@ async def create_indexes(conn):
     )
 
 
-async def search_img_hash(
-    conn, search_phash: int = -6023947298048657955, search_distance: int = 1
-):
-    values = (
-        await conn.fetch(
-            """
-                SELECT "id", "p_hash", "frame_offset", "media_id"
-                FROM "frames"
-                WHERE "p_hash" <@ ($1, $2)""",
-            search_phash,
-            search_distance,
-        )
-        or []
-    )
-    console.print(
-        f"count(searching(phash={search_phash}, search_distance={search_distance}))={len(values)}"
-    )
-
-
 async def reindex_tables(conn):
     """
     https://www.postgresql.org/docs/9.4/sql-reindex.html

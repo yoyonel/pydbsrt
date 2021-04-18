@@ -158,10 +158,13 @@ def extract_subtitles_from_medias(
     with yaspin(
         text=f"Searching all medias at '{str(root_dir_for_finding_medias)}' with pattern='{glob_for_finding_medias}'"
     ) as spinner:
-        medias_paths = list(
-            filter(
-                Path.is_file, root_dir_for_finding_medias.glob(glob_for_finding_medias)
-            )
+        # medias_paths = list(
+        #     filter(
+        #         Path.is_file, root_dir_for_finding_medias.glob(glob_for_finding_medias)
+        #     )
+        # )
+        it_medias_paths = filter(
+            Path.is_file, root_dir_for_finding_medias.glob(glob_for_finding_medias)
         )
     spinner.ok("✅ ")
 
@@ -173,9 +176,10 @@ def extract_subtitles_from_medias(
         filename=f"{str(root_dir_for_finding_medias)}{glob_for_finding_medias}",
         start=True,
     )
-    progress.update(task_id, total=len(medias_paths))
+    # progress.update(task_id, total=len(medias_paths))
     with progress:
-        for media_path in medias_paths:
+        # for media_path in medias_paths:
+        for media_path in it_medias_paths:
             try:
                 # "Extract all subtitles from a movie using ffprobe & ffmpeg"
                 # https://gist.github.com/kowalcj0/ae0bdc43018e2718fb75290079b8839a

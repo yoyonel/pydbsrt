@@ -23,8 +23,8 @@ def subriptime_to_frame(srt: SubRipTime) -> int:
 @dataclass(init=True, repr=False, eq=False, order=False, unsafe_hash=False, frozen=True)
 class SubFingerprint:
     index: int
-    id_frame: int
-    fp: ImageHash
+    offset_frame: int
+    img_hash: ImageHash
 
     def __getitem__(self, item):
         return self.__getattribute__(
@@ -41,8 +41,8 @@ class SubFingerprints:
 
     def __iter__(self) -> Iterator[SubFingerprint]:
         # we suppose subtitles generator in order
-        fp = next(self.imghash_reader)
-        id_frame = 0
+        img_hash = next(self.imghash_reader)
+        offset_frame = 0
         # iter on subtitles generator
         for subtitle in self.sub_reader:
             # get start, end timecodes
@@ -52,14 +52,14 @@ class SubFingerprints:
                 subriptime_to_frame(tc_end),
             )
             try:
-                while not (id_frame <= frame_start <= id_frame + 1):
-                    fp = next(self.imghash_reader)
-                    id_frame += 1
-                yield SubFingerprint(subtitle.index, id_frame, fp)
-                while not (id_frame <= frame_end <= id_frame + 1):
-                    fp = next(self.imghash_reader)
-                    id_frame += 1
-                    yield SubFingerprint(subtitle.index, id_frame, fp)
-                yield SubFingerprint(subtitle.index, id_frame, fp)
+                while not (offset_frame <= frame_start <= offset_frame + 1):
+                    img_hash = next(self.imghash_reader)
+                    offset_frame += 1
+                yield SubFingerprint(subtitle.index, offset_frame, img_hash)
+                while not (offset_frame <= frame_end <= offset_frame + 1):
+                    img_hash = next(self.imghash_reader)
+                    offset_frame += 1
+                    yield SubFingerprint(subtitle.index, offset_frame, img_hash)
+                yield SubFingerprint(subtitle.index, offset_frame, img_hash)
             except StopIteration:
                 break

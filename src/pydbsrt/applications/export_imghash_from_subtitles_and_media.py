@@ -42,8 +42,6 @@ import click
 import click_pathlib
 
 from pydbsrt.services.extended_subtitles import export_extended_subtitles
-from pydbsrt.services.reader_frames import build_reader_frames
-from pydbsrt.tools.ffmpeg_tools.ffmeg_extract_frame import rawframe_to_imghash
 
 
 @click.command(short_help="")
@@ -69,6 +67,4 @@ from pydbsrt.tools.ffmpeg_tools.ffmeg_extract_frame import rawframe_to_imghash
     "--output-file", "-o", default=None, help="File where to write images hashes."
 )
 def export_imghash_from_subtitles_and_media(subtitles, media, output_file):
-    reader, _ = build_reader_frames(media)
-    gen_frame_hash = map(rawframe_to_imghash, reader)
-    export_extended_subtitles(subtitles, gen_frame_hash, output_file)
+    export_extended_subtitles(subtitles, media, output_file)
