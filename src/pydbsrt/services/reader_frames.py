@@ -7,7 +7,7 @@ from typing import Iterator, Tuple
 from imageio_ffmpeg import read_frames
 from rich.progress import Progress
 
-from pydbsrt.tools.imghash import binary_to_signed_int64
+from pydbsrt.tools.imghash import bytes_to_signed_int64
 
 
 SIZE_IMG_HASH = 8
@@ -99,7 +99,7 @@ def gen_read_binary_img_hash_file(
             ba_img_hex = fo.read(SIZE_IMG_HASH)
             offset_frame = 0
             while ba_img_hex:
-                yield binary_to_signed_int64(ba_img_hex), offset_frame, media_id
+                yield bytes_to_signed_int64(ba_img_hex), offset_frame, media_id
                 ba_img_hex = fo.read(SIZE_IMG_HASH)
                 offset_frame += 1
                 if progress:

@@ -49,7 +49,7 @@ from rich.progress import (
 from pydbsrt.services.reader_frames import build_reader_frames
 from pydbsrt.tools.chunk import chunks
 from pydbsrt.tools.ffmpeg_tools.ffmeg_extract_frame import rawframe_to_imghash
-from pydbsrt.tools.imghash import imghash_to_binary
+from pydbsrt.tools.imghash import imghash_to_bytes
 from pydbsrt.tools.rich_colums import TimeElapsedOverRemainingColumn
 
 console = Console()
@@ -112,6 +112,6 @@ def export_imghash_from_media(media, output_file):
     with progress:
         for chunk_frames_hashes in chunks(gen_frame_hash, chunk_size):
             with output_file.open("ab") as fo:
-                for frame_hash_binary in map(imghash_to_binary, chunk_frames_hashes):
+                for frame_hash_binary in map(imghash_to_bytes, chunk_frames_hashes):
                     fo.write(frame_hash_binary)
             progress.update(task_id, advance=chunk_size, refresh=True)

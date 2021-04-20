@@ -33,9 +33,9 @@ class ImgHashExtended(ImageHash):
         return ret
 
 
-def imghash_to_binary(imghash: ImageHash) -> bytes:
+def imghash_to_bytes(imghash: ImageHash) -> bytes:
     """
-    >>> imghash_to_binary(ImageHash(np.array([\
+    >>> imghash_to_bytes(ImageHash(np.array([\
         np.array([ True,  True, False,  True, False,  True, False,  True]), \
         np.array([False, False, False, False, False, False, False, False]), \
         np.array([False, False, False, False, False, False, False, False]), \
@@ -75,9 +75,9 @@ def imghash_to_64bits(imghash: ImageHash) -> str:
     return BitArray(f"0x{str(imghash)}").bin
 
 
-def binary_to_signed_int64(binary_signed_int64: bytes, byteorder: str = "big") -> int:
+def bytes_to_signed_int64(binary_signed_int64: bytes, byteorder: str = "big") -> int:
     """
-    >>> binary_to_signed_int64(b'\\xd5\\x00\\x00\\x00\\x00\\x00\\x00\\x00')
+    >>> bytes_to_signed_int64(b'\\xd5\\x00\\x00\\x00\\x00\\x00\\x00\\x00')
     -3098476543630901248
     """
     # https://docs.python.org/3/library/stdtypes.html#int.from_bytes

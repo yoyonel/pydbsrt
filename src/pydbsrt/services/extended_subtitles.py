@@ -1,7 +1,8 @@
 from itertools import groupby, chain
 from operator import itemgetter
 from pathlib import Path
-from typing import Iterator
+from struct import unpack
+from typing import Iterator, Callable
 
 from imagehash import ImageHash
 from more_itertools import grouper
@@ -12,11 +13,13 @@ from yaspin.spinners import Spinners
 from pydbsrt.services.reader_frames import build_reader_frames
 from pydbsrt.tools.chunk import chunks
 from pydbsrt.tools.ffmpeg_tools.ffmeg_extract_frame import rawframe_to_imghash
-from pydbsrt.tools.imghash import imghash_to_binary
+from pydbsrt.tools.imghash import imghash_to_bytes
 from pydbsrt.tools.subfingerprint import SubFingerprints
 from pydbsrt.tools.subreader import SubReader
 
 console = Console()
+
+SIZE_IMG_HASH = 8
 
 
 def export_extended_subtitles(
@@ -32,7 +35,7 @@ def export_extended_subtitles(
     )
     #
     it_binary_imghash = (
-        imghash_to_binary(sub_fingerprint.img_hash)
+        imghash_to_bytes(sub_fingerprint.img_hash)
         for sub_fingerprint in it_sub_fingerprints
     )
     ################################################################
@@ -57,7 +60,10 @@ def export_extended_subtitles(
 
 
 def show_subtitles_fingerprints(
-    srt_path: Path, it_img_hash: Iterator[ImageHash], nb_fingerprints_by_row: int = 4
+    srt_path: Path,
+    it_img_hash: Iterator[ImageHash],
+    nb_fingerprints_by_row: int = 4,
+    fn_imghash_to: Callable[[ImageHash], str] = str,
 ) -> None:
     it_sub_fingerprints = SubFingerprints(
         sub_reader=SubReader(srt_path), imghash_reader=it_img_hash
@@ -73,4 +79,19 @@ def show_subtitles_fingerprints(
             (fingerprint for _, __, fingerprint in it_indexed_sub_fingerprints),
             nb_fingerprints_by_row,
         ):
-            console.print(" ".join(map(str, filter(None, chunk_fingerprints))))
+            console.print(
+                " ".join(fn_imghash_to(fp) for fp in filter(None, chunk_fingerprints))
+            )
+
+
+def read_extended_subtitles(
+    binary_extended_subtitles: Path,
+    chunk_size: int = 1024,
+) -> Iterator[int]:
+    with binary_extended_subtitles.open("rb") as fin:
+        while chunk_img_hash := fin.read(SIZE_IMG_HASH * chunk_size):
+            # https://docs.python.org/3/library/struct.html#byte-order-size-and-alignment
+            for signed_int64_img_hash in unpack(
+                f">{'q' * (len(chunk_img_hash) // SIZE_IMG_HASH)}", chunk_img_hash
+            ):
+                yield signed_int64_img_hash

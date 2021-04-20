@@ -11,6 +11,7 @@ from pydbsrt.applications.export_imghash_from_subtitles_and_media import (
 from pydbsrt.applications.extract_subtitles_from_medias import (
     extract_subtitles_from_medias,
 )
+from pydbsrt.applications.wip_generate_subtitles import generate_subtitles
 from pydbsrt.applications.import_imghash_into_db import import_images_hashes_into_db
 from pydbsrt.applications.import_subtitles_into_db import import_subtitles_into_db
 from pydbsrt.applications.recognize_media import recognize_media
@@ -38,6 +39,7 @@ entry_point.add_command(show_imghash_from_subtitles_and_media)
 entry_point.add_command(extract_subtitles_from_medias)
 entry_point.add_command(show_imghash_from_subtitles_and_media_in_db)
 entry_point.add_command(import_subtitles_into_db)
+entry_point.add_command(generate_subtitles)
 
 if __name__ == "__main__":
     try:

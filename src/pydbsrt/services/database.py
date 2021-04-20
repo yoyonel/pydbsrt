@@ -148,7 +148,6 @@ async def reindex_tables_async(conn):
 async def import_binary_img_hash_to_db_async(
     binary_img_hash_file: Path, progress: Optional[Progress] = None
 ) -> Tuple[int, int]:
-    """"""
     conn: Connection = await asyncpg.connect(
         user=psqlUserName, password=psqlUserPass, database=psqlDbName, host=psqlDbIpAddr
     )

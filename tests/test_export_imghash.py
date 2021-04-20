@@ -12,7 +12,7 @@ from PIL import Image
 
 from pydbsrt.applications.export_imghash_from_media import export_imghash_from_media
 from pydbsrt.tools.imghash import (
-    binary_to_signed_int64,
+    bytes_to_signed_int64,
     signed_int64_to_str_binary,
     imghash_to_64bits,
 )
@@ -22,7 +22,7 @@ def gen_signed_int64_hash(fo: FileIO) -> Iterator[int]:
     ba_img_hex = fo.read(8)
     offset_frame = 0
     while ba_img_hex:
-        yield binary_to_signed_int64(ba_img_hex)
+        yield bytes_to_signed_int64(ba_img_hex)
         ba_img_hex = fo.read(8)
         offset_frame += 1
 
