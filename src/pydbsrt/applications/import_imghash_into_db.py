@@ -31,7 +31,7 @@ from rich.progress import (
     TransferSpeedColumn,
 )
 
-from pydbsrt.services.database import import_binary_img_hash_to_db
+from pydbsrt.services.database import import_binary_img_hash_to_db_async
 from pydbsrt.tools.rich_colums import TimeElapsedOverRemainingColumn
 
 console = Console()
@@ -51,7 +51,7 @@ progress = Progress(
 
 
 async def run(binary_img_hash_file: Path) -> None:
-    media_id, nb_frames_inserted = await import_binary_img_hash_to_db(
+    media_id, nb_frames_inserted = await import_binary_img_hash_to_db_async(
         binary_img_hash_file, progress
     )
     if nb_frames_inserted:

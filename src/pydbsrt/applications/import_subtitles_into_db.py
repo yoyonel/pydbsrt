@@ -28,7 +28,7 @@ async def run(subtitles: Path, binary_img_hash_file: Path):
     spinner = yaspin(
         Spinners.dots2, f"Insert subtitles={subtitles.stem} into DB", timer=True
     )
-    nb_rows_inserted = await database.import_subtitles_into_db(
+    nb_rows_inserted = await database.import_subtitles_into_db_async(
         subtitles,
         binary_img_hash_file,
         spinner,

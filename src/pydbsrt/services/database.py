@@ -1,3 +1,6 @@
+"""
+http://python-notes.curiousefficiency.org/en/latest/pep_ideas/async_programming.html#naming-conventions
+"""
 import contextlib
 from itertools import groupby, chain
 from operator import itemgetter
@@ -27,25 +30,25 @@ console = Console()
 error_console = Console(stderr=True, style="bold red")
 
 
-async def drop_tables(conn, tables_names=("medias",)):
+async def drop_tables_async(conn, tables_names=("medias",)):
     # https://docs.postgresql.fr/11/sql-droptable.html
     for table_name in tables_names:
         await conn.execute(f"DROP TABLE IF EXISTS {table_name} CASCADE;")
 
 
-async def drop_types(conn, types_names=("LANG",)):
+async def drop_types_async(conn, types_names=("LANG",)):
     # https://www.postgresql.org/docs/9.1/sql-droptype.html
     for type_name in types_names:
         await conn.execute(f"DROP TYPE IF EXISTS {type_name} CASCADE;")
 
 
-async def create_tables(conn):
-    await create_tables_for_medias(conn)
-    await create_tables_for_frames(conn)
-    await create_tables_for_subtitles(conn)
+async def create_tables_async(conn):
+    await create_tables_for_medias_async(conn)
+    await create_tables_for_frames_async(conn)
+    await create_tables_for_subtitles_async(conn)
 
 
-async def create_tables_for_medias(conn):
+async def create_tables_for_medias_async(conn):
     """one-to-many: media ->* frames"""
     ################################################################
     # FIXME: media_hash has to be (fill with) the binary hash of the video file (not the binary imghash file)
@@ -63,7 +66,7 @@ async def create_tables_for_medias(conn):
     ################################################################
 
 
-async def create_tables_for_frames(conn):
+async def create_tables_for_frames_async(conn):
     await conn.execute(
         """
                 CREATE TABLE IF NOT EXISTS frames (
@@ -76,7 +79,7 @@ async def create_tables_for_frames(conn):
     )
 
 
-async def create_tables_for_subtitles(conn):
+async def create_tables_for_subtitles_async(conn):
     ################################################################
     # Subtitles
     ################################################################
@@ -116,7 +119,7 @@ async def create_tables_for_subtitles(conn):
     ################################################################
 
 
-async def create_indexes(conn):
+async def create_indexes_async(conn):
     await conn.execute(
         """
             CREATE INDEX IF NOT EXISTS
@@ -129,7 +132,7 @@ async def create_indexes(conn):
     )
 
 
-async def reindex_tables(conn):
+async def reindex_tables_async(conn):
     """
     https://www.postgresql.org/docs/9.4/sql-reindex.html
     """
@@ -142,7 +145,7 @@ async def reindex_tables(conn):
     )
 
 
-async def import_binary_img_hash_to_db(
+async def import_binary_img_hash_to_db_async(
     binary_img_hash_file: Path, progress: Optional[Progress] = None
 ) -> Tuple[int, int]:
     """"""
@@ -154,8 +157,8 @@ async def import_binary_img_hash_to_db(
     console.print(f"media_hash='{media_hash}'")
 
     # await drop_tables(conn)
-    await create_tables(conn)
-    await create_indexes(conn)
+    await create_tables_async(conn)
+    await create_indexes_async(conn)
 
     # await reindex_tables(conn)
 
@@ -260,7 +263,7 @@ async def agen_p_hash_from_media_in_db(
             records = await cur.fetch(chunk_size)
 
 
-async def _import_subtitles_into_db_check(
+async def _import_subtitles_into_db_check_async(
     conn,
     it_indexed_sub_fingerprints,
     start_frame_offset,
@@ -307,7 +310,7 @@ async def _import_subtitles_into_db_check(
     return end_frame_offset
 
 
-async def import_subtitles_into_db(
+async def import_subtitles_into_db_async(
     subtitles: Path,
     binary_img_hash_file: Path,
     spinner: Optional[Yaspin] = None,
@@ -324,9 +327,9 @@ async def import_subtitles_into_db(
         with (spinner or contextlib.nullcontext()) as spinner_subtitles:
             async with pool.acquire() as conn:
                 if drop_before_inserting:
-                    await drop_tables(conn, ("subtitles", "sub_frames"))
-                    await drop_types(conn, ("LANG",))
-                await create_tables_for_subtitles(conn)
+                    await drop_tables_async(conn, ("subtitles", "sub_frames"))
+                    await drop_types_async(conn, ("LANG",))
+                await create_tables_for_subtitles_async(conn)
 
                 subtitles_hash = hashfile(subtitles, hexdigest=True)
                 found_subtitles_id = await conn.fetchval(
@@ -414,7 +417,7 @@ async def import_subtitles_into_db(
                     )
 
                     if check_before_inserting:
-                        end_frame_offset = await _import_subtitles_into_db_check(
+                        end_frame_offset = await _import_subtitles_into_db_check_async(
                             conn,
                             it_indexed_sub_fingerprints,
                             start_frame_offset,
