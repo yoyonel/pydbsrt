@@ -31,7 +31,7 @@ from rich.progress import (
     TransferSpeedColumn,
 )
 
-from pydbsrt.services.database import import_binary_img_hash_to_db_async
+from pydbsrt.services.db_frames import import_binary_img_hash_to_db_async
 from pydbsrt.tools.rich_colums import TimeElapsedOverRemainingColumn
 
 console = Console()

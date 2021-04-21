@@ -19,7 +19,7 @@ from rich.console import Console
 from yaspin import yaspin
 from yaspin.spinners import Spinners
 
-import pydbsrt.services.database as database
+import pydbsrt.services.db_subtitles
 
 console = Console()
 
@@ -28,12 +28,14 @@ async def run(subtitles: Path, binary_img_hash_file: Path):
     spinner = yaspin(
         Spinners.dots2, f"Insert subtitles={subtitles.stem} into DB", timer=True
     )
-    nb_rows_inserted = await database.import_subtitles_into_db_async(
-        subtitles,
-        binary_img_hash_file,
-        spinner,
-        drop_before_inserting=True,
-        check_before_inserting=False,
+    nb_rows_inserted = (
+        await pydbsrt.services.db_subtitles.import_subtitles_into_db_async(
+            subtitles,
+            binary_img_hash_file,
+            spinner,
+            drop_before_inserting=True,
+            check_before_inserting=False,
+        )
     )
     console.print(f"nb_rows_inserted = {nb_rows_inserted}")
 

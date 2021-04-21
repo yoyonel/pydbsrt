@@ -8,13 +8,14 @@ class PHashMedia:
     frame_offset: int
 
 
-@dataclass
+@dataclass(frozen=True)
 class SubFrameRecord:
     index_subtitle: int
     start_frame_offset: int
     end_frame_offset: int
-    text: str
     subtitles_id: int
+
+    text: str = dataclasses.field(default=str)
 
     def __getitem__(self, item):
         return self.__getattribute__(

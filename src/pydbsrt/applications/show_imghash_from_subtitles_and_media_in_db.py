@@ -10,7 +10,7 @@ import click_pathlib
 from imohash import hashfile
 from rich.console import Console
 
-from pydbsrt.services.database import agen_p_hash_from_media_in_db
+from pydbsrt.services.db_frames import agen_p_hash_from_media_in_db
 
 console = Console()
 
