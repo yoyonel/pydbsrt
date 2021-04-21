@@ -10,7 +10,7 @@ class PHashMedia:
 
 @dataclass(frozen=True)
 class SubFrameRecord:
-    index_subtitle: int
+    index: int  # subtitles index
     start_frame_offset: int
     end_frame_offset: int
     subtitles_id: int

@@ -1,8 +1,9 @@
 import contextlib
+from dataclasses import fields
 from itertools import groupby, chain
 from operator import itemgetter
 from pathlib import Path
-from typing import Optional, Iterator
+from typing import Optional, Iterator, List
 
 import asyncpg
 from imohash import hashfile
@@ -119,7 +120,7 @@ async def import_subtitles_into_db_async(
                     key=itemgetter("index"),
                 )
 
-                records_sub_frames = []
+                records_sub_frames: List[SubFrameRecord] = []
                 for index_subtitle, it_indexed_sub_fingerprints in gb_sub_fingerprints:
                     if isinstance(index_subtitle, str):
                         index_subtitle = int(index_subtitle[1])
@@ -158,13 +159,7 @@ async def import_subtitles_into_db_async(
                 result = await conn.copy_records_to_table(
                     "sub_frames",
                     records=records_sub_frames,
-                    columns=[
-                        "index",
-                        "start_frame_offset",
-                        "end_frame_offset",
-                        "subtitles_id",
-                        "text",
-                    ],
+                    columns=(field.name for field in fields(SubFrameRecord)),
                 )
                 # On successful completion,
                 # a COPY command returns a command tag of the form: "COPY count"
