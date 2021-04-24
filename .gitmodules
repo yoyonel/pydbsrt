@@ -4,3 +4,6 @@
 [submodule "py_translator"]
 	path = py_translator
 	url = https://github.com/markolofsen/py_translator.git
+[submodule "cBKTree"]
+	path = cBKTree
+	url = git@github.com:yoyonel/cBKTree.git
