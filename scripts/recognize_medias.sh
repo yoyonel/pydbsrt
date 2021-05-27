@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 
 PROJECT_ROOT_DIR=$(git rev-parse --show-toplevel)
-MEDIAS_ROOT_DIR="${MEDIAS_ROOTDIR:-$HOME/NAS/tvshow/Silicon Valley/}"
+NAS_ROOT_DIR="${NAS_ROOT_DIR:-$HOME/__SYNOLOGY__}"
+MEDIAS_ROOT_DIR="${MEDIAS_ROOTDIR:-$NAS_ROOT_DIR/tvshow/Silicon Valley/}"
 PARALLEL_NB_JOBS="${PARALLEL_NB_JOBS:-1}"
 
 find "${MEDIAS_ROOT_DIR}" -type f -name "*.mkv" | \
