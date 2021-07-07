@@ -130,8 +130,6 @@ async def agen_p_hash_from_media_in_db(
             {'LIMIT ' + str(limit) if limit else ''};
         """
         cur = await conn.cursor(query, found_media_id)
-        records = await cur.fetch(chunk_size)
-        while records:
+        while records := await cur.fetch(chunk_size):
             for record in records:
                 yield PHashMedia(*record)
-            records = await cur.fetch(chunk_size)
