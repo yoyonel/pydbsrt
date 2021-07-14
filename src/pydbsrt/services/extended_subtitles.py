@@ -23,7 +23,7 @@ SIZE_IMG_HASH = 8
 
 
 def export_extended_subtitles(
-    srt_path: Path,
+    subtitles: Path,
     media: Path,
     output_file: Path,
     chunk_size: int = 25,
@@ -31,7 +31,7 @@ def export_extended_subtitles(
     #
     reader, _ = build_reader_frames(media)
     it_sub_fingerprints = SubFingerprints(
-        sub_reader=SubReader(srt_path), imghash_reader=map(rawframe_to_imghash, reader)
+        sub_reader=SubReader(subtitles), imghash_reader=map(rawframe_to_imghash, reader)
     )
     #
     it_binary_imghash = (
@@ -44,7 +44,7 @@ def export_extended_subtitles(
     output_file = (
         Path(output_file)
         if output_file
-        else Path("/tmp/") / srt_path.with_suffix(".phash").name
+        else Path("/tmp/") / subtitles.with_suffix(".phash").name
     )
     output_file.unlink(missing_ok=True)
     console.print()
