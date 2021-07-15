@@ -650,6 +650,17 @@ click = ">=6.0"
 pytest = ">=5.0"
 
 [[package]]
+name = "pytest-lazy-fixture"
+version = "0.6.3"
+description = "It helps to use fixtures in pytest.mark.parametrize"
+category = "dev"
+optional = false
+python-versions = "*"
+
+[package.dependencies]
+pytest = ">=3.2.5"
+
+[[package]]
 name = "pytest-postgresql"
 version = "2.6.1"
 description = "Postgresql fixtures and fixture factories for Pytest."
@@ -987,7 +998,7 @@ testing = ["pytest (>=4.6)", "pytest-checkdocs (>=1.2.3)", "pytest-flake8", "pyt
 [metadata]
 lock-version = "1.1"
 python-versions = "^3.8"
-content-hash = "c840d8cc0bb2e66204f2204a7ef5d1d7392a2aa2873140461745a813ce2a2cb4"
+content-hash = "5cf108c0b6f37239aaffdead4b79411bf75b55e2b6cbf342cf8c58c7b6868b43"
 
 [metadata.files]
 appdirs = [
@@ -1417,6 +1428,7 @@ pillow = [
     {file = "Pillow-8.2.0-pp37-pypy37_pp73-manylinux2010_i686.whl", hash = "sha256:aac00e4bc94d1b7813fe882c28990c1bc2f9d0e1aa765a5f2b516e8a6a16a9e4"},
     {file = "Pillow-8.2.0-pp37-pypy37_pp73-manylinux2010_x86_64.whl", hash = "sha256:22fd0f42ad15dfdde6c581347eaa4adb9a6fc4b865f90b23378aa7914895e120"},
     {file = "Pillow-8.2.0-pp37-pypy37_pp73-win32.whl", hash = "sha256:e98eca29a05913e82177b3ba3d198b1728e164869c613d76d0de4bde6768a50e"},
+    {file = "Pillow-8.2.0-pp37-pypy37_pp73-win_amd64.whl", hash = "sha256:8b56553c0345ad6dcb2e9b433ae47d67f95fc23fe28a0bde15a120f25257e291"},
     {file = "Pillow-8.2.0.tar.gz", hash = "sha256:a787ab10d7bb5494e5f76536ac460741788f1fbce851068d73a87ca7c35fc3e1"},
 ]
 pluggy = [
@@ -1504,6 +1516,10 @@ pytest = [
 pytest-click = [
     {file = "pytest_click-1.0.2-py3-none-any.whl", hash = "sha256:ac298e15a31d8892d9d063c3be82bb9877aaa11a4944e05e541ecc753258e474"},
     {file = "pytest_click-1.0.2.tar.gz", hash = "sha256:b40b8435adde7a0d931352036a3882b13cd424fce2ffd7be6c87665050259be5"},
+]
+pytest-lazy-fixture = [
+    {file = "pytest-lazy-fixture-0.6.3.tar.gz", hash = "sha256:0e7d0c7f74ba33e6e80905e9bfd81f9d15ef9a790de97993e34213deb5ad10ac"},
+    {file = "pytest_lazy_fixture-0.6.3-py3-none-any.whl", hash = "sha256:e0b379f38299ff27a653f03eaa69b08a6fd4484e46fd1c9907d984b9f9daeda6"},
 ]
 pytest-postgresql = [
     {file = "pytest_postgresql-2.6.1-py3-none-any.whl", hash = "sha256:5e24cc87d3a955a5ebe919ee5c1c15bd7300823a362269327b63526e6718cbdb"},
