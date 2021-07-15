@@ -39,7 +39,9 @@ def main():
         )
 
     def _clustering_srt_by_durations(
-        durations: List[SubRipTime], bandwidth=None, quantile=0.50,
+        durations: List[SubRipTime],
+        bandwidth=None,
+        quantile=0.50,
     ) -> Tuple[List[int], float]:
         x = [
             _time_to_timedelta(duration.to_time()).total_seconds()

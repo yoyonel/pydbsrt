@@ -20,7 +20,7 @@ class ImgHashExtended(ImageHash):
         ret = 0
         mask = 1 << len(self) - 1
         for bit in np.nditer(
-                self.hash, order="C"
+            self.hash, order="C"
         ):  # Specify memory order, so we're (theoretically) platform agnostic
             if bit:
                 ret |= mask
@@ -124,7 +124,7 @@ def signed_int64_to_str_hex(imghash_signed_int64: int) -> str:
 
 
 def imghash_distance(
-        imghash0: ImageHash, imghash1: ImageHash, distance_func=distance.hamming
+    imghash0: ImageHash, imghash1: ImageHash, distance_func=distance.hamming
 ) -> int:
     """
 

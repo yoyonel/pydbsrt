@@ -62,7 +62,10 @@ def clean_html(raw_html):
 
 
 def gen_translate_srt(
-    subs_src, src="en", dest="fr", it_func=lambda it: it,
+    subs_src,
+    src="en",
+    dest="fr",
+    it_func=lambda it: it,
 ) -> Generator[Tuple[SubRipItem, str], None, None]:
     translator = Translator()
     for sub in it_func(subs_src):
@@ -117,7 +120,9 @@ def test_with_google_translate():
 
 
 def translate_subtitles_with_google(
-    srt_path: Path, srt_src: str = "en", srt_dest: str = "fr",
+    srt_path: Path,
+    srt_src: str = "en",
+    srt_dest: str = "fr",
 ):
     """
 

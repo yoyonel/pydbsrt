@@ -5,40 +5,53 @@ import pytest
 from imagehash import ImageHash
 from pytest_lazyfixture import lazy_fixture
 from tools.imghash import (
-    imghash_to_bytes, imghash_to_64bits, bytes_to_signed_int64,
-    imghash_to_signed_int64, signed_int64_to_str_binary, imghash_distance,
-    imghash_count_nonzero, imghash_str_hex_to_str_binary, signed_int64_to_str_hex
+    imghash_to_bytes,
+    imghash_to_64bits,
+    bytes_to_signed_int64,
+    imghash_to_signed_int64,
+    signed_int64_to_str_binary,
+    imghash_distance,
+    imghash_count_nonzero,
+    imghash_str_hex_to_str_binary,
+    signed_int64_to_str_hex,
 )
 
 
 @pytest.fixture
 def imghash():
-    return ImageHash(np.array([
-        np.array([True, True, False, True, False, True, False, True]),
-        np.array([False, False, False, False, False, False, False, False]),
-        np.array([False, False, False, False, False, False, False, False]),
-        np.array([False, False, False, False, False, False, False, False]),
-        np.array([False, False, False, False, False, False, False, False]),
-        np.array([False, False, False, False, False, False, False, False]),
-        np.array([False, False, False, False, False, False, False, False]),
-        np.array([False, False, False, False, False, False, False, False])]))
+    return ImageHash(
+        np.array(
+            [
+                np.array([True, True, False, True, False, True, False, True]),
+                np.array([False, False, False, False, False, False, False, False]),
+                np.array([False, False, False, False, False, False, False, False]),
+                np.array([False, False, False, False, False, False, False, False]),
+                np.array([False, False, False, False, False, False, False, False]),
+                np.array([False, False, False, False, False, False, False, False]),
+                np.array([False, False, False, False, False, False, False, False]),
+                np.array([False, False, False, False, False, False, False, False]),
+            ]
+        )
+    )
 
 
 @pytest.fixture
 def bin_imghash() -> bytes:
-    return b'\xd5\x00\x00\x00\x00\x00\x00\x00'
+    return b"\xd5\x00\x00\x00\x00\x00\x00\x00"
 
 
 @pytest.fixture
 def str_imghash() -> str:
-    return "11010101" \
-           "00000000" \
-           "00000000" \
-           "00000000" \
-           "00000000" \
-           "00000000" \
-           "00000000" \
-           "00000000"
+    return (
+        "11010101"
+        "00000000"
+        "00000000"
+        "00000000"
+        "00000000"
+        "00000000"
+        "00000000"
+        "00000000"
+    )
 
 
 @pytest.fixture
@@ -72,8 +85,7 @@ def test_imghash_to_signed_int64(imghash, int64_imghash):
 
 @pytest.mark.parametrize(
     "input_int64_imghash,expected_result",
-    [(lazy_fixture("int64_imghash"), lazy_fixture("str_imghash")),
-     (0, "0" * 64)]
+    [(lazy_fixture("int64_imghash"), lazy_fixture("str_imghash")), (0, "0" * 64)],
 )
 def test_signed_int64_to_str_binary(input_int64_imghash, expected_result):
     result = signed_int64_to_str_binary(input_int64_imghash)
