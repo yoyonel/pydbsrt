@@ -2,6 +2,7 @@
 https://docs.pytest.org/en/stable/tmpdir.html
 """
 import math
+from functools import reduce
 from io import FileIO
 from pathlib import Path
 from typing import Iterator
@@ -46,7 +47,7 @@ def gen_signed_int64_hash(fo: FileIO) -> Iterator[int]:
         offset_frame += 1
 
 
-def test_export_imghash_from_subtitles_and_media_0(resource_video_path, cli_runner, tmpdir):
+def test_export_imghash_from_subtitles_and_media(resource_video_path, cli_runner, tmpdir):
     p_video = resource_video_path("big_buck_bunny_trailer_480p.webm")
     p_srt = resource_video_path("big_buck_bunny_trailer_480p.en.srt")
     output_file_path = tmpdir.mkdir("phash") / f"{p_video.stem}.phash"
@@ -79,37 +80,16 @@ def test_export_imghash_from_subtitles_and_media_0(resource_video_path, cli_runn
     #
     assert nb_binary_hashes == nb_fingerprints
 
-
-@pytest.mark.xfail(reason="SubFingerprints seems not to capture all subtitles/frames")
-def test_export_imghash_from_subtitles_and_media_1(resource_video_path, cli_runner, tmpdir):
-    p_video = resource_video_path("big_buck_bunny_trailer_480p.webm")
-    p_srt = resource_video_path("big_buck_bunny_trailer_480p.en.srt")
-    output_file_path = tmpdir.mkdir("phash") / f"{p_video.stem}.phash"
-    result = cli_runner.invoke(
-        export_imghash_from_subtitles_and_media,
-        args=f"--media {str(p_video)} "
-             f"--subtitles {str(p_srt)} "
-             f"-o {output_file_path} "
-    )
-    assert result.exit_code == 0
-
-    # count the number of binary imghashes export to the (binary file) output
-    with output_file_path.open("rb") as fo:
-        str_binary_hashes = list(map(signed_int64_to_str_binary, gen_signed_int64_hash(fo)))
-    nb_binary_hashes = len(str_binary_hashes)
-
     # compare nb output imghashes against the number of frames captured by subtitles
     # in this case, the reference source is only subtitles (not the video)
     # iter on subtitles generator
-    nb_frames = 0
     sub_reader = SubReader(p_srt)
-    for subtitle in sub_reader:
-        # get start, end timecodes
-        tc_start, tc_end = subtitle.start, subtitle.end
-        frame_start, frame_end = (
-            subriptime_to_frame(tc_start, cast_to_int=math.floor),
-            subriptime_to_frame(tc_end, cast_to_int=math.ceil),
-        )
-        nb_frames += frame_end - frame_start
-    # FIXME: assert fail !
-    assert nb_binary_hashes == nb_frames
+    it_srt_timecodes = ((subtitle.start, subtitle.end) for subtitle in sub_reader)
+    # Union des intervalles (définis par les timecodes des sous-titres) de frames
+    # https://docs.python.org/2/library/stdtypes.html#frozenset.union
+    imghash_from_srt = set().union(
+        *(range(subriptime_to_frame(tc_start, cast_to_int=math.floor),
+                subriptime_to_frame(tc_end, cast_to_int=math.ceil) + 1)
+          for tc_start, tc_end in it_srt_timecodes)
+    )
+    assert nb_binary_hashes == len(imghash_from_srt)

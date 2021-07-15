@@ -3,6 +3,7 @@
 import dataclasses
 import itertools
 import math
+from collections import defaultdict
 from dataclasses import dataclass
 from typing import Callable, Iterator, Union
 
@@ -16,7 +17,7 @@ from pysrt.srtitem import SubRipTime
 def subriptime_to_frame(
         srt: SubRipTime,
         fps: float = 25.0,
-        cast_to_int: Callable[float, int] = int
+        cast_to_int: Callable[[float], int] = int
 ) -> int:
     total_seconds = (
             srt.hours * 60 * 60 + srt.minutes * 60 + srt.seconds + srt.milliseconds / 1000.0
@@ -42,6 +43,17 @@ class SubFingerprints:
     imghash_reader: Union[VideoFingerprint, Iterator[ImageHash], Iterator[int]]
 
     def __iter__(self) -> Iterator[SubFingerprint]:
+        """
+        Return fingerprint of frame recover by subtitles
+
+        TODO
+        Il faudrait faire une version plus stable/robuste avec une prise en compte globale des sous-titres,
+        et ne pas considérer forcément que le SRT est bien construit
+        => refaire le tri des sous-titres et gérer (manuellement) les unions des intervalles de timecodes
+        IL faudrait mettre en place une résolution/arithmétique d'intervalles de timecodes (de sous-titres)
+        Ça devrait être jouable avec une résolution algébrique (plus fine que la résolution numérique utilisée
+        actuellement dans les tests unitaires).
+        """
         it_imghash = self.imghash_reader
 
         # we suppose subtitles generator in order
@@ -51,7 +63,9 @@ class SubFingerprints:
             return
         it_imghash = itertools.chain([img_hash], it_imghash)
 
-        offset_frame = 0
+        # debug_frames_start_end = defaultdict(list)
+
+        offset_frame = -1
         # iter on subtitles generator
         for subtitle in self.sub_reader:
             # get start, end timecodes
@@ -61,18 +75,25 @@ class SubFingerprints:
                 subriptime_to_frame(tc_end, cast_to_int=math.ceil),
             )
             try:
-                # go to the first subtitle frame offset
-                for img_hash in it_imghash:
-                    offset_frame += 1
-                    if offset_frame >= frame_start:
-                        break
+                if offset_frame < frame_start:
+                    # go to the first subtitle frame offset
+                    for offset_frame, img_hash in enumerate(it_imghash, start=offset_frame + 1):
+                        if offset_frame >= frame_start:
+                            break
+
                 # yield the first frame+phash
                 yield SubFingerprint(subtitle.index, offset_frame, img_hash)
+                # debug_frames_start_end[subtitle.index].append(
+                #     ((frame_start, frame_end), offset_frame)
+                # )
+
                 # (loop ...) iterate on images hashes frames
-                for img_hash in it_imghash:
-                    offset_frame += 1
+                for offset_frame, img_hash in enumerate(it_imghash, start=offset_frame + 1):
                     # yield the frame+phash
                     yield SubFingerprint(subtitle.index, offset_frame, img_hash)
+                    # debug_frames_start_end[subtitle.index].append(
+                    #     ((frame_start, frame_end), offset_frame)
+                    # )
                     # (loop ...) until the last subtitle frame offset
                     if offset_frame >= frame_end:
                         break
