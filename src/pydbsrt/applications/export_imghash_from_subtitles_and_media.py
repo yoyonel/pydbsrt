@@ -41,7 +41,7 @@ import click
 # https://pypi.org/project/click-pathlib/
 import click_pathlib
 
-from pydbsrt.services.extended_subtitles import export_extended_subtitles
+from pydbsrt.services import export_extended_subtitles
 
 
 @click.command(short_help="")
