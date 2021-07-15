@@ -2,7 +2,7 @@ from itertools import groupby, chain
 from operator import itemgetter
 from pathlib import Path
 from struct import unpack
-from typing import Iterator, Callable
+from typing import Iterator, Callable, Optional
 
 from imagehash import ImageHash
 from more_itertools import grouper
@@ -25,9 +25,9 @@ SIZE_IMG_HASH = 8
 def export_extended_subtitles(
     subtitles: Path,
     media: Path,
-    output_file: Path,
+    output_file: Optional[Path],
     chunk_size: int = 25,
-) -> None:
+) -> Path:
     #
     reader, _ = build_reader_frames(media)
     it_sub_fingerprints = SubFingerprints(
@@ -57,6 +57,8 @@ def export_extended_subtitles(
             with output_file.open("ab") as fo:
                 fo.write(b"".join(chunk_binary_imghash))
     spinner.ok("✅ ")
+
+    return output_file
 
 
 def show_subtitles_fingerprints(

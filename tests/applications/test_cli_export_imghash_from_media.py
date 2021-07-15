@@ -1,8 +1,7 @@
 """
 https://docs.pytest.org/en/stable/tmpdir.html
 """
-from io import FileIO
-from typing import Iterator
+from pathlib import Path
 
 import distance
 import imagehash
@@ -12,19 +11,22 @@ from PIL import Image
 
 from pydbsrt.applications.export_imghash_from_media import export_imghash_from_media
 from pydbsrt.tools.imghash import (
-    bytes_to_signed_int64,
     signed_int64_to_str_binary,
     imghash_to_64bits,
 )
+from tools.imghash import gen_signed_int64_hash
 
 
-def gen_signed_int64_hash(fo: FileIO) -> Iterator[int]:
-    ba_img_hex = fo.read(8)
-    offset_frame = 0
-    while ba_img_hex:
-        yield bytes_to_signed_int64(ba_img_hex)
-        ba_img_hex = fo.read(8)
-        offset_frame += 1
+@pytest.fixture()
+def resource_video_path():
+    """
+    https://stackoverflow.com/a/47704630 (How to generate a 2hour-long blank video)
+    ffmpeg commands:
+        - `ffmpeg -y -t 1 -f lavfi -i color=c=white:s=32x32 -c:v libx264 -tune stillimage -pix_fmt yuv420p white_frames.mp4`
+        - `ffmpeg -y -t 1 -f lavfi -i color=c=black:s=32x32 -c:v libx264 -tune stillimage -pix_fmt yuv420p black_frames.mp4`
+    TODO: tester d'autres encodages !
+    """
+    return lambda color_frame: Path(f"data/{color_frame}_frames.mp4")
 
 
 def test_export_imghash_from_white_frames(resource_video_path, cli_runner, tmpdir):
