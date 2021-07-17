@@ -2,7 +2,6 @@ from dataclasses import dataclass
 from typing import List, Iterable
 
 import asyncpg
-from async_lru import alru_cache
 from contexttimer import Timer
 
 from pydbsrt.services.database import (
@@ -33,7 +32,7 @@ class ResultSearch:
     timer: Timer
 
 
-@alru_cache
+# @alru_cache
 async def search_phash_in_db(conn, phash: int, distance: int) -> List[MatchedFrame]:
     return [
         MatchedFrame(*record)

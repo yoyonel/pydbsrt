@@ -12,7 +12,6 @@ from pydbsrt.services.database import (
     psqlUserPass,
     psqlDbName,
     psqlDbIpAddr,
-    console,
 )
 from pydbsrt.services.reader_frames import build_reader_frames
 from pydbsrt.tools.ffmpeg_tools.ffmeg_extract_frame import rawframe_to_imghash
@@ -38,10 +37,13 @@ class BuildSearchResult:
 
 
 async def search_media_in_db(
-    search_media: Path, search_distance: int, nb_seconds_to_extract: float
+    search_media: Path,
+    search_distance: int,
+    nb_seconds_to_extract: float,
+    seek_to_middle: bool = True,
 ) -> search_imghash_in_db.ResultSearch:
-    reader, _ = build_reader_frames(
-        search_media, nb_seconds_to_extract, seek_to_middle=True
+    reader, VIDEO_FRAME_RATE_ = build_reader_frames(
+        search_media, nb_seconds_to_extract, seek_to_middle=seek_to_middle
     )
     gen_frame_hash = map(rawframe_to_imghash, reader)
     gen_signed_int64_hash = map(imghash_to_signed_int64, gen_frame_hash)
@@ -112,20 +114,20 @@ async def build_search_media_results(
     return results
 
 
-async def search_img_hash(
-    conn, search_phash: int = -6023947298048657955, search_distance: int = 1
-):
-    values = (
-        await conn.fetch(
-            """
-                SELECT "id", "p_hash", "frame_offset", "media_id"
-                FROM "frames"
-                WHERE "p_hash" <@ ($1, $2)""",
-            search_phash,
-            search_distance,
-        )
-        or []
-    )
-    console.print(
-        f"count(searching(phash={search_phash}, search_distance={search_distance}))={len(values)}"
-    )
+# async def search_img_hash(
+#         conn, search_phash: int = -6023947298048657955, search_distance: int = 1
+# ):
+#     values = (
+#             await conn.fetch(
+#                 """
+#                     SELECT "id", "p_hash", "frame_offset", "media_id"
+#                     FROM "frames"
+#                     WHERE "p_hash" <@ ($1, $2)""",
+#                 search_phash,
+#                 search_distance,
+#             )
+#             or []
+#     )
+#     console.print(
+#         f"count(searching(phash={search_phash}, search_distance={search_distance}))={len(values)}"
+#     )
