@@ -124,6 +124,21 @@ def signed_int64_to_str_hex(imghash_signed_int64: int) -> str:
     return f"{imghash_signed_int64 & 0xffffffffffffffff:#4x}"
 
 
+def signed_int64_to_imghash(imghash_signed_int64: int):
+    """
+    - [using numpy to convert an int to an array of bits](https://stackoverflow.com/a/37192539)
+    - [Introduction to byte ordering and ndarrays](https://numpy.org/doc/stable/user/basics.byteswapping.html)
+
+    >>> imghash_to_signed_int64(signed_int64_to_imghash(-3098476543630901248))
+    -3098476543630901248
+    """
+    return ImageHash(
+        np.unpackbits(
+            np.array([imghash_signed_int64], dtype=">i8").view(np.uint8)
+        ).reshape((8, 8))
+    )
+
+
 def imghash_distance(
     imghash0: ImageHash, imghash1: ImageHash, distance_func=distance.hamming
 ) -> int:
