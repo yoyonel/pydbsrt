@@ -1,10 +1,10 @@
 """
 http://python-notes.curiousefficiency.org/en/latest/pep_ideas/async_programming.html#naming-conventions
 """
-
-from rich.console import Console
-
+import asyncpg
+from asyncpg import Connection
 from pydbsrt import settings
+from rich.console import Console
 
 psqlDbIpAddr = settings.PSQL_IP
 psqlDbName = settings.PSQL_DB_NAME
@@ -13,6 +13,13 @@ psqlUserPass = settings.PSQL_PASS
 
 console = Console()
 error_console = Console(stderr=True, style="bold red")
+
+
+async def create_conn() -> Connection:
+    conn: Connection = await asyncpg.connect(
+        user=psqlUserName, password=psqlUserPass, database=psqlDbName, host=psqlDbIpAddr
+    )
+    return conn
 
 
 async def drop_tables_async(conn, tables_names=("medias",)):

@@ -1,8 +1,7 @@
 """
 """
 import binascii
-from io import FileIO
-from typing import Iterator
+from typing import Iterator, BinaryIO
 
 import distance
 import numpy as np
@@ -193,7 +192,7 @@ def imghash_str_hex_to_str_binary(imghash_hex: hex) -> str:
     return bin(int(imghash_hex, 16))[2:]
 
 
-def gen_signed_int64_hash(fo: FileIO) -> Iterator[int]:
+def gen_signed_int64_hash(fo: BinaryIO) -> Iterator[int]:
     ba_img_hex = fo.read(8)
     offset_frame = 0
     while ba_img_hex:

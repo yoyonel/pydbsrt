@@ -1,31 +1,23 @@
 from pathlib import Path
 from typing import Optional, Tuple, Union
 
-import asyncpg
-from asyncpg import Connection
 from imohash import hashfile
-from rich.progress import Progress
-
 from pydbsrt.services.database import (
-    psqlUserName,
-    psqlUserPass,
-    psqlDbName,
-    psqlDbIpAddr,
     console,
     create_tables_async,
     create_indexes_async,
     error_console,
+    create_conn,
 )
 from pydbsrt.services.models import PHashMedia
 from pydbsrt.services.reader_frames import gen_read_binary_img_hash_file
+from rich.progress import Progress
 
 
 async def import_binary_img_hash_to_db_async(
     binary_img_hash_file: Path, progress: Optional[Progress] = None
 ) -> Tuple[int, int]:
-    conn: Connection = await asyncpg.connect(
-        user=psqlUserName, password=psqlUserPass, database=psqlDbName, host=psqlDbIpAddr
-    )
+    conn = await create_conn()
 
     media_hash = hashfile(binary_img_hash_file, hexdigest=True)
     console.print(f"media_hash='{media_hash}'")
@@ -80,13 +72,13 @@ async def import_binary_img_hash_to_db_async(
     nb_frames_inserted = (
         await conn.fetchval(
             """
-                        SELECT
-                            COUNT(*)
-                        FROM
-                            frames
-                        WHERE
-                            frames.media_id = $1;
-                    """,
+                            SELECT
+                                COUNT(*)
+                            FROM
+                                frames
+                            WHERE
+                                frames.media_id = $1;
+                        """,
             media_id,
         )
         or 0
@@ -107,9 +99,7 @@ async def agen_p_hash_from_media_in_db(
     # media_hash = hashfile(binary_img_hash_file, hexdigest=True)
     # console.print(f"media_hash='{media_hash}'")
 
-    conn: Connection = await asyncpg.connect(
-        user=psqlUserName, password=psqlUserPass, database=psqlDbName, host=psqlDbIpAddr
-    )
+    conn = await create_conn()
 
     found_media_id = await conn.fetchval(
         "SELECT id FROM medias WHERE medias.media_hash = $1", media_hash
@@ -118,6 +108,7 @@ async def agen_p_hash_from_media_in_db(
         return
 
     async with conn.transaction():
+        # https://www.postgresql.org/docs/8.1/queries-limit.html
         query = f"""
             SELECT
                 p_hash, frame_offset
