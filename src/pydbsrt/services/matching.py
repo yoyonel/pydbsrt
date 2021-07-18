@@ -2,8 +2,8 @@ from dataclasses import dataclass
 from typing import List, Iterable
 
 import asyncpg
+from asyncstdlib.functools import lru_cache
 from contexttimer import Timer
-
 from pydbsrt.services.database import (
     psqlUserName,
     psqlUserPass,
@@ -32,7 +32,7 @@ class ResultSearch:
     timer: Timer
 
 
-# @alru_cache
+@lru_cache
 async def search_phash_in_db(conn, phash: int, distance: int) -> List[MatchedFrame]:
     return [
         MatchedFrame(*record)

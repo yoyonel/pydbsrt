@@ -30,7 +30,7 @@ def resource_phash_path():
     return _resource_phash_path
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="session")
 def db_is_ready(session_scoped_container_getter):
     # get database service
     bktreedb_service = next(
@@ -43,9 +43,9 @@ def db_is_ready(session_scoped_container_getter):
     yield
 
 
-@pytest.fixture
+@pytest.fixture(scope="function")
 @pytest.mark.asyncio
-async def conn() -> Connection:
+async def conn(db_is_ready) -> Connection:
     conn = await create_conn()
     await drop_tables_async(conn, tables_names=("medias", "frames", "subtitles"))
     yield conn

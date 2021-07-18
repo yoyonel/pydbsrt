@@ -7,14 +7,6 @@ optional = false
 python-versions = "*"
 
 [[package]]
-name = "async-lru"
-version = "1.0.2"
-description = "Simple lru_cache for asyncio"
-category = "main"
-optional = false
-python-versions = "*"
-
-[[package]]
 name = "asyncpg"
 version = "0.21.0"
 description = "An asyncio PostgreSQL driver"
@@ -26,6 +18,18 @@ python-versions = ">=3.5.0"
 dev = ["Cython (==0.29.20)", "pytest (>=3.6.0)", "Sphinx (>=1.7.3,<1.8.0)", "sphinxcontrib-asyncio (>=0.2.0,<0.3.0)", "sphinx-rtd-theme (>=0.2.4,<0.3.0)", "pycodestyle (>=2.5.0,<2.6.0)", "flake8 (>=3.7.9,<3.8.0)", "uvloop (>=0.14.0,<0.15.0)"]
 docs = ["Sphinx (>=1.7.3,<1.8.0)", "sphinxcontrib-asyncio (>=0.2.0,<0.3.0)", "sphinx-rtd-theme (>=0.2.4,<0.3.0)"]
 test = ["pycodestyle (>=2.5.0,<2.6.0)", "flake8 (>=3.7.9,<3.8.0)", "uvloop (>=0.14.0,<0.15.0)"]
+
+[[package]]
+name = "asyncstdlib"
+version = "3.9.2"
+description = "The missing async toolbox"
+category = "main"
+optional = false
+python-versions = "*"
+
+[package.extras]
+doc = ["sphinx", "sphinxcontrib-contentui", "sphinxcontrib-trio"]
+test = ["pytest (>=4.3.0)", "flake8", "flake8-bugbear", "black", "coverage"]
 
 [[package]]
 name = "atomicwrites"
@@ -1319,15 +1323,12 @@ testing = ["pytest (>=4.6)", "pytest-checkdocs (>=1.2.3)", "pytest-flake8", "pyt
 [metadata]
 lock-version = "1.1"
 python-versions = "^3.8"
-content-hash = "8da65ff09652a6eee0ca2657995e05ab62a3e8274ee52454f7e5c3b7bb033521"
+content-hash = "7a1012862139d0557e67f8eddb7330f4c50f790b1d91d9c48d10f69c8fc61ea3"
 
 [metadata.files]
 appdirs = [
     {file = "appdirs-1.4.4-py2.py3-none-any.whl", hash = "sha256:a841dacd6b99318a741b166adb07e19ee71a274450e68237b4650ca1055ab128"},
     {file = "appdirs-1.4.4.tar.gz", hash = "sha256:7d5d0167b2b1ba821647616af46a749d1c653740dd0d2415100fe26e27afdf41"},
-]
-async-lru = [
-    {file = "async_lru-1.0.2.tar.gz", hash = "sha256:baa898027619f5cc31b7966f96f00e4fc0df43ba206a8940a5d1af5336a477cb"},
 ]
 asyncpg = [
     {file = "asyncpg-0.21.0-cp35-cp35m-macosx_10_13_x86_64.whl", hash = "sha256:09badce47a4645cfe523cc8a182bd047d5d62af0caaea77935e6a3c9e77dc364"},
@@ -1355,6 +1356,10 @@ asyncpg = [
     {file = "asyncpg-0.21.0-cp38-cp38-win32.whl", hash = "sha256:615c7e3adb46e1f2e3aff45e4ee9401b4f24f9f7153e5530a0753369be72a5c6"},
     {file = "asyncpg-0.21.0-cp38-cp38-win_amd64.whl", hash = "sha256:823eca36108bd64a8600efe7bbf1230aa00f2defa3be42852f3b61ab40cf1226"},
     {file = "asyncpg-0.21.0.tar.gz", hash = "sha256:53cb2a0eb326f61e34ef4da2db01d87ce9c0ebe396f65a295829df334e31863f"},
+]
+asyncstdlib = [
+    {file = "asyncstdlib-3.9.2-py2.py3-none-any.whl", hash = "sha256:cecb4e4d7d3d4e7c56ba8d304abe1e259ababb45b2defebf18e3171958e3c9ea"},
+    {file = "asyncstdlib-3.9.2.tar.gz", hash = "sha256:2b9c729d238df39f4728f59303b152d5e9ff89860256d567609c91deba2848f3"},
 ]
 atomicwrites = [
     {file = "atomicwrites-1.4.0-py2.py3-none-any.whl", hash = "sha256:6d1784dea7c0c8d4a5172b6c620f40b6e4cbfdf96d783691f2e1302a7b88e197"},
