@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from pydbsrt.applications.export_imghash_from_media import export_imghash_from_media
+from pydbsrt.applications import export_imghash_from_media
 from pydbsrt.tools.imghash import (
     signed_int64_to_str_binary,
     imghash_to_64bits,
@@ -29,7 +29,7 @@ def resource_video_path():
     return lambda color_frame: Path(f"data/{color_frame}_frames.mp4")
 
 
-def test_export_imghash_from_white_frames(resource_video_path, cli_runner, tmpdir):
+def test_cli_export_imghash_from_white_frames(resource_video_path, cli_runner, tmpdir):
     p_video = resource_video_path("white")
     output_file_path = tmpdir.mkdir("phash") / f"{p_video.stem}.phash"
     result = cli_runner.invoke(
@@ -51,7 +51,7 @@ def test_export_imghash_from_white_frames(resource_video_path, cli_runner, tmpdi
 
 
 @pytest.mark.xfail(raises=ValueError)
-def test_export_imghash_from_black_frames(resource_video_path, cli_runner, tmpdir):
+def test_cli_export_imghash_from_black_frames(resource_video_path, cli_runner, tmpdir):
     """
     Test pour montrer que l'algo d'hashing (et reconnaissance) ne fonctionne pas dans certain cas de figure ("pathologique").
     Par exemple, une vidéo composée de frame purement "noire", avec la compression (même élevée) va produire quelques artefacts,

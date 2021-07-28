@@ -5,13 +5,9 @@ from services.extended_subtitles import (
     export_extended_subtitles,
     read_extended_subtitles,
 )
-from tools.imghash import signed_int64_to_str_binary
+from tools.imghash import signed_int64_to_str_binary, gen_signed_int64_hash
 from tools.subfingerprint import subriptime_to_frame
 from tools.subreader import SubReader
-
-from tests.applications.test_cli_export_imghash_from_subtitles_and_media import (
-    gen_signed_int64_hash,
-)
 
 
 @lru_cache

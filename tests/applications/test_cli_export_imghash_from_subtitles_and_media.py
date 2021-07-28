@@ -1,22 +1,7 @@
 """
 https://docs.pytest.org/en/stable/tmpdir.html
 """
-from io import FileIO
-from typing import Iterator
-
-from pydbsrt.applications.export_imghash_from_subtitles_and_media import (
-    export_imghash_from_subtitles_and_media,
-)
-from pydbsrt.tools.imghash import bytes_to_signed_int64
-
-
-def gen_signed_int64_hash(fo: FileIO) -> Iterator[int]:
-    ba_img_hex = fo.read(8)
-    offset_frame = 0
-    while ba_img_hex:
-        yield bytes_to_signed_int64(ba_img_hex)
-        ba_img_hex = fo.read(8)
-        offset_frame += 1
+from applications import export_imghash_from_subtitles_and_media
 
 
 def test_export_imghash_from_subtitles_and_media(
