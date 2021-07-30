@@ -194,7 +194,7 @@ def translate_with_google_translate_webapi(querystr, to_l="zh", from_l="en"):
     request = urllib.request.Request(
         f"{translate_google_url}/{tar_url}", headers=c_agent
     )
-    page = str(urllib.request.urlopen(request).read().decode(typ))
+    page = str(urllib.request.urlopen(request).read().decode(typ))  # nosec
     target = page[page.find(flag) + len(flag) :]
     target = target.split("<")[0]
     return target

@@ -1,0 +1,4 @@
+# https://bandit.readthedocs.io/en/latest/config.html
+
+# (optional) list included tests here:
+tests: ['B201', 'B301']

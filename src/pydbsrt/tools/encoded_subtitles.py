@@ -1,6 +1,7 @@
 # https://chrisdown.name/2016/09/04/cleaning-up-muxing-extracting-subtitles-using-ffmpeg-srt-tools.html
 from dataclasses import dataclass
 from pathlib import Path
+from tempfile import gettempdir
 from typing import Tuple, List, Callable
 
 # https://pypi.org/project/click-pathlib/
@@ -69,7 +70,7 @@ def extract_subtitles_streams(media_path: Path) -> List[SubtitleStream]:
 
 def export_encoded_subtitles(
     media_path: Path,
-    root_dir_export_subtitles_path: Path = Path("/tmp"),
+    root_dir_export_subtitles_path: Path = Path(gettempdir()),
     filter_srt_export_fp: Callable[[Tuple[int, Path]], bool] = lambda _: True,
 ) -> List[Path]:
     """"""

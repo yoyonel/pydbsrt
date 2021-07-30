@@ -7,7 +7,7 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from typing import Iterable
-from urllib.request import urlopen
+from urllib.request import urlopen, Request
 
 from rich.progress import (
     BarColumn,
@@ -34,7 +34,7 @@ progress = Progress(
 
 def copy_url(task_id: TaskID, url: str, path: str) -> None:
     """Copy data from a url to a local file."""
-    response = urlopen(url)
+    response = urlopen(Request(url))  # nosec
     # This will break if the response doesn't contain content length
     progress.update(task_id, total=int(response.info()["Content-length"]))
     with open(path, "wb") as dest_file:

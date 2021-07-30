@@ -48,7 +48,7 @@ from pydbsrt.services.search_in_db import (
 
 console = Console()
 
-
+# https://docs.python.org/3.11/howto/enum.html#functional-api
 OUTPUT_FORMAT = Enum("output_format", "DataFrame CSV")
 
 

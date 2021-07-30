@@ -2,6 +2,7 @@ from itertools import groupby, chain
 from operator import itemgetter
 from pathlib import Path
 from struct import unpack
+from tempfile import gettempdir
 from typing import Iterator, Callable, Optional
 
 from imagehash import ImageHash
@@ -44,7 +45,7 @@ def export_extended_subtitles(
     output_file = (
         Path(output_file)
         if output_file
-        else Path("/tmp/") / subtitles.with_suffix(".phash").name
+        else Path(gettempdir() / subtitles.with_suffix(".phash").name)
     )
     output_file.unlink(missing_ok=True)
     console.print()

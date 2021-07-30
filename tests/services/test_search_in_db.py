@@ -13,9 +13,7 @@ from tools.imghash import gen_signed_int64_hash
 
 
 @pytest.mark.asyncio
-async def test_search_media_in_db(
-    conn, resource_phash_path, resource_video_path, tmpdir
-):
+async def test_search_media_in_db(conn, resource_video_path, tmpdir):
     media_name = "big_buck_bunny_trailer_480p"
 
     p_media = resource_video_path(f"{media_name}.webm")

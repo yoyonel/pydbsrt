@@ -1,7 +1,5 @@
 from pathlib import Path
 from typing import Optional, Tuple, Union
-
-from imohash import hashfile
 from pydbsrt.services.database import (
     console,
     create_tables_async,
@@ -12,6 +10,7 @@ from pydbsrt.services.database import (
 from pydbsrt.services.models import PHashMedia
 from pydbsrt.services.reader_frames import gen_read_binary_img_hash_file
 from rich.progress import Progress
+from tools.aio_filehash import aio_hashfile
 
 
 async def import_binary_img_hash_to_db_async(
@@ -19,7 +18,9 @@ async def import_binary_img_hash_to_db_async(
 ) -> Tuple[int, int]:
     conn = await create_conn()
 
-    media_hash = hashfile(binary_img_hash_file, hexdigest=True)
+    # media_hash = hashfile(binary_img_hash_file, hexdigest=True)
+    media_hash = await aio_hashfile(binary_img_hash_file, hexdigest=True)
+
     console.print(f"media_hash='{media_hash}'")
 
     # await drop_tables(conn)
@@ -72,13 +73,13 @@ async def import_binary_img_hash_to_db_async(
     nb_frames_inserted = (
         await conn.fetchval(
             """
-                            SELECT
-                                COUNT(*)
-                            FROM
-                                frames
-                            WHERE
-                                frames.media_id = $1;
-                        """,
+                                SELECT
+                                    COUNT(*)
+                                FROM
+                                    frames
+                                WHERE
+                                    frames.media_id = $1;
+                            """,
             media_id,
         )
         or 0
@@ -101,7 +102,7 @@ async def agen_p_hash_from_media_in_db(
 
     conn = await create_conn()
 
-    found_media_id = await conn.fetchval(
+    found_media_id: Optional[int] = await conn.fetchval(
         "SELECT id FROM medias WHERE medias.media_hash = $1", media_hash
     )
     if found_media_id is None:
@@ -109,7 +110,7 @@ async def agen_p_hash_from_media_in_db(
 
     async with conn.transaction():
         # https://www.postgresql.org/docs/8.1/queries-limit.html
-        query = f"""
+        query = """
             SELECT
                 p_hash, frame_offset
             FROM
@@ -118,8 +119,8 @@ async def agen_p_hash_from_media_in_db(
                 frames.media_id = $1
             ORDER BY
                 frames.frame_offset
-            {'LIMIT ' + str(limit) if limit else ''};
         """
+        query += f"\n{f'LIMIT {limit}' if limit else ''};"
         cur = await conn.cursor(query, found_media_id)
         while records := await cur.fetch(chunk_size):
             for record in records:

@@ -2,6 +2,8 @@ from itertools import islice
 from pathlib import Path
 
 # https://pypi.org/project/click-pathlib/
+from tempfile import gettempdir
+
 from numpy.ma import floor
 from pydbsrt.services.reader_frames import build_reader_frames
 from pydbsrt.tools.chunk import chunks
@@ -41,7 +43,8 @@ def export_imghash_from_media(media, output_file) -> Path:
     output_file = (
         Path(output_file)
         if output_file
-        else Path("/tmp/") / media.with_suffix(".phash").name
+        # https://bandit.readthedocs.io/en/latest/plugins/b108_hardcoded_tmp_directory.html
+        else Path(gettempdir()) / media.with_suffix(".phash").name
     )
     output_file.unlink(missing_ok=True)
     console.print(f"output_file: {str(output_file)}")
