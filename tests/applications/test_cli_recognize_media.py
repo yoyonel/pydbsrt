@@ -1,21 +1,9 @@
-from typing import Coroutine
-
 import pytest
 from click.testing import CliRunner
 
 from pydbsrt.applications import recognize_media
 from pydbsrt.applications.recognize_media import console
 from pydbsrt.services.db_frames import import_binary_img_hash_to_db_async
-
-
-@pytest.fixture(autouse=True)
-def patch_coroclick(mocker, event_loop):
-    def mocked_run_coro(coro: Coroutine):
-        loop = event_loop
-        task = loop.create_task(coro)
-        loop.run_until_complete(task)
-
-    mocker.patch("pydbsrt.tools.coro.run_coro", mocked_run_coro)
 
 
 @pytest.fixture

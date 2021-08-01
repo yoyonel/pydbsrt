@@ -17,7 +17,6 @@ dans BKTreeDB la base de donnée PostgreSQL (avec index) spécialisé·e pour le
     xargs -I {} poetry run python app_cli.py import-images-hashes-into-db -r "{}"
 
 """
-import asyncio
 from pathlib import Path
 
 import click
@@ -26,6 +25,7 @@ from rich.console import Console
 from rich.progress import BarColumn, DownloadColumn, Progress, TextColumn, TransferSpeedColumn
 
 from pydbsrt.services.db_frames import import_binary_img_hash_to_db_async
+from pydbsrt.tools.coro import coroclick
 from pydbsrt.tools.rich_colums import TimeElapsedOverRemainingColumn
 
 console = Console()
@@ -60,6 +60,8 @@ async def run(binary_img_hash_file: Path) -> None:
     type=click_pathlib.Path(exists=True, readable=True, resolve_path=True, allow_dash=False),
     help="Path to media",
 )
-def import_images_hashes_into_db(binary_img_hash_file):
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(run(binary_img_hash_file))
+@coroclick
+async def import_images_hashes_into_db(binary_img_hash_file):
+    # loop = asyncio.get_event_loop()
+    # loop.run_until_complete(run(binary_img_hash_file))
+    await run(binary_img_hash_file)

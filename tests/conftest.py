@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Coroutine
 
 import pytest
 from asyncpg import Connection
@@ -49,3 +50,13 @@ async def conn(db_is_ready) -> Connection:
     await drop_tables_async(conn, tables_names=("medias", "frames", "subtitles"))
     yield conn
     await drop_tables_async(conn, tables_names=("medias", "frames", "subtitles"))
+
+
+@pytest.fixture(autouse=True)
+def patch_coroclick(mocker, event_loop):
+    def mocked_run_coro(coro: Coroutine):
+        loop = event_loop
+        task = loop.create_task(coro)
+        loop.run_until_complete(task)
+
+    mocker.patch("pydbsrt.tools.coro.run_coro", mocked_run_coro)
