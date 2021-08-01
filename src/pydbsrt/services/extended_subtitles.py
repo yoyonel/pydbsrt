@@ -3,7 +3,7 @@ from operator import itemgetter
 from pathlib import Path
 from struct import unpack
 from tempfile import gettempdir
-from typing import Callable, Iterator, Optional, Tuple
+from typing import Callable, Iterator, Optional, Tuple, Union
 
 from imagehash import ImageHash
 from more_itertools import grouper
@@ -57,7 +57,7 @@ def export_extended_subtitles(
 
 def show_subtitles_fingerprints(
     srt_path: Path,
-    it_img_hash: Iterator[ImageHash],
+    it_img_hash: Union[Iterator[ImageHash], Iterator[int]],
     nb_fingerprints_by_row: int = 4,
     fn_imghash_to: Callable[[ImageHash], str] = str,
 ) -> None:

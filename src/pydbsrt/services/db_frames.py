@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Optional, Tuple, Union
+from typing import AsyncIterable, Optional, Tuple, Union
 
 import asyncpg
 from rich.progress import Progress
@@ -105,7 +105,7 @@ async def agen_p_hash_from_media_in_db(
     media_hash: Union[str, bytes],
     chunk_size: int = 32,
     limit: Optional[int] = None,
-):
+) -> AsyncIterable[PHashMedia]:
     # media_hash = hashfile(binary_img_hash_file, hexdigest=True)
     # console.print(f"media_hash='{media_hash}'")
 
