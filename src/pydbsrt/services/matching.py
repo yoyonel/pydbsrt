@@ -1,15 +1,11 @@
 from dataclasses import dataclass
-from typing import List, Iterable
+from typing import Iterable, List
 
 import asyncpg
 from asyncstdlib.functools import lru_cache
 from contexttimer import Timer
-from pydbsrt.services.database import (
-    psqlUserName,
-    psqlUserPass,
-    psqlDbName,
-    psqlDbIpAddr,
-)
+
+from pydbsrt.services.database import psqlDbIpAddr, psqlDbName, psqlUserName, psqlUserPass
 from pydbsrt.tools.timer_profiling import _Timer
 
 
@@ -47,9 +43,7 @@ WHERE "p_hash" <@ ($1, $2)""",
     ]
 
 
-async def search_phash_stream(
-    phash_stream: Iterable[str], search_distance: int
-) -> ResultSearch:
+async def search_phash_stream(phash_stream: Iterable[str], search_distance: int) -> ResultSearch:
     """"""
     async with asyncpg.create_pool(
         user=psqlUserName,
@@ -68,8 +62,6 @@ async def search_phash_stream(
                         offset,
                         await search_phash_in_db(conn, phash, search_distance),
                     )
-                    for offset, phash in enumerate(
-                        int(str_phash.rstrip()) for str_phash in phash_stream
-                    )
+                    for offset, phash in enumerate(int(str_phash.rstrip()) for str_phash in phash_stream)
                 ]
     return ResultSearch(records, timer)

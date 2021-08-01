@@ -2,8 +2,9 @@ from pathlib import Path
 
 import pytest
 from asyncpg import Connection
-from services.database import create_conn, drop_tables_async
 from waiting import wait
+
+from pydbsrt.services.database import create_conn, drop_tables_async
 
 
 @pytest.fixture()
@@ -23,9 +24,9 @@ def resource_phash_path():
     """"""
 
     def _resource_phash_path(phash_filename: str):
-        p_rphp = Path(f"{Path(__file__).parent}/data/{phash_filename}").resolve()
-        assert p_rphp.exists()
-        return p_rphp
+        path_to_resource = Path(f"{Path(__file__).parent}/data/{phash_filename}").resolve()
+        assert path_to_resource.exists()
+        return path_to_resource
 
     return _resource_phash_path
 
@@ -34,9 +35,7 @@ def resource_phash_path():
 def db_is_ready(session_scoped_container_getter):
     # get database service
     bktreedb_service = next(
-        service
-        for service in session_scoped_container_getter.docker_project.services
-        if service.name == "bktreedb"
+        service for service in session_scoped_container_getter.docker_project.services if service.name == "bktreedb"
     )
     # wait for a healthy status on database service
     wait(bktreedb_service.is_healthy)

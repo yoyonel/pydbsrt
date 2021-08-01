@@ -1,8 +1,6 @@
-from .export_imghash_from_subtitles_and_media import (
-    export_imghash_from_subtitles_and_media,
-)
-from .extract_subtitles_from_medias import extract_subtitles_from_medias
 from .export_imghash_from_media import export_imghash_from_media
+from .export_imghash_from_subtitles_and_media import export_imghash_from_subtitles_and_media
+from .extract_subtitles_from_medias import extract_subtitles_from_medias
 from .recognize_media import recognize_media
 
 __all__ = [

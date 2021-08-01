@@ -43,10 +43,7 @@ def main():
         bandwidth=None,
         quantile=0.50,
     ) -> Tuple[List[int], float]:
-        x = [
-            _time_to_timedelta(duration.to_time()).total_seconds()
-            for duration in durations
-        ]
+        x = [_time_to_timedelta(duration.to_time()).total_seconds() for duration in durations]
         X = np.array(list(zip(x, np.zeros(len(x)))), dtype=float)
         if bandwidth is None:
             bandwidth = estimate_bandwidth(X, quantile=quantile)
@@ -66,9 +63,7 @@ def main():
 
     acgt = defaultdict(lambda: "*", ((0, "A"), (1, "C"), (2, "G"), (3, "T")))
 
-    srt_from_labels, srt_from_bandwith = _clustering_srt_by_durations(
-        srt_from_durations, quantile=0.20
-    )
+    srt_from_labels, srt_from_bandwith = _clustering_srt_by_durations(srt_from_durations, quantile=0.20)
     srt_from_sequence_acgt = "".join([acgt[label] for label in srt_from_labels])
     s = "\n".join("".join(g) for g in grouper_without_fill(srt_from_sequence_acgt, 140))
     logger.info(f"srt_from_sequence_acgt:\n{s}")

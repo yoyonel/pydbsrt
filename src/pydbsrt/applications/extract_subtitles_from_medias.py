@@ -24,14 +24,15 @@ import sys
 
 # https://chrisdown.name/2016/09/04/cleaning-up-muxing-extracting-subtitles-using-ffmpeg-srt-tools.html
 from pathlib import Path
-from signal import signal, SIGINT, SIGHUP, SIGTERM, SIGUSR1, SIGUSR2
+from signal import SIGHUP, SIGINT, SIGTERM, SIGUSR1, SIGUSR2, signal
 from typing import Optional
 
 import click
 
 # https://pypi.org/project/click-pathlib/
 import click_pathlib
-from services import extract_from_medias
+
+from pydbsrt.services import extract_from_medias
 
 __version__ = "0.0.1"
 
@@ -57,15 +58,11 @@ def sh_shutdown(_sig, _):
     sys.exit()
 
 
-@click.command(
-    short_help="Tool for extracting subtitles from medias/videos (using ffprobe + ffmpeg)"
-)
+@click.command(short_help="Tool for extracting subtitles from medias/videos (using ffprobe + ffmpeg)")
 @click.version_option(version=__version__)
 @click.argument(
     "root-dir-for-finding-medias",
-    type=click_pathlib.Path(
-        exists=True, readable=True, resolve_path=True, allow_dash=False
-    ),
+    type=click_pathlib.Path(exists=True, readable=True, resolve_path=True, allow_dash=False),
 )
 @click.argument(
     "glob-for-finding-medias",

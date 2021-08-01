@@ -1,15 +1,12 @@
 from typing import Final
 
 import pytest
-from services import export_imghash_from_media
-from services.db_frames import import_binary_img_hash_to_db_async
-from services.matching import search_phash_stream
-from services.search_in_db import (
-    build_search_media_results,
-    BuildSearchResult,
-    search_media_in_db,
-)
-from tools.imghash import gen_signed_int64_hash
+
+from pydbsrt.services import export_imghash_from_media
+from pydbsrt.services.db_frames import import_binary_img_hash_to_db_async
+from pydbsrt.services.matching import search_phash_stream
+from pydbsrt.services.search_in_db import BuildSearchResult, build_search_media_results, search_media_in_db
+from pydbsrt.tools.imghash import gen_signed_int64_hash
 
 
 @pytest.mark.asyncio
@@ -21,9 +18,7 @@ async def test_search_media_in_db(conn, resource_video_path, tmpdir):
     output_file_exported = export_imghash_from_media(p_media, output_file_path)
 
     binary_img_hash_file = output_file_exported
-    media_id, _nb_frames_inserted = await import_binary_img_hash_to_db_async(
-        binary_img_hash_file
-    )
+    media_id, _nb_frames_inserted = await import_binary_img_hash_to_db_async(binary_img_hash_file)
 
     search_distance = 0
     nb_seconds_to_extract = 3.00
@@ -38,33 +33,23 @@ async def test_search_media_in_db(conn, resource_video_path, tmpdir):
             for match in record.matches
             if (match.frame_offset == record_offset and match.media_id == media_id)
         ][0]
-        for record_offset, record in enumerate(
-            results_from_search_imghash_in_db.records
-        )
+        for record_offset, record in enumerate(results_from_search_imghash_in_db.records)
     ] == list(range(int(nb_seconds_to_extract * video_framerate)))
 
 
 @pytest.mark.asyncio
-async def test_build_search_media_results(
-    conn, resource_phash_path, resource_video_path
-):
+async def test_build_search_media_results(conn, resource_phash_path, resource_video_path):
     media_name = "big_buck_bunny_trailer_480p"
 
     binary_img_hash_file = resource_phash_path(f"{media_name}.phash")
-    media_id, nb_frames_inserted = await import_binary_img_hash_to_db_async(
-        binary_img_hash_file
-    )
+    media_id, nb_frames_inserted = await import_binary_img_hash_to_db_async(binary_img_hash_file)
 
     it_phashes = map(str, gen_signed_int64_hash(binary_img_hash_file.open("rb")))
     # search all frames in order with 0 searching distance (<=> exact match)
-    results_from_search_imghash_in_db = await search_phash_stream(
-        it_phashes, search_distance=0
-    )
+    results_from_search_imghash_in_db = await search_phash_stream(it_phashes, search_distance=0)
 
     p_video = resource_video_path(f"{media_name}.webm")
-    build_search_results = await build_search_media_results(
-        p_video, results_from_search_imghash_in_db
-    )
+    build_search_results = await build_search_media_results(p_video, results_from_search_imghash_in_db)
     assert build_search_results == [
         BuildSearchResult(
             media_found=True,

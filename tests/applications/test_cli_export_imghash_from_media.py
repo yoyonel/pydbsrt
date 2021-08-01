@@ -10,11 +10,7 @@ import pytest
 from PIL import Image
 
 from pydbsrt.applications import export_imghash_from_media
-from pydbsrt.tools.imghash import (
-    signed_int64_to_str_binary,
-    imghash_to_64bits,
-)
-from tools.imghash import gen_signed_int64_hash
+from pydbsrt.tools.imghash import gen_signed_int64_hash, imghash_to_64bits, signed_int64_to_str_binary
 
 
 @pytest.fixture()
@@ -32,9 +28,7 @@ def resource_video_path():
 def test_cli_export_imghash_from_white_frames(resource_video_path, cli_runner, tmpdir):
     p_video = resource_video_path("white")
     output_file_path = tmpdir.mkdir("phash") / f"{p_video.stem}.phash"
-    result = cli_runner.invoke(
-        export_imghash_from_media, args=f"-r {str(p_video)} -o {output_file_path}"
-    )
+    result = cli_runner.invoke(export_imghash_from_media, args=f"-r {str(p_video)} -o {output_file_path}")
     assert result.exit_code == 0
 
     ndarray_white_frame = np.ndarray(dtype=np.uint8, shape=(32, 32))
@@ -61,9 +55,7 @@ def test_cli_export_imghash_from_black_frames(resource_video_path, cli_runner, t
     """
     p_video = resource_video_path("black")
     output_file_path = tmpdir.mkdir("phash") / f"{p_video.stem}.phash"
-    result = cli_runner.invoke(
-        export_imghash_from_media, args=f"-r {str(p_video)} -o {output_file_path}"
-    )
+    result = cli_runner.invoke(export_imghash_from_media, args=f"-r {str(p_video)} -o {output_file_path}")
     assert result.exit_code == 0
 
     ndarray_black_frame = np.ndarray(dtype=np.uint8, shape=(32, 32))
@@ -71,9 +63,7 @@ def test_cli_export_imghash_from_black_frames(resource_video_path, cli_runner, t
     phash_frame = imagehash.phash(Image.fromarray(ndarray_black_frame))
     expected_str_bits_hash_from_frame = imghash_to_64bits(phash_frame)
     with output_file_path.open("rb") as fo:
-        str_binary_hashes = list(
-            map(signed_int64_to_str_binary, gen_signed_int64_hash(fo))
-        )
+        str_binary_hashes = list(map(signed_int64_to_str_binary, gen_signed_int64_hash(fo)))
         diffs = [
             distance.hamming(expected_str_bits_hash_from_frame, str_binary_hash)
             for str_binary_hash in str_binary_hashes

@@ -79,9 +79,7 @@ def build_parser(parser=None, **argparse_options):
         )
 
     # config file
-    parser.add_argument(
-        "-i", "--input-file", dest="input_file", required=True, help="", metavar="FILE"
-    )
+    parser.add_argument("-i", "--input-file", dest="input_file", required=True, help="", metavar="FILE")
     parser.add_argument(
         "-o",
         "--output-file",

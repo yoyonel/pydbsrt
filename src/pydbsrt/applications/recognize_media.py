@@ -28,23 +28,19 @@ True,Silicon.Valley.S05E08.Fifty-One.Percent.1080p.AMZN.WEB-DL.DD.5.1.H.265-SiGM
 ```
 
 """
-import asyncio
 from dataclasses import asdict
 from enum import Enum
 from pathlib import Path
-from typing import List
+from typing import List, Optional, Union
 
 import click
 import click_pathlib
 import pandas as pd
 from rich.console import Console
 
-from pydbsrt.applications import search_imghash_in_db
-from pydbsrt.services.search_in_db import (
-    search_media_in_db,
-    BuildSearchResult,
-    build_search_media_results,
-)
+from pydbsrt.applications.search_imghash_in_db import ResultSearch
+from pydbsrt.services.search_in_db import BuildSearchResult, build_search_media_results, search_media_in_db
+from pydbsrt.tools.coro import coroclick
 
 console = Console()
 
@@ -57,14 +53,10 @@ OUTPUT_FORMAT = Enum("output_format", "DataFrame CSV")
     "--media",
     "-m",
     required=True,
-    type=click_pathlib.Path(
-        exists=True, readable=True, resolve_path=True, allow_dash=True
-    ),
+    type=click_pathlib.Path(exists=True, readable=True, resolve_path=True, allow_dash=True),
     help="Media to recognize",
 )
-@click.option(
-    "--search_distance", "-d", default=1, type=int, help="Search distance to use"
-)
+@click.option("--search_distance", "-d", default=1, type=int, help="Search distance to use")
 @click.option(
     "--nb_seconds_to_extract",
     "-s",
@@ -77,27 +69,22 @@ OUTPUT_FORMAT = Enum("output_format", "DataFrame CSV")
     type=click.Choice(list(map(lambda x: x.name, OUTPUT_FORMAT)), case_sensitive=False),
     default=OUTPUT_FORMAT.DataFrame.name,
 )
-def recognize_media(
+@coroclick
+async def recognize_media(
     media: Path,
     search_distance: int,
     nb_seconds_to_extract: float,
     output_format: OUTPUT_FORMAT,
 ):
-    loop = asyncio.get_event_loop()
-    results_from_search_imghash_in_db: search_imghash_in_db.ResultSearch = (
-        loop.run_until_complete(
-            search_media_in_db(media, search_distance, nb_seconds_to_extract)
-        )
+    results_from_search_imghash_in_db: ResultSearch = await search_media_in_db(
+        media, search_distance, nb_seconds_to_extract
     )
-    results: List[BuildSearchResult] = loop.run_until_complete(
-        build_search_media_results(media, results_from_search_imghash_in_db)
-    )
+    results: List[BuildSearchResult] = await build_search_media_results(media, results_from_search_imghash_in_db)
+
     # https://github.com/pandas-dev/pandas/issues/21910#issuecomment-405109225
     df_results = pd.DataFrame([asdict(x) for x in results])
-    console.print(
-        {
-            # https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.to_csv.html
-            "CSV": df_results.to_csv(index=False, header=False),
-            "DataFrame": df_results,
-        }.get(output_format, df_results)
-    )
+
+    results_to_print: Union[pd.Dataframe, Optional[str]] = df_results
+    if output_format == OUTPUT_FORMAT.CSV.name:
+        results_to_print = df_results.to_csv(index=False, header=False)
+    console.print(results_to_print)

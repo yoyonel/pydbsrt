@@ -5,19 +5,14 @@ from pathlib import Path
 from tempfile import gettempdir
 
 from numpy.ma import floor
+from rich.console import Console
+from rich.progress import BarColumn, DownloadColumn, Progress, TextColumn, TransferSpeedColumn
+
 from pydbsrt.services.reader_frames import build_reader_frames
 from pydbsrt.tools.chunk import chunks
 from pydbsrt.tools.ffmpeg_tools.ffmeg_extract_frame import rawframe_to_imghash
 from pydbsrt.tools.imghash import imghash_to_bytes
 from pydbsrt.tools.rich_colums import TimeElapsedOverRemainingColumn
-from rich.console import Console
-from rich.progress import (
-    BarColumn,
-    DownloadColumn,
-    Progress,
-    TextColumn,
-    TransferSpeedColumn,
-)
 
 console = Console()
 
@@ -30,10 +25,7 @@ def export_imghash_from_media(media, output_file) -> Path:
     reader, meta = build_reader_frames(media)
     console.print(meta)
     nb_frames_to_read = int(floor(meta["fps"] * meta["duration"]))
-    gen_frame_hash = map(rawframe_to_imghash, reader)
-    gen_frame_hash = islice(
-        gen_frame_hash, nb_frames_to_read + 0 * int(meta["fps"] * 60)
-    )
+    gen_frame_hash = islice(map(rawframe_to_imghash, reader), nb_frames_to_read + 0 * int(meta["fps"] * 60))
     chunk_nb_seconds = 15
     chunk_size = int(meta["fps"] * chunk_nb_seconds)
     console.print(f"Chunk size (nb frames): {chunk_size}")
@@ -60,9 +52,7 @@ def export_imghash_from_media(media, output_file) -> Path:
         TimeElapsedOverRemainingColumn(),
         console=console,
     )
-    task_id = progress.add_task(
-        "build&export images hashes", filename=media.name, start=True
-    )
+    task_id = progress.add_task("build&export images hashes", filename=media.name, start=True)
     progress.update(task_id, total=nb_frames_to_read)
     with progress:
         for chunk_frames_hashes in chunks(gen_frame_hash, chunk_size):

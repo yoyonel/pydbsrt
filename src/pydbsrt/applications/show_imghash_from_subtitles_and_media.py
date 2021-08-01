@@ -52,18 +52,14 @@ console = Console()
     "--subtitles",
     "-s",
     required=True,
-    type=click_pathlib.Path(
-        exists=True, readable=True, resolve_path=True, allow_dash=False
-    ),
+    type=click_pathlib.Path(exists=True, readable=True, resolve_path=True, allow_dash=False),
     help="Path to subtitles file",
 )
 @click.option(
     "--media",
     "-m",
     required=True,
-    type=click_pathlib.Path(
-        exists=True, readable=True, resolve_path=True, allow_dash=False
-    ),
+    type=click_pathlib.Path(exists=True, readable=True, resolve_path=True, allow_dash=False),
     help="Path to media",
 )
 def show_imghash_from_subtitles_and_media(subtitles, media):

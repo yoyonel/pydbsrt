@@ -1,8 +1,10 @@
 import binascii
 import hashlib
+from typing import List
 
 import pytest
-from tools.aio_filehash import aio_hashfile
+
+from pydbsrt.tools.aio_filehash import aio_hashfile
 
 
 @pytest.mark.asyncio
@@ -23,7 +25,7 @@ from tools.aio_filehash import aio_hashfile
 )
 async def test_aio_hashfile(tmpdir, sample_size, sample_threshold, size, expected_hash):
     def _generate_bin_hash(_size: int) -> bytes:
-        chunks = []
+        chunks: List[bytes] = []
         hasher = hashlib.md5()  # nosec
         while 16 * len(chunks) < _size:
             hasher.update(b"A")
@@ -34,7 +36,5 @@ async def test_aio_hashfile(tmpdir, sample_size, sample_threshold, size, expecte
     test_data_path = tmpdir / ".test_data"
     with test_data_path.open("wb") as f:
         f.write(_generate_bin_hash(size))
-    result = await aio_hashfile(
-        str(test_data_path), sample_threshold=sample_threshold, sample_size=sample_size
-    )
+    result = await aio_hashfile(str(test_data_path), sample_threshold=sample_threshold, sample_size=sample_size)
     assert binascii.hexlify(result) == expected_hash.encode()

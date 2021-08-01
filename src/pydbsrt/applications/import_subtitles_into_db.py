@@ -25,17 +25,13 @@ console = Console()
 
 
 async def run(subtitles: Path, binary_img_hash_file: Path):
-    spinner = yaspin(
-        Spinners.dots2, f"Insert subtitles={subtitles.stem} into DB", timer=True
-    )
-    nb_rows_inserted = (
-        await pydbsrt.services.db_subtitles.import_subtitles_into_db_async(
-            subtitles,
-            binary_img_hash_file,
-            spinner,
-            drop_before_inserting=True,
-            check_before_inserting=False,
-        )
+    spinner = yaspin(Spinners.dots2, f"Insert subtitles={subtitles.stem} into DB", timer=True)
+    nb_rows_inserted = await pydbsrt.services.db_subtitles.import_subtitles_into_db_async(
+        subtitles,
+        binary_img_hash_file,
+        spinner,
+        drop_before_inserting=True,
+        check_before_inserting=False,
     )
     console.print(f"nb_rows_inserted = {nb_rows_inserted}")
 
@@ -45,18 +41,14 @@ async def run(subtitles: Path, binary_img_hash_file: Path):
     "--subtitles",
     "-s",
     required=True,
-    type=click_pathlib.Path(
-        exists=True, readable=True, resolve_path=True, allow_dash=False
-    ),
+    type=click_pathlib.Path(exists=True, readable=True, resolve_path=True, allow_dash=False),
     help="Path to subtitles file",
 )
 @click.option(
     "--binary-img-hash-file",
     "-r",
     required=True,
-    type=click_pathlib.Path(
-        exists=True, readable=True, resolve_path=True, allow_dash=False
-    ),
+    type=click_pathlib.Path(exists=True, readable=True, resolve_path=True, allow_dash=False),
     help="Path to binary image hash file (generated from media)",
 )
 def import_subtitles_into_db(subtitles, binary_img_hash_file):

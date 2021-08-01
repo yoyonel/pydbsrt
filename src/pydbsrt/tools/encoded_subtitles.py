@@ -2,7 +2,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import gettempdir
-from typing import Tuple, List, Callable
+from typing import Callable, List, Tuple
 
 # https://pypi.org/project/click-pathlib/
 import sh
@@ -76,10 +76,7 @@ def export_encoded_subtitles(
     """"""
 
     def build_srt_export_filepath(sub_stream: SubtitleStream) -> Path:
-        return (
-            root_dir_export_subtitles_path
-            / f"{media_path.name}_{sub_stream.lang}_{sub_stream.idx}.srt"
-        )
+        return root_dir_export_subtitles_path / f"{media_path.name}_{sub_stream.lang}_{sub_stream.idx}.srt"
 
     list_srt_export_filepath: List[Tuple[int, Path]] = list(
         filter(
@@ -95,8 +92,7 @@ def export_encoded_subtitles(
 
     # https://trac.ffmpeg.org/wiki/Creating%20multiple%20outputs
     ffmpeg_map_cmd_for_srt = [
-        ("-map", f"0:{idx}", srt_export_filepath)
-        for idx, srt_export_filepath in list_srt_export_filepath
+        ("-map", f"0:{idx}", srt_export_filepath) for idx, srt_export_filepath in list_srt_export_filepath
     ]
 
     try:

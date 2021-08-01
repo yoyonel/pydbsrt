@@ -7,19 +7,16 @@ from dataclasses import dataclass
 from typing import Callable, Iterator, Union
 
 from imagehash import ImageHash
+from pysrt.srtitem import SubRipTime
+
 from pydbsrt.tools.subreader import SubReader
 
 #
 from pydbsrt.tools.videofingerprint import VideoFingerprint
-from pysrt.srtitem import SubRipTime
 
 
-def subriptime_to_frame(
-    srt: SubRipTime, fps: float = 25.0, cast_to_int: Callable[[float], int] = int
-) -> int:
-    total_seconds = (
-        srt.hours * 60 * 60 + srt.minutes * 60 + srt.seconds + srt.milliseconds / 1000.0
-    )
+def subriptime_to_frame(srt: SubRipTime, fps: float = 25.0, cast_to_int: Callable[[float], int] = int) -> int:
+    total_seconds = srt.hours * 60 * 60 + srt.minutes * 60 + srt.seconds + srt.milliseconds / 1000.0
     return cast_to_int(total_seconds * fps)
 
 
@@ -30,9 +27,7 @@ class SubFingerprint:
     img_hash: ImageHash
 
     def __getitem__(self, item):
-        return self.__getattribute__(
-            dataclasses.fields(self)[item].name if isinstance(item, int) else item
-        )
+        return self.__getattribute__(dataclasses.fields(self)[item].name if isinstance(item, int) else item)
 
 
 @dataclass(init=True, repr=False, eq=False, order=False, unsafe_hash=False, frozen=True)
@@ -75,9 +70,7 @@ class SubFingerprints:
             try:
                 if offset_frame < frame_start:
                     # go to the first subtitle frame offset
-                    for offset_frame, img_hash in enumerate(
-                        it_imghash, start=offset_frame + 1
-                    ):
+                    for offset_frame, img_hash in enumerate(it_imghash, start=offset_frame + 1):
                         if offset_frame >= frame_start:
                             break
 
@@ -88,9 +81,7 @@ class SubFingerprints:
                 # )
 
                 # (loop ...) iterate on images hashes frames
-                for offset_frame, img_hash in enumerate(
-                    it_imghash, start=offset_frame + 1
-                ):
+                for offset_frame, img_hash in enumerate(it_imghash, start=offset_frame + 1):
                     # yield the frame+phash
                     yield SubFingerprint(subtitle.index, offset_frame, img_hash)
                     # debug_frames_start_end[subtitle.index].append(

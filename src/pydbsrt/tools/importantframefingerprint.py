@@ -43,13 +43,8 @@ class ImportantFrameFingerprints:
             while True:
                 # tests on thresholds
                 thresholds_pass_for_exit = True
-                thresholds_pass_for_exit &= (
-                    imghash_distance(self.last_vfp, self.cur_vfp)
-                    >= self.threshold_distance
-                )
-                thresholds_pass_for_exit &= (
-                    imghash_count_nonzero(self.cur_vfp) >= self.threshold_nonzero
-                )
+                thresholds_pass_for_exit &= imghash_distance(self.last_vfp, self.cur_vfp) >= self.threshold_distance
+                thresholds_pass_for_exit &= imghash_count_nonzero(self.cur_vfp) >= self.threshold_nonzero
                 if thresholds_pass_for_exit:
                     break
                 # next frame

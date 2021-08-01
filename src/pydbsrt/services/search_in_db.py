@@ -7,12 +7,7 @@ import asyncpg
 from asyncpg import Connection
 
 from pydbsrt.applications import search_imghash_in_db
-from pydbsrt.services.database import (
-    psqlUserName,
-    psqlUserPass,
-    psqlDbName,
-    psqlDbIpAddr,
-)
+from pydbsrt.services.database import psqlDbIpAddr, psqlDbName, psqlUserName, psqlUserPass
 from pydbsrt.services.reader_frames import build_reader_frames
 from pydbsrt.tools.ffmpeg_tools.ffmeg_extract_frame import rawframe_to_imghash
 from pydbsrt.tools.imghash import imghash_to_signed_int64
@@ -42,14 +37,10 @@ async def search_media_in_db(
     nb_seconds_to_extract: float,
     seek_to_middle: bool = True,
 ) -> search_imghash_in_db.ResultSearch:
-    reader, VIDEO_FRAME_RATE_ = build_reader_frames(
-        search_media, nb_seconds_to_extract, seek_to_middle=seek_to_middle
-    )
+    reader, _ = build_reader_frames(search_media, nb_seconds_to_extract, seek_to_middle=seek_to_middle)
     gen_frame_hash = map(rawframe_to_imghash, reader)
     gen_signed_int64_hash = map(imghash_to_signed_int64, gen_frame_hash)
-    return await search_imghash_in_db.search_phash_stream(
-        map(str, gen_signed_int64_hash), search_distance
-    )
+    return await search_imghash_in_db.search_phash_stream(map(str, gen_signed_int64_hash), search_distance)
 
 
 async def search_media_name_into_db(conn: Connection, media_id: int) -> str:
@@ -62,12 +53,10 @@ async def search_media_name_into_db(conn: Connection, media_id: int) -> str:
 
 
 async def build_search_media_results(
-    media: Path, results: search_imghash_in_db.ResultSearch
+    media: Path, imghash_matched: search_imghash_in_db.ResultSearch
 ) -> List[BuildSearchResult]:
-    map_media_id_to_offsets_matched: Dict[int, List[PairedMatchedFrame]] = defaultdict(
-        list
-    )
-    for record in results.records:
+    map_media_id_to_offsets_matched: Dict[int, List[PairedMatchedFrame]] = defaultdict(list)
+    for record in imghash_matched.records:
         for match in record.matches:
             map_media_id_to_offsets_matched[match.media_id].append(
                 PairedMatchedFrame(
@@ -86,9 +75,7 @@ async def build_search_media_results(
     ) as pool:
         async with pool.acquire() as conn:
 
-            async def _build_result(
-                media_id, paired_matched_frames
-            ) -> BuildSearchResult:
+            async def _build_result(media_id, paired_matched_frames) -> BuildSearchResult:
                 media_name_found = await search_media_name_into_db(conn, media_id)
                 return BuildSearchResult(
                     media_found=media.stem == media_name_found,
@@ -97,21 +84,19 @@ async def build_search_media_results(
                     media_name_match=media_name_found,
                     nb_offsets_match=len(paired_matched_frames),
                     search_offsets_match={
-                        paired_matched_frame.record_search_offset
-                        for paired_matched_frame in paired_matched_frames
+                        paired_matched_frame.record_search_offset for paired_matched_frame in paired_matched_frames
                     },
                     match_frames_offsets={
-                        paired_matched_frame.match_frame_offset
-                        for paired_matched_frame in paired_matched_frames
+                        paired_matched_frame.match_frame_offset for paired_matched_frame in paired_matched_frames
                     },
-                    timer_in_seconds=results.timer.elapsed,
+                    timer_in_seconds=imghash_matched.timer.elapsed,
                 )
 
-            results = [
+            media_matched = [
                 await _build_result(media_id, paired_matched_frames)
                 for media_id, paired_matched_frames in map_media_id_to_offsets_matched.items()
             ]
-    return results
+    return media_matched
 
 
 # async def search_img_hash(

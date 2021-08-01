@@ -32,9 +32,7 @@ async def run(
     # spinner = yaspin(
     #     Spinners.dots2, f"", timer=True
     # )
-    src_p_hash_subtitles: List[int] = list(
-        read_extended_subtitles(src_binary_extended_subtitles)
-    )
+    src_p_hash_subtitles: List[int] = list(read_extended_subtitles(src_binary_extended_subtitles))
 
     # console.print(f"len(p_hash_subtitles) = {len(src_p_hash_subtitles)}\n{src_p_hash_subtitles[:25]}")
     cur_src_p_hash_subtitles = 0
@@ -64,18 +62,14 @@ async def run(
     "--src_subtitles",
     "-s",
     required=True,
-    type=click_pathlib.Path(
-        exists=True, readable=True, resolve_path=True, allow_dash=False
-    ),
+    type=click_pathlib.Path(exists=True, readable=True, resolve_path=True, allow_dash=False),
     help="Path to source subtitles file",
 )
 @click.option(
     "--src_binary_extended_subtitles",
     "-b",
     required=True,
-    type=click_pathlib.Path(
-        exists=True, readable=True, resolve_path=True, allow_dash=False
-    ),
+    type=click_pathlib.Path(exists=True, readable=True, resolve_path=True, allow_dash=False),
     help="Path to source subtitles file",
 )
 def generate_subtitles(src_subtitles, src_binary_extended_subtitles):

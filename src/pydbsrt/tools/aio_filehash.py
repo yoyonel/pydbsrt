@@ -9,9 +9,7 @@ SAMPLE_THRESHOLD = 128 * 1024
 SAMPLE_SIZE = 16 * 1024
 
 
-async def _aio_get_data_for_hash(
-    aio_fo, sample_threshold: int = SAMPLE_THRESHOLD, sample_size: int = SAMPLE_SIZE
-):
+async def _aio_get_data_for_hash(aio_fo, sample_threshold: int = SAMPLE_THRESHOLD, sample_size: int = SAMPLE_SIZE):
     await aio_fo.seek(0, os.SEEK_END)
     size = await aio_fo.tell()
     await aio_fo.seek(0, os.SEEK_SET)
@@ -50,6 +48,4 @@ async def aio_hashfile(
     hexdigest=False,
 ):
     async with aiofiles.open(filename, mode="rb") as aio_fo:
-        return await aio_hashfileobject(
-            aio_fo, sample_threshold, sample_size, hexdigest
-        )
+        return await aio_hashfileobject(aio_fo, sample_threshold, sample_size, hexdigest)

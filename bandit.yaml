@@ -1,4 +1,4 @@
 # https://bandit.readthedocs.io/en/latest/config.html
-
-# (optional) list included tests here:
-tests: ['B201', 'B301']
+# - https://bandit.readthedocs.io/en/latest/plugins/b105_hardcoded_password_string.html
+# - https://bandit.readthedocs.io/en/latest/plugins/b101_assert_used.html
+skips: ['B105','B101']

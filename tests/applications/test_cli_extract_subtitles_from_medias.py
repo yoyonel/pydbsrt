@@ -1,7 +1,7 @@
 """
 https://docs.pytest.org/en/stable/tmpdir.html
 """
-from applications import extract_subtitles_from_medias
+from pydbsrt.applications import extract_subtitles_from_medias
 
 
 def test_extract_subtitles_from_medias(cli_runner):

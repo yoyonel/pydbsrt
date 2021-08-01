@@ -23,13 +23,7 @@ from pathlib import Path
 import click
 import click_pathlib
 from rich.console import Console
-from rich.progress import (
-    BarColumn,
-    DownloadColumn,
-    Progress,
-    TextColumn,
-    TransferSpeedColumn,
-)
+from rich.progress import BarColumn, DownloadColumn, Progress, TextColumn, TransferSpeedColumn
 
 from pydbsrt.services.db_frames import import_binary_img_hash_to_db_async
 from pydbsrt.tools.rich_colums import TimeElapsedOverRemainingColumn
@@ -51,17 +45,11 @@ progress = Progress(
 
 
 async def run(binary_img_hash_file: Path) -> None:
-    media_id, nb_frames_inserted = await import_binary_img_hash_to_db_async(
-        binary_img_hash_file, progress
-    )
+    media_id, nb_frames_inserted = await import_binary_img_hash_to_db_async(binary_img_hash_file, progress)
     if nb_frames_inserted:
-        console.print(
-            f"count(frames where frames.media_id = {media_id})={nb_frames_inserted}"
-        )
+        console.print(f"count(frames where frames.media_id = {media_id})={nb_frames_inserted}")
     else:
-        console.print(
-            f"binary_img_hash_file={str(binary_img_hash_file)} already in DB (medias.id={media_id})"
-        )
+        console.print(f"binary_img_hash_file={str(binary_img_hash_file)} already in DB (medias.id={media_id})")
 
 
 @click.command(short_help="")
@@ -69,9 +57,7 @@ async def run(binary_img_hash_file: Path) -> None:
     "--binary_img_hash_file",
     "-r",
     required=True,
-    type=click_pathlib.Path(
-        exists=True, readable=True, resolve_path=True, allow_dash=False
-    ),
+    type=click_pathlib.Path(exists=True, readable=True, resolve_path=True, allow_dash=False),
     help="Path to media",
 )
 def import_images_hashes_into_db(binary_img_hash_file):

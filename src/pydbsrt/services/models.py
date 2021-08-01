@@ -15,9 +15,7 @@ class SubFrameRecord:
     end_frame_offset: int
     subtitles_id: int
 
-    text: str = dataclasses.field(default=str)
+    text: str = dataclasses.field(default="")
 
     def __getitem__(self, item):
-        return self.__getattribute__(
-            dataclasses.fields(self)[item].name if isinstance(item, int) else item
-        )
+        return self.__getattribute__(dataclasses.fields(self)[item].name if isinstance(item, int) else item)

@@ -4,15 +4,16 @@ import numpy as np
 import pytest
 from imagehash import ImageHash
 from pytest_lazyfixture import lazy_fixture
-from tools.imghash import (
-    imghash_to_bytes,
-    imghash_to_64bits,
+
+from pydbsrt.tools.imghash import (
     bytes_to_signed_int64,
+    imghash_count_nonzero,
+    imghash_distance,
+    imghash_str_hex_to_str_binary,
+    imghash_to_64bits,
+    imghash_to_bytes,
     imghash_to_signed_int64,
     signed_int64_to_str_binary,
-    imghash_distance,
-    imghash_count_nonzero,
-    imghash_str_hex_to_str_binary,
     signed_int64_to_str_hex,
 )
 
@@ -42,16 +43,7 @@ def bin_imghash() -> bytes:
 
 @pytest.fixture
 def str_imghash() -> str:
-    return (
-        "11010101"
-        "00000000"
-        "00000000"
-        "00000000"
-        "00000000"
-        "00000000"
-        "00000000"
-        "00000000"
-    )
+    return "11010101" "00000000" "00000000" "00000000" "00000000" "00000000" "00000000" "00000000"
 
 
 @pytest.fixture

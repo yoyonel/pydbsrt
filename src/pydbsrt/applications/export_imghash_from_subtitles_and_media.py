@@ -49,22 +49,16 @@ from pydbsrt.services import export_extended_subtitles
     "--subtitles",
     "-s",
     required=True,
-    type=click_pathlib.Path(
-        exists=True, readable=True, resolve_path=True, allow_dash=False
-    ),
+    type=click_pathlib.Path(exists=True, readable=True, resolve_path=True, allow_dash=False),
     help="Path to subtitles file",
 )
 @click.option(
     "--media",
     "-m",
     required=True,
-    type=click_pathlib.Path(
-        exists=True, readable=True, resolve_path=True, allow_dash=False
-    ),
+    type=click_pathlib.Path(exists=True, readable=True, resolve_path=True, allow_dash=False),
     help="Path to media",
 )
-@click.option(
-    "--output-file", "-o", default=None, help="File where to write images hashes."
-)
+@click.option("--output-file", "-o", default=None, help="File where to write images hashes.")
 def export_imghash_from_subtitles_and_media(subtitles, media, output_file):
     export_extended_subtitles(subtitles, media, output_file)

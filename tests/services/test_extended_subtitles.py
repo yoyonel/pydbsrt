@@ -1,31 +1,31 @@
 import math
 from functools import lru_cache
+from typing import Iterable, Iterator, Tuple
 
-from services.extended_subtitles import (
-    export_extended_subtitles,
-    read_extended_subtitles,
-)
-from tools.imghash import signed_int64_to_str_binary, gen_signed_int64_hash
-from tools.subfingerprint import subriptime_to_frame
-from tools.subreader import SubReader
+from pysrt import SubRipTime
+
+from pydbsrt.services.extended_subtitles import export_extended_subtitles, read_extended_subtitles
+from pydbsrt.tools.imghash import gen_signed_int64_hash, signed_int64_to_str_binary
+from pydbsrt.tools.subfingerprint import subriptime_to_frame
+from pydbsrt.tools.subreader import SubReader
 
 
 @lru_cache
 def _compute_nb_frames_from_srt(p_srt) -> int:
     sub_reader = SubReader(p_srt)
-    it_sub_timecodes = ((subtitle.start, subtitle.end) for subtitle in sub_reader)
+    it_sub_timecodes: Iterator[Tuple[SubRipTime, SubRipTime]] = (
+        (subtitle.start, subtitle.end) for subtitle in sub_reader
+    )
     # Union des intervalles (définis par les timecodes des sous-titres) de frames
     # https://docs.python.org/2/library/stdtypes.html#frozenset.union
-    intervals_frames_from_subs = set().union(
-        *(
-            range(
-                subriptime_to_frame(tc_start, cast_to_int=math.floor),
-                subriptime_to_frame(tc_end, cast_to_int=math.ceil) + 1,
-            )
-            for tc_start, tc_end in it_sub_timecodes
+    it_range: Iterable = (
+        range(
+            subriptime_to_frame(tc_start, cast_to_int=math.floor),
+            subriptime_to_frame(tc_end, cast_to_int=math.ceil) + 1,
         )
+        for tc_start, tc_end in it_sub_timecodes
     )
-    return len(intervals_frames_from_subs)
+    return len(set().union(*it_range))
 
 
 def test_export_extended_subtitles(resource_video_path, tmpdir):
@@ -39,9 +39,7 @@ def test_export_extended_subtitles(resource_video_path, tmpdir):
 
     # count the number of binary imghashes export to the (binary file) output
     with output_file_path.open("rb") as fo:
-        str_binary_hashes = list(
-            map(signed_int64_to_str_binary, gen_signed_int64_hash(fo))
-        )
+        str_binary_hashes = list(map(signed_int64_to_str_binary, gen_signed_int64_hash(fo)))
     nb_binary_hashes = len(str_binary_hashes)
 
     # compare nb output imghashes against the number of frames captured by subtitles

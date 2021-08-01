@@ -8,13 +8,7 @@ import re
 import subprocess
 import sys
 
-from pydbsrt.tools.ffmpeg_wrapper import (
-    FFException,
-    FFMedia,
-    FFmpeg,
-    FFmpegFilter,
-    FFprobe,
-)
+from pydbsrt.tools.ffmpeg_wrapper import FFException, FFMedia, FFmpeg, FFmpegFilter, FFprobe
 
 logger = logging.getLogger("ffmpegtools.cut")
 
@@ -67,9 +61,7 @@ def set_select_expression(
         try:
             i_frame_stop = int(frame_stop)
         except ValueError as e:
-            logger.error(
-                "Error when trying to cast [{}] to integer.".format(frame_stop)
-            )
+            logger.error("Error when trying to cast [{}] to integer.".format(frame_stop))
             raise e
         else:
             if i_frame_stop < 0:
@@ -110,31 +102,23 @@ def set_aselect_expression(frame_start, frame_stop, input_file):
         try:
             i_frame_start = int(frame_start)
         except ValueError as e:
-            logger.error(
-                "Error when trying to cast [{}] to integer.".format(frame_start)
-            )
+            logger.error("Error when trying to cast [{}] to integer.".format(frame_start))
             raise e
         else:
             if int(frame_start) < 0:
                 raise ValueError("Invalid start frame [{0}].".format(frame_start))
-            aselect_expression += "gte(t\,{0})".format(
-                calculate_frame_pts_time(i_frame_start, input_file)
-            )
+            aselect_expression += "gte(t\,{0})".format(calculate_frame_pts_time(i_frame_start, input_file))
 
     if frame_stop != "END":
         try:
             i_frame_stop = int(frame_stop)
         except ValueError as e:
-            logger.error(
-                "Error when trying to cast [{}] to integer.".format(frame_stop)
-            )
+            logger.error("Error when trying to cast [{}] to integer.".format(frame_stop))
             raise e
         else:
             if i_frame_stop < 0:
                 raise ValueError("Invalid stop frame [{0}].".format(frame_stop))
-            aselect_expression += "*lte(t\,{0})".format(
-                calculate_frame_pts_time(i_frame_stop, input_file)
-            )
+            aselect_expression += "*lte(t\,{0})".format(calculate_frame_pts_time(i_frame_stop, input_file))
 
     return aselect_expression
 
@@ -278,9 +262,7 @@ def build_parser(parser=None, **argparse_options):
         )
 
     # config file
-    parser.add_argument(
-        "-i", "--input-file", dest="input_file", required=True, help="", metavar="FILE"
-    )
+    parser.add_argument("-i", "--input-file", dest="input_file", required=True, help="", metavar="FILE")
     parser.add_argument(
         "-o",
         "--output-file",

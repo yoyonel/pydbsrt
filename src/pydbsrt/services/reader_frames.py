@@ -1,14 +1,12 @@
 import contextlib
 import datetime
 from pathlib import Path
-from typing import Dict, Optional
-from typing import Iterator, Tuple
+from typing import Dict, Iterator, Optional, Tuple
 
 from imageio_ffmpeg import read_frames
 from rich.progress import Progress
 
 from pydbsrt.tools.imghash import bytes_to_signed_int64
-
 
 SIZE_IMG_HASH = 8
 
@@ -48,9 +46,7 @@ def build_reader_frames(
     if ffmpeg_reduce_verbosity:
         ffmpeg_seek_input_cmd += "-hide_banner -nostats -nostdin".split(" ")
     if seek_to_middle:
-        ffmpeg_seek_input_cmd += (
-            f"-ss {str(datetime.timedelta(seconds=meta['duration'] // 2))}".split(" ")
-        )
+        ffmpeg_seek_input_cmd += f"-ss {str(datetime.timedelta(seconds=meta['duration'] // 2))}".split(" ")
 
     if nb_seconds_to_extract:
         ffmpeg_seek_output_cmd += [
@@ -91,9 +87,7 @@ def gen_read_binary_img_hash_file(
                 filename=binary_img_hash_file.name,
                 start=True,
             )
-            progress.update(
-                task_id, total=binary_img_hash_file.stat().st_size // SIZE_IMG_HASH
-            )
+            progress.update(task_id, total=binary_img_hash_file.stat().st_size // SIZE_IMG_HASH)
         with progress or contextlib.nullcontext():
             # TODO: maybe trying to read more bytes (packed chunk) to optimize (need to profile/evaluate)
             ba_img_hex = fo.read(SIZE_IMG_HASH)

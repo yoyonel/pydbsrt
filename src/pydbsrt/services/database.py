@@ -3,8 +3,9 @@ http://python-notes.curiousefficiency.org/en/latest/pep_ideas/async_programming.
 """
 import asyncpg
 from asyncpg import Connection
-from pydbsrt import settings
 from rich.console import Console
+
+from pydbsrt import settings
 
 psqlDbIpAddr = settings.PSQL_IP
 psqlDbName = settings.PSQL_DB_NAME

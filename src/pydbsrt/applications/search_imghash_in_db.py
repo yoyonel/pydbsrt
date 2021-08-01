@@ -25,7 +25,6 @@ from rich.console import Console
 
 from pydbsrt.services.matching import ResultSearch, search_phash_stream
 
-
 console = Console()
 
 
@@ -34,16 +33,12 @@ console = Console()
     "--phash_file",
     "-p",
     required=True,
-    type=click_pathlib.Path(
-        exists=True, readable=True, resolve_path=True, allow_dash=True
-    ),
+    type=click_pathlib.Path(exists=True, readable=True, resolve_path=True, allow_dash=True),
     help="PHash stream to search in db",
 )
 @click.option("--distance", "-d", default=1, type=int, help="Search distance to use")
 def search_imghash_in_db(phash_file, distance):
     phash_stream = sys.stdin if phash_file == Path("-") else phash_file.open("r")
     loop = asyncio.get_event_loop()
-    result_run: ResultSearch = loop.run_until_complete(
-        search_phash_stream(phash_stream, distance)
-    )
+    result_run: ResultSearch = loop.run_until_complete(search_phash_stream(phash_stream, distance))
     console.print(result_run.timer)

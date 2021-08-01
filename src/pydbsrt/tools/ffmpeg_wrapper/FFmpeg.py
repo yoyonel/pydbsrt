@@ -230,6 +230,4 @@ class FFmpeg(object):
         """
         Runner
         """
-        return subprocess.Popen(
-            self.built_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE
-        )
+        return subprocess.Popen(self.built_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)

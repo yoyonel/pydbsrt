@@ -7,7 +7,7 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from typing import Iterable
-from urllib.request import urlopen, Request
+from urllib.request import Request, urlopen
 
 from rich.progress import (
     BarColumn,

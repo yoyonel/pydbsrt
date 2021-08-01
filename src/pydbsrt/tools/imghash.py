@@ -1,7 +1,7 @@
 """
 """
 import binascii
-from typing import Iterator, BinaryIO
+from typing import BinaryIO, Iterator
 
 import distance
 import numpy as np
@@ -20,9 +20,7 @@ class ImgHashExtended(ImageHash):
     def __int__(self):
         ret = 0
         mask = 1 << len(self) - 1
-        for bit in np.nditer(
-            self.hash, order="C"
-        ):  # Specify memory order, so we're (theoretically) platform agnostic
+        for bit in np.nditer(self.hash, order="C"):  # Specify memory order, so we're (theoretically) platform agnostic
             if bit:
                 ret |= mask
             mask >>= 1
@@ -132,16 +130,10 @@ def signed_int64_to_imghash(imghash_signed_int64: int):
     >>> imghash_to_signed_int64(signed_int64_to_imghash(-3098476543630901248))
     -3098476543630901248
     """
-    return ImageHash(
-        np.unpackbits(
-            np.array([imghash_signed_int64], dtype=">i8").view(np.uint8)
-        ).reshape((8, 8))
-    )
+    return ImageHash(np.unpackbits(np.array([imghash_signed_int64], dtype=">i8").view(np.uint8)).reshape((8, 8)))
 
 
-def imghash_distance(
-    imghash0: ImageHash, imghash1: ImageHash, distance_func=distance.hamming
-) -> int:
+def imghash_distance(imghash0: ImageHash, imghash1: ImageHash, distance_func=distance.hamming) -> int:
     """
 
     :param imghash0:
@@ -193,7 +185,7 @@ def imghash_count_nonzero(imghash: ImageHash) -> int:
     return np.count_nonzero(imghash.hash.flatten())
 
 
-def imghash_str_hex_to_str_binary(imghash_hex: hex) -> str:
+def imghash_str_hex_to_str_binary(imghash_hex: str) -> str:
     """
 
     :param imghash_hex:

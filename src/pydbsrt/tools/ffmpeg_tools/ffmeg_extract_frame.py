@@ -3,7 +3,7 @@
 import logging
 import subprocess
 import time
-from typing import Generator
+from typing import Generator, Optional, Union
 
 import imagehash
 import numpy as np
@@ -16,11 +16,11 @@ from pydbsrt.tools.ffmpeg_wrapper import FFmpeg, FFmpegFilter
 
 def ffmpeg_frame_generator(
     input: str,
-    start_frame: int = None,
-    stop_frame: int = None,
+    start_frame: Optional[Union[int, str]] = None,
+    stop_frame: Optional[Union[int, str]] = None,
     frame_width: int = 32,
     frame_height: int = 32,
-) -> Generator[bytes, None, None]:
+) -> Generator[bytes, None, int]:
     """
 
     :param input: path or url of the media to read frames from
@@ -103,9 +103,9 @@ def rawframe_to_imghash(
     return imagehash.phash(
         Image.fromarray(
             # https://docs.scipy.org/doc/numpy-1.14.0/reference/generated/numpy.frombuffer.html
-            np.frombuffer(
-                raw_frame, dtype=np.uint8, count=frame_width * frame_height
-            ).reshape(frame_width, frame_height)
+            np.frombuffer(raw_frame, dtype=np.uint8, count=frame_width * frame_height).reshape(
+                frame_width, frame_height
+            )
         )
     )
 
@@ -117,9 +117,7 @@ def ffmpeg_imghash_generator(
     frame_width: int = 32,
     frame_height: int = 32,
 ) -> Generator[imagehash.ImageHash, None, None]:
-    for raw_frame in ffmpeg_frame_generator(
-        input, start_frame, stop_frame, frame_width, frame_height
-    ):
+    for raw_frame in ffmpeg_frame_generator(input, start_frame, stop_frame, frame_width, frame_height):
         yield rawframe_to_imghash(raw_frame)
 
 
@@ -128,19 +126,15 @@ if __name__ == "__main__":
 
     # root_path = Path('data/')
     # media_path = root_path.joinpath('big_buck_bunny_trailer_480p.webm')
-    root_path = Path(
-        "/home/latty/Vidéos/Mission Impossible Rogue Nation (2015) [1080p]/"
-    )
-    media_path = root_path.joinpath(
-        "Mission.Impossible.Rogue.Nation.2015.1080p.BluRay.x264.YIFY.[YTS.AG].mp4"
-    )
+    root_path = Path("/home/latty/Vidéos/Mission Impossible Rogue Nation (2015) [1080p]/")
+    media_path = root_path.joinpath("Mission.Impossible.Rogue.Nation.2015.1080p.BluRay.x264.YIFY.[YTS.AG].mp4")
 
     gen_imghash = ffmpeg_imghash_generator(str(media_path))
 
     # https://pythonhow.com/measure-execution-time-python-code/
     t0 = time.time()
     speed = None
-    sum_speed = 0
+    sum_speed = 0.0
     nb_mesures_for_timing = 10
 
     for i, imghash in enumerate(gen_imghash):

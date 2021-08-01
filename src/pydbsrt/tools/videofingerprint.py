@@ -2,13 +2,13 @@
 """
 import logging
 from dataclasses import dataclass, field
-from typing import Iterator
+from typing import Callable, Iterator
 
 import imagehash
 import imageio
 import numpy as np
-from PIL import Image
 from imagehash import ImageHash
+from PIL import Image
 
 #
 from pydbsrt.tools.videoreader import VideoReader
@@ -26,7 +26,7 @@ class VideoFingerprint:
 
     video_reader: VideoReader
     #
-    func_for_hash = _default_hash
+    func_for_hash: Callable[[Image], ImageHash] = _default_hash
 
     frame_reader: Iterator = field(init=False)
 

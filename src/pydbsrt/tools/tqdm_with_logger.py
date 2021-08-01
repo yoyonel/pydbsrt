@@ -27,5 +27,5 @@ def config_logger(
 ):
     logger.setLevel(logging._nameToLevel[level_name])
     tqdm_logging_handler = TqdmLoggingHandler()
-    tqdm_logging_handler.setFormatter(formatter)
+    tqdm_logging_handler.setFormatter(logging.Formatter(formatter))
     logger.addHandler(tqdm_logging_handler)

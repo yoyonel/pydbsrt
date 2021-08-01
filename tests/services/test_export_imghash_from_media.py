@@ -1,6 +1,6 @@
 from pydbsrt.services.imghash import export_imghash_from_media
-from services.reader_frames import build_reader_frames
-from tools.imghash import signed_int64_to_str_binary, gen_signed_int64_hash
+from pydbsrt.services.reader_frames import build_reader_frames
+from pydbsrt.tools.imghash import gen_signed_int64_hash, signed_int64_to_str_binary
 
 
 def test_export_imghash_from_media(resource_video_path, tmpdir):
@@ -13,9 +13,7 @@ def test_export_imghash_from_media(resource_video_path, tmpdir):
 
     # count the number of binary imghashes export to the (binary file) output
     with output_file_path.open("rb") as fo:
-        str_binary_hashes = list(
-            map(signed_int64_to_str_binary, gen_signed_int64_hash(fo))
-        )
+        str_binary_hashes = list(map(signed_int64_to_str_binary, gen_signed_int64_hash(fo)))
     nb_binary_hashes = len(str_binary_hashes)
 
     reader, _meta = build_reader_frames(p_video)
