@@ -14,7 +14,7 @@ from pydbsrt.tools.imghash import gen_signed_int64_hash, imghash_to_64bits, sign
 
 
 @pytest.fixture()
-def resource_video_path():
+def resource_colors_video_path():
     """
     https://stackoverflow.com/a/47704630 (How to generate a 2hour-long blank video)
     ffmpeg commands:
@@ -25,8 +25,16 @@ def resource_video_path():
     return lambda color_frame: Path(f"data/{color_frame}_frames.mp4")
 
 
-def test_cli_export_imghash_from_white_frames(resource_video_path, cli_runner, tmpdir):
-    p_video = resource_video_path("white")
+def test_cli_export_imghash(resource_video_path, cli_runner, tmpdir):
+    resource_video_name = "big_buck_bunny_trailer_480p"
+    p_video = resource_video_path(f"{resource_video_name}.webm")
+    binary_img_hash_file = tmpdir.mkdir("phash") / f"{resource_video_name}.phash"
+    result = cli_runner.invoke(export_imghash_from_media, args=f"-r {str(p_video)} -o {binary_img_hash_file}")
+    assert result.exit_code == 0
+
+
+def test_cli_export_imghash_from_white_frames(resource_colors_video_path, cli_runner, tmpdir):
+    p_video = resource_colors_video_path("white")
     output_file_path = tmpdir.mkdir("phash") / f"{p_video.stem}.phash"
     result = cli_runner.invoke(export_imghash_from_media, args=f"-r {str(p_video)} -o {output_file_path}")
     assert result.exit_code == 0
@@ -45,7 +53,7 @@ def test_cli_export_imghash_from_white_frames(resource_video_path, cli_runner, t
 
 
 @pytest.mark.xfail(raises=ValueError)
-def test_cli_export_imghash_from_black_frames(resource_video_path, cli_runner, tmpdir):
+def test_cli_export_imghash_from_black_frames(resource_colors_video_path, cli_runner, tmpdir):
     """
     Test pour montrer que l'algo d'hashing (et reconnaissance) ne fonctionne pas dans certain cas de figure ("pathologique").
     Par exemple, une vidéo composée de frame purement "noire", avec la compression (même élevée) va produire quelques artefacts,
@@ -53,7 +61,7 @@ def test_cli_export_imghash_from_black_frames(resource_video_path, cli_runner, t
     Ces quelques pixels non noirs vont casser l'uniformité de la frame et engendrés des "ondes" spectrale dans l'analyse (décomposition) DCT.
     Ces "ondes" impliqueront des hashes non nul, ce qui était les hashes attendus.
     """
-    p_video = resource_video_path("black")
+    p_video = resource_colors_video_path("black")
     output_file_path = tmpdir.mkdir("phash") / f"{p_video.stem}.phash"
     result = cli_runner.invoke(export_imghash_from_media, args=f"-r {str(p_video)} -o {output_file_path}")
     assert result.exit_code == 0

@@ -4,11 +4,12 @@ import dataclasses
 import itertools
 import math
 from dataclasses import dataclass
-from typing import Callable, Iterator, Union
+from typing import AsyncIterator, Callable, Iterator, Union
 
 from imagehash import ImageHash
 from pysrt.srtitem import SubRipTime
 
+from pydbsrt.services.models import PHashMedia
 from pydbsrt.tools.subreader import SubReader
 
 #
@@ -90,5 +91,63 @@ class SubFingerprints:
                     # (loop ...) until the last subtitle frame offset
                     if offset_frame >= frame_end:
                         break
+            except StopIteration:
+                break
+
+
+async def anext(ait):
+    return await ait.__anext__()
+
+
+@dataclass(init=True, repr=False, eq=False, order=False, unsafe_hash=False, frozen=True)
+class ASyncSubFingerprints:
+    sub_reader: SubReader
+    phash_media_reader: AsyncIterator[PHashMedia]
+
+    async def stream(self) -> AsyncIterator[SubFingerprint]:
+        ait_phash_media = self.phash_media_reader
+
+        # async def get_first_and_reinsert(async_iterator: AsyncIterator) -> Tuple[Any, AsyncIterable]:
+        #     try:
+        #         first_elem = await anext(async_iterator)
+        #     except StopIteration:
+        #         return
+        #
+        #     async def _rebuild_async_iterator():
+        #         yield first_elem
+        #         async for elem in async_iterator:
+        #             yield elem
+        #
+        #     return first_elem, _rebuild_async_iterator()
+        #
+        # img_hash, ait_imghash = await get_first_and_reinsert(ait_imghash)
+        # img_hash = -1
+        # offset_frame = -1
+
+        phash_media = await anext(ait_phash_media)
+
+        # iter on subtitles generator
+        for subtitle in self.sub_reader:
+            # get start, end timecodes
+            tc_start, tc_end = subtitle.start, subtitle.end
+            frame_start, frame_end = (
+                subriptime_to_frame(tc_start, cast_to_int=math.floor),
+                subriptime_to_frame(tc_end, cast_to_int=math.ceil),
+            )
+            try:
+                while phash_media.frame_offset < frame_start:
+                    try:
+                        phash_media = await anext(ait_phash_media)
+                    except StopAsyncIteration:
+                        break
+                # yield the first frame+phash
+                yield SubFingerprint(subtitle.index, phash_media.frame_offset, phash_media.p_hash)
+                # (loop ...) iterate on images hashes frames
+                while phash_media.frame_offset < frame_end:
+                    try:
+                        phash_media = await anext(ait_phash_media)
+                    except StopAsyncIteration:
+                        break
+                    yield SubFingerprint(subtitle.index, phash_media.frame_offset, phash_media.p_hash)
             except StopIteration:
                 break

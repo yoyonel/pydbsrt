@@ -1,10 +1,19 @@
 import math
+import re
 from functools import lru_cache
 from typing import Iterable, Iterator, Tuple
 
+import pytest
 from pysrt import SubRipTime
 
-from pydbsrt.services.extended_subtitles import export_extended_subtitles, read_extended_subtitles
+from pydbsrt.services.db_frames import agen_p_hash_from_media_in_db
+from pydbsrt.services.extended_subtitles import (
+    async_show_subtitles_fingerprints,
+    console,
+    export_extended_subtitles,
+    read_extended_subtitles,
+)
+from pydbsrt.tools.aio_filehash import aio_hashfile
 from pydbsrt.tools.imghash import gen_signed_int64_hash, signed_int64_to_str_binary
 from pydbsrt.tools.subfingerprint import subriptime_to_frame
 from pydbsrt.tools.subreader import SubReader
@@ -64,3 +73,35 @@ def test_read_extended_subtitles(resource_video_path, tmpdir):
 # def test_show_subtitles_fingerprints():
 #     # TODO: write utest ^^
 #     ...
+
+
+@pytest.mark.asyncio
+async def test_async_show_subtitles_fingerprints(
+    aio_insert_phash_into_db,
+    phash_from_media,
+    resource_video_path,
+):
+    resource_video_name = "big_buck_bunny_trailer_480p"
+    p_subtitles = resource_video_path(f"{resource_video_name}.en.srt")
+    binary_img_hash_file = phash_from_media
+    media_hash = await aio_hashfile(binary_img_hash_file, hexdigest=True)
+    agen_phash_media = agen_p_hash_from_media_in_db(media_hash)
+    with console.capture() as capture:
+        await async_show_subtitles_fingerprints(p_subtitles, agen_phash_media)
+    console_output = capture.get()
+
+    # https://regex101.com/r/Awetfu/1
+    regex = r"\* index subtitle: (?P<i_subtitle>\d*) - first frame: (?P<i_frame>\d*)"
+    matches = re.finditer(regex, console_output, re.MULTILINE)
+    extracted_index_subtitles_frame = [(match["i_subtitle"], match["i_frame"]) for match in matches]
+    expected_index_subtitles_frame = [
+        ('1', '0'),
+        ('2', '150'),
+        ('3', '272'),
+        ('4', '409'),
+        ('5', '573'),
+        ('6', '667'),
+        ('7', '750'),
+        ('8', '778'),
+    ]
+    assert extracted_index_subtitles_frame == expected_index_subtitles_frame

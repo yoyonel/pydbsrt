@@ -5,7 +5,9 @@ import pytest
 from asyncpg import Connection
 from waiting import wait
 
+from pydbsrt.services import export_imghash_from_media
 from pydbsrt.services.database import create_conn, drop_tables_async
+from pydbsrt.services.db_frames import import_binary_img_hash_to_db_async
 
 
 @pytest.fixture()
@@ -60,3 +62,19 @@ def patch_coroclick(mocker, event_loop):
         loop.run_until_complete(task)
 
     mocker.patch("pydbsrt.tools.coro.run_coro", mocked_run_coro)
+
+
+@pytest.fixture
+async def phash_from_media(resource_video_path, tmpdir) -> Path:
+    p_video = resource_video_path("big_buck_bunny_trailer_480p.webm")
+    output_file_path = tmpdir.mkdir("phash") / f"{p_video.stem}.phash"
+    output_file_exported: Path = export_imghash_from_media(p_video, output_file_path)
+    return output_file_exported
+
+
+@pytest.fixture
+@pytest.mark.asyncio
+async def aio_insert_phash_into_db(conn, phash_from_media: Path):
+    media_id, nb_frames_inserted = await import_binary_img_hash_to_db_async(phash_from_media)
+    assert media_id == 1
+    assert nb_frames_inserted == 812
