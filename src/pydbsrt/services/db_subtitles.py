@@ -125,7 +125,7 @@ async def import_subtitles_into_db_async(
                     )
 
                     if check_before_inserting:
-                        end_frame_offset = await _import_subtitles_into_db_check_async(
+                        end_frame_offset = await _async_check_import_subtitles_into_db(
                             conn,
                             it_indexed_sub_fingerprints,
                             sub_fingerprint.offset_frame,
@@ -158,7 +158,7 @@ async def import_subtitles_into_db_async(
     return nb_rows_inserted
 
 
-async def _import_subtitles_into_db_check_async(
+async def _async_check_import_subtitles_into_db(
     conn,
     it_indexed_sub_fingerprints,
     start_frame_offset,

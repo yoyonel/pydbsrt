@@ -44,7 +44,7 @@ progress = Progress(
 )
 
 
-async def run(binary_img_hash_file: Path) -> None:
+async def do_import_images_hashes_into_db(binary_img_hash_file: Path) -> None:
     media_id, nb_frames_inserted = await import_binary_img_hash_to_db_async(binary_img_hash_file, progress)
     if nb_frames_inserted:
         console.print(f"count(frames where frames.media_id = {media_id})={nb_frames_inserted}")
@@ -62,6 +62,4 @@ async def run(binary_img_hash_file: Path) -> None:
 )
 @coroclick
 async def import_images_hashes_into_db(binary_img_hash_file):
-    # loop = asyncio.get_event_loop()
-    # loop.run_until_complete(run(binary_img_hash_file))
-    await run(binary_img_hash_file)
+    await do_import_images_hashes_into_db(binary_img_hash_file)

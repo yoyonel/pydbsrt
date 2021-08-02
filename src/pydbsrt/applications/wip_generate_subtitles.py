@@ -5,7 +5,6 @@
 # Description
 
 """
-import asyncio
 from pathlib import Path
 from typing import List
 
@@ -16,6 +15,7 @@ import click_pathlib
 from rich.console import Console
 
 from pydbsrt.services.extended_subtitles import read_extended_subtitles
+from pydbsrt.tools.coro import coroclick
 from pydbsrt.tools.subfingerprint import subriptime_to_frame
 from pydbsrt.tools.subreader import SubReader
 
@@ -24,7 +24,7 @@ console = Console()
 SIZE_IMG_HASH = 8
 
 
-async def run(
+async def do_generate_subtitles(
     src_subtitles: Path,
     src_binary_extended_subtitles: Path,
     target_subtitles_lang: str = "FR",
@@ -72,6 +72,6 @@ async def run(
     type=click_pathlib.Path(exists=True, readable=True, resolve_path=True, allow_dash=False),
     help="Path to source subtitles file",
 )
-def generate_subtitles(src_subtitles, src_binary_extended_subtitles):
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(run(src_subtitles, src_binary_extended_subtitles))
+@coroclick
+async def generate_subtitles(src_subtitles, src_binary_extended_subtitles):
+    await do_generate_subtitles(src_subtitles, src_binary_extended_subtitles)

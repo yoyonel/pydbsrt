@@ -8,7 +8,6 @@
 # Description
 
 """
-import asyncio
 from pathlib import Path
 
 import click
@@ -20,11 +19,12 @@ from yaspin import yaspin
 from yaspin.spinners import Spinners
 
 import pydbsrt.services.db_subtitles
+from pydbsrt.tools.coro import coroclick
 
 console = Console()
 
 
-async def run(subtitles: Path, binary_img_hash_file: Path):
+async def do_import_subtitles_into_db(subtitles: Path, binary_img_hash_file: Path):
     spinner = yaspin(Spinners.dots2, f"Insert subtitles={subtitles.stem} into DB", timer=True)
     nb_rows_inserted = await pydbsrt.services.db_subtitles.import_subtitles_into_db_async(
         subtitles,
@@ -51,6 +51,6 @@ async def run(subtitles: Path, binary_img_hash_file: Path):
     type=click_pathlib.Path(exists=True, readable=True, resolve_path=True, allow_dash=False),
     help="Path to binary image hash file (generated from media)",
 )
-def import_subtitles_into_db(subtitles, binary_img_hash_file):
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(run(subtitles, binary_img_hash_file))
+@coroclick
+async def import_subtitles_into_db(subtitles, binary_img_hash_file):
+    await do_import_subtitles_into_db(subtitles, binary_img_hash_file)
