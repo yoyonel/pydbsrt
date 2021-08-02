@@ -2,6 +2,8 @@ from dataclasses import dataclass
 from typing import Iterable, List
 
 import asyncpg
+
+# https://asyncstdlib.readthedocs.io/en/latest/source/api/functools.html?highlight=lru_cache#asyncstdlib.functools.lru_cache
 from asyncstdlib.functools import lru_cache
 from contexttimer import Timer
 

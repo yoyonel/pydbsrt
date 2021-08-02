@@ -53,9 +53,9 @@ msgpack = "^1.0.0"
 ujson = "^4.0.1"
 yaspin = "^1.2.0"
 dictdiffer = "^0.8.1"
+# https://github.com/maxfischer2781/asyncstdlib
 asyncstdlib = "^3.9.2"
 aiofiles = "^0.7.0"
-aiostream = "^0.4.3"
 
 [tool.poetry.dev-dependencies]
 pytest = "^6.1.2"

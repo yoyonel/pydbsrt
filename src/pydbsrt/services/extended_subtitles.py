@@ -3,7 +3,7 @@ from operator import itemgetter
 from pathlib import Path
 from struct import unpack
 from tempfile import gettempdir
-from typing import AsyncIterator, Callable, Iterator, Optional, Tuple, Union
+from typing import AsyncGenerator, AsyncIterator, Callable, Iterator, Optional, Tuple, Union
 
 import asyncstdlib
 from imagehash import ImageHash
@@ -14,10 +14,11 @@ from yaspin.spinners import Spinners
 
 from pydbsrt.services.models import PHashMedia
 from pydbsrt.services.reader_frames import build_reader_frames
+from pydbsrt.tools.async_builtins import anext
 from pydbsrt.tools.chunk import chunks
 from pydbsrt.tools.ffmpeg_tools.ffmeg_extract_frame import rawframe_to_imghash
 from pydbsrt.tools.imghash import imghash_to_bytes
-from pydbsrt.tools.subfingerprint import ASyncSubFingerprints, SubFingerprint, SubFingerprints, anext
+from pydbsrt.tools.subfingerprint import ASyncSubFingerprints, SubFingerprint, SubFingerprints
 from pydbsrt.tools.subreader import SubReader
 
 console = Console()
@@ -89,14 +90,15 @@ async def async_show_subtitles_fingerprints(
     fn_imghash_to: Callable[[ImageHash], str] = str,
 ) -> None:
     agen_sub_fingerprint = ASyncSubFingerprints(sub_reader=SubReader(srt_path), phash_media_reader=agen_phash_media)
-    aio_gb_sub_fingerprints = asyncstdlib.groupby(agen_sub_fingerprint.stream(), key=itemgetter("index"))
+    # https://asyncstdlib.readthedocs.io/en/latest/source/api/itertools.html#asyncstdlib.itertools.groupby
+    # noinspection PyTypeChecker
+    aio_gb_sub_fingerprints: AsyncGenerator[tuple[int, AsyncIterator[SubFingerprint]], None] = asyncstdlib.groupby(
+        agen_sub_fingerprint.ait_subfingerprint, key=itemgetter("index")
+    )
     async for index_subtitle, ait_indexed_sub_fingerprints in aio_gb_sub_fingerprints:
         sub_fingerprint = await anext(ait_indexed_sub_fingerprints)
-
         console.print(f"* index subtitle: {index_subtitle} - first frame: {sub_fingerprint.offset_frame}")
-
         it_fingerprint = iter([sub_fingerprint.img_hash async for sub_fingerprint in ait_indexed_sub_fingerprints])
-
         for chunk_fingerprints in grouper(it_fingerprint, nb_fingerprints_by_row):
             it_chunk_fingerprints: Iterator[ImageHash] = filter(None, chunk_fingerprints)
             console.print(" ".join(fn_imghash_to(img_hash) for img_hash in it_chunk_fingerprints))

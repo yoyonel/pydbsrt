@@ -84,12 +84,13 @@ async def test_async_show_subtitles_fingerprints(
     resource_video_name = "big_buck_bunny_trailer_480p"
     p_subtitles = resource_video_path(f"{resource_video_name}.en.srt")
     binary_img_hash_file = phash_from_media
+
     media_hash = await aio_hashfile(binary_img_hash_file, hexdigest=True)
     agen_phash_media = agen_p_hash_from_media_in_db(media_hash)
     with console.capture() as capture:
         await async_show_subtitles_fingerprints(p_subtitles, agen_phash_media)
-    console_output = capture.get()
 
+    console_output = capture.get()
     # https://regex101.com/r/Awetfu/1
     regex = r"\* index subtitle: (?P<i_subtitle>\d*) - first frame: (?P<i_frame>\d*)"
     matches = re.finditer(regex, console_output, re.MULTILINE)

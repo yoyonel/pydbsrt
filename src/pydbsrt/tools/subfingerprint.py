@@ -10,9 +10,8 @@ from imagehash import ImageHash
 from pysrt.srtitem import SubRipTime
 
 from pydbsrt.services.models import PHashMedia
+from pydbsrt.tools.async_builtins import anext
 from pydbsrt.tools.subreader import SubReader
-
-#
 from pydbsrt.tools.videofingerprint import VideoFingerprint
 
 
@@ -25,7 +24,7 @@ def subriptime_to_frame(srt: SubRipTime, fps: float = 25.0, cast_to_int: Callabl
 class SubFingerprint:
     index: int
     offset_frame: int
-    img_hash: ImageHash
+    img_hash: Union[ImageHash, int]
 
     def __getitem__(self, item):
         return self.__getattribute__(dataclasses.fields(self)[item].name if isinstance(item, int) else item)
@@ -95,34 +94,14 @@ class SubFingerprints:
                 break
 
 
-async def anext(ait):
-    return await ait.__anext__()
-
-
 @dataclass(init=True, repr=False, eq=False, order=False, unsafe_hash=False, frozen=True)
 class ASyncSubFingerprints:
     sub_reader: SubReader
     phash_media_reader: AsyncIterator[PHashMedia]
 
-    async def stream(self) -> AsyncIterator[SubFingerprint]:
+    @property
+    async def ait_subfingerprint(self) -> AsyncIterator[SubFingerprint]:
         ait_phash_media = self.phash_media_reader
-
-        # async def get_first_and_reinsert(async_iterator: AsyncIterator) -> Tuple[Any, AsyncIterable]:
-        #     try:
-        #         first_elem = await anext(async_iterator)
-        #     except StopIteration:
-        #         return
-        #
-        #     async def _rebuild_async_iterator():
-        #         yield first_elem
-        #         async for elem in async_iterator:
-        #             yield elem
-        #
-        #     return first_elem, _rebuild_async_iterator()
-        #
-        # img_hash, ait_imghash = await get_first_and_reinsert(ait_imghash)
-        # img_hash = -1
-        # offset_frame = -1
 
         phash_media = await anext(ait_phash_media)
 

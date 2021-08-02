@@ -7,14 +7,6 @@ optional = false
 python-versions = ">=3.6,<4.0"
 
 [[package]]
-name = "aiostream"
-version = "0.4.3"
-description = "Generator-based operators for asynchronous iteration"
-category = "main"
-optional = false
-python-versions = "*"
-
-[[package]]
 name = "appdirs"
 version = "1.4.4"
 description = "A small Python module for determining appropriate platform-specific dirs, e.g. a \"user data dir\"."
@@ -1567,15 +1559,12 @@ python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*"
 [metadata]
 lock-version = "1.1"
 python-versions = "^3.8"
-content-hash = "4bdeeb1da45bf6db51a505ea6d5a20809be82fc19bbe926bb1690758e17ebe86"
+content-hash = "1161e0bfbfa4e9e8945a81d88bf6070bd157514a18775532e19702cc67904f51"
 
 [metadata.files]
 aiofiles = [
     {file = "aiofiles-0.7.0-py3-none-any.whl", hash = "sha256:c67a6823b5f23fcab0a2595a289cec7d8c863ffcb4322fb8cd6b90400aedfdbc"},
     {file = "aiofiles-0.7.0.tar.gz", hash = "sha256:a1c4fc9b2ff81568c83e21392a82f344ea9d23da906e4f6a52662764545e19d4"},
-]
-aiostream = [
-    {file = "aiostream-0.4.3.tar.gz", hash = "sha256:36345ef1d21bedffe0878210a9123234ca8d29d8f33f0f073bea1271735f63cc"},
 ]
 appdirs = [
     {file = "appdirs-1.4.4-py2.py3-none-any.whl", hash = "sha256:a841dacd6b99318a741b166adb07e19ee71a274450e68237b4650ca1055ab128"},

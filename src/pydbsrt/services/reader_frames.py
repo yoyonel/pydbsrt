@@ -87,6 +87,7 @@ def gen_read_binary_img_hash_file(
                 filename=binary_img_hash_file.name,
                 start=True,
             )
+            # https://docs.python.org/3/library/pathlib.html#pathlib.Path.stat
             progress.update(task_id, total=binary_img_hash_file.stat().st_size // SIZE_IMG_HASH)
         with progress or contextlib.nullcontext():
             # TODO: maybe trying to read more bytes (packed chunk) to optimize (need to profile/evaluate)
