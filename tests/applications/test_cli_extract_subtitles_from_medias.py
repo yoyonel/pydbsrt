@@ -18,5 +18,6 @@ def test_extract_subtitles_from_medias(cli_runner):
                 f"--default-relative-path-export-for-subtitles {default_relative_path_export_for_subtitles}",
             )
         ),
+        catch_exceptions=False,
     )
     assert result.exit_code == 0

@@ -13,8 +13,9 @@ def test_cli_recognize_media(aio_insert_phash_into_db, resource_video_path):
         result = runner.invoke(
             recognize_media,
             args=" ".join((f"--media {str(p_video)}", "--output_format CSV")),
+            catch_exceptions=False,
         )
-    assert result.exit_code == 0, f"{str(result.exception)=}{result.exc_info=}"
+    assert result.exit_code == 0
     console_output = capture.get()
     assert "True," in console_output
     assert resource_video_name in console_output

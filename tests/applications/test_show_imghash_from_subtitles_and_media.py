@@ -10,7 +10,9 @@ def test_cli_show_imghash_from_subtitles_and_media(cli_runner, resource_video_pa
     p_subtitles = resource_video_path(f"{resource_video_name}.en.srt")
     with console.capture() as capture:
         result = cli_runner.invoke(
-            show_imghash_from_subtitles_and_media, args=f"-m {str(p_video)} -s {str(p_subtitles)}"
+            show_imghash_from_subtitles_and_media,
+            args=f"-m {str(p_video)} -s {str(p_subtitles)}",
+            catch_exceptions=False,
         )
     assert result.exit_code == 0
     console_output = capture.get()

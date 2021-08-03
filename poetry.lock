@@ -1121,6 +1121,17 @@ pytest = ">=5.0"
 dev = ["pre-commit", "tox", "pytest-asyncio"]
 
 [[package]]
+name = "pytest-picked"
+version = "0.4.6"
+description = "Run the tests related to the changed files"
+category = "dev"
+optional = false
+python-versions = ">=3.5"
+
+[package.dependencies]
+pytest = ">=3.5.0"
+
+[[package]]
 name = "pytest-postgresql"
 version = "2.6.1"
 description = "Postgresql fixtures and fixture factories for Pytest."
@@ -1580,7 +1591,7 @@ python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*"
 [metadata]
 lock-version = "1.1"
 python-versions = "^3.8"
-content-hash = "e6f3e04a05327ad85ec7c23ec40bfdbff2b0eef186b6a1c4fa79cf85068dcf7d"
+content-hash = "aae1e2ea71a988505b3af42e66d261ce15d03a779c47cfe1e1e946d60daf9b39"
 
 [metadata.files]
 aiofiles = [
@@ -2403,6 +2414,10 @@ pytest-lazy-fixture = [
 pytest-mock = [
     {file = "pytest-mock-3.6.1.tar.gz", hash = "sha256:40217a058c52a63f1042f0784f62009e976ba824c418cced42e88d5f40ab0e62"},
     {file = "pytest_mock-3.6.1-py3-none-any.whl", hash = "sha256:30c2f2cc9759e76eee674b81ea28c9f0b94f8f0445a1b87762cadf774f0df7e3"},
+]
+pytest-picked = [
+    {file = "pytest-picked-0.4.6.tar.gz", hash = "sha256:e1ec7aee5d2cd3a91f676fd0afd7620a26c0ccc21e604152bbc5137f430e6c00"},
+    {file = "pytest_picked-0.4.6-py3-none-any.whl", hash = "sha256:8bc744222a39ecc84cbcb87251fb69810ee576a80f84cc77fc47222818b3fa7c"},
 ]
 pytest-postgresql = [
     {file = "pytest_postgresql-2.6.1-py3-none-any.whl", hash = "sha256:5e24cc87d3a955a5ebe919ee5c1c15bd7300823a362269327b63526e6718cbdb"},

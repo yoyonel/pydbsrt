@@ -11,5 +11,6 @@ def test_export_imghash_from_subtitles_and_media(resource_video_path, cli_runner
     result = cli_runner.invoke(
         export_imghash_from_subtitles_and_media,
         args=f"--media {str(p_video)} " f"--subtitles {str(p_srt)} " f"-o {output_file_path} ",
+        catch_exceptions=False,
     )
     assert result.exit_code == 0

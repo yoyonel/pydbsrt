@@ -36,6 +36,7 @@ async def aio_hashfileobject(
     hash_tmp = mmh3.hash_bytes(data)
     hash_ = hash_tmp[7::-1] + hash_tmp[16:7:-1]
     enc_size = varint.encode(size)
+    # https://black.readthedocs.io/en/stable/the_black_code_style/current_style.html#slices
     digest = enc_size + hash_[len(enc_size) :]
 
     return binascii.hexlify(digest).decode() if hexdigest else digest

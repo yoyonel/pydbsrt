@@ -83,6 +83,8 @@ mypy-extensions = "^0.4.3"
 types-aiofiles = "^0.1.7"
 types-click = "^7.1.2"
 pytest-sugar = "^0.9.4"
+pytest-picked = "^0.4.6"
+# https://github.com/freakboy3742/pytest-tldr
 
 [tool.unimport]
 sources = ["src"]
@@ -101,13 +103,14 @@ junit_family = "xunit2"
 filterwarnings = [
     "ignore:.*U.*mode is deprecated:DeprecationWarning",
 ]
+
 # https://github.com/pytest-docker-compose/pytest-docker-compose
 db-volume-args = "docker_test_bktreedb-data:/var/lib/postgresql/data"
 db-image = "docker_bktreedb:test"
 db-name = "bktreedb"
 db-port = 5432
 db-host-port = 5432
-addopts = "--docker-compose=docker/docker-compose.test.yml --use-running-containers --docker-compose-no-build"
+addopts = "--durations=0 --durations-min=0.2 --doctest-modules --docker-compose=docker/docker-compose.test.yml --use-running-containers --docker-compose-no-build"
 
 [tool.black]
 line-length = 120
@@ -125,15 +128,19 @@ line_length = 120
 [tool.poe.tasks]
 init = { cmd = "poetry install", help = "Install the required packages" }
 format-source = { cmd = "pre-commit run --all-files black", help = "Format source code" }
-format-imports = { cmd = "pre-commit run --all-files isort", help = "Check the imports" }
+format-imports = { cmd = "pre-commit run --all-files isort", help = "Sort the imports" }
+format-unimport = { cmd = "pre-commit run --all-files unimport", help = "Remove unused imports" }
 format = { sequence = [
   "format-source",
   "format-imports",
+    "format-unimport",
 ], help = "All formatting at once" }
 
+check-flake8 = { cmd = "pre-commit run --all-files flake8", help = "Check code style (with flake8)"}
 check-vulnerabilities = { cmd = "pre-commit run --all-files bandit", help = "Perform security linting"}
 check-grammar = { cmd = "pre-commit run --all-file mypy", help = "Check grammar with mypy" }
 check = { sequence = [
+    "check-flake8",
   "check-vulnerabilities",
   "check-grammar",
 ], help = "All check at once" }
@@ -147,6 +154,11 @@ help = "Build wheel in ./wheels"
 [tool.poe.tasks.test]
 cmd = "pytest --cov=./src --cov-report term --cov-report html --junit-xml=junit-report.xml"
 help = "Run tests with coverage"
+
+[tool.poe.tasks.test-picked]
+# https://github.com/anapaulagomes/pytest-picked
+cmd = "pytest --picked"
+help="Run tests on unstaged (according to git) modifications"
 
 [tool.poe.tasks.clean]
 cmd = """

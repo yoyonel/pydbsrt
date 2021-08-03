@@ -15,9 +15,11 @@ def test_cli_show_imghash_from_subtitles_and_media_in_db(
 
     with console.capture() as capture:
         result = cli_runner.invoke(
-            show_imghash_from_subtitles_and_media_in_db, args=f"-r {str(phash_from_media)} -s {str(p_subtitles)}"
+            show_imghash_from_subtitles_and_media_in_db,
+            args=f"-r {str(phash_from_media)} -s {str(p_subtitles)}",
+            catch_exceptions=False,
         )
-    assert result.exit_code == 0, f"{str(result.exception)=}{result.exc_info=}"
+    assert result.exit_code == 0
     console_output = capture.get()
 
     # https://regex101.com/r/Awetfu/1
