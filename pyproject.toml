@@ -85,6 +85,7 @@ types-click = "^7.1.2"
 pytest-sugar = "^0.9.4"
 pytest-picked = "^0.4.6"
 # https://github.com/freakboy3742/pytest-tldr
+tox-poetry-installer = {extras = ["poetry"], version = "^0.8.1"}
 
 [tool.unimport]
 sources = ["src"]

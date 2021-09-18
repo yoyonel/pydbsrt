@@ -49,10 +49,7 @@ fclean:
 	@find . -name "__pycache__" -delete
 
 pytest:
-	@cd tests && \
-	 PYTHONPATH=../src/pydbsrt \
-	 	poetry run pytest ${PYTEST_OPTIONS} --rootdir . && \
-	 cd -
+	@poetry run pytest ${PYTEST_OPTIONS} --rootdir .
 
 tox:
 	# http://ahmetdal.org/jenkins-tox-shebang-problem/

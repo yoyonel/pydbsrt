@@ -5,8 +5,7 @@ import aiofiles
 import mmh3
 import varint
 
-SAMPLE_THRESHOLD = 128 * 1024
-SAMPLE_SIZE = 16 * 1024
+from pydbsrt.tools.constants import SAMPLE_SIZE, SAMPLE_THRESHOLD
 
 
 async def _aio_get_data_for_hash(aio_fo, sample_threshold: int = SAMPLE_THRESHOLD, sample_size: int = SAMPLE_SIZE):
