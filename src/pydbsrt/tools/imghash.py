@@ -200,6 +200,7 @@ def imghash_str_hex_to_str_binary(imghash_hex: str) -> str:
 
 
 def gen_signed_int64_hash(fo: BinaryIO) -> Iterator[int]:
+    """ """
     ba_img_hex = fo.read(8)
     offset_frame = 0
     while ba_img_hex:

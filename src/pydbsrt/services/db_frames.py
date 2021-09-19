@@ -23,22 +23,15 @@ from pydbsrt.tools.aio_filehash import aio_hashfile
 async def import_binary_img_hash_to_db_async(
     binary_img_hash_file: Path, progress: Optional[Progress] = None
 ) -> Tuple[int, int]:
-    # conn = await create_conn()
-
-    # media_hash = hashfile(binary_img_hash_file, hexdigest=True)
     media_hash = await aio_hashfile(binary_img_hash_file, hexdigest=True)
-
     console.print(f"media_hash='{media_hash}'")
 
     async with asyncpg.create_pool(
         user=psqlUserName, password=psqlUserPass, database=psqlDbName, host=psqlDbIpAddr, command_timeout=60
     ) as pool:
         async with pool.acquire() as conn:
-            # await drop_tables(conn)
             await create_tables_async(conn)
             await create_indexes_async(conn)
-
-            # await reindex_tables(conn)
 
             # Test if this media is already in DB
             # https://magicstack.github.io/asyncpg/current/api/index.html?highlight=returning#asyncpg.connection.Connection.fetchval
@@ -70,10 +63,11 @@ async def import_binary_img_hash_to_db_async(
                 binary_img_hash_file.stem,
             )
             if media_id is None:
-                error_console.print(
+                error_msg = (
                     f"Problem when inserting media (media_hash={media_hash}, name={binary_img_hash_file.stem}) into DB!"
                 )
-                raise RuntimeError("DB: Problem when inserting media")
+                error_console.print(error_msg)
+                raise RuntimeError(error_msg)
 
             await conn.copy_records_to_table(
                 "frames",
@@ -95,8 +89,6 @@ async def import_binary_img_hash_to_db_async(
                 )
                 or 0
             )
-            # await search_img_hash(conn)
-            # await conn.close()
     return media_id, nb_frames_inserted
 
 

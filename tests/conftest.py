@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Coroutine
+from typing import Coroutine, Tuple
 
 import pytest
 from asyncpg import Connection
@@ -74,7 +74,8 @@ async def phash_from_media(resource_video_path, tmpdir) -> Path:
 
 @pytest.fixture
 @pytest.mark.asyncio
-async def aio_insert_phash_into_db(conn, phash_from_media: Path):
+async def aio_insert_phash_into_db(conn, phash_from_media: Path) -> Tuple[int, int]:
     media_id, nb_frames_inserted = await import_binary_img_hash_to_db_async(phash_from_media)
     assert media_id == 1
     assert nb_frames_inserted == 812
+    return media_id, nb_frames_inserted
