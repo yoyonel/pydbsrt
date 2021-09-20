@@ -4,7 +4,7 @@ from pydbsrt.applications import show_imghash_from_subtitles_and_media
 from pydbsrt.services.extended_subtitles import console
 
 
-def test_cli_show_imghash_from_subtitles_and_media(cli_runner, resource_video_path):
+def test_show_imghash_from_subtitles_and_media(cli_runner, resource_video_path):
     resource_video_name = "big_buck_bunny_trailer_480p"
     p_video = resource_video_path(f"{resource_video_name}.webm")
     p_subtitles = resource_video_path(f"{resource_video_name}.en.srt")

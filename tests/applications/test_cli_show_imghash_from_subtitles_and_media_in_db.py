@@ -4,7 +4,7 @@ from pydbsrt.applications import show_imghash_from_subtitles_and_media_in_db
 from pydbsrt.services.extended_subtitles import console
 
 
-def test_cli_show_imghash_from_subtitles_and_media_in_db(
+def test_show_imghash_from_subtitles_and_media_in_db(
     aio_insert_phash_into_db,
     phash_from_media,
     cli_runner,

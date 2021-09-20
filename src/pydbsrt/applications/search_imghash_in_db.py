@@ -24,6 +24,7 @@ from rich.console import Console
 
 from pydbsrt.services.matching import ResultSearch, search_phash_stream
 from pydbsrt.tools.coro import coroclick
+from pydbsrt.tools.imghash import gen_signed_int64_hash
 
 console = Console()
 
@@ -39,6 +40,8 @@ console = Console()
 @click.option("--distance", "-d", default=1, type=int, help="Search distance to use")
 @coroclick
 async def search_imghash_in_db(phash_file, distance):
-    phash_stream = sys.stdin if phash_file == Path("-") else phash_file.open("r")
-    result_run: ResultSearch = await search_phash_stream(phash_stream, distance)
-    console.print(result_run.timer)
+    it_phash_stream = gen_signed_int64_hash(sys.stdin if phash_file == Path("-") else phash_file.open("rb"))
+    results_search: ResultSearch = await search_phash_stream(map(str, it_phash_stream), distance)
+    for record in results_search.records:
+        console.print(record)
+    console.print(results_search.timer)
