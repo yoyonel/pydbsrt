@@ -1,7 +1,7 @@
 import asyncio
 import sys
 from functools import wraps
-from typing import Any, Awaitable, Callable, Coroutine, Optional, Set
+from typing import Any, Awaitable, Callable, Optional, Set
 
 import click
 
@@ -39,7 +39,7 @@ def _cancel_all_tasks(loop: asyncio.AbstractEventLoop) -> None:
             )
 
 
-def run_coro(coro: Coroutine):
+def run_coro(coro: Awaitable):
     loop = asyncio.get_event_loop()
     task = None
     complete = False
