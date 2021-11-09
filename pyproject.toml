@@ -56,6 +56,7 @@ dictdiffer = "^0.8.1"
 # https://github.com/maxfischer2781/asyncstdlib
 asyncstdlib = "^3.9.2"
 aiofiles = "^0.7.0"
+loguru = "^0.5.3"
 
 [tool.poetry.dev-dependencies]
 pytest = "^6.1.2"

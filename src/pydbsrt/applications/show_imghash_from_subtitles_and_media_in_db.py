@@ -7,6 +7,7 @@ import click
 
 # https://pypi.org/project/click-pathlib/
 import click_pathlib
+from loguru import logger
 from rich.console import Console
 
 from pydbsrt.services.db_frames import agen_p_hash_from_media_in_db
@@ -39,5 +40,6 @@ async def do_show_imghash_from_subtitles_and_media_in_db(subtitles: Path, binary
     help="Path to binary image hashes media (just for id_hash)",
 )
 @coroclick
+@logger.catch
 async def show_imghash_from_subtitles_and_media_in_db(subtitles, binary_img_hash_file):
     await do_show_imghash_from_subtitles_and_media_in_db(subtitles, binary_img_hash_file)

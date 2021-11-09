@@ -1,7 +1,8 @@
 #!/usr/bin/env python -*- coding: utf-8 -*-
-import logging
+import sys
 
 import click
+from loguru import logger
 
 from pydbsrt.applications.export_imghash_from_media import export_imghash_from_media
 from pydbsrt.applications.export_imghash_from_subtitles_and_media import export_imghash_from_subtitles_and_media
@@ -18,21 +19,26 @@ from pydbsrt.applications.wip_generate_subtitles import generate_subtitles
 
 
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
-@click.option("--log-level", default="WARN", help="set logging level")
-def entry_point(log_level):
-    logging.getLogger(__name__).setLevel(getattr(logging, log_level.upper()))
+# @click.option("--log-level", default="WARN", help="set logging level")
+# def entry_point(log_level):
+def entry_point():
+    # logging.getLogger(__name__).setLevel(getattr(logging, log_level.upper()))
+    logger.add(sys.stdout, colorize=True, backtrace=True, diagnose=True)
 
 
-entry_point.add_command(export_imghash_from_media)
-entry_point.add_command(import_images_hashes_into_db)
-entry_point.add_command(search_imghash_in_db)
-entry_point.add_command(recognize_media)
-entry_point.add_command(export_imghash_from_subtitles_and_media)
-entry_point.add_command(show_imghash_from_subtitles_and_media)
-entry_point.add_command(extract_subtitles_from_medias)
-entry_point.add_command(show_imghash_from_subtitles_and_media_in_db)
-entry_point.add_command(import_subtitles_into_db)
-entry_point.add_command(generate_subtitles)
+for command_name in (
+    export_imghash_from_media,
+    import_images_hashes_into_db,
+    search_imghash_in_db,
+    recognize_media,
+    export_imghash_from_subtitles_and_media,
+    show_imghash_from_subtitles_and_media,
+    extract_subtitles_from_medias,
+    show_imghash_from_subtitles_and_media_in_db,
+    import_subtitles_into_db,
+    generate_subtitles,
+):
+    entry_point.add_command(command_name)
 
 if __name__ == "__main__":
     try:

@@ -34,6 +34,7 @@ import click
 
 # https://pypi.org/project/click-pathlib/
 import click_pathlib
+from loguru import logger
 from rich.console import Console
 
 import pydbsrt.services as services
@@ -50,5 +51,6 @@ console = Console()
     help="Path to media",
 )
 @click.option("--output-file", "-o", default=None, help="File where to write images hashes.")
+@logger.catch
 def export_imghash_from_media(media, output_file):
     services.export_imghash_from_media(media, output_file)

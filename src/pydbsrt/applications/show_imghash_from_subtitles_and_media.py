@@ -37,6 +37,7 @@ import click
 
 # https://pypi.org/project/click-pathlib/
 import click_pathlib
+from loguru import logger
 from rich.console import Console
 
 from pydbsrt.services.extended_subtitles import show_subtitles_fingerprints
@@ -62,6 +63,7 @@ console = Console()
     type=click_pathlib.Path(exists=True, readable=True, resolve_path=True, allow_dash=False),
     help="Path to media",
 )
+@logger.catch
 def show_imghash_from_subtitles_and_media(subtitles, media):
     reader, _ = build_reader_frames(media)
     it_img_hash = map(rawframe_to_imghash, reader)

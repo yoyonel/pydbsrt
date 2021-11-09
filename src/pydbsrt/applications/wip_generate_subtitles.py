@@ -12,6 +12,7 @@ import click
 
 # https://pypi.org/project/click-pathlib/
 import click_pathlib
+from loguru import logger
 from rich.console import Console
 
 from pydbsrt.services.extended_subtitles import read_extended_subtitles
@@ -73,5 +74,6 @@ async def do_generate_subtitles(
     help="Path to source subtitles file",
 )
 @coroclick
+@logger.catch
 async def generate_subtitles(src_subtitles, src_binary_extended_subtitles):
     await do_generate_subtitles(src_subtitles, src_binary_extended_subtitles)

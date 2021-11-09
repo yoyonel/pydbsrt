@@ -31,6 +31,7 @@ import click
 
 # https://pypi.org/project/click-pathlib/
 import click_pathlib
+from loguru import logger
 
 from pydbsrt.services import extract_from_medias
 
@@ -79,6 +80,7 @@ def sh_shutdown(_sig, _):
     default="SRT",
     type=str,
 )
+@logger.catch
 def extract_subtitles_from_medias(
     root_dir_for_finding_medias: Path,
     glob_for_finding_medias: str,

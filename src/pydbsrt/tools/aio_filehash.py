@@ -1,5 +1,6 @@
 import binascii
 import os
+from typing import Tuple, Union
 
 import aiofiles
 import mmh3
@@ -8,7 +9,16 @@ import varint
 from pydbsrt.tools.constants import SAMPLE_SIZE, SAMPLE_THRESHOLD
 
 
-async def _aio_get_data_for_hash(aio_fo, sample_threshold: int = SAMPLE_THRESHOLD, sample_size: int = SAMPLE_SIZE):
+async def _aio_get_data_for_hash(
+    aio_fo, sample_threshold: int = SAMPLE_THRESHOLD, sample_size: int = SAMPLE_SIZE
+) -> Tuple[int, bytes]:
+    """
+
+    :param aio_fo:
+    :param sample_threshold:
+    :param sample_size:
+    :return:
+    """
     await aio_fo.seek(0, os.SEEK_END)
     size = await aio_fo.tell()
     await aio_fo.seek(0, os.SEEK_SET)
@@ -24,28 +34,27 @@ async def _aio_get_data_for_hash(aio_fo, sample_threshold: int = SAMPLE_THRESHOL
     return size, data
 
 
-async def aio_hashfileobject(
-    aio_fo,
+async def aio_hashfile(
+    filename: str,
     sample_threshold: int = SAMPLE_THRESHOLD,
     sample_size: int = SAMPLE_SIZE,
     hexdigest: bool = False,
-):
-    size, data = await _aio_get_data_for_hash(aio_fo, sample_threshold, sample_size)
+) -> Union[str, bytes]:
+    """
 
-    hash_tmp = mmh3.hash_bytes(data)
-    hash_ = hash_tmp[7::-1] + hash_tmp[16:7:-1]
-    enc_size = varint.encode(size)
-    # https://black.readthedocs.io/en/stable/the_black_code_style/current_style.html#slices
-    digest = enc_size + hash_[len(enc_size) :]
-
-    return binascii.hexlify(digest).decode() if hexdigest else digest
-
-
-async def aio_hashfile(
-    filename,
-    sample_threshold=SAMPLE_THRESHOLD,
-    sample_size=SAMPLE_SIZE,
-    hexdigest=False,
-):
+    :param filename:
+    :param sample_threshold:
+    :param sample_size:
+    :param hexdigest:
+    :return:
+    """
     async with aiofiles.open(filename, mode="rb") as aio_fo:
-        return await aio_hashfileobject(aio_fo, sample_threshold, sample_size, hexdigest)
+        size, data = await _aio_get_data_for_hash(aio_fo, sample_threshold, sample_size)
+
+        hash_tmp = mmh3.hash_bytes(data)
+        hash_ = hash_tmp[7::-1] + hash_tmp[16:7:-1]
+        enc_size = varint.encode(size)
+        # https://black.readthedocs.io/en/stable/the_black_code_style/current_style.html#slices
+        digest = enc_size + hash_[len(enc_size) :]
+
+        return binascii.hexlify(digest).decode() if hexdigest else digest

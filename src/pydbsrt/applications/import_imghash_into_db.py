@@ -21,6 +21,7 @@ from pathlib import Path
 
 import click
 import click_pathlib
+from loguru import logger
 from rich.console import Console
 from rich.progress import BarColumn, DownloadColumn, Progress, TextColumn, TransferSpeedColumn
 
@@ -61,5 +62,6 @@ async def do_import_images_hashes_into_db(binary_img_hash_file: Path) -> None:
     help="Path to media",
 )
 @coroclick
+@logger.catch
 async def import_images_hashes_into_db(binary_img_hash_file):
     await do_import_images_hashes_into_db(binary_img_hash_file)

@@ -20,6 +20,7 @@ from pathlib import Path
 
 import click
 import click_pathlib
+from loguru import logger
 from rich.console import Console
 
 from pydbsrt.services.matching import ResultSearch, search_phash_stream
@@ -39,6 +40,7 @@ console = Console()
 )
 @click.option("--distance", "-d", default=1, type=int, help="Search distance to use")
 @coroclick
+@logger.catch
 async def search_imghash_in_db(phash_file, distance):
     it_phash_stream = gen_signed_int64_hash(sys.stdin if phash_file == Path("-") else phash_file.open("rb"))
     results_search: ResultSearch = await search_phash_stream(map(str, it_phash_stream), distance)

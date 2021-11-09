@@ -40,6 +40,7 @@ import click
 
 # https://pypi.org/project/click-pathlib/
 import click_pathlib
+from loguru import logger
 
 from pydbsrt.services import export_extended_subtitles
 
@@ -60,5 +61,6 @@ from pydbsrt.services import export_extended_subtitles
     help="Path to media",
 )
 @click.option("--output-file", "-o", default=None, help="File where to write images hashes.")
+@logger.catch
 def export_imghash_from_subtitles_and_media(subtitles, media, output_file):
     export_extended_subtitles(subtitles, media, output_file)

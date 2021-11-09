@@ -36,6 +36,7 @@ from typing import List, Optional, Union
 import click
 import click_pathlib
 import pandas as pd
+from loguru import logger
 from rich.console import Console
 
 from pydbsrt.applications.search_imghash_in_db import ResultSearch
@@ -70,6 +71,7 @@ OUTPUT_FORMAT = Enum("output_format", "DataFrame CSV")
     default=OUTPUT_FORMAT.DataFrame.name,
 )
 @coroclick
+@logger.catch
 async def recognize_media(
     media: Path,
     search_distance: int,

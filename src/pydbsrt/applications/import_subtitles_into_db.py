@@ -14,6 +14,7 @@ import click
 
 # https://pypi.org/project/click-pathlib/
 import click_pathlib
+from loguru import logger
 from rich.console import Console
 from yaspin import yaspin
 from yaspin.spinners import Spinners
@@ -52,5 +53,6 @@ async def do_import_subtitles_into_db(subtitles: Path, binary_img_hash_file: Pat
     help="Path to binary image hash file (generated from media)",
 )
 @coroclick
+@logger.catch
 async def import_subtitles_into_db(subtitles, binary_img_hash_file):
     await do_import_subtitles_into_db(subtitles, binary_img_hash_file)
