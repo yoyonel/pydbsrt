@@ -1,5 +1,6 @@
 import binascii
 import os
+from pathlib import Path
 from typing import Tuple, Union
 
 import aiofiles
@@ -35,7 +36,7 @@ async def _aio_get_data_for_hash(
 
 
 async def aio_hashfile(
-    filename: str,
+    filename: Union[str, Path],
     sample_threshold: int = SAMPLE_THRESHOLD,
     sample_size: int = SAMPLE_SIZE,
     hexdigest: bool = False,

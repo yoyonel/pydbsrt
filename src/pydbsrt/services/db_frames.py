@@ -78,13 +78,13 @@ async def import_binary_img_hash_to_db_async(
             nb_frames_inserted = (
                 await conn.fetchval(
                     """
-                                            SELECT
-                                                COUNT(*)
-                                            FROM
-                                                frames
-                                            WHERE
-                                                frames.media_id = $1;
-                                        """,
+                        SELECT
+                            COUNT(*)
+                        FROM
+                            frames
+                        WHERE
+                            frames.media_id = $1;
+                    """,
                     media_id,
                 )
                 or 0
