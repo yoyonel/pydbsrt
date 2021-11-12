@@ -93,6 +93,9 @@ pytest-picked = "^0.4.6"
 tox-poetry-installer = {extras = ["poetry"], version = "^0.8.1"}
 ptpython = "^3.0.20"
 
+[tool.poetry.scripts]
+pydbsrt = "pydbsrt.app_cli:entry_point"
+
 [tool.unimport]
 sources = ["src"]
 exclude = 'src/pydbsrt/services/old/'
