@@ -40,7 +40,7 @@ async def search_media_in_db(
     reader, _ = build_reader_frames(search_media, nb_seconds_to_extract, seek_to_middle=seek_to_middle)
     gen_frame_hash = map(rawframe_to_imghash, reader)
     gen_signed_int64_hash = map(imghash_to_signed_int64, gen_frame_hash)
-    return await search_imghash_in_db.search_phash_stream(map(str, gen_signed_int64_hash), search_distance)
+    return await search_imghash_in_db.search_phash_stream_in_db(map(str, gen_signed_int64_hash), search_distance)
 
 
 async def search_media_name_into_db(conn: Connection, media_id: int) -> str:

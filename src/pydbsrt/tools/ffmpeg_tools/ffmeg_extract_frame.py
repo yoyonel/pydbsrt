@@ -124,10 +124,8 @@ def ffmpeg_imghash_generator(
 if __name__ == "__main__":
     from pathlib import Path
 
-    # root_path = Path('data/')
-    # media_path = root_path.joinpath('big_buck_bunny_trailer_480p.webm')
-    root_path = Path("/home/latty/Vidéos/Mission Impossible Rogue Nation (2015) [1080p]/")
-    media_path = root_path.joinpath("Mission.Impossible.Rogue.Nation.2015.1080p.BluRay.x264.YIFY.[YTS.AG].mp4")
+    root_path = Path('data/')
+    media_path = root_path.joinpath("big_buck_bunny_trailer_480p.mp4")
 
     gen_imghash = ffmpeg_imghash_generator(str(media_path))
 

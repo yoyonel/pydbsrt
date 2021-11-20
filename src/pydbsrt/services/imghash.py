@@ -3,6 +3,7 @@ from pathlib import Path
 
 # https://pypi.org/project/click-pathlib/
 from tempfile import gettempdir
+from typing import Optional
 
 from numpy.ma import floor
 from rich.console import Console
@@ -17,7 +18,7 @@ from pydbsrt.tools.rich_colums import TimeElapsedOverRemainingColumn
 console = Console()
 
 
-def export_imghash_from_media(media, output_file) -> Path:
+def export_imghash_from_media(media: Path, output_file: Optional[Path] = None) -> Path:
     ################################################################
     # PROCESSING                                                   #
     ################################################################
@@ -36,7 +37,7 @@ def export_imghash_from_media(media, output_file) -> Path:
         Path(output_file)
         if output_file
         # https://bandit.readthedocs.io/en/latest/plugins/b108_hardcoded_tmp_directory.html
-        else Path(gettempdir()) / media.with_suffix(".phash").name
+        else Path(gettempdir()) / f"{media.name}.{meta['fps']}fps.phash"
     )
     output_file.unlink(missing_ok=True)
     console.print(f"output_file: {str(output_file)}")
@@ -53,11 +54,11 @@ def export_imghash_from_media(media, output_file) -> Path:
         console=console,
     )
     task_id = progress.add_task("build&export images hashes", filename=media.name, start=True)
-    progress.update(task_id, total=nb_frames_to_read)
+    progress.update(task_id, total=nb_frames_to_read * 8)
     with progress:
         for chunk_frames_hashes in chunks(gen_frame_hash, chunk_size):
             with output_file.open("ab") as fo:
                 for frame_hash_binary in map(imghash_to_bytes, chunk_frames_hashes):
                     fo.write(frame_hash_binary)
-            progress.update(task_id, advance=chunk_size, refresh=True)
+            progress.update(task_id, advance=chunk_size * 8, refresh=True)
     return output_file

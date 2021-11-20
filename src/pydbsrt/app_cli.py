@@ -12,6 +12,7 @@ from pydbsrt.applications.extract_subtitles_from_medias import extract_subtitles
 from pydbsrt.applications.import_imghash_into_db import import_images_hashes_into_db
 from pydbsrt.applications.import_subtitles_into_db import import_subtitles_into_db
 from pydbsrt.applications.recognize_media import recognize_media
+from pydbsrt.applications.retarget_subtitles import retarget_subtitles
 from pydbsrt.applications.search_imghash_in_db import search_imghash_in_db
 from pydbsrt.applications.show_imghash_from_subtitles_and_media import show_imghash_from_subtitles_and_media
 from pydbsrt.applications.show_imghash_from_subtitles_and_media_in_db import show_imghash_from_subtitles_and_media_in_db
@@ -37,6 +38,7 @@ for command_name in (
     show_imghash_from_subtitles_and_media_in_db,
     import_subtitles_into_db,
     generate_subtitles,
+    retarget_subtitles,
 ):
     entry_point.add_command(command_name)
 

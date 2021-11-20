@@ -3,8 +3,8 @@ from pydbsrt.services.reader_frames import build_reader_frames
 from pydbsrt.tools.imghash import gen_signed_int64_hash, signed_int64_to_str_binary
 
 
-def test_export_imghash_from_media(resource_video_path, tmpdir):
-    p_video = resource_video_path("big_buck_bunny_trailer_480p.webm")
+def test_export_imghash_from_media(big_buck_bunny_trailer, tmpdir):
+    p_video = big_buck_bunny_trailer
     output_file_path = tmpdir.mkdir("phash") / f"{p_video.stem}.phash"
 
     assert not output_file_path.exists()

@@ -37,9 +37,9 @@ def _compute_nb_frames_from_srt(p_srt) -> int:
     return len(set().union(*it_range))
 
 
-def test_export_extended_subtitles(resource_video_path, tmpdir):
-    p_video = resource_video_path("big_buck_bunny_trailer_480p.webm")
-    p_srt = resource_video_path("big_buck_bunny_trailer_480p.en.srt")
+def test_export_extended_subtitles(big_buck_bunny_trailer, big_buck_bunny_trailer_srt, tmpdir):
+    p_video = big_buck_bunny_trailer
+    p_srt = big_buck_bunny_trailer_srt
     output_file_path = tmpdir.mkdir("phash") / f"{p_video.stem}.phash"
 
     assert not output_file_path.exists()
@@ -57,9 +57,9 @@ def test_export_extended_subtitles(resource_video_path, tmpdir):
     assert nb_binary_hashes == _compute_nb_frames_from_srt(p_srt)
 
 
-def test_read_extended_subtitles(resource_video_path, tmpdir):
-    p_video = resource_video_path("big_buck_bunny_trailer_480p.webm")
-    p_srt = resource_video_path("big_buck_bunny_trailer_480p.en.srt")
+def test_read_extended_subtitles(big_buck_bunny_trailer, big_buck_bunny_trailer_srt, tmpdir):
+    p_video = big_buck_bunny_trailer
+    p_srt = big_buck_bunny_trailer_srt
     output_file_path = tmpdir.mkdir("phash") / f"{p_video.stem}.phash"
 
     output_file_exported = export_extended_subtitles(p_srt, p_video, output_file_path)

@@ -83,6 +83,19 @@ def bytes_to_signed_int64(binary_signed_int64: bytes, byteorder: str = "big") ->
     return int.from_bytes(binary_signed_int64, byteorder, signed=True)
 
 
+def signed_int64_to_bytes(imghash_signed_int64: int) -> bytes:
+    """
+    https://docs.python.org/3/library/stdtypes.html#int.to_bytes
+
+    :param imghash_signed_int64:
+    :return:
+
+    >>> signed_int64_to_bytes(-3098476543630901248)
+    b'\\xd5\\x00\\x00\\x00\\x00\\x00\\x00\\x00'
+    """
+    return imghash_signed_int64.to_bytes(8, byteorder='big', signed=True)
+
+
 def imghash_to_signed_int64(imghash: ImageHash) -> int:
     """
     >>> imghash_to_signed_int64(ImageHash(np.array([\

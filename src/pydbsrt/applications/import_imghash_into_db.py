@@ -17,7 +17,6 @@ dans BKTreeDB la base de donnée PostgreSQL (avec index) spécialisé·e pour le
     xargs -I {} poetry run python app_cli.py import-images-hashes-into-db -r "{}"
 
 """
-from pathlib import Path
 
 import click
 import click_pathlib
@@ -45,14 +44,6 @@ progress = Progress(
 )
 
 
-async def do_import_images_hashes_into_db(binary_img_hash_file: Path) -> None:
-    media_id, nb_frames_inserted = await import_binary_img_hash_to_db_async(binary_img_hash_file, progress)
-    if nb_frames_inserted:
-        console.print(f"count(frames where frames.media_id = {media_id})={nb_frames_inserted}")
-    else:
-        console.print(f"binary_img_hash_file={str(binary_img_hash_file)} already in DB (medias.id={media_id})")
-
-
 @click.command(short_help="")
 @click.option(
     "--binary_img_hash_file",
@@ -64,4 +55,8 @@ async def do_import_images_hashes_into_db(binary_img_hash_file: Path) -> None:
 @coroclick
 @logger.catch
 async def import_images_hashes_into_db(binary_img_hash_file):
-    await do_import_images_hashes_into_db(binary_img_hash_file)
+    media_id, nb_frames_inserted = await import_binary_img_hash_to_db_async(binary_img_hash_file, progress)
+    if nb_frames_inserted:
+        console.print(f"count(frames where frames.media_id = {media_id})={nb_frames_inserted}")
+    else:
+        console.print(f"binary_img_hash_file={str(binary_img_hash_file)} already in DB (medias.id={media_id})")

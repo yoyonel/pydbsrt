@@ -25,9 +25,9 @@ def resource_colors_video_path():
     return lambda color_frame: Path(f"data/{color_frame}_frames.mp4")
 
 
-def test_cli_export_imghash(resource_video_path, cli_runner, tmpdir):
-    resource_video_name = "big_buck_bunny_trailer_480p"
-    p_video = resource_video_path(f"{resource_video_name}.webm")
+def test_cli_export_imghash(big_buck_bunny_trailer, cli_runner, tmpdir):
+    p_video = big_buck_bunny_trailer
+    resource_video_name = p_video.stem
     binary_img_hash_file = tmpdir.mkdir("phash") / f"{resource_video_name}.phash"
     result = cli_runner.invoke(
         export_imghash_from_media, args=f"-r {str(p_video)} -o {binary_img_hash_file}", catch_exceptions=False

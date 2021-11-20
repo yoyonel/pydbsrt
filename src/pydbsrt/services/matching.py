@@ -36,16 +36,17 @@ async def search_phash_in_db(conn, phash: int, distance: int) -> List[MatchedFra
         MatchedFrame(*record)
         for record in await conn.fetch(
             """
-SELECT "frame_offset", "media_id"
-FROM "frames"
-WHERE "p_hash" <@ ($1, $2)""",
+                SELECT "frame_offset", "media_id"
+                FROM "frames"
+                WHERE "p_hash" <@ ($1, $2)
+            """,
             phash,
             distance,
         )
     ]
 
 
-async def search_phash_stream(phash_stream: Iterable[str], search_distance: int) -> ResultSearch:
+async def search_phash_stream_in_db(phash_stream: Iterable[str], search_distance: int) -> ResultSearch:
     """"""
     async with asyncpg.create_pool(
         user=psqlUserName,
@@ -59,11 +60,7 @@ async def search_phash_stream(phash_stream: Iterable[str], search_distance: int)
                 # TODO: make generator here
                 # PEP 530 -- Asynchronous Comprehensions: https://www.python.org/dev/peps/pep-0530/
                 records = [
-                    ResultSearchRecord(
-                        phash,
-                        offset,
-                        await search_phash_in_db(conn, phash, search_distance),
-                    )
+                    ResultSearchRecord(phash, offset, await search_phash_in_db(conn, phash, search_distance))
                     for offset, phash in enumerate(int(str_phash.rstrip()) for str_phash in phash_stream)
                 ]
     return ResultSearch(records, timer)
