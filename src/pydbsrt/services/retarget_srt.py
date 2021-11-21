@@ -33,9 +33,55 @@ console = Console()
 # https://regex101.com/r/F4To6t/1
 framerate_r = re.compile(r"/*\.(?P<framerate>\d*\.\d*)fps*\.phash$")
 DEFAULT_FRAMERATE: Final[float] = 24.00
+DEFAULT_THRESHOLD_DISTANCE_FOR_CUT: Final[int] = 16
 
 
-async def _retarget_subtitles_in_db_async(ref_phash_file_hash, ref_phash_file, ref_subtitles, target_phash_file_hash):
+@dataclass
+class SearchTreeFromCuts(SearchTree):
+    """ """
+
+    threshold_distance_for_cut = DEFAULT_THRESHOLD_DISTANCE_FOR_CUT
+
+    def __post_init__(self):
+        self.tree = pybktree.BKTree(
+            item_distance, gen_items_from_cuts(self.binary_img_hash_file, self.threshold_distance_for_cut)
+        )
+
+
+def gen_items_from_cuts(
+    phash_file: Path, threshold_distance_for_cut: int = DEFAULT_THRESHOLD_DISTANCE_FOR_CUT
+) -> Iterator[Item]:
+    """
+
+    :param phash_file:
+    :param threshold_distance_for_cut:
+    :return:
+    """
+    it_img_hash: Iterator[int] = (img_hash for img_hash, _, _ in gen_read_binary_img_hash_file(phash_file, 1))
+    # https://docs.python.org/3.8/library/itertools.html#itertools.chain
+    # a paired frames correspond to a "cut"
+    # keep all paired frames with a (hamming) distance greater than a threshold (for example: 16 (different bits))
+    return itertools.chain(
+        *(
+            (Item(s0, offset_frame), Item(s1, offset_frame + 1))
+            for (offset_frame, (s0, s1)) in enumerate(pairwise(it_img_hash))
+            if distance.hamming(signed_int64_to_str_binary(s0), signed_int64_to_str_binary(s1))
+            > threshold_distance_for_cut
+        )
+    )
+
+
+async def retarget_subtitles_in_db_async(
+    ref_phash_file_hash: Path, ref_phash_file: Path, ref_subtitles: Path, target_phash_file_hash: Path
+) -> list[tuple[int, int]]:
+    """
+
+    :param ref_phash_file_hash:
+    :param ref_phash_file:
+    :param ref_subtitles:
+    :param target_phash_file_hash:
+    :return:
+    """
     async with asyncpg.create_pool(
         user=psqlUserName, password=psqlUserPass, database=psqlDbName, host=psqlDbIpAddr, command_timeout=60
     ) as pool:
@@ -108,7 +154,7 @@ async def _retarget_subtitles_in_db_async(ref_phash_file_hash, ref_phash_file, r
             return Counter(map_mcdp_diff_offsets.values()).most_common(5)
 
 
-def _retarget_subtitles_with_bktree(
+def retarget_subtitles_with_bktree(
     ref_phash_file: Path, _ref_subtitles: Path, target_phash_file: Path
 ) -> list[tuple[int, int]]:
     """
@@ -119,33 +165,13 @@ def _retarget_subtitles_with_bktree(
     :return:
     """
     search_distance: Final[int] = 0
-    threshold_distance_for_cut: Final[int] = 16
-
-    def _build_items_from_cuts(phash_file) -> Iterator[Item]:
-        it_img_hash: Iterator[int] = (img_hash for img_hash, _, _ in gen_read_binary_img_hash_file(phash_file, 1))
-        # https://docs.python.org/3.8/library/itertools.html#itertools.chain
-        # a paired frames correspond to a "cut"
-        # keep all paired frames with a (hamming) distance greater than a threshold (for example: 16 (different bits))
-        return itertools.chain(
-            *(
-                (Item(s0, offset_frame), Item(s1, offset_frame + 1))
-                for (offset_frame, (s0, s1)) in enumerate(pairwise(it_img_hash))
-                if distance.hamming(signed_int64_to_str_binary(s0), signed_int64_to_str_binary(s1))
-                > threshold_distance_for_cut
-            )
-        )
-
-    @dataclass
-    class _SearchTree(SearchTree):
-        def __post_init__(self):
-            self.tree = pybktree.BKTree(item_distance, _build_items_from_cuts(target_phash_file))
 
     with _Timer("Build BKTrees for target", func_to_log=console.print):
-        target_st = _SearchTree(Path())
+        target_st = SearchTreeFromCuts(target_phash_file)
         console.print(f"{target_st=}")
 
     with _Timer("Search differences offsets between reference and target", func_to_log=console.print):
-        it_items = _build_items_from_cuts(ref_phash_file)
+        it_items = gen_items_from_cuts(ref_phash_file)
         # search all paired matched frames from reference and target
         it_matches: Iterator[Tuple[List[MatchedItem], List[MatchedItem]]] = filter(
             lambda matches: all(matches),
@@ -171,8 +197,12 @@ def _retarget_subtitles_with_bktree(
 
         counter_diff_offsets = Counter(it_diff_offsets)
         nb_paired_frames_used = sum(counter_diff_offsets.values())
+        nb_paired_frames_used_by_mc = counter_diff_offsets.most_common(1)[0][1]
         console.print(
             f"Nb paired frames used: {nb_paired_frames_used} frames ~ {nb_paired_frames_used / 24.00} seconds"
+        )
+        console.print(
+            f"Percent of frames used for the most common: ~ {(nb_paired_frames_used_by_mc / nb_paired_frames_used) * 100:.2f} %"
         )
         # return 3 most common values (differences offsets) from counter
         return counter_diff_offsets.most_common(3)
@@ -192,7 +222,7 @@ async def retarget_subtitles_async(
         # [DB]
         # counter_results = await _retarget_subtitles_in_db_async(ref_phash_file_hash, ref_phash_file, ref_subtitles, target_phash_file_hash)
         # [CPU]
-        counter_results = _retarget_subtitles_with_bktree(ref_phash_file, ref_subtitles, target_phash_file)
+        counter_results = retarget_subtitles_with_bktree(ref_phash_file, ref_subtitles, target_phash_file)
 
     with _Timer("Shift subtitles (from reference) and save it (for target)", func_to_log=console.print):
         # TODO: need to work about framerates from reference and target
