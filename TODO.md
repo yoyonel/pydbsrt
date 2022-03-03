@@ -29,3 +29,12 @@ Faudrait aussi mettre en place un framework de tests (fonctionnels) pour:
         + la distribution
             - des calculs
             - du stockages
+
+# 2022-03
+
+- [✔️] Ajouter une CI (Github Action)
+- [🚧] Créer des images (docker) pour chacune des applications
+- [ ] Automatiser le proocessus --> le faire faire par Github Action
+  - [ ] targets multi-os en particulier pour le raspberry (armhf)
+  - [ ] mettre en place un docker registry perso/private ?
+  - [ ] autoriser github a pousser des images pour le projet
