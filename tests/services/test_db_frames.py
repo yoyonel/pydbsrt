@@ -1,7 +1,8 @@
 import pytest
 from imohash import hashfile
 
-from pydbsrt.services.db_frames import agen_p_hash_from_media_in_db, import_binary_img_hash_to_db_async
+from pydbsrt.services.db_frames import import_binary_img_hash_to_db_async
+from pydbsrt.tools.db_frames import agen_p_hash_from_media_in_db
 from pydbsrt.tools.imghash import gen_signed_int64_hash
 
 # https://pypi.org/project/waiting/

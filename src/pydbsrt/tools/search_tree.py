@@ -12,7 +12,7 @@ Item = collections.namedtuple('Item', 'bits id')
 MatchedItem = Tuple[int, Item]
 
 
-def item_distance(x, y):
+def item_distance(x, y) -> int:
     return pybktree.hamming_distance(x.bits, y.bits)
 
 
@@ -32,7 +32,7 @@ class SearchTree:
             ),
         )
 
-    def update(self, binary_img_hash_file):
+    def update(self, binary_img_hash_file: Path):
         """
         Build a search (bK)Tree from
         """
@@ -40,8 +40,8 @@ class SearchTree:
         for p_hash, frame_offset, _ in gen_read_binary_img_hash_file(binary_img_hash_file, 0):
             tree.add(Item(p_hash, frame_offset))
 
-    def find(self, item, distance) -> List[MatchedItem]:
+    def find(self, item: Item, distance: int) -> List[MatchedItem]:
         return self.tree.find(item, distance)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return repr(self.tree)

@@ -1,53 +1,42 @@
 from pathlib import Path
-from typing import AsyncIterator, Optional, Tuple, Union
+from typing import Optional
 
 import asyncpg
 from rich.progress import Progress
 
+from pydbsrt.models.database_import import ImportBinaryImageHashResult
 from pydbsrt.services.database import (
     console,
-    create_conn,
-    create_indexes_async,
-    create_tables_async,
+    create_indexes,
+    create_tables,
     error_console,
     psqlDbIpAddr,
     psqlDbName,
     psqlUserName,
     psqlUserPass,
 )
-from pydbsrt.services.models import PHashMedia
 from pydbsrt.services.reader_frames import gen_read_binary_img_hash_file
-from pydbsrt.tools.aio_filehash import aio_hashfile
+from pydbsrt.tools.aio_filehash import hashfile
+from pydbsrt.tools.search_in_db import search_media_hash_in_db
 
 
 async def import_binary_img_hash_to_db_async(
     binary_img_hash_file: Path, progress: Optional[Progress] = None
-) -> Tuple[int, int]:
-    media_hash = await aio_hashfile(binary_img_hash_file, hexdigest=True)
+) -> ImportBinaryImageHashResult:
+    media_hash = await hashfile(binary_img_hash_file, hexdigest=True)
     console.print(f"media_hash='{media_hash}'")
 
     async with asyncpg.create_pool(
         user=psqlUserName, password=psqlUserPass, database=psqlDbName, host=psqlDbIpAddr, command_timeout=60
     ) as pool:
         async with pool.acquire() as conn:
-            await create_tables_async(conn)
-            await create_indexes_async(conn)
+            await create_tables(conn)
+            await create_indexes(conn)
 
             # Test if this media is already in DB
-            # https://magicstack.github.io/asyncpg/current/api/index.html?highlight=returning#asyncpg.connection.Connection.fetchval
-            found_media_id = await conn.fetchval(
-                """
-                    SELECT
-                        id
-                    FROM
-                        medias
-                    WHERE
-                        medias.media_hash = $1;
-                """,
-                media_hash,
-            )
+            found_media_id = await search_media_hash_in_db(conn, media_hash)
             if found_media_id:
-                return found_media_id, 0
+                return ImportBinaryImageHashResult(found_media_id, 0)
 
             # Insert Media
             media_id = await conn.fetchval(
@@ -78,47 +67,15 @@ async def import_binary_img_hash_to_db_async(
             nb_frames_inserted = (
                 await conn.fetchval(
                     """
-                        SELECT
-                            COUNT(*)
-                        FROM
-                            frames
-                        WHERE
-                            frames.media_id = $1;
-                    """,
+                            SELECT
+                                COUNT(*)
+                            FROM
+                                frames
+                            WHERE
+                                frames.media_id = $1;
+                        """,
                     media_id,
                 )
                 or 0
             )
-    return media_id, nb_frames_inserted
-
-
-async def agen_p_hash_from_media_in_db(
-    media_hash: Union[str, bytes],
-    chunk_size: int = 32,
-    limit: Optional[int] = None,
-) -> AsyncIterator[PHashMedia]:
-    conn = await create_conn()
-
-    found_media_id: Optional[int] = await conn.fetchval(
-        "SELECT id FROM medias WHERE medias.media_hash = $1", media_hash
-    )
-    if found_media_id is None:
-        return
-
-    async with conn.transaction():
-        # https://www.postgresql.org/docs/8.1/queries-limit.html
-        query = """
-            SELECT
-                p_hash, frame_offset
-            FROM
-                frames
-            WHERE
-                frames.media_id = $1
-            ORDER BY
-                frames.frame_offset
-        """
-        query += f"\n{f'LIMIT {limit}' if limit else ''};"
-        cur = await conn.cursor(query, found_media_id)
-        while records := await cur.fetch(chunk_size):
-            for record in records:
-                yield PHashMedia(*record)
+    return ImportBinaryImageHashResult(media_id, nb_frames_inserted)

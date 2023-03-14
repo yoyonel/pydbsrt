@@ -33,7 +33,8 @@ import click
 import click_pathlib
 from loguru import logger
 
-from pydbsrt.services import extract_from_medias
+# from pydbsrt.services import extract_subtitles_from_medias as svc_extract_subtitles_from_medias
+import pydbsrt.services as svc
 
 __version__ = "0.0.1"
 
@@ -90,7 +91,7 @@ def extract_subtitles_from_medias(
     for sig in ALL_HANDLING_SIGNALS:
         signal(sig, sh_shutdown)
 
-    extract_from_medias(
+    svc.extract_subtitles_from_medias(
         root_dir_for_finding_medias,
         glob_for_finding_medias,
         root_dir_export_subtitles,

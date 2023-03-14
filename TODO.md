@@ -38,3 +38,5 @@ Faudrait aussi mettre en place un framework de tests (fonctionnels) pour:
   - [ ] targets multi-os en particulier pour le raspberry (armhf)
   - [ ] mettre en place un docker registry perso/private ?
   - [ ] autoriser github a pousser des images pour le projet
+- [ ] Réduire les dépendances pour permettre d'avoir des images/containeurs rapides à construire/utiliser.
+- 

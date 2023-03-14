@@ -6,19 +6,23 @@ from typing import Tuple, Union
 import aiofiles
 import mmh3
 import varint
+from aiofiles.threadpool.binary import AsyncBufferedReader
 
 from pydbsrt.tools.constants import SAMPLE_SIZE, SAMPLE_THRESHOLD
 
 
-async def _aio_get_data_for_hash(
-    aio_fo, sample_threshold: int = SAMPLE_THRESHOLD, sample_size: int = SAMPLE_SIZE
+async def _get_data_for_hash(
+    aio_fo: AsyncBufferedReader, sample_threshold: int = SAMPLE_THRESHOLD, sample_size: int = SAMPLE_SIZE
 ) -> Tuple[int, bytes]:
     """
 
-    :param aio_fo:
-    :param sample_threshold:
-    :param sample_size:
-    :return:
+    Args:
+        aio_fo:
+        sample_threshold:
+        sample_size:
+
+    Returns:
+
     """
     await aio_fo.seek(0, os.SEEK_END)
     size = await aio_fo.tell()
@@ -35,7 +39,7 @@ async def _aio_get_data_for_hash(
     return size, data
 
 
-async def aio_hashfile(
+async def hashfile(
     filename: Union[str, Path],
     sample_threshold: int = SAMPLE_THRESHOLD,
     sample_size: int = SAMPLE_SIZE,
@@ -43,14 +47,17 @@ async def aio_hashfile(
 ) -> Union[str, bytes]:
     """
 
-    :param filename:
-    :param sample_threshold:
-    :param sample_size:
-    :param hexdigest:
-    :return:
+    Args:
+        filename:
+        sample_threshold:
+        sample_size:
+        hexdigest:
+
+    Returns:
+
     """
     async with aiofiles.open(filename, mode="rb") as aio_fo:
-        size, data = await _aio_get_data_for_hash(aio_fo, sample_threshold, sample_size)
+        size, data = await _get_data_for_hash(aio_fo, sample_threshold, sample_size)
 
         hash_tmp = mmh3.hash_bytes(data)
         hash_ = hash_tmp[7::-1] + hash_tmp[16:7:-1]

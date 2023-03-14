@@ -6,7 +6,7 @@ from asyncpg import Connection
 from waiting import wait
 
 from pydbsrt.services import export_imghash_from_media
-from pydbsrt.services.database import create_conn, drop_tables_async
+from pydbsrt.services.database import create_conn, drop_tables
 from pydbsrt.services.db_frames import import_binary_img_hash_to_db_async
 
 
@@ -67,9 +67,9 @@ def db_is_ready(session_scoped_container_getter):
 @pytest.mark.asyncio
 async def conn(db_is_ready) -> Connection:
     conn = await create_conn()
-    await drop_tables_async(conn, tables_names=("medias", "frames", "subtitles"))
+    await drop_tables(conn, tables_names=("medias", "frames", "subtitles"))
     yield conn
-    await drop_tables_async(conn, tables_names=("medias", "frames", "subtitles"))
+    await drop_tables(conn, tables_names=("medias", "frames", "subtitles"))
 
 
 @pytest.fixture(autouse=True)

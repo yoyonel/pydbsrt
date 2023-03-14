@@ -3,7 +3,7 @@ from operator import itemgetter
 from pathlib import Path
 from struct import unpack
 from tempfile import gettempdir
-from typing import AsyncGenerator, AsyncIterator, Callable, Iterator, Optional, Tuple, Union
+from typing import AsyncGenerator, AsyncIterator, Callable, Iterator, Optional, Tuple
 
 import asyncstdlib
 from imagehash import ImageHash
@@ -12,10 +12,12 @@ from rich.console import Console
 from yaspin import yaspin
 from yaspin.spinners import Spinners
 
-from pydbsrt.services.models import PHashMedia
+from pydbsrt.models.phash import PHashMedia
 from pydbsrt.services.reader_frames import build_reader_frames
+from pydbsrt.tools.aio_filehash import hashfile
 from pydbsrt.tools.async_builtins import anext
 from pydbsrt.tools.chunk import chunks
+from pydbsrt.tools.db_frames import agen_p_hash_from_media_in_db
 from pydbsrt.tools.ffmpeg_tools.ffmeg_extract_frame import rawframe_to_imghash
 from pydbsrt.tools.imghash import imghash_to_bytes
 from pydbsrt.tools.subfingerprint import ASyncSubFingerprints, SubFingerprint, SubFingerprints
@@ -32,7 +34,17 @@ def export_extended_subtitles(
     output_file: Optional[Path],
     chunk_size: int = 25,
 ) -> Path:
-    #
+    """
+
+    Args:
+        subtitles:
+        media:
+        output_file:
+        chunk_size:
+
+    Returns:
+
+    """
     reader, _ = build_reader_frames(media)
     it_sub_fingerprints = SubFingerprints(
         sub_reader=SubReader(subtitles), imghash_reader=map(rawframe_to_imghash, reader)
@@ -60,10 +72,23 @@ def export_extended_subtitles(
 
 def show_subtitles_fingerprints(
     srt_path: Path,
-    it_img_hash: Union[Iterator[ImageHash], Iterator[int]],
+    media,
     nb_fingerprints_by_row: int = 4,
     fn_imghash_to: Callable[[ImageHash], str] = str,
 ) -> None:
+    """
+
+    Args:
+        srt_path:
+        media:
+        nb_fingerprints_by_row:
+        fn_imghash_to:
+
+    Returns:
+
+    """
+    reader, _ = build_reader_frames(media)
+    it_img_hash = map(rawframe_to_imghash, reader)
     it_sub_fingerprints = SubFingerprints(sub_reader=SubReader(srt_path), imghash_reader=it_img_hash)
     gb_sub_fingerprints: Iterator[Tuple[int, Iterator[SubFingerprint]]] = groupby(
         it_sub_fingerprints, key=itemgetter("index")
@@ -89,6 +114,17 @@ async def async_show_subtitles_fingerprints(
     nb_fingerprints_by_row: int = 4,
     fn_imghash_to: Callable[[ImageHash], str] = str,
 ) -> None:
+    """
+
+    Args:
+        srt_path:
+        agen_phash_media:
+        nb_fingerprints_by_row:
+        fn_imghash_to:
+
+    Returns:
+
+    """
     agen_sub_fingerprint = ASyncSubFingerprints(sub_reader=SubReader(srt_path), phash_media_reader=agen_phash_media)
     # https://asyncstdlib.readthedocs.io/en/latest/source/api/itertools.html#asyncstdlib.itertools.groupby
     # noinspection PyTypeChecker
@@ -108,8 +144,32 @@ def read_extended_subtitles(
     binary_extended_subtitles: Path,
     chunk_size: int = 1024,
 ) -> Iterator[int]:
+    """
+
+    Args:
+        binary_extended_subtitles:
+        chunk_size:
+
+    Returns:
+
+    """
     with binary_extended_subtitles.open("rb") as fin:
         while chunk_img_hash := fin.read(SIZE_IMG_HASH * chunk_size):
             # https://docs.python.org/3/library/struct.html#byte-order-size-and-alignment
             for signed_int64_img_hash in unpack(f">{'q' * (len(chunk_img_hash) // SIZE_IMG_HASH)}", chunk_img_hash):
                 yield signed_int64_img_hash
+
+
+async def show_imghash_from_subtitles_and_media_in_db(subtitles: Path, binary_img_hash_file: Path):
+    """
+
+    Args:
+        subtitles: Path to subtitles file
+        binary_img_hash_file: Path to binary image hash (related to the video and subtitles)
+
+    Returns:
+
+    """
+    media_hash = await hashfile(binary_img_hash_file, hexdigest=True)
+    agen_phash_media = agen_p_hash_from_media_in_db(media_hash)
+    await async_show_subtitles_fingerprints(subtitles, agen_phash_media)

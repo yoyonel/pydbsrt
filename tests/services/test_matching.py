@@ -15,7 +15,7 @@ async def test_search_phash_stream(conn, aio_insert_phash_into_db, phash_from_me
     it_phashes = map(str, gen_signed_int64_hash(binary_img_hash_file.open("rb")))
     # search all frames in order with 0 searching distance (<=> exact match)
     search_results = await search_phash_stream_in_db(it_phashes, search_distance=0)
-    # in all match records, we can found a match with:
+    # in all match records, we can find a match with:
     # - frame's offset equal to record's offset
     # - and media's id match equal to media's id inserted into database
     assert [

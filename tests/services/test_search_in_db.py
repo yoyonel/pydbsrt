@@ -2,10 +2,11 @@ from typing import Final
 
 import pytest
 
+from pydbsrt.models.searching import BuildSearchResult
 from pydbsrt.services import export_imghash_from_media
 from pydbsrt.services.db_frames import import_binary_img_hash_to_db_async
 from pydbsrt.services.matching import search_phash_stream_in_db
-from pydbsrt.services.search_in_db import BuildSearchResult, build_search_media_results, search_media_in_db
+from pydbsrt.services.search_in_db import build_search_media_results, search_media_in_db
 from pydbsrt.tools.imghash import gen_signed_int64_hash
 
 

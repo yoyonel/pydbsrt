@@ -17,7 +17,7 @@ def build_iframe_selection(pict_type: str = "I") -> str:
     # I-FRAME
     #######################################################################
     Select I-Frame from video cut
-    warning: all cut frames will be send with I-Frames repetitions
+    warning: all cut frames will be sent with I-Frames repetitions
     for example, media's frames are: (* for I-FRAMES)
       Frame_0*    Frame_1     Frame_2     Frame_3*    Frame_4
     then the filtered frames will be:
@@ -79,7 +79,6 @@ def gen_read_binary_img_hash_file(
     media_id: int,
     progress: Optional[Progress] = None,
 ) -> Iterator[Tuple[int, int, int]]:
-
     with binary_img_hash_file.open("rb") as fo:
         if progress:
             task_id = progress.add_task(

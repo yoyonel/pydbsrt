@@ -16,7 +16,7 @@ le script produit dans la console des séries d'images hashes correspondant aux 
 ➜ poetry run python /src/pydbsrt/app_cli.py \
     show-imghash-from-subtitles-and-media \
         --subtitles data/big_buck_bunny_trailer_480p.en.srt \
-        --media data/big_buck_bunny_trailer_480p.webm
+        --media data/big_buck_bunny_trailer_480p.mp4
 The frame size for reading (32, 32) is different from the source frame size (854, 480).
 * index subtitle: 1 - first frame: 0
 d5d52ad52ad42ad4 d5dc88f72ac880f6 d5dd88f22acd80f2 d5dd98b32acc80b3
@@ -41,8 +41,6 @@ from loguru import logger
 from rich.console import Console
 
 from pydbsrt.services.extended_subtitles import show_subtitles_fingerprints
-from pydbsrt.services.reader_frames import build_reader_frames
-from pydbsrt.tools.ffmpeg_tools.ffmeg_extract_frame import rawframe_to_imghash
 from pydbsrt.tools.imghash import imghash_to_signed_int64
 
 console = Console()
@@ -65,10 +63,8 @@ console = Console()
 )
 @logger.catch
 def show_imghash_from_subtitles_and_media(subtitles, media):
-    reader, _ = build_reader_frames(media)
-    it_img_hash = map(rawframe_to_imghash, reader)
     show_subtitles_fingerprints(
         subtitles,
-        it_img_hash,
-        fn_imghash_to=lambda fp: str(imghash_to_signed_int64(fp)),
+        media,
+        fn_imghash_to=lambda imghash: str(imghash_to_signed_int64(imghash)),
     )

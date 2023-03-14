@@ -1,11 +1,18 @@
 """
-http://python-notes.curiousefficiency.org/en/latest/pep_ideas/async_programming.html#naming-conventions
+ASYNC module
+
+- http://python-notes.curiousefficiency.org/en/latest/pep_ideas/async_programming.html#naming-conventions
+- https://peps.python.org/pep-0492/#why-magic-methods-start-with-a
 """
+from typing import AsyncIterator, Optional
+
 import asyncpg
 from asyncpg import Connection
 from rich.console import Console
 
 from pydbsrt import settings
+from pydbsrt.models.phash import Hash
+from pydbsrt.models.searching import SubFrameSearchResult
 
 psqlDbIpAddr = settings.PSQL_IP
 psqlDbName = settings.PSQL_DB_NAME
@@ -23,25 +30,25 @@ async def create_conn() -> Connection:
     return conn
 
 
-async def drop_tables_async(conn, tables_names=("medias",)):
+async def drop_tables(conn, tables_names=("medias",)) -> None:
     # https://docs.postgresql.fr/11/sql-droptable.html
     for table_name in tables_names:
         await conn.execute(f"DROP TABLE IF EXISTS {table_name} CASCADE;")
 
 
-async def drop_types_async(conn, types_names=("LANG",)):
+async def drop_types(conn, types_names=("LANG",)) -> None:
     # https://www.postgresql.org/docs/9.1/sql-droptype.html
     for type_name in types_names:
         await conn.execute(f"DROP TYPE IF EXISTS {type_name} CASCADE;")
 
 
-async def create_tables_async(conn):
-    await create_tables_for_medias_async(conn)
-    await create_tables_for_frames_async(conn)
-    await create_tables_for_subtitles_async(conn)
+async def create_tables(conn) -> None:
+    await create_tables_for_medias(conn)
+    await create_tables_for_frames(conn)
+    await create_tables_for_subtitles(conn)
 
 
-async def create_tables_for_medias_async(conn):
+async def create_tables_for_medias(conn) -> None:
     """one-to-many: media ->* frames"""
     ################################################################
     # FIXME: media_hash has to be (fill with) the binary hash of the video file (not the binary imghash file)
@@ -59,7 +66,7 @@ async def create_tables_for_medias_async(conn):
     ################################################################
 
 
-async def create_tables_for_frames_async(conn):
+async def create_tables_for_frames(conn) -> None:
     await conn.execute(
         """
                 CREATE TABLE IF NOT EXISTS frames (
@@ -72,7 +79,7 @@ async def create_tables_for_frames_async(conn):
     )
 
 
-async def create_tables_for_subtitles_async(conn):
+async def create_tables_for_subtitles(conn) -> None:
     ################################################################
     # Subtitles
     ################################################################
@@ -112,7 +119,7 @@ async def create_tables_for_subtitles_async(conn):
     ################################################################
 
 
-async def create_indexes_async(conn):
+async def create_indexes(conn) -> None:
     await conn.execute(
         """
             CREATE INDEX IF NOT EXISTS
@@ -125,7 +132,7 @@ async def create_indexes_async(conn):
     )
 
 
-async def reindex_tables_async(conn):
+async def reindex_tables(conn) -> None:
     """
     https://www.postgresql.org/docs/9.4/sql-reindex.html
     """
@@ -136,3 +143,74 @@ async def reindex_tables_async(conn):
             REINDEX TABLE subtitles;
         """
     )
+
+
+async def search_media_name(conn: Connection, media_id: int) -> str:
+    return await conn.fetchval(
+        """SELECT "name"
+            FROM "medias"
+            WHERE medias.id = $1""",
+        media_id,
+    )
+
+
+async def search_subtitles_from_hash(conn: Connection, subtitles_hash: Hash) -> Optional[int]:
+    """
+
+    Args:
+        conn:
+        subtitles_hash:
+
+    Returns:
+
+    """
+    found_subtitles_id: Optional[int] = await conn.fetchval(
+        """
+            SELECT
+                id
+            FROM
+                subtitles
+            WHERE
+                subtitles.subtitles_hash = $1;
+        """,
+        subtitles_hash,
+    )
+    return found_subtitles_id
+
+
+async def search_subframe_records_from_media(
+    conn: Connection,
+    search_media_id: int,
+    start_frame_offset: int,
+    end_frame_offset: int,
+) -> AsyncIterator[SubFrameSearchResult]:
+    """
+
+    Args:
+        conn:
+        search_media_id:
+        start_frame_offset:
+        end_frame_offset:
+
+    Returns:
+
+    """
+    records = await conn.fetch(
+        """
+            SELECT
+                id, p_hash, frame_offset
+            FROM
+                frames
+            WHERE
+                frames.media_id = $1 AND
+                frames.frame_offset >= $2 AND
+                frames.frame_offset < $3
+            LIMIT $4;
+        ;""",
+        search_media_id,
+        start_frame_offset,
+        end_frame_offset,
+        end_frame_offset - start_frame_offset,
+    )
+    for record in records:
+        yield SubFrameSearchResult(*record)

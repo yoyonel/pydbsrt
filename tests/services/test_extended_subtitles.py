@@ -6,14 +6,14 @@ from typing import Iterable, Iterator, Tuple
 import pytest
 from pysrt import SubRipTime
 
-from pydbsrt.services.db_frames import agen_p_hash_from_media_in_db
 from pydbsrt.services.extended_subtitles import (
     async_show_subtitles_fingerprints,
     console,
     export_extended_subtitles,
     read_extended_subtitles,
 )
-from pydbsrt.tools.aio_filehash import aio_hashfile
+from pydbsrt.tools.aio_filehash import hashfile
+from pydbsrt.tools.db_frames import agen_p_hash_from_media_in_db
 from pydbsrt.tools.imghash import gen_signed_int64_hash, signed_int64_to_str_binary
 from pydbsrt.tools.subfingerprint import subriptime_to_frame
 from pydbsrt.tools.subreader import SubReader
@@ -85,7 +85,7 @@ async def test_async_show_subtitles_fingerprints(
     p_subtitles = resource_video_path(f"{resource_video_name}.en.srt")
     binary_img_hash_file = phash_from_media
 
-    media_hash = await aio_hashfile(binary_img_hash_file, hexdigest=True)
+    media_hash = await hashfile(binary_img_hash_file, hexdigest=True)
     agen_phash_media = agen_p_hash_from_media_in_db(media_hash)
     with console.capture() as capture:
         await async_show_subtitles_fingerprints(p_subtitles, agen_phash_media)

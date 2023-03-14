@@ -23,7 +23,8 @@ import click_pathlib
 from loguru import logger
 from rich.console import Console
 
-from pydbsrt.services.matching import ResultSearch, search_phash_stream_in_db
+from pydbsrt.models.matching import ResultSearch
+from pydbsrt.services.matching import search_phash_stream_in_db
 from pydbsrt.tools.coro import coroclick
 from pydbsrt.tools.imghash import gen_signed_int64_hash
 

@@ -1,7 +1,7 @@
 """
 """
 import binascii
-from typing import BinaryIO, Iterator
+from typing import BinaryIO, Iterator, Literal
 
 import distance
 import numpy as np
@@ -28,7 +28,7 @@ class ImgHashExtended(ImageHash):
         # Convert to signed representation
         VALSIZE = 64
         if ret >= 2 ** (VALSIZE - 1):
-            ret -= 2 ** VALSIZE
+            ret -= 2**VALSIZE
         return ret
 
 
@@ -74,7 +74,7 @@ def imghash_to_64bits(imghash: ImageHash) -> str:
     return BitArray(f"0x{str(imghash)}").bin
 
 
-def bytes_to_signed_int64(binary_signed_int64: bytes, byteorder: str = "big") -> int:
+def bytes_to_signed_int64(binary_signed_int64: bytes, byteorder: Literal["little", "big"] = "big") -> int:
     """
     >>> bytes_to_signed_int64(b'\\xd5\\x00\\x00\\x00\\x00\\x00\\x00\\x00')
     -3098476543630901248
@@ -213,7 +213,14 @@ def imghash_str_hex_to_str_binary(imghash_hex: str) -> str:
 
 
 def gen_signed_int64_hash(fo: BinaryIO) -> Iterator[int]:
-    """ """
+    """
+
+    Args:
+        fo:
+
+    Returns:
+
+    """
     ba_img_hex = fo.read(8)
     offset_frame = 0
     while ba_img_hex:

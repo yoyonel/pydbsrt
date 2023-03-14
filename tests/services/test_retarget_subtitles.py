@@ -19,7 +19,7 @@ async def test_retarget_subtitles(
     ref_subtitles = big_buck_bunny_trailer_srt
     ref_phash_file = resource_phash_path(f"{media_name}.phash")
     # Generate an another (temp) phash file for target => random_phash + ref_phash
-    nb_random_seconds = 5
+    nb_random_seconds: Final[int] = 5
     nb_random_phash: Final[int] = 24 * nb_random_seconds
     it_target_img_hash: Iterator[bytes] = chain(
         (open("/dev/urandom", "rb").read(8) for _ in range(nb_random_phash)), ref_phash_file.open("rb")

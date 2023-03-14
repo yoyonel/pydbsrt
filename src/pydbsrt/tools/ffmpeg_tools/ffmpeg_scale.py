@@ -20,7 +20,6 @@ def scale(
     encoder="",
     aspect_ratio="disable",
 ):
-
     ffmpeg = FFmpeg.FFmpeg()
 
     ffmpeg.add_input_file(os.path.abspath(input_file))

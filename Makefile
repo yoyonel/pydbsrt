@@ -1,6 +1,8 @@
 PROJECT_NAME?=pydbsrt
 #
-DOCKER_TAG?=dailycodingproblem/$(PROJECT_NAME):${PACKAGE_VERSION}
+DOCKER_USER?=yoyonel
+PACKAGE_VERSION?=latest
+DOCKER_TAG?=$(DOCKER_USER)/$(PROJECT_NAME):${PACKAGE_VERSION}
 #
 # PYPI_SERVER?=https://tart.d-bi.fr/simple/
 # https://stackoverflow.com/questions/2019989/how-to-assign-the-output-of-a-command-to-a-makefile-variable
@@ -14,7 +16,7 @@ SOURCES=$(shell find src/ -type f -name '*.py') MANIFEST.in
 
 all: docker
 
-docker:
+docker: docker/Dockerfile
 	@echo PYPI_SERVER: $(PYPI_SERVER)
 	@docker build \
 		--build-arg PYPI_SERVER=$(PYPI_SERVER) \

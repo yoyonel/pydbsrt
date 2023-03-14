@@ -1,33 +1,13 @@
-from dataclasses import dataclass
 from typing import Iterable, List
 
 import asyncpg
 
 # https://asyncstdlib.readthedocs.io/en/latest/source/api/functools.html?highlight=lru_cache#asyncstdlib.functools.lru_cache
 from asyncstdlib.functools import lru_cache
-from contexttimer import Timer
 
+from pydbsrt.models.matching import MatchedFrame, ResultSearch, ResultSearchRecord
 from pydbsrt.services.database import psqlDbIpAddr, psqlDbName, psqlUserName, psqlUserPass
 from pydbsrt.tools.timer_profiling import _Timer
-
-
-@dataclass(frozen=True)
-class MatchedFrame:
-    frame_offset: int
-    media_id: int
-
-
-@dataclass(frozen=True)
-class ResultSearchRecord:
-    search_phash: int
-    search_offset: int
-    matches: List[MatchedFrame]
-
-
-@dataclass(frozen=True)
-class ResultSearch:
-    records: List[ResultSearchRecord]
-    timer: Timer
 
 
 @lru_cache

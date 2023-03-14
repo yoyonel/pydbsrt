@@ -9,7 +9,7 @@ from typing import AsyncIterator, Callable, Iterator, Union
 from imagehash import ImageHash
 from pysrt.srtitem import SubRipTime
 
-from pydbsrt.services.models import PHashMedia
+from pydbsrt.models.phash import PHashMedia
 from pydbsrt.tools.async_builtins import anext
 from pydbsrt.tools.subreader import SubReader
 from pydbsrt.tools.videofingerprint import VideoFingerprint

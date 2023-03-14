@@ -1,3 +1,6 @@
+"""
+ASYNC module
+"""
 import contextlib
 from dataclasses import fields
 from itertools import chain, groupby
@@ -9,31 +12,48 @@ import asyncpg
 from imohash import hashfile
 from yaspin.core import Yaspin
 
+from pydbsrt.models.database_import import ImportSubtitlesResult
+from pydbsrt.models.subtitles import SubFrameRecord, SubtitlesRecord
 from pydbsrt.services.database import (
     console,
-    create_tables_for_subtitles_async,
-    drop_tables_async,
-    drop_types_async,
+    create_tables_for_subtitles,
+    drop_tables,
+    drop_types,
     error_console,
     psqlDbIpAddr,
     psqlDbName,
     psqlUserName,
     psqlUserPass,
+    search_subframe_records_from_media,
+    search_subtitles_from_hash,
 )
-from pydbsrt.services.models import SubFrameRecord
+from pydbsrt.services.insert_in_db import insert_subtitles_in_db
 from pydbsrt.services.reader_frames import gen_read_binary_img_hash_file
 from pydbsrt.tools.compare import compare_containers
+from pydbsrt.tools.search_in_db import search_media_hash_in_db
 from pydbsrt.tools.subfingerprint import SubFingerprint, SubFingerprints
 from pydbsrt.tools.subreader import SubReader
 
 
-async def import_subtitles_into_db_async(
+async def import_subtitles_into_db(
     subtitles: Path,
     binary_img_hash_file: Path,
     spinner: Optional[Yaspin] = None,
     drop_before_inserting: bool = False,
     check_before_inserting: bool = False,
-) -> int:
+) -> ImportSubtitlesResult:
+    """
+
+    Args:
+        subtitles:
+        binary_img_hash_file:
+        spinner:
+        drop_before_inserting:
+        check_before_inserting:
+
+    Returns:
+
+    """
     async with asyncpg.create_pool(
         user=psqlUserName,
         password=psqlUserPass,
@@ -41,61 +61,31 @@ async def import_subtitles_into_db_async(
         host=psqlDbIpAddr,
         command_timeout=60,
     ) as pool:
-        with (spinner or contextlib.nullcontext()) as spinner_subtitles:
+        with spinner or contextlib.nullcontext() as spinner_subtitles:
             async with pool.acquire() as conn:
                 if drop_before_inserting:
-                    await drop_tables_async(conn, ("subtitles", "sub_frames"))
-                    await drop_types_async(conn, ("LANG",))
-                await create_tables_for_subtitles_async(conn)
+                    await drop_tables(conn, ("subtitles", "sub_frames"))
+                    await drop_types(conn, ("LANG",))
+                await create_tables_for_subtitles(conn)
 
                 subtitles_hash = hashfile(subtitles, hexdigest=True)
-                found_subtitles_id: Optional[int] = await conn.fetchval(
-                    """
-                        SELECT
-                            id
-                        FROM
-                            subtitles
-                        WHERE
-                            subtitles.subtitles_hash = $1;
-                    """,
-                    subtitles_hash,
-                )
+                found_subtitles_id = await search_subtitles_from_hash(conn, subtitles_hash)
                 nb_rows_inserted = 0
                 if found_subtitles_id:
                     console.print(
                         f"Subtitles={subtitles.stem} with hash={subtitles_hash} already exist into db at subtitles_id={found_subtitles_id}"
                     )
-                    return nb_rows_inserted
+                    return ImportSubtitlesResult(nb_rows_inserted)
 
                 media_hash = hashfile(binary_img_hash_file, hexdigest=True)
-                found_media_id: Optional[int] = await conn.fetchval(
-                    """
-                        SELECT
-                            id
-                        FROM
-                            medias
-                        WHERE
-                            medias.media_hash = $1;
-                    """,
-                    media_hash,
-                )
+                found_media_id: Optional[int] = await search_media_hash_in_db(conn, media_hash)
                 if found_media_id is None:
                     console.print(f"ERROR: can't found media where media_hash={media_hash}")
-                    return nb_rows_inserted
+                    return ImportSubtitlesResult(nb_rows_inserted)
 
                 # insert subtitles into DB
-                subtitles_id: Optional[int] = await conn.fetchval(
-                    """
-                        INSERT INTO
-                            subtitles (subtitles_hash, name, media_id)
-                        VALUES
-                            ($1, $2, $3)
-                        RETURNING
-                            id;
-                    """,
-                    subtitles_hash,
-                    subtitles.stem,
-                    found_media_id,
+                subtitles_id = await insert_subtitles_in_db(
+                    conn, SubtitlesRecord(subtitles_hash, subtitles.stem, found_media_id)
                 )
                 if subtitles_id is None:
                     error_console.print(
@@ -105,7 +95,8 @@ async def import_subtitles_into_db_async(
                 nb_rows_inserted += 1
 
                 it_img_hash: Iterator[int] = (
-                    # TODO: maybe an error on last parameter `media_hash` (the signature of `gen_read_binary_img_hash_file` reclaim a `media_id`)
+                    # TODO: maybe an error on last parameter `media_hash` (the signature of
+                    #  `gen_read_binary_img_hash_file` reclaim a `media_id`)
                     img_hash
                     for img_hash, _, _ in gen_read_binary_img_hash_file(binary_img_hash_file, media_hash)
                 )
@@ -127,7 +118,7 @@ async def import_subtitles_into_db_async(
                     )
 
                     if check_before_inserting:
-                        end_frame_offset = await _async_check_import_subtitles_into_db(
+                        end_frame_offset = await _check_import_subtitles_into_db(
                             conn,
                             it_indexed_sub_fingerprints,
                             sub_fingerprint.offset_frame,
@@ -157,44 +148,41 @@ async def import_subtitles_into_db_async(
                 nb_rows_inserted += int(result.split()[1])
     if spinner_subtitles:
         spinner_subtitles.ok("✅ ")
-    return nb_rows_inserted
+    return ImportSubtitlesResult(nb_rows_inserted)
 
 
-async def _async_check_import_subtitles_into_db(
+async def _check_import_subtitles_into_db(
     conn,
     it_indexed_sub_fingerprints,
     start_frame_offset,
     found_media_id,
     raise_exception: bool = True,
-):
+) -> int:
+    """
+
+    Args:
+        conn:
+        it_indexed_sub_fingerprints:
+        start_frame_offset:
+        found_media_id:
+        raise_exception:
+
+    Returns:
+
+    """
     ################################################################
     # DEBUG/VALIDITY PURPOSE
     ################################################################
     fingerprints = [fingerprint for _, _, fingerprint in it_indexed_sub_fingerprints]
     end_frame_offset = start_frame_offset + len(fingerprints)
     sub_nb_frames = end_frame_offset - start_frame_offset
-    records = await conn.fetch(
-        """
-            SELECT
-                id, p_hash, frame_offset
-            FROM
-                frames
-            WHERE
-                frames.media_id = $1 AND
-                frames.frame_offset >= $2 AND
-                frames.frame_offset < $3
-            LIMIT $4;
-        ;""",
-        found_media_id,
-        start_frame_offset,
-        end_frame_offset,
-        sub_nb_frames,
-    )
-    db_frame_id_p_hash = [
-        (db_frame_id, db_frame_p_hash, db_frame_offset) for db_frame_id, db_frame_p_hash, db_frame_offset in records
+    db_subframe_record = [
+        subframe_search_result.p_hash
+        async for subframe_search_result in search_subframe_records_from_media(
+            conn, found_media_id, start_frame_offset, end_frame_offset
+        )
     ]
-    db_frame_p_hash = [p_hash for _, p_hash, _ in db_frame_id_p_hash]
-    errors = compare_containers(fingerprints, db_frame_p_hash)
+    errors = compare_containers(fingerprints, db_subframe_record)
     if errors:
         console.print(f"sub_nb_frames={sub_nb_frames} - len(fingerprints)={len(fingerprints)}")
         console.print(errors)

@@ -1,14 +1,8 @@
-version: '3'
-
-volumes:
-  bktreedb-data:
-
+version: "3.0"
 services:
   bktreedb:
     build:
-      # can't build docker image with PostGreSQL 9.6
-#      context: pg-spgist_hamming/9.6-3.0-develop/.
-      context: pg-spgist_hamming/11.3-3.0-develop/.
+      context: .
       dockerfile: Dockerfile
     volumes:
       - bktreedb-data:/var/lib/postgresql/data
@@ -21,15 +15,11 @@ services:
       - POSTGRES_PASSWORD=docker
     restart: on-failure
 
-  postgres_exporter:
-    image: wrouesnel/postgres_exporter
-    environment:
-      - DATA_SOURCE_NAME=postgresql://docker:docker@bdktreedb:5432/postgres?sslmode=disable
-    ports:
-      - 9187:9187
-
   adminer:
     image: adminer
     restart: always
     ports:
       - 8080:8080
+
+volumes:
+  bktreedb-data:
