@@ -15,7 +15,7 @@ le script produit dans la console des séries d'images hashes correspondant aux 
 # Example
 ➜ poetry run python /src/pydbsrt/app_cli.py \
     show-imghash-from-subtitles-and-media \
-        --subtitles data/big_buck_bunny_trailer_480p.en.srt \
+        --subtitles data/SRT/big_buck_bunny_trailer_480p.en.srt \
         --media data/big_buck_bunny_trailer_480p.mp4
 The frame size for reading (32, 32) is different from the source frame size (854, 480).
 * index subtitle: 1 - first frame: 0

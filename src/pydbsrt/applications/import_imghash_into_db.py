@@ -46,7 +46,7 @@ progress = Progress(
 
 @click.command(short_help="")
 @click.option(
-    "--binary_img_hash_file",
+    "--binary-img-hash-file",
     "-r",
     required=True,
     type=click_pathlib.Path(exists=True, readable=True, resolve_path=True, allow_dash=False),

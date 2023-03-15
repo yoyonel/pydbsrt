@@ -16,7 +16,7 @@ le script exporte  dans un fichier output les images hashes correspondant aux tu
 # Example
 ➜ poetry run python src/pydbsrt/app_cli.py \
     export-imghash-from-subtitles-and-media \
-        --subtitles data/big_buck_bunny_trailer_480p.en.srt \
+        --subtitles data/SRT/big_buck_bunny_trailer_480p.en.srt \
         --media data/big_buck_bunny_trailer_480p.webm
 The frame size for reading (32, 32) is different from the source frame size (854, 480).
 
