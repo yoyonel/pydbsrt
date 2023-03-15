@@ -116,7 +116,7 @@ filterwarnings = [
 ]
 
 # https://github.com/pytest-docker-compose/pytest-docker-compose
-db-volume-args = "docker_test_bktreedb-data:/var/lib/postgresql/data"
+db-volume-args = "bktreedb-pg11-data-test:/var/lib/postgresql/data"
 db-image = "docker_bktreedb:test"
 db-name = "bktreedb"
 db-port = 5432
