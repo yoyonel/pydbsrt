@@ -18,7 +18,7 @@ from pydbsrt.tools.imghash import imghash_to_signed_int64
 async def search_media_in_db(
     search_media: Path,
     search_distance: int,
-    nb_seconds_to_extract: float,
+    nb_seconds_to_extract: float = 0,
     seek_to_middle: bool = True,
 ) -> ResultSearch:
     """
@@ -43,7 +43,8 @@ async def _build_search_result(
     media_id: int,
     media_name: str,
     paired_matched_frames: list[PairedMatchedFrame],
-    time_elapsed_for_match: float,
+    time_elapsed_for_matching: float,
+    total_frames_to_match: int,
 ) -> BuildSearchResult:
     """
 
@@ -51,7 +52,7 @@ async def _build_search_result(
         conn:
         media_id:
         paired_matched_frames:
-        time_elapsed_for_match:
+        time_elapsed_for_matching:
 
     Returns:
 
@@ -73,7 +74,8 @@ async def _build_search_result(
         nb_offsets_match=nb_offsets_match,
         search_offsets_match=search_offsets_match,
         match_frames_offsets=match_frames_offsets,
-        timer_in_seconds=time_elapsed_for_match,
+        timer_in_seconds=time_elapsed_for_matching,
+        confidence=len(search_offsets_match) / total_frames_to_match,
     )
 
 
@@ -112,6 +114,7 @@ async def build_search_media_results(media: Path, imghash_matched: ResultSearch)
     """
 
     map_media_id_to_offsets_matched = _build_map_media_id_to_offsets_matched(imghash_matched.records)
+    nb_records = len(imghash_matched.records)
 
     # https://magicstack.github.io/asyncpg/current/api/index.html#connection-pools
     async with asyncpg.create_pool(
@@ -122,17 +125,17 @@ async def build_search_media_results(media: Path, imghash_matched: ResultSearch)
         command_timeout=60,
     ) as pool:
         async with pool.acquire() as conn:
-            media_matched = [
+            return [
                 await _build_search_result(
                     conn,
                     media_id,
                     media_name=media.stem,
                     paired_matched_frames=paired_matched_frames,
-                    time_elapsed_for_match=imghash_matched.timer.elapsed,
+                    time_elapsed_for_matching=imghash_matched.timer.elapsed,
+                    total_frames_to_match=nb_records,
                 )
                 for media_id, paired_matched_frames in map_media_id_to_offsets_matched.items()
             ]
-    return media_matched
 
 
 # async def search_img_hash(

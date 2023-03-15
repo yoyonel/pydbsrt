@@ -20,6 +20,7 @@ class BuildSearchResult:
     search_offsets_match: Set[int]
     match_frames_offsets: Set[int]
     timer_in_seconds: float
+    confidence: float
 
 
 @dataclass(frozen=True)

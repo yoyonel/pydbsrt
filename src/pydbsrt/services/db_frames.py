@@ -39,18 +39,22 @@ async def import_binary_img_hash_to_db_async(
                 return ImportBinaryImageHashResult(found_media_id, 0)
 
             # Insert Media
-            media_id = await conn.fetchval(
-                """
-                    INSERT INTO
-                        medias (media_hash, name)
-                    VALUES
-                        ($1, $2)
-                    RETURNING
-                        id;
-                """,
-                media_hash,
-                binary_img_hash_file.stem,
-            )
+            media_id = None
+            try:
+                media_id = await conn.fetchval(
+                    """
+                        INSERT INTO
+                            medias (media_hash, name)
+                        VALUES
+                            ($1, $2)
+                        RETURNING
+                            id;
+                    """,
+                    media_hash,
+                    binary_img_hash_file.stem,
+                )
+            except asyncpg.PostgresError as err:
+                error_console.print(err)
             if media_id is None:
                 error_msg = (
                     f"Problem when inserting media (media_hash={media_hash}, name={binary_img_hash_file.stem}) into DB!"

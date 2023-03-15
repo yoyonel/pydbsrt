@@ -7,6 +7,7 @@ from imageio_ffmpeg import read_frames
 from rich.progress import Progress
 
 from pydbsrt.tools.imghash import bytes_to_signed_int64
+from pydbsrt.tools.silence_capture_stdout_stderr import suppress_stdout_stderr
 
 SIZE_IMG_HASH = 8
 
@@ -33,6 +34,7 @@ def build_reader_frames(
     nb_seconds_to_extract: float = 0,
     seek_to_middle: bool = False,
     ffmpeg_reduce_verbosity: bool = True,
+    ignore_stderr_with_ffmpeg: bool = False,
 ) -> Tuple[Iterator[bytes], Dict]:
     meta = {}
     ffmpeg_seek_input_cmd = []
@@ -69,7 +71,14 @@ def build_reader_frames(
         ],
         bits_per_pixel=8,
     )
-    meta = next(reader)
+
+    if ignore_stderr_with_ffmpeg:
+        # remove: The frame size for reading (32, 32) is different from the source frame size (_,__).
+        cm = suppress_stdout_stderr()
+    else:
+        cm = contextlib.nullcontext()
+    with cm:
+        meta = next(reader)
 
     return reader, meta
 

@@ -84,11 +84,11 @@ async def recognize_media(
     results_from_search_imghash_in_db: ResultSearch = await search_media_in_db(
         media, search_distance, nb_seconds_to_extract
     )
-    results: List[BuildSearchResult] = await build_search_media_results(media, results_from_search_imghash_in_db)
+    search_results: List[BuildSearchResult] = await build_search_media_results(media, results_from_search_imghash_in_db)
 
     # https://github.com/pandas-dev/pandas/issues/21910#issuecomment-405109225
-    df_results = pd.DataFrame([asdict(x) for x in results])
-    results_to_print: Union[pd.Dataframe, Optional[str]] = df_results
+    df_search_results = pd.DataFrame([asdict(x) for x in search_results])
+    results_to_print: Union[pd.Dataframe, Optional[str]] = df_search_results
     if output_format == OUTPUT_FORMAT.CSV.name:
-        results_to_print = df_results.to_csv(index=False, header=True)
+        results_to_print = df_search_results.to_csv(index=False, header=False)
     console.print(results_to_print)

@@ -59,5 +59,6 @@ async def test_build_search_media_results(conn, big_buck_bunny_trailer, resource
             search_offsets_match=set(list(range(nb_frames_inserted))),
             match_frames_offsets=set(list(range(nb_frames_inserted))),
             timer_in_seconds=build_search_results[0].timer_in_seconds,
+            confidence=1.0,
         )
     ]
