@@ -16,6 +16,6 @@ def test_export_imghash_from_media(big_buck_bunny_trailer, tmpdir):
         str_binary_hashes = list(map(signed_int64_to_str_binary, gen_signed_int64_hash(fo)))
     nb_binary_hashes = len(str_binary_hashes)
 
-    reader, _meta = build_reader_frames(p_video)
+    reader, _meta = build_reader_frames(p_video, seek_to_middle=True)
     expected_binary_hashed_count = len(list(reader))
     assert nb_binary_hashes == expected_binary_hashed_count

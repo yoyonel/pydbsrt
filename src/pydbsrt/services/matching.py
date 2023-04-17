@@ -37,7 +37,7 @@ async def search_phash_stream_in_db(phash_stream: Iterable[str], search_distance
     ) as pool:
         async with pool.acquire() as conn:
             with _Timer("search_img_hash", func_to_log=lambda s: None) as timer:
-                # TODO: make generator here
+                # TODO: use generator here
                 # PEP 530 -- Asynchronous Comprehensions: https://www.python.org/dev/peps/pep-0530/
                 records = [
                     ResultSearchRecord(phash, offset, await search_phash_in_db(conn, phash, search_distance))

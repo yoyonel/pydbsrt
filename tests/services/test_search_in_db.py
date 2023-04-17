@@ -39,16 +39,21 @@ async def test_search_media_in_db(conn, big_buck_bunny_trailer, tmpdir):
 @pytest.mark.asyncio
 async def test_build_search_media_results(conn, big_buck_bunny_trailer, resource_phash_path, resource_video_path):
     media_name = big_buck_bunny_trailer.stem
-
     binary_img_hash_file = resource_phash_path(f"{media_name}.phash")
+
+    # import images hashes file into (test) database
     media_id, nb_frames_inserted = await import_binary_img_hash_to_db_async(binary_img_hash_file)
 
+    # load images hashes into memory
     it_phashes = map(str, gen_signed_int64_hash(binary_img_hash_file.open("rb")))
+
     # search all frames in order with 0 searching distance (<=> exact match)
     results_from_search_imghash_in_db = await search_phash_stream_in_db(it_phashes, search_distance=0)
 
-    p_video = big_buck_bunny_trailer
-    build_search_results = await build_search_media_results(p_video, results_from_search_imghash_in_db)
+    # build results match
+    build_search_results = await build_search_media_results(big_buck_bunny_trailer, results_from_search_imghash_in_db)
+
+    # compare
     assert build_search_results == [
         BuildSearchResult(
             media_found=True,
@@ -56,8 +61,8 @@ async def test_build_search_media_results(conn, big_buck_bunny_trailer, resource
             media_name_match=media_name,
             media_id_match=media_id,
             nb_offsets_match=7367,
-            search_offsets_match=set(list(range(nb_frames_inserted))),
-            match_frames_offsets=set(list(range(nb_frames_inserted))),
+            search_offsets_match=set(range(nb_frames_inserted)),
+            match_frames_offsets=set(range(nb_frames_inserted)),
             timer_in_seconds=build_search_results[0].timer_in_seconds,
             confidence=1.0,
         )
