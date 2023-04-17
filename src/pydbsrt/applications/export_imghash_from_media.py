@@ -47,7 +47,8 @@ console = Console()
     "--media",
     "-r",
     required=True,
-    type=click_pathlib.Path(exists=True, readable=True, resolve_path=True, allow_dash=False),
+    # type=click_pathlib.Path(exists=True, readable=True, resolve_path=True, allow_dash=False),
+    type=click_pathlib.Path(),
     help="Path to media",
 )
 @click.option("--output-file", "-o", default=None, help="File where to write images hashes.")
