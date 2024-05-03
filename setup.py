@@ -41,7 +41,7 @@ setup(
         "python-Levenshtein==0.12.0",
         "python-opensubtitles==0.2.dev0",
         "py-translator==1.8.9",
-        "tqdm==4.24.0",
+        "tqdm==4.66.3",
     ],
     extras_require={},
     entry_points={
