@@ -87,6 +87,43 @@ tasks:
     cmds:
       - cargo test -p dbsrt-cli --test test_retarget_iso -- --nocapture
 
+  test:rs:server:
+    desc: Run dbsrt-server REST API integration tests
+    cmds:
+      - cargo test -p dbsrt-server --test test_api -- --nocapture
+
+  server:build:
+    desc: Build dbsrt-server release binary
+    cmds:
+      - cargo build --release -p dbsrt-server
+
+  server:run:
+    desc: Run dbsrt-server daemon on http://127.0.0.1:8765
+    deps: [server:build]
+    cmds:
+      - ./target/release/dbsrt-server --host 127.0.0.1 --port 8765 --phash-dir /tmp --subtitles-dir data/SRT
+
+  vlc:install-plugin:
+    desc: Install dbsrt VLC Lua plugins (GUI extension and CLI interface)
+    cmds:
+      - mkdir -p ~/.local/share/vlc/lua/extensions/ ~/.local/share/vlc/lua/intf/
+      - cp -v vlc-plugin/dbsrt_subsync.lua ~/.local/share/vlc/lua/extensions/
+      - cp -v vlc-plugin/dbsrt_intf.lua ~/.local/share/vlc/lua/intf/
+      - echo "dbsrt VLC plugins installed (GUI in extensions/, CLI in intf/)."
+
+  vlc:test-cvlc:
+    desc: Test headless cvlc subtitle auto-sync with event-driven completion
+    cmds:
+      - |
+        output=$(DBSRT_AUTOKILL=1 cvlc --avcodec-hw=none --extraintf luaintf --lua-intf dbsrt_intf tests/data/big_buck_bunny_trailer_480p.mp4 2>&1)
+        echo "$output"
+        if echo "$output" | grep -q "SUCCESS! Media matched"; then
+          echo "✓ E2E VLC Integration Test Passed (Event-driven autokill)!"
+        else
+          echo "✗ E2E VLC Integration Test Failed: Subtitle was not attached!"
+          exit 1
+        fi
+
   rs:bench:
     desc: Run Rust pHash throughput benchmark
     cmds:
