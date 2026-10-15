@@ -41,6 +41,9 @@ enum Commands {
     /// Retarget and synchronize SRT subtitles from reference to target media
     RetargetSubtitles(RetargetArgs),
 
+    /// Export binary .phash file for a media using fast SIMD extraction
+    ExportPhash(ExportPhashArgs),
+
     /// Zero-DB fast search across directory of .phash files via memory mapping
     ScanLibrary(ScanLibraryArgs),
 }
@@ -144,6 +147,21 @@ pub struct RetargetArgs {
     /// Hamming search distance for BK-Tree
     #[arg(long, default_value_t = 0)]
     pub search_distance: u32,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct ExportPhashArgs {
+    /// Media file to extract phash from
+    #[arg(short, long)]
+    pub media: PathBuf,
+
+    /// Output .phash file (defaults to /tmp/<name>.<fps>fps.phash)
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
+
+    /// Optional duration in seconds to extract (defaults to full media)
+    #[arg(short, long)]
+    pub duration: Option<f64>,
 }
 
 #[derive(Default)]
@@ -525,6 +543,42 @@ fn run_scan_library(args: &ScanLibraryArgs) -> Result<()> {
     Ok(())
 }
 
+fn run_export_phash(args: &ExportPhashArgs) -> Result<()> {
+    let start = Instant::now();
+    println!("Probing media {:?}...", args.media);
+    let meta = probe_video(&args.media)?;
+    println!(
+        "Media duration: {:.2}s, FPS: {:.3}",
+        meta.duration, meta.fps
+    );
+
+    let duration = args.duration.unwrap_or(meta.duration);
+    let total_frames = (duration * meta.fps).round() as usize;
+
+    let out_path = args.output.clone().unwrap_or_else(|| {
+        let name = args.media.file_name().unwrap().to_string_lossy();
+        PathBuf::from(format!("/tmp/{}.{:.3}fps.phash", name, meta.fps))
+    });
+
+    println!(
+        "Extracting pHash for {} frames ({:.1}s) -> {:?}...",
+        total_frames, duration, out_path
+    );
+
+    let hashes = extract_frames_phash(&args.media, 0.0, total_frames)?;
+    let elapsed = start.elapsed().as_secs_f64();
+    println!(
+        "Computed {} frame hashes in {:.2}s ({:.0} fps)",
+        hashes.len(),
+        elapsed,
+        hashes.len() as f64 / elapsed
+    );
+
+    write_phash_file(&out_path, &hashes)?;
+    println!("✓ Successfully wrote binary phash to {:?}", out_path);
+    Ok(())
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
@@ -551,6 +605,9 @@ fn main() -> Result<()> {
         }
         Commands::RetargetSubtitles(args) => {
             run_retarget_subtitles(&args)?;
+        }
+        Commands::ExportPhash(args) => {
+            run_export_phash(&args)?;
         }
         Commands::ScanLibrary(args) => {
             run_scan_library(&args)?;

@@ -42,10 +42,14 @@ pub struct SubtitleFile {
 }
 
 impl SubtitleFile {
-    /// Reads and parses an SRT file.
+    /// Reads and parses an SRT file, supporting UTF-8 and legacy encodings gracefully.
     pub fn open(path: &Path) -> Result<Self> {
-        let content = fs::read_to_string(path)
-            .with_context(|| format!("Failed to read subtitle file {:?}", path))?;
+        let bytes =
+            fs::read(path).with_context(|| format!("Failed to read subtitle file {:?}", path))?;
+        let content = match String::from_utf8(bytes.clone()) {
+            Ok(s) => s,
+            Err(_) => String::from_utf8_lossy(&bytes).into_owned(),
+        };
         Self::parse(&content)
     }
 

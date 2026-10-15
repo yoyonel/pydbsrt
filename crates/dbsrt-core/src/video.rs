@@ -108,6 +108,7 @@ pub fn extract_frames_phash(path: &Path, start_sec: f64, nb_frames: usize) -> Re
         ])
         .arg(path)
         .args([
+            "-an",
             "-frames:v",
             &nb_frames.to_string(),
             "-vf",
