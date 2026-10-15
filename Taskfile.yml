@@ -1,0 +1,115 @@
+version: '3'
+
+vars:
+  PROJECT_NAME: pydbsrt
+  DOCKER_IMAGE: pydbsrt:latest
+  DOCKER_DB_IMAGE: docker_bktreedb:test
+  COMPOSE_FILE: docker/docker-compose.yml
+  TEST_COMPOSE_FILE: docker/docker-compose.test.yml
+  NETWORK_NAME: docker_default
+  DB_HOST: docker-bktreedb-1
+  DEMO_MEDIA: data/big_buck_bunny_trailer_480p.webm
+  DEMO_SRT: data/SRT/big_buck_bunny_trailer_480p.en.srt
+  DEMO_PHASH: /tmp/big_buck_bunny_trailer_480p.webm.25.0fps.phash
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task --list
+
+  build:
+    desc: Build pydbsrt Docker image
+    cmds:
+      - docker build -t {{.DOCKER_IMAGE}} -f Dockerfile .
+
+  build-db:
+    desc: Build custom PostgreSQL 11 BK-tree Docker image
+    cmds:
+      - docker build -t {{.DOCKER_DB_IMAGE}} docker/pg-spgist_hamming/11.3-3.0-develop/
+
+  db:up:
+    desc: Start PostgreSQL BK-tree container stack in background
+    cmds:
+      - docker compose -f {{.COMPOSE_FILE}} up -d
+
+  db:down:
+    desc: Stop PostgreSQL BK-tree container stack
+    cmds:
+      - docker compose -f {{.COMPOSE_FILE}} down
+
+  db:logs:
+    desc: View DB container logs
+    cmds:
+      - docker compose -f {{.COMPOSE_FILE}} logs -f
+
+  db:psql:
+    desc: Open interactive psql shell inside running DB
+    interactive: true
+    cmds:
+      - docker exec -it {{.DB_HOST}} psql -U postgres -d postgres
+
+  test:
+    desc: Run test suite inside Docker container
+    deps: [db:up]
+    cmds:
+      - >
+        docker run --rm
+        --network {{.NETWORK_NAME}}
+        -e PSQL_IP={{.DB_HOST}}
+        -v "{{.ROOT_DIR}}/src:/app/src"
+        -v "{{.ROOT_DIR}}/data:/app/data"
+        -v "{{.ROOT_DIR}}/tests:/app/tests"
+        {{.DOCKER_IMAGE}}
+        pytest -o addopts="" -p no:docker-compose -v tests/
+
+  cli:
+    desc: Run pydbsrt CLI inside container (e.g. task cli -- --help)
+    cmds:
+      - >
+        docker run --rm
+        --network {{.NETWORK_NAME}}
+        -e PSQL_IP={{.DB_HOST}}
+        -v "{{.ROOT_DIR}}/src:/app/src"
+        -v "{{.ROOT_DIR}}/data:/app/data"
+        -v "/tmp:/tmp"
+        {{.DOCKER_IMAGE}}
+        pydbsrt {{.CLI_ARGS}}
+
+  demo:export-phash:
+    desc: Run demo export-imghash-from-media on sample video
+    cmds:
+      - task: cli
+        vars:
+          CLI_ARGS: export-imghash-from-media --media /app/{{.DEMO_MEDIA}}
+
+  demo:import-hashes:
+    desc: Run demo import-images-hashes-into-db
+    deps: [demo:export-phash]
+    cmds:
+      - task: cli
+        vars:
+          CLI_ARGS: import-images-hashes-into-db --binary-img-hash-file {{.DEMO_PHASH}}
+
+  demo:import-subtitles:
+    desc: Run demo import-subtitles-into-db
+    deps: [demo:import-hashes]
+    cmds:
+      - task: cli
+        vars:
+          CLI_ARGS: import-subtitles-into-db --binary-img-hash-file {{.DEMO_PHASH}} --subtitles /app/{{.DEMO_SRT}}
+
+  demo:search:
+    desc: Run demo search-imghash-in-db
+    deps: [demo:import-hashes]
+    cmds:
+      - task: cli
+        vars:
+          CLI_ARGS: search-imghash-in-db --phash_file {{.DEMO_PHASH}} --distance 0
+
+  clean:
+    desc: Clean cache files and build artifacts
+    cmds:
+      - find . -type f -name "*.pyc" -delete
+      - find . -type d -name "__pycache__" -delete
+      - rm -rf .pytest_cache .tox dist
