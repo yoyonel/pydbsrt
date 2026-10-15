@@ -1,4 +1,4 @@
-from typing import AsyncIterator, Optional, Union
+from typing import AsyncIterator
 
 from pydbsrt.models.phash import PHashMedia
 from pydbsrt.services.database import create_conn
@@ -6,13 +6,13 @@ from pydbsrt.tools.search_in_db import search_media_hash_in_db
 
 
 async def agen_p_hash_from_media_in_db(
-    media_hash: Union[str, bytes],
+    media_hash: str | bytes,
     chunk_size: int = 32,
-    limit: Optional[int] = None,
+    limit: int | None = None,
 ) -> AsyncIterator[PHashMedia]:
     conn = await create_conn()
 
-    found_media_id: Optional[int] = await search_media_hash_in_db(conn, media_hash)
+    found_media_id: int | None = await search_media_hash_in_db(conn, media_hash)
     if found_media_id is None:
         return
 

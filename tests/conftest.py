@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 from typing import Coroutine, Tuple
 
@@ -67,7 +68,6 @@ def db_is_ready(request):
 
 
 @pytest.fixture(scope="function")
-@pytest.mark.asyncio
 async def conn(db_is_ready) -> Connection:
     conn = await create_conn()
     await drop_tables(conn, tables_names=("medias", "frames", "subtitles"))
@@ -76,11 +76,9 @@ async def conn(db_is_ready) -> Connection:
 
 
 @pytest.fixture(autouse=True)
-def patch_coroclick(mocker, event_loop):
+def patch_coroclick(mocker):
     def mocked_run_coro(coro: Coroutine):
-        loop = event_loop
-        task = loop.create_task(coro)
-        loop.run_until_complete(task)
+        return asyncio.run(coro)
 
     mocker.patch("pydbsrt.tools.coro.run_coro", mocked_run_coro)
 
@@ -94,7 +92,6 @@ async def phash_from_media(big_buck_bunny_trailer, tmpdir) -> Path:
 
 
 @pytest.fixture
-@pytest.mark.asyncio
 async def aio_insert_phash_into_db(conn, phash_from_media: Path) -> Tuple[int, int]:
     media_id, nb_frames_inserted = await import_binary_img_hash_to_db_async(phash_from_media)
     assert media_id == 1

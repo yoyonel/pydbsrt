@@ -1,7 +1,7 @@
 import contextlib
 import datetime
 from pathlib import Path
-from typing import Dict, Iterator, Optional, Tuple
+from typing import Dict, Iterator, Tuple
 
 from imageio_ffmpeg import read_frames
 from rich.progress import Progress
@@ -86,7 +86,7 @@ def build_reader_frames(
 def gen_read_binary_img_hash_file(
     binary_img_hash_file: Path,
     media_id: int,
-    progress: Optional[Progress] = None,
+    progress: Progress | None = None,
 ) -> Iterator[Tuple[int, int, int]]:
     with binary_img_hash_file.open("rb") as fo:
         if progress:

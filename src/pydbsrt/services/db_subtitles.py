@@ -1,12 +1,13 @@
 """
 ASYNC module
 """
+
 import contextlib
 from dataclasses import fields
 from itertools import chain, groupby
 from operator import itemgetter
 from pathlib import Path
-from typing import Iterator, List, Optional, Tuple
+from typing import Iterator, List, Tuple
 
 import asyncpg
 from imohash import hashfile
@@ -38,7 +39,7 @@ from pydbsrt.tools.subreader import SubReader
 async def import_subtitles_into_db(
     subtitles: Path,
     binary_img_hash_file: Path,
-    spinner: Optional[Yaspin] = None,
+    spinner: Yaspin | None = None,
     drop_before_inserting: bool = False,
     check_before_inserting: bool = False,
 ) -> ImportSubtitlesResult:
@@ -78,7 +79,7 @@ async def import_subtitles_into_db(
                     return ImportSubtitlesResult(nb_rows_inserted)
 
                 media_hash = hashfile(binary_img_hash_file, hexdigest=True)
-                found_media_id: Optional[int] = await search_media_hash_in_db(conn, media_hash)
+                found_media_id: int | None = await search_media_hash_in_db(conn, media_hash)
                 if found_media_id is None:
                     console.print(f"ERROR: can't found media where media_hash={media_hash}")
                     return ImportSubtitlesResult(nb_rows_inserted)

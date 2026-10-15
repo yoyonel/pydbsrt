@@ -1,5 +1,4 @@
 from pathlib import Path
-from typing import Optional
 
 import asyncpg
 from rich.progress import Progress
@@ -21,7 +20,7 @@ from pydbsrt.tools.search_in_db import search_media_hash_in_db
 
 
 async def import_binary_img_hash_to_db_async(
-    binary_img_hash_file: Path, progress: Optional[Progress] = None
+    binary_img_hash_file: Path, progress: Progress | None = None
 ) -> ImportBinaryImageHashResult:
     media_hash = await hashfile(binary_img_hash_file, hexdigest=True)
     console.print(f"media_hash='{media_hash}'")

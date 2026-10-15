@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 ➜ poetry run python src/pydbsrt/app_cli.py recognize-media --help
 Usage: app_cli.py recognize-media [OPTIONS]
@@ -30,10 +29,11 @@ Percent.1080p.AMZN.WEB-DL.DD.5.1.H.265-SiGMA,38,33,"{0, 1, 2, 3, 4, 5, 6, 7, 8, 
 ```
 
 """
+
 from dataclasses import asdict
 from enum import Enum
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import List
 
 import click
 import click_pathlib
@@ -88,7 +88,7 @@ async def recognize_media(
 
     # https://github.com/pandas-dev/pandas/issues/21910#issuecomment-405109225
     df_search_results = pd.DataFrame([asdict(x) for x in search_results])
-    results_to_print: Union[pd.Dataframe, Optional[str]] = df_search_results
+    results_to_print: pd.Dataframe | str | None = df_search_results
     if output_format == OUTPUT_FORMAT.CSV.name:
         results_to_print = df_search_results.to_csv(index=False, header=False)
     console.print(results_to_print)

@@ -26,7 +26,7 @@ def get_video_scale(media_fp):
         media = FFMedia.FFMedia(media_fp)
         width = media.stream_entry("v:0", "width")
         height = media.stream_entry("v:0", "height")
-        return "{}x{}".format(width, height)
+        return f"{width}x{height}"
     except subprocess.CalledProcessError as e:
         logger.error("FFprobe failed.")
         raise e
@@ -118,7 +118,7 @@ def cat(out_media_fp, l_in_media_fp):
         fpath = tempfile.mkstemp()[1]
         with open(fpath, "w") as fp:
             for media_fp in l_in_media_fp:
-                fp.write("file '{}'\n".format(os.path.abspath(media_fp)))
+                fp.write(f"file '{os.path.abspath(media_fp)}'\n")
 
         ffmpeg.add_input_file(fpath)
 
@@ -148,7 +148,7 @@ def process(args):
         FFmpeg.initialize()
         FFprobe.initialize()
     except FFException.BinaryNotFound as e:
-        logger.error("Binary not found: [{0}].".format(e.binary_name))
+        logger.error(f"Binary not found: [{e.binary_name}].")
 
     for media_fp in args.l_in_media_fp:
         if not os.path.exists(media_fp):
@@ -167,7 +167,7 @@ def build_parser(parser=None, **argparse_options):
         parser = argparse.ArgumentParser(
             **argparse_options,
             description="""Search files recursively starting at 'base_directory'
-            and count the differents codecs found"""
+            and count the differents codecs found""",
         )
 
     parser.add_argument("-i", "--input", nargs="+", required=True, dest="l_in_media_fp")

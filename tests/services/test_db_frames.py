@@ -7,8 +7,6 @@ from pydbsrt.tools.imghash import gen_signed_int64_hash
 
 # https://pypi.org/project/waiting/
 
-pytest_plugins = ["docker_compose"]
-
 
 @pytest.mark.asyncio
 async def test_import_binary_img_hash_to_db_async(conn, resource_phash_path):

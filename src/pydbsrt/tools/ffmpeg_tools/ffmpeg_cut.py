@@ -258,7 +258,7 @@ def build_parser(parser=None, **argparse_options):
         parser = argparse.ArgumentParser(
             **argparse_options,
             description="""Search files recursively starting at 'base_directory'
-            and count the differents codecs found"""
+            and count the differents codecs found""",
         )
 
     # config file

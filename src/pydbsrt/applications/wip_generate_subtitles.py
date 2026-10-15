@@ -1,10 +1,10 @@
-# -*- coding: utf-8 -*-
 """
 ➜ poetry run python src/pydbsrt/app_cli.py generate-subtitles-from-db \
 
 # Description
 
 """
+
 from pathlib import Path
 from typing import List
 

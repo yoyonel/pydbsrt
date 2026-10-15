@@ -1,9 +1,7 @@
-from typing import Optional, Union
-
 from asyncpg import Connection
 
 
-async def search_media_hash_in_db(conn: Connection, media_hash: Union[str, bytes]) -> Optional[int]:
+async def search_media_hash_in_db(conn: Connection, media_hash: str | bytes) -> int | None:
     """
 
     Args:

@@ -1,6 +1,6 @@
 #!/usr/bin/env python
-"""
-"""
+""" """
+
 import logging
 import re
 import sys
@@ -83,11 +83,11 @@ def test_with_google_translate():
     # gen_subs_en_fr = gen_translate_srt(subs_en[:10], it_func=tqdm)
     # subs_en_fr = list(gen_subs_en_fr)
 
-    logger.info(pformat(([(sub[0].text, sub[1]) for sub in subs_en_fr])))
+    logger.info(pformat([(sub[0].text, sub[1]) for sub in subs_en_fr]))
 
     # be sure to validate the synchronization
     if fuzz.partial_ratio(subs_en_fr[0][1], subs_fr[0].text) <= 60:
-        logger.error(f"SRTs (en: {fn_subs_en}, fr: {fn_subs_fr}) " f"seems to be not synchronize")
+        logger.error(f"SRTs (en: {fn_subs_en}, fr: {fn_subs_fr}) seems to be not synchronize")
 
     # Process synchronization
     if subs_en[0].start >= subs_fr[0].start:
@@ -263,7 +263,7 @@ def translate_subtitles_with_google_translate_webapi(
             nb_chunks_produced = len(t_grp_srt_from.split(split_token))
             if nb_chunks_produced == nb_chunk_to_find:
                 break
-            logger.warning(f"'{split_token=}' " f"produce {nb_chunks_produced} chunks (!= {chunk_size})")
+            logger.warning(f"'{split_token=}' produce {nb_chunks_produced} chunks (!= {chunk_size})")
         if len(t_grp_srt_from.split(split_token)) == nb_chunk_to_find:
             for t_srt_from, srt_from in zip(t_grp_srt_from.split(split_token), grp_srt_from_for_zip):
                 yield srt_from, t_srt_from
@@ -328,7 +328,7 @@ def main():
             ),
             key=lambda m: m[1],
         )
-        logger.info(f"best matchs for '{t_srt_from}':" f"\n{srt_to[best_matchs[0]]} - score = {best_matchs[1]}")
+        logger.info(f"best matchs for '{t_srt_from}':\n{srt_to[best_matchs[0]]} - score = {best_matchs[1]}")
 
 
 def init_logger():

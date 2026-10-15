@@ -1,7 +1,7 @@
 import binascii
 import os
 from pathlib import Path
-from typing import Tuple, Union
+from typing import Tuple
 
 import aiofiles
 import mmh3
@@ -40,11 +40,11 @@ async def _get_data_for_hash(
 
 
 async def hashfile(
-    filename: Union[str, Path],
+    filename: str | Path,
     sample_threshold: int = SAMPLE_THRESHOLD,
     sample_size: int = SAMPLE_SIZE,
     hexdigest: bool = False,
-) -> Union[str, bytes]:
+) -> str | bytes:
     """
 
     Args:

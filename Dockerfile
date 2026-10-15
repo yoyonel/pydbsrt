@@ -1,25 +1,33 @@
-FROM python:3.9-bookworm as base
-ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+# Multi-stage Dockerfile powered by uv
+FROM ghcr.io/astral-sh/uv:0.6.5 AS uv_bin
+
+FROM python:3.11-slim-bookworm AS runtime
 WORKDIR /app
 
-FROM base as poetry
-RUN pip install poetry==1.4.2
-COPY poetry.lock pyproject.toml /app/
-RUN poetry export --with dev --without-hashes -o requirements.txt
+# Install system dependencies (ffmpeg for video decoding, libpq5 for PostgreSQL)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    libpq5 \
+    && rm -rf /var/lib/apt/lists/*
 
-FROM base as build
-COPY --from=poetry /app/requirements.txt /tmp/requirements.txt
-RUN python -m venv .venv && \
-    .venv/bin/pip install 'wheel==0.36.2' && \
-    .venv/bin/pip install -r /tmp/requirements.txt && \
-    .venv/bin/pip install sh
+# Install uv binary
+COPY --from=uv_bin /uv /uvx /bin/
 
-FROM python:3.9-slim-bookworm as runtime
-ENV PIP_DISABLE_PIP_VERSION_CHECK=1
-WORKDIR /app
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
-ENV PATH=/app/.venv/bin:$PATH
-ENV PYTHONPATH=/app/src:$PYTHONPATH
-COPY --from=build /app/.venv /app/.venv
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PYTHON_DOWNLOADS=never \
+    PATH="/app/.venv/bin:$PATH"
+
+# Copy dependency specifications first to leverage Docker layer cache
+COPY pyproject.toml uv.lock /app/
+
+# Install dependencies using uv sync without installing root project
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-install-project
+
+# Copy application source code and install project
 COPY . /app
-RUN .venv/bin/pip install --no-deps -e .
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen
+
+CMD ["pydbsrt"]

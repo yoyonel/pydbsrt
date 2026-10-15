@@ -1,9 +1,9 @@
-"""
-"""
+""" """
+
 import logging
 import subprocess
 import time
-from typing import Generator, Optional, Union
+from typing import Generator
 
 import imagehash
 import numpy as np
@@ -16,8 +16,8 @@ from pydbsrt.tools.ffmpeg_wrapper import FFmpeg, FFmpegFilter
 
 def ffmpeg_frame_generator(
     input: str,
-    start_frame: Optional[Union[int, str]] = None,
-    stop_frame: Optional[Union[int, str]] = None,
+    start_frame: int | str | None = None,
+    stop_frame: int | str | None = None,
     frame_width: int = 32,
     frame_height: int = 32,
 ) -> Generator[bytes, None, int]:
@@ -124,7 +124,7 @@ def ffmpeg_imghash_generator(
 if __name__ == "__main__":
     from pathlib import Path
 
-    root_path = Path('data/')
+    root_path = Path("data/")
     media_path = root_path.joinpath("big_buck_bunny_trailer_480p.mp4")
 
     gen_imghash = ffmpeg_imghash_generator(str(media_path))

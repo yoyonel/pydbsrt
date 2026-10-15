@@ -3,7 +3,7 @@ from operator import itemgetter
 from pathlib import Path
 from struct import unpack
 from tempfile import gettempdir
-from typing import AsyncGenerator, AsyncIterator, Callable, Iterator, Optional, Tuple
+from typing import AsyncGenerator, AsyncIterator, Callable, Iterator, Tuple
 
 import asyncstdlib
 from imagehash import ImageHash
@@ -31,7 +31,7 @@ SIZE_IMG_HASH = 8
 def export_extended_subtitles(
     subtitles: Path,
     media: Path,
-    output_file: Optional[Path],
+    output_file: Path | None,
     chunk_size: int = 25,
 ) -> Path:
     """
@@ -156,8 +156,7 @@ def read_extended_subtitles(
     with binary_extended_subtitles.open("rb") as fin:
         while chunk_img_hash := fin.read(SIZE_IMG_HASH * chunk_size):
             # https://docs.python.org/3/library/struct.html#byte-order-size-and-alignment
-            for signed_int64_img_hash in unpack(f">{'q' * (len(chunk_img_hash) // SIZE_IMG_HASH)}", chunk_img_hash):
-                yield signed_int64_img_hash
+            yield from unpack(f">{'q' * (len(chunk_img_hash) // SIZE_IMG_HASH)}", chunk_img_hash)
 
 
 async def show_imghash_from_subtitles_and_media_in_db(subtitles: Path, binary_img_hash_file: Path):

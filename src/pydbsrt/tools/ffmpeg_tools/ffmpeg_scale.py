@@ -48,10 +48,10 @@ def process(args):
         FFmpeg.initialize()
         FFprobe.initialize()
     except FFException.BinaryNotFound as e:
-        logger.error("Binary not found: [{0}].".format(e.binary_name))
+        logger.error(f"Binary not found: [{e.binary_name}].")
     else:
-        logger.info("ffmpeg binary found at [{0}].".format(FFmpeg.binary_path))
-        logger.info("ffprobe binary found at [{0}].".format(FFprobe.binary_path))
+        logger.info(f"ffmpeg binary found at [{FFmpeg.binary_path}].")
+        logger.info(f"ffprobe binary found at [{FFprobe.binary_path}].")
 
     return scale(
         input_file=args.input_file,
@@ -74,7 +74,7 @@ def build_parser(parser=None, **argparse_options):
         parser = argparse.ArgumentParser(
             **argparse_options,
             description="""Search files recursively starting at 'base_directory'
-            and count the differents codecs found"""
+            and count the differents codecs found""",
         )
 
     # config file

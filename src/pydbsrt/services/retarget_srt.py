@@ -1,5 +1,5 @@
-"""
-"""
+""" """
+
 import re
 from collections import Counter
 from itertools import groupby
@@ -79,11 +79,9 @@ async def retarget_subtitles_in_db_async(
                     # https://docs.python.org/3/library/statistics.html#statistics.mode
                     # "most common data point" of difference offsets
                     mcdp_diff_offsets = mode(
-                        (
-                            record.matches[1].frame_offset - record.matches[0].frame_offset
-                            for record in results_search.records
-                            if len(record.matches) == 2 and record.matches[0].media_id != record.matches[1].media_id
-                        )
+                        record.matches[1].frame_offset - record.matches[0].frame_offset
+                        for record in results_search.records
+                        if len(record.matches) == 2 and record.matches[0].media_id != record.matches[1].media_id
                     )
                     map_mcdp_diff_offsets[index_subtitle] = mcdp_diff_offsets
                 except StatisticsError:

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 ➜ poetry run python src/pydbsrt/app_cli.py import-subtitles-into-db \
     --subtitles [...]/video/Stalker.1979.1080p.BluRay.x264-USURY[rarbg]/stalker.1979.1080p.bluray.x264-usury.fr.srt \
@@ -8,6 +7,7 @@
 # Description
 
 """
+
 from pathlib import Path
 
 import click

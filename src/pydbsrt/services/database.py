@@ -4,7 +4,8 @@ ASYNC module
 - http://python-notes.curiousefficiency.org/en/latest/pep_ideas/async_programming.html#naming-conventions
 - https://peps.python.org/pep-0492/#why-magic-methods-start-with-a
 """
-from typing import AsyncIterator, Optional
+
+from typing import AsyncIterator
 
 import asyncpg
 from asyncpg import Connection
@@ -154,7 +155,7 @@ async def search_media_name(conn: Connection, media_id: int) -> str:
     )
 
 
-async def search_subtitles_from_hash(conn: Connection, subtitles_hash: Hash) -> Optional[int]:
+async def search_subtitles_from_hash(conn: Connection, subtitles_hash: Hash) -> int | None:
     """
 
     Args:
@@ -164,7 +165,7 @@ async def search_subtitles_from_hash(conn: Connection, subtitles_hash: Hash) -> 
     Returns:
 
     """
-    found_subtitles_id: Optional[int] = await conn.fetchval(
+    found_subtitles_id: int | None = await conn.fetchval(
         """
             SELECT
                 id

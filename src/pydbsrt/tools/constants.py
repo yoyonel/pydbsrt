@@ -1,6 +1,5 @@
-"""
+""" """
 
-"""
 from typing import Final
 
 SAMPLE_THRESHOLD = 128 * 1024

@@ -1,7 +1,6 @@
 from dataclasses import dataclass
-from typing import Union
 
-Hash = Union[str, bytes]
+Hash = str | bytes
 
 
 @dataclass(frozen=True)

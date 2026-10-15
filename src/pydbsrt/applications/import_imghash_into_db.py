@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 ➜ poetry run python src/pydbsrt/app_cli.py import-images-hashes-into-db --help
 Usage: app_cli.py import-images-hashes-into-db [OPTIONS]
@@ -17,6 +16,7 @@ dans BKTreeDB la base de donnée PostgreSQL (avec index) spécialisé·e pour le
     xargs -I {} poetry run python app_cli.py import-images-hashes-into-db -r "{}"
 
 """
+
 import sys
 
 import click

@@ -3,7 +3,6 @@ from pathlib import Path
 
 # https://pypi.org/project/click-pathlib/
 from tempfile import gettempdir
-from typing import Optional
 
 from numpy.ma import floor
 from rich.console import Console
@@ -18,7 +17,7 @@ from pydbsrt.tools.rich_colums import TimeElapsedOverRemainingColumn
 console = Console()
 
 
-def export_imghash_from_media(media: Path, output_file: Optional[Path] = None) -> Path:
+def export_imghash_from_media(media: Path, output_file: Path | None = None) -> Path:
     ################################################################
     # PROCESSING                                                   #
     ################################################################

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 ➜ poetry run python src/pydbsrt/app_cli.py export-imghash-from-subtitles-and-media --help
 Usage: app_cli.py export-imghash-from-subtitles-and-media [OPTIONS]

@@ -1,13 +1,12 @@
 import asyncio
-import sys
 from functools import wraps
-from typing import Any, Awaitable, Callable, Optional, Set
+from typing import Any, Awaitable, Callable, Set
 
 import click
 
 
 def all_tasks(
-    loop: Optional[asyncio.AbstractEventLoop] = None,
+    loop: asyncio.AbstractEventLoop | None = None,
 ) -> Set["asyncio.Task[Any]"]:
     tasks = list(asyncio.all_tasks(loop))
     return {t for t in tasks if not t.done()}
@@ -18,11 +17,11 @@ def _cancel_all_tasks(loop: asyncio.AbstractEventLoop) -> None:
     if not to_cancel:
         return
 
-    click.secho(f"\U0001F4A3 Cancelling {len(to_cancel)} tasks.", fg="magenta")
+    click.secho(f"\U0001f4a3 Cancelling {len(to_cancel)} tasks.", fg="magenta")
     for task in to_cancel:
         task.cancel()
 
-    click.secho(f"\U0001F4A3 Wait for {len(to_cancel)} tasks to finish.", fg="magenta")
+    click.secho(f"\U0001f4a3 Wait for {len(to_cancel)} tasks to finish.", fg="magenta")
     loop.run_until_complete(asyncio.gather(*to_cancel, loop=loop, return_exceptions=True))
 
     for task in to_cancel:
@@ -55,9 +54,9 @@ def run_coro(coro: Awaitable):
     finally:
         if task:
             if not complete:
-                click.secho("\U0001F4A3 Cancelling main task.", fg="magenta")
+                click.secho("\U0001f4a3 Cancelling main task.", fg="magenta")
             if task.exception():
-                click.secho(f"\U0001F4A3 Error on main task: {task.exception()}", fg="magenta")
+                click.secho(f"\U0001f4a3 Error on main task: {task.exception()}", fg="magenta")
             else:
                 task.cancel()
                 try:
@@ -65,10 +64,9 @@ def run_coro(coro: Awaitable):
                 except asyncio.CancelledError:  # pragma: no cover
                     pass
         _cancel_all_tasks(loop)
-        if sys.version_info >= (3, 6):  # don't use PY_36 to pass mypy
-            if not complete:
-                click.secho("\U0001F4A3 Shutting down async generators.", fg="magenta")
-            loop.run_until_complete(loop.shutdown_asyncgens())
+        if not complete:
+            click.secho("\U0001f4a3 Shutting down async generators.", fg="magenta")
+        loop.run_until_complete(loop.shutdown_asyncgens())
         loop.close()
 
 

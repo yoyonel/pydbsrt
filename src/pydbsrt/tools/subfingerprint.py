@@ -1,10 +1,10 @@
-"""
-"""
+""" """
+
 import dataclasses
 import itertools
 import math
 from dataclasses import dataclass
-from typing import AsyncIterator, Callable, Iterator, Union
+from typing import AsyncIterator, Callable, Iterator
 
 from imagehash import ImageHash
 from pysrt.srtitem import SubRipTime
@@ -24,7 +24,7 @@ def subriptime_to_frame(srt: SubRipTime, fps: float = 25.0, cast_to_int: Callabl
 class SubFingerprint:
     index: int
     offset_frame: int
-    img_hash: Union[ImageHash, int]
+    img_hash: ImageHash | int
 
     def __getitem__(self, item):
         return self.__getattribute__(dataclasses.fields(self)[item].name if isinstance(item, int) else item)
@@ -33,7 +33,7 @@ class SubFingerprint:
 @dataclass(init=True, repr=False, eq=False, order=False, unsafe_hash=False, frozen=True)
 class SubFingerprints:
     sub_reader: SubReader
-    imghash_reader: Union[VideoFingerprint, Iterator[ImageHash], Iterator[int]]
+    imghash_reader: VideoFingerprint | Iterator[ImageHash] | Iterator[int]
 
     def __iter__(self) -> Iterator[SubFingerprint]:
         """

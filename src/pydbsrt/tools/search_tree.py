@@ -7,7 +7,7 @@ import pybktree
 
 from pydbsrt.services.reader_frames import gen_read_binary_img_hash_file
 
-Item = collections.namedtuple('Item', 'bits id')
+Item = collections.namedtuple("Item", "bits id")
 
 MatchedItem = Tuple[int, Item]
 

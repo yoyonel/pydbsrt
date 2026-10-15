@@ -1,6 +1,7 @@
 """
 https://stackoverflow.com/questions/8290397/how-to-split-an-iterable-in-constant-size-chunks
 """
+
 from itertools import chain, islice
 from typing import Any, Iterator
 

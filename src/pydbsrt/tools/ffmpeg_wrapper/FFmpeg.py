@@ -28,7 +28,7 @@ def initialize():
         raise FFException.BinaryNotFound("ffmpeg")
 
 
-class FFmpeg(object):
+class FFmpeg:
     """
     FFmpeg Wrapper
     """

@@ -1,6 +1,5 @@
 # https://chrisdown.name/2016/09/04/cleaning-up-muxing-extracting-subtitles-using-ffmpeg-srt-tools.html
 from pathlib import Path
-from typing import Optional
 
 from pydbsrt.tools.encoded_subtitles import ExceptionSubtitles, export_encoded_subtitles
 from pydbsrt.tools.rich_helpers import print_error, print_info, print_warning, progress
@@ -9,7 +8,7 @@ from pydbsrt.tools.rich_helpers import print_error, print_info, print_warning, p
 def extract_subtitles_from_medias(
     root_dir_for_finding_medias: Path,
     glob_for_finding_medias: str,
-    root_dir_export_subtitles: Optional[Path],
+    root_dir_export_subtitles: Path | None,
     default_relative_path_export_for_subtitles: Path = Path("SRT"),
 ) -> None:
     """

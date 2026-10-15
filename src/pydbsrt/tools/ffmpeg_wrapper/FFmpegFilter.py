@@ -5,7 +5,7 @@ Class designed to handle FFmpeg filters
 """
 
 
-class FFmpegFilter(object):
+class FFmpegFilter:
     """A simple builder a ffmpeg filter"""
 
     def __init__(self, name):
@@ -37,5 +37,5 @@ class FFmpegFilter(object):
         built_string = self.name
         if self.opts:
             built_string += "="
-            built_string += ":".join("{0}={1}".format(opt, val) for opt, val in self.opts.items())
+            built_string += ":".join(f"{opt}={val}" for opt, val in self.opts.items())
         return built_string

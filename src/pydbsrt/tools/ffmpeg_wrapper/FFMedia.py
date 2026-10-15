@@ -4,7 +4,7 @@ from urllib.parse import urlparse
 from pydbsrt.tools.ffmpeg_wrapper import FFException, FFprobe
 
 
-class FFMedia(object):
+class FFMedia:
     """
     Checks Data Validity for FFprobe
     """

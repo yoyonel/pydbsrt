@@ -1,7 +1,7 @@
 from pydbsrt.tools.ffmpeg_wrapper import FFException
 
 
-class FFStream(object):
+class FFStream:
     """
     FFmpeg Stream
     """

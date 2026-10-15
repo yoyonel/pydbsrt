@@ -49,6 +49,28 @@ tasks:
     cmds:
       - docker exec -it {{.DB_HOST}} psql -U postgres -d postgres
 
+  sync:
+    desc: Synchronize local virtualenv with uv
+    cmds:
+      - uv sync
+
+  lint:
+    desc: Run Ruff linter on src and tests
+    cmds:
+      - uv run ruff check src/ tests/
+
+  fmt:
+    desc: Format code with Ruff (formatter + auto-fix)
+    cmds:
+      - uv run ruff format src/ tests/
+      - uv run ruff check --fix src/ tests/
+
+  test:local:
+    desc: Run test suite locally with uv (requires db:up)
+    deps: [db:up]
+    cmds:
+      - PSQL_IP=127.0.0.1 uv run pytest -o addopts="" tests/
+
   test:
     desc: Run test suite inside Docker container
     deps: [db:up]

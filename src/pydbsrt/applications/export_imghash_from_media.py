@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 ➜ poetry python src/pydbsrt/app_cli.py export-imghash-from-media --help
 Usage: app_cli.py export-imghash-from-media [OPTIONS]

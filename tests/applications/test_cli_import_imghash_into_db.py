@@ -1,6 +1,7 @@
 """
 https://docs.pytest.org/en/stable/tmpdir.html
 """
+
 from pydbsrt.applications.import_imghash_into_db import console, import_images_hashes_into_db
 from pydbsrt.tools.imghash import gen_signed_int64_hash
 

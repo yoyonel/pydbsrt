@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 ➜ poetry run python src/pydbsrt/app_cli.py retarget-subtitles --help
 Usage: app_cli.py retarget-subtitles [OPTIONS]
@@ -32,6 +31,7 @@ Shift subtitles seconds = 118 frames ~ 4.9208 seconds
 Exported subtitles for target in : '/tmp/Dallas.Buyers.Club.2013.1080p.BluRay.x265-RARBG.mp4.23.98fps.srt'
 Shift subtitles (from reference) and save it (for target) => took 0.0565 seconds
 """
+
 import shutil
 from pathlib import Path
 from tempfile import gettempdir

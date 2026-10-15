@@ -3,7 +3,7 @@ from copy import deepcopy
 import numpy as np
 import pytest
 from imagehash import ImageHash
-from pytest_lazyfixture import lazy_fixture
+from pytest_lazy_fixtures import lf as lazy_fixture
 
 from pydbsrt.tools.imghash import (
     bytes_to_signed_int64,
@@ -43,7 +43,7 @@ def bin_imghash() -> bytes:
 
 @pytest.fixture
 def str_imghash() -> str:
-    return "11010101" "00000000" "00000000" "00000000" "00000000" "00000000" "00000000" "00000000"
+    return "1101010100000000000000000000000000000000000000000000000000000000"
 
 
 @pytest.fixture

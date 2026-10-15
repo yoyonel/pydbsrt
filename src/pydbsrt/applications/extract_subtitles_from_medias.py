@@ -20,12 +20,12 @@ L'outil est concu pour fonctionner en batch, en fournissant un répertoire racin
 par défaut enregistre les sous-titres dans le répertoire "/home/latty/NAS/tvshow/SRT",
 au format: `<file stem du media>_<lang>_<index>.srt`
 """
+
 import sys
 
 # https://chrisdown.name/2016/09/04/cleaning-up-muxing-extracting-subtitles-using-ffmpeg-srt-tools.html
 from pathlib import Path
 from signal import SIGHUP, SIGINT, SIGTERM, SIGUSR1, SIGUSR2, signal
-from typing import Optional
 
 import click
 
@@ -85,7 +85,7 @@ def sh_shutdown(_sig, _):
 def extract_subtitles_from_medias(
     root_dir_for_finding_medias: Path,
     glob_for_finding_medias: str,
-    root_dir_export_subtitles: Optional[Path],
+    root_dir_export_subtitles: Path | None,
     default_relative_path_export_for_subtitles: str,
 ):
     for sig in ALL_HANDLING_SIGNALS:
