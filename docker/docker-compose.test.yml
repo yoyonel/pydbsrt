@@ -5,6 +5,7 @@ volumes:
 
 services:
   bktreedb:
+    image: docker_bktreedb:test
     build:
       # can't build docker image with PostGreSQL 9.6
 #      context: pg-spgist_hamming/9.6-3.0-develop/.
@@ -40,5 +41,5 @@ services:
     image: adminer
     restart: always
     ports:
-      - 8080:8080
+      - 8085:8080
 

@@ -1,11 +1,12 @@
 import dictdiffer
-from _pytest.python_api import ApproxScalar
+
+DEFAULT_RELATIVE_TOLERANCE = 1e-6
 
 
 def compare_containers(
     computed,
     expected,
-    tolerance=ApproxScalar.DEFAULT_RELATIVE_TOLERANCE,
+    tolerance=DEFAULT_RELATIVE_TOLERANCE,
     filter_nones=False,
     **kwargs,
 ):

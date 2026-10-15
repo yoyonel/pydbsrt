@@ -22,7 +22,7 @@ def resource_colors_video_path():
         - `ffmpeg -y -t 1 -f lavfi -i color=c=black:s=32x32 -c:v libx264 -tune stillimage -pix_fmt yuv420p black_frames.mp4`
     TODO: tester d'autres encodages !
     """
-    return lambda color_frame: Path(f"data/{color_frame}_frames.mp4")
+    return lambda color_frame: Path(f"tests/data/{color_frame}_frames.mp4") if Path(f"tests/data/{color_frame}_frames.mp4").exists() else Path(f"data/{color_frame}_frames.mp4")
 
 
 def test_cli_export_imghash(big_buck_bunny_trailer, cli_runner, tmpdir):

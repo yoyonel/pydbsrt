@@ -5,15 +5,16 @@ ENV POSTGRES_DBNAME=bktreedb
 ENV POSTGRES_USER=docker 
 ENV POSTGRES_PASSWORD=docker
 
-RUN apt-get update \
-    && apt-get install -y \
+RUN sed -i 's/^# deb/deb/g' /etc/apt/sources.list \
+    && sed -i 's/^deb http:\/\/deb.debian.org/# deb http:\/\/deb.debian.org/g' /etc/apt/sources.list \
+    && sed -i 's|http://apt.postgresql.org|https://apt-archive.postgresql.org|g' /etc/apt/sources.list.d/pgdg.list \
+    && echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99no-check-valid-until \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
     build-essential \
-    cmake \
     git \
-    libpq-dev \
-    libproj-dev \
-    libjson-c-dev \
-    postgresql-server-dev-11
+    postgresql-server-dev-11 \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN git clone https://github.com/yoyonel/pg-spgist_hamming -b develop /usr/local/src/pg-spgist_hamming
 # RUN mkdir /usr/local/src/pg-spgist_hamming/build

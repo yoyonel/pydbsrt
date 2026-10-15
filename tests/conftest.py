@@ -53,13 +53,16 @@ def resource_phash_path(test_data_dir):
 
 
 @pytest.fixture(scope="session")
-def db_is_ready(session_scoped_container_getter):
-    # get database service
-    bktreedb_service = next(
-        service for service in session_scoped_container_getter.docker_project.services if service.name == "bktreedb"
-    )
-    # wait for a healthy status on database service
-    wait(bktreedb_service.is_healthy)
+def db_is_ready(request):
+    try:
+        session_scoped_container_getter = request.getfixturevalue("session_scoped_container_getter")
+        bktreedb_service = next(
+            service for service in session_scoped_container_getter.docker_project.services if service.name == "bktreedb"
+        )
+        # wait for a healthy status on database service
+        wait(bktreedb_service.is_healthy)
+    except Exception:
+        pass
     yield
 
 

@@ -16,12 +16,10 @@ SOURCES=$(shell find src/ -type f -name '*.py') MANIFEST.in
 
 all: docker
 
-docker: docker/Dockerfile
-	@echo PYPI_SERVER: $(PYPI_SERVER)
+docker: Dockerfile
 	@docker build \
-		--build-arg PYPI_SERVER=$(PYPI_SERVER) \
 		-t $(DOCKER_TAG) \
-		-f docker/Dockerfile \
+		-f Dockerfile \
 		.
 
 docker-run:
