@@ -1,0 +1,216 @@
+version: '3'
+
+vars:
+  PROJECT_NAME: pydbsrt
+  DOCKER_IMAGE: pydbsrt:latest
+  DOCKER_DB_IMAGE: docker_bktreedb:test
+  COMPOSE_FILE: docker/docker-compose.yml
+  TEST_COMPOSE_FILE: docker/docker-compose.test.yml
+  NETWORK_NAME: docker_default
+  DB_HOST: docker-bktreedb-1
+  DEMO_MEDIA: data/big_buck_bunny_trailer_480p.webm
+  DEMO_TARGET_MEDIA: tests/data/big_buck_bunny_trailer_480p.mp4
+  DEMO_SRT: data/SRT/big_buck_bunny_trailer_480p.en.srt
+  DEMO_PHASH: /tmp/big_buck_bunny_trailer_480p.webm.25.0fps.phash
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task --list
+
+  # --- Build & Environment Management ---
+
+  build:
+    desc: Build pydbsrt Docker image using uv multi-stage cache
+    cmds:
+      - docker build -t {{.DOCKER_IMAGE}} -f Dockerfile .
+
+  build-db:
+    desc: Build custom PostgreSQL 11 BK-tree Docker image
+    cmds:
+      - docker build -t {{.DOCKER_DB_IMAGE}} docker/pg-spgist_hamming/11.3-3.0-develop/
+
+  re:
+    desc: Clean artifacts and rebuild Docker image (replaces make re)
+    cmds:
+      - task: clean
+      - task: build
+
+  sync:
+    desc: Synchronize local virtualenv with uv
+    cmds:
+      - uv sync
+
+  lint:
+    desc: Run Ruff linter on src and tests
+    cmds:
+      - uv run ruff check src/ tests/
+
+  fmt:
+    desc: Format code with Ruff (formatter + auto-fix)
+    cmds:
+      - uv run ruff format src/ tests/
+      - uv run ruff check --fix src/ tests/
+
+  clean:
+    desc: Clean cache files, coverage, and build artifacts (replaces make fclean)
+    cmds:
+      - find . -type f -name "*.pyc" -delete
+      - find . -type d -name "__pycache__" -delete
+      - rm -rf .pytest_cache .coverage .mypy_cache dist wheels /tmp/*.phash
+
+  # --- Database Stack (Docker Compose) ---
+
+  db:up:
+    desc: Start PostgreSQL BK-tree container stack in background (replaces make db_up_detach)
+    cmds:
+      - docker compose -f {{.COMPOSE_FILE}} up -d
+
+  db:down:
+    desc: Stop PostgreSQL BK-tree container stack (replaces make db_down)
+    cmds:
+      - docker compose -f {{.COMPOSE_FILE}} down
+
+  db:logs:
+    desc: View DB container logs
+    cmds:
+      - docker compose -f {{.COMPOSE_FILE}} logs -f
+
+  db:psql:
+    desc: Open interactive psql shell inside running DB
+    interactive: true
+    cmds:
+      - docker exec -it {{.DB_HOST}} psql -U postgres -d postgres
+
+  # --- Test Suites ---
+
+  test:
+    desc: Run test suite inside Docker container (replaces make pytest)
+    deps: [db:up]
+    cmds:
+      - >
+        docker run --rm
+        --network {{.NETWORK_NAME}}
+        -e PSQL_IP={{.DB_HOST}}
+        -v "{{.ROOT_DIR}}/src:/app/src"
+        -v "{{.ROOT_DIR}}/data:/app/data"
+        -v "{{.ROOT_DIR}}/tests:/app/tests"
+        {{.DOCKER_IMAGE}}
+        pytest -o addopts="" -p no:docker-compose -v tests/
+
+  test:local:
+    desc: Run test suite locally with uv (fast, requires db:up)
+    deps: [db:up]
+    cmds:
+      - PSQL_IP=127.0.0.1 uv run pytest -o addopts="" tests/
+
+  # --- Container Execution Helpers (replaces make docker-run, docker-run-shell) ---
+
+  run:
+    desc: Run pydbsrt Docker container (replaces make docker-run)
+    cmds:
+      - docker run --rm -it --network {{.NETWORK_NAME}} -e PSQL_IP={{.DB_HOST}} {{.DOCKER_IMAGE}}
+
+  run:shell:
+    desc: Open interactive shell inside pydbsrt Docker container (replaces make docker-run-shell)
+    interactive: true
+    cmds:
+      - >
+        docker run --rm -it
+        --network {{.NETWORK_NAME}}
+        -e PSQL_IP={{.DB_HOST}}
+        -v "{{.ROOT_DIR}}/src:/app/src"
+        -v "{{.ROOT_DIR}}/data:/app/data"
+        -v "/tmp:/tmp"
+        --entrypoint bash
+        {{.DOCKER_IMAGE}}
+
+  cli:
+    desc: Run pydbsrt CLI inside Docker (e.g. task cli -- --help)
+    cmds:
+      - >
+        docker run --rm
+        --network {{.NETWORK_NAME}}
+        -e PSQL_IP={{.DB_HOST}}
+        -v "{{.ROOT_DIR}}/src:/app/src"
+        -v "{{.ROOT_DIR}}/data:/app/data"
+        -v "/tmp:/tmp"
+        {{.DOCKER_IMAGE}}
+        pydbsrt {{.CLI_ARGS}}
+
+  cli:local:
+    desc: Run pydbsrt CLI locally with uv (e.g. task cli:local -- --help)
+    cmds:
+      - PSQL_IP=127.0.0.1 uv run pydbsrt {{.CLI_ARGS}}
+
+  # --- Full Demo & Application Workflows (replaces and completes all Makefile demo targets) ---
+
+  demo:export-phash:
+    desc: Export pHash stream from sample video to /tmp (replaces make export_imghash_from_media)
+    cmds:
+      - task: cli
+        vars:
+          CLI_ARGS: export-imghash-from-media --media /app/{{.DEMO_MEDIA}}
+
+  demo:show-subtitles-media:
+    desc: Show pHash per subtitle cue directly from media (replaces make show-imghash-from-subtitles-and-media)
+    cmds:
+      - task: cli
+        vars:
+          CLI_ARGS: show-imghash-from-subtitles-and-media --media /app/{{.DEMO_MEDIA}} --subtitles /app/{{.DEMO_SRT}}
+
+  demo:export-subtitles-media:
+    desc: Show pHash per subtitle and view binary hexdump (replaces make export-imghash-from-subtitles-and-media)
+    cmds:
+      - task: demo:show-subtitles-media
+      - hexdump -C {{.DEMO_PHASH}} | head -n 10
+
+  demo:import-hashes:
+    desc: Import video pHash frames into PostgreSQL BK-Tree (replaces make import-images-hashes-into-db)
+    deps: [db:up, demo:export-phash]
+    cmds:
+      - task: cli
+        vars:
+          CLI_ARGS: import-images-hashes-into-db --binary-img-hash-file {{.DEMO_PHASH}}
+
+  demo:import-subtitles:
+    desc: Import SRT subtitles into DB associated with media (replaces make import-subtitles-into-db)
+    deps: [demo:import-hashes]
+    cmds:
+      - task: cli
+        vars:
+          CLI_ARGS: import-subtitles-into-db --binary-img-hash-file {{.DEMO_PHASH}} --subtitles /app/{{.DEMO_SRT}}
+
+  demo:show-subtitles-db:
+    desc: Show subtitle pHash matched from DB (replaces make show-imghash-from-subtitles-and-media-in-db)
+    deps: [demo:import-hashes]
+    cmds:
+      - task: cli
+        vars:
+          CLI_ARGS: show-imghash-from-subtitles-and-media-in-db --binary-img-hash-file {{.DEMO_PHASH}} --subtitles /app/{{.DEMO_SRT}}
+
+  demo:search:
+    desc: Search video frames in PostgreSQL BK-tree with Hamming distance (replaces make search-imghash-in-db)
+    deps: [demo:import-hashes]
+    cmds:
+      - task: cli
+        vars:
+          CLI_ARGS: search-imghash-in-db --phash_file {{.DEMO_PHASH}} --distance 0
+
+  demo:retarget:
+    desc: Retarget & synchronize SRT subtitles from reference to target media (Core Feature!)
+    cmds:
+      - >
+        task cli -- retarget-subtitles
+        --ref_media /app/{{.DEMO_MEDIA}}
+        --ref_subtitles /app/{{.DEMO_SRT}}
+        --target_media /app/{{.DEMO_TARGET_MEDIA}}
+
+  demo:recognize:
+    desc: Recognize unknown media by querying DB BK-tree with fingerprint
+    deps: [demo:import-hashes]
+    cmds:
+      - task: cli
+        vars:
+          CLI_ARGS: recognize-media --media /app/{{.DEMO_MEDIA}} --search_distance 0

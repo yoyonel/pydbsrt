@@ -1,19 +1,19 @@
-"""
+""" """
 
-"""
-import attr
-import imageio
-from imageio.core.format import Format
+from dataclasses import dataclass, field
 from pathlib import Path
 
+import imageio
+from imageio.core.format import Format
 
-@attr.s()
+
+@dataclass
 class VideoReader:
-    media_path = attr.ib(type=Path)
+    media_path: Path
+    #
+    reader: Format.Reader = field(init=False)
+    metadata: dict = field(init=False)
 
-    reader = attr.ib(init=False, type=Format)
-    metadatas = attr.ib(init=False)
-
-    def __attrs_post_init__(self):
-        self.reader = imageio.get_reader(self.media_path, 'ffmpeg')
-        self.metadatas = self.reader.get_meta_data()
+    def __post_init__(self):
+        self.reader = imageio.get_reader(self.media_path, "ffmpeg")
+        self.metadata = self.reader.get_meta_data()

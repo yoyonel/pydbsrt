@@ -1,34 +1,43 @@
-"""
+""" """
 
-"""
-import attr
+import logging
+from dataclasses import dataclass, field
+from typing import Callable, Iterator
+
 import imagehash
 import imageio
 import numpy as np
+from imagehash import ImageHash
 from PIL import Image
+
 #
 from pydbsrt.tools.videoreader import VideoReader
 
+logger = logging.getLogger(__name__)
 
-@attr.s()
+
+@dataclass
 class VideoFingerprint:
-    """
+    """"""
 
-    """
-    vreader = attr.ib(type=VideoReader)
+    @staticmethod
+    def _default_hash(f):
+        return imagehash.phash(f)
+
+    video_reader: VideoReader
     #
-    func_for_hash = attr.ib(default=lambda f: imagehash.phash(f))
+    func_for_hash: Callable[[Image], ImageHash] = _default_hash
 
-    frame_reader = attr.ib(init=False)
+    frame_reader: Iterator = field(init=False)
 
-    def __attrs_post_init__(self):
-        self.frame_reader = iter(self.vreader.reader)
+    def __post_init__(self):
+        self.frame_reader = iter(self.video_reader.reader)
 
-    def __iter__(self):
-        self.frame_reader = iter(self.vreader.reader)
+    def __iter__(self) -> Iterator[ImageHash]:
+        self.frame_reader = iter(self.video_reader.reader)
         return self
 
-    def __next__(self):
+    def __next__(self) -> ImageHash:
         try:
             cur_frame = next(self.frame_reader)
             try:
@@ -36,6 +45,11 @@ class VideoFingerprint:
                 img = Image.fromarray(np.uint8(frame))
                 return self.func_for_hash(img)
             except imageio.core.format.CannotReadFrameError as e:
+                # TODO: refactor this !
+                logger.error(repr(e))
                 raise StopIteration
+            except Exception as e:
+                logger.error(repr(e))
+                raise RuntimeError(e)
         except StopIteration:
-            raise StopIteration
+            raise

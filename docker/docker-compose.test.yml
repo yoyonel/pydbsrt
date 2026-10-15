@@ -1,0 +1,45 @@
+version: '3'
+
+volumes:
+  bktreedb-pg11-data-test:
+
+services:
+  bktreedb:
+    image: docker_bktreedb:test
+    build:
+      # can't build docker image with PostGreSQL 9.6
+#      context: pg-spgist_hamming/9.6-3.0-develop/.
+      context: pg-spgist_hamming/11.3-3.0-develop/.
+      dockerfile: Dockerfile
+    volumes:
+      - bktreedb-pg11-data-test:/var/lib/postgresql/data
+    ports:
+      - 5432:5432
+    # https://stackoverflow.com/questions/35069027/docker-wait-for-postgresql-to-be-running
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U docker --db bktreedb" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    environment:
+      - POSTGRES_DATABASE=bktreedb
+      - POSTGRES_DB=bktreedb
+      - POSTGRES_USER=docker
+      - POSTGRES_PASSWORD=docker
+    restart: on-failure
+
+  # https://hub.docker.com/r/wrouesnel/postgres_exporter
+  # Postgres metrics exporter for Prometheus.
+  postgres_exporter:
+    image: wrouesnel/postgres_exporter
+    environment:
+      - DATA_SOURCE_NAME=postgresql://docker:docker@bdktreedb:5432/postgres?sslmode=disable
+    ports:
+      - 9187:9187
+
+  adminer:
+    image: adminer
+    restart: always
+    ports:
+      - 8085:8080
+

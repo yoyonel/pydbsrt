@@ -1,0 +1,3 @@
+[virtualenvs]
+# https://python-poetry.org/docs/configuration/#virtualenvsin-project-boolean
+in-project = true

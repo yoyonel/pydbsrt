@@ -1,0 +1,27 @@
+# Directories at any depth
+**/__pycache__/
+**/*.egg-info/
+
+# Directories
+.github/
+.mypy_cache/
+.pytest_cache/
+.vscode/
+.idea/
+.git/
+cBKTree/
+data/
+dist/
+doc/
+docker/
+htmlcov/
+notebook/
+scripts/
+wheels/
+.tox/
+.venv/
+
+# Files
+.coverage
+.env
+junit-report.xml

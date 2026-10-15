@@ -1,0 +1,66 @@
+"""
+➜ poetry run python src/pydbsrt/app_cli.py import-images-hashes-into-db --help
+Usage: app_cli.py import-images-hashes-into-db [OPTIONS]
+
+Options:
+  -r, --binary_img_hash_file PATH
+                                  Path to media  [required]
+  -h, --help                      Show this message and exit.
+
+# Description
+Import l'ensemble des images hashes (des frames d'un média) d'un fichier .phash (output du script `export_imghash_from_media`)
+dans BKTreeDB la base de donnée PostgreSQL (avec index) spécialisé·e pour le stockage (et recherche) de perceptives hashes.
+
+# Example
+➜ /usr/bin/ls -1 /tmp/*.phash | \
+    xargs -I {} poetry run python app_cli.py import-images-hashes-into-db -r "{}"
+
+"""
+
+import sys
+
+import click
+import click_pathlib
+from loguru import logger
+from rich.console import Console
+from rich.progress import BarColumn, DownloadColumn, Progress, TextColumn, TransferSpeedColumn
+
+from pydbsrt.services.db_frames import import_binary_img_hash_to_db_async
+from pydbsrt.tools.coro import coroclick
+from pydbsrt.tools.rich_colums import TimeElapsedOverRemainingColumn
+
+console = Console()
+
+progress = Progress(
+    TextColumn("[bold blue]{task.fields[filename]}", justify="right"),
+    BarColumn(bar_width=None),
+    "[progress.percentage]{task.percentage:>3.1f}%",
+    "•",
+    DownloadColumn(),
+    "•",
+    TransferSpeedColumn(),
+    "•",
+    TimeElapsedOverRemainingColumn(),
+    console=console,
+)
+
+
+@click.command(short_help="")
+@click.option(
+    "--binary-img-hash-file",
+    "-r",
+    required=True,
+    type=click_pathlib.Path(exists=True, readable=True, resolve_path=True, allow_dash=False),
+    help="Path to media",
+)
+@coroclick
+@logger.catch
+async def import_images_hashes_into_db(binary_img_hash_file):
+    try:
+        media_id, nb_frames_inserted = await import_binary_img_hash_to_db_async(binary_img_hash_file, progress)
+    except RuntimeError:
+        return sys.exit(1)
+    if nb_frames_inserted:
+        console.print(f"count(frames where frames.media_id = {media_id})={nb_frames_inserted}")
+    else:
+        console.print(f"binary_img_hash_file={str(binary_img_hash_file)} already in DB (medias.id={media_id})")

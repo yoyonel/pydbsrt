@@ -1,2 +1,1 @@
-
-__all__ = ['FFException', 'FFmpeg', 'FFprobe', 'FFStream', 'FFFilter']
+__all__ = ["FFException", "FFmpeg", "FFprobe", "FFStream", "FFFilter"]

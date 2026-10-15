@@ -1,0 +1,56 @@
+---
+repos:
+  - repo: https://github.com/pycqa/flake8.git
+    rev: 6.0.0
+    hooks:
+      - id: flake8
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.4.0
+    hooks:
+      - id: check-ast
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: end-of-file-fixer
+        types: [ python ]
+      - id: trailing-whitespace
+        types: [ python ]
+  - repo: https://github.com/ambv/black
+    rev: 23.1.0
+    hooks:
+      - id: black
+  #  - repo: https://github.com/gruntwork-io/pre-commit
+  #    rev: v0.1.12
+  #    hooks:
+  #      - id: shellcheck
+  - repo: https://github.com/pycqa/isort
+    rev: 5.12.0
+    hooks:
+      - id: isort
+        name: isort (python)
+        args: ["--profile", "black"]
+#  - repo: https://github.com/hakancelik96/unimport
+#    rev: 0.14.1
+#    hooks:
+#      - id: unimport
+#        args: [ --remove, --requirements, --include-star-import ]
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.1.1
+    hooks:
+    - id: mypy
+      # https://github.com/pre-commit/mirrors-mypy/issues/3
+      # https://github.com/pre-commit/pre-commit/issues/1351
+      additional_dependencies:
+        - types-aiofiles
+        - types-click
+        - types-requests
+  - repo: https://github.com/PyCQA/bandit
+    rev: '1.7.5'
+    hooks:
+      - id: bandit
+        files: .py$
+        args: [
+            --configfile, "bandit.yaml",
+            # TODO: work on this files !
+            --exclude, "src/pydbsrt/tools/ffmpeg_wrapper,src/pydbsrt/tools/ffmpeg_tools/",
+        ]

@@ -1,0 +1,4 @@
+[flake8]
+max-line-length = 160
+ignore = E118, E203, E501, W503
+exclude = src/pydbsrt/services/old/_app.py
