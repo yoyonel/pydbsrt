@@ -3,7 +3,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use dbsrt_core::{
     detect_cuts, extract_frames_phash, probe_video, read_phash_file, write_phash_file, SubtitleFile,
 };
-use dbsrt_index::{BkItem, BkTree, DbClient};
+use dbsrt_index::{BkItem, BkTree, DbClient, MmapLibrary};
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -35,11 +35,14 @@ enum Commands {
         count: usize,
     },
 
-    /// Recognize media from database by computing perceptual hash fingerprint
+    /// Recognize media from database or local phash files by computing perceptual hash fingerprint
     RecognizeMedia(RecognizeArgs),
 
     /// Retarget and synchronize SRT subtitles from reference to target media
     RetargetSubtitles(RetargetArgs),
+
+    /// Zero-DB fast search across directory of .phash files via memory mapping
+    ScanLibrary(ScanLibraryArgs),
 }
 
 #[derive(clap::Args, Debug)]
@@ -60,6 +63,14 @@ pub struct RecognizeArgs {
     #[arg(long, value_enum, default_value_t = OutputFormat::DataFrame)]
     output_format: OutputFormat,
 
+    /// Use zero-DB memory-mapped engine directly on .phash files (no PostgreSQL needed)
+    #[arg(long)]
+    no_db: bool,
+
+    /// Directory containing .phash files to search against when --no-db is active
+    #[arg(long)]
+    phash_dir: Option<PathBuf>,
+
     /// PostgreSQL host (defaults to PSQL_IP env or 127.0.0.1)
     #[arg(long)]
     db_host: Option<String>,
@@ -79,6 +90,37 @@ pub struct RecognizeArgs {
     /// PostgreSQL database name
     #[arg(long, default_value = "bktreedb")]
     db_name: String,
+
+    /// Maximum number of matched media results to output (0 for all)
+    #[arg(long, default_value_t = 1)]
+    limit: usize,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct ScanLibraryArgs {
+    /// Directory containing .phash files
+    #[arg(short, long, default_value = "/tmp")]
+    pub phash_dir: PathBuf,
+
+    /// Query media file to recognize
+    #[arg(short, long)]
+    pub query_media: Option<PathBuf>,
+
+    /// Query .phash file to search
+    #[arg(long)]
+    pub query_phash: Option<PathBuf>,
+
+    /// Hamming search distance
+    #[arg(short = 'd', long, default_value_t = 0)]
+    pub search_distance: u32,
+
+    /// Nb seconds to extract if querying with media file
+    #[arg(short = 's', long, default_value_t = 1.0)]
+    pub nb_seconds_to_extract: f64,
+
+    /// Maximum number of top matches to display
+    #[arg(short = 'n', long, default_value_t = 5)]
+    pub limit: usize,
 }
 
 #[derive(clap::Args, Debug)]
@@ -124,6 +166,73 @@ fn run_recognize_media(args: &RecognizeArgs) -> Result<()> {
 
     // 2. Extract frames & compute pHashes in streaming
     let hashes = extract_frames_phash(&args.media, start_sec, nb_frames)?;
+
+    let media_name_search = args
+        .media
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
+
+    // Zero-DB mode: search directly over memory-mapped .phash files
+    if args.no_db {
+        let phash_dir = args.phash_dir.clone().unwrap_or_else(std::env::temp_dir);
+        let library = MmapLibrary::from_directory(&phash_dir)?;
+        let match_start = Instant::now();
+        let matches = library.recognize(&hashes, args.search_distance);
+        let timer_in_seconds = match_start.elapsed().as_secs_f64();
+
+        if matches.is_empty() {
+            if args.output_format == OutputFormat::DataFrame {
+                println!("Empty DataFrame\nColumns: [media_found, media_name_search, media_id_match, media_name_match, nb_offsets_match, search_offsets_match, match_frames_offsets, timer_in_seconds, confidence]\nIndex: []");
+            }
+            return Ok(());
+        }
+
+        let display_matches = if args.limit > 0 && args.limit < matches.len() {
+            &matches[..args.limit]
+        } else {
+            &matches[..]
+        };
+
+        for (idx, m) in display_matches.iter().enumerate() {
+            let media_found = m.media_name.contains(&media_name_search)
+                || media_name_search.contains(&m.media_name);
+            let search_set: BTreeSet<usize> = m.search_offsets_match.iter().copied().collect();
+            let match_set: BTreeSet<usize> = m.match_frames_offsets.iter().copied().collect();
+
+            match args.output_format {
+                OutputFormat::Csv => {
+                    println!(
+                        "{},{},{},{},{},\"{}\",\"{}\",{:.16},{:.1}",
+                        if media_found { "True" } else { "False" },
+                        media_name_search,
+                        m.media_name,
+                        idx + 1,
+                        m.nb_offsets_match,
+                        format_set(&search_set),
+                        format_set(&match_set),
+                        timer_in_seconds,
+                        m.confidence
+                    );
+                }
+                OutputFormat::DataFrame => {
+                    println!(
+                        "   media_found            media_name_search  media_id_match             media_name_match  nb_offsets_match  ... timer_in_seconds  confidence\n\
+                         0         {}  {}               {}  {}               {}  ...         {:.6}         {:.1}\n\n\
+                         [1 rows x 9 columns]",
+                        if media_found { "True" } else { "False" },
+                        media_name_search,
+                        idx + 1,
+                        m.media_name,
+                        m.nb_offsets_match,
+                        timer_in_seconds,
+                        m.confidence
+                    );
+                }
+            }
+        }
+        return Ok(());
+    }
 
     // 3. Connect to DB
     let host = args
@@ -173,7 +282,13 @@ fn run_recognize_media(args: &RecognizeArgs) -> Result<()> {
     let mut sorted_media: Vec<(i32, AggregatedMatch)> = matches_by_media.into_iter().collect();
     sorted_media.sort_by_key(|a| std::cmp::Reverse(a.1.nb_offsets_match));
 
-    for (media_id, agg) in sorted_media {
+    let display_media = if args.limit > 0 && args.limit < sorted_media.len() {
+        &sorted_media[..args.limit]
+    } else {
+        &sorted_media[..]
+    };
+
+    for &(media_id, ref agg) in display_media {
         let media_name_match = db.get_media_name(media_id)?;
         let media_found = media_name_match.contains(&media_name_search)
             || media_name_search.contains(&media_name_match);
@@ -356,6 +471,60 @@ fn run_retarget_subtitles(args: &RetargetArgs) -> Result<()> {
     Ok(())
 }
 
+fn run_scan_library(args: &ScanLibraryArgs) -> Result<()> {
+    let query_hashes = if let Some(ref media_path) = args.query_media {
+        let meta = probe_video(media_path)?;
+        let start_sec = (meta.duration / 2.0).floor();
+        let nb_frames = (args.nb_seconds_to_extract * meta.fps).round() as usize;
+        extract_frames_phash(media_path, start_sec, nb_frames)?
+    } else if let Some(ref phash_path) = args.query_phash {
+        read_phash_file(phash_path)?
+    } else {
+        anyhow::bail!("Either --query-media or --query-phash must be specified");
+    };
+
+    let start = Instant::now();
+    let library = MmapLibrary::from_directory(&args.phash_dir)?;
+    println!(
+        "Loaded library from {:?}: {} files, {} total frames (took {:.2} ms)",
+        args.phash_dir,
+        library.file_count(),
+        library.total_frames(),
+        start.elapsed().as_secs_f64() * 1000.0
+    );
+
+    let search_start = Instant::now();
+    let matches = library.recognize(&query_hashes, args.search_distance);
+    let search_elapsed = search_start.elapsed().as_secs_f64();
+
+    println!(
+        "Search completed in {:.4} seconds ({} query frames)",
+        search_elapsed,
+        query_hashes.len()
+    );
+
+    if matches.is_empty() {
+        println!("No matching media found.");
+    } else {
+        println!("\nTop matches:");
+        let display_matches = if args.limit > 0 && args.limit < matches.len() {
+            &matches[..args.limit]
+        } else {
+            &matches[..]
+        };
+        for (i, m) in display_matches.iter().enumerate() {
+            println!(
+                "  {}. {} -> {} matching frames ({:.1}% confidence)",
+                i + 1,
+                m.media_name,
+                m.nb_offsets_match,
+                m.confidence * 100.0
+            );
+        }
+    }
+    Ok(())
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
@@ -382,6 +551,9 @@ fn main() -> Result<()> {
         }
         Commands::RetargetSubtitles(args) => {
             run_retarget_subtitles(&args)?;
+        }
+        Commands::ScanLibrary(args) => {
+            run_scan_library(&args)?;
         }
     }
     Ok(())

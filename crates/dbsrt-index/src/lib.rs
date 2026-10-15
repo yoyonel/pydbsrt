@@ -2,10 +2,12 @@
 
 pub mod bktree;
 pub mod db;
+pub mod mmap;
 
 pub use bktree::{BkItem, BkTree};
 pub use db::{DbClient, DbMatch};
 use dbsrt_core::{hamming_distance, FrameHashEntry};
+pub use mmap::{LibraryMediaMatch, MmapLibrary, MmapPhashFile};
 
 /// A memory-mapped or in-memory flat frame hash index.
 pub struct FlatHashIndex<'a> {

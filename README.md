@@ -1,66 +1,105 @@
-# SRT in DB
+# pydbsrt & dbsrt-rs
 
+> High-performance SubRip (SRT) subtitle synchronization and perceptual hash video frame matching.
 
-## Instructions
+Stack moderne propulsée par **Rust (`dbsrt-rs`)**, **PostgreSQL 17 (SP-GiST BK-Tree)**, **uv** et **Taskfile**.
 
-Modern stack powered by **uv**, **Taskfile**, and **PostgreSQL 17** (with native BK-Tree metric index extension).
+---
 
-### Prerequisites
-* [uv](https://github.com/astral-sh/uv)
+## 1. Deux Approches Complémentaires
+
+Le projet supporte deux moteurs d'indexation selon le cas d'usage :
+
+```mermaid
+flowchart LR
+    subgraph Mode_ZeroDB["Option 2 : Zero-DB mmap (CLI / Desktop / NAS)"]
+        CLI_Z["dbsrt CLI (Rust)"] -->|mmap 2 Zero-Copy| MMAP["Fichiers .phash plats (8 octets/frame)"]
+        MMAP -->|SIMD POPCNT + Rayon CPU| FAST["~3.2 ms matching (0 dépendance)"]
+    end
+
+    subgraph Mode_DB["Voie B : PostgreSQL 17 BK-Tree (Serveur / API)"]
+        CLI_D["dbsrt CLI / Python"] -->|TCP Wire Protocol| PG["PostgreSQL 17 SP-GiST"]
+        PG -->|bktree.so C extension| SQL["Jointures relationnelles, ACID, multi-clients"]
+    end
+```
+
+| Critère | Zero-DB `mmap` (Option 2) | PostgreSQL 17 BK-Tree (Voie B) |
+| :--- | :--- | :--- |
+| **Cas d'usage** | CLI local, desktop, NAS, CI rapide, one-shot | Serveur API centralisé, multi-utilisateurs, catalogue partagé |
+| **Dépendances** | **0 dépendance** (binaire autonome unique) | PostgreSQL 17 + extension `bktree.so`, Docker |
+| **Vitesse matching** | **~3.2 ms** (~440x plus rapide que Python) | **~22.8 ms** (~15x plus rapide que Python) |
+| **Stockage** | Fichiers `.phash` (8 Go / milliard de frames) | Table SQL `frames` avec index SP-GiST |
+| **ACID / Transactions**| Non (fichiers immuables) | Oui (concurrence ACID complète) |
+
+---
+
+## 2. Prérequis & Installation
+
+* [Rust](https://rustup.rs/) (>= 1.80)
+* [uv](https://github.com/astral-sh/uv) (pour l'environnement Python legacy)
 * [Taskfile](https://taskfile.dev/)
-* Docker / Docker Compose
-
-### Quickstart
+* Docker / Docker Compose (uniquement pour l'approche base de données PostgreSQL)
 
 ```bash
-# Sync Python virtual environment
-task sync
+# Compiler le binaire release Rust dbsrt
+task rs:build
 
-# Start PostgreSQL 17 + BK-Tree container stack
+# Installer l'environnement de développement et les pre-commits
+task sync
+poetry run pre-commit install
+```
+
+---
+
+## 3. Démos & Exécution Rapide
+
+### Approche 1 : Zero-DB `mmap` (Recommandé en local)
+```bash
+# Reconnaître une vidéo inconnue sans base de données (matching en ~3 ms)
+task demo:recognize:mmap
+
+# Scanner une bibliothèque de fichiers .phash
+task demo:scan:rs
+
+# Recaler et synchroniser des sous-titres SRT (en ~0.5 ms)
+task demo:retarget:rs
+```
+
+### Approche 2 : PostgreSQL 17 BK-Tree
+```bash
+# Démarrer le cluster PostgreSQL 17 + extension bktree
 task db:up
 
-# Run test suite
-task test:local  # or task test (inside container)
+# Reconnaître un média via la base de données
+task demo:recognize:rs
 
-# Run linters
-task lint
+# Lancer la démo Python legacy
+task demo:recognize
 ```
 
-## Implementations
+---
 
-### PostGreSQL
+## 4. Tâches de Tests Simples
 
-#### with SqlAlchemy
+Toutes les suites de tests sont orchestrées via `Taskfile` :
 
-Insertion d'un media et recherche d'une frame (aléatoire d'une autre source media) dans le DB:
-```shell
-/home/latty/.pyenv/versions/py3.8.3_pydbsrt/bin/python /home/latty/Prog/__DB_SRT__/pydbsrt/src/pydbsrt/app_with_sqlalchemy.py
-2020-12-03 16:54:43,708 - INFO     - __main__      - <sqlalchemy.engine.result.ResultProxy object at 0x7f61d7f094f0>
-2020-12-03 16:54:43,716 - INFO     - __main__      - media_path: /home/latty/NAS/tvshow/Silicon Valley/S02/Silicon.Valley.S02E06.Homicide.1080p.AMZN.WEB-DL.DD.5.1.H.265-SiGMA.mkv
-2020-12-03 16:54:43,723 - INFO     - __main__      - Build Image Hashes from media='/home/latty/NAS/tvshow/Silicon Valley/S02/Silicon.Valley.S02E06.Homicide.1080p.AMZN.WEB-DL.DD.5.1.H.265-SiGMA.mkv'
-42241it [05:01, 140.01it/s]
-2020-12-03 16:59:45,429 - INFO     - __main__      - Associate frame_items(len=42241) to media(=<__main__.TMedia object at 0x7f61f0b07400>)
-2020-12-03 16:59:46,140 - INFO     - __main__      - Add media to session and commit ...
-2020-12-03 17:00:33,031 - INFO     - pydbsrt.tools.timer_profiling - Insert ImageHashes (from media) into db => took 349.3147 seconds
-2020-12-03 17:00:33,608 - INFO     - pydbsrt.tools.timer_profiling - Build ImageHashes list (from media) => took 0.5686 seconds
-2020-12-03 17:00:33,608 - INFO     - __main__      - img_hash_to_search=f52e93916c2e9391
-2020-12-03 17:00:33,615 - INFO     - pydbsrt.tools.timer_profiling - Search random ImageHash (from media) into DB => took 0.0058 seconds
-2020-12-03 17:00:33,615 - INFO     - __main__      - count(search_img_hash({'search_phash': -779523432693984367, 'search_distance': 0})=13
-2020-12-03 17:00:33,615 - INFO     - __main__      - matched_frame_items=[FrameItem(db_id=281, p_hash=-779523432693984367, frame_offset=280, media_id=1),
- FrameItem(db_id=282, p_hash=-779523432693984367, frame_offset=281, media_id=1),
- FrameItem(db_id=283, p_hash=-779523432693984367, frame_offset=282, media_id=1),
- FrameItem(db_id=284, p_hash=-779523432693984367, frame_offset=283, media_id=1),
- FrameItem(db_id=285, p_hash=-779523432693984367, frame_offset=284, media_id=1),
- FrameItem(db_id=286, p_hash=-779523432693984367, frame_offset=285, media_id=1),
- FrameItem(db_id=287, p_hash=-779523432693984367, frame_offset=286, media_id=1),
- FrameItem(db_id=288, p_hash=-779523432693984367, frame_offset=287, media_id=1),
- FrameItem(db_id=289, p_hash=-779523432693984367, frame_offset=288, media_id=1),
- FrameItem(db_id=290, p_hash=-779523432693984367, frame_offset=289, media_id=1),
- FrameItem(db_id=291, p_hash=-779523432693984367, frame_offset=290, media_id=1),
- FrameItem(db_id=292, p_hash=-779523432693984367, frame_offset=291, media_id=1),
- FrameItem(db_id=293, p_hash=-779523432693984367, frame_offset=292, media_id=1)]
-```
+| Tâche | Description | Dépendances |
+| :--- | :--- | :--- |
+| **`task test:rs`** | Exécute **tous** les tests Rust (unitaires, intégration, E2E) | Aucune |
+| **`task test:rs:mmap`** | Teste le moteur Zero-DB `mmap` en mode autonome | Aucune |
+| **`task test:rs:retarget`** | Teste la parité ISO du recalage de sous-titres SRT | Aucune |
+| **`task test:rs:db`** | Teste l'intégration avec PostgreSQL 17 BK-Tree (démarre la DB auto) | Docker |
+| **`task test:local`** | Exécute la suite de tests Python avec `uv` | Docker (`db:up`) |
+| **`task rs:bench`** | Benchmark pHash SIMD (72 000 frames/s) | Aucune |
+| **`task lint`** | Exécute ruff et cargo clippy sur tout le codebase | Aucune |
 
-`Search random ImageHash (from media) into DB => took 0.0058 seconds` => ~ 6 ms pour rechercher une frame dans un ensemble de ~500k frames
-![](data/2020-12-03_17-08_adminer_pg_bktreedb.png)
-C'est pas mal du tout (c'est l'ordre du raisonnable) ... à voir comment ça progresse avec l'insertion de nouveaux médias (frames).
+---
+
+## 5. Documentation & Rapports d'Architecture
+
+Dossiers techniques détaillés disponibles dans le répertoire [`docs/`](file:///home/latty/Prog/__PERSO__/pydbsrt/docs) :
+
+* [`docs/2026-10-15-scaling-architecture-rust-mmap.md`](file:///home/latty/Prog/__PERSO__/pydbsrt/docs/2026-10-15-scaling-architecture-rust-mmap.md) : Étude d'ingénierie sur le passage à l'échelle (milliards de frames) et moteur `mmap`.
+* [`docs/2026-10-15-rust-e2e-benchmarks-and-tradeoffs.md`](file:///home/latty/Prog/__PERSO__/pydbsrt/docs/2026-10-15-rust-e2e-benchmarks-and-tradeoffs.md) : Analyse comparative des performances Rust vs Python et compromis techniques.
+* [`docs/2026-10-15-pg17-bktree-benchmark-migration.md`](file:///home/latty/Prog/__PERSO__/pydbsrt/docs/2026-10-15-pg17-bktree-benchmark-migration.md) : Migration de l'extension C BK-Tree sur PostgreSQL 17.
+* [`docs/2026-10-15-audit-global.md`](file:///home/latty/Prog/__PERSO__/pydbsrt/docs/2026-10-15-audit-global.md) : Audit exhaustif du dépôt avant modernisation.

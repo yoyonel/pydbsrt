@@ -61,9 +61,31 @@ tasks:
       - cargo build --release
 
   rs:test:
-    desc: Run Rust test suite
+    desc: Run all Rust tests (unit + integration + e2e)
     cmds:
-      - cargo test
+      - cargo test --workspace
+
+  test:rs:
+    desc: Run all Rust tests (alias to rs:test)
+    cmds:
+      - cargo test --workspace
+
+  test:rs:db:
+    desc: Run Rust PostgreSQL BK-Tree integration test (requires db:up)
+    deps: [db:up, demo:import-hashes]
+    cmds:
+      - PSQL_IP=127.0.0.1 cargo test -p dbsrt-cli --test integration_test -- --nocapture
+
+  test:rs:mmap:
+    desc: Run Rust Zero-DB mmap integration test (standalone, no DB required)
+    deps: [demo:export-phash]
+    cmds:
+      - cargo test -p dbsrt-cli --test test_mmap_zero_db -- --nocapture
+
+  test:rs:retarget:
+    desc: Run Rust Subtitle retargeting E2E test (standalone, no DB required)
+    cmds:
+      - cargo test -p dbsrt-cli --test test_retarget_iso -- --nocapture
 
   rs:bench:
     desc: Run Rust pHash throughput benchmark
@@ -237,6 +259,18 @@ tasks:
     deps: [demo:import-hashes, rs:build]
     cmds:
       - ./target/release/dbsrt recognize-media --media {{.DEMO_MEDIA}} --search-distance 0
+
+  demo:recognize:mmap:
+    desc: Recognize unknown media via Zero-DB mmap engine (~440x faster, no Postgres required)
+    deps: [demo:export-phash, rs:build]
+    cmds:
+      - ./target/release/dbsrt recognize-media --media {{.DEMO_MEDIA}} --no-db --phash-dir /tmp --search-distance 0
+
+  demo:scan:rs:
+    desc: Scan directory of .phash files via Zero-DB mmap engine (3 ms search)
+    deps: [demo:export-phash, rs:build]
+    cmds:
+      - ./target/release/dbsrt scan-library --phash-dir /tmp --query-media {{.DEMO_MEDIA}} --search-distance 0 --limit 3
 
   demo:retarget:rs:
     desc: Retarget & synchronize SRT subtitles using full standalone Rust CLI (thousands times faster than Python)
