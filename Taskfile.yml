@@ -231,3 +231,9 @@ tasks:
       - task: cli
         vars:
           CLI_ARGS: recognize-media --media /app/{{.DEMO_MEDIA}} --search_distance 0
+
+  demo:recognize:rs:
+    desc: Recognize unknown media using full Rust standalone CLI (15x faster than Python)
+    deps: [demo:import-hashes, rs:build]
+    cmds:
+      - ./target/release/dbsrt recognize-media --media {{.DEMO_MEDIA}} --search-distance 0

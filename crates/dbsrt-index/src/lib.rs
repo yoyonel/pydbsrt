@@ -1,6 +1,9 @@
 //! In-memory and memory-mapped search index for perceptual hashes.
 
+pub mod db;
+
 use dbsrt_core::{hamming_distance, FrameHashEntry};
+pub use db::{DbClient, DbMatch};
 
 /// A memory-mapped or in-memory flat frame hash index.
 pub struct FlatHashIndex<'a> {

@@ -12,3 +12,4 @@ memmap2 = { workspace = true }
 bytemuck = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
+postgres = { workspace = true }

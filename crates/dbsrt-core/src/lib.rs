@@ -4,8 +4,10 @@
 //! - Binary file format definitions
 
 pub mod phash;
+pub mod video;
 
 pub use phash::{hamming_distance, phash_32x32};
+pub use video::{extract_frames_phash, probe_video, VideoMetadata};
 
 /// A timestamped frame hash entry.
 #[repr(C)]
