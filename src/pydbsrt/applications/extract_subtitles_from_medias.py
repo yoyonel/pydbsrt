@@ -1,5 +1,5 @@
 """
-➜ poetry run python src/pydbsrt/app_cli.py extract-subtitles-from-medias --help
+➜ uv run python src/pydbsrt/app_cli.py extract-subtitles-from-medias --help
 Usage: app_cli.py extract-subtitles-from-medias [OPTIONS]
                                                 ROOT_DIR_FOR_FINDING_MEDIAS
                                                 GLOB_FOR_FINDING_MEDIAS

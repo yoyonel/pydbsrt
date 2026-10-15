@@ -1,5 +1,5 @@
 """
-➜ poetry run python src/pydbsrt/app_cli.py generate-subtitles-from-db \
+➜ uv run python src/pydbsrt/app_cli.py generate-subtitles-from-db \
 
 # Description
 

@@ -1,5 +1,5 @@
 """
-➜ poetry run python src/pydbsrt/app_cli.py import-images-hashes-into-db --help
+➜ uv run python src/pydbsrt/app_cli.py import-images-hashes-into-db --help
 Usage: app_cli.py import-images-hashes-into-db [OPTIONS]
 
 Options:
@@ -13,7 +13,7 @@ dans BKTreeDB la base de donnée PostgreSQL (avec index) spécialisé·e pour le
 
 # Example
 ➜ /usr/bin/ls -1 /tmp/*.phash | \
-    xargs -I {} poetry run python app_cli.py import-images-hashes-into-db -r "{}"
+    xargs -I {} uv run python app_cli.py import-images-hashes-into-db -r "{}"
 
 """
 

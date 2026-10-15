@@ -1,6 +1,6 @@
 [build-system]
-requires = ["poetry-core>=1.0.0"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "pydbsrt"
@@ -75,8 +75,6 @@ dev = [
     "waiting>=1.4.1",
     "pytest-lazy-fixtures>=1.4.1",
 ]
-
-# Legacy poetry section for poetry backward-compatibility if needed
 
 [tool.ruff]
 line-length = 120

@@ -12,4 +12,4 @@ popd
 /usr/bin/ls -1 "${PHASH_ROOT_DIR}"/*.phash | \
 /usr/bin/time -v \
     parallel -j"${PARALLEL_NB_JOBS}" --eta -I% --max-args 1 --tty \
-        poetry run python "${PROJECT_ROOT_DIR}"/src/pydbsrt/app_cli.py import-images-hashes-into-db -r %
+        uv run python "${PROJECT_ROOT_DIR}"/src/pydbsrt/app_cli.py import-images-hashes-into-db -r %

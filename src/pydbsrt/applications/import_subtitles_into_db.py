@@ -1,5 +1,5 @@
 """
-➜ poetry run python src/pydbsrt/app_cli.py import-subtitles-into-db \
+➜ uv run python src/pydbsrt/app_cli.py import-subtitles-into-db \
     --subtitles [...]/video/Stalker.1979.1080p.BluRay.x264-USURY[rarbg]/stalker.1979.1080p.bluray.x264-usury.fr.srt \
     --binary-img-hash-file /home/latty/NAS/video/__PHASH__/stalker.1979.1080p.bluray.x264-usury.mkv.phash
 ✅  Insert subtitles=stalker.1979.1080p.bluray.x264-usury.fr into DB (0:00:01.63)

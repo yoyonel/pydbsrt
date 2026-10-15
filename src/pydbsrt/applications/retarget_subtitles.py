@@ -1,5 +1,5 @@
 """
-➜ poetry run python src/pydbsrt/app_cli.py retarget-subtitles --help
+➜ uv run python src/pydbsrt/app_cli.py retarget-subtitles --help
 Usage: app_cli.py retarget-subtitles [OPTIONS]
 
 Options:
@@ -12,7 +12,7 @@ Options:
 # Description
 
 # Example
-➜ poetry run python src/pydbsrt/app_cli.py \
+➜ uv run python src/pydbsrt/app_cli.py \
     retarget-subtitles \
         --ref_subtitles "/media/nas/volume1/video/Dallas Buyers Club (2013) [1080p]/Dallas.Buyers.Club.2013.1080p.BluRay.x264.YIFY.fr.srt"
         --ref_media "/media/nas/volume1/video/Dallas Buyers Club (2013) [1080p]/Dallas.Buyers.Club.2013.1080p.BluRay.x264.YIFY.mp4"

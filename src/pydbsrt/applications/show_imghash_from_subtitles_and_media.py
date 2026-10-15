@@ -1,5 +1,5 @@
 """
-➜ poetry run python src/pydbsrt/app_cli.py show-imghash-from-subtitles-and-media --help
+➜ uv run python src/pydbsrt/app_cli.py show-imghash-from-subtitles-and-media --help
 Usage: app_cli.py show-imghash-from-subtitles-and-media [OPTIONS]
 
 Options:
@@ -12,7 +12,7 @@ Options:
 le script produit dans la console des séries d'images hashes correspondant aux tunnels (temporels) de sous-titres
 
 # Example
-➜ poetry run python /src/pydbsrt/app_cli.py \
+➜ uv run python /src/pydbsrt/app_cli.py \
     show-imghash-from-subtitles-and-media \
         --subtitles data/SRT/big_buck_bunny_trailer_480p.en.srt \
         --media data/big_buck_bunny_trailer_480p.mp4

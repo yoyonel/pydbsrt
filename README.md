@@ -46,7 +46,7 @@ task rs:build
 
 # Installer l'environnement de développement et les pre-commits
 task sync
-poetry run pre-commit install
+uv run pre-commit install
 ```
 
 ---

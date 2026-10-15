@@ -1,5 +1,5 @@
 """
-➜ poetry run python src/pydbsrt/app_cli.py search-imghash-in-db --help
+➜ uv run python src/pydbsrt/app_cli.py search-imghash-in-db --help
 Usage: app_cli.py search-imghash-in-db [OPTIONS]
 
 Options:
@@ -11,7 +11,7 @@ Options:
 
 # Example
 
-➜ poetry run python src/pydbsrt/search-imghash-in-db --phash_file /tmp/searching_phash.txt
+➜ uv run python src/pydbsrt/search-imghash-in-db --phash_file /tmp/searching_phash.txt
 
 """
 

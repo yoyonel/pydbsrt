@@ -6,7 +6,7 @@ INPUT_IMAGES=$(find /tmp/pydbsrt/. -type f -exec file -N -i -- {} + | sed -n 's!
 pushd ..
 
 for i in $INPUT_IMAGES; do
-  poetry run pydbsrt export-imghash-from-media -r $i
+  uv run pydbsrt export-imghash-from-media -r $i
 done
 
 popd

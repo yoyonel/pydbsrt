@@ -1,5 +1,5 @@
 """
-➜ poetry python src/pydbsrt/app_cli.py export-imghash-from-media --help
+➜ uv run python src/pydbsrt/app_cli.py export-imghash-from-media --help
 Usage: app_cli.py export-imghash-from-media [OPTIONS]
 
 Options:
@@ -11,7 +11,7 @@ Options:
 Export hashes (perceptive) images compute from an input video to output (binary) file.
 
 # Example
-➜ poetry python src/pydbsrt/app_cli.py \
+➜ uv run python src/pydbsrt/app_cli.py \
     export-imghash-from-media \
         --media data/big_buck_bunny_trailer_480p.webm
 The frame size for reading (32, 32) is different from the source frame size (854, 480).

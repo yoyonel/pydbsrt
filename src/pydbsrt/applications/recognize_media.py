@@ -1,5 +1,5 @@
 """
-➜ poetry run python src/pydbsrt/app_cli.py recognize-media --help
+➜ uv run python src/pydbsrt/app_cli.py recognize-media --help
 Usage: app_cli.py recognize-media [OPTIONS]
 
 Options:
