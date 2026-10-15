@@ -1,0 +1,17 @@
+[package]
+name = "dbsrt-cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "dbsrt"
+path = "src/main.rs"
+
+[dependencies]
+dbsrt-core = { path = "../dbsrt-core" }
+dbsrt-index = { path = "../dbsrt-index" }
+clap = { workspace = true }
+anyhow = { workspace = true }
+rayon = { workspace = true }

@@ -183,7 +183,7 @@ WHERE p_hash <@ ($1, $2);  -- $1 = hash recherché, $2 = distance max (ex: 0 ou 
   4. Stage `runtime` -> `python:3.9.7-slim` avec `.venv` copié.
 
 > [!WARNING]
-> Le `docker/Dockerfile` présent sur `master` est un vieux déchet qui cible une image `holimetrix2/...` et un serveur PyPI interne privé inaccessible (`https://tart.d-bi.fr/simple/`).
+> Le `docker/Dockerfile` historique présent sur `master` était un vieux déchet ciblant une image obsolète et un serveur PyPI interne privé inaccessible (purgé lors de la modernisation).
 
 ---
 

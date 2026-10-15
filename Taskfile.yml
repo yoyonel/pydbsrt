@@ -43,15 +43,32 @@ tasks:
       - uv sync
 
   lint:
-    desc: Run Ruff linter on src and tests
+    desc: Run linters (Ruff for Python, clippy for Rust)
     cmds:
       - uv run ruff check src/ tests/
+      - cargo clippy --workspace -- -D warnings
 
   fmt:
-    desc: Format code with Ruff (formatter + auto-fix)
+    desc: Format code (Ruff for Python, rustfmt for Rust)
     cmds:
       - uv run ruff format src/ tests/
       - uv run ruff check --fix src/ tests/
+      - cargo fmt
+
+  rs:build:
+    desc: Build Rust workspace (release)
+    cmds:
+      - cargo build --release
+
+  rs:test:
+    desc: Run Rust test suite
+    cmds:
+      - cargo test
+
+  rs:bench:
+    desc: Run Rust pHash throughput benchmark
+    cmds:
+      - cargo run --release -p dbsrt-cli -- bench-phash
 
   clean:
     desc: Clean cache files, coverage, and build artifacts (replaces make fclean)

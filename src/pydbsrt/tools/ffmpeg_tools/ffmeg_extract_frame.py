@@ -9,7 +9,6 @@ import imagehash
 import numpy as np
 from PIL import Image
 
-# from holimetrix.protos.crawler import Frame_pb2
 from pydbsrt.tools.ffmpeg_tools.ffmpeg_cut import set_select_expression
 from pydbsrt.tools.ffmpeg_wrapper import FFmpeg, FFmpegFilter
 
@@ -54,9 +53,6 @@ def ffmpeg_frame_generator(
     f_scale.set_option("width", frame_width)
     f_scale.set_option("height", frame_height)
     ffmpeg.add_video_filter(f_scale)
-
-    # Frame selections, based on
-    # https://github.com/Holimetrix/hmx-ffmpeg-tools/blob/master/src/holimetrix/ffmpeg_tools/ffmpeg_cut.py#L208-L222
 
     if start_frame is None:
         start_frame = "BEGIN"

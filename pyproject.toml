@@ -6,7 +6,7 @@ build-backend = "poetry.core.masonry.api"
 name = "pydbsrt"
 version = "0.1.0"
 description = "Database SubRip Text frame matching and subtitle retargeting"
-authors = [{ name = "ATTY Lionel", email = "lionel.atty@365talents.com" }]
+authors = [{ name = "Lionel ATTY" }]
 readme = "README.md"
 requires-python = ">=3.9, <3.12"
 dependencies = [
@@ -77,11 +77,6 @@ dev = [
 ]
 
 # Legacy poetry section for poetry backward-compatibility if needed
-[tool.poetry]
-name = "pydbsrt"
-version = "0.1.0"
-description = "Database SubRip Text frame matching and subtitle retargeting"
-authors = ["ATTY Lionel <lionel.atty@365talents.com>"]
 
 [tool.ruff]
 line-length = 120

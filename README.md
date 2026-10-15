@@ -3,32 +3,28 @@
 
 ## Instructions
 
-Structure is based on [this article](https://blog.ionelmc.ro/2014/05/25/python-packaging/#the-structure). Source code can be found in the `src` folder, and tests in the `tests` folder.
+Modern stack powered by **uv**, **Taskfile**, and **PostgreSQL 17** (with native BK-Tree metric index extension).
 
-To install the package, simply execute
+### Prerequisites
+* [uv](https://github.com/astral-sh/uv)
+* [Taskfile](https://taskfile.dev/)
+* Docker / Docker Compose
 
-```bash
-➤ pip install -r requirements_dev.txt
-```
-
-We use `tox` for the tests. This ensure a clear separation between the development environment and the test environment.
-To launch the tests, run the `tox` command:
+### Quickstart
 
 ```bash
-➤ tox
+# Sync Python virtual environment
+task sync
+
+# Start PostgreSQL 17 + BK-Tree container stack
+task db:up
+
+# Run test suite
+task test:local  # or task test (inside container)
+
+# Run linters
+task lint
 ```
-
-It first starts with a bunch of checks (`flask8` and others) and then launch the tests using python 3.
-
-## Packaging
-
-A Dockerfile is provided to build an image ready to be deployed, see `docker/Dockerfile`. You can build the image using `make`:
-
-```bash
-➤ make docker
-```
-
-This will create a new image named ``.
 
 ## Implementations
 

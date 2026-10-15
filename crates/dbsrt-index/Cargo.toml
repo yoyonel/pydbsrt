@@ -1,0 +1,14 @@
+[package]
+name = "dbsrt-index"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+dbsrt-core = { path = "../dbsrt-core" }
+rayon = { workspace = true }
+memmap2 = { workspace = true }
+bytemuck = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
