@@ -1,7 +1,7 @@
 # Benchmark Comparatif & Validation Migration PostgreSQL 17 + BK-Tree
 
-**Date** : 2026-10-15  
-**Auteur** : Antigravity CLI  
+**Date** : 2026-10-15
+**Auteur** : Antigravity CLI
 **Statut** : Validé en environnement réel (Docker PG11 vs PG17)
 
 ---

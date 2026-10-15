@@ -1,12 +1,19 @@
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
-use dbsrt_core::{extract_frames_phash, probe_video};
-use dbsrt_index::DbClient;
+use dbsrt_core::{
+    detect_cuts, extract_frames_phash, probe_video, read_phash_file, write_phash_file, SubtitleFile,
+};
+use dbsrt_index::{BkItem, BkTree, DbClient};
 use std::collections::{BTreeSet, HashMap};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 #[derive(Parser, Debug)]
-#[command(name = "dbsrt", version, about = "High-performance video perceptual hash & subtitle retargeting")]
+#[command(
+    name = "dbsrt",
+    version,
+    about = "High-performance video perceptual hash & subtitle retargeting"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -30,6 +37,9 @@ enum Commands {
 
     /// Recognize media from database by computing perceptual hash fingerprint
     RecognizeMedia(RecognizeArgs),
+
+    /// Retarget and synchronize SRT subtitles from reference to target media
+    RetargetSubtitles(RetargetArgs),
 }
 
 #[derive(clap::Args, Debug)]
@@ -71,6 +81,29 @@ pub struct RecognizeArgs {
     db_name: String,
 }
 
+#[derive(clap::Args, Debug)]
+pub struct RetargetArgs {
+    /// Path to reference subtitles file (.srt)
+    #[arg(long)]
+    pub ref_subtitles: PathBuf,
+
+    /// Path to reference media
+    #[arg(long)]
+    pub ref_media: PathBuf,
+
+    /// Path to target media
+    #[arg(long)]
+    pub target_media: PathBuf,
+
+    /// Path to directory containing or storing .phash files
+    #[arg(long, default_value = "/tmp")]
+    pub phash_dir: PathBuf,
+
+    /// Hamming search distance for BK-Tree
+    #[arg(long, default_value_t = 0)]
+    pub search_distance: u32,
+}
+
 #[derive(Default)]
 struct AggregatedMatch {
     nb_offsets_match: usize,
@@ -83,7 +116,7 @@ fn format_set<T: std::fmt::Display>(set: &BTreeSet<T>) -> String {
     format!("{{{}}}", items.join(", "))
 }
 
-fn run_recognize_media(args: &RecognizeArgs) -> anyhow::Result<()> {
+fn run_recognize_media(args: &RecognizeArgs) -> Result<()> {
     // 1. Probe video
     let meta = probe_video(&args.media)?;
     let start_sec = (meta.duration / 2.0).floor();
@@ -99,7 +132,13 @@ fn run_recognize_media(args: &RecognizeArgs) -> anyhow::Result<()> {
         .or_else(|| std::env::var("PSQL_IP").ok())
         .unwrap_or_else(|| "127.0.0.1".to_string());
 
-    let mut db = DbClient::connect(&host, args.db_port, &args.db_user, &args.db_pass, &args.db_name)?;
+    let mut db = DbClient::connect(
+        &host,
+        args.db_port,
+        &args.db_user,
+        &args.db_pass,
+        &args.db_name,
+    )?;
 
     // 4. Query DB & measure matching time
     let match_start = Instant::now();
@@ -175,7 +214,149 @@ fn run_recognize_media(args: &RecognizeArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn main() -> anyhow::Result<()> {
+fn find_or_build_phash(media_file: &Path, phash_dir: &Path) -> Result<(PathBuf, Vec<u64>, f64)> {
+    let stem = media_file
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
+
+    // Look for existing .phash file in phash_dir
+    if phash_dir.exists() {
+        if let Ok(entries) = std::fs::read_dir(phash_dir) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
+                    if name.contains(&stem) && name.ends_with(".phash") {
+                        let hashes = read_phash_file(&p)?;
+                        let meta = probe_video(media_file)?;
+                        return Ok((p, hashes, meta.fps));
+                    }
+                }
+            }
+        }
+    }
+
+    // Otherwise probe and extract all frames
+    let meta = probe_video(media_file)?;
+    let total_frames = (meta.duration * meta.fps).floor() as usize;
+    let hashes = extract_frames_phash(media_file, 0.0, total_frames)?;
+
+    let out_name = format!(
+        "{}.{:.1}fps.phash",
+        media_file.file_name().unwrap().to_string_lossy(),
+        meta.fps
+    );
+    let out_path = phash_dir.join(&out_name);
+    write_phash_file(&out_path, &hashes)?;
+
+    Ok((out_path, hashes, meta.fps))
+}
+
+fn run_retarget_subtitles(args: &RetargetArgs) -> Result<()> {
+    let (ref_phash_file, ref_hashes, _ref_fps) =
+        find_or_build_phash(&args.ref_media, &args.phash_dir).with_context(|| {
+            format!("Failed to resolve reference phash for {:?}", args.ref_media)
+        })?;
+
+    let (target_phash_file, target_hashes, target_fps) =
+        find_or_build_phash(&args.target_media, &args.phash_dir).with_context(|| {
+            format!("Failed to resolve target phash for {:?}", args.target_media)
+        })?;
+
+    println!("ref_phash_file={:?}", ref_phash_file);
+    println!(
+        "search_tree_from_target=SearchTreeFromCuts(binary_img_hash_file={:?})",
+        target_phash_file
+    );
+
+    // 1. Build BKTree for target cuts
+    let t_bktree = Instant::now();
+    let target_cuts = detect_cuts(&target_hashes, 16);
+    let mut target_tree = BkTree::new();
+    for cut in &target_cuts {
+        target_tree.insert(BkItem {
+            phash: cut.phash,
+            offset: cut.offset,
+        });
+    }
+    let bktree_elapsed = t_bktree.elapsed().as_secs_f64();
+    println!(
+        "Build BKTrees for target => took {:.4} seconds",
+        bktree_elapsed
+    );
+
+    // 2. Search difference offsets
+    let t_search = Instant::now();
+    let ref_cuts = detect_cuts(&ref_hashes, 16);
+    let mut diff_counter: HashMap<i64, usize> = HashMap::new();
+
+    for ref_cut in &ref_cuts {
+        let matches = target_tree.search(ref_cut.phash, args.search_distance);
+        if let Some(first_match) = matches.first() {
+            let diff = first_match.offset as i64 - ref_cut.offset as i64;
+            *diff_counter.entry(diff).or_default() += 1;
+        }
+    }
+    let search_elapsed = t_search.elapsed().as_secs_f64();
+
+    let total_paired: usize = diff_counter.values().sum();
+    let mut sorted_diffs: Vec<(i64, usize)> = diff_counter.into_iter().collect();
+    sorted_diffs.sort_by_key(|a| std::cmp::Reverse(a.1));
+
+    if let Some(&(most_common_diff, count)) = sorted_diffs.first() {
+        let percent = (count as f64 / total_paired as f64) * 100.0;
+        println!(
+            "Nb paired frames used: {} frames ~ {:.16} seconds",
+            total_paired,
+            total_paired as f64 / 24.0
+        );
+        println!(
+            "Percent of frames used for the most common: ~ {:.2} %",
+            percent
+        );
+        println!(
+            "Search differences offsets between reference and target => took {:.4} seconds",
+            search_elapsed
+        );
+        println!(
+            "Find differences offsets for synchronize subtitles (reference -> target) => took {:.4} seconds",
+            bktree_elapsed + search_elapsed
+        );
+
+        let t_shift = Instant::now();
+        let shift_frames = most_common_diff;
+        let shift_ms = (shift_frames as f64 / target_fps) * 1000.0;
+        println!("target_frame_rate={:.1} fps", target_fps);
+        println!(
+            "Shift subtitles seconds = {} frames ~ {:.4} seconds",
+            shift_frames,
+            shift_ms / 1000.0
+        );
+
+        let mut srt = SubtitleFile::open(&args.ref_subtitles)?;
+        srt.shift(shift_ms);
+
+        let out_name = target_phash_file
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(|n| n.replace(".phash", ".srt"))
+            .unwrap_or_else(|| "out.srt".to_string());
+        let out_path = args.phash_dir.join(&out_name);
+        srt.save(&out_path)?;
+
+        println!("Exported subtitles for target in : \n'{:?}'", out_path);
+        println!(
+            "Shift subtitles (from reference) and save it (for target) => took {:.4} seconds",
+            t_shift.elapsed().as_secs_f64()
+        );
+    } else {
+        println!("Error: Can't find difference offsets !");
+    }
+
+    Ok(())
+}
+
+fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Commands::BenchPhash { count } => {
@@ -191,10 +372,16 @@ fn main() -> anyhow::Result<()> {
             let per_frame_us = elapsed.as_secs_f64() * 1_000_000.0 / count as f64;
             println!("Result hash: {:016x}", last_hash);
             println!("Elapsed: {:?}", elapsed);
-            println!("Throughput: {:.0} frames/sec ({:.2} µs / frame)", fps, per_frame_us);
+            println!(
+                "Throughput: {:.0} frames/sec ({:.2} µs / frame)",
+                fps, per_frame_us
+            );
         }
         Commands::RecognizeMedia(args) => {
             run_recognize_media(&args)?;
+        }
+        Commands::RetargetSubtitles(args) => {
+            run_retarget_subtitles(&args)?;
         }
     }
     Ok(())

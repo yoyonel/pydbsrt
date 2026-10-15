@@ -81,6 +81,11 @@ dev = [
 [tool.ruff]
 line-length = 120
 target-version = "py311"
+exclude = [
+    ".git",
+    "notebook",
+    "data",
+]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B"]

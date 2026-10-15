@@ -2,7 +2,7 @@ FROM postgis/postgis:11-3.3
 
 LABEL maintainer="BKTreeDB Project"
 ENV POSTGRES_DBNAME=bktreedb
-ENV POSTGRES_USER=docker 
+ENV POSTGRES_USER=docker
 ENV POSTGRES_PASSWORD=docker
 
 RUN sed -i 's/^# deb/deb/g' /etc/apt/sources.list \

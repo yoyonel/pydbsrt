@@ -1,7 +1,7 @@
 # Rapport d'Ingénierie : Moteur Rust E2E (`dbsrt-rs`), Benchmarks & Analyse des Inconvénients
 
-**Date** : 2026-10-15  
-**Auteur** : Antigravity CLI  
+**Date** : 2026-10-15
+**Auteur** : Antigravity CLI
 **Statut** : Validé par tests d'intégration et benchmarks réels (Voie B)
 
 ---

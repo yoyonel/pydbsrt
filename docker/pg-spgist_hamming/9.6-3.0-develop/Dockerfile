@@ -1,7 +1,7 @@
 FROM postgis/postgis:9.6-3.0
 LABEL maintainer="BKTreeDB Project"
 ENV POSTGRES_DBNAME=bktreedb
-ENV POSTGRES_USER=docker 
+ENV POSTGRES_USER=docker
 ENV POSTGRES_PASSWORD=docker
 RUN apt-get update \
     && apt-get install -y \

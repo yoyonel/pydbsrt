@@ -45,10 +45,9 @@ impl DbClient {
 
     /// Look up media name by media_id.
     pub fn get_media_name(&mut self, media_id: i32) -> Result<String> {
-        let rows = self.client.query(
-            "SELECT name FROM medias WHERE id = $1",
-            &[&media_id],
-        )?;
+        let rows = self
+            .client
+            .query("SELECT name FROM medias WHERE id = $1", &[&media_id])?;
         if let Some(row) = rows.first() {
             Ok(row.get(0))
         } else {

@@ -1,7 +1,7 @@
 # Audit Massif & Exhaustif : Projet `pydbsrt`
 
-> **Date audit** : 15 Octobre 2026  
-> **Auteur** : Antigravity  
+> **Date audit** : 15 Octobre 2026
+> **Auteur** : Antigravity
 > **Statut global** : Projet mature et techniquement très avancé sur `develop`, mais bloqué dans l'écosystème Python 3.8-3.9 / Postgres 11, et branche `master` complètement obsolète.
 
 ---
@@ -149,14 +149,14 @@ CREATE TABLE frames (
     media_id INT REFERENCES medias(id) ON DELETE CASCADE
 );
 
-CREATE INDEX frames_phash_bk_tree_index ON frames 
+CREATE INDEX frames_phash_bk_tree_index ON frames
     USING spgist ( p_hash bktree_ops );  -- Index custom SP-GiST BK-Tree
 ```
 
 ### Requête de recherche par distance de Hamming
 ```sql
-SELECT frame_offset, media_id 
-FROM frames 
+SELECT frame_offset, media_id
+FROM frames
 WHERE p_hash <@ ($1, $2);  -- $1 = hash recherché, $2 = distance max (ex: 0 ou 1)
 ```
 
@@ -294,7 +294,7 @@ flowchart TD
 ```
 
 > [!TIP]
-> **Recommandation Langage : RUST**  
+> **Recommandation Langage : RUST**
 > Pour du traitement vidéo image par image, du calcul pHash et de la recherche métrique, **Rust** est le candidat idéal :
 > * Intruction processeur `u64::count_ones` pour une distance de Hamming en 1 cycle CPU.
 > * Écosystème riche : `ffmpeg-next` (décodage), `clap` (CLI moderne), `sqlx` (Postgres async), `tokio` (concurrence).
@@ -329,5 +329,3 @@ Remplacement du `Makefile` par **Task** (`Taskfile.yml`) :
 * Syntaxe déclarative YAML, gestion native des environnements (`.env`).
 * Dépendances conditionnelles précises (hash des fichiers sources, `sources:` / `generates:`).
 * Support natif multi-plateformes (Linux, macOS, Windows sans dépendre de bash/sed hôte).
-
-

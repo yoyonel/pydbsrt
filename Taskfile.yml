@@ -237,3 +237,14 @@ tasks:
     deps: [demo:import-hashes, rs:build]
     cmds:
       - ./target/release/dbsrt recognize-media --media {{.DEMO_MEDIA}} --search-distance 0
+
+  demo:retarget:rs:
+    desc: Retarget & synchronize SRT subtitles using full standalone Rust CLI (thousands times faster than Python)
+    deps: [rs:build]
+    cmds:
+      - >
+        ./target/release/dbsrt retarget-subtitles
+        --ref-media {{.DEMO_MEDIA}}
+        --ref-subtitles {{.DEMO_SRT}}
+        --target-media {{.DEMO_TARGET_MEDIA}}
+        --phash-dir /tmp

@@ -1,7 +1,7 @@
 # Réflexion d'Architecture : Passage à l'Échelle (Milliards de Frames)
 
-**Date** : 2026-10-15  
-**Auteur** : Antigravity CLI  
+**Date** : 2026-10-15
+**Auteur** : Antigravity CLI
 **Statut** : Étude d'ingénierie & R&D
 
 ---

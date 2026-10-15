@@ -96,11 +96,7 @@ pub fn probe_video(path: &Path) -> Result<VideoMetadata> {
 }
 
 /// Extracts a stream of 32x32 grayscale frames using ffmpeg and computes pHash on each.
-pub fn extract_frames_phash(
-    path: &Path,
-    start_sec: f64,
-    nb_frames: usize,
-) -> Result<Vec<u64>> {
+pub fn extract_frames_phash(path: &Path, start_sec: f64, nb_frames: usize) -> Result<Vec<u64>> {
     let mut child = Command::new("ffmpeg")
         .args([
             "-hide_banner",
@@ -127,7 +123,10 @@ pub fn extract_frames_phash(
         .spawn()
         .with_context(|| format!("Failed to spawn ffmpeg on {:?}", path))?;
 
-    let mut stdout = child.stdout.take().ok_or_else(|| anyhow!("Cannot capture ffmpeg stdout"))?;
+    let mut stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| anyhow!("Cannot capture ffmpeg stdout"))?;
     let mut buf = [0u8; 1024];
     let mut hashes = Vec::with_capacity(nb_frames);
 
