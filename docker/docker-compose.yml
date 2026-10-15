@@ -7,9 +7,7 @@ services:
   bktreedb:
     image: docker_bktreedb:test
     build:
-      # can't build docker image with PostGreSQL 9.6
-#      context: pg-spgist_hamming/9.6-3.0-develop/.
-      context: pg-spgist_hamming/11.3-3.0-develop/.
+      context: pg-spgist_hamming/17-develop/.
       dockerfile: Dockerfile
     volumes:
       - bktreedb-data:/var/lib/postgresql/data

@@ -27,9 +27,9 @@ tasks:
       - docker build -t {{.DOCKER_IMAGE}} -f Dockerfile .
 
   build-db:
-    desc: Build custom PostgreSQL 11 BK-tree Docker image
+    desc: Build custom PostgreSQL 17 BK-tree Docker image
     cmds:
-      - docker build -t {{.DOCKER_DB_IMAGE}} docker/pg-spgist_hamming/11.3-3.0-develop/
+      - docker build -t {{.DOCKER_DB_IMAGE}} docker/pg-spgist_hamming/17-develop/
 
   re:
     desc: Clean artifacts and rebuild Docker image (replaces make re)
