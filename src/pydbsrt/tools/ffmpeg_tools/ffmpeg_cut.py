@@ -17,7 +17,7 @@ def set_select_expression(
     frame_start,
     frame_stop,
 ):
-    """
+    r"""
 
     Args:
         frame_start (str or int):
@@ -55,7 +55,7 @@ def set_select_expression(
     else:
         if int(frame_start) < 0:
             raise ValueError("Invalid start frame [{0}].".format(frame_start))
-        select_expression += "gte(n\,{0})".format(i_frame_start)
+        select_expression += r"gte(n\,{0})".format(i_frame_start)
 
     if frame_stop != "END":
         try:
@@ -66,13 +66,13 @@ def set_select_expression(
         else:
             if i_frame_stop < 0:
                 raise ValueError("Invalid stop frame [{0}].".format(frame_stop))
-            select_expression += "*lte(n\,{0})".format(i_frame_stop)
+            select_expression += r"*lte(n\,{0})".format(i_frame_stop)
 
     return select_expression
 
 
 def set_aselect_expression(frame_start, frame_stop, input_file):
-    """
+    r"""
 
     Args:
         frame_start (str or int):
@@ -97,7 +97,7 @@ def set_aselect_expression(frame_start, frame_stop, input_file):
     aselect_expression = ""
 
     if frame_start == "BEGIN":
-        aselect_expression += "gte(t\,0)"
+        aselect_expression += r"gte(t\,0)"
     else:
         try:
             i_frame_start = int(frame_start)
@@ -107,7 +107,7 @@ def set_aselect_expression(frame_start, frame_stop, input_file):
         else:
             if int(frame_start) < 0:
                 raise ValueError("Invalid start frame [{0}].".format(frame_start))
-            aselect_expression += "gte(t\,{0})".format(calculate_frame_pts_time(i_frame_start, input_file))
+            aselect_expression += r"gte(t\,{0})".format(calculate_frame_pts_time(i_frame_start, input_file))
 
     if frame_stop != "END":
         try:
@@ -118,7 +118,7 @@ def set_aselect_expression(frame_start, frame_stop, input_file):
         else:
             if i_frame_stop < 0:
                 raise ValueError("Invalid stop frame [{0}].".format(frame_stop))
-            aselect_expression += "*lte(t\,{0})".format(calculate_frame_pts_time(i_frame_stop, input_file))
+            aselect_expression += r"*lte(t\,{0})".format(calculate_frame_pts_time(i_frame_stop, input_file))
 
     return aselect_expression
 

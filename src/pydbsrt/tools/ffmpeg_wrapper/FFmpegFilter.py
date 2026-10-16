@@ -28,7 +28,7 @@ class FFmpegFilter:
             pass
 
     def build(self):
-        """
+        r"""
         Build a valid ffmpeg filter string.
 
         Example for filter 'select' with option 'expr' set to 'eq(n\\, 0)' and option 'showinfo':
