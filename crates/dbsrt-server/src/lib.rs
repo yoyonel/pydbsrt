@@ -9,8 +9,8 @@ use axum::{
     Json, Router,
 };
 use dbsrt_core::{
-    detect_cuts, extract_frames_phash, probe_video, read_phash_file, write_phash_file, CutItem,
-    SubtitleFile,
+    detect_cuts, extract_embedded_subtitle, extract_frames_phash, inspect_container, probe_video,
+    read_phash_file, write_phash_file, CutItem, SubtitleFile,
 };
 use dbsrt_index::{BkItem, BkTree, MmapLibrary};
 use serde::{Deserialize, Serialize};
@@ -686,11 +686,11 @@ pub async fn autosync_handler(
         (stem, 80.0)
     };
 
-    // 3. Find reference subtitle in catalog for requested language
-    let ref_srt_path =
-        match find_subtitle_in_catalog(&subtitles_dir, &matched_stem, &payload.language) {
-            Some(p) => p,
-            None => {
+    // 3. Find reference subtitle: catalog on disk OR embedded subtitle stream in container
+    let mut srt = match find_subtitle_in_catalog(&subtitles_dir, &matched_stem, &payload.language) {
+        Some(p) => match SubtitleFile::open(&p) {
+            Ok(s) => s,
+            Err(e) => {
                 return Json(AutoSyncResponse {
                     success: false,
                     matched_media: Some(matched_stem.clone()),
@@ -700,13 +700,75 @@ pub async fn autosync_handler(
                     output_srt_path: String::new(),
                     confidence_percent: match_conf,
                     elapsed_seconds: start.elapsed().as_secs_f64(),
-                    error: Some(format!(
-                        "Media recognized as '{}' but no '{}' subtitle found in {:?}",
-                        matched_stem, payload.language, subtitles_dir
-                    )),
+                    error: Some(format!("Failed to parse catalog subtitle {:?}: {:#}", p, e)),
                 });
             }
-        };
+        },
+        None => {
+            // Fallback: check if target media container has an embedded subtitle track matching requested language
+            let embedded = inspect_container(&media_path)
+                .ok()
+                .and_then(|insp| insp.find_by_language(&payload.language).cloned());
+
+            match embedded {
+                Some(stream) => {
+                    match extract_embedded_subtitle(&media_path, stream.subtitle_index) {
+                        Ok(raw_srt) => match SubtitleFile::parse(&raw_srt) {
+                            Ok(s) => s,
+                            Err(e) => {
+                                return Json(AutoSyncResponse {
+                                    success: false,
+                                    matched_media: Some(matched_stem.clone()),
+                                    language: payload.language.clone(),
+                                    shift_frames: 0,
+                                    shift_ms: 0.0,
+                                    output_srt_path: String::new(),
+                                    confidence_percent: match_conf,
+                                    elapsed_seconds: start.elapsed().as_secs_f64(),
+                                    error: Some(format!(
+                                        "Failed to parse embedded subtitle track: {:#}",
+                                        e
+                                    )),
+                                });
+                            }
+                        },
+                        Err(e) => {
+                            return Json(AutoSyncResponse {
+                                success: false,
+                                matched_media: Some(matched_stem.clone()),
+                                language: payload.language.clone(),
+                                shift_frames: 0,
+                                shift_ms: 0.0,
+                                output_srt_path: String::new(),
+                                confidence_percent: match_conf,
+                                elapsed_seconds: start.elapsed().as_secs_f64(),
+                                error: Some(format!(
+                                    "Failed to extract embedded subtitle track: {:#}",
+                                    e
+                                )),
+                            });
+                        }
+                    }
+                }
+                None => {
+                    return Json(AutoSyncResponse {
+                        success: false,
+                        matched_media: Some(matched_stem.clone()),
+                        language: payload.language.clone(),
+                        shift_frames: 0,
+                        shift_ms: 0.0,
+                        output_srt_path: String::new(),
+                        confidence_percent: match_conf,
+                        elapsed_seconds: start.elapsed().as_secs_f64(),
+                        error: Some(format!(
+                            "Media recognized as '{}' but no '{}' subtitle found in catalog {:?} nor embedded in container",
+                            matched_stem, payload.language, subtitles_dir
+                        )),
+                    });
+                }
+            }
+        }
+    };
 
     // 4. Calculate shift:
     let target_cuts = detect_cuts(&target_hashes, 16);
@@ -723,25 +785,6 @@ pub async fn autosync_handler(
     let shift_ms = (shift_frames as f64 / target_fps) * 1000.0;
 
     // 5. Shift & Save Subtitle
-    let mut srt = match SubtitleFile::open(&ref_srt_path) {
-        Ok(s) => s,
-        Err(e) => {
-            return Json(AutoSyncResponse {
-                success: false,
-                matched_media: Some(matched_stem.clone()),
-                language: payload.language.clone(),
-                shift_frames: 0,
-                shift_ms: 0.0,
-                output_srt_path: String::new(),
-                confidence_percent,
-                elapsed_seconds: start.elapsed().as_secs_f64(),
-                error: Some(format!(
-                    "Failed to parse subtitle {:?}: {:#}",
-                    ref_srt_path, e
-                )),
-            });
-        }
-    };
     srt.shift(shift_ms);
 
     let out_name = format!(

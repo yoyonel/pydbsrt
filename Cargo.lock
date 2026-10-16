@@ -424,6 +424,8 @@ dependencies = [
  "dbsrt-core",
  "dbsrt-index",
  "rayon",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

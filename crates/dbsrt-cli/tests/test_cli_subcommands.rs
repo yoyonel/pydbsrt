@@ -148,3 +148,41 @@ fn test_cli_missing_args_error() {
         .expect("Failed to run bench-video without args");
     assert!(!out.status.success());
 }
+
+#[test]
+fn test_cli_inspect_media() {
+    let media = match get_canonical_demo_media() {
+        Some(m) => m,
+        None => {
+            eprintln!("Media file not found, skipping test");
+            return;
+        }
+    };
+
+    // 1. Text mode
+    let out_text = Command::new(env!("CARGO_BIN_EXE_dbsrt"))
+        .args(["inspect-media", "--media", media.to_str().unwrap()])
+        .output()
+        .expect("Failed to run inspect-media text");
+    assert!(out_text.status.success());
+    let stdout_text = String::from_utf8_lossy(&out_text.stdout);
+    assert!(stdout_text.contains("Media Release Metadata"));
+    assert!(stdout_text.contains("Clean Title:"));
+    assert!(stdout_text.contains("Container Subtitle Tracks"));
+
+    // 2. JSON mode
+    let out_json = Command::new(env!("CARGO_BIN_EXE_dbsrt"))
+        .args([
+            "inspect-media",
+            "--media",
+            media.to_str().unwrap(),
+            "--format",
+            "json",
+        ])
+        .output()
+        .expect("Failed to run inspect-media json");
+    assert!(out_json.status.success());
+    let stdout_json = String::from_utf8_lossy(&out_json.stdout);
+    assert!(stdout_json.contains("\"clean_title\""));
+    assert!(stdout_json.contains("\"subtitle_streams\""));
+}
