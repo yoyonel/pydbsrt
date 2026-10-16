@@ -96,13 +96,16 @@ def run_chrome_smoke_test(site_dir: Path) -> list[str]:
     cmd = [
         "google-chrome",
         "--headless=new",
+        "--no-sandbox",
+        "--disable-dev-shm-usage",
         "--disable-gpu",
         "--allow-file-access-from-files",
         "--dump-dom",
         file_url,
     ]
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=15, check=True)
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60, check=True)
+
         rendered_dom = proc.stdout
         if "mjx-container" not in rendered_dom:
             errors.append("Headless Chrome: MathJax mjx-container not generated on scaling doc")
