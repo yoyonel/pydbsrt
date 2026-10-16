@@ -1,6 +1,6 @@
 //! Library core for dbsrt-server HTTP API.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use axum::{
     extract::State,
     http::StatusCode,
@@ -15,11 +15,67 @@ use dbsrt_core::{
 use dbsrt_index::{BkItem, BkTree, MmapLibrary};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
+
+pub const DISCOVERY_FILE: &str = "/tmp/dbsrt-server.json";
+
+pub fn write_discovery_file(addr: SocketAddr) -> Result<()> {
+    let payload = serde_json::json!({
+        "host": addr.ip().to_string(),
+        "port": addr.port(),
+        "url": format!("http://{}", addr),
+        "pid": std::process::id(),
+        "version": env!("CARGO_PKG_VERSION")
+    });
+    std::fs::write(DISCOVERY_FILE, serde_json::to_string_pretty(&payload)?)
+        .with_context(|| format!("Failed to write discovery file {:?}", DISCOVERY_FILE))?;
+    Ok(())
+}
+
+pub fn remove_discovery_file() {
+    let _ = std::fs::remove_file(DISCOVERY_FILE);
+}
+
+pub async fn bind_listener(
+    host: &str,
+    start_port: u16,
+) -> Result<(tokio::net::TcpListener, SocketAddr)> {
+    if start_port == 0 {
+        let addr: SocketAddr = format!("{}:0", host).parse()?;
+        let listener = tokio::net::TcpListener::bind(addr).await?;
+        let local_addr = listener.local_addr()?;
+        return Ok((listener, local_addr));
+    }
+
+    let mut current_port = start_port;
+    loop {
+        let addr: SocketAddr = format!("{}:{}", host, current_port).parse()?;
+        match tokio::net::TcpListener::bind(addr).await {
+            Ok(listener) => {
+                let local_addr = listener.local_addr()?;
+                if current_port != start_port {
+                    tracing::warn!(
+                        "Port {} was already in use, successfully auto-selected port {}",
+                        start_port,
+                        current_port
+                    );
+                }
+                return Ok((listener, local_addr));
+            }
+            Err(e)
+                if e.kind() == std::io::ErrorKind::AddrInUse && current_port < start_port + 20 =>
+            {
+                current_port += 1;
+            }
+            Err(e) => return Err(e.into()),
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct AppState {
@@ -891,5 +947,31 @@ mod tests {
         // Support: 10 / 11 = 0.90909
         // Conf: 0.90 * (10/11) * 100 = 81.818%
         assert!(conf > 80.0 && conf < 85.0);
+    }
+
+    #[tokio::test]
+    async fn test_bind_listener_ephemeral() {
+        let (listener, addr) = bind_listener("127.0.0.1", 0).await.unwrap();
+        assert_eq!(addr.ip().to_string(), "127.0.0.1");
+        assert!(addr.port() > 0);
+        drop(listener);
+    }
+
+    #[test]
+    fn test_discovery_file_lifecycle() {
+        let addr = "127.0.0.1:9999".parse().unwrap();
+        write_discovery_file(addr).expect("write discovery file");
+        assert!(std::path::Path::new(DISCOVERY_FILE).exists());
+        let content = std::fs::read_to_string(DISCOVERY_FILE).unwrap();
+        assert!(content.contains("9999"));
+        assert!(content.contains("version"));
+        remove_discovery_file();
+        assert!(!std::path::Path::new(DISCOVERY_FILE).exists());
+    }
+
+    #[test]
+    fn test_find_subtitle_in_catalog_fallback() {
+        let empty_dir = std::env::temp_dir().join("empty_srt_dir_test_nonexistent");
+        assert!(find_subtitle_in_catalog(&empty_dir, "media", "en").is_none());
     }
 }
