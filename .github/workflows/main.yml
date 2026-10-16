@@ -71,7 +71,8 @@ jobs:
 
       - name: Start PostgreSQL 17 BK-Tree container
         run: |
-          docker compose -f docker/docker-compose.test.yml up -d --build bktreedb
+          docker compose -f docker/docker-compose.test.yml pull bktreedb || docker compose -f docker/docker-compose.test.yml build bktreedb
+          docker compose -f docker/docker-compose.test.yml up -d bktreedb
           for i in {1..30}; do
             if docker compose -f docker/docker-compose.test.yml exec -T bktreedb pg_isready -U docker -d bktreedb; then
               echo "PostgreSQL 17 BK-Tree is ready!"
@@ -98,13 +99,13 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-groups
 
-      - name: Build release binaries
-        run: cargo build --release
+      - name: Build debug binaries
+        run: cargo build
 
       - name: Seed database with sample media
         run: |
-          ./target/release/dbsrt export-phash --media data/big_buck_bunny_trailer_480p.webm -o /tmp/big_buck_bunny_trailer_480p.webm.25.0fps.phash
-          ./target/release/dbsrt import-phash --file /tmp/big_buck_bunny_trailer_480p.webm.25.0fps.phash
+          ./target/debug/dbsrt export-phash --media data/big_buck_bunny_trailer_480p.webm -o /tmp/big_buck_bunny_trailer_480p.webm.25.0fps.phash
+          ./target/debug/dbsrt import-phash --file /tmp/big_buck_bunny_trailer_480p.webm.25.0fps.phash
 
 
       - name: Run Rust DB integration tests
