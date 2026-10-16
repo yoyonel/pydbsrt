@@ -23,6 +23,11 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Setup FFmpeg
+        uses: FedericoCarboni/setup-ffmpeg@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:

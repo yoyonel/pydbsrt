@@ -18,6 +18,16 @@ def setup_ffmpeg_binaries():
         pass
 
 
+@pytest.fixture
+def require_ffmpeg():
+    if not FFmpeg.binary_path or not FFprobe.binary_path:
+        try:
+            FFmpeg.initialize()
+            FFprobe.initialize()
+        except Exception:
+            pytest.skip("ffmpeg/ffprobe binaries not found")
+
+
 def test_ffmpeg_filter_basic():
     filt = FFmpegFilter.FFmpegFilter("select")
     assert filt.build() == "select"
@@ -57,7 +67,7 @@ def test_set_select_expression():
         set_select_expression(10, "not_an_int")
 
 
-def test_set_aselect_expression(big_buck_bunny_trailer):
+def test_set_aselect_expression(require_ffmpeg, big_buck_bunny_trailer):
     # BEGIN case
     assert set_aselect_expression("BEGIN", "END", str(big_buck_bunny_trailer)) == r"gte(t\,0)"
 
@@ -75,7 +85,7 @@ def test_set_aselect_expression(big_buck_bunny_trailer):
         set_aselect_expression(10, -5, str(big_buck_bunny_trailer))
 
 
-def test_calculate_frame_pts_time(big_buck_bunny_trailer):
+def test_calculate_frame_pts_time(require_ffmpeg, big_buck_bunny_trailer):
     pts = calculate_frame_pts_time(25, str(big_buck_bunny_trailer))
     assert pts is not None
     assert round(pts, 2) == 1.0  # 25 fps => frame 25 is at 1.0s
@@ -95,7 +105,7 @@ def test_build_parser():
     assert args.frame_stop == "20"
 
 
-def test_cut(big_buck_bunny_trailer, tmp_path):
+def test_cut(require_ffmpeg, big_buck_bunny_trailer, tmp_path):
     from pydbsrt.tools.ffmpeg_tools.ffmpeg_cut import cut
 
     out_file = tmp_path / "cut_output.mp4"
