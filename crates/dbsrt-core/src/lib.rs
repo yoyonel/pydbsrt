@@ -8,10 +8,17 @@ pub mod phash;
 pub mod srt;
 pub mod video;
 
-pub use cuts::{detect_cuts, is_blank_phash, read_phash_file, write_phash_file, CutItem};
+pub use cuts::{
+    detect_cuts, detect_cuts_timestamped, is_blank_phash, read_phash_file, write_phash_file,
+    CutItem, TimestampedCutItem,
+};
 pub use phash::{hamming_distance, phash_32x32};
 pub use srt::{SubtitleCue, SubtitleFile};
-pub use video::{extract_frames_phash, probe_video, VideoMetadata};
+pub use video::{
+    extract_frames_advanced, extract_frames_phash, extract_keyframes_phash, extract_sparse_phash,
+    probe_keyframe_timestamps, probe_video, FrameSample, HwAccel, ResolvedFfmpeg, SamplingMode,
+    VideoExtractionOptions, VideoMetadata,
+};
 
 /// A timestamped frame hash entry.
 #[repr(C)]

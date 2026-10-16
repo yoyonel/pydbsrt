@@ -15,6 +15,14 @@ pub struct CutItem {
     pub offset: usize,
 }
 
+/// A scene cut with its exact presentation timestamp in milliseconds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TimestampedCutItem {
+    pub phash: u64,
+    pub offset: usize,
+    pub timestamp_ms: u64,
+}
+
 /// Returns true if a perceptual hash has abnormally low or high bit density,
 /// indicating an uninformative uniform/blank frame (black screen, fade-to-black, white frame).
 /// Standard 2D DCT-II hashes on natural scenes have ~32 active bits (median thresholding).
@@ -44,6 +52,41 @@ pub fn detect_cuts(hashes: &[u64], threshold: u32) -> Vec<CutItem> {
                 cuts.push(CutItem {
                     phash: h1,
                     offset: offset + 1,
+                });
+            }
+        }
+    }
+
+    cuts
+}
+
+/// Detects scene cut frames from timestamped FrameSamples.
+/// Retains exact frame offsets and presentation timestamps in milliseconds.
+pub fn detect_cuts_timestamped(
+    samples: &[crate::video::FrameSample],
+    threshold: u32,
+) -> Vec<TimestampedCutItem> {
+    let mut cuts = Vec::new();
+    if samples.len() < 2 {
+        return cuts;
+    }
+
+    for window in samples.windows(2) {
+        let s0 = &window[0];
+        let s1 = &window[1];
+        if hamming_distance(s0.phash, s1.phash) > threshold {
+            if !is_blank_phash(s0.phash) && cuts.last().map(|c| c.offset) != Some(s0.frame_idx) {
+                cuts.push(TimestampedCutItem {
+                    phash: s0.phash,
+                    offset: s0.frame_idx,
+                    timestamp_ms: s0.timestamp_ms,
+                });
+            }
+            if !is_blank_phash(s1.phash) {
+                cuts.push(TimestampedCutItem {
+                    phash: s1.phash,
+                    offset: s1.frame_idx,
+                    timestamp_ms: s1.timestamp_ms,
                 });
             }
         }
