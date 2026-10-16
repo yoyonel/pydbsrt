@@ -12,7 +12,7 @@
 cBKTree/
 data/
 dist/
-doc/
+docs/
 docker/
 htmlcov/
 notebook/

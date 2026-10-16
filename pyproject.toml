@@ -75,6 +75,12 @@ dev = [
     "waiting>=1.4.1",
     "pytest-lazy-fixtures>=1.4.1",
 ]
+docs = [
+    "mkdocs>=1.6.1",
+    "mkdocs-glightbox>=0.5.2",
+    "mkdocs-material>=9.7.7",
+    "pymdown-extensions>=10.21.3",
+]
 
 [tool.ruff]
 line-length = 120

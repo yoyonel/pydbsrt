@@ -1,0 +1,113 @@
+site_name: "pydbsrt / dbsrt-rs Docs"
+site_description: "Documentation technique, architecture, benchmarks et roadmaps du projet dbsrt"
+site_author: "Lionel ATTY"
+repo_name: "yoyonel/pydbsrt"
+repo_url: "https://github.com/yoyonel/pydbsrt"
+
+docs_dir: "docs"
+site_dir: "site"
+
+theme:
+  name: material
+  custom_dir: overrides
+  language: fr
+  palette:
+    # Palette 1: Dark mode (default)
+    - scheme: slate
+      primary: indigo
+      accent: cyan
+      toggle:
+        icon: material/brightness-4
+        name: Passer au mode clair
+    # Palette 2: Light mode
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Passer au mode sombre
+  font:
+    text: Roboto
+    code: JetBrains Mono
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - navigation.indexes
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - search.share
+    - content.tabs.link
+    - content.code.copy
+    - content.code.annotate
+
+plugins:
+  - search:
+      lang: fr
+  - tags:
+  - glightbox:
+      touchNavigation: true
+      loop: false
+      effect: zoom
+      slide_effect: slide
+      width: 100%
+      height: auto
+      zoomable: true
+      draggable: true
+      auto_caption: true
+      caption_position: bottom
+
+extra_css:
+  - stylesheets/extra.css
+
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://unpkg.com/mathjax@3/es5/tex-mml-svg.js
+  - javascripts/panzoom.js
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - tables
+  - attr_list
+  - md_in_html
+
+nav:
+  - Accueil: index.md
+  - 🗺️ Vision & Roadmap:
+      - Feuille de Route & Échelle (1920-2026): 2026-10-15-deep-dive-modernization-and-scaling-roadmap.md
+      - Modernization Blueprint: 2026-10-15-modernization-blueprint.md
+  - ⚡ Architecture & Moteurs:
+      - Intégration VLC & Daemon Axum: 2026-10-15-vlc-integration-daemon-and-plugins.md
+      - Moteur Zero-DB mmap: 2026-10-15-scaling-architecture-rust-mmap.md
+  - 📊 Benchmarks & Mesures:
+      - Benchmarks Rust vs Python: 2026-10-15-rust-e2e-benchmarks-and-tradeoffs.md
+      - PG17 BK-Tree vs pgvector: 2026-10-15-pg17-bktree-benchmark-migration.md
+  - 🔍 Audits & État des Lieux:
+      - Audit Global du Dépôt: 2026-10-15-audit-global.md
+  - 📜 Archives & Historique:
+      - 2021 Fast Hamming Postgres: history/2021-04-13-fast-hamming-postgres.md
+  - 🏷️ Index des Tags: tags.md
