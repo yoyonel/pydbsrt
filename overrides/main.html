@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+
+{% block extrahead %}
+  <script>
+    // Intercept closed shadowRoot to force open mode for diagram accessibility and zoom
+    (function() {
+      const origAttach = Element.prototype.attachShadow;
+      Element.prototype.attachShadow = function(init) {
+        return origAttach.call(this, Object.assign({}, init, { mode: "open" }));
+      };
+    })();
+  </script>
+{% endblock %}
