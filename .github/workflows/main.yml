@@ -103,7 +103,9 @@ jobs:
 
       - name: Seed database with sample media
         run: |
-          ./target/release/dbsrt import-phash -r tests/data/big_buck_bunny_trailer_480p.webm.25.0fps.phash
+          ./target/release/dbsrt export-phash --media data/big_buck_bunny_trailer_480p.webm
+          ./target/release/dbsrt import-phash --file /tmp/big_buck_bunny_trailer_480p.webm.25.0fps.phash
+
 
       - name: Run Rust DB integration tests
         run: |
