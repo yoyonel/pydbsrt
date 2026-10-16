@@ -23,7 +23,7 @@ class FFmpegFilter:
         Remove ffmpeg filter option.
         """
         try:
-            self.opts[name]
+            del self.opts[name]
         except KeyError:
             pass
 

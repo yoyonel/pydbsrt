@@ -9,7 +9,25 @@ fn test_recognize_media_mmap_zero_db() {
         return;
     }
 
-    let tmp_dir = std::env::temp_dir();
+    let tmp_dir = std::env::temp_dir().join(format!("test_mmap_zero_db_{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&tmp_dir);
+    let expected_phash = tmp_dir.join("big_buck_bunny_trailer_480p.webm.25.0fps.phash");
+
+    let export_output = Command::new(env!("CARGO_BIN_EXE_dbsrt"))
+        .args([
+            "export-phash",
+            "--media",
+            media.to_str().unwrap(),
+            "-o",
+            expected_phash.to_str().unwrap(),
+        ])
+        .output()
+        .expect("Failed to execute export-phash");
+    assert!(
+        export_output.status.success(),
+        "export-phash failed: {}",
+        String::from_utf8_lossy(&export_output.stderr)
+    );
 
     let output = Command::new(env!("CARGO_BIN_EXE_dbsrt"))
         .args([
@@ -47,4 +65,6 @@ fn test_recognize_media_mmap_zero_db() {
         );
         assert!(line.contains("1.0"), "confidence must be 1.0");
     }
+
+    let _ = std::fs::remove_dir_all(&tmp_dir);
 }
