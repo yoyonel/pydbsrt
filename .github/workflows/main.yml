@@ -39,8 +39,10 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Install system dependencies (ffmpeg)
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Setup FFmpeg
+        uses: FedericoCarboni/setup-ffmpeg@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -66,8 +68,10 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Install system dependencies (ffmpeg)
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Setup FFmpeg
+        uses: FedericoCarboni/setup-ffmpeg@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Start PostgreSQL 17 BK-Tree container
         run: |
