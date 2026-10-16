@@ -60,13 +60,13 @@ tasks:
     desc: Build static responsive documentation site to site/ directory
     aliases: [docs:build]
     cmds:
-      - uv run mkdocs build --clean
+      - uv run --no-sync mkdocs build --clean
 
   doc:check:
     desc: Automated documentation validator (strict build, LaTeX rendering, squashed lists, images)
     aliases: [docs:check, doc:lint, docs:lint]
     cmds:
-      - uv run python scripts/validate_docs.py
+      - uv run --no-sync python scripts/validate_docs.py
 
   doc:deploy:surge:
     desc: Build and deploy static documentation preview to surge.sh

@@ -120,7 +120,7 @@ def main() -> int:
     site_dir = Path("site")
 
     print("🔍 [1/3] Building documentation with mkdocs build --strict...")
-    res = subprocess.run(["uv", "run", "mkdocs", "build", "--strict"], capture_output=True, text=True)
+    res = subprocess.run(["uv", "run", "--no-sync", "mkdocs", "build", "--strict"], capture_output=True, text=True)
     if res.returncode != 0:
         print("❌ MkDocs strict build failed:")
         print(res.stderr or res.stdout)

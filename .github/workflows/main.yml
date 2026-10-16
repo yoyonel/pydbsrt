@@ -14,6 +14,7 @@ jobs:
   python-unit:
     name: Python Unit Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -27,7 +28,7 @@ jobs:
         run: uv python install 3.11
 
       - name: Install dependencies
-        run: uv sync --all-groups
+        run: uv sync
 
       - name: Run unit tests
         run: uv run pytest tests/tools/
@@ -35,6 +36,7 @@ jobs:
   rust-ci:
     name: Rust Quality & Test Suite
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -64,6 +66,7 @@ jobs:
   db-integration:
     name: PostgreSQL 17 BK-Tree Integration
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -101,29 +104,29 @@ jobs:
         run: uv python install 3.11
 
       - name: Install dependencies
-        run: uv sync --all-groups
+        run: uv sync
 
-      - name: Build debug binaries
-        run: cargo build
+      - name: Build dbsrt binary and integration tests
+        run: cargo test -p dbsrt-cli --test integration_test --no-run
 
       - name: Seed database with sample media
         run: |
           ./target/debug/dbsrt export-phash --media data/big_buck_bunny_trailer_480p.webm -o /tmp/big_buck_bunny_trailer_480p.webm.25.0fps.phash
           ./target/debug/dbsrt import-phash --file /tmp/big_buck_bunny_trailer_480p.webm.25.0fps.phash
 
-
       - name: Run Rust DB integration tests
         run: |
           PSQL_IP=127.0.0.1 cargo test -p dbsrt-cli --test integration_test -- --nocapture
 
-      - name: Run Python full test suite (unit + DB integration)
+      - name: Run Python DB integration test suite
         run: |
-          PSQL_IP=127.0.0.1 uv run pytest tests/
+          PSQL_IP=127.0.0.1 uv run pytest tests/ --ignore=tests/tools/
 
 
   docs-check:
     name: Documentation Quality Gate
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -143,7 +146,7 @@ jobs:
         run: uv python install 3.11
 
       - name: Install dependencies
-        run: uv sync --all-groups
+        run: uv sync --only-group docs --no-install-project
 
       - name: Validate documentation (strict build, MathJax, AST)
         run: task doc:check
