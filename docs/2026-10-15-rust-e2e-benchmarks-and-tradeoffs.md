@@ -1,3 +1,15 @@
+---
+title: Benchmarks E2E Rust vs Python
+description: Mesures réelles de gains de performance (15x à 1200x) et analyse critique des trade-offs
+tags:
+  - current
+  - benchmarks
+  - rust
+  - perf
+  - simd
+  - "2026"
+---
+
 # Rapport d'Ingénierie : Moteur Rust E2E (`dbsrt-rs`), Benchmarks & Analyse des Inconvénients
 
 **Date** : 2026-10-15
@@ -30,6 +42,7 @@ pydbsrt/
 ## 2. Parité ISO 100% avec le Code Legacy
 
 La commande `dbsrt recognize-media` a été calibrée pour reproduire strictement la logique et les formats de sortie de l'application Python historique :
+
 * **Détection du milieu vidéo** : seeking FFmpeg calé sur `(duration // 2)`.
 * **Prélèvement d'échantillon** : `nb_seconds_to_extract * fps` frames (ex: 25 frames pour 1.0s à 25 fps).
 * **Parité mathématique des hashes** : DCT-II 2D calculée par projection matricielle directe $C \cdot X \cdot C^T$, seuillage par médiane et bit-packing en entier 64-bit signé à complément à 2 (`i64`), rigoureusement identique aux valeurs produites par `scipy.fftpack.dct` et `imagehash.phash`.

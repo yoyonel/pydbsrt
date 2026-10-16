@@ -1,3 +1,17 @@
+---
+title: Moteur Zero-DB mmap & Passage à l'Échelle
+description: Conception d'un moteur de hachage perceptuel Rust mmap pour milliards de frames
+tags:
+  - current
+  - architecture
+  - scaling
+  - mmap
+  - zero-db
+  - rust
+  - simd
+  - "2026"
+---
+
 # Réflexion d'Architecture : Passage à l'Échelle (Milliards de Frames)
 
 **Date** : 2026-10-15
@@ -11,15 +25,18 @@
 L'historique du projet montrait une tentative d'arbre métrique (BK-Tree / VP-Tree) directement en mémoire Python pour éviter la dépendance à une base de données. Cette approche s'est heurtée au mur de l'échelle dès quelques centaines de milliers de frames :
 
 1. **Overhead structurel des objets Python (`PyObject`)** :
-   * En Python, un entier n'est pas un scalaire 64-bit brut, c'est un `PyLongObject` alloué sur le tas (28 octets minimum).
-   * Un nœud d'arbre (objet de classe ou dictionnaire d'arêtes + listes d'enfants + pointeurs de références) consomme entre **80 et 120 octets de RAM par frame**.
-   * **Conséquence pour 1 milliard de frames** :
-     $$\text{RAM requise} \approx 10^9 \times 100 \text{ octets} = 100 \text{ Go de RAM}$$
+    * En Python, un entier n'est pas un scalaire 64-bit brut, c'est un `PyLongObject` alloué sur le tas (28 octets minimum).
+    * Un nœud d'arbre (objet de classe ou dictionnaire d'arêtes + listes d'enfants + pointeurs de références) consomme entre **80 et 120 octets de RAM par frame**.
+    * **Conséquence pour 1 milliard de frames** :
+
+        $$\text{RAM requise} \approx 10^9 \times 100 \text{ octets} = 100 \text{ Go de RAM}$$
+
 2. **Le verrou du Garbage Collector (GC)** :
-   * Le GC de CPython doit traverser périodiquement des millions de pointeurs en graphe.
-   * Les cycles de collection provoquent des gels complets du processus (*stop-the-world*) de plusieurs dizaines de secondes.
+    * Le GC de CPython doit traverser périodiquement des millions de pointeurs en graphe.
+    * Les cycles de collection provoquent des gels complets du processus (*stop-the-world*) de plusieurs dizaines de secondes.
+
 3. **Le verrou du GIL (Global Interpreter Lock)** :
-   * Impossible d'interroger ou de construire l'arbre en multi-threading CPU réel sans sérialisation ou duplication inter-processus via `multiprocessing` (qui multiplie encore la consommation mémoire par le nombre de workers).
+    * Impossible d'interroger ou de construire l'arbre en multi-threading CPU réel sans sérialisation ou duplication inter-processus via `multiprocessing` (qui multiplie encore la consommation mémoire par le nombre de workers).
 
 ---
 
@@ -47,8 +64,10 @@ Cette approche élimine tout SGBD lourd pour les calculs de matching tout en con
 * En Rust, un pHash 64-bit est un type primitif `u64` (ou `[u8; 8]`).
 * Il est stocké **de manière contiguë, sans pointeur, sans indirection, sans GC**.
 * **Pour 1 milliard de frames** :
-  $$\text{Taille sur disque/RAM} = 10^9 \times 8 \text{ octets} = \mathbf{8 \text{ Go}}$$
-  *(12 fois plus compact qu'en Python).*
+
+    $$\text{Taille sur disque/RAM} = 10^9 \times 8 \text{ octets} = \mathbf{8 \text{ Go}}$$
+
+    *(12 fois plus compact qu'en Python).*
 
 #### 2. Mémoire Virtuelle Zero-Copy (`mmap`)
 * Les hashes et l'index métrique sont stockés dans un format binaire optimisé (structure compacte type flat array ou VP-tree sérialisé en tableau plat).
@@ -63,6 +82,7 @@ Cette approche élimine tout SGBD lourd pour les calculs de matching tout en con
     ```rust
     let dist = (hash_a ^ hash_b).count_ones(); // Compile en POPCNT
     ```
+
 * **SIMD AVX-512 / AVX2** :
   * Comparaison vectorielle de 8 hashes simultanément par registre 512-bit (`_mm512_popcnt_epi64`).
 * **Multi-threading sans verrou** :

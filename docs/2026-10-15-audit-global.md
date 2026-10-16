@@ -1,3 +1,15 @@
+---
+title: Audit Global du Dépôt
+description: Inventaire exhaustif du dépôt legacy, dépendances et sécurité
+tags:
+  - old
+  - audit
+  - legacy
+  - python
+  - security
+  - "2026"
+---
+
 # Audit Massif & Exhaustif : Projet `pydbsrt`
 
 > **Date audit** : 15 Octobre 2026
@@ -204,6 +216,7 @@ D'après les logs et documents de benchmarks archivés (`README.md`, `doc/2020-0
 ## 8. Scripts Shell & Exploitation NAS
 
 Le dossier `scripts/` sur `develop` illustre l'usage opérationnel réel :
+
 - **`scripts/import_phash_into_db.sh`** :
   - Démarre automatiquement Docker Compose (`docker-compose up -d`).
   - Scanne un point de montage NAS Synology (`$HOME/__SYNOLOGY__/tvshow/__PHASH__/*.phash`).
@@ -266,6 +279,7 @@ Tous les verrous initiaux ont été débloqués et validés en conditions réell
 ```text
 ================== 41 passed, 2 skipped, 1 xpassed in 17.67s ===================
 ```
+
 * **CLI** : 100% passante (export phash, import db, search, match, retarget, extract subtitles).
 * **Services** : 100% passants (requêtes SP-GiST, découpe, offsets de recalage).
 * **Tools** : 100% passants.
@@ -295,8 +309,10 @@ flowchart TD
 
 > [!TIP]
 > **Recommandation Langage : RUST**
+>
 > Pour du traitement vidéo image par image, du calcul pHash et de la recherche métrique, **Rust** est le candidat idéal :
-> * Intruction processeur `u64::count_ones` pour une distance de Hamming en 1 cycle CPU.
+>
+> * Instruction processeur `u64::count_ones` pour une distance de Hamming en 1 cycle CPU.
 > * Écosystème riche : `ffmpeg-next` (décodage), `clap` (CLI moderne), `sqlx` (Postgres async), `tokio` (concurrence).
 > * Portabilité complète : binaire autonome sans runtime externe.
 >
@@ -319,6 +335,7 @@ Actuellement, le projet dépend de l'extension C custom `pg-spgist_hamming` bloq
      CREATE INDEX ON frames USING hnsw (p_hash bit_hamming_ops);
      SELECT * FROM frames ORDER BY p_hash <~> B'1010...01' LIMIT 10;
      ```
+
    * **Bénéfice** : 100% standard, maintenu par l'écosystème, compatible avec les dernières versions de Postgres et les services managés cloud (AWS Aurora, GCP Cloud SQL, Supabase, Neon), **plus besoin de compiler d'extension C manuellement**.
 2. **Option B : Portage de `bktree.c` sur Postgres 17**
    * Adapter les headers SP-GiST de Postgres 11 vers 17 (`spgist.h`). Simple mais conserve la dette de maintenance de l'extension C.
@@ -326,6 +343,7 @@ Actuellement, le projet dépend de l'extension C custom `pg-spgist_hamming` bloq
 ### 12.3. Outillage & Orchestration : `Makefile` ➔ `Taskfile`
 
 Remplacement du `Makefile` par **Task** (`Taskfile.yml`) :
+
 * Syntaxe déclarative YAML, gestion native des environnements (`.env`).
 * Dépendances conditionnelles précises (hash des fichiers sources, `sources:` / `generates:`).
 * Support natif multi-plateformes (Linux, macOS, Windows sans dépendre de bash/sed hôte).

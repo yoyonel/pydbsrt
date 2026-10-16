@@ -1,8 +1,22 @@
+---
+title: Modernization Blueprint
+description: Plan de modernisation globale UV, Taskfile, PostgreSQL 17 et Rust
+tags:
+  - current
+  - architecture
+  - uv
+  - taskfile
+  - hatchling
+  - ruff
+  - "2026"
+---
+
 # Spécification Technique & Blueprint de Modernisation : pydbsrt -> modern stack
 
 ## 1. Contexte & État des lieux validé
 
 Le système actuel est désormais réparé, 100% vert sur les tests (41 passed, 2 skipped, 1 xpass) et orchestré via `Taskfile.yml` :
+
 - **Extraction vidéo** : Décodage via `ffmpeg` (frames 32x32 gray) -> calcul pHash 64 bits (8 octets/frame).
 - **Stockage & Indexation** : PostgreSQL 11 avec extension C personnalisée `pg-spgist_hamming` (SP-GiST BK-Tree sur int64).
 - **Recherche & Alignement** : Distance de Hamming entre empreintes, extraction du décalage prédominant (mode des deltas d'offset), réalignement des sous-titres `.srt`.
@@ -40,6 +54,7 @@ L'extension C `pg-spgist_hamming` nécessite une compilation gcc contre les en-t
 
 ### Solution Cible : PostgreSQL 17 + `pgvector` (VALIDÉ PAR POC)
 `pgvector` gère nativement le type `BIT(n)` et l'opérateur de distance de Hamming :
+
 - Type de colonne : `phash BIT(64)`
 - Opérateur Hamming : `<~>` (bit hamming distance)
 - Indexation : `HNSW` avec classe d'opérateur `bit_hamming_ops` :
@@ -53,6 +68,7 @@ L'extension C `pg-spgist_hamming` nécessite une compilation gcc contre les en-t
   );
   CREATE INDEX idx_frames_phash_hnsw ON frames USING hnsw (phash bit_hamming_ops);
   ```
+
 - **Résultats du PoC (PostgreSQL 17.11)** :
   - Insertion : **3 765 frames/sec** (495 frames insérées en 131 ms).
   - Requête exacte (`distance = 0`) : **3.8 ms**.
@@ -61,6 +77,7 @@ L'extension C `pg-spgist_hamming` nécessite une compilation gcc contre les en-t
 
 ### Solution Alternative (Zero-DB / Mode Local Autonome)
 Le format `.phash` pèse 8 octets par image :
+
 - 1 heure de vidéo à 25 fps = 90 000 frames = **720 Ko**.
 - 1 000 films complets = **~1,5 Go** en RAM.
 - Un arbre métrique en mémoire (BK-tree ou VP-tree en Rust) permet une exécution **CLI 100% autonome sans aucun serveur PostgreSQL** pour l'alignement local de deux vidéos/fichiers.

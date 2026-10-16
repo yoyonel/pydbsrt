@@ -1,3 +1,16 @@
+---
+title: Migration PG17 & BK-Tree vs pgvector
+description: Validation de l'extension C SP-GiST BK-Tree sur PostgreSQL 17 et comparatif pgvector HNSW
+tags:
+  - current
+  - benchmarks
+  - postgres
+  - pg17
+  - bktree
+  - pgvector
+  - "2026"
+---
+
 # Benchmark Comparatif & Validation Migration PostgreSQL 17 + BK-Tree
 
 **Date** : 2026-10-15
@@ -11,6 +24,7 @@
 Historiquement, `pydbsrt` s'appuyait sur une image Docker `postgis:11-3.3` (Debian Buster obsolète, snapshot apt Debian archivé) munie de l'extension C personnalisée `pg-spgist_hamming` (index métrique SP-GiST BK-Tree sur des entiers `bigint` 64-bit).
 
 Dans l'optique de moderniser l'infrastructure vers PostgreSQL 17, deux pistes ont été investiguées :
+
 1. **Piste A** : Utiliser l'extension standard moderne `pgvector` avec un index HNSW binaire sur le type `bit(64)`.
 2. **Piste B** : Recompiler et valider l'extension C `bktree` native directement sur PostgreSQL 17.
 
@@ -32,6 +46,7 @@ Un jeu d'essai réel de 495 frames issues de vidéos a été injecté et interro
 
 ### Conclusion du Benchmark pgvector
 Bien que `pgvector` soit standard et activement maintenu, son index HNSW binaire est conçu pour la recherche approximative (ANN) à grande dimension et se révèle nettement inférieur au BK-tree pour les hashes 64-bit discrets :
+
 * L'insertion est ralentie de **81.4%**.
 * Les requêtes sont ralenties de **71% à 94%**.
 

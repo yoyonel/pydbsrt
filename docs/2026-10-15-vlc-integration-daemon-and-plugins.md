@@ -1,3 +1,17 @@
+---
+title: Intégration VLC & Daemon Axum
+description: Architecture du daemon dbsrt-server et des plugins Lua (GUI & CLI)
+tags:
+  - current
+  - architecture
+  - vlc
+  - axum
+  - daemon
+  - lua
+  - osd
+  - "2026"
+---
+
 # Architecture & Intégration VLC : Daemon dbsrt-server et Plugins Lua (GUI / CLI)
 
 > **Date** : 15 Octobre 2026
@@ -12,11 +26,13 @@
 Les systèmes traditionnels de synchronisation et de recherche de sous-titres (comme l'extension VLC historique **VLSub** ou l'API OpenSubtitles) reposent sur un hash cryptographique calculé sur les premiers et derniers kilo-octets du fichier vidéo (ex: hash 64-bit MovieHash).
 
 **Faiblesses majeures** :
+
 1. **Sensibilité au conteneur et à l'encodage** : Le moindre ré-encodage (passage de Blu-Ray à WEB-DL, changement de codec h264 vers AV1, suppression d'un track audio) modifie intégralement le hash binaire, rendant la vidéo orpheline de sous-titres.
 2. **Décalages temporels non corrigés** : Même lorsqu'un sous-titre est trouvé par titre/release, les décalages induits par les logos d'éditeurs (intros, bumpers 20th Century Fox, FBI warnings) imposent un calage manuel laborieux à coups de raccourcis clavier (`h` / `j` dans VLC).
 
 ### 1.2 L'Approche dbsrt
 `dbsrt` transcende ce modèle en s'appuyant sur le contenu **visuel perceptuel** :
+
 * Hachage perceptuel DCT-II SIMD des frames vidéo (invariable aux ré-encodages et aux résolutions).
 * Détection automatique des changements de plans (scene cuts).
 * Résolution du décalage exact (offset en millisecondes) par appariement dans un **BK-Tree** de distance de Hamming.
@@ -179,6 +195,7 @@ flowchart TD
   ```bash
   cvlc --avcodec-hw=none --extraintf luaintf --lua-intf dbsrt_intf film.mp4
   ```
+
 * **Fonctionnement 100% autonome** :
   - Ne requiert aucun environnement graphique ni module Qt.
   - Écoute les événements du lecteur (`vlc.playlist.status() == "playing"`).
@@ -211,7 +228,7 @@ Connection: close
 1. **Extraction / Résolution pHash** : Vérifie la présence du `.phash` précalculé ou extrait les frames à la volée.
 2. **Détection de Scene Cuts** : Filtre les transitions temporelles à forte divergence de Hamming (> 16 bits).
 3. **Appariement BK-Tree** : Recherche les plus proches voisins pour chaque coupe dans l'arbre métrique.
-4. **Calcul de Décalage** : Établit un histogramme des écarts de frames ($\Delta = \text{offset}_{\text{cible}} - \text{offset}_{\text{ref}}$). Le mode dominant fournit le décalage ($\text{shift\_ms} = \frac{\Delta}{\text{FPS}} \times 1000$).
+4. **Calcul de Décalage** : Établit un histogramme des écarts de frames ($\Delta = \mathrm{offset}_{\mathrm{cible}} - \mathrm{offset}_{\mathrm{ref}}$). Le mode dominant fournit le décalage ($\Delta t_{\mathrm{ms}} = \frac{\Delta}{\mathrm{FPS}} \times 1000$).
 5. **Recalage SRT** : Décalage vectoriel des blocs de temps (`StartTime`, `EndTime`) et sauvegarde atomique dans `/tmp/<video>.synced.srt`.
 
 ### 4.3 Réponse du Serveur (`200 OK`)
@@ -272,14 +289,17 @@ Lors de l'appariement des coupes de scène (`detect_cuts`) contre l'arbre métri
 * **Solution** : `is_blank_phash` filtre toute frame dont la densité binaire est anormale (`ones < 10 || ones > 54`). Elles ne sont plus insérées dans le BK-Tree ni interrogées, éliminant 100% des collisions sur les transitions noires.
 
 #### B. Score de Confiance par Dominance & Consensus (Lowe's Ratio)
-* **Formule naïve initiale** : $\text{count} / \text{total\_votes}$ (pénalisait arbitrairement le score à 89% à cause de cuts répétés).
+* **Formule naïve initiale** : $\frac{\text{votes dominant}}{\text{votes totaux}}$ (pénalisait arbitrairement le score à 89% à cause de coupes rapprochées).
 * **Nouvelle formulation robuste** :
   1. **Taux de Dominance (Lowe's Ratio / SIFT)** : Marge entre le candidat dominant (gagnant) et le second meilleur candidat :
-     $$D = 1.0 - \frac{\text{score\_second}}{\text{score\_dominant}}$$
+     $D = 1.0 - \frac{\mathrm{score}_{\mathrm{second}}}{\mathrm{score}_{\mathrm{dominant}}}$
+
   2. **Taux de Support (RANSAC)** : Proportion des coupes de référence confirmant le décalage gagnant :
-     $$S = \min\left(1.0, \frac{\text{score\_dominant}}{|\text{ref\_cuts}|}\right)$$
+     $S = \min\left(1.0, \; \frac{\mathrm{score}_{\mathrm{dominant}}}{|\mathrm{ref\_cuts}|}\right)$
+
   3. **Score final** :
-     $$\text{Confiance (\%)} = D \times S \times 100$$
+     $\text{Confiance} = (D \times S \times 100)\%$
+
 * **Propriétés mathématiques** :
   - Consensus unanime sans bruit $\rightarrow 100\%$.
   - Égalité / ambiguïté parfaite ($10 \text{ vs } 10$) $\rightarrow D = 0 \rightarrow 0\%$ de confiance.
@@ -343,6 +363,7 @@ task server:run
 ```bash
 task vlc:install-plugin
 ```
+
 * Installe l'extension GUI dans `~/.local/share/vlc/lua/extensions/dbsrt_subsync.lua`.
 * Installe l'interface CLI dans `~/.local/share/vlc/lua/intf/dbsrt_intf.lua`.
 
@@ -350,6 +371,7 @@ task vlc:install-plugin
 
 L'interface headless supporte l'arrêt événementiel via la variable d'environnement `DBSRT_AUTOKILL=1`.
 **Zéro timer arbitraire (`--run-time`)** :
+
 * Dès que le sous-titre est attaché avec succès par le serveur (`SUCCESS! Subtitle attached`), le script Lua déclenche `vlc.misc.quit()`.
 * En cas d'erreur ou d'absence de réponse, VLC continue jusqu'à la fin du média ou lève une erreur, capturée par l'assertion du test.
 
