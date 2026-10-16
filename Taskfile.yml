@@ -68,6 +68,12 @@ tasks:
     cmds:
       - uv run python scripts/validate_docs.py
 
+  doc:deploy:surge:
+    desc: Build and deploy static documentation preview to surge.sh
+    deps: [doc:build]
+    cmds:
+      - npx --yes surge site {{.SURGE_DOMAIN | default "yoyonel-pydbsrt-docs.surge.sh"}}
+
   lint:
     desc: Run linters (Ruff for Python, clippy for Rust)
     cmds:
