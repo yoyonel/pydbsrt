@@ -1,7 +1,8 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use dbsrt_core::{
-    detect_cuts, extract_frames_phash, probe_video, read_phash_file, write_phash_file, SubtitleFile,
+    detect_cuts, extract_frames_advanced, extract_frames_phash, probe_video, read_phash_file,
+    write_phash_file, HwAccel, SamplingMode, SubtitleFile, VideoExtractionOptions,
 };
 use dbsrt_index::{BkItem, BkTree, DbClient, MmapLibrary};
 use std::collections::{BTreeSet, HashMap};
@@ -20,6 +21,32 @@ struct Cli {
 }
 
 #[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CliHwAccel {
+    #[value(name = "auto")]
+    Auto,
+    #[value(name = "disabled", alias = "cpu")]
+    Disabled,
+    #[value(name = "vaapi")]
+    Vaapi,
+    #[value(name = "cuda")]
+    Cuda,
+    #[value(name = "qsv")]
+    Qsv,
+}
+
+impl From<CliHwAccel> for HwAccel {
+    fn from(c: CliHwAccel) -> Self {
+        match c {
+            CliHwAccel::Auto => HwAccel::Auto,
+            CliHwAccel::Disabled => HwAccel::Disabled,
+            CliHwAccel::Vaapi => HwAccel::Vaapi,
+            CliHwAccel::Cuda => HwAccel::Cuda,
+            CliHwAccel::Qsv => HwAccel::Qsv,
+        }
+    }
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
 enum OutputFormat {
     #[value(name = "DataFrame", alias = "dataframe")]
     DataFrame,
@@ -34,6 +61,9 @@ enum Commands {
         #[arg(short, long, default_value_t = 100_000)]
         count: usize,
     },
+
+    /// Benchmark video decoding throughput across CPU, HWAccel, sparse and keyframe modes
+    BenchVideo(BenchVideoArgs),
 
     /// Recognize media from database or local phash files by computing perceptual hash fingerprint
     RecognizeMedia(RecognizeArgs),
@@ -202,6 +232,17 @@ pub struct RetargetArgs {
 }
 
 #[derive(clap::Args, Debug)]
+pub struct BenchVideoArgs {
+    /// Media file to benchmark
+    #[arg(short, long)]
+    pub media: PathBuf,
+
+    /// Duration in seconds to extract for benchmarking (defaults to 10.0s)
+    #[arg(short, long, default_value_t = 10.0)]
+    pub duration: f64,
+}
+
+#[derive(clap::Args, Debug)]
 pub struct ExportPhashArgs {
     /// Media file to extract phash from
     #[arg(short, long)]
@@ -214,6 +255,18 @@ pub struct ExportPhashArgs {
     /// Optional duration in seconds to extract (defaults to full media)
     #[arg(short, long)]
     pub duration: Option<f64>,
+
+    /// Optional sampling rate in FPS (e.g. 1.0 for sparse fast fingerprints)
+    #[arg(long)]
+    pub fps: Option<f64>,
+
+    /// Extract keyframes (I-frames) only
+    #[arg(long)]
+    pub keyframes: bool,
+
+    /// Hardware acceleration backend (auto, disabled, vaapi, cuda, qsv)
+    #[arg(long, value_enum, default_value_t = CliHwAccel::Disabled)]
+    pub hwaccel: CliHwAccel,
 }
 
 #[derive(Default)]
@@ -605,25 +658,57 @@ fn run_export_phash(args: &ExportPhashArgs) -> Result<()> {
     );
 
     let duration = args.duration.unwrap_or(meta.duration);
+    let sampling = if args.keyframes {
+        SamplingMode::KeyFrames
+    } else if let Some(target_fps) = args.fps {
+        SamplingMode::Fps(target_fps)
+    } else {
+        SamplingMode::Full
+    };
+
     let total_frames = (duration * meta.fps).round() as usize;
+
+    let opts = VideoExtractionOptions {
+        start_sec: 0.0,
+        duration_sec: if sampling == SamplingMode::Full {
+            None
+        } else {
+            Some(duration)
+        },
+        max_frames: if sampling == SamplingMode::Full {
+            Some(total_frames)
+        } else {
+            None
+        },
+        sampling,
+        hwaccel: args.hwaccel.into(),
+        custom_ffmpeg: None,
+    };
 
     let out_path = args.output.clone().unwrap_or_else(|| {
         let name = args.media.file_name().unwrap().to_string_lossy();
-        PathBuf::from(format!("/tmp/{}.{:.3}fps.phash", name, meta.fps))
+        let suffix = match sampling {
+            SamplingMode::KeyFrames => "keyframes.phash".to_string(),
+            SamplingMode::Fps(fps) => format!("{:.1}fps.phash", fps),
+            SamplingMode::Full => format!("{:.3}fps.phash", meta.fps),
+        };
+        PathBuf::from(format!("/tmp/{}.{}", name, suffix))
     });
 
     println!(
-        "Extracting pHash for {} frames ({:.1}s) -> {:?}...",
-        total_frames, duration, out_path
+        "Extracting pHash ({:?}, hwaccel={:?}) -> {:?}...",
+        sampling, args.hwaccel, out_path
     );
 
-    let hashes = extract_frames_phash(&args.media, 0.0, total_frames)?;
+    let samples = extract_frames_advanced(&args.media, &opts)?;
     let elapsed = start.elapsed().as_secs_f64();
+    let hashes: Vec<u64> = samples.into_iter().map(|s| s.phash).collect();
     println!(
-        "Computed {} frame hashes in {:.2}s ({:.0} fps)",
+        "Computed {} frame hashes in {:.2}s ({:.0} fps, {:.1}x real-time)",
         hashes.len(),
         elapsed,
-        hashes.len() as f64 / elapsed
+        hashes.len() as f64 / elapsed.max(0.0001),
+        duration / elapsed.max(0.0001)
     );
 
     write_phash_file(&out_path, &hashes)?;
@@ -806,6 +891,66 @@ fn run_import_phash(args: &ImportPhashArgs) -> Result<()> {
     Ok(())
 }
 
+fn run_bench_video(args: &BenchVideoArgs) -> Result<()> {
+    println!("Benchmarking video decoding on {:?}", args.media);
+    let meta = probe_video(&args.media)?;
+    println!(
+        "Duration: {:.2}s, FPS: {:.2} (Total ~{} frames)\n",
+        meta.duration,
+        meta.fps,
+        (meta.duration * meta.fps).round() as usize
+    );
+
+    let duration = args.duration.min(meta.duration);
+    println!(
+        "{:<26} | {:<12} | {:<12} | {:<14} | {:<10}",
+        "Extraction Mode", "Frames", "Time (ms)", "Throughput", "Real-Time"
+    );
+    println!(
+        "{:-<26}-+-{:-<12}-+-{:-<12}-+-{:-<14}-+-{:-<10}",
+        "", "", "", "", ""
+    );
+
+    let benchmarks = [
+        ("CPU Full (swscale)", SamplingMode::Full, HwAccel::Disabled),
+        ("HWAccel Full", SamplingMode::Full, HwAccel::Auto),
+        ("Sparse 1.0 FPS", SamplingMode::Fps(1.0), HwAccel::Auto),
+        ("KeyFrames Only", SamplingMode::KeyFrames, HwAccel::Auto),
+    ];
+
+    for (name, sampling, hwaccel) in benchmarks {
+        let opts = VideoExtractionOptions {
+            start_sec: 0.0,
+            duration_sec: Some(duration),
+            max_frames: None,
+            sampling,
+            hwaccel,
+            custom_ffmpeg: None,
+        };
+
+        let t0 = Instant::now();
+        match extract_frames_advanced(&args.media, &opts) {
+            Ok(samples) => {
+                let elapsed_s = t0.elapsed().as_secs_f64();
+                let elapsed_ms = elapsed_s * 1000.0;
+                let nb_frames = samples.len();
+                let fps = nb_frames as f64 / elapsed_s.max(0.0001);
+                let speedup = duration / elapsed_s.max(0.0001);
+
+                println!(
+                    "{:<26} | {:<12} | {:<12.1} | {:<10.1} fps | {:<8.1}x",
+                    name, nb_frames, elapsed_ms, fps, speedup
+                );
+            }
+            Err(e) => {
+                println!("{:<26} | FAILED ({})", name, e);
+            }
+        }
+    }
+
+    Ok(())
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
@@ -826,6 +971,9 @@ fn main() -> Result<()> {
                 "Throughput: {:.0} frames/sec ({:.2} µs / frame)",
                 fps, per_frame_us
             );
+        }
+        Commands::BenchVideo(args) => {
+            run_bench_video(&args)?;
         }
         Commands::RecognizeMedia(args) => {
             run_recognize_media(&args)?;

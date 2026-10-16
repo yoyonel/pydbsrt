@@ -10,13 +10,23 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   python-unit:
     name: Python Unit Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Setup FFmpeg
+        uses: FedericoCarboni/setup-ffmpeg@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
@@ -27,25 +37,38 @@ jobs:
         run: uv python install 3.11
 
       - name: Install dependencies
-        run: uv sync --all-groups
+        run: uv sync
 
-      - name: Run unit tests
-        run: uv run pytest tests/tools/
+      - name: Run unit tests with coverage
+        run: uv run pytest --cov=src --cov-report=term --cov-report=json:coverage-python.json tests/tools/
+
+      - name: Upload Python coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-coverage
+          path: coverage-python.json
+          retention-days: 1
 
   rust-ci:
     name: Rust Quality & Test Suite
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Install system dependencies (ffmpeg)
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Setup FFmpeg
+        uses: FedericoCarboni/setup-ffmpeg@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
 
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
@@ -56,22 +79,33 @@ jobs:
       - name: Linting (cargo clippy)
         run: cargo clippy --workspace --all-targets -- -D warnings
 
-      - name: Unit & Integration tests (cargo test)
-        run: cargo test --workspace
+      - name: Unit & Integration tests with coverage (cargo llvm-cov)
+        run: cargo llvm-cov --workspace --json --output-path coverage-rust.json
+
+      - name: Upload Rust coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-coverage
+          path: coverage-rust.json
+          retention-days: 1
 
   db-integration:
     name: PostgreSQL 17 BK-Tree Integration
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Install system dependencies (ffmpeg)
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Setup FFmpeg
+        uses: FedericoCarboni/setup-ffmpeg@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Start PostgreSQL 17 BK-Tree container
         run: |
-          docker compose -f docker/docker-compose.test.yml up -d --build bktreedb
+          docker compose -f docker/docker-compose.test.yml pull bktreedb || docker compose -f docker/docker-compose.test.yml build bktreedb
+          docker compose -f docker/docker-compose.test.yml up -d bktreedb
           for i in {1..30}; do
             if docker compose -f docker/docker-compose.test.yml exec -T bktreedb pg_isready -U docker -d bktreedb; then
               echo "PostgreSQL 17 BK-Tree is ready!"
@@ -96,29 +130,29 @@ jobs:
         run: uv python install 3.11
 
       - name: Install dependencies
-        run: uv sync --all-groups
+        run: uv sync
 
-      - name: Build release binaries
-        run: cargo build --release
+      - name: Build dbsrt binary and integration tests
+        run: cargo test -p dbsrt-cli --test integration_test --no-run
 
       - name: Seed database with sample media
         run: |
-          ./target/release/dbsrt export-phash --media data/big_buck_bunny_trailer_480p.webm -o /tmp/big_buck_bunny_trailer_480p.webm.25.0fps.phash
-          ./target/release/dbsrt import-phash --file /tmp/big_buck_bunny_trailer_480p.webm.25.0fps.phash
-
+          ./target/debug/dbsrt export-phash --media data/big_buck_bunny_trailer_480p.webm -o /tmp/big_buck_bunny_trailer_480p.webm.25.0fps.phash
+          ./target/debug/dbsrt import-phash --file /tmp/big_buck_bunny_trailer_480p.webm.25.0fps.phash
 
       - name: Run Rust DB integration tests
         run: |
           PSQL_IP=127.0.0.1 cargo test -p dbsrt-cli --test integration_test -- --nocapture
 
-      - name: Run Python full test suite (unit + DB integration)
+      - name: Run Python DB integration test suite
         run: |
-          PSQL_IP=127.0.0.1 uv run pytest tests/
+          PSQL_IP=127.0.0.1 uv run pytest tests/ --ignore=tests/tools/
 
 
   docs-check:
     name: Documentation Quality Gate
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -138,7 +172,72 @@ jobs:
         run: uv python install 3.11
 
       - name: Install dependencies
-        run: uv sync --all-groups
+        run: uv sync --only-group docs --no-install-project
 
       - name: Validate documentation (strict build, MathJax, AST)
         run: task doc:check
+
+  coverage:
+    name: Unified Test Coverage & PR Report
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [python-unit, rust-ci]
+    if: always() && needs.python-unit.result == 'success' && needs.rust-ci.result == 'success'
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download Python coverage artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: python-coverage
+
+      - name: Download Rust coverage artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: rust-coverage
+
+      - name: Generate coverage report
+        run: |
+          python3 scripts/generate_coverage_report.py \
+            --rust-json coverage-rust.json \
+            --python-json coverage-python.json \
+            --base-ref "origin/${{ github.base_ref || 'develop' }}" \
+            --output-md coverage-summary.md
+
+      - name: Post or update sticky coverage comment on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const prNum = context.issue.number;
+            const reportContent = fs.readFileSync('coverage-summary.md', 'utf8');
+            const header = '### 📊 Test Coverage Report (Rust & Python)';
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNum,
+            });
+            const botComment = comments.find(comment =>
+              comment.body.includes(header)
+            );
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: reportContent
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNum,
+                body: reportContent
+              });
+            }

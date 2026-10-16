@@ -23,12 +23,12 @@ class FFmpegFilter:
         Remove ffmpeg filter option.
         """
         try:
-            self.opts[name]
+            del self.opts[name]
         except KeyError:
             pass
 
     def build(self):
-        """
+        r"""
         Build a valid ffmpeg filter string.
 
         Example for filter 'select' with option 'expr' set to 'eq(n\\, 0)' and option 'showinfo':

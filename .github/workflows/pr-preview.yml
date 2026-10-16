@@ -20,6 +20,7 @@ jobs:
   deploy-preview:
     if: github.event.action != 'closed'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -46,7 +47,7 @@ jobs:
           node-version: "20"
 
       - name: Sync dependencies via uv
-        run: uv sync --all-groups
+        run: uv sync --only-group docs --no-install-project
 
       - name: Validate documentation integrity
         run: task doc:check
@@ -117,6 +118,7 @@ jobs:
   teardown-preview:
     if: github.event.action == 'closed'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Set up Node.js
         uses: actions/setup-node@v4

@@ -5,7 +5,7 @@ volumes:
 
 services:
   bktreedb:
-    image: docker_bktreedb:test
+    image: ${BKTREEDB_IMAGE:-ghcr.io/yoyonel/bktreedb:17}
     build:
       context: pg-spgist_hamming/17-develop/.
       dockerfile: Dockerfile
