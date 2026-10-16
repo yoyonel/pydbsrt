@@ -1,9 +1,18 @@
-name: test
+name: ci
 
-on: [push, pull_request]
+on:
+  push:
+    branches: [develop, master]
+  pull_request:
+    branches: [develop, master]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  test:
+  python-unit:
+    name: Python Unit Tests
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -20,5 +29,116 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-groups
 
-      - name: Run tests
-        run: uv run pytest tests/
+      - name: Run unit tests
+        run: uv run pytest tests/tools/
+
+  rust-ci:
+    name: Rust Quality & Test Suite
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies (ffmpeg)
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting (cargo fmt)
+        run: cargo fmt --all -- --check
+
+      - name: Linting (cargo clippy)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Unit & Integration tests (cargo test)
+        run: cargo test --workspace
+
+  db-integration:
+    name: PostgreSQL 17 BK-Tree Integration
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies (ffmpeg)
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Start PostgreSQL 17 BK-Tree container
+        run: |
+          docker compose -f docker/docker-compose.test.yml up -d --build bktreedb
+          for i in {1..30}; do
+            if docker compose -f docker/docker-compose.test.yml exec -T bktreedb pg_isready -U docker -d bktreedb; then
+              echo "PostgreSQL 17 BK-Tree is ready!"
+              break
+            fi
+            echo "Waiting for BK-Tree DB container ($i)..."
+            sleep 1
+          done
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Install dependencies
+        run: uv sync --all-groups
+
+      - name: Build release binaries
+        run: cargo build --release
+
+      - name: Seed database with sample media
+        run: |
+          ./target/release/dbsrt export-phash --media data/big_buck_bunny_trailer_480p.webm -o /tmp/big_buck_bunny_trailer_480p.webm.25.0fps.phash
+          ./target/release/dbsrt import-phash --file /tmp/big_buck_bunny_trailer_480p.webm.25.0fps.phash
+
+
+      - name: Run Rust DB integration tests
+        run: |
+          PSQL_IP=127.0.0.1 cargo test -p dbsrt-cli --test integration_test -- --nocapture
+
+      - name: Run Python full test suite (unit + DB integration)
+        run: |
+          PSQL_IP=127.0.0.1 uv run pytest tests/
+
+
+  docs-check:
+    name: Documentation Quality Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Taskfile runner
+        uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Install dependencies
+        run: uv sync --all-groups
+
+      - name: Validate documentation (strict build, MathJax, AST)
+        run: task doc:check

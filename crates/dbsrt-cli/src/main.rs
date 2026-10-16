@@ -46,6 +46,58 @@ enum Commands {
 
     /// Zero-DB fast search across directory of .phash files via memory mapping
     ScanLibrary(ScanLibraryArgs),
+
+    /// Benchmark scene cuts detection throughput across .phash files
+    BenchCuts(BenchCutsArgs),
+
+    /// Import .phash binary file(s) into PostgreSQL 17 BK-Tree
+    ImportPhash(ImportPhashArgs),
+}
+
+#[derive(clap::Args, Debug)]
+pub struct ImportPhashArgs {
+    /// Single .phash file to import
+    #[arg(short = 'r', long, alias = "binary-img-hash-file")]
+    file: Option<PathBuf>,
+
+    /// Directory of .phash files to batch import
+    #[arg(short = 'p', long)]
+    phash_dir: Option<PathBuf>,
+
+    /// PostgreSQL host (defaults to PSQL_IP env or 127.0.0.1)
+    #[arg(long)]
+    db_host: Option<String>,
+
+    /// PostgreSQL port
+    #[arg(long, default_value_t = 5432)]
+    db_port: u16,
+
+    /// PostgreSQL user
+    #[arg(long, default_value = "docker")]
+    db_user: String,
+
+    /// PostgreSQL password
+    #[arg(long, default_value = "docker")]
+    db_pass: String,
+
+    /// PostgreSQL database name
+    #[arg(long, default_value = "bktreedb")]
+    db_name: String,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct BenchCutsArgs {
+    /// Directory containing .phash files
+    #[arg(short, long, default_value = "data/__PHASH__")]
+    phash_dir: PathBuf,
+
+    /// Cut threshold Hamming distance
+    #[arg(short = 't', long, default_value_t = 16)]
+    threshold: u32,
+
+    /// Force single-threaded execution to benchmark single-core performance
+    #[arg(long)]
+    single_thread: bool,
 }
 
 #[derive(clap::Args, Debug)]
@@ -579,6 +631,181 @@ fn run_export_phash(args: &ExportPhashArgs) -> Result<()> {
     Ok(())
 }
 
+fn run_bench_cuts(args: &BenchCutsArgs) -> Result<()> {
+    use rayon::prelude::*;
+    let mut files = Vec::new();
+    if !args.phash_dir.exists() {
+        anyhow::bail!("Directory {:?} does not exist", args.phash_dir);
+    }
+    for entry in std::fs::read_dir(&args.phash_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) == Some("phash") {
+            files.push(path);
+        }
+    }
+    files.sort();
+    if files.is_empty() {
+        anyhow::bail!("No .phash files found in {:?}", args.phash_dir);
+    }
+
+    let mode_str = if args.single_thread {
+        "Single-threaded"
+    } else {
+        "Multi-threaded (Rayon)"
+    };
+    println!("=== RUST NATIVE BENCHMARK: SCENE CUTS DETECTION ===");
+    println!("Mode                  : {}", mode_str);
+    println!("Files                 : {}", files.len());
+    println!("Cut threshold         : {}", args.threshold);
+
+    let start = Instant::now();
+    let (total_frames, total_cuts): (usize, usize) = if args.single_thread {
+        let mut frames = 0;
+        let mut cuts = 0;
+        for f in &files {
+            let hashes = read_phash_file(f)?;
+            frames += hashes.len();
+            let detected = detect_cuts(&hashes, args.threshold);
+            cuts += detected.len();
+        }
+        (frames, cuts)
+    } else {
+        files
+            .par_iter()
+            .map(|f| -> Result<(usize, usize)> {
+                let hashes = read_phash_file(f)?;
+                let frames = hashes.len();
+                let cuts = detect_cuts(&hashes, args.threshold).len();
+                Ok((frames, cuts))
+            })
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .fold((0, 0), |acc, (f, c)| (acc.0 + f, acc.1 + c))
+    };
+
+    let elapsed = start.elapsed().as_secs_f64();
+    let fps = total_frames as f64 / elapsed;
+    let video_hours = (total_frames as f64 / 24.0) / 3600.0;
+    let speedup = (video_hours * 3600.0) / elapsed;
+
+    println!("Total frames          : {:>12}", total_frames);
+    println!("Total cuts detected   : {:>12}", total_cuts);
+    println!("Elapsed time          : {:>12.4} s", elapsed);
+    println!("Throughput            : {:>12.0} frames/s", fps);
+    println!(
+        "Average cuts / file   : {:>12.1}",
+        total_cuts as f64 / files.len() as f64
+    );
+    println!(
+        "Equivalent video time : {:>12.1} hours of 24fps media",
+        video_hours
+    );
+    println!("Processing speedup    : {:>12.0}x real-time", speedup);
+    println!("===================================================");
+
+    Ok(())
+}
+
+fn run_import_phash(args: &ImportPhashArgs) -> Result<()> {
+    let host = args
+        .db_host
+        .clone()
+        .or_else(|| std::env::var("PSQL_IP").ok())
+        .unwrap_or_else(|| "127.0.0.1".to_string());
+
+    let mut db = DbClient::connect(
+        &host,
+        args.db_port,
+        &args.db_user,
+        &args.db_pass,
+        &args.db_name,
+    )?;
+
+    println!("Ensuring BK-Tree schema & SP-GiST indexes in PostgreSQL...");
+    db.init_schema()?;
+
+    let mut target_files = Vec::new();
+    if let Some(ref f) = args.file {
+        target_files.push(f.clone());
+    } else if let Some(ref dir) = args.phash_dir {
+        if !dir.exists() {
+            anyhow::bail!("Directory {:?} does not exist", dir);
+        }
+        for entry in std::fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) == Some("phash") {
+                target_files.push(path);
+            }
+        }
+        target_files.sort();
+    } else {
+        anyhow::bail!("Either --file or --phash-dir must be specified");
+    }
+
+    if target_files.is_empty() {
+        anyhow::bail!("No .phash files found to import");
+    }
+
+    println!(
+        "Importing {} .phash file(s) into PostgreSQL BK-Tree...",
+        target_files.len()
+    );
+    let start = Instant::now();
+    let mut total_inserted = 0;
+    let mut total_skipped = 0;
+
+    for (idx, file_path) in target_files.iter().enumerate() {
+        let t_file = Instant::now();
+        let (media_id, nb_frames) = db.import_phash_file(file_path)?;
+        let elapsed_file = t_file.elapsed().as_secs_f64();
+        if nb_frames > 0 {
+            total_inserted += nb_frames;
+            let fps = nb_frames as f64 / elapsed_file;
+            println!(
+                "[{}/{}] Imported {:?} (media_id={}) -> {} frames in {:.3}s ({:.0} frames/s)",
+                idx + 1,
+                target_files.len(),
+                file_path.file_name().unwrap_or_default(),
+                media_id,
+                nb_frames,
+                elapsed_file,
+                fps
+            );
+        } else {
+            total_skipped += 1;
+            println!(
+                "[{}/{}] Skipped {:?} (already in DB, media_id={})",
+                idx + 1,
+                target_files.len(),
+                file_path.file_name().unwrap_or_default(),
+                media_id
+            );
+        }
+    }
+
+    let elapsed = start.elapsed().as_secs_f64();
+    let overall_fps = if elapsed > 0.0 {
+        total_inserted as f64 / elapsed
+    } else {
+        0.0
+    };
+    println!("=== RUST POSTGRESQL IMPORT COMPLETE ===");
+    println!("Total files processed : {}", target_files.len());
+    println!(
+        "Files newly inserted  : {}",
+        target_files.len() - total_skipped
+    );
+    println!("Files skipped (exist) : {}", total_skipped);
+    println!("Total frames inserted : {}", total_inserted);
+    println!("Total elapsed time    : {:.3} s", elapsed);
+    println!("Average throughput    : {:.0} frames/s", overall_fps);
+    println!("=======================================");
+
+    Ok(())
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
@@ -611,6 +838,12 @@ fn main() -> Result<()> {
         }
         Commands::ScanLibrary(args) => {
             run_scan_library(&args)?;
+        }
+        Commands::BenchCuts(args) => {
+            run_bench_cuts(&args)?;
+        }
+        Commands::ImportPhash(args) => {
+            run_import_phash(&args)?;
         }
     }
     Ok(())

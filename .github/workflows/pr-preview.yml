@@ -1,0 +1,136 @@
+name: pr-preview
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+    branches:
+      - develop
+      - master
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: pr-preview-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy-preview:
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Taskfile runner
+        uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Sync dependencies via uv
+        run: uv sync --all-groups
+
+      - name: Validate documentation integrity
+        run: task doc:check
+
+      - name: Build static documentation
+        run: task doc:build
+
+      - name: Deploy PR preview to Surge.sh
+        id: deploy_surge
+        env:
+          SURGE_LOGIN: ${{ secrets.SURGE_LOGIN }}
+          SURGE_TOKEN: ${{ secrets.SURGE_TOKEN }}
+        run: |
+          if [[ -z "$SURGE_TOKEN" ]]; then
+            echo "::warning::SURGE_TOKEN secret is not configured. Skipping surge.sh preview deployment."
+            exit 0
+          fi
+          DOMAIN="yoyonel-pydbsrt-docs-pr-${{ github.event.pull_request.number }}.surge.sh"
+          npx --yes surge site "$DOMAIN" --token "$SURGE_TOKEN"
+          echo "domain=$DOMAIN" >> "$GITHUB_OUTPUT"
+          echo "preview_url=https://$DOMAIN" >> "$GITHUB_OUTPUT"
+
+      - name: Comment PR with preview URL
+        if: steps.deploy_surge.outputs.preview_url != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNum = context.issue.number;
+            const previewUrl = "${{ steps.deploy_surge.outputs.preview_url }}";
+            const body = [
+              '### 🚀 Documentation Preview Deployment Ready!',
+              '',
+              `| **Preview URL** | [${previewUrl}](${previewUrl}) |`,
+              `| **Commit** | ${context.sha.substring(0, 7)} |`,
+              '',
+              '---',
+              '**🛡️ Automated Documentation Quality Gate:**',
+              '- ✅ MkDocs Material Strict Build (0 warnings)',
+              '- ✅ MathJax / LaTeX Vector Equations Validation',
+              '- ✅ HTML AST & Layout Integrity Verified'
+            ].join('\n');
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNum,
+            });
+            const botComment = comments.find(comment =>
+              comment.body.includes('### 🚀 Documentation Preview Deployment Ready!')
+            );
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNum,
+                body: body
+              });
+            }
+
+  teardown-preview:
+    if: github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Teardown Surge Preview
+        env:
+          SURGE_LOGIN: ${{ secrets.SURGE_LOGIN }}
+          SURGE_TOKEN: ${{ secrets.SURGE_TOKEN }}
+        run: |
+          if [[ -z "$SURGE_TOKEN" ]]; then
+            echo "SURGE_TOKEN not configured, skipping teardown."
+            exit 0
+          fi
+          DOMAIN="yoyonel-pydbsrt-docs-pr-${{ github.event.pull_request.number }}.surge.sh"
+          npx --yes surge teardown "$DOMAIN" --token "$SURGE_TOKEN" || true

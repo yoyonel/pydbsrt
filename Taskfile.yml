@@ -68,6 +68,12 @@ tasks:
     cmds:
       - uv run python scripts/validate_docs.py
 
+  doc:deploy:surge:
+    desc: Build and deploy static documentation preview to surge.sh
+    deps: [doc:build]
+    cmds:
+      - npx --yes surge site {{.SURGE_DOMAIN | default "yoyonel-pydbsrt-docs.surge.sh"}}
+
   lint:
     desc: Run linters (Ruff for Python, clippy for Rust)
     cmds:
@@ -280,12 +286,11 @@ tasks:
       - hexdump -C {{.DEMO_PHASH}} | head -n 10
 
   demo:import-hashes:
-    desc: Import video pHash frames into PostgreSQL BK-Tree (replaces make import-images-hashes-into-db)
-    deps: [db:up, demo:export-phash]
+    desc: Import video pHash frames into PostgreSQL BK-Tree (Rust native COPY)
+    deps: [db:up, demo:export-phash, rs:build]
     cmds:
-      - task: cli
-        vars:
-          CLI_ARGS: import-images-hashes-into-db --binary-img-hash-file {{.DEMO_PHASH}}
+      - ./target/release/dbsrt import-phash --file {{.DEMO_PHASH}}
+
 
   demo:import-subtitles:
     desc: Import SRT subtitles into DB associated with media (replaces make import-subtitles-into-db)
@@ -356,3 +361,43 @@ tasks:
         --ref-subtitles {{.DEMO_SRT}}
         --target-media {{.DEMO_TARGET_MEDIA}}
         --phash-dir /tmp
+
+  # --- Massive PHASH Dataset Scale Benchmarks ---
+
+  bench:cuts-scale:
+    desc: Benchmark scene cuts detection throughput on all 5.08M frames in data/__PHASH__/ (Rust Rayon)
+    deps: [rs:build]
+    cmds:
+      - ./target/release/dbsrt bench-cuts --phash-dir data/__PHASH__
+
+  bench:cuts-scale:single:
+    desc: Benchmark scene cuts detection single-core throughput (Rust Single-thread)
+    deps: [rs:build]
+    cmds:
+      - ./target/release/dbsrt bench-cuts --phash-dir data/__PHASH__ --single-thread
+
+  bench:mmap-scale:
+    desc: Benchmark Zero-DB mmap scanner across all 125 files / 5.08M frames in data/__PHASH__/
+    deps: [rs:build]
+    cmds:
+      - >
+        ./target/release/dbsrt scan-library
+        --phash-dir data/__PHASH__
+        --query-phash data/__PHASH__/Rick.and.Morty.S01.Extras.Deleted.Scene.Pilot.1080p.BluRay.AAC2.0.H.264-BTN.phash
+        --search-distance 0
+        --limit 5
+
+  db:import:all-phash:
+    desc: Fast batch import of all 125 files / 5.08M frames into PostgreSQL 17 BK-Tree (Rust native COPY)
+    deps: [db:up, rs:build]
+    cmds:
+      - ./target/release/dbsrt import-phash --phash-dir data/__PHASH__
+
+  # --- CI/CD Local Validation ---
+
+  ci:local:
+    desc: Fast local CI reproduction suite (<10s) running lint, rust tests and docs validation
+    cmds:
+      - task: lint
+      - task: rs:test
+      - task: doc:check

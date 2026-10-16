@@ -104,8 +104,10 @@ nav:
       - Intégration VLC & Daemon Axum: 2026-10-15-vlc-integration-daemon-and-plugins.md
       - Moteur Zero-DB mmap: 2026-10-15-scaling-architecture-rust-mmap.md
   - 📊 Benchmarks & Mesures:
+      - Dataset Réel à l'Échelle (5M frames): 2026-10-16-phash-dataset-scale-and-benchmarks.md
       - Benchmarks Rust vs Python: 2026-10-15-rust-e2e-benchmarks-and-tradeoffs.md
       - PG17 BK-Tree vs pgvector: 2026-10-15-pg17-bktree-benchmark-migration.md
+
   - 🔍 Audits & État des Lieux:
       - Audit Global du Dépôt: 2026-10-15-audit-global.md
   - 📜 Archives & Historique:

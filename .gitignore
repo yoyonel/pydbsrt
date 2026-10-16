@@ -105,3 +105,8 @@ venv.bak/
 
 # mypy
 .mypy_cache/
+
+# Dataset perceptual hashes
+data/__PHASH__
+data/__PHASH__/
+*.phash
