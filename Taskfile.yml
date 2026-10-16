@@ -392,3 +392,12 @@ tasks:
     deps: [db:up, rs:build]
     cmds:
       - ./target/release/dbsrt import-phash --phash-dir data/__PHASH__
+
+  # --- CI/CD Local Validation ---
+
+  ci:local:
+    desc: Fast local CI reproduction suite (<10s) running lint, rust tests and docs validation
+    cmds:
+      - task: lint
+      - task: rs:test
+      - task: doc:check
