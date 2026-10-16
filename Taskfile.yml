@@ -102,6 +102,34 @@ tasks:
     cmds:
       - cargo test --workspace
 
+  coverage:
+    desc: Generate unified Rust and Python test coverage report
+    cmds:
+      - cargo llvm-cov --workspace --json --output-path coverage-rust.json
+      - uv run pytest --cov=src --cov-report=json:coverage-python.json tests/tools/
+      - python3 scripts/generate_coverage_report.py --rust-json coverage-rust.json --python-json coverage-python.json
+      - rm -f coverage-rust.json coverage-python.json
+
+  coverage:rs:
+    desc: Run Rust code coverage using cargo-llvm-cov
+    cmds:
+      - cargo llvm-cov --workspace
+
+  coverage:rs:html:
+    desc: Generate Rust HTML coverage report in target/llvm-cov/html
+    cmds:
+      - cargo llvm-cov --workspace --html --open
+
+  coverage:py:
+    desc: Run Python code coverage using pytest-cov
+    cmds:
+      - uv run pytest --cov=src --cov-report=term-missing tests/tools/
+
+  coverage:py:html:
+    desc: Generate Python HTML coverage report in htmlcov/
+    cmds:
+      - uv run pytest --cov=src --cov-report=html:htmlcov tests/tools/
+
   test:rs:db:
     desc: Run Rust PostgreSQL BK-Tree integration test (requires db:up)
     deps: [db:up, demo:import-hashes]

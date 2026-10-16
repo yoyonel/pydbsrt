@@ -110,3 +110,11 @@ venv.bak/
 data/__PHASH__
 data/__PHASH__/
 *.phash
+
+# Coverage reports
+.coverage*
+coverage*.json
+coverage*.xml
+coverage-summary.md
+htmlcov/
+target/llvm-cov/
