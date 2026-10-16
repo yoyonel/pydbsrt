@@ -1,3 +1,16 @@
+---
+title: Notes 2021 Fast Hamming Postgres
+description: Notes historiques de recherche sur l'indexation Hamming SP-GiST et cBKTree
+tags:
+  - old
+  - history
+  - cython
+  - spgist
+  - postgres
+  - bktree
+  - "2021"
+---
+
 # Fast hamming distance queries in postgres
 
 https://dba.stackexchange.com/questions/72134/fast-hamming-distance-queries-in-postgres
@@ -51,7 +64,7 @@ Performance-wise, it's currently ~2-3 times slower then the pure-in-memory imple
 
 ## PostgreSQL: SP-GIST extension
 
-![img.png](img.png)
+![img.png](assets/img.png)
 
 https://www.postgresql.org/docs/current/spgist.html
 
@@ -63,7 +76,7 @@ https://github.com/fake-name/IntraArchiveDeduplicator/tree/master/Tests
 
 https://github.com/fake-name/pg-spgist_hamming/issues/1
 
-![img_1.png](img_1.png)
+![img_1.png](assets/img_1.png)
 
 # Theory
 
@@ -71,13 +84,13 @@ https://github.com/fake-name/pg-spgist_hamming/issues/1
 
 https://en.wikipedia.org/wiki/Triangle_inequality
 
-![img_4.png](img_4.png)
+![img_4.png](assets/img_4.png)
 
 ## Levenshtein distance
 
 https://en.wikipedia.org/wiki/Levenshtein_distance
 
-![img_3.png](img_3.png)
+![img_3.png](assets/img_3.png)
 
 ## Damn Cool Algorithms, Part 1: BK-Trees (2007)
 
@@ -87,7 +100,7 @@ http://blog.notdot.net/2007/4/Damn-Cool-Algorithms-Part-1-BK-Trees
 
 http://blog.notdot.net/2010/07/Damn-Cool-Algorithms-Levenshtein-Automata
 
-![img_6.png](img_6.png)
+![img_6.png](assets/img_6.png)
 
 => ca a l'air intéressant, mais plus chaud en théorie ...
 
@@ -95,18 +108,18 @@ http://blog.notdot.net/2010/07/Damn-Cool-Algorithms-Levenshtein-Automata
 
 https://nullwords.wordpress.com/2013/03/13/the-bk-tree-a-data-structure-for-spell-checking/
 
-![img_5.png](img_5.png)
+![img_5.png](assets/img_5.png)
 
 ## Some Approaches to Best-Match File Searching (1973)
 
 http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.160.2510&rep=rep1&type=pdf
 
-![img_2.png](img_2.png)
+![img_2.png](assets/img_2.png)
 
 ## VP-Tree
 ### Python VP-tree implementation
 
-![img_7.png](img_7.png)
+![img_7.png](assets/img_7.png)
 
 - http://www.logarithmic.net/pfh/blog/01164790008
 - https://www.logarithmic.net/pfh-files/blog/01164790008/VP_tree.py
@@ -114,13 +127,13 @@ http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.160.2510&rep=rep1&type=
 ### Building an Image Hashing Search Engine with VP-Trees and OpenCV (2019)
 https://www.pyimagesearch.com/2019/08/26/building-an-image-hashing-search-engine-with-vp-trees-and-opencv/
 
-![img_8.png](img_8.png)
+![img_8.png](assets/img_8.png)
 
-![img_9.png](img_9.png)
+![img_9.png](assets/img_9.png)
 
-![img_10.png](img_10.png)
+![img_10.png](assets/img_10.png)
 
-![img_11.png](img_11.png)
+![img_11.png](assets/img_11.png)
 
 => super intéressant, à lire/étudier, et s'inspirer :p
 
@@ -128,4 +141,4 @@ https://www.pyimagesearch.com/2019/08/26/building-an-image-hashing-search-engine
 
 https://github.com/RickardSjogren/vptree
 
-![img_12.png](img_12.png)
+![img_12.png](assets/img_12.png)
