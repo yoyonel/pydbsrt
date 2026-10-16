@@ -11,8 +11,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  python-test:
-    name: Python Test Suite
+  python-unit:
+    name: Python Unit Tests
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -29,8 +29,8 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-groups
 
-      - name: Run pytest
-        run: uv run pytest tests/
+      - name: Run unit tests
+        run: uv run pytest tests/tools/
 
   rust-ci:
     name: Rust Quality & Test Suite
@@ -38,6 +38,9 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Install system dependencies (ffmpeg)
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
 
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -59,23 +62,24 @@ jobs:
   db-integration:
     name: PostgreSQL 17 BK-Tree Integration
     runs-on: ubuntu-latest
-    services:
-      bktreedb:
-        image: ghcr.io/yoyonel/bktreedb:17
-        ports:
-          - 5432:5432
-        env:
-          POSTGRES_DB: bktreedb
-          POSTGRES_USER: docker
-          POSTGRES_PASSWORD: docker
-        options: >-
-          --health-cmd "pg_isready -U docker -d bktreedb"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 5
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Install system dependencies (ffmpeg)
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Start PostgreSQL 17 BK-Tree container
+        run: |
+          docker compose -f docker/docker-compose.test.yml up -d --build bktreedb
+          for i in {1..30}; do
+            if docker compose -f docker/docker-compose.test.yml exec -T bktreedb pg_isready -U docker -d bktreedb; then
+              echo "PostgreSQL 17 BK-Tree is ready!"
+              break
+            fi
+            echo "Waiting for BK-Tree DB container ($i)..."
+            sleep 1
+          done
 
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -105,9 +109,10 @@ jobs:
         run: |
           PSQL_IP=127.0.0.1 cargo test -p dbsrt-cli --test integration_test -- --nocapture
 
-      - name: Run Python DB integration tests
+      - name: Run Python full test suite (unit + DB integration)
         run: |
-          PSQL_IP=127.0.0.1 uv run pytest tests/applications/test_cli_import_imghash_into_db.py tests/applications/test_cli_search_imghash_in_db.py
+          PSQL_IP=127.0.0.1 uv run pytest tests/
+
 
   docs-check:
     name: Documentation Quality Gate
