@@ -1,9 +1,18 @@
-name: test
+name: ci
 
-on: [push, pull_request]
+on:
+  push:
+    branches: [develop, master]
+  pull_request:
+    branches: [develop, master]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  test:
+  python-test:
+    name: Python Test Suite
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -20,5 +29,56 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-groups
 
-      - name: Run tests
+      - name: Run pytest
         run: uv run pytest tests/
+
+  rust-ci:
+    name: Rust Quality & Test Suite
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting (cargo fmt)
+        run: cargo fmt --all -- --check
+
+      - name: Linting (cargo clippy)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Unit & Integration tests (cargo test)
+        run: cargo test --workspace
+
+  docs-check:
+    name: Documentation Quality Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Taskfile runner
+        uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Install dependencies
+        run: uv sync --all-groups
+
+      - name: Validate documentation (strict build, MathJax, AST)
+        run: task doc:check
