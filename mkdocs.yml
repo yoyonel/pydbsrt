@@ -1,6 +1,7 @@
 site_name: "pydbsrt / dbsrt-rs Docs"
 site_description: "Documentation technique, architecture, benchmarks et roadmaps du projet dbsrt"
 site_author: "Lionel ATTY"
+site_url: "https://yoyonel.github.io/pydbsrt/"
 repo_name: "yoyonel/pydbsrt"
 repo_url: "https://github.com/yoyonel/pydbsrt"
 
@@ -105,6 +106,7 @@ nav:
       - Moteur Zero-DB mmap: 2026-10-15-scaling-architecture-rust-mmap.md
       - Providers Distants & Fallback Web (Axe 5): 2026-10-16-axe5-remote-subtitles-providers.md
   - 📊 Benchmarks & Mesures:
+      - Validation Empirique E2E (Synology): 2026-10-17-validation-empirique-e2e-synology.md
       - Étude Frames, Cuts & Approche Hybride: 2026-10-17-etude-comparative-identification-frames-cuts-keyframes-hybride.md
       - Dataset Réel à l'Échelle (5M frames): 2026-10-16-phash-dataset-scale-and-benchmarks.md
       - Benchmarks Rust vs Python: 2026-10-15-rust-e2e-benchmarks-and-tradeoffs.md

@@ -12,17 +12,22 @@ fn test_heuristic_scoring_matrix() {
 
     // Perfect match
     let rel_perfect = "Game.of.Thrones.S08E06.1080p.AMZN.WEB-DL-GoT";
-    let score_perf = score_candidate(&meta, Some(rel_perfect), Some(23.976));
+    let score_perf = score_candidate(
+        &meta,
+        Some(rel_perfect),
+        Some("Game of Thrones"),
+        Some(23.976),
+    );
     assert!(score_perf >= 0.95);
 
     // Partial match: BluRay KILLERS (mismatched group and source)
     let rel_mismatch = "Game.of.Thrones.S08E06.720p.HDTV.x264-KILLERS";
-    let score_mis = score_candidate(&meta, Some(rel_mismatch), None);
+    let score_mis = score_candidate(&meta, Some(rel_mismatch), Some("Game of Thrones"), None);
     assert_eq!(score_mis, 0.1);
 
     // Moderate match: same source WEB-DL and resolution 1080p, different group
     let rel_mod = "Game.of.Thrones.S08E06.1080p.WEB-DL-FLUX";
-    let score_mod = score_candidate(&meta, Some(rel_mod), None);
+    let score_mod = score_candidate(&meta, Some(rel_mod), Some("Game of Thrones"), None);
     // 0.1 + 0.3 (source) + 0.2 (res) = 0.6
     assert!((score_mod - 0.6).abs() < 0.01);
 }

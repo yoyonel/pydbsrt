@@ -39,8 +39,14 @@ Le plugin historique VLSub de VLC repose sur deux approches déficientes :
 - **Approche 1 (MovieHash)** : Calcule une empreinte binaire sur les 64 premiers et derniers Ko du fichier vidéo. Dès que la vidéo est réencodée, tronquée de 1 seconde ou remuxée, le hash binaire change $\rightarrow$ **0 résultat trouvé**.
 - **Approche 2 (Recherche par nom)** : Envoie une chaîne non nettoyée en Lua (`Silicon.Valley.S02E01.1080p.AMZN.WEB-DL-SiGMA.mkv`). L'API renvoie des faux positifs ou oblige l'utilisateur à ressaisir manuellement le titre.
 
-### 1.3 La Solution Axe 5
-Axe 5 exploite le parser d'Axe 4 (`crates/dbsrt-core/src/metadata.rs`) pour construire des requêtes d'API REST propres et structurées, récupérer automatiquement un sous-titre brut sur le Web, puis l'acheminer vers le moteur de recalage visuel pHash.
+### 1.3 Périmètre Réel de l'Axe 5 : Récupération & Fallback (Pas de Recalage Magique)
+Un fichier de sous-titre distant brut (`.srt`) ne contient **aucune empreinte visuelle**. Le recalage par pHash opère strictement entre **deux flux vidéos** (la vidéo lue et une vidéo de référence indexée).
+
+Par conséquent :
+
+- **Cas A (Couplage Connu)** : Si la vidéo cible est identifiée comme variante d'une release de référence dont le `.phash` est en base $\rightarrow$ le recalage pHash recalcule le déphasage $\Delta t$.
+- **Cas B (Sous-Titre Random / Aucun index de référence)** : Sans empreinte visuelle de référence, le sous-titre est **injecté tel quel avec un décalage de 0 ms** (équivalent moderne et structuré de VLSub).
+- **Vision à terme** : Mise en place de pipelines de validation et d'annotations certifiant à 100% le couplage `(Sous-titre Validé <-> Frames / Empreintes pHash)` afin de constituer des références fiables pour le recalage.
 
 ---
 
@@ -53,7 +59,7 @@ flowchart TD
     START["Requête /v1/autosync (ex: lang=fr)"] --> STEP1
 
     STEP1{"1. SRT Local sur Disque ?<br/>(subtitles_dir)"}
-    STEP1 -- OUI --> SYNC["Recalage pHash<br/>(si empreinte dispo)"]
+    STEP1 -- OUI --> SYNC{"Empreinte de Référence<br/>présente en Base ?"}
     STEP1 -- NON --> STEP2
 
     STEP2{"2. Piste Interne Conteneur ?<br/>(Axe 4 container.rs)"}
@@ -64,7 +70,8 @@ flowchart TD
     STEP3 -- OUI (Candidat trouvé) --> CACHE["Mise en Cache Local"] --> DL["Téléchargement en RAM"] --> SYNC
     STEP3 -- NON (0 résultat / Offline) --> ERR["Erreur 404 Explicite :<br/>Aucune source locale ni distante"]
 
-    SYNC --> OUT["Sous-titre synchronisé injecté dans VLC"]
+    SYNC -- OUI --> RESYNC["Recalage Visuel pHash<br/>(Consensus Cuts BK-Tree)"] --> OUT["SRT recalé injecté dans VLC"]
+    SYNC -- NON --> DIRECT["Injection Directe (Shift = 0 ms)<br/>(Pas d'empreinte de référence disponible)"] --> OUT
 ```
 
 ---

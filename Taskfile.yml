@@ -74,6 +74,13 @@ tasks:
     cmds:
       - npx --yes surge site {{.SURGE_DOMAIN | default "yoyonel-pydbsrt-docs.surge.sh"}}
 
+  doc:deploy:gh-pages:
+    desc: Build and deploy static documentation to GitHub Pages (gh-deploy)
+    aliases: [doc:deploy]
+    deps: [doc:check]
+    cmds:
+      - uv run --no-sync mkdocs gh-deploy --force
+
   lint:
     desc: Run linters (Ruff for Python, clippy for Rust)
     cmds:

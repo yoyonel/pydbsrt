@@ -5,6 +5,7 @@ on:
     branches: [develop, master]
   pull_request:
     branches: [develop, master]
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -176,6 +177,58 @@ jobs:
 
       - name: Validate documentation (strict build, MathJax, AST)
         run: task doc:check
+
+  deploy-docs:
+    name: Deploy Documentation to GitHub Pages
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [docs-check]
+    if: (github.event_name == 'push' && (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/master')) || github.event_name == 'workflow_dispatch'
+    concurrency:
+      group: "pages"
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Taskfile runner
+        uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Install documentation dependencies
+        run: uv sync --only-group docs --no-install-project
+
+      - name: Build static documentation
+        run: task doc:build
+
+      - name: Setup GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages Artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
 
   coverage:
     name: Unified Test Coverage & PR Report

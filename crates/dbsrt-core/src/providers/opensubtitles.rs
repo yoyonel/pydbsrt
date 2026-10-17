@@ -50,7 +50,17 @@ struct OsSubtitleAttributes {
     fps: Option<f64>,
     release: Option<String>,
     #[serde(default)]
+    feature_details: Option<OsFeatureDetails>,
+    #[serde(default)]
     files: Vec<OsFileItem>,
+}
+
+#[derive(Debug, Deserialize)]
+#[allow(dead_code)]
+struct OsFeatureDetails {
+    title: Option<String>,
+    year: Option<u32>,
+    imdb_id: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -191,6 +201,7 @@ impl SubtitleProvider for OpenSubtitlesProvider {
                 hearing_impaired: None,
                 fps: None,
                 release: None,
+                feature_details: None,
                 files: Vec::new(),
             });
 
@@ -205,7 +216,11 @@ impl SubtitleProvider for OpenSubtitlesProvider {
                 format!("{}/subtitles/{}", self.base_url, sub_id)
             };
 
-            let match_score = score_candidate(meta, release_name.as_deref(), attrs.fps);
+            let cand_title = attrs
+                .feature_details
+                .as_ref()
+                .and_then(|f| f.title.as_deref());
+            let match_score = score_candidate(meta, release_name.as_deref(), cand_title, attrs.fps);
 
             candidates.push(RemoteSubtitleCandidate {
                 provider: "opensubtitles".to_string(),

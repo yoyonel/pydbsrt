@@ -57,6 +57,7 @@ pub trait SubtitleProvider: Send + Sync {
 /// Heuristic scoring of a remote candidate against local parsed media metadata.
 ///
 /// Weights:
+/// - Rejects (score 0.0) if candidate movie title does not match target clean title
 /// - +0.4 if release group matches (e.g. "SiGMA")
 /// - +0.3 if release source matches (e.g. "WEB-DL", "BluRay")
 /// - +0.2 if resolution matches (e.g. "1080p")
@@ -64,8 +65,32 @@ pub trait SubtitleProvider: Send + Sync {
 pub fn score_candidate(
     meta: &MediaMetadata,
     release_name: Option<&str>,
+    candidate_title: Option<&str>,
     candidate_fps: Option<f64>,
 ) -> f32 {
+    // 0. Verify feature/movie title match if candidate title is known
+    if let Some(cand_t) = candidate_title {
+        let cand_clean: String = cand_t
+            .chars()
+            .filter(|c| c.is_alphanumeric())
+            .collect::<String>()
+            .to_lowercase();
+        let query_clean: String = meta
+            .clean_title
+            .chars()
+            .filter(|c| c.is_alphanumeric())
+            .collect::<String>()
+            .to_lowercase();
+
+        if !cand_clean.is_empty()
+            && !query_clean.is_empty()
+            && !cand_clean.contains(&query_clean)
+            && !query_clean.contains(&cand_clean)
+        {
+            return 0.0;
+        }
+    }
+
     let mut score = 0.1f32; // Baseline match
     let rel_lower = release_name.map(|s| s.to_lowercase()).unwrap_or_default();
 
@@ -117,7 +142,7 @@ mod tests {
         let meta = MediaMetadata::parse("Silicon.Valley.S02E01.1080p.AMZN.WEB-DL-SiGMA.mkv");
         let release = "Silicon.Valley.S02E01.1080p.AMZN.WEB-DL-SiGMA";
 
-        let score = score_candidate(&meta, Some(release), Some(23.976));
+        let score = score_candidate(&meta, Some(release), Some("Silicon Valley"), Some(23.976));
         // 0.1 + 0.4 (SiGMA) + 0.3 (WEB-DL) + 0.2 (1080p) + 0.05 (fps) = 1.0 (clamped)
         assert!(score >= 0.95);
     }
@@ -127,8 +152,23 @@ mod tests {
         let meta = MediaMetadata::parse("Silicon.Valley.S02E01.1080p.AMZN.WEB-DL-SiGMA.mkv");
         let release = "Silicon.Valley.S02E01.720p.HDTV.x264-KILLERS";
 
-        let score = score_candidate(&meta, Some(release), None);
+        let score = score_candidate(&meta, Some(release), Some("Silicon Valley"), None);
         // Does not match SiGMA, WEB-DL or 1080p -> only baseline 0.1
         assert_eq!(score, 0.1);
+    }
+
+    #[test]
+    fn test_score_candidate_mismatched_title_rejected() {
+        let meta = MediaMetadata::parse("The.Hyperions.2022.1080p.WEBRip.x264-RARBG.mp4");
+        let release = "WEBRip.x264-RARBG";
+
+        // Even though release group matches RARBG and source WEBRip, title is different
+        let score = score_candidate(
+            &meta,
+            Some(release),
+            Some("La revanche des Crevettes Pailletées"),
+            None,
+        );
+        assert_eq!(score, 0.0);
     }
 }
