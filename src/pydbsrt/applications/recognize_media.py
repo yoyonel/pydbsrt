@@ -17,7 +17,7 @@ Application to launch a search from media (video) on BKTreeDB (implement on Post
 
 # Example
 ```sh
-find "/home/latty/NAS/tvshow/Silicon Valley/" -type f -name "*.mkv" | \
+find "/path/to/media/tvshow/Silicon Valley/" -type f -name "*.mkv" | \
 xargs -I {} python app_cli.py recognize-media -m "{}" --output_format CSV
 [...]
 The frame size for reading (32, 32) is different from the source frame size (1920, 1080).

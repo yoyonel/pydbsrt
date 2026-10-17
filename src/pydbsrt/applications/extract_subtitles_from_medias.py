@@ -16,8 +16,8 @@ L'outil est concu pour fonctionner en batch, en fournissant un répertoire racin
 
 # Examples
 ## Bach mode
-`extract-subtitles-from-medias "/home/latty/NAS/tvshow" "**/*.mkv"`
-par défaut enregistre les sous-titres dans le répertoire "/home/latty/NAS/tvshow/SRT",
+`extract-subtitles-from-medias "/path/to/media/tvshow" "**/*.mkv"`
+par défaut enregistre les sous-titres dans le répertoire "/path/to/media/tvshow/SRT",
 au format: `<file stem du media>_<lang>_<index>.srt`
 """
 

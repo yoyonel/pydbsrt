@@ -63,6 +63,15 @@ task demo:scan:rs
 
 # Recaler et synchroniser des sous-titres SRT (en ~0.5 ms)
 task demo:retarget:rs
+
+# Compiler un catalogue unifié haute densité .dbphash (Hybride Cuts + 1 fps)
+task demo:pack:rs
+
+# Recherche sub-milliseconde sur le catalogue unifié .dbphash
+task demo:scan:dbphash
+
+# Inspecter les métadonnées et flux de sous-titres intégrés d'un média
+task demo:inspect:rs
 ```
 
 ### Approche 2 : PostgreSQL 17 BK-Tree
@@ -90,6 +99,9 @@ Toutes les suites de tests sont orchestrées via `Taskfile` :
 | **`task test:rs:retarget`** | Teste la parité ISO du recalage de sous-titres SRT | Aucune |
 | **`task test:rs:db`** | Teste l'intégration avec PostgreSQL 17 BK-Tree (démarre la DB auto) | Docker |
 | **`task test:local`** | Exécute la suite de tests Python avec `uv` | Docker (`db:up`) |
+| **`task demo:pack:rs`** | Compile les fichiers `.phash` en catalogue unifié `.dbphash` (Hybride v2) | Aucune |
+| **`task demo:scan:dbphash`** | Recherche sub-milliseconde dans le catalogue `.dbphash` | Aucune |
+| **`task demo:inspect:rs`** | Inspecte les métadonnées release et pistes sous-titres embarquées | Aucune |
 | **`task rs:bench`** | Benchmark pHash SIMD (72 000 frames/s) | Aucune |
 | **`task lint`** | Exécute ruff et cargo clippy sur tout le codebase | Aucune |
 
@@ -97,9 +109,11 @@ Toutes les suites de tests sont orchestrées via `Taskfile` :
 
 ## 5. Documentation & Rapports d'Architecture
 
-Dossiers techniques détaillés disponibles dans le répertoire [`docs/`](file:///home/latty/Prog/__PERSO__/pydbsrt/docs) :
+Dossiers techniques détaillés disponibles dans le répertoire [`docs/`](docs) :
 
-* [`docs/2026-10-15-scaling-architecture-rust-mmap.md`](file:///home/latty/Prog/__PERSO__/pydbsrt/docs/2026-10-15-scaling-architecture-rust-mmap.md) : Étude d'ingénierie sur le passage à l'échelle (milliards de frames) et moteur `mmap`.
-* [`docs/2026-10-15-rust-e2e-benchmarks-and-tradeoffs.md`](file:///home/latty/Prog/__PERSO__/pydbsrt/docs/2026-10-15-rust-e2e-benchmarks-and-tradeoffs.md) : Analyse comparative des performances Rust vs Python et compromis techniques.
-* [`docs/2026-10-15-pg17-bktree-benchmark-migration.md`](file:///home/latty/Prog/__PERSO__/pydbsrt/docs/2026-10-15-pg17-bktree-benchmark-migration.md) : Migration de l'extension C BK-Tree sur PostgreSQL 17.
-* [`docs/2026-10-15-audit-global.md`](file:///home/latty/Prog/__PERSO__/pydbsrt/docs/2026-10-15-audit-global.md) : Audit exhaustif du dépôt avant modernisation.
+* [`docs/2026-10-17-etude-comparative-identification-frames-cuts-keyframes-hybride.md`](docs/2026-10-17-etude-comparative-identification-frames-cuts-keyframes-hybride.md) : Étude empirique comparative (5M frames, 125 épisodes, 5 encodages) et validation du format Hybride v2.0.
+* [`docs/2026-10-16-axe5-remote-subtitles-providers.md`](docs/2026-10-16-axe5-remote-subtitles-providers.md) : Spécification technique du moteur de récupération et d'agrégation de sous-titres distants.
+* [`docs/2026-10-15-scaling-architecture-rust-mmap.md`](docs/2026-10-15-scaling-architecture-rust-mmap.md) : Étude d'ingénierie sur le passage à l'échelle (milliards de frames) et moteur `mmap`.
+* [`docs/2026-10-15-rust-e2e-benchmarks-and-tradeoffs.md`](docs/2026-10-15-rust-e2e-benchmarks-and-tradeoffs.md) : Analyse comparative des performances Rust vs Python et compromis techniques.
+* [`docs/2026-10-15-pg17-bktree-benchmark-migration.md`](docs/2026-10-15-pg17-bktree-benchmark-migration.md) : Migration de l'extension C BK-Tree sur PostgreSQL 17.
+* [`docs/2026-10-15-audit-global.md`](docs/2026-10-15-audit-global.md) : Audit exhaustif du dépôt avant modernisation.

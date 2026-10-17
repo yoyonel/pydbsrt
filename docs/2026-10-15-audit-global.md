@@ -268,12 +268,12 @@ Tous les verrous initiaux ont été débloqués et validés en conditions réell
    - Intégration du binaire système `ffmpeg 5.1.9`.
    - Correction du `PYTHONPATH` et installation du package en mode éditable avec le binaire CLI `pydbsrt`.
 4. **Correctifs de Code & Configuration** :
-   - [src/pydbsrt/settings.py](file:///home/latty/Prog/__PERSO__/pydbsrt/src/pydbsrt/settings.py) : Support dynamique des variables d'environnement (`PSQL_IP`, `PSQL_USER`, etc.).
-   - [src/pydbsrt/tools/compare.py](file:///home/latty/Prog/__PERSO__/pydbsrt/src/pydbsrt/tools/compare.py) : Suppression de l'import interne parasite `_pytest.python_api.ApproxScalar`.
-   - [tests/conftest.py](file:///home/latty/Prog/__PERSO__/pydbsrt/tests/conftest.py) : Fixture `db_is_ready` résiliente (supporte connexion directe ou conteneurisée).
-   - [tests/services/test_export_imghash_from_media.py](file:///home/latty/Prog/__PERSO__/pydbsrt/tests/services/test_export_imghash_from_media.py) : Alignement du comptage de frames (812 frames complètes).
-   - [Makefile](file:///home/latty/Prog/__PERSO__/pydbsrt/Makefile) : Cible `docker` pointée sur `Dockerfile` racine.
-   - [docker/docker-compose.yml](file:///home/latty/Prog/__PERSO__/pydbsrt/docker/docker-compose.yml) : Port adminer décalé sur `8085` pour éviter le conflit d'écoute sur le port `8080`.
+   - `src/pydbsrt/settings.py` : Support dynamique des variables d'environnement (`PSQL_IP`, `PSQL_USER`, etc.).
+   - `src/pydbsrt/tools/compare.py` : Suppression de l'import interne parasite `_pytest.python_api.ApproxScalar`.
+   - `tests/conftest.py` : Fixture `db_is_ready` résiliente (supporte connexion directe ou conteneurisée).
+   - `tests/services/test_export_imghash_from_media.py` : Alignement du comptage de frames (812 frames complètes).
+   - `Makefile` : Cible `docker` pointée sur `Dockerfile` racine.
+   - `docker/docker-compose.yml` : Port adminer décalé sur `8085` pour éviter le conflit d'écoute sur le port `8080`.
 
 ### Résultats des Tests Unitaires & Intégration
 ```text

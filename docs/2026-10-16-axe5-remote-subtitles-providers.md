@@ -40,7 +40,7 @@ Le plugin historique VLSub de VLC repose sur deux approches déficientes :
 - **Approche 2 (Recherche par nom)** : Envoie une chaîne non nettoyée en Lua (`Silicon.Valley.S02E01.1080p.AMZN.WEB-DL-SiGMA.mkv`). L'API renvoie des faux positifs ou oblige l'utilisateur à ressaisir manuellement le titre.
 
 ### 1.3 La Solution Axe 5
-Axe 5 exploite le parser d'Axe 4 ([`metadata.rs`](file:///home/latty/Prog/__PERSO__/pydbsrt/crates/dbsrt-core/src/metadata.rs)) pour construire des requêtes d'API REST propres et structurées, récupérer automatiquement un sous-titre brut sur le Web, puis l'acheminer vers le moteur de recalage visuel pHash.
+Axe 5 exploite le parser d'Axe 4 (`crates/dbsrt-core/src/metadata.rs`) pour construire des requêtes d'API REST propres et structurées, récupérer automatiquement un sous-titre brut sur le Web, puis l'acheminer vers le moteur de recalage visuel pHash.
 
 ---
 
@@ -73,7 +73,7 @@ flowchart TD
 
 ### 3.1 Trait Asynchrone `SubtitleProvider`
 
-Le module [`crates/dbsrt-core/src/providers/`](file:///home/latty/Prog/__PERSO__/pydbsrt/crates/dbsrt-core/src/providers/) introduit une abstraction unifiée :
+Le module `crates/dbsrt-core/src/providers/` introduit une abstraction unifiée :
 
 ```rust
 use anyhow::Result;
