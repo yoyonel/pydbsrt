@@ -30,6 +30,7 @@ fn test_recognize_media_iso_parity() {
         if stderr.contains("Connection refused")
             || stderr.contains("does not exist")
             || stderr.contains("connection error")
+            || stderr.contains("password authentication failed")
         {
             eprintln!("Database not ready/seeded, skipping test: {}", stderr);
             return;

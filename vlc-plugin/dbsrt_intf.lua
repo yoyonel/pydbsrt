@@ -85,10 +85,14 @@ local function run_sync()
         local conf = string.match(body, '"confidence_percent":%s*([%d%.]+)')
         local matched = string.match(body, '"matched_media":%s*"([^"]+)"') or "unknown"
         if out_srt and out_srt ~= "" then
-            vlc.input.add_subtitle(out_srt, true)
-            vlc.msg.info(string.format("[dbsrt-intf] SUCCESS! Media matched: '%s' -> Subtitle attached: %s (shift: %s ms, conf: %s%%)", matched, out_srt, shift_ms or "0", conf or "100"))
+            local ok, err = pcall(function() vlc.input.add_subtitle(out_srt, true) end)
+            if ok then
+                vlc.msg.info(string.format("[dbsrt-intf] SUCCESS! Media matched: '%s' -> Subtitle attached: %s (shift: %s ms, conf: %s%%)", matched, out_srt, shift_ms or "0", conf or "100"))
+            else
+                vlc.msg.warn(string.format("[dbsrt-intf] add_subtitle notification (%s) -> Subtitle ready at: %s (shift: %s ms)", tostring(err), out_srt, shift_ms or "0"))
+            end
             if os.getenv("DBSRT_AUTOKILL") == "1" then
-                vlc.msg.info("[dbsrt-intf] Event-driven autokill triggered: subtitle attached successfully -> quitting VLC")
+                vlc.msg.info("[dbsrt-intf] Event-driven autokill triggered: subtitle processed -> quitting VLC")
                 vlc.misc.quit()
             end
         else

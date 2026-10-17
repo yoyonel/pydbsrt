@@ -7,6 +7,7 @@ pub mod container;
 pub mod cuts;
 pub mod metadata;
 pub mod phash;
+pub mod providers;
 pub mod srt;
 pub mod video;
 
@@ -20,6 +21,10 @@ pub use cuts::{
 };
 pub use metadata::{MediaMetadata, MediaType};
 pub use phash::{hamming_distance, phash_32x32};
+pub use providers::{
+    cache::SubtitleCache, mock::MockSubtitleProvider, opensubtitles::OpenSubtitlesProvider,
+    score_candidate, RemoteSubtitleCandidate, SubtitleProvider,
+};
 pub use srt::{SubtitleCue, SubtitleFile};
 pub use video::{
     extract_frames_advanced, extract_frames_phash, extract_keyframes_phash, extract_sparse_phash,

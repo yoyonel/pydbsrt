@@ -260,3 +260,41 @@ fn test_cli_pack_and_scan_dbphash() {
 
     let _ = std::fs::remove_dir_all(&temp_dir);
 }
+
+#[test]
+fn test_cli_fetch_subtitles_help() {
+    let out = Command::new(env!("CARGO_BIN_EXE_dbsrt"))
+        .args(["fetch-subtitles", "--help"])
+        .output()
+        .expect("Failed to run dbsrt fetch-subtitles --help");
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("Fetch subtitles from remote providers"));
+    assert!(stdout.contains("--query"));
+    assert!(stdout.contains("--language"));
+    assert!(stdout.contains("--dry-run"));
+}
+
+#[test]
+fn test_cli_fetch_subtitles_mock_dry_run() {
+    let out = Command::new(env!("CARGO_BIN_EXE_dbsrt"))
+        .args([
+            "fetch-subtitles",
+            "--query",
+            "Silicon.Valley.S02E01.1080p.AMZN.WEB-DL-SiGMA.mkv",
+            "--language",
+            "fr",
+            "--provider",
+            "mock",
+            "--dry-run",
+        ])
+        .output()
+        .expect("Failed to run dbsrt fetch-subtitles");
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("DBS-RT FETCH SUBTITLES"));
+    assert!(stdout.contains("Silicon Valley"));
+    assert!(stdout.contains("S02E01"));
+    assert!(stdout.contains("SiGMA"));
+    assert!(stdout.contains("mock"));
+}

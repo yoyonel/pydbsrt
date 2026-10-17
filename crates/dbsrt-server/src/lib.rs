@@ -10,7 +10,8 @@ use axum::{
 };
 use dbsrt_core::{
     detect_cuts, extract_embedded_subtitle, extract_frames_phash, inspect_container, probe_video,
-    read_phash_file, write_phash_file, CutItem, SubtitleFile,
+    read_phash_file, write_phash_file, CutItem, MediaMetadata, OpenSubtitlesProvider,
+    SubtitleCache, SubtitleFile, SubtitleProvider,
 };
 use dbsrt_index::{BkItem, BkTree, MmapLibrary};
 use serde::{Deserialize, Serialize};
@@ -81,6 +82,8 @@ pub async fn bind_listener(
 pub struct AppState {
     pub phash_dir: PathBuf,
     pub subtitles_dir: PathBuf,
+    pub provider: Arc<dyn SubtitleProvider>,
+    pub cache: SubtitleCache,
 }
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -194,12 +197,19 @@ pub struct ScanResponse {
     pub top_matches: Vec<ScanMatchItem>,
 }
 
-/// Builds the Axum router for dbsrt-server.
+/// Builds the Axum router for dbsrt-server with default providers.
 pub fn create_router(phash_dir: PathBuf, subtitles_dir: PathBuf) -> Router {
-    let state = Arc::new(AppState {
+    create_router_with_state(AppState {
         phash_dir,
         subtitles_dir,
-    });
+        provider: Arc::new(OpenSubtitlesProvider::new(None)),
+        cache: SubtitleCache::default(),
+    })
+}
+
+/// Builds the Axum router for dbsrt-server with custom AppState.
+pub fn create_router_with_state(state: AppState) -> Router {
+    let state = Arc::new(state);
 
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -283,10 +293,10 @@ pub async fn recognize_handler(
     }
 }
 
-pub fn resolve_or_extract_phash(
+pub fn find_existing_phash(
     media_file: &Path,
     phash_dir: &Path,
-) -> Result<(PathBuf, Vec<u64>, f64)> {
+) -> Option<(PathBuf, Vec<u64>, f64)> {
     let stem = media_file
         .file_stem()
         .map(|s| s.to_string_lossy().to_string())
@@ -298,17 +308,23 @@ pub fn resolve_or_extract_phash(
                 let p = entry.path();
                 if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
                     if name.contains(&stem) && name.ends_with(".phash") {
-                        let hashes = read_phash_file(&p)?;
-                        let mut fps = if let Some(fps_match) = name.strip_suffix("fps.phash") {
-                            let parts: Vec<&str> = fps_match.split('.').collect();
-                            if parts.len() >= 2 {
-                                let last_two = format!(
-                                    "{}.{}",
-                                    parts[parts.len() - 2],
-                                    parts[parts.len() - 1]
-                                );
-                                if let Ok(v) = last_two.parse::<f64>() {
-                                    v
+                        if let Ok(hashes) = read_phash_file(&p) {
+                            let mut fps = if let Some(fps_match) = name.strip_suffix("fps.phash") {
+                                let parts: Vec<&str> = fps_match.split('.').collect();
+                                if parts.len() >= 2 {
+                                    let last_two = format!(
+                                        "{}.{}",
+                                        parts[parts.len() - 2],
+                                        parts[parts.len() - 1]
+                                    );
+                                    if let Ok(v) = last_two.parse::<f64>() {
+                                        v
+                                    } else {
+                                        parts
+                                            .last()
+                                            .and_then(|p| p.parse::<f64>().ok())
+                                            .unwrap_or(25.0)
+                                    }
                                 } else {
                                     parts
                                         .last()
@@ -316,22 +332,27 @@ pub fn resolve_or_extract_phash(
                                         .unwrap_or(25.0)
                                 }
                             } else {
-                                parts
-                                    .last()
-                                    .and_then(|p| p.parse::<f64>().ok())
-                                    .unwrap_or(25.0)
+                                probe_video(media_file).map(|m| m.fps).unwrap_or(25.0)
+                            };
+                            if fps <= 0.0 || fps.is_nan() {
+                                fps = 25.0;
                             }
-                        } else {
-                            probe_video(media_file).map(|m| m.fps).unwrap_or(25.0)
-                        };
-                        if fps <= 0.0 || fps.is_nan() {
-                            fps = 25.0;
+                            return Some((p, hashes, fps));
                         }
-                        return Ok((p, hashes, fps));
                     }
                 }
             }
         }
+    }
+    None
+}
+
+pub fn resolve_or_extract_phash(
+    media_file: &Path,
+    phash_dir: &Path,
+) -> Result<(PathBuf, Vec<u64>, f64)> {
+    if let Some(existing) = find_existing_phash(media_file, phash_dir) {
+        return Ok(existing);
     }
 
     let meta = probe_video(media_file)?;
@@ -630,24 +651,29 @@ pub async fn autosync_handler(
         .map(PathBuf::from)
         .unwrap_or_else(|| state.subtitles_dir.clone());
 
-    // 1. Resolve or extract target media phash
-    let (_target_phash_file, target_hashes, target_fps) =
-        match resolve_or_extract_phash(&media_path, &phash_dir) {
-            Ok(res) => res,
-            Err(e) => {
-                return Json(AutoSyncResponse {
-                    success: false,
-                    matched_media: None,
-                    language: payload.language.clone(),
-                    shift_frames: 0,
-                    shift_ms: 0.0,
-                    output_srt_path: String::new(),
-                    confidence_percent: 0.0,
-                    elapsed_seconds: start.elapsed().as_secs_f64(),
-                    error: Some(format!("Failed to extract target media phash: {:#}", e)),
-                });
-            }
+    // 1. Try to find existing target phash or extract small sample for library recognition
+    let existing_phash = find_existing_phash(&media_path, &phash_dir);
+    let (target_fps, query_sample) = if let Some((_, ref hashes, fps)) = existing_phash {
+        let sample_len = ((payload.nb_seconds * fps).round() as usize).min(hashes.len());
+        let sample_start = if hashes.len() > sample_len * 2 {
+            hashes.len() / 4
+        } else {
+            0
         };
+        (
+            fps,
+            hashes[sample_start..sample_start + sample_len].to_vec(),
+        )
+    } else {
+        let meta = probe_video(&media_path).unwrap_or(dbsrt_core::video::VideoMetadata {
+            duration: 0.0,
+            fps: 25.0,
+        });
+        let nb_frames = ((payload.nb_seconds * meta.fps).round() as usize).max(1);
+        let start_sec = (meta.duration / 2.0).floor().max(0.0);
+        let sample = extract_frames_phash(&media_path, start_sec, nb_frames).unwrap_or_default();
+        (meta.fps, sample)
+    };
 
     // 2. Identify media in index library
     let library = match MmapLibrary::from_directory(&phash_dir) {
@@ -667,14 +693,11 @@ pub async fn autosync_handler(
         }
     };
 
-    let sample_len = ((payload.nb_seconds * target_fps).round() as usize).min(target_hashes.len());
-    let sample_start = if target_hashes.len() > sample_len * 2 {
-        target_hashes.len() / 4
+    let matches = if !query_sample.is_empty() {
+        library.recognize(&query_sample, payload.search_distance)
     } else {
-        0
+        Vec::new()
     };
-    let query_sample = &target_hashes[sample_start..sample_start + sample_len];
-    let matches = library.recognize(query_sample, payload.search_distance);
 
     let (matched_stem, match_conf) = if let Some(m) = matches.first() {
         (m.media_name.clone(), m.confidence * 100.0)
@@ -751,36 +774,107 @@ pub async fn autosync_handler(
                     }
                 }
                 None => {
-                    return Json(AutoSyncResponse {
-                        success: false,
-                        matched_media: Some(matched_stem.clone()),
-                        language: payload.language.clone(),
-                        shift_frames: 0,
-                        shift_ms: 0.0,
-                        output_srt_path: String::new(),
-                        confidence_percent: match_conf,
-                        elapsed_seconds: start.elapsed().as_secs_f64(),
-                        error: Some(format!(
-                            "Media recognized as '{}' but no '{}' subtitle found in catalog {:?} nor embedded in container",
-                            matched_stem, payload.language, subtitles_dir
-                        )),
-                    });
+                    // Fallback Step 3: Remote Subtitle Provider Web Fallback (Axe 5)
+                    let meta = MediaMetadata::parse_from_path(&media_path);
+                    let candidates = match state.provider.search(&meta, &payload.language).await {
+                        Ok(cands) => cands,
+                        Err(e) => {
+                            return Json(AutoSyncResponse {
+                                success: false,
+                                matched_media: Some(matched_stem.clone()),
+                                language: payload.language.clone(),
+                                shift_frames: 0,
+                                shift_ms: 0.0,
+                                output_srt_path: String::new(),
+                                confidence_percent: match_conf,
+                                elapsed_seconds: start.elapsed().as_secs_f64(),
+                                error: Some(format!(
+                                    "Remote provider search failed for '{}' ({}): {:#}",
+                                    meta.clean_title, payload.language, e
+                                )),
+                            });
+                        }
+                    };
+
+                    let mut downloaded_srt = None;
+                    for cand in candidates.iter().take(3) {
+                        // Check disk cache first
+                        if let Some(cached_content) =
+                            state.cache.get(&meta, &payload.language, &cand.subtitle_id)
+                        {
+                            if let Ok(parsed) = SubtitleFile::parse(&cached_content) {
+                                downloaded_srt = Some(parsed);
+                                break;
+                            }
+                        }
+
+                        // Otherwise download from provider
+                        if let Ok(raw_content) = state.provider.download(cand).await {
+                            let _ = state.cache.put(
+                                &meta,
+                                &payload.language,
+                                &cand.subtitle_id,
+                                &raw_content,
+                            );
+                            if let Ok(parsed) = SubtitleFile::parse(&raw_content) {
+                                downloaded_srt = Some(parsed);
+                                break;
+                            }
+                        }
+                    }
+
+                    match downloaded_srt {
+                        Some(s) => s,
+                        None => {
+                            return Json(AutoSyncResponse {
+                                success: false,
+                                matched_media: Some(matched_stem.clone()),
+                                language: payload.language.clone(),
+                                shift_frames: 0,
+                                shift_ms: 0.0,
+                                output_srt_path: String::new(),
+                                confidence_percent: match_conf,
+                                elapsed_seconds: start.elapsed().as_secs_f64(),
+                                error: Some(format!(
+                                    "Media recognized as '{}' but no '{}' subtitle found in local catalog {:?}, container tracks, nor remote providers",
+                                    matched_stem, payload.language, subtitles_dir
+                                )),
+                            });
+                        }
+                    }
                 }
             }
         }
     };
 
     // 4. Calculate shift:
-    let target_cuts = detect_cuts(&target_hashes, 16);
-    let ref_hashes = if let Ok(ref_h) = read_ref_phash_for_media(&phash_dir, &matched_stem) {
-        ref_h
-    } else {
-        target_hashes.clone()
-    };
-    let ref_cuts = detect_cuts(&ref_hashes, 16);
-
     let (shift_frames, confidence_percent) =
-        calculate_shift_consensus(&target_cuts, &ref_cuts, payload.search_distance, match_conf);
+        match read_ref_phash_for_media(&phash_dir, &matched_stem) {
+            Ok(ref_hashes) => {
+                let target_hashes = if let Some((_, ref hashes, _)) = existing_phash {
+                    hashes.clone()
+                } else if let Ok(m) = probe_video(&media_path) {
+                    let total_frames = (m.duration * m.fps).floor() as usize;
+                    extract_frames_phash(&media_path, 0.0, total_frames).unwrap_or_default()
+                } else {
+                    Vec::new()
+                };
+
+                if !target_hashes.is_empty() {
+                    let target_cuts = detect_cuts(&target_hashes, 16);
+                    let ref_cuts = detect_cuts(&ref_hashes, 16);
+                    calculate_shift_consensus(
+                        &target_cuts,
+                        &ref_cuts,
+                        payload.search_distance,
+                        match_conf,
+                    )
+                } else {
+                    (0, match_conf)
+                }
+            }
+            Err(_) => (0, match_conf),
+        };
 
     let shift_ms = (shift_frames as f64 / target_fps) * 1000.0;
 
