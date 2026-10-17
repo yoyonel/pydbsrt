@@ -390,6 +390,29 @@ tasks:
         --target-media {{.DEMO_TARGET_MEDIA}}
         --phash-dir /tmp
 
+  demo:inspect:rs:
+    desc: Inspect media release metadata and embedded container subtitle streams
+    deps: [rs:build]
+    cmds:
+      - ./target/release/dbsrt inspect-media --media {{.DEMO_MEDIA}}
+
+  demo:pack:rs:
+    desc: Compile directory of .phash files into a unified high-density Hybrid .dbphash catalog
+    deps: [rs:build]
+    cmds:
+      - ./target/release/dbsrt pack --phash-dir data/__PHASH__ --output /tmp/catalog.dbphash
+
+  demo:scan:dbphash:
+    desc: Sub-millisecond search against unified Hybrid .dbphash catalog
+    deps: [demo:pack:rs]
+    cmds:
+      - >
+        ./target/release/dbsrt scan-library
+        --dbphash /tmp/catalog.dbphash
+        --query-phash data/__PHASH__/Silicon.Valley.S03E01.Founder.Friendly.1080p.AMZN.WEB-DL.DD.5.1.H.265-SiGMA.phash
+        --search-distance 0
+        --limit 5
+
   # --- Massive PHASH Dataset Scale Benchmarks ---
 
   bench:cuts-scale:

@@ -221,3 +221,100 @@ async fn test_server_health_retarget_and_autosync() {
         assert!(bad_ret_data.error.is_some());
     }
 }
+
+#[tokio::test]
+async fn test_autosync_embedded_container_subtitle() {
+    let tmp_dir = std::env::temp_dir();
+    let empty_subtitles_dir = tmp_dir.join(format!("empty_sub_dir_{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&empty_subtitles_dir);
+
+    let test_mkv = tmp_dir.join(format!("test_autosync_embedded_{}.mkv", std::process::id()));
+    let srt_path = PathBuf::from("../../tests/data/big_buck_bunny_trailer_480p.en.srt");
+
+    if !srt_path.exists() {
+        let _ = std::fs::remove_dir_all(&empty_subtitles_dir);
+        return;
+    }
+
+    // Mux black video + embedded french subtitle
+    let status = std::process::Command::new("ffmpeg")
+        .args([
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=black:s=320x240:d=2",
+            "-f",
+            "srt",
+            "-i",
+        ])
+        .arg(&srt_path)
+        .args([
+            "-map",
+            "0:v",
+            "-map",
+            "1:s",
+            "-c:v",
+            "mjpeg",
+            "-c:s",
+            "srt",
+            "-metadata:s:s:0",
+            "language=fra",
+            "-metadata:s:s:0",
+            "title=French",
+        ])
+        .arg(&test_mkv)
+        .status();
+
+    if !matches!(status, Ok(s) if s.success()) {
+        let _ = std::fs::remove_dir_all(&empty_subtitles_dir);
+        let _ = std::fs::remove_file(&test_mkv);
+        return;
+    }
+
+    let app = create_router(tmp_dir.clone(), empty_subtitles_dir.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("Failed to bind ephemeral port");
+    let addr: SocketAddr = listener.local_addr().unwrap();
+
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    let client = reqwest::Client::new();
+    let base_url = format!("http://{}", addr);
+
+    let payload = AutoSyncRequest {
+        media_path: test_mkv.to_str().unwrap().to_string(),
+        language: "fr".to_string(),
+        phash_dir: Some(tmp_dir.to_str().unwrap().to_string()),
+        subtitles_dir: Some(empty_subtitles_dir.to_str().unwrap().to_string()),
+        search_distance: 0,
+        nb_seconds: 1.0,
+    };
+
+    let res = client
+        .post(format!("{}/v1/autosync", base_url))
+        .json(&payload)
+        .send()
+        .await
+        .expect("Call autosync with embedded subtitle");
+
+    assert!(res.status().is_success());
+    let auto_res: AutoSyncResponse = res.json().await.expect("Parse autosync response");
+
+    assert!(auto_res.success, "Autosync failed: {:?}", auto_res.error);
+    assert_eq!(auto_res.language, "fr");
+    assert!(!auto_res.output_srt_path.is_empty());
+    assert!(Path::new(&auto_res.output_srt_path).exists());
+
+    // Verify content
+    let saved_content = std::fs::read_to_string(&auto_res.output_srt_path).unwrap();
+    assert!(saved_content.contains("The peach open movie project"));
+
+    // Cleanup
+    let _ = std::fs::remove_file(&auto_res.output_srt_path);
+    let _ = std::fs::remove_file(&test_mkv);
+    let _ = std::fs::remove_dir_all(&empty_subtitles_dir);
+}

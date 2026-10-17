@@ -148,3 +148,115 @@ fn test_cli_missing_args_error() {
         .expect("Failed to run bench-video without args");
     assert!(!out.status.success());
 }
+
+#[test]
+fn test_cli_inspect_media() {
+    let media = match get_canonical_demo_media() {
+        Some(m) => m,
+        None => {
+            eprintln!("Media file not found, skipping test");
+            return;
+        }
+    };
+
+    // 1. Text mode
+    let out_text = Command::new(env!("CARGO_BIN_EXE_dbsrt"))
+        .args(["inspect-media", "--media", media.to_str().unwrap()])
+        .output()
+        .expect("Failed to run inspect-media text");
+    assert!(out_text.status.success());
+    let stdout_text = String::from_utf8_lossy(&out_text.stdout);
+    assert!(stdout_text.contains("Media Release Metadata"));
+    assert!(stdout_text.contains("Clean Title:"));
+    assert!(stdout_text.contains("Container Subtitle Tracks"));
+
+    // 2. JSON mode
+    let out_json = Command::new(env!("CARGO_BIN_EXE_dbsrt"))
+        .args([
+            "inspect-media",
+            "--media",
+            media.to_str().unwrap(),
+            "--format",
+            "json",
+        ])
+        .output()
+        .expect("Failed to run inspect-media json");
+    assert!(out_json.status.success());
+    let stdout_json = String::from_utf8_lossy(&out_json.stdout);
+    assert!(stdout_json.contains("\"clean_title\""));
+    assert!(stdout_json.contains("\"subtitle_streams\""));
+}
+
+#[test]
+fn test_cli_pack_and_scan_dbphash() {
+    let temp_dir = std::env::temp_dir().join(format!("test_cli_pack_{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&temp_dir);
+
+    // Create 2 synthetic phash files
+    let phash1_path = temp_dir.join("Silicon.Valley.S01E01.1080p.24.0fps.phash");
+    let phash2_path = temp_dir.join("Chernobyl.2019.Part.1.1080p.24.0fps.phash");
+
+    let mut hashes1 = Vec::new();
+    for i in 0..100 {
+        hashes1.push(if i % 10 == 0 {
+            0xAAAA_BBBB_CCCC_DDDD
+        } else {
+            0x1111_2222_3333_4444
+        });
+    }
+    dbsrt_core::write_phash_file(&phash1_path, &hashes1).expect("Failed to write phash1");
+
+    let mut hashes2 = Vec::new();
+    for i in 0..100 {
+        hashes2.push(if i % 15 == 0 {
+            0x1234_5678_9ABC_DEF0
+        } else {
+            0x5555_6666_7777_8888
+        });
+    }
+    dbsrt_core::write_phash_file(&phash2_path, &hashes2).expect("Failed to write phash2");
+
+    let dbphash_out = temp_dir.join("catalog.dbphash");
+
+    // 1. Run dbsrt pack
+    let pack_out = Command::new(env!("CARGO_BIN_EXE_dbsrt"))
+        .args([
+            "pack",
+            "--phash-dir",
+            temp_dir.to_str().unwrap(),
+            "--output",
+            dbphash_out.to_str().unwrap(),
+            "--threshold",
+            "16",
+        ])
+        .output()
+        .expect("Failed to run dbsrt pack");
+
+    assert!(pack_out.status.success());
+    let pack_stdout = String::from_utf8_lossy(&pack_out.stdout);
+    assert!(pack_stdout.contains("PACKAGING SUCCESSFUL"));
+    assert!(pack_stdout.contains("Media items packed    :          2"));
+    assert!(dbphash_out.exists());
+
+    // 2. Run dbsrt scan-library --dbphash
+    let scan_out = Command::new(env!("CARGO_BIN_EXE_dbsrt"))
+        .args([
+            "scan-library",
+            "--dbphash",
+            dbphash_out.to_str().unwrap(),
+            "--query-phash",
+            phash1_path.to_str().unwrap(),
+            "-d",
+            "0",
+        ])
+        .output()
+        .expect("Failed to run dbsrt scan-library --dbphash");
+
+    assert!(scan_out.status.success());
+    let scan_stdout = String::from_utf8_lossy(&scan_out.stdout);
+    assert!(scan_stdout.contains("Loaded .dbphash index"));
+    assert!(scan_stdout.contains("Top matches from .dbphash index"));
+    assert!(scan_stdout.contains("Silicon Valley"));
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}

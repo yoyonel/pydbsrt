@@ -118,8 +118,8 @@ sequenceDiagram
 ```mermaid
 flowchart TD
     subgraph S1 ["1. État Lecteur vers Identifiant Média"]
-        D0["Pointeur mémoire LibVLC<br/>libvlc_media_player_t"] -->|"vlc.input.item()"| D1["URI URL-encodée<br/>file:///home/.../video%20test.mp4"]
-        D1 -->|"Décodage URL + strip file://"| D2["Chemin POSIX brut<br/>/home/.../video test.mp4"]
+        D0["Pointeur mémoire LibVLC<br/>libvlc_media_player_t"] -->|"vlc.input.item()"| D1["URI URL-encodée<br/>file:///path/to/video%20test.mp4"]
+        D1 -->|"Décodage URL + strip file://"| D2["Chemin POSIX brut<br/>/path/to/video test.mp4"]
     end
 
     subgraph S2 ["2. Chemin Média vers Paramètres Résolus"]
@@ -217,8 +217,8 @@ Content-Length: 181
 Connection: close
 
 {
-  "target_media": "/home/latty/Prog/__PERSO__/pydbsrt/tests/data/big_buck_bunny_trailer_480p.mp4",
-  "ref_subtitles": "/home/latty/Prog/__PERSO__/pydbsrt/data/SRT/big_buck_bunny_trailer_480p.en.srt",
+  "target_media": "tests/data/big_buck_bunny_trailer_480p.mp4",
+  "ref_subtitles": "data/SRT/big_buck_bunny_trailer_480p.en.srt",
   "phash_dir": "/tmp",
   "search_distance": 0
 }
@@ -354,9 +354,6 @@ Validation effectuée sur Linux (Debian x86_64, processeur Intel Core i7) :
 ```bash
 # Compilation et lancement via Taskfile
 task server:run
-
-# Ou via binaire standalone avec options
-./target/release/dbsrt-server --host 127.0.0.1 --port 8765 --phash-dir /tmp
 ```
 
 ### 6.2 Déployer les Plugins VLC
@@ -387,7 +384,7 @@ DBSRT_AUTOKILL=1 cvlc --avcodec-hw=none --extraintf luaintf --lua-intf dbsrt_int
 **Trace d'exécution obtenue (1.4 s chrono)** :
 ```text
 [dbsrt_intf] lua interface: [dbsrt-intf] Module initialized
-[dbsrt_intf] lua interface: [dbsrt-intf] Active video: /home/latty/.../big_buck_bunny_trailer_480p.mp4
+[dbsrt_intf] lua interface: [dbsrt-intf] Active video: tests/data/big_buck_bunny_trailer_480p.mp4
 [dbsrt_intf] lua interface: [dbsrt-intf] Connecting to server 127.0.0.1:8765
 [dbsrt_intf] lua interface: [dbsrt-intf] SUCCESS! Subtitle attached: /tmp/big_buck_bunny_trailer_480p.mp4.synced.srt (shift: 0.0 ms, conf: 89.0625%)
 [dbsrt_intf] lua interface: [dbsrt-intf] Event-driven autokill triggered: subtitle attached successfully -> quitting VLC

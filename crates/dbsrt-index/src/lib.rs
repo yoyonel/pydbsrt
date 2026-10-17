@@ -2,10 +2,15 @@
 
 pub mod bktree;
 pub mod db;
+pub mod dbphash;
 pub mod mmap;
 
 pub use bktree::{BkItem, BkTree};
 pub use db::{DbClient, DbMatch};
+pub use dbphash::{
+    DbphashBuilder, DbphashCutEntry, DbphashCutMatch, DbphashHeader, DbphashMediaEntry,
+    DbphashMediaMatch, DbphashPackStats, MmapDbphash, DBPHASH_MAGIC, DBPHASH_VERSION,
+};
 use dbsrt_core::{hamming_distance, FrameHashEntry};
 pub use mmap::{LibraryMediaMatch, MmapLibrary, MmapPhashFile};
 

@@ -3,15 +3,22 @@
 //! - Hardware-accelerated Hamming distance (`hamming_distance`)
 //! - Binary file format definitions
 
+pub mod container;
 pub mod cuts;
+pub mod metadata;
 pub mod phash;
 pub mod srt;
 pub mod video;
 
+pub use container::{
+    extract_embedded_subtitle, inspect_container, language_matches, ContainerInspection,
+    SubtitleStreamInfo,
+};
 pub use cuts::{
     detect_cuts, detect_cuts_timestamped, is_blank_phash, read_phash_file, write_phash_file,
     CutItem, TimestampedCutItem,
 };
+pub use metadata::{MediaMetadata, MediaType};
 pub use phash::{hamming_distance, phash_32x32};
 pub use srt::{SubtitleCue, SubtitleFile};
 pub use video::{

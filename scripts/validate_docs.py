@@ -116,8 +116,37 @@ def run_chrome_smoke_test(site_dir: Path) -> list[str]:
     return errors
 
 
+def check_no_local_paths() -> list[str]:
+    """Ensure no machine-local paths (/home/latty or file:///home/) exist in versioned docs/code."""
+    errors: list[str] = []
+    targets = [
+        Path("README.md"),
+        *Path("docs").rglob("*.md"),
+        *Path("src").rglob("*.py"),
+        *Path("crates").rglob("*.rs"),
+    ]
+    pattern = re.compile(r"(/home/latty|file:///home/)")
+    for p in targets:
+        if not p.exists():
+            continue
+        text = p.read_text(encoding="utf-8", errors="ignore")
+        for line_no, line in enumerate(text.splitlines(), 1):
+            if pattern.search(line):
+                errors.append(f"{p}:{line_no}: Forbidden machine-local path detected: '{line.strip()[:80]}'")
+    return errors
+
+
 def main() -> int:
     site_dir = Path("site")
+
+    print("🔍 [0/3] Checking for forbidden machine-local paths...")
+    path_errors = check_no_local_paths()
+    if path_errors:
+        print(f"❌ Found {len(path_errors)} forbidden machine-local path(s):")
+        for err in path_errors:
+            print(f"   • {err}")
+        return 1
+    print("✅ Zero machine-local paths: OK")
 
     print("🔍 [1/3] Building documentation with mkdocs build --strict...")
     res = subprocess.run(["uv", "run", "--no-sync", "mkdocs", "build", "--strict"], capture_output=True, text=True)
