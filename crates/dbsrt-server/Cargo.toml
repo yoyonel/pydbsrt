@@ -13,7 +13,7 @@ path = "src/main.rs"
 dbsrt-core = { path = "../dbsrt-core" }
 dbsrt-index = { path = "../dbsrt-index" }
 
-tokio = { version = "1.43", features = ["full"] }
+tokio = { workspace = true }
 axum = { version = "0.8", features = ["json"] }
 tower-http = { version = "0.6", features = ["cors", "trace"] }
 tracing = "0.1"

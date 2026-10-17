@@ -24,6 +24,9 @@ thiserror = "2.0"
 postgres = { version = "0.19", default-features = false }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+async-trait = "0.1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tokio = { version = "1.43", features = ["full"] }
 
 [profile.release]
 opt-level = 3

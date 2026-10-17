@@ -3,7 +3,8 @@ use clap::{Parser, Subcommand, ValueEnum};
 use dbsrt_core::{
     detect_cuts, extract_embedded_subtitle, extract_frames_advanced, extract_frames_phash,
     inspect_container, probe_video, read_phash_file, write_phash_file, HwAccel, MediaMetadata,
-    SamplingMode, SubtitleFile, VideoExtractionOptions,
+    MockSubtitleProvider, OpenSubtitlesProvider, SamplingMode, SubtitleCache, SubtitleFile,
+    SubtitleProvider, VideoExtractionOptions,
 };
 use dbsrt_index::{BkItem, BkTree, DbClient, DbphashBuilder, MmapDbphash, MmapLibrary};
 use std::collections::{BTreeSet, HashMap};
@@ -89,6 +90,9 @@ enum Commands {
 
     /// Pack a directory of .phash files into a unified high-density .dbphash index
     Pack(PackArgs),
+
+    /// Fetch subtitles from remote providers (OpenSubtitles REST) with local cache fallback
+    FetchSubtitles(FetchSubtitlesArgs),
 }
 
 #[derive(clap::Args, Debug)]
@@ -240,6 +244,41 @@ pub struct PackArgs {
     /// Default framerate if not detectable from filename
     #[arg(long, default_value_t = 24.0)]
     pub default_fps: f64,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct FetchSubtitlesArgs {
+    /// Media file path or search title query (e.g. "Silicon Valley S02E01" or path/to/video.mkv)
+    #[arg(short, long)]
+    pub query: String,
+
+    /// Target subtitle language code (e.g. "fr", "en", "es")
+    #[arg(short, long, default_value = "en")]
+    pub language: String,
+
+    /// Output SRT file path (default: stdout or <media>.<lang>.srt if file exists)
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
+
+    /// Subtitle provider ("opensubtitles", "mock")
+    #[arg(long, default_value = "opensubtitles")]
+    pub provider: String,
+
+    /// OpenSubtitles API key (or set OPEN_SUBTITLES_API_KEY env)
+    #[arg(long)]
+    pub api_key: Option<String>,
+
+    /// Local cache directory (defaults to ~/.cache/dbsrt/subtitles)
+    #[arg(long)]
+    pub cache_dir: Option<PathBuf>,
+
+    /// Bypass local disk cache
+    #[arg(long)]
+    pub no_cache: bool,
+
+    /// Dry run: search and display ranked candidates without downloading
+    #[arg(long)]
+    pub dry_run: bool,
 }
 
 #[derive(clap::Args, Debug)]
@@ -1103,6 +1142,147 @@ fn run_bench_video(args: &BenchVideoArgs) -> Result<()> {
     Ok(())
 }
 
+async fn run_fetch_subtitles(args: &FetchSubtitlesArgs) -> Result<()> {
+    let start = Instant::now();
+    let query_path = Path::new(&args.query);
+    let meta = if query_path.exists() {
+        MediaMetadata::parse_from_path(query_path)
+    } else {
+        MediaMetadata::parse(&args.query)
+    };
+
+    println!("=== DBS-RT FETCH SUBTITLES ===");
+    println!("Target Query   : {}", args.query);
+    println!("Clean Title    : {}", meta.clean_title);
+    if let (Some(s), Some(e)) = (meta.season, meta.episode) {
+        println!("Series Episode : S{:02}E{:02}", s, e);
+    } else if let Some(year) = meta.year {
+        println!("Release Year   : {}", year);
+    }
+    if let Some(ref grp) = meta.release_group {
+        println!("Release Group  : {}", grp);
+    }
+    println!("Language       : {}", args.language);
+    println!("Provider       : {}", args.provider);
+
+    let provider: Box<dyn SubtitleProvider> = if args.provider.to_lowercase() == "mock" {
+        Box::new(MockSubtitleProvider::new())
+    } else {
+        Box::new(OpenSubtitlesProvider::new(args.api_key.clone()))
+    };
+
+    let cache = SubtitleCache::new(args.cache_dir.clone());
+    println!("Cache Base Dir : {:?}", cache.base_dir());
+
+    println!("\nSearching remote provider '{}'...", provider.name());
+    let candidates = match provider.search(&meta, &args.language).await {
+        Ok(cands) => cands,
+        Err(e) => {
+            eprintln!("Search error from provider: {:#}", e);
+            anyhow::bail!("Provider search failed: {:#}", e);
+        }
+    };
+
+    if candidates.is_empty() {
+        println!(
+            "No subtitle candidates found for '{}' ({}).",
+            meta.clean_title, args.language
+        );
+        return Ok(());
+    }
+
+    println!(
+        "Found {} candidates (ranked by heuristic match score):",
+        candidates.len()
+    );
+    for (idx, cand) in candidates.iter().enumerate().take(10) {
+        let cached_mark = if cache.exists(&meta, &args.language, &cand.subtitle_id) {
+            "[CACHED]"
+        } else {
+            "        "
+        };
+        println!(
+            "  [{:>2}] Score: {:.2} {} ID: {:<12} Release: {}",
+            idx + 1,
+            cand.match_score,
+            cached_mark,
+            cand.subtitle_id,
+            cand.release_name.as_deref().unwrap_or("<unknown>")
+        );
+    }
+
+    if args.dry_run {
+        println!("\nDry run mode enabled. Subtitle was not downloaded.");
+        return Ok(());
+    }
+
+    let mut chosen_content = None;
+    let mut chosen_cand = None;
+
+    for cand in candidates.iter().take(3) {
+        if !args.no_cache {
+            if let Some(cached) = cache.get(&meta, &args.language, &cand.subtitle_id) {
+                println!(
+                    "\nUsing cached subtitle ID '{}' (bypassing network).",
+                    cand.subtitle_id
+                );
+                chosen_content = Some(cached);
+                chosen_cand = Some(cand);
+                break;
+            }
+        }
+
+        println!("\nDownloading candidate ID '{}'...", cand.subtitle_id);
+        match provider.download(cand).await {
+            Ok(content) => {
+                let _ = cache.put(&meta, &args.language, &cand.subtitle_id, &content);
+                chosen_content = Some(content);
+                chosen_cand = Some(cand);
+                break;
+            }
+            Err(e) => {
+                eprintln!(
+                    "Download failed for ID '{}': {:#}. Trying next candidate...",
+                    cand.subtitle_id, e
+                );
+            }
+        }
+    }
+
+    let (content, cand) = match (chosen_content, chosen_cand) {
+        (Some(c), Some(cd)) => (c, cd),
+        _ => anyhow::bail!("Failed to download any candidate subtitles."),
+    };
+
+    let output_path = if let Some(ref out) = args.output {
+        Some(out.clone())
+    } else if query_path.exists() {
+        let parent = query_path.parent().unwrap_or_else(|| Path::new("."));
+        let stem = query_path.file_stem().unwrap_or_default().to_string_lossy();
+        Some(parent.join(format!("{}.{}.srt", stem, args.language)))
+    } else {
+        None
+    };
+
+    if let Some(ref path) = output_path {
+        std::fs::write(path, &content)
+            .with_context(|| format!("Failed to write subtitle to {:?}", path))?;
+        println!("Saved subtitle to: {:?}", path);
+    } else {
+        println!("\n--- SUBTITLE CONTENT START ---");
+        println!("{}", content);
+        println!("--- SUBTITLE CONTENT END ---");
+    }
+
+    let elapsed = start.elapsed().as_secs_f64();
+    println!(
+        "Completed in {:.3} s (Subtitle ID: {})",
+        elapsed, cand.subtitle_id
+    );
+
+    Ok(())
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
@@ -1150,6 +1330,10 @@ fn main() -> Result<()> {
         }
         Commands::Pack(args) => {
             run_pack(&args)?;
+        }
+        Commands::FetchSubtitles(args) => {
+            let rt = tokio::runtime::Runtime::new()?;
+            rt.block_on(run_fetch_subtitles(&args))?;
         }
     }
     Ok(())

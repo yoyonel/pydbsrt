@@ -10,7 +10,8 @@ use axum::{
 };
 use dbsrt_core::{
     detect_cuts, extract_embedded_subtitle, extract_frames_phash, inspect_container, probe_video,
-    read_phash_file, write_phash_file, CutItem, SubtitleFile,
+    read_phash_file, write_phash_file, CutItem, MediaMetadata, OpenSubtitlesProvider,
+    SubtitleCache, SubtitleFile, SubtitleProvider,
 };
 use dbsrt_index::{BkItem, BkTree, MmapLibrary};
 use serde::{Deserialize, Serialize};
@@ -81,6 +82,8 @@ pub async fn bind_listener(
 pub struct AppState {
     pub phash_dir: PathBuf,
     pub subtitles_dir: PathBuf,
+    pub provider: Arc<dyn SubtitleProvider>,
+    pub cache: SubtitleCache,
 }
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -194,12 +197,19 @@ pub struct ScanResponse {
     pub top_matches: Vec<ScanMatchItem>,
 }
 
-/// Builds the Axum router for dbsrt-server.
+/// Builds the Axum router for dbsrt-server with default providers.
 pub fn create_router(phash_dir: PathBuf, subtitles_dir: PathBuf) -> Router {
-    let state = Arc::new(AppState {
+    create_router_with_state(AppState {
         phash_dir,
         subtitles_dir,
-    });
+        provider: Arc::new(OpenSubtitlesProvider::new(None)),
+        cache: SubtitleCache::default(),
+    })
+}
+
+/// Builds the Axum router for dbsrt-server with custom AppState.
+pub fn create_router_with_state(state: AppState) -> Router {
+    let state = Arc::new(state);
 
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -751,20 +761,74 @@ pub async fn autosync_handler(
                     }
                 }
                 None => {
-                    return Json(AutoSyncResponse {
-                        success: false,
-                        matched_media: Some(matched_stem.clone()),
-                        language: payload.language.clone(),
-                        shift_frames: 0,
-                        shift_ms: 0.0,
-                        output_srt_path: String::new(),
-                        confidence_percent: match_conf,
-                        elapsed_seconds: start.elapsed().as_secs_f64(),
-                        error: Some(format!(
-                            "Media recognized as '{}' but no '{}' subtitle found in catalog {:?} nor embedded in container",
-                            matched_stem, payload.language, subtitles_dir
-                        )),
-                    });
+                    // Fallback Step 3: Remote Subtitle Provider Web Fallback (Axe 5)
+                    let meta = MediaMetadata::parse_from_path(&media_path);
+                    let candidates = match state.provider.search(&meta, &payload.language).await {
+                        Ok(cands) => cands,
+                        Err(e) => {
+                            return Json(AutoSyncResponse {
+                                success: false,
+                                matched_media: Some(matched_stem.clone()),
+                                language: payload.language.clone(),
+                                shift_frames: 0,
+                                shift_ms: 0.0,
+                                output_srt_path: String::new(),
+                                confidence_percent: match_conf,
+                                elapsed_seconds: start.elapsed().as_secs_f64(),
+                                error: Some(format!(
+                                    "Remote provider search failed for '{}' ({}): {:#}",
+                                    meta.clean_title, payload.language, e
+                                )),
+                            });
+                        }
+                    };
+
+                    let mut downloaded_srt = None;
+                    for cand in candidates.iter().take(3) {
+                        // Check disk cache first
+                        if let Some(cached_content) =
+                            state.cache.get(&meta, &payload.language, &cand.subtitle_id)
+                        {
+                            if let Ok(parsed) = SubtitleFile::parse(&cached_content) {
+                                downloaded_srt = Some(parsed);
+                                break;
+                            }
+                        }
+
+                        // Otherwise download from provider
+                        if let Ok(raw_content) = state.provider.download(cand).await {
+                            let _ = state.cache.put(
+                                &meta,
+                                &payload.language,
+                                &cand.subtitle_id,
+                                &raw_content,
+                            );
+                            if let Ok(parsed) = SubtitleFile::parse(&raw_content) {
+                                downloaded_srt = Some(parsed);
+                                break;
+                            }
+                        }
+                    }
+
+                    match downloaded_srt {
+                        Some(s) => s,
+                        None => {
+                            return Json(AutoSyncResponse {
+                                success: false,
+                                matched_media: Some(matched_stem.clone()),
+                                language: payload.language.clone(),
+                                shift_frames: 0,
+                                shift_ms: 0.0,
+                                output_srt_path: String::new(),
+                                confidence_percent: match_conf,
+                                elapsed_seconds: start.elapsed().as_secs_f64(),
+                                error: Some(format!(
+                                    "Media recognized as '{}' but no '{}' subtitle found in local catalog {:?}, container tracks, nor remote providers",
+                                    matched_stem, payload.language, subtitles_dir
+                                )),
+                            });
+                        }
+                    }
                 }
             }
         }

@@ -413,6 +413,17 @@ tasks:
         --search-distance 0
         --limit 5
 
+  demo:fetch:rs:
+    desc: Fetch remote subtitles with heuristic scoring, OpenSubtitles API and cache fallback
+    deps: [rs:build]
+    cmds:
+      - >
+        ./target/release/dbsrt fetch-subtitles
+        --query "Silicon.Valley.S02E01.1080p.AMZN.WEB-DL-SiGMA.mkv"
+        --language fr
+        --provider mock
+        --dry-run
+
   # --- Massive PHASH Dataset Scale Benchmarks ---
 
   bench:cuts-scale:

@@ -12,7 +12,7 @@ tags:
 
 # 🌐 Spécification Axe 5 : Providers Distants & Fallback Web
 
-> **Statut** : Spécifié / Prêt pour Implémentation
+> **Statut** : :octicons-check-circle-fill-16: Implémenté & Validé (Jalons 5.1 à 5.5 complétés)
 > **Auteur** : Lionel ATTY & Antigravity (DeepMind)
 > **Dépendances** : Axe 4 (Extraction de Métadonnées Typées) $\rightarrow$ Axe 5 $\rightarrow$ Axe 1 (Recalage Visuel)
 > **Composant Cible** : `crates/dbsrt-core/src/providers/` & `crates/dbsrt-server`
@@ -170,3 +170,26 @@ Afin de ne pas gaspiller les quotas journaliers (généralement 20 téléchargem
 | **5.3** | Cache Local & Mock | `crates/dbsrt-core/src/providers/cache.rs` | Mise en cache fichier + suite de tests unitaires sans réseau via `MockProvider`. |
 | **5.4** | Intégration Daemon & CLI | `crates/dbsrt-server/src/lib.rs`<br/>`crates/dbsrt-cli/src/main.rs` | Étape 3 dans `/v1/autosync` + commande CLI `dbsrt fetch-subtitles`. |
 | **5.5** | Tests E2E Mockés | `crates/dbsrt-server/tests/test_remote_providers.rs` | Validation E2E complète du fallback web sous mock HTTP. |
+
+---
+
+## 7. Commandes et Démonstrations Validées
+
+### 7.1 Commande CLI `dbsrt fetch-subtitles`
+
+La commande CLI autonome permet de rechercher et récupérer un sous-titre directement depuis le terminal :
+
+```bash
+# Recherche et scoring sans téléchargement (--dry-run)
+dbsrt fetch-subtitles --query "Silicon.Valley.S02E01.1080p.AMZN.WEB-DL-SiGMA.mkv" --language fr --provider mock --dry-run
+
+# Téléchargement réel avec cache automatique
+dbsrt fetch-subtitles --query "Silicon.Valley.S02E01" --language fr -o /tmp/silicon_valley.fr.srt
+```
+
+### 7.2 Cible Taskfile
+
+```bash
+# Démonstration validée dans Taskfile
+task demo:fetch:rs
+```
