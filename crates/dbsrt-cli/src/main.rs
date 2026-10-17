@@ -5,7 +5,7 @@ use dbsrt_core::{
     inspect_container, probe_video, read_phash_file, write_phash_file, HwAccel, MediaMetadata,
     SamplingMode, SubtitleFile, VideoExtractionOptions,
 };
-use dbsrt_index::{BkItem, BkTree, DbClient, MmapLibrary};
+use dbsrt_index::{BkItem, BkTree, DbClient, DbphashBuilder, MmapDbphash, MmapLibrary};
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -86,6 +86,9 @@ enum Commands {
 
     /// Inspect media container tracks and release metadata
     InspectMedia(InspectMediaArgs),
+
+    /// Pack a directory of .phash files into a unified high-density .dbphash index
+    Pack(PackArgs),
 }
 
 #[derive(clap::Args, Debug)]
@@ -152,6 +155,10 @@ pub struct RecognizeArgs {
     #[arg(long, value_enum, default_value_t = OutputFormat::DataFrame)]
     output_format: OutputFormat,
 
+    /// Optional unified .dbphash index file to search against
+    #[arg(long)]
+    dbphash: Option<PathBuf>,
+
     /// Use zero-DB memory-mapped engine directly on .phash files (no PostgreSQL needed)
     #[arg(long)]
     no_db: bool,
@@ -191,6 +198,10 @@ pub struct ScanLibraryArgs {
     #[arg(short, long, default_value = "/tmp")]
     pub phash_dir: PathBuf,
 
+    /// Optional unified .dbphash index file to search
+    #[arg(long)]
+    pub dbphash: Option<PathBuf>,
+
     /// Query media file to recognize
     #[arg(short, long)]
     pub query_media: Option<PathBuf>,
@@ -210,6 +221,25 @@ pub struct ScanLibraryArgs {
     /// Maximum number of top matches to display
     #[arg(short = 'n', long, default_value_t = 5)]
     pub limit: usize,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct PackArgs {
+    /// Directory containing .phash files
+    #[arg(short, long, default_value = "data/__PHASH__")]
+    pub phash_dir: PathBuf,
+
+    /// Output .dbphash compiled binary index file
+    #[arg(short, long, default_value = "catalog.dbphash")]
+    pub output: PathBuf,
+
+    /// Scene cut Hamming threshold
+    #[arg(short = 't', long, default_value_t = 16)]
+    pub threshold: u32,
+
+    /// Default framerate if not detectable from filename
+    #[arg(long, default_value_t = 24.0)]
+    pub default_fps: f64,
 }
 
 #[derive(clap::Args, Debug)]
@@ -314,6 +344,62 @@ fn run_recognize_media(args: &RecognizeArgs) -> Result<()> {
         .file_stem()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_default();
+
+    // Unified .dbphash mode: search directly over single compiled index
+    if let Some(ref dbphash_path) = args.dbphash {
+        let dbphash = MmapDbphash::open(dbphash_path)?;
+        let match_start = Instant::now();
+        let matches = dbphash.recognize(&hashes, args.search_distance);
+        let timer_in_seconds = match_start.elapsed().as_secs_f64();
+
+        if matches.is_empty() {
+            if args.output_format == OutputFormat::DataFrame {
+                println!("Empty DataFrame\nColumns: [media_found, media_name_search, media_id_match, media_name_match, nb_offsets_match, timer_in_seconds, confidence]\nIndex: []");
+            }
+            return Ok(());
+        }
+
+        let display_matches = if args.limit > 0 && args.limit < matches.len() {
+            &matches[..args.limit]
+        } else {
+            &matches[..]
+        };
+
+        for m in display_matches.iter() {
+            let media_found = m.clean_title.contains(&media_name_search)
+                || media_name_search.contains(&m.clean_title);
+
+            match args.output_format {
+                OutputFormat::Csv => {
+                    println!(
+                        "{},{},{},{},{},{:.16},{:.1}",
+                        if media_found { "True" } else { "False" },
+                        media_name_search,
+                        m.clean_title,
+                        m.media_id,
+                        m.matching_cuts,
+                        timer_in_seconds,
+                        m.confidence
+                    );
+                }
+                OutputFormat::DataFrame => {
+                    println!(
+                        "   media_found            media_name_search  media_id_match             media_name_match  nb_offsets_match  ... timer_in_seconds  confidence\n\
+                         0         {}  {}               {}  {}               {}  ...         {:.6}         {:.1}\n\n\
+                         [1 rows x 7 columns]",
+                        if media_found { "True" } else { "False" },
+                        media_name_search,
+                        m.media_id,
+                        m.clean_title,
+                        m.matching_cuts,
+                        timer_in_seconds,
+                        m.confidence
+                    );
+                }
+            }
+        }
+        return Ok(());
+    }
 
     // Zero-DB mode: search directly over memory-mapped .phash files
     if args.no_db {
@@ -624,6 +710,53 @@ fn run_scan_library(args: &ScanLibraryArgs) -> Result<()> {
     } else {
         anyhow::bail!("Either --query-media or --query-phash must be specified");
     };
+
+    if let Some(ref dbphash_path) = args.dbphash {
+        let start = Instant::now();
+        let dbphash = MmapDbphash::open(dbphash_path)?;
+        println!(
+            "Loaded .dbphash index {:?}: {} media entries, {} cuts, {} sparse frames (took {:.2} ms)",
+            dbphash_path,
+            dbphash.header().media_count,
+            dbphash.header().total_cuts_count,
+            dbphash.header().total_sparse_count,
+            start.elapsed().as_secs_f64() * 1000.0
+        );
+
+        let search_start = Instant::now();
+        let matches = dbphash.recognize(&query_hashes, args.search_distance);
+        let search_elapsed = search_start.elapsed().as_secs_f64();
+
+        println!(
+            "Search completed in {:.4} seconds ({} query frames)",
+            search_elapsed,
+            query_hashes.len()
+        );
+
+        if matches.is_empty() {
+            println!("No matching media found in .dbphash index.");
+        } else {
+            println!("\nTop matches from .dbphash index:");
+            let display_matches = if args.limit > 0 && args.limit < matches.len() {
+                &matches[..args.limit]
+            } else {
+                &matches[..]
+            };
+            for (i, m) in display_matches.iter().enumerate() {
+                println!(
+                    "  {}. ID #{}: {} -> cuts: {}, 1fps: {} ({:.1}% confidence, shift: {} ms)",
+                    i + 1,
+                    m.media_id,
+                    m.clean_title,
+                    m.matching_cuts,
+                    m.matching_sparse,
+                    m.confidence,
+                    m.estimated_shift_ms
+                );
+            }
+        }
+        return Ok(());
+    }
 
     let start = Instant::now();
     let library = MmapLibrary::from_directory(&args.phash_dir)?;
@@ -1015,6 +1148,9 @@ fn main() -> Result<()> {
         Commands::InspectMedia(args) => {
             run_inspect_media(&args)?;
         }
+        Commands::Pack(args) => {
+            run_pack(&args)?;
+        }
     }
     Ok(())
 }
@@ -1097,6 +1233,117 @@ fn run_inspect_media(args: &InspectMediaArgs) -> Result<()> {
             }
         }
     }
+
+    Ok(())
+}
+
+fn extract_fps_from_path(path: &Path) -> Option<f64> {
+    let s = path.file_name()?.to_str()?;
+    for part in s.split('.') {
+        if let Some(fps_str) = part.strip_suffix("fps") {
+            if let Ok(fps) = fps_str.parse::<f64>() {
+                if fps > 0.0 && fps < 240.0 {
+                    return Some(fps);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn run_pack(args: &PackArgs) -> Result<()> {
+    if !args.phash_dir.exists() {
+        anyhow::bail!("Directory {:?} does not exist", args.phash_dir);
+    }
+
+    let mut files = Vec::new();
+    for entry in std::fs::read_dir(&args.phash_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) == Some("phash") {
+            files.push(path);
+        }
+    }
+    files.sort();
+
+    if files.is_empty() {
+        anyhow::bail!("No .phash files found in {:?}", args.phash_dir);
+    }
+
+    println!("=== DBS-RT COMPILER: UNIFIED .DBPHASH PACKER ===");
+    println!("Input directory  : {:?}", args.phash_dir);
+    println!("Output index     : {:?}", args.output);
+    println!("Found .phash     : {} files", files.len());
+    println!("Cut threshold    : {}", args.threshold);
+
+    let start = Instant::now();
+    let mut builder = DbphashBuilder::new();
+    let mut total_raw_bytes = 0u64;
+
+    for (idx, file_path) in files.iter().enumerate() {
+        let meta = MediaMetadata::parse_from_path(file_path);
+        let hashes = read_phash_file(file_path)?;
+        let file_len = std::fs::metadata(file_path)?.len();
+        total_raw_bytes += file_len;
+
+        let fps = extract_fps_from_path(file_path).unwrap_or(args.default_fps);
+        let duration_ms = (hashes.len() as f64 / fps * 1000.0).round() as u64;
+
+        let detected = detect_cuts(&hashes, args.threshold);
+        let cuts: Vec<(u64, u32)> = detected
+            .into_iter()
+            .map(|c| (c.phash, (c.offset as f64 / fps * 1000.0).round() as u32))
+            .collect();
+
+        let fps_step = (fps.round() as usize).max(1);
+        let sparse: Vec<(u64, u32)> = (0..hashes.len())
+            .step_by(fps_step)
+            .map(|idx| (hashes[idx], (idx as f64 / fps * 1000.0).round() as u32))
+            .collect();
+
+        let cuts_cnt = cuts.len();
+        let sparse_cnt = sparse.len();
+        builder.add_media(&meta, duration_ms, fps, &cuts, &sparse);
+
+        if (idx + 1) % 25 == 0 || idx + 1 == files.len() {
+            println!(
+                "  [{:>3}/{:>3}] Packed {:<40} ({} cuts, {} 1fps)",
+                idx + 1,
+                files.len(),
+                file_path.file_name().unwrap_or_default().to_string_lossy(),
+                cuts_cnt,
+                sparse_cnt
+            );
+        }
+    }
+
+    let stats = builder.write_to_file(&args.output)?;
+    let elapsed = start.elapsed().as_secs_f64();
+    let ratio = if stats.output_bytes > 0 {
+        total_raw_bytes as f64 / stats.output_bytes as f64
+    } else {
+        1.0
+    };
+
+    println!("\n=== PACKAGING SUCCESSFUL (HYBRID v2.0) ===");
+    println!("Media items packed    : {:>10}", stats.media_count);
+    println!("Total scene cuts      : {:>10}", stats.total_cuts_count);
+    println!("Total 1 fps frames    : {:>10}", stats.total_sparse_count);
+    println!(
+        "Raw .phash total size : {:>10.2} MB",
+        total_raw_bytes as f64 / (1024.0 * 1024.0)
+    );
+    println!(
+        "Compiled .dbphash size: {:>10.2} MB",
+        stats.output_bytes as f64 / (1024.0 * 1024.0)
+    );
+    println!(
+        "Space reduction       : {:>10.1}x ({:.1}% smaller)",
+        ratio,
+        (1.0 - 1.0 / ratio) * 100.0
+    );
+    println!("Total elapsed time    : {:>10.3} s", elapsed);
+    println!("Output index path     : {:?}", args.output);
 
     Ok(())
 }
