@@ -12,7 +12,10 @@ fn test_retarget_subtitles_e2e_iso() {
         return;
     }
 
-    let tmp_dir = std::env::temp_dir();
+    let tmp_dir =
+        std::env::temp_dir().join(format!("dbsrt_retarget_iso_test_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+    std::fs::create_dir_all(&tmp_dir).unwrap();
 
     let output = Command::new(env!("CARGO_BIN_EXE_dbsrt"))
         .args([
@@ -46,4 +49,6 @@ fn test_retarget_subtitles_e2e_iso() {
     let content = std::fs::read_to_string(&out_srt).expect("Failed to read output SRT");
     assert!(content.contains("The peach open movie project presents"));
     assert!(content.contains("00:00:00,005 --> 00:00:03,800"));
+
+    let _ = std::fs::remove_dir_all(&tmp_dir);
 }

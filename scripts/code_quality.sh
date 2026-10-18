@@ -46,12 +46,33 @@ run_fmt() {
   shfmt -i 2 -ci -w scripts/*.sh data/*.sh
 }
 
+run_coverage() {
+  echo "=== [1/3] Rust Coverage (cargo llvm-cov --workspace) ==="
+  cargo llvm-cov --workspace --json --output-path coverage-rust.json
+
+  echo "=== [2/3] Python Coverage (pytest --cov=src) ==="
+  uv run pytest --cov=src --cov-report=json:coverage-python.json tests/tools/
+  if (echo >"/dev/tcp/${PSQL_IP:-127.0.0.1}/${PSQL_PORT:-5433}") >/dev/null 2>&1; then
+    PSQL_PORT="${PSQL_PORT:-5433}" uv run pytest --cov=src --cov-report=json:coverage-python-db.json tests/ --ignore=tests/tools/
+    bash scripts/seed_couplings.sh >/dev/null 2>&1 || true
+  fi
+
+  echo "=== [3/3] Unified Coverage Report (Rust & Python) ==="
+  uv run python scripts/generate_coverage_report.py \
+    --rust-json coverage-rust.json \
+    --python-json coverage-python.json \
+    --python-db-json coverage-python-db.json \
+    --output-md coverage-summary.md
+  rm -f coverage-rust.json coverage-python.json coverage-python-db.json coverage-summary.md .coverage
+}
+
 case "$ACTION" in
   lint) run_lint ;;
   lint-fast) run_lint_fast ;;
   fmt) run_fmt ;;
+  coverage) run_coverage ;;
   *)
-    echo "Usage: $0 {lint|lint-fast|fmt}" >&2
+    echo "Usage: $0 {lint|lint-fast|fmt|coverage}" >&2
     exit 1
     ;;
 esac
