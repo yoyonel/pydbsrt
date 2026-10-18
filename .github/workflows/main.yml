@@ -51,10 +51,12 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Setup FFmpeg
-        uses: FedericoCarboni/setup-ffmpeg@v3
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Ensure FFmpeg is installed
+        run: |
+          if ! command -v ffmpeg >/dev/null 2>&1; then
+            sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+          fi
+          ffmpeg -version | head -n 1
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
@@ -85,10 +87,12 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Setup FFmpeg
-        uses: FedericoCarboni/setup-ffmpeg@v3
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Ensure FFmpeg is installed
+        run: |
+          if ! command -v ffmpeg >/dev/null 2>&1; then
+            sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+          fi
+          ffmpeg -version | head -n 1
 
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -128,10 +132,12 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Setup FFmpeg
-        uses: FedericoCarboni/setup-ffmpeg@v3
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Ensure FFmpeg is installed
+        run: |
+          if ! command -v ffmpeg >/dev/null 2>&1; then
+            sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+          fi
+          ffmpeg -version | head -n 1
 
       - name: Start PostgreSQL 17 BK-Tree container
         run: |
@@ -179,11 +185,10 @@ jobs:
         run: |
           mkdir -p /tmp/dbsrt-ci-subs
           ./target/debug/dbsrt certify-coupling \
-            --phash /tmp/big_buck_bunny_trailer_480p.webm.25.0fps.phash \
-            --subtitles data/SRT/big_buck_bunny_trailer_480p.fr.srt \
-            --language fr \
-            --subtitles-dir /tmp/dbsrt-ci-subs \
-            --use-db
+            --phash-file /tmp/big_buck_bunny_trailer_480p.webm.25.0fps.phash \
+            --subtitle data/SRT/big_buck_bunny_trailer_480p.fr.srt \
+            --lang fr \
+            --subtitles-dir /tmp/dbsrt-ci-subs
 
       - name: Run Python DB integration test suite
         run: |
