@@ -25,3 +25,8 @@
 
 ## Communication
 - **Caveman Mode**: Always terse, ultra-compressed, 100% technical accuracy, zero filler words.
+
+## Video Demonstrations & Media Formats
+- **STRICTLY FORBIDDEN from using GIF format**: Never generate, store, or embed `.gif` files for video records or UI/UX demos (destructive 256-color palette, heavy bloat, horrible dithering).
+- **Mandatory MP4 / WebM with HTML5 Video**: Always record high-definition H.264/MP4 or WebM (24-bit color, 1080p, lightweight compression). Embed in documentation/reports via HTML5 `<video autoplay loop muted playsinline width="100%"><source src="..." type="video/mp4"></video>`.
+- **Meaningful Dialogue Timestamps**: When demoing subtitle sync on real media, never record idle intro/logo sequences. Seek directly to active dialogue timestamps (e.g. `--start-time`) so that spoken subtitles and OSD are clearly visible on screen.

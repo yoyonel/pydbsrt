@@ -102,10 +102,12 @@ nav:
       - Feuille de Route & Échelle (1920-2026): 2026-10-15-deep-dive-modernization-and-scaling-roadmap.md
       - Modernization Blueprint: 2026-10-15-modernization-blueprint.md
   - ⚡ Architecture & Moteurs:
+      - Fork & Modernisation VLSub: 2026-10-18-vlsub-fork-and-restoration.md
       - Intégration VLC & Daemon Axum: 2026-10-15-vlc-integration-daemon-and-plugins.md
       - Moteur Zero-DB mmap: 2026-10-15-scaling-architecture-rust-mmap.md
       - Providers Distants & Fallback Web (Axe 5): 2026-10-16-axe5-remote-subtitles-providers.md
   - 📊 Benchmarks & Mesures:
+      - Validation UI/UX Plugin VLC v2.0: 2026-10-17-validation-ui-ux-vlc-plugin-v2.md
       - Validation Empirique E2E (Synology): 2026-10-17-validation-empirique-e2e-synology.md
       - Étude Frames, Cuts & Approche Hybride: 2026-10-17-etude-comparative-identification-frames-cuts-keyframes-hybride.md
       - Dataset Réel à l'Échelle (5M frames): 2026-10-16-phash-dataset-scale-and-benchmarks.md
@@ -113,6 +115,7 @@ nav:
       - PG17 BK-Tree vs pgvector: 2026-10-15-pg17-bktree-benchmark-migration.md
 
   - 🔍 Audits & État des Lieux:
+      - Audit Technique Legacy VLSub: 2026-10-18-vlsub-legacy-audit.md
       - Audit Global du Dépôt: 2026-10-15-audit-global.md
   - 📜 Archives & Historique:
       - 2021 Fast Hamming Postgres: history/2021-04-13-fast-hamming-postgres.md

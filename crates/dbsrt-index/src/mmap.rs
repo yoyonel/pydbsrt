@@ -121,7 +121,15 @@ impl MmapLibrary {
     }
 
     fn collect_phash_files(dir: &Path, files: &mut Vec<MmapPhashFile>) -> Result<()> {
-        if !dir.exists() {
+        Self::collect_phash_files_bounded(dir, files, 0)
+    }
+
+    fn collect_phash_files_bounded(
+        dir: &Path,
+        files: &mut Vec<MmapPhashFile>,
+        depth: usize,
+    ) -> Result<()> {
+        if depth > 5 || !dir.exists() {
             return Ok(());
         }
         let entries = match std::fs::read_dir(dir) {
@@ -129,9 +137,13 @@ impl MmapLibrary {
             Err(_) => return Ok(()),
         };
         for entry in entries.flatten() {
+            let Ok(ft) = entry.file_type() else { continue };
+            if ft.is_symlink() {
+                continue;
+            }
             let path = entry.path();
-            if path.is_dir() {
-                let _ = Self::collect_phash_files(&path, files);
+            if ft.is_dir() {
+                let _ = Self::collect_phash_files_bounded(&path, files, depth + 1);
             } else if path.extension().and_then(|e| e.to_str()) == Some("phash") {
                 if let Ok(mmap_file) = MmapPhashFile::open(&path) {
                     files.push(mmap_file);

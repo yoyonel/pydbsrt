@@ -175,6 +175,45 @@ tasks:
     cmds:
       - ./target/release/dbsrt-server --host 127.0.0.1 --port 8765 --phash-dir /tmp --subtitles-dir data/SRT
 
+  server:daemon:
+    desc: Start dbsrt-server daemon in background with logging to /tmp/dbsrt-server.log
+    deps: [server:build]
+    cmds:
+      - |
+        if [ -f /tmp/dbsrt-server.pid ] && kill -0 $(cat /tmp/dbsrt-server.pid) 2>/dev/null; then
+          echo "dbsrt-server is already running (PID: $(cat /tmp/dbsrt-server.pid))"
+          exit 0
+        fi
+        nohup ./target/release/dbsrt-server --host 127.0.0.1 --port 8765 --phash-dir /tmp --subtitles-dir data/SRT > /tmp/dbsrt-server.log 2>&1 &
+        echo $! > /tmp/dbsrt-server.pid
+        sleep 0.5
+        echo "dbsrt-server started in background (PID: $(cat /tmp/dbsrt-server.pid))"
+
+  server:status:
+    desc: Query dbsrt-server telemetry status endpoint (/v1/status)
+    cmds:
+      - |
+        port=8765
+        if [ -f /tmp/dbsrt-server.json ]; then
+          port=$(grep -o '"port": *[0-9]*' /tmp/dbsrt-server.json | grep -o '[0-9]*')
+        fi
+        curl -s -f "http://127.0.0.1:${port}/v1/status" | (command -v jq >/dev/null && jq . || cat)
+
+  server:stop:
+    desc: Stop background dbsrt-server daemon
+    cmds:
+      - |
+        if [ -f /tmp/dbsrt-server.pid ]; then
+          pid=$(cat /tmp/dbsrt-server.pid)
+          kill "$pid" 2>/dev/null || true
+          rm -f /tmp/dbsrt-server.pid
+          echo "dbsrt-server (PID: $pid) stopped."
+        else
+          pkill -f "dbsrt-server" 2>/dev/null || true
+          echo "dbsrt-server stopped."
+        fi
+        rm -f /tmp/dbsrt-server.json
+
   vlc:
     desc: Shortcut to install plugins and run headless VLC E2E test
     cmds:
@@ -185,12 +224,14 @@ tasks:
     desc: Install dbsrt VLC Lua plugins (GUI extension and CLI interface)
     cmds:
       - mkdir -p ~/.local/share/vlc/lua/extensions/ ~/.local/share/vlc/lua/intf/
+      - cp -v vlc-plugin/vlsub_dbsrt.lua ~/.local/share/vlc/lua/extensions/
       - cp -v vlc-plugin/dbsrt_subsync.lua ~/.local/share/vlc/lua/extensions/
       - cp -v vlc-plugin/dbsrt_intf.lua ~/.local/share/vlc/lua/intf/
-      - echo "dbsrt VLC plugins installed (GUI in extensions/, CLI in intf/)."
+      - echo "dbsrt VLC plugins installed (VLSub dbsrt + subsync in extensions/, CLI in intf/)."
 
   vlc:test-cvlc:
     desc: Test headless cvlc subtitle auto-sync with event-driven completion
+    deps: [server:daemon, vlc:install-plugin]
     cmds:
       - |
         output=$(DBSRT_AUTOKILL=1 cvlc --avcodec-hw=none --extraintf luaintf --lua-intf dbsrt_intf tests/data/big_buck_bunny_trailer_480p.mp4 2>&1)
@@ -201,6 +242,13 @@ tasks:
           echo "✗ E2E VLC Integration Test Failed: Subtitle was not attached!"
           exit 1
         fi
+
+  vlc:record-demo:
+    desc: Record full HD 1080p MP4 demo of VLSub dbsrt plugin interaction on isolated Xvfb screen
+    deps: [server:daemon, vlc:install-plugin]
+    cmds:
+      - chmod +x scripts/record_vlsub_demo.sh
+      - bash scripts/record_vlsub_demo.sh
 
   rs:bench:
     desc: Run Rust pHash throughput benchmark
@@ -470,3 +518,8 @@ tasks:
       - task: lint
       - task: rs:test
       - task: doc:check
+
+  pre-commit:
+    desc: Run pre-commit hooks on all files with strict timeout
+    cmds:
+      - timeout 60s uv run pre-commit run --all-files

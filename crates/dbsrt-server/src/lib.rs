@@ -84,6 +84,24 @@ pub struct AppState {
     pub subtitles_dir: PathBuf,
     pub provider: Arc<dyn SubtitleProvider>,
     pub cache: SubtitleCache,
+    pub start_time: Instant,
+}
+
+impl AppState {
+    pub fn new(
+        phash_dir: PathBuf,
+        subtitles_dir: PathBuf,
+        provider: Arc<dyn SubtitleProvider>,
+        cache: SubtitleCache,
+    ) -> Self {
+        Self {
+            phash_dir,
+            subtitles_dir,
+            provider,
+            cache,
+            start_time: Instant::now(),
+        }
+    }
 }
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -113,6 +131,8 @@ pub struct AutoSyncResponse {
     pub output_srt_path: String,
     pub confidence_percent: f64,
     pub elapsed_seconds: f64,
+    #[serde(default)]
+    pub source: Option<String>,
     pub error: Option<String>,
 }
 
@@ -121,6 +141,75 @@ pub struct HealthResponse {
     pub status: String,
     pub version: String,
     pub service: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct StatusResponse {
+    pub status: String,
+    pub version: String,
+    pub service: String,
+    pub uptime_seconds: u64,
+    pub phash_dir: String,
+    pub subtitles_dir: String,
+    pub indexed_phash_count: usize,
+}
+
+#[derive(Deserialize, Serialize, Debug)]
+pub struct SearchSubtitlesRequest {
+    pub media_path: String,
+    #[serde(default = "default_lang")]
+    pub language: String,
+    pub subtitles_dir: Option<String>,
+    pub query_title: Option<String>,
+    pub season: Option<u32>,
+    pub episode: Option<u32>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct SubtitleCandidate {
+    pub source: String,
+    pub language: String,
+    pub title: String,
+    pub release: Option<String>,
+    pub details: Option<String>,
+    pub candidate_id: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct SearchSubtitlesResponse {
+    pub media_path: String,
+    pub language: String,
+    pub total_candidates: usize,
+    pub candidates: Vec<SubtitleCandidate>,
+}
+
+#[derive(Deserialize, Serialize, Debug)]
+pub struct DownloadSubtitleRequest {
+    pub media_path: String,
+    pub source: String,
+    pub candidate_id: Option<String>,
+    #[serde(default = "default_lang")]
+    pub language: String,
+    #[serde(default = "default_true")]
+    pub resync: bool,
+    pub subtitles_dir: Option<String>,
+    pub phash_dir: Option<String>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct DownloadSubtitleResponse {
+    pub success: bool,
+    pub output_srt_path: String,
+    pub shift_frames: i64,
+    pub shift_ms: f64,
+    pub confidence_percent: f64,
+    pub source: String,
+    pub language: String,
+    pub error: Option<String>,
 }
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -199,12 +288,12 @@ pub struct ScanResponse {
 
 /// Builds the Axum router for dbsrt-server with default providers.
 pub fn create_router(phash_dir: PathBuf, subtitles_dir: PathBuf) -> Router {
-    create_router_with_state(AppState {
+    create_router_with_state(AppState::new(
         phash_dir,
         subtitles_dir,
-        provider: Arc::new(OpenSubtitlesProvider::new(None)),
-        cache: SubtitleCache::default(),
-    })
+        Arc::new(OpenSubtitlesProvider::new(None)),
+        SubtitleCache::default(),
+    ))
 }
 
 /// Builds the Axum router for dbsrt-server with custom AppState.
@@ -217,7 +306,11 @@ pub fn create_router_with_state(state: AppState) -> Router {
         .allow_headers(Any);
 
     Router::new()
+        .route("/health", get(health_handler))
         .route("/v1/health", get(health_handler))
+        .route("/v1/status", get(status_handler))
+        .route("/v1/search", post(search_handler))
+        .route("/v1/download", post(download_handler))
         .route("/v1/recognize", post(recognize_handler))
         .route("/v1/retarget", post(retarget_handler))
         .route("/v1/autosync", post(autosync_handler))
@@ -232,6 +325,395 @@ pub async fn health_handler() -> impl IntoResponse {
         status: "ok".to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
         service: "dbsrt-server".to_string(),
+    })
+}
+
+pub async fn status_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let indexed_phash_count = std::fs::read_dir(&state.phash_dir)
+        .map(|entries| {
+            entries
+                .flatten()
+                .filter(|e| e.path().extension().and_then(|ext| ext.to_str()) == Some("phash"))
+                .count()
+        })
+        .unwrap_or(0);
+
+    Json(StatusResponse {
+        status: "ok".to_string(),
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        service: "dbsrt-server".to_string(),
+        uptime_seconds: state.start_time.elapsed().as_secs(),
+        phash_dir: state.phash_dir.to_string_lossy().to_string(),
+        subtitles_dir: state.subtitles_dir.to_string_lossy().to_string(),
+        indexed_phash_count,
+    })
+}
+
+pub async fn search_handler(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<SearchSubtitlesRequest>,
+) -> impl IntoResponse {
+    let media_path = PathBuf::from(&payload.media_path);
+    let subtitles_dir = payload
+        .subtitles_dir
+        .map(PathBuf::from)
+        .unwrap_or_else(|| state.subtitles_dir.clone());
+    let mut candidates: Vec<SubtitleCandidate> = Vec::new();
+
+    // 1. Inspect container if media exists
+    if media_path.exists() {
+        if let Ok(insp) = inspect_container(&media_path) {
+            for stream in insp.subtitle_streams {
+                let stream_lang = stream.language.as_deref().unwrap_or("und");
+                let lang_match = payload.language == "auto"
+                    || payload.language == "all"
+                    || stream_lang
+                        .to_lowercase()
+                        .starts_with(&payload.language.to_lowercase())
+                    || payload
+                        .language
+                        .to_lowercase()
+                        .starts_with(&stream_lang.to_lowercase());
+                if lang_match {
+                    candidates.push(SubtitleCandidate {
+                        source: "container".to_string(),
+                        language: stream_lang.to_string(),
+                        title: stream
+                            .title
+                            .clone()
+                            .unwrap_or_else(|| format!("Embedded #{}", stream.subtitle_index)),
+                        release: media_path
+                            .file_name()
+                            .map(|n| n.to_string_lossy().to_string()),
+                        details: Some(format!(
+                            "Track index {}, codec {}",
+                            stream.subtitle_index, stream.codec_name
+                        )),
+                        candidate_id: Some(stream.subtitle_index.to_string()),
+                    });
+                }
+            }
+        }
+    }
+
+    // 2. Inspect local subtitles directory
+    if subtitles_dir.exists() {
+        let clean_stem = media_path
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let stem_lower = clean_stem.to_lowercase();
+        let req_lang = payload.language.to_lowercase();
+
+        if let Ok(entries) = std::fs::read_dir(&subtitles_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|e| e.to_str()) != Some("srt") {
+                    continue;
+                }
+                let fname = path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_lowercase();
+                let has_stem = fname.contains(&stem_lower)
+                    || stem_lower.contains(&fname.trim_end_matches(".srt").to_string())
+                    || (stem_lower.len() > 10 && fname.contains(&stem_lower[..10]));
+
+                if has_stem {
+                    let lang_in_file =
+                        if fname.contains(&req_lang) || req_lang == "auto" || req_lang == "all" {
+                            payload.language.clone()
+                        } else {
+                            "unknown".to_string()
+                        };
+                    candidates.push(SubtitleCandidate {
+                        source: "catalog".to_string(),
+                        language: lang_in_file,
+                        title: path
+                            .file_name()
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                            .to_string(),
+                        release: Some(clean_stem.clone()),
+                        details: Some(path.to_string_lossy().to_string()),
+                        candidate_id: Some(path.to_string_lossy().to_string()),
+                    });
+                }
+            }
+        }
+    }
+
+    // 3. Search remote provider
+    let mut meta = MediaMetadata::parse_from_path(&media_path);
+    if let Some(ref qt) = payload.query_title {
+        if !qt.trim().is_empty() {
+            meta.clean_title = qt.trim().to_string();
+        }
+    }
+    if let Some(s) = payload.season {
+        meta.season = Some(s);
+    }
+    if let Some(ep) = payload.episode {
+        meta.episode = Some(ep);
+    }
+
+    if let Ok(remote_cands) = state.provider.search(&meta, &payload.language).await {
+        for cand in remote_cands {
+            candidates.push(SubtitleCandidate {
+                source: "opensubtitles".to_string(),
+                language: cand.language.clone(),
+                title: cand
+                    .release_name
+                    .clone()
+                    .unwrap_or_else(|| meta.clean_title.clone()),
+                release: cand.release_name.clone(),
+                details: Some(format!(
+                    "Match score: {:.2}, ID: {}",
+                    cand.match_score, cand.subtitle_id
+                )),
+                candidate_id: Some(cand.subtitle_id.clone()),
+            });
+        }
+    }
+
+    let total_candidates = candidates.len();
+    Json(SearchSubtitlesResponse {
+        media_path: payload.media_path,
+        language: payload.language,
+        total_candidates,
+        candidates,
+    })
+}
+
+pub async fn download_handler(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<DownloadSubtitleRequest>,
+) -> Json<DownloadSubtitleResponse> {
+    let media_path = PathBuf::from(&payload.media_path);
+    let subtitles_dir = payload
+        .subtitles_dir
+        .map(PathBuf::from)
+        .unwrap_or_else(|| state.subtitles_dir.clone());
+    let phash_dir = payload
+        .phash_dir
+        .map(PathBuf::from)
+        .unwrap_or_else(|| state.phash_dir.clone());
+
+    // 1. Fetch raw subtitle according to source
+    let (mut srt_file, source_name) = match payload.source.as_str() {
+        "container" => {
+            let idx: usize = payload
+                .candidate_id
+                .as_deref()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0);
+            match extract_embedded_subtitle(&media_path, idx) {
+                Ok(raw) => match SubtitleFile::parse(&raw) {
+                    Ok(s) => (s, "container".to_string()),
+                    Err(e) => {
+                        return Json(DownloadSubtitleResponse {
+                            success: false,
+                            output_srt_path: String::new(),
+                            shift_frames: 0,
+                            shift_ms: 0.0,
+                            confidence_percent: 0.0,
+                            source: payload.source,
+                            language: payload.language,
+                            error: Some(format!("Failed to parse container subtitle: {:#}", e)),
+                        });
+                    }
+                },
+                Err(e) => {
+                    return Json(DownloadSubtitleResponse {
+                        success: false,
+                        output_srt_path: String::new(),
+                        shift_frames: 0,
+                        shift_ms: 0.0,
+                        confidence_percent: 0.0,
+                        source: payload.source,
+                        language: payload.language,
+                        error: Some(format!(
+                            "Failed to extract container subtitle track: {:#}",
+                            e
+                        )),
+                    });
+                }
+            }
+        }
+        "catalog" => {
+            let path = payload
+                .candidate_id
+                .map(PathBuf::from)
+                .unwrap_or_else(|| subtitles_dir.clone());
+            match SubtitleFile::open(&path) {
+                Ok(s) => (s, "catalog".to_string()),
+                Err(e) => {
+                    return Json(DownloadSubtitleResponse {
+                        success: false,
+                        output_srt_path: String::new(),
+                        shift_frames: 0,
+                        shift_ms: 0.0,
+                        confidence_percent: 0.0,
+                        source: payload.source,
+                        language: payload.language,
+                        error: Some(format!("Failed to open catalog subtitle: {:#}", e)),
+                    });
+                }
+            }
+        }
+        "opensubtitles" => {
+            let sub_id = payload.candidate_id.clone().unwrap_or_default();
+            let meta = MediaMetadata::parse_from_path(&media_path);
+            let mut raw_content = None;
+
+            if let Some(cached) = state.cache.get(&meta, &payload.language, &sub_id) {
+                raw_content = Some(cached);
+            } else {
+                let cand = dbsrt_core::RemoteSubtitleCandidate {
+                    provider: "opensubtitles".to_string(),
+                    subtitle_id: sub_id.clone(),
+                    release_name: None,
+                    language: payload.language.clone(),
+                    download_url: String::new(),
+                    hearing_impaired: false,
+                    fps: None,
+                    match_score: 1.0,
+                };
+                if let Ok(raw) = state.provider.download(&cand).await {
+                    let _ = state.cache.put(&meta, &payload.language, &sub_id, &raw);
+                    raw_content = Some(raw);
+                }
+            }
+
+            match raw_content {
+                Some(raw) => match SubtitleFile::parse(&raw) {
+                    Ok(s) => (s, "opensubtitles".to_string()),
+                    Err(e) => {
+                        return Json(DownloadSubtitleResponse {
+                            success: false,
+                            output_srt_path: String::new(),
+                            shift_frames: 0,
+                            shift_ms: 0.0,
+                            confidence_percent: 0.0,
+                            source: payload.source,
+                            language: payload.language,
+                            error: Some(format!("Failed to parse remote subtitle: {:#}", e)),
+                        });
+                    }
+                },
+                None => {
+                    return Json(DownloadSubtitleResponse {
+                        success: false,
+                        output_srt_path: String::new(),
+                        shift_frames: 0,
+                        shift_ms: 0.0,
+                        confidence_percent: 0.0,
+                        source: payload.source,
+                        language: payload.language,
+                        error: Some(format!("Failed to download subtitle ID '{}'", sub_id)),
+                    });
+                }
+            }
+        }
+        other => {
+            return Json(DownloadSubtitleResponse {
+                success: false,
+                output_srt_path: String::new(),
+                shift_frames: 0,
+                shift_ms: 0.0,
+                confidence_percent: 0.0,
+                source: other.to_string(),
+                language: payload.language,
+                error: Some(format!("Unknown subtitle source: {}", other)),
+            });
+        }
+    };
+
+    // 2. Perform resync if requested and possible
+    let mut shift_frames = 0i64;
+    let mut shift_ms = 0.0f64;
+    let mut confidence_percent = 0.0f64;
+
+    if payload.resync && media_path.exists() {
+        if let Some((_, ref target_hashes, target_fps)) =
+            find_existing_phash(&media_path, &phash_dir)
+        {
+            if let Ok(entries) = std::fs::read_dir(&phash_dir) {
+                let target_cuts = detect_cuts(target_hashes, 16);
+                let target_stem = media_path
+                    .file_stem()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
+                for entry in entries.flatten() {
+                    let p = entry.path();
+                    if p.extension().and_then(|e| e.to_str()) == Some("phash")
+                        && !p.to_string_lossy().contains(&target_stem)
+                    {
+                        if let Ok(ref_hashes) = read_phash_file(&p) {
+                            let ref_cuts = detect_cuts(&ref_hashes, 16);
+                            let (s_frames, conf) =
+                                calculate_shift_consensus(&target_cuts, &ref_cuts, 0, 0.0);
+                            if conf > 50.0 {
+                                shift_frames = s_frames;
+                                shift_ms = (shift_frames as f64 / target_fps) * 1000.0;
+                                confidence_percent = conf;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if shift_ms.abs() > 0.001 {
+        srt_file.shift(shift_ms);
+    }
+
+    // 3. Save subtitle file to disk
+    let out_dir = media_path
+        .parent()
+        .filter(|p| p.is_dir() && !p.to_string_lossy().is_empty())
+        .unwrap_or_else(|| Path::new("/tmp"));
+    let media_stem = media_path
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "subtitles".to_string());
+
+    let out_name = if shift_ms.abs() > 0.001 {
+        format!("{}.synced.{}.srt", media_stem, payload.language)
+    } else {
+        format!("{}.{}.srt", media_stem, payload.language)
+    };
+    let out_path = out_dir.join(&out_name);
+
+    if let Err(e) = srt_file.save(&out_path) {
+        return Json(DownloadSubtitleResponse {
+            success: false,
+            output_srt_path: String::new(),
+            shift_frames: 0,
+            shift_ms: 0.0,
+            confidence_percent: 0.0,
+            source: source_name,
+            language: payload.language,
+            error: Some(format!(
+                "Failed to write subtitle file to {:?}: {:#}",
+                out_path, e
+            )),
+        });
+    }
+
+    Json(DownloadSubtitleResponse {
+        success: true,
+        output_srt_path: out_path.to_string_lossy().to_string(),
+        shift_frames,
+        shift_ms,
+        confidence_percent,
+        source: source_name,
+        language: payload.language,
+        error: None,
     })
 }
 
@@ -638,6 +1120,7 @@ pub async fn autosync_handler(
             output_srt_path: String::new(),
             confidence_percent: 0.0,
             elapsed_seconds: start.elapsed().as_secs_f64(),
+            source: None,
             error: Some(format!("Target media file not found: {:?}", media_path)),
         });
     }
@@ -688,6 +1171,7 @@ pub async fn autosync_handler(
                 output_srt_path: String::new(),
                 confidence_percent: 0.0,
                 elapsed_seconds: start.elapsed().as_secs_f64(),
+                source: None,
                 error: Some(format!("Failed to load mmap library: {:#}", e)),
             });
         }
@@ -709,10 +1193,14 @@ pub async fn autosync_handler(
         (stem, 80.0)
     };
 
-    // 3. Find reference subtitle: catalog on disk OR embedded subtitle stream in container
-    let mut srt = match find_subtitle_in_catalog(&subtitles_dir, &matched_stem, &payload.language) {
+    // 3. Find reference subtitle: catalog on disk OR embedded subtitle stream in container OR remote provider
+    let (mut srt, subtitle_source) = match find_subtitle_in_catalog(
+        &subtitles_dir,
+        &matched_stem,
+        &payload.language,
+    ) {
         Some(p) => match SubtitleFile::open(&p) {
-            Ok(s) => s,
+            Ok(s) => (s, "catalog".to_string()),
             Err(e) => {
                 return Json(AutoSyncResponse {
                     success: false,
@@ -723,6 +1211,7 @@ pub async fn autosync_handler(
                     output_srt_path: String::new(),
                     confidence_percent: match_conf,
                     elapsed_seconds: start.elapsed().as_secs_f64(),
+                    source: Some("catalog".to_string()),
                     error: Some(format!("Failed to parse catalog subtitle {:?}: {:#}", p, e)),
                 });
             }
@@ -737,7 +1226,7 @@ pub async fn autosync_handler(
                 Some(stream) => {
                     match extract_embedded_subtitle(&media_path, stream.subtitle_index) {
                         Ok(raw_srt) => match SubtitleFile::parse(&raw_srt) {
-                            Ok(s) => s,
+                            Ok(s) => (s, "container".to_string()),
                             Err(e) => {
                                 return Json(AutoSyncResponse {
                                     success: false,
@@ -748,6 +1237,7 @@ pub async fn autosync_handler(
                                     output_srt_path: String::new(),
                                     confidence_percent: match_conf,
                                     elapsed_seconds: start.elapsed().as_secs_f64(),
+                                    source: Some("container".to_string()),
                                     error: Some(format!(
                                         "Failed to parse embedded subtitle track: {:#}",
                                         e
@@ -765,6 +1255,7 @@ pub async fn autosync_handler(
                                 output_srt_path: String::new(),
                                 confidence_percent: match_conf,
                                 elapsed_seconds: start.elapsed().as_secs_f64(),
+                                source: Some("container".to_string()),
                                 error: Some(format!(
                                     "Failed to extract embedded subtitle track: {:#}",
                                     e
@@ -788,6 +1279,7 @@ pub async fn autosync_handler(
                                 output_srt_path: String::new(),
                                 confidence_percent: match_conf,
                                 elapsed_seconds: start.elapsed().as_secs_f64(),
+                                source: Some("opensubtitles".to_string()),
                                 error: Some(format!(
                                     "Remote provider search failed for '{}' ({}): {:#}",
                                     meta.clean_title, payload.language, e
@@ -824,7 +1316,7 @@ pub async fn autosync_handler(
                     }
 
                     match downloaded_srt {
-                        Some(s) => s,
+                        Some(s) => (s, "opensubtitles".to_string()),
                         None => {
                             return Json(AutoSyncResponse {
                                 success: false,
@@ -835,6 +1327,7 @@ pub async fn autosync_handler(
                                 output_srt_path: String::new(),
                                 confidence_percent: match_conf,
                                 elapsed_seconds: start.elapsed().as_secs_f64(),
+                                source: None,
                                 error: Some(format!(
                                     "Media recognized as '{}' but no '{}' subtitle found in local catalog {:?}, container tracks, nor remote providers",
                                     matched_stem, payload.language, subtitles_dir
@@ -897,6 +1390,7 @@ pub async fn autosync_handler(
             output_srt_path: String::new(),
             confidence_percent,
             elapsed_seconds: start.elapsed().as_secs_f64(),
+            source: Some(subtitle_source),
             error: Some(format!("Failed to save synced subtitle: {:#}", e)),
         });
     }
@@ -910,6 +1404,7 @@ pub async fn autosync_handler(
         output_srt_path: out_path.to_string_lossy().to_string(),
         confidence_percent,
         elapsed_seconds: start.elapsed().as_secs_f64(),
+        source: Some(subtitle_source),
         error: None,
     })
 }

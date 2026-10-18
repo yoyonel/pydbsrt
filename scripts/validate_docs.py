@@ -81,6 +81,15 @@ def check_html_files(site_dir: Path) -> list[str]:
                 if not target.exists():
                     errors.append(f"{rel_path}: Broken local image src: '{src}'")
 
+        # 4. Check local video and media sources
+        for media_tag in article.find_all(["video", "source"]):
+            src = media_tag.get("src", "")
+            if src and not src.startswith(("http://", "https://", "data:")):
+                clean_src = src.split("?")[0].split("#")[0]
+                target = (html_path.parent / clean_src).resolve()
+                if not target.exists():
+                    errors.append(f"{rel_path}: Broken local video/media src: '{src}'")
+
     return errors
 
 

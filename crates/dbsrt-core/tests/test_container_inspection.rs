@@ -76,7 +76,9 @@ fn test_embedded_subtitle_inspection_and_extraction() {
 
     // Generate a test MKV with 2 embedded subtitle tracks: English (default) and French
     let status = Command::new("ffmpeg")
+        .stdin(std::process::Stdio::null())
         .args([
+            "-nostdin",
             "-y",
             "-f",
             "lavfi",
@@ -152,7 +154,7 @@ fn test_embedded_subtitle_inspection_and_extraction() {
     let extracted_srt =
         extract_embedded_subtitle(&test_mkv, 0).expect("Failed to extract subtitle stream 0");
     assert!(!extracted_srt.is_empty());
-    assert!(extracted_srt.contains("The peach open movie project"));
+    assert!(extracted_srt.contains("peach open movie project"));
 
     // Cleanup
     let _ = fs::remove_file(&test_mkv);

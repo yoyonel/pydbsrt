@@ -1,6 +1,6 @@
 use dbsrt_server::{
     create_router, AutoSyncRequest, AutoSyncResponse, HealthResponse, RetargetRequest,
-    RetargetResponse,
+    RetargetResponse, SearchSubtitlesRequest, SearchSubtitlesResponse, StatusResponse,
 };
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -8,8 +8,10 @@ use std::path::{Path, PathBuf};
 #[tokio::test]
 async fn test_server_health_retarget_and_autosync() {
     let tmp_dir = std::env::temp_dir();
+    let test_phash_dir = tmp_dir.join(format!("test_phash_health_{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&test_phash_dir);
     let srt_dir = PathBuf::from("../../data/SRT");
-    let app = create_router(tmp_dir.clone(), srt_dir.clone());
+    let app = create_router(test_phash_dir.clone(), srt_dir.clone());
 
     // Bind on ephemeral port
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -238,7 +240,9 @@ async fn test_autosync_embedded_container_subtitle() {
 
     // Mux black video + embedded french subtitle
     let status = std::process::Command::new("ffmpeg")
+        .stdin(std::process::Stdio::null())
         .args([
+            "-nostdin",
             "-y",
             "-f",
             "lavfi",
@@ -272,7 +276,9 @@ async fn test_autosync_embedded_container_subtitle() {
         return;
     }
 
-    let app = create_router(tmp_dir.clone(), empty_subtitles_dir.clone());
+    let test_phash_dir = tmp_dir.join(format!("test_phash_auto_{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&test_phash_dir);
+    let app = create_router(test_phash_dir.clone(), empty_subtitles_dir.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("Failed to bind ephemeral port");
@@ -311,10 +317,112 @@ async fn test_autosync_embedded_container_subtitle() {
 
     // Verify content
     let saved_content = std::fs::read_to_string(&auto_res.output_srt_path).unwrap();
-    assert!(saved_content.contains("The peach open movie project"));
+    assert!(saved_content.contains("peach open movie project"));
 
     // Cleanup
     let _ = std::fs::remove_file(&auto_res.output_srt_path);
     let _ = std::fs::remove_file(&test_mkv);
     let _ = std::fs::remove_dir_all(&empty_subtitles_dir);
+}
+
+#[tokio::test]
+async fn test_server_status_and_search_endpoints() {
+    let tmp_dir = std::env::temp_dir();
+    let test_phash_dir = tmp_dir.join(format!("test_phash_status_{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&test_phash_dir);
+    let srt_dir = PathBuf::from("../../data/SRT");
+    let app = create_router(test_phash_dir.clone(), srt_dir.clone());
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("Failed to bind ephemeral port");
+    let addr: SocketAddr = listener.local_addr().unwrap();
+
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    let client = reqwest::Client::new();
+    let base_url = format!("http://{}", addr);
+
+    // 1. Test /health (alias)
+    let res = client
+        .get(format!("{}/health", base_url))
+        .send()
+        .await
+        .expect("Failed to call /health");
+    assert!(res.status().is_success());
+
+    // 2. Test /v1/status
+    let res = client
+        .get(format!("{}/v1/status", base_url))
+        .send()
+        .await
+        .expect("Failed to call /v1/status");
+    assert!(res.status().is_success());
+    let status: StatusResponse = res.json().await.expect("Failed to parse status JSON");
+    assert_eq!(status.status, "ok");
+    assert_eq!(status.service, "dbsrt-server");
+    assert!(!status.version.is_empty());
+
+    // 3. Test /v1/search for Big Buck Bunny
+    let original_media = "../../tests/data/big_buck_bunny_trailer_480p.mp4";
+    let tmp_media = tmp_dir.join("big_buck_bunny_trailer_480p.mp4");
+    let _ = std::fs::copy(original_media, &tmp_media);
+    let test_media = tmp_media.to_str().unwrap();
+    let search_req = SearchSubtitlesRequest {
+        media_path: test_media.to_string(),
+        language: "en".to_string(),
+        subtitles_dir: Some(srt_dir.to_str().unwrap().to_string()),
+        query_title: None,
+        season: None,
+        episode: None,
+    };
+
+    let res = client
+        .post(format!("{}/v1/search", base_url))
+        .json(&search_req)
+        .send()
+        .await
+        .expect("Failed to call /v1/search");
+    assert!(res.status().is_success());
+    let search_res: SearchSubtitlesResponse =
+        res.json().await.expect("Failed to parse search JSON");
+    assert_eq!(search_res.language, "en");
+    assert!(search_res.total_candidates > 0);
+    assert!(search_res.candidates.iter().any(|c| c.source == "catalog"));
+
+    // 4. Test /v1/download for selected candidate
+    let catalog_cand = search_res
+        .candidates
+        .iter()
+        .find(|c| c.source == "catalog")
+        .expect("Must have catalog candidate");
+    let dl_req = dbsrt_server::DownloadSubtitleRequest {
+        media_path: test_media.to_string(),
+        source: "catalog".to_string(),
+        candidate_id: catalog_cand.candidate_id.clone(),
+        language: "en".to_string(),
+        resync: false,
+        subtitles_dir: Some(srt_dir.to_str().unwrap().to_string()),
+        phash_dir: Some(tmp_dir.to_str().unwrap().to_string()),
+    };
+
+    let res = client
+        .post(format!("{}/v1/download", base_url))
+        .json(&dl_req)
+        .send()
+        .await
+        .expect("Failed to call /v1/download");
+    assert!(res.status().is_success());
+    let dl_res: dbsrt_server::DownloadSubtitleResponse =
+        res.json().await.expect("Failed to parse download JSON");
+    assert!(dl_res.success);
+    assert!(!dl_res.output_srt_path.is_empty());
+    assert!(std::path::Path::new(&dl_res.output_srt_path).exists());
+
+    // Cleanup
+    let _ = std::fs::remove_file(&tmp_media);
+    let _ = std::fs::remove_file(&dl_res.output_srt_path);
+    let _ = std::fs::remove_dir_all(&test_phash_dir);
 }

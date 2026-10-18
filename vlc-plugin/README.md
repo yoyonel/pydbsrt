@@ -1,34 +1,44 @@
-# Plugin VLC dbsrt Subtitle Auto-Sync
+# Plugin VLC dbsrt Subtitle Auto-Sync (v2.0)
 
-> Extension Lua officielle pour VLC Media Player pour la détection et synchronisation automatique de sous-titres par analyse visuelle des frames (DCT-II SIMD).
+> Extension Lua officielle pour VLC Media Player pour la détection et synchronisation automatique de sous-titres par analyse visuelle des frames (DCT-II SIMD) avec affichage On-Screen Display (OSD).
 
----
+## 1. Démonstration Visuelle
 
-## 1. Fonctionnement
-
-Contrairement au plugin VLSub traditionnel qui se base sur le hash binaire d'OpenSubtitles (qui échoue dès qu'une vidéo est réencodée ou provient d'une release différente) :
-
-1. L'extension VLC `dbsrt_subsync.lua` lit l'URI de la vidéo en cours de lecture dans VLC.
-2. Elle interroge le microservice local Rust `dbsrt-server` (sur `http://127.0.0.1:8080/v1/retarget`).
-3. Le serveur analyse les cuts visuels, extrait les empreintes pHash et résout le consensus de décalage temporel $\Delta t$.
-4. Le sous-titre recalé est généré et injecté **directement à chaud** dans VLC via l'API `vlc.input.add_subtitle()`.
+![Démonstration Plugin VLC v2.0](../docs/assets/vlc-v2/03_autosync_completed.png)
 
 ---
 
-## 2. Installation Rapide
+## 2. Fonctionnalités v2.0
+
+* **Auto-Sync Événementiel Zero-Click** : Dès qu'une vidéo démarre dans VLC, l'écouteur `input_changed` contacte `dbsrt-server` en arrière-plan sans bloquer la lecture.
+* **Notification OSD Native LibVLC** : Feedback visuel incrusté en surimpression sur la vidéo (`✓ dbsrt: [FR] Synced (+0.12s, 96% conf) via container`).
+* **Recherche Multi-Sources (`/v1/search`)** : Inspection unifiée des pistes conteneur (MKV/MP4), du catalogue local pHash, et du provider distant OpenSubtitles.
+* **Panneau de Contrôle Interactif (Qt)** :
+  * Sélecteur de langue rapide (`[FR]`, `[EN]`, `[AUTO]`).
+  * Interrupteur Auto-Sync on/off.
+  * Télémétrie daemon (`/v1/status` : uptime, version, nombre de médias indexés).
+* **Interface Console Headless (`cvlc`)** : Interface `dbsrt_intf.lua` pour CI/CD et pipelines de scripts autonomes avec terminaison déterministe (`DBSRT_AUTOKILL=1`).
+
+---
+
+## 3. Guide d'Installation & Utilisation
 
 ```bash
-# 1. Compiler et lancer le daemon Rust
-task server:build
-task server:run  # écoute sur http://127.0.0.1:8080
-
-# 2. Installer l'extension dans VLC (copie dans ~/.local/share/vlc/lua/extensions/)
+# 1. Compiler et déployer les plugins VLC dans ~/.local/share/vlc/lua/
 task vlc:install-plugin
+
+# 2. Démarrer le daemon backend en arrière-plan
+task server:daemon
+
+# 3. Vérifier la télémétrie du daemon
+task server:status
+
+# 4. Tester l'intégration headless avec cvlc
+task vlc:test-cvlc
 ```
 
-Puis dans VLC :
-1. Redémarrer VLC (ou aller dans `Outils` > `Extensions et greffons` > recharger).
-2. Lancer la lecture d'une vidéo.
-3. Ouvrir le menu **`Vue`** > **`dbsrt Subtitle Auto-Sync`**.
-4. Cliquer sur **`⚡ Auto-Sync Subtitle`**.
-5. Le sous-titre est synchronisé et appliqué automatiquement à la milliseconde près !
+### Utilisation dans VLC (Interface Graphique) :
+1. Démarrer VLC et lancer une vidéo.
+2. Si l'auto-sync est activé, une notification OSD apparaît automatiquement à l'écran confirmant le calage.
+3. Pour ouvrir le panneau de contrôle : Menu **`Vue`** > **`dbsrt Subtitle Auto-Sync`**.
+4. Cliquer sur **`🔍 Search Candidates`** pour explorer les pistes disponibles ou **`⚡ Auto-Sync Subtitle`** pour forcer un réalignement.

@@ -175,19 +175,23 @@ flowchart TD
 * **Auto-sélection de port & Résilience** :
   - Port par défaut : `8765` (configurable via `--port` ou variable d'environnement `DBSRT_PORT`).
   - Détection automatique de conflit : si le port est occupé (`AddrInUse`), le serveur teste automatiquement les ports incrémentaux (`8766`, `8767`, etc.) sans planter.
-* **Publication Service Discovery** :
+* **Publication Service Discovery & Télémétrie** :
   - À l'initialisation, le serveur écrit `/tmp/dbsrt-server.json` contenant `{ "host": "127.0.0.1", "port": 8765, "pid": ..., "url": "..." }`.
+  - Endpoint `GET /v1/status` : exposition en temps réel du statut, uptime, versions et volumétrie d'index (`indexed_phash_count`).
+  - Endpoint `POST /v1/search` : exploration multi-sources unifiée des sous-titres (conteneur MKV/MP4, catalogue local pHash, et providers distants OpenSubtitles REST).
   - Au signal d'arrêt (SIGINT / Ctrl-C), le fichier temporaire est automatiquement nettoyé.
 
-### 3.2 L'Extension Graphique VLC : `dbsrt_subsync.lua`
+### 3.2 L'Extension Graphique VLC : `dbsrt_subsync.lua` (v2.0)
 * **Localisation** : `~/.local/share/vlc/lua/extensions/dbsrt_subsync.lua`.
-* **Capacités VLC** : `capabilities = { "menu", "input-listener" }` (enregistrement sous l'indicateur interne `0x5`).
-* **Comportement** :
-  - S'affiche dans le menu `Vue > dbsrt Subtitle Auto-Sync`.
-  - Détecte dynamiquement la vidéo en cours de lecture.
-  - Découvre le démon via `/tmp/dbsrt-server.json` sans aucune configuration manuelle de l'utilisateur.
-  - Pré-remplit automatiquement le chemin du sous-titre de référence grâce à une recherche heuristique locale (`.en.srt`, `.srt`, `data/SRT/`).
-  - Déclenche la synchronisation en un clic et injecte le fichier calé via `vlc.input.add_subtitle()`.
+* **Capacités VLC** : `capabilities = { "menu", "input-listener" }`.
+* **Comportement v2.0** :
+  - **Auto-Sync Événementiel Zero-Click** : Dès qu'une vidéo commence à jouer, le callback `input_changed()` est déclenché par VLC. Il contacte `dbsrt-server` de manière asynchrone et injecte le meilleur sous-titre sans intervention utilisateur.
+  - **Notification OSD Native** : Incrustation visuelle directe sur la vidéo (`vlc.osd.message`) affichant la langue, le décalage $\Delta t$ résolu et la source (`[container]`, `[catalog]`, `[opensubtitles]`).
+  - **Panneau de Contrôle Qt Interactif** :
+    - Boutons rapides de langue (`[FR]`, `[EN]`, `[AUTO]`).
+    - Bouton `🔍 Search Candidates` pour lister toutes les pistes trouvées.
+    - Bouton `🔄 Ping` pour vérifier l'état du daemon en direct.
+    - Interrupteur ON/OFF pour l'auto-sync au démarrage.
 
 ### 3.3 L'Interface Console Headless : `dbsrt_intf.lua`
 * **Localisation** : `~/.local/share/vlc/lua/intf/dbsrt_intf.lua`.
@@ -199,7 +203,7 @@ flowchart TD
 * **Fonctionnement 100% autonome** :
   - Ne requiert aucun environnement graphique ni module Qt.
   - Écoute les événements du lecteur (`vlc.playlist.status() == "playing"`).
-  - Détecte l'URI du média actif, trouve le SRT local correspondant, appelle `dbsrt-server`, et injecte la piste calée au vol dès la première seconde de lecture.
+  - Trace la source du sous-titre et supporte la terminaison événementielle déterministe via `DBSRT_AUTOKILL=1`.
 
 ---
 
