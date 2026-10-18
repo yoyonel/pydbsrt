@@ -1,0 +1,1875 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>dbsrt Studio — Relational Couplings & pHash Backoffice</title>
+  <style>
+    :root {
+      --bg-base: #090d16;
+      --bg-surface: #0f1623;
+      --bg-elevated: #161f30;
+      --bg-hover: #1e293b;
+      --border: #26334d;
+      --border-subtle: #1b2538;
+      --text-primary: #f1f5f9;
+      --text-secondary: #94a3b8;
+      --text-muted: #64748b;
+      --accent-blue: #38bdf8;
+      --accent-indigo: #818cf8;
+      --accent-emerald: #34d399;
+      --accent-amber: #fbbf24;
+      --accent-rose: #fb7185;
+      --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      --font-mono: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: var(--bg-base);
+      color: var(--text-primary);
+      font-family: var(--font-sans);
+      font-size: 14px;
+      line-height: 1.5;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Top Header */
+    header {
+      background: rgba(15, 22, 35, 0.9);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 50;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .brand-logo {
+      width: 34px;
+      height: 34px;
+      border-radius: 8px;
+      background: linear-gradient(135deg, #38bdf8 0%, #6366f1 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-family: var(--font-mono);
+      color: #090d16;
+      font-size: 15px;
+      box-shadow: 0 0 18px rgba(56, 189, 248, 0.35);
+    }
+    .brand-title {
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+    .brand-sub {
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    /* Pills & Badges */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      font-family: var(--font-mono);
+      border: 1px solid transparent;
+    }
+    .badge-emerald {
+      background: rgba(52, 211, 153, 0.12);
+      color: var(--accent-emerald);
+      border-color: rgba(52, 211, 153, 0.3);
+    }
+    .badge-amber {
+      background: rgba(251, 191, 36, 0.12);
+      color: var(--accent-amber);
+      border-color: rgba(251, 191, 36, 0.3);
+    }
+    .badge-blue {
+      background: rgba(56, 189, 248, 0.12);
+      color: var(--accent-blue);
+      border-color: rgba(56, 189, 248, 0.3);
+    }
+    .badge-indigo {
+      background: rgba(129, 140, 248, 0.14);
+      color: var(--accent-indigo);
+      border-color: rgba(129, 140, 248, 0.3);
+    }
+    .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    .btn {
+      background: var(--bg-elevated);
+      color: var(--text-primary);
+      border: 1px solid var(--border);
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s ease;
+    }
+    .btn:hover {
+      background: var(--bg-hover);
+      border-color: var(--accent-blue);
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, #0284c7 0%, #4f46e5 100%);
+      border-color: rgba(56, 189, 248, 0.4);
+      color: #fff;
+    }
+    .btn-primary:hover {
+      filter: brightness(1.12);
+    }
+
+    /* Main Container */
+    main {
+      max-width: 1560px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 20px 24px 48px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    /* Relational ER Schema Banner */
+    .schema-section {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px 20px;
+    }
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px;
+    }
+    .section-title {
+      font-size: 13px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-secondary);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .er-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+      gap: 12px;
+      align-items: stretch;
+    }
+    .er-card {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      position: relative;
+    }
+    .er-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .er-table-name {
+      font-family: var(--font-mono);
+      font-weight: 700;
+      font-size: 13px;
+      color: var(--accent-blue);
+    }
+    .er-count {
+      font-family: var(--font-mono);
+      font-size: 18px;
+      font-weight: 800;
+      color: var(--text-primary);
+    }
+    .er-cols {
+      list-style: none;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-secondary);
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+    .er-cols li span.pk { color: var(--accent-amber); font-weight: 700; }
+    .er-cols li span.fk { color: var(--accent-indigo); font-weight: 700; }
+    .er-cols li span.idx { color: var(--accent-emerald); }
+
+    /* Navigation Tabs */
+    .tabs {
+      display: flex;
+      gap: 8px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 0;
+    }
+    .tab-btn {
+      background: transparent;
+      color: var(--text-secondary);
+      border: none;
+      border-bottom: 2px solid transparent;
+      padding: 10px 16px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.15s ease;
+    }
+    .tab-btn:hover {
+      color: var(--text-primary);
+    }
+    .tab-btn.active {
+      color: var(--accent-blue);
+      border-bottom-color: var(--accent-blue);
+      background: rgba(56, 189, 248, 0.06);
+    }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    /* Split Explorer Layout */
+    .explorer-layout {
+      display: grid;
+      grid-template-columns: 360px 1fr;
+      gap: 18px;
+      align-items: start;
+    }
+    @media (max-width: 1024px) {
+      .explorer-layout { grid-template-columns: 1fr; }
+    }
+
+    .panel-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    .panel-card-header {
+      padding: 12px 16px;
+      background: var(--bg-elevated);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-weight: 600;
+      font-size: 13px;
+    }
+
+    /* Coupling List Items & Scalable Sidebar Toolbar */
+    .sidebar-toolbar {
+      padding: 12px 14px;
+      background: var(--bg-card);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .sidebar-search-wrap {
+      position: relative;
+      display: flex;
+      align-items: center;
+    }
+    .sidebar-search-wrap input {
+      width: 100%;
+      padding-right: 28px;
+    }
+    .sidebar-search-clear {
+      position: absolute;
+      right: 6px;
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 14px;
+      line-height: 1;
+      padding: 2px 4px;
+    }
+    .sidebar-search-clear:hover { color: var(--text-primary); }
+    .sidebar-facets {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+    .sidebar-facets select {
+      width: 100%;
+      padding: 5px 6px;
+      font-size: 11px;
+    }
+    .sidebar-pagination {
+      padding: 8px 12px;
+      background: var(--bg-elevated);
+      border-bottom: 1px solid var(--border);
+      border-top: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      font-family: var(--font-mono);
+      color: var(--text-secondary);
+    }
+    .media-list {
+      display: flex;
+      flex-direction: column;
+    }
+    .media-item {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border-subtle);
+      cursor: pointer;
+      transition: background 0.12s ease;
+    }
+    .media-item:hover { background: var(--bg-hover); }
+    .media-item.active {
+      background: rgba(56, 189, 248, 0.1);
+      border-left: 3px solid var(--accent-blue);
+    }
+    .media-item-title {
+      font-weight: 700;
+      font-size: 12.5px;
+      word-break: break-all;
+      margin-bottom: 5px;
+      color: var(--text-primary);
+      line-height: 1.35;
+    }
+    .media-item-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      font-size: 11px;
+      font-family: var(--font-mono);
+      color: var(--text-secondary);
+    }
+
+    /* Subtitle Track Selector & Timeline */
+    .detail-body {
+      padding: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+    .sub-tabs {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .sub-pill {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      color: var(--text-secondary);
+      padding: 7px 14px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 600;
+      font-family: var(--font-mono);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .sub-pill.active {
+      background: rgba(52, 211, 153, 0.14);
+      border-color: var(--accent-emerald);
+      color: var(--accent-emerald);
+    }
+
+    .meta-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 10px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      padding: 12px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+    }
+    .meta-kv label {
+      display: block;
+      font-size: 10px;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      margin-bottom: 2px;
+    }
+    .meta-kv span {
+      color: var(--text-primary);
+      word-break: break-all;
+    }
+
+    /* Timeline Bar (Dual-Track: Overview Minimap + Zoomed Page Window) */
+    .timeline-box {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .timeline-label {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 11px;
+      font-family: var(--font-mono);
+      color: var(--text-secondary);
+    }
+    .timeline-minimap {
+      position: relative;
+      height: 14px;
+      background: #090d16;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      overflow: hidden;
+      cursor: pointer;
+    }
+    .timeline-minimap-tick {
+      position: absolute;
+      top: 2px;
+      bottom: 2px;
+      width: 2px;
+      background: rgba(52, 211, 153, 0.35);
+      pointer-events: none;
+    }
+    .timeline-viewport {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      background: rgba(56, 189, 248, 0.22);
+      border-left: 2px solid var(--accent-blue);
+      border-right: 2px solid var(--accent-blue);
+      pointer-events: none;
+    }
+    .timeline-track {
+      position: relative;
+      height: 36px;
+      background: #090d16;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    .timeline-cue {
+      position: absolute;
+      top: 4px;
+      bottom: 4px;
+      background: linear-gradient(180deg, rgba(52, 211, 153, 0.82), rgba(16, 185, 129, 0.45));
+      border: 1px solid var(--accent-emerald);
+      border-radius: 4px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 700;
+      color: #042f2e;
+      transition: transform 0.1s ease, filter 0.1s ease, border-color 0.1s ease;
+    }
+    .timeline-cue:hover {
+      filter: brightness(1.25);
+      z-index: 6;
+      border-color: #fff;
+    }
+    .timeline-cue.active-cue {
+      background: linear-gradient(180deg, #38bdf8, #0284c7);
+      border: 2px solid #fff;
+      color: #082f49;
+      z-index: 8;
+      box-shadow: 0 0 10px rgba(56, 189, 248, 0.6);
+    }
+
+    /* Active Cue & pHash Loupe Inspector Card */
+    .cue-inspector {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 16px;
+      align-items: center;
+      background: linear-gradient(135deg, rgba(17, 24, 39, 0.95), rgba(30, 41, 59, 0.75));
+      border: 1px solid rgba(56, 189, 248, 0.4);
+      border-radius: 8px;
+      padding: 12px 16px;
+    }
+    .cue-inspector-phash {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding-right: 14px;
+      border-right: 1px solid var(--border);
+    }
+    .phash-canvas-lg {
+      width: 56px;
+      height: 56px;
+      border-radius: 6px;
+      border: 1px solid var(--accent-blue);
+      image-rendering: pixelated;
+      background: #000;
+      flex-shrink: 0;
+    }
+
+    /* Pagination Toolbar */
+    .pagination-bar {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 12px;
+    }
+    .pagination-controls {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .page-btn {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      color: var(--text-primary);
+      padding: 4px 10px;
+      border-radius: 5px;
+      font-size: 12px;
+      font-family: var(--font-mono);
+      cursor: pointer;
+      transition: all 0.12s ease;
+    }
+    .page-btn:hover:not(:disabled) {
+      border-color: var(--accent-blue);
+      color: var(--accent-blue);
+    }
+    .page-btn.active {
+      background: var(--accent-blue);
+      border-color: var(--accent-blue);
+      color: #090d16;
+      font-weight: 700;
+    }
+    .page-btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    /* Tables */
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+      font-size: 13px;
+    }
+    th {
+      background: var(--bg-elevated);
+      color: var(--text-secondary);
+      font-weight: 600;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    td {
+      padding: 9px 12px;
+      border-bottom: 1px solid var(--border-subtle);
+      vertical-align: middle;
+    }
+    tr.cue-row {
+      cursor: pointer;
+    }
+    tr:hover td {
+      background: rgba(30, 41, 59, 0.55);
+    }
+    tr.highlight-row td {
+      background: rgba(56, 189, 248, 0.2) !important;
+    }
+    .mono {
+      font-family: var(--font-mono);
+      font-size: 12px;
+    }
+    .phash-cell {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .phash-canvas {
+      width: 32px;
+      height: 32px;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+      image-rendering: pixelated;
+      background: #000;
+      flex-shrink: 0;
+    }
+
+    /* Forms & Inputs */
+    .form-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: flex-end;
+      margin-bottom: 14px;
+    }
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      flex: 1;
+      min-width: 200px;
+    }
+    .field label {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-secondary);
+    }
+    input[type="text"], input[type="number"], select {
+      background: var(--bg-base);
+      border: 1px solid var(--border);
+      color: var(--text-primary);
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-family: var(--font-mono);
+    }
+    input[type="text"]:focus, input[type="number"]:focus, select:focus {
+      outline: none;
+      border-color: var(--accent-blue);
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <div class="brand-logo">dS</div>
+      <div>
+        <div class="brand-title">dbsrt Studio <span style="color:var(--accent-blue);font-weight:500;font-size:13px;">Relational Backoffice</span></div>
+        <div class="brand-sub">Ground-Truth Couplings (Video Frames / pHash &lt;-&gt; Subtitles) &amp; PostgreSQL 17 SP-GiST</div>
+      </div>
+    </div>
+    <div class="header-actions">
+      <span id="pg-status-badge" class="badge badge-amber"><span class="dot"></span>PG: checking...</span>
+      <span id="phash-count-badge" class="badge badge-blue">0 .phash indexed</span>
+      <span id="cert-count-badge" class="badge badge-emerald">0 certified couplings</span>
+      <a href="http://127.0.0.1:8086" target="_blank" rel="noopener" class="btn" title="Open PgWeb PostgreSQL Explorer">PgWeb (:8086) ↗</a>
+      <a href="http://127.0.0.1:8000" target="_blank" rel="noopener" class="btn" title="Open MkDocs Documentation Portal">Docs (:8000) ↗</a>
+      <button class="btn btn-primary" onclick="loadStudioData()">↻ Refresh</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- Relational ER Model & Live Counters -->
+    <section class="schema-section">
+      <div class="section-header">
+        <div class="section-title">
+          <span>PostgreSQL 17 Relational Schema &amp; Zero-DB Hybrid Store</span>
+        </div>
+        <div class="mono" style="font-size:11px;color:var(--text-secondary);" id="registry-path-label">Registry: data/SRT/couplings.json</div>
+      </div>
+      <div class="er-grid">
+        <div class="er-card">
+          <div class="er-card-header">
+            <span class="er-table-name">1. medias</span>
+            <span class="er-count" id="cnt-medias">-</span>
+          </div>
+          <ul class="er-cols">
+            <li><span class="pk">PK</span> id (BIGSERIAL)</li>
+            <li><span class="idx">UQ</span> media_hash (CHAR(32) SHA256)</li>
+            <li>name (VARCHAR) · fps (REAL)</li>
+          </ul>
+        </div>
+        <div class="er-card">
+          <div class="er-card-header">
+            <span class="er-table-name">2. frames (BK-Tree)</span>
+            <span class="er-count" id="cnt-frames">-</span>
+          </div>
+          <ul class="er-cols">
+            <li><span class="fk">FK</span> media_id → medias.id</li>
+            <li>frame_offset (INT4)</li>
+            <li><span class="idx">SP-GiST</span> p_hash (INT8 bktree_ops)</li>
+          </ul>
+        </div>
+        <div class="er-card">
+          <div class="er-card-header">
+            <span class="er-table-name">3. subtitles</span>
+            <span class="er-count" id="cnt-subtitles">-</span>
+          </div>
+          <ul class="er-cols">
+            <li><span class="pk">PK</span> id · <span class="fk">FK</span> media_id → medias.id</li>
+            <li><span class="idx">UQ</span> subtitles_hash (CHAR(32))</li>
+            <li>lang · srt_path · certified (BOOL)</li>
+          </ul>
+        </div>
+        <div class="er-card">
+          <div class="er-card-header">
+            <span class="er-table-name">4. sub_frames</span>
+            <span class="er-count" id="cnt-sub-frames">-</span>
+          </div>
+          <ul class="er-cols">
+            <li><span class="fk">FK</span> subtitles_id → subtitles.id</li>
+            <li>index · start_frame_offset · end_frame_offset</li>
+            <li><span class="idx">JOIN</span> frames.p_hash + cue text</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- Navigation Tabs -->
+    <div class="tabs">
+      <button class="tab-btn active" id="tab-btn-couplings" onclick="switchTab('couplings', this)">
+        ✓ Certified Couplings &amp; <code>sub_frames</code> Inspector
+      </button>
+      <button class="tab-btn" id="tab-btn-catalog" onclick="switchTab('catalog', this)">
+        🎞️ Indexed <code>.phash</code> Catalog (<span id="tab-phash-cnt">0</span>)
+      </button>
+      <button class="tab-btn" id="tab-btn-playground" onclick="switchTab('playground', this)">
+        ⚡ Live Search &amp; Certify Playground
+      </button>
+    </div>
+
+    <!-- TAB 1: Certified Couplings & sub_frames Inspector -->
+    <section id="tab-couplings" class="tab-panel active">
+      <div class="explorer-layout">
+        <!-- Left Sidebar: Scalable Media Navigator (Search + Facets + Sort + Pagination) -->
+        <div class="panel-card">
+          <div class="panel-card-header">
+            <span>Certified Reference Medias</span>
+            <span class="badge badge-emerald" id="couplings-list-count">0</span>
+          </div>
+
+          <div class="sidebar-toolbar">
+            <div class="sidebar-search-wrap">
+              <input
+                type="text"
+                id="media-search-input"
+                placeholder="🔍 Search media, S01E01, SHA256... (press /)"
+                oninput="onMediaFilterChange()"
+              />
+              <button class="sidebar-search-clear" onclick="clearMediaSearch()" title="Clear search">×</button>
+            </div>
+            <div class="sidebar-facets">
+              <select id="media-lang-filter" onchange="onMediaFilterChange()" title="Filter by certified language">
+                <option value="all">🌐 All Languages</option>
+                <option value="fr">🇫🇷 FR Certified</option>
+                <option value="en">🇬🇧 EN Certified</option>
+                <option value="multi">📚 Multi-Lang (2+)</option>
+              </select>
+              <select id="media-store-filter" onchange="onMediaFilterChange()" title="Filter by storage engine">
+                <option value="all">💾 All Stores</option>
+                <option value="pg">🐘 PG + JSON</option>
+                <option value="json">📄 JSON Only</option>
+              </select>
+            </div>
+            <div class="sidebar-facets">
+              <select id="media-sort-select" onchange="onMediaFilterChange()" title="Sort medias">
+                <option value="frames_desc">↕ Sort: Frames (High→Low)</option>
+                <option value="name_asc">↕ Sort: Name (A→Z)</option>
+                <option value="cues_desc">↕ Sort: Total Cues (High→Low)</option>
+                <option value="fps_desc">↕ Sort: FPS (High→Low)</option>
+              </select>
+              <select id="media-pagesize-select" onchange="onMediaPageSizeChange(parseInt(this.value, 10))" title="Medias per page">
+                <option value="10" selected>10 medias / page</option>
+                <option value="25">25 medias / page</option>
+                <option value="50">50 medias / page</option>
+                <option value="100">100 medias / page</option>
+              </select>
+            </div>
+          </div>
+
+          <div id="media-pagination-top"></div>
+          <div class="media-list" id="couplings-media-list">
+            <div style="padding:20px;color:var(--text-secondary);">Loading certified couplings...</div>
+          </div>
+          <div id="media-pagination-bottom"></div>
+        </div>
+
+        <!-- Right Detail Workspace: Server-Backed Paginated sub_frames Inspector -->
+        <div class="panel-card">
+          <div class="panel-card-header">
+            <span id="detail-media-title">Select a certified media</span>
+            <div id="detail-badges" style="display:flex;gap:6px;"></div>
+          </div>
+          <div class="detail-body" id="detail-body">
+            <div style="color:var(--text-secondary);">Select a media on the left to inspect its certified subtitle tracks and <code>sub_frames</code> pHash anchors.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 2: Indexed .phash Catalog (Multi-Facet Search, Sort & Pagination for 100k+ files) -->
+    <section id="tab-catalog" class="tab-panel">
+      <div class="panel-card">
+        <div class="panel-card-header" style="flex-wrap:wrap;gap:10px;">
+          <span>Memory-Mapped <code>.phash</code> Fingerprint Catalog (<code>/tmp</code> + <code>data/__PHASH__</code>)</span>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+            <input type="text" id="catalog-filter" placeholder="🔍 Search title, S01E01, group, codec..." oninput="onCatalogFilterInput()" style="width:260px;" />
+            <select id="catalog-status-filter" onchange="onCatalogFilterInput()">
+              <option value="all">All Statuses</option>
+              <option value="certified">✓ Certified Coupling Only</option>
+              <option value="uncoupled">Uncoupled (.phash only)</option>
+            </select>
+            <select id="catalog-fps-filter" onchange="onCatalogFilterInput()">
+              <option value="all">All FPS</option>
+              <option value="24">23.98 / 24 fps (Cinema/WEB)</option>
+              <option value="25">25 fps (PAL)</option>
+              <option value="30">29.97 / 30 fps (NTSC)</option>
+            </select>
+            <select id="catalog-sort" onchange="onCatalogFilterInput()">
+              <option value="certified_first">↕ Sort: Certified First</option>
+              <option value="name_asc">↕ Sort: Name (A→Z)</option>
+              <option value="frames_desc">↕ Sort: Frames (High→Low)</option>
+              <option value="size_desc">↕ Sort: Size (High→Low)</option>
+            </select>
+            <button class="btn" onclick="resetCatalogFilters()">Reset</button>
+          </div>
+        </div>
+        <div style="padding:16px;display:flex;flex-direction:column;gap:12px;">
+          <div id="catalog-pagination-top"></div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th style="width:55px;">#</th>
+                  <th>Media Stem / Release Name</th>
+                  <th style="width:85px;">FPS</th>
+                  <th style="width:110px;">Frames</th>
+                  <th style="width:120px;">Approx Duration</th>
+                  <th style="width:100px;">Size</th>
+                  <th style="width:180px;">Coupling Status</th>
+                  <th style="width:150px;">Quick Action</th>
+                </tr>
+              </thead>
+              <tbody id="catalog-tbody"></tbody>
+            </table>
+          </div>
+          <div id="catalog-pagination-bottom"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 3: Live Search & Certify Playground -->
+    <section id="tab-playground" class="tab-panel">
+      <div class="panel-card" style="margin-bottom:16px;">
+        <div class="panel-card-header">
+          <span>🎬 Quick Presets — Real TV Show Releases &amp; Test Fixtures</span>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button class="btn" onclick="applyPreset('kingdom1')">Kingdom S01E01 (FR/EN)</button>
+            <button class="btn" onclick="applyPreset('loop1')">Tales From The Loop S01E01 (FR/EN)</button>
+            <button class="btn" onclick="applyPreset('mando3')">The Mandalorian S01E03 (FR/EN)</button>
+            <button class="btn" onclick="applyPreset('silicon1')">Silicon Valley S02E01 (EN)</button>
+            <button class="btn" onclick="applyPreset('rick1')">Rick and Morty S04E01 (EN)</button>
+            <button class="btn" onclick="applyPreset('bbb')">Big Buck Bunny (480p)</button>
+          </div>
+        </div>
+      </div>
+      <div class="explorer-layout" style="grid-template-columns: 1fr 1fr;">
+        <div class="panel-card">
+          <div class="panel-card-header">
+            <span>🔍 Test <code>POST /v1/search</code> (pHash / MovieHash / Name)</span>
+          </div>
+          <div class="detail-body">
+            <div class="form-row">
+              <div class="field">
+                <label>Media or <code>.phash</code> Path</label>
+                <input type="text" id="search-media-path" value="data/__PHASH__/Kingdom.(2019).S01E01.Episode.1.1080p.NF.WEB-DL.DD5.1.x264-MZABI.phash" />
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="field">
+                <label>Search Mode</label>
+                <select id="search-mode">
+                  <option value="phash">phash (Visual 2D DCT-II Fingerprint)</option>
+                  <option value="hash">hash (OpenSubtitles 64-bit MovieHash)</option>
+                  <option value="name">name (Title / Season / Episode)</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>Language</label>
+                <select id="search-lang">
+                  <option value="fr">fr (French)</option>
+                  <option value="en">en (English)</option>
+                  <option value="all">all (All Languages)</option>
+                </select>
+              </div>
+              <button class="btn btn-primary" style="height:36px;" onclick="runLiveSearch()">Run Search</button>
+            </div>
+            <div id="search-result-box" class="mono" style="font-size:12px;color:var(--text-secondary);"></div>
+          </div>
+        </div>
+
+        <div class="panel-card">
+          <div class="panel-card-header">
+            <span>🛡️ Certify Ground-Truth Coupling (<code>POST /v1/certify</code>)</span>
+          </div>
+          <div class="detail-body">
+            <div class="form-row">
+              <div class="field">
+                <label>Reference Media or <code>.phash</code> Path</label>
+                <input type="text" id="cert-media-path" value="data/__PHASH__/Kingdom.(2019).S01E01.Episode.1.1080p.NF.WEB-DL.DD5.1.x264-MZABI.phash" />
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="field">
+                <label>Synchronized Subtitle Path (.srt)</label>
+                <input type="text" id="cert-srt-path" value="data/SRT/Kingdom.(2019).S01E01.Episode.1.1080p.NF.WEB-DL.DD5.1.x264-MZABI.fr.srt" />
+              </div>
+              <div class="field" style="max-width:110px;">
+                <label>Language</label>
+                <input type="text" id="cert-lang" value="fr" />
+              </div>
+              <button class="btn btn-primary" style="height:36px;" onclick="runLiveCertify()">Certify Coupling</button>
+            </div>
+            <div id="cert-result-box" class="mono" style="font-size:12px;color:var(--text-secondary);"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    let studioState = null;
+    // Selected media is tracked by media_hash so sorting/filtering/paging never loses selection
+    let selectedMediaHash = null;
+    let selectedSubIdx = 0;
+
+    // Left Sidebar Media List State (scales to 10,000+ certified medias)
+    let mediaPage = 1;
+    let mediaPageSize = 10;
+
+    // Right Workspace Server-Backed sub_frames State
+    let subFramesPageData = null;
+    let selectedCueIdx = 1;
+    let cuePage = 1;
+    let cuePageSize = 50;
+    let cueSearchQuery = '';
+    let cueSearchDebounceTimer = null;
+
+    // Tab 2 Catalog State (scales to 100,000+ .phash files)
+    let catalogPage = 1;
+    let catalogPageSize = 50;
+
+    let initialLoadDone = false;
+
+    const PAGE_SIZE_OPTIONS = [25, 50, 100, 150, 250];
+
+    // Press '/' anywhere outside an input to focus the media search box
+    document.addEventListener('keydown', (e) => {
+      if (e.key === '/' && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) {
+        e.preventDefault();
+        const input = document.getElementById('media-search-input');
+        if (input) input.focus();
+      }
+    });
+
+    const PRESETS = {
+      kingdom1: {
+        media: 'data/__PHASH__/Kingdom.(2019).S01E01.Episode.1.1080p.NF.WEB-DL.DD5.1.x264-MZABI.phash',
+        srt: 'data/SRT/Kingdom.(2019).S01E01.Episode.1.1080p.NF.WEB-DL.DD5.1.x264-MZABI.fr.srt',
+        lang: 'fr'
+      },
+      loop1: {
+        media: 'data/__PHASH__/Tales.From.The.Loop.S01E01.1080p.AMZN.WEBRip.DDP5.1.x264-AJP69.phash',
+        srt: 'data/SRT/Tales.From.The.Loop.S01E01.1080p.AMZN.WEBRip.DDP5.1.x264-AJP69.fr.srt',
+        lang: 'fr'
+      },
+      mando3: {
+        media: 'data/__PHASH__/The.Mandalorian.S01E03.iNTERNAL.720p.WEB.H264-AMRAP.phash',
+        srt: 'data/SRT/The.Mandalorian.S01E03.iNTERNAL.720p.WEB.H264-AMRAP.fr.srt',
+        lang: 'fr'
+      },
+      silicon1: {
+        media: 'data/__PHASH__/Silicon.Valley.S02E01.Sand.Hill.Shuffle.1080p.AMZN.WEB-DL.DD.5.1.H.265-SiGMA.phash',
+        srt: 'data/SRT/Silicon.Valley.S02E01.Sand.Hill.Shuffle.1080p.AMZN.WEB-DL.DD.5.1.H.265-SiGMA.en.srt',
+        lang: 'en'
+      },
+      rick1: {
+        media: 'data/__PHASH__/Rick.and.Morty.S04E01.Edge.of.Tomorty.Rick.Die.Rickpeat.1080p.AMZN.WEB-DL.DD+5.1.H.264-CtrlHD.phash',
+        srt: 'data/SRT/Rick.and.Morty.S04E01.Edge.of.Tomorty.Rick.Die.Rickpeat.1080p.AMZN.WEB-DL.DD+5.1.H.264-CtrlHD.en.srt',
+        lang: 'en'
+      },
+      bbb: {
+        media: 'tests/data/big_buck_bunny_trailer_480p.mp4',
+        srt: 'data/SRT/big_buck_bunny_trailer_480p.fr.srt',
+        lang: 'fr'
+      }
+    };
+
+    function applyPreset(key) {
+      const p = PRESETS[key];
+      if (!p) return;
+      document.getElementById('search-media-path').value = p.media;
+      document.getElementById('search-lang').value = p.lang;
+      document.getElementById('cert-media-path').value = p.media;
+      document.getElementById('cert-srt-path').value = p.srt;
+      document.getElementById('cert-lang').value = p.lang;
+    }
+
+    function switchTab(tabId, btnEl) {
+      document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.getElementById('tab-' + tabId).classList.add('active');
+      if (btnEl) {
+        btnEl.classList.add('active');
+      } else {
+        const autoBtn = document.getElementById('tab-btn-' + tabId);
+        if (autoBtn) autoBtn.classList.add('active');
+      }
+    }
+
+    function formatTimeFromFrame(frameOffset, fps) {
+      const f = fps > 0 ? fps : 25.0;
+      const totalSec = frameOffset / f;
+      const mins = Math.floor(totalSec / 60);
+      const secs = (totalSec % 60).toFixed(2).padStart(5, '0');
+      return `${String(mins).padStart(2, '0')}:${secs}`;
+    }
+
+    function formatDurationShort(frameCount, fps) {
+      const f = fps > 0 ? fps : 25.0;
+      const durSec = frameCount / f;
+      const mins = Math.floor(durSec / 60);
+      const secs = Math.round(durSec % 60);
+      return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+    }
+
+    function formatHexPhash(anchorPhash) {
+      if (anchorPhash === null || anchorPhash === undefined) return 'N/A';
+      return '0x' + BigInt(anchorPhash).toString(16).padStart(16, '0');
+    }
+
+    function countSetBitsHex(hexStr) {
+      if (!hexStr || hexStr === 'N/A') return 0;
+      const clean = hexStr.replace(/^0x/i, '').padStart(16, '0');
+      let ones = 0;
+      for (let i = 0; i < 16; i++) {
+        const nibble = parseInt(clean[i] || '0', 16) || 0;
+        ones += nibble.toString(2).split('1').length - 1;
+      }
+      return ones;
+    }
+
+    function drawPhashCanvas(canvas, hexStr) {
+      if (!canvas || !hexStr || hexStr === 'N/A') return;
+      const ctx = canvas.getContext('2d');
+      canvas.width = 8;
+      canvas.height = 8;
+      const clean = hexStr.replace(/^0x/i, '').padStart(16, '0');
+      let bits = '';
+      for (let i = 0; i < 16; i++) {
+        const nibble = parseInt(clean[i] || '0', 16) || 0;
+        bits += nibble.toString(2).padStart(4, '0');
+      }
+      for (let y = 0; y < 8; y++) {
+        for (let x = 0; x < 8; x++) {
+          const bit = bits[y * 8 + x] === '1';
+          ctx.fillStyle = bit ? '#38bdf8' : '#0f172a';
+          ctx.fillRect(x, y, 1, 1);
+        }
+      }
+    }
+
+    function buildPaginationBarHtml({ totalItems, page, pageSize, onPageFn, onSizeFn, label }) {
+      const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+      const safePage = Math.min(Math.max(1, page), totalPages);
+      const startItem = totalItems === 0 ? 0 : (safePage - 1) * pageSize + 1;
+      const endItem = Math.min(totalItems, safePage * pageSize);
+
+      const sizeOptionsHtml = PAGE_SIZE_OPTIONS.map(sz =>
+        `<option value="${sz}" ${sz === pageSize ? 'selected' : ''}>${sz} / page</option>`
+      ).join('');
+
+      const pages = [];
+      const windowRadius = 2;
+      for (let p = 1; p <= totalPages; p++) {
+        if (p === 1 || p === totalPages || (p >= safePage - windowRadius && p <= safePage + windowRadius)) {
+          pages.push(p);
+        } else if (pages[pages.length - 1] !== '...') {
+          pages.push('...');
+        }
+      }
+
+      const pageBtnsHtml = pages.map(p => {
+        if (p === '...') return `<span style="color:var(--text-muted);padding:0 4px;">…</span>`;
+        return `<button class="page-btn ${p === safePage ? 'active' : ''}" onclick="${onPageFn}(${p})">${p}</button>`;
+      }).join('');
+
+      return `
+        <div class="pagination-bar">
+          <div style="display:flex;align-items:center;gap:10px;font-size:12px;color:var(--text-secondary);">
+            <span class="mono">Showing <b style="color:var(--text-primary);">${startItem}–${endItem}</b> of <b style="color:var(--accent-blue);">${totalItems}</b> ${label}</span>
+            <select onchange="${onSizeFn}(parseInt(this.value, 10))" style="padding:4px 8px;font-size:12px;">
+              ${sizeOptionsHtml}
+            </select>
+          </div>
+          <div class="pagination-controls">
+            <button class="page-btn" ${safePage <= 1 ? 'disabled' : ''} onclick="${onPageFn}(1)" title="First Page">⟪</button>
+            <button class="page-btn" ${safePage <= 1 ? 'disabled' : ''} onclick="${onPageFn}(${safePage - 1})" title="Previous Page">‹ Prev</button>
+            ${pageBtnsHtml}
+            <button class="page-btn" ${safePage >= totalPages ? 'disabled' : ''} onclick="${onPageFn}(${safePage + 1})" title="Next Page">Next ›</button>
+            <button class="page-btn" ${safePage >= totalPages ? 'disabled' : ''} onclick="${onPageFn}(${totalPages})" title="Last Page">⟫</button>
+          </div>
+        </div>
+      `;
+    }
+
+    async function loadStudioData() {
+      try {
+        // Use summary=true so initial overview omits heavy sub_frames arrays and scales to 10,000+ medias
+        const res = await fetch('/v1/couplings?summary=true');
+        studioState = await res.json();
+        if (!initialLoadDone && studioState.couplings && studioState.couplings.length > 0) {
+          const richMedia = studioState.couplings.find(c => c.frame_count > 5000) || studioState.couplings[0];
+          selectedMediaHash = richMedia.media_hash;
+          initialLoadDone = true;
+        }
+        renderHeaderAndSchema();
+        renderMediaList();
+        await renderMediaDetail();
+        renderCatalogTable();
+      } catch (err) {
+        console.error('Failed to load /v1/couplings:', err);
+      }
+    }
+
+    function renderHeaderAndSchema() {
+      const s = studioState;
+      const pgBadge = document.getElementById('pg-status-badge');
+      if (s.postgres_connected) {
+        pgBadge.className = 'badge badge-emerald';
+        pgBadge.innerHTML = '<span class="dot"></span>PostgreSQL 17 SP-GiST: Connected';
+      } else {
+        pgBadge.className = 'badge badge-amber';
+        pgBadge.innerHTML = '<span class="dot"></span>PostgreSQL: Offline (Zero-DB JSON active)';
+      }
+
+      document.getElementById('phash-count-badge').textContent = `${s.indexed_phash_files.toLocaleString()} .phash indexed`;
+      document.getElementById('tab-phash-cnt').textContent = s.indexed_phash_files.toLocaleString();
+
+      const totalCertSubs = s.couplings.reduce((acc, c) => acc + c.subtitles.length, 0);
+      document.getElementById('cert-count-badge').textContent = `${totalCertSubs.toLocaleString()} certified couplings`;
+      document.getElementById('registry-path-label').textContent = `Registry: ${s.local_registry_path}`;
+
+      if (s.postgres_counts) {
+        document.getElementById('cnt-medias').textContent = s.postgres_counts.medias_count.toLocaleString();
+        document.getElementById('cnt-frames').textContent = s.postgres_counts.frames_count.toLocaleString();
+        document.getElementById('cnt-subtitles').textContent = s.postgres_counts.subtitles_count.toLocaleString();
+        document.getElementById('cnt-sub-frames').textContent = s.postgres_counts.sub_frames_count.toLocaleString();
+      } else {
+        const localFrames = s.couplings.reduce((a, c) => a + c.frame_count, 0);
+        const localAnchors = s.couplings.reduce((a, c) => a + c.subtitles.reduce((sa, sub) => sa + sub.cue_count, 0), 0);
+        document.getElementById('cnt-medias').textContent = `${s.couplings.length} (JSON)`;
+        document.getElementById('cnt-frames').textContent = `${localFrames.toLocaleString()} (mmap)`;
+        document.getElementById('cnt-subtitles').textContent = `${totalCertSubs} (JSON)`;
+        document.getElementById('cnt-sub-frames').textContent = `${localAnchors.toLocaleString()} (JSON)`;
+      }
+    }
+
+    function getFilteredAndSortedMedias() {
+      const couplings = (studioState?.couplings || []).slice();
+      const q = (document.getElementById('media-search-input')?.value || '').toLowerCase().trim();
+      const langFilter = document.getElementById('media-lang-filter')?.value || 'all';
+      const storeFilter = document.getElementById('media-store-filter')?.value || 'all';
+      const sortMode = document.getElementById('media-sort-select')?.value || 'frames_desc';
+
+      const filtered = couplings.filter(c => {
+        if (q) {
+          const matchText =
+            c.media_name.toLowerCase().includes(q) ||
+            c.phash_filename.toLowerCase().includes(q) ||
+            c.media_hash.toLowerCase().includes(q) ||
+            c.subtitles.some(s => s.name.toLowerCase().includes(q) || s.lang.toLowerCase().includes(q));
+          if (!matchText) return false;
+        }
+        if (langFilter === 'fr' && !c.subtitles.some(s => s.lang.toLowerCase() === 'fr')) return false;
+        if (langFilter === 'en' && !c.subtitles.some(s => s.lang.toLowerCase() === 'en')) return false;
+        if (langFilter === 'multi' && c.subtitles.length < 2) return false;
+        if (storeFilter === 'pg' && !c.in_postgres) return false;
+        if (storeFilter === 'json' && c.in_postgres) return false;
+        return true;
+      });
+
+      filtered.sort((a, b) => {
+        if (sortMode === 'name_asc') return a.media_name.localeCompare(b.media_name);
+        if (sortMode === 'cues_desc') {
+          const ca = a.subtitles.reduce((acc, s) => acc + s.cue_count, 0);
+          const cb = b.subtitles.reduce((acc, s) => acc + s.cue_count, 0);
+          return cb - ca || a.media_name.localeCompare(b.media_name);
+        }
+        if (sortMode === 'fps_desc') return b.fps - a.fps || b.frame_count - a.frame_count;
+        return b.frame_count - a.frame_count || a.media_name.localeCompare(b.media_name);
+      });
+
+      return filtered;
+    }
+
+    function onMediaFilterChange() {
+      mediaPage = 1;
+      renderMediaList();
+    }
+
+    function clearMediaSearch() {
+      const input = document.getElementById('media-search-input');
+      if (input) input.value = '';
+      onMediaFilterChange();
+    }
+
+    function onMediaPageSizeChange(sz) {
+      mediaPageSize = sz;
+      mediaPage = 1;
+      renderMediaList();
+    }
+
+    function setMediaPage(p) {
+      mediaPage = p;
+      renderMediaList();
+    }
+
+    function buildSidebarPaginationHtml(totalItems, page, pageSize) {
+      const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+      const safePage = Math.min(Math.max(1, page), totalPages);
+      const startItem = totalItems === 0 ? 0 : (safePage - 1) * pageSize + 1;
+      const endItem = Math.min(totalItems, safePage * pageSize);
+      return `
+        <div class="sidebar-pagination">
+          <span><b style="color:var(--text-primary);">${startItem}–${endItem}</b> / <b style="color:var(--accent-blue);">${totalItems}</b> medias</span>
+          <div style="display:flex;gap:4px;align-items:center;">
+            <button class="page-btn" style="padding:2px 7px;font-size:11px;" ${safePage <= 1 ? 'disabled' : ''} onclick="setMediaPage(1)" title="First">⟪</button>
+            <button class="page-btn" style="padding:2px 7px;font-size:11px;" ${safePage <= 1 ? 'disabled' : ''} onclick="setMediaPage(${safePage - 1})" title="Prev">‹</button>
+            <span style="padding:0 4px;">P.${safePage}/${totalPages}</span>
+            <button class="page-btn" style="padding:2px 7px;font-size:11px;" ${safePage >= totalPages ? 'disabled' : ''} onclick="setMediaPage(${safePage + 1})" title="Next">›</button>
+            <button class="page-btn" style="padding:2px 7px;font-size:11px;" ${safePage >= totalPages ? 'disabled' : ''} onclick="setMediaPage(${totalPages})" title="Last">⟫</button>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderMediaList() {
+      const listEl = document.getElementById('couplings-media-list');
+      const totalCouplings = (studioState?.couplings || []).length;
+      const filtered = getFilteredAndSortedMedias();
+      document.getElementById('couplings-list-count').textContent =
+        filtered.length === totalCouplings ? `${totalCouplings}` : `${filtered.length} / ${totalCouplings}`;
+
+      const totalPages = Math.max(1, Math.ceil(filtered.length / mediaPageSize));
+      mediaPage = Math.min(Math.max(1, mediaPage), totalPages);
+      const startIdx = (mediaPage - 1) * mediaPageSize;
+      const pageItems = filtered.slice(startIdx, startIdx + mediaPageSize);
+
+      const pagHtml = buildSidebarPaginationHtml(filtered.length, mediaPage, mediaPageSize);
+      const topPag = document.getElementById('media-pagination-top');
+      const botPag = document.getElementById('media-pagination-bottom');
+      if (topPag) topPag.innerHTML = pagHtml;
+      if (botPag) botPag.innerHTML = filtered.length > 5 ? pagHtml : '';
+
+      if (filtered.length === 0) {
+        listEl.innerHTML = '<div style="padding:20px;color:var(--text-secondary);font-size:12px;">No media matches the current search/filter criteria.</div>';
+        return;
+      }
+
+      listEl.innerHTML = pageItems.map((c) => {
+        const isSelected = c.media_hash === selectedMediaHash;
+        const activeClass = isSelected ? 'active' : '';
+        const langs = c.subtitles.map((s, sIdx) => {
+          const isSubActive = isSelected && sIdx === selectedSubIdx;
+          const borderStyle = isSubActive ? 'border:1px solid #fff;' : '';
+          return `<span class="badge badge-emerald" style="padding:1px 7px;font-size:10px;cursor:pointer;${borderStyle}" onclick="event.stopPropagation(); selectMediaAndSub('${c.media_hash}', ${sIdx})" title="Inspect ${s.lang.toUpperCase()} subtitle track">${s.lang.toUpperCase()} (${s.cue_count})</span>`;
+        }).join(' ');
+        const pgTag = c.in_postgres
+          ? '<span class="badge badge-indigo" style="padding:1px 7px;font-size:10px;">PG+JSON</span>'
+          : '<span class="badge badge-blue" style="padding:1px 7px;font-size:10px;">JSON</span>';
+        const durStr = formatDurationShort(c.frame_count, c.fps);
+        return `
+          <div class="media-item ${activeClass}" onclick="selectMediaByHash('${c.media_hash}')">
+            <div class="media-item-title">${c.media_name}</div>
+            <div class="media-item-meta" style="margin-bottom:6px;">
+              <span>${c.frame_count.toLocaleString()} f (${durStr})</span>
+              <span>·</span>
+              <span>${c.fps.toFixed(2)} fps</span>
+              <span>·</span>
+              <span>#${c.media_hash.slice(0, 8)}</span>
+            </div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+              ${pgTag}
+              ${langs}
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function getSelectedMedia() {
+      const couplings = studioState?.couplings || [];
+      return couplings.find(c => c.media_hash === selectedMediaHash) || couplings[0] || null;
+    }
+
+    function getCurrentSub() {
+      const media = getSelectedMedia();
+      if (!media) return null;
+      return media.subtitles[selectedSubIdx] || media.subtitles[0] || null;
+    }
+
+    async function selectMediaByHash(mediaHash) {
+      selectedMediaHash = mediaHash;
+      selectedSubIdx = 0;
+      cuePage = 1;
+      cueSearchQuery = '';
+      selectedCueIdx = 1;
+      renderMediaList();
+      await renderMediaDetail();
+    }
+
+    async function selectMediaAndSub(mediaHash, subIdx) {
+      selectedMediaHash = mediaHash;
+      selectedSubIdx = subIdx;
+      cuePage = 1;
+      cueSearchQuery = '';
+      selectedCueIdx = 1;
+      renderMediaList();
+      await renderMediaDetail();
+    }
+
+    async function selectSub(idx) {
+      selectedSubIdx = idx;
+      cuePage = 1;
+      cueSearchQuery = '';
+      selectedCueIdx = 1;
+      renderMediaList();
+      await renderMediaDetail();
+    }
+
+    async function fetchAndRenderCueWorkspace(opts = {}) {
+      const media = getSelectedMedia();
+      const sub = getCurrentSub();
+      if (!media || !sub) return;
+
+      const params = new URLSearchParams({
+        media_hash: media.media_hash,
+        subtitles_hash: sub.subtitles_hash,
+        page: String(opts.page ?? cuePage),
+        page_size: String(opts.pageSize ?? cuePageSize)
+      });
+      if (cueSearchQuery.trim()) {
+        params.set('q', cueSearchQuery.trim());
+      }
+      if (opts.cueIndex !== undefined && opts.cueIndex !== null) {
+        params.set('cue_index', String(opts.cueIndex));
+      }
+      if (opts.targetFrame !== undefined && opts.targetFrame !== null) {
+        params.set('target_frame', String(opts.targetFrame));
+      }
+
+      try {
+        const res = await fetch('/v1/couplings/sub_frames?' + params.toString());
+        if (!res.ok) return;
+        subFramesPageData = await res.json();
+        cuePage = subFramesPageData.page;
+        cuePageSize = subFramesPageData.page_size;
+        if (subFramesPageData.selected_cue) {
+          selectedCueIdx = subFramesPageData.selected_cue.index;
+        }
+        renderCueWorkspace(Boolean(opts.scrollRow));
+      } catch (e) {
+        console.error('Failed to fetch /v1/couplings/sub_frames:', e);
+      }
+    }
+
+    async function setCuePage(p) {
+      cuePage = p;
+      await fetchAndRenderCueWorkspace({ page: p });
+    }
+
+    async function setCuePageSize(sz) {
+      cuePageSize = sz;
+      await fetchAndRenderCueWorkspace({ pageSize: sz, cueIndex: selectedCueIdx });
+    }
+
+    function onCueFilterInput(val) {
+      cueSearchQuery = val || '';
+      cuePage = 1;
+      if (cueSearchDebounceTimer) clearTimeout(cueSearchDebounceTimer);
+      cueSearchDebounceTimer = setTimeout(() => {
+        fetchAndRenderCueWorkspace({ page: 1 });
+      }, 120);
+    }
+
+    async function selectCue(cueIdx, shouldScrollRow = false) {
+      selectedCueIdx = cueIdx;
+      // If the cue is already on the current loaded page, update immediately without network roundtrip
+      if (subFramesPageData && subFramesPageData.items.some(sf => sf.index === cueIdx)) {
+        subFramesPageData.selected_cue = subFramesPageData.items.find(sf => sf.index === cueIdx);
+        renderCueWorkspace(shouldScrollRow);
+        return;
+      }
+      // Otherwise ask backend to locate the page containing cueIdx (clearing filter if needed)
+      await fetchAndRenderCueWorkspace({ cueIndex: cueIdx, scrollRow: shouldScrollRow });
+    }
+
+    async function stepCue(delta) {
+      if (!subFramesPageData) return;
+      const nextTarget = Math.min(
+        subFramesPageData.total_cues,
+        Math.max(1, (selectedCueIdx || 1) + delta)
+      );
+      await selectCue(nextTarget, true);
+    }
+
+    async function jumpToCueInput() {
+      const el = document.getElementById('jump-cue-input');
+      if (!el) return;
+      const target = parseInt(el.value, 10);
+      if (!isNaN(target)) {
+        if (cueSearchQuery) {
+          cueSearchQuery = '';
+          const filterInput = document.getElementById('cue-filter-input');
+          if (filterInput) filterInput.value = '';
+        }
+        await selectCue(target, true);
+      }
+    }
+
+    async function onMinimapClick(event) {
+      const media = getSelectedMedia();
+      if (!media) return;
+      const rect = event.currentTarget.getBoundingClientRect();
+      const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
+      const targetFrame = Math.round(ratio * media.frame_count);
+      await fetchAndRenderCueWorkspace({ targetFrame });
+    }
+
+    async function renderMediaDetail() {
+      const media = getSelectedMedia();
+      const bodyEl = document.getElementById('detail-body');
+      if (!media) {
+        document.getElementById('detail-media-title').textContent = 'No media selected';
+        bodyEl.innerHTML = '<div style="color:var(--text-secondary);">No certified coupling available.</div>';
+        return;
+      }
+
+      selectedMediaHash = media.media_hash;
+      document.getElementById('detail-media-title').textContent = media.media_name;
+      document.getElementById('detail-badges').innerHTML = `
+        <span class="badge badge-blue">${media.frame_count.toLocaleString()} frames (${formatDurationShort(media.frame_count, media.fps)})</span>
+        <span class="badge badge-emerald">${media.fps.toFixed(2)} fps</span>
+      `;
+
+      const sub = getCurrentSub();
+      const subTabsHtml = media.subtitles.map((s, idx) => `
+        <button class="sub-pill ${idx === selectedSubIdx ? 'active' : ''}" onclick="selectSub(${idx})">
+          <span>[${s.lang.toUpperCase()}] ${s.name}</span>
+          <span style="opacity:0.75;">(${s.cue_count} cues)</span>
+        </button>
+      `).join('');
+
+      if (!sub) {
+        bodyEl.innerHTML = '<div>No certified subtitles for this media.</div>';
+        return;
+      }
+
+      bodyEl.innerHTML = `
+        <div class="sub-tabs">${subTabsHtml}</div>
+
+        <div class="meta-grid">
+          <div class="meta-kv"><label>Media Digest (CHAR(32))</label><span>${media.media_hash}</span></div>
+          <div class="meta-kv"><label>Subtitles Digest (CHAR(32))</label><span>${sub.subtitles_hash}</span></div>
+          <div class="meta-kv"><label>pHash Binary File</label><span>${media.phash_filename}</span></div>
+          <div class="meta-kv"><label>Certified SRT Path</label><span>${sub.srt_path}</span></div>
+        </div>
+
+        <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:10px;">
+          <input type="text" id="cue-filter-input" value="${cueSearchQuery.replace(/"/g, '&quot;')}" placeholder="🔍 Server-side search in sub_frames by dialogue text, #index, frame offset, or pHash hex..." oninput="onCueFilterInput(this.value)" style="flex:1;min-width:240px;" />
+          <div style="display:flex;align-items:center;gap:6px;">
+            <input type="number" id="jump-cue-input" min="1" max="${sub.cue_count}" placeholder="Cue # (1..${sub.cue_count})" style="width:130px;padding:6px 8px;" onkeydown="if(event.key==='Enter') jumpToCueInput()" />
+            <button class="btn" style="padding:6px 10px;" onclick="jumpToCueInput()">Go to Cue #</button>
+          </div>
+        </div>
+
+        <div id="cue-workspace-container" style="display:flex;flex-direction:column;gap:14px;"></div>
+      `;
+
+      await fetchAndRenderCueWorkspace({ page: cuePage, cueIndex: selectedCueIdx });
+    }
+
+    function renderCueWorkspace(shouldScrollRow = false) {
+      const container = document.getElementById('cue-workspace-container');
+      const media = getSelectedMedia();
+      const data = subFramesPageData;
+      if (!container || !media || !data) return;
+
+      const pageItems = data.items || [];
+      const activeCue = data.selected_cue || pageItems[0] || null;
+      const totalPages = data.total_pages || 1;
+
+      // 1. Overview Minimap (Full episode 0 .. media.frame_count) + Current Page Viewport Box
+      const maxFrame = Math.max(media.frame_count, 1);
+      const winStartFrame = data.window_start_frame || 0;
+      const winEndFrame = data.window_end_frame || maxFrame;
+      const vpLeftPct = Math.min(100, Math.max(0, (winStartFrame / maxFrame) * 100));
+      const vpWidthPct = Math.max(1.2, Math.min(100 - vpLeftPct, ((winEndFrame - winStartFrame) / maxFrame) * 100));
+
+      const minimapTicksHtml = (data.minimap_ticks || []).map(frameOffset => {
+        const leftPct = Math.min(99.8, Math.max(0, (frameOffset / maxFrame) * 100));
+        return `<div class="timeline-minimap-tick" style="left:${leftPct}%;"></div>`;
+      }).join('');
+
+      // 2. Zoomed Page Timeline (Strictly current page cues scaled to [winStartFrame .. winEndFrame])
+      const spanFrames = Math.max(1, winEndFrame - winStartFrame);
+      const pageBarsHtml = pageItems.map(sf => {
+        const leftPct = Math.min(99, Math.max(0, ((sf.start_frame_offset - winStartFrame) / spanFrames) * 100));
+        const widthPct = Math.max(1.3, Math.min(100 - leftPct, ((sf.end_frame_offset - sf.start_frame_offset) / spanFrames) * 100));
+        const isSelected = activeCue && sf.index === activeCue.index;
+        const safeText = (sf.text || '').replace(/"/g, '&quot;').replace(/\n/g, ' ');
+        const showLabel = widthPct >= 3.2 ? `#${sf.index}` : '';
+        return `<div class="timeline-cue ${isSelected ? 'active-cue' : ''}" style="left:${leftPct}%;width:${widthPct}%;" title="Cue #${sf.index} [${sf.start_frame_offset}→${sf.end_frame_offset}]: ${safeText}" onclick="selectCue(${sf.index}, true)">${showLabel}</div>`;
+      }).join('');
+
+      // 3. Active Cue & pHash Loupe Inspector Card
+      let inspectorHtml = '';
+      if (activeCue) {
+        const hexHash = formatHexPhash(activeCue.anchor_phash);
+        const setBits = countSetBitsHex(hexHash);
+        const tStart = formatTimeFromFrame(activeCue.start_frame_offset, media.fps);
+        const tEnd = formatTimeFromFrame(activeCue.end_frame_offset, media.fps);
+        const durFrames = Math.max(0, activeCue.end_frame_offset - activeCue.start_frame_offset);
+        inspectorHtml = `
+          <div class="cue-inspector">
+            <div class="cue-inspector-phash">
+              <canvas class="phash-canvas-lg" data-phash="${hexHash}"></canvas>
+              <div class="mono">
+                <div style="font-size:10px;text-transform:uppercase;color:var(--text-muted);">Selected Anchor pHash</div>
+                <div style="font-size:14px;font-weight:700;color:var(--accent-blue);">${hexHash}</div>
+                <div style="font-size:11px;color:var(--text-secondary);">8×8 DCT-II · ${setBits}/64 bits set</div>
+              </div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:4px;min-width:0;">
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <span class="badge badge-blue">Cue #${activeCue.index} / ${data.total_cues}</span>
+                <span class="mono" style="font-size:12px;color:var(--accent-emerald);font-weight:600;">
+                  Frames ${activeCue.start_frame_offset.toLocaleString()} → ${activeCue.end_frame_offset.toLocaleString()} (${durFrames} frames)
+                </span>
+                <span class="mono" style="font-size:12px;color:var(--text-secondary);">
+                  ⏱ ${tStart} → ${tEnd}
+                </span>
+              </div>
+              <div style="font-size:14px;font-weight:600;color:var(--text-primary);white-space:pre-wrap;margin-top:2px;">${activeCue.text}</div>
+            </div>
+            <div style="display:flex;gap:6px;align-items:center;">
+              <button class="page-btn" onclick="stepCue(-1)" title="Previous Cue">‹ Prev Cue</button>
+              <button class="page-btn" onclick="stepCue(1)" title="Next Cue">Next Cue ›</button>
+            </div>
+          </div>
+        `;
+      }
+
+      // 4. Paginated Table Rows (No internal scrollbar)
+      const rowsHtml = pageItems.map(sf => {
+        const hexHash = formatHexPhash(sf.anchor_phash);
+        const tStart = formatTimeFromFrame(sf.start_frame_offset, media.fps);
+        const tEnd = formatTimeFromFrame(sf.end_frame_offset, media.fps);
+        const isSelected = activeCue && sf.index === activeCue.index;
+        return `
+          <tr id="cue-row-${sf.index}" class="cue-row ${isSelected ? 'highlight-row' : ''}" onclick="selectCue(${sf.index}, false)">
+            <td class="mono" style="font-weight:700;color:var(--accent-blue);">#${sf.index}</td>
+            <td class="mono">
+              <span style="color:var(--accent-emerald);">${sf.start_frame_offset}</span>
+              <span style="color:var(--text-muted);">→</span>
+              <span style="color:var(--accent-emerald);">${sf.end_frame_offset}</span>
+              <div style="font-size:11px;color:var(--text-secondary);">${tStart} → ${tEnd}</div>
+            </td>
+            <td class="mono">
+              <div class="phash-cell">
+                <canvas class="phash-canvas" data-phash="${hexHash}"></canvas>
+                <div>
+                  <div style="color:var(--accent-indigo);font-weight:600;">${hexHash}</div>
+                  <div style="font-size:10px;color:var(--text-muted);">64-bit 2D DCT-II anchor</div>
+                </div>
+              </div>
+            </td>
+            <td style="white-space:pre-wrap;font-weight:500;">${sf.text}</td>
+          </tr>
+        `;
+      }).join('');
+
+      const paginationHtml = buildPaginationBarHtml({
+        totalItems: data.filtered_cues,
+        page: data.page,
+        pageSize: data.page_size,
+        onPageFn: 'setCuePage',
+        onSizeFn: 'setCuePageSize',
+        label: 'cues'
+      });
+
+      container.innerHTML = `
+        <div class="timeline-box">
+          <div class="timeline-label">
+            <span>Full Episode Minimap (0 → ${media.frame_count.toLocaleString()} frames) — Click anywhere to jump to that timestamp</span>
+            <span style="color:var(--accent-blue);">Page ${data.page}/${totalPages} Viewport: frames ${winStartFrame.toLocaleString()} → ${winEndFrame.toLocaleString()}</span>
+          </div>
+          <div class="timeline-minimap" onclick="onMinimapClick(event)" title="Click anywhere on the episode minimap to jump to that page">
+            ${minimapTicksHtml}
+            <div class="timeline-viewport" style="left:${vpLeftPct}%;width:${vpWidthPct}%;"></div>
+          </div>
+          <div class="timeline-label" style="margin-top:4px;">
+            <span>Frame ${winStartFrame.toLocaleString()} (${formatTimeFromFrame(winStartFrame, media.fps)})</span>
+            <span>Zoomed Page Timeline (${pageItems.length} cues on this page — click a bar to inspect its pHash)</span>
+            <span>Frame ${winEndFrame.toLocaleString()} (${formatTimeFromFrame(winEndFrame, media.fps)})</span>
+          </div>
+          <div class="timeline-track">${pageBarsHtml}</div>
+        </div>
+
+        ${inspectorHtml}
+
+        ${paginationHtml}
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:70px;">Cue #</th>
+                <th style="width:190px;">Frame Span &amp; Time</th>
+                <th style="width:250px;">Anchor pHash (8×8 DCT Grid)</th>
+                <th>Dialogue Cue Text</th>
+              </tr>
+            </thead>
+            <tbody id="subframes-tbody">${rowsHtml}</tbody>
+          </table>
+        </div>
+
+        ${paginationHtml}
+      `;
+
+      container.querySelectorAll('.phash-canvas, .phash-canvas-lg').forEach(canvas => {
+        drawPhashCanvas(canvas, canvas.getAttribute('data-phash'));
+      });
+
+      if (shouldScrollRow && activeCue) {
+        const row = document.getElementById('cue-row-' + activeCue.index);
+        if (row) row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    }
+
+    function setCatalogPage(p) {
+      catalogPage = p;
+      renderCatalogTable();
+    }
+
+    function setCatalogPageSize(sz) {
+      catalogPageSize = sz;
+      catalogPage = 1;
+      renderCatalogTable();
+    }
+
+    function onCatalogFilterInput() {
+      catalogPage = 1;
+      renderCatalogTable();
+    }
+
+    function resetCatalogFilters() {
+      document.getElementById('catalog-filter').value = '';
+      document.getElementById('catalog-status-filter').value = 'all';
+      document.getElementById('catalog-fps-filter').value = 'all';
+      document.getElementById('catalog-sort').value = 'certified_first';
+      catalogPage = 1;
+      renderCatalogTable();
+    }
+
+    async function inspectCertifiedFromCatalog(mediaName) {
+      const target = (studioState?.couplings || []).find(
+        c => c.media_name === mediaName || c.phash_filename.replace(/\.phash$/, '') === mediaName
+      );
+      if (!target) return;
+      switchTab('couplings');
+      await selectMediaByHash(target.media_hash);
+    }
+
+    function openInPlaygroundFromCatalog(phashFilename) {
+      const path = 'data/__PHASH__/' + phashFilename;
+      document.getElementById('search-media-path').value = path;
+      document.getElementById('cert-media-path').value = path;
+      switchTab('playground');
+      runLiveSearch();
+    }
+
+    function renderCatalogTable() {
+      if (!studioState) return;
+      const q = (document.getElementById('catalog-filter')?.value || '').toLowerCase().trim();
+      const statusFilter = document.getElementById('catalog-status-filter')?.value || 'all';
+      const fpsFilter = document.getElementById('catalog-fps-filter')?.value || 'all';
+      const sortMode = document.getElementById('catalog-sort')?.value || 'certified_first';
+
+      const items = (studioState.catalog_phashes || []).filter(item => {
+        if (q && !item.media_name.toLowerCase().includes(q) && !item.filename.toLowerCase().includes(q)) {
+          return false;
+        }
+        if (statusFilter === 'certified' && !item.is_certified) return false;
+        if (statusFilter === 'uncoupled' && item.is_certified) return false;
+        if (fpsFilter === '24' && Math.abs(item.fps - 23.976) > 0.2 && Math.abs(item.fps - 24.0) > 0.2) return false;
+        if (fpsFilter === '25' && Math.abs(item.fps - 25.0) > 0.2) return false;
+        if (fpsFilter === '30' && Math.abs(item.fps - 29.97) > 0.2 && Math.abs(item.fps - 30.0) > 0.2) return false;
+        return true;
+      });
+
+      items.sort((a, b) => {
+        if (sortMode === 'name_asc') return a.media_name.localeCompare(b.media_name);
+        if (sortMode === 'frames_desc') return b.frame_count - a.frame_count || a.media_name.localeCompare(b.media_name);
+        if (sortMode === 'size_desc') return b.size_bytes - a.size_bytes || a.media_name.localeCompare(b.media_name);
+        return (b.is_certified ? 1 : 0) - (a.is_certified ? 1 : 0) || a.media_name.localeCompare(b.media_name);
+      });
+
+      const totalPages = Math.max(1, Math.ceil(items.length / catalogPageSize));
+      catalogPage = Math.min(Math.max(1, catalogPage), totalPages);
+      const startIdx = (catalogPage - 1) * catalogPageSize;
+      const pageItems = items.slice(startIdx, startIdx + catalogPageSize);
+
+      const paginationHtml = buildPaginationBarHtml({
+        totalItems: items.length,
+        page: catalogPage,
+        pageSize: catalogPageSize,
+        onPageFn: 'setCatalogPage',
+        onSizeFn: 'setCatalogPageSize',
+        label: '.phash files'
+      });
+
+      const topBar = document.getElementById('catalog-pagination-top');
+      const bottomBar = document.getElementById('catalog-pagination-bottom');
+      if (topBar) topBar.innerHTML = paginationHtml;
+      if (bottomBar) bottomBar.innerHTML = paginationHtml;
+
+      const tbody = document.getElementById('catalog-tbody');
+      tbody.innerHTML = pageItems.map((item, i) => {
+        const durSec = item.fps > 0 ? (item.frame_count / item.fps) : 0;
+        const mins = Math.floor(durSec / 60);
+        const secs = Math.round(durSec % 60);
+        const sizeKb = (item.size_bytes / 1024).toFixed(1);
+        const badge = item.is_certified
+          ? '<span class="badge badge-emerald">✓ Certified Coupling</span>'
+          : '<span class="badge badge-amber">Uncoupled (.phash only)</span>';
+        const safeMediaName = item.media_name.replace(/'/g, "\\'");
+        const safeFilename = item.filename.replace(/'/g, "\\'");
+        const actionBtn = item.is_certified
+          ? `<button class="page-btn" onclick="inspectCertifiedFromCatalog('${safeMediaName}')">🔍 Inspect</button>`
+          : `<button class="page-btn" onclick="openInPlaygroundFromCatalog('${safeFilename}')">⚡ Search Subs</button>`;
+        return `
+          <tr>
+            <td class="mono" style="color:var(--text-muted);">${startIdx + i + 1}</td>
+            <td class="mono" style="font-weight:600;color:var(--text-primary);">${item.media_name}</td>
+            <td class="mono">${item.fps.toFixed(2)}</td>
+            <td class="mono">${item.frame_count.toLocaleString()}</td>
+            <td class="mono">${mins}m ${secs}s</td>
+            <td class="mono">${sizeKb} KB</td>
+            <td>${badge}</td>
+            <td>${actionBtn}</td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    async function runLiveSearch() {
+      const box = document.getElementById('search-result-box');
+      box.textContent = 'Searching...';
+      try {
+        const res = await fetch('/v1/search', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            media_path: document.getElementById('search-media-path').value,
+            search_mode: document.getElementById('search-mode').value,
+            language: document.getElementById('search-lang').value
+          })
+        });
+        const data = await res.json();
+        const rows = (data.candidates || []).map((c, idx) => `
+          <tr>
+            <td class="mono">#${idx + 1}</td>
+            <td><span class="badge ${c.source === 'certified' ? 'badge-emerald' : 'badge-blue'}">${c.source.toUpperCase()}</span></td>
+            <td class="mono">${c.language.toUpperCase()}</td>
+            <td class="mono" style="font-weight:600;">${c.title}</td>
+            <td style="font-size:12px;color:var(--text-secondary);">${c.details || ''}</td>
+          </tr>
+        `).join('');
+        box.innerHTML = `
+          <div style="margin-bottom:8px;color:var(--accent-emerald);">
+            ✓ Matched Media: <b>${data.matched_media || 'none'}</b> | MovieHash: <b>${data.moviehash || 'none'}</b> | Total: <b>${data.total_candidates}</b>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>#</th><th>Source</th><th>Lang</th><th>Title</th><th>Details</th></tr></thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        `;
+      } catch (e) {
+        box.textContent = 'Error: ' + e;
+      }
+    }
+
+    async function runLiveCertify() {
+      const box = document.getElementById('cert-result-box');
+      box.textContent = 'Certifying ground-truth coupling...';
+      try {
+        const res = await fetch('/v1/certify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            media_path: document.getElementById('cert-media-path').value,
+            subtitle_path: document.getElementById('cert-srt-path').value,
+            language: document.getElementById('cert-lang').value,
+            strict: true
+          })
+        });
+        const data = await res.json();
+        if (data.success) {
+          box.innerHTML = `<div style="color:var(--accent-emerald);">✓ Certified <b>${data.media_name}</b> (${data.cue_count} cues / ${data.sub_frames_count} frame anchors, SHA256: ${data.subtitles_hash.slice(0,12)}…, PG imported: ${data.postgres_imported})</div>`;
+          await loadStudioData();
+        } else {
+          box.innerHTML = `<div style="color:var(--accent-rose);">✗ Certification rejected: ${data.error}</div>`;
+        }
+      } catch (e) {
+        box.textContent = 'Error: ' + e;
+      }
+    }
+
+    loadStudioData();
+  </script>
+</body>
+</html>

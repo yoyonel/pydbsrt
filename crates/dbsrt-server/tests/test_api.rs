@@ -393,24 +393,27 @@ async fn test_server_status_and_search_endpoints() {
     assert_eq!(search_res.language, "en");
     assert!(search_res.moviehash.is_some());
     assert!(search_res.total_candidates > 0);
-    assert!(search_res.candidates.iter().any(|c| c.source == "catalog"));
+    assert!(search_res
+        .candidates
+        .iter()
+        .any(|c| c.source == "certified" || c.source == "catalog"));
     // Verify strict language filtering: no "unknown" or non-matching language candidates
     assert!(search_res
         .candidates
         .iter()
-        .filter(|c| c.source == "catalog")
+        .filter(|c| c.source == "certified" || c.source == "catalog")
         .all(|c| c.language == "en"));
 
     // 4. Test /v1/download for selected candidate
-    let catalog_cand = search_res
+    let local_cand = search_res
         .candidates
         .iter()
-        .find(|c| c.source == "catalog")
-        .expect("Must have catalog candidate");
+        .find(|c| c.source == "certified" || c.source == "catalog")
+        .expect("Must have certified or catalog candidate");
     let dl_req = dbsrt_server::DownloadSubtitleRequest {
         media_path: test_media.to_string(),
-        source: "catalog".to_string(),
-        candidate_id: catalog_cand.candidate_id.clone(),
+        source: local_cand.source.clone(),
+        candidate_id: local_cand.candidate_id.clone(),
         language: "en".to_string(),
         resync: true,
         subtitles_dir: Some(srt_dir.to_str().unwrap().to_string()),
@@ -434,4 +437,174 @@ async fn test_server_status_and_search_endpoints() {
     let _ = std::fs::remove_file(&tmp_media);
     let _ = std::fs::remove_file(&dl_res.output_srt_path);
     let _ = std::fs::remove_dir_all(&test_phash_dir);
+}
+
+#[tokio::test]
+async fn test_certify_and_certified_search_download_e2e() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let workspace_root = std::path::Path::new(manifest_dir)
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
+
+    let orig_media = workspace_root.join("tests/data/big_buck_bunny_trailer_480p.mp4");
+    let orig_srt = workspace_root.join("data/SRT/big_buck_bunny_trailer_480p.fr.srt");
+    if !orig_media.exists() || !orig_srt.exists() {
+        return;
+    }
+
+    let tmp_base = std::env::temp_dir().join(format!("dbsrt_certify_e2e_{}", std::process::id()));
+    let phash_dir = tmp_base.join("phash");
+    let srt_dir = tmp_base.join("srt");
+    let _ = std::fs::create_dir_all(&phash_dir);
+    let _ = std::fs::create_dir_all(&srt_dir);
+
+    let test_media = tmp_base.join("big_buck_bunny_trailer_480p.mp4");
+    std::fs::copy(&orig_media, &test_media).unwrap();
+    let test_srt = srt_dir.join("big_buck_bunny_trailer_480p.fr.srt");
+    std::fs::copy(&orig_srt, &test_srt).unwrap();
+
+    let (listener, addr) = dbsrt_server::bind_listener("127.0.0.1", 0).await.unwrap();
+    let app = create_router(phash_dir.clone(), srt_dir.clone());
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    let base_url = format!("http://{}", addr);
+    let client = reqwest::Client::new();
+
+    // 1. Call POST /v1/certify with valid media + SRT
+    let cert_req = dbsrt_server::CertifySyncRequest {
+        media_path: test_media.to_string_lossy().to_string(),
+        subtitle_path: test_srt.to_string_lossy().to_string(),
+        language: "fr".to_string(),
+        strict: true,
+        phash_dir: Some(phash_dir.to_string_lossy().to_string()),
+        subtitles_dir: Some(srt_dir.to_string_lossy().to_string()),
+    };
+
+    let res = client
+        .post(format!("{}/v1/certify", base_url))
+        .json(&cert_req)
+        .send()
+        .await
+        .expect("Failed to call /v1/certify");
+    assert!(res.status().is_success());
+    let cert_res: dbsrt_server::CertifySyncResponse =
+        res.json().await.expect("Failed to parse /v1/certify JSON");
+    assert!(cert_res.success, "Certify error: {:?}", cert_res.error);
+    assert_eq!(cert_res.cue_count, 8);
+    assert_eq!(cert_res.sub_frames_count, 8);
+    assert_eq!(cert_res.media_hash.len(), 32);
+    assert_eq!(cert_res.subtitles_hash.len(), 32);
+    assert!(std::path::Path::new(&cert_res.registry_path).exists());
+
+    // 2. Call POST /v1/certify with an out-of-bounds cue -> must be rejected
+    let bad_srt = tmp_base.join("oob.srt");
+    std::fs::write(
+        &bad_srt,
+        "1\n02:30:00,000 --> 02:30:05,000\nCue way past 33s video duration\n\n",
+    )
+    .unwrap();
+    let bad_req = dbsrt_server::CertifySyncRequest {
+        media_path: test_media.to_string_lossy().to_string(),
+        subtitle_path: bad_srt.to_string_lossy().to_string(),
+        language: "fr".to_string(),
+        strict: true,
+        phash_dir: Some(phash_dir.to_string_lossy().to_string()),
+        subtitles_dir: Some(srt_dir.to_string_lossy().to_string()),
+    };
+    let bad_res: dbsrt_server::CertifySyncResponse = client
+        .post(format!("{}/v1/certify", base_url))
+        .json(&bad_req)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(
+        !bad_res.success,
+        "Out-of-bounds subtitle must fail certification"
+    );
+    assert!(bad_res
+        .error
+        .unwrap_or_default()
+        .contains("exceeds media duration"));
+
+    // 3. Call POST /v1/search (search_mode="phash", language="fr") -> first candidate must be source="certified"
+    let search_req = dbsrt_server::SearchSubtitlesRequest {
+        media_path: test_media.to_string_lossy().to_string(),
+        language: "fr".to_string(),
+        subtitles_dir: Some(srt_dir.to_string_lossy().to_string()),
+        phash_dir: Some(phash_dir.to_string_lossy().to_string()),
+        search_mode: Some("phash".to_string()),
+        query_title: None,
+        season: None,
+        episode: None,
+    };
+    let search_res: dbsrt_server::SearchSubtitlesResponse = client
+        .post(format!("{}/v1/search", base_url))
+        .json(&search_req)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(search_res.matched_media.is_some());
+    assert!(!search_res.candidates.is_empty());
+    let top_cand = &search_res.candidates[0];
+    assert_eq!(top_cand.source, "certified");
+    assert_eq!(top_cand.language, "fr");
+
+    // 4. Call POST /v1/download for the certified candidate
+    let dl_req = dbsrt_server::DownloadSubtitleRequest {
+        media_path: test_media.to_string_lossy().to_string(),
+        source: "certified".to_string(),
+        candidate_id: top_cand.candidate_id.clone(),
+        language: "fr".to_string(),
+        resync: true,
+        subtitles_dir: Some(srt_dir.to_string_lossy().to_string()),
+        phash_dir: Some(phash_dir.to_string_lossy().to_string()),
+    };
+    let dl_res: dbsrt_server::DownloadSubtitleResponse = client
+        .post(format!("{}/v1/download", base_url))
+        .json(&dl_req)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(dl_res.success);
+    assert_eq!(dl_res.source, "certified");
+    assert!(std::path::Path::new(&dl_res.output_srt_path).exists());
+
+    // 5. Call GET /v1/couplings and GET /studio
+    let couplings_res: dbsrt_server::CouplingsOverviewResponse = client
+        .get(format!("{}/v1/couplings", base_url))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(!couplings_res.couplings.is_empty());
+    assert_eq!(couplings_res.couplings[0].subtitles.len(), 1);
+    assert_eq!(couplings_res.couplings[0].subtitles[0].sub_frames.len(), 8);
+
+    let studio_html = client
+        .get(format!("{}/studio", base_url))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(studio_html.contains("dbsrt Studio"));
+
+    // Cleanup
+    let _ = std::fs::remove_dir_all(&tmp_base);
 }

@@ -40,6 +40,8 @@ local file_info = {
 
 local candidates_store = {}
 local input_table = {}
+local last_downloaded_srt = nil
+local last_downloaded_lang = nil
 
 local languages = {
     { "fr", "French" },
@@ -275,7 +277,7 @@ function create_dialog()
     dlg:add_button("Help", show_help, 1, 6, 1, 1)
     dlg:add_button("Status", check_daemon_status, 2, 6, 1, 1)
     dlg:add_button("Download selection", download_selection, 3, 6, 1, 1)
-    dlg:add_button("Close", close, 4, 6, 1, 1)
+    dlg:add_button("Certify sync", certify_active_sync, 4, 6, 1, 1)
 end
 
 function show_help()
@@ -285,7 +287,7 @@ function show_help()
             .. "1. Start your video in VLC.<br/>"
             .. "2. Click <b>Search by pHash</b> (visual frame fingerprint), <b>Search by hash</b> (OpenSubtitles MovieHash), or <b>Search by name</b>.<br/>"
             .. "3. Select a subtitle in the list and click <b>Download selection</b>.<br/>"
-            .. "dbsrt will automatically resynchronize the timeline if a certified reference exists!</span>"
+            .. "4. Click <b>Certify sync</b> once verified to register the ground-truth (video pHash &lt;-&gt; subtitle) coupling!</span>"
         )
     end
 end
@@ -470,6 +472,9 @@ function download_candidate_at(sel_idx)
     local source = string.match(body, '"source":%s*"([^"]+)"') or candidate.source
 
     if success == "true" and out_srt and out_srt ~= "" then
+        last_downloaded_srt = out_srt
+        last_downloaded_lang = candidate.language or "fr"
+
         -- Attach to VLC video stream
         local ok, add_err = pcall(function() vlc.input.add_subtitle(out_srt, true) end)
 
@@ -500,5 +505,93 @@ function download_candidate_at(sel_idx)
             input_table["message"]:set_text("<span style=\"color:#f85149;\">Error: " .. err_msg .. "</span>")
         end
         notify_osd("✗ dbsrt error: " .. err_msg, 4)
+    end
+end
+
+-- Certify Active Subtitle Sync (Ground-Truth Video pHash <-> Subtitle Coupling)
+function certify_active_sync()
+    update_file_info()
+    if not file_info.has_input or not file_info.path then
+        if input_table["message"] then
+            input_table["message"]:set_text("<span style=\"color:#f85149;\">Error: No video playing in VLC!</span>")
+        end
+        return
+    end
+
+    local srt_path = last_downloaded_srt
+    local srt_lang = last_downloaded_lang
+
+    -- Fallback: if no subtitle was downloaded yet in this session, check selected catalog/certified item
+    if not srt_path and input_table["mainlist"] then
+        local selection = input_table["mainlist"]:get_selection()
+        for idx, _ in pairs(selection) do
+            local cand = candidates_store[idx]
+            if cand and (cand.source == "catalog" or cand.source == "certified") and cand.candidate_id then
+                srt_path = cand.candidate_id
+                srt_lang = cand.language
+                break
+            end
+        end
+    end
+
+    if not srt_path or srt_path == "" then
+        if input_table["message"] then
+            input_table["message"]:set_text(
+                "<span style=\"color:#f85149;\">Download or select a local subtitle first before certifying sync.</span>"
+            )
+        end
+        return
+    end
+
+    if not srt_lang or srt_lang == "" then
+        local lang_idx = input_table["language"] and input_table["language"]:get_value() or 1
+        srt_lang = (languages[lang_idx] and languages[lang_idx][1]) or "fr"
+    end
+
+    if input_table["message"] then
+        input_table["message"]:set_text("<span style=\"color:#58a6ff;\">Certifying ground-truth pHash coupling...</span>")
+    end
+
+    local host, port = parse_url(server_url)
+    local payload = string.format(
+        '{"media_path":"%s","subtitle_path":"%s","language":"%s","strict":true}',
+        file_info.path:gsub('\\', '\\\\'),
+        srt_path:gsub('\\', '\\\\'),
+        srt_lang
+    )
+
+    local body, err = send_http_request(host, port, "POST", "/v1/certify", payload)
+    if not body then
+        local msg = "<span style=\"color:#f85149;\">Certify error: " .. (err or "No response from daemon") .. "</span>"
+        if input_table["message"] then input_table["message"]:set_text(msg) end
+        notify_osd("✗ Certify sync failed", 3)
+        return
+    end
+
+    local success = string.match(body, '"success":%s*(%a+)')
+    if success == "true" then
+        local media_name = string.match(body, '"media_name":%s*"([^"]+)"') or "?"
+        local cue_count = string.match(body, '"cue_count":%s*(%d+)') or "0"
+        local sub_frames_count = string.match(body, '"sub_frames_count":%s*(%d+)') or "0"
+        local sub_hash = string.match(body, '"subtitles_hash":%s*"([^"]+)"') or ""
+        local short_hash = string.sub(sub_hash, 1, 8)
+
+        notify_osd(
+            string.format("✓ Certified [%s] (%s cues / %s frame anchors)", srt_lang:upper(), cue_count, sub_frames_count),
+            4
+        )
+        if input_table["message"] then
+            input_table["message"]:set_text(string.format(
+                "<span style=\"color:#3fb950;\"><b>✓ Ground-Truth Coupling Certified!</b> [%s]<br/>"
+                .. "Media: <b>%s</b> | Cues: <b>%s</b> (%s frame anchors, SHA256: %s…)</span>",
+                srt_lang:upper(), media_name, cue_count, sub_frames_count, short_hash
+            ))
+        end
+    else
+        local err_msg = string.match(body, '"error":%s*"([^"]+)"') or "Certification failed"
+        if input_table["message"] then
+            input_table["message"]:set_text("<span style=\"color:#f85149;\">Certify Error: " .. err_msg .. "</span>")
+        end
+        notify_osd("✗ Certify error: " .. err_msg, 4)
     end
 end
