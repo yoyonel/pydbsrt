@@ -12,19 +12,20 @@ Suite à l'audit technique objectif de **VLSub legacy** ([audit complet](2026-10
 
 Le projet a donc opéré un retour rigoureux aux fondamentaux de VLSub sous la forme d'un **fork bonifié** :
 
-1. **Restauration 1:1 de l'interface graphique VLSub** : conservation de la grille de saisie (choix de langue, recherche par hash, recherche par titre/saison/épisode, listbox de résultats, boutons d'action).
+1. **Restauration 1:1 de l'interface graphique VLSub + Extension pHash** : conservation de la grille de saisie (choix de langue, recherche legacy par MovieHash `Search by hash`, nouvelle recherche visuelle `Search by pHash`, recherche par titre/saison/épisode `Search by name`, listbox de résultats, boutons d'action).
 2. **Substitut moderne du backend XML-RPC** : remplacement du code réseau obsolète par un client HTTP/REST communiquant avec le démon local `dbsrt-server` (Rust Axum).
-3. **Recherche multi-sources transparente** : recherche simultanée dans les pistes internes du conteneur (MKV/MP4), le catalogue local `data/SRT` et l'API OpenSubtitles REST.
-4. **Resynchronisation visuelle pHash automatique** : application automatique du recalage temporel dérivé des empreintes visuelles si une référence existe dans la base de données locale ou distante.
+3. **Recherche multi-sources transparente** : identification visuelle `MmapLibrary` (`pHash`), recherche simultanée dans les pistes internes du conteneur (MKV/MP4), le catalogue local `data/SRT` et l'API OpenSubtitles REST.
+4. **Resynchronisation visuelle pHash automatique** : application automatique du recalage temporel dérivé des empreintes visuelles si une référence certifiée existe dans l'index local `MmapLibrary`.
 
 ```mermaid
 graph TD
     A["VLC Media Player (GUI Qt)"] -->|"Menu Vue > VLSub (dbsrt Enhanced)"| B["Extension Lua: vlsub_dbsrt.lua"]
     B -->|"HTTP GET /v1/status"| C["dbsrt-server (Rust Axum Daemon)"]
-    B -->|"HTTP POST /v1/search (hash, name, s/e)"| C
+    B -->|"HTTP POST /v1/search (phash, hash, name, s/e)"| C
+    C -->|"0. Visual pHash Match"| H["MmapLibrary (.phash Index)"]
     C -->|"1. Container Scan"| D["Embedded MKV/MP4 Tracks"]
-    C -->|"2. Catalog Scan"| E["Local data/SRT (pHash indexed)"]
-    C -->|"3. REST API"| F["OpenSubtitles REST"]
+    C -->|"2. Catalog Scan"| E["Local data/SRT (Language filtered)"]
+    C -->|"3. REST API"| F["OpenSubtitles REST (MovieHash / Query)"]
     B -->|"HTTP POST /v1/download (candidate_id)"| C
     C -->|"pHash Shift Engine (DCT-II)"| G["Synchronized SRT (+XX.X ms)"]
     G -->|"vlc.input.add_subtitle"| A
@@ -41,7 +42,7 @@ Conformément à la règle d'intégrité factuelle, l'interaction complète avec
   Votre navigateur ne supporte pas la balise vidéo HTML5.
 </video>
 
-*Vidéo HD 1080p : Parcours complet dans VLC — Ouverture du dialogue VLSub depuis le menu Vue, interrogation de télémétrie du démon, recherche par nom, sélection dans la liste, téléchargement et injection synchronisée dans le flux vidéo.*
+*Vidéo HD 1080p : Parcours complet dans VLC — Ouverture du dialogue VLSub depuis le menu Vue, interrogation de télémétrie du démon, recherche par empreinte visuelle (`Search by pHash`), sélection dans la liste, téléchargement et injection synchronisée dans le flux vidéo.*
 
 ---
 
@@ -52,8 +53,8 @@ Conformément à la règle d'intégrité factuelle, l'interaction complète avec
 
 ![Étape 1 : Dialogue Initialisé](assets/vlsub-dbsrt/01_vlsub_dialog_init.png)
 
-### Étape 2 : Recherche Multi-Sources & Rendu dans la Listbox
-Un clic sur **Search by name** ou **Search by hash** déclenche une requête `POST /v1/search` au démon Rust. Les résultats provenant des conteneurs, du catalogue et des fournisseurs externes sont fusionnés, filtrés par langue et affichés dans la liste principale.
+### Étape 2 : Recherche Multi-Sources (`Search by pHash` / `Search by hash` / `Search by name`) & Rendu dans la Listbox
+Un clic sur **Search by pHash** (empreinte visuelle des frames/cuts), **Search by hash** (MovieHash 64-bit OpenSubtitles) ou **Search by name** déclenche une requête `POST /v1/search` au démon Rust. Les résultats provenant des conteneurs, du catalogue et des fournisseurs externes sont fusionnés, filtrés par langue et affichés dans la liste principale.
 
 ![Étape 2 : Résultats de Recherche](assets/vlsub-dbsrt/02_vlsub_search_results.png)
 

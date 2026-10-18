@@ -102,6 +102,7 @@ nav:
       - Feuille de Route & Échelle (1920-2026): 2026-10-15-deep-dive-modernization-and-scaling-roadmap.md
       - Modernization Blueprint: 2026-10-15-modernization-blueprint.md
   - ⚡ Architecture & Moteurs:
+      - Mécanique E2E Search by pHash & Roadmap: 2026-10-18-e2e-phash-search-mechanics-and-roadmap.md
       - Fork & Modernisation VLSub: 2026-10-18-vlsub-fork-and-restoration.md
       - Intégration VLC & Daemon Axum: 2026-10-15-vlc-integration-daemon-and-plugins.md
       - Moteur Zero-DB mmap: 2026-10-15-scaling-architecture-rust-mmap.md
