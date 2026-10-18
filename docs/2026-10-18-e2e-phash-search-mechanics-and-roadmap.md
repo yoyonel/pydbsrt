@@ -114,79 +114,52 @@ Dans `crates/dbsrt-server/src/lib.rs`, la fonction `identify_media_by_phash()` :
    - Le moteur `MmapLibrary` (`crates/dbsrt-index/src/mmap.rs`) projette en mémoire (`mmap` zéro-copie) tous les fichiers `.phash` présents dans `--phash-dir` et compare chaque frame de `query_sample` par distance de Hamming ($\le 8$ bits sur 64).
    - Le fichier `/tmp/big_buck_bunny_trailer_480p.mp4.25.0fps.phash` obtient `96.2%` de frames reconnues et est retourné comme `matched_media`.
 
-### Maillon 3 : La passerelle actuelle entre le `.phash` reconnu et le `.srt` proposé
+### Maillon 3 : Résolution Prioritaire par Couplages Certifiés (`CertifiedCoupling` + Fallback Catalogue)
 
-Une fois `matched_media = "big_buck_bunny_trailer_480p.mp4.25.0fps.phash"` identifié, comment `search_handler` trouve-t-il le fichier `.srt` ?
+Une fois `matched_media = "big_buck_bunny_trailer_480p.mp4.25.0fps.phash"` identifié, `search_handler` résout les pistes `.srt` en **deux niveaux prioritaires** :
 
-Actuellement, **il n'existe pas encore de table de jointure explicite `(phash_id <-> subtitle_id)`**. Le serveur effectue une **jointure implicite par convention de nommage** :
-
-1. Il retire les suffixes techniques `.phash` et `.25.0fps` du nom de l'empreinte reconnue pour récupérer le nom du média de référence d'origine (`big_buck_bunny_trailer_480p.mp4`).
-2. Il extrait les métadonnées structurées via `parse_release_metadata()` : `title = "big buck bunny trailer"`, `year = None`, `season = None`, `episode = None`.
-3. Il appelle `search_subtitles_in_catalog(&state.config.subtitles_dir, &ref_meta, "fre", Some("big buck bunny trailer"))` qui scanne `data/SRT/*.srt`, filtre strictement par code langue ISO-639 normalisé (`fre` / `fra` / `fr` $\rightarrow$ `"fr"`), et sélectionne `data/SRT/big_buck_bunny_trailer_480p.fr.srt` car son titre normalisé correspond au média reconnu par pHash.
+1. **Niveau 1 — Registre Relationnel des Couplages Certifiés (`CouplingRegistry` / PostgreSQL `subtitles` + `sub_frames`)** :
+   - Le serveur interroge d'abord `CouplingRegistry::load_from_dir(&state.config.subtitles_dir)` (`data/SRT/couplings.json`, synchronisé avec les tables PostgreSQL `medias`, `subtitles` et `sub_frames`).
+   - Si le fichier `.phash` reconnu possède des pistes `.srt` certifiées dans la langue demandée (`CertifiedSubtitleRecord`), celles-ci sont retournées en priorité absolue (`score = 1.0`, statut `[CATALOG] [CERTIFIED]`).
+2. **Niveau 2 — Repli Heuristique par Métadonnées de Release** :
+   - Si aucun couplage explicite n'est enregistré pour ce `.phash`, le serveur extrait les métadonnées (`parse_release_metadata()`) et scanne `data/SRT/*.srt` en filtrant par code langue ISO-639 normalisé (`fre` / `fra` / `fr` $\rightarrow$ `"fr"`).
 
 ### Maillon 4 : Le recalage temporel (`compute_media_phash_shift`) lors du téléchargement
 
 Lorsque l'utilisateur clique sur `"Download selection"` (`POST /v1/download` avec `resync: true`), la fonction `compute_media_phash_shift()` :
 
-1. Identifie à nouveau le fichier `.phash` de référence dans `--phash-dir` via `identify_media_by_phash()`.
+1. Identifie à nouveau le fichier `.phash` de référence dans les répertoires `--phash-dir` (`data/__PHASH__` et `/tmp`) via `identify_media_by_phash()`.
 2. Charge le vecteur complet des pHashes de la vidéo cible (`target_hashes`) et celui du `.phash` de référence (`ref_hashes`).
 3. Pour chaque sous-titre (cue) du fichier `.srt`, exécute `compute_subtitle_shifts()` suivi de `consensus_shift_ms()` afin de mesurer le décalage temporel médian entre les deux flux vidéo.
 4. Applique `sub_file.apply_shift(shift_ms.round() as i64)` et sauvegarde le `.srt` recalé.
 
 ---
 
-## 3. Matrice de Vérité : Empiriquement Prouvé vs Limites Actuelles
+## 3. Matrice de Vérité : Briques Empiriquement Prouvées & Limites Physiques
 
-Conformément aux règles d'ingénierie du projet (`GEMINI.md`), voici la classification stricte de ce qui fonctionne aujourd'hui par rapport aux manques architecturaux :
+Conformément aux règles d'ingénierie du projet (`GEMINI.md`), voici la classification stricte de l'état actuel :
 
-| Brique Technique | Classification | Détail Factuel & Limites |
+| Brique Technique | Classification | Détail Factuel & Preuve Empirique |
 | :--- | :--- | :--- |
-| **Reconnaissance visuelle d'un média par ses frames (`MmapLibrary::recognize`)** | **Empiriquement Prouvé** | Fonctionne même si le fichier vidéo cible est renommé arbitrairement (`film_inconnu.mp4`), tant que son `.phash` de référence figure dans `--phash-dir`. |
+| **Reconnaissance visuelle d'un média par ses frames (`MmapLibrary::recognize`)** | **Empiriquement Prouvé** | Fonctionne même si le fichier vidéo cible est renommé arbitrairement (`film_inconnu.mp4`), tant que son `.phash` de référence figure dans `--phash-dir` (`data/__PHASH__` ou `/tmp`). |
+| **Couplage Relationnel Certifié (`medias` ↔ `frames` ↔ `subtitles` ↔ `sub_frames`)** | **Empiriquement Prouvé** | `8` médias, `363 165` frames, `14` pistes `.srt` et `4 428` répliques ancrées dans PostgreSQL 17 SP-GiST + miroir Zero-DB `data/SRT/couplings.json` via `task coupling:certify`. |
 | **Recalage temporel (`compute_media_phash_shift`) sur `/v1/download` et `/v1/autosync`** | **Empiriquement Prouvé** | Validé par test d'intégration (`test_api.rs` avec décalage synthétique de `+50 frames = +2000 ms`) et en E2E VLC (`0.0 ms`, `96.2% conf`). |
-| **Filtrage linguistique ISO-639 (`fr`/`fre`/`fra`, `en`/`eng`) du catalogue local** | **Empiriquement Prouvé** | Unifié dans `search_subtitles_in_catalog()` ; ne retourne plus jamais un `.en.srt` lorsqu'on demande `fre`. |
-| **Couplage entre l'empreinte `.phash` reconnue et le fichier `.srt` de référence** | **Convention de nommage (Limite #1)** | Repose sur le fait que le fichier `.phash` dans `--phash-dir` et le fichier `.srt` dans `--subtitles-dir` partagent le même nom/titre (`big_buck_bunny_trailer_480p`). Aucune garantie cryptographique ou base de données ne certifie que ce `.srt` a été validé sur cette vidéo précise. |
-| **Alimentation de `--phash-dir` au démarrage du démon** | **Manuel / Volatile `/tmp` (Limite #2)** | `Taskfile.yml` lance `dbsrt-server --phash-dir /tmp`. Si `/tmp` est purgé au redémarrage de l'OS et que `data/__PHASH__` n'est pas utilisé, l'index pHash repart à zéro. |
-| **Support du format `.dbphash` unifié dans `dbsrt-server`** | **Partiel CLI uniquement (Limite #3)** | Le compilateur/lecteur binaire `.dbphash` (`crates/dbsrt-index/src/dbphash.rs`) est implémenté dans `dbsrt-cli` (`pack` / `scan-library --dbphash`), mais `dbsrt-server` n'utilise pour l'instant que `MmapLibrary::from_directory(phash_dir)` (fichiers `.phash` unitaires). |
-| **Recalage d'un sous-titre distant OpenSubtitles sans `.phash` de référence** | **Shift = 0 ms par design (Limite #4)** | Si un `.srt` est téléchargé depuis OpenSubtitles pour une vidéo dont aucun `.phash` de référence n'est connu localement, aucun recalage visuel n'est possible (`shift_ms = 0.0`). |
+| **Backoffice d'Inspection `dbsrt Studio` (`/studio`) & `PgWeb` (`:8086`)** | **Empiriquement Prouvé** | Exploration relationnelle paginée côté serveur (`/v1/couplings?summary=true`, `/v1/couplings/sub_frames`), timeline bi-piste et loupe DCT $8 \times 8$. |
+| **Certification à chaud depuis VLC (`POST /v1/certify` / bouton `"Certify sync"`)** | **Empiriquement Prouvé** | Permet de certifier et persister un couple `(Vidéo <-> SRT)` directement depuis le démon ou la CLI (`dbsrt certify-coupling`). |
+| **Recalage d'un sous-titre distant OpenSubtitles sans `.phash` de référence** | **Shift = 0 ms par design** | Un fichier `.srt` seul ne contenant aucune empreinte visuelle, si aucun `.phash` de référence n'est connu pour ce média, aucun recalage visuel n'est possible (`shift_ms = 0.0`). |
 
 ---
 
-## 4. Plan d'Action Architectural pour Adresser les Manques
+## 4. Architecture des 4 Chantiers Implémentés
 
-Pour passer de cette mécanique basée sur des conventions de nommage de fichiers à une architecture industrielle de **Couplages Certifiés `(Vidéo Référence / pHash <-> Sous-titre Certifié)`**, voici le plan d'exécution structuré en **4 chantiers incrémentaux** :
+Les 4 chantiers d'industrialisation des couplages certifiés sont désormais actifs en production locale :
 
-### Chantier 1 : Manifeste de Couplages Certifiés (`CertifiedCoupling` & Index `.dbphash` v2)
-
-- **Problème adressé** : Aujourd'hui, `dbsrt-server` devine quel `.srt` correspond à quel `.phash` en parsant le nom de fichier (`strip_suffix(".phash")` $\rightarrow$ `parse_release_metadata`). Si deux releases différentes d'un même épisode (`AMZN.WEBRip` vs `BluRay`) ont des timelines différentes dans `data/SRT/`, le nom du titre seul ne suffit pas toujours à garantir quel `.srt` est la vérité terrain certifiée pour quel `.phash`.
-- **Solution technique** :
-  1. Introduire dans `crates/dbsrt-core` et `crates/dbsrt-index` une structure explicite `CertifiedCoupling` :
-     - `phash_file: String` (ou `media_hash_sha256`)
-     - `fps: f64`, `frame_count: u32`
-     - `certified_subtitles: Vec<CertifiedSubtitleEntry>` contenant `{ language: String, srt_rel_path: String, srt_sha256: String, validation_status: Certified | Heuristic, cue_phash_anchors: Vec<(u64, u64)> }`.
-  2. Persister cette table de couplage dans un fichier d'index `data/SRT/couplings.json` (ou directement dans l'en-tête binaire `.dbphash` v2).
-  3. Lors d'un `Search by pHash` ou `/v1/download`, si `MmapLibrary` reconnaît `phash_id`, `dbsrt-server` résout directement les `.srt` certifiés liés à ce `phash_id` exact, avant tout repli heuristique par nom.
-
-### Chantier 2 : Commande `dbsrt certify-coupling` (Pipeline de Validation & Ancrage des Cues)
-
-- **Problème adressé** : Comment créer et certifier proprement un couple `(Vidéo de référence <-> Fichier .srt)` ?
-- **Solution technique** :
-  1. Ajouter une sous-commande CLI `dbsrt certify-coupling --media <video> --subtitles <srt> --language <lang> --output-dir data/` (et sa cible `task coupling:certify`).
-  2. Ce pipeline :
-     - Extrait (ou vérifie) le `.phash` complet de la vidéo de référence et le stocke dans un répertoire persistant (`data/__PHASH__/` au lieu de `/tmp`).
-     - Vérifie que tous les timestamps des répliques (`start_ms .. end_ms`) tombent dans `[0, video_duration]` et ne tombent pas sur des écrans noirs (`is_blank_phash`).
-     - Enregistre l'entrée certifiée `(phash_file, srt_file, srt_sha256, fps, cue_count)` dans le registre `couplings.json`.
-
-### Chantier 3 : Support natif de `data/__PHASH__` et des catalogues `.dbphash` dans `dbsrt-server`
-
-- **Problème adressé** : `dbsrt-server` ne lit actuellement qu'un seul dossier `--phash-dir /tmp` contenant des fichiers `.phash` individuels et ignore les catalogues `.dbphash` compilés ainsi que le dossier versionné `data/__PHASH__/`.
-- **Solution technique** :
-  1. Permettre à `ServerConfig` (`crates/dbsrt-server/src/lib.rs`) d'accepter :
-     - Plusieurs répertoires `--phash-dir` (ex. `data/__PHASH__` + `/tmp/dbsrt-cache`) ou un fichier `--dbphash catalog.dbphash`.
-  2. Charger `DbPhashReader` ou `MmapLibrary` en mémoire partagée dans `AppState` au démarrage du démon (avec rechargement incrémental si un nouveau `.phash` est généré), évitant de ré-ouvrir le répertoire à chaque requête HTTP.
-
-### Chantier 4 : Auto-Indexation Côté Client / Démon lors d'une Validation Utilisateur dans VLC
-
-- **Problème adressé** : Lorsqu'un utilisateur ouvre une nouvelle vidéo non indexée dans VLC, télécharge un sous-titre via `Search by hash` ou `Search by name`, et constate qu'il est parfaitement synchronisé, cette connaissance est perdue à la fermeture de VLC.
-- **Solution technique** :
-  1. Ajouter un endpoint `POST /v1/certify` sur `dbsrt-server` et un bouton **`"Certify sync"`** dans `vlsub_dbsrt.lua`.
-  2. Lorsque l'utilisateur valide que le sous-titre actif est parfaitement calé sur sa vidéo, le démon génère en tâche de fond le `.phash` de la vidéo, archive le `.srt` dans `data/SRT/`, et inscrit le couple dans `couplings.json` — enrichissant automatiquement la base de vérité terrain pour toutes les futures vidéos encodées différemment.
+1. **Chantier 1 — Modèle Relationnel & Registre Hybride (`crates/dbsrt-core/src/coupling.rs` & `crates/dbsrt-index/src/db.rs`)** :
+   - Tables SQL `medias`, `frames`, `subtitles` et `sub_frames` dans PostgreSQL 17 + registre Zero-DB `data/SRT/couplings.json`.
+   - Chaque réplique (`SubFrameAnchor`) stocke explicitement `(cue_index, start_ms, end_ms, start_num_frame, end_num_frame, start_imghash, end_imghash, cue_text)`.
+2. **Chantier 2 — Pipeline `dbsrt certify-coupling` & `task coupling:certify` (`scripts/seed_couplings.sh`)** :
+   - Détection automatique de la cadence exacte (`23.976` NTSC vs `25.0` PAL), vérification des bornes temporelles et des écrans noirs (`is_blank_phash`), et double indexation atomique PostgreSQL + JSON.
+3. **Chantier 3 — Support Multi-Répertoires `--phash-dir` (`data/__PHASH__` + `/tmp`)** :
+   - `ServerConfig` agrège nativement plusieurs répertoires d'empreintes via `MmapLibrary::from_directories()`, garantissant la persistance des empreintes versionnées dans `data/__PHASH__/`.
+4. **Chantier 4 — Endpoint `POST /v1/certify`, Bouton VLC `"Certify sync"` & Backoffice `dbsrt Studio`** :
+   - Voir le rapport d'architecture dédié : [dbsrt Studio, Couplages Relationnels Certifiés & Qualité Code](2026-10-18-studio-backoffice-and-relational-couplings.md).

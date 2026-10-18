@@ -12,6 +12,7 @@
 ## Git & Workflow Rules
 - **Human Approval Before Commit/Push**: STRICTLY FORBIDDEN from executing `git commit` or `git push` automatically. Always present summary and proposed commit message, and wait for explicit human validation.
 - **Taskfile-First Execution**: All recurring commands, builds, tests, demos, benchmarks must be in `Taskfile.yml` and invoked via `task <name>`.
+- **Pure Taskfile Orchestrator (Zero Inline Logic / Hardcoded Data Lists)**: `Taskfile.yml` is strictly a declarative task orchestrator, NEVER a storage dump for inline shell/Python scripts, PID management blocks, loops, or hardcoded lists of media files. Any operational logic, daemon control, or dataset discovery/seeding MUST be placed in dedicated external scripts under `scripts/` so `Taskfile.yml` remains concise, readable, and maintainable.
 - **Zero Local Absolute Paths**: Never write machine-local absolute paths or `file://` URIs in any versioned file.
 
 ## Architectural Reality: Subtitle Retargeting & Ground Truth Couplings
@@ -19,8 +20,8 @@
 - **Current Reality of Remote Providers (Axe 5)**:
   - If a subtitle is downloaded from OpenSubtitles and our database does NOT contain certified reference pHashes for that release, the computed visual shift is **0 ms**. The subtitle is injected as-is (pure modern VLSub replacement).
   - Visual recalage by pHash is ONLY active if the target video was successfully recognized against a known reference media whose pHash index exists locally or in PostgreSQL.
-- **Future Roadmap: Certified Couplings & Validators**:
-  - Long-term goal: build subtitle validation pipelines confirming with 100% certainty (human annotations in phase 1) that a subtitle is precisely timed for a given video/media release.
+- **Relational Certified Couplings (`medias` ↔ `frames` ↔ `subtitles` ↔ `sub_frames`)**:
+  - Certified ground-truth couplings are stored both in PostgreSQL 17 (`subtitles` + `sub_frames` linked to `medias` and `frames`) and in the Zero-DB registry `data/SRT/couplings.json` via `dbsrt certify-coupling` / `task coupling:certify`.
   - Only when this ground-truth coupling `(Certified Subtitles <-> Video Frames / pHash)` is established can that subtitle serve as reference to automatically retarget other releases via pHash consensus.
 
 ## Communication
