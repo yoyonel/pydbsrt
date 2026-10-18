@@ -36,7 +36,6 @@ local file_info = {
     title = "",
     season = "",
     episode = "",
-    hash = nil,
 }
 
 local candidates_store = {}
@@ -221,15 +220,6 @@ function activate()
     end
 end
 
-function run_demo_workflow()
-    vlc.misc.mwait(vlc.misc.mdate() + 1500000) -- 1.5s
-    do_search("name")
-    vlc.misc.mwait(vlc.misc.mdate() + 2000000) -- 2.0s
-    if #candidates_store > 0 then
-        download_candidate_at(1)
-    end
-end
-
 function deactivate()
     if dlg then
         dlg:delete()
@@ -243,31 +233,26 @@ end
 
 function input_changed()
     update_file_info()
-    if not dlg and (os.getenv("VLSub_AUTO_OPEN") == "1" or os.getenv("DBSRT_AUTO_OPEN") == "1") then
-        activate()
-    end
     if dlg and input_table["title"] then
         input_table["title"]:set_text(file_info.title or "")
         input_table["season"]:set_text(file_info.season or "")
         input_table["episode"]:set_text(file_info.episode or "")
-        if input_table["lbl_media"] then
-            input_table["lbl_media"]:set_text("<span style=\"color:#58a6ff;\">" .. (file_info.path or "No active video") .. "</span>")
-        end
     end
 end
 
--- GUI Interface (VLSub 1:1 Layout)
+-- GUI Interface (VLSub Layout + Search by pHash)
 function create_dialog()
     dlg = vlc.dialog("VLSub (dbsrt Enhanced)")
 
-    -- Row 1: Language & Search by Hash
+    -- Row 1: Language, Legacy Search by Hash & New Search by pHash
     dlg:add_label("<b>Subtitles language:</b>", 1, 1, 1, 1)
-    input_table["language"] = dlg:add_dropdown(2, 1, 2, 1)
+    input_table["language"] = dlg:add_dropdown(2, 1, 1, 1)
     for idx, lang in ipairs(languages) do
         input_table["language"]:add_value(lang[2], idx)
     end
 
-    dlg:add_button("Search by hash", function() do_search("hash") end, 4, 1, 1, 1)
+    dlg:add_button("Search by hash", function() do_search("hash") end, 3, 1, 1, 1)
+    dlg:add_button("Search by pHash", function() do_search("phash") end, 4, 1, 1, 1)
 
     -- Row 2: Title & Search by Name
     dlg:add_label("<b>Title:</b>", 1, 2, 1, 1)
@@ -298,9 +283,9 @@ function show_help()
         input_table["message"]:set_text(
             "<span style=\"color:#8b949e;\"><b>VLSub dbsrt Help:</b><br/>"
             .. "1. Start your video in VLC.<br/>"
-            .. "2. Click <b>Search by hash</b> (match release) or <b>Search by name</b>.<br/>"
+            .. "2. Click <b>Search by pHash</b> (visual frame fingerprint), <b>Search by hash</b> (OpenSubtitles MovieHash), or <b>Search by name</b>.<br/>"
             .. "3. Select a subtitle in the list and click <b>Download selection</b>.<br/>"
-            .. "dbsrt will automatically resynchronize the timeline if a reference exists!</span>"
+            .. "dbsrt will automatically resynchronize the timeline if a certified reference exists!</span>"
         )
     end
 end
@@ -348,7 +333,8 @@ function do_search(mode)
 
     local json_parts = {
         string.format('"media_path":"%s"', file_info.path:gsub('\\', '\\\\')),
-        string.format('"language":"%s"', lang_code)
+        string.format('"language":"%s"', lang_code),
+        string.format('"search_mode":"%s"', mode or "all")
     }
 
     if mode == "name" and title and title ~= "" then
@@ -374,6 +360,9 @@ function do_search(mode)
         notify_osd("✗ dbsrt search failed", 3)
         return
     end
+
+    local matched_media = string.match(body, '"matched_media":%s*"([^"]+)"')
+    local moviehash = string.match(body, '"moviehash":%s*"([^"]+)"')
 
     candidates_store = {}
     local mainlist = input_table["mainlist"]
@@ -411,14 +400,21 @@ function do_search(mode)
         end
     end
 
+    local extra_info = ""
+    if mode == "phash" and matched_media then
+        extra_info = string.format(" <i>(pHash match: %s)</i>", matched_media)
+    elseif mode == "hash" and moviehash then
+        extra_info = string.format(" <i>(MovieHash: %s)</i>", moviehash)
+    end
+
     if count == 0 then
         mainlist:add_value("No subtitles found", 1)
         if input_table["message"] then
-            input_table["message"]:set_text("<b>Search complete:</b> 0 results.")
+            input_table["message"]:set_text("<b>Search complete:</b> 0 results." .. extra_info)
         end
     else
         if input_table["message"] then
-            input_table["message"]:set_text(string.format("<b>Search complete:</b> Found %d subtitle(s).", count))
+            input_table["message"]:set_text(string.format("<b>Search complete:</b> Found %d subtitle(s).%s", count, extra_info))
         end
         notify_osd(string.format("dbsrt: Found %d subtitle(s)", count), 3)
     end
@@ -479,10 +475,12 @@ function download_candidate_at(sel_idx)
 
         local shift_sec = shift_ms / 1000.0
         local shift_desc = string.format("%+.2fs", shift_sec)
+        local conf_num = tonumber(conf) or 100.0
+        local out_basename = out_srt:match("([^/\\]+)$") or out_srt
 
         local osd_msg = ""
         if math.abs(shift_ms) > 1 then
-            osd_msg = string.format("✓ dbsrt: [%s] Synced (%s, %s%%) via %s", candidate.language:upper(), shift_desc, conf, source)
+            osd_msg = string.format("✓ dbsrt: [%s] Synced (%s, %.1f%%) via %s", candidate.language:upper(), shift_desc, conf_num, source)
         else
             osd_msg = string.format("✓ dbsrt: [%s] Loaded via %s", candidate.language:upper(), source)
         end
@@ -491,9 +489,9 @@ function download_candidate_at(sel_idx)
         if input_table["message"] then
             input_table["message"]:set_text(string.format(
                 "<span style=\"color:#3fb950;\"><b>✓ Subtitle Loaded!</b> [%s]<br/>"
-                .. "Source: <b>%s</b> | Resync Shift: <b>%s</b> (%.1f ms, %s%% conf)</span><br/>"
+                .. "Source: <b>%s</b> | Resync Shift: <b>%s</b> (%.1f ms, %.1f%% conf)</span><br/>"
                 .. "<small style=\"color:#8b949e;\">%s</small>",
-                candidate.language:upper(), source, shift_desc, shift_ms, conf, out_srt
+                candidate.language:upper(), source, shift_desc, shift_ms, conf_num, out_basename
             ))
         end
     else

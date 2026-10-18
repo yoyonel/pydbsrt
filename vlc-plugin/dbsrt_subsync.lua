@@ -38,7 +38,6 @@ local lbl_media = nil
 local txt_lang = nil
 local txt_server_url = nil
 local btn_toggle_auto = nil
-local list_results = nil
 
 -- OSD feedback helper
 function notify_osd(msg, duration_sec, pos)
@@ -298,9 +297,14 @@ function do_search_candidates()
     local total = string.match(body, '"total_candidates":%s*(%d+)') or "0"
     local summary = string.format("<b>Found %s candidate(s):</b><br/>", total)
 
-    -- Simple parsing for candidates
-    for source, title, c_lang in string.gmatch(body, '"source":"([^"]+)".-"language":"([^"]+)".-"title":"([^"]+)"') do
-        summary = summary .. string.format("• <b>[%s]</b> %s (%s)<br/>", source:upper(), title, c_lang)
+    -- Parse each candidate JSON block independently of field order
+    for cand_str in string.gmatch(body, '{[^{}]+}') do
+        local source = string.match(cand_str, '"source":%s*"([^"]+)"')
+        local c_lang = string.match(cand_str, '"language":%s*"([^"]+)"')
+        local title = string.match(cand_str, '"title":%s*"([^"]+)"')
+        if source and title then
+            summary = summary .. string.format("• <b>[%s]</b> %s (%s)<br/>", source:upper(), title, c_lang or lang)
+        end
     end
 
     if tonumber(total) == 0 then

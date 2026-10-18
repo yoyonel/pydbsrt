@@ -36,7 +36,9 @@ trap cleanup EXIT
 
 echo "=== 4. Launching VLC Media Player ==="
 export DISPLAY=":$DISPLAY_NUM"
-vlc --no-audio --repeat --sub-language=fr tests/data/big_buck_bunny_trailer_480p.mp4 > /tmp/vlc_demo.log 2>&1 &
+MEDIA_FILE="${1:-tests/data/big_buck_bunny_trailer_480p.mp4}"
+START_TIME="${START_TIME:-18}"
+vlc --no-audio --no-sub-autodetect-file --repeat --start-time="$START_TIME" --sub-language=fr "$MEDIA_FILE" > /tmp/vlc_demo.log 2>&1 &
 VLC_PID=$!
 
 echo "Waiting for VLC player to start..."
@@ -55,26 +57,29 @@ sleep 2.0
 echo "Capturing Step 1: Initialized Dialog..."
 ffmpeg -y -f x11grab -video_size 1920x1080 -i ":$DISPLAY_NUM.0" -vframes 1 "$ASSETS_DIR/01_vlsub_dialog_init.png" > /dev/null 2>&1
 
-echo "Clicking 'Search by name'..."
-xdotool mousemove 1150 380 click 1
+VLSUB_WIN=$(xdotool search --name "VLSub" | tail -n 1)
+echo "VLSub window ID: $VLSUB_WIN"
+
+echo "Clicking 'Search by pHash'..."
+xdotool mousemove --window "$VLSUB_WIN" 530 22 click 1
 sleep 2.0
 
 echo "Capturing Step 2: Search Results in Mainlist..."
 ffmpeg -y -f x11grab -video_size 1920x1080 -i ":$DISPLAY_NUM.0" -vframes 1 "$ASSETS_DIR/02_vlsub_search_results.png" > /dev/null 2>&1
 
 echo "Selecting first subtitle candidate in listbox..."
-xdotool mousemove 800 435 click 1
-sleep 0.8
+xdotool mousemove --window "$VLSUB_WIN" 200 110 click 1
+sleep 0.6
 
 echo "Clicking 'Download selection'..."
-xdotool mousemove 1000 650 click 1
-sleep 2.5
+xdotool mousemove --window "$VLSUB_WIN" 395 326 click 1
+sleep 2.0
 
 echo "Capturing Step 3: Subtitle Synced and Loaded in Player..."
 ffmpeg -y -f x11grab -video_size 1920x1080 -i ":$DISPLAY_NUM.0" -vframes 1 "$ASSETS_DIR/03_vlsub_subtitle_synced.png" > /dev/null 2>&1
 
 echo "Closing dialog to observe active subtitles and OSD..."
-xdotool mousemove 1150 650 click 1
+xdotool mousemove --window "$VLSUB_WIN" 530 326 click 1
 sleep 3.5
 
 echo "=== 5. Recording successfully completed! ==="
