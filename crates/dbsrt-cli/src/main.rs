@@ -1,12 +1,15 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use dbsrt_core::{
+    build_and_validate_sub_frames, compute_bytes_digest_32, compute_media_phash_digest,
     detect_cuts, extract_embedded_subtitle, extract_frames_advanced, extract_frames_phash,
-    inspect_container, probe_video, read_phash_file, write_phash_file, HwAccel, MediaMetadata,
-    MockSubtitleProvider, OpenSubtitlesProvider, SamplingMode, SubtitleCache, SubtitleFile,
-    SubtitleProvider, VideoExtractionOptions,
+    inspect_container, probe_video, read_phash_file, write_phash_file, CertifiedSubtitleRecord,
+    CouplingRegistry, HwAccel, MediaMetadata, MockSubtitleProvider, OpenSubtitlesProvider,
+    SamplingMode, SubtitleCache, SubtitleFile, SubtitleProvider, VideoExtractionOptions,
 };
-use dbsrt_index::{BkItem, BkTree, DbClient, DbphashBuilder, MmapDbphash, MmapLibrary};
+use dbsrt_index::{
+    parse_fps_from_phash_stem, BkItem, BkTree, DbClient, DbphashBuilder, MmapDbphash, MmapLibrary,
+};
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -85,6 +88,10 @@ enum Commands {
     /// Import .phash binary file(s) into PostgreSQL 17 BK-Tree
     ImportPhash(ImportPhashArgs),
 
+    /// Certify and import a ground-truth (media/phash <-> subtitle) coupling into couplings.json and/or PostgreSQL
+    #[command(visible_alias = "import-subtitles")]
+    CertifyCoupling(CertifyCouplingArgs),
+
     /// Inspect media container tracks and release metadata
     InspectMedia(InspectMediaArgs),
 
@@ -93,6 +100,61 @@ enum Commands {
 
     /// Fetch subtitles from remote providers (OpenSubtitles REST) with local cache fallback
     FetchSubtitles(FetchSubtitlesArgs),
+}
+
+#[derive(clap::Args, Debug)]
+pub struct CertifyCouplingArgs {
+    /// Reference media file (.mp4, .mkv, .webm) to extract/locate .phash for
+    #[arg(short, long, alias = "ref-media")]
+    pub media: Option<PathBuf>,
+
+    /// Existing .phash file (if certifying directly against a .phash without the raw video)
+    #[arg(long, alias = "binary-img-hash-file")]
+    pub phash_file: Option<PathBuf>,
+
+    /// Reference subtitle file (.srt) certified as synchronized with the media
+    #[arg(short, long, alias = "ref-subtitles")]
+    pub subtitle: PathBuf,
+
+    /// Subtitle language code (e.g. "fr", "en", or "auto" to detect from filename)
+    #[arg(short, long, default_value = "auto")]
+    pub lang: String,
+
+    /// Directory storing certified .srt files and couplings.json
+    #[arg(long, default_value = "data/SRT")]
+    pub subtitles_dir: PathBuf,
+
+    /// Directory storing .phash files
+    #[arg(long, default_value = "/tmp")]
+    pub phash_dir: PathBuf,
+
+    /// Allow subtitle cues that exceed the video frame count (disables strict out-of-bounds rejection)
+    #[arg(long)]
+    pub allow_oob: bool,
+
+    /// Also import the relational coupling (`medias`, `frames`, `subtitles`, `sub_frames`) into PostgreSQL
+    #[arg(long)]
+    pub use_db: bool,
+
+    /// PostgreSQL host (defaults to PSQL_IP env or 127.0.0.1)
+    #[arg(long)]
+    pub db_host: Option<String>,
+
+    /// PostgreSQL port
+    #[arg(long, env = "PSQL_PORT", default_value_t = 5433)]
+    pub db_port: u16,
+
+    /// PostgreSQL user
+    #[arg(long, default_value = "docker")]
+    pub db_user: String,
+
+    /// PostgreSQL password
+    #[arg(long, default_value = "docker")]
+    pub db_pass: String,
+
+    /// PostgreSQL database name
+    #[arg(long, default_value = "bktreedb")]
+    pub db_name: String,
 }
 
 #[derive(clap::Args, Debug)]
@@ -110,7 +172,7 @@ pub struct ImportPhashArgs {
     db_host: Option<String>,
 
     /// PostgreSQL port
-    #[arg(long, default_value_t = 5432)]
+    #[arg(long, env = "PSQL_PORT", default_value_t = 5433)]
     db_port: u16,
 
     /// PostgreSQL user
@@ -176,7 +238,7 @@ pub struct RecognizeArgs {
     db_host: Option<String>,
 
     /// PostgreSQL port
-    #[arg(long, default_value_t = 5432)]
+    #[arg(long, env = "PSQL_PORT", default_value_t = 5433)]
     db_port: u16,
 
     /// PostgreSQL user
@@ -597,21 +659,59 @@ fn run_recognize_media(args: &RecognizeArgs) -> Result<()> {
 }
 
 fn find_or_build_phash(media_file: &Path, phash_dir: &Path) -> Result<(PathBuf, Vec<u64>, f64)> {
+    let full_name = media_file
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
     let stem = media_file
         .file_stem()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_default();
 
-    // Look for existing .phash file in phash_dir
+    if media_file.extension().and_then(|e| e.to_str()) == Some("phash") && media_file.exists() {
+        let hashes = read_phash_file(media_file)?;
+        let fps = dbsrt_index::parse_fps_from_phash_stem(&stem);
+        return Ok((media_file.to_path_buf(), hashes, fps));
+    }
+
     if phash_dir.exists() {
-        if let Ok(entries) = std::fs::read_dir(phash_dir) {
-            for entry in entries.flatten() {
-                let p = entry.path();
-                if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
-                    if name.contains(&stem) && name.ends_with(".phash") {
-                        let hashes = read_phash_file(&p)?;
-                        let meta = probe_video(media_file)?;
-                        return Ok((p, hashes, meta.fps));
+        if let Ok(dir_entries) = std::fs::read_dir(phash_dir) {
+            let entries: Vec<_> = dir_entries.flatten().map(|e| e.path()).collect();
+
+            // Pass 1: Prefer exact full filename prefix (e.g. `foo.mp4.25.0fps.phash` over `foo.webm.25.0fps.phash`)
+            if !full_name.is_empty() {
+                for p in &entries {
+                    if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
+                        if name.starts_with(&full_name) && name.ends_with(".phash") {
+                            let hashes = read_phash_file(p)?;
+                            let meta = probe_video(media_file)?;
+                            return Ok((p.clone(), hashes, meta.fps));
+                        }
+                    }
+                }
+            }
+
+            // Pass 2: Stem fallback without conflicting container extension
+            let known_video_exts = [".mp4.", ".webm.", ".mkv.", ".avi.", ".mov."];
+            let my_ext = media_file
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| format!(".{}.", e.to_lowercase()));
+            if !stem.is_empty() {
+                for p in &entries {
+                    if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
+                        if name.contains(&stem) && name.ends_with(".phash") {
+                            let name_lower = name.to_lowercase();
+                            let has_conflicting_ext = known_video_exts.iter().any(|ext| {
+                                name_lower.contains(ext) && my_ext.as_deref() != Some(*ext)
+                            });
+                            if has_conflicting_ext {
+                                continue;
+                            }
+                            let hashes = read_phash_file(p)?;
+                            let meta = probe_video(media_file)?;
+                            return Ok((p.clone(), hashes, meta.fps));
+                        }
                     }
                 }
             }
@@ -1325,6 +1425,9 @@ fn main() -> Result<()> {
         Commands::ImportPhash(args) => {
             run_import_phash(&args)?;
         }
+        Commands::CertifyCoupling(args) => {
+            run_certify_coupling(&args)?;
+        }
         Commands::InspectMedia(args) => {
             run_inspect_media(&args)?;
         }
@@ -1336,6 +1439,169 @@ fn main() -> Result<()> {
             rt.block_on(run_fetch_subtitles(&args))?;
         }
     }
+    Ok(())
+}
+
+fn detect_cli_subtitle_lang(filename: &str, fallback: &str) -> String {
+    if fallback != "auto" && !fallback.is_empty() {
+        return fallback.to_lowercase();
+    }
+    let stem = filename
+        .strip_suffix(".srt")
+        .or_else(|| filename.strip_suffix(".SRT"))
+        .unwrap_or(filename);
+    if let Some((_, last)) = stem.rsplit_once('.') {
+        match last.to_lowercase().as_str() {
+            "fr" | "fre" | "fra" => return "fr".to_string(),
+            "en" | "eng" => return "en".to_string(),
+            "es" | "spa" => return "es".to_string(),
+            "de" | "ger" | "deu" => return "de".to_string(),
+            "it" | "ita" => return "it".to_string(),
+            "pt" | "por" | "pob" => return "pt".to_string(),
+            _ => {}
+        }
+    }
+    "en".to_string()
+}
+
+fn run_certify_coupling(args: &CertifyCouplingArgs) -> Result<()> {
+    if !args.subtitle.exists() {
+        anyhow::bail!("Subtitle file not found: {:?}", args.subtitle);
+    }
+
+    let (phash_path, hashes, fps) = if let Some(ref pf) = args.phash_file {
+        if !pf.exists() {
+            anyhow::bail!("Specified .phash file not found: {:?}", pf);
+        }
+        let hashes = read_phash_file(pf)?;
+        let stem = pf
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .trim_end_matches(".phash")
+            .to_string();
+        let fps = parse_fps_from_phash_stem(&stem);
+        (pf.clone(), hashes, fps)
+    } else if let Some(ref media) = args.media {
+        if !media.exists() {
+            anyhow::bail!("Media file not found: {:?}", media);
+        }
+        find_or_build_phash(media, &args.phash_dir)?
+    } else {
+        anyhow::bail!("Either --media or --phash-file must be provided");
+    };
+
+    let srt_file = SubtitleFile::open(&args.subtitle)?;
+    let strict = !args.allow_oob;
+    let sub_frames = build_and_validate_sub_frames(&srt_file, &hashes, fps)?;
+
+    let srt_fname = args
+        .subtitle
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+    let lang = detect_cli_subtitle_lang(&srt_fname, &args.lang);
+
+    std::fs::create_dir_all(&args.subtitles_dir)?;
+    let phash_fname = phash_path
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+    let media_name = phash_fname
+        .strip_suffix(".phash")
+        .unwrap_or(&phash_fname)
+        .to_string();
+
+    let dest_srt_path = if args.subtitle.starts_with(&args.subtitles_dir) {
+        args.subtitle.clone()
+    } else {
+        let dest = args.subtitles_dir.join(&srt_fname);
+        if dest != args.subtitle {
+            std::fs::copy(&args.subtitle, &dest)?;
+        }
+        dest
+    };
+
+    let raw_srt_bytes = std::fs::read(&dest_srt_path)?;
+    let media_hash = compute_media_phash_digest(&hashes);
+    let subtitles_hash = compute_bytes_digest_32(&raw_srt_bytes);
+    let rel_srt_name = dest_srt_path
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+
+    let reg_path = CouplingRegistry::default_path(&args.subtitles_dir);
+    let mut reg = CouplingRegistry::load_or_default(&reg_path)?;
+    reg.upsert_coupling(
+        media_hash.clone(),
+        media_name.clone(),
+        phash_fname.clone(),
+        fps,
+        hashes.len(),
+        CertifiedSubtitleRecord {
+            name: rel_srt_name.clone(),
+            srt_path: rel_srt_name.clone(),
+            lang: lang.clone(),
+            subtitles_hash: subtitles_hash.clone(),
+            certified: true,
+            cue_count: srt_file.cues.len(),
+            sub_frames: sub_frames.clone(),
+        },
+    );
+    reg.save(&reg_path)?;
+
+    println!("=== CERTIFIED COUPLING REGISTERED ===");
+    println!("Media Name       : {}", media_name);
+    println!(
+        "pHash File       : {:?} ({} frames @ {:.2} fps)",
+        phash_path,
+        hashes.len(),
+        fps
+    );
+    println!("Media Digest     : {}", media_hash);
+    println!("Subtitle File    : {:?} (lang: {})", dest_srt_path, lang);
+    println!("Subtitle Digest  : {}", subtitles_hash);
+    println!(
+        "Validated Cues   : {} cues -> {} frame anchors (start/end offsets)",
+        srt_file.cues.len(),
+        sub_frames.len()
+    );
+    println!("Local Registry   : {:?}", reg_path);
+
+    if args.use_db || args.db_host.is_some() {
+        let host = args
+            .db_host
+            .clone()
+            .or_else(|| std::env::var("PSQL_IP").ok())
+            .unwrap_or_else(|| "127.0.0.1".to_string());
+        match DbClient::connect(
+            &host,
+            args.db_port,
+            &args.db_user,
+            &args.db_pass,
+            &args.db_name,
+        ) {
+            Ok(mut client) => {
+                client.init_schema()?;
+                let (media_id, sub_id, inserted_anchors) =
+                    client.import_subtitle_coupling(&phash_path, &dest_srt_path, &lang, strict)?;
+                println!(
+                    "PostgreSQL Sync  : Imported media_id={}, sub_id={}, sub_frames={}",
+                    media_id, sub_id, inserted_anchors
+                );
+            }
+            Err(e) => {
+                if args.use_db {
+                    return Err(e.context("Failed to connect to PostgreSQL (--use-db enabled)"));
+                }
+                eprintln!("PostgreSQL Sync  : Skipped (DB unreachable: {})", e);
+            }
+        }
+    }
+
     Ok(())
 }
 

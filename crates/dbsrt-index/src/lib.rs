@@ -6,7 +6,7 @@ pub mod dbphash;
 pub mod mmap;
 
 pub use bktree::{BkItem, BkTree};
-pub use db::{DbClient, DbMatch};
+pub use db::{parse_fps_from_phash_stem, DbClient, DbMatch, DbMediaRecord, DbSubtitleCoupling};
 pub use dbphash::{
     DbphashBuilder, DbphashCutEntry, DbphashCutMatch, DbphashHeader, DbphashMediaEntry,
     DbphashMediaMatch, DbphashPackStats, MmapDbphash, DBPHASH_MAGIC, DBPHASH_VERSION,

@@ -120,6 +120,22 @@ impl MmapLibrary {
         Ok(Self { files })
     }
 
+    /// Loads all .phash files found recursively across multiple directories (deduplicated by filename).
+    pub fn from_directories<P: AsRef<Path>>(dirs: &[P]) -> Result<Self> {
+        let mut files = Vec::new();
+        let mut seen_names = HashSet::new();
+        for dir in dirs {
+            let mut dir_files = Vec::new();
+            Self::collect_phash_files(dir.as_ref(), &mut dir_files)?;
+            for f in dir_files {
+                if seen_names.insert(f.name.clone()) {
+                    files.push(f);
+                }
+            }
+        }
+        Ok(Self { files })
+    }
+
     fn collect_phash_files(dir: &Path, files: &mut Vec<MmapPhashFile>) -> Result<()> {
         Self::collect_phash_files_bounded(dir, files, 0)
     }

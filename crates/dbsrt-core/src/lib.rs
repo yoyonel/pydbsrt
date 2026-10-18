@@ -4,6 +4,7 @@
 //! - Binary file format definitions
 
 pub mod container;
+pub mod coupling;
 pub mod cuts;
 pub mod metadata;
 pub mod phash;
@@ -14,6 +15,10 @@ pub mod video;
 pub use container::{
     extract_embedded_subtitle, inspect_container, language_matches, ContainerInspection,
     SubtitleStreamInfo,
+};
+pub use coupling::{
+    build_and_validate_sub_frames, compute_bytes_digest_32, compute_media_phash_digest,
+    CertifiedMediaCoupling, CertifiedSubtitleRecord, CouplingRegistry, SubFrameAnchor,
 };
 pub use cuts::{
     detect_cuts, detect_cuts_timestamped, is_blank_phash, read_phash_file, write_phash_file,
