@@ -1,6 +1,8 @@
 /**
  * Interactive Pan, Zoom & Fullscreen Viewer for Mermaid Diagrams
  * Compatible with Material for MkDocs & Light/Dark themes
+ * Uses native SVG CTM (getScreenCTM().inverse()) so pan & zoom are 100% 1:1
+ * with cursor movements regardless of SVG viewBox dimensions or zoom scale.
  */
 (() => {
   const initViewer = (originalEl) => {
@@ -77,14 +79,31 @@
     originalEl.style.display = "none";
     originalEl.parentNode.insertBefore(card, originalEl);
 
-    // State
+    // State in SVG root (viewBox) coordinate units
     let scale = 1;
     let tx = 0;
     let ty = 0;
     let isDragging = false;
-    let startX = 0;
-    let startY = 0;
+    let dragStartScreenX = 0;
+    let dragStartScreenY = 0;
+    let dragStartTx = 0;
+    let dragStartTy = 0;
     let hasMoved = false;
+
+    /**
+     * Convert screen (clientX, clientY) CSS pixels into clonedSvg's internal
+     * viewBox coordinate system (the exact parent coordinate space of zoomGroup).
+     */
+    const screenToSvgRoot = (clientX, clientY) => {
+      const ctm = clonedSvg.getScreenCTM();
+      if (!ctm) {
+        return { x: clientX, y: clientY };
+      }
+      const pt = clonedSvg.createSVGPoint();
+      pt.x = clientX;
+      pt.y = clientY;
+      return pt.matrixTransform(ctm.inverse());
+    };
 
     const updateTransform = () => {
       zoomGroup.setAttribute("transform", `translate(${tx}, ${ty}) scale(${scale})`);
@@ -92,12 +111,13 @@
 
     const zoomAt = (factor, clientX, clientY) => {
       const rect = viewport.getBoundingClientRect();
-      const x = clientX !== undefined ? clientX - rect.left : rect.width / 2;
-      const y = clientY !== undefined ? clientY - rect.top : rect.height / 2;
+      const cx = clientX !== undefined ? clientX : rect.left + rect.width / 2;
+      const cy = clientY !== undefined ? clientY : rect.top + rect.height / 2;
+      const pt = screenToSvgRoot(cx, cy);
 
       const newScale = Math.min(Math.max(0.2, scale * factor), 20);
-      tx = x - (x - tx) * (newScale / scale);
-      ty = y - (y - ty) * (newScale / scale);
+      tx = pt.x - (pt.x - tx) * (newScale / scale);
+      ty = pt.y - (pt.y - ty) * (newScale / scale);
       scale = newScale;
       updateTransform();
     };
@@ -109,7 +129,7 @@
       updateTransform();
     };
 
-    // Wheel Zoom
+    // Wheel Zoom (centered on exact cursor position in SVG root coordinates)
     viewport.addEventListener(
       "wheel",
       (e) => {
@@ -120,22 +140,27 @@
       { passive: false }
     );
 
-    // Mouse Pan
+    // Mouse Pan (1:1 screen-to-SVG-viewBox delta via getScreenCTM().inverse())
     viewport.addEventListener("mousedown", (e) => {
-      // Ignore if clicking on a button or link
       if (e.target.closest("button") || e.target.closest("a")) return;
       isDragging = true;
       hasMoved = false;
-      startX = e.clientX - tx;
-      startY = e.clientY - ty;
+      dragStartScreenX = e.clientX;
+      dragStartScreenY = e.clientY;
+      dragStartTx = tx;
+      dragStartTy = ty;
       viewport.style.cursor = "grabbing";
     });
 
     window.addEventListener("mousemove", (e) => {
       if (!isDragging) return;
-      hasMoved = true;
-      tx = e.clientX - startX;
-      ty = e.clientY - startY;
+      if (Math.hypot(e.clientX - dragStartScreenX, e.clientY - dragStartScreenY) > 2) {
+        hasMoved = true;
+      }
+      const p0 = screenToSvgRoot(dragStartScreenX, dragStartScreenY);
+      const p1 = screenToSvgRoot(e.clientX, e.clientY);
+      tx = dragStartTx + (p1.x - p0.x);
+      ty = dragStartTy + (p1.y - p0.y);
       updateTransform();
     });
 
@@ -153,8 +178,10 @@
       (e) => {
         if (e.touches.length === 1) {
           isDragging = true;
-          startX = e.touches[0].clientX - tx;
-          startY = e.touches[0].clientY - ty;
+          dragStartScreenX = e.touches[0].clientX;
+          dragStartScreenY = e.touches[0].clientY;
+          dragStartTx = tx;
+          dragStartTy = ty;
         } else if (e.touches.length === 2) {
           isDragging = false;
           lastTouchDist = Math.hypot(
@@ -171,8 +198,10 @@
       (e) => {
         if (isDragging && e.touches.length === 1) {
           e.preventDefault();
-          tx = e.touches[0].clientX - startX;
-          ty = e.touches[0].clientY - startY;
+          const p0 = screenToSvgRoot(dragStartScreenX, dragStartScreenY);
+          const p1 = screenToSvgRoot(e.touches[0].clientX, e.touches[0].clientY);
+          tx = dragStartTx + (p1.x - p0.x);
+          ty = dragStartTy + (p1.y - p0.y);
           updateTransform();
         } else if (e.touches.length === 2 && lastTouchDist) {
           e.preventDefault();
@@ -195,7 +224,7 @@
     });
 
     // Double-click to toggle fullscreen
-    viewport.addEventListener("dblclick", (e) => {
+    viewport.addEventListener("dblclick", () => {
       if (hasMoved) return;
       toggleFullscreen();
     });
