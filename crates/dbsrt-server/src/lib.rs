@@ -154,12 +154,46 @@ pub struct StatusResponse {
     pub indexed_phash_count: usize,
 }
 
+/// Canonical subtitle source origin across the pipeline.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum SubtitleSource {
+    Container,
+    Catalog,
+    OpenSubtitles,
+}
+
+impl SubtitleSource {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Container => "container",
+            Self::Catalog => "catalog",
+            Self::OpenSubtitles => "opensubtitles",
+        }
+    }
+}
+
+impl std::str::FromStr for SubtitleSource {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "container" => Ok(Self::Container),
+            "catalog" => Ok(Self::Catalog),
+            "opensubtitles" => Ok(Self::OpenSubtitles),
+            other => Err(other.to_string()),
+        }
+    }
+}
+
 #[derive(Deserialize, Serialize, Debug)]
 pub struct SearchSubtitlesRequest {
     pub media_path: String,
     #[serde(default = "default_lang")]
     pub language: String,
     pub subtitles_dir: Option<String>,
+    pub phash_dir: Option<String>,
+    pub search_mode: Option<String>,
     pub query_title: Option<String>,
     pub season: Option<u32>,
     pub episode: Option<u32>,
@@ -179,6 +213,8 @@ pub struct SubtitleCandidate {
 pub struct SearchSubtitlesResponse {
     pub media_path: String,
     pub language: String,
+    pub matched_media: Option<String>,
+    pub moviehash: Option<String>,
     pub total_candidates: usize,
     pub candidates: Vec<SubtitleCandidate>,
 }
@@ -349,6 +385,277 @@ pub async fn status_handler(State(state): State<Arc<AppState>>) -> impl IntoResp
     })
 }
 
+/// Normalizes a language code (ISO 639-1 / 639-2) to canonical 2-letter lowercase where known.
+pub fn normalize_lang_code(lang: &str) -> String {
+    match lang.trim().to_lowercase().as_str() {
+        "fr" | "fre" | "fra" | "french" => "fr".to_string(),
+        "en" | "eng" | "english" => "en".to_string(),
+        "es" | "spa" | "spanish" => "es".to_string(),
+        "de" | "ger" | "deu" | "german" => "de".to_string(),
+        "it" | "ita" | "italian" => "it".to_string(),
+        "pt" | "por" | "pob" | "portuguese" => "pt".to_string(),
+        "ru" | "rus" | "russian" => "ru".to_string(),
+        "ja" | "jpn" | "japanese" => "ja".to_string(),
+        "zh" | "chi" | "zho" | "chinese" => "zh".to_string(),
+        "nl" | "dut" | "nld" | "dutch" => "nl".to_string(),
+        "pl" | "pol" | "polish" => "pl".to_string(),
+        "tr" | "tur" | "turkish" => "tr".to_string(),
+        other => other.to_string(),
+    }
+}
+
+/// Extracts explicit language tag from a subtitle filename (e.g. `movie.fr.srt` -> `Some("fr")`).
+pub fn detect_subtitle_file_language(filename: &str) -> Option<String> {
+    let base = filename.strip_suffix(".srt").unwrap_or(filename);
+    let last_token = base.rsplit(['.', '_', '-']).next()?;
+    let lower = last_token.to_lowercase();
+    match lower.as_str() {
+        "fr" | "fre" | "fra" => Some("fr".to_string()),
+        "en" | "eng" => Some("en".to_string()),
+        "es" | "spa" => Some("es".to_string()),
+        "de" | "ger" | "deu" => Some("de".to_string()),
+        "it" | "ita" => Some("it".to_string()),
+        "pt" | "por" | "pob" => Some("pt".to_string()),
+        "ru" | "rus" => Some("ru".to_string()),
+        "ja" | "jpn" => Some("ja".to_string()),
+        "zh" | "chi" | "zho" => Some("zh".to_string()),
+        "nl" | "dut" | "nld" => Some("nl".to_string()),
+        "pl" | "pol" => Some("pl".to_string()),
+        "tr" | "tur" => Some("tr".to_string()),
+        "ar" | "ara" => Some("ar".to_string()),
+        "he" | "heb" => Some("he".to_string()),
+        "sv" | "swe" => Some("sv".to_string()),
+        "da" | "dan" => Some("da".to_string()),
+        "fi" | "fin" => Some("fi".to_string()),
+        "cs" | "cze" | "ces" => Some("cs".to_string()),
+        "hu" | "hun" => Some("hu".to_string()),
+        "ro" | "rum" | "ron" => Some("ro".to_string()),
+        "el" | "ell" | "gre" => Some("el".to_string()),
+        "uk" | "ukr" => Some("uk".to_string()),
+        _ => None,
+    }
+}
+
+/// Unified catalog search returning `(score, PathBuf, detected_language)` sorted by relevance.
+pub fn search_subtitles_in_catalog(
+    subtitles_dir: &Path,
+    media_stems: &[String],
+    query_title: Option<&str>,
+    season: Option<u32>,
+    episode: Option<u32>,
+    language: &str,
+) -> Vec<(i32, PathBuf, String)> {
+    if !subtitles_dir.exists() {
+        return Vec::new();
+    }
+    let Ok(entries) = std::fs::read_dir(subtitles_dir) else {
+        return Vec::new();
+    };
+
+    let req_lang = normalize_lang_code(language);
+    let any_lang = req_lang == "auto" || req_lang == "all" || req_lang.is_empty();
+
+    let clean_stems: Vec<String> = media_stems
+        .iter()
+        .map(|s| {
+            s.strip_suffix(".phash")
+                .unwrap_or(s)
+                .strip_suffix(".mp4")
+                .unwrap_or(s)
+                .strip_suffix(".webm")
+                .unwrap_or(s)
+                .strip_suffix(".mkv")
+                .unwrap_or(s)
+                .to_lowercase()
+        })
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    let query_norm: Option<String> = query_title
+        .map(|q| {
+            q.chars()
+                .filter(|c| c.is_alphanumeric())
+                .collect::<String>()
+                .to_lowercase()
+        })
+        .filter(|q| !q.is_empty());
+
+    let mut results: Vec<(i32, PathBuf, String)> = Vec::new();
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("srt") {
+            continue;
+        }
+        let Some(fname_os) = path.file_name() else {
+            continue;
+        };
+        let fname = fname_os.to_string_lossy().to_lowercase();
+        let fname_alnum: String = fname.chars().filter(|c| c.is_alphanumeric()).collect();
+
+        let has_stem = clean_stems.iter().any(|stem_lower| {
+            fname.contains(stem_lower)
+                || stem_lower.contains(fname.trim_end_matches(".srt"))
+                || (stem_lower.len() > 10 && fname.contains(&stem_lower[..10]))
+        });
+
+        let has_query = query_norm
+            .as_ref()
+            .is_some_and(|qn| fname_alnum.contains(qn));
+
+        if !has_stem && !has_query {
+            continue;
+        }
+
+        // Check season/episode filter if explicitly requested via query search
+        if !has_stem {
+            if let (Some(s), Some(e)) = (season, episode) {
+                let se_tag = format!("s{:02}e{:02}", s, e);
+                let x_tag = format!("{}x{:02}", s, e);
+                if !fname.contains(&se_tag) && !fname.contains(&x_tag) {
+                    continue;
+                }
+            }
+        }
+
+        let detected_lang = detect_subtitle_file_language(&fname);
+        let (score, resolved_lang) = match detected_lang {
+            Some(ref d_lang) if *d_lang == req_lang => (100, d_lang.clone()),
+            Some(ref d_lang) if any_lang => (50, d_lang.clone()),
+            Some(_) => {
+                // Explicit language suffix on file does NOT match requested language -> filter out!
+                continue;
+            }
+            None => {
+                // File has no explicit language tag in filename (e.g. `movie.srt`)
+                let fallback_lang = if any_lang {
+                    "und".to_string()
+                } else {
+                    req_lang.clone()
+                };
+                (10, fallback_lang)
+            }
+        };
+
+        results.push((score, path, resolved_lang));
+    }
+
+    results.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+    results
+}
+
+/// Shared helper to fetch a remote subtitle from disk cache or download it via provider.
+pub async fn fetch_or_cache_remote_subtitle(
+    state: &AppState,
+    meta: &MediaMetadata,
+    language: &str,
+    candidate: &dbsrt_core::RemoteSubtitleCandidate,
+) -> Result<SubtitleFile> {
+    if let Some(cached) = state.cache.get(meta, language, &candidate.subtitle_id) {
+        if let Ok(parsed) = SubtitleFile::parse(&cached) {
+            return Ok(parsed);
+        }
+    }
+
+    let raw = state.provider.download(candidate).await?;
+    let _ = state
+        .cache
+        .put(meta, language, &candidate.subtitle_id, &raw);
+    SubtitleFile::parse(&raw)
+}
+
+pub type ExistingPhashData = (PathBuf, Vec<u64>, f64);
+pub type PhashIdentificationResult = (Option<(String, f64)>, f64, Option<ExistingPhashData>);
+
+/// Identifies a target media file against `MmapLibrary` in `phash_dir` using existing `.phash`
+/// or an on-the-fly frame sample. Returns `(matched_media_name_and_conf, target_fps, existing_phash)`.
+pub fn identify_media_by_phash(
+    media_path: &Path,
+    phash_dir: &Path,
+    nb_seconds: f64,
+    search_distance: u32,
+) -> PhashIdentificationResult {
+    let existing_phash = find_existing_phash(media_path, phash_dir);
+    let (target_fps, query_sample) = if let Some((_, ref hashes, fps)) = existing_phash {
+        let sample_len = ((nb_seconds * fps).round() as usize).min(hashes.len());
+        let sample_start = if hashes.len() > sample_len * 2 {
+            hashes.len() / 4
+        } else {
+            0
+        };
+        (
+            fps,
+            hashes[sample_start..sample_start + sample_len].to_vec(),
+        )
+    } else if media_path.exists() {
+        let meta = probe_video(media_path).unwrap_or(dbsrt_core::video::VideoMetadata {
+            duration: 0.0,
+            fps: 25.0,
+        });
+        let nb_frames = ((nb_seconds * meta.fps).round() as usize).max(1);
+        let start_sec = (meta.duration / 2.0).floor().max(0.0);
+        let sample = extract_frames_phash(media_path, start_sec, nb_frames).unwrap_or_default();
+        (meta.fps, sample)
+    } else {
+        (25.0, Vec::new())
+    };
+
+    let matched = if !query_sample.is_empty() {
+        MmapLibrary::from_directory(phash_dir)
+            .ok()
+            .and_then(|lib| {
+                lib.recognize(&query_sample, search_distance)
+                    .into_iter()
+                    .next()
+            })
+            .map(|m| (m.media_name, m.confidence * 100.0))
+    } else {
+        None
+    };
+
+    (matched, target_fps, existing_phash)
+}
+
+/// Computes visual pHash shift between `media_path` and a certified reference in `phash_dir`.
+/// Strictly adheres to `GEMINI.md`: pHash recalage is ONLY active if the media is recognized
+/// against a known reference `.phash` in `phash_dir`.
+pub fn compute_media_phash_shift(
+    media_path: &Path,
+    phash_dir: &Path,
+    matched_stem: &str,
+    match_conf: f64,
+    target_fps: f64,
+    existing_phash: &Option<(PathBuf, Vec<u64>, f64)>,
+    search_distance: u32,
+) -> (i64, f64, f64) {
+    let (shift_frames, confidence_percent) = match read_ref_phash_for_media(phash_dir, matched_stem)
+    {
+        Ok(ref_hashes) => {
+            let target_hashes = if let Some((_, ref hashes, _)) = existing_phash {
+                hashes.clone()
+            } else if let Ok(m) = probe_video(media_path) {
+                let total_frames = (m.duration * m.fps).floor() as usize;
+                extract_frames_phash(media_path, 0.0, total_frames).unwrap_or_default()
+            } else {
+                Vec::new()
+            };
+
+            if !target_hashes.is_empty() {
+                let target_cuts = detect_cuts(&target_hashes, 16);
+                let ref_cuts = detect_cuts(&ref_hashes, 16);
+                calculate_shift_consensus(&target_cuts, &ref_cuts, search_distance, match_conf)
+            } else {
+                (0, match_conf)
+            }
+        }
+        Err(_) => (0, match_conf),
+    };
+
+    let fps = if target_fps > 0.0 { target_fps } else { 25.0 };
+    let shift_ms = (shift_frames as f64 / fps) * 1000.0;
+    (shift_frames, shift_ms, confidence_percent)
+}
+
 pub async fn search_handler(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<SearchSubtitlesRequest>,
@@ -358,15 +665,35 @@ pub async fn search_handler(
         .subtitles_dir
         .map(PathBuf::from)
         .unwrap_or_else(|| state.subtitles_dir.clone());
+    let phash_dir = payload
+        .phash_dir
+        .map(PathBuf::from)
+        .unwrap_or_else(|| state.phash_dir.clone());
     let mut candidates: Vec<SubtitleCandidate> = Vec::new();
+
+    let mode = payload.search_mode.as_deref().unwrap_or("all");
+
+    // 0. Visual pHash Recognition when mode == "phash" or index exists
+    let mut matched_media: Option<String> = None;
+    let mut phash_conf: f64 = 0.0;
+    if media_path.exists() && (mode == "phash" || phash_dir.exists()) {
+        let (matched, _, _) = identify_media_by_phash(&media_path, &phash_dir, 1.0, 12);
+        if let Some((m_name, conf)) = matched {
+            matched_media = Some(m_name);
+            phash_conf = conf;
+        }
+    }
 
     // 1. Inspect container if media exists
     if media_path.exists() {
         if let Ok(insp) = inspect_container(&media_path) {
+            let req_norm = normalize_lang_code(&payload.language);
             for stream in insp.subtitle_streams {
                 let stream_lang = stream.language.as_deref().unwrap_or("und");
+                let stream_norm = normalize_lang_code(stream_lang);
                 let lang_match = payload.language == "auto"
                     || payload.language == "all"
+                    || stream_norm == req_norm
                     || stream_lang
                         .to_lowercase()
                         .starts_with(&payload.language.to_lowercase())
@@ -376,7 +703,7 @@ pub async fn search_handler(
                         .starts_with(&stream_lang.to_lowercase());
                 if lang_match {
                     candidates.push(SubtitleCandidate {
-                        source: "container".to_string(),
+                        source: SubtitleSource::Container.as_str().to_string(),
                         language: stream_lang.to_string(),
                         title: stream
                             .title
@@ -396,56 +723,61 @@ pub async fn search_handler(
         }
     }
 
-    // 2. Inspect local subtitles directory
-    if subtitles_dir.exists() {
-        let clean_stem = media_path
-            .file_stem()
-            .map(|s| s.to_string_lossy().to_string())
-            .unwrap_or_default();
-        let stem_lower = clean_stem.to_lowercase();
-        let req_lang = payload.language.to_lowercase();
+    // 2. Inspect local subtitles directory (matching file stem, pHash matched media, or query_title)
+    let file_stem = media_path
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let mut stems = Vec::new();
+    if let Some(ref m) = matched_media {
+        stems.push(m.clone());
+    }
+    if !file_stem.is_empty() && !stems.contains(&file_stem) {
+        stems.push(file_stem.clone());
+    }
 
-        if let Ok(entries) = std::fs::read_dir(&subtitles_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().and_then(|e| e.to_str()) != Some("srt") {
-                    continue;
-                }
-                let fname = path
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_lowercase();
-                let has_stem = fname.contains(&stem_lower)
-                    || stem_lower.contains(&fname.trim_end_matches(".srt").to_string())
-                    || (stem_lower.len() > 10 && fname.contains(&stem_lower[..10]));
-
-                if has_stem {
-                    let lang_in_file =
-                        if fname.contains(&req_lang) || req_lang == "auto" || req_lang == "all" {
-                            payload.language.clone()
-                        } else {
-                            "unknown".to_string()
-                        };
-                    candidates.push(SubtitleCandidate {
-                        source: "catalog".to_string(),
-                        language: lang_in_file,
-                        title: path
-                            .file_name()
-                            .unwrap_or_default()
-                            .to_string_lossy()
-                            .to_string(),
-                        release: Some(clean_stem.clone()),
-                        details: Some(path.to_string_lossy().to_string()),
-                        candidate_id: Some(path.to_string_lossy().to_string()),
-                    });
-                }
-            }
-        }
+    for (_, path, resolved_lang) in search_subtitles_in_catalog(
+        &subtitles_dir,
+        &stems,
+        payload.query_title.as_deref(),
+        payload.season,
+        payload.episode,
+        &payload.language,
+    ) {
+        let details = if let Some(ref m) = matched_media {
+            format!(
+                "pHash matched '{}' ({:.0}% conf) — {}",
+                m,
+                phash_conf,
+                path.display()
+            )
+        } else {
+            path.to_string_lossy().to_string()
+        };
+        candidates.push(SubtitleCandidate {
+            source: SubtitleSource::Catalog.as_str().to_string(),
+            language: resolved_lang,
+            title: path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string(),
+            release: matched_media.clone().or_else(|| Some(file_stem.clone())),
+            details: Some(details),
+            candidate_id: Some(path.to_string_lossy().to_string()),
+        });
     }
 
     // 3. Search remote provider
     let mut meta = MediaMetadata::parse_from_path(&media_path);
+    if mode == "phash" {
+        if let Some(ref m) = matched_media {
+            let ref_meta = MediaMetadata::parse(m);
+            if !ref_meta.clean_title.is_empty() {
+                meta.clean_title = ref_meta.clean_title;
+            }
+        }
+    }
     if let Some(ref qt) = payload.query_title {
         if !qt.trim().is_empty() {
             meta.clean_title = qt.trim().to_string();
@@ -457,11 +789,12 @@ pub async fn search_handler(
     if let Some(ep) = payload.episode {
         meta.episode = Some(ep);
     }
+    let moviehash = meta.moviehash.clone();
 
     if let Ok(remote_cands) = state.provider.search(&meta, &payload.language).await {
         for cand in remote_cands {
             candidates.push(SubtitleCandidate {
-                source: "opensubtitles".to_string(),
+                source: SubtitleSource::OpenSubtitles.as_str().to_string(),
                 language: cand.language.clone(),
                 title: cand
                     .release_name
@@ -481,6 +814,8 @@ pub async fn search_handler(
     Json(SearchSubtitlesResponse {
         media_path: payload.media_path,
         language: payload.language,
+        matched_media,
+        moviehash,
         total_candidates,
         candidates,
     })
@@ -500,9 +835,25 @@ pub async fn download_handler(
         .map(PathBuf::from)
         .unwrap_or_else(|| state.phash_dir.clone());
 
+    let parsed_source = match payload.source.parse::<SubtitleSource>() {
+        Ok(s) => s,
+        Err(other) => {
+            return Json(DownloadSubtitleResponse {
+                success: false,
+                output_srt_path: String::new(),
+                shift_frames: 0,
+                shift_ms: 0.0,
+                confidence_percent: 0.0,
+                source: other.clone(),
+                language: payload.language,
+                error: Some(format!("Unknown subtitle source: {}", other)),
+            });
+        }
+    };
+
     // 1. Fetch raw subtitle according to source
-    let (mut srt_file, source_name) = match payload.source.as_str() {
-        "container" => {
+    let (mut srt_file, source_name) = match parsed_source {
+        SubtitleSource::Container => {
             let idx: usize = payload
                 .candidate_id
                 .as_deref()
@@ -510,7 +861,7 @@ pub async fn download_handler(
                 .unwrap_or(0);
             match extract_embedded_subtitle(&media_path, idx) {
                 Ok(raw) => match SubtitleFile::parse(&raw) {
-                    Ok(s) => (s, "container".to_string()),
+                    Ok(s) => (s, SubtitleSource::Container.as_str().to_string()),
                     Err(e) => {
                         return Json(DownloadSubtitleResponse {
                             success: false,
@@ -541,13 +892,13 @@ pub async fn download_handler(
                 }
             }
         }
-        "catalog" => {
+        SubtitleSource::Catalog => {
             let path = payload
                 .candidate_id
                 .map(PathBuf::from)
                 .unwrap_or_else(|| subtitles_dir.clone());
             match SubtitleFile::open(&path) {
-                Ok(s) => (s, "catalog".to_string()),
+                Ok(s) => (s, SubtitleSource::Catalog.as_str().to_string()),
                 Err(e) => {
                     return Json(DownloadSubtitleResponse {
                         success: false,
@@ -562,47 +913,23 @@ pub async fn download_handler(
                 }
             }
         }
-        "opensubtitles" => {
+        SubtitleSource::OpenSubtitles => {
             let sub_id = payload.candidate_id.clone().unwrap_or_default();
             let meta = MediaMetadata::parse_from_path(&media_path);
-            let mut raw_content = None;
+            let cand = dbsrt_core::RemoteSubtitleCandidate {
+                provider: SubtitleSource::OpenSubtitles.as_str().to_string(),
+                subtitle_id: sub_id.clone(),
+                release_name: None,
+                language: payload.language.clone(),
+                download_url: String::new(),
+                hearing_impaired: false,
+                fps: None,
+                match_score: 1.0,
+            };
 
-            if let Some(cached) = state.cache.get(&meta, &payload.language, &sub_id) {
-                raw_content = Some(cached);
-            } else {
-                let cand = dbsrt_core::RemoteSubtitleCandidate {
-                    provider: "opensubtitles".to_string(),
-                    subtitle_id: sub_id.clone(),
-                    release_name: None,
-                    language: payload.language.clone(),
-                    download_url: String::new(),
-                    hearing_impaired: false,
-                    fps: None,
-                    match_score: 1.0,
-                };
-                if let Ok(raw) = state.provider.download(&cand).await {
-                    let _ = state.cache.put(&meta, &payload.language, &sub_id, &raw);
-                    raw_content = Some(raw);
-                }
-            }
-
-            match raw_content {
-                Some(raw) => match SubtitleFile::parse(&raw) {
-                    Ok(s) => (s, "opensubtitles".to_string()),
-                    Err(e) => {
-                        return Json(DownloadSubtitleResponse {
-                            success: false,
-                            output_srt_path: String::new(),
-                            shift_frames: 0,
-                            shift_ms: 0.0,
-                            confidence_percent: 0.0,
-                            source: payload.source,
-                            language: payload.language,
-                            error: Some(format!("Failed to parse remote subtitle: {:#}", e)),
-                        });
-                    }
-                },
-                None => {
+            match fetch_or_cache_remote_subtitle(&state, &meta, &payload.language, &cand).await {
+                Ok(s) => (s, SubtitleSource::OpenSubtitles.as_str().to_string()),
+                Err(e) => {
                     return Json(DownloadSubtitleResponse {
                         success: false,
                         output_srt_path: String::new(),
@@ -611,60 +938,37 @@ pub async fn download_handler(
                         confidence_percent: 0.0,
                         source: payload.source,
                         language: payload.language,
-                        error: Some(format!("Failed to download subtitle ID '{}'", sub_id)),
+                        error: Some(format!(
+                            "Failed to download/parse subtitle ID '{}': {:#}",
+                            sub_id, e
+                        )),
                     });
                 }
             }
         }
-        other => {
-            return Json(DownloadSubtitleResponse {
-                success: false,
-                output_srt_path: String::new(),
-                shift_frames: 0,
-                shift_ms: 0.0,
-                confidence_percent: 0.0,
-                source: other.to_string(),
-                language: payload.language,
-                error: Some(format!("Unknown subtitle source: {}", other)),
-            });
-        }
     };
 
-    // 2. Perform resync if requested and possible
+    // 2. Perform certified pHash resync if requested and target media is recognized in MmapLibrary
     let mut shift_frames = 0i64;
     let mut shift_ms = 0.0f64;
     let mut confidence_percent = 0.0f64;
 
     if payload.resync && media_path.exists() {
-        if let Some((_, ref target_hashes, target_fps)) =
-            find_existing_phash(&media_path, &phash_dir)
-        {
-            if let Ok(entries) = std::fs::read_dir(&phash_dir) {
-                let target_cuts = detect_cuts(target_hashes, 16);
-                let target_stem = media_path
-                    .file_stem()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_string();
-                for entry in entries.flatten() {
-                    let p = entry.path();
-                    if p.extension().and_then(|e| e.to_str()) == Some("phash")
-                        && !p.to_string_lossy().contains(&target_stem)
-                    {
-                        if let Ok(ref_hashes) = read_phash_file(&p) {
-                            let ref_cuts = detect_cuts(&ref_hashes, 16);
-                            let (s_frames, conf) =
-                                calculate_shift_consensus(&target_cuts, &ref_cuts, 0, 0.0);
-                            if conf > 50.0 {
-                                shift_frames = s_frames;
-                                shift_ms = (shift_frames as f64 / target_fps) * 1000.0;
-                                confidence_percent = conf;
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
+        let (matched, target_fps, existing_phash) =
+            identify_media_by_phash(&media_path, &phash_dir, 1.0, 12);
+        if let Some((matched_stem, match_conf)) = matched {
+            let (sf, sms, conf) = compute_media_phash_shift(
+                &media_path,
+                &phash_dir,
+                &matched_stem,
+                match_conf,
+                target_fps,
+                &existing_phash,
+                12,
+            );
+            shift_frames = sf;
+            shift_ms = sms;
+            confidence_percent = conf;
         }
     }
 
@@ -775,52 +1079,91 @@ pub async fn recognize_handler(
     }
 }
 
+fn parse_phash_fps(name: &str, media_file: &Path) -> f64 {
+    let mut fps = if let Some(fps_match) = name.strip_suffix("fps.phash") {
+        let parts: Vec<&str> = fps_match.split('.').collect();
+        if parts.len() >= 2 {
+            let last_two = format!("{}.{}", parts[parts.len() - 2], parts[parts.len() - 1]);
+            if let Ok(v) = last_two.parse::<f64>() {
+                v
+            } else {
+                parts
+                    .last()
+                    .and_then(|p| p.parse::<f64>().ok())
+                    .unwrap_or(25.0)
+            }
+        } else {
+            parts
+                .last()
+                .and_then(|p| p.parse::<f64>().ok())
+                .unwrap_or(25.0)
+        }
+    } else {
+        probe_video(media_file).map(|m| m.fps).unwrap_or(25.0)
+    };
+    if fps <= 0.0 || fps.is_nan() {
+        fps = 25.0;
+    }
+    fps
+}
+
 pub fn find_existing_phash(
     media_file: &Path,
     phash_dir: &Path,
 ) -> Option<(PathBuf, Vec<u64>, f64)> {
+    let full_name = media_file
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
     let stem = media_file
         .file_stem()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_default();
 
-    if phash_dir.exists() {
-        if let Ok(entries) = std::fs::read_dir(phash_dir) {
-            for entry in entries.flatten() {
-                let p = entry.path();
-                if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
-                    if name.contains(&stem) && name.ends_with(".phash") {
-                        if let Ok(hashes) = read_phash_file(&p) {
-                            let mut fps = if let Some(fps_match) = name.strip_suffix("fps.phash") {
-                                let parts: Vec<&str> = fps_match.split('.').collect();
-                                if parts.len() >= 2 {
-                                    let last_two = format!(
-                                        "{}.{}",
-                                        parts[parts.len() - 2],
-                                        parts[parts.len() - 1]
-                                    );
-                                    if let Ok(v) = last_two.parse::<f64>() {
-                                        v
-                                    } else {
-                                        parts
-                                            .last()
-                                            .and_then(|p| p.parse::<f64>().ok())
-                                            .unwrap_or(25.0)
-                                    }
-                                } else {
-                                    parts
-                                        .last()
-                                        .and_then(|p| p.parse::<f64>().ok())
-                                        .unwrap_or(25.0)
-                                }
-                            } else {
-                                probe_video(media_file).map(|m| m.fps).unwrap_or(25.0)
-                            };
-                            if fps <= 0.0 || fps.is_nan() {
-                                fps = 25.0;
-                            }
-                            return Some((p, hashes, fps));
-                        }
+    if !phash_dir.exists() {
+        return None;
+    }
+    let entries: Vec<_> = std::fs::read_dir(phash_dir)
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .collect();
+
+    // Pass 1: Prefer exact full filename match (e.g. `foo.mp4.25.0fps.phash` over `foo.webm.25.0fps.phash`)
+    if !full_name.is_empty() {
+        for p in &entries {
+            if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
+                if name.starts_with(&full_name) && name.ends_with(".phash") {
+                    if let Ok(hashes) = read_phash_file(p) {
+                        let fps = parse_phash_fps(name, media_file);
+                        return Some((p.clone(), hashes, fps));
+                    }
+                }
+            }
+        }
+    }
+
+    // Pass 2: Fallback to stem match ONLY if the candidate does not belong to a different container extension
+    let known_video_exts = [".mp4.", ".webm.", ".mkv.", ".avi.", ".mov."];
+    let my_ext = media_file
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| format!(".{}.", e.to_lowercase()));
+
+    if !stem.is_empty() {
+        for p in &entries {
+            if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
+                if name.contains(&stem) && name.ends_with(".phash") {
+                    let name_lower = name.to_lowercase();
+                    let has_conflicting_ext = known_video_exts
+                        .iter()
+                        .any(|ext| name_lower.contains(ext) && my_ext.as_deref() != Some(*ext));
+                    if has_conflicting_ext {
+                        continue;
+                    }
+                    if let Ok(hashes) = read_phash_file(p) {
+                        let fps = parse_phash_fps(name, media_file);
+                        return Some((p.clone(), hashes, fps));
                     }
                 }
             }
@@ -1036,56 +1379,11 @@ pub fn find_subtitle_in_catalog(
     media_stem: &str,
     language: &str,
 ) -> Option<PathBuf> {
-    if !subtitles_dir.exists() {
-        return None;
-    }
-    let lang = language.to_lowercase();
-    let entries = std::fs::read_dir(subtitles_dir).ok()?;
-    let mut candidates: Vec<(i32, PathBuf)> = Vec::new();
-
-    let clean_stem = media_stem
-        .strip_suffix(".phash")
-        .unwrap_or(media_stem)
-        .strip_suffix(".mp4")
-        .unwrap_or(media_stem)
-        .strip_suffix(".webm")
-        .unwrap_or(media_stem)
-        .strip_suffix(".mkv")
-        .unwrap_or(media_stem);
-    let stem_lower = clean_stem.to_lowercase();
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("srt") {
-            continue;
-        }
-        let fname = path.file_name()?.to_string_lossy().to_lowercase();
-
-        let has_stem = fname.contains(&stem_lower)
-            || stem_lower.contains(&fname.trim_end_matches(".srt").to_string())
-            || (stem_lower.len() > 10 && fname.contains(&stem_lower[..10]));
-        if !has_stem {
-            continue;
-        }
-
-        // Check language match
-        let is_exact_lang = fname.ends_with(&format!(".{}.srt", lang))
-            || fname.ends_with(&format!("_{}.srt", lang))
-            || fname.contains(&format!(".{}.", lang));
-
-        if is_exact_lang {
-            return Some(path);
-        }
-
-        if lang == "auto" || lang == "all" || fname.contains(&lang) {
-            candidates.push((10, path));
-        } else {
-            candidates.push((1, path));
-        }
-    }
-
-    candidates.sort_by_key(|c| std::cmp::Reverse(c.0));
-    candidates.first().map(|c| c.1.clone())
+    let stems = vec![media_stem.to_string()];
+    search_subtitles_in_catalog(subtitles_dir, &stems, None, None, None, language)
+        .into_iter()
+        .next()
+        .map(|(_, path, _)| path)
 }
 
 pub fn read_ref_phash_for_media(phash_dir: &Path, media_name: &str) -> Result<Vec<u64>> {
@@ -1134,57 +1432,31 @@ pub async fn autosync_handler(
         .map(PathBuf::from)
         .unwrap_or_else(|| state.subtitles_dir.clone());
 
-    // 1. Try to find existing target phash or extract small sample for library recognition
-    let existing_phash = find_existing_phash(&media_path, &phash_dir);
-    let (target_fps, query_sample) = if let Some((_, ref hashes, fps)) = existing_phash {
-        let sample_len = ((payload.nb_seconds * fps).round() as usize).min(hashes.len());
-        let sample_start = if hashes.len() > sample_len * 2 {
-            hashes.len() / 4
-        } else {
-            0
-        };
-        (
-            fps,
-            hashes[sample_start..sample_start + sample_len].to_vec(),
-        )
-    } else {
-        let meta = probe_video(&media_path).unwrap_or(dbsrt_core::video::VideoMetadata {
-            duration: 0.0,
-            fps: 25.0,
+    if let Err(e) = MmapLibrary::from_directory(&phash_dir) {
+        return Json(AutoSyncResponse {
+            success: false,
+            matched_media: None,
+            language: payload.language.clone(),
+            shift_frames: 0,
+            shift_ms: 0.0,
+            output_srt_path: String::new(),
+            confidence_percent: 0.0,
+            elapsed_seconds: start.elapsed().as_secs_f64(),
+            source: None,
+            error: Some(format!("Failed to load mmap library: {:#}", e)),
         });
-        let nb_frames = ((payload.nb_seconds * meta.fps).round() as usize).max(1);
-        let start_sec = (meta.duration / 2.0).floor().max(0.0);
-        let sample = extract_frames_phash(&media_path, start_sec, nb_frames).unwrap_or_default();
-        (meta.fps, sample)
-    };
+    }
 
-    // 2. Identify media in index library
-    let library = match MmapLibrary::from_directory(&phash_dir) {
-        Ok(lib) => lib,
-        Err(e) => {
-            return Json(AutoSyncResponse {
-                success: false,
-                matched_media: None,
-                language: payload.language.clone(),
-                shift_frames: 0,
-                shift_ms: 0.0,
-                output_srt_path: String::new(),
-                confidence_percent: 0.0,
-                elapsed_seconds: start.elapsed().as_secs_f64(),
-                source: None,
-                error: Some(format!("Failed to load mmap library: {:#}", e)),
-            });
-        }
-    };
+    // 1 & 2. Identify media in index library via pHash sample
+    let (matched, target_fps, existing_phash) = identify_media_by_phash(
+        &media_path,
+        &phash_dir,
+        payload.nb_seconds,
+        payload.search_distance,
+    );
 
-    let matches = if !query_sample.is_empty() {
-        library.recognize(&query_sample, payload.search_distance)
-    } else {
-        Vec::new()
-    };
-
-    let (matched_stem, match_conf) = if let Some(m) = matches.first() {
-        (m.media_name.clone(), m.confidence * 100.0)
+    let (matched_stem, match_conf) = if let Some((m_name, conf)) = matched {
+        (m_name, conf)
     } else {
         let stem = media_path
             .file_stem()
@@ -1200,7 +1472,7 @@ pub async fn autosync_handler(
         &payload.language,
     ) {
         Some(p) => match SubtitleFile::open(&p) {
-            Ok(s) => (s, "catalog".to_string()),
+            Ok(s) => (s, SubtitleSource::Catalog.as_str().to_string()),
             Err(e) => {
                 return Json(AutoSyncResponse {
                     success: false,
@@ -1211,7 +1483,7 @@ pub async fn autosync_handler(
                     output_srt_path: String::new(),
                     confidence_percent: match_conf,
                     elapsed_seconds: start.elapsed().as_secs_f64(),
-                    source: Some("catalog".to_string()),
+                    source: Some(SubtitleSource::Catalog.as_str().to_string()),
                     error: Some(format!("Failed to parse catalog subtitle {:?}: {:#}", p, e)),
                 });
             }
@@ -1226,7 +1498,7 @@ pub async fn autosync_handler(
                 Some(stream) => {
                     match extract_embedded_subtitle(&media_path, stream.subtitle_index) {
                         Ok(raw_srt) => match SubtitleFile::parse(&raw_srt) {
-                            Ok(s) => (s, "container".to_string()),
+                            Ok(s) => (s, SubtitleSource::Container.as_str().to_string()),
                             Err(e) => {
                                 return Json(AutoSyncResponse {
                                     success: false,
@@ -1237,7 +1509,7 @@ pub async fn autosync_handler(
                                     output_srt_path: String::new(),
                                     confidence_percent: match_conf,
                                     elapsed_seconds: start.elapsed().as_secs_f64(),
-                                    source: Some("container".to_string()),
+                                    source: Some(SubtitleSource::Container.as_str().to_string()),
                                     error: Some(format!(
                                         "Failed to parse embedded subtitle track: {:#}",
                                         e
@@ -1255,7 +1527,7 @@ pub async fn autosync_handler(
                                 output_srt_path: String::new(),
                                 confidence_percent: match_conf,
                                 elapsed_seconds: start.elapsed().as_secs_f64(),
-                                source: Some("container".to_string()),
+                                source: Some(SubtitleSource::Container.as_str().to_string()),
                                 error: Some(format!(
                                     "Failed to extract embedded subtitle track: {:#}",
                                     e
@@ -1279,7 +1551,7 @@ pub async fn autosync_handler(
                                 output_srt_path: String::new(),
                                 confidence_percent: match_conf,
                                 elapsed_seconds: start.elapsed().as_secs_f64(),
-                                source: Some("opensubtitles".to_string()),
+                                source: Some(SubtitleSource::OpenSubtitles.as_str().to_string()),
                                 error: Some(format!(
                                     "Remote provider search failed for '{}' ({}): {:#}",
                                     meta.clean_title, payload.language, e
@@ -1290,33 +1562,17 @@ pub async fn autosync_handler(
 
                     let mut downloaded_srt = None;
                     for cand in candidates.iter().take(3) {
-                        // Check disk cache first
-                        if let Some(cached_content) =
-                            state.cache.get(&meta, &payload.language, &cand.subtitle_id)
+                        if let Ok(parsed) =
+                            fetch_or_cache_remote_subtitle(&state, &meta, &payload.language, cand)
+                                .await
                         {
-                            if let Ok(parsed) = SubtitleFile::parse(&cached_content) {
-                                downloaded_srt = Some(parsed);
-                                break;
-                            }
-                        }
-
-                        // Otherwise download from provider
-                        if let Ok(raw_content) = state.provider.download(cand).await {
-                            let _ = state.cache.put(
-                                &meta,
-                                &payload.language,
-                                &cand.subtitle_id,
-                                &raw_content,
-                            );
-                            if let Ok(parsed) = SubtitleFile::parse(&raw_content) {
-                                downloaded_srt = Some(parsed);
-                                break;
-                            }
+                            downloaded_srt = Some(parsed);
+                            break;
                         }
                     }
 
                     match downloaded_srt {
-                        Some(s) => (s, "opensubtitles".to_string()),
+                        Some(s) => (s, SubtitleSource::OpenSubtitles.as_str().to_string()),
                         None => {
                             return Json(AutoSyncResponse {
                                 success: false,
@@ -1340,36 +1596,16 @@ pub async fn autosync_handler(
         }
     };
 
-    // 4. Calculate shift:
-    let (shift_frames, confidence_percent) =
-        match read_ref_phash_for_media(&phash_dir, &matched_stem) {
-            Ok(ref_hashes) => {
-                let target_hashes = if let Some((_, ref hashes, _)) = existing_phash {
-                    hashes.clone()
-                } else if let Ok(m) = probe_video(&media_path) {
-                    let total_frames = (m.duration * m.fps).floor() as usize;
-                    extract_frames_phash(&media_path, 0.0, total_frames).unwrap_or_default()
-                } else {
-                    Vec::new()
-                };
-
-                if !target_hashes.is_empty() {
-                    let target_cuts = detect_cuts(&target_hashes, 16);
-                    let ref_cuts = detect_cuts(&ref_hashes, 16);
-                    calculate_shift_consensus(
-                        &target_cuts,
-                        &ref_cuts,
-                        payload.search_distance,
-                        match_conf,
-                    )
-                } else {
-                    (0, match_conf)
-                }
-            }
-            Err(_) => (0, match_conf),
-        };
-
-    let shift_ms = (shift_frames as f64 / target_fps) * 1000.0;
+    // 4. Calculate shift via shared helper:
+    let (shift_frames, shift_ms, confidence_percent) = compute_media_phash_shift(
+        &media_path,
+        &phash_dir,
+        &matched_stem,
+        match_conf,
+        target_fps,
+        &existing_phash,
+        payload.search_distance,
+    );
 
     // 5. Shift & Save Subtitle
     srt.shift(shift_ms);

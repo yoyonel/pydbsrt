@@ -374,6 +374,8 @@ async fn test_server_status_and_search_endpoints() {
         media_path: test_media.to_string(),
         language: "en".to_string(),
         subtitles_dir: Some(srt_dir.to_str().unwrap().to_string()),
+        phash_dir: Some(tmp_dir.to_str().unwrap().to_string()),
+        search_mode: Some("phash".to_string()),
         query_title: None,
         season: None,
         episode: None,
@@ -389,8 +391,15 @@ async fn test_server_status_and_search_endpoints() {
     let search_res: SearchSubtitlesResponse =
         res.json().await.expect("Failed to parse search JSON");
     assert_eq!(search_res.language, "en");
+    assert!(search_res.moviehash.is_some());
     assert!(search_res.total_candidates > 0);
     assert!(search_res.candidates.iter().any(|c| c.source == "catalog"));
+    // Verify strict language filtering: no "unknown" or non-matching language candidates
+    assert!(search_res
+        .candidates
+        .iter()
+        .filter(|c| c.source == "catalog")
+        .all(|c| c.language == "en"));
 
     // 4. Test /v1/download for selected candidate
     let catalog_cand = search_res
@@ -403,7 +412,7 @@ async fn test_server_status_and_search_endpoints() {
         source: "catalog".to_string(),
         candidate_id: catalog_cand.candidate_id.clone(),
         language: "en".to_string(),
-        resync: false,
+        resync: true,
         subtitles_dir: Some(srt_dir.to_str().unwrap().to_string()),
         phash_dir: Some(tmp_dir.to_str().unwrap().to_string()),
     };

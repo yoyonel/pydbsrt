@@ -40,6 +40,45 @@ pub struct MediaMetadata {
     pub source: Option<String>,
     /// Release group tag (e.g. "KILLERS", "SiGMA", "MZABI", "SubsPlease")
     pub release_group: Option<String>,
+    /// Optional OpenSubtitles 64-bit MovieHash (16-char hex string)
+    #[serde(default)]
+    pub moviehash: Option<String>,
+}
+
+/// Computes the standard 64-bit OpenSubtitles MovieHash for a local video file
+/// (filesize + 64 KiB head + 64 KiB tail summed as little-endian u64 words).
+pub fn compute_opensubtitles_hash<P: AsRef<Path>>(path: P) -> std::io::Result<String> {
+    use std::io::{Read, Seek, SeekFrom};
+    const CHUNK_SIZE: u64 = 65536;
+
+    let mut file = std::fs::File::open(path.as_ref())?;
+    let file_size = file.metadata()?.len();
+    if file_size < CHUNK_SIZE {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "File smaller than 64 KiB for OpenSubtitles MovieHash",
+        ));
+    }
+
+    let mut hash: u64 = file_size;
+    let mut buf = [0u8; 8];
+
+    // Sum first 64 KiB (8192 u64 words)
+    file.seek(SeekFrom::Start(0))?;
+    for _ in 0..(CHUNK_SIZE / 8) {
+        file.read_exact(&mut buf)?;
+        hash = hash.wrapping_add(u64::from_le_bytes(buf));
+    }
+
+    // Sum last 64 KiB (8192 u64 words)
+    let tail_offset = file_size.saturating_sub(CHUNK_SIZE);
+    file.seek(SeekFrom::Start(tail_offset))?;
+    for _ in 0..(CHUNK_SIZE / 8) {
+        file.read_exact(&mut buf)?;
+        hash = hash.wrapping_add(u64::from_le_bytes(buf));
+    }
+
+    Ok(format!("{:016x}", hash))
 }
 
 impl MediaMetadata {
@@ -64,7 +103,11 @@ impl MediaMetadata {
             .file_name()
             .and_then(|s| s.to_str())
             .unwrap_or_else(|| p.to_str().unwrap_or(""));
-        Self::parse(filename)
+        let mut meta = Self::parse(filename);
+        if p.exists() {
+            meta.moviehash = compute_opensubtitles_hash(p).ok();
+        }
+        meta
     }
 }
 
@@ -137,6 +180,7 @@ fn parse_anime_convention(raw: &str, name: &str) -> Option<MediaMetadata> {
         resolution,
         source: extract_source(remainder),
         release_group: Some(group.to_string()),
+        moviehash: None,
     })
 }
 
@@ -300,6 +344,7 @@ fn parse_scene_convention(raw: &str, name: &str) -> MediaMetadata {
         resolution,
         source,
         release_group,
+        moviehash: None,
     }
 }
 
