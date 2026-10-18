@@ -3,10 +3,10 @@
 
 INPUT_IMAGES=$(find /tmp/pydbsrt/. -type f -exec file -N -i -- {} + | sed -n 's!: image/[^:]*$!!p')
 
-pushd ..
+pushd .. || exit 1
 
 for i in $INPUT_IMAGES; do
-  uv run pydbsrt export-imghash-from-media -r $i
+  uv run pydbsrt export-imghash-from-media -r "$i"
 done
 
-popd
+popd || exit 1

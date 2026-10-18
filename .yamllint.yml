@@ -1,0 +1,13 @@
+extends: default
+
+ignore: |
+  .venv/
+  target/
+  site/
+  vendor/
+
+rules:
+  line-length: disable
+  document-start: disable
+  truthy: disable
+  comments-indentation: disable

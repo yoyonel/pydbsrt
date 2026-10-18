@@ -1,5 +1,3 @@
-version: '3'
-
 volumes:
   bktreedb-data:
 
@@ -12,7 +10,7 @@ services:
     volumes:
       - bktreedb-data:/var/lib/postgresql/data
     ports:
-      - 5432:5432
+      - "${PSQL_PORT:-5433}:5432"
     environment:
       - POSTGRES_DATABASE=bktreedb
       - POSTGRES_DB=bktreedb
@@ -23,12 +21,18 @@ services:
   postgres_exporter:
     image: wrouesnel/postgres_exporter
     environment:
-      - DATA_SOURCE_NAME=postgresql://docker:docker@bdktreedb:5432/postgres?sslmode=disable
+      - DATA_SOURCE_NAME=postgresql://docker:docker@bktreedb:5432/bktreedb?sslmode=disable
     ports:
-      - 9187:9187
+      - "9187:9187"
+    depends_on:
+      - bktreedb
 
-  adminer:
-    image: adminer
-    restart: always
+  pgweb:
+    image: sosedoff/pgweb:latest
+    restart: unless-stopped
+    environment:
+      - PGWEB_DATABASE_URL=postgres://docker:docker@bktreedb:5432/bktreedb?sslmode=disable
     ports:
-      - 8085:8080
+      - "8086:8081"
+    depends_on:
+      - bktreedb

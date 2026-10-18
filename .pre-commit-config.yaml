@@ -2,7 +2,7 @@
 default_stages: [pre-commit]
 
 repos:
-  # Generic hygiene
+  # Generic hygiene (.json, .yaml, .sh shebangs, whitespace)
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:
@@ -11,10 +11,11 @@ repos:
       - id: check-merge-conflict
       - id: check-yaml
         args: [--unsafe]
+      - id: check-executables-have-shebangs
       - id: end-of-file-fixer
       - id: trailing-whitespace
 
-  # Python: Ruff (Lint & Format)
+  # Python: Ruff (Lint & Format across src/, tests/, scripts/)
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.9.9
     hooks:
@@ -22,25 +23,56 @@ repos:
         args: [--fix]
       - id: ruff-format
 
-  # Rust: Local hooks (native system cargo)
+  # Local native hooks: Rust (.rs), Shell (.sh), Lua (.lua), YAML (.yml), Web (.html/.js)
   - repo: local
     hooks:
+      - id: shellcheck
+        name: shellcheck (.sh)
+        entry: shellcheck
+        language: system
+        types: [shell]
+
+      - id: shfmt
+        name: shfmt (.sh)
+        entry: shfmt -i 2 -ci -d
+        language: system
+        types: [shell]
+
+      - id: yamllint
+        name: yamllint (.yml/.yaml)
+        entry: yamllint -c .yamllint.yml
+        language: system
+        types: [yaml]
+
+      - id: luac-check
+        name: luac bytecode check (.lua)
+        entry: luac -p
+        language: system
+        files: ^vlc-plugin/.*\.lua$
+
+      - id: validate-web-assets
+        name: validate HTML/JS/JSON assets (.html/.json)
+        entry: uv run python scripts/validate_web_assets.py
+        language: system
+        files: \.(html|json)$
+        pass_filenames: false
+
       - id: cargo-fmt
-        name: cargo fmt
+        name: cargo fmt (.rs)
         entry: cargo fmt --all -- --check
         language: system
         types: [rust]
         pass_filenames: false
 
       - id: cargo-clippy
-        name: cargo clippy
+        name: cargo clippy (.rs)
         entry: cargo clippy --workspace --all-targets -- -D warnings
         language: system
         types: [rust]
         pass_filenames: false
 
       - id: cargo-test
-        name: cargo test
+        name: cargo test (.rs)
         entry: cargo test --workspace
         language: system
         types: [rust]
