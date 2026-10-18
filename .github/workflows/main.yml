@@ -83,6 +83,9 @@ jobs:
     name: Rust Quality & Test Suite
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    env:
+      PSQL_IP: 127.0.0.1
+      PSQL_PORT: 5432
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -93,6 +96,18 @@ jobs:
             sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
           fi
           ffmpeg -version | head -n 1
+
+      - name: Start PostgreSQL 17 BK-Tree container for DB coverage
+        run: |
+          docker compose -f docker/docker-compose.test.yml pull bktreedb || docker compose -f docker/docker-compose.test.yml build bktreedb
+          docker compose -f docker/docker-compose.test.yml up -d bktreedb
+          for i in {1..30}; do
+            if docker compose -f docker/docker-compose.test.yml exec -T bktreedb pg_isready -U docker -d bktreedb; then
+              echo "PostgreSQL 17 BK-Tree is ready!"
+              break
+            fi
+            sleep 1
+          done
 
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -190,10 +205,16 @@ jobs:
             --lang fr \
             --subtitles-dir /tmp/dbsrt-ci-subs
 
-      - name: Run Python DB integration test suite
+      - name: Run Python DB integration test suite with coverage
         run: |
-          uv run pytest tests/ --ignore=tests/tools/
+          uv run pytest --cov=src --cov-report=term --cov-report=json:coverage-python-db.json tests/ --ignore=tests/tools/
 
+      - name: Upload Python DB coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-db-coverage
+          path: coverage-python-db.json
+          retention-days: 1
 
   docs-check:
     name: Documentation Quality Gate
@@ -279,8 +300,8 @@ jobs:
     name: Unified Test Coverage & PR Report
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [python-unit, rust-ci]
-    if: always() && needs.python-unit.result == 'success' && needs.rust-ci.result == 'success'
+    needs: [python-unit, rust-ci, db-integration]
+    if: always() && needs.python-unit.result == 'success' && needs.rust-ci.result == 'success' && needs.db-integration.result == 'success'
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -292,6 +313,11 @@ jobs:
         with:
           name: python-coverage
 
+      - name: Download Python DB coverage artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: python-db-coverage
+
       - name: Download Rust coverage artifact
         uses: actions/download-artifact@v4
         with:
@@ -302,6 +328,7 @@ jobs:
           python3 scripts/generate_coverage_report.py \
             --rust-json coverage-rust.json \
             --python-json coverage-python.json \
+            --python-db-json coverage-python-db.json \
             --base-ref "origin/${{ github.base_ref || 'develop' }}" \
             --output-md coverage-summary.md
 

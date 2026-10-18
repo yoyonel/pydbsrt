@@ -26,7 +26,11 @@ error_console = Console(stderr=True, style="bold red")
 
 async def create_conn() -> Connection:
     conn: Connection = await asyncpg.connect(
-        user=psqlUserName, password=psqlUserPass, database=psqlDbName, host=psqlDbIpAddr
+        user=psqlUserName,
+        password=psqlUserPass,
+        database=psqlDbName,
+        host=psqlDbIpAddr,
+        port=settings.PSQL_PORT,
     )
     return conn
 

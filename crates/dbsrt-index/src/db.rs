@@ -543,3 +543,155 @@ impl DbClient {
         Ok((row.get(0), row.get(1), row.get(2), row.get(3)))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dbsrt_core::write_phash_file;
+
+    #[test]
+    fn test_parse_fps_from_phash_stem_branches() {
+        assert!((parse_fps_from_phash_stem("movie.mp4.25.0fps") - 25.0).abs() < 1e-6);
+        assert!((parse_fps_from_phash_stem("episode.mkv.23.976fps") - 23.976).abs() < 1e-6);
+        assert!((parse_fps_from_phash_stem("show.s01e01.1080p.web.h264") - 23.976).abs() < 1e-6);
+        assert!((parse_fps_from_phash_stem("show.s01e01.720p.bluray") - 23.976).abs() < 1e-6);
+        assert!((parse_fps_from_phash_stem("show.s01e01.2160p.web-dl") - 23.976).abs() < 1e-6);
+        assert!((parse_fps_from_phash_stem("show.s01e01.webrip.x264") - 23.976).abs() < 1e-6);
+        assert!((parse_fps_from_phash_stem("pal_dvd_release") - 25.0).abs() < 1e-6);
+    }
+
+    fn try_connect_test_db() -> Option<DbClient> {
+        let host = std::env::var("PSQL_IP").unwrap_or_else(|_| "127.0.0.1".to_string());
+        let env_port = std::env::var("PSQL_PORT")
+            .ok()
+            .and_then(|p| p.parse::<u16>().ok());
+        let ports: Vec<u16> = match env_port {
+            Some(p) => vec![p, 5433, 5432],
+            None => vec![5433, 5432],
+        };
+        for port in ports {
+            if let Ok(client) = DbClient::connect(&host, port, "docker", "docker", "bktreedb") {
+                return Some(client);
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn test_db_client_full_relational_lifecycle() {
+        let Some(mut db) = try_connect_test_db() else {
+            eprintln!(
+                "PostgreSQL not reachable, skipping test_db_client_full_relational_lifecycle"
+            );
+            return;
+        };
+
+        db.init_schema().expect("init_schema must succeed");
+
+        let tmp_dir =
+            std::env::temp_dir().join(format!("dbsrt_db_unit_test_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&tmp_dir);
+
+        // 1. Empty phash file handling
+        let empty_phash = tmp_dir.join("empty_test.25.0fps.phash");
+        write_phash_file(&empty_phash, &[]).unwrap();
+        let (empty_id, empty_cnt) = db.import_phash_file(&empty_phash).unwrap();
+        assert_eq!(empty_id, 0);
+        assert_eq!(empty_cnt, 0);
+
+        // 2. Non-empty synthetic phash file (500 frames @ 25.0 fps = 20s)
+        let synth_phash = tmp_dir.join("unit_test_media_cov.mp4.25.0fps.phash");
+        let hashes: Vec<u64> = (0..500)
+            .map(|i| 0x5555_AAAA_0000_0000u64 ^ ((i as u64) * 0x0101_0101))
+            .collect();
+        write_phash_file(&synth_phash, &hashes).unwrap();
+
+        let (media_id, inserted) = db.import_phash_file(&synth_phash).unwrap();
+        assert!(media_id > 0);
+        // Re-importing same media updates metadata and returns (media_id, 0)
+        let (same_id, re_inserted) = db.import_phash_file(&synth_phash).unwrap();
+        assert_eq!(same_id, media_id);
+        assert_eq!(re_inserted, 0);
+        let _ = inserted;
+
+        // 3. Test get_media_name (existing + fallback)
+        let mname = db.get_media_name(media_id).unwrap();
+        assert_eq!(mname, "unit_test_media_cov.mp4.25.0fps");
+        let fallback_name = db.get_media_name(-999_999).unwrap();
+        assert_eq!(fallback_name, "media_-999999");
+
+        // 4. Test search_frame and recognize_sample
+        assert!(db.recognize_sample(&[], 2).unwrap().is_none());
+        let matches = db.search_frame(hashes[100], 0).unwrap();
+        assert!(!matches.is_empty());
+
+        let rec = db
+            .recognize_sample(&hashes[50..80], 2)
+            .unwrap()
+            .expect("Must recognize synthetic sample");
+        assert!(rec.1 > 0.8);
+
+        // 5. Test import_subtitle_coupling (FR, EN, and ES)
+        let srt_fr = tmp_dir.join("unit_test_media_cov.fr.srt");
+        std::fs::write(
+            &srt_fr,
+            "1\n00:00:01,000 --> 00:00:03,000\nBonjour le monde\n\n2\n00:00:04,000 --> 00:00:06,000\nDeuxieme ligne\n\n",
+        )
+        .unwrap();
+        let (m_id, sub_fr_id, sf_count) = db
+            .import_subtitle_coupling(&synth_phash, &srt_fr, "fr", true)
+            .unwrap();
+        assert_eq!(m_id, media_id);
+        assert!(sub_fr_id > 0);
+        assert_eq!(sf_count, 2);
+
+        // Idempotent re-import of same subtitle
+        let (_, same_sub_id, sf_re) = db
+            .import_subtitle_coupling(&synth_phash, &srt_fr, "fr", true)
+            .unwrap();
+        assert_eq!(same_sub_id, sub_fr_id);
+        assert_eq!(sf_re, 0);
+
+        let srt_en = tmp_dir.join("unit_test_media_cov.en.srt");
+        std::fs::write(&srt_en, "1\n00:00:01,500 --> 00:00:03,500\nHello world\n\n").unwrap();
+        let (_, sub_en_id, _) = db
+            .import_subtitle_coupling(&synth_phash, &srt_en, "en", true)
+            .unwrap();
+        assert!(sub_en_id > 0);
+
+        // 6. Test get_subtitles_for_media (by id, by name, all, and language filter)
+        let by_id_fr = db
+            .get_subtitles_for_media(Some(media_id), None, Some("fr"))
+            .unwrap();
+        assert!(!by_id_fr.is_empty());
+        assert!(by_id_fr.iter().all(|s| s.lang == "fr"));
+
+        let by_name_en = db
+            .get_subtitles_for_media(
+                None,
+                Some("unit_test_media_cov.mp4.25.0fps.phash"),
+                Some("en"),
+            )
+            .unwrap();
+        assert!(!by_name_en.is_empty());
+
+        let all_subs = db
+            .get_subtitles_for_media(None, None, Some("auto"))
+            .unwrap();
+        assert!(all_subs.len() >= 2);
+
+        // 7. Test get_sub_frames_with_phash & get_table_counts
+        let anchors = db.get_sub_frames_with_phash(sub_fr_id).unwrap();
+        assert_eq!(anchors.len(), 2);
+        assert!(anchors[0].anchor_phash.is_some());
+
+        let counts = db.get_table_counts().unwrap();
+        assert!(counts.0 >= 1 && counts.1 >= 500 && counts.2 >= 2 && counts.3 >= 3);
+
+        // Cleanup test media row (ON DELETE CASCADE cleans frames, subtitles, sub_frames)
+        let _ = db
+            .client
+            .execute("DELETE FROM medias WHERE id = $1", &[&media_id]);
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+}

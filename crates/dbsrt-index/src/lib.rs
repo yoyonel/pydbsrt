@@ -32,3 +32,35 @@ impl<'a> FlatHashIndex<'a> {
             .collect()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_flat_hash_index_search() {
+        let entries = vec![
+            FrameHashEntry {
+                media_id: 1,
+                frame_offset: 10,
+                phash: 0b1010,
+            },
+            FrameHashEntry {
+                media_id: 1,
+                frame_offset: 20,
+                phash: 0b1111_0000,
+            },
+        ];
+        let index = FlatHashIndex::new(&entries);
+        let exact = index.search(0b1010, 0);
+        assert_eq!(exact.len(), 1);
+        assert_eq!(exact[0].frame_offset, 10);
+
+        let near = index.search(0b1011, 1);
+        assert_eq!(near.len(), 1);
+        assert_eq!(near[0].frame_offset, 10);
+
+        let none = index.search(0xFFFF_FFFF_FFFF_FFFF, 2);
+        assert!(none.is_empty());
+    }
+}

@@ -582,7 +582,7 @@ async fn test_certify_and_certified_search_download_e2e() {
     assert_eq!(dl_res.source, "certified");
     assert!(std::path::Path::new(&dl_res.output_srt_path).exists());
 
-    // 5. Call GET /v1/couplings and GET /studio
+    // 5. Call GET /v1/couplings (full) and GET /v1/couplings?summary=true
     let couplings_res: dbsrt_server::CouplingsOverviewResponse = client
         .get(format!("{}/v1/couplings", base_url))
         .send()
@@ -595,6 +595,160 @@ async fn test_certify_and_certified_search_download_e2e() {
     assert_eq!(couplings_res.couplings[0].subtitles.len(), 1);
     assert_eq!(couplings_res.couplings[0].subtitles[0].sub_frames.len(), 8);
 
+    let summary_res: dbsrt_server::CouplingsOverviewResponse = client
+        .get(format!("{}/v1/couplings?summary=true", base_url))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(!summary_res.couplings.is_empty());
+    assert!(summary_res.couplings[0].subtitles[0].sub_frames.is_empty());
+
+    // 6. Call GET /v1/couplings/sub_frames (pagination, search q, cue_index, target_frame, 404s)
+    let m_hash = &couplings_res.couplings[0].media_hash;
+    let s_hash = &couplings_res.couplings[0].subtitles[0].subtitles_hash;
+
+    let sf_page: dbsrt_server::SubFramesPageResponse = client
+        .get(format!(
+            "{}/v1/couplings/sub_frames?media_hash={}&subtitles_hash={}&page=1&page_size=3",
+            base_url, m_hash, s_hash
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(sf_page.total_cues, 8);
+    assert_eq!(sf_page.items.len(), 3);
+    assert_eq!(sf_page.total_pages, 3);
+    assert!(!sf_page.minimap_ticks.is_empty());
+
+    // Filter with q
+    let sf_q: dbsrt_server::SubFramesPageResponse = client
+        .get(format!(
+            "{}/v1/couplings/sub_frames?media_hash={}&q=Big&page_size=10",
+            base_url, m_hash
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(sf_q.filtered_cues >= 1);
+
+    // Jump by cue_index and target_frame
+    let sf_cue: dbsrt_server::SubFramesPageResponse = client
+        .get(format!(
+            "{}/v1/couplings/sub_frames?media_hash={}&cue_index=2&page_size=2",
+            base_url, m_hash
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(sf_cue.selected_cue.is_some());
+
+    let sf_frame: dbsrt_server::SubFramesPageResponse = client
+        .get(format!(
+            "{}/v1/couplings/sub_frames?media_hash={}&target_frame=100&page_size=2",
+            base_url, m_hash
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(sf_frame.selected_cue.is_some());
+
+    // 404 cases on /v1/couplings/sub_frames
+    let nf_media = client
+        .get(format!(
+            "{}/v1/couplings/sub_frames?media_hash=non_existent_hash",
+            base_url
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(nf_media.status(), reqwest::StatusCode::NOT_FOUND);
+
+    let nf_sub = client
+        .get(format!(
+            "{}/v1/couplings/sub_frames?media_hash={}&subtitles_hash=unknown_sub",
+            base_url, m_hash
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(nf_sub.status(), reqwest::StatusCode::NOT_FOUND);
+
+    // 7. Test search_mode="hash", search_mode="name", search_mode="auto", and download resync=false
+    for mode in ["hash", "name", "auto"] {
+        let s_req = dbsrt_server::SearchSubtitlesRequest {
+            media_path: test_media.to_string_lossy().to_string(),
+            language: "fr".to_string(),
+            subtitles_dir: Some(srt_dir.to_string_lossy().to_string()),
+            phash_dir: Some(phash_dir.to_string_lossy().to_string()),
+            search_mode: Some(mode.to_string()),
+            query_title: Some("big buck bunny".to_string()),
+            season: Some(1),
+            episode: Some(1),
+        };
+        let s_res = client
+            .post(format!("{}/v1/search", base_url))
+            .json(&s_req)
+            .send()
+            .await
+            .unwrap();
+        assert!(s_res.status().is_success());
+    }
+
+    let dl_no_resync = dbsrt_server::DownloadSubtitleRequest {
+        media_path: test_media.to_string_lossy().to_string(),
+        source: "catalog".to_string(),
+        candidate_id: Some(test_srt.to_string_lossy().to_string()),
+        language: "fr".to_string(),
+        resync: false,
+        subtitles_dir: Some(srt_dir.to_string_lossy().to_string()),
+        phash_dir: Some(phash_dir.to_string_lossy().to_string()),
+    };
+    let dl_nr_res: dbsrt_server::DownloadSubtitleResponse = client
+        .post(format!("{}/v1/download", base_url))
+        .json(&dl_no_resync)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(dl_nr_res.success);
+
+    let dl_invalid = dbsrt_server::DownloadSubtitleRequest {
+        media_path: test_media.to_string_lossy().to_string(),
+        source: "unknown_source_xyz".to_string(),
+        candidate_id: None,
+        language: "fr".to_string(),
+        resync: false,
+        subtitles_dir: None,
+        phash_dir: None,
+    };
+    let dl_inv_res: dbsrt_server::DownloadSubtitleResponse = client
+        .post(format!("{}/v1/download", base_url))
+        .json(&dl_invalid)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(!dl_inv_res.success);
+
     let studio_html = client
         .get(format!("{}/studio", base_url))
         .send()
@@ -604,6 +758,98 @@ async fn test_certify_and_certified_search_download_e2e() {
         .await
         .unwrap();
     assert!(studio_html.contains("dbsrt Studio"));
+
+    // 8. Test PostgreSQL-backed AppState when PostgreSQL is reachable
+    let db_host = std::env::var("PSQL_IP").unwrap_or_else(|_| "127.0.0.1".to_string());
+    let env_port = std::env::var("PSQL_PORT")
+        .ok()
+        .and_then(|p| p.parse::<u16>().ok());
+    let ports: Vec<u16> = match env_port {
+        Some(p) => vec![p, 5433, 5432],
+        None => vec![5433, 5432],
+    };
+    let mut reachable_port = None;
+    for p in ports {
+        let probe_cfg = dbsrt_server::DbConnectionConfig {
+            host: db_host.clone(),
+            port: p,
+            user: "docker".to_string(),
+            pass: "docker".to_string(),
+            dbname: "bktreedb".to_string(),
+        };
+        if probe_cfg.with_client(|_| Ok(())).is_ok() {
+            reachable_port = Some(p);
+            break;
+        }
+    }
+    if let Some(pg_port) = reachable_port {
+        let db_cfg = dbsrt_server::DbConnectionConfig {
+            host: db_host,
+            port: pg_port,
+            user: "docker".to_string(),
+            pass: "docker".to_string(),
+            dbname: "bktreedb".to_string(),
+        };
+        let mut pg_state = dbsrt_server::AppState::new(
+            phash_dir.clone(),
+            srt_dir.clone(),
+            std::sync::Arc::new(
+                dbsrt_core::providers::opensubtitles::OpenSubtitlesProvider::new(None),
+            ),
+            dbsrt_core::providers::cache::SubtitleCache::default(),
+        );
+        pg_state.db_config = Some(db_cfg);
+        let (pg_listener, pg_addr) = dbsrt_server::bind_listener("127.0.0.1", 0).await.unwrap();
+        let pg_app = dbsrt_server::create_router_with_state(pg_state);
+        tokio::spawn(async move {
+            axum::serve(pg_listener, pg_app).await.unwrap();
+        });
+        let pg_base = format!("http://{}", pg_addr);
+
+        let pg_cert: dbsrt_server::CertifySyncResponse = client
+            .post(format!("{}/v1/certify", pg_base))
+            .json(&cert_req)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert!(pg_cert.success);
+        assert!(pg_cert.postgres_imported);
+
+        let pg_status: dbsrt_server::StatusResponse = client
+            .get(format!("{}/v1/status", pg_base))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert!(pg_status.postgres_connected);
+
+        let pg_couplings: dbsrt_server::CouplingsOverviewResponse = client
+            .get(format!("{}/v1/couplings?summary=true", pg_base))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert!(pg_couplings.postgres_connected);
+        assert!(pg_couplings.postgres_counts.is_some());
+
+        let pg_search: dbsrt_server::SearchSubtitlesResponse = client
+            .post(format!("{}/v1/search", pg_base))
+            .json(&search_req)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert!(!pg_search.candidates.is_empty());
+    }
 
     // Cleanup
     let _ = std::fs::remove_dir_all(&tmp_base);
