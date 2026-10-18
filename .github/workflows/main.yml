@@ -16,6 +16,33 @@ permissions:
   pull-requests: write
 
 jobs:
+  code-quality:
+    name: Multi-Language Code Quality Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install system linters (shellcheck, shfmt, lua5.2, yamllint)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends shellcheck shfmt lua5.2 yamllint
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run multi-language lint checks (.py, .sh, .lua, .yml, .html, .js, .json)
+        run: bash scripts/code_quality.sh lint-fast
+
   python-unit:
     name: Python Unit Tests
     runs-on: ubuntu-latest
@@ -94,6 +121,9 @@ jobs:
     name: PostgreSQL 17 BK-Tree Integration
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    env:
+      PSQL_IP: 127.0.0.1
+      PSQL_PORT: 5432
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -143,11 +173,21 @@ jobs:
 
       - name: Run Rust DB integration tests
         run: |
-          PSQL_IP=127.0.0.1 cargo test -p dbsrt-cli --test integration_test -- --nocapture
+          cargo test -p dbsrt-cli --test integration_test -- --nocapture
+
+      - name: Certify relational coupling in PostgreSQL 17 (subtitles + sub_frames)
+        run: |
+          mkdir -p /tmp/dbsrt-ci-subs
+          ./target/debug/dbsrt certify-coupling \
+            --phash /tmp/big_buck_bunny_trailer_480p.webm.25.0fps.phash \
+            --subtitles data/SRT/big_buck_bunny_trailer_480p.fr.srt \
+            --language fr \
+            --subtitles-dir /tmp/dbsrt-ci-subs \
+            --use-db
 
       - name: Run Python DB integration test suite
         run: |
-          PSQL_IP=127.0.0.1 uv run pytest tests/ --ignore=tests/tools/
+          uv run pytest tests/ --ignore=tests/tools/
 
 
   docs-check:
