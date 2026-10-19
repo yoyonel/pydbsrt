@@ -47,7 +47,8 @@ certify_phash_pair() {
     --lang "$lang" \
     --subtitles-dir "$SUBTITLES_DIR" \
     --db-host "$DB_HOST" \
-    --db-port "$DB_PORT"
+    --db-port "$DB_PORT" \
+    --allow-oob
 }
 
 # 1. Local video test fixtures (Big Buck Bunny WebM + MP4)

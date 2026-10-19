@@ -97,11 +97,22 @@ pub fn compute_bytes_digest_32(bytes: &[u8]) -> String {
 }
 
 /// Builds the list of `SubFrameAnchor` entries by projecting each `SubtitleCue` timestamp
+/// Validates and converts subtitle cues into `SubFrameAnchor` structs mapped
 /// onto the reference media's frame grid (`fps` and `hashes`) and validates temporal bounds.
 pub fn build_and_validate_sub_frames(
     sub_file: &SubtitleFile,
     hashes: &[u64],
     fps: f64,
+) -> Result<Vec<SubFrameAnchor>> {
+    build_and_validate_sub_frames_opts(sub_file, hashes, fps, false)
+}
+
+/// Validates and converts subtitle cues into `SubFrameAnchor` structs with optional out-of-bounds relaxation.
+pub fn build_and_validate_sub_frames_opts(
+    sub_file: &SubtitleFile,
+    hashes: &[u64],
+    fps: f64,
+    allow_oob: bool,
 ) -> Result<Vec<SubFrameAnchor>> {
     if hashes.is_empty() {
         bail!("Reference pHash stream is empty (0 frames)");
@@ -114,8 +125,8 @@ pub fn build_and_validate_sub_frames(
     }
 
     let max_frame_idx = (hashes.len() - 1) as i32;
-    // Allow a small tolerance (e.g. +5 seconds past the last frame) for end credits cues
-    let tolerance_frames = (fps * 5.0).ceil() as i32;
+    // Allow tolerance (e.g. +15 seconds past the last frame) for end credits / preview cues
+    let tolerance_frames = (fps * 15.0).ceil() as i32;
     let mut anchors = Vec::with_capacity(sub_file.cues.len());
 
     for cue in &sub_file.cues {
@@ -130,7 +141,7 @@ pub fn build_and_validate_sub_frames(
         let start_frame = ((cue.start_ms as f64 / 1000.0) * fps).round() as i32;
         let end_frame = ((cue.end_ms as f64 / 1000.0) * fps).round() as i32;
 
-        if start_frame > max_frame_idx + tolerance_frames {
+        if start_frame > max_frame_idx + tolerance_frames && !allow_oob {
             bail!(
                 "Cue #{} start_ms ({} ms -> frame {}) exceeds media duration ({} frames at {} fps)",
                 cue.index,
@@ -231,17 +242,34 @@ impl CouplingRegistry {
         }
     }
 
-    /// Finds a media coupling matching a recognized `.phash` filename, media name, or media hash.
+    /// Finds a media coupling matching a recognized `.phash` filename, media name, clean title, or media hash.
     pub fn find_by_matched_media(&self, matched_media: &str) -> Option<&CertifiedMediaCoupling> {
         let clean = matched_media
             .strip_suffix(".phash")
             .unwrap_or(matched_media);
+        let norm_matched = matched_media.replace(['_', '.', '-'], " ").to_lowercase();
+        let norm_clean = norm_matched.trim();
+
         self.couplings.iter().find(|c| {
-            c.phash_filename == matched_media
+            if c.phash_filename == matched_media
                 || c.media_name == matched_media
                 || c.media_name == clean
                 || c.phash_filename.strip_suffix(".phash") == Some(clean)
                 || c.media_hash == matched_media
+            {
+                return true;
+            }
+            if !norm_clean.is_empty() {
+                let norm_c_name = c.media_name.replace(['_', '.', '-'], " ").to_lowercase();
+                let norm_c_phash = c
+                    .phash_filename
+                    .replace(['_', '.', '-'], " ")
+                    .to_lowercase();
+                if norm_c_name.starts_with(norm_clean) || norm_c_phash.starts_with(norm_clean) {
+                    return true;
+                }
+            }
+            false
         })
     }
 }
