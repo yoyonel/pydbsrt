@@ -3,6 +3,7 @@
 pub mod bktree;
 pub mod db;
 pub mod dbphash;
+pub mod mih;
 pub mod mmap;
 
 pub use bktree::{BkItem, BkTree};
@@ -12,7 +13,11 @@ pub use dbphash::{
     DbphashMediaMatch, DbphashPackStats, MmapDbphash, DBPHASH_MAGIC, DBPHASH_VERSION,
 };
 use dbsrt_core::{hamming_distance, FrameHashEntry};
-pub use mmap::{LibraryMediaMatch, MmapLibrary, MmapPhashFile};
+pub use mih::{MihCandidate, MihTable, MultiIndexHash64};
+pub use mmap::{
+    compute_temporal_coherence, LibraryMediaMatch, MmapLibrary, MmapPhashFile,
+    MIN_TEMPORAL_COHERENCE_CONFIDENCE,
+};
 
 /// A memory-mapped or in-memory flat frame hash index.
 pub struct FlatHashIndex<'a> {

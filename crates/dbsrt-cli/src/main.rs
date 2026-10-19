@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use dbsrt_core::{
-    build_and_validate_sub_frames, compute_bytes_digest_32, compute_media_phash_digest,
+    build_and_validate_sub_frames_opts, compute_bytes_digest_32, compute_media_phash_digest,
     detect_cuts, extract_embedded_subtitle, extract_frames_advanced, extract_frames_phash,
     inspect_container, probe_video, read_phash_file, write_phash_file, CertifiedSubtitleRecord,
     CouplingRegistry, HwAccel, MediaMetadata, MockSubtitleProvider, OpenSubtitlesProvider,
@@ -120,6 +120,10 @@ pub struct CertifyCouplingArgs {
     #[arg(short, long, default_value = "auto")]
     pub lang: String,
 
+    /// Override framerate (e.g. 23.976, 24.0, 25.0)
+    #[arg(long)]
+    pub fps: Option<f64>,
+
     /// Directory storing certified .srt files and couplings.json
     #[arg(long, default_value = "data/SRT")]
     pub subtitles_dir: PathBuf,
@@ -135,6 +139,10 @@ pub struct CertifyCouplingArgs {
     /// Also import the relational coupling (`medias`, `frames`, `subtitles`, `sub_frames`) into PostgreSQL
     #[arg(long)]
     pub use_db: bool,
+
+    /// Import only into PostgreSQL without copying the .srt file or modifying couplings.json
+    #[arg(long)]
+    pub db_only: bool,
 
     /// PostgreSQL host (defaults to PSQL_IP env or 127.0.0.1)
     #[arg(long)]
@@ -275,6 +283,14 @@ pub struct ScanLibraryArgs {
     /// Query .phash file to search
     #[arg(long)]
     pub query_phash: Option<PathBuf>,
+
+    /// Optional second query .phash file for Two-Window Consensus recognition
+    #[arg(long)]
+    pub query_phash_b: Option<PathBuf>,
+
+    /// Expected frame gap between query_phash and query_phash_b
+    #[arg(long, default_value_t = 0)]
+    pub frame_gap: usize,
 
     /// Hamming search distance
     #[arg(short = 'd', long, default_value_t = 0)]
@@ -882,11 +898,16 @@ fn run_scan_library(args: &ScanLibraryArgs) -> Result<()> {
                 &matches[..]
             };
             for (i, m) in display_matches.iter().enumerate() {
+                let season_ep = match (m.season, m.episode) {
+                    (Some(s), Some(e)) if s > 0 || e > 0 => format!(" S{:02}E{:02}", s, e),
+                    _ => String::new(),
+                };
                 println!(
-                    "  {}. ID #{}: {} -> cuts: {}, 1fps: {} ({:.1}% confidence, shift: {} ms)",
+                    "  {}. ID #{}: {}{} -> cuts: {}, 1fps: {} ({:.1}% confidence, shift: {} ms)",
                     i + 1,
                     m.media_id,
                     m.clean_title,
+                    season_ep,
                     m.matching_cuts,
                     m.matching_sparse,
                     m.confidence,
@@ -908,13 +929,30 @@ fn run_scan_library(args: &ScanLibraryArgs) -> Result<()> {
     );
 
     let search_start = Instant::now();
-    let matches = library.recognize(&query_hashes, args.search_distance);
+    let (matches, total_q_frames) = if let Some(ref phash_b_path) = args.query_phash_b {
+        let hashes_b = read_phash_file(phash_b_path)?;
+        let n_frames = query_hashes.len() + hashes_b.len();
+        (
+            library.recognize_two_windows(
+                &query_hashes,
+                &hashes_b,
+                args.frame_gap,
+                args.search_distance,
+            ),
+            n_frames,
+        )
+    } else {
+        let n_frames = query_hashes.len();
+        (
+            library.recognize(&query_hashes, args.search_distance),
+            n_frames,
+        )
+    };
     let search_elapsed = search_start.elapsed().as_secs_f64();
 
     println!(
         "Search completed in {:.4} seconds ({} query frames)",
-        search_elapsed,
-        query_hashes.len()
+        search_elapsed, total_q_frames
     );
 
     if matches.is_empty() {
@@ -1449,16 +1487,25 @@ fn detect_cli_subtitle_lang(filename: &str, fallback: &str) -> String {
     let stem = filename
         .strip_suffix(".srt")
         .or_else(|| filename.strip_suffix(".SRT"))
-        .unwrap_or(filename);
-    if let Some((_, last)) = stem.rsplit_once('.') {
-        match last.to_lowercase().as_str() {
-            "fr" | "fre" | "fra" => return "fr".to_string(),
-            "en" | "eng" => return "en".to_string(),
-            "es" | "spa" => return "es".to_string(),
-            "de" | "ger" | "deu" => return "de".to_string(),
-            "it" | "ita" => return "it".to_string(),
-            "pt" | "por" | "pob" => return "pt".to_string(),
-            _ => {}
+        .unwrap_or(filename)
+        .to_lowercase();
+    for token in stem.rsplit(['.', '_', '-']) {
+        if token.chars().all(|c| c.is_ascii_digit())
+            || matches!(
+                token,
+                "forced" | "sdh" | "hi" | "shift" | "resync" | "synced" | "track" | "sub" | "subs"
+            )
+        {
+            continue;
+        }
+        match token {
+            "fr" | "fre" | "fra" | "french" | "vff" | "vf" | "vostfr" => return "fr".to_string(),
+            "en" | "eng" | "english" => return "en".to_string(),
+            "es" | "spa" | "spanish" => return "es".to_string(),
+            "de" | "ger" | "deu" | "german" => return "de".to_string(),
+            "it" | "ita" | "italian" => return "it".to_string(),
+            "pt" | "por" | "pob" | "portuguese" => return "pt".to_string(),
+            _ => break,
         }
     }
     "en".to_string()
@@ -1469,7 +1516,7 @@ fn run_certify_coupling(args: &CertifyCouplingArgs) -> Result<()> {
         anyhow::bail!("Subtitle file not found: {:?}", args.subtitle);
     }
 
-    let (phash_path, hashes, fps) = if let Some(ref pf) = args.phash_file {
+    let (phash_path, hashes, detected_fps) = if let Some(ref pf) = args.phash_file {
         if !pf.exists() {
             anyhow::bail!("Specified .phash file not found: {:?}", pf);
         }
@@ -1491,9 +1538,23 @@ fn run_certify_coupling(args: &CertifyCouplingArgs) -> Result<()> {
         anyhow::bail!("Either --media or --phash-file must be provided");
     };
 
+    let initial_fps = args.fps.unwrap_or(detected_fps);
     let srt_file = SubtitleFile::open(&args.subtitle)?;
     let strict = !args.allow_oob;
-    let sub_frames = build_and_validate_sub_frames(&srt_file, &hashes, fps)?;
+    let (sub_frames, fps) =
+        match build_and_validate_sub_frames_opts(&srt_file, &hashes, initial_fps, args.allow_oob) {
+            Ok(anchors) => (anchors, initial_fps),
+            Err(e) if args.fps.is_none() && (initial_fps - 25.0).abs() < 1e-3 => {
+                if let Ok(anchors) =
+                    build_and_validate_sub_frames_opts(&srt_file, &hashes, 23.976, args.allow_oob)
+                {
+                    (anchors, 23.976)
+                } else {
+                    return Err(e);
+                }
+            }
+            Err(e) => return Err(e),
+        };
 
     let srt_fname = args
         .subtitle
@@ -1503,7 +1564,6 @@ fn run_certify_coupling(args: &CertifyCouplingArgs) -> Result<()> {
         .to_string();
     let lang = detect_cli_subtitle_lang(&srt_fname, &args.lang);
 
-    std::fs::create_dir_all(&args.subtitles_dir)?;
     let phash_fname = phash_path
         .file_name()
         .unwrap_or_default()
@@ -1514,9 +1574,10 @@ fn run_certify_coupling(args: &CertifyCouplingArgs) -> Result<()> {
         .unwrap_or(&phash_fname)
         .to_string();
 
-    let dest_srt_path = if args.subtitle.starts_with(&args.subtitles_dir) {
+    let dest_srt_path = if args.db_only || args.subtitle.starts_with(&args.subtitles_dir) {
         args.subtitle.clone()
     } else {
+        std::fs::create_dir_all(&args.subtitles_dir)?;
         let dest = args.subtitles_dir.join(&srt_fname);
         if dest != args.subtitle {
             std::fs::copy(&args.subtitle, &dest)?;
@@ -1534,24 +1595,27 @@ fn run_certify_coupling(args: &CertifyCouplingArgs) -> Result<()> {
         .to_string();
 
     let reg_path = CouplingRegistry::default_path(&args.subtitles_dir);
-    let mut reg = CouplingRegistry::load_or_default(&reg_path)?;
-    reg.upsert_coupling(
-        media_hash.clone(),
-        media_name.clone(),
-        phash_fname.clone(),
-        fps,
-        hashes.len(),
-        CertifiedSubtitleRecord {
-            name: rel_srt_name.clone(),
-            srt_path: rel_srt_name.clone(),
-            lang: lang.clone(),
-            subtitles_hash: subtitles_hash.clone(),
-            certified: true,
-            cue_count: srt_file.cues.len(),
-            sub_frames: sub_frames.clone(),
-        },
-    );
-    reg.save(&reg_path)?;
+    if !args.db_only {
+        std::fs::create_dir_all(&args.subtitles_dir)?;
+        let mut reg = CouplingRegistry::load_or_default(&reg_path)?;
+        reg.upsert_coupling(
+            media_hash.clone(),
+            media_name.clone(),
+            phash_fname.clone(),
+            fps,
+            hashes.len(),
+            CertifiedSubtitleRecord {
+                name: rel_srt_name.clone(),
+                srt_path: rel_srt_name.clone(),
+                lang: lang.clone(),
+                subtitles_hash: subtitles_hash.clone(),
+                certified: true,
+                cue_count: srt_file.cues.len(),
+                sub_frames: sub_frames.clone(),
+            },
+        );
+        reg.save(&reg_path)?;
+    }
 
     println!("=== CERTIFIED COUPLING REGISTERED ===");
     println!("Media Name       : {}", media_name);
@@ -1569,9 +1633,11 @@ fn run_certify_coupling(args: &CertifyCouplingArgs) -> Result<()> {
         srt_file.cues.len(),
         sub_frames.len()
     );
-    println!("Local Registry   : {:?}", reg_path);
+    if !args.db_only {
+        println!("Local Registry   : {:?}", reg_path);
+    }
 
-    if args.use_db || args.db_host.is_some() {
+    if args.db_only || args.use_db || args.db_host.is_some() {
         let host = args
             .db_host
             .clone()
@@ -1594,8 +1660,8 @@ fn run_certify_coupling(args: &CertifyCouplingArgs) -> Result<()> {
                 );
             }
             Err(e) => {
-                if args.use_db {
-                    return Err(e.context("Failed to connect to PostgreSQL (--use-db enabled)"));
+                if args.use_db || args.db_only {
+                    return Err(e.context("Failed to connect to PostgreSQL"));
                 }
                 eprintln!("PostgreSQL Sync  : Skipped (DB unreachable: {})", e);
             }
