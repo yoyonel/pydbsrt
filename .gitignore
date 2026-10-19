@@ -111,6 +111,8 @@ data/__PHASH__
 data/__PHASH__/
 data/SRT/*.srt
 *.phash
+*.dbphash
+data/*.dbphash
 
 # Coverage reports
 .coverage*

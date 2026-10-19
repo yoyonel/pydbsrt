@@ -16,6 +16,11 @@ server_start() {
     echo "dbsrt-server is already running (PID: $(pgrep -f 'target/release/dbsrt-server' | head -n1))"
     exit 0
   fi
+  local dbphash_args=()
+  if [[ -f "data/catalog.dbphash" ]]; then
+    dbphash_args=(--dbphash data/catalog.dbphash)
+  fi
+
   setsid "$SERVER_BIN" \
     --host 127.0.0.1 \
     --port 8765 \
@@ -24,6 +29,7 @@ server_start() {
     --subtitles-dir data/SRT \
     --db-host 127.0.0.1 \
     --db-port 5433 \
+    "${dbphash_args[@]}" \
     </dev/null >"$SERVER_LOG_FILE" 2>&1 &
   echo $! >"$SERVER_PID_FILE"
   sleep 0.5

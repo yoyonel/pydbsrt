@@ -462,7 +462,7 @@ tasks:
     desc: Compile directory of .phash files into a unified high-density Hybrid .dbphash catalog
     deps: [rs:build]
     cmds:
-      - ./target/release/dbsrt pack --phash-dir data/__PHASH__ --output /tmp/catalog.dbphash
+      - ./target/release/dbsrt pack --phash-dir data/__PHASH__ --output data/catalog.dbphash
 
   demo:scan:dbphash:
     desc: Sub-millisecond search against unified Hybrid .dbphash catalog
@@ -470,7 +470,7 @@ tasks:
     cmds:
       - >
         ./target/release/dbsrt scan-library
-        --dbphash /tmp/catalog.dbphash
+        --dbphash data/catalog.dbphash
         --query-phash data/__PHASH__/Silicon.Valley.S03E01.Founder.Friendly.1080p.AMZN.WEB-DL.DD.5.1.H.265-SiGMA.phash
         --search-distance 0
         --limit 5
@@ -511,11 +511,39 @@ tasks:
         --search-distance 0
         --limit 5
 
+  bench:mih:100m:
+    desc: Empirical stress test of Multi-Index Hashing (MIH) up to 100 Million frames (100M pHash)
+    cmds:
+      - cargo run --release -p dbsrt-index --example bench_100m
+
   db:import:all-phash:
-    desc: Fast batch import of all 125 files / 5.08M frames into PostgreSQL 17 BK-Tree (Rust native COPY)
+    desc: Fast batch import of all .phash files into PostgreSQL 17 BK-Tree (Rust native COPY)
     deps: [db:up, rs:build]
     cmds:
       - ./target/release/dbsrt import-phash --phash-dir data/__PHASH__
+
+  eval:scale-up:
+    desc: Extract pHash on 100+ diverse NAS videos, import millions of frames into PostgreSQL 17, and certify subtitle couplings
+    deps: [db:up, rs:build]
+    cmds:
+      - uv run python scripts/scale_up_nas_dataset.py
+
+  eval:nas:
+    desc: Run 5-suite massive quantitative reliability evaluation across PostgreSQL 17, MmapLibrary, NAS videos, and VLC plugin
+    deps: [rs:build, server:daemon]
+    cmds:
+      - uv run python scripts/eval_nas_reliability.py
+
+  eval:trailers:
+    desc: Automated empirical verification of pHash matching on remote video streams (YouTube trailers/clips)
+    deps: [rs:build]
+    cmds:
+      - uv run python scripts/download_and_audit_all_trailers.py
+
+  dataset:audit:
+    desc: Audit local pHash catalog (230+ files, frame counts, size, and category distribution)
+    cmds:
+      - uv run python scripts/audit_phash_catalog.py
 
   # --- CI/CD Local Validation ---
 

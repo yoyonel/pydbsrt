@@ -136,7 +136,7 @@ hide:
 
 <div class="dbsrt-catalog-toolbar">
   <div class="dbsrt-filter-pills" id="dbsrt-filter-pills">
-    <button class="dbsrt-filter-btn active" data-filter="all">Tous (16)</button>
+    <button class="dbsrt-filter-btn active" data-filter="all">Tous (18)</button>
     <button class="dbsrt-filter-btn" data-filter="essential">⭐ Essentiels</button>
     <button class="dbsrt-filter-btn" data-filter="vlc">🎬 VLC &amp; VLSub</button>
     <button class="dbsrt-filter-btn" data-filter="studio">🎛️ Studio &amp; Couplages</button>
@@ -151,6 +151,8 @@ hide:
 
 | Document | Date | Pôle | Statut | Tags Clés | Résumé Synthétique |
 | :--- | :---: | :---: | :---: | :--- | :--- |
+| [⚡ Indexation Métrique : cBKTree Plat vs MIH](2026-10-19-indexing-metric-trees-and-multi-index-hashing.md) | `2026-10-19` | **pHash** | :octicons-star-fill-16: **ESSENTIEL** | `phash`, `bktree`, `cbktree`, `mih`, `indexing`, `scaling`, `essential` | Limite d'échelle du scan linéaire brut $O(N)$, conception du cBKTree plat zéro-copie et spécification du Multi-Index Hashing (MIH) sous les 5 ms. |
+| [Audit Exhaustif Matching E2E & Preuves Empiriques](2026-10-19-audit-exhaustif-matching-e2e-phash.md) | `2026-10-19` | **Benchmarks** | :octicons-check-circle-fill-16: **CURRENT** | `benchmarks`, `phash`, `e2e`, `audit`, `dataset` | Campagne empirique 100% catalogue (233 empreintes, 13M frames), 57 flux réels YouTube, 96.6% Top-1 et analyse des limites. |
 | [⚡ Guide Opérationnel & Référence CLI / API](quickstart-and-reference.md) | `2026-10-18` | **Guide** | :octicons-star-fill-16: **ESSENTIEL** | `taskfile`, `studio`, `vlc`, `api`, `essential` | Commandes `task` par pôle, URLs locales (`:8085`, `:8086`, `:8000`), référence des endpoints REST Axum et workflow de démarrage en 60s. |
 | [dbsrt Studio, Couplages Relationnels & Qualité Code](2026-10-18-studio-backoffice-and-relational-couplings.md) | `2026-10-18` | **Studio** | :octicons-check-circle-fill-16: **CURRENT** | `studio`, `postgres`, `phash`, `quality`, `essential` | Modèle relationnel (`medias`/`frames`/`subtitles`/`sub_frames`), backoffice `dbsrt Studio` (`/studio`) + `PgWeb` (`:8086`), timeline bi-piste et `17/17` hooks. |
 | [Mécanique E2E Search by pHash & Couplages Certifiés](2026-10-18-e2e-phash-search-mechanics-and-roadmap.md) | `2026-10-18` | **Studio** | :octicons-check-circle-fill-16: **CURRENT** | `vlc`, `vlsub`, `phash`, `studio`, `essential` | Chaîne E2E `Search by pHash` en 4 maillons, résolution prioritaire par `CouplingRegistry` / PostgreSQL et certification via `dbsrt certify-coupling`. |

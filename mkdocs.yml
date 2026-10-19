@@ -126,6 +126,7 @@ nav:
           - PostgreSQL 17 SP-GiST BK-Tree: 2026-10-15-pg17-bktree-benchmark-migration.md
   - 📊 Benchmarks & Preuves:
       - Campagnes Empiriques:
+          - Audit Exhaustif Matching E2E (YouTube & DB): 2026-10-19-audit-exhaustif-matching-e2e-phash.md
           - Benchmarks E2E Rust vs Python: 2026-10-15-rust-e2e-benchmarks-and-tradeoffs.md
           - Passage à l'Échelle (5M frames): 2026-10-16-phash-dataset-scale-and-benchmarks.md
           - Validation Empirique Synology NAS: 2026-10-17-validation-empirique-e2e-synology.md
