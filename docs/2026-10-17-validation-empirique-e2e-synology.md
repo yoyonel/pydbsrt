@@ -84,9 +84,10 @@ Compilation de 125 fichiers `.phash` issus du dossier `tvshow/__PHASH__` :
 
 ### 3.2 Commande de Packaging
 ```bash
+# Compilation vers l'emplacement persistant (chargé automatiquement par dbsrt-server)
 dbsrt pack \
-  --phash-dir "$SYNOLOGY_TVSHOW/__PHASH__" \
-  --output "/tmp/tvshow_catalog.dbphash"
+  --phash-dir "data/__PHASH__" \
+  --output "data/catalog.dbphash"
 ```
 
 ### 3.3 Résultats de Compression

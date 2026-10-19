@@ -46,22 +46,40 @@ Conformément à la règle d'intégrité factuelle, l'interaction complète avec
 
 ---
 
-## 3. Décomposition des Étapes d'Interaction UI/UX
+## 3. Décomposition des Étapes d'Interaction UI/UX (Prototype Studio v2 vs Legacy v1)
 
 ### Étape 1 : Initialisation du Dialogue & Télémétrie Daemon
-À l'ouverture du dialogue `VLSub (dbsrt Enhanced)`, l'extension interroge le fichier de découverte `/tmp/dbsrt-server.json` et effectue un `GET /v1/status`. Le statut s'affiche en vert avec la version, l'uptime et le nombre de médias indexés.
+À l'ouverture du dialogue `VLSub (dbsrt Enhanced)`, l'extension interroge `/tmp/dbsrt-server.json` et effectue un `GET /v1/status`. La carte **Dark Slate (`#0f172a`)** en en-tête affiche l'état `[ONLINE]`, l'endpoint, la version, le nombre d'empreintes `.phash` en RAM et le média actif. La grille 5 colonnes élargie (`789x413`) affiche le titre complet sans troncature.
 
-![Étape 1 : Dialogue Initialisé](assets/vlsub-dbsrt/01_vlsub_dialog_init.png)
+=== "Après — Studio Edition v2.0"
 
-### Étape 2 : Recherche Multi-Sources (`Search by pHash` / `Search by hash` / `Search by name`) & Rendu dans la Listbox
-Un clic sur **Search by pHash** (empreinte visuelle des frames/cuts), **Search by hash** (MovieHash 64-bit OpenSubtitles) ou **Search by name** déclenche une requête `POST /v1/search` au démon Rust. Les résultats provenant des conteneurs, du catalogue et des fournisseurs externes sont fusionnés, filtrés par langue et affichés dans la liste principale.
+    ![Étape 1 — Après (Studio v2)](assets/vlsub-dbsrt/vlsub_after_01_init.png)
 
-![Étape 2 : Résultats de Recherche](assets/vlsub-dbsrt/02_vlsub_search_results.png)
+=== "Avant — Legacy v1"
 
-### Étape 3 : Téléchargement, Recalage Temporel & Injection VLC
-La sélection d'un sous-titre suivie d'un clic sur **Download selection** déclenche l'appel `POST /v1/download`. Si le flux vidéo dispose d'une référence pHash connue, le décalage temporel est calculé et appliqué à la volée. Le sous-titre est instantanément attaché à la vidéo active (`vlc.input.add_subtitle`), et le rapport de recalage s'affiche en pied de dialogue et via l'OSD.
+    ![Étape 1 — Avant (Legacy v1)](assets/vlsub-dbsrt/vlsub_before_01.png)
 
-![Étape 3 : Sous-titre Synchronisé et Chargé](assets/vlsub-dbsrt/03_vlsub_subtitle_synced.png)
+### Étape 2 : Recherche Multi-Sources (`Smart Search (All)` / `Search by pHash` / `Search by Hash` / `Search by Name`)
+Un clic sur **Smart Search (All)** ou **Search by pHash** déclenche `POST /v1/search`. Les candidats sont formatés de manière tabulaire sans barre de défilement horizontale (`#01   [CERTIFIED pHash]   [FR]   ...  |  PostgreSQL #1`). L'OSD s'affiche en `top-left` pour éviter toute collision avec l'OSD natif VLC.
+
+=== "Après — Studio Edition v2.0"
+
+    ![Étape 2 — Après (Studio v2)](assets/vlsub-dbsrt/vlsub_after_02_results.png)
+
+=== "Avant — Legacy v1"
+
+    ![Étape 2 — Avant (Legacy v1)](assets/vlsub-dbsrt/vlsub_before_02.png)
+
+### Étape 3 : Téléchargement, Recalage Temporel, Certification & Injection VLC
+Un clic sur **Download + Sync** (qui sélectionne automatiquement `#01` si aucune ligne n'a été cliquée) ou sur **1-Click Auto-Sync** applique le recalage pHash et injecte le sous-titre dans VLC. La console inférieure **Dark Slate (`#0f172a`)** affiche le décalage (`ms`/`s`) et la confiance (`96.2%`), tandis que le bouton **Certify Coupling** permet d'enregistrer le couplage certifié dans PostgreSQL 17 et `couplings.json`.
+
+=== "Après — Studio Edition v2.0"
+
+    ![Étape 3 — Après (Studio v2)](assets/vlsub-dbsrt/vlsub_after_03_synced.png)
+
+=== "Avant — Legacy v1"
+
+    ![Étape 3 — Avant (Legacy v1)](assets/vlsub-dbsrt/vlsub_before_03.png)
 
 ---
 
