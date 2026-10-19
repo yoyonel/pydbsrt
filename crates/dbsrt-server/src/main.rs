@@ -65,12 +65,8 @@ pub struct ServerCli {
 
 impl ServerCli {
     pub fn into_app_state(self) -> AppState {
-        let db_config = self.db_host.map(|host| DbConnectionConfig {
-            host,
-            port: self.db_port,
-            user: self.db_user,
-            pass: self.db_pass,
-            dbname: self.db_name,
+        let db_config = self.db_host.map(|host| {
+            DbConnectionConfig::new(host, self.db_port, self.db_user, self.db_pass, self.db_name)
         });
 
         let mut state = AppState::new(
@@ -84,7 +80,7 @@ impl ServerCli {
                 state.extra_phash_dirs.push(dir);
             }
         }
-        state.dbphash_path = self.dbphash;
+        state.set_dbphash(self.dbphash);
         state.db_config = db_config;
         state
     }

@@ -65,12 +65,33 @@ pub fn parse_fps_from_phash_stem(stem: &str) -> f64 {
         }
     }
     let lower = stem.to_lowercase();
+    if lower.contains("pal")
+        || lower.contains("576i")
+        || lower.contains("576p")
+        || lower.contains("25fps")
+    {
+        return 25.0;
+    }
     if lower.contains("1080p")
         || lower.contains("720p")
         || lower.contains("2160p")
+        || lower.contains("480p")
         || lower.contains("bluray")
         || lower.contains("web-dl")
         || lower.contains("webrip")
+        || lower.contains("web")
+        || lower.contains("h264")
+        || lower.contains("x264")
+        || lower.contains("h265")
+        || lower.contains("x265")
+        || lower.contains("hevc")
+        || lower.contains("ntsc")
+        || lower.contains("[ember]")
+        || lower.contains("[erai-raws]")
+        || lower.contains("[subsplease]")
+        || lower.contains("kimetsu")
+        || lower.contains("haikyuu")
+        || lower.contains("anime")
     {
         return 23.976;
     }
@@ -86,6 +107,11 @@ impl DbClient {
         let client = Client::connect(&conn_str, NoTls)
             .with_context(|| format!("Failed to connect to PostgreSQL at {}:{}", host, port))?;
         Ok(Self { client })
+    }
+
+    /// Returns true if the underlying PostgreSQL connection is closed.
+    pub fn is_closed(&self) -> bool {
+        self.client.is_closed()
     }
 
     /// Ensures all 4 relational tables (`medias`, `frames`, `subtitles`, `sub_frames`),
@@ -239,7 +265,17 @@ impl DbClient {
         let raw_srt = fs::read_to_string(srt_path)
             .with_context(|| format!("Failed to read subtitle file {:?}", srt_path))?;
         let sub_file = SubtitleFile::parse(&raw_srt)?;
-        let anchors = build_and_validate_sub_frames(&sub_file, &hashes, fps)?;
+        let anchors = match build_and_validate_sub_frames(&sub_file, &hashes, fps) {
+            Ok(a) => a,
+            Err(e) if (fps - 25.0).abs() < 1e-3 => {
+                if let Ok(a) = build_and_validate_sub_frames(&sub_file, &hashes, 23.976) {
+                    a
+                } else {
+                    return Err(e);
+                }
+            }
+            Err(e) => return Err(e),
+        };
 
         let subtitles_hash = compute_bytes_digest_32(raw_srt.as_bytes());
         let sub_name = srt_path
@@ -332,7 +368,8 @@ impl DbClient {
     }
 
     /// Recognizes a sequence of query frame pHashes against the PostgreSQL BK-tree (`frames`)
-    /// and returns the best matching `(DbMediaRecord, confidence_0_to_1)`.
+    /// using temporal offset coherence (`delta = frame_offset - q_idx`) and returns the best
+    /// matching `(DbMediaRecord, confidence_0_to_1)` if it meets `MIN_TEMPORAL_COHERENCE_CONFIDENCE`.
     pub fn recognize_sample(
         &mut self,
         query_hashes: &[u64],
@@ -341,24 +378,44 @@ impl DbClient {
         if query_hashes.is_empty() {
             return Ok(None);
         }
-        let mut media_hits: HashMap<i32, usize> = HashMap::new();
-        for &h in query_hashes {
+        let mut media_pairs: HashMap<i32, Vec<(usize, usize)>> = HashMap::new();
+        for (q_idx, &h) in query_hashes.iter().enumerate() {
+            if dbsrt_core::is_blank_phash(h) {
+                continue;
+            }
             if let Ok(matches) = self.search_frame(h, distance) {
-                let mut seen_for_frame = std::collections::HashSet::new();
                 for m in matches {
-                    if seen_for_frame.insert(m.media_id) {
-                        *media_hits.entry(m.media_id).or_insert(0) += 1;
+                    if m.frame_offset >= 0 {
+                        media_pairs
+                            .entry(m.media_id)
+                            .or_default()
+                            .push((q_idx, m.frame_offset as usize));
                     }
                 }
             }
         }
 
-        let Some((&best_media_id, &hits)) = media_hits.iter().max_by_key(|(_, &count)| count)
-        else {
+        let mut best_candidate: Option<(i32, usize, f64)> = None;
+        for (media_id, pairs) in &media_pairs {
+            let (coherent_count, conf) =
+                crate::mmap::compute_temporal_coherence(query_hashes, pairs);
+            if conf >= crate::mmap::MIN_TEMPORAL_COHERENCE_CONFIDENCE {
+                let is_better = match best_candidate {
+                    None => true,
+                    Some((_, best_cnt, best_conf)) => {
+                        conf > best_conf || (conf == best_conf && coherent_count > best_cnt)
+                    }
+                };
+                if is_better {
+                    best_candidate = Some((*media_id, coherent_count, conf));
+                }
+            }
+        }
+
+        let Some((best_media_id, _, confidence)) = best_candidate else {
             return Ok(None);
         };
 
-        let confidence = (hits as f64 / query_hashes.len() as f64).min(1.0);
         let row_opt = self.client.query_opt(
             "SELECT id, TRIM(media_hash), name, COALESCE(fps, 25.0), COALESCE(frame_count, 0), phash_path FROM medias WHERE id = $1",
             &[&best_media_id],

@@ -379,6 +379,7 @@ async fn test_server_status_and_search_endpoints() {
         query_title: None,
         season: None,
         episode: None,
+        index_engine: None,
     };
 
     let res = client
@@ -543,6 +544,7 @@ async fn test_certify_and_certified_search_download_e2e() {
         query_title: None,
         season: None,
         episode: None,
+        index_engine: None,
     };
     let search_res: dbsrt_server::SearchSubtitlesResponse = client
         .post(format!("{}/v1/search", base_url))
@@ -699,6 +701,7 @@ async fn test_certify_and_certified_search_download_e2e() {
             query_title: Some("big buck bunny".to_string()),
             season: Some(1),
             episode: Some(1),
+            index_engine: None,
         };
         let s_res = client
             .post(format!("{}/v1/search", base_url))
@@ -770,26 +773,21 @@ async fn test_certify_and_certified_search_download_e2e() {
     };
     let mut reachable_port = None;
     for p in ports {
-        let probe_cfg = dbsrt_server::DbConnectionConfig {
-            host: db_host.clone(),
-            port: p,
-            user: "docker".to_string(),
-            pass: "docker".to_string(),
-            dbname: "bktreedb".to_string(),
-        };
+        let probe_cfg = dbsrt_server::DbConnectionConfig::new(
+            db_host.clone(),
+            p,
+            "docker",
+            "docker",
+            "bktreedb",
+        );
         if probe_cfg.with_client(|_| Ok(())).is_ok() {
             reachable_port = Some(p);
             break;
         }
     }
     if let Some(pg_port) = reachable_port {
-        let db_cfg = dbsrt_server::DbConnectionConfig {
-            host: db_host,
-            port: pg_port,
-            user: "docker".to_string(),
-            pass: "docker".to_string(),
-            dbname: "bktreedb".to_string(),
-        };
+        let db_cfg =
+            dbsrt_server::DbConnectionConfig::new(db_host, pg_port, "docker", "docker", "bktreedb");
         let mut pg_state = dbsrt_server::AppState::new(
             phash_dir.clone(),
             srt_dir.clone(),

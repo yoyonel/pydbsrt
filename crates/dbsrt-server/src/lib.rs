@@ -83,22 +83,74 @@ pub async fn bind_listener(
     }
 }
 
-#[derive(Clone, Debug)]
+/// Persistent container for a reusable `DbClient`.
+/// Implements `Drop` on an isolated OS thread so `postgres::Client::drop` never calls
+/// Tokio's `block_on` inside an active async runtime worker thread (which would panic).
+pub struct ClientPool {
+    client: std::sync::Mutex<Option<DbClient>>,
+}
+
+impl Drop for ClientPool {
+    fn drop(&mut self) {
+        if let Ok(mut lock) = self.client.lock() {
+            if let Some(client) = lock.take() {
+                let _ = std::thread::spawn(move || {
+                    drop(client);
+                })
+                .join();
+            }
+        }
+    }
+}
+
+#[derive(Clone)]
 pub struct DbConnectionConfig {
     pub host: String,
     pub port: u16,
     pub user: String,
     pub pass: String,
     pub dbname: String,
+    pub pool: Arc<ClientPool>,
+}
+
+impl std::fmt::Debug for DbConnectionConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DbConnectionConfig")
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("user", &self.user)
+            .field("dbname", &self.dbname)
+            .finish()
+    }
 }
 
 impl DbConnectionConfig {
+    pub fn new(
+        host: impl Into<String>,
+        port: u16,
+        user: impl Into<String>,
+        pass: impl Into<String>,
+        dbname: impl Into<String>,
+    ) -> Self {
+        Self {
+            host: host.into(),
+            port,
+            user: user.into(),
+            pass: pass.into(),
+            dbname: dbname.into(),
+            pool: Arc::new(ClientPool {
+                client: std::sync::Mutex::new(None),
+            }),
+        }
+    }
+
     pub fn connect(&self) -> Result<DbClient> {
         DbClient::connect(&self.host, self.port, &self.user, &self.pass, &self.dbname)
     }
 
     /// Executes a synchronous `DbClient` closure inside an isolated OS thread scope so
     /// `postgres::Client` never panics when called from inside an active Tokio runtime.
+    /// Reuses persistent connection from `pool` to avoid 10-13ms TCP handshake + SCRAM auth latency.
     pub fn with_client<T, F>(&self, f: F) -> Result<T>
     where
         F: FnOnce(&mut DbClient) -> Result<T> + Send,
@@ -106,8 +158,32 @@ impl DbConnectionConfig {
     {
         std::thread::scope(|s| {
             s.spawn(|| {
-                let mut client = self.connect()?;
-                f(&mut client)
+                let mut client = {
+                    let mut lock = self
+                        .pool
+                        .client
+                        .lock()
+                        .map_err(|e| anyhow::anyhow!("DB pool lock poisoned: {}", e))?;
+                    if let Some(c) = lock.take() {
+                        if !c.is_closed() {
+                            c
+                        } else {
+                            self.connect()?
+                        }
+                    } else {
+                        self.connect()?
+                    }
+                };
+
+                let res = f(&mut client);
+
+                if !client.is_closed() {
+                    if let Ok(mut lock) = self.pool.client.lock() {
+                        *lock = Some(client);
+                    }
+                }
+
+                res
             })
             .join()
             .unwrap_or_else(|_| Err(anyhow::anyhow!("PostgreSQL worker thread panicked")))
@@ -120,8 +196,10 @@ pub struct AppState {
     pub phash_dir: PathBuf,
     pub extra_phash_dirs: Vec<PathBuf>,
     pub dbphash_path: Option<PathBuf>,
+    pub dbphash_reader: Option<Arc<MmapDbphash>>,
     pub db_config: Option<DbConnectionConfig>,
     pub subtitles_dir: PathBuf,
+    pub coupling_registry: Arc<std::sync::RwLock<CouplingRegistry>>,
     pub provider: Arc<dyn SubtitleProvider>,
     pub cache: SubtitleCache,
     pub start_time: Instant,
@@ -139,16 +217,51 @@ impl AppState {
         if default_repo_phash != phash_dir && default_repo_phash.exists() {
             extra_phash_dirs.push(default_repo_phash);
         }
+
+        let reg_path = CouplingRegistry::default_path(&subtitles_dir);
+        let coupling_registry = Arc::new(std::sync::RwLock::new(
+            CouplingRegistry::load_or_default(&reg_path).unwrap_or_default(),
+        ));
+
         Self {
             phash_dir,
             extra_phash_dirs,
             dbphash_path: None,
+            dbphash_reader: None,
             db_config: None,
             subtitles_dir,
+            coupling_registry,
             provider,
             cache,
             start_time: Instant::now(),
         }
+    }
+
+    /// Reloads the in-memory `CouplingRegistry` from disk.
+    pub fn reload_coupling_registry(&self) {
+        let reg_path = CouplingRegistry::default_path(&self.subtitles_dir);
+        if let Ok(reg) = CouplingRegistry::load_or_default(&reg_path) {
+            if let Ok(mut lock) = self.coupling_registry.write() {
+                *lock = reg;
+            }
+        }
+    }
+
+    /// Sets or updates the `.dbphash` catalog and pre-warms the MIH indices in RAM.
+    pub fn set_dbphash(&mut self, path: Option<PathBuf>) {
+        if let Some(ref p) = path {
+            if let Ok(reader) = MmapDbphash::open(p) {
+                // Pre-warm MIH OnceLock indices (zero query-time allocation)
+                let _ = reader.sparse_mih();
+                let _ = reader.cuts_mih();
+                self.dbphash_reader = Some(Arc::new(reader));
+            } else {
+                self.dbphash_reader = None;
+            }
+        } else {
+            self.dbphash_reader = None;
+        }
+        self.dbphash_path = path;
     }
 
     /// Returns all active `.phash` directories with `override_dir` (or `self.phash_dir`) first.
@@ -291,6 +404,7 @@ pub struct SearchSubtitlesRequest {
     pub subtitles_dir: Option<String>,
     pub phash_dir: Option<String>,
     pub search_mode: Option<String>,
+    pub index_engine: Option<String>,
     pub query_title: Option<String>,
     pub season: Option<u32>,
     pub episode: Option<u32>,
@@ -306,6 +420,28 @@ pub struct SubtitleCandidate {
     pub candidate_id: Option<String>,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct SearchTimingStats {
+    pub phash_match_ms: f64,
+    pub pg_lookup_ms: f64,
+    pub json_lookup_ms: f64,
+    pub container_ms: f64,
+    pub disk_catalog_ms: f64,
+    pub moviehash_ms: f64,
+    pub overhead_ms: f64,
+    pub total_ms: f64,
+    pub pg_cached: bool,
+    pub phash_frames_count: usize,
+    pub video_duration_minutes: f64,
+    pub query_sample_frames: usize,
+    pub index_targets_count: usize,
+    pub total_hamming_comparisons: usize,
+    pub us_per_frame: f64,
+    pub mfps_throughput: f64,
+    pub matching_tier: String,
+    pub confidence_percent: f64,
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SearchSubtitlesResponse {
     pub media_path: String,
@@ -314,6 +450,8 @@ pub struct SearchSubtitlesResponse {
     pub moviehash: Option<String>,
     pub total_candidates: usize,
     pub candidates: Vec<SubtitleCandidate>,
+    #[serde(default)]
+    pub timing: SearchTimingStats,
 }
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -547,7 +685,11 @@ pub async fn couplings_handler(
     let summary_only = query.summary.unwrap_or(false);
     let dirs = state.effective_phash_dirs(None);
     let reg_path = CouplingRegistry::default_path(&state.subtitles_dir);
-    let reg = CouplingRegistry::load_or_default(&reg_path).unwrap_or_default();
+    let reg = state
+        .coupling_registry
+        .read()
+        .map(|r| r.clone())
+        .unwrap_or_default();
 
     let mut postgres_connected = false;
     let mut postgres_counts = None;
@@ -668,8 +810,11 @@ pub async fn sub_frames_handler(
     State(state): State<Arc<AppState>>,
     Query(query): Query<SubFramesQuery>,
 ) -> Result<Json<SubFramesPageResponse>, (StatusCode, String)> {
-    let reg_path = CouplingRegistry::default_path(&state.subtitles_dir);
-    let reg = CouplingRegistry::load_or_default(&reg_path).unwrap_or_default();
+    let reg = state
+        .coupling_registry
+        .read()
+        .map(|r| r.clone())
+        .unwrap_or_default();
 
     let media = reg
         .couplings
@@ -810,14 +955,17 @@ pub async fn status_handler(State(state): State<Arc<AppState>>) -> impl IntoResp
     let mut indexed_phash_count = MmapLibrary::from_directories(&dirs)
         .map(|lib| lib.file_count())
         .unwrap_or(0);
-    if let Some(ref dbphash) = state.dbphash_path {
+    if let Some(ref reader) = state.dbphash_reader {
+        indexed_phash_count += reader.media_entries().len();
+    } else if let Some(ref dbphash) = state.dbphash_path {
         if let Ok(reader) = MmapDbphash::open(dbphash) {
             indexed_phash_count += reader.media_entries().len();
         }
     }
 
-    let reg_path = CouplingRegistry::default_path(&state.subtitles_dir);
-    let certified_couplings_count = CouplingRegistry::load_or_default(&reg_path)
+    let certified_couplings_count = state
+        .coupling_registry
+        .read()
         .map(|r| r.couplings.iter().map(|c| c.subtitles.len()).sum())
         .unwrap_or(0);
 
@@ -858,36 +1006,92 @@ pub fn normalize_lang_code(lang: &str) -> String {
     }
 }
 
-/// Extracts explicit language tag from a subtitle filename (e.g. `movie.fr.srt` -> `Some("fr")`).
+/// Extracts explicit language tag from a subtitle filename, supporting:
+/// - Standard suffixes: `movie.fr.srt`, `movie.eng.srt`, `movie.french.srt`
+/// - Synology / ffmpeg extracted tracks: `Episode.mkv_fre_9.srt`, `Episode.mkv_eng_3.srt`
+/// - Shifted/synced suffixes: `Movie.french.shift.srt`, `Movie.fr.synced.srt`
 pub fn detect_subtitle_file_language(filename: &str) -> Option<String> {
     let base = filename.strip_suffix(".srt").unwrap_or(filename);
-    let last_token = base.rsplit(['.', '_', '-']).next()?;
-    let lower = last_token.to_lowercase();
-    match lower.as_str() {
-        "fr" | "fre" | "fra" => Some("fr".to_string()),
-        "en" | "eng" => Some("en".to_string()),
-        "es" | "spa" => Some("es".to_string()),
-        "de" | "ger" | "deu" => Some("de".to_string()),
-        "it" | "ita" => Some("it".to_string()),
-        "pt" | "por" | "pob" => Some("pt".to_string()),
-        "ru" | "rus" => Some("ru".to_string()),
-        "ja" | "jpn" => Some("ja".to_string()),
-        "zh" | "chi" | "zho" => Some("zh".to_string()),
-        "nl" | "dut" | "nld" => Some("nl".to_string()),
-        "pl" | "pol" => Some("pl".to_string()),
-        "tr" | "tur" => Some("tr".to_string()),
-        "ar" | "ara" => Some("ar".to_string()),
-        "he" | "heb" => Some("he".to_string()),
-        "sv" | "swe" => Some("sv".to_string()),
-        "da" | "dan" => Some("da".to_string()),
-        "fi" | "fin" => Some("fi".to_string()),
-        "cs" | "cze" | "ces" => Some("cs".to_string()),
-        "hu" | "hun" => Some("hu".to_string()),
-        "ro" | "rum" | "ron" => Some("ro".to_string()),
-        "el" | "ell" | "gre" => Some("el".to_string()),
-        "uk" | "ukr" => Some("uk".to_string()),
-        _ => None,
+    for token in base
+        .rsplit(['.', '_', '-', ' ', '(', ')', '[', ']'])
+        .filter(|t| !t.is_empty())
+        .take(4)
+    {
+        let lower = token.to_lowercase();
+        if lower.chars().all(|c| c.is_ascii_digit()) {
+            continue;
+        }
+        if matches!(
+            lower.as_str(),
+            "shift" | "synced" | "sdh" | "forced" | "srt" | "sub" | "vtt" | "ass" | "ssa"
+        ) {
+            continue;
+        }
+        let mapped = match lower.as_str() {
+            "fr" | "fre" | "fra" | "french" | "vf" | "vostfr" => Some("fr"),
+            "en" | "eng" | "english" | "vo" => Some("en"),
+            "es" | "spa" | "spanish" => Some("es"),
+            "de" | "ger" | "deu" | "german" => Some("de"),
+            "it" | "ita" | "italian" => Some("it"),
+            "pt" | "por" | "pob" | "portuguese" => Some("pt"),
+            "ru" | "rus" | "russian" => Some("ru"),
+            "ja" | "jpn" | "japanese" => Some("ja"),
+            "zh" | "chi" | "zho" | "chinese" => Some("zh"),
+            "nl" | "dut" | "nld" | "dutch" => Some("nl"),
+            "pl" | "pol" | "polish" => Some("pl"),
+            "tr" | "tur" | "turkish" => Some("tr"),
+            "ar" | "ara" | "arabic" => Some("ar"),
+            "he" | "heb" | "hebrew" => Some("he"),
+            "sv" | "swe" | "swedish" => Some("sv"),
+            "da" | "dan" | "danish" => Some("da"),
+            "fi" | "fin" | "finnish" => Some("fi"),
+            "no" | "nor" | "nob" | "nno" | "norwegian" => Some("no"),
+            "cs" | "cze" | "ces" | "czech" => Some("cs"),
+            "hu" | "hun" | "hungarian" => Some("hu"),
+            "ro" | "rum" | "ron" | "romanian" => Some("ro"),
+            "el" | "ell" | "gre" | "greek" => Some("el"),
+            "uk" | "ukr" | "ukrainian" => Some("uk"),
+            "ko" | "kor" | "korean" => Some("ko"),
+            "hin" | "hindi" => Some("hi"),
+            _ => None,
+        };
+        if let Some(code) = mapped {
+            return Some(code.to_string());
+        }
     }
+    None
+}
+
+/// Collects candidate subtitle directories: `primary_dir` plus (when `allow_sidecars` is true)
+/// the media file's parent directory and nearby `SRT/` folders (e.g. `/media/latty/Synology/tvshow/SRT`).
+pub fn collect_subtitle_search_dirs(
+    primary_dir: &Path,
+    media_path: &Path,
+    allow_sidecars: bool,
+) -> Vec<PathBuf> {
+    let mut dirs = vec![primary_dir.to_path_buf()];
+    if !allow_sidecars {
+        return dirs;
+    }
+    let mut push_unique = |p: PathBuf| {
+        if p.is_dir() && !dirs.contains(&p) {
+            dirs.push(p);
+        }
+    };
+    if let Some(parent) = media_path.parent() {
+        if !parent.as_os_str().is_empty() && parent != Path::new("/tmp") {
+            push_unique(parent.to_path_buf());
+            push_unique(parent.join("SRT"));
+            push_unique(parent.join("Subs"));
+            if let Some(gp) = parent.parent() {
+                push_unique(gp.join("SRT"));
+                if let Some(ggp) = gp.parent() {
+                    push_unique(ggp.join("SRT"));
+                }
+            }
+        }
+    }
+    dirs
 }
 
 /// Unified catalog search returning `(score, PathBuf, detected_language)` sorted by relevance.
@@ -925,14 +1129,27 @@ pub fn search_subtitles_in_catalog(
         .filter(|s| !s.is_empty())
         .collect();
 
+    // Infer season/episode and normalized title from stems if not explicitly passed
+    let stem_meta = clean_stems.first().map(|s| MediaMetadata::parse(s));
+    let eff_season = season.or_else(|| stem_meta.as_ref().and_then(|m| m.season));
+    let eff_episode = episode.or_else(|| stem_meta.as_ref().and_then(|m| m.episode));
+
+    let norm_alnum = |s: &str| -> String {
+        s.chars()
+            .filter(|c| c.is_alphanumeric())
+            .collect::<String>()
+            .to_lowercase()
+    };
+
     let query_norm: Option<String> = query_title
-        .map(|q| {
-            q.chars()
-                .filter(|c| c.is_alphanumeric())
-                .collect::<String>()
-                .to_lowercase()
-        })
-        .filter(|q| !q.is_empty());
+        .map(norm_alnum)
+        .filter(|q| !q.is_empty())
+        .or_else(|| {
+            stem_meta
+                .as_ref()
+                .map(|m| norm_alnum(&m.clean_title))
+                .filter(|q| q.len() >= 3)
+        });
 
     let mut results: Vec<(i32, PathBuf, String)> = Vec::new();
 
@@ -941,39 +1158,63 @@ pub fn search_subtitles_in_catalog(
         if path.extension().and_then(|e| e.to_str()) != Some("srt") {
             continue;
         }
+        let file_size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+        // Ignore empty/corrupt 0-byte .srt files
+        if file_size > 0 && file_size < 10 {
+            continue;
+        }
+        if file_size == 0 {
+            continue;
+        }
+
         let Some(fname_os) = path.file_name() else {
             continue;
         };
         let fname = fname_os.to_string_lossy().to_lowercase();
-        let fname_alnum: String = fname.chars().filter(|c| c.is_alphanumeric()).collect();
+        let fname_alnum = norm_alnum(&fname);
+        let cand_meta = MediaMetadata::parse(&fname);
+        let cand_title_norm = norm_alnum(&cand_meta.clean_title);
 
-        let has_stem = clean_stems.iter().any(|stem_lower| {
-            fname.contains(stem_lower)
-                || stem_lower.contains(fname.trim_end_matches(".srt"))
-                || (stem_lower.len() > 10 && fname.contains(&stem_lower[..10]))
+        // Strict Season/Episode conflict gate: NEVER match S01E01 onto S01E02 or S02E03!
+        if let (Some(req_s), Some(req_e)) = (eff_season, eff_episode) {
+            if let (Some(cs), Some(ce)) = (cand_meta.season, cand_meta.episode) {
+                if cs != req_s || ce != req_e {
+                    continue;
+                }
+            }
+        }
+
+        let has_exact_stem = clean_stems.iter().any(|stem_lower| {
+            fname.contains(stem_lower) || stem_lower.contains(fname.trim_end_matches(".srt"))
         });
 
-        let has_query = query_norm
-            .as_ref()
-            .is_some_and(|qn| fname_alnum.contains(qn));
+        let has_query = query_norm.as_ref().is_some_and(|qn| {
+            if !cand_title_norm.is_empty() && cand_title_norm.len() >= 3 {
+                cand_title_norm == *qn || (qn.len() >= 5 && fname_alnum.starts_with(qn))
+            } else {
+                fname_alnum.contains(qn)
+            }
+        });
 
-        if !has_stem && !has_query {
+        if !has_exact_stem && !has_query {
             continue;
         }
 
-        // Check season/episode filter if explicitly requested via query search
-        if !has_stem {
-            if let (Some(s), Some(e)) = (season, episode) {
+        // If matched via title query (not exact release stem) and target has SxxExx,
+        // the candidate subtitle MUST explicitly match that SxxExx
+        if !has_exact_stem {
+            if let (Some(s), Some(e)) = (eff_season, eff_episode) {
+                let se_match = cand_meta.season == Some(s) && cand_meta.episode == Some(e);
                 let se_tag = format!("s{:02}e{:02}", s, e);
                 let x_tag = format!("{}x{:02}", s, e);
-                if !fname.contains(&se_tag) && !fname.contains(&x_tag) {
+                if !se_match && !fname.contains(&se_tag) && !fname.contains(&x_tag) {
                     continue;
                 }
             }
         }
 
         let detected_lang = detect_subtitle_file_language(&fname);
-        let (score, resolved_lang) = match detected_lang {
+        let (mut score, resolved_lang) = match detected_lang {
             Some(ref d_lang) if *d_lang == req_lang => (100, d_lang.clone()),
             Some(ref d_lang) if any_lang => (50, d_lang.clone()),
             Some(_) => {
@@ -990,6 +1231,14 @@ pub fn search_subtitles_in_catalog(
                 (10, fallback_lang)
             }
         };
+
+        if has_exact_stem {
+            score += 50;
+        }
+        // Prefer full dialogue subtitle files (>= 4 KB) over tiny forced/sign tracks (< 4 KB)
+        if file_size >= 4096 {
+            score += 15;
+        }
 
         results.push((score, path, resolved_lang));
     }
@@ -1021,6 +1270,13 @@ pub async fn fetch_or_cache_remote_subtitle(
 pub type ExistingPhashData = (PathBuf, Vec<u64>, f64);
 pub type PhashIdentificationResult = (Option<(String, f64)>, f64, Option<ExistingPhashData>);
 
+/// Default maximum Hamming distance (bits out of 64) used for visual pHash media identification.
+pub const DEFAULT_RECOGNITION_SEARCH_DISTANCE: u32 = 6;
+
+/// Minimum temporally coherent confidence percentage (`0.0 ..= 100.0`) required to accept a pHash media match.
+pub const MIN_PHASH_RECOGNITION_CONFIDENCE_PERCENT: f64 =
+    dbsrt_index::MIN_TEMPORAL_COHERENCE_CONFIDENCE * 100.0;
+
 /// Identifies a target media file against `MmapLibrary` in `phash_dir` using existing `.phash`
 /// or an on-the-fly frame sample. Returns `(matched_media_name_and_conf, target_fps, existing_phash)`.
 pub fn identify_media_by_phash(
@@ -1039,16 +1295,24 @@ pub fn identify_media_by_phash(
     )
 }
 
-/// Identifies a target media file across multiple `.phash` directories, an optional `.dbphash`
-/// catalog, and an optional PostgreSQL BK-tree (`DbConnectionConfig`).
-pub fn identify_media_by_phash_multi(
+/// Identifies a target media file across multiple `.phash` directories, an optional pre-warmed `.dbphash`
+/// reader (or path), and an optional PostgreSQL BK-tree (`DbConnectionConfig`).
+pub type RoutedPhashResult = (
+    Option<(String, f64, String)>,
+    f64,
+    Option<ExistingPhashData>,
+);
+
+/// Identifies a target media file with explicit index engine routing.
+pub fn identify_media_by_phash_multi_routed(
     media_path: &Path,
     phash_dirs: &[PathBuf],
-    dbphash_path: Option<&Path>,
+    dbphash_reader: Option<&MmapDbphash>,
     db_config: Option<&DbConnectionConfig>,
     nb_seconds: f64,
     search_distance: u32,
-) -> PhashIdentificationResult {
+    engine: Option<&str>,
+) -> RoutedPhashResult {
     let existing_phash = phash_dirs
         .iter()
         .find_map(|dir| find_existing_phash(media_path, dir));
@@ -1071,50 +1335,154 @@ pub fn identify_media_by_phash_multi(
         });
         let nb_frames = ((nb_seconds * meta.fps).round() as usize).max(1);
         let start_sec = (meta.duration / 2.0).floor().max(0.0);
-        let sample = extract_frames_phash(media_path, start_sec, nb_frames).unwrap_or_default();
+        let mut sample = extract_frames_phash(media_path, start_sec, nb_frames).unwrap_or_default();
+        let non_blank = sample
+            .iter()
+            .filter(|&&h| !dbsrt_core::is_blank_phash(h))
+            .count();
+        if non_blank * 2 < sample.len() && meta.duration > 6.0 {
+            let alt_sec = (meta.duration * 0.3).floor().max(0.0);
+            let alt_sample =
+                extract_frames_phash(media_path, alt_sec, nb_frames).unwrap_or_default();
+            if alt_sample
+                .iter()
+                .filter(|&&h| !dbsrt_core::is_blank_phash(h))
+                .count()
+                > non_blank
+            {
+                sample = alt_sample;
+            }
+        }
         (meta.fps, sample)
     } else {
         (25.0, Vec::new())
     };
 
-    if query_sample.is_empty() {
+    if query_sample.is_empty() || query_sample.iter().all(|&h| dbsrt_core::is_blank_phash(h)) {
         return (None, target_fps, existing_phash);
     }
 
-    // 1. Check PostgreSQL BK-Tree if configured
-    if let Some(cfg) = db_config {
-        if let Ok(Some((rec, conf))) =
-            cfg.with_client(|client| client.recognize_sample(&query_sample, search_distance))
-        {
-            return (Some((rec.name, conf * 100.0)), target_fps, existing_phash);
+    let rec_distance = search_distance.min(8);
+    let chosen_engine = engine.unwrap_or("auto");
+
+    // Mode 1: Force PostgreSQL 17 SP-GiST BK-Tree
+    if chosen_engine == "pg_bktree" || chosen_engine == "postgres" {
+        if let Some(cfg) = db_config {
+            if let Ok(Some((rec, conf))) =
+                cfg.with_client(|client| client.recognize_sample(&query_sample, rec_distance))
+            {
+                let conf_pct = conf * 100.0;
+                if conf_pct >= MIN_PHASH_RECOGNITION_CONFIDENCE_PERCENT {
+                    return (
+                        Some((
+                            rec.name,
+                            conf_pct,
+                            "Tier 3 (PostgreSQL 17 SP-GiST BK-Tree)".to_string(),
+                        )),
+                        target_fps,
+                        existing_phash,
+                    );
+                }
+            }
+        }
+        return (None, target_fps, existing_phash);
+    }
+
+    // Mode 2: Force Flat Linear Scan O(N)
+    if chosen_engine == "linear" {
+        if let Some(reader) = dbphash_reader {
+            let matches = reader.recognize_linear(&query_sample, rec_distance);
+            if let Some(m) = matches.into_iter().next() {
+                if m.confidence >= MIN_PHASH_RECOGNITION_CONFIDENCE_PERCENT {
+                    return (
+                        Some((
+                            m.clean_title,
+                            m.confidence,
+                            "Tier 1 (RAM .dbphash Flat Linear O(N))".to_string(),
+                        )),
+                        target_fps,
+                        existing_phash,
+                    );
+                }
+            }
+        }
+        return (None, target_fps, existing_phash);
+    }
+
+    // Mode 3: Force MIH (Tier 1 exclusive)
+    if chosen_engine == "mih" {
+        if let Some(reader) = dbphash_reader {
+            let matches = reader.recognize(&query_sample, rec_distance);
+            if let Some(m) = matches.into_iter().next() {
+                if m.confidence >= MIN_PHASH_RECOGNITION_CONFIDENCE_PERCENT {
+                    return (
+                        Some((
+                            m.clean_title,
+                            m.confidence,
+                            "Tier 1 (RAM .dbphash MIH <10ms)".to_string(),
+                        )),
+                        target_fps,
+                        existing_phash,
+                    );
+                }
+            }
+        }
+        return (None, target_fps, existing_phash);
+    }
+
+    // Mode 4: Auto Cascade (Tier 1 MIH -> Tier 2 MmapLibrary -> Tier 3 PostgreSQL)
+    if let Some(reader) = dbphash_reader {
+        let matches = reader.recognize(&query_sample, rec_distance);
+        if let Some(m) = matches.into_iter().next() {
+            if m.confidence >= MIN_PHASH_RECOGNITION_CONFIDENCE_PERCENT {
+                return (
+                    Some((
+                        m.clean_title,
+                        m.confidence,
+                        "Tier 1 (RAM .dbphash MIH <10ms)".to_string(),
+                    )),
+                    target_fps,
+                    existing_phash,
+                );
+            }
         }
     }
 
-    // 2. Check MmapLibrary across all configured phash_dirs
+    // 2. Check MmapLibrary across all configured phash_dirs (Tier 2: Fast In-Memory Zero-DB, ~300ms)
     if let Ok(lib) = MmapLibrary::from_directories(phash_dirs) {
         if let Some(m) = lib
-            .recognize(&query_sample, search_distance)
+            .recognize(&query_sample, rec_distance)
             .into_iter()
             .next()
         {
-            return (
-                Some((m.media_name, m.confidence * 100.0)),
-                target_fps,
-                existing_phash,
-            );
+            let conf_pct = m.confidence * 100.0;
+            if conf_pct >= MIN_PHASH_RECOGNITION_CONFIDENCE_PERCENT {
+                return (
+                    Some((
+                        m.media_name,
+                        conf_pct,
+                        "Tier 2 (MmapLibrary Zero-DB Files)".to_string(),
+                    )),
+                    target_fps,
+                    existing_phash,
+                );
+            }
         }
     }
 
-    // 3. Check compiled .dbphash catalog if configured
-    if let Some(dbphash) = dbphash_path {
-        if let Ok(reader) = MmapDbphash::open(dbphash) {
-            if let Some(m) = reader
-                .recognize(&query_sample, search_distance)
-                .into_iter()
-                .next()
-            {
+    // 3. Check PostgreSQL BK-Tree if configured (Tier 3: Persistent Store Fallback)
+    if let Some(cfg) = db_config {
+        if let Ok(Some((rec, conf))) =
+            cfg.with_client(|client| client.recognize_sample(&query_sample, rec_distance))
+        {
+            let conf_pct = conf * 100.0;
+            if conf_pct >= MIN_PHASH_RECOGNITION_CONFIDENCE_PERCENT {
                 return (
-                    Some((m.clean_title, m.confidence)),
+                    Some((
+                        rec.name,
+                        conf_pct,
+                        "Tier 3 (PostgreSQL 17 SP-GiST BK-Tree)".to_string(),
+                    )),
                     target_fps,
                     existing_phash,
                 );
@@ -1123,6 +1491,48 @@ pub fn identify_media_by_phash_multi(
     }
 
     (None, target_fps, existing_phash)
+}
+
+pub fn identify_media_by_phash_multi_with_reader(
+    media_path: &Path,
+    phash_dirs: &[PathBuf],
+    dbphash_reader: Option<&MmapDbphash>,
+    db_config: Option<&DbConnectionConfig>,
+    nb_seconds: f64,
+    search_distance: u32,
+) -> PhashIdentificationResult {
+    let (matched, target_fps, existing_phash) = identify_media_by_phash_multi_routed(
+        media_path,
+        phash_dirs,
+        dbphash_reader,
+        db_config,
+        nb_seconds,
+        search_distance,
+        None,
+    );
+    let matched_pair = matched.map(|(name, conf, _tier)| (name, conf));
+    (matched_pair, target_fps, existing_phash)
+}
+
+/// Identifies a target media file across multiple `.phash` directories, an optional `.dbphash`
+/// catalog, and an optional PostgreSQL BK-tree (`DbConnectionConfig`).
+pub fn identify_media_by_phash_multi(
+    media_path: &Path,
+    phash_dirs: &[PathBuf],
+    dbphash_path: Option<&Path>,
+    db_config: Option<&DbConnectionConfig>,
+    nb_seconds: f64,
+    search_distance: u32,
+) -> PhashIdentificationResult {
+    let reader = dbphash_path.and_then(|p| MmapDbphash::open(p).ok());
+    identify_media_by_phash_multi_with_reader(
+        media_path,
+        phash_dirs,
+        reader.as_ref(),
+        db_config,
+        nb_seconds,
+        search_distance,
+    )
 }
 
 /// Computes visual pHash shift between `media_path` and a certified reference in `phash_dir`.
@@ -1190,20 +1600,84 @@ pub fn compute_media_phash_shift_multi(
 
 /// Resolves certified subtitle couplings from PostgreSQL (`subtitles` JOIN `medias`)
 /// and/or the local `couplings.json` registry (`CouplingRegistry`).
+/// Returns (candidates, pg_lookup_ms, json_lookup_ms, pg_cached).
 fn lookup_certified_couplings(
     state: &AppState,
     subtitles_dir: &Path,
     matched_media: &str,
     language: &str,
     phash_conf: f64,
-) -> Vec<SubtitleCandidate> {
+) -> (Vec<SubtitleCandidate>, f64, f64, bool) {
     let mut certified_candidates = Vec::new();
     let req_lang = normalize_lang_code(language);
     let any_lang = req_lang == "auto" || req_lang == "all" || req_lang.is_empty();
     let mut seen_paths = std::collections::HashSet::new();
 
-    // 1. Check PostgreSQL relational `subtitles` table if configured
-    if let Some(ref cfg) = state.db_config {
+    // 1. Check in-memory cached `couplings.json` registry first (sub-millisecond RAM lookup)
+    let json_start = std::time::Instant::now();
+    let reg_fallback = if subtitles_dir != state.subtitles_dir {
+        // Request passed an ad-hoc custom subtitles_dir (e.g. in test fixtures)
+        let reg_path = CouplingRegistry::default_path(subtitles_dir);
+        Some(CouplingRegistry::load_or_default(&reg_path).unwrap_or_default())
+    } else {
+        None
+    };
+
+    let reg_guard = if reg_fallback.is_none() {
+        state.coupling_registry.read().ok()
+    } else {
+        None
+    };
+
+    let reg_ref: Option<&CouplingRegistry> = match (&reg_guard, &reg_fallback) {
+        (Some(guard), _) => Some(&**guard),
+        (_, Some(fallback)) => Some(fallback),
+        _ => None,
+    };
+
+    if let Some(reg) = reg_ref {
+        if let Some(coupling) = reg.find_by_matched_media(matched_media) {
+            for sub in &coupling.subtitles {
+                let sub_lang = normalize_lang_code(&sub.lang);
+                if !any_lang && sub_lang != req_lang {
+                    continue;
+                }
+                let full_srt_path = if Path::new(&sub.srt_path).is_absolute()
+                    || Path::new(&sub.srt_path).exists()
+                {
+                    PathBuf::from(&sub.srt_path)
+                } else {
+                    subtitles_dir.join(&sub.srt_path)
+                };
+                let full_str = full_srt_path.to_string_lossy().to_string();
+                if seen_paths.insert(full_str.clone()) {
+                    certified_candidates.push(SubtitleCandidate {
+                        source: SubtitleSource::Certified.as_str().to_string(),
+                        language: sub_lang,
+                        title: sub.name.clone(),
+                        release: Some(coupling.phash_filename.clone()),
+                        details: Some(format!(
+                            "Certified Coupling ({} cues, SHA256: {}…) for '{}' ({:.0}% conf)",
+                            sub.cue_count,
+                            &sub.subtitles_hash[..8.min(sub.subtitles_hash.len())],
+                            coupling.phash_filename,
+                            phash_conf
+                        )),
+                        candidate_id: Some(full_str),
+                    });
+                }
+            }
+        }
+    }
+    let json_lookup_ms = json_start.elapsed().as_secs_f64() * 1000.0;
+
+    // 2. Fallback to PostgreSQL relational `subtitles` table ONLY if cache didn't find candidates
+    let mut pg_lookup_ms = 0.0;
+    let mut pg_cached = false;
+    if !certified_candidates.is_empty() {
+        pg_cached = true;
+    } else if let Some(ref cfg) = state.db_config {
+        let pg_start = std::time::Instant::now();
         let lang_opt = if any_lang {
             None
         } else {
@@ -1242,46 +1716,15 @@ fn lookup_certified_couplings(
                 }
             }
         }
+        pg_lookup_ms = pg_start.elapsed().as_secs_f64() * 1000.0;
     }
 
-    // 2. Check `couplings.json` registry in `subtitles_dir`
-    let reg_path = CouplingRegistry::default_path(subtitles_dir);
-    if let Ok(reg) = CouplingRegistry::load_or_default(&reg_path) {
-        if let Some(coupling) = reg.find_by_matched_media(matched_media) {
-            for sub in &coupling.subtitles {
-                let sub_lang = normalize_lang_code(&sub.lang);
-                if !any_lang && sub_lang != req_lang {
-                    continue;
-                }
-                let full_srt_path = if Path::new(&sub.srt_path).is_absolute()
-                    || Path::new(&sub.srt_path).exists()
-                {
-                    PathBuf::from(&sub.srt_path)
-                } else {
-                    subtitles_dir.join(&sub.srt_path)
-                };
-                let full_str = full_srt_path.to_string_lossy().to_string();
-                if seen_paths.insert(full_str.clone()) {
-                    certified_candidates.push(SubtitleCandidate {
-                        source: SubtitleSource::Certified.as_str().to_string(),
-                        language: sub_lang,
-                        title: sub.name.clone(),
-                        release: Some(coupling.phash_filename.clone()),
-                        details: Some(format!(
-                            "Certified Coupling ({} cues, SHA256: {}…) for '{}' ({:.0}% conf)",
-                            sub.cue_count,
-                            &sub.subtitles_hash[..8.min(sub.subtitles_hash.len())],
-                            coupling.phash_filename,
-                            phash_conf
-                        )),
-                        candidate_id: Some(full_str),
-                    });
-                }
-            }
-        }
-    }
-
-    certified_candidates
+    (
+        certified_candidates,
+        pg_lookup_ms,
+        json_lookup_ms,
+        pg_cached,
+    )
 }
 
 pub async fn search_handler(
@@ -1289,6 +1732,7 @@ pub async fn search_handler(
     Json(payload): Json<SearchSubtitlesRequest>,
 ) -> impl IntoResponse {
     let media_path = PathBuf::from(&payload.media_path);
+    let include_sidecars = payload.subtitles_dir.is_none();
     let subtitles_dir = payload
         .subtitles_dir
         .map(PathBuf::from)
@@ -1298,39 +1742,138 @@ pub async fn search_handler(
     let mut candidates: Vec<SubtitleCandidate> = Vec::new();
 
     let mode = payload.search_mode.as_deref().unwrap_or("all");
+    let use_phash = mode == "phash" || mode == "all" || mode == "auto";
 
-    // 0. Visual pHash Recognition when mode == "phash" or index exists
+    let start_overall = std::time::Instant::now();
+    let mut timing = SearchTimingStats::default();
+
+    // 0. Visual pHash Recognition when mode allows pHash identification
     let mut matched_media: Option<String> = None;
     let mut phash_conf: f64 = 0.0;
-    if media_path.exists()
-        && (mode == "phash"
-            || phash_dirs.iter().any(|d| d.exists())
-            || state.dbphash_path.is_some())
+    if use_phash
+        && media_path.exists()
+        && (phash_dirs.iter().any(|d| d.exists())
+            || state.dbphash_path.is_some()
+            || state.db_config.is_some())
     {
-        let (matched, _, _) = identify_media_by_phash_multi(
+        let t0 = std::time::Instant::now();
+        let (matched_routed, _target_fps, existing_phash) = identify_media_by_phash_multi_routed(
             &media_path,
             &phash_dirs,
-            state.dbphash_path.as_deref(),
+            state.dbphash_reader.as_deref(),
             state.db_config.as_ref(),
             1.0,
-            12,
+            DEFAULT_RECOGNITION_SEARCH_DISTANCE,
+            payload.index_engine.as_deref(),
         );
-        if let Some((m_name, conf)) = matched {
+        timing.phash_match_ms = t0.elapsed().as_secs_f64() * 1000.0;
+
+        if let Some((_, ref hashes, fps)) = existing_phash {
+            timing.phash_frames_count = hashes.len();
+            if fps > 0.0 {
+                timing.video_duration_minutes = (hashes.len() as f64 / fps) / 60.0;
+                timing.query_sample_frames = ((1.0 * fps).round() as usize).min(hashes.len());
+            }
+        } else if media_path.exists() {
+            if let Ok(meta) = probe_video(&media_path) {
+                timing.phash_frames_count = (meta.duration * meta.fps).round() as usize;
+                timing.video_duration_minutes = meta.duration / 60.0;
+                timing.query_sample_frames = ((1.0 * meta.fps).round() as usize).max(1);
+            }
+        }
+
+        if timing.query_sample_frames == 0 {
+            timing.query_sample_frames = 24;
+        }
+
+        // Calculate index targets count and atomic comparisons
+        if let Some(ref reader) = state.dbphash_reader {
+            let targets = reader.cuts_entries().len() + reader.sparse_entries().len();
+            timing.index_targets_count = targets;
+            timing.total_hamming_comparisons = timing.query_sample_frames * targets;
+        } else if let Some(ref dbphash) = state.dbphash_path {
+            if let Ok(reader) = MmapDbphash::open(dbphash) {
+                let targets = reader.cuts_entries().len() + reader.sparse_entries().len();
+                timing.index_targets_count = targets;
+                timing.total_hamming_comparisons = timing.query_sample_frames * targets;
+            }
+        }
+
+        if timing.phash_match_ms > 0.0 && timing.total_hamming_comparisons > 0 {
+            // Microseconds per atomic frame comparison
+            timing.us_per_frame =
+                (timing.phash_match_ms * 1000.0) / (timing.total_hamming_comparisons as f64);
+            // Millions of frame comparisons per second (MFPS)
+            timing.mfps_throughput = (timing.total_hamming_comparisons as f64 / 1_000_000.0)
+                / (timing.phash_match_ms / 1000.0);
+        }
+
+        if let Some((m_name, conf, tier_label)) = matched_routed {
             matched_media = Some(m_name);
             phash_conf = conf;
+            timing.confidence_percent = conf;
+            timing.matching_tier = tier_label;
         }
+    }
+
+    let t_meta = std::time::Instant::now();
+    let is_phash_file = media_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.eq_ignore_ascii_case("phash"))
+        .unwrap_or(false);
+
+    let (mut meta, moviehash) = if is_phash_file {
+        // Fast path: skip disk moviehash I/O on .phash files (not a video container)
+        let meta = MediaMetadata::parse(
+            media_path
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or(""),
+        );
+        (meta, None)
+    } else {
+        let meta = MediaMetadata::parse_from_path(&media_path);
+        let mh = meta.moviehash.clone();
+        (meta, mh)
+    };
+    timing.moviehash_ms = t_meta.elapsed().as_secs_f64() * 1000.0;
+
+    // Strict pHash mode: if the user explicitly requested "Search by pHash" and the video
+    // does not match any reference .phash in PostgreSQL / MmapLibrary, return 0 candidates immediately.
+    if mode == "phash" && matched_media.is_none() {
+        timing.total_ms = start_overall.elapsed().as_secs_f64() * 1000.0;
+        let accounted_ms = timing.phash_match_ms
+            + timing.pg_lookup_ms
+            + timing.json_lookup_ms
+            + timing.container_ms
+            + timing.disk_catalog_ms
+            + timing.moviehash_ms;
+        timing.overhead_ms = (timing.total_ms - accounted_ms).max(0.0);
+        return Json(SearchSubtitlesResponse {
+            media_path: payload.media_path,
+            language: payload.language,
+            matched_media: None,
+            moviehash,
+            total_candidates: 0,
+            candidates,
+            timing,
+        });
     }
 
     // 0b. Certified Couplings (PostgreSQL `subtitles` JOIN `medias` + `couplings.json`)
     let mut seen_catalog_paths = std::collections::HashSet::new();
     if let Some(ref m_name) = matched_media {
-        let cert_cands = lookup_certified_couplings(
+        let (cert_cands, pg_ms, json_ms, pg_cached) = lookup_certified_couplings(
             &state,
             &subtitles_dir,
             m_name,
             &payload.language,
             phash_conf,
         );
+        timing.pg_lookup_ms = pg_ms;
+        timing.json_lookup_ms = json_ms;
+        timing.pg_cached = pg_cached;
         for c in cert_cands {
             if let Some(ref cid) = c.candidate_id {
                 seen_catalog_paths.insert(cid.clone());
@@ -1339,8 +1882,9 @@ pub async fn search_handler(
         }
     }
 
-    // 1. Inspect container if media exists
-    if media_path.exists() {
+    // 1. Inspect container if media exists (skip when mode == "phash" so only pHash-backed results appear)
+    if mode != "phash" && media_path.exists() {
+        let t_cont = std::time::Instant::now();
         if let Ok(insp) = inspect_container(&media_path) {
             let req_norm = normalize_lang_code(&payload.language);
             for stream in insp.subtitle_streams {
@@ -1376,9 +1920,11 @@ pub async fn search_handler(
                 }
             }
         }
+        timing.container_ms = t_cont.elapsed().as_secs_f64() * 1000.0;
     }
 
-    // 2. Inspect local subtitles directory (matching file stem, pHash matched media, or query_title)
+    // 2. Inspect local subtitles directory (matching pHash matched media, or file stem / query_title when mode != "phash")
+    let t_disk = std::time::Instant::now();
     let file_stem = media_path
         .file_stem()
         .map(|s| s.to_string_lossy().to_string())
@@ -1387,89 +1933,100 @@ pub async fn search_handler(
     if let Some(ref m) = matched_media {
         stems.push(m.clone());
     }
-    if !file_stem.is_empty() && !stems.contains(&file_stem) {
+    if mode != "phash" && !file_stem.is_empty() && !stems.contains(&file_stem) {
         stems.push(file_stem.clone());
     }
 
-    for (_, path, resolved_lang) in search_subtitles_in_catalog(
-        &subtitles_dir,
-        &stems,
-        payload.query_title.as_deref(),
-        payload.season,
-        payload.episode,
-        &payload.language,
-    ) {
-        let path_str = path.to_string_lossy().to_string();
-        if seen_catalog_paths.contains(&path_str) {
-            continue;
-        }
-        let details = if let Some(ref m) = matched_media {
-            format!(
-                "pHash matched '{}' ({:.0}% conf) — {}",
-                m,
-                phash_conf,
-                path.display()
-            )
-        } else {
-            path_str.clone()
-        };
-        candidates.push(SubtitleCandidate {
-            source: SubtitleSource::Catalog.as_str().to_string(),
-            language: resolved_lang,
-            title: path
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string(),
-            release: matched_media.clone().or_else(|| Some(file_stem.clone())),
-            details: Some(details),
-            candidate_id: Some(path_str),
-        });
-    }
+    let catalog_query_title = if mode == "phash" {
+        None
+    } else {
+        payload.query_title.as_deref()
+    };
 
-    // 3. Search remote provider
-    let mut meta = MediaMetadata::parse_from_path(&media_path);
-    if mode == "phash" {
-        if let Some(ref m) = matched_media {
-            let ref_meta = MediaMetadata::parse(m);
-            if !ref_meta.clean_title.is_empty() {
-                meta.clean_title = ref_meta.clean_title;
+    let search_dirs = collect_subtitle_search_dirs(&subtitles_dir, &media_path, include_sidecars);
+
+    for dir in &search_dirs {
+        for (_, path, resolved_lang) in search_subtitles_in_catalog(
+            dir,
+            &stems,
+            catalog_query_title,
+            payload.season,
+            payload.episode,
+            &payload.language,
+        ) {
+            let path_str = path.to_string_lossy().to_string();
+            if !seen_catalog_paths.insert(path_str.clone()) {
+                continue;
+            }
+            let details = if let Some(ref m) = matched_media {
+                format!(
+                    "pHash matched '{}' ({:.0}% conf) — {}",
+                    m,
+                    phash_conf,
+                    path.display()
+                )
+            } else {
+                path_str.clone()
+            };
+            candidates.push(SubtitleCandidate {
+                source: SubtitleSource::Catalog.as_str().to_string(),
+                language: resolved_lang,
+                title: path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string(),
+                release: matched_media.clone().or_else(|| Some(file_stem.clone())),
+                details: Some(details),
+                candidate_id: Some(path_str),
+            });
+        }
+    }
+    timing.disk_catalog_ms = t_disk.elapsed().as_secs_f64() * 1000.0;
+
+    // 3. Search remote provider (skip in strict "phash" mode so uncoupled remote subs are not mixed in)
+    if mode != "phash" {
+        if let Some(ref qt) = payload.query_title {
+            if !qt.trim().is_empty() {
+                meta.clean_title = qt.trim().to_string();
             }
         }
-    }
-    if let Some(ref qt) = payload.query_title {
-        if !qt.trim().is_empty() {
-            meta.clean_title = qt.trim().to_string();
+        if let Some(s) = payload.season {
+            meta.season = Some(s);
         }
-    }
-    if let Some(s) = payload.season {
-        meta.season = Some(s);
-    }
-    if let Some(ep) = payload.episode {
-        meta.episode = Some(ep);
-    }
-    let moviehash = meta.moviehash.clone();
+        if let Some(ep) = payload.episode {
+            meta.episode = Some(ep);
+        }
 
-    if let Ok(remote_cands) = state.provider.search(&meta, &payload.language).await {
-        for cand in remote_cands {
-            candidates.push(SubtitleCandidate {
-                source: SubtitleSource::OpenSubtitles.as_str().to_string(),
-                language: cand.language.clone(),
-                title: cand
-                    .release_name
-                    .clone()
-                    .unwrap_or_else(|| meta.clean_title.clone()),
-                release: cand.release_name.clone(),
-                details: Some(format!(
-                    "Match score: {:.2}, ID: {}",
-                    cand.match_score, cand.subtitle_id
-                )),
-                candidate_id: Some(cand.subtitle_id.clone()),
-            });
+        if let Ok(remote_cands) = state.provider.search(&meta, &payload.language).await {
+            for cand in remote_cands {
+                candidates.push(SubtitleCandidate {
+                    source: SubtitleSource::OpenSubtitles.as_str().to_string(),
+                    language: cand.language.clone(),
+                    title: cand
+                        .release_name
+                        .clone()
+                        .unwrap_or_else(|| meta.clean_title.clone()),
+                    release: cand.release_name.clone(),
+                    details: Some(format!(
+                        "Match score: {:.2}, ID: {}",
+                        cand.match_score, cand.subtitle_id
+                    )),
+                    candidate_id: Some(cand.subtitle_id.clone()),
+                });
+            }
         }
     }
 
     let total_candidates = candidates.len();
+    timing.total_ms = start_overall.elapsed().as_secs_f64() * 1000.0;
+    let accounted_ms = timing.phash_match_ms
+        + timing.pg_lookup_ms
+        + timing.json_lookup_ms
+        + timing.container_ms
+        + timing.disk_catalog_ms
+        + timing.moviehash_ms;
+    timing.overhead_ms = (timing.total_ms - accounted_ms).max(0.0);
     Json(SearchSubtitlesResponse {
         media_path: payload.media_path,
         language: payload.language,
@@ -1477,6 +2034,7 @@ pub async fn search_handler(
         moviehash,
         total_candidates,
         candidates,
+        timing,
     })
 }
 
@@ -1611,13 +2169,13 @@ pub async fn download_handler(
     let mut confidence_percent = 0.0f64;
 
     if payload.resync && media_path.exists() {
-        let (matched, target_fps, existing_phash) = identify_media_by_phash_multi(
+        let (matched, target_fps, existing_phash) = identify_media_by_phash_multi_with_reader(
             &media_path,
             &phash_dirs,
-            state.dbphash_path.as_deref(),
+            state.dbphash_reader.as_deref(),
             state.db_config.as_ref(),
             1.0,
-            12,
+            DEFAULT_RECOGNITION_SEARCH_DISTANCE,
         );
         if let Some((matched_stem, match_conf)) = matched {
             let (sf, sms, conf) = compute_media_phash_shift_multi(
@@ -1739,8 +2297,15 @@ pub async fn certify_handler(
         }
     };
 
-    let sub_frames = match build_and_validate_sub_frames(&srt_file, &hashes, fps) {
-        Ok(sf) => sf,
+    let (sub_frames, fps) = match build_and_validate_sub_frames(&srt_file, &hashes, fps) {
+        Ok(sf) => (sf, fps),
+        Err(e) if (fps - 25.0).abs() < 1e-3 => {
+            if let Ok(sf) = build_and_validate_sub_frames(&srt_file, &hashes, 23.976) {
+                (sf, 23.976)
+            } else {
+                return err_resp(format!("Subtitle frame validation failed: {:#}", e));
+            }
+        }
         Err(e) => {
             return err_resp(format!("Subtitle frame validation failed: {:#}", e));
         }
@@ -1830,6 +2395,11 @@ pub async fn certify_handler(
 
     if let Err(e) = reg.save(&reg_path) {
         return err_resp(format!("Failed to save coupling registry: {:#}", e));
+    }
+
+    // Update in-memory registry cache so subsequent searches see the new coupling instantly
+    if let Ok(mut lock) = state.coupling_registry.write() {
+        *lock = reg;
     }
 
     let mut postgres_imported = false;
@@ -2273,6 +2843,7 @@ pub async fn autosync_handler(
         .phash_dir
         .map(PathBuf::from)
         .unwrap_or_else(|| state.phash_dir.clone());
+    let include_sidecars = payload.subtitles_dir.is_none();
     let subtitles_dir = payload
         .subtitles_dir
         .map(PathBuf::from)
@@ -2312,11 +2883,11 @@ pub async fn autosync_handler(
     };
 
     // 3. Find reference subtitle: catalog on disk OR embedded subtitle stream in container OR remote provider
-    let (mut srt, subtitle_source) = match find_subtitle_in_catalog(
-        &subtitles_dir,
-        &matched_stem,
-        &payload.language,
-    ) {
+    let search_dirs = collect_subtitle_search_dirs(&subtitles_dir, &media_path, include_sidecars);
+    let found_catalog = search_dirs
+        .iter()
+        .find_map(|d| find_subtitle_in_catalog(d, &matched_stem, &payload.language));
+    let (mut srt, subtitle_source) = match found_catalog {
         Some(p) => match SubtitleFile::open(&p) {
             Ok(s) => (s, SubtitleSource::Catalog.as_str().to_string()),
             Err(e) => {

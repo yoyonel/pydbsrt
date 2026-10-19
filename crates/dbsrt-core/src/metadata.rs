@@ -49,11 +49,21 @@ pub struct MediaMetadata {
 /// (filesize + 64 KiB head + 64 KiB tail summed as little-endian u64 words).
 pub fn compute_opensubtitles_hash<P: AsRef<Path>>(path: P) -> std::io::Result<String> {
     use std::io::{Read, Seek, SeekFrom};
-    const CHUNK_SIZE: u64 = 65536;
+    const CHUNK_SIZE: usize = 65536;
 
-    let mut file = std::fs::File::open(path.as_ref())?;
+    let path_ref = path.as_ref();
+    if let Some(ext) = path_ref.extension().and_then(|e| e.to_str()) {
+        if ext.eq_ignore_ascii_case("phash") || ext.eq_ignore_ascii_case("srt") {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Not a video media file",
+            ));
+        }
+    }
+
+    let mut file = std::fs::File::open(path_ref)?;
     let file_size = file.metadata()?.len();
-    if file_size < CHUNK_SIZE {
+    if file_size < CHUNK_SIZE as u64 {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
             "File smaller than 64 KiB for OpenSubtitles MovieHash",
@@ -61,21 +71,21 @@ pub fn compute_opensubtitles_hash<P: AsRef<Path>>(path: P) -> std::io::Result<St
     }
 
     let mut hash: u64 = file_size;
-    let mut buf = [0u8; 8];
+    let mut chunk = [0u8; CHUNK_SIZE];
 
-    // Sum first 64 KiB (8192 u64 words)
+    // Sum first 64 KiB (read in ONE single syscall)
     file.seek(SeekFrom::Start(0))?;
-    for _ in 0..(CHUNK_SIZE / 8) {
-        file.read_exact(&mut buf)?;
-        hash = hash.wrapping_add(u64::from_le_bytes(buf));
+    file.read_exact(&mut chunk)?;
+    for word in chunk.as_chunks::<8>().0 {
+        hash = hash.wrapping_add(u64::from_le_bytes(*word));
     }
 
-    // Sum last 64 KiB (8192 u64 words)
-    let tail_offset = file_size.saturating_sub(CHUNK_SIZE);
+    // Sum last 64 KiB (read in ONE single syscall)
+    let tail_offset = file_size.saturating_sub(CHUNK_SIZE as u64);
     file.seek(SeekFrom::Start(tail_offset))?;
-    for _ in 0..(CHUNK_SIZE / 8) {
-        file.read_exact(&mut buf)?;
-        hash = hash.wrapping_add(u64::from_le_bytes(buf));
+    file.read_exact(&mut chunk)?;
+    for word in chunk.as_chunks::<8>().0 {
+        hash = hash.wrapping_add(u64::from_le_bytes(*word));
     }
 
     Ok(format!("{:016x}", hash))

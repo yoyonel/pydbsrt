@@ -925,6 +925,15 @@
                 </select>
               </div>
               <div class="field">
+                <label>Index Engine</label>
+                <select id="search-index-engine">
+                  <option value="auto">Auto (Tier 1 MIH -> Fallback)</option>
+                  <option value="mih">Force MIH (RAM Multi-Index Hashing &lt;10ms)</option>
+                  <option value="pg_bktree">Force PostgreSQL 17 (SP-GiST BK-Tree)</option>
+                  <option value="linear">Force Flat Linear Scan (O(N) Brute-Force)</option>
+                </select>
+              </div>
+              <div class="field">
                 <label>Language</label>
                 <select id="search-lang">
                   <option value="fr">fr (French)</option>
@@ -1814,10 +1823,12 @@
           body: JSON.stringify({
             media_path: document.getElementById('search-media-path').value,
             search_mode: document.getElementById('search-mode').value,
+            index_engine: document.getElementById('search-index-engine').value,
             language: document.getElementById('search-lang').value
           })
         });
         const data = await res.json();
+        const t = data.timing || {};
         const rows = (data.candidates || []).map((c, idx) => `
           <tr>
             <td class="mono">#${idx + 1}</td>
@@ -1827,14 +1838,117 @@
             <td style="font-size:12px;color:var(--text-secondary);">${c.details || ''}</td>
           </tr>
         `).join('');
+
+        const totalMs = (t.total_ms && t.total_ms > 0) ? t.total_ms : 1.0;
+        const pctVal = (val) => Math.max(0, ((val || 0) / totalMs) * 100);
+        const pct = (val) => val > 0 ? `<span style="font-size:11px;font-weight:400;color:var(--text-muted);margin-left:4px;">(${pctVal(val).toFixed(0)}%)</span>` : '';
+
+        const isPgBypassed = t.pg_cached || (t.pg_lookup_ms || 0) === 0;
+        const pgCard = isPgBypassed ? `
+            <div style="background:var(--bg-elevated);border:1px solid rgba(52, 211, 153, 0.35);border-radius:6px;padding:8px 10px;">
+              <div style="font-size:10px;text-transform:uppercase;color:var(--text-muted);display:flex;justify-content:space-between;align-items:center;">
+                <span>🐘 PostgreSQL Join</span>
+                <span class="badge badge-emerald" style="font-size:8.5px;padding:1px 5px;">RAM CACHE HIT</span>
+              </div>
+              <div class="mono" style="font-size:15px;font-weight:700;color:var(--accent-emerald);">0.0 ms <span style="font-size:11px;font-weight:400;color:var(--accent-emerald);">(Bypassé)</span></div>
+            </div>
+        ` : `
+            <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:6px;padding:8px 10px;">
+              <div style="font-size:10px;text-transform:uppercase;color:var(--text-muted);">🐘 PostgreSQL Join</div>
+              <div class="mono" style="font-size:15px;font-weight:700;color:var(--accent-amber);">${(t.pg_lookup_ms || 0).toFixed(1)} ms ${pct(t.pg_lookup_ms)}</div>
+            </div>
+        `;
+
+        const containerCard = (t.container_ms && t.container_ms > 0) ? `
+            <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:6px;padding:8px 10px;">
+              <div style="font-size:10px;text-transform:uppercase;color:var(--text-muted);">📦 Container Insp</div>
+              <div class="mono" style="font-size:15px;font-weight:700;color:var(--accent-purple);">${t.container_ms.toFixed(1)} ms ${pct(t.container_ms)}</div>
+            </div>
+        ` : '';
+
+        const phashPct = pctVal(t.phash_match_ms);
+        const moviehashPct = pctVal(t.moviehash_ms);
+        const pgPct = pctVal(t.pg_lookup_ms);
+        const jsonPct = pctVal(t.json_lookup_ms);
+        const diskPct = pctVal(t.disk_catalog_ms);
+        const containerPct = pctVal(t.container_ms);
+        const overheadPct = pctVal(t.overhead_ms);
+
+        const timingCards = `
+          <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(135px, 1fr));gap:8px;margin-bottom:8px;">
+            <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:6px;padding:8px 10px;">
+              <div style="font-size:10px;text-transform:uppercase;color:var(--text-muted);">Total Request</div>
+              <div class="mono" style="font-size:15px;font-weight:700;color:var(--text-primary);">${(t.total_ms || 0).toFixed(1)} ms <span style="font-size:11px;font-weight:400;color:var(--text-muted);">(100%)</span></div>
+            </div>
+            <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:6px;padding:8px 10px;">
+              <div style="font-size:10px;text-transform:uppercase;color:var(--text-muted);">⚡ RAM pHash Match</div>
+              <div class="mono" style="font-size:15px;font-weight:700;color:var(--accent-emerald);">${(t.phash_match_ms || 0).toFixed(1)} ms ${pct(t.phash_match_ms)}</div>
+            </div>
+            ${pgCard}
+            <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:6px;padding:8px 10px;">
+              <div style="font-size:10px;text-transform:uppercase;color:var(--text-muted);">📄 JSON Registry</div>
+              <div class="mono" style="font-size:15px;font-weight:700;color:var(--accent-blue);">${(t.json_lookup_ms || 0).toFixed(1)} ms ${pct(t.json_lookup_ms)}</div>
+            </div>
+            <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:6px;padding:8px 10px;">
+              <div style="font-size:10px;text-transform:uppercase;color:var(--text-muted);">💿 MovieHash I/O</div>
+              <div class="mono" style="font-size:15px;font-weight:700;color:#c084fc;">${(t.moviehash_ms || 0).toFixed(1)} ms ${pct(t.moviehash_ms)}</div>
+            </div>
+            <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:6px;padding:8px 10px;">
+              <div style="font-size:10px;text-transform:uppercase;color:var(--text-muted);">📁 Disk Catalog</div>
+              <div class="mono" style="font-size:15px;font-weight:700;color:var(--text-secondary);">${(t.disk_catalog_ms || 0).toFixed(1)} ms ${pct(t.disk_catalog_ms)}</div>
+            </div>
+            ${containerCard}
+            <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:6px;padding:8px 10px;">
+              <div style="font-size:10px;text-transform:uppercase;color:var(--text-muted);">⚙️ Pipeline / HTTP</div>
+              <div class="mono" style="font-size:15px;font-weight:700;color:var(--text-muted);">${(t.overhead_ms || 0).toFixed(1)} ms ${pct(t.overhead_ms)}</div>
+            </div>
+            <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:6px;padding:8px 10px;">
+              <div style="font-size:10px;text-transform:uppercase;color:var(--text-muted);">⚡ SIMD Throughput</div>
+              <div class="mono" style="font-size:15px;font-weight:700;color:var(--accent-indigo);">${(t.mfps_throughput || 0).toFixed(1)} M comps/s</div>
+            </div>
+          </div>
+          <div style="margin-bottom:12px;background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:6px;padding:8px 12px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;font-size:11px;color:var(--text-secondary);">
+              <span><b>Décomposition Temporelle Exhaustive (100% Total)</b></span>
+              <span class="mono">${(t.total_ms || 0).toFixed(1)} ms</span>
+            </div>
+            <div style="height:8px;border-radius:4px;background:var(--bg-tertiary);display:flex;overflow:hidden;gap:1px;" title="Somme des étapes = 100%">
+              ${phashPct > 0 ? `<div style="width:${phashPct}%;background:var(--accent-emerald);" title="RAM pHash Match: ${(t.phash_match_ms||0).toFixed(1)}ms (${phashPct.toFixed(0)}%)"></div>` : ''}
+              ${pgPct > 0 ? `<div style="width:${pgPct}%;background:var(--accent-amber);" title="PostgreSQL: ${(t.pg_lookup_ms||0).toFixed(1)}ms (${pgPct.toFixed(0)}%)"></div>` : ''}
+              ${jsonPct > 0 ? `<div style="width:${jsonPct}%;background:var(--accent-blue);" title="JSON Registry: ${(t.json_lookup_ms||0).toFixed(1)}ms (${jsonPct.toFixed(0)}%)"></div>` : ''}
+              ${moviehashPct > 0 ? `<div style="width:${moviehashPct}%;background:#c084fc;" title="MovieHash I/O: ${(t.moviehash_ms||0).toFixed(1)}ms (${moviehashPct.toFixed(0)}%)"></div>` : ''}
+              ${diskPct > 0 ? `<div style="width:${diskPct}%;background:var(--text-secondary);" title="Disk Catalog: ${(t.disk_catalog_ms||0).toFixed(1)}ms (${diskPct.toFixed(0)}%)"></div>` : ''}
+              ${containerPct > 0 ? `<div style="width:${containerPct}%;background:var(--accent-purple);" title="Container Insp: ${(t.container_ms||0).toFixed(1)}ms (${containerPct.toFixed(0)}%)"></div>` : ''}
+              ${overheadPct > 0 ? `<div style="width:${overheadPct}%;background:#64748b;" title="Pipeline & Overhead: ${(t.overhead_ms||0).toFixed(1)}ms (${overheadPct.toFixed(0)}%)"></div>` : ''}
+            </div>
+          </div>
+        `;
+
+        const phashDetails = t.phash_frames_count ? `
+          <div style="margin-bottom:10px;padding:10px 14px;background:rgba(56, 189, 248, 0.08);border:1px solid rgba(56, 189, 248, 0.25);border-radius:8px;display:flex;flex-direction:column;gap:8px;font-size:12px;">
+            <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:center;">
+              <span>🎞️ <b>Fingerprint Specs:</b> <span class="mono">${(t.phash_frames_count || 0).toLocaleString()} frames</span></span>
+              <span>⏱️ <b>Video Duration:</b> <span class="mono">${(t.video_duration_minutes || 0).toFixed(1)} min</span></span>
+              <span>🎯 <b>Engine Tier:</b> <span class="badge badge-emerald">${t.matching_tier || 'Tier 1'}</span></span>
+              <span>📊 <b>Match Confidence:</b> <span class="badge badge-blue">${(t.confidence_percent || 0).toFixed(1)}%</span></span>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:center;padding-top:6px;border-top:1px solid rgba(56, 189, 248, 0.15);font-size:11.5px;color:var(--text-secondary);">
+              <span>🔬 <b>Atomic Workload:</b> <span class="mono" style="color:var(--text-primary);font-weight:600;">${t.query_sample_frames || 24} query frames × ${(t.index_targets_count || 0).toLocaleString()} index targets = ${(t.total_hamming_comparisons || 0).toLocaleString()} Hamming comparisons</span></span>
+              <span>⚡ <b>Unit Cost:</b> <span class="mono" style="color:var(--accent-emerald);font-weight:600;">${(t.us_per_frame * 1000 || 0).toFixed(1)} ns / comp</span> (<span class="mono">${(t.us_per_frame || 0).toFixed(4)} µs / comp</span>)</span>
+            </div>
+          </div>
+        ` : '';
+
         box.innerHTML = `
+          ${timingCards}
+          ${phashDetails}
           <div style="margin-bottom:8px;color:var(--accent-emerald);">
-            ✓ Matched Media: <b>${data.matched_media || 'none'}</b> | MovieHash: <b>${data.moviehash || 'none'}</b> | Total: <b>${data.total_candidates}</b>
+            ✓ Matched Media: <b>${data.matched_media || 'none'}</b> | MovieHash: <b>${data.moviehash || 'none'}</b> | Total Subtitles Found: <b>${data.total_candidates}</b>
           </div>
           <div class="table-wrap">
             <table>
               <thead><tr><th>#</th><th>Source</th><th>Lang</th><th>Title</th><th>Details</th></tr></thead>
-              <tbody>${rows}</tbody>
+              <tbody>${rows.length > 0 ? rows : '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:14px;">No candidates found</td></tr>'}</tbody>
             </table>
           </div>
         `;
