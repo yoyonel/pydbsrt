@@ -66,6 +66,7 @@ tags:
   - e2e
   - vlc
   - benchmarks
+glightbox: false
 ---
 
 # Dashboard Interactif E2E VLC GUI (1 334 Tests Réels)
@@ -149,6 +150,17 @@ tags:
     border-color: #38bdf8;
 }}
 
+/* Active Synchronized Row Highlight */
+#e2e-table tbody tr.active-selected-row {{
+    background-color: rgba(56, 189, 248, 0.22) !important;
+    outline: 2px solid #38bdf8;
+    outline-offset: -2px;
+    transition: background-color 0.2s ease;
+}}
+#e2e-table tbody tr.active-selected-row td {{
+    color: #f8fafc !important;
+}}
+
 /* Lightbox Modal */
 #modal-lightbox {{
     display: none;
@@ -176,6 +188,14 @@ tags:
     margin-top: 14px;
     font-size: 14px;
     font-family: monospace;
+    text-align: center;
+    max-width: 85vw;
+}}
+#modal-counter {{
+    color: #94a3b8;
+    margin-top: 6px;
+    font-size: 12px;
+    font-family: monospace;
 }}
 #modal-close {{
     position: absolute;
@@ -185,9 +205,34 @@ tags:
     font-size: 34px;
     cursor: pointer;
     font-weight: bold;
+    z-index: 100001;
 }}
 #modal-close:hover {{
     color: #fff;
+}}
+.modal-nav {{
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #94a3b8;
+    font-size: 64px;
+    font-family: system-ui, -apple-system, sans-serif;
+    cursor: pointer;
+    user-select: none;
+    padding: 16px 24px;
+    transition: color 0.15s, transform 0.15s;
+    line-height: 1;
+    z-index: 100001;
+}}
+.modal-nav:hover {{
+    color: #fff;
+    transform: translateY(-50%) scale(1.15);
+}}
+#modal-prev {{
+    left: 16px;
+}}
+#modal-next {{
+    right: 16px;
 }}
 </style>
 
@@ -232,9 +277,12 @@ tags:
 
 <!-- Lightbox Overlay -->
 <div id="modal-lightbox">
-    <span id="modal-close">&times;</span>
+    <span id="modal-close" title="Fermer (&Eacute;chap)">&times;</span>
+    <span id="modal-prev" class="modal-nav" title="Pr&eacute;c&eacute;dent (Fl&egrave;che gauche)">&lsaquo;</span>
+    <span id="modal-next" class="modal-nav" title="Suivant (Fl&egrave;che droite)">&rsaquo;</span>
     <img id="modal-img" src="" alt="Capture plein écran">
     <div id="modal-caption"></div>
+    <div id="modal-counter"></div>
 </div>
 
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
@@ -257,7 +305,7 @@ $(document).ready(function() {{
                 title: "Miniature",
                 orderable: false,
                 render: function(data, type, row) {{
-                    return '<img class="table-thumb" src="' + data + '" loading="lazy" alt="Miniature" data-url="' + data + '" data-title="' + encodeURIComponent(row[2]) + '">';
+                    return '<img class="table-thumb off-glb" src="' + data + '" loading="lazy" alt="Miniature" data-url="' + data + '" data-title="' + encodeURIComponent(row[2]) + '">';
                 }}
             }},
             {{
@@ -359,24 +407,106 @@ $(document).ready(function() {{
         table.column(5).search('ÉCHEC').draw();
     }});
 
-    // Event delegation for lightbox clicks
-    $('#e2e-table').on('click', '.table-thumb', function() {{
-        const url = $(this).attr('data-url');
-        const title = decodeURIComponent($(this).attr('data-title'));
+    // Lightbox state and navigation
+    let currentFilteredRows = [];
+    let currentLightboxIdx = -1;
+
+    function syncTableWithLightbox(idx) {{
+        if (!currentFilteredRows || currentFilteredRows.length === 0 || idx < 0 || idx >= currentFilteredRows.length) return;
+        const rowData = currentFilteredRows[idx];
+        if (!rowData) return;
+
+        // Auto-switch DataTable page if target item is on a different page
+        const pageLength = table.page.len();
+        const targetPage = Math.floor(idx / pageLength);
+        if (table.page() !== targetPage) {{
+            table.page(targetPage).draw(false);
+        }}
+
+        // Highlight active row & smooth scroll into view
+        $('#e2e-table tbody tr').removeClass('active-selected-row');
+        const targetUrl = rowData[1];
+        const $targetImg = $('#e2e-table tbody img[data-url="' + targetUrl + '"]');
+        if ($targetImg.length) {{
+            const $row = $targetImg.closest('tr');
+            $row.addClass('active-selected-row');
+            $row[0].scrollIntoView({{ behavior: 'smooth', block: 'center' }});
+        }}
+    }}
+
+    function showLightboxAt(idx) {{
+        if (!currentFilteredRows || currentFilteredRows.length === 0) return;
+        if (idx < 0) idx = currentFilteredRows.length - 1;
+        if (idx >= currentFilteredRows.length) idx = 0;
+        currentLightboxIdx = idx;
+
+        const row = currentFilteredRows[idx];
+        const url = row[1];
+        const title = row[2];
+        const matched = row[3];
+        const score = row[4];
+        const status = row[5];
+
         $('#modal-img').attr('src', url);
-        $('#modal-caption').text(title);
+        $('#modal-caption').html('<b>' + title + '</b> &bull; ' + score + ' &bull; ' + status);
+        $('#modal-counter').text((currentLightboxIdx + 1) + ' / ' + currentFilteredRows.length);
         $('#modal-lightbox').css('display', 'flex');
+
+        syncTableWithLightbox(idx);
+    }}
+
+    function closeLightbox() {{
+        $('#modal-lightbox').hide();
+        syncTableWithLightbox(currentLightboxIdx);
+    }}
+
+    // Event delegation for lightbox clicks
+    $('#e2e-table').on('click', '.table-thumb', function(e) {{
+        e.preventDefault();
+        e.stopPropagation();
+        currentFilteredRows = table.rows({{ search: 'applied' }}).data().toArray();
+        const url = $(this).attr('data-url');
+        const foundIdx = currentFilteredRows.findIndex(function(r) {{ return r[1] === url; }});
+        showLightboxAt(foundIdx !== -1 ? foundIdx : 0);
+    }});
+
+    // Direct click on table row highlights it
+    $('#e2e-table tbody').on('click', 'tr', function(e) {{
+        if ($(e.target).hasClass('table-thumb')) return;
+        $('#e2e-table tbody tr').removeClass('active-selected-row');
+        $(this).addClass('active-selected-row');
+    }});
+
+    $('#modal-prev').on('click', function(e) {{
+        e.preventDefault();
+        e.stopPropagation();
+        showLightboxAt(currentLightboxIdx - 1);
+    }});
+
+    $('#modal-next').on('click', function(e) {{
+        e.preventDefault();
+        e.stopPropagation();
+        showLightboxAt(currentLightboxIdx + 1);
     }});
 
     // Lightbox modal close handlers
     $('#modal-close, #modal-lightbox').on('click', function(e) {{
-        if (e.target !== $('#modal-img')[0]) {{
-            $('#modal-lightbox').hide();
+        if (e.target !== $('#modal-img')[0] && !$(e.target).hasClass('modal-nav')) {{
+            closeLightbox();
         }}
     }});
+
     $(document).on('keydown', function(e) {{
-        if (e.key === "Escape") {{
-            $('#modal-lightbox').hide();
+        if ($('#modal-lightbox').is(':visible')) {{
+            if (e.key === "Escape") {{
+                closeLightbox();
+            }} else if (e.key === "ArrowLeft") {{
+                e.preventDefault();
+                showLightboxAt(currentLightboxIdx - 1);
+            }} else if (e.key === "ArrowRight") {{
+                e.preventDefault();
+                showLightboxAt(currentLightboxIdx + 1);
+            }}
         }}
     }});
 }});
