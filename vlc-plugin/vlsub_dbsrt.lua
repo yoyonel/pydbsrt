@@ -156,7 +156,7 @@ function discover_server()
     if url and port then
         server_url = url
         default_host = host or "127.0.0.1"
-        default_port = tonumber(port) or 8085
+        default_port = tonumber(port) or 8765
         return true
     end
     return nil
@@ -519,35 +519,58 @@ function do_search(mode)
         end
     end
 
-    local extra_info = ""
-    if matched_media then
-        extra_info = string.format(" &nbsp;|&nbsp; <font color=\"#94a3b8\">pHash Ref:</font> <font color=\"#38bdf8\"><b>%s</b></font>", matched_media)
-    elseif moviehash then
-        extra_info = string.format(" &nbsp;|&nbsp; <font color=\"#94a3b8\">MovieHash:</font> <code>%s</code>", moviehash)
-    end
+    local matched_media = string.match(body, '"matched_media":%s*"([^"]+)"')
+    local moviehash = string.match(body, '"moviehash":%s*"([^"]+)"')
+    local conf = string.match(body, '"confidence_percent":%s*([%d%.]+)')
+    local tier = string.match(body, '"matching_tier":%s*"([^"]+)"')
+    local match_ms = string.match(body, '"phash_match_ms":%s*([%d%.]+)')
+
+    local conf_val = tonumber(conf) or 100.0
+    local conf_str = string.format("%.1f%%", conf_val)
+    local tier_str = tier or "RAM Index"
+    local ms_str = match_ms and string.format("%.1f ms", tonumber(match_ms) or 0.0) or "<20 ms"
 
     if count == 0 then
-        mainlist:add_value("No subtitle candidates found for current criteria.", 1)
-        if mode == "phash" and not matched_media then
+        if matched_media then
+            mainlist:add_value(string.format("✓ [PHASH MATCH: %s] %s", conf_str, matched_media), 1)
+            mainlist:add_value("  (Aucun sous-titre lie dans la base locale pour cette langue)", 2)
+            mainlist:add_value("  -> Cliquez sur 'Smart Search (All)' ou 'Search by Name' puis 'Certify Coupling'", 3)
+
             set_console_message(
-                "<font color=\"#fbbf24\"><b>PHASH NOT INDEXED: 0 RESULTS</b></font>" .. extra_info,
-                "This video has no certified <code>.phash</code> reference in DB yet. Click <b>Smart Search (All)</b> or <b>Search by Name</b>, then <b>Certify Coupling</b>.",
+                string.format("<font color=\"#34d399\"><b>&#10003; VIDÉO RECONNUE PAR PHASH (Score: %s) : %s</b></font>", conf_str, matched_media),
+                string.format("<b>Moteur :</b> %s &bull; <b>Latence :</b> %s<br/><font color=\"#cbd5e1\">Empreinte visuelle authentifiée avec succès. Aucun fichier <code>.srt</code> lié pour cette langue. Cliquez sur <b>Smart Search (All)</b> pour chercher sur le web puis <b>Certify Coupling</b>.</font>", tier_str, ms_str),
+                "#34d399"
+            )
+            notify_osd(string.format("dbsrt: Reconnue '%s' (%s)", matched_media, conf_str), 3)
+        elseif mode == "phash" then
+            mainlist:add_value("Empreinte pHash non trouvée dans l'index.", 1)
+            set_console_message(
+                "<font color=\"#fbbf24\"><b>PHASH NON INDEXÉ : 0 RÉSULTAT</b></font>",
+                "Cette vidéo n'a pas encore d'empreinte <code>.phash</code> certifiée en base. Cliquez sur <b>Smart Search (All)</b> pour chercher par nom, puis sur <b>Certify Coupling</b> pour créer l'empreinte.",
                 "#fbbf24"
             )
         else
+            mainlist:add_value("Aucun candidat sous-titre pour ces critères.", 1)
             set_console_message(
-                "<font color=\"#fbbf24\"><b>SEARCH COMPLETE: 0 RESULTS</b></font>" .. extra_info,
-                "Try switching Language to <b>All Languages (all)</b> or clicking <b>Smart Search (All)</b>.",
+                "<font color=\"#fbbf24\"><b>RECHERCHE TERMINÉE : 0 RÉSULTAT</b></font>",
+                "Essayez de basculer la langue sur <b>All Languages (all)</b> ou cliquez sur <b>Smart Search (All)</b>.",
                 "#fbbf24"
             )
         end
     else
+        local ref_info = ""
+        if matched_media then
+            ref_info = string.format(" &nbsp;|&nbsp; <font color=\"#94a3b8\">Réf :</font> <font color=\"#38bdf8\"><b>%s (%s)</b></font>", matched_media, conf_str)
+        elseif moviehash then
+            ref_info = string.format(" &nbsp;|&nbsp; <font color=\"#94a3b8\">MovieHash :</font> <code>%s</code>", moviehash)
+        end
+
         set_console_message(
-            string.format("<font color=\"#34d399\"><b>SEARCH COMPLETE: %d CANDIDATE(S) FOUND</b></font>%s", count, extra_info),
-            "Select a candidate in the list (or leave unselected to use <b>#01</b>) and click <b>Download + Sync</b>.",
+            string.format("<font color=\"#34d399\"><b>&#10003; RECHERCHE TERMINÉE : %d CANDIDAT(S) TROUVÉ(S)</b></font>%s", count, ref_info),
+            string.format("<b>Index :</b> %s &bull; Sélectionnez un sous-titre dans la liste et cliquez sur <b>Download + Sync</b> (ou <b>1-Click Auto-Sync</b> pour recalage direct).", tier_str),
             "#34d399"
         )
-        notify_osd(string.format("dbsrt: Found %d subtitle(s)", count), 3)
+        notify_osd(string.format("dbsrt: %d sous-titre(s) trouvé(s) pour '%s'", count, matched_media or file_info.filename), 3)
     end
 
     return count

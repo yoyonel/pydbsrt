@@ -102,6 +102,10 @@ local function run_sync()
         else
             local err_msg = string.match(body, '"error":%s*"([^"]+)"') or "Failed to match/sync"
             vlc.msg.err("[dbsrt-intf] Sync error from daemon: " .. err_msg)
+            if os.getenv("DBSRT_AUTOKILL") == "1" then
+                vlc.msg.info("[dbsrt-intf] Event-driven autokill triggered (match completed without subtitle) -> quitting VLC")
+                vlc.misc.quit()
+            end
         end
     else
         vlc.msg.err("[dbsrt-intf] No valid HTTP response received from server")
