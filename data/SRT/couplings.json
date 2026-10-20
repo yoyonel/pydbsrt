@@ -638,6 +638,4524 @@
           "sub_frames": []
         }
       ]
+    },
+    {
+      "media_hash": "f5b0c1ee1761d522f0d4ab3e1683a5a3",
+      "media_name": "Devs.S01E07.1080p.AMZN.WEB-DL.DDP5.1.H.264-TEPES_mid15s",
+      "phash_filename": "Devs.S01E07.1080p.AMZN.WEB-DL.DDP5.1.H.264-TEPES_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "bf494a28c9dc65341a7f9f7f18dbbce4",
+          "name": "Devs.S01E07.1080p.AMZN.WEB-DL.DDP5.1.H.264-TEPES_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Devs.S01E07.1080p.AMZN.WEB-DL.DDP5.1.H.264-TEPES_mid15s.srt",
+          "certified": true,
+          "cue_count": 376
+        }
+      ]
+    },
+    {
+      "media_hash": "46f1472f59500ae76a6c3291232fd75e",
+      "media_name": "Mad.Max.Fury.Road.2015.2160p.4K.BluRay.x265.10bit.AAC5.1-[YTS.MX]_mid15s",
+      "phash_filename": "Mad.Max.Fury.Road.2015.2160p.4K.BluRay.x265.10bit.AAC5.1-[YTS.MX]_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "715f5e71fefea7f2c082734167c7d614",
+          "name": "Mad.Max.Fury.Road.2015.2160p.4K.BluRay.x265.10bit.AAC5.1-[YTS.MX]_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Mad.Max.Fury.Road.2015.2160p.4K.BluRay.x265.10bit.AAC5.1-[YTS.MX]_mid15s.srt",
+          "certified": true,
+          "cue_count": 778
+        }
+      ]
+    },
+    {
+      "media_hash": "7fb7b5ee43471fe26d0b58ceb65cce5e",
+      "media_name": "The.Office.US.S07E17.720p.NF.WEB.x264-MRSK_mid15s",
+      "phash_filename": "The.Office.US.S07E17.720p.NF.WEB.x264-MRSK_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "20f02f046a0f77746bbfceb90a9388fd",
+          "name": "The.Office.US.S07E17.720p.NF.WEB.x264-MRSK_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S07E17.720p.NF.WEB.x264-MRSK_mid15s.srt",
+          "certified": true,
+          "cue_count": 328
+        }
+      ]
+    },
+    {
+      "media_hash": "72160c98faec5cf623c2cdf57ac4bddb",
+      "media_name": "Pulp.Fiction.1994.1080p.BrRip.x264.YIFY_mid15s",
+      "phash_filename": "Pulp.Fiction.1994.1080p.BrRip.x264.YIFY_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "afac4c3f491d4b6e18e1b859737e710e",
+          "name": "Pulp.Fiction.1994.1080p.BrRip.x264.YIFY_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Pulp.Fiction.1994.1080p.BrRip.x264.YIFY_mid15s.srt",
+          "certified": true,
+          "cue_count": 1985
+        }
+      ]
+    },
+    {
+      "media_hash": "8362db7dca14f56490625b23346d83d0",
+      "media_name": "Sorry.We.Missed.You.2019.1080p.BluRay.x264.AAC5.1-[YTS.MX]_mid15s",
+      "phash_filename": "Sorry.We.Missed.You.2019.1080p.BluRay.x264.AAC5.1-[YTS.MX]_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "722229c451f72a35cfad5bbe12a92045",
+          "name": "Sorry.We.Missed.You.2019.1080p.BluRay.x264.AAC5.1-[YTS.MX]_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Sorry.We.Missed.You.2019.1080p.BluRay.x264.AAC5.1-[YTS.MX]_mid15s.srt",
+          "certified": true,
+          "cue_count": 4
+        }
+      ]
+    },
+    {
+      "media_hash": "cc49f7601de4e22ee39651c47df79fe2",
+      "media_name": "mr.robot.s03e08.1080p.bluray.x264-rovers_mid15s",
+      "phash_filename": "mr.robot.s03e08.1080p.bluray.x264-rovers_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "0e858ca7fa21203526bcbb2eb3d00b53",
+          "name": "mr.robot.s03e08.1080p.bluray.x264-rovers_mid15s.srt",
+          "lang": "en",
+          "srt_path": "mr.robot.s03e08.1080p.bluray.x264-rovers_mid15s.srt",
+          "certified": true,
+          "cue_count": 496
+        }
+      ]
+    },
+    {
+      "media_hash": "320acdce989d9ed437a91796f2b89ffa",
+      "media_name": "Severance.S01E04.The.You.You.Are.1080p.ATVP.WEB-DL.DDP5.1.H.264-EniaHD_mid15s",
+      "phash_filename": "Severance.S01E04.The.You.You.Are.1080p.ATVP.WEB-DL.DDP5.1.H.264-EniaHD_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "8bab9a0cd30ffffe6784db9522b69ec2",
+          "name": "Severance.S01E04.The.You.You.Are.1080p.ATVP.WEB-DL.DDP5.1.H.264-EniaHD_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Severance.S01E04.The.You.You.Are.1080p.ATVP.WEB-DL.DDP5.1.H.264-EniaHD_mid15s.srt",
+          "certified": true,
+          "cue_count": 435
+        }
+      ]
+    },
+    {
+      "media_hash": "60f981daea947b82468712df9b0c6e30",
+      "media_name": "His.Dark.Materials.S02E01.The.City.of.Magpies.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb_mid15s",
+      "phash_filename": "His.Dark.Materials.S02E01.The.City.of.Magpies.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "82cc0e5f43f4e5653d9a14b5f1aa15be",
+          "name": "His.Dark.Materials.S02E01.The.City.of.Magpies.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb_mid15s.srt",
+          "lang": "en",
+          "srt_path": "His.Dark.Materials.S02E01.The.City.of.Magpies.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb_mid15s.srt",
+          "certified": true,
+          "cue_count": 518
+        }
+      ]
+    },
+    {
+      "media_hash": "d62645d8500ec894587c385bd49d5391",
+      "media_name": "mr.robot.s01e04.1080p.bluray.x264-rovers_mid15s",
+      "phash_filename": "mr.robot.s01e04.1080p.bluray.x264-rovers_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "159b4f5d2ab6e50b7689796cb4b3ab19",
+          "name": "mr.robot.s01e04.1080p.bluray.x264-rovers_mid15s.srt",
+          "lang": "en",
+          "srt_path": "mr.robot.s01e04.1080p.bluray.x264-rovers_mid15s.srt",
+          "certified": true,
+          "cue_count": 502
+        }
+      ]
+    },
+    {
+      "media_hash": "564f1f31c9ffee2e7ac7083c2a705901",
+      "media_name": "His.Dark.Materials.S02E02.The.Cave.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb_mid15s",
+      "phash_filename": "His.Dark.Materials.S02E02.The.Cave.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "7df055f0d75534b131b69166cb74ce89",
+          "name": "His.Dark.Materials.S02E02.The.Cave.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb_mid15s.srt",
+          "lang": "en",
+          "srt_path": "His.Dark.Materials.S02E02.The.Cave.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb_mid15s.srt",
+          "certified": true,
+          "cue_count": 630
+        }
+      ]
+    },
+    {
+      "media_hash": "24539a331c21bc16c7256e6487a507ca",
+      "media_name": "mr.robot.s01e05.1080p.bluray.x264-rovers_mid15s",
+      "phash_filename": "mr.robot.s01e05.1080p.bluray.x264-rovers_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "ab08da05e46b4fbb3c4a154327c7dd16",
+          "name": "mr.robot.s01e05.1080p.bluray.x264-rovers_mid15s.srt",
+          "lang": "en",
+          "srt_path": "mr.robot.s01e05.1080p.bluray.x264-rovers_mid15s.srt",
+          "certified": true,
+          "cue_count": 629
+        }
+      ]
+    },
+    {
+      "media_hash": "a86c1b56bc4eab0417e39a92bf176881",
+      "media_name": "The.Office.US.S04E17.Job.Fair.WEBRip.x264-FGT_mid15s",
+      "phash_filename": "The.Office.US.S04E17.Job.Fair.WEBRip.x264-FGT_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "41c5411de8ac6dff3666ff6cbdd81fc5",
+          "name": "The.Office.US.S04E17.Job.Fair.WEBRip.x264-FGT_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S04E17.Job.Fair.WEBRip.x264-FGT_mid15s.srt",
+          "certified": true,
+          "cue_count": 460
+        }
+      ]
+    },
+    {
+      "media_hash": "a472f250d8a05eb843db8f7199102d8d",
+      "media_name": "westworld.s04e02.1080p.web.h264-cakes_mid15s",
+      "phash_filename": "westworld.s04e02.1080p.web.h264-cakes_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "dd3fe5bd79fb8526788e1d4bb0cfbf17",
+          "name": "westworld.s04e02.1080p.web.h264-cakes_mid15s.srt",
+          "lang": "en",
+          "srt_path": "westworld.s04e02.1080p.web.h264-cakes_mid15s.srt",
+          "certified": true,
+          "cue_count": 542
+        }
+      ]
+    },
+    {
+      "media_hash": "6fba2b592b76afee2d24d1a98a160894",
+      "media_name": "shogun.2024.s01e08.dv.hdr.2160p.web.h265-successfulcrab_mid15s",
+      "phash_filename": "shogun.2024.s01e08.dv.hdr.2160p.web.h265-successfulcrab_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "ed9cb2c55492a85e007b00d385ed827e",
+          "name": "shogun.2024.s01e08.dv.hdr.2160p.web.h265-successfulcrab_mid15s.srt",
+          "lang": "en",
+          "srt_path": "shogun.2024.s01e08.dv.hdr.2160p.web.h265-successfulcrab_mid15s.srt",
+          "certified": true,
+          "cue_count": 513
+        }
+      ]
+    },
+    {
+      "media_hash": "493fe349c716468ce3b589ab68487c4e",
+      "media_name": "Mr.Robot.S02E11.1080p.BluRay.x264-SHORTBREHD_mid15s",
+      "phash_filename": "Mr.Robot.S02E11.1080p.BluRay.x264-SHORTBREHD_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "ca673ae2b9954ada4ec441db0783da74",
+          "name": "Mr.Robot.S02E11.1080p.BluRay.x264-SHORTBREHD_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Mr.Robot.S02E11.1080p.BluRay.x264-SHORTBREHD_mid15s.srt",
+          "certified": true,
+          "cue_count": 726
+        }
+      ]
+    },
+    {
+      "media_hash": "58e0faa99653cbfff529e14d9e2de39d",
+      "media_name": "The.Office.US.S07E09.720p.NF.WEB.x264-MRSK_mid15s",
+      "phash_filename": "The.Office.US.S07E09.720p.NF.WEB.x264-MRSK_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "adc3762b46dfd4db9c7f514b528b9595",
+          "name": "The.Office.US.S07E09.720p.NF.WEB.x264-MRSK_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S07E09.720p.NF.WEB.x264-MRSK_mid15s.srt",
+          "certified": true,
+          "cue_count": 425
+        }
+      ]
+    },
+    {
+      "media_hash": "2b64440cc4a0cb1866cbc0e5ce978974",
+      "media_name": "Euphoria.US.S01E04.1080p.WEBRip.x265-RARBG_mid15s",
+      "phash_filename": "Euphoria.US.S01E04.1080p.WEBRip.x265-RARBG_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "6dc42fb300d6677ad6947352276b1223",
+          "name": "Euphoria.US.S01E04.1080p.WEBRip.x265-RARBG_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Euphoria.US.S01E04.1080p.WEBRip.x265-RARBG_mid15s.srt",
+          "certified": true,
+          "cue_count": 655
+        }
+      ]
+    },
+    {
+      "media_hash": "0bc70dec56079efe43721e70bcca5ca9",
+      "media_name": "utopia.s01e05.720p.bluray.sujaidr_mid15s",
+      "phash_filename": "utopia.s01e05.720p.bluray.sujaidr_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "c724a7af4b2cc6e658d392b6b5f147fe",
+          "name": "utopia.s01e05.720p.bluray.sujaidr_mid15s.srt",
+          "lang": "en",
+          "srt_path": "utopia.s01e05.720p.bluray.sujaidr_mid15s.srt",
+          "certified": true,
+          "cue_count": 645
+        }
+      ]
+    },
+    {
+      "media_hash": "715a1af31fe4ef34bed739a4b941c419",
+      "media_name": "Euphoria.US.S01E07.1080p.WEBRip.x265-RARBG_mid15s",
+      "phash_filename": "Euphoria.US.S01E07.1080p.WEBRip.x265-RARBG_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "8e31a11fdf84e5036ee2abcc311fdcd9",
+          "name": "Euphoria.US.S01E07.1080p.WEBRip.x265-RARBG_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Euphoria.US.S01E07.1080p.WEBRip.x265-RARBG_mid15s.srt",
+          "certified": true,
+          "cue_count": 709
+        }
+      ]
+    },
+    {
+      "media_hash": "9c7d6af85b4a0c9d1a36e8acda0c83ac",
+      "media_name": "The.Expanse.S03E09.Intransigence.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG_mid15s",
+      "phash_filename": "The.Expanse.S03E09.Intransigence.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "ff475397f3855b68a9d2483fc3930fd8",
+          "name": "The.Expanse.S03E09.Intransigence.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Expanse.S03E09.Intransigence.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG_mid15s.srt",
+          "certified": true,
+          "cue_count": 550
+        }
+      ]
+    },
+    {
+      "media_hash": "ed62994bdc3badcf0c51a68ce454fcd5",
+      "media_name": "Halt.and.Catch.Fire.S04E02.Signal.to.Noise.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s",
+      "phash_filename": "Halt.and.Catch.Fire.S04E02.Signal.to.Noise.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "763afbbfa382368781f5991dcd817bd1",
+          "name": "Halt.and.Catch.Fire.S04E02.Signal.to.Noise.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Halt.and.Catch.Fire.S04E02.Signal.to.Noise.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s.srt",
+          "certified": true,
+          "cue_count": 723
+        }
+      ]
+    },
+    {
+      "media_hash": "7dbc4cb57f1810aeb91e743be6629eea",
+      "media_name": "The.Expanse.S03E03.Assured.Destruction.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG_mid15s",
+      "phash_filename": "The.Expanse.S03E03.Assured.Destruction.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "fe0f5ea2dd32381d5f6f4856cadf8ec9",
+          "name": "The.Expanse.S03E03.Assured.Destruction.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Expanse.S03E03.Assured.Destruction.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG_mid15s.srt",
+          "certified": true,
+          "cue_count": 554
+        }
+      ]
+    },
+    {
+      "media_hash": "dc7c15eb92313ad5d26c443b8e494f9c",
+      "media_name": "Halt.and.Catch.Fire.S04E01.So.It.Goes.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s",
+      "phash_filename": "Halt.and.Catch.Fire.S04E01.So.It.Goes.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "5441933975b9ab172ce2b1078375a0b5",
+          "name": "Halt.and.Catch.Fire.S04E01.So.It.Goes.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Halt.and.Catch.Fire.S04E01.So.It.Goes.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s.srt",
+          "certified": true,
+          "cue_count": 596
+        }
+      ]
+    },
+    {
+      "media_hash": "ba86eca9ebeebd7f2c7489539c79a310",
+      "media_name": "The.Office.US.S04E03-04.1080p.AMZN.WEB.x264-MRSK_mid15s",
+      "phash_filename": "The.Office.US.S04E03-04.1080p.AMZN.WEB.x264-MRSK_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "b53a43daefcc0d635c4d15a8666db1e2",
+          "name": "The.Office.US.S04E03-04.1080p.AMZN.WEB.x264-MRSK_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S04E03-04.1080p.AMZN.WEB.x264-MRSK_mid15s.srt",
+          "certified": true,
+          "cue_count": 794
+        }
+      ]
+    },
+    {
+      "media_hash": "0b991d11e29794853ec6446751313b47",
+      "media_name": "mr.robot.s01e02.1080p.bluray.x264-rovers_mid15s",
+      "phash_filename": "mr.robot.s01e02.1080p.bluray.x264-rovers_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "c09744f43c6073ba69cac393e7a2b7f4",
+          "name": "mr.robot.s01e02.1080p.bluray.x264-rovers_mid15s.srt",
+          "lang": "en",
+          "srt_path": "mr.robot.s01e02.1080p.bluray.x264-rovers_mid15s.srt",
+          "certified": true,
+          "cue_count": 649
+        }
+      ]
+    },
+    {
+      "media_hash": "22a14e4c4231bab7a4ebab79673cd7ef",
+      "media_name": "mr.robot.s01e06.1080p.bluray.x264-rovers_mid15s",
+      "phash_filename": "mr.robot.s01e06.1080p.bluray.x264-rovers_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "8fae2007f634786bc59919267746365c",
+          "name": "mr.robot.s01e06.1080p.bluray.x264-rovers_mid15s.srt",
+          "lang": "en",
+          "srt_path": "mr.robot.s01e06.1080p.bluray.x264-rovers_mid15s.srt",
+          "certified": true,
+          "cue_count": 581
+        }
+      ]
+    },
+    {
+      "media_hash": "0488eef59eec1ede034fed8216a57806",
+      "media_name": "The.Expanse.S03E08.It.Reaches.Out.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG_mid15s",
+      "phash_filename": "The.Expanse.S03E08.It.Reaches.Out.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "98a79ca045059fd0b9a335a61d0f493f",
+          "name": "The.Expanse.S03E08.It.Reaches.Out.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Expanse.S03E08.It.Reaches.Out.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG_mid15s.srt",
+          "certified": true,
+          "cue_count": 460
+        }
+      ]
+    },
+    {
+      "media_hash": "b399c928f0c1d96df3c505d8da798e0a",
+      "media_name": "Frozen.2013.FRENCH.BluRay.x264.AAC.2.0-LeRalouf_mid15s",
+      "phash_filename": "Frozen.2013.FRENCH.BluRay.x264.AAC.2.0-LeRalouf_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "31c9aaf96ed06d02833930064800b9f6",
+          "name": "Frozen.2013.FRENCH.BluRay.x264.AAC.2.0-LeRalouf_mid15s.srt",
+          "lang": "fr",
+          "srt_path": "Frozen.2013.FRENCH.BluRay.x264.AAC.2.0-LeRalouf_mid15s.srt",
+          "certified": true,
+          "cue_count": 1511
+        }
+      ]
+    },
+    {
+      "media_hash": "768e2279bd1e84271409bef7a380acc6",
+      "media_name": "Halt.and.Catch.Fire.S04E03.Miscellaneous.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s",
+      "phash_filename": "Halt.and.Catch.Fire.S04E03.Miscellaneous.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "48a870d75de0495a508473836cb36ece",
+          "name": "Halt.and.Catch.Fire.S04E03.Miscellaneous.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Halt.and.Catch.Fire.S04E03.Miscellaneous.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s.srt",
+          "certified": true,
+          "cue_count": 748
+        }
+      ]
+    },
+    {
+      "media_hash": "b87571243fa94639210c333878550b0e",
+      "media_name": "The.Office.US.S07E05.720p.NF.WEB.x264-MRSK_mid15s",
+      "phash_filename": "The.Office.US.S07E05.720p.NF.WEB.x264-MRSK_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "392892bf6dea4e190f3ed89e04b9b032",
+          "name": "The.Office.US.S07E05.720p.NF.WEB.x264-MRSK_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S07E05.720p.NF.WEB.x264-MRSK_mid15s.srt",
+          "certified": true,
+          "cue_count": 481
+        }
+      ]
+    },
+    {
+      "media_hash": "d38cd81372d7bc84240c44a4714e3feb",
+      "media_name": "Naked.Lunch.1991.1080p.BluRay.x265-RARBG_mid15s",
+      "phash_filename": "Naked.Lunch.1991.1080p.BluRay.x265-RARBG_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "5900c34b49dbec6f65d652978f8780b4",
+          "name": "Naked.Lunch.1991.1080p.BluRay.x265-RARBG_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Naked.Lunch.1991.1080p.BluRay.x265-RARBG_mid15s.srt",
+          "certified": true,
+          "cue_count": 1205
+        }
+      ]
+    },
+    {
+      "media_hash": "aebb3826ac91ecca9b3bbb0df8289b32",
+      "media_name": "Mad.Max.1979.2160p.4K.BluRay.x265.10bit.AAC5.1-[YTS.MX]_mid15s",
+      "phash_filename": "Mad.Max.1979.2160p.4K.BluRay.x265.10bit.AAC5.1-[YTS.MX]_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "90abecc760ba31f9c67b672111f8cc84",
+          "name": "Mad.Max.1979.2160p.4K.BluRay.x265.10bit.AAC5.1-[YTS.MX]_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Mad.Max.1979.2160p.4K.BluRay.x265.10bit.AAC5.1-[YTS.MX]_mid15s.srt",
+          "certified": true,
+          "cue_count": 607
+        }
+      ]
+    },
+    {
+      "media_hash": "8b10e8d16e37ba860c4ef764cf9cc0e2",
+      "media_name": "Someone.Great.2019.1080p.WEBRip.x265-RARBG_mid15s",
+      "phash_filename": "Someone.Great.2019.1080p.WEBRip.x265-RARBG_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "e4f185acf156bc7a2fb81bc2724ee190",
+          "name": "Someone.Great.2019.1080p.WEBRip.x265-RARBG_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Someone.Great.2019.1080p.WEBRip.x265-RARBG_mid15s.srt",
+          "certified": true,
+          "cue_count": 1487
+        }
+      ]
+    },
+    {
+      "media_hash": "9bfaf149be3f4dab49c7a04b5455bb60",
+      "media_name": "Severance.S01E06.Hide.and.Seek.1080p.ATVP.WEB-DL.DDP5.1.H.264-EniaHD_mid15s",
+      "phash_filename": "Severance.S01E06.Hide.and.Seek.1080p.ATVP.WEB-DL.DDP5.1.H.264-EniaHD_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "b04368454c3713dcac02fed50f97701f",
+          "name": "Severance.S01E06.Hide.and.Seek.1080p.ATVP.WEB-DL.DDP5.1.H.264-EniaHD_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Severance.S01E06.Hide.and.Seek.1080p.ATVP.WEB-DL.DDP5.1.H.264-EniaHD_mid15s.srt",
+          "certified": true,
+          "cue_count": 455
+        }
+      ]
+    },
+    {
+      "media_hash": "5fb80039c3c9718954d4692a483ce649",
+      "media_name": "Devs.S01E02.1080p.AMZN.WEB-DL.DDP5.1.H.264-TEPES_mid15s",
+      "phash_filename": "Devs.S01E02.1080p.AMZN.WEB-DL.DDP5.1.H.264-TEPES_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "6ee1169972606397c187584e021cf789",
+          "name": "Devs.S01E02.1080p.AMZN.WEB-DL.DDP5.1.H.264-TEPES_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Devs.S01E02.1080p.AMZN.WEB-DL.DDP5.1.H.264-TEPES_mid15s.srt",
+          "certified": true,
+          "cue_count": 420
+        }
+      ]
+    },
+    {
+      "media_hash": "697c5ad7fad043699d88d196cc1ff416",
+      "media_name": "Dracula.Untold.2014.1080p.BluRay.x265-RARBG_mid15s",
+      "phash_filename": "Dracula.Untold.2014.1080p.BluRay.x265-RARBG_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "dea420fe2805b3b6c6c9de68638fdaaa",
+          "name": "Dracula.Untold.2014.1080p.BluRay.x265-RARBG_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Dracula.Untold.2014.1080p.BluRay.x265-RARBG_mid15s.srt",
+          "certified": true,
+          "cue_count": 760
+        }
+      ]
+    },
+    {
+      "media_hash": "c63a96ce0b4bc3882e31462f32c30fbc",
+      "media_name": "A.Touch.Of.Zen.1971.1080p.BluRay.x264-[YTS.LT]_mid15s",
+      "phash_filename": "A.Touch.Of.Zen.1971.1080p.BluRay.x264-[YTS.LT]_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "596e7c515376cb28f9adf249a32ca0b5",
+          "name": "A.Touch.Of.Zen.1971.1080p.BluRay.x264-[YTS.LT]_mid15s.srt",
+          "lang": "en",
+          "srt_path": "A.Touch.Of.Zen.1971.1080p.BluRay.x264-[YTS.LT]_mid15s.srt",
+          "certified": true,
+          "cue_count": 826
+        }
+      ]
+    },
+    {
+      "media_hash": "afa89f919044f9010b5e62e7490d2b72",
+      "media_name": "House.of.the.Dragon.S01E10.2160p.HMAX.WEB-DL.DDP5.1.Atmos.HDR.HEVC-CMRG_mid15s",
+      "phash_filename": "House.of.the.Dragon.S01E10.2160p.HMAX.WEB-DL.DDP5.1.Atmos.HDR.HEVC-CMRG_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "77809a8db98ed278448d1f50ba701e0f",
+          "name": "House.of.the.Dragon.S01E10.2160p.HMAX.WEB-DL.DDP5.1.Atmos.HDR.HEVC-CMRG_mid15s.srt",
+          "lang": "en",
+          "srt_path": "House.of.the.Dragon.S01E10.2160p.HMAX.WEB-DL.DDP5.1.Atmos.HDR.HEVC-CMRG_mid15s.srt",
+          "certified": true,
+          "cue_count": 537
+        }
+      ]
+    },
+    {
+      "media_hash": "9c1073bc4d41805f9439c0adc04cbd86",
+      "media_name": "The.Office.US.S04E01E02.Fun.Run.WEBRip.x264-FGT_mid15s",
+      "phash_filename": "The.Office.US.S04E01E02.Fun.Run.WEBRip.x264-FGT_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "bab7c069db8164f1c0991457ea696d65",
+          "name": "The.Office.US.S04E01E02.Fun.Run.WEBRip.x264-FGT_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S04E01E02.Fun.Run.WEBRip.x264-FGT_mid15s.srt",
+          "certified": true,
+          "cue_count": 1063
+        }
+      ]
+    },
+    {
+      "media_hash": "f9215fd381ec06bd9118b7a381e25d6e",
+      "media_name": "The.Office.US.S04E13.1080p.AMZN.WEB.x264-MRSK_mid15s",
+      "phash_filename": "The.Office.US.S04E13.1080p.AMZN.WEB.x264-MRSK_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "b6f44457e6ca6961d4f4c4bc6b57232b",
+          "name": "The.Office.US.S04E13.1080p.AMZN.WEB.x264-MRSK_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S04E13.1080p.AMZN.WEB.x264-MRSK_mid15s.srt",
+          "certified": true,
+          "cue_count": 400
+        }
+      ]
+    },
+    {
+      "media_hash": "5c3f6798d1e6d0504dbccc161b196124",
+      "media_name": "The.Office.US.S07E24.720p.NF.WEB.x264-MRSK_mid15s",
+      "phash_filename": "The.Office.US.S07E24.720p.NF.WEB.x264-MRSK_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "383c4b9386d4f641ca90658df333352c",
+          "name": "The.Office.US.S07E24.720p.NF.WEB.x264-MRSK_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S07E24.720p.NF.WEB.x264-MRSK_mid15s.srt",
+          "certified": true,
+          "cue_count": 383
+        }
+      ]
+    },
+    {
+      "media_hash": "fb34cd0aa559c4a375c5983970a0f2da",
+      "media_name": "Dark.City.1998.1080p.BluRay.x264-[YTS.AG]_mid15s",
+      "phash_filename": "Dark.City.1998.1080p.BluRay.x264-[YTS.AG]_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "94b568db7f60c185ab9b49fd7a2d7627",
+          "name": "Dark.City.1998.1080p.BluRay.x264-[YTS.AG]_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Dark.City.1998.1080p.BluRay.x264-[YTS.AG]_mid15s.srt",
+          "certified": true,
+          "cue_count": 1107
+        }
+      ]
+    },
+    {
+      "media_hash": "ad67dd5a470698044b3773f37c30b9a8",
+      "media_name": "Hidden.Figures.2016.1080p.BluRay.x265-RARBG_mid15s",
+      "phash_filename": "Hidden.Figures.2016.1080p.BluRay.x265-RARBG_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "7f889831ee5a5b54b0352daa1fe15078",
+          "name": "Hidden.Figures.2016.1080p.BluRay.x265-RARBG_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Hidden.Figures.2016.1080p.BluRay.x265-RARBG_mid15s.srt",
+          "certified": true,
+          "cue_count": 1983
+        }
+      ]
+    },
+    {
+      "media_hash": "df2f1c45e58e75830da26681c55acf70",
+      "media_name": "The.Expanse.S03E04.Reload.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG_mid15s",
+      "phash_filename": "The.Expanse.S03E04.Reload.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "79987eb0df811b3be05faf888af932e1",
+          "name": "The.Expanse.S03E04.Reload.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Expanse.S03E04.Reload.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG_mid15s.srt",
+          "certified": true,
+          "cue_count": 479
+        }
+      ]
+    },
+    {
+      "media_hash": "cc795f5771ea460823eafd3d6d95ff4a",
+      "media_name": "The.Office.US.S04E14.1080p.AMZN.WEB.x264-MRSK_mid15s",
+      "phash_filename": "The.Office.US.S04E14.1080p.AMZN.WEB.x264-MRSK_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "4f7a5f7fdfe9de66a24651e37b2901e4",
+          "name": "The.Office.US.S04E14.1080p.AMZN.WEB.x264-MRSK_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S04E14.1080p.AMZN.WEB.x264-MRSK_mid15s.srt",
+          "certified": true,
+          "cue_count": 377
+        }
+      ]
+    },
+    {
+      "media_hash": "2d1f0e512c959594ba2d6237d6c8b641",
+      "media_name": "The.Expanse.S03E10.Dandelion.Sky.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG_mid15s",
+      "phash_filename": "The.Expanse.S03E10.Dandelion.Sky.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "2d4201e678c22f02ae6cf794344ae64a",
+          "name": "The.Expanse.S03E10.Dandelion.Sky.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Expanse.S03E10.Dandelion.Sky.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG_mid15s.srt",
+          "certified": true,
+          "cue_count": 486
+        }
+      ]
+    },
+    {
+      "media_hash": "8ec8e0a9c0d6046f774a2ba38bc7793f",
+      "media_name": "The.Thing.1982.1080p.BluRay.x264-[YTS.AG]_mid15s",
+      "phash_filename": "The.Thing.1982.1080p.BluRay.x264-[YTS.AG]_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "920416d130ffe93d886286a52e290a59",
+          "name": "The.Thing.1982.1080p.BluRay.x264-[YTS.AG]_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Thing.1982.1080p.BluRay.x264-[YTS.AG]_mid15s.srt",
+          "certified": true,
+          "cue_count": 588
+        }
+      ]
+    },
+    {
+      "media_hash": "2ef90eccf2085d8958126000fea7b8de",
+      "media_name": "The.Connection.1961.1080p.BluRay.x264.AAC-[YTS.MX]_mid15s",
+      "phash_filename": "The.Connection.1961.1080p.BluRay.x264.AAC-[YTS.MX]_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "9dee7e930f90eb97a081ebff57ffe592",
+          "name": "The.Connection.1961.1080p.BluRay.x264.AAC-[YTS.MX]_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Connection.1961.1080p.BluRay.x264.AAC-[YTS.MX]_mid15s.srt",
+          "certified": true,
+          "cue_count": 1493
+        }
+      ]
+    },
+    {
+      "media_hash": "079eec95375fed45c2984cae9a22390e",
+      "media_name": "The.Harder.They.Fall.2021.1080p.WEBRip.x264.AAC5.1-[YTS.MX]_mid15s",
+      "phash_filename": "The.Harder.They.Fall.2021.1080p.WEBRip.x264.AAC5.1-[YTS.MX]_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "f4186dad31f75fd0fa0163fb0e14a855",
+          "name": "The.Harder.They.Fall.2021.1080p.WEBRip.x264.AAC5.1-[YTS.MX]_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Harder.They.Fall.2021.1080p.WEBRip.x264.AAC5.1-[YTS.MX]_mid15s.srt",
+          "certified": true,
+          "cue_count": 1141
+        }
+      ]
+    },
+    {
+      "media_hash": "058cdb0e0646470ac15de92f687f18fa",
+      "media_name": "The.Office.US.S07E07.720p.NF.WEB.x264-MRSK_mid15s",
+      "phash_filename": "The.Office.US.S07E07.720p.NF.WEB.x264-MRSK_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "c7b25e73c0a5d2b6d77972804e36a83d",
+          "name": "The.Office.US.S07E07.720p.NF.WEB.x264-MRSK_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S07E07.720p.NF.WEB.x264-MRSK_mid15s.srt",
+          "certified": true,
+          "cue_count": 411
+        }
+      ]
+    },
+    {
+      "media_hash": "ea68414a7525581ddfad4a2fab4cc50c",
+      "media_name": "The.Office.US.S04E05-06.1080p.AMZN.WEB.x264-MRSK_mid15s",
+      "phash_filename": "The.Office.US.S04E05-06.1080p.AMZN.WEB.x264-MRSK_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "20cd482a323e48817ea1999c9ef7b264",
+          "name": "The.Office.US.S04E05-06.1080p.AMZN.WEB.x264-MRSK_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S04E05-06.1080p.AMZN.WEB.x264-MRSK_mid15s.srt",
+          "certified": true,
+          "cue_count": 740
+        }
+      ]
+    },
+    {
+      "media_hash": "440ee5e5fe044580c7a238280ba85418",
+      "media_name": "Halt.and.Catch.Fire.S03E02.One.Way.or.Another.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s",
+      "phash_filename": "Halt.and.Catch.Fire.S03E02.One.Way.or.Another.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "c1a4defa1d4e9716965091c6a52f01ce",
+          "name": "Halt.and.Catch.Fire.S03E02.One.Way.or.Another.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Halt.and.Catch.Fire.S03E02.One.Way.or.Another.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s.srt",
+          "certified": true,
+          "cue_count": 689
+        }
+      ]
+    },
+    {
+      "media_hash": "2055998ff88dc2c02065a89f32e7766a",
+      "media_name": "Severance.S01E09.The.We.We.Are.1080p.ATVp.WEB-DL.DDP5.1.H.264-EniaHD_mid15s",
+      "phash_filename": "Severance.S01E09.The.We.We.Are.1080p.ATVp.WEB-DL.DDP5.1.H.264-EniaHD_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "d0bb4cb660d7103b7b9f917855f79639",
+          "name": "Severance.S01E09.The.We.We.Are.1080p.ATVp.WEB-DL.DDP5.1.H.264-EniaHD_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Severance.S01E09.The.We.We.Are.1080p.ATVp.WEB-DL.DDP5.1.H.264-EniaHD_mid15s.srt",
+          "certified": true,
+          "cue_count": 409
+        }
+      ]
+    },
+    {
+      "media_hash": "d11081307178196c3a657016f68b12b5",
+      "media_name": "Avengers.Age.of.Ultron.2015.1080p.BluRay.x264.YIFY_mid15s",
+      "phash_filename": "Avengers.Age.of.Ultron.2015.1080p.BluRay.x264.YIFY_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "0e52913f8043086e749b17fc3dc54c4b",
+          "name": "Avengers.Age.of.Ultron.2015.1080p.BluRay.x264.YIFY_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Avengers.Age.of.Ultron.2015.1080p.BluRay.x264.YIFY_mid15s.srt",
+          "certified": true,
+          "cue_count": 1881
+        }
+      ]
+    },
+    {
+      "media_hash": "f70b69b57ad229e2c8ef54d84b9e7367",
+      "media_name": "The.Office.US.S04E12.1080p.AMZN.WEB.x264-MRSK_mid15s",
+      "phash_filename": "The.Office.US.S04E12.1080p.AMZN.WEB.x264-MRSK_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "ec5437059c11a96be43fa589042cfe97",
+          "name": "The.Office.US.S04E12.1080p.AMZN.WEB.x264-MRSK_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S04E12.1080p.AMZN.WEB.x264-MRSK_mid15s.srt",
+          "certified": true,
+          "cue_count": 392
+        }
+      ]
+    },
+    {
+      "media_hash": "7fa8457771639e1fa099816160807a52",
+      "media_name": "Inverso.The.Peripheral.S01E04.Jackpot.ITA.ENG.HDR.2160p.WEB.h265-MeM.GP_mid15s",
+      "phash_filename": "Inverso.The.Peripheral.S01E04.Jackpot.ITA.ENG.HDR.2160p.WEB.h265-MeM.GP_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "99fda3cf42fb8414811c8bd0327f988e",
+          "name": "Inverso.The.Peripheral.S01E04.Jackpot.ITA.ENG.HDR.2160p.WEB.h265-MeM.GP_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Inverso.The.Peripheral.S01E04.Jackpot.ITA.ENG.HDR.2160p.WEB.h265-MeM.GP_mid15s.srt",
+          "certified": true,
+          "cue_count": 746
+        }
+      ]
+    },
+    {
+      "media_hash": "b3328a62fa69289b5757600e67f9096f",
+      "media_name": "Halt.and.Catch.Fire.S03E05.Yerba.Buena.720p.AMZN.WEBRip.DD5.1.x264-NTb_mid15s",
+      "phash_filename": "Halt.and.Catch.Fire.S03E05.Yerba.Buena.720p.AMZN.WEBRip.DD5.1.x264-NTb_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "b409ed6e4ed0720bd296a6bed2fa8ea8",
+          "name": "Halt.and.Catch.Fire.S03E05.Yerba.Buena.720p.AMZN.WEBRip.DD5.1.x264-NTb_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Halt.and.Catch.Fire.S03E05.Yerba.Buena.720p.AMZN.WEBRip.DD5.1.x264-NTb_mid15s.srt",
+          "certified": true,
+          "cue_count": 646
+        }
+      ]
+    },
+    {
+      "media_hash": "f9ef95a02a24856c51d37eb0f922675a",
+      "media_name": "The.Office.US.S07E26.720p.NF.WEB.x264-MRSK_mid15s",
+      "phash_filename": "The.Office.US.S07E26.720p.NF.WEB.x264-MRSK_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "8dac4d3710027be6ea60e4be41c18e28",
+          "name": "The.Office.US.S07E26.720p.NF.WEB.x264-MRSK_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S07E26.720p.NF.WEB.x264-MRSK_mid15s.srt",
+          "certified": true,
+          "cue_count": 363
+        }
+      ]
+    },
+    {
+      "media_hash": "d239797a3d984aca3768a959fecb1508",
+      "media_name": "Lawrence.Of.Arabia.1962.1080p.BluRay.x265-RARBG_mid15s",
+      "phash_filename": "Lawrence.Of.Arabia.1962.1080p.BluRay.x265-RARBG_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "4b0aeb31ac0acb40e9579aba31030a56",
+          "name": "Lawrence.Of.Arabia.1962.1080p.BluRay.x265-RARBG_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Lawrence.Of.Arabia.1962.1080p.BluRay.x265-RARBG_mid15s.srt",
+          "certified": true,
+          "cue_count": 1840
+        }
+      ]
+    },
+    {
+      "media_hash": "3c80836b7249e972ad43ace49447a30b",
+      "media_name": "The.Bad.Guys.2022.2160p.AMZN.WEB-DL.DDP5.1.HDR.HEVC-CM_mid15s",
+      "phash_filename": "The.Bad.Guys.2022.2160p.AMZN.WEB-DL.DDP5.1.HDR.HEVC-CM_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "b84cd6b7795db9da9fd74c70ff03b402",
+          "name": "The.Bad.Guys.2022.2160p.AMZN.WEB-DL.DDP5.1.HDR.HEVC-CM_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Bad.Guys.2022.2160p.AMZN.WEB-DL.DDP5.1.HDR.HEVC-CM_mid15s.srt",
+          "certified": true,
+          "cue_count": 1992
+        }
+      ]
+    },
+    {
+      "media_hash": "5c75e0ccec315fe56c82b365eb33fabf",
+      "media_name": "Halt.and.Catch.Fire.S03E10.NeXT.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s",
+      "phash_filename": "Halt.and.Catch.Fire.S03E10.NeXT.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "7a6e2675d89f7d7eb2ddda2788f1b7fb",
+          "name": "Halt.and.Catch.Fire.S03E10.NeXT.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Halt.and.Catch.Fire.S03E10.NeXT.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s.srt",
+          "certified": true,
+          "cue_count": 693
+        }
+      ]
+    },
+    {
+      "media_hash": "2eee2b185349a71ae281278f5a37745a",
+      "media_name": "Halt.and.Catch.Fire.S03E01.Valley.of.the.Hearts.Delight.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s",
+      "phash_filename": "Halt.and.Catch.Fire.S03E01.Valley.of.the.Hearts.Delight.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "8e97c6850f83ac0611b31113eaedccf6",
+          "name": "Halt.and.Catch.Fire.S03E01.Valley.of.the.Hearts.Delight.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Halt.and.Catch.Fire.S03E01.Valley.of.the.Hearts.Delight.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s.srt",
+          "certified": true,
+          "cue_count": 674
+        }
+      ]
+    },
+    {
+      "media_hash": "a8b84454e457f5d5e028c9957acc2279",
+      "media_name": "Halt.and.Catch.Fire.S04E04.Tonya.and.Nancy.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s",
+      "phash_filename": "Halt.and.Catch.Fire.S04E04.Tonya.and.Nancy.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "54c39340844a5e1d0b33d516bcfba583",
+          "name": "Halt.and.Catch.Fire.S04E04.Tonya.and.Nancy.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Halt.and.Catch.Fire.S04E04.Tonya.and.Nancy.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s.srt",
+          "certified": true,
+          "cue_count": 671
+        }
+      ]
+    },
+    {
+      "media_hash": "93b2fde8d27650b1efb17b5cd67c49e8",
+      "media_name": "All.The.Bright.Places.2020.WEBRip.x264-ION10_mid15s",
+      "phash_filename": "All.The.Bright.Places.2020.WEBRip.x264-ION10_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "cc23460fbe9770b72f4aff272f81ccc3",
+          "name": "All.The.Bright.Places.2020.WEBRip.x264-ION10_mid15s.srt",
+          "lang": "en",
+          "srt_path": "All.The.Bright.Places.2020.WEBRip.x264-ION10_mid15s.srt",
+          "certified": true,
+          "cue_count": 950
+        }
+      ]
+    },
+    {
+      "media_hash": "9db3d13e1275e1a17f98522a3de0abc1",
+      "media_name": "Euphoria.US.S01E03.1080p.WEBRip.x265-RARBG_mid15s",
+      "phash_filename": "Euphoria.US.S01E03.1080p.WEBRip.x265-RARBG_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "181925b9624e26e1584aaae2b7092624",
+          "name": "Euphoria.US.S01E03.1080p.WEBRip.x265-RARBG_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Euphoria.US.S01E03.1080p.WEBRip.x265-RARBG_mid15s.srt",
+          "certified": true,
+          "cue_count": 774
+        }
+      ]
+    },
+    {
+      "media_hash": "03af55c72fe09595f8c21c73a319d913",
+      "media_name": "Sing.Street.2016.1080p.BluRay.x264-[YTS.AG]_mid15s",
+      "phash_filename": "Sing.Street.2016.1080p.BluRay.x264-[YTS.AG]_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "d3c8f68d3c3fd752b8e6dbf17377245f",
+          "name": "Sing.Street.2016.1080p.BluRay.x264-[YTS.AG]_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Sing.Street.2016.1080p.BluRay.x264-[YTS.AG]_mid15s.srt",
+          "certified": true,
+          "cue_count": 1524
+        }
+      ]
+    },
+    {
+      "media_hash": "fc8eb830537c85c88a05a9544a83d511",
+      "media_name": "The.Office.US.S03E23.The.Job.1080p.BluRay.DDP5.1.x264-BTN_mid15s",
+      "phash_filename": "The.Office.US.S03E23.The.Job.1080p.BluRay.DDP5.1.x264-BTN_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "77d7a9bcbbf04bc96734c9a7c40fef59",
+          "name": "The.Office.US.S03E23.The.Job.1080p.BluRay.DDP5.1.x264-BTN_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S03E23.The.Job.1080p.BluRay.DDP5.1.x264-BTN_mid15s.srt",
+          "certified": true,
+          "cue_count": 715
+        }
+      ]
+    },
+    {
+      "media_hash": "750f3ab66ab7f856da93dfe894879466",
+      "media_name": "Stillwater.2021.1080p.AMZN.WEB-DL.DDP5.1.H.264-CM_mid15s",
+      "phash_filename": "Stillwater.2021.1080p.AMZN.WEB-DL.DDP5.1.H.264-CM_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "ca9bb2e160eeb27a2a79c23f6f63f497",
+          "name": "Stillwater.2021.1080p.AMZN.WEB-DL.DDP5.1.H.264-CM_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Stillwater.2021.1080p.AMZN.WEB-DL.DDP5.1.H.264-CM_mid15s.srt",
+          "certified": true,
+          "cue_count": 1115
+        }
+      ]
+    },
+    {
+      "media_hash": "bd06660cbdfbb891d4f83a5292060f26",
+      "media_name": "The.Guilty.2018.1080p.BluRay.x264-[YTS.AM]_mid15s",
+      "phash_filename": "The.Guilty.2018.1080p.BluRay.x264-[YTS.AM]_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "094981ca11a28241b4f66710fb7cdb95",
+          "name": "The.Guilty.2018.1080p.BluRay.x264-[YTS.AM]_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Guilty.2018.1080p.BluRay.x264-[YTS.AM]_mid15s.srt",
+          "certified": true,
+          "cue_count": 1138
+        }
+      ]
+    },
+    {
+      "media_hash": "8698497c77b0ac4c466709336943c395",
+      "media_name": "Cmon.Cmon.2021.2160p.4K.WEB.x265.10bit.AAC5.1-[YTS.MX]_mid15s",
+      "phash_filename": "Cmon.Cmon.2021.2160p.4K.WEB.x265.10bit.AAC5.1-[YTS.MX]_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "ea5ff0ac612d24b7bf1080d9b6b13e1b",
+          "name": "Cmon.Cmon.2021.2160p.4K.WEB.x265.10bit.AAC5.1-[YTS.MX]_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Cmon.Cmon.2021.2160p.4K.WEB.x265.10bit.AAC5.1-[YTS.MX]_mid15s.srt",
+          "certified": true,
+          "cue_count": 1449
+        }
+      ]
+    },
+    {
+      "media_hash": "a40dc6cf58c030c8a98fee81bf46107f",
+      "media_name": "Severance.S01E08.Whats.for.Dinner.1080p.ATVP.WEB-DL.DDP5.1.H.264-EniaHD_mid15s",
+      "phash_filename": "Severance.S01E08.Whats.for.Dinner.1080p.ATVP.WEB-DL.DDP5.1.H.264-EniaHD_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "ad138c3ee4bdc8f61b257af2d9857d36",
+          "name": "Severance.S01E08.Whats.for.Dinner.1080p.ATVP.WEB-DL.DDP5.1.H.264-EniaHD_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Severance.S01E08.Whats.for.Dinner.1080p.ATVP.WEB-DL.DDP5.1.H.264-EniaHD_mid15s.srt",
+          "certified": true,
+          "cue_count": 376
+        }
+      ]
+    },
+    {
+      "media_hash": "e96393f819a450b5fde11235d923f97c",
+      "media_name": "The.Office.US.S04E07E08.Money.WEBRip.x264-FGT_mid15s",
+      "phash_filename": "The.Office.US.S04E07E08.Money.WEBRip.x264-FGT_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "18be18af3600988f9086bf2e071803ad",
+          "name": "The.Office.US.S04E07E08.Money.WEBRip.x264-FGT_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S04E07E08.Money.WEBRip.x264-FGT_mid15s.srt",
+          "certified": true,
+          "cue_count": 986
+        }
+      ]
+    },
+    {
+      "media_hash": "ffc7daa33177ec03654d192d0a968e90",
+      "media_name": "Euphoria.US.S02E03.1080p.WEBRip.x265-RARBG_mid15s",
+      "phash_filename": "Euphoria.US.S02E03.1080p.WEBRip.x265-RARBG_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "e6d6caf14b0aaa891c1b5f8f8d1403b8",
+          "name": "Euphoria.US.S02E03.1080p.WEBRip.x265-RARBG_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Euphoria.US.S02E03.1080p.WEBRip.x265-RARBG_mid15s.srt",
+          "certified": true,
+          "cue_count": 764
+        }
+      ]
+    },
+    {
+      "media_hash": "890c18ed0d1209cdc52f2eb8aa822403",
+      "media_name": "The.Office.US.S07E15.720p.NF.WEB.x264-MRSK_mid15s",
+      "phash_filename": "The.Office.US.S07E15.720p.NF.WEB.x264-MRSK_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "dfd75c8dde34ba26c48c36fe8f82eb77",
+          "name": "The.Office.US.S07E15.720p.NF.WEB.x264-MRSK_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S07E15.720p.NF.WEB.x264-MRSK_mid15s.srt",
+          "certified": true,
+          "cue_count": 398
+        }
+      ]
+    },
+    {
+      "media_hash": "86710a6adf93296e7dab51cd2a78819e",
+      "media_name": "Neon.Genesis.Evangelion.The.End.Of.Evangelion.1997.1080p.WEBRip.x264.AAC5.1-[YTS.MX]_mid15s",
+      "phash_filename": "Neon.Genesis.Evangelion.The.End.Of.Evangelion.1997.1080p.WEBRip.x264.AAC5.1-[YTS.MX]_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "1f60547794b608ed022d16245b87c617",
+          "name": "Neon.Genesis.Evangelion.The.End.Of.Evangelion.1997.1080p.WEBRip.x264.AAC5.1-[YTS.MX]_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Neon.Genesis.Evangelion.The.End.Of.Evangelion.1997.1080p.WEBRip.x264.AAC5.1-[YTS.MX]_mid15s.srt",
+          "certified": true,
+          "cue_count": 785
+        }
+      ]
+    },
+    {
+      "media_hash": "d6c6ab37d48b074c34dabf7f535be371",
+      "media_name": "The.Expanse.S03E07.Delta-V.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG_mid15s",
+      "phash_filename": "The.Expanse.S03E07.Delta-V.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "fde964d567ffc5c6e26f80d16ca4e4cd",
+          "name": "The.Expanse.S03E07.Delta-V.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Expanse.S03E07.Delta-V.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG_mid15s.srt",
+          "certified": true,
+          "cue_count": 534
+        }
+      ]
+    },
+    {
+      "media_hash": "c9de4ebcd3ae167bda6188eeda2cd752",
+      "media_name": "The.Office.US.S07E25.720p.NF.WEB.x264-MRSK_mid15s",
+      "phash_filename": "The.Office.US.S07E25.720p.NF.WEB.x264-MRSK_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "806878a71eb85cfe0459ed5d7718cb79",
+          "name": "The.Office.US.S07E25.720p.NF.WEB.x264-MRSK_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S07E25.720p.NF.WEB.x264-MRSK_mid15s.srt",
+          "certified": true,
+          "cue_count": 434
+        }
+      ]
+    },
+    {
+      "media_hash": "cc9d966595df48b2d0631ca21e4765c4",
+      "media_name": "We.Own.the.Night.2007.1080p.BrRip.x264.YIFY_mid15s",
+      "phash_filename": "We.Own.the.Night.2007.1080p.BrRip.x264.YIFY_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "5903a4342e033399e50490a7bd1d6eb0",
+          "name": "We.Own.the.Night.2007.1080p.BrRip.x264.YIFY_mid15s.srt",
+          "lang": "en",
+          "srt_path": "We.Own.the.Night.2007.1080p.BrRip.x264.YIFY_mid15s.srt",
+          "certified": true,
+          "cue_count": 1358
+        }
+      ]
+    },
+    {
+      "media_hash": "20b5d07939e7864f647fcbf4e9c56eff",
+      "media_name": "mr.robot.s01e03.1080p.bluray.x264-rovers_mid15s",
+      "phash_filename": "mr.robot.s01e03.1080p.bluray.x264-rovers_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "9c85a7acb4fdb43fa792966b53a15997",
+          "name": "mr.robot.s01e03.1080p.bluray.x264-rovers_mid15s.srt",
+          "lang": "en",
+          "srt_path": "mr.robot.s01e03.1080p.bluray.x264-rovers_mid15s.srt",
+          "certified": true,
+          "cue_count": 580
+        }
+      ]
+    },
+    {
+      "media_hash": "43c6cc9393b71ded9dc39ac86da7939e",
+      "media_name": "The.Electrical.Life.of.Louis.Wain.2021.1080p.AMZN.WEB-DL.DDP5.1.H.264-CM_mid15s",
+      "phash_filename": "The.Electrical.Life.of.Louis.Wain.2021.1080p.AMZN.WEB-DL.DDP5.1.H.264-CM_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "560c511ddfad71a8c4d18c7a6abcad5a",
+          "name": "The.Electrical.Life.of.Louis.Wain.2021.1080p.AMZN.WEB-DL.DDP5.1.H.264-CM_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Electrical.Life.of.Louis.Wain.2021.1080p.AMZN.WEB-DL.DDP5.1.H.264-CM_mid15s.srt",
+          "certified": true,
+          "cue_count": 1462
+        }
+      ]
+    },
+    {
+      "media_hash": "cbebc558ec804881f412c517b289bbc6",
+      "media_name": "The.Office.US.S04E11.1080p.AMZN.WEB.x264-MRSK_mid15s",
+      "phash_filename": "The.Office.US.S04E11.1080p.AMZN.WEB.x264-MRSK_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "eb8e31d80459024d2bb3cdea3a50b826",
+          "name": "The.Office.US.S04E11.1080p.AMZN.WEB.x264-MRSK_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S04E11.1080p.AMZN.WEB.x264-MRSK_mid15s.srt",
+          "certified": true,
+          "cue_count": 406
+        }
+      ]
+    },
+    {
+      "media_hash": "03c394513ef88418c295edbc184518a1",
+      "media_name": "Severance.S01E07.Defiant.Jazz.1080p.ATVP.WEB-DL.DDP5.1.H.264-EniaHD_mid15s",
+      "phash_filename": "Severance.S01E07.Defiant.Jazz.1080p.ATVP.WEB-DL.DDP5.1.H.264-EniaHD_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "e2fc73d98d1f65de27d4d3bee0005ede",
+          "name": "Severance.S01E07.Defiant.Jazz.1080p.ATVP.WEB-DL.DDP5.1.H.264-EniaHD_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Severance.S01E07.Defiant.Jazz.1080p.ATVP.WEB-DL.DDP5.1.H.264-EniaHD_mid15s.srt",
+          "certified": true,
+          "cue_count": 505
+        }
+      ]
+    },
+    {
+      "media_hash": "7cc0a2d5dece1b6dff35c4890a20b8db",
+      "media_name": "Uncharted.2022.1080p.WEBRip.x264-RARBG_mid15s",
+      "phash_filename": "Uncharted.2022.1080p.WEBRip.x264-RARBG_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "a685d496d753574843324138bc276fe7",
+          "name": "Uncharted.2022.1080p.WEBRip.x264-RARBG_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Uncharted.2022.1080p.WEBRip.x264-RARBG_mid15s.srt",
+          "certified": true,
+          "cue_count": 1630
+        }
+      ]
+    },
+    {
+      "media_hash": "460fb3334d6623e24d13e24119977eba",
+      "media_name": "Predator.2.1990.1080p.BrRip.x264.bitloks.YIFY_mid15s",
+      "phash_filename": "Predator.2.1990.1080p.BrRip.x264.bitloks.YIFY_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "e7341f84dd049727e796b508dc180500",
+          "name": "Predator.2.1990.1080p.BrRip.x264.bitloks.YIFY_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Predator.2.1990.1080p.BrRip.x264.bitloks.YIFY_mid15s.srt",
+          "certified": true,
+          "cue_count": 772
+        }
+      ]
+    },
+    {
+      "media_hash": "fe330c83e72671a65923e52ccc2a909e",
+      "media_name": "Troy.2004.DC.1080p.BluRay.x264.AAC5.1-[YTS.MX]_mid15s",
+      "phash_filename": "Troy.2004.DC.1080p.BluRay.x264.AAC5.1-[YTS.MX]_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "d0636275656479c596fcf752d9497f93",
+          "name": "Troy.2004.DC.1080p.BluRay.x264.AAC5.1-[YTS.MX]_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Troy.2004.DC.1080p.BluRay.x264.AAC5.1-[YTS.MX]_mid15s.srt",
+          "certified": true,
+          "cue_count": 1348
+        }
+      ]
+    },
+    {
+      "media_hash": "5a8b10071ed1da437330786a834e9ece",
+      "media_name": "Euphoria.US.S02E08.1080p.WEBRip.x265-RARBG_mid15s",
+      "phash_filename": "Euphoria.US.S02E08.1080p.WEBRip.x265-RARBG_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "2adc04cadbb771c428236b851abe4f9b",
+          "name": "Euphoria.US.S02E08.1080p.WEBRip.x265-RARBG_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Euphoria.US.S02E08.1080p.WEBRip.x265-RARBG_mid15s.srt",
+          "certified": true,
+          "cue_count": 616
+        }
+      ]
+    },
+    {
+      "media_hash": "16e2cd23f33cabcf038a9c5024338c6a",
+      "media_name": "Inside.Chernobyl.With.Ben.Fogle.2021.1080p.WEBRip.x264.AAC-[YTS.MX]_mid15s",
+      "phash_filename": "Inside.Chernobyl.With.Ben.Fogle.2021.1080p.WEBRip.x264.AAC-[YTS.MX]_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "058682c63f52a11a9383bfd69d508fb3",
+          "name": "Inside.Chernobyl.With.Ben.Fogle.2021.1080p.WEBRip.x264.AAC-[YTS.MX]_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Inside.Chernobyl.With.Ben.Fogle.2021.1080p.WEBRip.x264.AAC-[YTS.MX]_mid15s.srt",
+          "certified": true,
+          "cue_count": 851
+        }
+      ]
+    },
+    {
+      "media_hash": "f9e54c794f45e7222bc1063b1fc66a06",
+      "media_name": "utopia.s01e06.720p.bluray.sujaidr_mid15s",
+      "phash_filename": "utopia.s01e06.720p.bluray.sujaidr_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "3bf84e83f57c121e3dfb031d1e802a6d",
+          "name": "utopia.s01e06.720p.bluray.sujaidr_mid15s.srt",
+          "lang": "en",
+          "srt_path": "utopia.s01e06.720p.bluray.sujaidr_mid15s.srt",
+          "certified": true,
+          "cue_count": 599
+        }
+      ]
+    },
+    {
+      "media_hash": "92054d17bc19e3ad130461b0cffaf190",
+      "media_name": "The.Lord.of.the.Rings.The.Return.of.the.King.2003.EXTENDED.REMASTERED.1080p.BluRay.x265-RARBG_mid15s",
+      "phash_filename": "The.Lord.of.the.Rings.The.Return.of.the.King.2003.EXTENDED.REMASTERED.1080p.BluRay.x265-RARBG_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "492761c66beceb74e884a8563462c878",
+          "name": "The.Lord.of.the.Rings.The.Return.of.the.King.2003.EXTENDED.REMASTERED.1080p.BluRay.x265-RARBG_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Lord.of.the.Rings.The.Return.of.the.King.2003.EXTENDED.REMASTERED.1080p.BluRay.x265-RARBG_mid15s.srt",
+          "certified": true,
+          "cue_count": 1786
+        }
+      ]
+    },
+    {
+      "media_hash": "78600a320db922837124e4597f95f4b4",
+      "media_name": "The.Office.US.S07E20.720p.NF.WEB.x264-MRSK_mid15s",
+      "phash_filename": "The.Office.US.S07E20.720p.NF.WEB.x264-MRSK_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "a74d7569f56ca97aa8a2a12035898cd8",
+          "name": "The.Office.US.S07E20.720p.NF.WEB.x264-MRSK_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S07E20.720p.NF.WEB.x264-MRSK_mid15s.srt",
+          "certified": true,
+          "cue_count": 423
+        }
+      ]
+    },
+    {
+      "media_hash": "11baf6f36a4400e44c32441896ca85fc",
+      "media_name": "mr.robot.s03e10.1080p.bluray.x264-rovers_mid15s",
+      "phash_filename": "mr.robot.s03e10.1080p.bluray.x264-rovers_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "5ae5eb356bff300e06f24ed59414e74b",
+          "name": "mr.robot.s03e10.1080p.bluray.x264-rovers_mid15s.srt",
+          "lang": "en",
+          "srt_path": "mr.robot.s03e10.1080p.bluray.x264-rovers_mid15s.srt",
+          "certified": true,
+          "cue_count": 663
+        }
+      ]
+    },
+    {
+      "media_hash": "d86278c6a95702b2609d8b8de3800b7c",
+      "media_name": "Rollerball.1975.1080p.BluRay.x264.YIFY_mid15s",
+      "phash_filename": "Rollerball.1975.1080p.BluRay.x264.YIFY_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "13d602d1a1bdc75bda9eb9269adab025",
+          "name": "Rollerball.1975.1080p.BluRay.x264.YIFY_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Rollerball.1975.1080p.BluRay.x264.YIFY_mid15s.srt",
+          "certified": true,
+          "cue_count": 953
+        }
+      ]
+    },
+    {
+      "media_hash": "540bbe58a7e500e697c6fdce66bdc493",
+      "media_name": "utopia.s01e03.720p.bluray.sujaidr_mid15s",
+      "phash_filename": "utopia.s01e03.720p.bluray.sujaidr_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "173803a75caf0d74be7615f098e1030f",
+          "name": "utopia.s01e03.720p.bluray.sujaidr_mid15s.srt",
+          "lang": "en",
+          "srt_path": "utopia.s01e03.720p.bluray.sujaidr_mid15s.srt",
+          "certified": true,
+          "cue_count": 500
+        }
+      ]
+    },
+    {
+      "media_hash": "b7f96ae97245fdc1cf906f77f6f85697",
+      "media_name": "Her.Smell.2018.1080p.BluRay.H264.AAC-RARBG_mid15s",
+      "phash_filename": "Her.Smell.2018.1080p.BluRay.H264.AAC-RARBG_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "554bab557353b610dd3eaeb7d8f5fb12",
+          "name": "Her.Smell.2018.1080p.BluRay.H264.AAC-RARBG_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Her.Smell.2018.1080p.BluRay.H264.AAC-RARBG_mid15s.srt",
+          "certified": true,
+          "cue_count": 1741
+        }
+      ]
+    },
+    {
+      "media_hash": "f7eaad2847ac3ea9c9e2451a01521afa",
+      "media_name": "The.Dark.Crystal.1982.REMASTERED.1080p.BluRay.X264-AMIABLE_mid15s",
+      "phash_filename": "The.Dark.Crystal.1982.REMASTERED.1080p.BluRay.X264-AMIABLE_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "4d9fbc8c3ca8c2860161ec056fe0c183",
+          "name": "The.Dark.Crystal.1982.REMASTERED.1080p.BluRay.X264-AMIABLE_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Dark.Crystal.1982.REMASTERED.1080p.BluRay.X264-AMIABLE_mid15s.srt",
+          "certified": true,
+          "cue_count": 455
+        }
+      ]
+    },
+    {
+      "media_hash": "c61153c611024c6b56a550719400f0d5",
+      "media_name": "The.Deer.Hunter.1978.REMASTERED.1080p.BluRay.x265-RARBG_mid15s",
+      "phash_filename": "The.Deer.Hunter.1978.REMASTERED.1080p.BluRay.x265-RARBG_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "affa28ab2e7a65d4d01d8ab422f6f716",
+          "name": "The.Deer.Hunter.1978.REMASTERED.1080p.BluRay.x265-RARBG_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Deer.Hunter.1978.REMASTERED.1080p.BluRay.x265-RARBG_mid15s.srt",
+          "certified": true,
+          "cue_count": 918
+        }
+      ]
+    },
+    {
+      "media_hash": "cb986beca6f5e587218907642318d595",
+      "media_name": "The.Man.Who.Knew.Infinity.2015.1080p.BluRay.x264-[YTS.AG]_mid15s",
+      "phash_filename": "The.Man.Who.Knew.Infinity.2015.1080p.BluRay.x264-[YTS.AG]_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "e3695f874324ce45033601dd162f45f2",
+          "name": "The.Man.Who.Knew.Infinity.2015.1080p.BluRay.x264-[YTS.AG]_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Man.Who.Knew.Infinity.2015.1080p.BluRay.x264-[YTS.AG]_mid15s.srt",
+          "certified": true,
+          "cue_count": 1158
+        }
+      ]
+    },
+    {
+      "media_hash": "14b56bb767d7d6699edf023f8b2401ea",
+      "media_name": "Master.and.Commander.The.Far.Side.of.the.World.2003.1080p.BluRay.x265-RARBG_mid15s",
+      "phash_filename": "Master.and.Commander.The.Far.Side.of.the.World.2003.1080p.BluRay.x265-RARBG_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "1e53594ff193e854c36b3674bb3dc72c",
+          "name": "Master.and.Commander.The.Far.Side.of.the.World.2003.1080p.BluRay.x265-RARBG_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Master.and.Commander.The.Far.Side.of.the.World.2003.1080p.BluRay.x265-RARBG_mid15s.srt",
+          "certified": true,
+          "cue_count": 1019
+        }
+      ]
+    },
+    {
+      "media_hash": "e82ba0807979d18d6eebecaddb53d0cc",
+      "media_name": "His.Dark.Materials.S02E04.Tower.of.the.Angels.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb_mid15s",
+      "phash_filename": "His.Dark.Materials.S02E04.Tower.of.the.Angels.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "017f3d2ab4e841f390e14bd8040a56c6",
+          "name": "His.Dark.Materials.S02E04.Tower.of.the.Angels.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb_mid15s.srt",
+          "lang": "en",
+          "srt_path": "His.Dark.Materials.S02E04.Tower.of.the.Angels.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb_mid15s.srt",
+          "certified": true,
+          "cue_count": 483
+        }
+      ]
+    },
+    {
+      "media_hash": "21110fdd43532659a4e9d8b0655a0e10",
+      "media_name": "Searching.For.Sugar.Man.2012.1080p.BluRay.x264-[YTS.LT]_mid15s",
+      "phash_filename": "Searching.For.Sugar.Man.2012.1080p.BluRay.x264-[YTS.LT]_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "b00d075c8cb231eae86c1c5bae12988b",
+          "name": "Searching.For.Sugar.Man.2012.1080p.BluRay.x264-[YTS.LT]_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Searching.For.Sugar.Man.2012.1080p.BluRay.x264-[YTS.LT]_mid15s.srt",
+          "certified": true,
+          "cue_count": 4
+        }
+      ]
+    },
+    {
+      "media_hash": "2a8e97396a75d6bf82ca0bdfb4361165",
+      "media_name": "The.Office.US.S07E10.720p.NF.WEB.x264-MRSK_mid15s",
+      "phash_filename": "The.Office.US.S07E10.720p.NF.WEB.x264-MRSK_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "fb7ac995b98ae8431265d6699071855a",
+          "name": "The.Office.US.S07E10.720p.NF.WEB.x264-MRSK_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S07E10.720p.NF.WEB.x264-MRSK_mid15s.srt",
+          "certified": true,
+          "cue_count": 419
+        }
+      ]
+    },
+    {
+      "media_hash": "e7899a5552793611e5e4694881e82651",
+      "media_name": "Margin.Call.2011.1080p.BluRay.x264.AAC5.1-[YTS.MX]_mid15s",
+      "phash_filename": "Margin.Call.2011.1080p.BluRay.x264.AAC5.1-[YTS.MX]_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "5238cd5b3f1bc56ff47ee4496882b673",
+          "name": "Margin.Call.2011.1080p.BluRay.x264.AAC5.1-[YTS.MX]_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Margin.Call.2011.1080p.BluRay.x264.AAC5.1-[YTS.MX]_mid15s.srt",
+          "certified": true,
+          "cue_count": 1357
+        }
+      ]
+    },
+    {
+      "media_hash": "2f61760e479549e0288d3879ce6d7300",
+      "media_name": "Shogun.2024.S01E02.Servants.of.Two.Masters.2160p.DSNP.WEB-DL.DDP5.1.DV.HDR.H.265-FLUX_mid15s",
+      "phash_filename": "Shogun.2024.S01E02.Servants.of.Two.Masters.2160p.DSNP.WEB-DL.DDP5.1.DV.HDR.H.265-FLUX_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "f4980f5405172d26f9b271451b5b167b",
+          "name": "Shogun.2024.S01E02.Servants.of.Two.Masters.2160p.DSNP.WEB-DL.DDP5.1.DV.HDR.H.265-FLUX_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Shogun.2024.S01E02.Servants.of.Two.Masters.2160p.DSNP.WEB-DL.DDP5.1.DV.HDR.H.265-FLUX_mid15s.srt",
+          "certified": true,
+          "cue_count": 679
+        }
+      ]
+    },
+    {
+      "media_hash": "3a68e7a168af73c62af6b0dd4fc004a8",
+      "media_name": "So.Long.Stooge.1983.1080p.BluRay.x264.AAC-[YTS.MX]_mid15s",
+      "phash_filename": "So.Long.Stooge.1983.1080p.BluRay.x264.AAC-[YTS.MX]_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "9971c0b2c0cfce5899865d75c86acb21",
+          "name": "So.Long.Stooge.1983.1080p.BluRay.x264.AAC-[YTS.MX]_mid15s.srt",
+          "lang": "en",
+          "srt_path": "So.Long.Stooge.1983.1080p.BluRay.x264.AAC-[YTS.MX]_mid15s.srt",
+          "certified": true,
+          "cue_count": 718
+        }
+      ]
+    },
+    {
+      "media_hash": "a5203a50bb544000206f733a2be639b3",
+      "media_name": "In.the.Mouth.of.Madness.1994.1080p.BluRay.x264.YIFY_mid15s",
+      "phash_filename": "In.the.Mouth.of.Madness.1994.1080p.BluRay.x264.YIFY_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "8e1ead707b22e9e878ad19a72841ce1b",
+          "name": "In.the.Mouth.of.Madness.1994.1080p.BluRay.x264.YIFY_mid15s.srt",
+          "lang": "en",
+          "srt_path": "In.the.Mouth.of.Madness.1994.1080p.BluRay.x264.YIFY_mid15s.srt",
+          "certified": true,
+          "cue_count": 866
+        }
+      ]
+    },
+    {
+      "media_hash": "91a3cdf7c2fae8a9118b40270c37e34f",
+      "media_name": "The.Office.US.S04E09.1080p.AMZN.WEB.x264-MRSK_mid15s",
+      "phash_filename": "The.Office.US.S04E09.1080p.AMZN.WEB.x264-MRSK_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "d74a22fc44d2dec47a9d8867371ff9b0",
+          "name": "The.Office.US.S04E09.1080p.AMZN.WEB.x264-MRSK_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S04E09.1080p.AMZN.WEB.x264-MRSK_mid15s.srt",
+          "certified": true,
+          "cue_count": 386
+        }
+      ]
+    },
+    {
+      "media_hash": "66408353e9b3f1dde63c1a4666aaa9a4",
+      "media_name": "westworld.s04e01.1080p.web.h264-cakes_mid15s",
+      "phash_filename": "westworld.s04e01.1080p.web.h264-cakes_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "8cfa1df469014f968cb66d530ed4db98",
+          "name": "westworld.s04e01.1080p.web.h264-cakes_mid15s.srt",
+          "lang": "en",
+          "srt_path": "westworld.s04e01.1080p.web.h264-cakes_mid15s.srt",
+          "certified": true,
+          "cue_count": 511
+        }
+      ]
+    },
+    {
+      "media_hash": "8a98b9d3580af371e0a767ba3cd57e0c",
+      "media_name": "mr.robot.s03e01.1080p.bluray.x264-rovers_mid15s",
+      "phash_filename": "mr.robot.s03e01.1080p.bluray.x264-rovers_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "c56d7ba620bffba4d4b1bfb92bf094e1",
+          "name": "mr.robot.s03e01.1080p.bluray.x264-rovers_mid15s.srt",
+          "lang": "en",
+          "srt_path": "mr.robot.s03e01.1080p.bluray.x264-rovers_mid15s.srt",
+          "certified": true,
+          "cue_count": 659
+        }
+      ]
+    },
+    {
+      "media_hash": "e8123fd070da9fc9eb7b347a03943288",
+      "media_name": "mr.robot.s01e09.1080p.bluray.x264-rovers_mid15s",
+      "phash_filename": "mr.robot.s01e09.1080p.bluray.x264-rovers_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "956312ede30a3735c3e595a8156729b8",
+          "name": "mr.robot.s01e09.1080p.bluray.x264-rovers_mid15s.srt",
+          "lang": "en",
+          "srt_path": "mr.robot.s01e09.1080p.bluray.x264-rovers_mid15s.srt",
+          "certified": true,
+          "cue_count": 636
+        }
+      ]
+    },
+    {
+      "media_hash": "b51ccaf3245f68e4891a1a23708e55e6",
+      "media_name": "The.Office.US.S04E15.1080p.AMZN.WEB.x264-MRSK_mid15s",
+      "phash_filename": "The.Office.US.S04E15.1080p.AMZN.WEB.x264-MRSK_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "cd231c868a76e0e7a192280b69e7d3df",
+          "name": "The.Office.US.S04E15.1080p.AMZN.WEB.x264-MRSK_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S04E15.1080p.AMZN.WEB.x264-MRSK_mid15s.srt",
+          "certified": true,
+          "cue_count": 398
+        }
+      ]
+    },
+    {
+      "media_hash": "0fef5faefe9372eb30a00908a630d8c7",
+      "media_name": "The.Office.US.S07E19.720p.NF.WEB.x264-MRSK_mid15s",
+      "phash_filename": "The.Office.US.S07E19.720p.NF.WEB.x264-MRSK_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "5ed770d30ad77546af6f7504997d7109",
+          "name": "The.Office.US.S07E19.720p.NF.WEB.x264-MRSK_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S07E19.720p.NF.WEB.x264-MRSK_mid15s.srt",
+          "certified": true,
+          "cue_count": 395
+        }
+      ]
+    },
+    {
+      "media_hash": "a99559859e19aa55678201d6a242a60b",
+      "media_name": "The.Office.US.S04E05E06.Launch.Party.WEBRip.x264-FGT_mid15s",
+      "phash_filename": "The.Office.US.S04E05E06.Launch.Party.WEBRip.x264-FGT_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "1cfb1f70284abb1fa68f5d6b9c02da41",
+          "name": "The.Office.US.S04E05E06.Launch.Party.WEBRip.x264-FGT_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S04E05E06.Launch.Party.WEBRip.x264-FGT_mid15s.srt",
+          "certified": true,
+          "cue_count": 1023
+        }
+      ]
+    },
+    {
+      "media_hash": "c19101ae3b263916cfb4ef06c3422261",
+      "media_name": "The.Expanse.S03E05.Triple.Point.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG_mid15s",
+      "phash_filename": "The.Expanse.S03E05.Triple.Point.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "d3f7ba512da9cf7331bd6b1bf6c56e2e",
+          "name": "The.Expanse.S03E05.Triple.Point.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Expanse.S03E05.Triple.Point.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG_mid15s.srt",
+          "certified": true,
+          "cue_count": 530
+        }
+      ]
+    },
+    {
+      "media_hash": "5fd0765305302280ab3f2e7619340891",
+      "media_name": "Chaos.Walking.2021.1080p.WEB-DL.DD5.1.H264-FGT_mid15s",
+      "phash_filename": "Chaos.Walking.2021.1080p.WEB-DL.DD5.1.H264-FGT_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "019d86b66b4ffe70fc895bc5fdb777d6",
+          "name": "Chaos.Walking.2021.1080p.WEB-DL.DD5.1.H264-FGT_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Chaos.Walking.2021.1080p.WEB-DL.DD5.1.H264-FGT_mid15s.srt",
+          "certified": true,
+          "cue_count": 1418
+        }
+      ]
+    },
+    {
+      "media_hash": "e59d036b0df2bff6c5511d80a0f81fd3",
+      "media_name": "Minority.Report.2002.2160p.WEB-DL.x265.8bit.SDR.DTS-HD.MA.5.1-SWTYBLZ_mid15s",
+      "phash_filename": "Minority.Report.2002.2160p.WEB-DL.x265.8bit.SDR.DTS-HD.MA.5.1-SWTYBLZ_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "afb05e0257fd1b35f5a2c10e8f6d6ebf",
+          "name": "Minority.Report.2002.2160p.WEB-DL.x265.8bit.SDR.DTS-HD.MA.5.1-SWTYBLZ_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Minority.Report.2002.2160p.WEB-DL.x265.8bit.SDR.DTS-HD.MA.5.1-SWTYBLZ_mid15s.srt",
+          "certified": true,
+          "cue_count": 1453
+        }
+      ]
+    },
+    {
+      "media_hash": "0540f7a45b652fbc1f9c43ea17e7d36f",
+      "media_name": "His.Dark.Materials.S02E06.Malice.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb_mid15s",
+      "phash_filename": "His.Dark.Materials.S02E06.Malice.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "ba0761782fb2bdaed0cf72d6355ea1a4",
+          "name": "His.Dark.Materials.S02E06.Malice.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb_mid15s.srt",
+          "lang": "en",
+          "srt_path": "His.Dark.Materials.S02E06.Malice.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb_mid15s.srt",
+          "certified": true,
+          "cue_count": 473
+        }
+      ]
+    },
+    {
+      "media_hash": "29368def7ee0fab7e81470460ccfd825",
+      "media_name": "mr.robot.s01e08.1080p.bluray.x264-rovers_mid15s",
+      "phash_filename": "mr.robot.s01e08.1080p.bluray.x264-rovers_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "1da82db35765155de9342377c47ec2cc",
+          "name": "mr.robot.s01e08.1080p.bluray.x264-rovers_mid15s.srt",
+          "lang": "en",
+          "srt_path": "mr.robot.s01e08.1080p.bluray.x264-rovers_mid15s.srt",
+          "certified": true,
+          "cue_count": 549
+        }
+      ]
+    },
+    {
+      "media_hash": "53e325a2b93628f3512a24d582405a7a",
+      "media_name": "The.Office.US.S04E01-02.1080p.AMZN.WEB.x264-MRSK_mid15s",
+      "phash_filename": "The.Office.US.S04E01-02.1080p.AMZN.WEB.x264-MRSK_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "926348c531a61dab05686b00c1cd8517",
+          "name": "The.Office.US.S04E01-02.1080p.AMZN.WEB.x264-MRSK_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S04E01-02.1080p.AMZN.WEB.x264-MRSK_mid15s.srt",
+          "certified": true,
+          "cue_count": 783
+        }
+      ]
+    },
+    {
+      "media_hash": "e270d4024a24d6c3e4e36bc386aed6ca",
+      "media_name": "The.Office.US.S04E14.The.Chair.Model.WEBRip.x264-FGT_mid15s",
+      "phash_filename": "The.Office.US.S04E14.The.Chair.Model.WEBRip.x264-FGT_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "f4ef6f316960c1611590d9a3c131afb6",
+          "name": "The.Office.US.S04E14.The.Chair.Model.WEBRip.x264-FGT_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S04E14.The.Chair.Model.WEBRip.x264-FGT_mid15s.srt",
+          "certified": true,
+          "cue_count": 512
+        }
+      ]
+    },
+    {
+      "media_hash": "c430b601817c8ecff8b20b4cb98b79a2",
+      "media_name": "The.Office.US.S04E10.Branch.Wars.WEBRip.x264-FGT_mid15s",
+      "phash_filename": "The.Office.US.S04E10.Branch.Wars.WEBRip.x264-FGT_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "9f7afcd7d7f1ad53fcee5113fd49c70e",
+          "name": "The.Office.US.S04E10.Branch.Wars.WEBRip.x264-FGT_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S04E10.Branch.Wars.WEBRip.x264-FGT_mid15s.srt",
+          "certified": true,
+          "cue_count": 571
+        }
+      ]
+    },
+    {
+      "media_hash": "22795da12a4092345a6982af436f774b",
+      "media_name": "The.Walking.Dead.Daryl.Dixon.S01E01.2160p.WEB.h265_iris2_mid15s",
+      "phash_filename": "The.Walking.Dead.Daryl.Dixon.S01E01.2160p.WEB.h265_iris2_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "d26660d9d1e3dc9ea5fc463ea190686f",
+          "name": "The.Walking.Dead.Daryl.Dixon.S01E01.2160p.WEB.h265_iris2_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Walking.Dead.Daryl.Dixon.S01E01.2160p.WEB.h265_iris2_mid15s.srt",
+          "certified": true,
+          "cue_count": 352
+        }
+      ]
+    },
+    {
+      "media_hash": "6374d1516b287e768c332887ba04c64e",
+      "media_name": "mr.robot.s03e09.1080p.bluray.x264-rovers_mid15s",
+      "phash_filename": "mr.robot.s03e09.1080p.bluray.x264-rovers_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "d865df398623d658dfa329a35fdd20e7",
+          "name": "mr.robot.s03e09.1080p.bluray.x264-rovers_mid15s.srt",
+          "lang": "en",
+          "srt_path": "mr.robot.s03e09.1080p.bluray.x264-rovers_mid15s.srt",
+          "certified": true,
+          "cue_count": 659
+        }
+      ]
+    },
+    {
+      "media_hash": "57ba99ad70a9f5666880714e3c3a792b",
+      "media_name": "The.Office.US.S07E01.720p.NF.WEB.x264-MRSK_mid15s",
+      "phash_filename": "The.Office.US.S07E01.720p.NF.WEB.x264-MRSK_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "218715d9a60ea995bb26802319b2ee6a",
+          "name": "The.Office.US.S07E01.720p.NF.WEB.x264-MRSK_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S07E01.720p.NF.WEB.x264-MRSK_mid15s.srt",
+          "certified": true,
+          "cue_count": 419
+        }
+      ]
+    },
+    {
+      "media_hash": "0bfb5273416b15896eeb0a908b23a2bc",
+      "media_name": "Devs.S01E08.1080p.AMZN.WEB-DL.DDP5.1.H.264-TEPES_mid15s",
+      "phash_filename": "Devs.S01E08.1080p.AMZN.WEB-DL.DDP5.1.H.264-TEPES_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "6342a4e835e791bca442a3786f68324a",
+          "name": "Devs.S01E08.1080p.AMZN.WEB-DL.DDP5.1.H.264-TEPES_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Devs.S01E08.1080p.AMZN.WEB-DL.DDP5.1.H.264-TEPES_mid15s.srt",
+          "certified": true,
+          "cue_count": 309
+        }
+      ]
+    },
+    {
+      "media_hash": "9a5e249ab0ec60f96f285a433bb4f5f5",
+      "media_name": "The.Office.US.S07E04.720p.NF.WEB.x264-MRSK_mid15s",
+      "phash_filename": "The.Office.US.S07E04.720p.NF.WEB.x264-MRSK_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "27c2b14edb2de250c19580c90e725bbe",
+          "name": "The.Office.US.S07E04.720p.NF.WEB.x264-MRSK_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S07E04.720p.NF.WEB.x264-MRSK_mid15s.srt",
+          "certified": true,
+          "cue_count": 433
+        }
+      ]
+    },
+    {
+      "media_hash": "1ae937831c9e2892e4580ee97adad085",
+      "media_name": "Halt.and.Catch.Fire.S03E09.NIM.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s",
+      "phash_filename": "Halt.and.Catch.Fire.S03E09.NIM.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "a2f7f020281f9a92109295f1acff47f8",
+          "name": "Halt.and.Catch.Fire.S03E09.NIM.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Halt.and.Catch.Fire.S03E09.NIM.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s.srt",
+          "certified": true,
+          "cue_count": 562
+        }
+      ]
+    },
+    {
+      "media_hash": "6fbeaf7682ff1dcc5d7205169a497b74",
+      "media_name": "The.Expanse.S03E12.Congregation.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG_mid15s",
+      "phash_filename": "The.Expanse.S03E12.Congregation.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "b85474bd1eb52460d2b7d38887bdbc22",
+          "name": "The.Expanse.S03E12.Congregation.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Expanse.S03E12.Congregation.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG_mid15s.srt",
+          "certified": true,
+          "cue_count": 532
+        }
+      ]
+    },
+    {
+      "media_hash": "741add2353e5fcfb969b131ece77728f",
+      "media_name": "His.Dark.Materials.S02E07.AEsahaettr.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb_mid15s",
+      "phash_filename": "His.Dark.Materials.S02E07.AEsahaettr.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "3a4c76da949238bef7bdd16dcd1ecd07",
+          "name": "His.Dark.Materials.S02E07.AEsahaettr.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb_mid15s.srt",
+          "lang": "en",
+          "srt_path": "His.Dark.Materials.S02E07.AEsahaettr.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb_mid15s.srt",
+          "certified": true,
+          "cue_count": 394
+        }
+      ]
+    },
+    {
+      "media_hash": "bc9babca52675a11f7647a765d3b5a9e",
+      "media_name": "The.Last.Detail.1973.1080p.BluRay.x265-RARBG_mid15s",
+      "phash_filename": "The.Last.Detail.1973.1080p.BluRay.x265-RARBG_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "2d0792d94c6f863bce105f1c00bda344",
+          "name": "The.Last.Detail.1973.1080p.BluRay.x265-RARBG_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Last.Detail.1973.1080p.BluRay.x265-RARBG_mid15s.srt",
+          "certified": true,
+          "cue_count": 807
+        }
+      ]
+    },
+    {
+      "media_hash": "9bfd8b6fa902376a9c41791a88e19691",
+      "media_name": "His.Dark.Materials.S02E03.Theft.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb_mid15s",
+      "phash_filename": "His.Dark.Materials.S02E03.Theft.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "fefd2121cf8d99b61766e4be6676ae45",
+          "name": "His.Dark.Materials.S02E03.Theft.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb_mid15s.srt",
+          "lang": "en",
+          "srt_path": "His.Dark.Materials.S02E03.Theft.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb_mid15s.srt",
+          "certified": true,
+          "cue_count": 577
+        }
+      ]
+    },
+    {
+      "media_hash": "8c800237c9cebc34412455de50da8b4b",
+      "media_name": "Paperhouse.1988.1080p.BluRay.x264.YIFY_mid15s",
+      "phash_filename": "Paperhouse.1988.1080p.BluRay.x264.YIFY_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "28a5d85bc931a449176607b5246e0ba7",
+          "name": "Paperhouse.1988.1080p.BluRay.x264.YIFY_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Paperhouse.1988.1080p.BluRay.x264.YIFY_mid15s.srt",
+          "certified": true,
+          "cue_count": 742
+        }
+      ]
+    },
+    {
+      "media_hash": "4d80904398427bd89c790b094e80d0e6",
+      "media_name": "mr.robot.s01e10.1080p.bluray.x264-rovers_mid15s",
+      "phash_filename": "mr.robot.s01e10.1080p.bluray.x264-rovers_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "a79544bd1c886b045af4fdd630f8501f",
+          "name": "mr.robot.s01e10.1080p.bluray.x264-rovers_mid15s.srt",
+          "lang": "en",
+          "srt_path": "mr.robot.s01e10.1080p.bluray.x264-rovers_mid15s.srt",
+          "certified": true,
+          "cue_count": 689
+        }
+      ]
+    },
+    {
+      "media_hash": "51016ad1c9764affa86773081cbbeb2c",
+      "media_name": "The.Expanse.S03E01.Fight.or.Flight.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG_mid15s",
+      "phash_filename": "The.Expanse.S03E01.Fight.or.Flight.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "619a0ca0e5f5a311f7a4ec048d374ff2",
+          "name": "The.Expanse.S03E01.Fight.or.Flight.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Expanse.S03E01.Fight.or.Flight.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG_mid15s.srt",
+          "certified": true,
+          "cue_count": 469
+        }
+      ]
+    },
+    {
+      "media_hash": "9ba98749078cbb1744e151c19b7e3e7a",
+      "media_name": "The.355.2022.1080p.WEBRip.x265-RARBG_mid15s",
+      "phash_filename": "The.355.2022.1080p.WEBRip.x265-RARBG_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "7942293b56c8bbec1a717232f28ab962",
+          "name": "The.355.2022.1080p.WEBRip.x265-RARBG_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.355.2022.1080p.WEBRip.x265-RARBG_mid15s.srt",
+          "certified": true,
+          "cue_count": 1459
+        }
+      ]
+    },
+    {
+      "media_hash": "f933d444b1cbfafc717a82466de40cff",
+      "media_name": "Lady.and.the.Tramp.2019.iNTERNAL.720p.WEB.H264-AMRAP_mid15s",
+      "phash_filename": "Lady.and.the.Tramp.2019.iNTERNAL.720p.WEB.H264-AMRAP_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "66fa1285fa349359055a98b13dec195c",
+          "name": "Lady.and.the.Tramp.2019.iNTERNAL.720p.WEB.H264-AMRAP_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Lady.and.the.Tramp.2019.iNTERNAL.720p.WEB.H264-AMRAP_mid15s.srt",
+          "certified": true,
+          "cue_count": 1461
+        }
+      ]
+    },
+    {
+      "media_hash": "6e1b4b3f639219318210f54252c93d3f",
+      "media_name": "The.Office.US.S07E06.720p.NF.WEB.x264-MRSK_mid15s",
+      "phash_filename": "The.Office.US.S07E06.720p.NF.WEB.x264-MRSK_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "a7e4a4801f52dfaa7d4c9e9414b945c1",
+          "name": "The.Office.US.S07E06.720p.NF.WEB.x264-MRSK_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S07E06.720p.NF.WEB.x264-MRSK_mid15s.srt",
+          "certified": true,
+          "cue_count": 421
+        }
+      ]
+    },
+    {
+      "media_hash": "168ccde1b527e077f87bd12e882529ad",
+      "media_name": "Euphoria.US.S01E06.1080p.WEBRip.x265-RARBG_mid15s",
+      "phash_filename": "Euphoria.US.S01E06.1080p.WEBRip.x265-RARBG_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "efe9928cec5eca63bd42c3d3d45694f1",
+          "name": "Euphoria.US.S01E06.1080p.WEBRip.x265-RARBG_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Euphoria.US.S01E06.1080p.WEBRip.x265-RARBG_mid15s.srt",
+          "certified": true,
+          "cue_count": 586
+        }
+      ]
+    },
+    {
+      "media_hash": "c67394c847b0cdfa5a772f8f330729c3",
+      "media_name": "The.Expanse.S03E11.Fallen.World.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG_mid15s",
+      "phash_filename": "The.Expanse.S03E11.Fallen.World.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "87178ee03ac28c3304a90894ced95720",
+          "name": "The.Expanse.S03E11.Fallen.World.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Expanse.S03E11.Fallen.World.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG_mid15s.srt",
+          "certified": true,
+          "cue_count": 446
+        }
+      ]
+    },
+    {
+      "media_hash": "aa46b3f6571aa0a1ed4091eb91099c8a",
+      "media_name": "The.Office.US.S07E02.720p.NF.WEB.x264-MRSK_mid15s",
+      "phash_filename": "The.Office.US.S07E02.720p.NF.WEB.x264-MRSK_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "faaa33242a6eae1b94626ebc834237ce",
+          "name": "The.Office.US.S07E02.720p.NF.WEB.x264-MRSK_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S07E02.720p.NF.WEB.x264-MRSK_mid15s.srt",
+          "certified": true,
+          "cue_count": 419
+        }
+      ]
+    },
+    {
+      "media_hash": "7b1665c16e7b03068ada12ce01935f12",
+      "media_name": "Severance.S01E03.In.Perpetuity.1080p.ATVP.WEB-DL.DDP5.1.H264-EniaHD_mid15s",
+      "phash_filename": "Severance.S01E03.In.Perpetuity.1080p.ATVP.WEB-DL.DDP5.1.H264-EniaHD_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "5b8097f52bceb21de4c0fb41eb331a87",
+          "name": "Severance.S01E03.In.Perpetuity.1080p.ATVP.WEB-DL.DDP5.1.H264-EniaHD_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Severance.S01E03.In.Perpetuity.1080p.ATVP.WEB-DL.DDP5.1.H264-EniaHD_mid15s.srt",
+          "certified": true,
+          "cue_count": 602
+        }
+      ]
+    },
+    {
+      "media_hash": "bdb151b3a77602e885c1972fed1ed8e6",
+      "media_name": "Devs.S01E06.1080p.AMZN.WEB-DL.DDP5.1.H.264-TEPES_mid15s",
+      "phash_filename": "Devs.S01E06.1080p.AMZN.WEB-DL.DDP5.1.H.264-TEPES_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "d6d0f755124afe6bed0b09ef7c224d95",
+          "name": "Devs.S01E06.1080p.AMZN.WEB-DL.DDP5.1.H.264-TEPES_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Devs.S01E06.1080p.AMZN.WEB-DL.DDP5.1.H.264-TEPES_mid15s.srt",
+          "certified": true,
+          "cue_count": 527
+        }
+      ]
+    },
+    {
+      "media_hash": "22a1e4de32ec129c028337e9b866c58d",
+      "media_name": "The.Master.2012.1080p.BRrip.x264.GAZ.YIFY_mid15s",
+      "phash_filename": "The.Master.2012.1080p.BRrip.x264.GAZ.YIFY_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "36174d105f848485eed499d227966406",
+          "name": "The.Master.2012.1080p.BRrip.x264.GAZ.YIFY_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Master.2012.1080p.BRrip.x264.GAZ.YIFY_mid15s.srt",
+          "certified": true,
+          "cue_count": 1416
+        }
+      ]
+    },
+    {
+      "media_hash": "e8202a32df9e596ece6ad6d01132c86d",
+      "media_name": "Halt.and.Catch.Fire.S03E07.The.Threshold.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s",
+      "phash_filename": "Halt.and.Catch.Fire.S03E07.The.Threshold.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "9762ff37b7e5376b47a1cd03fb8072da",
+          "name": "Halt.and.Catch.Fire.S03E07.The.Threshold.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Halt.and.Catch.Fire.S03E07.The.Threshold.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s.srt",
+          "certified": true,
+          "cue_count": 712
+        }
+      ]
+    },
+    {
+      "media_hash": "18c6bccbdd62471c696b83f75d7a538d",
+      "media_name": "The.Valet.2022.2160p.4K.WEB.x265.10bit.AAC5.1-[YTS.MX]_mid15s",
+      "phash_filename": "The.Valet.2022.2160p.4K.WEB.x265.10bit.AAC5.1-[YTS.MX]_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "c68645b9272db09a6a87444ac1fc09cd",
+          "name": "The.Valet.2022.2160p.4K.WEB.x265.10bit.AAC5.1-[YTS.MX]_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Valet.2022.2160p.4K.WEB.x265.10bit.AAC5.1-[YTS.MX]_mid15s.srt",
+          "certified": true,
+          "cue_count": 1917
+        }
+      ]
+    },
+    {
+      "media_hash": "65a79e5697e4d0d56f3d0cc0dbaf0d74",
+      "media_name": "Conan.The.Barbarian.1982.1080p.BluRay.x264-[YTS.AG]_mid15s",
+      "phash_filename": "Conan.The.Barbarian.1982.1080p.BluRay.x264-[YTS.AG]_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "1d6730e9aeeac9435e4abbcccba8c8bc",
+          "name": "Conan.The.Barbarian.1982.1080p.BluRay.x264-[YTS.AG]_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Conan.The.Barbarian.1982.1080p.BluRay.x264-[YTS.AG]_mid15s.srt",
+          "certified": true,
+          "cue_count": 420
+        }
+      ]
+    },
+    {
+      "media_hash": "44701c01b7ced43cc5140eb0fedc9256",
+      "media_name": "Shogun.2024.S01E03.Tomorrow.Is.Tomorrow.2160p.DSNP.WEB-DL.DDP5.1.DV.HDR.H.265-FLUX_mid15s",
+      "phash_filename": "Shogun.2024.S01E03.Tomorrow.Is.Tomorrow.2160p.DSNP.WEB-DL.DDP5.1.DV.HDR.H.265-FLUX_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "653211ee4a074c58d2158451fb26643a",
+          "name": "Shogun.2024.S01E03.Tomorrow.Is.Tomorrow.2160p.DSNP.WEB-DL.DDP5.1.DV.HDR.H.265-FLUX_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Shogun.2024.S01E03.Tomorrow.Is.Tomorrow.2160p.DSNP.WEB-DL.DDP5.1.DV.HDR.H.265-FLUX_mid15s.srt",
+          "certified": true,
+          "cue_count": 534
+        }
+      ]
+    },
+    {
+      "media_hash": "13c8bf96664a0e11801314382a299688",
+      "media_name": "Shogun.2024.S01E01.Anjin.2160p.DSNP.WEB-DL.DDP5.1.DV.HDR.H.265-FLUX_mid15s",
+      "phash_filename": "Shogun.2024.S01E01.Anjin.2160p.DSNP.WEB-DL.DDP5.1.DV.HDR.H.265-FLUX_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "5f4a95845ae0f7b73274611113fe1b3e",
+          "name": "Shogun.2024.S01E01.Anjin.2160p.DSNP.WEB-DL.DDP5.1.DV.HDR.H.265-FLUX_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Shogun.2024.S01E01.Anjin.2160p.DSNP.WEB-DL.DDP5.1.DV.HDR.H.265-FLUX_mid15s.srt",
+          "certified": true,
+          "cue_count": 688
+        }
+      ]
+    },
+    {
+      "media_hash": "215cfe8bf78b470ef19cb6648afa56d1",
+      "media_name": "Halt.and.Catch.Fire.S04E07.Who.Needs.a.Guy.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s",
+      "phash_filename": "Halt.and.Catch.Fire.S04E07.Who.Needs.a.Guy.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "006623de9ee998b8ed932c241044041a",
+          "name": "Halt.and.Catch.Fire.S04E07.Who.Needs.a.Guy.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Halt.and.Catch.Fire.S04E07.Who.Needs.a.Guy.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s.srt",
+          "certified": true,
+          "cue_count": 624
+        }
+      ]
+    },
+    {
+      "media_hash": "32e18738ccd7e0d9f43f9414abc35a76",
+      "media_name": "Severance.S01E02.Half.Loop.1080p.ATVP.WEB-DL.DDP5.1.H.264-EniaHD_mid15s",
+      "phash_filename": "Severance.S01E02.Half.Loop.1080p.ATVP.WEB-DL.DDP5.1.H.264-EniaHD_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "7b138105a321f97fcf7adc523724859e",
+          "name": "Severance.S01E02.Half.Loop.1080p.ATVP.WEB-DL.DDP5.1.H.264-EniaHD_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Severance.S01E02.Half.Loop.1080p.ATVP.WEB-DL.DDP5.1.H.264-EniaHD_mid15s.srt",
+          "certified": true,
+          "cue_count": 595
+        }
+      ]
+    },
+    {
+      "media_hash": "c1603ac2a06630a419f2d13cc4698983",
+      "media_name": "mr.robot.s03e07.1080p.bluray.x264-rovers_mid15s",
+      "phash_filename": "mr.robot.s03e07.1080p.bluray.x264-rovers_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "fbed9e507b8caf9adf833fb5f5d41d79",
+          "name": "mr.robot.s03e07.1080p.bluray.x264-rovers_mid15s.srt",
+          "lang": "en",
+          "srt_path": "mr.robot.s03e07.1080p.bluray.x264-rovers_mid15s.srt",
+          "certified": true,
+          "cue_count": 579
+        }
+      ]
+    },
+    {
+      "media_hash": "6e4c6299259de643825de337e14600c9",
+      "media_name": "The.Office.US.S07E23.720p.NF.WEB.x264-MRSK_mid15s",
+      "phash_filename": "The.Office.US.S07E23.720p.NF.WEB.x264-MRSK_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "438d0c72ab8ee456476cf0421b6c56f2",
+          "name": "The.Office.US.S07E23.720p.NF.WEB.x264-MRSK_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S07E23.720p.NF.WEB.x264-MRSK_mid15s.srt",
+          "certified": true,
+          "cue_count": 410
+        }
+      ]
+    },
+    {
+      "media_hash": "d0c12fbeaa98447ce7b68a5823abe150",
+      "media_name": "Halt.and.Catch.Fire.S03E04.Rules.Of.Honorable.Play.720p.AMZN.WEBRip.DD5.1.x264-NTb_mid15s",
+      "phash_filename": "Halt.and.Catch.Fire.S03E04.Rules.Of.Honorable.Play.720p.AMZN.WEBRip.DD5.1.x264-NTb_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "1a18fcccc041874d329d990a9d7b4306",
+          "name": "Halt.and.Catch.Fire.S03E04.Rules.Of.Honorable.Play.720p.AMZN.WEBRip.DD5.1.x264-NTb_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Halt.and.Catch.Fire.S03E04.Rules.Of.Honorable.Play.720p.AMZN.WEBRip.DD5.1.x264-NTb_mid15s.srt",
+          "certified": true,
+          "cue_count": 632
+        }
+      ]
+    },
+    {
+      "media_hash": "f33a07353267d6b10a1d9cdbb805f17d",
+      "media_name": "mr.robot.s03e04.1080p.bluray.x264-rovers_mid15s",
+      "phash_filename": "mr.robot.s03e04.1080p.bluray.x264-rovers_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "bc839bbaf7ca149c947ff1b5a5919f21",
+          "name": "mr.robot.s03e04.1080p.bluray.x264-rovers_mid15s.srt",
+          "lang": "en",
+          "srt_path": "mr.robot.s03e04.1080p.bluray.x264-rovers_mid15s.srt",
+          "certified": true,
+          "cue_count": 569
+        }
+      ]
+    },
+    {
+      "media_hash": "beb6fe851e5fb354d2c8580e69c740bd",
+      "media_name": "Devs.S01E03.1080p.AMZN.WEB-DL.DDP5.1.H.264-TEPES_mid15s",
+      "phash_filename": "Devs.S01E03.1080p.AMZN.WEB-DL.DDP5.1.H.264-TEPES_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "bb30452d4bb52209240f71873341f320",
+          "name": "Devs.S01E03.1080p.AMZN.WEB-DL.DDP5.1.H.264-TEPES_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Devs.S01E03.1080p.AMZN.WEB-DL.DDP5.1.H.264-TEPES_mid15s.srt",
+          "certified": true,
+          "cue_count": 427
+        }
+      ]
+    },
+    {
+      "media_hash": "803d3c5613c22a57169b2144f66664ac",
+      "media_name": "Euphoria.US.S01E01.1080p.WEBRip.x265-RARBG_mid15s",
+      "phash_filename": "Euphoria.US.S01E01.1080p.WEBRip.x265-RARBG_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "10aade9eda03b3ed9e5bd06687492e87",
+          "name": "Euphoria.US.S01E01.1080p.WEBRip.x265-RARBG_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Euphoria.US.S01E01.1080p.WEBRip.x265-RARBG_mid15s.srt",
+          "certified": true,
+          "cue_count": 702
+        }
+      ]
+    },
+    {
+      "media_hash": "23bb2f7b9e6104e6122777f17c773c43",
+      "media_name": "Once.Upon.a.Time.in.the.West.1968.1080p.BluRay.x264.YIFY_mid15s",
+      "phash_filename": "Once.Upon.a.Time.in.the.West.1968.1080p.BluRay.x264.YIFY_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "73c3a22da65f3519461ba297c47501c6",
+          "name": "Once.Upon.a.Time.in.the.West.1968.1080p.BluRay.x264.YIFY_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Once.Upon.a.Time.in.the.West.1968.1080p.BluRay.x264.YIFY_mid15s.srt",
+          "certified": true,
+          "cue_count": 782
+        }
+      ]
+    },
+    {
+      "media_hash": "02c65e55072612a3e60554fc06b06ab2",
+      "media_name": "Halt.and.Catch.Fire.S04E08.Goodwill.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s",
+      "phash_filename": "Halt.and.Catch.Fire.S04E08.Goodwill.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "c243f7934096ee512d09e20d9b399752",
+          "name": "Halt.and.Catch.Fire.S04E08.Goodwill.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Halt.and.Catch.Fire.S04E08.Goodwill.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s.srt",
+          "certified": true,
+          "cue_count": 573
+        }
+      ]
+    },
+    {
+      "media_hash": "f39d97f5d27d7ae0aab979201ed9f800",
+      "media_name": "Three.Thousand.Years.of.Longing.2022.2160p.WEB-DL.DD5.1.HDR.H.265-EVO_mid15s",
+      "phash_filename": "Three.Thousand.Years.of.Longing.2022.2160p.WEB-DL.DD5.1.HDR.H.265-EVO_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "5b44245d79310f9a093b0e5af7223577",
+          "name": "Three.Thousand.Years.of.Longing.2022.2160p.WEB-DL.DD5.1.HDR.H.265-EVO_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Three.Thousand.Years.of.Longing.2022.2160p.WEB-DL.DD5.1.HDR.H.265-EVO_mid15s.srt",
+          "certified": true,
+          "cue_count": 1260
+        }
+      ]
+    },
+    {
+      "media_hash": "23f562eec6c49f881cefc740ae4d74ea",
+      "media_name": "what.we.do.in.the.shadows.s04e01.1080p.web.h264-plzproper_mid15s",
+      "phash_filename": "what.we.do.in.the.shadows.s04e01.1080p.web.h264-plzproper_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "6277301a06f3f2296b94584789211b28",
+          "name": "what.we.do.in.the.shadows.s04e01.1080p.web.h264-plzproper_mid15s.srt",
+          "lang": "en",
+          "srt_path": "what.we.do.in.the.shadows.s04e01.1080p.web.h264-plzproper_mid15s.srt",
+          "certified": true,
+          "cue_count": 495
+        }
+      ]
+    },
+    {
+      "media_hash": "9ab44f0c1171d1133e64f7ddc23667df",
+      "media_name": "Peter.The.Wolf.2023.1080p.WEBRip.x264.AAC5.1-[YTS.MX]_mid15s",
+      "phash_filename": "Peter.The.Wolf.2023.1080p.WEBRip.x264.AAC5.1-[YTS.MX]_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "1e0b3c656b9a1160c342a55505b7294a",
+          "name": "Peter.The.Wolf.2023.1080p.WEBRip.x264.AAC5.1-[YTS.MX]_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Peter.The.Wolf.2023.1080p.WEBRip.x264.AAC5.1-[YTS.MX]_mid15s.srt",
+          "certified": true,
+          "cue_count": 297
+        }
+      ]
+    },
+    {
+      "media_hash": "41862821d6c02ecc3ddc15e76e6b0ff3",
+      "media_name": "The.Office.US.S07E08.720p.NF.WEB.x264-MRSK_mid15s",
+      "phash_filename": "The.Office.US.S07E08.720p.NF.WEB.x264-MRSK_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "7fff002240ce1cb3e6986931d4d53102",
+          "name": "The.Office.US.S07E08.720p.NF.WEB.x264-MRSK_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S07E08.720p.NF.WEB.x264-MRSK_mid15s.srt",
+          "certified": true,
+          "cue_count": 407
+        }
+      ]
+    },
+    {
+      "media_hash": "3c903bb238e17227084e607f86ce5cc7",
+      "media_name": "Euphoria.US.S02E06.1080p.WEBRip.x265-RARBG_mid15s",
+      "phash_filename": "Euphoria.US.S02E06.1080p.WEBRip.x265-RARBG_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "7c98e6aa1d70b3edad5dce485aab39d2",
+          "name": "Euphoria.US.S02E06.1080p.WEBRip.x265-RARBG_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Euphoria.US.S02E06.1080p.WEBRip.x265-RARBG_mid15s.srt",
+          "certified": true,
+          "cue_count": 693
+        }
+      ]
+    },
+    {
+      "media_hash": "367042540b5328d50deebb8eb04604b4",
+      "media_name": "Cmon.Cmon.2021.1080p.WEBRip.DDP5.1.Atmos.x264-NOGRP_mid15s",
+      "phash_filename": "Cmon.Cmon.2021.1080p.WEBRip.DDP5.1.Atmos.x264-NOGRP_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "56e7201348cce23a6eeae28fd162a659",
+          "name": "Cmon.Cmon.2021.1080p.WEBRip.DDP5.1.Atmos.x264-NOGRP_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Cmon.Cmon.2021.1080p.WEBRip.DDP5.1.Atmos.x264-NOGRP_mid15s.srt",
+          "certified": true,
+          "cue_count": 2173
+        }
+      ]
+    },
+    {
+      "media_hash": "153d516b0fabd1e336207aa16cfd47e1",
+      "media_name": "Oldboy.2003.REMASTERED.KOREAN.1080p.BluRay.H264.AAC-VXT_mid15s",
+      "phash_filename": "Oldboy.2003.REMASTERED.KOREAN.1080p.BluRay.H264.AAC-VXT_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "a7ad31092010e7abb87e5a0c2b902fe7",
+          "name": "Oldboy.2003.REMASTERED.KOREAN.1080p.BluRay.H264.AAC-VXT_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Oldboy.2003.REMASTERED.KOREAN.1080p.BluRay.H264.AAC-VXT_mid15s.srt",
+          "certified": true,
+          "cue_count": 1057
+        }
+      ]
+    },
+    {
+      "media_hash": "5c3d8abf85142ea42864a6d374d776ab",
+      "media_name": "Star.Wars.Episode.IX.-.The.Rise.Of.Skywalker.2019.2160p.4K.BluRay.x265.10bit.AAC5.1-[YTS.MX]_mid15s",
+      "phash_filename": "Star.Wars.Episode.IX.-.The.Rise.Of.Skywalker.2019.2160p.4K.BluRay.x265.10bit.AAC5.1-[YTS.MX]_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "56ad038f489a9398f8a1c9f32fa1e41f",
+          "name": "Star.Wars.Episode.IX.-.The.Rise.Of.Skywalker.2019.2160p.4K.BluRay.x265.10bit.AAC5.1-[YTS.MX]_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Star.Wars.Episode.IX.-.The.Rise.Of.Skywalker.2019.2160p.4K.BluRay.x265.10bit.AAC5.1-[YTS.MX]_mid15s.srt",
+          "certified": true,
+          "cue_count": 1473
+        }
+      ]
+    },
+    {
+      "media_hash": "c953c2441afc8ca8201f595720b0cf83",
+      "media_name": "Euphoria.US.S02E02.1080p.WEBRip.x265-RARBG_mid15s",
+      "phash_filename": "Euphoria.US.S02E02.1080p.WEBRip.x265-RARBG_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "c7af6d383bb62cd3b6017aa4d3c7825d",
+          "name": "Euphoria.US.S02E02.1080p.WEBRip.x265-RARBG_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Euphoria.US.S02E02.1080p.WEBRip.x265-RARBG_mid15s.srt",
+          "certified": true,
+          "cue_count": 713
+        }
+      ]
+    },
+    {
+      "media_hash": "ceb702d1f81180cee984ea3a4504827b",
+      "media_name": "utopia.s01e04.720p.bluray.sujaidr_mid15s",
+      "phash_filename": "utopia.s01e04.720p.bluray.sujaidr_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "7c5392fddd49e0f120f474242efa0353",
+          "name": "utopia.s01e04.720p.bluray.sujaidr_mid15s.srt",
+          "lang": "en",
+          "srt_path": "utopia.s01e04.720p.bluray.sujaidr_mid15s.srt",
+          "certified": true,
+          "cue_count": 555
+        }
+      ]
+    },
+    {
+      "media_hash": "42afa0aeb704f5a8056030f9edc1cf0c",
+      "media_name": "The.Office.US.S04E18-19.1080p.AMZN.WEB.x264-MRSK_mid15s",
+      "phash_filename": "The.Office.US.S04E18-19.1080p.AMZN.WEB.x264-MRSK_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "6dae69bde85f2145d865366df6f9a6ba",
+          "name": "The.Office.US.S04E18-19.1080p.AMZN.WEB.x264-MRSK_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S04E18-19.1080p.AMZN.WEB.x264-MRSK_mid15s.srt",
+          "certified": true,
+          "cue_count": 752
+        }
+      ]
+    },
+    {
+      "media_hash": "71f88fef249366130c7722915a628422",
+      "media_name": "Euphoria.US.S02E04.1080p.WEBRip.x265-RARBG_mid15s",
+      "phash_filename": "Euphoria.US.S02E04.1080p.WEBRip.x265-RARBG_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "8b98691d409a5a8907686a42079eae6d",
+          "name": "Euphoria.US.S02E04.1080p.WEBRip.x265-RARBG_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Euphoria.US.S02E04.1080p.WEBRip.x265-RARBG_mid15s.srt",
+          "certified": true,
+          "cue_count": 804
+        }
+      ]
+    },
+    {
+      "media_hash": "325cd49d8ba86ad9c88ae15c8ac36242",
+      "media_name": "Big.Eyes.2014.1080p.BluRay.x264.YIFY_mid15s",
+      "phash_filename": "Big.Eyes.2014.1080p.BluRay.x264.YIFY_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "1b9f7f96abd2f2e4bfa2968f74a0e2f7",
+          "name": "Big.Eyes.2014.1080p.BluRay.x264.YIFY_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Big.Eyes.2014.1080p.BluRay.x264.YIFY_mid15s.srt",
+          "certified": true,
+          "cue_count": 1140
+        }
+      ]
+    },
+    {
+      "media_hash": "d99d79c7aafc07f1a1f03359bcc0fcf2",
+      "media_name": "Halt.and.Catch.Fire.S04E10.Ten.of.Swords.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s",
+      "phash_filename": "Halt.and.Catch.Fire.S04E10.Ten.of.Swords.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "70dabd49b9aeaa5da1a092422118f71e",
+          "name": "Halt.and.Catch.Fire.S04E10.Ten.of.Swords.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Halt.and.Catch.Fire.S04E10.Ten.of.Swords.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s.srt",
+          "certified": true,
+          "cue_count": 671
+        }
+      ]
+    },
+    {
+      "media_hash": "ecd45c8fab7612bd579affa1f52b1099",
+      "media_name": "The.Office.US.S04E13.Dinner.Party.WEBRip.x264-FGT_mid15s",
+      "phash_filename": "The.Office.US.S04E13.Dinner.Party.WEBRip.x264-FGT_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "5cc04865fb5b16e6120fd96b6d710356",
+          "name": "The.Office.US.S04E13.Dinner.Party.WEBRip.x264-FGT_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S04E13.Dinner.Party.WEBRip.x264-FGT_mid15s.srt",
+          "certified": true,
+          "cue_count": 599
+        }
+      ]
+    },
+    {
+      "media_hash": "86001103d4b94cf2f65ed5b412b8ec74",
+      "media_name": "Time.Bandits.1981.REMASTERED.1080p.BluRay.x265-RARBG_mid15s",
+      "phash_filename": "Time.Bandits.1981.REMASTERED.1080p.BluRay.x265-RARBG_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "33d8133e5b26938a6d3a7360d893b250",
+          "name": "Time.Bandits.1981.REMASTERED.1080p.BluRay.x265-RARBG_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Time.Bandits.1981.REMASTERED.1080p.BluRay.x265-RARBG_mid15s.srt",
+          "certified": true,
+          "cue_count": 1050
+        }
+      ]
+    },
+    {
+      "media_hash": "852916348275ed99e67ec0ba520b6a6f",
+      "media_name": "The.Wheel.of.Time.S02E08.What.Was.Meant.To.Be.2160p.AMZN.WEB-DL.DUAL.DDP5.1.DV.HDR.H.265-KiNGSMAN_mid15s",
+      "phash_filename": "The.Wheel.of.Time.S02E08.What.Was.Meant.To.Be.2160p.AMZN.WEB-DL.DUAL.DDP5.1.DV.HDR.H.265-KiNGSMAN_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "1ff6783e4b57c33d0d08cf1d325ab3f3",
+          "name": "The.Wheel.of.Time.S02E08.What.Was.Meant.To.Be.2160p.AMZN.WEB-DL.DUAL.DDP5.1.DV.HDR.H.265-KiNGSMAN_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Wheel.of.Time.S02E08.What.Was.Meant.To.Be.2160p.AMZN.WEB-DL.DUAL.DDP5.1.DV.HDR.H.265-KiNGSMAN_mid15s.srt",
+          "certified": true,
+          "cue_count": 600
+        }
+      ]
+    },
+    {
+      "media_hash": "b306213f78c649648b5e4f893a536ddc",
+      "media_name": "The.Office.US.S07E14.720p.NF.WEB.x264-MRSK_mid15s",
+      "phash_filename": "The.Office.US.S07E14.720p.NF.WEB.x264-MRSK_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "c333ec01a400ad8963d3a94e396a76e3",
+          "name": "The.Office.US.S07E14.720p.NF.WEB.x264-MRSK_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S07E14.720p.NF.WEB.x264-MRSK_mid15s.srt",
+          "certified": true,
+          "cue_count": 419
+        }
+      ]
+    },
+    {
+      "media_hash": "7067f53844b2fb9ddeb24a6d0cd0fec4",
+      "media_name": "The.Office.US.S04E16.Did.I.Stutter.WEBRip.x264-FGT_mid15s",
+      "phash_filename": "The.Office.US.S04E16.Did.I.Stutter.WEBRip.x264-FGT_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "4a22aa7abaa4c4cd334017d25d228921",
+          "name": "The.Office.US.S04E16.Did.I.Stutter.WEBRip.x264-FGT_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S04E16.Did.I.Stutter.WEBRip.x264-FGT_mid15s.srt",
+          "certified": true,
+          "cue_count": 530
+        }
+      ]
+    },
+    {
+      "media_hash": "6ddc711489182e0959f6fe3f7ffabeed",
+      "media_name": "mr.robot.s01e01.1080p.bluray.x264-rovers_mid15s",
+      "phash_filename": "mr.robot.s01e01.1080p.bluray.x264-rovers_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "b6d3219716c6802e81a2f5090cb07941",
+          "name": "mr.robot.s01e01.1080p.bluray.x264-rovers_mid15s.srt",
+          "lang": "en",
+          "srt_path": "mr.robot.s01e01.1080p.bluray.x264-rovers_mid15s.srt",
+          "certified": true,
+          "cue_count": 805
+        }
+      ]
+    },
+    {
+      "media_hash": "43069f2b25719a5953f1a96bfd0f7bc6",
+      "media_name": "Severance.S01E01.Good.News.About.Hell.1080p.ATVP.WEB-DL.DDP5.1.H.264-EniaHD_mid15s",
+      "phash_filename": "Severance.S01E01.Good.News.About.Hell.1080p.ATVP.WEB-DL.DDP5.1.H.264-EniaHD_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "019f1c41aa01929dac9ae9b44a4110d0",
+          "name": "Severance.S01E01.Good.News.About.Hell.1080p.ATVP.WEB-DL.DDP5.1.H.264-EniaHD_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Severance.S01E01.Good.News.About.Hell.1080p.ATVP.WEB-DL.DDP5.1.H.264-EniaHD_mid15s.srt",
+          "certified": true,
+          "cue_count": 618
+        }
+      ]
+    },
+    {
+      "media_hash": "5f53391ccd52f9f86ce08b859ce07129",
+      "media_name": "The.Office.US.S04E10.1080p.AMZN.WEB.x264-MRSK_mid15s",
+      "phash_filename": "The.Office.US.S04E10.1080p.AMZN.WEB.x264-MRSK_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "c25a89e243bfa1ce7e0e9b4d87bd9656",
+          "name": "The.Office.US.S04E10.1080p.AMZN.WEB.x264-MRSK_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S04E10.1080p.AMZN.WEB.x264-MRSK_mid15s.srt",
+          "certified": true,
+          "cue_count": 425
+        }
+      ]
+    },
+    {
+      "media_hash": "451667ad29ff0190d2225680874b4274",
+      "media_name": "Halt.and.Catch.Fire.S04E09.Search.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s",
+      "phash_filename": "Halt.and.Catch.Fire.S04E09.Search.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "188dc10f56de7fa4a0740914587b1404",
+          "name": "Halt.and.Catch.Fire.S04E09.Search.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Halt.and.Catch.Fire.S04E09.Search.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s.srt",
+          "certified": true,
+          "cue_count": 606
+        }
+      ]
+    },
+    {
+      "media_hash": "531a640be3e8e613028b2dc0ffed4d27",
+      "media_name": "Concussion.2015.1080p.BluRay.x265-RARBG_mid15s",
+      "phash_filename": "Concussion.2015.1080p.BluRay.x265-RARBG_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "416be8fe1f114e8d755e4d133d6285b5",
+          "name": "Concussion.2015.1080p.BluRay.x265-RARBG_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Concussion.2015.1080p.BluRay.x265-RARBG_mid15s.srt",
+          "certified": true,
+          "cue_count": 1373
+        }
+      ]
+    },
+    {
+      "media_hash": "c7816b2cd8cccd976c41f94bf0172508",
+      "media_name": "Abominable.2019.1080p.BluRay.x264-[YTS.LT]_mid15s",
+      "phash_filename": "Abominable.2019.1080p.BluRay.x264-[YTS.LT]_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "30852dabdb72bb4e010ad878510856ee",
+          "name": "Abominable.2019.1080p.BluRay.x264-[YTS.LT]_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Abominable.2019.1080p.BluRay.x264-[YTS.LT]_mid15s.srt",
+          "certified": true,
+          "cue_count": 996
+        }
+      ]
+    },
+    {
+      "media_hash": "4787e4043f5609deb70a8721d1e0ebef",
+      "media_name": "Leave.No.Trace.2018.1080p.BluRay.H264.AAC-RARBG_mid15s",
+      "phash_filename": "Leave.No.Trace.2018.1080p.BluRay.H264.AAC-RARBG_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "a0cf47d6732990a680fbe0098b7cd3ac",
+          "name": "Leave.No.Trace.2018.1080p.BluRay.H264.AAC-RARBG_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Leave.No.Trace.2018.1080p.BluRay.H264.AAC-RARBG_mid15s.srt",
+          "certified": true,
+          "cue_count": 813
+        }
+      ]
+    },
+    {
+      "media_hash": "35df5d49b4667aea79c6f584b671f5f2",
+      "media_name": "mr.robot.s03e05.1080p.bluray.x264-rovers_mid15s",
+      "phash_filename": "mr.robot.s03e05.1080p.bluray.x264-rovers_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "1c6b93e72e84cc7e3eff2441869b68c6",
+          "name": "mr.robot.s03e05.1080p.bluray.x264-rovers_mid15s.srt",
+          "lang": "en",
+          "srt_path": "mr.robot.s03e05.1080p.bluray.x264-rovers_mid15s.srt",
+          "certified": true,
+          "cue_count": 523
+        }
+      ]
+    },
+    {
+      "media_hash": "5cde96ce1696c588d25fd69647f78b68",
+      "media_name": "The.Office.US.S04E11.Survivor.Man.WEBRip.x264-FGT_mid15s",
+      "phash_filename": "The.Office.US.S04E11.Survivor.Man.WEBRip.x264-FGT_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "9257c598c0564ec66b060ff81061e820",
+          "name": "The.Office.US.S04E11.Survivor.Man.WEBRip.x264-FGT_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S04E11.Survivor.Man.WEBRip.x264-FGT_mid15s.srt",
+          "certified": true,
+          "cue_count": 558
+        }
+      ]
+    },
+    {
+      "media_hash": "6e96f424b12d57a6032e3bdddd687863",
+      "media_name": "The.Peripheral.S01E02.1080p.x265-ELiTE_mid15s",
+      "phash_filename": "The.Peripheral.S01E02.1080p.x265-ELiTE_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "523d34c6ec0fa3b102e90b2441371917",
+          "name": "The.Peripheral.S01E02.1080p.x265-ELiTE_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Peripheral.S01E02.1080p.x265-ELiTE_mid15s.srt",
+          "certified": true,
+          "cue_count": 690
+        }
+      ]
+    },
+    {
+      "media_hash": "cc0bae75b4421d05aa72c35c1363ab7f",
+      "media_name": "Euphoria.US.S02E07.1080p.WEBRip.x265-RARBG_mid15s",
+      "phash_filename": "Euphoria.US.S02E07.1080p.WEBRip.x265-RARBG_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "8a0147afd93b58ec2eb350298852c787",
+          "name": "Euphoria.US.S02E07.1080p.WEBRip.x265-RARBG_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Euphoria.US.S02E07.1080p.WEBRip.x265-RARBG_mid15s.srt",
+          "certified": true,
+          "cue_count": 518
+        }
+      ]
+    },
+    {
+      "media_hash": "88995aee256eb5e5217f26813cc29328",
+      "media_name": "westworld.s04e03.1080p.web.h264-cakes_mid15s",
+      "phash_filename": "westworld.s04e03.1080p.web.h264-cakes_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "cb3e18146685a27083e67ff544806684",
+          "name": "westworld.s04e03.1080p.web.h264-cakes_mid15s.srt",
+          "lang": "en",
+          "srt_path": "westworld.s04e03.1080p.web.h264-cakes_mid15s.srt",
+          "certified": true,
+          "cue_count": 450
+        }
+      ]
+    },
+    {
+      "media_hash": "cff1bf64c620c475389c0f6dad135bff",
+      "media_name": "The.Dead.Dont.Die.2019.HDR.2160p.WEB.H265-DEFLATE_mid15s",
+      "phash_filename": "The.Dead.Dont.Die.2019.HDR.2160p.WEB.H265-DEFLATE_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "d852654f52af2059269807a4a1eebccc",
+          "name": "The.Dead.Dont.Die.2019.HDR.2160p.WEB.H265-DEFLATE_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Dead.Dont.Die.2019.HDR.2160p.WEB.H265-DEFLATE_mid15s.srt",
+          "certified": true,
+          "cue_count": 1011
+        }
+      ]
+    },
+    {
+      "media_hash": "8504db566232cee021f73b090d9cfc6e",
+      "media_name": "The.Lord.of.the.Rings.The.Two.Towers.2002.EXTENDED.REMASTERED.1080p.BluRay.x265-RARBG_mid15s",
+      "phash_filename": "The.Lord.of.the.Rings.The.Two.Towers.2002.EXTENDED.REMASTERED.1080p.BluRay.x265-RARBG_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "e8427f99b8371dec4db5932d0b6c39a0",
+          "name": "The.Lord.of.the.Rings.The.Two.Towers.2002.EXTENDED.REMASTERED.1080p.BluRay.x265-RARBG_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Lord.of.the.Rings.The.Two.Towers.2002.EXTENDED.REMASTERED.1080p.BluRay.x265-RARBG_mid15s.srt",
+          "certified": true,
+          "cue_count": 2119
+        }
+      ]
+    },
+    {
+      "media_hash": "ca601a422eb95dd5823263065d8d985b",
+      "media_name": "Euphoria.US.S02E05.1080p.WEBRip.x265-RARBG_mid15s",
+      "phash_filename": "Euphoria.US.S02E05.1080p.WEBRip.x265-RARBG_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "2ea30054b2e6f4337fd4f78c91df9f40",
+          "name": "Euphoria.US.S02E05.1080p.WEBRip.x265-RARBG_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Euphoria.US.S02E05.1080p.WEBRip.x265-RARBG_mid15s.srt",
+          "certified": true,
+          "cue_count": 553
+        }
+      ]
+    },
+    {
+      "media_hash": "8f511114c2bf2d9aa8873539309c6db8",
+      "media_name": "Devs.S01E01.1080p.AMZN.WEB-DL.DDP5.1.H.264-TEPES_mid15s",
+      "phash_filename": "Devs.S01E01.1080p.AMZN.WEB-DL.DDP5.1.H.264-TEPES_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "525e261b71331627ae1ef919101e840e",
+          "name": "Devs.S01E01.1080p.AMZN.WEB-DL.DDP5.1.H.264-TEPES_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Devs.S01E01.1080p.AMZN.WEB-DL.DDP5.1.H.264-TEPES_mid15s.srt",
+          "certified": true,
+          "cue_count": 497
+        }
+      ]
+    },
+    {
+      "media_hash": "0db482dfdb0382084877d30657eec508",
+      "media_name": "House.of.the.Dragon.S01E09.2160p.HMAX.WEB-DL.DDP5.1.Atmos.HDR.HEVC-CMRG_mid15s",
+      "phash_filename": "House.of.the.Dragon.S01E09.2160p.HMAX.WEB-DL.DDP5.1.Atmos.HDR.HEVC-CMRG_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "5fc8bcb726a7d1579982be2841a2c35f",
+          "name": "House.of.the.Dragon.S01E09.2160p.HMAX.WEB-DL.DDP5.1.Atmos.HDR.HEVC-CMRG_mid15s.srt",
+          "lang": "en",
+          "srt_path": "House.of.the.Dragon.S01E09.2160p.HMAX.WEB-DL.DDP5.1.Atmos.HDR.HEVC-CMRG_mid15s.srt",
+          "certified": true,
+          "cue_count": 490
+        }
+      ]
+    },
+    {
+      "media_hash": "9e041c85fc0f3b024b0a2e48dc068edc",
+      "media_name": "The.Walking.Dead.Daryl.Dixon.S01E02.2160p.WEB.h265_iris2_mid15s",
+      "phash_filename": "The.Walking.Dead.Daryl.Dixon.S01E02.2160p.WEB.h265_iris2_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "8044ca2ae7fa171315c40d06096f59f0",
+          "name": "The.Walking.Dead.Daryl.Dixon.S01E02.2160p.WEB.h265_iris2_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Walking.Dead.Daryl.Dixon.S01E02.2160p.WEB.h265_iris2_mid15s.srt",
+          "certified": true,
+          "cue_count": 462
+        }
+      ]
+    },
+    {
+      "media_hash": "5b3dec7801c2139b0e9d66f96ab77456",
+      "media_name": "Euphoria.US.S01E02.1080p.WEBRip.x265-RARBG_mid15s",
+      "phash_filename": "Euphoria.US.S01E02.1080p.WEBRip.x265-RARBG_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "f6e03dcc67f8892e12533c9c0cc37d85",
+          "name": "Euphoria.US.S01E02.1080p.WEBRip.x265-RARBG_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Euphoria.US.S01E02.1080p.WEBRip.x265-RARBG_mid15s.srt",
+          "certified": true,
+          "cue_count": 701
+        }
+      ]
+    },
+    {
+      "media_hash": "03b4dd2f8201887dbcb7ef275dcd0b6d",
+      "media_name": "The.Office.US.S04E03E04.Dunder.Mifflin.Infinity.WEBRip.x264-FGT_mid15s",
+      "phash_filename": "The.Office.US.S04E03E04.Dunder.Mifflin.Infinity.WEBRip.x264-FGT_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "8d08f01675f4e2a0eced569c2fc17052",
+          "name": "The.Office.US.S04E03E04.Dunder.Mifflin.Infinity.WEBRip.x264-FGT_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S04E03E04.Dunder.Mifflin.Infinity.WEBRip.x264-FGT_mid15s.srt",
+          "certified": true,
+          "cue_count": 1113
+        }
+      ]
+    },
+    {
+      "media_hash": "ba4d59d696d72151f0142686a8f63aca",
+      "media_name": "Taxi.Driver.1976.1080p.BluRay.x264-[YTS.AM]_mid15s",
+      "phash_filename": "Taxi.Driver.1976.1080p.BluRay.x264-[YTS.AM]_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "a6ffeeeba986f34d3354988e9fd33f12",
+          "name": "Taxi.Driver.1976.1080p.BluRay.x264-[YTS.AM]_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Taxi.Driver.1976.1080p.BluRay.x264-[YTS.AM]_mid15s.srt",
+          "certified": true,
+          "cue_count": 1205
+        }
+      ]
+    },
+    {
+      "media_hash": "3c51b022c4e01b596dd435e3c447f047",
+      "media_name": "Once.Were.Warriors.1994.1080p.BluRay.H264.AAC-RARBG_mid15s",
+      "phash_filename": "Once.Were.Warriors.1994.1080p.BluRay.H264.AAC-RARBG_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "f127e98e1f1bed7bbe7c9ef8a9234e7e",
+          "name": "Once.Were.Warriors.1994.1080p.BluRay.H264.AAC-RARBG_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Once.Were.Warriors.1994.1080p.BluRay.H264.AAC-RARBG_mid15s.srt",
+          "certified": true,
+          "cue_count": 960
+        }
+      ]
+    },
+    {
+      "media_hash": "f2d152a3b5d031ecdff654108e5078ed",
+      "media_name": "Train.To.Busan.2016.KOREAN.1080p.BluRay.x265-VXT_mid15s",
+      "phash_filename": "Train.To.Busan.2016.KOREAN.1080p.BluRay.x265-VXT_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "ccdce2de173dc47a3019a42b6f0f756a",
+          "name": "Train.To.Busan.2016.KOREAN.1080p.BluRay.x265-VXT_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Train.To.Busan.2016.KOREAN.1080p.BluRay.x265-VXT_mid15s.srt",
+          "certified": true,
+          "cue_count": 869
+        }
+      ]
+    },
+    {
+      "media_hash": "c64dd5a0d21c69495abd706534e67108",
+      "media_name": "utopia.s01e02.720p.bluray.sujaidr_mid15s",
+      "phash_filename": "utopia.s01e02.720p.bluray.sujaidr_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "401644f93372d147e0f299e831563114",
+          "name": "utopia.s01e02.720p.bluray.sujaidr_mid15s.srt",
+          "lang": "en",
+          "srt_path": "utopia.s01e02.720p.bluray.sujaidr_mid15s.srt",
+          "certified": true,
+          "cue_count": 556
+        }
+      ]
+    },
+    {
+      "media_hash": "996fef053c8dc1400389ab58e4f92ce4",
+      "media_name": "The.Fisher.King.1991.1080p.BluRay.x264-[YTS.AG]_mid15s",
+      "phash_filename": "The.Fisher.King.1991.1080p.BluRay.x264-[YTS.AG]_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "95cbfec5ebf4715d105b2a1bd9b9805a",
+          "name": "The.Fisher.King.1991.1080p.BluRay.x264-[YTS.AG]_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Fisher.King.1991.1080p.BluRay.x264-[YTS.AG]_mid15s.srt",
+          "certified": true,
+          "cue_count": 1721
+        }
+      ]
+    },
+    {
+      "media_hash": "b55bbf3e7ed9952850612a636661e61a",
+      "media_name": "The.Office.US.S04E12.The.Deposition.WEBRip.x264-FGT_mid15s",
+      "phash_filename": "The.Office.US.S04E12.The.Deposition.WEBRip.x264-FGT_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "f01dfb0660d2a5a23f2e27bf1e1d2fe2",
+          "name": "The.Office.US.S04E12.The.Deposition.WEBRip.x264-FGT_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S04E12.The.Deposition.WEBRip.x264-FGT_mid15s.srt",
+          "certified": true,
+          "cue_count": 541
+        }
+      ]
+    },
+    {
+      "media_hash": "846873e6ae1569a39ade0741f9322a53",
+      "media_name": "westworld.s04e04.1080p.web.h264-cakes[eztv.re]_mid15s",
+      "phash_filename": "westworld.s04e04.1080p.web.h264-cakes[eztv.re]_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "a2e6e9d4c098383d224a07225e34bf04",
+          "name": "westworld.s04e04.1080p.web.h264-cakes[eztv.re]_mid15s.srt",
+          "lang": "en",
+          "srt_path": "westworld.s04e04.1080p.web.h264-cakes[eztv.re]_mid15s.srt",
+          "certified": true,
+          "cue_count": 482
+        }
+      ]
+    },
+    {
+      "media_hash": "775e26b824ea7eba61b11abf1f168e81",
+      "media_name": "The.Office.US.S07E11.720p.NF.WEB.x264-MRSK_mid15s",
+      "phash_filename": "The.Office.US.S07E11.720p.NF.WEB.x264-MRSK_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "ee7f5c2b8070273b4f6561c88e3ee8fa",
+          "name": "The.Office.US.S07E11.720p.NF.WEB.x264-MRSK_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S07E11.720p.NF.WEB.x264-MRSK_mid15s.srt",
+          "certified": true,
+          "cue_count": 467
+        }
+      ]
+    },
+    {
+      "media_hash": "33084cd23cd4f3c321d750e09470e0e5",
+      "media_name": "The.Lord.of.the.Rings.The.Fellowship.of.the.Ring.2001.EXTENDED.REMASTERED.1080p.BluRay.x265-RARBG_mid15s",
+      "phash_filename": "The.Lord.of.the.Rings.The.Fellowship.of.the.Ring.2001.EXTENDED.REMASTERED.1080p.BluRay.x265-RARBG_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "68abe92b18c9b3e25f924a69938ce278",
+          "name": "The.Lord.of.the.Rings.The.Fellowship.of.the.Ring.2001.EXTENDED.REMASTERED.1080p.BluRay.x265-RARBG_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Lord.of.the.Rings.The.Fellowship.of.the.Ring.2001.EXTENDED.REMASTERED.1080p.BluRay.x265-RARBG_mid15s.srt",
+          "certified": true,
+          "cue_count": 1852
+        }
+      ]
+    },
+    {
+      "media_hash": "441a0a0e9dd7e8fd857167afefa0b7e5",
+      "media_name": "The.Office.US.S07E22.720p.NF.WEB.x264-MRSK_mid15s",
+      "phash_filename": "The.Office.US.S07E22.720p.NF.WEB.x264-MRSK_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "29930ba928afbb48696a8eb03d07decd",
+          "name": "The.Office.US.S07E22.720p.NF.WEB.x264-MRSK_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S07E22.720p.NF.WEB.x264-MRSK_mid15s.srt",
+          "certified": true,
+          "cue_count": 560
+        }
+      ]
+    },
+    {
+      "media_hash": "771e835d700fbcec856c667fd361e491",
+      "media_name": "Star.Wars.Episode.VII.-.The.Force.Awakens.2015.2160p.4K.BluRay.x265.10bit.AAC5.1-[YTS.MX]_mid15s",
+      "phash_filename": "Star.Wars.Episode.VII.-.The.Force.Awakens.2015.2160p.4K.BluRay.x265.10bit.AAC5.1-[YTS.MX]_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "0b70e6b1f6a6953dd2ae9679363beeda",
+          "name": "Star.Wars.Episode.VII.-.The.Force.Awakens.2015.2160p.4K.BluRay.x265.10bit.AAC5.1-[YTS.MX]_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Star.Wars.Episode.VII.-.The.Force.Awakens.2015.2160p.4K.BluRay.x265.10bit.AAC5.1-[YTS.MX]_mid15s.srt",
+          "certified": true,
+          "cue_count": 1348
+        }
+      ]
+    },
+    {
+      "media_hash": "9ebabebd3fedc0273b8cf98aad699c91",
+      "media_name": "The.Office.US.S04E18E19.Goodbye.Toby.WEBRip.x264-FGT_mid15s",
+      "phash_filename": "The.Office.US.S04E18E19.Goodbye.Toby.WEBRip.x264-FGT_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "d0b803d4a6ed1ed8dc69b7650d37ba3f",
+          "name": "The.Office.US.S04E18E19.Goodbye.Toby.WEBRip.x264-FGT_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S04E18E19.Goodbye.Toby.WEBRip.x264-FGT_mid15s.srt",
+          "certified": true,
+          "cue_count": 1008
+        }
+      ]
+    },
+    {
+      "media_hash": "2bd974cb9371edc00a8b46219ca3ba99",
+      "media_name": "I.Am.Legend.ALTERNATE.ENDING.2007.1080p.BrRip.x264.YIFY_mid15s",
+      "phash_filename": "I.Am.Legend.ALTERNATE.ENDING.2007.1080p.BrRip.x264.YIFY_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "b72b58a06f0b5b56188b337288c2dd74",
+          "name": "I.Am.Legend.ALTERNATE.ENDING.2007.1080p.BrRip.x264.YIFY_mid15s.srt",
+          "lang": "en",
+          "srt_path": "I.Am.Legend.ALTERNATE.ENDING.2007.1080p.BrRip.x264.YIFY_mid15s.srt",
+          "certified": true,
+          "cue_count": 552
+        }
+      ]
+    },
+    {
+      "media_hash": "69ad767202f3a589032578e4bacc90fc",
+      "media_name": "The.Expanse.S03E13.Abaddons.Gate.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG_mid15s",
+      "phash_filename": "The.Expanse.S03E13.Abaddons.Gate.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "7107c9e8de9caee780c82e217c499009",
+          "name": "The.Expanse.S03E13.Abaddons.Gate.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Expanse.S03E13.Abaddons.Gate.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG_mid15s.srt",
+          "certified": true,
+          "cue_count": 406
+        }
+      ]
+    },
+    {
+      "media_hash": "0d67eaec4213720245db6fe2541ba06d",
+      "media_name": "Inverso.The.Peripheral.S01E05.Tutte.le.manie.di.Bob.ITA.ENG.HDR.2160p.WEB.h265-MeM.GP_mid15s",
+      "phash_filename": "Inverso.The.Peripheral.S01E05.Tutte.le.manie.di.Bob.ITA.ENG.HDR.2160p.WEB.h265-MeM.GP_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "b6a5374e0d63fdb4fe26d194b62a9b47",
+          "name": "Inverso.The.Peripheral.S01E05.Tutte.le.manie.di.Bob.ITA.ENG.HDR.2160p.WEB.h265-MeM.GP_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Inverso.The.Peripheral.S01E05.Tutte.le.manie.di.Bob.ITA.ENG.HDR.2160p.WEB.h265-MeM.GP_mid15s.srt",
+          "certified": true,
+          "cue_count": 642
+        }
+      ]
+    },
+    {
+      "media_hash": "69c6f4e0cd7badca4f2a467e80c0b5f6",
+      "media_name": "The.Office.US.S07E16.720p.NF.WEB.x264-MRSK_mid15s",
+      "phash_filename": "The.Office.US.S07E16.720p.NF.WEB.x264-MRSK_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "505d99428272aa2c24702e677957b666",
+          "name": "The.Office.US.S07E16.720p.NF.WEB.x264-MRSK_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S07E16.720p.NF.WEB.x264-MRSK_mid15s.srt",
+          "certified": true,
+          "cue_count": 391
+        }
+      ]
+    },
+    {
+      "media_hash": "6526a86eefdc86f11e428a7f48a81909",
+      "media_name": "Nappily.Ever.After.2018.1080p.WEBRip.x264-RARBG_mid15s",
+      "phash_filename": "Nappily.Ever.After.2018.1080p.WEBRip.x264-RARBG_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "0b6e72574d3d4fec93ec78742c04dc1e",
+          "name": "Nappily.Ever.After.2018.1080p.WEBRip.x264-RARBG_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Nappily.Ever.After.2018.1080p.WEBRip.x264-RARBG_mid15s.srt",
+          "certified": true,
+          "cue_count": 1269
+        }
+      ]
+    },
+    {
+      "media_hash": "cbabeafe713f4f14a6097b35f83abc49",
+      "media_name": "Inverso.The.Peripheral.S01E06.Fanculo.e.ingoia.merda.ITA.ENG.HDR.2160p.WEB.h265-MeM.GP_mid15s",
+      "phash_filename": "Inverso.The.Peripheral.S01E06.Fanculo.e.ingoia.merda.ITA.ENG.HDR.2160p.WEB.h265-MeM.GP_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "89a4258bc05b5091c19bd59a6b10730c",
+          "name": "Inverso.The.Peripheral.S01E06.Fanculo.e.ingoia.merda.ITA.ENG.HDR.2160p.WEB.h265-MeM.GP_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Inverso.The.Peripheral.S01E06.Fanculo.e.ingoia.merda.ITA.ENG.HDR.2160p.WEB.h265-MeM.GP_mid15s.srt",
+          "certified": true,
+          "cue_count": 815
+        }
+      ]
+    },
+    {
+      "media_hash": "d2cfd6a52797a62d750dfc3a722ad409",
+      "media_name": "The.Pursuit.Of.Happyness.2006.1080p.BluRay.H264.AAC-RARBG_mid15s",
+      "phash_filename": "The.Pursuit.Of.Happyness.2006.1080p.BluRay.H264.AAC-RARBG_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "4d5c7c20af5366f7b00bef03aaa55f2d",
+          "name": "The.Pursuit.Of.Happyness.2006.1080p.BluRay.H264.AAC-RARBG_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Pursuit.Of.Happyness.2006.1080p.BluRay.H264.AAC-RARBG_mid15s.srt",
+          "certified": true,
+          "cue_count": 1250
+        }
+      ]
+    },
+    {
+      "media_hash": "a1542304f9dac85fc04484e09b036fe5",
+      "media_name": "The.Office.US.S07E13.720p.NF.WEB.x264-MRSK_mid15s",
+      "phash_filename": "The.Office.US.S07E13.720p.NF.WEB.x264-MRSK_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "b50f18b17071f3a2b1ccd6577bf42fa3",
+          "name": "The.Office.US.S07E13.720p.NF.WEB.x264-MRSK_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S07E13.720p.NF.WEB.x264-MRSK_mid15s.srt",
+          "certified": true,
+          "cue_count": 421
+        }
+      ]
+    },
+    {
+      "media_hash": "be2ce06ee94fdddbe3e90af1c9576f9d",
+      "media_name": "Euphoria.US.S01E05.1080p.WEBRip.x265-RARBG_mid15s",
+      "phash_filename": "Euphoria.US.S01E05.1080p.WEBRip.x265-RARBG_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "1b4e8a7a94da9b3d6e506595bd195211",
+          "name": "Euphoria.US.S01E05.1080p.WEBRip.x265-RARBG_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Euphoria.US.S01E05.1080p.WEBRip.x265-RARBG_mid15s.srt",
+          "certified": true,
+          "cue_count": 675
+        }
+      ]
+    },
+    {
+      "media_hash": "a682082489b0b2c2bab37ac2ddf3ef7d",
+      "media_name": "Halt.and.Catch.Fire.S03E08.You.Are.Not.Safe.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s",
+      "phash_filename": "Halt.and.Catch.Fire.S03E08.You.Are.Not.Safe.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "caa84813495b68c67510d44fee0cb762",
+          "name": "Halt.and.Catch.Fire.S03E08.You.Are.Not.Safe.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Halt.and.Catch.Fire.S03E08.You.Are.Not.Safe.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s.srt",
+          "certified": true,
+          "cue_count": 580
+        }
+      ]
+    },
+    {
+      "media_hash": "ee34d5a6c78500d826eb0a7a64c75e9f",
+      "media_name": "The.Office.US.S07E03.720p.NF.WEB.x264-MRSK_mid15s",
+      "phash_filename": "The.Office.US.S07E03.720p.NF.WEB.x264-MRSK_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "51cd6e89d9af7981b4d2ffe23e4abb41",
+          "name": "The.Office.US.S07E03.720p.NF.WEB.x264-MRSK_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S07E03.720p.NF.WEB.x264-MRSK_mid15s.srt",
+          "certified": true,
+          "cue_count": 364
+        }
+      ]
+    },
+    {
+      "media_hash": "017fc9f6ab709d95aaa8cf453dc08415",
+      "media_name": "Waves.2019.1080p.WEBRip.x264.AAC5.1-[YTS.LT]_mid15s",
+      "phash_filename": "Waves.2019.1080p.WEBRip.x264.AAC5.1-[YTS.LT]_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "093a1621981a5a24a528aa20408804c2",
+          "name": "Waves.2019.1080p.WEBRip.x264.AAC5.1-[YTS.LT]_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Waves.2019.1080p.WEBRip.x264.AAC5.1-[YTS.LT]_mid15s.srt",
+          "certified": true,
+          "cue_count": 1596
+        }
+      ]
+    },
+    {
+      "media_hash": "9fe8ec3a925af2239d5be0555f695dce",
+      "media_name": "utopia.s01e01.proper_720p_bluray.sujaidr_mid15s",
+      "phash_filename": "utopia.s01e01.proper_720p_bluray.sujaidr_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "d2b5644489d0a33ae2b24e6de65aeaf9",
+          "name": "utopia.s01e01.proper_720p_bluray.sujaidr_mid15s.srt",
+          "lang": "en",
+          "srt_path": "utopia.s01e01.proper_720p_bluray.sujaidr_mid15s.srt",
+          "certified": true,
+          "cue_count": 624
+        }
+      ]
+    },
+    {
+      "media_hash": "1e2a38f45852d9cf9dbf1b025132574d",
+      "media_name": "mr.robot.s03e06.1080p.bluray.x264-rovers_mid15s",
+      "phash_filename": "mr.robot.s03e06.1080p.bluray.x264-rovers_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "6c6ed851ec911c997aa9ce93cf5d91a1",
+          "name": "mr.robot.s03e06.1080p.bluray.x264-rovers_mid15s.srt",
+          "lang": "en",
+          "srt_path": "mr.robot.s03e06.1080p.bluray.x264-rovers_mid15s.srt",
+          "certified": true,
+          "cue_count": 505
+        }
+      ]
+    },
+    {
+      "media_hash": "d185f3f9182bc458d2b49ee61228cb31",
+      "media_name": "The.Office.US.S07E12.720p.NF.WEB.x264-MRSK_mid15s",
+      "phash_filename": "The.Office.US.S07E12.720p.NF.WEB.x264-MRSK_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "823546c5f5b67010d8821e16aef0036e",
+          "name": "The.Office.US.S07E12.720p.NF.WEB.x264-MRSK_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S07E12.720p.NF.WEB.x264-MRSK_mid15s.srt",
+          "certified": true,
+          "cue_count": 305
+        }
+      ]
+    },
+    {
+      "media_hash": "90dca710d94829af7347e06ed802e879",
+      "media_name": "what.we.do.in.the.shadows.s04e02.1080p.web.h264-plzproper_mid15s",
+      "phash_filename": "what.we.do.in.the.shadows.s04e02.1080p.web.h264-plzproper_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "f777f304a56c06a9a66fa425e9041384",
+          "name": "what.we.do.in.the.shadows.s04e02.1080p.web.h264-plzproper_mid15s.srt",
+          "lang": "en",
+          "srt_path": "what.we.do.in.the.shadows.s04e02.1080p.web.h264-plzproper_mid15s.srt",
+          "certified": true,
+          "cue_count": 507
+        }
+      ]
+    },
+    {
+      "media_hash": "d81624d2609a7b122d8bd93270cb29d7",
+      "media_name": "mr.robot.s03e02.1080p.bluray.x264-rovers_mid15s",
+      "phash_filename": "mr.robot.s03e02.1080p.bluray.x264-rovers_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "76a84c1381a85f345aa9db89b9a8128a",
+          "name": "mr.robot.s03e02.1080p.bluray.x264-rovers_mid15s.srt",
+          "lang": "en",
+          "srt_path": "mr.robot.s03e02.1080p.bluray.x264-rovers_mid15s.srt",
+          "certified": true,
+          "cue_count": 712
+        }
+      ]
+    },
+    {
+      "media_hash": "2dad51e5d978b76e627d71fd1b96c9ea",
+      "media_name": "The.Walking.Dead.Daryl.Dixon.S01E03.2160p.WEB.h265_iris2_mid15s",
+      "phash_filename": "The.Walking.Dead.Daryl.Dixon.S01E03.2160p.WEB.h265_iris2_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "80a29b949d792d02eee0fa69fe8a575b",
+          "name": "The.Walking.Dead.Daryl.Dixon.S01E03.2160p.WEB.h265_iris2_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Walking.Dead.Daryl.Dixon.S01E03.2160p.WEB.h265_iris2_mid15s.srt",
+          "certified": true,
+          "cue_count": 395
+        }
+      ]
+    },
+    {
+      "media_hash": "6c41bbd033e9396381d617c96694807d",
+      "media_name": "This.Is.Spinal.Tap.1984.1080p.BluRay.x265-RARBG_mid15s",
+      "phash_filename": "This.Is.Spinal.Tap.1984.1080p.BluRay.x265-RARBG_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "4ec5df2465f4292580657be8b9938e88",
+          "name": "This.Is.Spinal.Tap.1984.1080p.BluRay.x265-RARBG_mid15s.srt",
+          "lang": "en",
+          "srt_path": "This.Is.Spinal.Tap.1984.1080p.BluRay.x265-RARBG_mid15s.srt",
+          "certified": true,
+          "cue_count": 1261
+        }
+      ]
+    },
+    {
+      "media_hash": "eb1b67b29468d6ed0a63462ddac3ee32",
+      "media_name": "The.Office.US.S04E17.1080p.AMZN.WEB.x264-MRSK_mid15s",
+      "phash_filename": "The.Office.US.S04E17.1080p.AMZN.WEB.x264-MRSK_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "03e523105b828ccacb37338e90c0c336",
+          "name": "The.Office.US.S04E17.1080p.AMZN.WEB.x264-MRSK_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S04E17.1080p.AMZN.WEB.x264-MRSK_mid15s.srt",
+          "certified": true,
+          "cue_count": 355
+        }
+      ]
+    },
+    {
+      "media_hash": "1a71c78066b9f2297ef779e09c026b17",
+      "media_name": "Halt.and.Catch.Fire.S04E05.Nowhere.Man.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s",
+      "phash_filename": "Halt.and.Catch.Fire.S04E05.Nowhere.Man.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "582d869a9a9e11358008b7777928c710",
+          "name": "Halt.and.Catch.Fire.S04E05.Nowhere.Man.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Halt.and.Catch.Fire.S04E05.Nowhere.Man.1080p.AMZN.WEB-DL.DD5.1.H265-SiGMA_mid15s.srt",
+          "certified": true,
+          "cue_count": 610
+        }
+      ]
+    },
+    {
+      "media_hash": "aac2306f638ce03035d7168c400a539b",
+      "media_name": "The.Office.US.S04E07-08.1080p.AMZN.WEB.x264-MRSK_mid15s",
+      "phash_filename": "The.Office.US.S04E07-08.1080p.AMZN.WEB.x264-MRSK_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "2912b4a0ed4a22b3902ad2d58acc3366",
+          "name": "The.Office.US.S04E07-08.1080p.AMZN.WEB.x264-MRSK_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S04E07-08.1080p.AMZN.WEB.x264-MRSK_mid15s.srt",
+          "certified": true,
+          "cue_count": 711
+        }
+      ]
+    },
+    {
+      "media_hash": "e9d4fa5511739e0adbba47b70dbda9ac",
+      "media_name": "Devs.S01E04.1080p.AMZN.WEB-DL.DDP5.1.H.264-TEPES_mid15s",
+      "phash_filename": "Devs.S01E04.1080p.AMZN.WEB-DL.DDP5.1.H.264-TEPES_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "1059f2c900ac38896e6d96f27f9c19e2",
+          "name": "Devs.S01E04.1080p.AMZN.WEB-DL.DDP5.1.H.264-TEPES_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Devs.S01E04.1080p.AMZN.WEB-DL.DDP5.1.H.264-TEPES_mid15s.srt",
+          "certified": true,
+          "cue_count": 450
+        }
+      ]
+    },
+    {
+      "media_hash": "aec5cd1089e92632e0f5f7bc554118ed",
+      "media_name": "Euphoria.US.S02E01.1080p.WEBRip.x265-RARBG_mid15s",
+      "phash_filename": "Euphoria.US.S02E01.1080p.WEBRip.x265-RARBG_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "3b5796e7da85e8b30b5bdd351ae2e7ea",
+          "name": "Euphoria.US.S02E01.1080p.WEBRip.x265-RARBG_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Euphoria.US.S02E01.1080p.WEBRip.x265-RARBG_mid15s.srt",
+          "certified": true,
+          "cue_count": 710
+        }
+      ]
+    },
+    {
+      "media_hash": "41c2425766e30b9a3227321827d4da96",
+      "media_name": "mr.robot.s01e07.1080p.bluray.x264-rovers_mid15s",
+      "phash_filename": "mr.robot.s01e07.1080p.bluray.x264-rovers_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "d5c2c920abf4f2320f00c3d2aae30b25",
+          "name": "mr.robot.s01e07.1080p.bluray.x264-rovers_mid15s.srt",
+          "lang": "en",
+          "srt_path": "mr.robot.s01e07.1080p.bluray.x264-rovers_mid15s.srt",
+          "certified": true,
+          "cue_count": 564
+        }
+      ]
+    },
+    {
+      "media_hash": "774bb957e1cee7bf7e22e086ae151549",
+      "media_name": "The.Office.US.S04E09.Local.Ad.WEBRip.x264-FGT_mid15s",
+      "phash_filename": "The.Office.US.S04E09.Local.Ad.WEBRip.x264-FGT_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "d2231fb54329152706f8878de6c7c077",
+          "name": "The.Office.US.S04E09.Local.Ad.WEBRip.x264-FGT_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S04E09.Local.Ad.WEBRip.x264-FGT_mid15s.srt",
+          "certified": true,
+          "cue_count": 532
+        }
+      ]
+    },
+    {
+      "media_hash": "191eefc16669de14b8362e150a8f4cf4",
+      "media_name": "The.Expanse.S03E02.REPACK.IFF.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG_mid15s",
+      "phash_filename": "The.Expanse.S03E02.REPACK.IFF.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "b575e71b4f9c6fb8abfe5e6ed558b469",
+          "name": "The.Expanse.S03E02.REPACK.IFF.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Expanse.S03E02.REPACK.IFF.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG_mid15s.srt",
+          "certified": true,
+          "cue_count": 472
+        }
+      ]
+    },
+    {
+      "media_hash": "948655ff5c7d9e515ab91d0825a1d3bc",
+      "media_name": "The.Passion.Of.The.Christ.2004.1080p.BluRay.x264-Japhson_mid15s",
+      "phash_filename": "The.Passion.Of.The.Christ.2004.1080p.BluRay.x264-Japhson_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "0cc21d7147e29a3e833b20a2af35506d",
+          "name": "The.Passion.Of.The.Christ.2004.1080p.BluRay.x264-Japhson_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Passion.Of.The.Christ.2004.1080p.BluRay.x264-Japhson_mid15s.srt",
+          "certified": true,
+          "cue_count": 520
+        }
+      ]
+    },
+    {
+      "media_hash": "40caa76378b2b3dd4f623b3a6d281040",
+      "media_name": "Euphoria.US.S01E08.1080p.WEBRip.x265-RARBG_mid15s",
+      "phash_filename": "Euphoria.US.S01E08.1080p.WEBRip.x265-RARBG_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "448987ab23d5de44ae8de1b888fb68f1",
+          "name": "Euphoria.US.S01E08.1080p.WEBRip.x265-RARBG_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Euphoria.US.S01E08.1080p.WEBRip.x265-RARBG_mid15s.srt",
+          "certified": true,
+          "cue_count": 642
+        }
+      ]
+    },
+    {
+      "media_hash": "78f604257bb7d243641bc9c318264cf1",
+      "media_name": "Strange.Days.1995.1080p.BluRay.x264.AAC5.1-[YTS.MX]_mid15s",
+      "phash_filename": "Strange.Days.1995.1080p.BluRay.x264.AAC5.1-[YTS.MX]_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "d14a7064c1d2e8e5aecaac2e16b11128",
+          "name": "Strange.Days.1995.1080p.BluRay.x264.AAC5.1-[YTS.MX]_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Strange.Days.1995.1080p.BluRay.x264.AAC5.1-[YTS.MX]_mid15s.srt",
+          "certified": true,
+          "cue_count": 1259
+        }
+      ]
+    },
+    {
+      "media_hash": "30fd42d662dc50e3f5b504a0e2b198d5",
+      "media_name": "Shogun.2024.S01E05.Broken.to.the.Fist.2160p.HULU.WEB-DL.DD+5.1.H.265-playWEB_mid15s",
+      "phash_filename": "Shogun.2024.S01E05.Broken.to.the.Fist.2160p.HULU.WEB-DL.DD+5.1.H.265-playWEB_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "bebfa65f125ac1948201bb09d9cc9501",
+          "name": "Shogun.2024.S01E05.Broken.to.the.Fist.2160p.HULU.WEB-DL.DD+5.1.H.265-playWEB_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Shogun.2024.S01E05.Broken.to.the.Fist.2160p.HULU.WEB-DL.DD+5.1.H.265-playWEB_mid15s.srt",
+          "certified": true,
+          "cue_count": 546
+        }
+      ]
+    },
+    {
+      "media_hash": "d02fd9345b3e68045715e3a9070cf104",
+      "media_name": "Zombieland.2009.720p.BrRip.x264-YIFY_mid15s",
+      "phash_filename": "Zombieland.2009.720p.BrRip.x264-YIFY_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "b2e7eba5e6c318bbce73a430392bd374",
+          "name": "Zombieland.2009.720p.BrRip.x264-YIFY_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Zombieland.2009.720p.BrRip.x264-YIFY_mid15s.srt",
+          "certified": true,
+          "cue_count": 887
+        }
+      ]
+    },
+    {
+      "media_hash": "030e94d5015f223ff0a1f43863c1d4d1",
+      "media_name": "His.Dark.Materials.S02E05.The.Scholar.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb_mid15s",
+      "phash_filename": "His.Dark.Materials.S02E05.The.Scholar.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "63ff06e40f07a8203e8cd2df8cb56573",
+          "name": "His.Dark.Materials.S02E05.The.Scholar.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb_mid15s.srt",
+          "lang": "en",
+          "srt_path": "His.Dark.Materials.S02E05.The.Scholar.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb_mid15s.srt",
+          "certified": true,
+          "cue_count": 496
+        }
+      ]
+    },
+    {
+      "media_hash": "a15ab401b08302ac8b1958b63b4673ee",
+      "media_name": "Devs.S01E05.1080p.AMZN.WEB-DL.DDP5.1.H.264-TEPES_mid15s",
+      "phash_filename": "Devs.S01E05.1080p.AMZN.WEB-DL.DDP5.1.H.264-TEPES_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "03c57e64a96da55d8e2421e19673418a",
+          "name": "Devs.S01E05.1080p.AMZN.WEB-DL.DDP5.1.H.264-TEPES_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Devs.S01E05.1080p.AMZN.WEB-DL.DDP5.1.H.264-TEPES_mid15s.srt",
+          "certified": true,
+          "cue_count": 388
+        }
+      ]
+    },
+    {
+      "media_hash": "4d008be0d175b222407c92643612d38c",
+      "media_name": "The.Holy.Mountain.1973.1080p.BluRay.H264.AAC-RARBG_mid15s",
+      "phash_filename": "The.Holy.Mountain.1973.1080p.BluRay.H264.AAC-RARBG_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "a35b3f50e0211997f54dbf48383db99e",
+          "name": "The.Holy.Mountain.1973.1080p.BluRay.H264.AAC-RARBG_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Holy.Mountain.1973.1080p.BluRay.H264.AAC-RARBG_mid15s.srt",
+          "certified": true,
+          "cue_count": 385
+        }
+      ]
+    },
+    {
+      "media_hash": "f040e3904f63e028a5f1e6be7be8904e",
+      "media_name": "The.Office.US.S04E16.1080p.AMZN.WEB.x264-MRSK_mid15s",
+      "phash_filename": "The.Office.US.S04E16.1080p.AMZN.WEB.x264-MRSK_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "3e092e45e7023286402427bc9205d2f1",
+          "name": "The.Office.US.S04E16.1080p.AMZN.WEB.x264-MRSK_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S04E16.1080p.AMZN.WEB.x264-MRSK_mid15s.srt",
+          "certified": true,
+          "cue_count": 405
+        }
+      ]
+    },
+    {
+      "media_hash": "a4abb7846bad4b0bca7497922a5079b1",
+      "media_name": "Severance.S01E05.The.Grim.Barbarity.of.Optics.and.Design.1080p.ATVP.WEB-DL.DDP5.1.H.264-EniaHD_mid15s",
+      "phash_filename": "Severance.S01E05.The.Grim.Barbarity.of.Optics.and.Design.1080p.ATVP.WEB-DL.DDP5.1.H.264-EniaHD_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "f848165c6d168e5485779fe439b179b3",
+          "name": "Severance.S01E05.The.Grim.Barbarity.of.Optics.and.Design.1080p.ATVP.WEB-DL.DDP5.1.H.264-EniaHD_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Severance.S01E05.The.Grim.Barbarity.of.Optics.and.Design.1080p.ATVP.WEB-DL.DDP5.1.H.264-EniaHD_mid15s.srt",
+          "certified": true,
+          "cue_count": 533
+        }
+      ]
+    },
+    {
+      "media_hash": "b198703c1d32e227561b59dbca7f5b75",
+      "media_name": "The.Office.US.S07E18.720p.NF.WEB.x264-MRSK_mid15s",
+      "phash_filename": "The.Office.US.S07E18.720p.NF.WEB.x264-MRSK_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "2c8aa1b82eb58ef4464d09a6ba52c2c7",
+          "name": "The.Office.US.S07E18.720p.NF.WEB.x264-MRSK_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S07E18.720p.NF.WEB.x264-MRSK_mid15s.srt",
+          "certified": true,
+          "cue_count": 439
+        }
+      ]
+    },
+    {
+      "media_hash": "51ae90b9bf3670ea0f504d74a70e490e",
+      "media_name": "The.Office.US.S07E21.720p.NF.WEB.x264-MRSK_mid15s",
+      "phash_filename": "The.Office.US.S07E21.720p.NF.WEB.x264-MRSK_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "37324dbb567ed55ae7756f7a8b1284bf",
+          "name": "The.Office.US.S07E21.720p.NF.WEB.x264-MRSK_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S07E21.720p.NF.WEB.x264-MRSK_mid15s.srt",
+          "certified": true,
+          "cue_count": 411
+        }
+      ]
+    },
+    {
+      "media_hash": "387a135f79203123c5ec435e90fe6218",
+      "media_name": "The.Office.US.S04E15.Night.Out.WEBRip.x264-FGT_mid15s",
+      "phash_filename": "The.Office.US.S04E15.Night.Out.WEBRip.x264-FGT_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "63653312a15f377e53c03b8298cc3d74",
+          "name": "The.Office.US.S04E15.Night.Out.WEBRip.x264-FGT_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S04E15.Night.Out.WEBRip.x264-FGT_mid15s.srt",
+          "certified": true,
+          "cue_count": 569
+        }
+      ]
+    },
+    {
+      "media_hash": "a264fa8388558697a2daac1bfd68cace",
+      "media_name": "Star.Wars.Episode.VIII.-.The.Last.Jedi.2017.2160p.4K.BluRay.x265.10bit.AAC5.1-[YTS.MX]_mid15s",
+      "phash_filename": "Star.Wars.Episode.VIII.-.The.Last.Jedi.2017.2160p.4K.BluRay.x265.10bit.AAC5.1-[YTS.MX]_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "90dff9300e952cc00167f1c8982e3fd5",
+          "name": "Star.Wars.Episode.VIII.-.The.Last.Jedi.2017.2160p.4K.BluRay.x265.10bit.AAC5.1-[YTS.MX]_mid15s.srt",
+          "lang": "en",
+          "srt_path": "Star.Wars.Episode.VIII.-.The.Last.Jedi.2017.2160p.4K.BluRay.x265.10bit.AAC5.1-[YTS.MX]_mid15s.srt",
+          "certified": true,
+          "cue_count": 1710
+        }
+      ]
+    },
+    {
+      "media_hash": "10cc1883e071b1f5e83c13375375db37",
+      "media_name": "The.Office.US.S03E22.Beach.Games.1080p.BluRay.DDP5.1.x264-BTN_mid15s",
+      "phash_filename": "The.Office.US.S03E22.Beach.Games.1080p.BluRay.DDP5.1.x264-BTN_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "658b82210d0d26ad53a87b7d912dd0db",
+          "name": "The.Office.US.S03E22.Beach.Games.1080p.BluRay.DDP5.1.x264-BTN_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Office.US.S03E22.Beach.Games.1080p.BluRay.DDP5.1.x264-BTN_mid15s.srt",
+          "certified": true,
+          "cue_count": 484
+        }
+      ]
+    },
+    {
+      "media_hash": "d8d1699b389dc76552badfe083cac318",
+      "media_name": "The.Expanse.S03E06.Immolation.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG_mid15s",
+      "phash_filename": "The.Expanse.S03E06.Immolation.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG_mid15s.phash",
+      "fps": 24.0,
+      "frame_count": 360,
+      "in_postgres": false,
+      "subtitles": [
+        {
+          "subtitles_hash": "d2ff08ef03649de1775dc848d6d6ad94",
+          "name": "The.Expanse.S03E06.Immolation.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG_mid15s.srt",
+          "lang": "en",
+          "srt_path": "The.Expanse.S03E06.Immolation.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG_mid15s.srt",
+          "certified": true,
+          "cue_count": 417
+        }
+      ]
     }
   ]
 }
