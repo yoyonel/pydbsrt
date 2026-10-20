@@ -12,10 +12,14 @@ Suite à l'audit technique objectif de **VLSub legacy** ([audit complet](2026-10
 
 Le projet a donc opéré un retour rigoureux aux fondamentaux de VLSub sous la forme d'un **fork bonifié** :
 
-1. **Restauration 1:1 de l'interface graphique VLSub + Extension pHash** : conservation de la grille de saisie (choix de langue, recherche legacy par MovieHash `Search by hash`, nouvelle recherche visuelle `Search by pHash`, recherche par titre/saison/épisode `Search by name`, listbox de résultats, boutons d'action).
-2. **Substitut moderne du backend XML-RPC** : remplacement du code réseau obsolète par un client HTTP/REST communiquant avec le démon local `dbsrt-server` (Rust Axum).
-3. **Recherche multi-sources transparente** : identification visuelle `MmapLibrary` (`pHash`), recherche simultanée dans les pistes internes du conteneur (MKV/MP4), le catalogue local `data/SRT` et l'API OpenSubtitles REST.
-4. **Resynchronisation visuelle pHash automatique** : application automatique du recalage temporel dérivé des empreintes visuelles si une référence certifiée existe dans l'index local `MmapLibrary`.
+1. **Restauration 1:1 de l'interface graphique ISO VLSub + Extension pHash** : conservation stricte de la disposition 4 colonnes originale VLSub (choix de langue, recherche standard MovieHash `Search by hash`, recherche manuelle `Search by name`, et ajout du 3ème bouton dédié `Search by pHash`, listbox de résultats, boutons d'action explicites `Download selection` et `Show config`).
+2. **Zéro action automatique imposée** : aucune resynchronisation ou injection forcée en tâche de fond sans validation de l'utilisateur. Le serveur propose explicitement deux entrées distinctes si un décalage visuel est détecté : la version brute certifiée (`0.0s`) et la version synchronisée (`[Synced -XX.Xs]`).
+3. **Substitut moderne du backend XML-RPC** : remplacement du code réseau obsolète par un client HTTP/REST via socket TCP brute Lua communiquant avec le démon local `dbsrt-server` (Rust Axum).
+4. **Recherche multi-sources transparente** : identification visuelle `MmapLibrary` (`pHash`), recherche simultanée dans les pistes internes du conteneur (MKV/MP4), le catalogue local `data/SRT` et l'API OpenSubtitles REST.
+5. **Recalage hybride robuste (Scene Cuts + Cross-Correlation Continue)** :
+   * Si le média possède des transitions de scènes identifiables : consensus par vote BK-tree sur les cuts (`calculate_shift_consensus`).
+   * Si le média est un extrait court / snippet continu (ex: 15s sans changement de plan) : fenêtrage glissant par cross-correlation sur pHash 64-bit DCT (`calculate_sequence_shift_argmin`), garantissant une précision sub-seconde exacte.
+   * Élagage automatique des répliques négatives antérieures au début du snippet (`end_ms <= 0`) et réindexation séquentielle des IDs.
 
 ```mermaid
 graph TD
@@ -92,26 +96,30 @@ Un clic sur **Download + Sync** (qui sélectionne automatiquement `#01` si aucun
 | **Extraction Conteneur** | Impossible (OpenSubtitles seul) | Support natif pistes MKV/MP4 | **Empiriquement Prouvé** |
 | **Catalogue Local** | Absent | Scan instantané local `data/SRT` | **Empiriquement Prouvé** |
 | **Fournisseurs Externes** | OpenSubtitles (XML-RPC déprécié) | OpenSubtitles REST v1 + fallback | **Hermétiquement Mocké** (en attente clé prod) |
-| **Synchronisation Vidéo** | Nulle (0 ms statique) | Recalage pHash automatique | **Empiriquement Prouvé** |
-| **Mise en Page IHM** | Grille Qt native (dropdown, list) | Grille Qt 1:1 préservée | **Empiriquement Prouvé** |
+| **Synchronisation Vidéo** | Nulle (0 ms statique) | Recalage hybride (cuts + cross-correlation) | **Empiriquement Prouvé** |
+| **Ergonomie & Choix** | Téléchargement brut forcé | Choix explicite (Brut 0s vs Synced -XXs) | **Empiriquement Prouvé** |
+| **Mise en Page IHM** | Grille Qt native (dropdown, list) | Grille Qt 1:1 ISO VLSub + "Search by pHash" | **Empiriquement Prouvé** |
 | **Feedback Utilisateur** | Label d'état textuel seul | Label d'état + OSD vidéo temps réel | **Empiriquement Prouvé** |
 
 ---
 
 ## 5. Exécution & Recette Automatisée (Taskfile)
 
-Tous les scénarios d'installation, de test et d'enregistrement vidéo sont pilotables via `Taskfile.yml` :
+Tous les scénarios d'installation, de test et de validation sont pilotables via `Taskfile.yml` :
 
 ```bash
 # 1. Démarrer le démon local Rust Axum
 task server:daemon
 
-# 2. Installer les plugins VLC (VLSub fork + autosync)
+# 2. Installer les plugins VLC (VLSub dbsrt dans ~/.local/share/vlc/lua/extensions/)
 task vlc:install-plugin
 
-# 3. Exécuter le test d'intégration automatisé E2E (headless cvlc)
-task vlc
+# 3. Exécuter la suite complète de tests (unitaires Lua + bytecode + cvlc headless + GUI Xvfb)
+task vlc:test
 
-# 4. Enregistrer la vidéo HD 1080p et les captures d'écran (Xvfb)
-task vlc:record-demo
+# 4. Exécuter uniquement les tests unitaires mockés LibVLC (29 tests)
+task vlc:test:unit
+
+# 5. Tester l'interaction graphique E2E sous Xvfb avec xdotool
+task vlc:test:e2e
 ```
