@@ -22,6 +22,11 @@ if [[ -d "data/SRT" ]]; then
   rsync -avz --progress "data/SRT" "${RPI_HOST}:${REMOTE_BASE}/data/"
 fi
 
+if [[ -d "data/__PHASH__" ]]; then
+  echo "Syncing data/__PHASH__..."
+  rsync -avz --progress "data/__PHASH__" "${RPI_HOST}:${REMOTE_BASE}/data/"
+fi
+
 echo "Syncing docker-compose.rpi4.yml..."
 scp "docker/docker-compose.rpi4.yml" "${RPI_HOST}:${REMOTE_BASE}/docker-compose.yml"
 

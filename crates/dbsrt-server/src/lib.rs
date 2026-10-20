@@ -691,6 +691,7 @@ pub fn create_router_with_state(state: AppState) -> Router {
         .route("/v1/couplings/sub_frames", get(sub_frames_handler))
         .route("/v1/search", post(search_handler))
         .route("/v1/download", post(download_handler))
+        .route("/v1/subtitles/{hash}", get(get_subtitle_by_hash_handler))
         .route("/v1/certify", post(certify_handler))
         .route("/v1/recognize", post(recognize_handler))
         .route("/v1/retarget", post(retarget_handler))
@@ -1949,15 +1950,8 @@ fn lookup_certified_couplings(
                 if !any_lang && sub_lang != req_lang {
                     continue;
                 }
-                let full_srt_path = if Path::new(&sub.srt_path).is_absolute()
-                    || Path::new(&sub.srt_path).exists()
-                {
-                    PathBuf::from(&sub.srt_path)
-                } else {
-                    subtitles_dir.join(&sub.srt_path)
-                };
-                let full_str = full_srt_path.to_string_lossy().to_string();
-                if seen_paths.insert(full_str.clone()) {
+                let cas_id = format!("sub:sha256:{}", sub.subtitles_hash);
+                if seen_paths.insert(sub.subtitles_hash.clone()) {
                     certified_candidates.push(SubtitleCandidate {
                         source: SubtitleSource::Certified.as_str().to_string(),
                         language: sub_lang,
@@ -1970,7 +1964,7 @@ fn lookup_certified_couplings(
                             coupling.phash_filename,
                             phash_conf
                         )),
-                        candidate_id: Some(full_str),
+                        candidate_id: Some(cas_id),
                         shift_ms: None,
                     });
                 }
@@ -1996,20 +1990,16 @@ fn lookup_certified_couplings(
         }) {
             for DbSubtitleCoupling {
                 id,
+                subtitles_hash,
                 name,
                 lang,
                 media_name,
-                srt_path,
                 ..
             } in db_subs
             {
-                let resolved_path = srt_path.clone().unwrap_or_else(|| {
-                    subtitles_dir
-                        .join(format!("{}.srt", name))
-                        .to_string_lossy()
-                        .to_string()
-                });
-                if seen_paths.insert(resolved_path.clone()) {
+                let clean_h = subtitles_hash.trim().to_string();
+                let cas_id = format!("sub:sha256:{}", clean_h);
+                if seen_paths.insert(clean_h) {
                     certified_candidates.push(SubtitleCandidate {
                         source: SubtitleSource::Certified.as_str().to_string(),
                         language: lang,
@@ -2019,7 +2009,7 @@ fn lookup_certified_couplings(
                             "PostgreSQL Certified Coupling #{} for '{}' ({:.0}% conf)",
                             id, media_name, phash_conf
                         )),
-                        candidate_id: Some(resolved_path),
+                        candidate_id: Some(cas_id),
                         shift_ms: None,
                     });
                 }
@@ -2642,6 +2632,10 @@ pub async fn download_handler(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<DownloadSubtitleRequest>,
 ) -> Json<DownloadSubtitleResponse> {
+    state
+        .metrics
+        .total_requests
+        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let media_path = PathBuf::from(&payload.media_path);
     let subtitles_dir = payload
         .subtitles_dir
@@ -2708,25 +2702,144 @@ pub async fn download_handler(
             }
         }
         SubtitleSource::Certified | SubtitleSource::Catalog => {
-            let path = payload
-                .candidate_id
-                .map(PathBuf::from)
-                .unwrap_or_else(|| subtitles_dir.clone());
-            match SubtitleFile::open(&path) {
-                Ok(s) => (s, parsed_source.as_str().to_string()),
-                Err(e) => {
-                    return Json(DownloadSubtitleResponse {
-                        success: false,
-                        output_srt_path: String::new(),
-                        shift_frames: 0,
-                        shift_ms: 0.0,
-                        confidence_percent: 0.0,
-                        source: payload.source,
-                        language: payload.language,
-                        error: Some(format!("Failed to open catalog subtitle: {:#}", e)),
-                    });
+            let cand_id = payload.candidate_id.as_deref().unwrap_or_default();
+            let is_cas_hash = cand_id.starts_with("sub:sha256:") || cand_id.starts_with("sha256:");
+            let clean_hash = cand_id
+                .trim_start_matches("sub:sha256:")
+                .trim_start_matches("sha256:")
+                .trim();
+
+            let mut fetched_file: Option<SubtitleFile> = None;
+
+            // 1. Try local resolution first
+            if !is_cas_hash {
+                let local_path = PathBuf::from(cand_id);
+                if local_path.exists() {
+                    if let Ok(s) = SubtitleFile::open(&local_path) {
+                        fetched_file = Some(s);
+                    }
+                }
+            } else if let Ok(reg) = state.coupling_registry.read() {
+                if let Some((_coupling, sub)) = reg.find_subtitle_by_hash(clean_hash) {
+                    let p = if Path::new(&sub.srt_path).is_absolute()
+                        || Path::new(&sub.srt_path).exists()
+                    {
+                        PathBuf::from(&sub.srt_path)
+                    } else {
+                        subtitles_dir.join(&sub.srt_path)
+                    };
+                    if p.exists() {
+                        if let Ok(s) = SubtitleFile::open(&p) {
+                            fetched_file = Some(s);
+                        }
+                    }
                 }
             }
+
+            // 2. If not resolved locally and remote_api is configured, fetch from remote Subtitle Service (RPi4 / Cloud)
+            if fetched_file.is_none() && state.remote_api.is_some() {
+                if let Some(ref remote_url) = state.remote_api {
+                    let fetch_target = if is_cas_hash {
+                        clean_hash.to_string()
+                    } else {
+                        Path::new(cand_id)
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or(cand_id)
+                            .to_string()
+                    };
+
+                    let url = format!(
+                        "{}/v1/subtitles/{}",
+                        remote_url.trim_end_matches('/'),
+                        fetch_target
+                    );
+                    state.push_log(
+                        "REMOTE_CAS",
+                        "INFO",
+                        format!("Fetching subtitle from remote Subtitle Service: {}", url),
+                    );
+
+                    let client = reqwest::Client::builder()
+                        .timeout(std::time::Duration::from_secs(5))
+                        .build()
+                        .unwrap_or_default();
+
+                    match client.get(&url).send().await {
+                        Ok(resp) if resp.status().is_success() => {
+                            if let Ok(text) = resp.text().await {
+                                match SubtitleFile::parse(&text) {
+                                    Ok(s) => {
+                                        fetched_file = Some(s);
+                                        // Cache locally if possible
+                                        let cache_dir = state.cache.base_dir();
+                                        let _ = std::fs::create_dir_all(cache_dir);
+                                        let cache_file =
+                                            cache_dir.join(format!("{}.srt", clean_hash));
+                                        let _ = std::fs::write(&cache_file, &text);
+                                    }
+                                    Err(e) => {
+                                        state.push_log(
+                                            "REMOTE_CAS",
+                                            "ERROR",
+                                            format!(
+                                                "Failed to parse remote subtitle content: {:#}",
+                                                e
+                                            ),
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                        Ok(resp) => {
+                            state.push_log(
+                                "REMOTE_CAS",
+                                "WARN",
+                                format!(
+                                    "Remote Subtitle Service returned HTTP status {}",
+                                    resp.status()
+                                ),
+                            );
+                        }
+                        Err(e) => {
+                            state.push_log(
+                                "REMOTE_CAS",
+                                "ERROR",
+                                format!(
+                                    "Failed to connect to remote Subtitle Service at {}: {:#}",
+                                    url, e
+                                ),
+                            );
+                        }
+                    }
+                }
+            }
+
+            // 3. Fallback: try candidate_id as direct path
+            if fetched_file.is_none() {
+                let path = PathBuf::from(cand_id);
+                match SubtitleFile::open(&path) {
+                    Ok(s) => fetched_file = Some(s),
+                    Err(e) => {
+                        return Json(DownloadSubtitleResponse {
+                            success: false,
+                            output_srt_path: String::new(),
+                            shift_frames: 0,
+                            shift_ms: 0.0,
+                            confidence_percent: 0.0,
+                            source: payload.source,
+                            language: payload.language,
+                            error: Some(format!(
+                                "Failed to resolve subtitle (CAS hash '{}'): {:#}",
+                                clean_hash, e
+                            )),
+                        });
+                    }
+                }
+            }
+
+            let s = fetched_file.unwrap();
+            (s, parsed_source.as_str().to_string())
         }
         SubtitleSource::OpenSubtitles => {
             let sub_id = payload.candidate_id.clone().unwrap_or_default();
@@ -2866,6 +2979,121 @@ pub async fn download_handler(
         language: payload.language,
         error: None,
     })
+}
+
+pub async fn get_subtitle_by_hash_handler(
+    axum::extract::Path(hash): axum::extract::Path<String>,
+    State(state): State<Arc<AppState>>,
+) -> Result<axum::response::Response, (StatusCode, String)> {
+    state
+        .metrics
+        .total_requests
+        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let clean_hash = hash
+        .trim_start_matches("sub:sha256:")
+        .trim_start_matches("sha256:")
+        .trim();
+
+    state.push_log(
+        "CAS",
+        "INFO",
+        format!("Requested subtitle by hash: '{}'", clean_hash),
+    );
+
+    // 1. Look up in coupling registry
+    let mut resolved_path: Option<(PathBuf, String)> = None;
+    if let Ok(reg) = state.coupling_registry.read() {
+        if let Some((_coupling, sub)) = reg.find_subtitle_by_hash(clean_hash) {
+            let p = if Path::new(&sub.srt_path).is_absolute() || Path::new(&sub.srt_path).exists() {
+                PathBuf::from(&sub.srt_path)
+            } else {
+                state.subtitles_dir.join(&sub.srt_path)
+            };
+            if p.exists() {
+                resolved_path = Some((p, sub.name.clone()));
+            }
+        }
+    }
+
+    // 2. Look up in PostgreSQL subtitles table if configured
+    if resolved_path.is_none() {
+        if let Some(ref cfg) = state.db_config {
+            let _ = cfg.with_client(|client| {
+                if let Ok(subs) = client.get_subtitles_for_media(None, None, None) {
+                    for s in subs {
+                        if s.subtitles_hash.eq_ignore_ascii_case(clean_hash)
+                            || s.subtitles_hash.starts_with(clean_hash)
+                            || clean_hash.starts_with(&s.subtitles_hash)
+                        {
+                            let p = s.srt_path.map(PathBuf::from).unwrap_or_else(|| {
+                                state.subtitles_dir.join(format!("{}.srt", s.name))
+                            });
+                            if p.exists() {
+                                resolved_path = Some((p, s.name));
+                                break;
+                            }
+                        }
+                    }
+                }
+                Ok(())
+            });
+        }
+    }
+
+    // 3. Fallback: search subtitles_dir for matching filename or hash
+    if resolved_path.is_none() {
+        if let Ok(entries) = std::fs::read_dir(&state.subtitles_dir) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                let fname_opt = p
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .map(|s| s.to_string());
+                if let Some(fname) = fname_opt {
+                    if fname.ends_with(".srt")
+                        && (fname.contains(clean_hash) || clean_hash.contains(&fname))
+                    {
+                        resolved_path = Some((p, fname));
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    match resolved_path {
+        Some((path, filename)) => {
+            let content = std::fs::read_to_string(&path).map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to read subtitle file: {:#}", e),
+                )
+            })?;
+
+            let res = axum::response::Response::builder()
+                .status(StatusCode::OK)
+                .header("Content-Type", "text/plain; charset=utf-8")
+                .header("Cache-Control", "public, max-age=31536000, immutable")
+                .header("ETag", format!("\"{}\"", clean_hash))
+                .header(
+                    "Content-Disposition",
+                    format!("inline; filename=\"{}\"", filename),
+                )
+                .body(axum::body::Body::from(content))
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("Failed to build response: {:#}", e),
+                    )
+                })?;
+
+            Ok(res)
+        }
+        None => Err((
+            StatusCode::NOT_FOUND,
+            format!("Subtitle resource with hash '{}' not found", clean_hash),
+        )),
+    }
 }
 
 pub async fn certify_handler(

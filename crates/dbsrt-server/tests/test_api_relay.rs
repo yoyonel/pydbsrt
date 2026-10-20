@@ -109,24 +109,83 @@ async fn test_dual_process_remote_relay_e2e() {
         res_data.candidates
     );
 
-    // 4. Verify Observability: Local agent metrics
+    // 4. Test CAS Subtitle Service: GET /v1/subtitles/{hash} on Remote Server
+    let top_cand = &res_data.candidates[0];
+    let cand_id = top_cand
+        .candidate_id
+        .as_ref()
+        .expect("candidate_id present");
+    assert!(
+        cand_id.starts_with("sub:sha256:"),
+        "Expected CAS format 'sub:sha256:<hash>', got '{}'",
+        cand_id
+    );
+    let sub_hash = cand_id.strip_prefix("sub:sha256:").unwrap();
+
+    let cas_res = client
+        .get(format!("{}/v1/subtitles/{}", remote_url, sub_hash))
+        .send()
+        .await
+        .expect("GET /v1/subtitles/{hash}");
+    assert!(cas_res.status().is_success());
+    assert_eq!(
+        cas_res
+            .headers()
+            .get("content-type")
+            .unwrap()
+            .to_str()
+            .unwrap(),
+        "text/plain; charset=utf-8"
+    );
+    let srt_body = cas_res.text().await.expect("read CAS srt text");
+    assert!(srt_body.contains("-->"), "SRT body must contain cue arrows");
+
+    // 5. Test Remote Subtitle Transfer in Download Handler: Local agent downloads via remote CAS
+    let dl_req = dbsrt_server::DownloadSubtitleRequest {
+        media_path: snippet_video.to_string_lossy().to_string(),
+        source: top_cand.source.clone(),
+        candidate_id: top_cand.candidate_id.clone(),
+        language: top_cand.language.clone(),
+        resync: false,
+        shift_ms: top_cand.shift_ms,
+        subtitles_dir: None,
+        phash_dir: None,
+    };
+    let dl_res = client
+        .post(format!("{}/v1/download", local_url))
+        .json(&dl_req)
+        .send()
+        .await
+        .expect("POST /v1/download to local agent");
+    assert!(dl_res.status().is_success());
+    let dl_data: dbsrt_server::DownloadSubtitleResponse = dl_res.json().await.unwrap();
+    assert!(
+        dl_data.success,
+        "Download must succeed via remote CAS: {:?}",
+        dl_data.error
+    );
+    assert!(!dl_data.output_srt_path.is_empty());
+    assert!(std::path::Path::new(&dl_data.output_srt_path).exists());
+    let _ = std::fs::remove_file(&dl_data.output_srt_path);
+
+    // 6. Verify Observability: Local agent metrics
     let local_metrics_res = client
         .get(format!("{}/v1/metrics", local_url))
         .send()
         .await
         .expect("local /v1/metrics");
     let local_m: MetricsResponse = local_metrics_res.json().await.unwrap();
-    assert_eq!(local_m.total_requests, 1);
+    assert_eq!(local_m.total_requests, 2);
     assert_eq!(local_m.search_requests, 1);
     assert_eq!(local_m.remote_errors, 0);
 
-    // 5. Verify Observability: Remote server metrics
+    // 7. Verify Observability: Remote server metrics
     let remote_metrics_res = client
         .get(format!("{}/v1/metrics", remote_url))
         .send()
         .await
         .expect("remote /v1/metrics");
     let remote_m: MetricsResponse = remote_metrics_res.json().await.unwrap();
-    assert_eq!(remote_m.total_requests, 1);
+    assert_eq!(remote_m.total_requests, 3); // 1 recognize + 1 test CAS fetch + 1 agent CAS fetch during download
     assert_eq!(remote_m.recognize_requests, 1);
 }

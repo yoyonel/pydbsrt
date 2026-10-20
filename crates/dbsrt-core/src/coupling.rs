@@ -276,6 +276,28 @@ impl CouplingRegistry {
             false
         })
     }
+
+    /// Finds a subtitle record by its full or partial SHA-256 hash.
+    pub fn find_subtitle_by_hash(
+        &self,
+        hash: &str,
+    ) -> Option<(&CertifiedMediaCoupling, &CertifiedSubtitleRecord)> {
+        let clean = hash
+            .trim_start_matches("sub:sha256:")
+            .trim_start_matches("sha256:")
+            .trim();
+        for coupling in &self.couplings {
+            for sub in &coupling.subtitles {
+                if sub.subtitles_hash.eq_ignore_ascii_case(clean)
+                    || sub.subtitles_hash.starts_with(clean)
+                    || clean.starts_with(&sub.subtitles_hash)
+                {
+                    return Some((coupling, sub));
+                }
+            }
+        }
+        None
+    }
 }
 
 #[cfg(test)]

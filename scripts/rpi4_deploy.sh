@@ -64,7 +64,7 @@ case "${ACTION}" in
 
   demo)
     echo "=== Testing Remote Recognize API (200 bytes pHash) on http://${RPI_IP}:${SERVER_PORT} ==="
-    curl -s -f -X POST "http://${RPI_IP}:${SERVER_PORT}/v1/recognize" \
+    RESP=$(curl -s -f -X POST "http://${RPI_IP}:${SERVER_PORT}/v1/recognize" \
       -H "Content-Type: application/json" \
       -d '{
       "query_fingerprint": [
@@ -76,7 +76,17 @@ case "${ACTION}" in
       ],
       "fps": 25.0,
       "language": "fr"
-    }' | jq .
+    }')
+    echo "${RESP}" | jq .
+    CANDIDATE_ID=$(echo "${RESP}" | jq -r '.candidates[0].candidate_id // empty')
+    if [[ "${CANDIDATE_ID}" =~ ^sub:sha256:(.+) ]]; then
+      HASH="${BASH_REMATCH[1]}"
+      echo ""
+      echo "=== Testing Remote CAS Subtitle Fetch (/v1/subtitles/${HASH}) ==="
+      SRT_CONTENT=$(curl -s -f "http://${RPI_IP}:${SERVER_PORT}/v1/subtitles/${HASH}")
+      echo "${SRT_CONTENT}" | head -n 8
+      echo "✓ Remote CAS Subtitle Download verified!"
+    fi
     echo "✓ Remote API test successful!"
     ;;
 
