@@ -1,0 +1,42 @@
+# Production Docker Compose for dbsrt-server on Raspberry Pi 4 (ARM64)
+services:
+  dbsrt-server:
+    image: dbsrt-server:rpi4
+    container_name: dbsrt-remote-server
+    restart: unless-stopped
+    network_mode: "host"
+    volumes:
+      - ${DBS_DATA_DIR:-./data}:/app/data:ro
+    environment:
+      - RUST_LOG=info
+      - HOST=0.0.0.0
+      - PORT=8765
+      - PHASH_DIR=/app/data/__PHASH__
+      - DBPHASH_PATH=/app/data/catalog.dbphash
+      - SUBTITLES_DIR=/app/data/SRT
+      - PSQL_HOST=${PSQL_HOST:-127.0.0.1}
+      - PSQL_PORT=${PSQL_PORT:-5432}
+      - PSQL_USER=${PSQL_USER:-docker}
+      - PSQL_PASS=${PSQL_PASS:-docker}
+      - PSQL_DBNAME=${PSQL_DBNAME:-bktreedb}
+    command:
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8765"
+      - "--phash-dir"
+      - "/app/data/__PHASH__"
+      - "--subtitles-dir"
+      - "/app/data/SRT"
+      - "--dbphash"
+      - "/app/data/catalog.dbphash"
+      - "--db-host"
+      - "127.0.0.1"
+      - "--db-port"
+      - "5432"
+      - "--db-user"
+      - "docker"
+      - "--db-pass"
+      - "docker"
+      - "--db-name"
+      - "bktreedb"

@@ -1,5 +1,3 @@
-version: '3'
-
 volumes:
   bktreedb-pg17-data-test:
 

@@ -1,0 +1,50 @@
+# syntax=docker/dockerfile:1
+# Multi-stage Dockerfile for dbsrt-server ARM64 (Bookworm glibc parity)
+
+# Stage 1: Fast cross-compilation on host architecture using Debian Bookworm toolchain
+FROM --platform=$BUILDPLATFORM rust:slim-bookworm AS builder
+
+WORKDIR /src
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc-aarch64-linux-gnu \
+    libc6-dev-arm64-cross \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN rustup target add aarch64-unknown-linux-gnu
+
+# Copy workspace dependency declarations and source trees
+COPY Cargo.toml Cargo.lock ./
+COPY crates/dbsrt-core crates/dbsrt-core
+COPY crates/dbsrt-index crates/dbsrt-index
+COPY crates/dbsrt-cli crates/dbsrt-cli
+COPY crates/dbsrt-server crates/dbsrt-server
+
+ENV CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+RUN cargo build --release --target aarch64-unknown-linux-gnu --bin dbsrt-server
+
+# Stage 2: Minimal ARM64 runtime image for Raspberry Pi 4
+FROM --platform=linux/arm64 debian:bookworm-slim AS runtime
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN useradd -r -u 1000 -m -d /home/dbsrt -s /bin/false dbsrt \
+    && mkdir -p /app/data && chown -R dbsrt:dbsrt /app
+
+COPY --from=builder /src/target/aarch64-unknown-linux-gnu/release/dbsrt-server /usr/local/bin/dbsrt-server
+RUN chmod +x /usr/local/bin/dbsrt-server
+
+USER dbsrt
+
+EXPOSE 8765
+
+HEALTHCHECK --interval=15s --timeout=3s --start-period=5s --retries=3 \
+    CMD ["curl", "-f", "http://localhost:8765/v1/health"]
+
+ENTRYPOINT ["/usr/local/bin/dbsrt-server"]
+CMD ["--host", "0.0.0.0", "--port", "8765", "--phash-dir", "/app/data/__PHASH__", "--subtitles-dir", "/app/data/SRT"]

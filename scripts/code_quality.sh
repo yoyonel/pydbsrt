@@ -23,21 +23,34 @@ run_lint_fast() {
   lua tests/lua/test_vlsub_dbsrt.lua
   echo "✓ All Lua plugins compiled cleanly and passed unit tests (vlc-plugin/*.lua)"
 
-  echo "=== [5/6] YAML Configs (yamllint) ==="
-  yamllint -c .yamllint.yml Taskfile.yml mkdocs.yml bandit.yaml .pre-commit-config.yaml .yamllint.yml docker/*.yml .github/workflows/*.yml
-  echo "✓ All YAML files passed yamllint"
+  echo "=== [5/7] YAML Configs & Docker Compose Validation ==="
+  yamllint -c .yamllint.yml Taskfile.yml mkdocs.yml bandit.yaml .pre-commit-config.yaml .yamllint.yml .hadolint.yaml docker/*.yml sim/*.yml .github/workflows/*.yml
+  for compose_file in docker/docker-compose*.yml sim/*.yml; do
+    if [[ -f "$compose_file" ]]; then
+      docker compose -f "$compose_file" config -q
+    fi
+  done
+  echo "✓ All YAML and Docker Compose definitions valid"
 
-  echo "=== [6/6] HTML / Embedded JS / JSON Assets ==="
+  echo "=== [6/7] Dockerfiles Lint (hadolint) ==="
+  if command -v hadolint >/dev/null 2>&1; then
+    hadolint -c .hadolint.yaml Dockerfile docker/Dockerfile.server
+    echo "✓ All Dockerfiles passed hadolint"
+  else
+    echo "⊘ hadolint not found, skipping Dockerfile lint"
+  fi
+
+  echo "=== [7/7] HTML / Embedded JS / JSON Assets ==="
   uv run python scripts/validate_web_assets.py
 }
 
 run_lint() {
   run_lint_fast
-  echo "=== [7/8] Rust (cargo fmt --check & clippy) ==="
+  echo "=== [8/9] Rust (cargo fmt --check & clippy) ==="
   cargo fmt --all -- --check
   cargo clippy --workspace --all-targets -- -D warnings
 
-  echo "=== [8/8] Disk Space Safety Guard ==="
+  echo "=== [9/9] Disk Space Safety Guard ==="
   bash scripts/disk_guard.sh check
 }
 

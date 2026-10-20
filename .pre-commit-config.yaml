@@ -51,6 +51,18 @@ repos:
         language: system
         types: [yaml]
 
+      - id: docker-compose-check
+        name: docker compose config check
+        entry: bash -c 'for f in "$@"; do docker compose -f "$f" config -q; done' --
+        language: system
+        files: ^(docker/docker-compose.*|sim/docker-compose.*)\.ya?ml$
+
+      - id: hadolint
+        name: hadolint (.dockerfile / Dockerfile)
+        entry: hadolint -c .hadolint.yaml
+        language: system
+        files: (^|/)(Dockerfile[^/]*|.*\.dockerfile)$
+
       - id: luac-check
         name: luac bytecode check (.lua)
         entry: luac -p

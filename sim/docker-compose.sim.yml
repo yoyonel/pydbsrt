@@ -1,0 +1,26 @@
+# Simulation of dbsrt-server ARM64 on x86 host (QEMU user-mode emulation)
+# Pattern aligned with rpi-internet-monitoring/sim/docker-compose.sim.yml
+services:
+  dbsrt-sim-server:
+    image: dbsrt-server:rpi4
+    container_name: dbsrt-sim-server
+    platform: linux/arm64
+    mem_limit: 512m
+    memswap_limit: 1g
+    ports:
+      - "127.0.0.1:8766:8765"
+    volumes:
+      - ./data:/app/data:ro
+    environment:
+      - RUST_LOG=info
+    command:
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8765"
+      - "--phash-dir"
+      - "/app/data/__PHASH__"
+      - "--subtitles-dir"
+      - "/app/data/SRT"
+      - "--dbphash"
+      - "/app/data/catalog.dbphash"

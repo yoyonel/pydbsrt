@@ -1,0 +1,4 @@
+ignored:
+  - DL3008  # Pin versions in apt-get install (Debian mirrors drop outdated point packages)
+  - DL3029  # Do not use --platform flag with FROM (required for multi-arch cross-compilation)
+  - DL3066  # Non-numeric user-id
