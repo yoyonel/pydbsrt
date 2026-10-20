@@ -311,6 +311,10 @@ pub struct PackArgs {
     #[arg(short, long, default_value = "data/__PHASH__")]
     pub phash_dir: PathBuf,
 
+    /// Extra directory containing .phash files
+    #[arg(long = "extra-dir")]
+    pub extra_dirs: Vec<PathBuf>,
+
     /// Output .dbphash compiled binary index file
     #[arg(short, long, default_value = "catalog.dbphash")]
     pub output: PathBuf,
@@ -1768,28 +1772,38 @@ fn extract_fps_from_path(path: &Path) -> Option<f64> {
 }
 
 fn run_pack(args: &PackArgs) -> Result<()> {
-    if !args.phash_dir.exists() {
-        anyhow::bail!("Directory {:?} does not exist", args.phash_dir);
-    }
+    let mut search_dirs = vec![args.phash_dir.clone()];
+    search_dirs.extend(args.extra_dirs.clone());
 
     let mut files = Vec::new();
-    for entry in std::fs::read_dir(&args.phash_dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if path.extension().and_then(|s| s.to_str()) == Some("phash") {
-            files.push(path);
+    let mut seen_stems = std::collections::HashSet::new();
+
+    for dir in &search_dirs {
+        if !dir.exists() {
+            continue;
+        }
+        for entry in std::fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) == Some("phash") {
+                if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                    if seen_stems.insert(stem.to_string()) {
+                        files.push(path);
+                    }
+                }
+            }
         }
     }
     files.sort();
 
     if files.is_empty() {
-        anyhow::bail!("No .phash files found in {:?}", args.phash_dir);
+        anyhow::bail!("No .phash files found in {:?}", search_dirs);
     }
 
     println!("=== DBS-RT COMPILER: UNIFIED .DBPHASH PACKER ===");
-    println!("Input directory  : {:?}", args.phash_dir);
+    println!("Input directories: {:?}", search_dirs);
     println!("Output index     : {:?}", args.output);
-    println!("Found .phash     : {} files", files.len());
+    println!("Found .phash     : {} unique files", files.len());
     println!("Cut threshold    : {}", args.threshold);
 
     let start = Instant::now();

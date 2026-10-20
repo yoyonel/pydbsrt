@@ -3,12 +3,10 @@
 //! Enables lightning-fast perceptual hash searching directly across disk files
 //! without needing a PostgreSQL database or external daemon.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use dbsrt_core::{hamming_distance, is_blank_phash};
-use memmap2::Mmap;
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
-use std::fs::File;
 use std::path::{Path, PathBuf};
 
 /// Minimum temporally coherent frame match ratio (`0.0 ..= 1.0`) required to certify
@@ -78,17 +76,15 @@ pub fn compute_temporal_coherence(
     (coh, conf)
 }
 
-/// A memory-mapped .phash binary file (contiguous big-endian u64 frames).
+/// A loaded or memory-mapped .phash binary file (contiguous u64 frames).
 pub struct MmapPhashFile {
     pub path: PathBuf,
     pub name: String,
-    _file: File,
-    mmap: Mmap,
-    len: usize,
+    hashes: Vec<u64>,
 }
 
 impl MmapPhashFile {
-    /// Opens and memory-maps a .phash file.
+    /// Opens and loads a .phash file into memory without keeping the file descriptor open.
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
         let path_buf = path.as_ref().to_path_buf();
         let name = path_buf
@@ -96,39 +92,31 @@ impl MmapPhashFile {
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_default();
 
-        let file = File::open(&path_buf)
-            .with_context(|| format!("Failed to open phash file {:?}", path_buf))?;
-        let mmap = unsafe { Mmap::map(&file)? };
-        let len = mmap.len() / 8;
+        let hashes = dbsrt_core::read_phash_file(&path_buf)?;
 
         Ok(Self {
             path: path_buf,
             name,
-            _file: file,
-            mmap,
-            len,
+            hashes,
         })
     }
 
     /// Number of frames in this phash file.
+    #[inline]
     pub fn len(&self) -> usize {
-        self.len
+        self.hashes.len()
     }
 
     /// Returns true if empty.
+    #[inline]
     pub fn is_empty(&self) -> bool {
-        self.len == 0
+        self.hashes.is_empty()
     }
 
     /// Gets perceptual hash at frame index.
     #[inline]
     pub fn get_hash(&self, index: usize) -> Option<u64> {
-        if index >= self.len {
-            return None;
-        }
-        let offset = index * 8;
-        let bytes: [u8; 8] = self.mmap[offset..offset + 8].try_into().ok()?;
-        Some(u64::from_be_bytes(bytes))
+        self.hashes.get(index).copied()
     }
 
     /// Scans the file against a list of query hashes.
@@ -139,17 +127,14 @@ impl MmapPhashFile {
         query_hashes: &[u64],
         max_distance: u32,
     ) -> Vec<(usize, usize, u32)> {
-        let (chunks, _) = self.mmap.as_chunks::<8>();
-
         query_hashes
             .par_iter()
             .enumerate()
             .flat_map(|(q_idx, &q_hash)| {
-                chunks
+                self.hashes
                     .iter()
                     .enumerate()
-                    .filter_map(move |(t_idx, chunk)| {
-                        let t_hash = u64::from_be_bytes(*chunk);
+                    .filter_map(move |(t_idx, &t_hash)| {
                         let dist = hamming_distance(q_hash, t_hash);
                         if dist <= max_distance {
                             Some((q_idx, t_idx, dist))
@@ -403,6 +388,7 @@ impl MmapLibrary {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs::File;
     use std::io::Write;
 
     #[test]

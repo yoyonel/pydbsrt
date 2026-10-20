@@ -1319,14 +1319,53 @@ pub fn identify_media_by_phash_multi_routed(
 
     let (target_fps, query_sample) = if let Some((_, ref hashes, fps)) = existing_phash {
         let sample_len = ((nb_seconds * fps).round() as usize).min(hashes.len());
-        let sample_start = if hashes.len() > sample_len * 2 {
-            hashes.len() / 4
+        let center_start = if hashes.len() > sample_len {
+            (hashes.len() / 2).saturating_sub(sample_len / 2)
         } else {
             0
         };
+
+        // 1. Test nominal window at t=50%
+        let nominal_sample = &hashes[center_start..center_start + sample_len];
+        let nominal_unique = nominal_sample
+            .iter()
+            .copied()
+            .filter(|&h| !dbsrt_core::is_blank_phash(h))
+            .collect::<std::collections::HashSet<_>>()
+            .len();
+
+        let chosen_start = if nominal_unique >= 2 || hashes.len() <= sample_len {
+            center_start
+        } else {
+            // Adaptive sliding window: find the 1-second segment with highest visual entropy
+            let step = (fps.round() as usize / 2).max(1); // 0.5s step
+            let mut best_start = center_start;
+            let mut best_unique = nominal_unique;
+
+            let mut cur = 0;
+            while cur + sample_len <= hashes.len() {
+                let win = &hashes[cur..cur + sample_len];
+                let uniq = win
+                    .iter()
+                    .copied()
+                    .filter(|&h| !dbsrt_core::is_blank_phash(h))
+                    .collect::<std::collections::HashSet<_>>()
+                    .len();
+                if uniq > best_unique {
+                    best_unique = uniq;
+                    best_start = cur;
+                    if best_unique >= 6 {
+                        break; // Sufficient entropy found
+                    }
+                }
+                cur += step;
+            }
+            best_start
+        };
+
         (
             fps,
-            hashes[sample_start..sample_start + sample_len].to_vec(),
+            hashes[chosen_start..chosen_start + sample_len].to_vec(),
         )
     } else if media_path.exists() {
         let meta = probe_video(media_path).unwrap_or(dbsrt_core::video::VideoMetadata {
@@ -1336,21 +1375,31 @@ pub fn identify_media_by_phash_multi_routed(
         let nb_frames = ((nb_seconds * meta.fps).round() as usize).max(1);
         let start_sec = (meta.duration / 2.0).floor().max(0.0);
         let mut sample = extract_frames_phash(media_path, start_sec, nb_frames).unwrap_or_default();
-        let non_blank = sample
+        let non_blank_unique = sample
             .iter()
-            .filter(|&&h| !dbsrt_core::is_blank_phash(h))
-            .count();
-        if non_blank * 2 < sample.len() && meta.duration > 6.0 {
-            let alt_sec = (meta.duration * 0.3).floor().max(0.0);
-            let alt_sample =
-                extract_frames_phash(media_path, alt_sec, nb_frames).unwrap_or_default();
-            if alt_sample
-                .iter()
-                .filter(|&&h| !dbsrt_core::is_blank_phash(h))
-                .count()
-                > non_blank
-            {
-                sample = alt_sample;
+            .copied()
+            .filter(|&h| !dbsrt_core::is_blank_phash(h))
+            .collect::<std::collections::HashSet<_>>()
+            .len();
+
+        if non_blank_unique < 2 && meta.duration > 6.0 {
+            // Test alternate candidate timestamps across the clip
+            for offset_ratio in [0.25, 0.75, 0.1, 0.9] {
+                let alt_sec = (meta.duration * offset_ratio).floor().max(0.0);
+                if let Ok(alt_sample) = extract_frames_phash(media_path, alt_sec, nb_frames) {
+                    let alt_unique = alt_sample
+                        .iter()
+                        .copied()
+                        .filter(|&h| !dbsrt_core::is_blank_phash(h))
+                        .collect::<std::collections::HashSet<_>>()
+                        .len();
+                    if alt_unique > non_blank_unique {
+                        sample = alt_sample;
+                        if alt_unique >= 2 {
+                            break;
+                        }
+                    }
+                }
             }
         }
         (meta.fps, sample)
@@ -1358,7 +1407,13 @@ pub fn identify_media_by_phash_multi_routed(
         (25.0, Vec::new())
     };
 
-    if query_sample.is_empty() || query_sample.iter().all(|&h| dbsrt_core::is_blank_phash(h)) {
+    let non_blank_unique: std::collections::HashSet<u64> = query_sample
+        .iter()
+        .copied()
+        .filter(|&h| !dbsrt_core::is_blank_phash(h))
+        .collect();
+
+    if non_blank_unique.is_empty() || (query_sample.len() >= 10 && non_blank_unique.len() < 2) {
         return (None, target_fps, existing_phash);
     }
 
@@ -2442,10 +2497,8 @@ pub async fn recognize_handler(
         ));
     }
 
-    let phash_dir = payload
-        .phash_dir
-        .map(PathBuf::from)
-        .unwrap_or_else(|| state.phash_dir.clone());
+    let override_phash_dir = payload.phash_dir.map(PathBuf::from);
+    let phash_dirs = state.effective_phash_dirs(override_phash_dir.as_deref());
 
     let start = Instant::now();
     let meta =
@@ -2456,16 +2509,27 @@ pub async fn recognize_handler(
     let hashes = extract_frames_phash(&media_path, start_sec, nb_frames)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    let library = MmapLibrary::from_directory(&phash_dir)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-    let matches = library.recognize(&hashes, payload.search_distance);
-    let timer_seconds = start.elapsed().as_secs_f64();
-
     let media_name_search = media_path
         .file_stem()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_default();
+
+    if hashes.is_empty() || hashes.iter().all(|&h| dbsrt_core::is_blank_phash(h)) {
+        return Ok(Json(RecognizeResponse {
+            found: false,
+            media_name_search,
+            media_match: None,
+            nb_offsets_match: 0,
+            confidence: 0.0,
+            timer_seconds: start.elapsed().as_secs_f64(),
+        }));
+    }
+
+    let library = MmapLibrary::from_directories(&phash_dirs)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let matches = library.recognize(&hashes, payload.search_distance);
+    let timer_seconds = start.elapsed().as_secs_f64();
 
     if let Some(top) = matches.first() {
         Ok(Json(RecognizeResponse {
@@ -2839,61 +2903,47 @@ pub async fn autosync_handler(
         });
     }
 
-    let phash_dir = payload
-        .phash_dir
-        .map(PathBuf::from)
-        .unwrap_or_else(|| state.phash_dir.clone());
+    let override_phash_dir = payload.phash_dir.map(PathBuf::from);
+    let phash_dirs = state.effective_phash_dirs(override_phash_dir.as_deref());
     let include_sidecars = payload.subtitles_dir.is_none();
     let subtitles_dir = payload
         .subtitles_dir
         .map(PathBuf::from)
         .unwrap_or_else(|| state.subtitles_dir.clone());
+    let media_stem = media_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_string();
 
-    if let Err(e) = MmapLibrary::from_directory(&phash_dir) {
-        return Json(AutoSyncResponse {
-            success: false,
-            matched_media: None,
-            language: payload.language.clone(),
-            shift_frames: 0,
-            shift_ms: 0.0,
-            output_srt_path: String::new(),
-            confidence_percent: 0.0,
-            elapsed_seconds: start.elapsed().as_secs_f64(),
-            source: None,
-            error: Some(format!("Failed to load mmap library: {:#}", e)),
-        });
-    }
-
-    // 1 & 2. Identify media in index library via pHash sample
-    let (matched, target_fps, existing_phash) = identify_media_by_phash(
+    // 1 & 2. Identify media across all configured directories via Multi-Tier pHash recognition
+    let (matched, target_fps, existing_phash) = identify_media_by_phash_multi_with_reader(
         &media_path,
-        &phash_dir,
+        &phash_dirs,
+        state.dbphash_reader.as_deref(),
+        state.db_config.as_ref(),
         payload.nb_seconds,
         payload.search_distance,
     );
 
-    let (matched_stem, match_conf) = if let Some((m_name, conf)) = matched {
-        (m_name, conf)
-    } else {
-        let stem = media_path
-            .file_stem()
-            .map(|s| s.to_string_lossy().to_string())
-            .unwrap_or_default();
-        (stem, 80.0)
+    let (is_recognized, matched_stem_opt, match_conf) = match matched {
+        Some((m_name, conf)) => (true, Some(m_name), conf),
+        None => (false, None, 0.0),
     };
 
     // 3. Find reference subtitle: catalog on disk OR embedded subtitle stream in container OR remote provider
+    let search_stem = matched_stem_opt.as_deref().unwrap_or(&media_stem);
     let search_dirs = collect_subtitle_search_dirs(&subtitles_dir, &media_path, include_sidecars);
     let found_catalog = search_dirs
         .iter()
-        .find_map(|d| find_subtitle_in_catalog(d, &matched_stem, &payload.language));
+        .find_map(|d| find_subtitle_in_catalog(d, search_stem, &payload.language));
     let (mut srt, subtitle_source) = match found_catalog {
         Some(p) => match SubtitleFile::open(&p) {
             Ok(s) => (s, SubtitleSource::Catalog.as_str().to_string()),
             Err(e) => {
                 return Json(AutoSyncResponse {
                     success: false,
-                    matched_media: Some(matched_stem.clone()),
+                    matched_media: matched_stem_opt,
                     language: payload.language.clone(),
                     shift_frames: 0,
                     shift_ms: 0.0,
@@ -2919,7 +2969,7 @@ pub async fn autosync_handler(
                             Err(e) => {
                                 return Json(AutoSyncResponse {
                                     success: false,
-                                    matched_media: Some(matched_stem.clone()),
+                                    matched_media: matched_stem_opt,
                                     language: payload.language.clone(),
                                     shift_frames: 0,
                                     shift_ms: 0.0,
@@ -2937,7 +2987,7 @@ pub async fn autosync_handler(
                         Err(e) => {
                             return Json(AutoSyncResponse {
                                 success: false,
-                                matched_media: Some(matched_stem.clone()),
+                                matched_media: matched_stem_opt,
                                 language: payload.language.clone(),
                                 shift_frames: 0,
                                 shift_ms: 0.0,
@@ -2961,7 +3011,7 @@ pub async fn autosync_handler(
                         Err(e) => {
                             return Json(AutoSyncResponse {
                                 success: false,
-                                matched_media: Some(matched_stem.clone()),
+                                matched_media: matched_stem_opt,
                                 language: payload.language.clone(),
                                 shift_frames: 0,
                                 shift_ms: 0.0,
@@ -2991,9 +3041,20 @@ pub async fn autosync_handler(
                     match downloaded_srt {
                         Some(s) => (s, SubtitleSource::OpenSubtitles.as_str().to_string()),
                         None => {
+                            let err_msg = if is_recognized {
+                                format!(
+                                    "Media recognized as '{}' but no '{}' subtitle found in local catalog {:?}, container tracks, nor remote providers",
+                                    matched_stem_opt.as_deref().unwrap_or(""), payload.language, subtitles_dir
+                                )
+                            } else {
+                                format!(
+                                    "Media not recognized by perceptual hash fingerprint in indexed libraries ({:?}) and no '{}' subtitle found in local catalog, container tracks, nor remote providers",
+                                    phash_dirs, payload.language
+                                )
+                            };
                             return Json(AutoSyncResponse {
                                 success: false,
-                                matched_media: Some(matched_stem.clone()),
+                                matched_media: matched_stem_opt,
                                 language: payload.language.clone(),
                                 shift_frames: 0,
                                 shift_ms: 0.0,
@@ -3001,10 +3062,7 @@ pub async fn autosync_handler(
                                 confidence_percent: match_conf,
                                 elapsed_seconds: start.elapsed().as_secs_f64(),
                                 source: None,
-                                error: Some(format!(
-                                    "Media recognized as '{}' but no '{}' subtitle found in local catalog {:?}, container tracks, nor remote providers",
-                                    matched_stem, payload.language, subtitles_dir
-                                )),
+                                error: Some(err_msg),
                             });
                         }
                     }
@@ -3013,30 +3071,42 @@ pub async fn autosync_handler(
         }
     };
 
-    // 4. Calculate shift via shared helper:
-    let (shift_frames, shift_ms, confidence_percent) = compute_media_phash_shift(
-        &media_path,
-        &phash_dir,
-        &matched_stem,
-        match_conf,
-        target_fps,
-        &existing_phash,
-        payload.search_distance,
-    );
+    // 4. Calculate shift via shared multi-directory helper if recognized:
+    let (shift_frames, shift_ms, confidence_percent) = if let Some(ref ref_stem) = matched_stem_opt
+    {
+        compute_media_phash_shift_multi(
+            &media_path,
+            &phash_dirs,
+            ref_stem,
+            match_conf,
+            target_fps,
+            &existing_phash,
+            payload.search_distance,
+        )
+    } else {
+        (0, 0.0, 0.0)
+    };
 
     // 5. Shift & Save Subtitle
-    srt.shift(shift_ms);
+    if shift_ms != 0.0 {
+        srt.shift(shift_ms);
+    }
+
+    let out_dir = media_path
+        .parent()
+        .filter(|p| p.is_dir() && !p.to_string_lossy().is_empty())
+        .unwrap_or_else(|| Path::new("/tmp"));
 
     let out_name = format!(
         "{}.{}.synced.srt",
         media_path.file_name().unwrap().to_string_lossy(),
         payload.language
     );
-    let out_path = phash_dir.join(&out_name);
+    let out_path = out_dir.join(&out_name);
     if let Err(e) = srt.save(&out_path) {
         return Json(AutoSyncResponse {
             success: false,
-            matched_media: Some(matched_stem),
+            matched_media: matched_stem_opt,
             language: payload.language,
             shift_frames: 0,
             shift_ms: 0.0,
@@ -3050,7 +3120,7 @@ pub async fn autosync_handler(
 
     Json(AutoSyncResponse {
         success: true,
-        matched_media: Some(matched_stem),
+        matched_media: matched_stem_opt,
         language: payload.language,
         shift_frames,
         shift_ms,
@@ -3074,10 +3144,8 @@ pub async fn scan_handler(
         ));
     }
 
-    let phash_dir = payload
-        .phash_dir
-        .map(PathBuf::from)
-        .unwrap_or_else(|| state.phash_dir.clone());
+    let override_phash_dir = payload.phash_dir.map(PathBuf::from);
+    let phash_dirs = state.effective_phash_dirs(override_phash_dir.as_deref());
 
     let start = Instant::now();
     let meta = probe_video(&query_media)
@@ -3088,7 +3156,16 @@ pub async fn scan_handler(
     let query_hashes = extract_frames_phash(&query_media, start_sec, nb_frames)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    let library = MmapLibrary::from_directory(&phash_dir)
+    if query_hashes.is_empty() || query_hashes.iter().all(|&h| dbsrt_core::is_blank_phash(h)) {
+        return Ok(Json(ScanResponse {
+            total_files: 0,
+            total_frames: 0,
+            elapsed_seconds: start.elapsed().as_secs_f64(),
+            top_matches: Vec::new(),
+        }));
+    }
+
+    let library = MmapLibrary::from_directories(&phash_dirs)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     let total_files = library.file_count();

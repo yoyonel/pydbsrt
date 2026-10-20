@@ -257,6 +257,12 @@ tasks:
     cmds:
       - bash scripts/record_vlsub_demo.sh
 
+  vlc:eval-all:
+    desc: Run exhaustive E2E VLC GUI + VLSub batch on all NAS snippets under Xvfb :98
+    deps: [server:daemon, vlc:install-plugin]
+    cmds:
+      - python3 scripts/eval_vlc_vlsub_batch.py --all --resume
+
   rs:bench:
     desc: Run Rust pHash throughput benchmark
     cmds:
@@ -533,6 +539,23 @@ tasks:
     deps: [rs:build, server:daemon]
     cmds:
       - uv run python scripts/eval_nas_reliability.py
+
+  nas:extract:snippets:
+    desc: Extract stratified 15s video snippets and compute pHashes from Synology NAS within 2GB budget
+    deps: [rs:build]
+    cmds:
+      - uv run --no-sync python scripts/extract_nas_snippets.py {{.CLI_ARGS}}
+
+  nas:snippets:metadata:
+    desc: Enrich extracted NAS snippets with structured metadata (title, year, country, language, season/episode) for DB insertion
+    cmds:
+      - uv run --no-sync python scripts/enrich_snippets_metadata.py {{.CLI_ARGS}}
+
+  eval:nas-snippets:
+    desc: Run exhaustive quantitative evaluation matrix across all 4 batteries on real NAS snippets
+    deps: [rs:build, server:daemon]
+    cmds:
+      - uv run --no-sync python scripts/eval_exhaustive_nas_snippets.py {{.CLI_ARGS}}
 
   eval:trailers:
     desc: Automated empirical verification of pHash matching on remote video streams (YouTube trailers/clips)

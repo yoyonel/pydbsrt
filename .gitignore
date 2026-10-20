@@ -110,6 +110,7 @@ venv.bak/
 data/__PHASH__
 data/__PHASH__/
 data/SRT/*.srt
+data/snippets/
 *.phash
 *.dbphash
 data/*.dbphash

@@ -23,13 +23,17 @@ pub struct TimestampedCutItem {
     pub timestamp_ms: u64,
 }
 
+/// Standard 2D DCT-II hashes on uniform flat white or black frames.
+pub const FLAT_WHITE_PHASH: u64 = 0x8669_3900_3986_c639;
+pub const FLAT_BLACK_PHASH: u64 = 0x0000_0000_0000_0000;
+
 /// Returns true if a perceptual hash has abnormally low or high bit density,
-/// indicating an uninformative uniform/blank frame (black screen, fade-to-black, white frame).
+/// or matches a known uniform/flat screen fingerprint (black screen, fade-to-black, white frame).
 /// Standard 2D DCT-II hashes on natural scenes have ~32 active bits (median thresholding).
 #[inline]
 pub fn is_blank_phash(hash: u64) -> bool {
     let ones = hash.count_ones();
-    !(10..=54).contains(&ones)
+    !(10..=54).contains(&ones) || hash == FLAT_WHITE_PHASH || hash == FLAT_BLACK_PHASH
 }
 
 /// Detects scene cut frames from consecutive frame hashes.
