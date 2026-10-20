@@ -236,3 +236,111 @@ Le test de bout en bout a été exécuté depuis le poste de développement vers
    * **Temps d'extraction vidéo 1s** : ~10 ms.
    * **Temps aller-retour réseau LAN + Matching RPi4** : ~19.9 ms.
    * **Temps total perçu par le client VLC** : **31.0 ms** (`"total_ms": 31.017658`).
+
+---
+
+## 6. Architecture Finale Distribuée & Ségrégation des Responsabilités
+
+Pour valider l'architecture en conditions réelles et garantir qu'aucun artefact local ne fausse la recette, la ségrégation stricte suivante a été appliquée :
+
+```mermaid
+flowchart TD
+    subgraph Client_PC ["Poste Client Utilisateur (PC Linux/Mac/Win)"]
+        subgraph VLC_Layer ["Lecteur Vidéo & IHM"]
+            VLC["VLC Media Player"]
+            LUA["Plugin vlsub_dbsrt.lua\n(Sandbox Lua 5.1 / UI)"]
+            VLC --- LUA
+        end
+
+        subgraph Local_Storage ["Système de Fichiers Local"]
+            VIDEO["Fichier Vidéo Local\n(ex: The.Boys..._mid15s.mp4)"]
+            OUT_SRT["Sous-titre Synchronisé\n(The.Boys..._mid15s.synced.fr.srt)"]
+            CACHE["Cache CAS Local\n(~/.cache/dbsrt/subtitles/)"]
+        end
+
+        subgraph Sidecar_Daemon ["Agent Sidecar Local (127.0.0.1:8765)"]
+            AGENT["dbsrt-server --agent\n--remote-api http://192.168.1.24:8765"]
+            FFMPEG["Extracteur pHash Local\n(FFmpeg / LibAV HW Accel)"]
+            AGENT --- FFMPEG
+        end
+
+        LUA -->|"1. POST /v1/search\n(chemin local du fichier)"| AGENT
+        FFMPEG -->|"Lecture & Décodage 1s"| VIDEO
+        AGENT -->|"5. Application Δt en RAM\n& Écriture disque"| OUT_SRT
+        AGENT <-->|"Stockage immuable"| CACHE
+        OUT_SRT -.->|"6. vlc.input.add_subtitle()\nAttachement automatique"| VLC
+    end
+
+    subgraph Remote_RPi4 ["Serveur Central Distant (Raspberry Pi 4 - 192.168.1.24)"]
+        CONTAINER["Conteneur Docker dbsrt-remote-server\n(aarch64 - network: host :8765)"]
+
+        subgraph Storage_RPi4 ["Données Centrales Distantes"]
+            DBPHASH["catalog.dbphash\n(Index compact RAM MIH Tier 1)"]
+            SRT_STORE["data/SRT/\n(Sous-titres certifiés CAS)"]
+            PHASH_STORE["data/__PHASH__/\n(Séquences pHash complètes pour Δt)"]
+            PG["pg-spgist_hamming_bktreedb_1\n(PostgreSQL 15.2 SP-GiST BK-Tree\n817 370 frames indexées)"]
+        end
+
+        CONTAINER --> DBPHASH
+        CONTAINER --> SRT_STORE
+        CONTAINER --> PHASH_STORE
+        CONTAINER --> PG
+    end
+
+    AGENT -->|"2. POST /v1/recognize\n(200 octets pHash sur LAN)"| CONTAINER
+    CONTAINER -->|"3. Candidat CAS + Décalage Δt\n(sub:sha256:63af... / -1754.5s)"| AGENT
+    AGENT -->|"4. GET /v1/subtitles/63af...\n(Rapatriement flux brut SRT)"| CONTAINER
+```
+
+### 6.1 Pourquoi cette Répartition des Services ?
+
+1. **Poste Client Local (PC) : Zéro Base de Données, Zéro Catalogue Global**
+   * **Tous les conteneurs Docker locaux éteints** : `task db:down` a arrêté `docker-bktreedb-1`, `pgweb`, `grafana`, `prometheus` et `postgres_exporter`. Le client ne dispose d'aucune base de données locale (`postgres_connected: false`).
+   * **Nécessité de l'agent sidecar sur le PC** : Le moteur Lua 5.1 de VLC ne peut pas décoder de la vidéo ni calculer d'empreintes pHash. De plus, le serveur distant (RPi4) n'a pas accès au système de fichiers du PC client (`/path/to/media/...`). L'agent local effectue donc l'extraction vidéo locale via FFmpeg (~10-400 ms), extrait 5 trames (200 octets), et les délègue au RPi4.
+   * **Rapatriement et écriture locale** : Une fois le décalage calculé par le RPi4, le sidecar télécharge le sous-titre brut, applique $\Delta t$ en mémoire, et l'enregistre à côté de la vidéo locale pour que VLC l'attache en direct.
+
+2. **Serveur Central Distant (RPi4) : Zéro Décodage Vidéo, Recherche Haute Vitesse**
+   * **Consommation CPU quasi-nulle** : Le RPi4 ne traite aucun flux vidéo lourd ; il ne reçoit que des vecteurs d'entiers 64-bit sur le réseau LAN.
+   * **Indexation centralisée** : Le RPi4 héberge le catalogue compact `catalog.dbphash` (RAM MIH Tier 1), les sous-titres certifiés, l'archive des pHashes de référence, et la base PostgreSQL 15.2 (817 370 trames pHash indexées en SP-GiST BK-Tree).
+
+---
+
+## 7. Recette Fonctionnelle Live VLC & Résolution d'Incident
+
+### 7.1 Protocole du Test en Conditions Réelles
+
+* **Média testé** : Extrait vidéo de 15 secondes `data/snippets/The.Boys.S02E03.1080p.AMZN.WEBRip.DDP5.1.x264-NTb_mid15s.mp4`.
+* **Client** : VLC Media Player avec extension `vlsub_dbsrt.lua` activée.
+* **Agent local** : `dbsrt-server --agent --remote-api http://192.168.1.24:8765` sur port `8765`.
+* **Serveur distant** : `dbsrt-remote-server` sur Raspberry Pi 4 (`192.168.1.24:8765`).
+
+### 7.2 Incident Rencontré : Absence de Décalage Temporel ($\Delta t = 0.0$ ms)
+
+Lors de la première exécution du bouton **Search by pHash** dans VLC :
+
+1. **Symptôme** : Le média `The Boys` était correctement reconnu à 100% de confiance via le Tier 1 MIH du RPi4, mais le décalage temporel affiché était `visual shift = 0frames / 0.0ms`.
+2. **Conséquence** : L'IHM VLC ne proposait que le sous-titre original 1:1 (`The.Boys.S02E03.1080p.AMZN.WEBRip.DDP5.1.x264-NTb.fr.srt`), sans le candidat synchronisé pour l'extrait (`certified_synced`). Au téléchargement, les sous-titres apparaissaient avec ~29 minutes de retard sur l'extrait vidéo.
+3. **Analyse de Cause Racine (Root Cause)** :
+   * L'index compact `catalog.dbphash` permet d'identifier l'œuvre globale en RAM en < 3 ms.
+   * Cependant, pour calculer le décalage temporel exact d'un extrait (`calculate_sequence_shift_argmin`), l'algorithme doit corréler l'échantillon de trames de la requête contre la **séquence pHash complète** de l'épisode de référence (`.phash`).
+   * Le script de synchronisation `scripts/rpi4_sync.sh` synchronisait `catalog.dbphash` et `data/SRT/`, mais **omettait** le répertoire `data/__PHASH__/` (101 Mo).
+   * Sur le RPi4, le répertoire `/app/data/__PHASH__` était vide, empêchant la corrélation fine de s'exécuter.
+
+### 7.3 Résolution & Validation Définitive
+
+1. **Correction appliquée dans `scripts/rpi4_sync.sh`** :
+   ```bash
+   if [[ -d "data/__PHASH__" ]]; then
+     echo "Syncing data/__PHASH__..."
+     rsync -avz --progress "data/__PHASH__" "${RPI_HOST}:${REMOTE_BASE}/data/"
+   fi
+   ```
+2. **Synchronisation et redémarrage** : Exécution de `task rpi4:sync` (transfert des 101 Mo de pHashes de référence sur le RPi4) et redémarrage du conteneur `dbsrt-remote-server`.
+3. **Résultat Terminal & IHM VLC Validé** :
+   * **Calcul RPi4** : Détection instantanée du décalage de **`-1754.5s`** (`-42 067` trames à 23.976 fps).
+   * **Affichage VLC** : Apparition immédiate dans la liste du candidat resynchronisé :
+     ```text
+     The.Boys.S02E03.1080p.AMZN.WEBRip.DDP5.1.x264-NTb.fr.srt [Synced -1754.5s]
+     ```
+   * **Téléchargement CAS** : Clic sur *Download selection* $\to$ Rapatriement CAS `sub:sha256:63af4d0b...` depuis le RPi4 $\to$ Recalage temporel $\Delta t$ appliqué par l'agent local $\to$ Écriture de `The.Boys.S02E03.1080p.AMZN.WEBRip.DDP5.1.x264-NTb_mid15s.synced.fr.srt`.
+   * **Rendu Vidéo** : Attachement direct dans le flux VLC avec synchronisation parfaite des répliques sur les 15 secondes de l'extrait.
