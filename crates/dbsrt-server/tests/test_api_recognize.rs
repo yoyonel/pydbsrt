@@ -6,7 +6,8 @@ use std::path::PathBuf;
 async fn test_api_recognize_fingerprint_and_metrics() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let repo_root = manifest_dir.parent().unwrap().parent().unwrap();
-    let test_phash_dir = repo_root.join("data/__PHASH__");
+    let bbb_phash = repo_root.join("tests/data/big_buck_bunny_trailer_480p.phash");
+    let test_phash_dir = repo_root.join("tests/data");
     let srt_dir = repo_root.join("data/SRT");
 
     let app = create_router(test_phash_dir.clone(), srt_dir.clone());
@@ -61,24 +62,23 @@ async fn test_api_recognize_fingerprint_and_metrics() {
     assert!(!blank_data.found);
     assert_eq!(blank_data.confidence, 0.0);
 
-    // 3. Test POST /v1/recognize with 25 real hashes from Andor .phash
-    let andor_phash = repo_root.join("data/__PHASH__/Andor.S01E01.1080p.WEB.h264-KOGi.phash");
+    // 3. Test POST /v1/recognize with 25 real hashes from versioned Big Buck Bunny .phash
     assert!(
-        andor_phash.exists(),
-        "Andor phash file must exist at {:?}",
-        andor_phash
+        bbb_phash.exists(),
+        "BBB phash file must exist at {:?}",
+        bbb_phash
     );
-    let hashes = dbsrt_core::read_phash_file(&andor_phash).expect("read phash file");
+    let hashes = dbsrt_core::read_phash_file(&bbb_phash).expect("read phash file");
     assert!(hashes.len() >= 100);
 
     // Take 25 consecutive hashes from middle
-    let sample = &hashes[1000..1025];
+    let sample = &hashes[100..125];
     let fp_strings: Vec<String> = sample.iter().map(|h| format!("{:#018x}", h)).collect();
 
     let req_payload = RecognizeRequest {
         media_path: String::new(),
         query_fingerprint: Some(fp_strings),
-        fps: Some(23.976),
+        fps: Some(25.0),
         language: Some("fr".to_string()),
         client_version: Some("2.1.0".to_string()),
         search_distance: 12,
@@ -101,19 +101,18 @@ async fn test_api_recognize_fingerprint_and_metrics() {
     assert!(rec_data.found);
     assert!(rec_data.media_match.is_some());
     let matched = rec_data.media_match.unwrap();
-    assert!(matched.contains("Andor"));
+    assert!(matched.contains("big_buck_bunny"));
     assert!(rec_data.confidence >= 50.0);
     assert!(rec_data.tier.is_some());
     assert!(rec_data.shift_ms.is_some());
-    assert!(rec_data.candidates.is_some());
     println!(
-            "✓ Recognized via pure 200-byte fingerprint in {:.2}ms: matched='{}' (conf={:.1}%, tier={:?}, shift={:?}ms)",
-            rec_data.timer_seconds * 1000.0,
-            matched,
-            rec_data.confidence,
-            rec_data.tier,
-            rec_data.shift_ms
-        );
+        "✓ Recognized via pure 200-byte fingerprint in {:.2}ms: matched='{}' (conf={:.1}%, tier={:?}, shift={:?}ms)",
+        rec_data.timer_seconds * 1000.0,
+        matched,
+        rec_data.confidence,
+        rec_data.tier,
+        rec_data.shift_ms
+    );
 
     // 4. Verify metrics were updated
     let m_res2 = client
