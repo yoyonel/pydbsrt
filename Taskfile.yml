@@ -68,6 +68,12 @@ tasks:
     cmds:
       - bash scripts/stack_ctl.sh doc-stop
 
+  doc:logs:
+    desc: Tail background MkDocs documentation server logs
+    aliases: [docs:logs]
+    cmds:
+      - bash scripts/stack_ctl.sh doc-logs
+
   doc:build:
     desc: Build static responsive documentation site to site/ directory
     aliases: [docs:build]
@@ -187,6 +193,11 @@ tasks:
     cmds:
       - task: server:run
 
+  cli:build:
+    desc: Build dbsrt CLI release binary
+    cmds:
+      - cargo build --release -p dbsrt-cli
+
   server:build:
     desc: Build dbsrt-server release binary
     cmds:
@@ -206,7 +217,7 @@ tasks:
 
   coupling:certify:
     desc: Auto-discover and certify ground-truth (video/.phash <-> subtitle) couplings
-    deps: [rs:build]
+    deps: [cli:build]
     cmds:
       - bash scripts/seed_couplings.sh
 
@@ -245,6 +256,11 @@ tasks:
     desc: Query dbsrt-server telemetry status endpoint (/v1/status)
     cmds:
       - bash scripts/stack_ctl.sh server-status
+
+  server:logs:
+    desc: Tail background dbsrt-server daemon logs
+    cmds:
+      - bash scripts/stack_ctl.sh server-logs
 
   server:stop:
     desc: Stop background dbsrt-server daemon
