@@ -26,6 +26,7 @@ server_start() {
     --port 8765 \
     --phash-dir /tmp \
     --extra-phash-dir data/__PHASH__ \
+    --extra-phash-dir data/snippets \
     --subtitles-dir data/SRT \
     --db-host 127.0.0.1 \
     --db-port 5433 \

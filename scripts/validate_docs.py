@@ -109,6 +109,7 @@ def run_chrome_smoke_test(site_dir: Path) -> list[str]:
         "--disable-dev-shm-usage",
         "--disable-gpu",
         "--allow-file-access-from-files",
+        "--virtual-time-budget=5000",
         "--dump-dom",
         file_url,
     ]
