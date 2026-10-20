@@ -122,8 +122,9 @@ Toutes les suites de tests et de qualité code (`.rs`, `.py`, `.sh`, `.lua`, `.y
 | **`task test:rs:db`** | Teste l'intégration avec PostgreSQL 17 BK-Tree (démarre la DB auto) | Docker |
 | **`task test:local`** | Exécute la suite de tests Python avec `uv` | Docker (`db:up`) |
 | **`task fmt`** | Formate tout le dépôt (`ruff format`, `cargo fmt`, `shfmt`, `stylua`) | Aucune |
-| **`task lint`** | Exécute tous les linters (`ruff`, `mypy`, `bandit`, `clippy`, `shellcheck`, `luac5.2`, `yamllint`, web AST, disk guard) | Aucune |
-| **`task pre-commit`** | Exécute les `17/17` hooks pre-commit sur l'ensemble des fichiers suivis | Aucune |
+| **`task lint`** | Exécute tous les linters (`ruff`, `pyright`, `clippy`, `shellcheck`, `luac5.2`, `yamllint`, web AST, disk guard) | Aucune |
+| **`task typecheck`** | Vérifie le typage statique strict Python via Pyright (`task typecheck:summary` pour la synthèse) | Aucune |
+| **`task pre-commit`** | Exécute les hooks pre-commit (dont Pyright, Ruff, Clippy) sur l'ensemble des fichiers suivis | Aucune |
 | **`task doc:check`** | Valide le build strict MkDocs, l'AST HTML/LaTeX et le rendu Headless Chrome | Aucune |
 | **`task doc:optimize-images`** | Convertit les captures lourdes PNG en WebP 720p optimisé (-91.5% payload) | Aucune |
 | **`task disk:check`** | Vérifie les seuils d'espace disque disponible (> 10 Go) et de `target/` (< 4 Go) | Aucune |

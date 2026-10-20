@@ -438,6 +438,3 @@ Contrairement à la recherche d'images fixes isolées (où chaque requête est 1
 
 * **En Production (`dbsrt-server`)** : Le mode **MIH Pur 25 requêtes** (16.25 ms sur 100M) doit demeurer le **standard par défaut non négociable**. La latence de 16 ms étant déjà 3× inférieure au budget temps réel de 50 ms, il est injustifié de troquer une preuve mathématique absolue contre un gain marginal de 10 ms.
 * **Cible Embarquée Basse Consommation (ex: Raspberry Pi 4 / CPU ARM anciens)** : L'approche multi-ancres (2 pivots + seuil de consensus $\ge 80\%$) reste documentée comme levier d'optimisation d'urgence si la charge CPU saturait sur cœur unique ARM.
-
-
-

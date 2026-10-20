@@ -1,7 +1,7 @@
 # Audit Exhaustif du Moteur de Matching pHash & Preuves Empiriques E2E
 
-**Date** : 2026-10-19  
-**Statut** : Empiriquement Prouvé (Campagne E2E sur flux réels YouTube téléchargés & catalogue 100% audité)  
+**Date** : 2026-10-19
+**Statut** : Empiriquement Prouvé (Campagne E2E sur flux réels YouTube téléchargés & catalogue 100% audité)
 **Périmètre** : 233 empreintes `.phash` (13 117 729 frames 64-bit), index hybride `catalog.dbphash` (17,0 Mo), PostgreSQL 17 SP-GiST, et 57 œuvres réelles testées via téléchargement public direct (`yt-dlp`).
 
 ---
@@ -304,4 +304,3 @@ flowchart LR
 2. **Suite 3 (True-Negative Specificity)** : Validation de 0.0% de faux positifs sur 80 vidéos NAS non indexées.
 3. **Suite 4 (Catalogue & SxxExx Isolation)** : Découverte automatique des sous-titres sidecars Synology (`_fre_`, `_eng_`) sur 120 fichiers et vérification de 25 resyncs `/v1/download`.
 4. **Suite 5 (VLC Headless E2E)** : Validation de l'extension `vlsub_dbsrt.lua` via `task vlc:test-cvlc`.
-
