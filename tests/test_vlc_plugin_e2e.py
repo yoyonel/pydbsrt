@@ -18,7 +18,8 @@ import pytest
 def test_lua_unit_tests():
     """Tier 1: Run hermetic Lua unit test suite with mocked LibVLC environment."""
     lua_bin = shutil.which("lua")
-    assert lua_bin is not None, "lua executable not found on system"
+    if not lua_bin:
+        pytest.skip("lua executable not found on system")
 
     cmd = [lua_bin, "tests/lua/test_vlsub_dbsrt.lua"]
     res = subprocess.run(cmd, capture_output=True, text=True, check=False)
@@ -29,7 +30,8 @@ def test_lua_unit_tests():
 def test_lua_bytecode_syntax():
     """Tier 1: Validate bytecode compilation with luac for all plugins."""
     luac_bin = shutil.which("luac")
-    assert luac_bin is not None, "luac executable not found on system"
+    if not luac_bin:
+        pytest.skip("luac executable not found on system")
 
     for script in [
         "vlc-plugin/vlsub_dbsrt.lua",

@@ -61,6 +61,14 @@ pub struct ServerCli {
     /// PostgreSQL database name (env: PSQL_DBNAME)
     #[arg(long, env = "PSQL_DBNAME", default_value = "bktreedb")]
     pub db_name: String,
+
+    /// Optional remote dbsrt-server URL for Cloud/o2switch relay (env: DBSRT_REMOTE_API)
+    #[arg(long, env = "DBSRT_REMOTE_API")]
+    pub remote_api: Option<String>,
+
+    /// Run as lightweight client agent (env: DBSRT_AGENT)
+    #[arg(long, env = "DBSRT_AGENT", default_value_t = false)]
+    pub agent: bool,
 }
 
 impl ServerCli {
@@ -82,6 +90,8 @@ impl ServerCli {
         }
         state.set_dbphash(self.dbphash);
         state.db_config = db_config;
+        state.remote_api = self.remote_api;
+        state.is_agent = self.agent;
         state
     }
 }

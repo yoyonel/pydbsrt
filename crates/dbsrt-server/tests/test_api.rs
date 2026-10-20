@@ -104,6 +104,7 @@ async fn test_server_health_retarget_and_autosync() {
             search_distance: 0,
             nb_seconds: 1.0,
             phash_dir: Some(tmp_dir.to_str().unwrap().to_string()),
+            ..Default::default()
         };
         let rec_res = client
             .post(format!("{}/v1/recognize", base_url))
@@ -138,6 +139,7 @@ async fn test_server_health_retarget_and_autosync() {
             search_distance: 0,
             nb_seconds: 1.0,
             phash_dir: None,
+            ..Default::default()
         };
         let bad_rec_res = client
             .post(format!("{}/v1/recognize", base_url))

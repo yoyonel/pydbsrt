@@ -191,6 +191,30 @@ impl DbConnectionConfig {
     }
 }
 
+#[derive(Debug, Default)]
+pub struct ServerMetrics {
+    pub total_requests: std::sync::atomic::AtomicU64,
+    pub recognize_requests: std::sync::atomic::AtomicU64,
+    pub search_requests: std::sync::atomic::AtomicU64,
+    pub cache_hits: std::sync::atomic::AtomicU64,
+    pub remote_errors: std::sync::atomic::AtomicU64,
+    pub total_latency_us: std::sync::atomic::AtomicU64,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ServerLogEntry {
+    pub timestamp: String,
+    pub tag: String,
+    pub level: String,
+    pub message: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ServerLogsResponse {
+    pub count: usize,
+    pub logs: Vec<ServerLogEntry>,
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub phash_dir: PathBuf,
@@ -203,6 +227,10 @@ pub struct AppState {
     pub provider: Arc<dyn SubtitleProvider>,
     pub cache: SubtitleCache,
     pub start_time: Instant,
+    pub metrics: Arc<ServerMetrics>,
+    pub remote_api: Option<String>,
+    pub is_agent: bool,
+    pub log_buffer: Arc<std::sync::RwLock<std::collections::VecDeque<ServerLogEntry>>>,
 }
 
 impl AppState {
@@ -234,6 +262,35 @@ impl AppState {
             provider,
             cache,
             start_time: Instant::now(),
+            metrics: Arc::new(ServerMetrics::default()),
+            remote_api: None,
+            is_agent: false,
+            log_buffer: Arc::new(std::sync::RwLock::new(
+                std::collections::VecDeque::with_capacity(LOG_BUFFER_CAPACITY),
+            )),
+        }
+    }
+
+    pub fn push_log(&self, tag: &str, level: &str, message: impl Into<String>) {
+        if let Ok(mut buf) = self.log_buffer.write() {
+            if buf.len() >= LOG_BUFFER_CAPACITY {
+                buf.pop_front();
+            }
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default();
+            let secs = now.as_secs() % SECONDS_PER_DAY;
+            let h = secs / SECONDS_PER_HOUR;
+            let m = (secs % SECONDS_PER_HOUR) / SECONDS_PER_MINUTE;
+            let s = secs % SECONDS_PER_MINUTE;
+            let ms = now.subsec_millis();
+            let ts = format!("{:02}:{:02}:{:02}.{:03}", h, m, s, ms);
+            buf.push_back(ServerLogEntry {
+                timestamp: ts,
+                tag: tag.to_string(),
+                level: level.to_string(),
+                message: message.into(),
+            });
         }
     }
 
@@ -454,6 +511,8 @@ pub struct SearchSubtitlesResponse {
     pub language: String,
     pub matched_media: Option<String>,
     pub moviehash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fingerprint_preview: Option<Vec<String>>,
     pub total_candidates: usize,
     pub candidates: Vec<SubtitleCandidate>,
     #[serde(default)]
@@ -487,9 +546,14 @@ pub struct DownloadSubtitleResponse {
     pub error: Option<String>,
 }
 
-#[derive(Deserialize, Serialize, Debug)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct RecognizeRequest {
+    #[serde(default)]
     pub media_path: String,
+    pub query_fingerprint: Option<Vec<String>>,
+    pub fps: Option<f64>,
+    pub language: Option<String>,
+    pub client_version: Option<String>,
     #[serde(default)]
     pub search_distance: u32,
     #[serde(default = "default_extract_duration")]
@@ -497,18 +561,53 @@ pub struct RecognizeRequest {
     pub phash_dir: Option<String>,
 }
 
-fn default_extract_duration() -> f64 {
-    1.0
+impl Default for RecognizeRequest {
+    fn default() -> Self {
+        Self {
+            media_path: String::new(),
+            query_fingerprint: None,
+            fps: None,
+            language: None,
+            client_version: None,
+            search_distance: 0,
+            nb_seconds: DEFAULT_EXTRACT_SAMPLE_SECONDS,
+            phash_dir: None,
+        }
+    }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+fn default_extract_duration() -> f64 {
+    DEFAULT_EXTRACT_SAMPLE_SECONDS
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct RecognizeResponse {
     pub found: bool,
     pub media_name_search: String,
     pub media_match: Option<String>,
     pub nb_offsets_match: usize,
     pub confidence: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tier: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shift_frames: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shift_ms: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub candidates: Option<Vec<SubtitleCandidate>>,
     pub timer_seconds: f64,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct MetricsResponse {
+    pub status: String,
+    pub uptime_seconds: u64,
+    pub total_requests: u64,
+    pub recognize_requests: u64,
+    pub search_requests: u64,
+    pub cache_hits: u64,
+    pub remote_errors: u64,
+    pub avg_latency_ms: f64,
 }
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -586,6 +685,8 @@ pub fn create_router_with_state(state: AppState) -> Router {
         .route("/health", get(health_handler))
         .route("/v1/health", get(health_handler))
         .route("/v1/status", get(status_handler))
+        .route("/v1/metrics", get(metrics_handler))
+        .route("/v1/logs", get(logs_handler))
         .route("/v1/couplings", get(couplings_handler))
         .route("/v1/couplings/sub_frames", get(sub_frames_handler))
         .route("/v1/search", post(search_handler))
@@ -991,6 +1092,57 @@ pub async fn status_handler(State(state): State<Arc<AppState>>) -> impl IntoResp
     })
 }
 
+pub async fn metrics_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let total = state
+        .metrics
+        .total_requests
+        .load(std::sync::atomic::Ordering::Relaxed);
+    let total_us = state
+        .metrics
+        .total_latency_us
+        .load(std::sync::atomic::Ordering::Relaxed);
+    let avg_latency_ms = if total > 0 {
+        (total_us as f64 / total as f64) / 1000.0
+    } else {
+        0.0
+    };
+
+    Json(MetricsResponse {
+        status: "ok".to_string(),
+        uptime_seconds: state.start_time.elapsed().as_secs(),
+        total_requests: total,
+        recognize_requests: state
+            .metrics
+            .recognize_requests
+            .load(std::sync::atomic::Ordering::Relaxed),
+        search_requests: state
+            .metrics
+            .search_requests
+            .load(std::sync::atomic::Ordering::Relaxed),
+        cache_hits: state
+            .metrics
+            .cache_hits
+            .load(std::sync::atomic::Ordering::Relaxed),
+        remote_errors: state
+            .metrics
+            .remote_errors
+            .load(std::sync::atomic::Ordering::Relaxed),
+        avg_latency_ms,
+    })
+}
+
+pub async fn logs_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let logs = state
+        .log_buffer
+        .read()
+        .map(|b| b.iter().cloned().collect::<Vec<_>>())
+        .unwrap_or_default();
+    Json(ServerLogsResponse {
+        count: logs.len(),
+        logs,
+    })
+}
+
 /// Normalizes a language code (ISO 639-1 / 639-2) to canonical 2-letter lowercase where known.
 pub fn normalize_lang_code(lang: &str) -> String {
     match lang.trim().to_lowercase().as_str() {
@@ -1284,6 +1436,27 @@ pub const MIN_PHASH_RECOGNITION_CONFIDENCE_PERCENT: f64 =
 /// Default fallback frame rate when media container metadata cannot be probed.
 pub const DEFAULT_FALLBACK_FPS: f64 = 23.976;
 
+/// Default maximum number of log entries retained in the in-memory circular buffer.
+pub const LOG_BUFFER_CAPACITY: usize = 300;
+
+/// Default sample extraction duration in seconds for media fingerprinting.
+pub const DEFAULT_EXTRACT_SAMPLE_SECONDS: f64 = 1.0;
+
+/// Default network timeout in milliseconds for remote relay requests.
+pub const DEFAULT_RELAY_TIMEOUT_MS: u64 = 10_000;
+
+/// Number of perceptual hash samples included in JSON search response preview.
+pub const FINGERPRINT_PREVIEW_SAMPLE_COUNT: usize = 5;
+
+/// Number of seconds in a standard 24-hour day.
+pub const SECONDS_PER_DAY: u64 = 86_400;
+
+/// Number of seconds in an hour.
+pub const SECONDS_PER_HOUR: u64 = 3600;
+
+/// Number of seconds in a minute.
+pub const SECONDS_PER_MINUTE: u64 = 60;
+
 /// Total bit depth of a 64-bit DCT perceptual hash.
 pub const PHASH_BIT_DEPTH: f64 = 64.0;
 
@@ -1346,16 +1519,12 @@ pub type RoutedPhashResult = (
     Option<ExistingPhashData>,
 );
 
-/// Identifies a target media file with explicit index engine routing.
-pub fn identify_media_by_phash_multi_routed(
+/// Extracts a query sample sequence (hashes + fps) from an existing .phash file or directly from video via FFmpeg.
+pub fn extract_media_query_sample(
     media_path: &Path,
     phash_dirs: &[PathBuf],
-    dbphash_reader: Option<&MmapDbphash>,
-    db_config: Option<&DbConnectionConfig>,
     nb_seconds: f64,
-    search_distance: u32,
-    engine: Option<&str>,
-) -> RoutedPhashResult {
+) -> (f64, Vec<u64>, Option<ExistingPhashData>) {
     let existing_phash = phash_dirs
         .iter()
         .find_map(|dir| find_existing_phash(media_path, dir));
@@ -1450,6 +1619,30 @@ pub fn identify_media_by_phash_multi_routed(
         (25.0, Vec::new())
     };
 
+    (target_fps, query_sample, existing_phash)
+}
+
+/// Normalizes a string by keeping only lowercase alphanumeric characters.
+pub fn norm_alnum(s: &str) -> String {
+    s.chars()
+        .filter(|c| c.is_alphanumeric())
+        .flat_map(|c| c.to_lowercase())
+        .collect()
+}
+
+/// Identifies a target media file with explicit index engine routing.
+pub fn identify_media_by_phash_multi_routed(
+    media_path: &Path,
+    phash_dirs: &[PathBuf],
+    dbphash_reader: Option<&MmapDbphash>,
+    db_config: Option<&DbConnectionConfig>,
+    nb_seconds: f64,
+    search_distance: u32,
+    engine: Option<&str>,
+) -> RoutedPhashResult {
+    let (target_fps, query_sample, existing_phash) =
+        extract_media_query_sample(media_path, phash_dirs, nb_seconds);
+
     let non_blank_unique: std::collections::HashSet<u64> = query_sample
         .iter()
         .copied()
@@ -1517,7 +1710,7 @@ pub fn identify_media_by_phash_multi_routed(
                         Some((
                             m.clean_title,
                             m.confidence,
-                            "Tier 1 (RAM .dbphash MIH <10ms)".to_string(),
+                            "Tier 1 (RAM .dbphash MIH under 10ms)".to_string(),
                         )),
                         target_fps,
                         existing_phash,
@@ -1537,7 +1730,7 @@ pub fn identify_media_by_phash_multi_routed(
                     Some((
                         m.clean_title,
                         m.confidence,
-                        "Tier 1 (RAM .dbphash MIH <10ms)".to_string(),
+                        "Tier 1 (RAM .dbphash MIH under 10ms)".to_string(),
                     )),
                     target_fps,
                     existing_phash,
@@ -1847,6 +2040,16 @@ pub async fn search_handler(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<SearchSubtitlesRequest>,
 ) -> impl IntoResponse {
+    let start_overall = std::time::Instant::now();
+    state
+        .metrics
+        .total_requests
+        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    state
+        .metrics
+        .search_requests
+        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
     let media_path = PathBuf::from(&payload.media_path);
     let include_sidecars = payload.subtitles_dir.is_none();
     let subtitles_dir = payload
@@ -1860,7 +2063,20 @@ pub async fn search_handler(
     let mode = payload.search_mode.as_deref().unwrap_or("all");
     let use_phash = mode == "phash" || mode == "all" || mode == "auto";
 
-    let start_overall = std::time::Instant::now();
+    state.push_log(
+        "SEARCH",
+        "INFO",
+        format!(
+            "Request: mode='{}', lang='{}', media='{}'",
+            mode,
+            payload.language,
+            media_path
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+        ),
+    );
+
     let mut timing = SearchTimingStats::default();
 
     // 0. Visual pHash Recognition when mode allows pHash identification
@@ -1868,71 +2084,234 @@ pub async fn search_handler(
     let mut phash_conf: f64 = 0.0;
     let mut target_fps: f64 = DEFAULT_FALLBACK_FPS;
     let mut existing_phash: Option<ExistingPhashData> = None;
-    if use_phash
-        && media_path.exists()
-        && (phash_dirs.iter().any(|d| d.exists())
+    let mut query_sample_opt: Option<Vec<u64>> = None;
+
+    if use_phash && media_path.exists() {
+        if let Some(ref remote_url) = state.remote_api {
+            let t0 = std::time::Instant::now();
+            let (tfps, query_sample, e_phash) = extract_media_query_sample(
+                &media_path,
+                &phash_dirs,
+                DEFAULT_EXTRACT_SAMPLE_SECONDS,
+            );
+            target_fps = tfps;
+            existing_phash = e_phash;
+            query_sample_opt = Some(query_sample.clone());
+
+            let extract_ms = t0.elapsed().as_secs_f64() * 1000.0;
+            state.push_log(
+                "RELAY",
+                "INFO",
+                format!(
+                    "Extracted {} pHash frames from {:?} in {:.2}ms (fps={:.2})",
+                    query_sample.len(),
+                    media_path.file_name().unwrap_or_default(),
+                    extract_ms,
+                    target_fps
+                ),
+            );
+            tracing::info!(
+                "[Relay] Extracted {} pHash frames from {:?} in {:.2}ms (fps={:.2})",
+                query_sample.len(),
+                media_path.file_name().unwrap_or_default(),
+                extract_ms,
+                target_fps
+            );
+
+            if !query_sample.is_empty() {
+                let fp_strings: Vec<String> = query_sample
+                    .iter()
+                    .map(|h| format!("{:#018x}", h))
+                    .collect();
+                let remote_req = RecognizeRequest {
+                    media_path: String::new(),
+                    query_fingerprint: Some(fp_strings),
+                    fps: Some(target_fps),
+                    language: Some(payload.language.clone()),
+                    client_version: Some(env!("CARGO_PKG_VERSION").to_string()),
+                    search_distance: 0,
+                    nb_seconds: DEFAULT_EXTRACT_SAMPLE_SECONDS,
+                    phash_dir: None,
+                };
+
+                let http_client = reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_millis(DEFAULT_RELAY_TIMEOUT_MS))
+                    .build()
+                    .unwrap_or_default();
+
+                let endpoint = format!("{}/v1/recognize", remote_url.trim_end_matches('/'));
+                state.push_log(
+                    "RELAY",
+                    "INFO",
+                    format!(
+                        "Transmitting 200B fingerprint ({} hashes) to {}",
+                        query_sample.len(),
+                        endpoint
+                    ),
+                );
+                tracing::info!(
+                    "[Relay] Transmitting 200-byte fingerprint ({} hashes) to remote API: {}",
+                    query_sample.len(),
+                    endpoint
+                );
+
+                let t_net = std::time::Instant::now();
+                match http_client.post(&endpoint).json(&remote_req).send().await {
+                    Ok(resp) if resp.status().is_success() => {
+                        let net_rtt_ms = t_net.elapsed().as_secs_f64() * 1000.0;
+                        if let Ok(rec_res) = resp.json::<RecognizeResponse>().await {
+                            if rec_res.found {
+                                matched_media = rec_res.media_match.clone();
+                                phash_conf = rec_res.confidence;
+                                timing.matching_tier = format!(
+                                    "Remote Relay -> {}",
+                                    rec_res.tier.as_deref().unwrap_or("o2switch")
+                                );
+                                timing.confidence_percent = phash_conf;
+                                timing.phash_match_ms = t0.elapsed().as_secs_f64() * 1000.0;
+                                timing.query_sample_frames = query_sample.len();
+
+                                let cands_count =
+                                    rec_res.candidates.as_ref().map(|c| c.len()).unwrap_or(0);
+                                state.push_log(
+                                    "RELAY",
+                                    "INFO",
+                                    format!(
+                                        "✓ Remote recognition in {:.2}ms (RTT={:.2}ms): matched='{}' (conf={:.1}%, tier='{}', candidates={})",
+                                        rec_res.timer_seconds * 1000.0,
+                                        net_rtt_ms,
+                                        matched_media.as_deref().unwrap_or("unknown"),
+                                        phash_conf,
+                                        timing.matching_tier,
+                                        cands_count
+                                    ),
+                                );
+                                tracing::info!(
+                                    "[Relay] ✓ Remote recognition in {:.2}ms (RTT={:.2}ms): matched='{}' (conf={:.1}%, tier='{}', candidates={})",
+                                    rec_res.timer_seconds * 1000.0,
+                                    net_rtt_ms,
+                                    matched_media.as_deref().unwrap_or("unknown"),
+                                    phash_conf,
+                                    timing.matching_tier,
+                                    cands_count
+                                );
+
+                                if let Some(remote_cands) = rec_res.candidates {
+                                    for c in remote_cands {
+                                        candidates.push(c);
+                                    }
+                                }
+                            } else {
+                                state.push_log(
+                                    "RELAY",
+                                    "INFO",
+                                    format!(
+                                        "Remote server replied in {:.2}ms: media not recognized (found=false)",
+                                        net_rtt_ms
+                                    ),
+                                );
+                                tracing::info!(
+                                    "[Relay] Remote server replied in {:.2}ms: media not recognized (found=false)",
+                                    net_rtt_ms
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        state
+                            .metrics
+                            .remote_errors
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        state.push_log(
+                            "RELAY",
+                            "WARN",
+                            format!("✗ Remote relay error to {}: {:#}", endpoint, e),
+                        );
+                        tracing::warn!("[Relay] ✗ Remote relay error to {}: {:#}", endpoint, e);
+                    }
+                    _ => {
+                        state
+                            .metrics
+                            .remote_errors
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        state.push_log(
+                            "RELAY",
+                            "WARN",
+                            "✗ Remote relay returned unexpected non-200 status code",
+                        );
+                        tracing::warn!(
+                            "[Relay] ✗ Remote relay returned unexpected non-200 status code"
+                        );
+                    }
+                }
+            }
+        } else if phash_dirs.iter().any(|d| d.exists())
             || state.dbphash_path.is_some()
-            || state.db_config.is_some())
-    {
-        let t0 = std::time::Instant::now();
-        let (matched_routed, tfps, e_phash) = identify_media_by_phash_multi_routed(
-            &media_path,
-            &phash_dirs,
-            state.dbphash_reader.as_deref(),
-            state.db_config.as_ref(),
-            1.0,
-            DEFAULT_RECOGNITION_SEARCH_DISTANCE,
-            payload.index_engine.as_deref(),
-        );
-        target_fps = tfps;
-        existing_phash = e_phash;
-        timing.phash_match_ms = t0.elapsed().as_secs_f64() * 1000.0;
+            || state.db_config.is_some()
+        {
+            let t0 = std::time::Instant::now();
+            let (matched_routed, tfps, e_phash) = identify_media_by_phash_multi_routed(
+                &media_path,
+                &phash_dirs,
+                state.dbphash_reader.as_deref(),
+                state.db_config.as_ref(),
+                1.0,
+                DEFAULT_RECOGNITION_SEARCH_DISTANCE,
+                payload.index_engine.as_deref(),
+            );
+            target_fps = tfps;
+            existing_phash = e_phash;
+            timing.phash_match_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
-        if let Some((_, ref hashes, fps)) = existing_phash {
-            timing.phash_frames_count = hashes.len();
-            if fps > 0.0 {
-                timing.video_duration_minutes = (hashes.len() as f64 / fps) / 60.0;
-                timing.query_sample_frames = ((1.0 * fps).round() as usize).min(hashes.len());
+            if let Some((_, ref hashes, fps)) = existing_phash {
+                timing.phash_frames_count = hashes.len();
+                if fps > 0.0 {
+                    timing.video_duration_minutes =
+                        (hashes.len() as f64 / fps) / SECONDS_PER_MINUTE as f64;
+                    timing.query_sample_frames =
+                        ((DEFAULT_EXTRACT_SAMPLE_SECONDS * fps).round() as usize).min(hashes.len());
+                }
+            } else if media_path.exists() {
+                if let Ok(meta) = probe_video(&media_path) {
+                    timing.phash_frames_count = (meta.duration * meta.fps).round() as usize;
+                    timing.video_duration_minutes = meta.duration / SECONDS_PER_MINUTE as f64;
+                    timing.query_sample_frames =
+                        ((DEFAULT_EXTRACT_SAMPLE_SECONDS * meta.fps).round() as usize).max(1);
+                }
             }
-        } else if media_path.exists() {
-            if let Ok(meta) = probe_video(&media_path) {
-                timing.phash_frames_count = (meta.duration * meta.fps).round() as usize;
-                timing.video_duration_minutes = meta.duration / 60.0;
-                timing.query_sample_frames = ((1.0 * meta.fps).round() as usize).max(1);
+
+            if timing.query_sample_frames == 0 {
+                timing.query_sample_frames = DEFAULT_BASELINE_FPS.round() as usize;
             }
-        }
 
-        if timing.query_sample_frames == 0 {
-            timing.query_sample_frames = 24;
-        }
-
-        // Calculate index targets count and atomic comparisons
-        if let Some(ref reader) = state.dbphash_reader {
-            let targets = reader.cuts_entries().len() + reader.sparse_entries().len();
-            timing.index_targets_count = targets;
-            timing.total_hamming_comparisons = timing.query_sample_frames * targets;
-        } else if let Some(ref dbphash) = state.dbphash_path {
-            if let Ok(reader) = MmapDbphash::open(dbphash) {
+            // Calculate index targets count and atomic comparisons
+            if let Some(ref reader) = state.dbphash_reader {
                 let targets = reader.cuts_entries().len() + reader.sparse_entries().len();
                 timing.index_targets_count = targets;
                 timing.total_hamming_comparisons = timing.query_sample_frames * targets;
+            } else if let Some(ref dbphash) = state.dbphash_path {
+                if let Ok(reader) = MmapDbphash::open(dbphash) {
+                    let targets = reader.cuts_entries().len() + reader.sparse_entries().len();
+                    timing.index_targets_count = targets;
+                    timing.total_hamming_comparisons = timing.query_sample_frames * targets;
+                }
             }
-        }
 
-        if timing.phash_match_ms > 0.0 && timing.total_hamming_comparisons > 0 {
-            // Microseconds per atomic frame comparison
-            timing.us_per_frame =
-                (timing.phash_match_ms * 1000.0) / (timing.total_hamming_comparisons as f64);
-            // Millions of frame comparisons per second (MFPS)
-            timing.mfps_throughput = (timing.total_hamming_comparisons as f64 / 1_000_000.0)
-                / (timing.phash_match_ms / 1000.0);
-        }
+            if timing.phash_match_ms > 0.0 && timing.total_hamming_comparisons > 0 {
+                // Microseconds per atomic frame comparison
+                timing.us_per_frame =
+                    (timing.phash_match_ms * 1000.0) / (timing.total_hamming_comparisons as f64);
+                // Millions of frame comparisons per second (MFPS)
+                timing.mfps_throughput = (timing.total_hamming_comparisons as f64 / 1_000_000.0)
+                    / (timing.phash_match_ms / 1000.0);
+            }
 
-        if let Some((m_name, conf, tier_label)) = matched_routed {
-            matched_media = Some(m_name);
-            phash_conf = conf;
-            timing.confidence_percent = conf;
-            timing.matching_tier = tier_label;
+            if let Some((m_name, conf, tier_label)) = matched_routed {
+                matched_media = Some(m_name);
+                phash_conf = conf;
+                timing.confidence_percent = conf;
+                timing.matching_tier = tier_label;
+            }
         }
     }
 
@@ -1959,6 +2338,21 @@ pub async fn search_handler(
     };
     timing.moviehash_ms = t_meta.elapsed().as_secs_f64() * 1000.0;
 
+    let fingerprint_preview = query_sample_opt
+        .as_deref()
+        .or_else(|| {
+            existing_phash
+                .as_ref()
+                .map(|(_, hashes, _)| hashes.as_slice())
+        })
+        .map(|hashes| {
+            hashes
+                .iter()
+                .take(FINGERPRINT_PREVIEW_SAMPLE_COUNT)
+                .map(|h| format!("{:#018x}", h))
+                .collect::<Vec<_>>()
+        });
+
     // Strict pHash mode: if the user explicitly requested "Search by pHash" and the video
     // does not match any reference .phash in PostgreSQL / MmapLibrary, return 0 candidates immediately.
     if mode == "phash" && matched_media.is_none() {
@@ -1975,6 +2369,7 @@ pub async fn search_handler(
             language: payload.language,
             matched_media: None,
             moviehash,
+            fingerprint_preview,
             total_candidates: 0,
             candidates,
             timing,
@@ -1985,59 +2380,69 @@ pub async fn search_handler(
     let mut seen_catalog_paths = std::collections::HashSet::new();
     let mut seen_filenames = std::collections::HashSet::new();
     if let Some(ref m_name) = matched_media {
-        let (cert_cands, pg_ms, json_ms, pg_cached) = lookup_certified_couplings(
-            &state,
-            &subtitles_dir,
-            m_name,
-            &payload.language,
-            phash_conf,
-        );
-        timing.pg_lookup_ms = pg_ms;
-        timing.json_lookup_ms = json_ms;
-        timing.pg_cached = pg_cached;
+        if candidates.is_empty() && !state.is_agent {
+            let (cert_cands, pg_ms, json_ms, pg_cached) = lookup_certified_couplings(
+                &state,
+                &subtitles_dir,
+                m_name,
+                &payload.language,
+                phash_conf,
+            );
+            timing.pg_lookup_ms = pg_ms;
+            timing.json_lookup_ms = json_ms;
+            timing.pg_cached = pg_cached;
 
-        for mut c in cert_cands {
-            if let Some(ref cid) = c.candidate_id {
-                seen_catalog_paths.insert(cid.clone());
-                if let Ok(canon) = Path::new(cid).canonicalize() {
-                    seen_catalog_paths.insert(canon.to_string_lossy().to_string());
+            for mut c in cert_cands {
+                if let Some(ref cid) = c.candidate_id {
+                    seen_catalog_paths.insert(cid.clone());
+                    if let Ok(canon) = Path::new(cid).canonicalize() {
+                        seen_catalog_paths.insert(canon.to_string_lossy().to_string());
+                    }
+                }
+                seen_filenames.insert(c.title.to_lowercase());
+
+                let ref_stem = c.release.as_deref().unwrap_or(m_name);
+                let (_sf, computed_shift_ms, _sconf) = compute_media_phash_shift_multi(
+                    &media_path,
+                    &phash_dirs,
+                    ref_stem,
+                    phash_conf,
+                    target_fps,
+                    &existing_phash,
+                    DEFAULT_SEARCH_DISTANCE,
+                );
+
+                // 1. Raw candidate (original timeline, zero shift)
+                c.shift_ms = Some(0.0);
+                candidates.push(c.clone());
+
+                // 2. Synced candidate if visual offset is significant (> 500ms)
+                if computed_shift_ms.abs() > SIGNIFICANT_SHIFT_THRESHOLD_MS {
+                    let mut c_synced = c.clone();
+                    c_synced.source = "certified_synced".to_string();
+                    c_synced.shift_ms = Some(computed_shift_ms);
+                    c_synced.title = format!(
+                        "{} [Synced {:+.1}s]",
+                        c.title,
+                        computed_shift_ms / MILLIS_PER_SEC
+                    );
+                    if let Some(ref d) = c.details {
+                        c_synced.details = Some(format!(
+                            "{} (Synchronized: {:+.2}s visual shift)",
+                            d,
+                            computed_shift_ms / MILLIS_PER_SEC
+                        ));
+                    }
+                    candidates.push(c_synced);
                 }
             }
-            seen_filenames.insert(c.title.to_lowercase());
-
-            let ref_stem = c.release.as_deref().unwrap_or(m_name);
-            let (_sf, computed_shift_ms, _sconf) = compute_media_phash_shift_multi(
-                &media_path,
-                &phash_dirs,
-                ref_stem,
-                phash_conf,
-                target_fps,
-                &existing_phash,
-                DEFAULT_SEARCH_DISTANCE,
-            );
-
-            // 1. Raw candidate (original timeline, zero shift)
-            c.shift_ms = Some(0.0);
-            candidates.push(c.clone());
-
-            // 2. Synced candidate if visual offset is significant (> 500ms)
-            if computed_shift_ms.abs() > SIGNIFICANT_SHIFT_THRESHOLD_MS {
-                let mut c_synced = c.clone();
-                c_synced.source = "certified_synced".to_string();
-                c_synced.shift_ms = Some(computed_shift_ms);
-                c_synced.title = format!(
-                    "{} [Synced {:+.1}s]",
-                    c.title,
-                    computed_shift_ms / MILLIS_PER_SEC
-                );
-                if let Some(ref d) = c.details {
-                    c_synced.details = Some(format!(
-                        "{} (Synchronized: {:+.2}s visual shift)",
-                        d,
-                        computed_shift_ms / MILLIS_PER_SEC
-                    ));
+        } else {
+            // Already populated via remote relay
+            for c in &candidates {
+                if let Some(ref cid) = c.candidate_id {
+                    seen_catalog_paths.insert(cid.clone());
                 }
-                candidates.push(c_synced);
+                seen_filenames.insert(c.title.to_lowercase());
             }
         }
     }
@@ -2197,6 +2602,10 @@ pub async fn search_handler(
 
     let total_candidates = candidates.len();
     timing.total_ms = start_overall.elapsed().as_secs_f64() * 1000.0;
+    state.metrics.total_latency_us.fetch_add(
+        start_overall.elapsed().as_micros() as u64,
+        std::sync::atomic::Ordering::Relaxed,
+    );
     let accounted_ms = timing.phash_match_ms
         + timing.pg_lookup_ms
         + timing.json_lookup_ms
@@ -2204,11 +2613,25 @@ pub async fn search_handler(
         + timing.disk_catalog_ms
         + timing.moviehash_ms;
     timing.overhead_ms = (timing.total_ms - accounted_ms).max(0.0);
+
+    state.push_log(
+        "SEARCH",
+        "INFO",
+        format!(
+            "Completed in {:.2}ms: matched='{}' (conf={:.1}%), candidates={}",
+            timing.total_ms,
+            matched_media.as_deref().unwrap_or("none"),
+            phash_conf,
+            total_candidates
+        ),
+    );
+
     Json(SearchSubtitlesResponse {
         media_path: payload.media_path,
         language: payload.language,
         matched_media,
         moviehash,
+        fingerprint_preview,
         total_candidates,
         candidates,
         timing,
@@ -2401,6 +2824,11 @@ pub async fn download_handler(
     let out_path = out_dir.join(&out_name);
 
     if let Err(e) = srt_file.save(&out_path) {
+        state.push_log(
+            "DOWNLOAD",
+            "ERROR",
+            format!("Failed to write subtitle file to {:?}: {:#}", out_path, e),
+        );
         return Json(DownloadSubtitleResponse {
             success: false,
             output_srt_path: String::new(),
@@ -2415,6 +2843,18 @@ pub async fn download_handler(
             )),
         });
     }
+
+    state.push_log(
+        "DOWNLOAD",
+        "INFO",
+        format!(
+            "Saved subtitle to {:?} (source='{}', lang='{}', shift={:.2}ms)",
+            out_path.file_name().unwrap_or_default(),
+            source_name,
+            payload.language,
+            shift_ms
+        ),
+    );
 
     Json(DownloadSubtitleResponse {
         success: true,
@@ -2616,10 +3056,289 @@ pub async fn certify_handler(
     })
 }
 
+pub fn parse_fingerprint_hashes(fingerprint: &[String]) -> Vec<u64> {
+    fingerprint
+        .iter()
+        .filter_map(|s| {
+            let s_trim = s.trim();
+            if let Some(hex_part) = s_trim
+                .strip_prefix("0x")
+                .or_else(|| s_trim.strip_prefix("0X"))
+            {
+                u64::from_str_radix(hex_part, 16).ok()
+            } else if s_trim.chars().any(|c| matches!(c, 'a'..='f' | 'A'..='F')) {
+                u64::from_str_radix(s_trim, 16).ok()
+            } else {
+                s_trim
+                    .parse::<u64>()
+                    .ok()
+                    .or_else(|| u64::from_str_radix(s_trim, 16).ok())
+            }
+        })
+        .collect()
+}
+
 pub async fn recognize_handler(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<RecognizeRequest>,
 ) -> Result<Json<RecognizeResponse>, (StatusCode, String)> {
+    let t_start = Instant::now();
+    state
+        .metrics
+        .total_requests
+        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    state
+        .metrics
+        .recognize_requests
+        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+    let override_phash_dir = payload.phash_dir.map(PathBuf::from);
+    let phash_dirs = state.effective_phash_dirs(override_phash_dir.as_deref());
+
+    // Branch A: Direct Fingerprint Mode (Remote o2switch / NAS / RPi4+ contract, 200 bytes, zero video I/O)
+    if let Some(ref fp) = payload.query_fingerprint {
+        let hashes = parse_fingerprint_hashes(fp);
+        let req_fps = payload.fps.unwrap_or(DEFAULT_BASELINE_FPS);
+        let req_lang = payload.language.as_deref().unwrap_or("auto");
+        let search_distance = if payload.search_distance > 0 {
+            payload.search_distance
+        } else {
+            DEFAULT_SEARCH_DISTANCE
+        };
+
+        tracing::info!(
+            "[Recognize] Incoming fingerprint: {} frames (fps={:.2}, lang='{}')",
+            hashes.len(),
+            req_fps,
+            req_lang
+        );
+
+        if hashes.is_empty() || hashes.iter().all(|&h| dbsrt_core::is_blank_phash(h)) {
+            let elapsed = t_start.elapsed().as_secs_f64();
+            state.metrics.total_latency_us.fetch_add(
+                t_start.elapsed().as_micros() as u64,
+                std::sync::atomic::Ordering::Relaxed,
+            );
+            return Ok(Json(RecognizeResponse {
+                found: false,
+                media_name_search: "fingerprint_query".to_string(),
+                media_match: None,
+                nb_offsets_match: 0,
+                confidence: 0.0,
+                tier: None,
+                shift_frames: None,
+                shift_ms: None,
+                candidates: None,
+                timer_seconds: elapsed,
+            }));
+        }
+
+        // 1. Tier 1: Check in-memory .dbphash MIH reader (<10ms)
+        let mut matched: Option<(String, f64, String)> = None;
+        if let Some(ref reader) = state.dbphash_reader {
+            let m = reader.recognize(&hashes, search_distance);
+            if let Some(top) = m.into_iter().next() {
+                if top.confidence >= MIN_PHASH_RECOGNITION_CONFIDENCE_PERCENT {
+                    matched = Some((
+                        top.clean_title,
+                        top.confidence,
+                        "Tier 1 (RAM .dbphash MIH under 10ms)".to_string(),
+                    ));
+                }
+            }
+        }
+
+        // 2. Tier 2: Check MmapLibrary Zero-DB files in phash_dirs
+        if matched.is_none() {
+            if let Ok(lib) = MmapLibrary::from_directories(&phash_dirs) {
+                let m = lib.recognize(&hashes, search_distance);
+                if let Some(top) = m.into_iter().next() {
+                    let conf_pct = top.confidence * 100.0;
+                    if conf_pct >= MIN_PHASH_RECOGNITION_CONFIDENCE_PERCENT {
+                        matched = Some((
+                            top.media_name,
+                            conf_pct,
+                            "Tier 2 (MmapLibrary Zero-DB Files)".to_string(),
+                        ));
+                    }
+                }
+            }
+        }
+
+        // 3. Tier 3: Check PostgreSQL BK-Tree if configured
+        if matched.is_none() {
+            if let Some(ref cfg) = state.db_config {
+                if let Ok(Some((rec, conf))) =
+                    cfg.with_client(|client| client.recognize_sample(&hashes, search_distance))
+                {
+                    let conf_pct = conf * 100.0;
+                    if conf_pct >= MIN_PHASH_RECOGNITION_CONFIDENCE_PERCENT {
+                        matched = Some((
+                            rec.name,
+                            conf_pct,
+                            "Tier 3 (PostgreSQL 17 SP-GiST BK-Tree)".to_string(),
+                        ));
+                    }
+                }
+            }
+        }
+
+        let elapsed = t_start.elapsed().as_secs_f64();
+        state.metrics.total_latency_us.fetch_add(
+            t_start.elapsed().as_micros() as u64,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+
+        if let Some((media_match, confidence, tier)) = matched {
+            // Find reference hashes to compute shift Δt across all candidate prints
+            let mut best_shift_pair = (0i64, 0.0f64, 0.0f64);
+            let req_fps = if req_fps > 0.0 {
+                req_fps
+            } else {
+                DEFAULT_BASELINE_FPS
+            };
+
+            for dir in &phash_dirs {
+                if let Ok(entries) = std::fs::read_dir(dir) {
+                    for entry in entries.flatten() {
+                        let p = entry.path();
+                        if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
+                            if name.ends_with(".phash") && !name.contains("_mid15s") {
+                                let cand_stem = name.trim_end_matches(".phash");
+                                let norm_m = norm_alnum(&media_match);
+                                let norm_c = norm_alnum(cand_stem);
+                                if norm_c.starts_with(&norm_m)
+                                    || norm_m.starts_with(&norm_c)
+                                    || name.contains(&media_match)
+                                    || media_match.contains(cand_stem)
+                                {
+                                    if let Ok(ref_hashes) = read_phash_file(&p) {
+                                        let (sf, match_conf) = calculate_sequence_shift_argmin(
+                                            &hashes,
+                                            &ref_hashes,
+                                            req_fps,
+                                        );
+                                        if match_conf > best_shift_pair.2 {
+                                            let sms = (sf as f64 / req_fps) * 1000.0;
+                                            best_shift_pair = (sf, sms, match_conf);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            let (shift_frames, shift_ms) =
+                if best_shift_pair.2 >= MIN_PHASH_RECOGNITION_CONFIDENCE_PERCENT {
+                    (Some(best_shift_pair.0), Some(best_shift_pair.1))
+                } else {
+                    (Some(0), Some(0.0))
+                };
+
+            // Lookup certified subtitles
+            let (cert_cands, _, _, _) = lookup_certified_couplings(
+                &state,
+                &state.subtitles_dir,
+                &media_match,
+                req_lang,
+                confidence,
+            );
+
+            // Generate candidates: raw 1:1 original + synced if visual shift is significant (> 500ms)
+            let mut final_cands = Vec::new();
+            for c in cert_cands {
+                let mut c_raw = c.clone();
+                c_raw.shift_ms = Some(0.0);
+                final_cands.push(c_raw);
+
+                if let Some(sms) = shift_ms {
+                    if sms.abs() > SIGNIFICANT_SHIFT_THRESHOLD_MS {
+                        let mut c_synced = c.clone();
+                        c_synced.source = "certified_synced".to_string();
+                        c_synced.shift_ms = Some(sms);
+                        c_synced.title =
+                            format!("{} [Synced {:+.1}s]", c.title, sms / MILLIS_PER_SEC);
+                        if let Some(ref d) = c.details {
+                            c_synced.details = Some(format!(
+                                "{} (Synchronized: {:+.2}s visual shift)",
+                                d,
+                                sms / MILLIS_PER_SEC
+                            ));
+                        }
+                        final_cands.push(c_synced);
+                    }
+                }
+            }
+
+            tracing::info!(
+                "[Recognize] ✓ Matched in {:.2}ms: media='{}' (conf={:.1}%, tier='{}', candidates={})",
+                elapsed * 1000.0,
+                media_match,
+                confidence,
+                tier,
+                final_cands.len()
+            );
+
+            state.push_log(
+                "RECOGNIZE",
+                "INFO",
+                format!(
+                    "✓ Matched in {:.2}ms: '{}' (conf={:.1}%, tier='{}', candidates={})",
+                    elapsed * 1000.0,
+                    media_match,
+                    confidence,
+                    tier,
+                    final_cands.len()
+                ),
+            );
+
+            return Ok(Json(RecognizeResponse {
+                found: true,
+                media_name_search: format!("fingerprint:{}frames", hashes.len()),
+                media_match: Some(media_match),
+                nb_offsets_match: hashes.len(),
+                confidence,
+                tier: Some(tier),
+                shift_frames,
+                shift_ms,
+                candidates: Some(final_cands),
+                timer_seconds: elapsed,
+            }));
+        } else {
+            tracing::info!(
+                "[Recognize] ✗ No match found in {:.2}ms (tested {} frames)",
+                elapsed * 1000.0,
+                hashes.len()
+            );
+
+            state.push_log(
+                "RECOGNIZE",
+                "INFO",
+                format!(
+                    "✗ No match found in {:.2}ms (tested {} frames)",
+                    elapsed * 1000.0,
+                    hashes.len()
+                ),
+            );
+
+            return Ok(Json(RecognizeResponse {
+                found: false,
+                media_name_search: format!("fingerprint:{}frames", hashes.len()),
+                media_match: None,
+                nb_offsets_match: 0,
+                confidence: 0.0,
+                tier: None,
+                shift_frames: None,
+                shift_ms: None,
+                candidates: None,
+                timer_seconds: elapsed,
+            }));
+        }
+    }
+
+    // Branch B: Legacy Local Video Path Mode (probe_video + extract_frames_phash)
     let media_path = PathBuf::from(&payload.media_path);
     if !media_path.exists() {
         return Err((
@@ -2628,10 +3347,6 @@ pub async fn recognize_handler(
         ));
     }
 
-    let override_phash_dir = payload.phash_dir.map(PathBuf::from);
-    let phash_dirs = state.effective_phash_dirs(override_phash_dir.as_deref());
-
-    let start = Instant::now();
     let meta =
         probe_video(&media_path).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let start_sec = (meta.duration / 2.0).floor();
@@ -2646,13 +3361,22 @@ pub async fn recognize_handler(
         .unwrap_or_default();
 
     if hashes.is_empty() || hashes.iter().all(|&h| dbsrt_core::is_blank_phash(h)) {
+        let elapsed = t_start.elapsed().as_secs_f64();
+        state.metrics.total_latency_us.fetch_add(
+            t_start.elapsed().as_micros() as u64,
+            std::sync::atomic::Ordering::Relaxed,
+        );
         return Ok(Json(RecognizeResponse {
             found: false,
             media_name_search,
             media_match: None,
             nb_offsets_match: 0,
             confidence: 0.0,
-            timer_seconds: start.elapsed().as_secs_f64(),
+            tier: None,
+            shift_frames: None,
+            shift_ms: None,
+            candidates: None,
+            timer_seconds: elapsed,
         }));
     }
 
@@ -2660,7 +3384,11 @@ pub async fn recognize_handler(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     let matches = library.recognize(&hashes, payload.search_distance);
-    let timer_seconds = start.elapsed().as_secs_f64();
+    let timer_seconds = t_start.elapsed().as_secs_f64();
+    state.metrics.total_latency_us.fetch_add(
+        t_start.elapsed().as_micros() as u64,
+        std::sync::atomic::Ordering::Relaxed,
+    );
 
     if let Some(top) = matches.first() {
         Ok(Json(RecognizeResponse {
@@ -2669,6 +3397,10 @@ pub async fn recognize_handler(
             media_match: Some(top.media_name.clone()),
             nb_offsets_match: top.nb_offsets_match,
             confidence: top.confidence,
+            tier: Some("Tier 2 (MmapLibrary Zero-DB Files)".to_string()),
+            shift_frames: None,
+            shift_ms: None,
+            candidates: None,
             timer_seconds,
         }))
     } else {
@@ -2678,6 +3410,10 @@ pub async fn recognize_handler(
             media_match: None,
             nb_offsets_match: 0,
             confidence: 0.0,
+            tier: None,
+            shift_frames: None,
+            shift_ms: None,
+            candidates: None,
             timer_seconds,
         }))
     }
@@ -3110,15 +3846,22 @@ pub fn read_ref_phash_for_media(phash_dir: &Path, media_name: &str) -> Result<Ve
     let clean_name = media_name.strip_suffix(".phash").unwrap_or(media_name);
     let entries = std::fs::read_dir(phash_dir)?;
     let mut candidate_paths = Vec::new();
+    let norm_target = norm_alnum(clean_name);
+
     for entry in entries.flatten() {
         let p = entry.path();
         if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
             // Never treat a snippet file (*_mid15s*) as a reference print
             if name.ends_with(".phash") && !name.contains("_mid15s") {
+                let cand_stem = name.trim_end_matches(".phash");
                 if name == format!("{}.phash", clean_name) || name == clean_name {
                     return read_phash_file(&p);
                 }
-                if name.contains(clean_name) || clean_name.contains(name.trim_end_matches(".phash"))
+                let norm_cand = norm_alnum(cand_stem);
+                if name.contains(clean_name)
+                    || clean_name.contains(cand_stem)
+                    || norm_cand.starts_with(&norm_target)
+                    || norm_target.starts_with(&norm_cand)
                 {
                     candidate_paths.push(p);
                 }

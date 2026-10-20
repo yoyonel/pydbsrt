@@ -126,6 +126,58 @@ local help_message = [[
 </div>
 ]]
 
+-- Log Verbosity Levels: 0 = ERRORS, 1 = WARNINGS, 2 = INFO, 3 = DEBUG
+local LOG_LEVEL_ERROR = 0
+local LOG_LEVEL_WARN = 1
+local LOG_LEVEL_INFO = 2
+local LOG_LEVEL_DEBUG = 3
+
+-- Active verbosity threshold (default: DEBUG for development & rich telemetry)
+local active_log_level = LOG_LEVEL_DEBUG
+
+-- Structured logging helpers
+local function log_err(fmt, ...)
+    if active_log_level >= LOG_LEVEL_ERROR then
+        local msg = select("#", ...) > 0 and string.format(fmt, ...) or fmt
+        if vlc and vlc.msg and vlc.msg.err then
+            vlc.msg.err("[vlsub-dbsrt] [ERROR] " .. msg)
+        elseif vlc and vlc.msg and vlc.msg.info then
+            vlc.msg.info("[vlsub-dbsrt] [ERROR] " .. msg)
+        end
+    end
+end
+
+local function log_warn(fmt, ...)
+    if active_log_level >= LOG_LEVEL_WARN then
+        local msg = select("#", ...) > 0 and string.format(fmt, ...) or fmt
+        if vlc and vlc.msg and vlc.msg.warn then
+            vlc.msg.warn("[vlsub-dbsrt] [WARN] " .. msg)
+        elseif vlc and vlc.msg and vlc.msg.info then
+            vlc.msg.info("[vlsub-dbsrt] [WARN] " .. msg)
+        end
+    end
+end
+
+local function log_info(fmt, ...)
+    if active_log_level >= LOG_LEVEL_INFO then
+        local msg = select("#", ...) > 0 and string.format(fmt, ...) or fmt
+        if vlc and vlc.msg and vlc.msg.info then
+            vlc.msg.info("[vlsub-dbsrt] [INFO] " .. msg)
+        end
+    end
+end
+
+local function log_dbg(fmt, ...)
+    if active_log_level >= LOG_LEVEL_DEBUG then
+        local msg = select("#", ...) > 0 and string.format(fmt, ...) or fmt
+        -- Route via vlc.msg.info with [DEBUG] tag because LibVLC drops vlc.msg.dbg
+        -- unless VLC was specifically started with -vv from terminal
+        if vlc and vlc.msg and vlc.msg.info then
+            vlc.msg.info("[vlsub-dbsrt] [DEBUG] " .. msg)
+        end
+    end
+end
+
 -- OSD feedback
 function notify_osd(msg, duration_sec, pos)
     duration_sec = duration_sec or DEFAULT_OSD_DURATION_SEC
@@ -139,15 +191,16 @@ function notify_osd(msg, duration_sec, pos)
             vlc.osd.message(msg, osd_channel or 1, pos, duration_sec * MICROSECONDS_PER_SEC)
         end)
     end
-    if vlc.msg and vlc.msg.info then
-        vlc.msg.info("[vlsub-dbsrt] " .. msg)
-    end
+    log_info("[OSD] %s", msg)
 end
 
 -- Server discovery via /tmp/dbsrt-server.json
 function discover_server()
     local f = io.open("/tmp/dbsrt-server.json", "r")
-    if not f then return nil end
+    if not f then
+        log_dbg("[Discovery] No /tmp/dbsrt-server.json found, keeping current endpoint: %s", server_url)
+        return nil
+    end
     local content = f:read("*all")
     f:close()
 
@@ -159,8 +212,11 @@ function discover_server()
         server_url = url
         default_host = host or DEFAULT_HOST
         default_port = tonumber(port) or DEFAULT_DAEMON_PORT
+        log_info("[Discovery] Detected active daemon: %s (host=%s, port=%d)", server_url, default_host, default_port)
         return true
     end
+    local preview = string.sub(content, 1, 80)
+    log_warn("[Discovery] /tmp/dbsrt-server.json could not be parsed: %s", preview)
     return nil
 end
 
@@ -174,12 +230,21 @@ end
 
 -- HTTP Client via TCP socket
 function send_http_request(host, port, method, path, payload)
-    local ok_conn, fd = pcall(function() return vlc.net.connect_tcp(host, port) end)
-    if not ok_conn or not fd or fd < 0 then
-        return nil, string.format("Cannot connect to %s:%d", host, port)
+    local t0 = os.clock()
+    local body_str = payload or ""
+    log_info("[HTTP] [REQ] %s %s to %s:%d (body: %d bytes)", method, path, host, port, string.len(body_str))
+    if string.len(body_str) > 0 then
+        log_dbg("[HTTP] [REQ] Payload: %s", body_str)
     end
 
-    local body_str = payload or ""
+    local ok_conn, fd = pcall(function() return vlc.net.connect_tcp(host, port) end)
+    if not ok_conn or not fd or fd < 0 then
+        local elapsed_ms = (os.clock() - t0) * 1000.0
+        log_err("[HTTP] Connection failed to %s:%d after %.2fms (is dbsrt-server running?)", host, port, elapsed_ms)
+        return nil, string.format("Cannot connect to %s:%d", host, port)
+    end
+    log_dbg("[HTTP] Connected to %s:%d (socket fd=%d)", host, port, fd)
+
     local req = string.format(
         "%s %s HTTP/1.1\r\n"
         .. "Host: %s:%d\r\n"
@@ -192,8 +257,10 @@ function send_http_request(host, port, method, path, payload)
     local ok_send = pcall(function() vlc.net.send(fd, req) end)
     if not ok_send then
         pcall(function() vlc.net.close(fd) end)
+        log_err("[HTTP] Failed to transmit bytes on socket fd=%d", fd)
         return nil, "Failed to send HTTP request"
     end
+    log_dbg("[HTTP] Request transmitted (%d bytes), awaiting daemon response...", string.len(req))
 
     local pollfds = {}
     pollfds[fd] = vlc.net.POLLIN
@@ -203,8 +270,12 @@ function send_http_request(host, port, method, path, payload)
     local buf = ""
     local header_end = nil
     local content_length = nil
+    local chunk_count = 0
+    local total_bytes = 0
 
     while chunk and string.len(chunk) > 0 do
+        chunk_count = chunk_count + 1
+        total_bytes = total_bytes + string.len(chunk)
         buf = buf .. chunk
         if not header_end then
             header_end = string.find(buf, CRLF_DOUBLE)
@@ -212,6 +283,7 @@ function send_http_request(host, port, method, path, payload)
                 local cl = string.match(buf, "[Cc]ontent%-[Ll]ength:%s*(%d+)")
                 if cl then
                     content_length = tonumber(cl)
+                    log_dbg("[HTTP] Parsed Content-Length header: %d bytes", content_length)
                 end
             end
         end
@@ -235,10 +307,18 @@ function send_http_request(host, port, method, path, payload)
         header_end = string.find(buf, CRLF_DOUBLE)
     end
 
+    local elapsed_ms = (os.clock() - t0) * 1000.0
     if not header_end then
+        log_err("[HTTP] Invalid HTTP response after %.2fms: %d bytes received, missing CRLF header boundary", elapsed_ms, total_bytes)
         return nil, "Invalid HTTP response from daemon"
     end
-    return string.sub(buf, header_end + CRLF_DOUBLE_LEN), nil
+
+    local resp_body = string.sub(buf, header_end + CRLF_DOUBLE_LEN)
+    log_info("[HTTP] [RESP] %s %s completed in %.2fms (%d bytes, %d chunk(s), body: %d bytes)",
+        method, path, elapsed_ms, total_bytes, chunk_count, string.len(resp_body))
+    local excerpt = string.sub(resp_body, 1, 150) .. (string.len(resp_body) > 150 and "..." or "")
+    log_dbg("[HTTP] [RESP] Body excerpt: %s", excerpt)
+    return resp_body, nil
 end
 
 -- Media file information extraction
@@ -252,6 +332,7 @@ function update_file_info()
         file_info.title = ""
         file_info.season = ""
         file_info.episode = ""
+        log_dbg("[Media] No active input item playing")
         return false
     end
 
@@ -259,6 +340,7 @@ function update_file_info()
     file_info.uri = item:uri()
     if not file_info.uri then
         file_info.path = nil
+        log_warn("[Media] Active input item has empty URI")
         return false
     end
 
@@ -290,6 +372,9 @@ function update_file_info()
     name = string.gsub(name, "^%s*(.-)%s*$", "%1")
 
     file_info.title = name
+    log_info("[Media] Active file: '%s' (title='%s', S%sE%s, path='%s')",
+        file_info.filename, file_info.title, file_info.season ~= "" and file_info.season or "?",
+        file_info.episode ~= "" and file_info.episode or "?", file_info.path)
     return true
 end
 
@@ -429,14 +514,16 @@ function close()
 end
 
 function activate()
-    vlc.msg.info("[vlsub-dbsrt] Plugin activated")
+    log_info("==================================================")
+    log_info("=== VLSub (dbsrt Enhanced) v%s Initialized ===", app_version)
+    log_info("==================================================")
     discover_server()
     update_file_info()
     show_main()
 end
 
 function deactivate()
-    vlc.msg.info("[vlsub-dbsrt] Plugin deactivated")
+    log_info("=== VLSub (dbsrt Enhanced) Deactivated ===")
     if dlg then
         dlg:hide()
     end
@@ -461,7 +548,11 @@ end
 
 -- Unified search runner via dbsrt-server REST API
 function run_search(mode)
+    local t_start = os.clock()
+    log_info("=== [Search] Triggered method: %s ===", mode:upper())
+
     if not file_info.has_input or not file_info.path then
+        log_warn("[Search] Aborted: No active media file playing in VLC")
         setMessage("<b>Error:</b> No active media playing in VLC.")
         return
     end
@@ -469,6 +560,7 @@ function run_search(mode)
     discover_server()
     local host, port = parse_url(server_url)
     local lang = get_selected_lang()
+    log_info("[Search] Connecting to daemon at %s:%d | Requested language: '%s'", host, port, lang)
 
     local title_query = ""
     local season_query = nil
@@ -483,6 +575,9 @@ function run_search(mode)
     if input_table["episodeNumber"] then
         episode_query = tonumber(input_table["episodeNumber"]:get_text())
     end
+
+    log_info("[Search] Query parameters: title='%s', season=%s, episode=%s, media='%s'",
+        title_query, tostring(season_query), tostring(episode_query), file_info.filename)
 
     setMessage(string.format("<b>Searching subtitles (%s)...</b>", mode:upper()))
 
@@ -501,10 +596,51 @@ function run_search(mode)
     end
     payload = payload .. "}"
 
+    local t_req_start = os.clock()
     local body, err = send_http_request(host, port, "POST", "/v1/search", payload)
+    local req_elapsed_ms = (os.clock() - t_req_start) * 1000.0
+
     if not body then
+        log_err("[Search] Daemon unreachable after %.2fms: %s", req_elapsed_ms, err or "offline")
         setMessage(string.format("<b>Error:</b> Cannot connect to dbsrt-server (%s)", err or "offline"))
         return
+    end
+
+    local matched_media = string.match(body, '"matched_media":%s*"([^"]+)"')
+    local shift_frames = string.match(body, '"shift_frames":%s*([%d%-]+)')
+    local shift_ms_str = string.match(body, '"shift_ms":%s*([%d%.%-]+)')
+    local confidence_str = string.match(body, '"confidence_percent":%s*([%d%.]+)')
+    local matching_tier = string.match(body, '"matching_tier":%s*"([^"]+)"')
+
+    if matching_tier and string.find(matching_tier, "Remote Relay") then
+        log_info("[Relay] ✓ Media identified via Remote Server (%s)", matching_tier)
+    elseif matching_tier and matching_tier ~= "" then
+        log_dbg("[Search] Engine tier: %s", matching_tier)
+    end
+
+    log_info("[Search] Server response in %.2fms: matched_ref='%s', confidence=%s%%, visual shift=%sframes / %sms",
+        req_elapsed_ms, matched_media or "none", confidence_str or "0.0", shift_frames or "0", shift_ms_str or "0.0")
+
+    -- Extract & log fingerprints (MovieHash & pHash frames) in DEBUG mode
+    local moviehash = string.match(body, '"moviehash":%s*"([^"]+)"')
+    if moviehash then
+        log_dbg("[Fingerprint] 64-bit MovieHash (OpenSubtitles): %s", moviehash)
+    end
+
+    local fp_start = string.find(body, '"fingerprint_preview":%s*%[')
+    if fp_start then
+        local fp_end = string.find(body, "%]", fp_start)
+        if fp_end then
+            local fp_str = string.sub(body, fp_start, fp_end)
+            local fp_hexes = {}
+            for h in string.gmatch(fp_str, '"(0x[0-9a-fA-F]+)"') do
+                table.insert(fp_hexes, h)
+            end
+            if #fp_hexes > 0 then
+                log_dbg("[Fingerprint] Server-computed visual pHash preview (%d frames): %s",
+                    #fp_hexes, table.concat(fp_hexes, ", "))
+            end
+        end
     end
 
     for k in pairs(candidates_store) do candidates_store[k] = nil end
@@ -534,15 +670,23 @@ function run_search(mode)
                 score = c_score,
                 shift_ms = c_shift
             })
+
+            local shift_desc = c_shift and string.format("%+.2fms", c_shift) or "0.0ms"
+            log_dbg("[Search] Candidate #%d: '%s' [lang=%s, source=%s, shift=%s, id=%s]",
+                #candidates_store, c_title, c_lang:upper(), c_source, shift_desc, c_id)
         end
     end
 
     display_subtitles()
 
+    local total_elapsed_ms = (os.clock() - t_start) * 1000.0
+    local relay_tag = (matching_tier and string.find(matching_tier, "Remote Relay")) and " [Remote Relay]" or ""
     if #candidates_store == 0 then
+        log_info("[Search] Complete%s in %.2fms: 0 subtitles found", relay_tag, total_elapsed_ms)
         setMessage("<b>Complete:</b> No subtitles found.")
     else
-        setMessage(string.format("<b>Complete:</b> %d subtitle(s) found.", #candidates_store))
+        log_info("[Search] Complete%s in %.2fms: %d candidate(s) loaded into UI listbox", relay_tag, total_elapsed_ms, #candidates_store)
+        setMessage(string.format("<b>Complete%s:</b> %d subtitle(s) found.", relay_tag, #candidates_store))
     end
 end
 
@@ -586,6 +730,7 @@ end
 
 -- Download and apply user selected subtitle
 function download_selection()
+    local t_start = os.clock()
     if not input_table["mainlist"] then return end
     local selection = input_table["mainlist"]:get_selection()
     local sel_idx = nil
@@ -595,11 +740,15 @@ function download_selection()
     end
 
     if not sel_idx or not candidates_store[sel_idx] then
+        log_warn("[Download] Aborted: No subtitle selected in listbox by user")
         setMessage("<b>No subtitle selected:</b> Please select a subtitle in the list first.")
         return
     end
 
     local candidate = candidates_store[sel_idx]
+    log_info("=== [Download] User selected entry #%d: '%s' [lang=%s, source=%s] ===",
+        sel_idx, candidate.title, candidate.language:upper(), candidate.source)
+
     setMessage(string.format("<b>Downloading:</b> %s [%s]...", candidate.title, candidate.language:upper()))
 
     local is_resync = false
@@ -607,6 +756,10 @@ function download_selection()
     if candidate.shift_ms and math.abs(candidate.shift_ms) > 1.0 then
         is_resync = true
         shift_param = string.format("%.2f", candidate.shift_ms)
+        log_info("[Download] Visual resynchronization active: shift_ms=%+.2fms (%.2fs)",
+            candidate.shift_ms, candidate.shift_ms / MILLIS_PER_SEC)
+    else
+        log_info("[Download] Standard 1:1 injection without shift (shift_ms=0.0)")
     end
 
     discover_server()
@@ -621,10 +774,17 @@ function download_selection()
         shift_param
     )
 
+    log_info("[Download] Requesting download from daemon at %s:%d (candidate_id='%s')",
+        host, port, candidate.candidate_id or "")
+
+    local t_req = os.clock()
     local body, err = send_http_request(host, port, "POST", "/v1/download", payload)
+    local req_ms = (os.clock() - t_req) * 1000.0
+
     if not body then
+        log_err("[Download] Download failed after %.2fms: %s", req_ms, err or "No response from dbsrt-server")
         setMessage(string.format("<b>Download error:</b> %s", err or "No response from dbsrt-server"))
-        notify_osd("dbsrt: Download failed", 3)
+        notify_osd("dbsrt: Download failed", DEFAULT_OSD_DURATION_SEC)
         return
     end
 
@@ -633,7 +793,17 @@ function download_selection()
     local shift_ms = tonumber(string.match(body, '"shift_ms":%s*([%d%.%-]+)')) or 0.0
 
     if success == "true" and out_srt and out_srt ~= "" then
-        pcall(function() vlc.input.add_subtitle(out_srt, true) end)
+        log_info("[Download] Server saved subtitle in %.2fms -> '%s' (applied shift: %+.2fms)",
+            req_ms, out_srt, shift_ms)
+        log_info("[Download] Attaching subtitle to VLC stream: vlc.input.add_subtitle('%s', autoselect=true)", out_srt)
+
+        local ok_sub, sub_err = pcall(function() return vlc.input.add_subtitle(out_srt, true) end)
+        if ok_sub then
+            log_info("[Download] ✓ Subtitle attached successfully to active playback")
+        else
+            log_err("[Download] vlc.input.add_subtitle failed: %s", tostring(sub_err))
+        end
+
         local out_basename = out_srt:match("([^/\\]+)$") or out_srt
         local shift_desc = ""
         if math.abs(shift_ms) > MIN_SIGNIFICANT_DISPLAY_SHIFT_MS then
@@ -641,8 +811,12 @@ function download_selection()
         end
         setMessage(string.format("<b>Subtitles loaded:</b> %s%s", out_basename, shift_desc))
         notify_osd(string.format("✓ Subtitles loaded: %s", out_basename), DEFAULT_OSD_DURATION_SEC)
+
+        local total_dl_ms = (os.clock() - t_start) * 1000.0
+        log_info("=== [Download] Complete in %.2fms: loaded '%s'%s ===", total_dl_ms, out_basename, shift_desc)
     else
         local err_msg = string.match(body, '"error":%s*"([^"]+)"') or "Failed to download subtitle."
+        log_err("[Download] Server download failed: %s", err_msg)
         setMessage(string.format("<b>Download failed:</b> %s", err_msg))
     end
 end

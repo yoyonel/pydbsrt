@@ -111,6 +111,7 @@ nav:
           - Fork VLSub & Démo 1080p: 2026-10-18-vlsub-fork-and-restoration.md
           - Plugin VLC v2.0 & OSD: 2026-10-17-validation-ui-ux-vlc-plugin-v2.md
           - Daemon Axum & Plugins Lua: 2026-10-15-vlc-integration-daemon-and-plugins.md
+          - Client Daemon Sidecar & Packaging: 2026-10-20-architecture-client-daemon-sidecar-et-deploiement-o2switch.md
           - Déploiement Remote o2switch & VLSub++: 2026-10-19-etude-deploiement-remote-o2switch-et-dimensionnement-vlsub.md
       - Rétro-Ingénierie:
           - Audit Legacy VLSub: 2026-10-18-vlsub-legacy-audit.md

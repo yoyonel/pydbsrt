@@ -265,7 +265,11 @@ impl CouplingRegistry {
                     .phash_filename
                     .replace(['_', '.', '-'], " ")
                     .to_lowercase();
-                if norm_c_name.starts_with(norm_clean) || norm_c_phash.starts_with(norm_clean) {
+                if norm_c_name.starts_with(norm_clean)
+                    || norm_c_phash.starts_with(norm_clean)
+                    || norm_clean.starts_with(&norm_c_name)
+                    || norm_clean.starts_with(&norm_c_phash)
+                {
                     return true;
                 }
             }
