@@ -122,9 +122,12 @@ Toutes les suites de tests et de qualité code (`.rs`, `.py`, `.sh`, `.lua`, `.y
 | **`task test:rs:db`** | Teste l'intégration avec PostgreSQL 17 BK-Tree (démarre la DB auto) | Docker |
 | **`task test:local`** | Exécute la suite de tests Python avec `uv` | Docker (`db:up`) |
 | **`task fmt`** | Formate tout le dépôt (`ruff format`, `cargo fmt`, `shfmt`, `stylua`) | Aucune |
-| **`task lint`** | Exécute tous les linters (`ruff`, `mypy`, `bandit`, `clippy`, `shellcheck`, `luac5.2`, `yamllint`, web AST) | Aucune |
+| **`task lint`** | Exécute tous les linters (`ruff`, `mypy`, `bandit`, `clippy`, `shellcheck`, `luac5.2`, `yamllint`, web AST, disk guard) | Aucune |
 | **`task pre-commit`** | Exécute les `17/17` hooks pre-commit sur l'ensemble des fichiers suivis | Aucune |
 | **`task doc:check`** | Valide le build strict MkDocs, l'AST HTML/LaTeX et le rendu Headless Chrome | Aucune |
+| **`task doc:optimize-images`** | Convertit les captures lourdes PNG en WebP 720p optimisé (-91.5% payload) | Aucune |
+| **`task disk:check`** | Vérifie les seuils d'espace disque disponible (> 10 Go) et de `target/` (< 4 Go) | Aucune |
+| **`task clean`** | Purge unifiée des artefacts et caches (`cargo clean`, `.pytest_cache`, `.ruff_cache`, `__pycache__`) | Aucune |
 
 ---
 
@@ -132,6 +135,8 @@ Toutes les suites de tests et de qualité code (`.rs`, `.py`, `.sh`, `.lua`, `.y
 
 Dossiers techniques détaillés disponibles dans le répertoire [`docs/`](docs) :
 
+* [`docs/2026-10-20-dashboard-interactif-e2e-vlc-corpus-nas.md`](docs/2026-10-20-dashboard-interactif-e2e-vlc-corpus-nas.md) : Dashboard interactif sur 1 334 vidéos réelles (99.8% succès), navigation plein écran par flèches clavier, synchronisation bidirectionnelle du curseur et captures WebP 720p.
+* [`docs/2026-10-20-architecture-retrait-invalidation-donnees-globales.md`](docs/2026-10-20-architecture-retrait-invalidation-donnees-globales.md) : Architecture de retrait et invalidation globale sur 5 paliers synchronisés (FS, Zero-DB JSON, PostgreSQL 17 `ON DELETE CASCADE`, `.dbphash` mmap).
 * [`docs/2026-10-18-studio-backoffice-and-relational-couplings.md`](docs/2026-10-18-studio-backoffice-and-relational-couplings.md) : Architecture des couplages relationnels certifiés (`medias`/`frames`/`subtitles`/`sub_frames`), backoffice `dbsrt Studio` (`/studio`) + `PgWeb` (`:8086`), Taskfile déclaratif et pipeline qualité `17/17` hooks.
 * [`docs/2026-10-18-e2e-phash-search-mechanics-and-roadmap.md`](docs/2026-10-18-e2e-phash-search-mechanics-and-roadmap.md) : Analyse mécanique E2E de `Search by pHash`, résolution prioritaire par couplages certifiés et certification `dbsrt certify-coupling`.
 * [`docs/2026-10-18-vlsub-fork-and-restoration.md`](docs/2026-10-18-vlsub-fork-and-restoration.md) : Fork bonifié de VLSub (`vlsub_dbsrt.lua`), backend REST Axum et démonstration vidéo 1080p MP4.

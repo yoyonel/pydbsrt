@@ -86,6 +86,9 @@ Conformément à la règle **Taskfile-First**, toutes les opérations récurrent
     | `task format` | `scripts/code_quality.sh format` | Formate automatiquement le code Rust (`cargo fmt`), Python (`ruff`), Shell (`shfmt`) et Lua (`stylua`). |
     | `task coverage` | `scripts/code_quality.sh coverage` | Mesure la couverture 1:1 avec la CI GitHub Actions (PostgreSQL 17 + `cargo llvm-cov` + `pytest --cov`). |
     | `task pre-commit:run` | `pre-commit run --all-files` | Exécute les `17/17` hooks pre-commit sur l'ensemble du dépôt. |
+    | `task disk:check` | `scripts/disk_guard.sh check` | Harnais de sécurité vérifiant l'espace disque (> 10 Go) et la taille de `target/` (< 4 Go). |
+    | `task clean` | `scripts/disk_guard.sh clean` | Purge unifiée des artefacts et caches (`cargo clean`, `.pytest_cache`, `.ruff_cache`, `__pycache__`). |
+    | `task clean:rs` | `cargo clean` | Purge ciblée des binaires et tables DWARF accumulés dans `target/`. |
 
 === "📚 Documentation"
 
@@ -94,6 +97,7 @@ Conformément à la règle **Taskfile-First**, toutes les opérations récurrent
     | `task doc` / `task doc:serve` | `scripts/serve_docs.py` | Lance le serveur MkDocs avec allocation dynamique de port (`8000`–`8020`). |
     | `task doc:build` | `mkdocs build --strict` | Compile le site statique HTML/CSS/JS dans `site/` en mode strict. |
     | `task doc:check` | `scripts/validate_docs.py` | Valide le build strict, l'AST HTML, les équations LaTeX et les liens d'images. |
+    | `task doc:optimize-images` | `scripts/convert_dashboard_webp.py` | Conversion batch multithreadée des captures PNG en WebP 720p (-91.5% de payload). |
 
 ---
 
@@ -110,3 +114,30 @@ Conformément à la règle **Taskfile-First**, toutes les opérations récurrent
 | `POST /v1/search` | `{"video_path": "...", "query": "...", "language": "fr"}` | Recherche multi-sources (1. Couplages Certifiés pHash → 2. Catalogue Local → 3. OpenSubtitles). |
 | `POST /v1/download` | `{"subtitle_id": "...", "video_path": "..."}` | Télécharge le `.srt` et applique automatiquement le recalage temporel pHash si une référence existe. |
 | `POST /v1/sync` | `{"video_path": "...", "srt_path": "..."}` | Recalage direct en 1 clic et génération du fichier `.dbsrt.srt` synchronisé. |
+
+---
+
+## 5. FAQ Opérationnelle & Bonnes Pratiques
+
+### 🛡️ Gestion de l'Espace Disque & Profil de Compilation Rust
+* **Problème** : `target/` enfle rapidement jusqu'à plusieurs dizaines de gigaoctets lors des itérations de tests (`cargo test`).
+* **Causes identifiées** : L'accumulation de centaines de binaires de tests d'intégration statiques combinée au niveau de debug par défaut DWARF (`debug = 2`).
+* **Garde-fous déployés** :
+  1. `Cargo.toml` configure désormais `debug = 1` sur les profils `dev` et `test` : les backtraces conservent les numéros de ligne et fichiers, mais les volumineux dictionnaires de types sont éludés (taille divisée par $4\times$ à $5\times$).
+  2. Le script `scripts/disk_guard.sh` surveille les seuils critiques ($> 10\text{ Go}$ libres sur la partition, $< 4\text{ Go}$ pour `target/`) et auto-nettoie si le seuil est franchi.
+  3. La commande `task disk:check` est intégrée comme palier de validation `[7/7]` dans `task lint` et `task check`.
+  4. Pour purger manuellement : `task clean:rs` (Rust seul) ou `task clean` (purge unifiée Rust + caches Python).
+
+### 🎬 Dashboard E2E VLC GUI & Navigation Synchronisée
+* **Accès** : Disponible sur le portail documentaire via [`Dashboard Interactif E2E VLC`](2026-10-20-dashboard-interactif-e2e-vlc-corpus-nas.md).
+* **Navigation Clavier** :
+  * Flèche gauche $\leftarrow$ (`ArrowLeft`) et Flèche droite $\rightarrow$ (`ArrowRight`) : défilement instantané entre les captures avec bouclage circulaire.
+  * Touche $\text{Échap}$ : fermeture immédiate du modal plein écran.
+* **Synchronisation Bidirectionnelle** :
+  * La sélection reste contextualisée au filtre en cours (Tous, Matchs Valides $\ge 90\%$, Plans Fixes).
+  * Lors de la navigation ou à la sortie du modal, la DataTable change automatiquement de page si nécessaire (`table.page(targetPage).draw(false)`), applique la classe cyan `.active-selected-row` et centre la ligne correspondante dans la fenêtre via `scrollIntoView`.
+
+### 🖼️ Optimisation des Médias : WebP 720p vs PNG
+* **Pourquoi pas de PNG bruts ?** : 1 334 captures $1920 \times 1080$ totalisaient $861\text{ Mo}$ dans `docs/screenshots/e2e_vlc_all/`, provoquant un dépassement de quota et l'échec du déploiement Surge.sh (`pr-preview`).
+* **Conversion Automatisée** : `task doc:optimize-images` invoque `scripts/convert_dashboard_webp.py` en multithread (`cwebp -q 80 -resize 1280 720`), réduisant la charge utile à $73.5\text{ Mo}$ ($-91.5\%$).
+* **Évitement des collisions de Lightbox** : La directive `glightbox: false` dans le frontmatter garantit que le plugin MkDocs n'interfère pas avec le modal plein écran natif du dashboard.

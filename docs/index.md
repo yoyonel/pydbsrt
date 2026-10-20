@@ -67,6 +67,7 @@ hide:
     <h3>Plugin VLC v2.0 &amp; Fork VLSub</h3>
     <p>Rechercher, télécharger et recaler automatiquement un sous-titre directement depuis l'interface Qt de VLC avec notification OSD native.</p>
     <div class="bento-links">
+      <a href="2026-10-20-dashboard-interactif-e2e-vlc-corpus-nas/">→ ⚡ Dashboard E2E VLC GUI (1 334 Tests)</a>
       <a href="2026-10-18-vlsub-fork-and-restoration/">→ Fork VLSub &amp; Démo Vidéo 1080p</a>
       <a href="2026-10-17-validation-ui-ux-vlc-plugin-v2/">→ Validation UI/UX Plugin VLC v2.0</a>
       <a href="2026-10-15-vlc-integration-daemon-and-plugins/">→ Daemon Axum &amp; Plugins Lua</a>
@@ -151,6 +152,8 @@ hide:
 
 | Document | Date | Pôle | Statut | Tags Clés | Résumé Synthétique |
 | :--- | :---: | :---: | :---: | :--- | :--- |
+| [⚡ Dashboard Interactif E2E VLC (1 334 Tests)](2026-10-20-dashboard-interactif-e2e-vlc-corpus-nas.md) | `2026-10-20` | **Benchmarks** | :octicons-star-fill-16: **ESSENTIEL** | `dashboard`, `e2e`, `vlc`, `benchmarks`, `essential` | Dashboard interactif haute performance sur 1 334 vidéos réelles (99.8% succès) avec captures 720p WebP, navigation clavier flèches et synchronisation curseur. |
+| [Architecture de Retrait & Invalidation Globale](2026-10-20-architecture-retrait-invalidation-donnees-globales.md) | `2026-10-20` | **Studio** | :octicons-check-circle-fill-16: **CURRENT** | `purge`, `invalidation`, `postgres`, `zero-db`, `studio` | Procédure d'invalidation et retrait de médias corrompus sur 5 paliers synchronisés (FS, Zero-DB JSON, PostgreSQL 17 ON DELETE CASCADE, catalog.dbphash). |
 | [⚡ Indexation Métrique : cBKTree Plat vs MIH](2026-10-19-indexing-metric-trees-and-multi-index-hashing.md) | `2026-10-19` | **pHash** | :octicons-star-fill-16: **ESSENTIEL** | `phash`, `bktree`, `cbktree`, `mih`, `indexing`, `scaling`, `essential` | Limite d'échelle du scan linéaire brut $O(N)$, conception du cBKTree plat zéro-copie et spécification du Multi-Index Hashing (MIH) sous les 5 ms. |
 | [Audit Exhaustif Matching E2E & Preuves Empiriques](2026-10-19-audit-exhaustif-matching-e2e-phash.md) | `2026-10-19` | **Benchmarks** | :octicons-check-circle-fill-16: **CURRENT** | `benchmarks`, `phash`, `e2e`, `audit`, `dataset` | Campagne empirique 100% catalogue (233 empreintes, 13M frames), 57 flux réels YouTube, 96.6% Top-1 et analyse des limites. |
 | [⚡ Guide Opérationnel & Référence CLI / API](quickstart-and-reference.md) | `2026-10-18` | **Guide** | :octicons-star-fill-16: **ESSENTIEL** | `taskfile`, `studio`, `vlc`, `api`, `essential` | Commandes `task` par pôle, URLs locales (`:8085`, `:8086`, `:8000`), référence des endpoints REST Axum et workflow de démarrage en 60s. |
