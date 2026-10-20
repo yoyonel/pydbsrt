@@ -11,6 +11,7 @@
 
 ## Git & Workflow Rules
 - **Human Approval Before Commit/Push**: STRICTLY FORBIDDEN from executing `git commit` or `git push` automatically. Always present summary and proposed commit message, and wait for explicit human validation.
+- **Zero Diffs in Chat Responses**: STRICTLY FORBIDDEN from printing code diffs or `git diff` in chat responses (the user uses Git and IDE to inspect diffs). Provide concise summaries, modified file links, and proposed commit message only.
 - **Taskfile-First Execution**: All recurring commands, builds, tests, demos, benchmarks must be in `Taskfile.yml` and invoked via `task <name>`.
 - **Pure Taskfile Orchestrator (Zero Inline Logic / Hardcoded Data Lists)**: `Taskfile.yml` is strictly a declarative task orchestrator, NEVER a storage dump for inline shell/Python scripts, PID management blocks, loops, or hardcoded lists of media files. Any operational logic, daemon control, or dataset discovery/seeding MUST be placed in dedicated external scripts under `scripts/` so `Taskfile.yml` remains concise, readable, and maintainable.
 - **Zero Local Absolute Paths**: Never write machine-local absolute paths or `file://` URIs in any versioned file.
