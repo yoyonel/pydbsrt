@@ -16,28 +16,64 @@ tags:
 
 ---
 
-## 1. Démarrage en 60 Secondes (Workflow Complet)
+## 1. Démarrage en Une Commande (`task dev` / `task up`)
+
+La commande unifiée `task dev` (alias de `task up`) orchestre l'ensemble de la pile de développement en 4 phases séquentielles :
 
 ```mermaid
-flowchart LR
-    A["1. task stack:up"] --> B["PG17 (:5433) + PgWeb (:8086) + Daemon (:8085)"]
-    B --> C["2. task coupling:seed"]
-    C --> D["21 Couplages Certifiés (JSON + PG17)"]
-    D --> E["🎛️ Studio (:8085/studio)"]
-    D --> F["🎬 VLC (task vlc:run)"]
-    D --> G["🐘 PgWeb (:8086)"]
+flowchart TD
+    dev["task dev (up)"] --> studio["1. task studio"]
+    dev --> vlc["2. task vlc:install-plugin"]
+    dev --> doc["3. task doc:daemon"]
+    dev --> status["4. task status"]
+
+    studio --> db_up["1.1 db:up (Docker)"]
+    studio --> certify["1.2 coupling:certify (Rust build + seed)"]
+    studio --> srv_stop["1.3 server:stop"]
+    studio --> srv_start["1.4 server:daemon"]
+    studio --> srv_status["1.5 server:status"]
 ```
 
 ```bash
-# 1. Démarrer toute l'infrastructure (PostgreSQL 17 SP-GiST + PgWeb + Daemon Rust Axum)
-task stack:up
+# Lancer la stack complète de développement (Backend, DB, Daemon, VLC, Documentation)
+task dev
 
-# 2. Indexer et certifier les 21 épisodes/extraits de référence (JSON + PostgreSQL 17)
-task coupling:seed
+# Vérifier l'état et les compteurs SQL à tout moment
+task status
 
-# 3. Vérifier l'état de santé de tous les services et les URLs actives
-task stack:status
+# Arrêter l'ensemble des services en une commande
+task down
 ```
+
+### Décomposition des 4 Phases et Rôles Opérationnels
+
+#### Phase 1 : Socle Backend & Données (`task studio`)
+1. **`task db:up`** : Démarre les conteneurs Docker de persistance et monitoring en arrière-plan (`docker-compose.yml`) :
+    - `bktreedb` : PostgreSQL 17 avec extension `spgist_hamming` (port `5433`).
+    - `pgweb` : Interface SQL web (port `8086`).
+    - `postgres_exporter` : Exportateur de métriques PostgreSQL (port `9187`).
+    - `prometheus` : Moteur TSDB et scrape Prometheus (port `9090`).
+    - `grafana` : Dashboard de monitoring PostgreSQL 17 clé en main (port `3000`, zero-login).
+2. **`task coupling:certify`** :
+    - Déclenche la compilation optimisée du CLI Rust (`task cli:build`).
+    - Exécute `scripts/seed_couplings.sh` pour auto-découvrir et certifier les couples vérité-terrain (`data/__PHASH__/*.phash` et `data/SRT/*.srt`). Enregistre les ancres temporelles sous-titres $\leftrightarrow$ trames visuelles dans `data/SRT/couplings.json` et synchronise les tables `subtitles` et `sub_frames` dans PostgreSQL 17.
+3. **`task server:stop`** : Tue proprement toute instance précédente de `dbsrt-server` pour libérer le port `8765`.
+4. **`task server:daemon`** : Démarre `dbsrt-server` en arrière-plan (PID persisté, journalisation dans `/tmp/dbsrt-server.log`). Expose l'API REST `/v1/...` et le backoffice web `/studio`.
+5. **`task server:status`** : Interroge `GET http://127.0.0.1:8765/v1/status` pour valider la disponibilité immédiate du daemon et la connectivité PostgreSQL.
+
+#### Phase 2 : Intégration Lecteur VLC (`task vlc:install-plugin`)
+- Déploie automatiquement les plugins Lua `pydbsrt` dans le profil utilisateur local via `scripts/vlc_ctl.sh` :
+    - `vlsub_dbsrt.lua` dans `~/.local/share/vlc/lua/extensions/` (GUI de recherche et recalage).
+    - `dbsrt_intf.lua` dans `~/.local/share/vlc/lua/intf/` (contrôle daemon et CLI headless).
+
+#### Phase 3 : Portail Documentaire (`task doc:daemon`)
+- Démarre le serveur MkDocs Material en démon d'arrière-plan sur `http://127.0.0.1:8000` avec hot-reload via `scripts/stack_ctl.sh`.
+
+#### Phase 4 : Contrôle d'Intégrité Unifié (`task status`)
+- Exécute la sonde globale `scripts/stack_ctl.sh status` :
+    - Contrôle de santé HTTP sur les services de la stack (`Studio :8765`, `MkDocs :8000`, `Grafana :3000`, `PgWeb :8086`, `Prometheus :9090`, `Exporter :9187`).
+    - Affiche en direct le décompte des entités PostgreSQL (`medias`, `frames`, `subtitles`, `sub_frames`) et le total des couplages certifiés.
+    - Présente le guide complet des points d'accès IHM, routes API et commandes de logs.
 
 ---
 
@@ -45,10 +81,12 @@ task stack:status
 
 | Interface / Service | URL Locale | Port | Rôle & Fonctionnalités |
 | :--- | :--- | :---: | :--- |
-| **🎛️ dbsrt Studio** | `http://127.0.0.1:8085/studio` | `8085` | Backoffice interactif : Timeline bi-piste (`Frames` ↔ `SRT Cues`), Loupe pHash 8×8, lecteur `<video>` synchronisé, pagination serveur et certification en 1 clic. |
-| **⚡ API REST Daemon** | `http://127.0.0.1:8085/v1/health` | `8085` | Daemon Rust Axum découvert dynamiquement via `/tmp/dbsrt-server.json` par les extensions VLC. |
+| **🎛️ dbsrt Studio** | `http://127.0.0.1:8765/studio` | `8765` | Backoffice interactif : Timeline bi-piste (`Frames` ↔ `SRT Cues`), Loupe pHash 8×8, lecteur `<video>` synchronisé, pagination serveur et certification en 1 clic. |
+| **📊 Grafana Dashboards** | `http://127.0.0.1:3000` | `3000` | Suite de 3 dashboards out-of-the-box (Corpus Explorer, NAS Benchmarks, PostgreSQL 17 health - zero login). Guide complet : [`Observabilité & Grafana`](2026-10-20-observabilite-prometheus-grafana-et-telemetrie-pydbsrt.md). |
+| **📚 Portail Documentation** | `http://127.0.0.1:8000` | `8000` | Serveur MkDocs Material avec recherche instantanée, diagrammes Mermaid Panzoom, équations MathJax vectorielles et Dashboard E2E VLC. |
 | **🐘 PgWeb (SQL Explorer)** | `http://127.0.0.1:8086` | `8086` | Explorateur web zero-conf branché sur PostgreSQL 17 (`bktreedb`) pour inspecter `medias`, `frames`, `subtitles` et `sub_frames`. |
-| **📚 Portail Documentation** | `http://127.0.0.1:8000` | `8000` | Serveur MkDocs Material avec recherche instantanée, diagrammes Mermaid Panzoom et équations MathJax vectorielles (`task doc:serve`). |
+| **🔥 Prometheus Console** | `http://127.0.0.1:9090` | `9090` | Moteur TSDB Prometheus, exploration de requêtes PromQL et statut des cibles de scraping. |
+| **⚡ API REST Daemon** | `http://127.0.0.1:8765/v1/status` | `8765` | Daemon Rust Axum découvert dynamiquement via `/tmp/dbsrt-server.json` par les extensions VLC. |
 
 ---
 
@@ -60,19 +98,19 @@ Conformément à la règle **Taskfile-First**, toutes les opérations récurrent
 
     | Commande `task` | Script Sous-Jacent | Description Technique |
     | :--- | :--- | :--- |
-    | `task stack:up` | `scripts/stack_ctl.sh up` | Démarre `postgres` (`:5433`), `pgweb` (`:8086`) et le daemon `dbsrt-server` (`:8085`). |
-    | `task stack:status` | `scripts/stack_ctl.sh status` | Affiche les PIDs, conteneurs Docker, santé `/v1/health` et compteurs de couplages. |
-    | `task stack:down` | `scripts/stack_ctl.sh down` | Arrête proprement le daemon `dbsrt-server` et les conteneurs Docker. |
-    | `task coupling:certify` | `dbsrt certify-coupling` | Certifie un couple `(Vidéo, SRT)` dans `couplings.json` + PostgreSQL 17. |
-    | `task coupling:seed` | `scripts/seed_couplings.sh` | Découvre et certifie tous les couples de référence (`Big Buck Bunny` + `20` épisodes DBZ). |
-    | `task coupling:list` | `scripts/stack_ctl.sh couplings` | Liste les couplages certifiés via `GET /v1/couplings?summary=true`. |
+    | `task dev` / `task up` | `Taskfile.yml` orchestrateur | Démarre la stack unifiée complète (Docker, seed couplages, daemon `dbsrt-server :8765`, plugins VLC, MkDocs). |
+    | `task down` | `scripts/stack_ctl.sh` | Arrête proprement le daemon `dbsrt-server`, MkDocs et les conteneurs Docker. |
+    | `task status` | `scripts/stack_ctl.sh status` | Affiche l'état HTTP 200 des 4 services et les compteurs d'entités PostgreSQL. |
+    | `task studio` | `Taskfile.yml` orchestrateur | Démarre le socle backend seul (Docker + seed couplages + daemon `dbsrt-server`). |
+    | `task coupling:certify` | `scripts/seed_couplings.sh` | Découvre et certifie tous les couples de référence (`data/__PHASH__` $\leftrightarrow$ `data/SRT`). |
+    | `task server:status` | `scripts/stack_ctl.sh server-status` | Interroge le statut du daemon via `GET /v1/status`. |
     | `task media:purge` | `scripts/purge_media.py` | Purge atomique d'un média corrompu sur tous les paliers (FS, JSON, DB, .dbphash). |
 
 === "🎬 Lecteur VLC & VLSub"
 
     | Commande `task` | Script Sous-Jacent | Description Technique |
     | :--- | :--- | :--- |
-    | `task vlc:install-plugin` | Installation `~/.local/share/vlc/...` | Installe `vlsub_dbsrt.lua` (GUI Qt) et `dbsrt_Sync.lua` (intf) dans le profil VLC utilisateur. |
+    | `task vlc:install-plugin` | Installation `~/.local/share/vlc/...` | Installe `vlsub_dbsrt.lua` (GUI Qt) et `dbsrt_intf.lua` (intf CLI/daemon) dans le profil VLC utilisateur. |
     | `task vlc:run` | `scripts/vlc_ctl.sh run` | Lance VLC en assurant que `dbsrt-server` tourne en arrière-plan. |
     | `task vlc:demo` | `scripts/vlc_ctl.sh demo` | Lance la démo interactive avec sous-titre recalé et notification OSD native. |
     | `task vlc:record-demo` | `scripts/record_vlsub_demo.sh` | Enregistre la preuve E2E `1080p` H.264/MP4 sous serveur X11 virtuel `Xvfb`. |
@@ -101,12 +139,19 @@ Conformément à la règle **Taskfile-First**, toutes les opérations récurrent
 
 ---
 
-## 4. Référence de l'API REST (`dbsrt-server :8085`)
+## 4. Référence de l'API REST (`dbsrt-server :8765`)
 
 | Méthode & Endpoint | Paramètres / Payload | Description & Usage |
 | :--- | :--- | :--- |
 | `GET /studio` | — | Interface web complète **dbsrt Studio** (Backoffice Couplages & Timeline pHash). |
-| `GET /v1/health` | — | État du démon, uptime, chemins des catalogues (`subtitles_dir`, `phash_dir`) et statut PostgreSQL. |
+| `GET /v1/status` | — | État du démon, uptime, versions, catalogues (`subtitles_dir`, `phash_dir`) et statut PostgreSQL. |
+| `GET /v1/media/stream` | `?path=<video_path>` | Streaming vidéo HTTP `206 Partial Content` (`Range: bytes=...`) pour le lecteur HTML5 de Studio. |
+| `GET /v1/couplings` | `?summary=true` | Liste légère des couplages certifiés (métadonnées + compteurs sans charger les tableaux massifs). |
+| `GET /v1/couplings/sub_frames` | `?media_stem=...&offset=0&limit=50` | Pagination serveur (`offset`/`limit`) des répliques SRT ancrées aux frames pHash (`sub_frames`). |
+| `POST /v1/certify` | `{"video_path": "...", "srt_path": "...", "language": "fr"}` | Certifie à chaud un couplage Ground-Truth (extraction hybride + écriture JSON & PostgreSQL 17). |
+| `POST /v1/search` | `{"video_path": "...", "query": "...", "language": "fr"}` | Recherche multi-sources (1. Couplages Certifiés pHash → 2. Catalogue Local → 3. OpenSubtitles). |
+| `POST /v1/download` | `{"subtitle_id": "...", "video_path": "..."}` | Télécharge le `.srt` et applique automatiquement le recalage temporel pHash si une référence existe. |
+| `POST /v1/sync` | `{"video_path": "...", "srt_path": "..."}` | Recalage direct en 1 clic et génération du fichier `.dbsrt.srt` synchronisé. |
 | `GET /v1/media/stream` | `?path=<video_path>` | Streaming vidéo HTTP `206 Partial Content` (`Range: bytes=...`) pour le lecteur HTML5 de Studio. |
 | `GET /v1/couplings` | `?summary=true` | Liste légère des couplages certifiés (métadonnées + compteurs sans charger les tableaux massifs). |
 | `GET /v1/couplings/sub_frames` | `?media_stem=...&offset=0&limit=50` | Pagination serveur (`offset`/`limit`) des répliques SRT ancrées aux frames pHash (`sub_frames`). |
