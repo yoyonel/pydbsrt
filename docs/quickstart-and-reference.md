@@ -66,6 +66,7 @@ Conformément à la règle **Taskfile-First**, toutes les opérations récurrent
     | `task coupling:certify` | `dbsrt certify-coupling` | Certifie un couple `(Vidéo, SRT)` dans `couplings.json` + PostgreSQL 17. |
     | `task coupling:seed` | `scripts/seed_couplings.sh` | Découvre et certifie tous les couples de référence (`Big Buck Bunny` + `20` épisodes DBZ). |
     | `task coupling:list` | `scripts/stack_ctl.sh couplings` | Liste les couplages certifiés via `GET /v1/couplings?summary=true`. |
+    | `task media:purge` | `scripts/purge_media.py` | Purge atomique d'un média corrompu sur tous les paliers (FS, JSON, DB, .dbphash). |
 
 === "🎬 Lecteur VLC & VLSub"
 

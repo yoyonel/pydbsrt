@@ -118,16 +118,21 @@ nav:
       - Vérité Terrain & Backoffice:
           - dbsrt Studio & Modèle Relationnel: 2026-10-18-studio-backoffice-and-relational-couplings.md
           - Mécanique E2E Search by pHash: 2026-10-18-e2e-phash-search-mechanics-and-roadmap.md
+          - Retrait & Invalidation Globale: 2026-10-20-architecture-retrait-invalidation-donnees-globales.md
       - Connecteurs Externes:
           - Providers Distants (OpenSubtitles): 2026-10-16-axe5-remote-subtitles-providers.md
   - ⚡ Moteur pHash & DB:
       - Empreintes Visuelles & Stockage:
+          - Profiling Latences & Mécanique E2E VLSub: 2026-10-19-profiling-latences-recherche-phash-et-e2e.md
           - Format .dbphash Hybride (Cuts + 1fps): 2026-10-17-etude-comparative-identification-frames-cuts-keyframes-hybride.md
           - Moteur Rust Zero-DB mmap SIMD: 2026-10-15-scaling-architecture-rust-mmap.md
           - Indexation Métrique & Multi-Index Hashing: 2026-10-19-indexing-metric-trees-and-multi-index-hashing.md
           - PostgreSQL 17 SP-GiST BK-Tree: 2026-10-15-pg17-bktree-benchmark-migration.md
   - 📊 Benchmarks & Preuves:
       - Campagnes Empiriques:
+          - Dashboard Interactif E2E VLC (1 336 Tests): 2026-10-20-dashboard-interactif-e2e-vlc-corpus-nas.md
+          - Validation E2E VLC Corpus Exhaustif (1 336 Extraits): 2026-10-19-validation-e2e-vlc-vlsub-corpus-nas-exhaustif.md
+          - Validation E2E VLC & Corpus Réel NAS: 2026-10-19-validation-e2e-vlc-et-benchmarks-corpus-nas.md
           - Stress-Test 100M Frames (MIH): 2026-10-19-mih-100m-scale-benchmark-report.md
           - Audit Exhaustif Matching E2E (YouTube & DB): 2026-10-19-audit-exhaustif-matching-e2e-phash.md
           - Benchmarks E2E Rust vs Python: 2026-10-15-rust-e2e-benchmarks-and-tradeoffs.md
