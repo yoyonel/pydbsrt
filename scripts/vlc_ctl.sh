@@ -6,10 +6,12 @@ ACTION="${1:-install}"
 
 install_plugin() {
   mkdir -p ~/.local/share/vlc/lua/extensions/ ~/.local/share/vlc/lua/intf/
+  # Clean deprecated/redundant plugins
+  rm -f ~/.local/share/vlc/lua/extensions/dbsrt_subsync.lua
+  # Install official studio extension and CLI interface
   cp -v vlc-plugin/vlsub_dbsrt.lua ~/.local/share/vlc/lua/extensions/
-  cp -v vlc-plugin/dbsrt_subsync.lua ~/.local/share/vlc/lua/extensions/
   cp -v vlc-plugin/dbsrt_intf.lua ~/.local/share/vlc/lua/intf/
-  echo "dbsrt VLC plugins installed (VLSub dbsrt + subsync in extensions/, CLI in intf/)."
+  echo "dbsrt VLC plugins installed (VLSub dbsrt in extensions/, CLI in intf/)."
 }
 
 test_cvlc() {
