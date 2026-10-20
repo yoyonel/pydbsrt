@@ -601,6 +601,30 @@ tasks:
 
   # --- CI/CD Local Validation ---
 
+  # --- Distributed Dev Stack (Local Agent Sidecar <-> Remote Server) ---
+
+  stack:distributed:up:
+    desc: Start simulated distributed stack (Local Agent on :8765 relaying to Remote Server on :8766)
+    deps: [rs:build]
+    cmds:
+      - ./scripts/distributed_dev_stack.sh up
+
+  stack:distributed:down:
+    desc: Stop simulated distributed stack processes
+    cmds:
+      - ./scripts/distributed_dev_stack.sh down
+
+  stack:distributed:status:
+    desc: Check status and real-time metrics of Local Agent and Remote Server
+    cmds:
+      - ./scripts/distributed_dev_stack.sh status
+
+  client:linux:install:
+    desc: Install dbsrt-agent and VLC plugin into ~/.local/ and configure systemd user service
+    deps: [rs:build]
+    cmds:
+      - ./scripts/install_debian.sh {{.CLI_ARGS}}
+
   ci:local:
     desc: Fast local CI reproduction suite (<10s) running lint, rust tests and docs validation
     cmds:
