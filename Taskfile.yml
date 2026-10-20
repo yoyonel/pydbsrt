@@ -651,7 +651,37 @@ tasks:
     desc: Install dbsrt-agent and VLC plugin into ~/.local/ and configure systemd user service
     deps: [rs:build]
     cmds:
-      - ./scripts/install_debian.sh {{.CLI_ARGS}}
+      - ./scripts/install_debian.sh install {{.CLI_ARGS}}
+
+  client:linux:start:
+    desc: Start dbsrt-agent user systemd service
+    cmds:
+      - ./scripts/install_debian.sh start
+
+  client:linux:stop:
+    desc: Stop dbsrt-agent user systemd service
+    cmds:
+      - ./scripts/install_debian.sh stop
+
+  client:linux:restart:
+    desc: Restart dbsrt-agent user systemd service
+    cmds:
+      - ./scripts/install_debian.sh restart
+
+  client:linux:status:
+    desc: Check status of dbsrt-agent user systemd service
+    cmds:
+      - ./scripts/install_debian.sh status
+
+  client:linux:logs:
+    desc: View live journal logs for dbsrt-agent user systemd service
+    cmds:
+      - ./scripts/install_debian.sh logs
+
+  client:linux:uninstall:
+    desc: Completely uninstall dbsrt-agent, VLC plugin, and remove systemd service
+    cmds:
+      - ./scripts/install_debian.sh uninstall
 
   rpi4:build:
     desc: Cross-compile dbsrt-server for aarch64 and package ARM64 Docker image

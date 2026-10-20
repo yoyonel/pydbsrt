@@ -254,17 +254,25 @@ function send_http_request(host, port, method, path, payload)
         method, path, host, port, string.len(body_str), body_str
     )
 
-    local ok_send = pcall(function() vlc.net.send(fd, req) end)
-    if not ok_send then
+    local ok_send, bytes_sent = pcall(function() return vlc.net.send(fd, req) end)
+    if not ok_send or not bytes_sent or bytes_sent <= 0 then
         pcall(function() vlc.net.close(fd) end)
-        log_err("[HTTP] Failed to transmit bytes on socket fd=%d", fd)
-        return nil, "Failed to send HTTP request"
+        local elapsed_ms = (os.clock() - t0) * 1000.0
+        log_err("[HTTP] Failed to transmit bytes on socket fd=%s after %.2fms (send returned %s, daemon offline)",
+            tostring(fd), elapsed_ms, tostring(bytes_sent))
+        return nil, string.format("Cannot connect to %s:%d (daemon offline)", host, port)
     end
-    log_dbg("[HTTP] Request transmitted (%d bytes), awaiting daemon response...", string.len(req))
+    log_dbg("[HTTP] Request transmitted (%d bytes), awaiting daemon response...", bytes_sent)
 
     local pollfds = {}
     pollfds[fd] = vlc.net.POLLIN
-    vlc.net.poll(pollfds)
+    local poll_status = vlc.net.poll(pollfds)
+    if not poll_status or poll_status <= 0 or not pollfds[fd] or pollfds[fd] == 0 then
+        pcall(function() vlc.net.close(fd) end)
+        log_err("[HTTP] Socket poll error or hang up on fd=%s (poll status=%s, revents=%s)",
+            tostring(fd), tostring(poll_status), tostring(pollfds[fd]))
+        return nil, string.format("Connection dropped by %s:%d", host, port)
+    end
 
     local chunk = vlc.net.recv(fd, HTTP_BUFFER_CHUNK_SIZE)
     local buf = ""
@@ -295,9 +303,7 @@ function send_http_request(host, port, method, path, payload)
             end
         end
 
-        pollfds = {}
-        pollfds[fd] = vlc.net.POLLIN
-        vlc.net.poll(pollfds)
+        -- Read next incoming chunk without blocking poll inside loop
         chunk = vlc.net.recv(fd, HTTP_BUFFER_CHUNK_SIZE)
     end
 

@@ -276,7 +276,21 @@ local function test_help_dialog()
     local html = S.input_table["help"]:get_text()
     assert_true(html:find("Method 3: Search by pHash") ~= nil, "Help documents Method 3 pHash")
     assert_true(html:find("Method 1: Search by hash") ~= nil, "Help documents Method 1 hash")
-    print("  [7/7] test_help_dialog: PASSED")
+    print("  [7/8] test_help_dialog: PASSED")
+end
+
+local function test_offline_daemon_fails_gracefully()
+    local orig_send = _G.vlc.net.send
+    _G.vlc.net.send = function(fd, req)
+        return -1 -- Simulates disconnected or dead socket
+    end
+
+    local body, err = S.send_http_request("127.0.0.1", 8765, "GET", "/v1/health", nil)
+    assert_true(body == nil, "Offline daemon returns nil body")
+    assert_true(err ~= nil and err:find("daemon offline") ~= nil, "Clean offline daemon error returned")
+
+    _G.vlc.net.send = orig_send
+    print("  [8/8] test_offline_daemon_fails_gracefully: PASSED")
 end
 
 -- Run all unit tests
@@ -287,5 +301,6 @@ test_multi_chunk_http_socket_without_misc()
 test_search_by_phash_populates_mainlist()
 test_download_selection()
 test_help_dialog()
+test_offline_daemon_fails_gracefully()
 
 print(string.format("=== All %d VLC Lua Plugin Unit Tests PASSED (100%%) ===", tests_passed))
