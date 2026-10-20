@@ -25,6 +25,13 @@
   - Certified ground-truth couplings are stored both in PostgreSQL 17 (`subtitles` + `sub_frames` linked to `medias` and `frames`) and in the Zero-DB registry `data/SRT/couplings.json` via `dbsrt certify-coupling` / `task coupling:certify`.
   - Only when this ground-truth coupling `(Certified Subtitles <-> Video Frames / pHash)` is established can that subtitle serve as reference to automatically retarget other releases via pHash consensus.
 
+## Code Quality & Zero Magic Constants (Strictly Enforced)
+- **STRICTLY FORBIDDEN from using Magic Constants / Numbers / Unnamed Literals**: Hardcoded numeric literals, timeouts, buffer sizes, frame counts, bit depths, and thresholds are strictly forbidden in business logic, HTTP endpoints, parsers, and data pipelines across Rust, Python, and Lua.
+- **Mandatory Named & Documented Constants**: Every operational, algorithmic, or temporal value MUST be declared as a typed, named constant (`pub const` in Rust, `UPPER_SNAKE_CASE` in Python/Lua) placed at the top of the relevant module or in dedicated configuration structs with docstrings explaining units and rationales.
+  - Examples: `LOG_BUFFER_CAPACITY`, `DEFAULT_EXTRACT_SAMPLE_SECONDS`, `DEFAULT_RELAY_TIMEOUT_MS`, `FINGERPRINT_PREVIEW_SAMPLE_COUNT`, `SECONDS_PER_DAY`, `DEFAULT_BASELINE_FPS`.
+- **Zero Inline Conversions**: Temporal arithmetic (e.g. `% 86400`, `/ 3600`, `* 1000.0`, `/ 60.0`) MUST reference standard named factors (`SECONDS_PER_DAY`, `SECONDS_PER_HOUR`, `MILLIS_PER_SEC`, `SECONDS_PER_MINUTE`).
+- **Strict Justification Exception**: Standard radix literals in language-native parsing routines (e.g. `u64::from_str_radix(s, 16)` for hex, base-10/2) and structural 0/1 identity boundaries in loops are tolerated ONLY where defining an external constant degrades readability. All other domain values require explicit named constants.
+
 ## Communication
 - **Caveman Mode**: Always terse, ultra-compressed, 100% technical accuracy, zero filler words.
 
