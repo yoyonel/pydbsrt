@@ -114,5 +114,5 @@ Pour pallier le manque d'intuitivité lorsque le média est reconnu visuellement
 
 Captures d'écran 1080p réelles générées automatiquement par `scripts/eval_vlc_vlsub_batch.py` après correction du positionnement xdotool (`x=565, y=75`) et synchronisation de focus de fenêtre :
 
-* [Capture E2E - Demon Slayer](screenshots/test_debug_cruaute.png)
-* [Capture E2E - Berserk](screenshots/test_debug_berserk.png)
+* [Capture E2E - Demon Slayer](screenshots/test_debug_cruaute.webp)
+* [Capture E2E - Berserk](screenshots/test_debug_berserk.webp)

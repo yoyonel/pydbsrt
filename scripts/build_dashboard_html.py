@@ -21,7 +21,9 @@ def get_failure_reason(video: str, conf: float) -> str:
 
 
 def main():
-    manifest_path = Path("docs/screenshots/e2e_vlc_all/manifest.json")
+    manifest_path = Path("data/benchmarks/e2e_vlc_manifest.json")
+    if not manifest_path.exists():
+        manifest_path = Path("docs/screenshots/e2e_vlc_all/manifest.json")
     if not manifest_path.exists():
         print("Manifest not found")
         return
@@ -42,8 +44,8 @@ def main():
         status_label = get_failure_reason(video, conf)
 
         raw_rel = x.get("screenshot_rel", "")
-        clean_rel = raw_rel.replace("docs/", "")
-        img_url = f"/pydbsrt/{clean_rel}" if not clean_rel.startswith("/") else clean_rel
+        clean_rel = raw_rel.replace("docs/", "").lstrip("/")
+        img_url = f"../{clean_rel}"
 
         table_data.append(
             [
