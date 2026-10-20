@@ -29,9 +29,12 @@ run_lint_fast() {
 
 run_lint() {
   run_lint_fast
-  echo "=== [6/6] Rust (cargo fmt --check & clippy) ==="
+  echo "=== [6/7] Rust (cargo fmt --check & clippy) ==="
   cargo fmt --all -- --check
   cargo clippy --workspace --all-targets -- -D warnings
+
+  echo "=== [7/7] Disk Space Safety Guard ==="
+  bash scripts/disk_guard.sh check
 }
 
 run_fmt() {

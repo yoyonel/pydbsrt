@@ -74,6 +74,11 @@ tasks:
     cmds:
       - uv run --no-sync mkdocs build --clean
 
+  doc:optimize-images:
+    desc: Batch convert heavy PNG screenshots in docs/ to lightweight 720p WebP
+    cmds:
+      - uv run python scripts/convert_dashboard_webp.py
+
   doc:check:
     desc: Automated documentation validator (strict build, LaTeX rendering, squashed lists, images)
     aliases: [docs:check, doc:lint, docs:lint]
@@ -269,11 +274,19 @@ tasks:
       - cargo run --release -p dbsrt-cli -- bench-phash
 
   clean:
-    desc: Clean cache files, coverage, and build artifacts (replaces make fclean)
+    desc: Unified purge of caches, coverage, and target/ build artifacts (replaces make fclean)
     cmds:
-      - find . -type f -name "*.pyc" -delete
-      - find . -type d -name "__pycache__" -delete
-      - rm -rf .pytest_cache .coverage .mypy_cache dist wheels /tmp/*.phash
+      - bash scripts/disk_guard.sh clean
+
+  clean:rs:
+    desc: Purge Rust build artifacts from target/ (cargo clean)
+    cmds:
+      - cargo clean
+
+  disk:check:
+    desc: Safety guard checking free disk space and target/ size against thresholds
+    cmds:
+      - bash scripts/disk_guard.sh check
 
   # --- Database Stack (Docker Compose) ---
 
