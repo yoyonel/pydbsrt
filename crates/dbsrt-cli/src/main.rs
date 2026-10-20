@@ -136,6 +136,10 @@ pub struct CertifyCouplingArgs {
     #[arg(long)]
     pub allow_oob: bool,
 
+    /// Suppress verbose details and output only on error
+    #[arg(short = 'q', long)]
+    pub quiet: bool,
+
     /// Also import the relational coupling (`medias`, `frames`, `subtitles`, `sub_frames`) into PostgreSQL
     #[arg(long)]
     pub use_db: bool,
@@ -1621,24 +1625,26 @@ fn run_certify_coupling(args: &CertifyCouplingArgs) -> Result<()> {
         reg.save(&reg_path)?;
     }
 
-    println!("=== CERTIFIED COUPLING REGISTERED ===");
-    println!("Media Name       : {}", media_name);
-    println!(
-        "pHash File       : {:?} ({} frames @ {:.2} fps)",
-        phash_path,
-        hashes.len(),
-        fps
-    );
-    println!("Media Digest     : {}", media_hash);
-    println!("Subtitle File    : {:?} (lang: {})", dest_srt_path, lang);
-    println!("Subtitle Digest  : {}", subtitles_hash);
-    println!(
-        "Validated Cues   : {} cues -> {} frame anchors (start/end offsets)",
-        srt_file.cues.len(),
-        sub_frames.len()
-    );
-    if !args.db_only {
-        println!("Local Registry   : {:?}", reg_path);
+    if !args.quiet {
+        println!("=== CERTIFIED COUPLING REGISTERED ===");
+        println!("Media Name       : {}", media_name);
+        println!(
+            "pHash File       : {:?} ({} frames @ {:.2} fps)",
+            phash_path,
+            hashes.len(),
+            fps
+        );
+        println!("Media Digest     : {}", media_hash);
+        println!("Subtitle File    : {:?} (lang: {})", dest_srt_path, lang);
+        println!("Subtitle Digest  : {}", subtitles_hash);
+        println!(
+            "Validated Cues   : {} cues -> {} frame anchors (start/end offsets)",
+            srt_file.cues.len(),
+            sub_frames.len()
+        );
+        if !args.db_only {
+            println!("Local Registry   : {:?}", reg_path);
+        }
     }
 
     if args.db_only || args.use_db || args.db_host.is_some() {
@@ -1658,16 +1664,20 @@ fn run_certify_coupling(args: &CertifyCouplingArgs) -> Result<()> {
                 client.init_schema()?;
                 let (media_id, sub_id, inserted_anchors) =
                     client.import_subtitle_coupling(&phash_path, &dest_srt_path, &lang, strict)?;
-                println!(
-                    "PostgreSQL Sync  : Imported media_id={}, sub_id={}, sub_frames={}",
-                    media_id, sub_id, inserted_anchors
-                );
+                if !args.quiet {
+                    println!(
+                        "PostgreSQL Sync  : Imported media_id={}, sub_id={}, sub_frames={}",
+                        media_id, sub_id, inserted_anchors
+                    );
+                }
             }
             Err(e) => {
                 if args.use_db || args.db_only {
                     return Err(e.context("Failed to connect to PostgreSQL"));
                 }
-                eprintln!("PostgreSQL Sync  : Skipped (DB unreachable: {})", e);
+                if !args.quiet {
+                    eprintln!("PostgreSQL Sync  : Skipped (DB unreachable: {})", e);
+                }
             }
         }
     }
