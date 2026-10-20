@@ -13,11 +13,12 @@ run_lint_fast() {
   shellcheck scripts/*.sh data/*.sh
   shfmt -i 2 -ci -d scripts/*.sh data/*.sh
 
-  echo "=== [3/5] Lua VLC Plugins (luac bytecode syntax check) ==="
+  echo "=== [3/5] Lua VLC Plugins (luac bytecode check & hermetic unit tests) ==="
   for lua_file in vlc-plugin/*.lua; do
     luac -p "$lua_file"
   done
-  echo "✓ All Lua plugins compiled cleanly (vlc-plugin/*.lua)"
+  lua tests/lua/test_vlsub_dbsrt.lua
+  echo "✓ All Lua plugins compiled cleanly and passed unit tests (vlc-plugin/*.lua)"
 
   echo "=== [4/5] YAML Configs (yamllint) ==="
   yamllint -c .yamllint.yml Taskfile.yml mkdocs.yml bandit.yaml .pre-commit-config.yaml .yamllint.yml docker/*.yml .github/workflows/*.yml

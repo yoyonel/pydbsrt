@@ -360,7 +360,7 @@ impl std::str::FromStr for SubtitleSource {
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
-            "certified" | "catalog_certified" => Ok(Self::Certified),
+            "certified" | "catalog_certified" | "certified_synced" => Ok(Self::Certified),
             "container" => Ok(Self::Container),
             "catalog" => Ok(Self::Catalog),
             "opensubtitles" => Ok(Self::OpenSubtitles),
@@ -379,6 +379,10 @@ pub struct CertifySyncRequest {
     pub strict: bool,
     pub phash_dir: Option<String>,
     pub subtitles_dir: Option<String>,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -418,6 +422,8 @@ pub struct SubtitleCandidate {
     pub release: Option<String>,
     pub details: Option<String>,
     pub candidate_id: Option<String>,
+    #[serde(default)]
+    pub shift_ms: Option<f64>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
@@ -461,14 +467,12 @@ pub struct DownloadSubtitleRequest {
     pub candidate_id: Option<String>,
     #[serde(default = "default_lang")]
     pub language: String,
-    #[serde(default = "default_true")]
+    #[serde(default)]
     pub resync: bool,
+    #[serde(default)]
+    pub shift_ms: Option<f64>,
     pub subtitles_dir: Option<String>,
     pub phash_dir: Option<String>,
-}
-
-fn default_true() -> bool {
-    true
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -1277,6 +1281,45 @@ pub const DEFAULT_RECOGNITION_SEARCH_DISTANCE: u32 = 6;
 pub const MIN_PHASH_RECOGNITION_CONFIDENCE_PERCENT: f64 =
     dbsrt_index::MIN_TEMPORAL_COHERENCE_CONFIDENCE * 100.0;
 
+/// Default fallback frame rate when media container metadata cannot be probed.
+pub const DEFAULT_FALLBACK_FPS: f64 = 23.976;
+
+/// Total bit depth of a 64-bit DCT perceptual hash.
+pub const PHASH_BIT_DEPTH: f64 = 64.0;
+
+/// Scale factor to convert ratios (0.0 ..= 1.0) into percentages (0.0 ..= 100.0).
+pub const PERCENT_SCALE: f64 = 100.0;
+
+/// Default baseline FPS when target FPS is unspecified or invalid.
+pub const DEFAULT_BASELINE_FPS: f64 = 24.0;
+
+/// Default Hamming threshold between consecutive frames to detect a scene cut.
+pub const DEFAULT_CUT_THRESHOLD: u32 = 16;
+
+/// Default Hamming search distance for BK-tree and sequence cut voting.
+pub const DEFAULT_SEARCH_DISTANCE: u32 = 12;
+
+/// Maximum number of frames (~5 seconds at 24fps) used for continuous cross-correlation sequence alignment.
+pub const MAX_CORRELATION_SAMPLE_FRAMES: usize = 120;
+
+/// Minimum number of scene cuts in both target and reference to trigger cut-consensus voting.
+pub const MIN_CUTS_FOR_CONSENSUS: usize = 2;
+
+/// Minimum confidence percentage (0.0 ..= 100.0) from cut consensus required before falling back to sliding window.
+pub const MIN_CUT_CONSENSUS_CONFIDENCE: f64 = 70.0;
+
+/// Minimum visual shift in milliseconds to consider an offset significant enough to offer a synced candidate.
+pub const SIGNIFICANT_SHIFT_THRESHOLD_MS: f64 = 500.0;
+
+/// Minimum significant shift in milliseconds to apply subtitle timeline modification.
+pub const MIN_SIGNIFICANT_SHIFT_MS: f64 = 0.001;
+
+/// Milliseconds per second conversion factor.
+pub const MILLIS_PER_SEC: f64 = 1000.0;
+
+/// Refinement window radius in step units (+/- 2 seconds).
+pub const REFINEMENT_STEP_RADIUS: usize = 2;
+
 /// Identifies a target media file against `MmapLibrary` in `phash_dir` using existing `.phash`
 /// or an on-the-fly frame sample. Returns `(matched_media_name_and_conf, target_fps, existing_phash)`.
 pub fn identify_media_by_phash(
@@ -1638,9 +1681,21 @@ pub fn compute_media_phash_shift_multi(
             };
 
             if !target_hashes.is_empty() {
-                let target_cuts = detect_cuts(&target_hashes, 16);
-                let ref_cuts = detect_cuts(&ref_hashes, 16);
-                calculate_shift_consensus(&target_cuts, &ref_cuts, search_distance, match_conf)
+                let target_cuts = detect_cuts(&target_hashes, DEFAULT_CUT_THRESHOLD);
+                let ref_cuts = detect_cuts(&ref_hashes, DEFAULT_CUT_THRESHOLD);
+                let (sf_cut, conf_cut) = if target_cuts.len() >= MIN_CUTS_FOR_CONSENSUS
+                    && ref_cuts.len() >= MIN_CUTS_FOR_CONSENSUS
+                {
+                    calculate_shift_consensus(&target_cuts, &ref_cuts, search_distance, match_conf)
+                } else {
+                    (0, 0.0)
+                };
+
+                if conf_cut >= MIN_CUT_CONSENSUS_CONFIDENCE {
+                    (sf_cut, conf_cut)
+                } else {
+                    calculate_sequence_shift_argmin(&target_hashes, &ref_hashes, target_fps)
+                }
             } else {
                 (0, match_conf)
             }
@@ -1648,8 +1703,12 @@ pub fn compute_media_phash_shift_multi(
         None => (0, match_conf),
     };
 
-    let fps = if target_fps > 0.0 { target_fps } else { 25.0 };
-    let shift_ms = (shift_frames as f64 / fps) * 1000.0;
+    let fps = if target_fps > 0.0 {
+        target_fps
+    } else {
+        DEFAULT_FALLBACK_FPS
+    };
+    let shift_ms = (shift_frames as f64 / fps) * MILLIS_PER_SEC;
     (shift_frames, shift_ms, confidence_percent)
 }
 
@@ -1719,6 +1778,7 @@ fn lookup_certified_couplings(
                             phash_conf
                         )),
                         candidate_id: Some(full_str),
+                        shift_ms: None,
                     });
                 }
             }
@@ -1767,6 +1827,7 @@ fn lookup_certified_couplings(
                             id, media_name, phash_conf
                         )),
                         candidate_id: Some(resolved_path),
+                        shift_ms: None,
                     });
                 }
             }
@@ -1805,6 +1866,8 @@ pub async fn search_handler(
     // 0. Visual pHash Recognition when mode allows pHash identification
     let mut matched_media: Option<String> = None;
     let mut phash_conf: f64 = 0.0;
+    let mut target_fps: f64 = DEFAULT_FALLBACK_FPS;
+    let mut existing_phash: Option<ExistingPhashData> = None;
     if use_phash
         && media_path.exists()
         && (phash_dirs.iter().any(|d| d.exists())
@@ -1812,7 +1875,7 @@ pub async fn search_handler(
             || state.db_config.is_some())
     {
         let t0 = std::time::Instant::now();
-        let (matched_routed, _target_fps, existing_phash) = identify_media_by_phash_multi_routed(
+        let (matched_routed, tfps, e_phash) = identify_media_by_phash_multi_routed(
             &media_path,
             &phash_dirs,
             state.dbphash_reader.as_deref(),
@@ -1821,6 +1884,8 @@ pub async fn search_handler(
             DEFAULT_RECOGNITION_SEARCH_DISTANCE,
             payload.index_engine.as_deref(),
         );
+        target_fps = tfps;
+        existing_phash = e_phash;
         timing.phash_match_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
         if let Some((_, ref hashes, fps)) = existing_phash {
@@ -1918,6 +1983,7 @@ pub async fn search_handler(
 
     // 0b. Certified Couplings (PostgreSQL `subtitles` JOIN `medias` + `couplings.json`)
     let mut seen_catalog_paths = std::collections::HashSet::new();
+    let mut seen_filenames = std::collections::HashSet::new();
     if let Some(ref m_name) = matched_media {
         let (cert_cands, pg_ms, json_ms, pg_cached) = lookup_certified_couplings(
             &state,
@@ -1929,11 +1995,50 @@ pub async fn search_handler(
         timing.pg_lookup_ms = pg_ms;
         timing.json_lookup_ms = json_ms;
         timing.pg_cached = pg_cached;
-        for c in cert_cands {
+
+        for mut c in cert_cands {
             if let Some(ref cid) = c.candidate_id {
                 seen_catalog_paths.insert(cid.clone());
+                if let Ok(canon) = Path::new(cid).canonicalize() {
+                    seen_catalog_paths.insert(canon.to_string_lossy().to_string());
+                }
             }
-            candidates.push(c);
+            seen_filenames.insert(c.title.to_lowercase());
+
+            let ref_stem = c.release.as_deref().unwrap_or(m_name);
+            let (_sf, computed_shift_ms, _sconf) = compute_media_phash_shift_multi(
+                &media_path,
+                &phash_dirs,
+                ref_stem,
+                phash_conf,
+                target_fps,
+                &existing_phash,
+                DEFAULT_SEARCH_DISTANCE,
+            );
+
+            // 1. Raw candidate (original timeline, zero shift)
+            c.shift_ms = Some(0.0);
+            candidates.push(c.clone());
+
+            // 2. Synced candidate if visual offset is significant (> 500ms)
+            if computed_shift_ms.abs() > SIGNIFICANT_SHIFT_THRESHOLD_MS {
+                let mut c_synced = c.clone();
+                c_synced.source = "certified_synced".to_string();
+                c_synced.shift_ms = Some(computed_shift_ms);
+                c_synced.title = format!(
+                    "{} [Synced {:+.1}s]",
+                    c.title,
+                    computed_shift_ms / MILLIS_PER_SEC
+                );
+                if let Some(ref d) = c.details {
+                    c_synced.details = Some(format!(
+                        "{} (Synchronized: {:+.2}s visual shift)",
+                        d,
+                        computed_shift_ms / MILLIS_PER_SEC
+                    ));
+                }
+                candidates.push(c_synced);
+            }
         }
     }
 
@@ -1971,6 +2076,7 @@ pub async fn search_handler(
                             stream.subtitle_index, stream.codec_name
                         )),
                         candidate_id: Some(stream.subtitle_index.to_string()),
+                        shift_ms: None,
                     });
                 }
             }
@@ -1985,11 +2091,13 @@ pub async fn search_handler(
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_default();
     let mut stems = Vec::new();
-    if let Some(ref m) = matched_media {
-        stems.push(m.clone());
-    }
-    if mode != "phash" && !file_stem.is_empty() && !stems.contains(&file_stem) {
+    if !file_stem.is_empty() {
         stems.push(file_stem.clone());
+    }
+    if let Some(ref m) = matched_media {
+        if !stems.contains(m) {
+            stems.push(m.clone());
+        }
     }
 
     let catalog_query_title = if mode == "phash" {
@@ -1998,6 +2106,9 @@ pub async fn search_handler(
         payload.query_title.as_deref()
     };
 
+    let effective_season = payload.season.or(meta.season);
+    let effective_episode = payload.episode.or(meta.episode);
+
     let search_dirs = collect_subtitle_search_dirs(&subtitles_dir, &media_path, include_sidecars);
 
     for dir in &search_dirs {
@@ -2005,14 +2116,27 @@ pub async fn search_handler(
             dir,
             &stems,
             catalog_query_title,
-            payload.season,
-            payload.episode,
+            effective_season,
+            effective_episode,
             &payload.language,
         ) {
             let path_str = path.to_string_lossy().to_string();
-            if !seen_catalog_paths.insert(path_str.clone()) {
+            let canon_path = path.canonicalize().unwrap_or_else(|_| path.clone());
+            let canon_str = canon_path.to_string_lossy().to_string();
+            if !seen_catalog_paths.insert(path_str.clone()) || !seen_catalog_paths.insert(canon_str)
+            {
                 continue;
             }
+
+            let cand_fname = path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
+            if !seen_filenames.insert(cand_fname.to_lowercase()) {
+                continue;
+            }
+
             let details = if let Some(ref m) = matched_media {
                 format!(
                     "pHash matched '{}' ({:.0}% conf) — {}",
@@ -2026,14 +2150,11 @@ pub async fn search_handler(
             candidates.push(SubtitleCandidate {
                 source: SubtitleSource::Catalog.as_str().to_string(),
                 language: resolved_lang,
-                title: path
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_string(),
+                title: cand_fname,
                 release: matched_media.clone().or_else(|| Some(file_stem.clone())),
                 details: Some(details),
                 candidate_id: Some(path_str),
+                shift_ms: None,
             });
         }
     }
@@ -2068,6 +2189,7 @@ pub async fn search_handler(
                         cand.match_score, cand.subtitle_id
                     )),
                     candidate_id: Some(cand.subtitle_id.clone()),
+                    shift_ms: None,
                 });
             }
         }
@@ -2223,7 +2345,16 @@ pub async fn download_handler(
     let mut shift_ms = 0.0f64;
     let mut confidence_percent = 0.0f64;
 
-    if payload.resync && media_path.exists() {
+    if let Some(explicit_shift) = payload.shift_ms {
+        if explicit_shift.abs() > MIN_SIGNIFICANT_SHIFT_MS {
+            shift_ms = explicit_shift;
+            let fps = probe_video(&media_path)
+                .map(|m| m.fps)
+                .unwrap_or(DEFAULT_FALLBACK_FPS);
+            shift_frames = (shift_ms / MILLIS_PER_SEC * fps).round() as i64;
+            confidence_percent = 100.0;
+        }
+    } else if payload.resync && media_path.exists() {
         let (matched, target_fps, existing_phash) = identify_media_by_phash_multi_with_reader(
             &media_path,
             &phash_dirs,
@@ -2755,13 +2886,13 @@ pub async fn retarget_handler(
     };
 
     // 3. Detect cuts and calculate shift consensus
-    let target_cuts = detect_cuts(&target_hashes, 16);
-    let ref_cuts = detect_cuts(&ref_hashes, 16);
+    let target_cuts = detect_cuts(&target_hashes, DEFAULT_CUT_THRESHOLD);
+    let ref_cuts = detect_cuts(&ref_hashes, DEFAULT_CUT_THRESHOLD);
 
     let (shift_frames, confidence_percent) =
         calculate_shift_consensus(&target_cuts, &ref_cuts, payload.search_distance, 0.0);
 
-    let shift_ms = (shift_frames as f64 / target_fps) * 1000.0;
+    let shift_ms = (shift_frames as f64 / target_fps) * MILLIS_PER_SEC;
 
     let mut srt = match SubtitleFile::open(&ref_subtitles) {
         Ok(s) => s,
@@ -2847,10 +2978,119 @@ pub fn calculate_shift_consensus(
             0.0
         };
         let support = (count as f64 / ref_cuts.len() as f64).min(1.0);
-        let confidence_percent = (dominance * support * 100.0).clamp(0.0, 100.0);
+        let confidence_percent = (dominance * support * PERCENT_SCALE).clamp(0.0, PERCENT_SCALE);
         (shift_frames, confidence_percent)
     } else {
         (0, fallback_confidence)
+    }
+}
+
+/// Finds the best frame shift between target_hashes and ref_hashes by sliding window
+/// cross-correlation over 64-bit DCT pHashes.
+/// Handles both snippet within full media and relative timeline offsets between releases.
+pub fn calculate_sequence_shift_argmin(
+    target_hashes: &[u64],
+    ref_hashes: &[u64],
+    target_fps: f64,
+) -> (i64, f64) {
+    if target_hashes.is_empty() || ref_hashes.is_empty() {
+        return (0, 0.0);
+    }
+
+    let fps = if target_fps > 0.0 {
+        target_fps
+    } else {
+        DEFAULT_BASELINE_FPS
+    };
+    let sample_len = target_hashes.len().min(MAX_CORRELATION_SAMPLE_FRAMES);
+    let query = &target_hashes[..sample_len];
+
+    // Case 1: Target is shorter or equal to ref (e.g. snippet inside full episode)
+    if target_hashes.len() <= ref_hashes.len() {
+        let max_pos = ref_hashes.len() - sample_len;
+        let step = (fps.round() as usize).max(1);
+        let mut coarse_best = 0;
+        let mut coarse_min = u64::MAX;
+        let mut pos = 0;
+
+        while pos <= max_pos {
+            let mut dist_sum = 0u64;
+            for j in (0..sample_len).step_by(step) {
+                dist_sum += (query[j] ^ ref_hashes[pos + j]).count_ones() as u64;
+            }
+            if dist_sum < coarse_min {
+                coarse_min = dist_sum;
+                coarse_best = pos;
+            }
+            pos += step;
+        }
+
+        // Fine refinement: +/- REFINEMENT_STEP_RADIUS steps around coarse_best
+        let refine_radius = step * REFINEMENT_STEP_RADIUS;
+        let refine_start = coarse_best.saturating_sub(refine_radius);
+        let refine_end = (coarse_best + refine_radius).min(max_pos);
+        let mut min_dist_sum = u64::MAX;
+        let mut best_offset = coarse_best;
+
+        for r_pos in refine_start..=refine_end {
+            let dist_sum: u64 = query
+                .iter()
+                .zip(&ref_hashes[r_pos..r_pos + sample_len])
+                .map(|(&q, &r)| (q ^ r).count_ones() as u64)
+                .sum();
+            if dist_sum < min_dist_sum {
+                min_dist_sum = dist_sum;
+                best_offset = r_pos;
+            }
+        }
+
+        let avg_dist = min_dist_sum as f64 / sample_len as f64;
+        let conf = ((1.0 - (avg_dist / PHASH_BIT_DEPTH)) * PERCENT_SCALE).clamp(0.0, PERCENT_SCALE);
+        (-(best_offset as i64), conf)
+    } else {
+        // Case 2: Ref is shorter than target (ref is snippet or target has earlier frames)
+        let max_pos = target_hashes.len() - sample_len;
+        let step = (fps.round() as usize).max(1);
+        let ref_sample_len = ref_hashes.len().min(MAX_CORRELATION_SAMPLE_FRAMES);
+        let ref_query = &ref_hashes[..ref_sample_len];
+
+        let mut coarse_best = 0;
+        let mut coarse_min = u64::MAX;
+        let mut pos = 0;
+
+        while pos <= max_pos {
+            let mut dist_sum = 0u64;
+            for j in (0..ref_sample_len).step_by(step) {
+                dist_sum += (ref_query[j] ^ target_hashes[pos + j]).count_ones() as u64;
+            }
+            if dist_sum < coarse_min {
+                coarse_min = dist_sum;
+                coarse_best = pos;
+            }
+            pos += step;
+        }
+
+        let refine_radius = step * REFINEMENT_STEP_RADIUS;
+        let refine_start = coarse_best.saturating_sub(refine_radius);
+        let refine_end = (coarse_best + refine_radius).min(max_pos);
+        let mut min_dist_sum = u64::MAX;
+        let mut best_offset = coarse_best;
+
+        for t_pos in refine_start..=refine_end {
+            let dist_sum: u64 = ref_query
+                .iter()
+                .zip(&target_hashes[t_pos..t_pos + ref_sample_len])
+                .map(|(&r, &t)| (r ^ t).count_ones() as u64)
+                .sum();
+            if dist_sum < min_dist_sum {
+                min_dist_sum = dist_sum;
+                best_offset = t_pos;
+            }
+        }
+
+        let avg_dist = min_dist_sum as f64 / ref_sample_len as f64;
+        let conf = ((1.0 - (avg_dist / PHASH_BIT_DEPTH)) * PERCENT_SCALE).clamp(0.0, PERCENT_SCALE);
+        (best_offset as i64, conf)
     }
 }
 
@@ -2869,15 +3109,24 @@ pub fn find_subtitle_in_catalog(
 pub fn read_ref_phash_for_media(phash_dir: &Path, media_name: &str) -> Result<Vec<u64>> {
     let clean_name = media_name.strip_suffix(".phash").unwrap_or(media_name);
     let entries = std::fs::read_dir(phash_dir)?;
+    let mut candidate_paths = Vec::new();
     for entry in entries.flatten() {
         let p = entry.path();
         if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
-            if (name.contains(clean_name) || clean_name.contains(name.trim_end_matches(".phash")))
-                && name.ends_with(".phash")
-            {
-                return read_phash_file(&p);
+            // Never treat a snippet file (*_mid15s*) as a reference print
+            if name.ends_with(".phash") && !name.contains("_mid15s") {
+                if name == format!("{}.phash", clean_name) || name == clean_name {
+                    return read_phash_file(&p);
+                }
+                if name.contains(clean_name) || clean_name.contains(name.trim_end_matches(".phash"))
+                {
+                    candidate_paths.push(p);
+                }
             }
         }
+    }
+    if let Some(p) = candidate_paths.first() {
+        return read_phash_file(p);
     }
     anyhow::bail!("Reference phash not found for media '{}'", media_name);
 }

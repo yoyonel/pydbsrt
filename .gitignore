@@ -115,6 +115,7 @@ data/snippets/
 *.dbphash
 data/*.dbphash
 *.auto.synced.srt
+*.synced.srt
 
 # Coverage reports
 .coverage*

@@ -417,6 +417,7 @@ async fn test_server_status_and_search_endpoints() {
         candidate_id: local_cand.candidate_id.clone(),
         language: "en".to_string(),
         resync: true,
+        shift_ms: None,
         subtitles_dir: Some(srt_dir.to_str().unwrap().to_string()),
         phash_dir: Some(tmp_dir.to_str().unwrap().to_string()),
     };
@@ -568,6 +569,7 @@ async fn test_certify_and_certified_search_download_e2e() {
         candidate_id: top_cand.candidate_id.clone(),
         language: "fr".to_string(),
         resync: true,
+        shift_ms: None,
         subtitles_dir: Some(srt_dir.to_string_lossy().to_string()),
         phash_dir: Some(phash_dir.to_string_lossy().to_string()),
     };
@@ -718,6 +720,7 @@ async fn test_certify_and_certified_search_download_e2e() {
         candidate_id: Some(test_srt.to_string_lossy().to_string()),
         language: "fr".to_string(),
         resync: false,
+        shift_ms: None,
         subtitles_dir: Some(srt_dir.to_string_lossy().to_string()),
         phash_dir: Some(phash_dir.to_string_lossy().to_string()),
     };
@@ -738,6 +741,7 @@ async fn test_certify_and_certified_search_download_e2e() {
         candidate_id: None,
         language: "fr".to_string(),
         resync: false,
+        shift_ms: None,
         subtitles_dir: None,
         phash_dir: None,
     };

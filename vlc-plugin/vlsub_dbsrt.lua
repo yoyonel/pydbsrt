@@ -1,130 +1,134 @@
 --[[
-  vlsub_dbsrt.lua - VLSub (dbsrt Studio Edition)
-  Based on VLSub by Guillaume Le Maout (GPLv2)
-  Enhanced by Lionel ATTY for pydbsrt (Rust Axum Daemon, Multi-providers & pHash Sync)
+  vlsub_dbsrt.lua - VLSub (dbsrt Enhanced Edition)
+  Based on original VLSub by Guillaume Le Maout (GPLv2)
+  Strict 1:1 ISO VLSub ergonomics + "Search by pHash" addition
 --]]
+
+local app_title = "VLSub (dbsrt Enhanced)"
+local app_version = "2.1.0"
 
 function descriptor()
     return {
-        title = "VLSub (dbsrt Enhanced)",
-        version = "2.0.0",
+        title = app_title,
+        version = app_version,
         author = "Lionel ATTY & Guillaume Le Maout",
         url = "https://github.com/yoyonel/pydbsrt",
-        shortdesc = "VLSub Studio Edition: REST API & pHash Frame-Exact Sync",
-        description = "<div style=\"background-color: #0f172a; color: #f8fafc; padding: 12px;\">"
-            .. "<h3>VLSub — dbsrt Studio Edition (v2.0)</h3>"
-            .. "<p>Modernized VLSub fork powered by the local Rust Axum daemon, "
-            .. "certified relational couplings (PostgreSQL 17 + Zero-DB), local catalog, "
-            .. "OpenSubtitles REST fallback, and frame-exact perceptual hash (pHash) synchronization.</p>"
-            .. "</div>",
-        capabilities = { "input-listener" }
+        shortdesc = "VLSub ISO + Search by pHash",
+        description = "<p>Standard VLSub interface with legacy hash, title/name search, "
+            .. "and visual frame-exact perceptual hash (pHash) search.</p>",
+        capabilities = { "menu", "input-listener" }
     }
 end
 
+-- Protocol, Network & UI Constants
+local DEFAULT_HOST = "127.0.0.1"
+local DEFAULT_DAEMON_PORT = 8765
+local DEFAULT_HTTP_PORT = 80
+local HTTP_BUFFER_CHUNK_SIZE = 8192
+local CRLF_DOUBLE = "\r\n\r\n"
+local CRLF_DOUBLE_LEN = 4
+local MICROSECONDS_PER_SEC = 1000000
+local MILLIS_PER_SEC = 1000.0
+local MIN_SIGNIFICANT_DISPLAY_SHIFT_MS = 1.0
+local DIALOG_SPACER_REPEAT = 100
+local DEFAULT_OSD_DURATION_SEC = 3
+
 -- Global state & configuration
 local dlg = nil
-local default_host = "127.0.0.1"
-local default_port = 8765
-local server_url = "http://127.0.0.1:8765"
+local default_host = DEFAULT_HOST
+local default_port = DEFAULT_DAEMON_PORT
+local server_url = "http://" .. DEFAULT_HOST .. ":" .. DEFAULT_DAEMON_PORT
 local osd_channel = nil
-
-local daemon_state = {
-    online = false,
-    version = "?",
-    uptime = "0",
-    phash_count = "0",
-    certified_count = "0"
-}
 
 local file_info = {
     has_input = false,
     uri = nil,
     path = nil,
     filename = "",
-    clean_name = "",
     title = "",
     season = "",
-    episode = "",
+    episode = ""
 }
 
 local candidates_store = {}
 local input_table = {}
-local last_downloaded_srt = nil
-local last_downloaded_lang = nil
+local selected_lang_code = "fre"
 
 local languages = {
-    { "fr", "French — Francais [FR]      " },
-    { "en", "English — International [EN]" },
-    { "all", "All Languages — Auto [ALL]  " },
-    { "es", "Spanish — Espanol [ES]      " },
-    { "de", "German — Deutsch [DE]       " },
-    { "it", "Italian — Italiano [IT]     " },
-    { "pt", "Portuguese — Portugues [PT] " },
-    { "ru", "Russian — Russkiy [RU]      " },
-    { "ja", "Japanese — Nihongo [JA]     " },
-    { "zh", "Chinese — Zhongwen [ZH]     " }
+    { "fre", "French" },
+    { "eng", "English" },
+    { "all", "All" },
+    { "spa", "Spanish" },
+    { "ger", "German" },
+    { "ita", "Italian" },
+    { "por", "Portuguese" },
+    { "dut", "Dutch" },
+    { "pol", "Polish" },
+    { "rus", "Russian" },
+    { "ara", "Arabic" },
+    { "chi", "Chinese" },
+    { "jpn", "Japanese" },
+    { "kor", "Korean" },
+    { "cze", "Czech" },
+    { "dan", "Danish" },
+    { "fin", "Finnish" },
+    { "ell", "Greek" },
+    { "swe", "Swedish" },
+    { "hun", "Hungarian" }
 }
 
--- RichText HTML Console & Banner Builders (Dark Slate #0f172a for high contrast on Qt dialogs)
-function render_dark_card(title_html, body_html, border_color)
-    local accent = border_color or "#38bdf8"
-    return string.format(
-        "<table width=\"100%%\" cellspacing=\"0\" cellpadding=\"8\" bgcolor=\"#0f172a\" style=\"border-left: 4px solid %s;\">"
-        .. "<tr><td>"
-        .. "<div style=\"font-family: monospace; font-size: 11px; color: #f8fafc;\">%s</div>"
-        .. "<div style=\"font-family: sans-serif; font-size: 11px; color: #cbd5e1; margin-top: 3px;\">%s</div>"
-        .. "</td></tr></table>",
-        accent, title_html, body_html
-    )
-end
+-- Mapping 3-letter ISO 639-2 codes to 2-letter ISO 639-1
+local lang_map_2 = {
+    fre = "fr",
+    eng = "en",
+    all = "all",
+    spa = "es",
+    ger = "de",
+    ita = "it",
+    por = "pt",
+    dut = "nl",
+    pol = "pl",
+    rus = "ru",
+    ara = "ar",
+    chi = "zh",
+    jpn = "ja",
+    kor = "ko",
+    cze = "cs",
+    dan = "da",
+    fin = "fi",
+    ell = "el",
+    swe = "sv",
+    hun = "hu"
+}
 
-function update_header_banner()
-    if not input_table["header_banner"] then
-        return
-    end
+-- Help documentation HTML
+local help_message = [[
+<div style="font-family: sans-serif; font-size: 12px; line-height: 1.5; color: #222;">
+  <h3>VLSub (dbsrt Enhanced) &mdash; Help &amp; Usage</h3>
+  <p>Download subtitles from local dbsrt services and OpenSubtitles, and display them while watching a video.</p>
+  <hr/>
+  <h4><b>Usage:</b></h4>
+  <p>1. Start your video in VLC.</p>
+  <p>2. Select the desired subtitle language from the dropdown menu.</p>
+  <p>3. Choose one of the <b>three available search methods</b>:</p>
+  <ul>
+    <li><b>Method 1: Search by hash</b><br/>
+    Searches for subtitles using the standard 64-bit video file checksum (MovieHash). Recommended for exact file release matches.</li>
+    <li><b>Method 2: Search by name</b><br/>
+    Searches by video title, with optional Season and Episode numbers for TV shows.</li>
+    <li><b>Method 3: Search by pHash</b> <i>(Powered by dbsrt engine)</i><br/>
+    Performs visual perceptual matching of the active video stream (DCT-II SIMD) against certified reference prints in the dbsrt catalog. Enables automatic frame-exact resynchronization across different releases (web-dl, bluray, hdtv).</li>
+  </ul>
+  <hr/>
+  <h4><b>Downloading Subtitles:</b></h4>
+  <p>Select a subtitle candidate in the listbox and click <b>Download selection</b>. The subtitle will be downloaded, saved alongside your video file, and immediately attached to the running VLC player.</p>
+  <p><i>Note: Subtitles are saved without asking confirmation, matching standard VLSub behavior.</i></p>
+</div>
+]]
 
-    local status_badge = ""
-    if daemon_state.online then
-        status_badge = string.format(
-            "<font color=\"#34d399\"><b>[ONLINE]</b></font> <font color=\"#94a3b8\">%s &bull; v%s &bull; %s .phash indexed</font>",
-            server_url, daemon_state.version, daemon_state.phash_count
-        )
-    else
-        status_badge = string.format(
-            "<font color=\"#fb7185\"><b>[OFFLINE]</b></font> <font color=\"#94a3b8\">%s (run 'task stack:up')</font>",
-            server_url
-        )
-    end
-
-    local title_line = "<font color=\"#38bdf8\"><b>DBSRT STUDIO EXTENSION</b></font> &nbsp;|&nbsp; " .. status_badge
-
-    local media_line = ""
-    if file_info.has_input and file_info.filename ~= "" then
-        local se_info = ""
-        if file_info.season ~= "" and file_info.episode ~= "" then
-            se_info = string.format(" &nbsp;|&nbsp; <font color=\"#38bdf8\">S%02dE%02d</font>",
-                tonumber(file_info.season) or 0, tonumber(file_info.episode) or 0)
-        end
-        media_line = string.format(
-            "<font color=\"#94a3b8\">Active Media:</font> <font color=\"#f8fafc\"><b>%s</b></font>%s",
-            file_info.filename, se_info
-        )
-    else
-        media_line = "<font color=\"#fbbf24\">No active video stream detected in VLC.</font>"
-    end
-
-    input_table["header_banner"]:set_text(render_dark_card(title_line, media_line, "#38bdf8"))
-end
-
-function set_console_message(title_html, body_html, accent_color)
-    if input_table["message"] then
-        input_table["message"]:set_text(render_dark_card(title_html, body_html, accent_color or "#38bdf8"))
-    end
-end
-
--- OSD feedback (top-left to avoid overlapping VLC native top-right track notification)
+-- OSD feedback
 function notify_osd(msg, duration_sec, pos)
-    duration_sec = duration_sec or 3
+    duration_sec = duration_sec or DEFAULT_OSD_DURATION_SEC
     pos = pos or "top-left"
     if vlc.osd and vlc.osd.message then
         if not osd_channel and vlc.osd.channel_register then
@@ -132,7 +136,7 @@ function notify_osd(msg, duration_sec, pos)
             if ok and ch then osd_channel = ch end
         end
         pcall(function()
-            vlc.osd.message(msg, osd_channel or 1, pos, duration_sec * 1000000)
+            vlc.osd.message(msg, osd_channel or 1, pos, duration_sec * MICROSECONDS_PER_SEC)
         end)
     end
     if vlc.msg and vlc.msg.info then
@@ -140,12 +144,10 @@ function notify_osd(msg, duration_sec, pos)
     end
 end
 
--- Server discovery
+-- Server discovery via /tmp/dbsrt-server.json
 function discover_server()
     local f = io.open("/tmp/dbsrt-server.json", "r")
-    if not f then
-        return nil
-    end
+    if not f then return nil end
     local content = f:read("*all")
     f:close()
 
@@ -155,8 +157,8 @@ function discover_server()
 
     if url and port then
         server_url = url
-        default_host = host or "127.0.0.1"
-        default_port = tonumber(port) or 8765
+        default_host = host or DEFAULT_HOST
+        default_port = tonumber(port) or DEFAULT_DAEMON_PORT
         return true
     end
     return nil
@@ -164,11 +166,9 @@ end
 
 function parse_url(url)
     local host, port = string.match(url, "http://([^:]+):?(%d*)")
-    host = host or "127.0.0.1"
+    host = host or DEFAULT_HOST
     port = tonumber(port)
-    if not port or port == 0 then
-        port = 80
-    end
+    if not port or port == 0 then port = DEFAULT_HTTP_PORT end
     return host, port
 end
 
@@ -195,40 +195,50 @@ function send_http_request(host, port, method, path, payload)
         return nil, "Failed to send HTTP request"
     end
 
-    local resp = ""
-    local pollfds = { [fd] = vlc.net.POLLIN }
+    local pollfds = {}
+    pollfds[fd] = vlc.net.POLLIN
+    vlc.net.poll(pollfds)
 
-    for _ = 1, 60 do
-        local ok_poll, p = pcall(function() return vlc.net.poll(pollfds) end)
-        if not ok_poll then break end
-        if p and p > 0 then
-            local ok_recv, chunk = pcall(function() return vlc.net.recv(fd, 4096) end)
-            if ok_recv and chunk and string.len(chunk) > 0 then
-                resp = resp .. chunk
-                local header_end = string.find(resp, "\r\n\r\n")
-                if header_end then
-                    local cl = string.match(resp, "[Cc]ontent%-[Ll]ength:%s*(%d+)")
-                    if cl then
-                        local body_len = string.len(resp) - (header_end + 3)
-                        if body_len >= tonumber(cl) then
-                            break
-                        end
-                    end
+    local chunk = vlc.net.recv(fd, HTTP_BUFFER_CHUNK_SIZE)
+    local buf = ""
+    local header_end = nil
+    local content_length = nil
+
+    while chunk and string.len(chunk) > 0 do
+        buf = buf .. chunk
+        if not header_end then
+            header_end = string.find(buf, CRLF_DOUBLE)
+            if header_end then
+                local cl = string.match(buf, "[Cc]ontent%-[Ll]ength:%s*(%d+)")
+                if cl then
+                    content_length = tonumber(cl)
                 end
-            else
+            end
+        end
+
+        if header_end and content_length then
+            local body_len = string.len(buf) - (header_end + CRLF_DOUBLE_LEN - 1)
+            if body_len >= content_length then
                 break
             end
         end
-        vlc.misc.mwait(vlc.misc.mdate() + 10000) -- 10ms
+
+        pollfds = {}
+        pollfds[fd] = vlc.net.POLLIN
+        vlc.net.poll(pollfds)
+        chunk = vlc.net.recv(fd, HTTP_BUFFER_CHUNK_SIZE)
     end
 
     pcall(function() vlc.net.close(fd) end)
 
-    local header_end = string.find(resp, "\r\n\r\n")
+    if not header_end then
+        header_end = string.find(buf, CRLF_DOUBLE)
+    end
+
     if not header_end then
         return nil, "Invalid HTTP response from daemon"
     end
-    return string.sub(resp, header_end + 4), nil
+    return string.sub(buf, header_end + CRLF_DOUBLE_LEN), nil
 end
 
 -- Media file information extraction
@@ -239,7 +249,6 @@ function update_file_info()
         file_info.uri = nil
         file_info.path = nil
         file_info.filename = ""
-        file_info.clean_name = ""
         file_info.title = ""
         file_info.season = ""
         file_info.episode = ""
@@ -248,344 +257,336 @@ function update_file_info()
 
     file_info.has_input = true
     file_info.uri = item:uri()
-    local path = vlc.strings.decode_uri(file_info.uri)
-    path = path:gsub("^file://", "")
-    file_info.path = path
-
-    local fname = string.match(path, "([^/]+)$") or path
-    file_info.filename = fname
-    local stem = fname:gsub("%.%w+$", "")
-    file_info.clean_name = stem:gsub("[%._]", " ")
-
-    local show, s, e = string.match(file_info.clean_name, "(.+)[sS](%d?%d)[eE](%d%d)")
-    if not show then
-        show, s, e = string.match(file_info.clean_name, "(.-)(%d?%d)[xX](%d%d)")
+    if not file_info.uri then
+        file_info.path = nil
+        return false
     end
 
-    if show then
-        file_info.title = show:gsub("^%s*(.-)%s*$", "%1")
-        file_info.season = tostring(tonumber(s) or "")
-        file_info.episode = tostring(tonumber(e) or "")
+    file_info.path = vlc.strings.decode_uri(file_info.uri):gsub("^file://", "")
+    file_info.filename = file_info.path:match("([^/\\]+)$") or file_info.path
+
+    -- Strip extension from filename using last dot: ^(.+)%.([^%.]+)$
+    local name = file_info.filename:match("^(.+)%.[^%.]+$") or file_info.filename
+    name = name:gsub("[%.%_%+]", " ")
+
+    local s, e = string.match(name, "[sS](%d%d?)[eE](%d%d?)")
+    if not s then
+        s, e = string.match(name, "(%d%d?)[xX](%d%d?)")
+    end
+
+    if s and e then
+        file_info.season = tostring(tonumber(s))
+        file_info.episode = tostring(tonumber(e))
+        name = string.gsub(name, "[sS]%d%d?[eE]%d%d?.*", "")
+        name = string.gsub(name, "%d%d?[xX]%d%d?.*", "")
     else
-        file_info.title = file_info.clean_name
         file_info.season = ""
         file_info.episode = ""
     end
 
+    name = string.gsub(name, "%b()", "")
+    name = string.gsub(name, "%b[]", "")
+    name = string.gsub(name, "%s+", " ")
+    name = string.gsub(name, "^%s*(.-)%s*$", "%1")
+
+    file_info.title = name
     return true
 end
 
--- VLC Lifecycle Callbacks
-function activate()
-    local ok, err = pcall(function()
-        discover_server()
-        update_file_info()
-        create_dialog()
-        check_daemon_status()
-    end)
-    if not ok then
-        vlc.msg.err("[vlsub-dbsrt] Error in activate: " .. tostring(err))
+function get_selected_lang()
+    if not input_table["language"] then return "fr" end
+    local val = input_table["language"]:get_value()
+    if type(val) == "number" and languages[val] then
+        local code3 = languages[val][1]
+        return lang_map_2[code3] or "fr"
+    end
+    return "fr"
+end
+
+function setMessage(str)
+    if input_table["message"] then
+        input_table["message"]:set_text(str or "")
+        if dlg and dlg.update then dlg:update() end
     end
 end
 
-function deactivate()
-    if dlg then
-        dlg:delete()
-        dlg = nil
+-- Main dialog creation (100% ISO VLSub layout with Search by pHash added)
+function interface_main()
+    -- Row 1: Subtitles language dropdown + Search by hash button
+    dlg:add_label("Subtitles language:", 1, 1, 1, 1)
+    input_table["language"] = dlg:add_dropdown(2, 1, 2, 1)
+    for idx, lang in ipairs(languages) do
+        input_table["language"]:add_value(lang[2], idx)
     end
+    dlg:add_button("Search by hash", search_by_hash, 4, 1, 1, 1)
+
+    -- Row 2: Title input + Search by name button
+    dlg:add_label("Title:", 1, 2, 1, 1)
+    input_table["title"] = dlg:add_text_input(file_info.title or "", 2, 2, 2, 1)
+    dlg:add_button("Search by name", search_by_name, 4, 2, 1, 1)
+
+    -- Row 3: Season input + Search by pHash button (3rd choice)
+    dlg:add_label("Season (series):", 1, 3, 1, 1)
+    input_table["seasonNumber"] = dlg:add_text_input(file_info.season or "", 2, 3, 2, 1)
+    dlg:add_button("Search by pHash", search_by_phash, 4, 3, 1, 1)
+
+    -- Row 4: Episode input
+    dlg:add_label("Episode (series):", 1, 4, 1, 1)
+    input_table["episodeNumber"] = dlg:add_text_input(file_info.episode or "", 2, 4, 2, 1)
+
+    -- Row 5: Results List (Full width across all 4 columns)
+    input_table["mainlist"] = dlg:add_list(1, 5, 4, 1)
+
+    -- Row 6: Message Label (Status feedback)
+    input_table["message"] = dlg:add_label(" ", 1, 6, 4, 1)
+
+    -- Row 7: Action Toolbar (Show help, Show config, Download selection, Close)
+    dlg:add_button("Show help", show_help, 1, 7, 1, 1)
+    dlg:add_button("Show config", show_conf, 2, 7, 1, 1)
+    dlg:add_button("Download selection", download_selection, 3, 7, 1, 1)
+    dlg:add_button("Close", close, 4, 7, 1, 1)
+
+    display_subtitles()
+end
+
+-- Configuration dialog
+function interface_config()
+    dlg:add_label("<b>VLSub Configuration:</b>", 1, 1, 4, 1)
+
+    dlg:add_label("Default language:", 1, 2, 2, 1)
+    input_table["conf_lang"] = dlg:add_dropdown(3, 2, 2, 1)
+    for idx, lang in ipairs(languages) do
+        input_table["conf_lang"]:add_value(lang[2], idx)
+    end
+
+    dlg:add_label("dbsrt Server Endpoint:", 1, 3, 2, 1)
+    input_table["conf_server"] = dlg:add_text_input(server_url, 3, 3, 2, 1)
+
+    input_table["conf_status"] = dlg:add_label(" ", 1, 4, 4, 1)
+
+    dlg:add_button("Cancel", show_main, 3, 5, 1, 1)
+    dlg:add_button("Save", save_config, 4, 5, 1, 1)
+end
+
+function save_config()
+    if input_table["conf_server"] then
+        local custom_url = input_table["conf_server"]:get_text()
+        if custom_url and custom_url ~= "" then
+            server_url = custom_url
+        end
+    end
+    show_main()
+end
+
+-- Help dialog
+function interface_help()
+    input_table["help"] = dlg:add_html(help_message, 1, 1, 4, 1)
+    dlg:add_label(string.rep("&nbsp;", DIALOG_SPACER_REPEAT), 1, 2, 3, 1)
+    dlg:add_button("OK", show_main, 4, 2, 1, 1)
+end
+
+-- Menu and window lifecycle
+function trigger_menu(dlg_id)
+    close_dlg()
+    if dlg_id == 1 then
+        dlg = vlc.dialog(app_title)
+        interface_main()
+    elseif dlg_id == 2 then
+        dlg = vlc.dialog(app_title .. " - Configuration")
+        interface_config()
+    elseif dlg_id == 3 then
+        dlg = vlc.dialog(app_title .. " - Help")
+        interface_help()
+    end
+    collectgarbage()
+end
+
+function show_main()
+    trigger_menu(1)
+end
+
+function show_conf()
+    trigger_menu(2)
+end
+
+function show_help()
+    trigger_menu(3)
+end
+
+function close_dlg()
+    if dlg ~= nil then
+        dlg:hide()
+    end
+    dlg = nil
+    for k in pairs(input_table) do
+        input_table[k] = nil
+    end
+    collectgarbage()
 end
 
 function close()
     vlc.deactivate()
 end
 
+function activate()
+    vlc.msg.info("[vlsub-dbsrt] Plugin activated")
+    discover_server()
+    update_file_info()
+    show_main()
+end
+
+function deactivate()
+    vlc.msg.info("[vlsub-dbsrt] Plugin deactivated")
+    if dlg then
+        dlg:hide()
+    end
+    dlg = nil
+    for k in pairs(input_table) do
+        input_table[k] = nil
+    end
+end
+
 function input_changed()
     update_file_info()
-    if dlg and input_table["title"] then
+    if dlg and input_table["title"] and type(input_table["title"]) == "userdata" then
         input_table["title"]:set_text(file_info.title or "")
-        input_table["season"]:set_text(file_info.season or "")
-        input_table["episode"]:set_text(file_info.episode or "")
-        update_header_banner()
+        input_table["seasonNumber"]:set_text(file_info.season or "")
+        input_table["episodeNumber"]:set_text(file_info.episode or "")
     end
 end
 
--- Modernized Studio Dialog Layout (5-column Grid, High-Contrast Dark Telemetry Cards)
-function create_dialog()
-    dlg = vlc.dialog("VLSub (dbsrt Enhanced)")
+function meta_changed()
+    return false
+end
 
-    -- Row 1: Studio Slate Header Banner (Daemon Telemetry + Active Media)
-    input_table["header_banner"] = dlg:add_label("", 1, 1, 5, 1)
-    update_header_banner()
-
-    -- Row 2: Language Selector & Primary Search Modes
-    dlg:add_label("<b>Language:</b>", 1, 2, 1, 1)
-    input_table["language"] = dlg:add_dropdown(2, 2, 1, 1)
-    for idx, lang in ipairs(languages) do
-        input_table["language"]:add_value(lang[2], idx)
+-- Unified search runner via dbsrt-server REST API
+function run_search(mode)
+    if not file_info.has_input or not file_info.path then
+        setMessage("<b>Error:</b> No active media playing in VLC.")
+        return
     end
 
-    dlg:add_button("Smart Search (All)", function() do_search("all") end, 3, 2, 1, 1)
-    dlg:add_button("Search by pHash", function() do_search("phash") end, 4, 2, 1, 1)
-    dlg:add_button("Search by Hash", function() do_search("hash") end, 5, 2, 1, 1)
-
-    -- Row 3: Release Metadata (Title + Season / Episode) & Name Search
-    dlg:add_label("<b>Title / S-E:</b>", 1, 3, 1, 1)
-    input_table["title"] = dlg:add_text_input(file_info.title or "", 2, 3, 1, 1)
-    input_table["season"] = dlg:add_text_input(file_info.season or "", 3, 3, 1, 1)
-    input_table["episode"] = dlg:add_text_input(file_info.episode or "", 4, 3, 1, 1)
-    dlg:add_button("Search by Name", function() do_search("name") end, 5, 3, 1, 1)
-
-    -- Row 4: Interactive Results List (Tabular Formatted Candidates)
-    input_table["mainlist"] = dlg:add_list(1, 4, 5, 1)
-
-    -- Row 5: Dark Slate Telemetry & Sync Console
-    input_table["message"] = dlg:add_label("", 1, 5, 5, 1)
-    set_console_message(
-        "<font color=\"#38bdf8\"><b>READY</b></font> &nbsp;|&nbsp; Select a search mode or click <b>1-Click Auto-Sync</b>",
-        "Priority order: <b>1. Certified Ground-Truth (pHash)</b> &rarr; <b>2. Local Catalog (.srt)</b> &rarr; <b>3. OpenSubtitles REST</b>.",
-        "#38bdf8"
-    )
-
-    -- Row 6: Action Toolbar
-    dlg:add_button("1-Click Auto-Sync", one_click_auto_sync, 1, 6, 1, 1)
-    dlg:add_button("Download + Sync", download_selection, 2, 6, 1, 1)
-    dlg:add_button("Certify Coupling", certify_active_sync, 3, 6, 1, 1)
-    dlg:add_button("Status / Help", show_help, 4, 6, 1, 1)
-    dlg:add_button("Close", close, 5, 6, 1, 1)
-end
-
-function show_help()
-    check_daemon_status()
-    set_console_message(
-        "<font color=\"#38bdf8\"><b>WORKFLOW &amp; DIAGNOSTICS</b></font> &nbsp;|&nbsp; <font color=\"#94a3b8\">dbsrt Studio Edition v2.0</font>",
-        "<b>1. Smart Search / Search by pHash</b>: Identifies video via 64-bit DCT-II perceptual hashes.<br/>"
-        .. "<b>2. Download + Sync</b>: Downloads selected track (or #01 by default) and applies pHash shift.<br/>"
-        .. "<b>3. Certify Coupling</b>: Registers verified (Video &lt;-&gt; SRT) ground-truth coupling in PostgreSQL 17 &amp; couplings.json.",
-        "#818cf8"
-    )
-end
-
-function check_daemon_status()
     discover_server()
     local host, port = parse_url(server_url)
-    local body, _ = send_http_request(host, port, "GET", "/v1/status")
-    if not body then
-        daemon_state.online = false
-        update_header_banner()
-        set_console_message(
-            "<font color=\"#fb7185\"><b>DAEMON OFFLINE</b></font>",
-            "Cannot reach <b>" .. server_url .. "</b>. Start the stack with <code>task stack:up</code>.",
-            "#fb7185"
-        )
-        return false
+    local lang = get_selected_lang()
+
+    local title_query = ""
+    local season_query = nil
+    local episode_query = nil
+
+    if input_table["title"] then
+        title_query = input_table["title"]:get_text() or ""
+    end
+    if input_table["seasonNumber"] then
+        season_query = tonumber(input_table["seasonNumber"]:get_text())
+    end
+    if input_table["episodeNumber"] then
+        episode_query = tonumber(input_table["episodeNumber"]:get_text())
     end
 
-    daemon_state.online = true
-    daemon_state.version = string.match(body, '"version":%s*"([^"]+)"') or "0.3.0"
-    daemon_state.phash_count = string.match(body, '"indexed_phash_count":%s*(%d+)') or "0"
-    daemon_state.uptime = string.match(body, '"uptime_seconds":%s*(%d+)') or "0"
+    setMessage(string.format("<b>Searching subtitles (%s)...</b>", mode:upper()))
 
-    update_header_banner()
-    set_console_message(
-        string.format("<font color=\"#34d399\"><b>DAEMON READY</b></font> &nbsp;|&nbsp; <font color=\"#94a3b8\">dbsrt-server v%s (%ss uptime)</font>", daemon_state.version, daemon_state.uptime),
-        string.format("Indexed memory-mapped fingerprints: <b>%s .phash files</b> &nbsp;|&nbsp; Endpoint: <b>%s</b>", daemon_state.phash_count, server_url),
-        "#34d399"
+    local payload = string.format(
+        '{"media_path":"%s","search_mode":"%s","language":"%s","title":"%s"',
+        file_info.path:gsub('\\', '\\\\'),
+        mode,
+        lang,
+        (title_query or ""):gsub('\\', '\\\\')
     )
-    return true
-end
-
-function format_source_tag(source)
-    local s = (source or ""):lower()
-    if s == "certified" then
-        return "[CERTIFIED pHash]"
-    elseif s == "catalog" then
-        return "[LOCAL CATALOG]  "
-    elseif s == "container" then
-        return "[MKV TRACK]      "
-    elseif s == "opensubtitles" then
-        return "[OPENSUBTITLES]  "
+    if season_query then
+        payload = payload .. string.format(',"season":%d', season_query)
     end
-    return "[" .. (source or "UNKNOWN"):upper() .. "]"
-end
-
--- Search Execution
-function do_search(mode)
-    update_file_info()
-    update_header_banner()
-    if not file_info.has_input or not file_info.path then
-        set_console_message(
-            "<font color=\"#fb7185\"><b>NO MEDIA PLAYING</b></font>",
-            "Start playing a video file in VLC before running subtitle search.",
-            "#fb7185"
-        )
-        return 0
+    if episode_query then
+        payload = payload .. string.format(',"episode":%d', episode_query)
     end
-
-    local lang_idx = input_table["language"]:get_value()
-    local lang_code = (languages[lang_idx] and languages[lang_idx][1]) or "fr"
-    local host, port = parse_url(server_url)
-
-    local title = input_table["title"]:get_text() or file_info.title
-    local season = tonumber(input_table["season"]:get_text())
-    local episode = tonumber(input_table["episode"]:get_text())
-
-    local json_parts = {
-        string.format('"media_path":"%s"', file_info.path:gsub('\\', '\\\\')),
-        string.format('"language":"%s"', lang_code),
-        string.format('"search_mode":"%s"', mode or "all")
-    }
-
-    if (mode == "name" or mode == "all") and title and title ~= "" then
-        table.insert(json_parts, string.format('"query_title":"%s"', title:gsub('"', '\\"')))
-    end
-    if season then
-        table.insert(json_parts, string.format('"season":%d', season))
-    end
-    if episode then
-        table.insert(json_parts, string.format('"episode":%d', episode))
-    end
-
-    local payload = "{" .. table.concat(json_parts, ",") .. "}"
-
-    set_console_message(
-        string.format("<font color=\"#38bdf8\"><b>SEARCHING (%s)...</b></font>", (mode or "all"):upper()),
-        string.format("Querying <b>%s/v1/search</b> for language <b>[%s]</b>...", server_url, lang_code:upper()),
-        "#38bdf8"
-    )
+    payload = payload .. "}"
 
     local body, err = send_http_request(host, port, "POST", "/v1/search", payload)
     if not body then
-        set_console_message(
-            "<font color=\"#fb7185\"><b>SEARCH ERROR</b></font>",
-            err or "No response from dbsrt-server daemon.",
-            "#fb7185"
-        )
-        notify_osd("dbsrt: Search failed", 3)
-        return 0
+        setMessage(string.format("<b>Error:</b> Cannot connect to dbsrt-server (%s)", err or "offline"))
+        return
     end
 
-    local matched_media = string.match(body, '"matched_media":%s*"([^"]+)"')
-    local moviehash = string.match(body, '"moviehash":%s*"([^"]+)"')
+    for k in pairs(candidates_store) do candidates_store[k] = nil end
+    local cand_start = string.find(body, '"candidates":%s*%[')
+    if cand_start then
+        local search_from = string.find(body, "%[", cand_start) + 1
+        local cand_end = string.find(body, "%]%s*,%s*\"timing\"", search_from)
+        if not cand_end then
+            cand_end = string.find(body, "%]%s*}", search_from)
+        end
+        local cand_block = cand_end and string.sub(body, search_from, cand_end - 1) or string.sub(body, search_from)
+        for item in string.gmatch(cand_block, "{([^}]+)}") do
+            local c_title = string.match(item, '"title":%s*"([^"]+)"') or "Subtitle"
+            local c_lang = string.match(item, '"language":%s*"([^"]+)"') or lang
+            local c_source = string.match(item, '"source":%s*"([^"]+)"') or "unknown"
+            local c_id = string.match(item, '"candidate_id":%s*"([^"]+)"') or ""
+            local c_fps = string.match(item, '"fps":%s*([%d%.]+)') or ""
+            local c_score = tonumber(string.match(item, '"score":%s*([%d%.]+)')) or 1.0
+            local c_shift = tonumber(string.match(item, '"shift_ms":%s*([%d%.%-]+)'))
 
-    candidates_store = {}
-    local mainlist = input_table["mainlist"]
-    mainlist:clear()
-
-    local count = 0
-    for cand_str in string.gmatch(body, '{[^{}]+}') do
-        local source = string.match(cand_str, '"source":%s*"([^"]+)"')
-        local cand_lang = string.match(cand_str, '"language":%s*"([^"]+)"')
-        local cand_title = string.match(cand_str, '"title":%s*"([^"]+)"')
-        local cand_id = string.match(cand_str, '"candidate_id":%s*"([^"]+)"')
-        local details = string.match(cand_str, '"details":%s*"([^"]+)"')
-
-        if source and cand_title then
-            count = count + 1
-            local item = {
-                index = count,
-                source = source,
-                language = cand_lang or lang_code,
-                title = cand_title,
-                candidate_id = cand_id,
-                details = details,
-            }
-            table.insert(candidates_store, item)
-
-            local detail_suffix = ""
-            if details and details ~= "" then
-                local short_detail = details
-                local conf_badge = string.match(details, "%((%d+%% conf)%)")
-                local conf_str = conf_badge and (" (" .. conf_badge .. ")") or ""
-                if string.find(details, "PostgreSQL", 1, true) then
-                    local cid = string.match(details, "#(%d+)") or "1"
-                    short_detail = "PostgreSQL #" .. cid .. conf_str
-                elseif string.find(details, "Certified Coupling", 1, true) or string.find(details, "couplings.json", 1, true) then
-                    short_detail = "Zero-DB Registry" .. conf_str
-                elseif #details > 28 then
-                    short_detail = string.sub(details, 1, 25) .. "..."
-                end
-                detail_suffix = "  |  " .. short_detail
-            end
-
-            local display_label = string.format(
-                "#%02d   %s   [%s]   %s%s",
-                count,
-                format_source_tag(source),
-                (cand_lang or "?"):upper(),
-                cand_title,
-                detail_suffix
-            )
-            mainlist:add_value(display_label, count)
+            table.insert(candidates_store, {
+                title = c_title,
+                language = c_lang,
+                source = c_source,
+                candidate_id = c_id,
+                fps = c_fps,
+                score = c_score,
+                shift_ms = c_shift
+            })
         end
     end
 
-    local matched_media = string.match(body, '"matched_media":%s*"([^"]+)"')
-    local moviehash = string.match(body, '"moviehash":%s*"([^"]+)"')
-    local conf = string.match(body, '"confidence_percent":%s*([%d%.]+)')
-    local tier = string.match(body, '"matching_tier":%s*"([^"]+)"')
-    local match_ms = string.match(body, '"phash_match_ms":%s*([%d%.]+)')
+    display_subtitles()
 
-    local conf_val = tonumber(conf) or 100.0
-    local conf_str = string.format("%.1f%%", conf_val)
-    local tier_str = tier or "RAM Index"
-    local ms_str = match_ms and string.format("%.1f ms", tonumber(match_ms) or 0.0) or "<20 ms"
-
-    if count == 0 then
-        if matched_media then
-            mainlist:add_value(string.format("✓ [PHASH MATCH: %s] %s", conf_str, matched_media), 1)
-            mainlist:add_value("  (Aucun sous-titre lie dans la base locale pour cette langue)", 2)
-            mainlist:add_value("  -> Cliquez sur 'Smart Search (All)' ou 'Search by Name' puis 'Certify Coupling'", 3)
-
-            set_console_message(
-                string.format("<font color=\"#34d399\"><b>&#10003; VIDÉO RECONNUE PAR PHASH (Score: %s) : %s</b></font>", conf_str, matched_media),
-                string.format("<b>Moteur :</b> %s &bull; <b>Latence :</b> %s<br/><font color=\"#cbd5e1\">Empreinte visuelle authentifiée avec succès. Aucun fichier <code>.srt</code> lié pour cette langue. Cliquez sur <b>Smart Search (All)</b> pour chercher sur le web puis <b>Certify Coupling</b>.</font>", tier_str, ms_str),
-                "#34d399"
-            )
-            notify_osd(string.format("dbsrt: Reconnue '%s' (%s)", matched_media, conf_str), 3)
-        elseif mode == "phash" then
-            mainlist:add_value("Empreinte pHash non trouvée dans l'index.", 1)
-            set_console_message(
-                "<font color=\"#fbbf24\"><b>PHASH NON INDEXÉ : 0 RÉSULTAT</b></font>",
-                "Cette vidéo n'a pas encore d'empreinte <code>.phash</code> certifiée en base. Cliquez sur <b>Smart Search (All)</b> pour chercher par nom, puis sur <b>Certify Coupling</b> pour créer l'empreinte.",
-                "#fbbf24"
-            )
-        else
-            mainlist:add_value("Aucun candidat sous-titre pour ces critères.", 1)
-            set_console_message(
-                "<font color=\"#fbbf24\"><b>RECHERCHE TERMINÉE : 0 RÉSULTAT</b></font>",
-                "Essayez de basculer la langue sur <b>All Languages (all)</b> ou cliquez sur <b>Smart Search (All)</b>.",
-                "#fbbf24"
-            )
-        end
+    if #candidates_store == 0 then
+        setMessage("<b>Complete:</b> No subtitles found.")
     else
-        local ref_info = ""
-        if matched_media then
-            ref_info = string.format(" &nbsp;|&nbsp; <font color=\"#94a3b8\">Réf :</font> <font color=\"#38bdf8\"><b>%s (%s)</b></font>", matched_media, conf_str)
-        elseif moviehash then
-            ref_info = string.format(" &nbsp;|&nbsp; <font color=\"#94a3b8\">MovieHash :</font> <code>%s</code>", moviehash)
+        setMessage(string.format("<b>Complete:</b> %d subtitle(s) found.", #candidates_store))
+    end
+end
+
+function search_by_phash()
+    run_search("phash")
+end
+
+function search_by_hash()
+    run_search("hash")
+end
+
+function search_by_name()
+    run_search("name")
+end
+
+-- Format and populate the VLSub standard listbox
+function display_subtitles()
+    if not input_table["mainlist"] then return end
+    input_table["mainlist"]:clear()
+
+    if #candidates_store == 0 then
+        return
+    end
+
+    for idx, c in ipairs(candidates_store) do
+        local source_tag = c.source:upper()
+        if c.source == "certified" or c.source == "certified_synced" then
+            source_tag = "pHash certified"
+        elseif c.source == "container" then
+            source_tag = "container"
+        elseif c.source == "catalog" then
+            source_tag = "catalog"
+        elseif c.source == "remote" then
+            source_tag = "OpenSubtitles"
         end
 
-        set_console_message(
-            string.format("<font color=\"#34d399\"><b>&#10003; RECHERCHE TERMINÉE : %d CANDIDAT(S) TROUVÉ(S)</b></font>%s", count, ref_info),
-            string.format("<b>Index :</b> %s &bull; Sélectionnez un sous-titre dans la liste et cliquez sur <b>Download + Sync</b> (ou <b>1-Click Auto-Sync</b> pour recalage direct).", tier_str),
-            "#34d399"
-        )
-        notify_osd(string.format("dbsrt: %d sous-titre(s) trouvé(s) pour '%s'", count, matched_media or file_info.filename), 3)
-    end
-
-    return count
-end
-
--- 1-Click Auto-Sync: Runs Smart Search (or pHash) and automatically downloads Candidate #1
-function one_click_auto_sync()
-    local count = do_search("all")
-    if count and count > 0 then
-        download_candidate_at(1)
+        local display_text = string.format("%s [%s] (%s)", c.title, c.language:upper(), source_tag)
+        input_table["mainlist"]:add_value(display_text, idx)
     end
 end
 
--- Download and Apply Selected Subtitle (falls back to #1 if none explicitly highlighted)
+-- Download and apply user selected subtitle
 function download_selection()
+    if not input_table["mainlist"] then return end
     local selection = input_table["mainlist"]:get_selection()
     local sel_idx = nil
     for idx, _ in pairs(selection) do
@@ -593,49 +594,36 @@ function download_selection()
         break
     end
 
-    -- Ergonomic fallback: if candidates exist and user didn't click a row, pick #1
-    if (not sel_idx or sel_idx == 0) and #candidates_store > 0 then
-        sel_idx = 1
-    end
-
     if not sel_idx or not candidates_store[sel_idx] then
-        set_console_message(
-            "<font color=\"#fbbf24\"><b>NO CANDIDATE AVAILABLE</b></font>",
-            "Run a search first or select a subtitle track from the list.",
-            "#fbbf24"
-        )
+        setMessage("<b>No subtitle selected:</b> Please select a subtitle in the list first.")
         return
     end
 
-    download_candidate_at(sel_idx)
-end
-
-function download_candidate_at(sel_idx)
-    if not candidates_store[sel_idx] then return end
     local candidate = candidates_store[sel_idx]
+    setMessage(string.format("<b>Downloading:</b> %s [%s]...", candidate.title, candidate.language:upper()))
 
-    set_console_message(
-        string.format("<font color=\"#38bdf8\"><b>SYNCHRONIZING CANDIDATE #%02d...</b></font>", sel_idx),
-        string.format("Source: <b>%s</b> &nbsp;|&nbsp; Track: <b>%s</b>", candidate.source:upper(), candidate.title),
-        "#38bdf8"
-    )
+    local is_resync = false
+    local shift_param = "null"
+    if candidate.shift_ms and math.abs(candidate.shift_ms) > 1.0 then
+        is_resync = true
+        shift_param = string.format("%.2f", candidate.shift_ms)
+    end
 
+    discover_server()
     local host, port = parse_url(server_url)
     local payload = string.format(
-        '{"media_path":"%s","source":"%s","candidate_id":"%s","language":"%s","resync":true}',
+        '{"media_path":"%s","source":"%s","candidate_id":"%s","language":"%s","resync":%s,"shift_ms":%s}',
         file_info.path:gsub('\\', '\\\\'),
         candidate.source,
         (candidate.candidate_id or ""):gsub('\\', '\\\\'),
-        candidate.language
+        candidate.language,
+        tostring(is_resync),
+        shift_param
     )
 
     local body, err = send_http_request(host, port, "POST", "/v1/download", payload)
     if not body then
-        set_console_message(
-            "<font color=\"#fb7185\"><b>DOWNLOAD ERROR</b></font>",
-            err or "No response from dbsrt-server daemon.",
-            "#fb7185"
-        )
+        setMessage(string.format("<b>Download error:</b> %s", err or "No response from dbsrt-server"))
         notify_osd("dbsrt: Download failed", 3)
         return
     end
@@ -643,147 +631,36 @@ function download_candidate_at(sel_idx)
     local success = string.match(body, '"success":%s*(%a+)')
     local out_srt = string.match(body, '"output_srt_path":%s*"([^"]+)"')
     local shift_ms = tonumber(string.match(body, '"shift_ms":%s*([%d%.%-]+)')) or 0.0
-    local conf = string.match(body, '"confidence_percent":%s*([%d%.]+)') or "100"
-    local source = string.match(body, '"source":%s*"([^"]+)"') or candidate.source
 
     if success == "true" and out_srt and out_srt ~= "" then
-        last_downloaded_srt = out_srt
-        last_downloaded_lang = candidate.language or "fr"
-
         pcall(function() vlc.input.add_subtitle(out_srt, true) end)
-
-        local shift_sec = shift_ms / 1000.0
-        local shift_desc = string.format("%+.2fs", shift_sec)
-        local conf_num = tonumber(conf) or 100.0
         local out_basename = out_srt:match("([^/\\]+)$") or out_srt
-
-        local osd_msg = ""
-        if math.abs(shift_ms) > 1 then
-            osd_msg = string.format("dbsrt: [%s] Synced (%s, %.1f%%) via %s", candidate.language:upper(), shift_desc, conf_num, source)
-        else
-            osd_msg = string.format("dbsrt: [%s] Loaded via %s", candidate.language:upper(), source)
+        local shift_desc = ""
+        if math.abs(shift_ms) > MIN_SIGNIFICANT_DISPLAY_SHIFT_MS then
+            shift_desc = string.format(" (shift: %+.2fs)", shift_ms / MILLIS_PER_SEC)
         end
-        notify_osd(osd_msg, 4)
-
-        set_console_message(
-            string.format(
-                "<font color=\"#34d399\"><b>SUBTITLE SYNCHRONIZED &amp; ACTIVE</b></font> &nbsp;|&nbsp; <font color=\"#38bdf8\"><b>[%s] %s</b></font>",
-                candidate.language:upper(), source:upper()
-            ),
-            string.format(
-                "Temporal Shift: <font color=\"#f8fafc\"><b>%s (%.1f ms)</b></font> &nbsp;|&nbsp; Confidence: <font color=\"#34d399\"><b>%.1f%%</b></font> &nbsp;|&nbsp; File: <code>%s</code>",
-                shift_desc, shift_ms, conf_num, out_basename
-            ),
-            "#34d399"
-        )
+        setMessage(string.format("<b>Subtitles loaded:</b> %s%s", out_basename, shift_desc))
+        notify_osd(string.format("✓ Subtitles loaded: %s", out_basename), DEFAULT_OSD_DURATION_SEC)
     else
-        local err_msg = string.match(body, '"error":%s*"([^"]+)"') or "Failed to process subtitle"
-        set_console_message(
-            "<font color=\"#fb7185\"><b>SYNC ERROR</b></font>",
-            err_msg,
-            "#fb7185"
-        )
-        notify_osd("dbsrt error: " .. err_msg, 4)
+        local err_msg = string.match(body, '"error":%s*"([^"]+)"') or "Failed to download subtitle."
+        setMessage(string.format("<b>Download failed:</b> %s", err_msg))
     end
 end
 
--- Certify Active Subtitle Sync (Ground-Truth Video pHash <-> Subtitle Coupling)
-function certify_active_sync()
-    update_file_info()
-    if not file_info.has_input or not file_info.path then
-        set_console_message(
-            "<font color=\"#fb7185\"><b>NO MEDIA PLAYING</b></font>",
-            "Start a video in VLC before certifying a ground-truth coupling.",
-            "#fb7185"
-        )
-        return
-    end
-
-    local srt_path = last_downloaded_srt
-    local srt_lang = last_downloaded_lang
-
-    if not srt_path and input_table["mainlist"] then
-        local selection = input_table["mainlist"]:get_selection()
-        for idx, _ in pairs(selection) do
-            local cand = candidates_store[idx]
-            if cand and (cand.source == "catalog" or cand.source == "certified") and cand.candidate_id then
-                srt_path = cand.candidate_id
-                srt_lang = cand.language
-                break
-            end
-        end
-        if not srt_path and candidates_store[1] and (candidates_store[1].source == "catalog" or candidates_store[1].source == "certified") then
-            srt_path = candidates_store[1].candidate_id
-            srt_lang = candidates_store[1].language
-        end
-    end
-
-    if not srt_path or srt_path == "" then
-        set_console_message(
-            "<font color=\"#fbbf24\"><b>NO SUBTITLE TRACK SELECTED</b></font>",
-            "Download or select a local subtitle track first before certifying ground-truth sync.",
-            "#fbbf24"
-        )
-        return
-    end
-
-    if not srt_lang or srt_lang == "" then
-        local lang_idx = input_table["language"] and input_table["language"]:get_value() or 1
-        srt_lang = (languages[lang_idx] and languages[lang_idx][1]) or "fr"
-    end
-
-    set_console_message(
-        "<font color=\"#38bdf8\"><b>CERTIFYING GROUND-TRUTH COUPLING...</b></font>",
-        "Anchoring subtitle cues to video pHash frames in PostgreSQL 17 &amp; couplings.json...",
-        "#38bdf8"
-    )
-
-    local host, port = parse_url(server_url)
-    local payload = string.format(
-        '{"media_path":"%s","subtitle_path":"%s","language":"%s","strict":true}',
-        file_info.path:gsub('\\', '\\\\'),
-        srt_path:gsub('\\', '\\\\'),
-        srt_lang
-    )
-
-    local body, err = send_http_request(host, port, "POST", "/v1/certify", payload)
-    if not body then
-        set_console_message(
-            "<font color=\"#fb7185\"><b>CERTIFICATION ERROR</b></font>",
-            err or "No response from dbsrt-server daemon.",
-            "#fb7185"
-        )
-        notify_osd("dbsrt: Certify failed", 3)
-        return
-    end
-
-    local success = string.match(body, '"success":%s*(%a+)')
-    if success == "true" then
-        local media_name = string.match(body, '"media_name":%s*"([^"]+)"') or "?"
-        local cue_count = string.match(body, '"cue_count":%s*(%d+)') or "0"
-        local sub_frames_count = string.match(body, '"sub_frames_count":%s*(%d+)') or "0"
-        local sub_hash = string.match(body, '"subtitles_hash":%s*"([^"]+)"') or ""
-        local short_hash = string.sub(sub_hash, 1, 8)
-
-        notify_osd(
-            string.format("dbsrt: Certified [%s] (%s cues / %s anchors)", srt_lang:upper(), cue_count, sub_frames_count),
-            4
-        )
-        set_console_message(
-            string.format("<font color=\"#34d399\"><b>GROUND-TRUTH COUPLING CERTIFIED [%s]</b></font>", srt_lang:upper()),
-            string.format(
-                "Media: <b>%s</b> &nbsp;|&nbsp; Cues: <b>%s</b> (%s frame anchors) &nbsp;|&nbsp; SHA256: <code>%s...</code>",
-                media_name, cue_count, sub_frames_count, short_hash
-            ),
-            "#34d399"
-        )
-    else
-        local err_msg = string.match(body, '"error":%s*"([^"]+)"') or "Certification failed"
-        set_console_message(
-            "<font color=\"#fb7185\"><b>CERTIFICATION REJECTED</b></font>",
-            err_msg,
-            "#fb7185"
-        )
-        notify_osd("dbsrt certify error: " .. err_msg, 4)
-    end
+-- Export internal state for unit test harness
+if _G and _G._VLSub_test_hook then
+    _G._VLSub_state = {
+        file_info = file_info,
+        candidates_store = candidates_store,
+        input_table = input_table,
+        parse_url = parse_url,
+        update_file_info = update_file_info,
+        send_http_request = send_http_request,
+        run_search = run_search,
+        search_by_phash = search_by_phash,
+        search_by_hash = search_by_hash,
+        search_by_name = search_by_name,
+        download_selection = download_selection,
+        show_help = show_help
+    }
 end

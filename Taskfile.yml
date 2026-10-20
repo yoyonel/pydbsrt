@@ -240,10 +240,28 @@ tasks:
       - bash scripts/stack_ctl.sh server-stop
 
   vlc:
-    desc: Shortcut to install plugins and run headless VLC E2E test
+    desc: Shortcut to run VLC Lua unit tests and headless cvlc E2E test
     cmds:
       - task: vlc:install-plugin
+      - task: vlc:test:unit
       - task: vlc:test-cvlc
+
+  vlc:test:unit:
+    desc: Run hermetic unit tests on VLC Lua plugins (<15ms, mocked LibVLC)
+    cmds:
+      - lua tests/lua/test_vlsub_dbsrt.lua
+
+  vlc:test:e2e:
+    desc: Run comprehensive E2E Pytest suite for VLC plugins (unit, bytecode, headless cvlc, GUI Xvfb)
+    deps: [server:daemon, vlc:install-plugin]
+    cmds:
+      - uv run pytest tests/test_vlc_plugin_e2e.py -v
+
+  vlc:test:
+    desc: Run full testing pyramid for VLC plugins (Unit + Headless + GUI E2E)
+    cmds:
+      - task: vlc:test:unit
+      - task: vlc:test:e2e
 
   vlc:install-plugin:
     desc: Install dbsrt VLC Lua plugins (GUI extension and CLI interface)
