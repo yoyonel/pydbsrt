@@ -73,7 +73,8 @@ def check_html_files(site_dir: Path) -> list[str]:
 
         # 3. Check local image sources
         for img in article.find_all("img"):
-            src = img.get("src", "")
+            src_val = img.get("src", "")
+            src = src_val[0] if isinstance(src_val, list) else str(src_val or "")
             if src and not src.startswith(("http://", "https://", "data:")):
                 # Remove query/hash
                 clean_src = src.split("?")[0].split("#")[0]
@@ -83,7 +84,8 @@ def check_html_files(site_dir: Path) -> list[str]:
 
         # 4. Check local video and media sources
         for media_tag in article.find_all(["video", "source"]):
-            src = media_tag.get("src", "")
+            src_val = media_tag.get("src", "")
+            src = src_val[0] if isinstance(src_val, list) else str(src_val or "")
             if src and not src.startswith(("http://", "https://", "data:")):
                 clean_src = src.split("?")[0].split("#")[0]
                 target = (html_path.parent / clean_src).resolve()

@@ -74,8 +74,8 @@ def test_with_google_translate():
     fn_subs_en = "Teenage.Mutant.Ninja.Turtles.1990.1080p.BluRay.H264.AAC-RARBG.srt"
     fn_subs_fr = "Teenage.Mutant.Ninja.Turtles.1990.iNTERNAL.DV-VH-PROD.french.srt"
 
-    subs_en = pysrt.open(medias_root_path / fn_subs_en)
-    subs_fr = pysrt.open(medias_root_path / fn_subs_fr)
+    subs_en = pysrt.open(str(medias_root_path / fn_subs_en))
+    subs_fr = pysrt.open(str(medias_root_path / fn_subs_fr))
 
     translator = Translator()
     subs_en_fr = [(sub, translator.translate(text=sub.text, src="en", dest="fr").text) for sub in tqdm(subs_en[:10])]
@@ -124,7 +124,7 @@ def translate_subtitles_with_google(
     :param srt_dest:
     :return:
     """
-    srt = pysrt.open(srt_path)
+    srt = pysrt.open(str(srt_path))
     # compute subtitles translation, can be long ...
     it_srt_translated = grouper(50, gen_translate_srt(srt, src=srt_src, dest=srt_dest))
     # translate_srt = list(
@@ -138,8 +138,8 @@ def test_synchronize_subtitles():
     srt_fr_fn = "The Golden Child.DVD_PAL.fre.srt"
     srt_en_fn = "The Golden Child (1986) 1080p web.en.srt"
 
-    srt_fr = pysrt.open(medias_root_path / srt_fr_fn)
-    srt_en = pysrt.open(medias_root_path / srt_en_fn)
+    srt_fr = pysrt.open(str(medias_root_path / srt_fr_fn))
+    srt_en = pysrt.open(str(medias_root_path / srt_en_fn))
 
     ####################################################################################
     # see problems
@@ -282,10 +282,10 @@ def main():
     # logger.info(translate("Salut le monde", to_l='en', from_l='fr'))
 
     srt_to_path = medias_root_path / "The Golden Child.DVD_PAL.fre.srt"
-    srt_to = pysrt.open(srt_to_path)
+    srt_to = pysrt.open(str(srt_to_path))
 
     for srt_from, t_srt_from in translate_subtitles_with_google_translate_webapi(
-        medias_root_path / "The Golden Child (1986) 1080p web.en.srt",
+        str(medias_root_path / "The Golden Child (1986) 1080p web.en.srt"),
         chunk_size=70,
         split_tokens=[" ¶ ", " ** ", " @ ", " @_ "],
         # it_func=tqdm

@@ -34,6 +34,7 @@ async def test_retarget_subtitles(
             ref_phash_file,
             target_phash_file,
         )
+        assert output_retarget_subtitles is not None
         assert output_retarget_subtitles.exists()
     console_output = capture.get()
     regex = r"Shift subtitles seconds = (?P<nb_frames>\d*) frames ~ (?P<nb_seconds>\d*\.*\d+) seconds"

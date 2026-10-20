@@ -78,16 +78,16 @@ def sh_shutdown(_sig, _):
 @click.option(
     "--default-relative-path-export-for-subtitles",
     required=False,
-    default="SRT",
-    type=str,
+    default=Path("SRT"),
+    type=click_pathlib.Path(),
 )
 @logger.catch
 def extract_subtitles_from_medias(
     root_dir_for_finding_medias: Path,
     glob_for_finding_medias: str,
     root_dir_export_subtitles: Path | None,
-    default_relative_path_export_for_subtitles: str,
-):
+    default_relative_path_export_for_subtitles: Path,
+) -> None:
     for sig in ALL_HANDLING_SIGNALS:
         signal(sig, sh_shutdown)
 

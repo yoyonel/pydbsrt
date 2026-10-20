@@ -42,6 +42,8 @@ class FFmpeg:
 
         self.hw_acceleration = None
 
+        self.built_cmd: list[str] | None = None
+
         self.no_video = False
         self.no_audio = False
 
@@ -230,4 +232,7 @@ class FFmpeg:
         """
         Runner
         """
+        if self.built_cmd is None:
+            self.build()
+        assert self.built_cmd is not None
         return subprocess.Popen(self.built_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)

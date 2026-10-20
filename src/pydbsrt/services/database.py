@@ -5,7 +5,7 @@ ASYNC module
 - https://peps.python.org/pep-0492/#why-magic-methods-start-with-a
 """
 
-from typing import AsyncIterator
+from typing import Any, AsyncIterator
 
 import asyncpg
 from asyncpg import Connection
@@ -150,7 +150,7 @@ async def reindex_tables(conn) -> None:
     )
 
 
-async def search_media_name(conn: Connection, media_id: int) -> str:
+async def search_media_name(conn: Connection, media_id: int) -> str | None:
     return await conn.fetchval(
         """SELECT "name"
             FROM "medias"
@@ -159,7 +159,7 @@ async def search_media_name(conn: Connection, media_id: int) -> str:
     )
 
 
-async def search_subtitles_from_hash(conn: Connection, subtitles_hash: Hash) -> int | None:
+async def search_subtitles_from_hash(conn: Connection | Any, subtitles_hash: Hash) -> int | None:
     """
 
     Args:

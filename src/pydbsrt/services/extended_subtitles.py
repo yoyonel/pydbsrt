@@ -3,7 +3,7 @@ from operator import itemgetter
 from pathlib import Path
 from struct import unpack
 from tempfile import gettempdir
-from typing import AsyncGenerator, AsyncIterator, Callable, Iterator, Tuple
+from typing import Any, AsyncIterator, Callable, Iterator, Tuple
 
 import asyncstdlib
 from imagehash import ImageHash
@@ -74,7 +74,7 @@ def show_subtitles_fingerprints(
     srt_path: Path,
     media,
     nb_fingerprints_by_row: int = 4,
-    fn_imghash_to: Callable[[ImageHash], str] = str,
+    fn_imghash_to: Callable[[Any], str] = str,
 ) -> None:
     """
 
@@ -100,11 +100,11 @@ def show_subtitles_fingerprints(
             it_indexed_sub_fingerprints,
         )
         console.print(f"* index subtitle: {index_subtitle} - first frame: {sub_fingerprint.offset_frame}")
-        it_fingerprint: Iterator[ImageHash] = (
+        it_fingerprint: Iterator[ImageHash | int] = (
             sub_fingerprint.img_hash for sub_fingerprint in it_indexed_sub_fingerprints
         )
         for chunk_fingerprints in grouper(it_fingerprint, nb_fingerprints_by_row):
-            it_chunk_fingerprints: Iterator[ImageHash] = filter(None, chunk_fingerprints)
+            it_chunk_fingerprints: Iterator[Any] = filter(None, chunk_fingerprints)
             console.print(" ".join(fn_imghash_to(img_hash) for img_hash in it_chunk_fingerprints))
 
 
@@ -112,7 +112,7 @@ async def async_show_subtitles_fingerprints(
     srt_path: Path,
     agen_phash_media: AsyncIterator[PHashMedia],
     nb_fingerprints_by_row: int = 4,
-    fn_imghash_to: Callable[[ImageHash], str] = str,
+    fn_imghash_to: Callable[[Any], str] = str,
 ) -> None:
     """
 
@@ -128,7 +128,7 @@ async def async_show_subtitles_fingerprints(
     agen_sub_fingerprint = ASyncSubFingerprints(sub_reader=SubReader(srt_path), phash_media_reader=agen_phash_media)
     # https://asyncstdlib.readthedocs.io/en/latest/source/api/itertools.html#asyncstdlib.itertools.groupby
     # noinspection PyTypeChecker
-    aio_gb_sub_fingerprints: AsyncGenerator[tuple[int, AsyncIterator[SubFingerprint]], None] = asyncstdlib.groupby(
+    aio_gb_sub_fingerprints: AsyncIterator[tuple[int, AsyncIterator[SubFingerprint]]] = asyncstdlib.groupby(
         agen_sub_fingerprint.ait_subfingerprint, key=itemgetter("index")
     )
     async for index_subtitle, ait_indexed_sub_fingerprints in aio_gb_sub_fingerprints:
@@ -136,7 +136,7 @@ async def async_show_subtitles_fingerprints(
         console.print(f"* index subtitle: {index_subtitle} - first frame: {sub_fingerprint.offset_frame}")
         it_fingerprint = iter([sub_fingerprint.img_hash async for sub_fingerprint in ait_indexed_sub_fingerprints])
         for chunk_fingerprints in grouper(it_fingerprint, nb_fingerprints_by_row):
-            it_chunk_fingerprints: Iterator[ImageHash] = filter(None, chunk_fingerprints)
+            it_chunk_fingerprints: Iterator[Any] = filter(None, chunk_fingerprints)
             console.print(" ".join(fn_imghash_to(img_hash) for img_hash in it_chunk_fingerprints))
 
 

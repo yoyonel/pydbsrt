@@ -1,7 +1,7 @@
 from typing import Callable
 
 from fuzzywuzzy import fuzz
-from rich.emoji import EMOJI
+from rich._emoji_codes import EMOJI
 
 
 def find_emoji(emoji_desc: str, func_str_compare: Callable[[str, str], int] = fuzz.ratio) -> str:

@@ -43,7 +43,7 @@ console = Console()
 @coroclick
 @logger.catch
 async def search_imghash_in_db(phash_file, distance):
-    it_phash_stream = gen_signed_int64_hash(sys.stdin if phash_file == Path("-") else phash_file.open("rb"))
+    it_phash_stream = gen_signed_int64_hash(sys.stdin.buffer if phash_file == Path("-") else phash_file.open("rb"))
     results_search: ResultSearch = await search_phash_stream_in_db(map(str, it_phash_stream), distance)
     for record in results_search.records:
         console.print(record)

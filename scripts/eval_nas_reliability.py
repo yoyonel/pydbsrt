@@ -475,7 +475,7 @@ def run_suite_2_real_video_recognition(
             }
         )
         print(
-            f"  [{tc['type']}] {vpath.name[:45]:<45} -> matched={matched} (cands={len(cands)}, {lat_ms}ms) ok={is_ok}",
+            f"  [{tc['type']}] {curr_vpath.name[:45]:<45} -> matched={matched} (cands={len(cands)}, {lat_ms}ms) ok={is_ok}",
             flush=True,
         )
 

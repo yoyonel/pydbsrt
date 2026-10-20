@@ -96,10 +96,7 @@ async def import_subtitles_into_db(
                 nb_rows_inserted += 1
 
                 it_img_hash: Iterator[int] = (
-                    # TODO: maybe an error on last parameter `media_hash` (the signature of
-                    #  `gen_read_binary_img_hash_file` reclaim a `media_id`)
-                    img_hash
-                    for img_hash, _, _ in gen_read_binary_img_hash_file(binary_img_hash_file, media_hash)
+                    img_hash for img_hash, _, _ in gen_read_binary_img_hash_file(binary_img_hash_file, found_media_id)
                 )
 
                 gb_sub_fingerprints: Iterator[Tuple[int, Iterator[SubFingerprint]]] = groupby(

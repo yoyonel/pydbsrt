@@ -1,1 +1,10 @@
-__all__ = ["FFException", "FFmpeg", "FFprobe", "FFStream", "FFFilter"]
+from . import FFException, FFMedia, FFmpeg, FFmpegFilter, FFprobe, FFStream
+
+__all__ = [
+    "FFException",
+    "FFMedia",
+    "FFmpeg",
+    "FFmpegFilter",
+    "FFprobe",
+    "FFStream",
+]

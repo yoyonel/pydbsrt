@@ -75,6 +75,7 @@ def ffmpeg_frame_generator(
         nb_frames = 0
 
         proc = ffmpeg.build().run()
+        assert proc.stdout is not None
 
         frame_data = proc.stdout.read(frame_size)
         while len(frame_data) > 0:
@@ -108,8 +109,8 @@ def rawframe_to_imghash(
 
 def ffmpeg_imghash_generator(
     input: str,
-    start_frame: int = None,
-    stop_frame: int = None,
+    start_frame: int | str | None = None,
+    stop_frame: int | str | None = None,
     frame_width: int = 32,
     frame_height: int = 32,
 ) -> Generator[imagehash.ImageHash, None, None]:

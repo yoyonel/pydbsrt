@@ -89,6 +89,7 @@ def gen_read_binary_img_hash_file(
     progress: Progress | None = None,
 ) -> Iterator[Tuple[int, int, int]]:
     with binary_img_hash_file.open("rb") as fo:
+        task_id = None
         if progress:
             task_id = progress.add_task(
                 "insert img_hash into db",
@@ -105,5 +106,5 @@ def gen_read_binary_img_hash_file(
                 yield bytes_to_signed_int64(ba_img_hex), offset_frame, media_id
                 ba_img_hex = fo.read(SIZE_IMG_HASH)
                 offset_frame += 1
-                if progress:
+                if progress and task_id is not None:
                     progress.update(task_id, advance=1, refresh=False)

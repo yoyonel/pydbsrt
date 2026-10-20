@@ -90,7 +90,7 @@ async def retarget_subtitles(ref_subtitles, ref_media, target_media, phash_dir):
             console.print(f"Building PHash for reference: '{media_file}")
             phash_file = services.export_imghash_from_media(media_file)
             # https://docs.python.org/3/library/shutil.html#shutil.move
-            phash_file = shutil.move(phash_file, phash_dir.joinpath(phash_file.name))
+            phash_file = Path(shutil.move(phash_file, phash_dir.joinpath(phash_file.name)))
             console.print(f"PHash for reference export to: '{phash_file}'")
         return phash_file
 

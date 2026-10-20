@@ -1,17 +1,21 @@
-#!/usr/bin/env python
+# pyright: reportMissingImports=false, reportOptionalCall=false
 import logging
 from collections import defaultdict
 from datetime import time, timedelta
 from pathlib import Path
 from pprint import PrettyPrinter
-from typing import List, Tuple
+from typing import Any, List, Tuple
 
 import numpy as np
 import pysrt
 from pysrt import SubRipTime
-from sklearn.cluster import MeanShift, estimate_bandwidth
 
-from pydbsrt.translate.sync_srt import grouper_without_fill
+try:
+    from sklearn.cluster import MeanShift, estimate_bandwidth
+except ImportError:
+    MeanShift = estimate_bandwidth = None  # type: ignore
+
+from pydbsrt.translate.sync_srt_with_translations import grouper_without_fill
 
 logger = logging.getLogger(__name__)
 
@@ -21,12 +25,12 @@ pp = PrettyPrinter(indent=4)
 
 def main():
     srt_from_path = medias_root_path / "The Golden Child (1986) 1080p web.en.srt"
-    srt_from = pysrt.open(srt_from_path)
+    srt_from = pysrt.open(str(srt_from_path))
     srt_from_durations = [srt.duration for srt in srt_from]
     logger.info(f"srt_from_durations={pp.pformat(srt_from_durations)}")
 
     srt_to_path = medias_root_path / "The Golden Child.DVD_PAL.fre.srt"
-    srt_to = pysrt.open(srt_to_path)
+    srt_to = pysrt.open(str(srt_to_path))
     srt_to_durations = [srt.duration for srt in srt_to]
     logger.info(f"srt_to_durations={pp.pformat(srt_to_durations)}")
 
@@ -61,16 +65,16 @@ def main():
         #     print("cluster {0}: {1}".format(k, X[my_members, 0]))
         return labels, bandwidth
 
-    acgt = defaultdict(lambda: "*", ((0, "A"), (1, "C"), (2, "G"), (3, "T")))
+    acgt: defaultdict[Any, str] = defaultdict(lambda: "*", {0: "A", 1: "C", 2: "G", 3: "T"})
 
     srt_from_labels, srt_from_bandwith = _clustering_srt_by_durations(srt_from_durations, quantile=0.20)
     srt_from_sequence_acgt = "".join([acgt[label] for label in srt_from_labels])
-    s = "\n".join("".join(g) for g in grouper_without_fill(srt_from_sequence_acgt, 140))
+    s = "\n".join("".join(str(c) for c in g) for g in grouper_without_fill(srt_from_sequence_acgt, 140))
     logger.info(f"srt_from_sequence_acgt:\n{s}")
 
     srt_to_labels, _ = _clustering_srt_by_durations(srt_to_durations, quantile=0.40)
     srt_to_sequence_acgt = "".join([acgt[label] for label in srt_to_labels])
-    s = "\n".join("".join(g) for g in grouper_without_fill(srt_to_sequence_acgt, 140))
+    s = "\n".join("".join(str(c) for c in g) for g in grouper_without_fill(srt_to_sequence_acgt, 140))
     logger.info(f"srt_to_sequence_acgt:\n{s}")
 
 
