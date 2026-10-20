@@ -5,37 +5,45 @@ set -euo pipefail
 ACTION="${1:-lint}"
 
 run_lint_fast() {
-  echo "=== [1/5] Python (Ruff Check & Format Check) ==="
+  echo "=== [1/6] Python (Ruff Check & Format Check) ==="
   uv run ruff check src/ tests/ scripts/
   uv run ruff format --check src/ tests/ scripts/
 
-  echo "=== [2/5] Shell Scripts (shellcheck & shfmt) ==="
+  echo "=== [2/6] Python Type Checking (Pyright) ==="
+  run_typecheck
+
+  echo "=== [3/6] Shell Scripts (shellcheck & shfmt) ==="
   shellcheck scripts/*.sh data/*.sh
   shfmt -i 2 -ci -d scripts/*.sh data/*.sh
 
-  echo "=== [3/5] Lua VLC Plugins (luac bytecode check & hermetic unit tests) ==="
+  echo "=== [4/6] Lua VLC Plugins (luac bytecode check & hermetic unit tests) ==="
   for lua_file in vlc-plugin/*.lua; do
     luac -p "$lua_file"
   done
   lua tests/lua/test_vlsub_dbsrt.lua
   echo "✓ All Lua plugins compiled cleanly and passed unit tests (vlc-plugin/*.lua)"
 
-  echo "=== [4/5] YAML Configs (yamllint) ==="
+  echo "=== [5/6] YAML Configs (yamllint) ==="
   yamllint -c .yamllint.yml Taskfile.yml mkdocs.yml bandit.yaml .pre-commit-config.yaml .yamllint.yml docker/*.yml .github/workflows/*.yml
   echo "✓ All YAML files passed yamllint"
 
-  echo "=== [5/5] HTML / Embedded JS / JSON Assets ==="
+  echo "=== [6/6] HTML / Embedded JS / JSON Assets ==="
   uv run python scripts/validate_web_assets.py
 }
 
 run_lint() {
   run_lint_fast
-  echo "=== [6/7] Rust (cargo fmt --check & clippy) ==="
+  echo "=== [7/8] Rust (cargo fmt --check & clippy) ==="
   cargo fmt --all -- --check
   cargo clippy --workspace --all-targets -- -D warnings
 
-  echo "=== [7/7] Disk Space Safety Guard ==="
+  echo "=== [8/8] Disk Space Safety Guard ==="
   bash scripts/disk_guard.sh check
+}
+
+run_typecheck() {
+  echo "=== Python Type Checking (Pyright) ==="
+  uv run pyright "$@"
 }
 
 run_fmt() {
@@ -73,10 +81,11 @@ run_coverage() {
 case "$ACTION" in
   lint) run_lint ;;
   lint-fast) run_lint_fast ;;
+  typecheck) run_typecheck "${@:2}" ;;
   fmt) run_fmt ;;
   coverage) run_coverage ;;
   *)
-    echo "Usage: $0 {lint|lint-fast|fmt|coverage}" >&2
+    echo "Usage: $0 {lint|lint-fast|typecheck|fmt|coverage}" >&2
     exit 1
     ;;
 esac

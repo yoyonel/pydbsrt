@@ -103,6 +103,18 @@ tasks:
     cmds:
       - bash scripts/code_quality.sh lint
 
+  typecheck:
+    desc: Run static type checker across Python codebase (Pyright)
+    aliases: [types, lint:types]
+    cmds:
+      - bash scripts/code_quality.sh typecheck {{.CLI_ARGS}}
+
+  typecheck:summary:
+    desc: Generate structured statistical summary of Pyright type errors across files and rules
+    aliases: [types:summary]
+    cmds:
+      - uv run python scripts/report_type_errors.py
+
   fmt:
     desc: Format code across Python (Ruff), Rust (rustfmt), and Shell (shfmt)
     cmds:

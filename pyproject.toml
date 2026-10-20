@@ -74,6 +74,7 @@ dev = [
     "types-click>=7.1.2",
     "waiting>=1.4.1",
     "pytest-lazy-fixtures>=1.4.1",
+    "pyright>=1.1.414",
 ]
 docs = [
     "beautifulsoup4>=4.12.0",
@@ -129,3 +130,14 @@ omit = [
     "src/pydbsrt/tools/tqdm_with_logger.py",
     "src/pydbsrt/tools/importantframefingerprint.py",
 ]
+
+[tool.pyright]
+include = ["src", "tests", "scripts"]
+exclude = [
+    "**/__pycache__",
+    ".git",
+    "notebook",
+    "data",
+]
+pythonVersion = "3.11"
+typeCheckingMode = "standard"

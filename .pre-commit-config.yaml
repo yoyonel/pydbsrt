@@ -26,6 +26,13 @@ repos:
   # Local native hooks: Rust (.rs), Shell (.sh), Lua (.lua), YAML (.yml), Web (.html/.js)
   - repo: local
     hooks:
+      - id: pyright
+        name: pyright type check (.py)
+        entry: uv run pyright
+        language: system
+        files: ^(src|tests|scripts)/.*\.py$
+        pass_filenames: false
+
       - id: shellcheck
         name: shellcheck (.sh)
         entry: shellcheck
