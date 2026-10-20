@@ -133,6 +133,7 @@ Pour un utilisateur grand public, l'installation doit être instantanée et ne c
 ### 4.1 Plateforme Prioritaire #1 : Linux (Debian / Ubuntu)
 
 La priorité absolue de déploiement et de packaging est la cible **Linux Debian / Ubuntu** :
+
 * **Format principal** : Paquet natif `.deb` et script d'installation utilisateur 1-commande (`install_debian.sh`).
 * **Service d'arrière-plan** : Unité utilisateur `systemd --user` (`~/.config/systemd/user/dbsrt-agent.service`).
 * **Chemin VLC standardisé** : `~/.local/share/vlc/lua/extensions/vlsub_dbsrt.lua`.
@@ -164,55 +165,10 @@ L'installeur réalise 3 opérations silencieuses :
      ```
    * Activation automatique : `systemctl --user enable --now dbsrt-agent`.
 
----
-
-## 5. Observabilité, Monitoring & Métriques
-
-Pour assurer une traçabilité totale en développement comme en production :
-
-1. **Logging Structuré & Corrélation de Requêtes** :
-   * Chaque recherche génère un identifiant unique `X-Request-ID` propagé du client Lua au serveur distant.
-   * Format des logs en JSON structuré (`tracing`) avec ventilation précise des latences :
-     * `extract_local_ms` : Décodage FFmpeg et calcul des 25 pHashes sur le client.
-     * `network_rtt_ms` : Temps de trajet réseau vers o2switch / NAS / RPi4+.
-     * `remote_mih_ms` : Recherche métrique vectorielle sur le serveur distant.
-2. **Exposition des Métriques (`GET /v1/metrics`)** :
-   * Endpoint de métriques (format JSON / Prometheus) exposant :
-     * `dbsrt_queries_total` : Volume global de requêtes par mode (`phash`, `hash`, `name`).
-     * `dbsrt_latency_seconds` : Histogramme des latences (p50, p95, p99).
-     * `dbsrt_cache_hits_total` : Taux de réutilisation du cache mémoire.
-     * `dbsrt_remote_errors_total` : Suivi des erreurs réseau et indisponibilités de l'API distante.
-
----
-
-## 6. Simulation Locale Haute-Fidélité (Dual-Process)
-
-En attendant le déploiement sur infrastructure distante (hébergement Cloud o2switch, Synology NAS, ou Raspberry Pi 4+), l'environnement de développement local reproduit à 100% la topologie distribuée :
-
-```mermaid
-flowchart LR
-    subgraph ClientProcess ["Processus 1 : Agent Local (:8765)"]
-        VLC["VLC Player"] -->|"media_path"| A1["dbsrt-agent"]
-        A1 -->|"FFmpeg 1s"| A2["25 pHashes (200 B)"]
-    end
-
-    subgraph ServerProcess ["Processus 2 : Serveur Simulé (:8766)"]
-        A2 -->|"POST /v1/recognize\nHTTP Loopback"| S1["dbsrt-server (Simulateur o2switch/NAS/RPi4+)"]
-        S1 -->|"MIH RAM <4ms"| S2["Sous-titres & Shift Δt"]
-    end
-
-    S2 -->|"200 OK"| A1
-    A1 -->|"Injection OSD"| VLC
-```
-
-* **Orchestration Taskfile** :
-  * `task stack:distributed:up` : Démarre le serveur distant simulé sur le port `8766` et le daemon agent local sur le port `8765`.
-  * `task stack:distributed:status` : Interroge la santé et les métriques des deux daemons.
-  * `task stack:distributed:down` : Extinction propre des deux processus.
-
 ### 4.3 Variante Ergonomique : Mini-App System Tray (Barre des Tâches)
 
 Pour offrir une visibilité rassurante à l'utilisateur :
+
 * Une mini-application compagnon en Rust (via `tray-icon` ou `Tauri`, consommant <10 Mo de RAM).
 * Une icône discrète dans la zone de notification avec menu contextuel :
   * État : *Service actif (Connecté au Cloud o2switch)*
