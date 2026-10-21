@@ -73,7 +73,7 @@ pub async fn run_fetch_subtitles(args: &FetchSubtitlesArgs) -> Result<()> {
     println!("Provider       : {}", args.provider);
 
     let provider: Box<dyn SubtitleProvider> = if args.provider.to_lowercase() == "mock" {
-        Box::new(MockSubtitleProvider::new())
+        Box::new(MockSubtitleProvider::with_default_fixtures())
     } else {
         Box::new(OpenSubtitlesProvider::new(args.api_key.clone()))
     };
@@ -192,4 +192,118 @@ pub async fn run_fetch_subtitles(args: &FetchSubtitlesArgs) -> Result<()> {
     );
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_fetch_subtitles_empty_candidates() {
+        let args = FetchSubtitlesArgs {
+            query: "NonExistentShow12345".to_string(),
+            language: "en".to_string(),
+            output: None,
+            provider: "mock".to_string(),
+            api_key: None,
+            cache_dir: None,
+            no_cache: false,
+            dry_run: false,
+        };
+        let res = run_fetch_subtitles(&args).await;
+        assert!(res.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_fetch_subtitles_dry_run() {
+        let args = FetchSubtitlesArgs {
+            query: "Silicon.Valley.S02E01.1080p.mkv".to_string(),
+            language: "fr".to_string(),
+            output: None,
+            provider: "mock".to_string(),
+            api_key: None,
+            cache_dir: None,
+            no_cache: false,
+            dry_run: true,
+        };
+        let res = run_fetch_subtitles(&args).await;
+        assert!(res.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_fetch_subtitles_download_cache_and_cache_hit() {
+        let tmp_dir = std::env::temp_dir().join(format!("test_fetch_subs_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&tmp_dir);
+        let out_file = tmp_dir.join("silicon_valley.en.srt");
+        let cache_dir = tmp_dir.join("cache");
+
+        let args = FetchSubtitlesArgs {
+            query: "Silicon.Valley.S02E01.1080p.mkv".to_string(),
+            language: "en".to_string(),
+            output: Some(out_file.clone()),
+            provider: "mock".to_string(),
+            api_key: None,
+            cache_dir: Some(cache_dir.clone()),
+            no_cache: false,
+            dry_run: false,
+        };
+
+        // First run: downloads and writes to disk + cache
+        let res = run_fetch_subtitles(&args).await;
+        assert!(res.is_ok());
+        assert!(out_file.exists());
+        let content = std::fs::read_to_string(&out_file).unwrap();
+        assert!(content.contains("Pied Piper in English"));
+
+        // Second run: hits cache
+        let res_cached = run_fetch_subtitles(&args).await;
+        assert!(res_cached.is_ok());
+
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_fetch_subtitles_stdout_and_movie_year() {
+        let args = FetchSubtitlesArgs {
+            query: "Big.Buck.Bunny.2008.1080p.mkv".to_string(),
+            language: "en".to_string(),
+            output: None,
+            provider: "mock".to_string(),
+            api_key: None,
+            cache_dir: None,
+            no_cache: true,
+            dry_run: false,
+        };
+        let res = run_fetch_subtitles(&args).await;
+        assert!(res.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_fetch_subtitles_query_path_exists_auto_output() {
+        let tmp_dir = std::env::temp_dir().join(format!("test_fetch_path_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&tmp_dir);
+        let video_path = tmp_dir.join("Big.Buck.Bunny.mkv");
+        std::fs::write(&video_path, b"dummy video content").unwrap();
+
+        let expected_srt = tmp_dir.join("Big.Buck.Bunny.en.srt");
+
+        let args = FetchSubtitlesArgs {
+            query: video_path.to_string_lossy().to_string(),
+            language: "en".to_string(),
+            output: None,
+            provider: "mock".to_string(),
+            api_key: None,
+            cache_dir: None,
+            no_cache: true,
+            dry_run: false,
+        };
+
+        let res = run_fetch_subtitles(&args).await;
+        assert!(res.is_ok());
+        assert!(expected_srt.exists());
+        let content = std::fs::read_to_string(&expected_srt).unwrap();
+        assert!(content.contains("Big Buck Bunny English"));
+
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
 }
