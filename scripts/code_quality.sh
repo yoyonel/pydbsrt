@@ -34,7 +34,7 @@ run_lint_fast() {
 
   echo "=== [6/7] Dockerfiles Lint (hadolint) ==="
   if command -v hadolint >/dev/null 2>&1; then
-    hadolint -c .hadolint.yaml Dockerfile docker/Dockerfile.server
+    hadolint -c .hadolint.yaml Dockerfile docker/Dockerfile* docker/pg-spgist_hamming/*/Dockerfile
     echo "✓ All Dockerfiles passed hadolint"
   else
     echo "⊘ hadolint not found, skipping Dockerfile lint"

@@ -8,10 +8,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
+WORKDIR /usr/local/src
 RUN git clone https://github.com/yoyonel/pg-spgist_hamming -b develop /usr/local/src/pg-spgist_hamming \
-    && cd /usr/local/src/pg-spgist_hamming/bktree \
-    && make \
-    && make install
+    && make -C /usr/local/src/pg-spgist_hamming/bktree \
+    && make -C /usr/local/src/pg-spgist_hamming/bktree install
 
 # Stage 2: Clean PostgreSQL 17 runtime
 FROM postgres:17-bookworm

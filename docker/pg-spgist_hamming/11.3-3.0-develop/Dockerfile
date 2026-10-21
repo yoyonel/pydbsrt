@@ -16,11 +16,10 @@ RUN sed -i 's/^# deb/deb/g' /etc/apt/sources.list \
     postgresql-server-dev-11 \
     && rm -rf /var/lib/apt/lists/*
 
-RUN git clone https://github.com/yoyonel/pg-spgist_hamming -b develop /usr/local/src/pg-spgist_hamming
-# RUN mkdir /usr/local/src/pg-spgist_hamming/build
-RUN cd /usr/local/src/pg-spgist_hamming/bktree && \
-    make && \
-    make install
+WORKDIR /usr/local/src
+RUN git clone https://github.com/yoyonel/pg-spgist_hamming -b develop /usr/local/src/pg-spgist_hamming \
+    && make -C /usr/local/src/pg-spgist_hamming/bktree \
+    && make -C /usr/local/src/pg-spgist_hamming/bktree install
 
 RUN rm /docker-entrypoint-initdb.d/10_postgis.sh
 COPY ./initdb-bktree.sh /docker-entrypoint-initdb.d/
