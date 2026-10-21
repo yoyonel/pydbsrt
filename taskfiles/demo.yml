@@ -1,0 +1,26 @@
+version: '3'
+
+tasks:
+  demo:sync:
+    desc: Retarget & synchronize SRT subtitles using standalone Rust CLI (Core Engine)
+    aliases: [demo:retarget:rs]
+    deps: [build]
+    cmds:
+      - >
+        ./target/release/dbsrt retarget-subtitles
+        --ref-media {{.DEMO_MEDIA}}
+        --ref-subtitles {{.DEMO_SRT}}
+        --target-media {{.DEMO_TARGET_MEDIA}}
+        --phash-dir /tmp
+
+  demo:studio:
+    desc: Start dbsrt Studio web timeline and recalage backoffice on http://127.0.0.1:8765/studio
+    cmds:
+      - task: studio
+      - echo "dbsrt Studio is available on http://127.0.0.1:8765/studio"
+
+  demo:vlc:
+    desc: Interactive live demonstration of subtitle retargeting and OSD notification in VLC
+    aliases: [demo]
+    cmds:
+      - task: vlc:demo

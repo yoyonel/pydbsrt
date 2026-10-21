@@ -1,0 +1,222 @@
+version: '3'
+
+tasks:
+  # --- Legacy Docker execution targets (replaces 2021 Makefile) ---
+
+  build:docker:legacy:
+    desc: Build pydbsrt Docker image using uv multi-stage cache (legacy)
+    internal: true
+    cmds:
+      - docker build -t {{.DOCKER_IMAGE}} -f Dockerfile .
+
+  re:
+    desc: Clean artifacts and rebuild Docker image (replaces make re)
+    internal: true
+    cmds:
+      - task: clean
+      - task: build:docker:legacy
+
+  clean:rs:
+    desc: Purge Rust build artifacts from target/ (cargo clean)
+    internal: true
+    cmds:
+      - cargo clean
+
+  test:docker:legacy:
+    desc: Run test suite inside Docker container (replaces make pytest)
+    internal: true
+    deps: [db:up]
+    cmds:
+      - >
+        docker run --rm
+        --network {{.NETWORK_NAME}}
+        -e PSQL_IP={{.DB_HOST}}
+        -v "{{.ROOT_DIR}}/src:/app/src"
+        -v "{{.ROOT_DIR}}/data:/app/data"
+        -v "{{.ROOT_DIR}}/tests:/app/tests"
+        {{.DOCKER_IMAGE}}
+        pytest -o addopts="" -p no:docker-compose -v tests/
+
+  run:
+    desc: Run pydbsrt Docker container (replaces make docker-run)
+    internal: true
+    cmds:
+      - docker run --rm -it --network {{.NETWORK_NAME}} -e PSQL_IP={{.DB_HOST}} {{.DOCKER_IMAGE}}
+
+  run:shell:
+    desc: Open interactive shell inside pydbsrt Docker container (replaces make docker-run-shell)
+    internal: true
+    interactive: true
+    cmds:
+      - >
+        docker run --rm -it
+        --network {{.NETWORK_NAME}}
+        -e PSQL_IP={{.DB_HOST}}
+        -v "{{.ROOT_DIR}}/src:/app/src"
+        -v "{{.ROOT_DIR}}/data:/app/data"
+        -v "/tmp:/tmp"
+        --entrypoint bash
+        {{.DOCKER_IMAGE}}
+
+  cli:
+    desc: Run pydbsrt CLI inside Docker (e.g. task cli -- --help)
+    internal: true
+    cmds:
+      - >
+        docker run --rm
+        --network {{.NETWORK_NAME}}
+        -e PSQL_IP={{.DB_HOST}}
+        -v "{{.ROOT_DIR}}/src:/app/src"
+        -v "{{.ROOT_DIR}}/data:/app/data"
+        -v "/tmp:/tmp"
+        {{.DOCKER_IMAGE}}
+        pydbsrt {{.CLI_ARGS}}
+
+  cli:local:
+    desc: Run pydbsrt CLI locally with uv (e.g. task cli:local -- --help)
+    internal: true
+    cmds:
+      - PSQL_IP=127.0.0.1 uv run pydbsrt {{.CLI_ARGS}}
+
+  rs:bench:
+    desc: Run Rust pHash throughput benchmark
+    internal: true
+    cmds:
+      - cargo run --release -p dbsrt-cli -- bench-phash
+
+  # --- Legacy & Micro Demo targets (Internalized for backward compatibility) ---
+
+  demo:export-phash:
+    desc: Export pHash stream from sample video to /tmp (replaces make export_imghash_from_media)
+    internal: true
+    cmds:
+      - task: cli
+        vars:
+          CLI_ARGS: export-imghash-from-media --media /app/{{.DEMO_MEDIA}}
+
+  demo:show-subtitles-media:
+    desc: Show pHash per subtitle cue directly from media (replaces make show-imghash-from-subtitles-and-media)
+    internal: true
+    cmds:
+      - task: cli
+        vars:
+          CLI_ARGS: show-imghash-from-subtitles-and-media --media /app/{{.DEMO_MEDIA}} --subtitles /app/{{.DEMO_SRT}}
+
+  demo:export-subtitles-media:
+    desc: Show pHash per subtitle and view binary hexdump (replaces make export-imghash-from-subtitles-and-media)
+    internal: true
+    cmds:
+      - task: demo:show-subtitles-media
+      - hexdump -C {{.DEMO_PHASH}} | head -n 10
+
+  demo:import-hashes:
+    desc: Import video pHash frames into PostgreSQL BK-Tree (Rust native COPY)
+    internal: true
+    deps: [db:up, demo:export-phash, rs:build]
+    cmds:
+      - ./target/release/dbsrt import-phash --file {{.DEMO_PHASH}}
+
+  demo:import-subtitles:
+    desc: Import SRT subtitles into DB associated with media (replaces make import-subtitles-into-db)
+    internal: true
+    deps: [demo:import-hashes]
+    cmds:
+      - task: cli
+        vars:
+          CLI_ARGS: import-subtitles-into-db --binary-img-hash-file {{.DEMO_PHASH}} --subtitles /app/{{.DEMO_SRT}}
+
+  demo:show-subtitles-db:
+    desc: Show subtitle pHash matched from DB (replaces make show-imghash-from-subtitles-and-media-in-db)
+    internal: true
+    deps: [demo:import-hashes]
+    cmds:
+      - task: cli
+        vars:
+          CLI_ARGS: show-imghash-from-subtitles-and-media-in-db --binary-img-hash-file {{.DEMO_PHASH}} --subtitles /app/{{.DEMO_SRT}}
+
+  demo:search:
+    desc: Search video frames in PostgreSQL BK-tree with Hamming distance (replaces make search-imghash-in-db)
+    internal: true
+    deps: [demo:import-hashes]
+    cmds:
+      - task: cli
+        vars:
+          CLI_ARGS: search-imghash-in-db --phash_file {{.DEMO_PHASH}} --distance 0
+
+  demo:retarget:
+    desc: Retarget & synchronize SRT subtitles from reference to target media (Core Feature!)
+    internal: true
+    cmds:
+      - >
+        task cli -- retarget-subtitles
+        --ref_media /app/{{.DEMO_MEDIA}}
+        --ref_subtitles /app/{{.DEMO_SRT}}
+        --target_media /app/{{.DEMO_TARGET_MEDIA}}
+
+  demo:recognize:
+    desc: Recognize unknown media by querying DB BK-tree with fingerprint
+    internal: true
+    deps: [demo:import-hashes]
+    cmds:
+      - task: cli
+        vars:
+          CLI_ARGS: recognize-media --media /app/{{.DEMO_MEDIA}} --search_distance 0
+
+  demo:recognize:rs:
+    desc: Recognize unknown media using full Rust standalone CLI (15x faster than Python)
+    internal: true
+    deps: [demo:import-hashes, rs:build]
+    cmds:
+      - ./target/release/dbsrt recognize-media --media {{.DEMO_MEDIA}} --search-distance 0
+
+  demo:recognize:mmap:
+    desc: Recognize unknown media via Zero-DB mmap engine (~440x faster, no Postgres required)
+    internal: true
+    deps: [demo:export-phash, rs:build]
+    cmds:
+      - ./target/release/dbsrt recognize-media --media {{.DEMO_MEDIA}} --no-db --phash-dir /tmp --search-distance 0
+
+  demo:scan:rs:
+    desc: Scan directory of .phash files via Zero-DB mmap engine (3 ms search)
+    internal: true
+    deps: [demo:export-phash, rs:build]
+    cmds:
+      - ./target/release/dbsrt scan-library --phash-dir /tmp --query-media {{.DEMO_MEDIA}} --search-distance 0 --limit 3
+
+  demo:inspect:rs:
+    desc: Inspect media release metadata and embedded container subtitle streams
+    internal: true
+    deps: [rs:build]
+    cmds:
+      - ./target/release/dbsrt inspect-media --media {{.DEMO_MEDIA}}
+
+  demo:pack:rs:
+    desc: Compile directory of .phash files into a unified high-density Hybrid .dbphash catalog
+    internal: true
+    deps: [rs:build]
+    cmds:
+      - ./target/release/dbsrt pack --phash-dir data/__PHASH__ --output data/catalog.dbphash
+
+  demo:scan:dbphash:
+    desc: Sub-millisecond search against unified Hybrid .dbphash catalog
+    internal: true
+    deps: [demo:pack:rs]
+    cmds:
+      - >
+        ./target/release/dbsrt scan-library
+        --dbphash data/catalog.dbphash
+        --query-phash data/__PHASH__/Silicon.Valley.S03E01.Founder.Friendly.1080p.AMZN.WEB-DL.DD.5.1.H.265-SiGMA.phash
+        --search-distance 0
+        --limit 5
+
+  demo:fetch:rs:
+    desc: Fetch remote subtitles with heuristic scoring, OpenSubtitles API and cache fallback
+    internal: true
+    deps: [rs:build]
+    cmds:
+      - >
+        ./target/release/dbsrt fetch-subtitles
+        --query "Silicon.Valley.S02E01.1080p.AMZN.WEB-DL-SiGMA.mkv"
+        --language fr
+        --provider mock
+        --dry-run

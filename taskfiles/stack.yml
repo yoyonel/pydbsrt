@@ -1,0 +1,65 @@
+version: '3'
+
+tasks:
+  studio:
+    desc: Start PostgreSQL 17 SP-GiST + PgWeb + dbsrt-server and seed certified couplings for dbsrt Studio (/studio)
+    cmds:
+      - task: db:up
+      - task: coupling:certify
+      - task: server:stop
+      - task: server:daemon
+      - task: server:status
+
+  coupling:certify:
+    desc: Auto-discover and certify ground-truth (video/.phash <-> subtitle) couplings
+    deps: [cli:build]
+    cmds:
+      - bash scripts/seed_couplings.sh
+
+  server:status:
+    desc: Query dbsrt-server telemetry status endpoint (/v1/status)
+    cmds:
+      - bash scripts/stack_ctl.sh server-status
+
+  server:run:
+    desc: Run dbsrt-server daemon in foreground on http://127.0.0.1:8765
+    deps: [server:build]
+    cmds:
+      - ./target/release/dbsrt-server --host 127.0.0.1 --port 8765 --phash-dir /tmp --extra-phash-dir data/__PHASH__ --subtitles-dir data/SRT --db-host 127.0.0.1 --db-port 5433
+
+  server:
+    desc: Shortcut to build and run dbsrt-server daemon on http://127.0.0.1:8765
+    internal: true
+    cmds:
+      - task: server:run
+
+  cli:build:
+    desc: Build dbsrt CLI release binary
+    internal: true
+    cmds:
+      - cargo build --release -p dbsrt-cli
+
+  server:build:
+    desc: Build dbsrt-server release binary
+    internal: true
+    cmds:
+      - cargo build --release -p dbsrt-server
+
+  server:daemon:
+    desc: Start dbsrt-server daemon in background with logging to /tmp/dbsrt-server.log
+    internal: true
+    deps: [server:build]
+    cmds:
+      - bash scripts/stack_ctl.sh server-start
+
+  server:logs:
+    desc: Tail background dbsrt-server daemon logs
+    internal: true
+    cmds:
+      - bash scripts/stack_ctl.sh server-logs
+
+  server:stop:
+    desc: Stop background dbsrt-server daemon
+    internal: true
+    cmds:
+      - bash scripts/stack_ctl.sh server-stop

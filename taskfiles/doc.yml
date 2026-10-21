@@ -1,0 +1,60 @@
+version: '3'
+
+tasks:
+  doc:
+    desc: Shortcut for documentation server (MkDocs Material on http://127.0.0.1:8000)
+    aliases: [docs, doc:serve]
+    cmds:
+      - uv run python scripts/serve_docs.py
+
+  doc:check:
+    desc: Automated documentation validator (strict build, LaTeX rendering, squashed lists, images)
+    aliases: [docs:check, doc:lint, docs:lint]
+    cmds:
+      - uv run --no-sync python scripts/validate_docs.py
+
+  doc:build:
+    desc: Build static responsive documentation site to site/ directory
+    aliases: [docs:build]
+    cmds:
+      - uv run --no-sync mkdocs build --clean
+
+  doc:deploy:surge:
+    desc: Build and deploy static documentation preview to surge.sh
+    deps: [doc:build]
+    cmds:
+      - npx --yes surge site {{.SURGE_DOMAIN | default "yoyonel-pydbsrt-docs.surge.sh"}}
+
+  doc:deploy:gh-pages:
+    desc: Build and deploy static documentation to GitHub Pages (gh-deploy)
+    aliases: [doc:deploy]
+    deps: [doc:check]
+    cmds:
+      - uv run --no-sync mkdocs gh-deploy --force
+
+  doc:daemon:
+    desc: Start MkDocs Material documentation server in background on http://127.0.0.1:8000
+    internal: true
+    aliases: [docs:daemon]
+    cmds:
+      - bash scripts/stack_ctl.sh doc-start
+
+  doc:stop:
+    desc: Stop background MkDocs documentation server
+    internal: true
+    aliases: [docs:stop]
+    cmds:
+      - bash scripts/stack_ctl.sh doc-stop
+
+  doc:logs:
+    desc: Tail background MkDocs documentation server logs
+    internal: true
+    aliases: [docs:logs]
+    cmds:
+      - bash scripts/stack_ctl.sh doc-logs
+
+  doc:optimize-images:
+    desc: Batch convert heavy PNG screenshots in docs/ to lightweight 720p WebP
+    internal: true
+    cmds:
+      - uv run python scripts/convert_dashboard_webp.py

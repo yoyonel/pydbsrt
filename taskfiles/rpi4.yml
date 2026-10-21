@@ -1,0 +1,72 @@
+version: '3'
+
+tasks:
+  rpi4:build:
+    desc: Cross-compile dbsrt-server for aarch64 and package ARM64 Docker image
+    cmds:
+      - ./scripts/rpi4_build.sh
+
+  rpi4:up:
+    desc: Start dbsrt-server stack on Raspberry Pi 4
+    cmds:
+      - ./scripts/rpi4_deploy.sh up
+
+  rpi4:down:
+    desc: Stop dbsrt-server stack on Raspberry Pi 4
+    cmds:
+      - ./scripts/rpi4_deploy.sh down
+
+  rpi4:status:
+    desc: Check remote dbsrt-server status and metrics on Raspberry Pi 4
+    cmds:
+      - ./scripts/rpi4_deploy.sh status
+
+  rpi4:logs:
+    desc: Tail remote dbsrt-server logs on Raspberry Pi 4
+    cmds:
+      - ./scripts/rpi4_deploy.sh logs
+
+  rpi4:sync:
+    desc: Synchronize catalog and SRT data to Raspberry Pi 4
+    cmds:
+      - ./scripts/rpi4_sync.sh
+
+  rpi4:push:
+    desc: Stream ARM64 Docker image to Raspberry Pi 4 via SSH
+    cmds:
+      - ./scripts/rpi4_deploy.sh push
+
+  rpi4:demo:
+    desc: Test remote recognition API on Raspberry Pi 4 with 200 bytes pHash payload
+    cmds:
+      - ./scripts/rpi4_deploy.sh demo
+
+  sim:rpi4:up:
+    desc: Start local ARM64 simulation container via QEMU binfmt on :8766
+    internal: true
+    cmds:
+      - ./scripts/rpi4_sim.sh up
+
+  sim:rpi4:down:
+    desc: Stop local ARM64 simulation container
+    internal: true
+    cmds:
+      - ./scripts/rpi4_sim.sh down
+
+  sim:rpi4:status:
+    desc: Check local ARM64 simulation container status
+    internal: true
+    cmds:
+      - ./scripts/rpi4_sim.sh status
+
+  sim:rpi4:logs:
+    desc: Tail local ARM64 simulation container logs
+    internal: true
+    cmds:
+      - ./scripts/rpi4_sim.sh logs
+
+  sim:rpi4:test:
+    desc: Test local ARM64 simulation container endpoints
+    internal: true
+    cmds:
+      - ./scripts/rpi4_sim.sh test
