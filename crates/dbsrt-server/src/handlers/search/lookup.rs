@@ -116,11 +116,14 @@ pub async fn search_handler(
                     phash_dir: None,
                 };
 
+                let relay_timeout_ms = std::env::var("DBSRT_RELAY_TIMEOUT_MS")
+                    .ok()
+                    .and_then(|v| v.parse::<u64>().ok())
+                    .unwrap_or(crate::constants::DEFAULT_RELAY_TIMEOUT_MS);
+
                 let endpoint = format!("{}/v1/recognize", remote_url.trim_end_matches('/'));
                 let client = reqwest::Client::builder()
-                    .timeout(std::time::Duration::from_millis(
-                        crate::constants::DEFAULT_RELAY_TIMEOUT_MS,
-                    ))
+                    .timeout(std::time::Duration::from_millis(relay_timeout_ms))
                     .build()
                     .unwrap_or_default();
 

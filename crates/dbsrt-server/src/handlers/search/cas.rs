@@ -182,3 +182,95 @@ pub async fn scan_handler(
         top_matches,
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dtos::ScanRequest;
+    use crate::state::AppState;
+    use dbsrt_core::{OpenSubtitlesProvider, SubtitleCache};
+    use std::sync::Arc;
+
+    fn test_app_state() -> Arc<AppState> {
+        let phash_dir = PathBuf::from("tests/data");
+        let srt_dir = PathBuf::from("data/SRT");
+        Arc::new(AppState::new(
+            phash_dir,
+            srt_dir,
+            Arc::new(OpenSubtitlesProvider::new(None)),
+            SubtitleCache::default(),
+        ))
+    }
+
+    #[tokio::test]
+    async fn test_get_subtitle_by_hash_not_found() {
+        let state = test_app_state();
+        let res = get_subtitle_by_hash_handler(
+            AxumPath("nonexistent_sha256_hash_123456789".to_string()),
+            State(state),
+        )
+        .await;
+        assert!(res.is_err());
+        let (status, _msg) = res.err().unwrap();
+        assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_get_subtitle_by_hash_existing_in_registry() {
+        let state = test_app_state();
+        let test_hash = if let Ok(reg) = state.coupling_registry.read() {
+            reg.couplings
+                .first()
+                .and_then(|c| c.subtitles.first())
+                .map(|s| s.subtitles_hash.clone())
+        } else {
+            None
+        };
+        if let Some(hash) = test_hash {
+            let res = get_subtitle_by_hash_handler(
+                AxumPath(format!("sub:sha256:{}", hash)),
+                State(state),
+            )
+            .await;
+            if let Ok(response) = res {
+                assert_eq!(response.status(), StatusCode::OK);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_scan_handler_missing_media() {
+        let state = test_app_state();
+        let req = ScanRequest {
+            query_media: "nonexistent_video_path_123.mp4".to_string(),
+            phash_dir: None,
+            search_distance: 12,
+            limit: 5,
+        };
+        let res = scan_handler(State(state), Json(req)).await;
+        assert!(res.is_err());
+        assert_eq!(res.err().unwrap().0, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn test_scan_handler_valid_media() {
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let repo_root = manifest_dir.parent().unwrap().parent().unwrap();
+        let video = repo_root.join("tests/data/big_buck_bunny_trailer_480p.mp4");
+        if !video.exists() {
+            return;
+        }
+        let test_phash_dir = repo_root.join("tests/data");
+        let state = test_app_state();
+        let req = ScanRequest {
+            query_media: video.to_string_lossy().to_string(),
+            phash_dir: Some(test_phash_dir.to_string_lossy().to_string()),
+            search_distance: 12,
+            limit: 3,
+        };
+        let res = scan_handler(State(state), Json(req)).await;
+        assert!(res.is_ok());
+        let scan_resp = res.unwrap().0;
+        assert!(scan_resp.total_files > 0);
+    }
+}

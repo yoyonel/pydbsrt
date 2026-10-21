@@ -73,7 +73,7 @@ run_fmt() {
 
 run_coverage() {
   echo "=== [1/3] Rust Coverage (cargo llvm-cov --workspace) ==="
-  cargo llvm-cov --workspace --json --output-path coverage-rust.json
+  DBSRT_RELAY_TIMEOUT_MS="${DBSRT_RELAY_TIMEOUT_MS:-30000}" cargo llvm-cov --workspace --json --output-path coverage-rust.json
 
   echo "=== [2/3] Python Coverage (pytest --cov=src) ==="
   uv run pytest --cov=src --cov-report=json:coverage-python.json tests/tools/

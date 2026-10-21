@@ -341,3 +341,171 @@ pub async fn download_handler(
         error: None,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dtos::DownloadSubtitleRequest;
+    use crate::state::AppState;
+    use dbsrt_core::{OpenSubtitlesProvider, SubtitleCache};
+    use std::sync::Arc;
+
+    fn test_app_state() -> Arc<AppState> {
+        let phash_dir = PathBuf::from("tests/data");
+        let srt_dir = PathBuf::from("data/SRT");
+        Arc::new(AppState::new(
+            phash_dir,
+            srt_dir,
+            Arc::new(OpenSubtitlesProvider::new(None)),
+            SubtitleCache::default(),
+        ))
+    }
+
+    #[tokio::test]
+    async fn test_download_unknown_source() {
+        let state = test_app_state();
+        let req = DownloadSubtitleRequest {
+            media_path: "video.mp4".to_string(),
+            source: "unknown_bogus_source".to_string(),
+            candidate_id: None,
+            language: "fr".to_string(),
+            resync: false,
+            shift_ms: None,
+            subtitles_dir: None,
+            phash_dir: None,
+        };
+        let res = download_handler(State(state), Json(req)).await;
+        assert!(!res.0.success);
+        assert!(res.0.error.unwrap().contains("Unknown subtitle source"));
+    }
+
+    #[tokio::test]
+    async fn test_download_container_missing_media() {
+        let state = test_app_state();
+        let req = DownloadSubtitleRequest {
+            media_path: "nonexistent_video.mkv".to_string(),
+            source: "container".to_string(),
+            candidate_id: Some("0".to_string()),
+            language: "fr".to_string(),
+            resync: false,
+            shift_ms: None,
+            subtitles_dir: None,
+            phash_dir: None,
+        };
+        let res = download_handler(State(state), Json(req)).await;
+        assert!(!res.0.success);
+        assert!(res
+            .0
+            .error
+            .unwrap()
+            .contains("Failed to extract container subtitle track"));
+    }
+
+    #[tokio::test]
+    async fn test_download_catalog_missing_file() {
+        let state = test_app_state();
+        let req = DownloadSubtitleRequest {
+            media_path: "tests/data/big_buck_bunny_trailer_480p.mp4".to_string(),
+            source: "catalog".to_string(),
+            candidate_id: Some("nonexistent_path_to_subtitle.srt".to_string()),
+            language: "fr".to_string(),
+            resync: false,
+            shift_ms: None,
+            subtitles_dir: None,
+            phash_dir: None,
+        };
+        let res = download_handler(State(state), Json(req)).await;
+        assert!(!res.0.success);
+        assert!(res.0.error.unwrap().contains("Failed to resolve subtitle"));
+    }
+
+    #[tokio::test]
+    async fn test_download_opensubtitles_unconfigured_error() {
+        let state = test_app_state();
+        let req = DownloadSubtitleRequest {
+            media_path: "tests/data/big_buck_bunny_trailer_480p.mp4".to_string(),
+            source: "opensubtitles".to_string(),
+            candidate_id: Some("sub_id_99999999".to_string()),
+            language: "fr".to_string(),
+            resync: false,
+            shift_ms: None,
+            subtitles_dir: None,
+            phash_dir: None,
+        };
+        let res = download_handler(State(state), Json(req)).await;
+        assert!(!res.0.success);
+        assert!(res
+            .0
+            .error
+            .unwrap()
+            .contains("Failed to download/parse subtitle"));
+    }
+
+    #[tokio::test]
+    async fn test_download_catalog_existing_file_with_shift() {
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let repo_root = manifest_dir.parent().unwrap().parent().unwrap();
+        let srt_fixture = repo_root.join("tests/data/big_buck_bunny_trailer_480p.en.srt");
+        let video_fixture = repo_root.join("tests/data/big_buck_bunny_trailer_480p.mp4");
+        if !srt_fixture.exists() || !video_fixture.exists() {
+            return;
+        }
+        let tmp_media =
+            std::env::temp_dir().join(format!("test_shift_media_{}.mp4", std::process::id()));
+        let _ = std::fs::copy(&video_fixture, &tmp_media);
+        let state = test_app_state();
+        let tmp_out = std::env::temp_dir();
+        let req = DownloadSubtitleRequest {
+            media_path: tmp_media.to_string_lossy().to_string(),
+            source: "catalog".to_string(),
+            candidate_id: Some(srt_fixture.to_string_lossy().to_string()),
+            language: "en".to_string(),
+            resync: false,
+            shift_ms: Some(1500.0),
+            subtitles_dir: Some(tmp_out.to_string_lossy().to_string()),
+            phash_dir: None,
+        };
+        let res = download_handler(State(state), Json(req)).await;
+        assert!(res.0.success);
+        assert_eq!(res.0.shift_ms, 1500.0);
+        let out_file = PathBuf::from(&res.0.output_srt_path);
+        if out_file.exists() {
+            let _ = std::fs::remove_file(out_file);
+        }
+        let _ = std::fs::remove_file(tmp_media);
+    }
+
+    #[tokio::test]
+    async fn test_download_certified_resync_branch() {
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let repo_root = manifest_dir.parent().unwrap().parent().unwrap();
+        let srt_fixture = repo_root.join("tests/data/big_buck_bunny_trailer_480p.en.srt");
+        let video_fixture = repo_root.join("tests/data/big_buck_bunny_trailer_480p.mp4");
+        let test_phash_dir = repo_root.join("tests/data");
+        if !srt_fixture.exists() || !video_fixture.exists() {
+            return;
+        }
+        let tmp_media =
+            std::env::temp_dir().join(format!("test_resync_media_{}.mp4", std::process::id()));
+        let _ = std::fs::copy(&video_fixture, &tmp_media);
+        let state = test_app_state();
+        let tmp_out = std::env::temp_dir();
+        let req = DownloadSubtitleRequest {
+            media_path: tmp_media.to_string_lossy().to_string(),
+            source: "certified".to_string(),
+            candidate_id: Some(srt_fixture.to_string_lossy().to_string()),
+            language: "en".to_string(),
+            resync: true,
+            shift_ms: None,
+            subtitles_dir: Some(tmp_out.to_string_lossy().to_string()),
+            phash_dir: Some(test_phash_dir.to_string_lossy().to_string()),
+        };
+        let res = download_handler(State(state), Json(req)).await;
+        assert!(res.0.success);
+        let out_file = PathBuf::from(&res.0.output_srt_path);
+        if out_file.exists() {
+            let _ = std::fs::remove_file(out_file);
+        }
+        let _ = std::fs::remove_file(tmp_media);
+    }
+}
