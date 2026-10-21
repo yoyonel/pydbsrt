@@ -251,7 +251,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     needs: [docs-check]
-    if: (github.event_name == 'push' && (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/master')) || github.event_name == 'workflow_dispatch'
+    if: (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/master') && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     concurrency:
       group: "pages"
       cancel-in-progress: false

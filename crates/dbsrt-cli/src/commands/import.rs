@@ -44,25 +44,11 @@ pub struct ImportPhashArgs {
 
 /// Run batch or single .phash import into PostgreSQL BK-Tree table.
 pub fn run_import_phash(args: &ImportPhashArgs) -> Result<()> {
-    let host = args
-        .db_host
-        .clone()
-        .or_else(|| std::env::var("PSQL_IP").ok())
-        .unwrap_or_else(|| DEFAULT_POSTGRES_HOST.to_string());
-
-    let mut db = DbClient::connect(
-        &host,
-        args.db_port,
-        &args.db_user,
-        &args.db_pass,
-        &args.db_name,
-    )?;
-
-    println!("Ensuring BK-Tree schema & SP-GiST indexes in PostgreSQL...");
-    db.init_schema()?;
-
     let mut target_files = Vec::new();
     if let Some(ref f) = args.file {
+        if !f.exists() {
+            anyhow::bail!("File {:?} does not exist", f);
+        }
         target_files.push(f.clone());
     } else if let Some(ref dir) = args.phash_dir {
         if !dir.exists() {
@@ -83,6 +69,23 @@ pub fn run_import_phash(args: &ImportPhashArgs) -> Result<()> {
     if target_files.is_empty() {
         anyhow::bail!("No .phash files found to import");
     }
+
+    let host = args
+        .db_host
+        .clone()
+        .or_else(|| std::env::var("PSQL_IP").ok())
+        .unwrap_or_else(|| DEFAULT_POSTGRES_HOST.to_string());
+
+    let mut db = DbClient::connect(
+        &host,
+        args.db_port,
+        &args.db_user,
+        &args.db_pass,
+        &args.db_name,
+    )?;
+
+    println!("Ensuring BK-Tree schema & SP-GiST indexes in PostgreSQL...");
+    db.init_schema()?;
 
     println!(
         "Importing {} .phash file(s) into PostgreSQL BK-Tree...",
@@ -140,4 +143,170 @@ pub fn run_import_phash(args: &ImportPhashArgs) -> Result<()> {
     println!("=======================================");
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dbsrt_core::write_phash_file;
+
+    #[test]
+    fn test_import_phash_missing_args() {
+        let args = ImportPhashArgs {
+            file: None,
+            phash_dir: None,
+            db_host: None,
+            db_port: DEFAULT_POSTGRES_PORT,
+            db_user: DEFAULT_POSTGRES_USER.to_string(),
+            db_pass: DEFAULT_POSTGRES_PASS.to_string(),
+            db_name: DEFAULT_POSTGRES_DB.to_string(),
+        };
+        let err = run_import_phash(&args).unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("Either --file or --phash-dir must be specified"));
+    }
+
+    #[test]
+    fn test_import_phash_nonexistent_file() {
+        let args = ImportPhashArgs {
+            file: Some(PathBuf::from("/nonexistent/file.phash")),
+            phash_dir: None,
+            db_host: None,
+            db_port: DEFAULT_POSTGRES_PORT,
+            db_user: DEFAULT_POSTGRES_USER.to_string(),
+            db_pass: DEFAULT_POSTGRES_PASS.to_string(),
+            db_name: DEFAULT_POSTGRES_DB.to_string(),
+        };
+        let err = run_import_phash(&args).unwrap_err();
+        assert!(err.to_string().contains("does not exist"));
+    }
+
+    #[test]
+    fn test_import_phash_nonexistent_dir() {
+        let args = ImportPhashArgs {
+            file: None,
+            phash_dir: Some(PathBuf::from("/nonexistent/dir")),
+            db_host: None,
+            db_port: DEFAULT_POSTGRES_PORT,
+            db_user: DEFAULT_POSTGRES_USER.to_string(),
+            db_pass: DEFAULT_POSTGRES_PASS.to_string(),
+            db_name: DEFAULT_POSTGRES_DB.to_string(),
+        };
+        let err = run_import_phash(&args).unwrap_err();
+        assert!(err.to_string().contains("does not exist"));
+    }
+
+    #[test]
+    fn test_import_phash_empty_dir() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("test_import_empty_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let args = ImportPhashArgs {
+            file: None,
+            phash_dir: Some(temp_dir.clone()),
+            db_host: None,
+            db_port: DEFAULT_POSTGRES_PORT,
+            db_user: DEFAULT_POSTGRES_USER.to_string(),
+            db_pass: DEFAULT_POSTGRES_PASS.to_string(),
+            db_name: DEFAULT_POSTGRES_DB.to_string(),
+        };
+        let err = run_import_phash(&args).unwrap_err();
+        assert!(err.to_string().contains("No .phash files found to import"));
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_import_phash_db_connection_failure() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("test_import_conn_fail_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let phash_path = temp_dir.join("sample.25.0fps.phash");
+        write_phash_file(&phash_path, &[0x1111_2222_3333_4444_u64]).unwrap();
+
+        let args = ImportPhashArgs {
+            file: Some(phash_path),
+            phash_dir: None,
+            db_host: Some("127.0.0.1".to_string()),
+            db_port: 59999, // Unused port to guarantee failure
+            db_user: DEFAULT_POSTGRES_USER.to_string(),
+            db_pass: DEFAULT_POSTGRES_PASS.to_string(),
+            db_name: DEFAULT_POSTGRES_DB.to_string(),
+        };
+        assert!(run_import_phash(&args).is_err());
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_import_phash_live_db() {
+        let host = std::env::var("PSQL_IP").unwrap_or_else(|_| "127.0.0.1".to_string());
+        let env_port = std::env::var("PSQL_PORT")
+            .ok()
+            .and_then(|p| p.parse::<u16>().ok());
+        let ports: Vec<u16> = match env_port {
+            Some(p) => vec![p, 5433, 5432],
+            None => vec![5433, 5432],
+        };
+        let mut active_port = None;
+        for port in ports {
+            if DbClient::connect(&host, port, "docker", "docker", "bktreedb").is_ok() {
+                active_port = Some(port);
+                break;
+            }
+        }
+        let Some(port) = active_port else {
+            eprintln!("PostgreSQL BK-Tree container not available, skipping live import test");
+            return;
+        };
+
+        let temp_dir =
+            std::env::temp_dir().join(format!("test_import_live_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let synth_file = temp_dir.join(format!(
+            "unit_test_cli_import_{}.25.0fps.phash",
+            std::process::id()
+        ));
+        let hashes = vec![0x1234_5678_9abc_def0_u64; 20];
+        write_phash_file(&synth_file, &hashes).unwrap();
+
+        // 1. Single file import
+        let args_file = ImportPhashArgs {
+            file: Some(synth_file.clone()),
+            phash_dir: None,
+            db_host: Some(host.clone()),
+            db_port: port,
+            db_user: "docker".to_string(),
+            db_pass: "docker".to_string(),
+            db_name: "bktreedb".to_string(),
+        };
+        assert!(run_import_phash(&args_file).is_ok());
+
+        // 2. Directory import (re-import triggers idempotent skip branch)
+        let args_dir = ImportPhashArgs {
+            file: None,
+            phash_dir: Some(temp_dir.clone()),
+            db_host: Some(host),
+            db_port: port,
+            db_user: "docker".to_string(),
+            db_pass: "docker".to_string(),
+            db_name: "bktreedb".to_string(),
+        };
+        assert!(run_import_phash(&args_dir).is_ok());
+
+        // Cleanup DB row
+        if let Ok(mut db) = DbClient::connect(
+            args_file.db_host.as_deref().unwrap_or("127.0.0.1"),
+            port,
+            "docker",
+            "docker",
+            "bktreedb",
+        ) {
+            let stem = synth_file
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or_default();
+            let _ = db.delete_media_by_name(stem);
+        }
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
 }
