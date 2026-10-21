@@ -82,7 +82,7 @@ flowchart LR
 | **Qualité & Tests** | `taskfiles/quality.yml` | `task lint`, `task fmt`, `task test:rs`, `task coverage`, `task ci:local` |
 | **Lecteur VLC** | `taskfiles/vlc.yml` | `task vlc:install-plugin`, `task vlc:run`, `task vlc:demo`, `task vlc:test` |
 | **Client Linux** | `taskfiles/client.yml` | `task client:linux:install`, `task test:recipe:debian` |
-| **Raspberry Pi 4** | `taskfiles/rpi4.yml` | `task rpi4:build`, `task rpi4:up`, `task rpi4:sync`, `task sim:rpi4:up` |
+| **Raspberry Pi 4 & Sim** | `taskfiles/rpi4.yml` | `task rpi4:build`, `task rpi4:up`, `task sim:up`, `task sim:test`, `task sim:down` |
 | **Évaluations** | `taskfiles/eval.yml` | `task eval:nas`, `task bench:mmap-scale`, `task bench:cuts-scale` |
 | **Démos Modernes** | `taskfiles/demo.yml` | `task demo:sync` (recalage Rust), `task demo:vlc`, `task demo:studio` |
 | **Archives Legacy** | `taskfiles/legacy.yml` | Anciennes cibles Docker 2021 masquées (`internal: true`) |
@@ -170,6 +170,28 @@ task test:recipe:debian
 ```
 
 Ce test vérifie l'installation, le healthcheck HTTP, la survie au redémarrage (`docker restart`), et la désinstallation propre en **~8 secondes**.
+
+---
+
+### Workflow 5 : Simulation & Smoke Testing ARM64 RPi4
+
+Pour valider le binaire serveur et le moteur Multi-Index Hashing en conditions contraintes (architecture ARM64 `aarch64`, plafond de 512 Mo de RAM) sous émulation QEMU :
+
+```bash
+# 1. Cross-compiler l'image Docker ARM64 Debian Bookworm
+task rpi4:build
+
+# 2. Démarrer le conteneur de simulation locale (port 8766, plafond 512m)
+task sim:up
+
+# 3. Exécuter la batterie de 6 tests d'intégration (Health, Metrics, Studio, MIH, Search, CAS)
+task sim:test
+
+# 4. Arrêter le conteneur de simulation
+task sim:down
+```
+
+Ce smoke test valide la non-régression d'architecture CPU et l'absence d'OOM ou de fuite mémoire avant tout déploiement sur l'appliance physique réelle.
 
 ---
 
