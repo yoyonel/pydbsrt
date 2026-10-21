@@ -41,8 +41,8 @@ flowchart LR
 * Docker / Docker Compose (uniquement pour l'approche base de données PostgreSQL)
 
 ```bash
-# Compiler le binaire release Rust dbsrt
-task rs:build
+# Compiler l'ensemble du workspace Rust dbsrt en mode release
+task build
 
 # Installer l'environnement de développement et les pre-commits
 task sync
@@ -53,10 +53,10 @@ uv run pre-commit install
 
 ## 3. Stack Unifiée, Backoffice `dbsrt Studio` & Démos
 
-### Orchestration Complète de la Stack (`task up` / `task studio`)
+### Orchestration Complète de la Stack (`task dev` / `task up`)
 ```bash
 # Démarrer toute la stack (PostgreSQL 17 SP-GiST + PgWeb + dbsrt-server + MkDocs + Seed Couplings)
-task up
+task dev
 
 # Afficher l'état de tous les services et les compteurs relationnels (medias, frames, subtitles, sub_frames)
 task status
@@ -71,70 +71,58 @@ task coupling:certify
 task down
 ```
 
-### Approche 1 : Zero-DB `mmap` (Recommandé en local)
+### Démos Clés & Recalage Temps Réel
 ```bash
-# Reconnaître une vidéo inconnue sans base de données (matching en ~3 ms)
-task demo:recognize:mmap
+# Recaler et synchroniser des sous-titres SRT via le moteur Rust natif (en ~0.5 ms)
+task demo:sync
 
-# Scanner une bibliothèque de fichiers .phash
-task demo:scan:rs
+# Démonstration interactive VLC avec extension VLSub bonifiée et affichage OSD
+task demo:vlc
 
-# Recaler et synchroniser des sous-titres SRT (en ~0.5 ms)
-task demo:retarget:rs
+# Lancer dbsrt Studio (interface web bi-piste et loupe 8x8 pHash sur :8765/studio)
+task demo:studio
 
-# Compiler un catalogue unifié haute densité .dbphash (Hybride Cuts + 1 fps)
-task demo:pack:rs
-
-# Recherche sub-milliseconde sur le catalogue unifié .dbphash
-task demo:scan:dbphash
-
-# Inspecter les métadonnées et flux de sous-titres intégrés d'un média
-task demo:inspect:rs
-```
-
-### Approche 2 : PostgreSQL 17 BK-Tree & Couplages Relationnels
-```bash
-# Démarrer le cluster PostgreSQL 17 + extension bktree + PgWeb
-task db:up
-
-# Reconnaître un média via la base de données
-task demo:recognize:rs
-
-# Lancer la démo Python legacy
-task demo:recognize
+# Tester le cycle de vie systemd et l'installation client en conteneur hermétique
+task test:recipe:debian
 ```
 
 ---
 
-## 4. Tâches de Tests & Qualité Code Multi-Langages
+## 4. Ordonnancement Modulaire Taskfile & Assurance Qualité
 
-Toutes les suites de tests et de qualité code (`.rs`, `.py`, `.sh`, `.lua`, `.yml`, `.html`/`.js`, `.json`, `.md`) sont orchestrées via `Taskfile.yml` :
+Le dépôt est orchestré par **[Taskfile (go-task)](https://taskfile.dev/)** découpé en modules spécialisés sous `taskfiles/` :
 
-| Tâche | Description | Dépendances |
+* 📚 **[Consulter le Tutoriel Développeur & Guide d'Ordonnancement Taskfile](docs/2026-10-21-tutoriel-orchestration-taskfile-et-guide-developpeur.md)** pour le guide pas à pas.
+
+| Tâche | Description | Domaine (`taskfiles/`) |
 | :--- | :--- | :--- |
-| **`task up` / `task down`** | Démarre / arrête toute la stack (`PostgreSQL 17`, `PgWeb`, `dbsrt-server`, `MkDocs`) | Docker |
-| **`task status`** | Affiche l'état des services HTTP et les compteurs SQL (`medias`, `frames`, `subtitles`, `sub_frames`) | Aucune |
-| **`task studio`** | Ouvre `dbsrt Studio` (`:8765/studio`), `PgWeb` (`:8086`) et `MkDocs` (`:8000`) | `task up` |
-| **`task coupling:certify`** | Certifie et indexe tous les couples `(SRT <-> pHash)` dans PG17 et `couplings.json` | Aucune |
-| **`task test:rs`** | Exécute **tous** les tests Rust (unitaires, intégration, API REST `/studio` & `/v1/*`) | Aucune |
-| **`task test:rs:mmap`** | Teste le moteur Zero-DB `mmap` en mode autonome | Aucune |
-| **`task test:rs:retarget`** | Teste la parité ISO du recalage de sous-titres SRT | Aucune |
-| **`task test:rs:db`** | Teste l'intégration avec PostgreSQL 17 BK-Tree (démarre la DB auto) | Docker |
-| **`task test:local`** | Exécute la suite de tests Python avec `uv` | Docker (`db:up`) |
-| **`task fmt`** | Formate tout le dépôt (`ruff format`, `cargo fmt`, `shfmt`, `stylua`) | Aucune |
-| **`task lint`** | Exécute tous les linters (`ruff`, `pyright`, `clippy`, `shellcheck`, `luac5.2`, `yamllint`, web AST, disk guard) | Aucune |
-| **`task typecheck`** | Vérifie le typage statique strict Python via Pyright (`task typecheck:summary` pour la synthèse) | Aucune |
-| **`task pre-commit`** | Exécute les hooks pre-commit (dont Pyright, Ruff, Clippy) sur l'ensemble des fichiers suivis | Aucune |
-| **`task doc:check`** | Valide le build strict MkDocs, l'AST HTML/LaTeX et le rendu Headless Chrome | Aucune |
-| **`task doc:optimize-images`** | Convertit les captures lourdes PNG en WebP 720p optimisé (-91.5% payload) | Aucune |
-| **`task disk:check`** | Vérifie les seuils d'espace disque disponible (> 10 Go) et de `target/` (< 4 Go) | Aucune |
-| **`task clean`** | Purge unifiée des artefacts et caches (`cargo clean`, `.pytest_cache`, `.ruff_cache`, `__pycache__`) | Aucune |
+| **`task dev` / `task down`** | Démarre / arrête toute la stack de dev en arrière-plan | `Taskfile.yml` |
+| **`task status`** | Tableau de bord de santé unifié et compteurs PostgreSQL 17 | `Taskfile.yml` |
+| **`task build`** | Compile tous les binaires Rust en release (`dbsrt-cli`, `dbsrt-server`, `dbsrt-index`) | `Taskfile.yml` |
+| **`task test`** | Exécute l'ensemble des suites de tests Rust et Python | `Taskfile.yml` |
+| **`task test:rs`** | Exécute tous les tests unitaires, d'intégration et E2E Rust | `taskfiles/quality.yml` |
+| **`task test:recipe:debian`**| Teste la recette de déploiement client en conteneur Docker systemd isolé | `taskfiles/client.yml` |
+| **`task fmt`** | Formate automatiquement le code (`cargo fmt`, `ruff`, `shfmt`, `stylua`) | `taskfiles/quality.yml` |
+| **`task lint`** | Exécute les 9 linters (Rust, Python, Shell, Lua, Docker, YAML, web AST) | `taskfiles/quality.yml` |
+| **`task typecheck`** | Vérifie le typage statique strict Python via Pyright | `taskfiles/quality.yml` |
+| **`task coverage`** | Génère la couverture unifiée (1:1 parité CI GitHub Actions) | `taskfiles/quality.yml` |
+| **`task ci:local`** | Suite rapide de validation pré-push (< 10s chrono) | `taskfiles/quality.yml` |
+| **`task doc`** | Lance le serveur local de documentation MkDocs Material (`:8000`) | `taskfiles/doc.yml` |
+| **`task doc:check`** | Validateur strict de documentation (liens, LaTeX, AST HTML, Chrome headless) | `taskfiles/doc.yml` |
+| **`task vlc:install-plugin`** | Installe l'extension GUI VLSub et l'interface CLI dans le profil VLC | `taskfiles/vlc.yml` |
+| **`task vlc:test`** | Exécute la pyramide complète de tests VLC (unitaires + cvlc + GUI E2E) | `taskfiles/vlc.yml` |
+| **`task db:up` / `db:down`** | Démarre / arrête la base PostgreSQL 17 SP-GiST BK-Tree | `taskfiles/db.yml` |
+| **`task rpi4:build`** | Cross-compile pour ARM64 / Raspberry Pi 4 | `taskfiles/rpi4.yml` |
+| **`task clean`** | Purge unifiée des artefacts et caches (`target/`, `.pytest_cache`, `.ruff_cache`) | `Taskfile.yml` |
 
 ---
 
 ## 5. Documentation & Rapports d'Architecture
 
 Dossiers techniques détaillés disponibles dans le répertoire [`docs/`](docs) :
+
+* [`docs/2026-10-21-tutoriel-orchestration-taskfile-et-guide-developpeur.md`](docs/2026-10-21-tutoriel-orchestration-taskfile-et-guide-developpeur.md) : **Tutoriel Développeur & Guide d'Ordonnancement Taskfile** : Philosophie, modules `taskfiles/`, 4 workflows quotidiens et guide pas à pas pour ajouter une tâche.
+* [`docs/2026-10-21-strategie-tests-infrastructure-et-recettes-systemd-hermetiques.md`](docs/2026-10-21-strategie-tests-infrastructure-et-recettes-systemd-hermetiques.md) : **Stratégie de Test d'Infrastructure & Recettes systemd Hermétiques** : Épreuve de déploiement en conteneur Docker cgroups v2 isolé sans toucher à la machine hôte.
 
 * [`docs/2026-10-20-dashboard-interactif-e2e-vlc-corpus-nas.md`](docs/2026-10-20-dashboard-interactif-e2e-vlc-corpus-nas.md) : Dashboard interactif sur 1 334 vidéos réelles (99.8% succès), navigation plein écran par flèches clavier, synchronisation bidirectionnelle du curseur et captures WebP 720p.
 * [`docs/2026-10-20-architecture-retrait-invalidation-donnees-globales.md`](docs/2026-10-20-architecture-retrait-invalidation-donnees-globales.md) : Architecture de retrait et invalidation globale sur 5 paliers synchronisés (FS, Zero-DB JSON, PostgreSQL 17 `ON DELETE CASCADE`, `.dbphash` mmap).

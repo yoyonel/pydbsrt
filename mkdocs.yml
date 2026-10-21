@@ -106,6 +106,7 @@ nav:
   - 🏠 Accueil & Guide:
       - Portail & Dashboard: index.md
       - ⚡ Guide Opérationnel & CLI/API: quickstart-and-reference.md
+      - 🛠️ Tutoriel Orchestration Taskfile & Guide Dev: 2026-10-21-tutoriel-orchestration-taskfile-et-guide-developpeur.md
   - 🎬 Plugin VLC & VLSub:
       - Extension Lecteur VLC:
           - Fork VLSub & Démo 1080p: 2026-10-18-vlsub-fork-and-restoration.md

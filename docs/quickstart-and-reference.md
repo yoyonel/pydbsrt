@@ -92,50 +92,61 @@ task down
 
 ## 3. Matrice des Commandes `Taskfile.yml`
 
-Conformément à la règle **Taskfile-First**, toutes les opérations récurrentes passent par `task <cible>` (orchestrant les scripts dédiés sous `scripts/`) :
+Conformément à la règle **Taskfile-First**, toutes les opérations récurrentes passent par `task <cible>` (orchestrant les scripts dédiés sous `scripts/` et découpées sous `taskfiles/`) :
+
+> [!TIP] Guide Développeur & Architecture Modulaire
+> Consultez le **[Tutoriel Développeur & Guide d'Ordonnancement Taskfile](2026-10-21-tutoriel-orchestration-taskfile-et-guide-developpeur.md)** pour le détail de l'architecture modulaire `taskfiles/` et les 4 workflows clés.
 
 === "🎛️ Stack & Couplages"
 
-    | Commande `task` | Script Sous-Jacent | Description Technique |
+    | Commande `task` | Script / Outil | Description Technique |
     | :--- | :--- | :--- |
-    | `task dev` / `task up` | `Taskfile.yml` orchestrateur | Démarre la stack unifiée complète (Docker, seed couplages, daemon `dbsrt-server :8765`, plugins VLC, MkDocs). |
+    | `task dev` / `task up` | `Taskfile.yml` | Démarre la stack unifiée complète (Docker, seed couplages, daemon `dbsrt-server :8765`, plugins VLC, MkDocs). |
     | `task down` | `scripts/stack_ctl.sh` | Arrête proprement le daemon `dbsrt-server`, MkDocs et les conteneurs Docker. |
     | `task status` | `scripts/stack_ctl.sh status` | Affiche l'état HTTP 200 des 4 services et les compteurs d'entités PostgreSQL. |
-    | `task studio` | `Taskfile.yml` orchestrateur | Démarre le socle backend seul (Docker + seed couplages + daemon `dbsrt-server`). |
+    | `task studio` | `Taskfile.yml` | Démarre le socle backend seul (Docker + seed couplages + daemon `dbsrt-server`). |
     | `task coupling:certify` | `scripts/seed_couplings.sh` | Découvre et certifie tous les couples de référence (`data/__PHASH__` $\leftrightarrow$ `data/SRT`). |
     | `task server:status` | `scripts/stack_ctl.sh server-status` | Interroge le statut du daemon via `GET /v1/status`. |
-    | `task media:purge` | `scripts/purge_media.py` | Purge atomique d'un média corrompu sur tous les paliers (FS, JSON, DB, .dbphash). |
 
 === "🎬 Lecteur VLC & VLSub"
 
-    | Commande `task` | Script Sous-Jacent | Description Technique |
+    | Commande `task` | Script / Outil | Description Technique |
     | :--- | :--- | :--- |
-    | `task vlc:install-plugin` | Installation `~/.local/share/vlc/...` | Installe `vlsub_dbsrt.lua` (GUI Qt) et `dbsrt_intf.lua` (intf CLI/daemon) dans le profil VLC utilisateur. |
+    | `task vlc:install-plugin` | `scripts/vlc_ctl.sh install` | Installe `vlsub_dbsrt.lua` (GUI Qt) et `dbsrt_intf.lua` (intf CLI/daemon) dans le profil VLC utilisateur. |
     | `task vlc:run` | `scripts/vlc_ctl.sh run` | Lance VLC en assurant que `dbsrt-server` tourne en arrière-plan. |
     | `task vlc:demo` | `scripts/vlc_ctl.sh demo` | Lance la démo interactive avec sous-titre recalé et notification OSD native. |
+    | `task vlc:test` | `vlc:test:unit` + `vlc:test:e2e` | Exécute la pyramide complète de tests VLC (unitaires + cvlc + GUI Xvfb). |
     | `task vlc:record-demo` | `scripts/record_vlsub_demo.sh` | Enregistre la preuve E2E `1080p` H.264/MP4 sous serveur X11 virtuel `Xvfb`. |
 
 === "🛡️ Qualité, Tests & CI"
 
-    | Commande `task` | Script Sous-Jacent | Description Technique |
+    | Commande `task` | Script / Outil | Description Technique |
     | :--- | :--- | :--- |
-    | `task check` | `scripts/code_quality.sh check` | Exécute la suite complète multi-langage (Rust, Python, Shell, Lua, Web, YAML, Docs). |
-    | `task lint:all` | `scripts/code_quality.sh lint` | Vérifie le formatage et le linting sur `.rs`, `.py`, `.sh`, `.lua`, `.html`, `.css`, `.js`, `.json`, `.yml`. |
-    | `task format` | `scripts/code_quality.sh format` | Formate automatiquement le code Rust (`cargo fmt`), Python (`ruff`), Shell (`shfmt`) et Lua (`stylua`). |
+    | `task lint` | `scripts/code_quality.sh lint` | Exécute la suite complète multi-langage (Rust, Python, Shell, Lua, Web, YAML, Docs). |
+    | `task fmt` | `scripts/code_quality.sh fmt` | Formate automatiquement le code Rust (`cargo fmt`), Python (`ruff`), Shell (`shfmt`) et Lua (`stylua`). |
+    | `task test` | `test:rs` + `pytest` | Exécute les tests unitaires et d'intégration sur Rust et Python. |
+    | `task test:rs` | `cargo test --workspace` | Exécute tous les tests unitaires et E2E du workspace Rust. |
     | `task coverage` | `scripts/code_quality.sh coverage` | Mesure la couverture 1:1 avec la CI GitHub Actions (PostgreSQL 17 + `cargo llvm-cov` + `pytest --cov`). |
-    | `task pre-commit:run` | `pre-commit run --all-files` | Exécute les `17/17` hooks pre-commit sur l'ensemble du dépôt. |
-    | `task disk:check` | `scripts/disk_guard.sh check` | Harnais de sécurité vérifiant l'espace disque (> 10 Go) et la taille de `target/` (< 4 Go). |
+    | `task ci:local` | `Taskfile.yml` | Suite rapide de reproduction CI locale (< 10s chrono). |
+    | `task pre-commit` | `pre-commit run --all-files` | Exécute les 17 hooks pre-commit sur l'ensemble du dépôt. |
     | `task clean` | `scripts/disk_guard.sh clean` | Purge unifiée des artefacts et caches (`cargo clean`, `.pytest_cache`, `.ruff_cache`, `__pycache__`). |
-    | `task clean:rs` | `cargo clean` | Purge ciblée des binaires et tables DWARF accumulés dans `target/`. |
+
+=== "🚀 Déploiement & Démos"
+
+    | Commande `task` | Script / Outil | Description Technique |
+    | :--- | :--- | :--- |
+    | `task test:recipe:debian` | `scripts/test_recipe_debian.sh` | Teste la recette de déploiement client en conteneur Docker systemd isolé (8s). |
+    | `task demo:sync` | `./target/release/dbsrt` | Recalage temporel standalone SRT $\to$ média cible en Rust natif (~0.5 ms). |
+    | `task demo:vlc` | `scripts/vlc_ctl.sh demo` | Démonstration interactive avec sous-titres recalés et OSD dans VLC. |
+    | `task demo:studio` | `http://127.0.0.1:8765/studio` | Lance le backoffice web Studio (timeline bi-piste et loupe 8x8 pHash). |
 
 === "📚 Documentation"
 
-    | Commande `task` | Script Sous-Jacent | Description Technique |
+    | Commande `task` | Script / Outil | Description Technique |
     | :--- | :--- | :--- |
-    | `task doc` / `task doc:serve` | `scripts/serve_docs.py` | Lance le serveur MkDocs avec allocation dynamique de port (`8000`–`8020`). |
+    | `task doc` | `scripts/serve_docs.py` | Lance le serveur MkDocs Material avec rechargement à chaud sur `:8000`. |
+    | `task doc:check` | `scripts/validate_docs.py` | Valide le build strict, l'AST HTML, les équations LaTeX et le rendu Chrome headless. |
     | `task doc:build` | `mkdocs build --strict` | Compile le site statique HTML/CSS/JS dans `site/` en mode strict. |
-    | `task doc:check` | `scripts/validate_docs.py` | Valide le build strict, l'AST HTML, les équations LaTeX et les liens d'images. |
-    | `task doc:optimize-images` | `scripts/convert_dashboard_webp.py` | Conversion batch multithreadée des captures PNG en WebP 720p (-91.5% de payload). |
 
 ---
 
