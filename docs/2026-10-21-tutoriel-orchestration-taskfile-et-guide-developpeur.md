@@ -100,6 +100,9 @@ Pour démarrer l'ensemble des services en un seul appel :
 task dev
 # (ou son alias : task up)
 
+# Astuce multi-projets : si le port 8086 est déjà réservé par vos conteneurs pros :
+PGWEB_PORT=8088 task dev
+
 # 2. Consulter le tableau de bord de santé unifié
 task status
 

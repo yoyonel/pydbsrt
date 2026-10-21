@@ -81,6 +81,7 @@ pub struct MmapPhashFile {
     pub path: PathBuf,
     pub name: String,
     hashes: Vec<u64>,
+    mih: std::sync::OnceLock<crate::mih::MultiIndexHash64>,
 }
 
 impl MmapPhashFile {
@@ -98,6 +99,7 @@ impl MmapPhashFile {
             path: path_buf,
             name,
             hashes,
+            mih: std::sync::OnceLock::new(),
         })
     }
 
@@ -119,10 +121,47 @@ impl MmapPhashFile {
         self.hashes.get(index).copied()
     }
 
-    /// Scans the file against a list of query hashes.
+    /// Returns reference to contiguous hash slice.
+    #[inline]
+    pub fn as_slice(&self) -> &[u64] {
+        &self.hashes
+    }
+
+    /// Returns or lazily constructs the MultiIndexHash64 index for this file.
+    #[inline]
+    pub fn mih(&self) -> &crate::mih::MultiIndexHash64 {
+        self.mih
+            .get_or_init(|| crate::mih::MultiIndexHash64::build(&self.hashes))
+    }
+
+    /// Scans the file against a list of query hashes using accelerated Multi-Index Hashing (MIH).
     ///
     /// Returns a list of matches: (query_offset, target_frame_offset, distance).
     pub fn search_query_hashes(
+        &self,
+        query_hashes: &[u64],
+        max_distance: u32,
+    ) -> Vec<(usize, usize, u32)> {
+        if query_hashes.is_empty() || self.hashes.is_empty() {
+            return Vec::new();
+        }
+        let mih = self.mih();
+        let hashes = &self.hashes;
+        query_hashes
+            .par_iter()
+            .enumerate()
+            .flat_map(|(q_idx, &q_hash)| {
+                let candidates = mih.search(q_hash, max_distance, hashes);
+                candidates
+                    .into_iter()
+                    .map(move |c| (q_idx, c.index, c.distance))
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    }
+
+    /// Legacy linear brute-force scan preserved for ground-truth parity testing and benchmarks.
+    pub fn search_query_hashes_linear(
         &self,
         query_hashes: &[u64],
         max_distance: u32,
@@ -230,6 +269,13 @@ impl MmapLibrary {
     /// Total number of frame hashes across the whole library.
     pub fn total_frames(&self) -> usize {
         self.files.iter().map(|f| f.len()).sum()
+    }
+
+    /// Pre-warms the MIH indices across all loaded files in parallel (zero query-time allocation).
+    pub fn prewarm_mih(&self) {
+        self.files.par_iter().for_each(|f| {
+            let _ = f.mih();
+        });
     }
 
     /// Searches query hashes across all media files in parallel using rayon.
@@ -515,6 +561,43 @@ mod tests {
                 "Ep 2 sharing only intro must have lower confidence"
             );
         }
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        Ok(())
+    }
+
+    #[test]
+    fn test_mmap_phash_file_mih_vs_linear_parity() -> Result<()> {
+        let temp_dir = std::env::temp_dir().join(format!("test_mih_parity_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let test_file = temp_dir.join("test_parity.phash");
+
+        let hashes: Vec<u64> = (0..200)
+            .map(|i| 0x1234_5678_9ABC_DEF0 ^ (i * 0x1F2E3D4C))
+            .collect();
+        {
+            let mut f = File::create(&test_file)?;
+            for &h in &hashes {
+                f.write_all(&h.to_be_bytes())?;
+            }
+        }
+
+        let mmap_phash = MmapPhashFile::open(&test_file)?;
+        let query: Vec<u64> = vec![
+            hashes[10],
+            hashes[25] ^ 1,        // 1-bit flip
+            hashes[50] ^ 3,        // 2-bit flip
+            0xFFFF_FFFF_FFFF_FFFF, // random
+        ];
+
+        let mih_matches = mmap_phash.search_query_hashes(&query, 2);
+        let linear_matches = mmap_phash.search_query_hashes_linear(&query, 2);
+
+        assert_eq!(
+            mih_matches.len(),
+            linear_matches.len(),
+            "MIH and Linear search must return identical match count"
+        );
 
         let _ = std::fs::remove_dir_all(&temp_dir);
         Ok(())

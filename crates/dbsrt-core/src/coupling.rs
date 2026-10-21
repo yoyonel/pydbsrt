@@ -189,14 +189,22 @@ impl CouplingRegistry {
         Ok(reg)
     }
 
-    /// Saves `CouplingRegistry` atomically to `path`.
+    /// Saves `CouplingRegistry` atomically to `path` using a temporary file and rename.
     pub fn save(&self, path: &Path) -> Result<()> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
         let json = serde_json::to_string_pretty(self)?;
-        fs::write(path, json)
-            .with_context(|| format!("Failed to write coupling registry to {:?}", path))?;
+        let tmp_path = path.with_extension(format!("tmp.{}", std::process::id()));
+        fs::write(&tmp_path, json).with_context(|| {
+            format!(
+                "Failed to write temporary coupling registry to {:?}",
+                tmp_path
+            )
+        })?;
+        fs::rename(&tmp_path, path).with_context(|| {
+            format!("Failed to rename temporary coupling registry to {:?}", path)
+        })?;
         Ok(())
     }
 

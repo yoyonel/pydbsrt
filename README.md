@@ -58,6 +58,10 @@ uv run pre-commit install
 # Démarrer toute la stack (PostgreSQL 17 SP-GiST + PgWeb + dbsrt-server + MkDocs + Seed Couplings)
 task dev
 
+# Astuce multi-projets : en cas de conflit sur le port 8086 (ex: pods/conteneurs professionnels déjà actifs)
+# Surcharger simplement la variable sans impacter vos autres services :
+PGWEB_PORT=8088 task dev
+
 # Afficher l'état de tous les services et les compteurs relationnels (medias, frames, subtitles, sub_frames)
 task status
 

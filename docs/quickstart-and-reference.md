@@ -84,9 +84,19 @@ task down
 | **🎛️ dbsrt Studio** | `http://127.0.0.1:8765/studio` | `8765` | Backoffice interactif : Timeline bi-piste (`Frames` ↔ `SRT Cues`), Loupe pHash 8×8, lecteur `<video>` synchronisé, pagination serveur et certification en 1 clic. |
 | **📊 Grafana Dashboards** | `http://127.0.0.1:3000` | `3000` | Suite de 3 dashboards out-of-the-box (Corpus Explorer, NAS Benchmarks, PostgreSQL 17 health - zero login). Guide complet : [`Observabilité & Grafana`](2026-10-20-observabilite-prometheus-grafana-et-telemetrie-pydbsrt.md). |
 | **📚 Portail Documentation** | `http://127.0.0.1:8000` | `8000` | Serveur MkDocs Material avec recherche instantanée, diagrammes Mermaid Panzoom, équations MathJax vectorielles et Dashboard E2E VLC. |
-| **🐘 PgWeb (SQL Explorer)** | `http://127.0.0.1:8086` | `8086` | Explorateur web zero-conf branché sur PostgreSQL 17 (`bktreedb`) pour inspecter `medias`, `frames`, `subtitles` et `sub_frames`. |
+| **🐘 PgWeb (SQL Explorer)** | `http://127.0.0.1:8086` | `8086` (ou `$PGWEB_PORT`) | Explorateur web zero-conf branché sur PostgreSQL 17 (`bktreedb`) pour inspecter `medias`, `frames`, `subtitles` et `sub_frames`. |
 | **🔥 Prometheus Console** | `http://127.0.0.1:9090` | `9090` | Moteur TSDB Prometheus, exploration de requêtes PromQL et statut des cibles de scraping. |
 | **⚡ API REST Daemon** | `http://127.0.0.1:8765/v1/status` | `8765` | Daemon Rust Axum découvert dynamiquement via `/tmp/dbsrt-server.json` par les extensions VLC. |
+
+> [!TIP] Coexistence Multi-Projets & Isolation des Ports Locaux
+> Si un port par défaut est déjà occupé sur la machine de développement (par exemple le port `8086` utilisé par des conteneurs professionnels ou d'autres projets sans devoir y toucher), vous pouvez surcharger dynamiquement le port exposé sans altérer vos autres conteneurs :
+> ```bash
+> # Lancer la stack en redirigeant PgWeb sur un port alternatif (ex: 8088)
+> PGWEB_PORT=8088 task dev
+> # ou pour le studio seul :
+> PGWEB_PORT=8088 task studio
+> ```
+> `stack_ctl.sh status` et `docker compose` détecteront automatiquement `PGWEB_PORT` et afficheront le lien mis à jour (`http://127.0.0.1:8088`).
 
 ---
 
