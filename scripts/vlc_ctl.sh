@@ -16,7 +16,7 @@ install_plugin() {
 
 test_cvlc() {
   local output
-  output="$(DBSRT_AUTOKILL=1 cvlc --avcodec-hw=none --extraintf luaintf --lua-intf dbsrt_intf tests/data/big_buck_bunny_trailer_480p.mp4 2>&1)"
+  output="$(DBSRT_AUTOKILL=1 cvlc --no-audio --avcodec-hw=none --extraintf luaintf --lua-intf dbsrt_intf tests/data/big_buck_bunny_trailer_480p.mp4 2>&1)"
   echo "$output"
   if echo "$output" | grep -q "SUCCESS! Media matched"; then
     echo "✓ E2E VLC Integration Test Passed (Event-driven autokill)!"
