@@ -29,7 +29,10 @@ GRAFANA_PORT="${GRAFANA_PORT:-$DEFAULT_GRAFANA_PORT}"
 
 DEFAULT_START_WAIT_SECONDS="0.5"
 DEFAULT_STOP_WAIT_SECONDS="0.3"
-DEFAULT_DOCS_WAIT_SECONDS="1"
+# Maximum seconds to wait for MkDocs to compile and serve pages on startup
+DEFAULT_DOCS_MAX_WAIT_SECONDS=15
+# Polling interval in seconds when verifying HTTP daemon readiness
+HTTP_READY_POLL_INTERVAL_SECONDS="0.5"
 
 if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
   COLOR_RESET="\033[0m"
@@ -154,7 +157,18 @@ doc_start() {
   fi
   setsid uv run --no-sync mkdocs serve --dev-addr "${SERVER_HOST}:${DOCS_PORT}" </dev/null >"$DOCS_LOG_FILE" 2>&1 &
   echo $! >"$DOCS_PID_FILE"
-  sleep "$DEFAULT_DOCS_WAIT_SECONDS"
+
+  # Wait for MkDocs to finish initial build and bind port
+  local max_attempts=$((DEFAULT_DOCS_MAX_WAIT_SECONDS * 2))
+  local attempt=0
+  while [[ $attempt -lt $max_attempts ]]; do
+    if curl -s -o /dev/null -w "%{http_code}" "http://${SERVER_HOST}:${DOCS_PORT}/" 2>/dev/null | grep -Eq '^(200|301|302)$'; then
+      break
+    fi
+    sleep "$HTTP_READY_POLL_INTERVAL_SECONDS"
+    attempt=$((attempt + 1))
+  done
+
   echo "MkDocs documentation server started in background on http://${SERVER_HOST}:${DOCS_PORT} (PID: $(cat "$DOCS_PID_FILE"))"
 }
 
@@ -175,9 +189,22 @@ doc_logs() {
 }
 
 stack_status() {
+  local port_conflict_warning=""
+  if [[ -f "$SERVER_DISCOVERY_FILE" ]]; then
+    local disc_port
+    disc_port="$(grep -o '"port": *[0-9]*' "$SERVER_DISCOVERY_FILE" | grep -o '[0-9]*' || echo "$SERVER_PORT")"
+    if [[ "$disc_port" != "$SERVER_PORT" ]]; then
+      port_conflict_warning="⚠️  CONFLIT DE PORT : Port ${SERVER_PORT} déjà utilisé, repli anormal du serveur sur le port ${disc_port} !"
+    fi
+  fi
+
   echo -e "${COLOR_BOLD}================================================================================${COLOR_RESET}"
   echo -e "${COLOR_BOLD}                    pydbsrt — Unified Stack Status & Guide                      ${COLOR_RESET}"
   echo -e "${COLOR_BOLD}================================================================================${COLOR_RESET}"
+  if [[ -n "$port_conflict_warning" ]]; then
+    echo ""
+    echo -e "${COLOR_RED}${COLOR_BOLD}${port_conflict_warning}${COLOR_RESET}"
+  fi
   echo ""
   echo -e "${COLOR_BOLD}📡 SERVICES & HEALTH CHECK:${COLOR_RESET}"
   check_http_service "dbsrt Studio & REST API" "http://${SERVER_HOST}:${SERVER_PORT}/v1/status" "http://${SERVER_HOST}:${SERVER_PORT}/v1/status"
