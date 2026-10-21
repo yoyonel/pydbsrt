@@ -19,7 +19,6 @@ use crate::services::phash::{
 use crate::services::recognition::identify_media_by_phash_multi_routed;
 use crate::state::AppState;
 use axum::extract::State;
-use axum::response::IntoResponse;
 use axum::Json;
 use dbsrt_core::{inspect_container, probe_video, MediaMetadata};
 use std::path::{Path, PathBuf};
@@ -29,7 +28,7 @@ use std::time::Instant;
 pub async fn search_handler(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<SearchSubtitlesRequest>,
-) -> impl IntoResponse {
+) -> Json<SearchSubtitlesResponse> {
     let start_overall = Instant::now();
     state
         .metrics
@@ -575,4 +574,276 @@ pub async fn search_handler(
         candidates,
         timing,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dbsrt_core::{
+        CertifiedMediaCoupling, CertifiedSubtitleRecord, MockSubtitleProvider, SubtitleCache,
+    };
+    use std::path::PathBuf;
+
+    fn get_repo_root() -> PathBuf {
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        manifest_dir
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .to_path_buf()
+    }
+
+    fn test_app_state() -> Arc<AppState> {
+        let root = get_repo_root();
+        let phash_dir = root.join("tests/data");
+        let srt_dir = root.join("data/SRT");
+        let mock_provider = MockSubtitleProvider::new();
+        mock_provider.add_candidate(
+            "big buck bunny",
+            dbsrt_core::RemoteSubtitleCandidate {
+                provider: "mock".to_string(),
+                subtitle_id: "mock_sub_1".to_string(),
+                release_name: Some("Big.Buck.Bunny.720p".to_string()),
+                language: "en".to_string(),
+                download_url: "http://example.com/mock.srt".to_string(),
+                hearing_impaired: false,
+                fps: Some(25.0),
+                match_score: 1.0,
+            },
+            "1\n00:00:01,000 --> 00:00:04,000\nMock Subtitle Text\n",
+        );
+        mock_provider.add_candidate(
+            "agent query",
+            dbsrt_core::RemoteSubtitleCandidate {
+                provider: "mock".to_string(),
+                subtitle_id: "mock_sub_2".to_string(),
+                release_name: Some("Agent.Release".to_string()),
+                language: "fr".to_string(),
+                download_url: "http://example.com/agent.srt".to_string(),
+                hearing_impaired: false,
+                fps: Some(25.0),
+                match_score: 1.0,
+            },
+            "1\n00:00:01,000 --> 00:00:04,000\nMock Agent Subtitle\n",
+        );
+        let mut state = AppState::new(
+            phash_dir,
+            srt_dir,
+            Arc::new(mock_provider),
+            SubtitleCache::default(),
+        );
+        state.extra_phash_dirs.push(root.join("data/__PHASH__"));
+        Arc::new(state)
+    }
+
+    #[tokio::test]
+    async fn test_search_missing_media_phash_early_return() {
+        let state = test_app_state();
+        let req = SearchSubtitlesRequest {
+            media_path: "nonexistent_video_file_9999.mp4".to_string(),
+            language: "fr".to_string(),
+            search_mode: Some("phash".to_string()),
+            query_title: None,
+            season: None,
+            episode: None,
+            subtitles_dir: None,
+            phash_dir: None,
+            index_engine: None,
+        };
+        let res = search_handler(State(state), Json(req)).await;
+        assert_eq!(res.0.total_candidates, 0);
+        assert!(res.0.matched_media.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_search_mode_all_with_mock_provider() {
+        let state = test_app_state();
+        let req = SearchSubtitlesRequest {
+            media_path: "nonexistent_video_query.mp4".to_string(),
+            language: "en".to_string(),
+            search_mode: Some("all".to_string()),
+            query_title: Some("Big Buck Bunny".to_string()),
+            season: Some(1),
+            episode: Some(1),
+            subtitles_dir: None,
+            phash_dir: None,
+            index_engine: None,
+        };
+        let res = search_handler(State(state), Json(req)).await;
+        assert!(res.0.total_candidates > 0);
+    }
+
+    #[tokio::test]
+    async fn test_search_phash_file_extension() {
+        let root = get_repo_root();
+        let phash_file = root.join("tests/data/big_buck_bunny_trailer_480p.phash");
+        if !phash_file.exists() {
+            return;
+        }
+        let state = test_app_state();
+        let req = SearchSubtitlesRequest {
+            media_path: phash_file.to_string_lossy().to_string(),
+            language: "en".to_string(),
+            search_mode: Some("catalog".to_string()),
+            query_title: None,
+            season: None,
+            episode: None,
+            subtitles_dir: Some(root.join("tests/data").to_string_lossy().to_string()),
+            phash_dir: None,
+            index_engine: None,
+        };
+        let res = search_handler(State(state), Json(req)).await;
+        assert!(res.0.moviehash.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_search_real_media_phash_and_certified_couplings() {
+        let root = get_repo_root();
+        let video = root.join("tests/data/big_buck_bunny_trailer_480p.mp4");
+        if !video.exists() {
+            return;
+        }
+        let state = test_app_state();
+
+        // Seed a coupling into registry so lookup_certified_couplings finds a match
+        if let Ok(mut reg) = state.coupling_registry.write() {
+            reg.couplings.push(CertifiedMediaCoupling {
+                media_hash: "dummy_media_hash_bbb".to_string(),
+                media_name: "big_buck_bunny_trailer_480p".to_string(),
+                phash_filename: "big_buck_bunny_trailer_480p.phash".to_string(),
+                fps: 25.0,
+                frame_count: 50,
+                subtitles: vec![CertifiedSubtitleRecord {
+                    subtitles_hash: "dummy_sub_hash_bbb".to_string(),
+                    name: "big_buck_bunny_trailer_480p.en".to_string(),
+                    lang: "en".to_string(),
+                    srt_path: root
+                        .join("tests/data/big_buck_bunny_trailer_480p.en.srt")
+                        .to_string_lossy()
+                        .to_string(),
+                    certified: true,
+                    cue_count: 5,
+                    sub_frames: vec![],
+                }],
+            });
+        }
+
+        let req = SearchSubtitlesRequest {
+            media_path: video.to_string_lossy().to_string(),
+            language: "en".to_string(),
+            search_mode: Some("all".to_string()),
+            query_title: None,
+            season: None,
+            episode: None,
+            subtitles_dir: Some(root.join("tests/data").to_string_lossy().to_string()),
+            phash_dir: Some(root.join("tests/data").to_string_lossy().to_string()),
+            index_engine: None,
+        };
+        let res = search_handler(State(state), Json(req)).await;
+        assert!(res.0.matched_media.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_search_container_inspection() {
+        let root = get_repo_root();
+        let srt_path = root.join("tests/data/big_buck_bunny_trailer_480p.en.srt");
+        if !srt_path.exists() {
+            return;
+        }
+        let tmp_mkv =
+            std::env::temp_dir().join(format!("test_lookup_container_{}.mkv", std::process::id()));
+        let status = std::process::Command::new("ffmpeg")
+            .stdin(std::process::Stdio::null())
+            .args([
+                "-nostdin",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=black:s=320x240:d=1",
+                "-f",
+                "srt",
+                "-i",
+                srt_path.to_str().unwrap(),
+                "-c:v",
+                "mjpeg",
+                "-c:s",
+                "srt",
+                "-metadata:s:s:0",
+                "language=eng",
+                tmp_mkv.to_str().unwrap(),
+            ])
+            .status();
+
+        if let Ok(st) = status {
+            if st.success() {
+                let state = test_app_state();
+                let req = SearchSubtitlesRequest {
+                    media_path: tmp_mkv.to_string_lossy().to_string(),
+                    language: "en".to_string(),
+                    search_mode: Some("container".to_string()),
+                    query_title: None,
+                    season: None,
+                    episode: None,
+                    subtitles_dir: None,
+                    phash_dir: None,
+                    index_engine: None,
+                };
+                let res = search_handler(State(state), Json(req)).await;
+                assert!(res
+                    .0
+                    .candidates
+                    .iter()
+                    .any(|c| c.source == SubtitleSource::Container.as_str()));
+                let _ = std::fs::remove_file(tmp_mkv);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_search_remote_relay_unreachable() {
+        let root = get_repo_root();
+        let video = root.join("tests/data/big_buck_bunny_trailer_480p.mp4");
+        if !video.exists() {
+            return;
+        }
+        let mut state = (*test_app_state()).clone();
+        state.remote_api = Some("http://127.0.0.1:9".to_string()); // Unreachable port
+        let state = Arc::new(state);
+
+        let req = SearchSubtitlesRequest {
+            media_path: video.to_string_lossy().to_string(),
+            language: "en".to_string(),
+            search_mode: Some("phash".to_string()),
+            query_title: None,
+            season: None,
+            episode: None,
+            subtitles_dir: None,
+            phash_dir: None,
+            index_engine: None,
+        };
+        let _ = search_handler(State(state), Json(req)).await;
+    }
+
+    #[tokio::test]
+    async fn test_search_agent_mode_candidate_filtering() {
+        let mut state = (*test_app_state()).clone();
+        state.is_agent = true;
+        let state = Arc::new(state);
+
+        let req = SearchSubtitlesRequest {
+            media_path: "nonexistent_agent_file.mp4".to_string(),
+            language: "fr".to_string(),
+            search_mode: Some("all".to_string()),
+            query_title: Some("Agent Query".to_string()),
+            season: None,
+            episode: None,
+            subtitles_dir: None,
+            phash_dir: None,
+            index_engine: None,
+        };
+        let res = search_handler(State(state), Json(req)).await;
+        assert!(res.0.total_candidates > 0);
+    }
 }
