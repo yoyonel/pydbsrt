@@ -58,6 +58,10 @@ uv run pre-commit install
 # Démarrer toute la stack (PostgreSQL 17 SP-GiST + PgWeb + dbsrt-server + MkDocs + Seed Couplings)
 task dev
 
+# Astuce multi-projets : en cas de conflit sur le port 8086 (ex: pods/conteneurs professionnels déjà actifs)
+# Surcharger simplement la variable sans impacter vos autres services :
+PGWEB_PORT=8088 task dev
+
 # Afficher l'état de tous les services et les compteurs relationnels (medias, frames, subtitles, sub_frames)
 task status
 
@@ -113,6 +117,7 @@ Le dépôt est orchestré par **[Taskfile (go-task)](https://taskfile.dev/)** d�
 | **`task vlc:test`** | Exécute la pyramide complète de tests VLC (unitaires + cvlc + GUI E2E) | `taskfiles/vlc.yml` |
 | **`task db:up` / `db:down`** | Démarre / arrête la base PostgreSQL 17 SP-GiST BK-Tree | `taskfiles/db.yml` |
 | **`task rpi4:build`** | Cross-compile pour ARM64 / Raspberry Pi 4 | `taskfiles/rpi4.yml` |
+| **`task sim:test`** / **`task sim:rpi4:test`** | Exécute la batterie de 6 tests API ARM64 en simulation QEMU (512 Mo RAM) | `taskfiles/rpi4.yml` |
 | **`task clean`** | Purge unifiée des artefacts et caches (`target/`, `.pytest_cache`, `.ruff_cache`) | `Taskfile.yml` |
 
 ---

@@ -16,7 +16,7 @@ install_plugin() {
 
 test_cvlc() {
   local output
-  output="$(DBSRT_AUTOKILL=1 cvlc --avcodec-hw=none --extraintf luaintf --lua-intf dbsrt_intf tests/data/big_buck_bunny_trailer_480p.mp4 2>&1)"
+  output="$(DBSRT_AUTOKILL=1 cvlc --no-audio --avcodec-hw=none --extraintf luaintf --lua-intf dbsrt_intf tests/data/big_buck_bunny_trailer_480p.mp4 2>&1)"
   echo "$output"
   if echo "$output" | grep -q "SUCCESS! Media matched"; then
     echo "✓ E2E VLC Integration Test Passed (Event-driven autokill)!"
@@ -26,11 +26,27 @@ test_cvlc() {
   fi
 }
 
+run_vlc() {
+  install_plugin
+  local media="${2:-tests/data/big_buck_bunny_trailer_480p.mp4}"
+  vlc --no-sub-autodetect-file "$media"
+}
+
+demo_vlc() {
+  install_plugin
+  local media="${2:-tests/data/big_buck_bunny_trailer_480p.mp4}"
+  echo "Lancement VLC pour démonstration interactive dbsrt..."
+  echo "Dans VLC : Menu Vue -> VLSub (dbsrt) -> Clic sur 'Recherche par pHash'"
+  vlc --no-sub-autodetect-file "$media"
+}
+
 case "$ACTION" in
   install) install_plugin ;;
   test-cvlc) test_cvlc ;;
+  run) run_vlc "$@" ;;
+  demo) demo_vlc "$@" ;;
   *)
-    echo "Usage: $0 {install|test-cvlc}" >&2
+    echo "Usage: $0 {install|test-cvlc|run|demo}" >&2
     exit 1
     ;;
 esac

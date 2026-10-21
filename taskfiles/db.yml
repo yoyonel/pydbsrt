@@ -4,7 +4,7 @@ tasks:
   db:up:
     desc: Start PostgreSQL BK-tree container stack in background
     cmds:
-      - docker compose -f {{.COMPOSE_FILE}} up -d --remove-orphans
+      - PGWEB_PORT={{.PGWEB_PORT | default 8086}} docker compose -f {{.COMPOSE_FILE}} up -d --remove-orphans
 
   db:down:
     desc: Stop PostgreSQL BK-tree container stack

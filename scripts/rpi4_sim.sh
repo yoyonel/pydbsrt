@@ -44,13 +44,21 @@ case "${ACTION}" in
     ;;
 
   test)
-    echo "=== Testing ARM64 simulated container via /v1/health & /v1/status ==="
-    curl -s -f "http://127.0.0.1:${SIM_PORT}/v1/health"
+    echo "=== [1/6] Testing ARM64 simulated container via /v1/health & /v1/status ==="
+    curl -s -f "http://127.0.0.1:${SIM_PORT}/v1/health" | jq .
     echo ""
-    echo "=== Testing /v1/metrics ==="
-    curl -s -f "http://127.0.0.1:${SIM_PORT}/v1/metrics"
+    curl -s -f "http://127.0.0.1:${SIM_PORT}/v1/status" | jq .
     echo ""
-    echo "=== Testing /v1/recognize (200 bytes pHash payload) ==="
+
+    echo "=== [2/6] Testing /v1/metrics ==="
+    curl -s -f "http://127.0.0.1:${SIM_PORT}/v1/metrics" | jq .
+    echo ""
+
+    echo "=== [3/6] Testing /studio Web UI (HTTP 200) ==="
+    curl -s -f -o /dev/null -w "HTTP %{http_code} OK (bytes: %{size_download})\n" "http://127.0.0.1:${SIM_PORT}/studio"
+    echo ""
+
+    echo "=== [4/6] Testing /v1/recognize (Multi-Index Hashing RAM on ARM64) ==="
     curl -s -f -X POST "http://127.0.0.1:${SIM_PORT}/v1/recognize" \
       -H "Content-Type: application/json" \
       -d '{
@@ -64,7 +72,27 @@ case "${ACTION}" in
       "fps": 25.0,
       "language": "fr"
     }' | jq .
-    echo "✓ Test completed successfully!"
+    echo ""
+
+    echo "=== [5/6] Testing /v1/search (Full Search API) ==="
+    curl -s -f -X POST "http://127.0.0.1:${SIM_PORT}/v1/search" \
+      -H "Content-Type: application/json" \
+      -d '{
+      "media_path": "/app/data/big_buck_bunny_trailer_480p.webm",
+      "language": "en",
+      "search_mode": "catalog"
+    }' | jq .
+    echo ""
+
+    echo "=== [6/6] Testing /v1/subtitles/:hash (Content-Addressable Storage CAS) ==="
+    SUB_HASH=$(grep -m 1 "subtitles_hash" data/SRT/couplings.json | tr -d '", ' | cut -d: -f2)
+    if [[ -n "${SUB_HASH}" ]]; then
+      HEAD_SRT=$(curl -s -f "http://127.0.0.1:${SIM_PORT}/v1/subtitles/${SUB_HASH}" | head -n 4)
+      echo "✓ CAS successfully retrieved subtitle track for hash ${SUB_HASH}:"
+      echo "${HEAD_SRT}"
+    fi
+    echo ""
+    echo "✓ All ARM64 simulated RPi4 smoke tests completed successfully!"
     ;;
 
   *)

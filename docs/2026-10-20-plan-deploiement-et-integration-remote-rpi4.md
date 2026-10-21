@@ -165,11 +165,18 @@ Avantages : transfert direct en un flux TCP compressé sur le LAN, chargement at
 
 ### Brique 5 : Orchestration Taskfile (`Taskfile.yml`)
 
-Ajout du groupe déclaratif `rpi4:*` et `sim:rpi4:*` :
+Ajout du groupe déclaratif `rpi4:*` et `sim:*` (avec alias `sim:rpi4:*`) :
 
 * `task rpi4:build` : Cross-compilation sur le PC hôte et packaging de l'image `dbsrt-server:rpi4` (`linux/arm64`).
-* `task sim:rpi4:up` : Démarre le conteneur ARM64 en simulation locale QEMU sur x86 avec bridage RAM.
-* `task sim:rpi4:test` : Exécute les tests de conformité API (`/v1/recognize`) contre le conteneur simulé.
+* `task sim:up` (alias `task sim:rpi4:up`) : Démarre le conteneur ARM64 en simulation locale QEMU sur x86 avec bridage 512 Mo RAM (`sim/docker-compose.sim.yml` sur le port `8766`).
+* `task sim:test` (alias `task sim:rpi4:test`) : Exécute la batterie de 6 tests de conformité API contre le conteneur ARM64 simulé :
+  1. `GET /v1/health` & `GET /v1/status` (Healthcheck & métriques d'indexation Zero-DB).
+  2. `GET /v1/metrics` (Compteurs atomiques et latences).
+  3. `GET /studio` (Interface web backoffice dbsrt Studio HTTP 200).
+  4. `POST /v1/recognize` (Moteur Multi-Index Hashing en RAM sous ARM64 avec injection automatique de sous-titres certifiés).
+  5. `POST /v1/search` (Pipeline complet de recherche et calcul moviehash).
+  6. `GET /v1/subtitles/:hash` (Content-Addressable Storage CAS avec extraction du texte SRT).
+* `task sim:down` (alias `task sim:rpi4:down`) : Arrête et détruit le conteneur de simulation ARM64.
 * `task rpi4:push` : Envoie l'image Docker cross-compilée sur le RPi4 via stream SSH (`docker save ... | ssh rpi4 docker load`).
 * `task rpi4:sync` : Synchronise les données (`catalog.dbphash`, `data/SRT`) par `rsync` sur `rpi4`.
 * `task rpi4:init-db` : Applique la mise à niveau non-destructive du schéma (`init_schema()`) sur PostgreSQL 15.2.

@@ -499,6 +499,7 @@ dependencies = [
  "memmap2",
  "postgres",
  "rayon",
+ "serde",
  "sha2 0.11.1",
  "thiserror",
 ]

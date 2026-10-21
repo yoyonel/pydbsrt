@@ -71,6 +71,6 @@ services:
     environment:
       - PGWEB_DATABASE_URL=postgres://docker:docker@bktreedb:5432/bktreedb?sslmode=disable
     ports:
-      - "8086:8081"
+      - "${PGWEB_PORT:-8086}:8081"
     depends_on:
       - bktreedb
