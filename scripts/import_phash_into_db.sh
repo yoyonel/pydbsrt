@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
 PROJECT_ROOT_DIR=$(git rev-parse --show-toplevel)
 NAS_ROOT_DIR="${NAS_ROOT_DIR:-$HOME/__SYNOLOGY__}"
 PHASH_ROOT_DIR="${MEDIAS_ROOTDIR:-${NAS_ROOT_DIR}/tvshow/__PHASH__}"
 PARALLEL_NB_JOBS="${PARALLEL_NB_JOBS:-1}"
 
-pushd "${PROJECT_ROOT_DIR}"/docker
+pushd "${PROJECT_ROOT_DIR}/docker" >/dev/null || exit 1
 docker-compose up -d
-popd
+popd >/dev/null || exit 1
 
-/usr/bin/ls -1 "${PHASH_ROOT_DIR}"/*.phash | \
-/usr/bin/time -v \
+/usr/bin/ls -1 "${PHASH_ROOT_DIR}"/*.phash |
+  /usr/bin/time -v \
     parallel -j"${PARALLEL_NB_JOBS}" --eta -I% --max-args 1 --tty \
-        uv run python "${PROJECT_ROOT_DIR}"/src/pydbsrt/app_cli.py import-images-hashes-into-db -r %
+    uv run python "${PROJECT_ROOT_DIR}"/src/pydbsrt/app_cli.py import-images-hashes-into-db -r %

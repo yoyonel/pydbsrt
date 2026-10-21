@@ -1,7 +1,7 @@
 import binascii
 import os
 from pathlib import Path
-from typing import Tuple
+from typing import Literal, Tuple, overload
 
 import aiofiles
 import mmh3
@@ -37,6 +37,33 @@ async def _get_data_for_hash(
         await aio_fo.seek(-sample_size, os.SEEK_END)
         data += await aio_fo.read(sample_size)
     return size, data
+
+
+@overload
+async def hashfile(
+    filename: str | Path,
+    sample_threshold: int = SAMPLE_THRESHOLD,
+    sample_size: int = SAMPLE_SIZE,
+    hexdigest: Literal[False] = False,
+) -> bytes: ...
+
+
+@overload
+async def hashfile(
+    filename: str | Path,
+    sample_threshold: int = SAMPLE_THRESHOLD,
+    sample_size: int = SAMPLE_SIZE,
+    hexdigest: Literal[True] = ...,
+) -> str: ...
+
+
+@overload
+async def hashfile(
+    filename: str | Path,
+    sample_threshold: int = SAMPLE_THRESHOLD,
+    sample_size: int = SAMPLE_SIZE,
+    hexdigest: bool = False,
+) -> str | bytes: ...
 
 
 async def hashfile(

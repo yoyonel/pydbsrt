@@ -87,16 +87,34 @@ def parse_rust_coverage(rust_json_path: Path) -> dict:
     }
 
 
-def parse_python_coverage(python_json_path: Path) -> dict:
-    """Parse pytest-cov json output."""
-    if not python_json_path.exists():
+def parse_python_coverage(python_json_paths: list[Path]) -> dict:
+    """Parse and merge one or more pytest-cov json outputs by unioning executed_lines."""
+    merged_files: dict[str, dict] = {}
+    for p in python_json_paths:
+        if not p.exists():
+            continue
+        with open(p, encoding="utf-8") as f:
+            data = json.load(f)
+        for fname, f_info in data.get("files", {}).items():
+            summary = f_info.get("summary", {})
+            count = summary.get("num_statements", 0)
+            exec_lines = set(f_info.get("executed_lines", []))
+            if fname not in merged_files:
+                merged_files[fname] = {
+                    "count": count,
+                    "executed": exec_lines,
+                    "max_covered": summary.get("covered_lines", 0),
+                }
+            else:
+                merged_files[fname]["count"] = max(merged_files[fname]["count"], count)
+                merged_files[fname]["executed"].update(exec_lines)
+                merged_files[fname]["max_covered"] = max(
+                    merged_files[fname]["max_covered"],
+                    summary.get("covered_lines", 0),
+                )
+
+    if not merged_files:
         return {}
-
-    with open(python_json_path, encoding="utf-8") as f:
-        data = json.load(f)
-
-    totals = data.get("totals", {})
-    files_data = data.get("files", {})
 
     file_map: dict[str, dict] = {}
     groups: dict[str, dict] = {
@@ -106,11 +124,17 @@ def parse_python_coverage(python_json_path: Path) -> dict:
         "src/pydbsrt/applications": {"total": 0, "covered": 0},
     }
 
-    for fname, f_info in files_data.items():
-        summary = f_info.get("summary", {})
-        count = summary.get("num_statements", 0)
-        covered = summary.get("covered_lines", 0)
-        percent = summary.get("percent_covered", 0.0)
+    total_stmts = 0
+    total_covered = 0
+
+    for fname, info in merged_files.items():
+        count = info["count"]
+        covered = max(len(info["executed"]), info["max_covered"])
+        covered = min(covered, count)
+        percent = (covered / count * 100.0) if count > 0 else 100.0
+
+        total_stmts += count
+        total_covered += covered
 
         file_map[fname] = {
             "total": count,
@@ -123,10 +147,11 @@ def parse_python_coverage(python_json_path: Path) -> dict:
                 groups[grp]["total"] += count
                 groups[grp]["covered"] += covered
 
+    overall_pct = (total_covered / total_stmts * 100.0) if total_stmts > 0 else 0.0
     return {
-        "total_lines": totals.get("num_statements", 0),
-        "covered_lines": totals.get("covered_lines", 0),
-        "percent": totals.get("percent_covered", 0.0),
+        "total_lines": total_stmts,
+        "covered_lines": total_covered,
+        "percent": overall_pct,
         "groups": groups,
         "files": file_map,
     }
@@ -240,12 +265,13 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Generate unified coverage report.")
     parser.add_argument("--rust-json", type=Path, default=Path("coverage-rust.json"))
     parser.add_argument("--python-json", type=Path, default=Path("coverage-python.json"))
+    parser.add_argument("--python-db-json", type=Path, default=Path("coverage-python-db.json"))
     parser.add_argument("--base-ref", type=str, default="origin/develop")
     parser.add_argument("--output-md", type=Path, default=None)
     args = parser.parse_args()
 
     rust_cov = parse_rust_coverage(args.rust_json)
-    py_cov = parse_python_coverage(args.python_json)
+    py_cov = parse_python_coverage([args.python_json, args.python_db_json])
     modified = get_modified_files(args.base_ref)
 
     report_md = generate_markdown(rust_cov, py_cov, modified)

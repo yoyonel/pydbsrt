@@ -1,0 +1,118 @@
+version: '3'
+
+tasks:
+  lint:
+    desc: Run unified linters across Python, Rust, Shell, Lua, YAML, HTML/JS, and JSON
+    cmds:
+      - bash scripts/code_quality.sh lint
+
+  typecheck:
+    desc: Run static type checker across Python codebase (Pyright)
+    aliases: [types, lint:types]
+    cmds:
+      - bash scripts/code_quality.sh typecheck {{.CLI_ARGS}}
+
+  fmt:
+    desc: Format code across Python (Ruff), Rust (rustfmt), Shell (shfmt), and Lua (stylua)
+    cmds:
+      - bash scripts/code_quality.sh fmt
+
+  test:rs:
+    desc: Run all Rust workspace tests (unit + integration + e2e)
+    aliases: [rs:test]
+    cmds:
+      - cargo test --workspace
+
+  coverage:
+    desc: Run unified Rust & Python coverage pipeline (1:1 parity with GitHub Actions CI)
+    cmds:
+      - bash scripts/code_quality.sh coverage
+
+  coverage:html:
+    desc: Generate both Rust and Python HTML coverage reports
+    cmds:
+      - cargo llvm-cov --workspace --html
+      - uv run pytest --cov=src --cov-report=html:htmlcov tests/tools/
+      - echo "HTML reports generated in target/llvm-cov/html and htmlcov/"
+
+  ci:local:
+    desc: Fast local CI reproduction suite (<10s) running lint, rust tests and docs validation
+    cmds:
+      - task: lint
+      - task: test:rs
+      - task: doc:check
+
+  pre-commit:
+    desc: Run pre-commit hooks on all files with strict timeout
+    cmds:
+      - timeout 60s uv run pre-commit run --all-files
+
+  test:rs:db:
+    desc: Run Rust PostgreSQL BK-Tree integration test (requires db:up)
+    internal: true
+    deps: [db:up, demo:import-hashes]
+    cmds:
+      - PSQL_IP=127.0.0.1 cargo test -p dbsrt-cli --test integration_test -- --nocapture
+
+  test:rs:mmap:
+    desc: Run Rust Zero-DB mmap integration test (standalone, no DB required)
+    internal: true
+    deps: [demo:export-phash]
+    cmds:
+      - cargo test -p dbsrt-cli --test test_mmap_zero_db -- --nocapture
+
+  test:rs:retarget:
+    desc: Run Rust Subtitle retargeting E2E test (standalone, no DB required)
+    internal: true
+    cmds:
+      - cargo test -p dbsrt-cli --test test_retarget_iso -- --nocapture
+
+  test:rs:server:
+    desc: Run dbsrt-server REST API integration tests
+    internal: true
+    cmds:
+      - cargo test -p dbsrt-server --test test_api -- --nocapture
+
+  test:local:
+    desc: Run test suite locally with uv (fast, requires db:up)
+    internal: true
+    deps: [db:up]
+    cmds:
+      - PSQL_IP=127.0.0.1 uv run pytest -o addopts="" tests/
+
+  coverage:rs:
+    desc: Run Rust code coverage using cargo-llvm-cov
+    internal: true
+    cmds:
+      - cargo llvm-cov --workspace
+
+  coverage:rs:html:
+    desc: Generate Rust HTML coverage report in target/llvm-cov/html
+    internal: true
+    cmds:
+      - cargo llvm-cov --workspace --html --open
+
+  coverage:py:
+    desc: Run Python code coverage using pytest-cov
+    internal: true
+    cmds:
+      - uv run pytest --cov=src --cov-report=term-missing tests/tools/
+
+  coverage:py:html:
+    desc: Generate Python HTML coverage report in htmlcov/
+    internal: true
+    cmds:
+      - uv run pytest --cov=src --cov-report=html:htmlcov tests/tools/
+
+  disk:check:
+    desc: Safety guard checking free disk space and target/ size against thresholds
+    internal: true
+    cmds:
+      - bash scripts/disk_guard.sh check
+
+  typecheck:summary:
+    desc: Generate structured statistical summary of Pyright type errors across files and rules
+    internal: true
+    aliases: [types:summary]
+    cmds:
+      - uv run python scripts/report_type_errors.py

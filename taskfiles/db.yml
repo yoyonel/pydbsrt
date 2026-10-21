@@ -1,0 +1,35 @@
+version: '3'
+
+tasks:
+  db:up:
+    desc: Start PostgreSQL BK-tree container stack in background
+    cmds:
+      - docker compose -f {{.COMPOSE_FILE}} up -d --remove-orphans
+
+  db:down:
+    desc: Stop PostgreSQL BK-tree container stack
+    cmds:
+      - docker compose -f {{.COMPOSE_FILE}} down
+
+  db:logs:
+    desc: View DB container logs
+    cmds:
+      - docker compose -f {{.COMPOSE_FILE}} logs -f
+
+  db:psql:
+    desc: Open interactive psql shell inside running DB
+    interactive: true
+    cmds:
+      - docker exec -it {{.DB_HOST}} psql -U docker -d bktreedb
+
+  db:import:all-phash:
+    desc: Fast batch import of all .phash files into PostgreSQL 17 BK-Tree (Rust native COPY)
+    deps: [db:up, rs:build]
+    cmds:
+      - ./target/release/dbsrt import-phash --phash-dir data/__PHASH__
+
+  build-db:
+    desc: Build custom PostgreSQL 17 BK-tree Docker image
+    internal: true
+    cmds:
+      - docker build -t {{.DOCKER_DB_IMAGE}} docker/pg-spgist_hamming/17-develop/

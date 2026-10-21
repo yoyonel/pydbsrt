@@ -85,11 +85,21 @@ impl SubtitleFile {
     }
 
     /// Shifts all cues by a given offset in milliseconds.
+    /// Cues that end before t=0s are pruned, and remaining cues are re-indexed.
     pub fn shift(&mut self, offset_ms: f64) {
         let delta = offset_ms.round() as i64;
-        for cue in &mut self.cues {
-            cue.start_ms = (cue.start_ms + delta).max(0);
-            cue.end_ms = (cue.end_ms + delta).max(0);
+        self.cues.retain_mut(|cue| {
+            let new_end = cue.end_ms + delta;
+            if new_end <= 0 {
+                return false;
+            }
+            let new_start = (cue.start_ms + delta).max(0);
+            cue.start_ms = new_start;
+            cue.end_ms = new_end;
+            true
+        });
+        for (i, cue) in self.cues.iter_mut().enumerate() {
+            cue.index = (i + 1) as u32;
         }
     }
 

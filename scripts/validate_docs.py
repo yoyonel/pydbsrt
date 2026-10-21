@@ -73,13 +73,24 @@ def check_html_files(site_dir: Path) -> list[str]:
 
         # 3. Check local image sources
         for img in article.find_all("img"):
-            src = img.get("src", "")
+            src_val = img.get("src", "")
+            src = src_val[0] if isinstance(src_val, list) else str(src_val or "")
             if src and not src.startswith(("http://", "https://", "data:")):
                 # Remove query/hash
                 clean_src = src.split("?")[0].split("#")[0]
                 target = (html_path.parent / clean_src).resolve()
                 if not target.exists():
                     errors.append(f"{rel_path}: Broken local image src: '{src}'")
+
+        # 4. Check local video and media sources
+        for media_tag in article.find_all(["video", "source"]):
+            src_val = media_tag.get("src", "")
+            src = src_val[0] if isinstance(src_val, list) else str(src_val or "")
+            if src and not src.startswith(("http://", "https://", "data:")):
+                clean_src = src.split("?")[0].split("#")[0]
+                target = (html_path.parent / clean_src).resolve()
+                if not target.exists():
+                    errors.append(f"{rel_path}: Broken local video/media src: '{src}'")
 
     return errors
 
@@ -100,6 +111,7 @@ def run_chrome_smoke_test(site_dir: Path) -> list[str]:
         "--disable-dev-shm-usage",
         "--disable-gpu",
         "--allow-file-access-from-files",
+        "--virtual-time-budget=5000",
         "--dump-dom",
         file_url,
     ]
@@ -116,6 +128,31 @@ def run_chrome_smoke_test(site_dir: Path) -> list[str]:
     return errors
 
 
+def check_docs_filetypes() -> list[str]:
+    """Ensure no forbidden data blobs or non-documentation files exist in docs/."""
+    errors: list[str] = []
+    allowed_exts = {
+        ".md",
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".webp",
+        ".mp4",
+        ".webm",
+        ".js",
+        ".css",
+        ".pdf",
+        ".svg",
+        ".woff2",
+        ".ttf",
+    }
+    docs_dir = Path("docs")
+    for p in docs_dir.rglob("*"):
+        if p.is_file() and p.suffix.lower() not in allowed_exts:
+            errors.append(f"{p}: Unauthorized file extension '{p.suffix}' in docs/ (place raw data/manifests in data/)")
+    return errors
+
+
 def check_no_local_paths() -> list[str]:
     """Ensure no machine-local paths (/home/latty or file:///home/) exist in versioned docs/code."""
     errors: list[str] = []
@@ -125,7 +162,7 @@ def check_no_local_paths() -> list[str]:
         *Path("src").rglob("*.py"),
         *Path("crates").rglob("*.rs"),
     ]
-    pattern = re.compile(r"(/home/latty|file:///home/)")
+    pattern = re.compile(r"(/home/latty|file:///home/|/pydbsrt/(?:screenshots|assets)/)")
     for p in targets:
         if not p.exists():
             continue
@@ -139,16 +176,23 @@ def check_no_local_paths() -> list[str]:
 def main() -> int:
     site_dir = Path("site")
 
-    print("🔍 [0/3] Checking for forbidden machine-local paths...")
+    print("🔍 [0/4] Checking file extensions and forbidden machine-local paths in docs/...")
+    filetype_errors = check_docs_filetypes()
+    if filetype_errors:
+        print(f"❌ Found {len(filetype_errors)} unauthorized file(s) in docs/:")
+        for err in filetype_errors:
+            print(f"   • {err}")
+        return 1
+
     path_errors = check_no_local_paths()
     if path_errors:
         print(f"❌ Found {len(path_errors)} forbidden machine-local path(s):")
         for err in path_errors:
             print(f"   • {err}")
         return 1
-    print("✅ Zero machine-local paths: OK")
+    print("✅ Zero unauthorized files & zero machine-local paths: OK")
 
-    print("🔍 [1/3] Building documentation with mkdocs build --strict...")
+    print("🔍 [1/4] Building documentation with mkdocs build --strict...")
     res = subprocess.run(["uv", "run", "--no-sync", "mkdocs", "build", "--strict"], capture_output=True, text=True)
     if res.returncode != 0:
         print("❌ MkDocs strict build failed:")
@@ -156,7 +200,7 @@ def main() -> int:
         return 1
     print("✅ MkDocs strict build: OK")
 
-    print("🔍 [2/3] Validating rendered HTML AST & integrity...")
+    print("🔍 [2/4] Validating rendered HTML AST & integrity...")
     html_errors = check_html_files(site_dir)
     if html_errors:
         print(f"❌ Found {len(html_errors)} documentation integrity error(s):")
@@ -165,7 +209,7 @@ def main() -> int:
         return 1
     print("✅ HTML AST & LaTeX validation: 0 errors")
 
-    print("🔍 [3/3] Running Headless Chrome DOM & MathJax check...")
+    print("🔍 [3/4] Running Headless Chrome DOM & MathJax check...")
     chrome_errors = run_chrome_smoke_test(site_dir)
     if chrome_errors:
         print("❌ Chrome smoke test error(s):")

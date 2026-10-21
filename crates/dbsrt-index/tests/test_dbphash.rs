@@ -22,6 +22,7 @@ fn test_dbphash_pack_and_mmap_search() {
         resolution: Some("1080p".to_string()),
         source: Some("WEB-DL".to_string()),
         release_group: Some("KILLERS".to_string()),
+        moviehash: None,
     };
     let cuts1 = [
         (0x0123_4567_89ab_cdef_u64, 1000u32),
@@ -46,6 +47,7 @@ fn test_dbphash_pack_and_mmap_search() {
         resolution: Some("1080p".to_string()),
         source: Some("WEB-DL".to_string()),
         release_group: Some("MZABI".to_string()),
+        moviehash: None,
     };
     let cuts2 = [
         (0xaaaa_bbbb_cccc_dddd_u64, 2000u32),
@@ -68,6 +70,7 @@ fn test_dbphash_pack_and_mmap_search() {
         resolution: Some("1080p".to_string()),
         source: None,
         release_group: Some("SubsPlease".to_string()),
+        moviehash: None,
     };
     let cuts3 = [
         (0xffff_0000_ffff_0000_u64, 500u32),

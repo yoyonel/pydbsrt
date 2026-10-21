@@ -32,7 +32,7 @@ class ImgHashExtended(ImageHash):
         return ret
 
 
-def imghash_to_bytes(imghash: ImageHash) -> bytes:
+def imghash_to_bytes(imghash: ImageHash | int) -> bytes:
     """
     >>> imghash_to_bytes(ImageHash(np.array([\
         np.array([ True,  True, False,  True, False,  True, False,  True]), \
@@ -45,6 +45,8 @@ def imghash_to_bytes(imghash: ImageHash) -> bytes:
         np.array([False, False, False, False, False, False, False, False])])))
     b'\\xd5\\x00\\x00\\x00\\x00\\x00\\x00\\x00'
     """
+    if isinstance(imghash, int):
+        return signed_int64_to_bytes(imghash)
     return binascii.a2b_hex(str(imghash))
 
 
@@ -195,7 +197,7 @@ def imghash_count_nonzero(imghash: ImageHash) -> int:
         np.array([False, False, False, False, False, False, False, False])])))
     5
     """
-    return np.count_nonzero(imghash.hash.flatten())
+    return int(np.count_nonzero(imghash.hash.flatten()))
 
 
 def imghash_str_hex_to_str_binary(imghash_hex: str) -> str:

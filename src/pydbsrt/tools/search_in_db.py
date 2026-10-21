@@ -1,7 +1,9 @@
+from typing import Any
+
 from asyncpg import Connection
 
 
-async def search_media_hash_in_db(conn: Connection, media_hash: str | bytes) -> int | None:
+async def search_media_hash_in_db(conn: Connection | Any, media_hash: str | bytes) -> int | None:
     """
 
     Args:

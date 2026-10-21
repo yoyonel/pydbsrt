@@ -31,9 +31,13 @@ soup = BeautifulSoup(html.text, "lxml")
 def get_images_data():
     logger.info("\nGoogle Images Metadata:")
     for google_image in soup.select(".isv-r.PNCib.MSM1fd.BUooTd"):
-        title = google_image.select_one(".VFACy.kGQAp.sMi44c.lNHeqe.WGvvNb")["title"]
-        source = google_image.select_one(".fxgdke").text
-        link = google_image.select_one(".VFACy.kGQAp.sMi44c.lNHeqe.WGvvNb")["href"]
+        title_elem = google_image.select_one(".VFACy.kGQAp.sMi44c.lNHeqe.WGvvNb")
+        source_elem = google_image.select_one(".fxgdke")
+        if not title_elem or not source_elem:
+            continue
+        title = title_elem["title"]
+        source = source_elem.text
+        link = title_elem["href"]
         logger.info(f"{title}\n{source}\n{link}\n")
 
     # this steps could be refactored to a more compact

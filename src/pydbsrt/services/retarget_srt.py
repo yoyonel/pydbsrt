@@ -33,7 +33,7 @@ framerate_r = re.compile(r"/*\.(?P<framerate>\d*\.\d*)fps*\.phash$")
 
 
 async def retarget_subtitles_in_db_async(
-    ref_phash_file_hash: Path, ref_phash_file: Path, ref_subtitles: Path, target_phash_file_hash: Path
+    ref_phash_file_hash: str | Path, ref_phash_file: Path, ref_subtitles: Path, target_phash_file_hash: str | Path
 ) -> list[tuple[int, int]]:
     """
 
@@ -50,10 +50,10 @@ async def retarget_subtitles_in_db_async(
         user=psqlUserName, password=psqlUserPass, database=psqlDbName, host=psqlDbIpAddr, command_timeout=60
     ) as pool:
         async with pool.acquire() as conn:
-            found_ref_media_id = search_media_hash_in_db(conn, ref_phash_file_hash)
-            assert found_ref_media_id
-            found_target_media_id = await search_media_hash_in_db(conn, target_phash_file_hash)
-            assert found_target_media_id
+            found_ref_media_id = await search_media_hash_in_db(conn, str(ref_phash_file_hash))
+            assert found_ref_media_id is not None
+            found_target_media_id = await search_media_hash_in_db(conn, str(target_phash_file_hash))
+            assert found_target_media_id is not None
 
             it_ref_img_hash: Iterator[int] = (
                 img_hash for img_hash, _, _ in gen_read_binary_img_hash_file(ref_phash_file, found_ref_media_id)
@@ -156,7 +156,7 @@ async def retarget_subtitles_async(
     ref_subtitles: Path,
     ref_phash_file: Path,
     target_phash_file: Path,
-) -> Path:
+) -> Path | None:
     ref_phash_file_hash = await hashfile(ref_phash_file, hexdigest=True)
     console.print(f"{ref_phash_file_hash=}")
     target_phash_file_hash = await hashfile(target_phash_file, hexdigest=True)
@@ -169,6 +169,7 @@ async def retarget_subtitles_async(
         # [CPU]
         counter_results = retarget_subtitles_with_bktree(ref_phash_file, ref_subtitles, target_phash_file)
 
+    subs_target_filepath: Path | None = None
     with _Timer("Shift subtitles (from reference) and save it (for target)", func_to_log=console.print):
         # TODO: need to work about framerates from reference and target
         try:
@@ -182,7 +183,7 @@ async def retarget_subtitles_async(
             console.print(
                 f"Shift subtitles seconds = {shift_offset_frames} frames ~ {shift_offset_milliseconds / 1000:.4f} seconds"
             )
-            subs = pysrt.open(ref_subtitles)
+            subs = pysrt.open(str(ref_subtitles))
             subs.shift(milliseconds=shift_offset_milliseconds)
             # TODO: need to parametrize directory export
             subs_target_filepath = Path(gettempdir()) / target_phash_file.with_suffix(".srt").name

@@ -1,6 +1,6 @@
 from collections import defaultdict
 from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict, List
 
 import asyncpg
 from asyncpg import Connection
@@ -39,7 +39,7 @@ async def search_media_in_db(
 
 
 async def _build_search_result(
-    conn: Connection,
+    conn: Connection | Any,
     media_id: int,
     media_name: str,
     paired_matched_frames: list[PairedMatchedFrame],
@@ -57,7 +57,7 @@ async def _build_search_result(
     Returns:
 
     """
-    media_name_found = await search_media_name(conn, media_id)
+    media_name_found = await search_media_name(conn, media_id) or ""
 
     nb_offsets_match = 0
     search_offsets_match: set[int] = set()

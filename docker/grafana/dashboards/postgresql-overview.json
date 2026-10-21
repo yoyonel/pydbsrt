@@ -1,0 +1,377 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 100,
+      "title": "PostgreSQL 17 Database Health & Telemetry",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-ds" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [
+            {
+              "options": {
+                "0": { "color": "red", "text": "DOWN" },
+                "1": { "color": "green", "text": "HEALTHY / UP" }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 1 },
+      "id": 1,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "pluginVersion": "11.2.0",
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus-ds" },
+          "editorMode": "code",
+          "expr": "pg_up",
+          "legendFormat": "Status",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "PostgreSQL Instance Status",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-ds" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "blue", "value": null },
+              { "color": "yellow", "value": 50 },
+              { "color": "red", "value": 90 }
+            ]
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 1 },
+      "id": 2,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus-ds" },
+          "editorMode": "code",
+          "expr": "sum(pg_stat_database_numbackends{datname=\"bktreedb\"})",
+          "legendFormat": "Active Connections",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Active Client Connections",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-ds" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 80 },
+              { "color": "green", "value": 95 }
+            ]
+          },
+          "unit": "percent"
+        }
+      },
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 1 },
+      "id": 3,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus-ds" },
+          "editorMode": "code",
+          "expr": "100 * sum(rate(pg_stat_database_blks_hit{datname=\"bktreedb\"}[1m])) / (sum(rate(pg_stat_database_blks_hit{datname=\"bktreedb\"}[1m])) + sum(rate(pg_stat_database_blks_read{datname=\"bktreedb\"}[1m])) > 0 or 1)",
+          "legendFormat": "Cache Hit Ratio",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Buffer Cache Hit Ratio",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-ds" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 50 },
+              { "color": "red", "value": 200 }
+            ]
+          },
+          "unit": "ms"
+        }
+      },
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 1 },
+      "id": 4,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus-ds" },
+          "editorMode": "code",
+          "expr": "pg_exporter_last_scrape_duration_seconds * 1000",
+          "legendFormat": "Scrape Latency",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Prometheus Scrape Duration",
+      "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 6 },
+      "id": 101,
+      "title": "Throughput & Operations",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-ds" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 15
+          },
+          "unit": "ops"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 7 },
+      "id": 5,
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "mean", "max"] }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus-ds" },
+          "expr": "rate(pg_stat_database_xact_commit{datname=\"bktreedb\"}[1m])",
+          "legendFormat": "Commits/sec",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus-ds" },
+          "expr": "rate(pg_stat_database_xact_rollback{datname=\"bktreedb\"}[1m])",
+          "legendFormat": "Rollbacks/sec",
+          "refId": "B"
+        }
+      ],
+      "title": "Transactions Rate (Commits vs Rollbacks)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-ds" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 15
+          },
+          "unit": "ops"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 7 },
+      "id": 6,
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "mean", "max"] }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus-ds" },
+          "expr": "rate(pg_stat_database_tup_returned{datname=\"bktreedb\"}[1m])",
+          "legendFormat": "Tuples Returned",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus-ds" },
+          "expr": "rate(pg_stat_database_tup_fetched{datname=\"bktreedb\"}[1m])",
+          "legendFormat": "Tuples Fetched",
+          "refId": "B"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus-ds" },
+          "expr": "rate(pg_stat_database_tup_inserted{datname=\"bktreedb\"}[1m])",
+          "legendFormat": "Tuples Inserted",
+          "refId": "C"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus-ds" },
+          "expr": "rate(pg_stat_database_tup_updated{datname=\"bktreedb\"}[1m])",
+          "legendFormat": "Tuples Updated",
+          "refId": "D"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus-ds" },
+          "expr": "rate(pg_stat_database_tup_deleted{datname=\"bktreedb\"}[1m])",
+          "legendFormat": "Tuples Deleted",
+          "refId": "E"
+        }
+      ],
+      "title": "Tuple Activity Throughput",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 15 },
+      "id": 102,
+      "title": "I/O & Disk Performance",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-ds" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 15
+          },
+          "unit": "ops"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "id": 7,
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "mean", "max"] }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus-ds" },
+          "expr": "rate(pg_stat_database_blks_hit{datname=\"bktreedb\"}[1m])",
+          "legendFormat": "Buffer Cache Hits",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus-ds" },
+          "expr": "rate(pg_stat_database_blks_read{datname=\"bktreedb\"}[1m])",
+          "legendFormat": "Disk Blocks Read",
+          "refId": "B"
+        }
+      ],
+      "title": "Disk I/O vs Memory Cache Blocks",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus-ds" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 15
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "id": 8,
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus-ds" },
+          "expr": "rate(pg_stat_database_conflicts{datname=\"bktreedb\"}[1m])",
+          "legendFormat": "Conflicts/sec",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus-ds" },
+          "expr": "rate(pg_stat_database_deadlocks{datname=\"bktreedb\"}[1m])",
+          "legendFormat": "Deadlocks/sec",
+          "refId": "B"
+        }
+      ],
+      "title": "Database Conflicts & Deadlocks",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 39,
+  "tags": ["pydbsrt", "postgres", "prometheus", "bktreedb"],
+  "time": { "from": "now-15m", "to": "now" },
+  "timepicker": { "refresh_intervals": ["5s", "10s", "30s", "1m", "5m"] },
+  "timezone": "browser",
+  "title": "PostgreSQL 17 Database Overview",
+  "uid": "postgresql-overview",
+  "version": 1
+}

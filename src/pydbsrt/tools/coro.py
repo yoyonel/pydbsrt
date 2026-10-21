@@ -22,7 +22,7 @@ def _cancel_all_tasks(loop: asyncio.AbstractEventLoop) -> None:
         task.cancel()
 
     click.secho(f"\U0001f4a3 Wait for {len(to_cancel)} tasks to finish.", fg="magenta")
-    loop.run_until_complete(asyncio.gather(*to_cancel, loop=loop, return_exceptions=True))
+    loop.run_until_complete(asyncio.gather(*to_cancel, return_exceptions=True))
 
     for task in to_cancel:
         # KEEPME: while we find out why this was added.
@@ -38,7 +38,7 @@ def _cancel_all_tasks(loop: asyncio.AbstractEventLoop) -> None:
             )
 
 
-def run_coro(coro: Awaitable):
+def run_coro(coro: Any):
     loop = asyncio.get_event_loop()
     task = None
     complete = False

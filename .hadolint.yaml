@@ -1,0 +1,5 @@
+ignored:
+  - DL3008  # Pin versions in apt-get install (Debian mirrors drop outdated point packages)
+  - DL3029  # Do not use --platform flag with FROM (required for multi-arch cross-compilation)
+  - DL3064  # Potentially sensitive data (e.g. POSTGRES_PASSWORD=docker in local dev containers)
+  - DL3066  # Non-numeric user-id

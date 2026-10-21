@@ -1,5 +1,5 @@
-site_name: "pydbsrt / dbsrt-rs Docs"
-site_description: "Documentation technique, architecture, benchmarks et roadmaps du projet dbsrt"
+site_name: "dbsrt — pHash Subtitle Sync & Studio"
+site_description: "Portail d'ingénierie, guide opérationnel, architecture pHash et benchmarks du projet pydbsrt / dbsrt-rs"
 site_author: "Lionel ATTY"
 site_url: "https://yoyonel.github.io/pydbsrt/"
 repo_name: "yoyonel/pydbsrt"
@@ -12,29 +12,34 @@ theme:
   name: material
   custom_dir: overrides
   language: fr
+  icon:
+    logo: material/movie-check-outline
+    repo: fontawesome/brands/github
   palette:
-    # Palette 1: Dark mode (default)
+    # Palette 1: Dark mode (default — Studio Slate)
     - scheme: slate
-      primary: indigo
+      primary: custom
       accent: cyan
       toggle:
         icon: material/brightness-4
         name: Passer au mode clair
     # Palette 2: Light mode
     - scheme: default
-      primary: indigo
+      primary: custom
       accent: indigo
       toggle:
         icon: material/brightness-7
         name: Passer au mode sombre
   font:
-    text: Roboto
+    text: Inter
     code: JetBrains Mono
   features:
     - navigation.tabs
     - navigation.tabs.sticky
     - navigation.sections
     - navigation.expand
+    - navigation.path
+    - navigation.footer
     - navigation.top
     - navigation.indexes
     - toc.follow
@@ -68,6 +73,7 @@ extra_javascript:
   - javascripts/mathjax.js
   - https://unpkg.com/mathjax@3/es5/tex-mml-svg.js
   - javascripts/panzoom.js
+  - javascripts/doc-portal.js
 
 markdown_extensions:
   - admonition
@@ -97,23 +103,61 @@ markdown_extensions:
   - md_in_html
 
 nav:
-  - Accueil: index.md
-  - 🗺️ Vision & Roadmap:
-      - Feuille de Route & Échelle (1920-2026): 2026-10-15-deep-dive-modernization-and-scaling-roadmap.md
-      - Modernization Blueprint: 2026-10-15-modernization-blueprint.md
-  - ⚡ Architecture & Moteurs:
-      - Intégration VLC & Daemon Axum: 2026-10-15-vlc-integration-daemon-and-plugins.md
-      - Moteur Zero-DB mmap: 2026-10-15-scaling-architecture-rust-mmap.md
-      - Providers Distants & Fallback Web (Axe 5): 2026-10-16-axe5-remote-subtitles-providers.md
-  - 📊 Benchmarks & Mesures:
-      - Validation Empirique E2E (Synology): 2026-10-17-validation-empirique-e2e-synology.md
-      - Étude Frames, Cuts & Approche Hybride: 2026-10-17-etude-comparative-identification-frames-cuts-keyframes-hybride.md
-      - Dataset Réel à l'Échelle (5M frames): 2026-10-16-phash-dataset-scale-and-benchmarks.md
-      - Benchmarks Rust vs Python: 2026-10-15-rust-e2e-benchmarks-and-tradeoffs.md
-      - PG17 BK-Tree vs pgvector: 2026-10-15-pg17-bktree-benchmark-migration.md
-
-  - 🔍 Audits & État des Lieux:
-      - Audit Global du Dépôt: 2026-10-15-audit-global.md
-  - 📜 Archives & Historique:
-      - 2021 Fast Hamming Postgres: history/2021-04-13-fast-hamming-postgres.md
-  - 🏷️ Index des Tags: tags.md
+  - 🏠 Accueil & Guide:
+      - Portail & Dashboard: index.md
+      - ⚡ Guide Opérationnel & CLI/API: quickstart-and-reference.md
+      - 🛠️ Tutoriel Orchestration Taskfile & Guide Dev: 2026-10-21-tutoriel-orchestration-taskfile-et-guide-developpeur.md
+  - 🎬 Plugin VLC & VLSub:
+      - Extension Lecteur VLC:
+          - Fork VLSub & Démo 1080p: 2026-10-18-vlsub-fork-and-restoration.md
+          - Plugin VLC v2.0 & OSD: 2026-10-17-validation-ui-ux-vlc-plugin-v2.md
+          - Daemon Axum & Plugins Lua: 2026-10-15-vlc-integration-daemon-and-plugins.md
+          - Client Daemon Sidecar & Packaging: 2026-10-20-architecture-client-daemon-sidecar-et-deploiement-o2switch.md
+          - Déploiement Remote o2switch & VLSub++: 2026-10-19-etude-deploiement-remote-o2switch-et-dimensionnement-vlsub.md
+          - Tutoriel Client Linux & systemd: 2026-10-20-tutoriel-installation-client-linux-vlc-et-service-systemd.md
+          - Déploiement & Intégration RPi4: 2026-10-20-plan-deploiement-et-integration-remote-rpi4.md
+      - Rétro-Ingénierie:
+          - Audit Legacy VLSub: 2026-10-18-vlsub-legacy-audit.md
+  - 🎛️ Studio & Couplages:
+      - Vérité Terrain & Backoffice:
+          - dbsrt Studio & Modèle Relationnel: 2026-10-18-studio-backoffice-and-relational-couplings.md
+          - Mécanique E2E Search by pHash: 2026-10-18-e2e-phash-search-mechanics-and-roadmap.md
+          - Retrait & Invalidation Globale: 2026-10-20-architecture-retrait-invalidation-donnees-globales.md
+      - Connecteurs & Distribution:
+          - Providers Distants (OpenSubtitles): 2026-10-16-axe5-remote-subtitles-providers.md
+          - Stockage Décentralisé & CAS: 2026-10-20-architecture-distribution-sous-titres-o2switch-et-stockage-decentralise.md
+          - Service CAS Subtitles (REST vs gRPC): 2026-10-20-architecture-subtitle-service-cas-et-comparatif-rest-grpc.md
+  - ⚡ Moteur pHash & DB:
+      - Empreintes Visuelles & Stockage:
+          - Profiling Latences & Mécanique E2E VLSub: 2026-10-19-profiling-latences-recherche-phash-et-e2e.md
+          - Format .dbphash Hybride (Cuts + 1fps): 2026-10-17-etude-comparative-identification-frames-cuts-keyframes-hybride.md
+          - Moteur Rust Zero-DB mmap SIMD: 2026-10-15-scaling-architecture-rust-mmap.md
+          - Indexation Métrique & Multi-Index Hashing: 2026-10-19-indexing-metric-trees-and-multi-index-hashing.md
+          - PostgreSQL 17 SP-GiST BK-Tree: 2026-10-15-pg17-bktree-benchmark-migration.md
+      - Observabilité & Télémétrie:
+          - Métriques Prometheus & Suite Grafana: 2026-10-20-observabilite-prometheus-grafana-et-telemetrie-pydbsrt.md
+  - 🛡️ Fiabilité & Tests d'Infra:
+      - Recettes & Robustesse:
+          - Tests d'Infra & Recettes systemd Hermétiques: 2026-10-21-strategie-tests-infrastructure-et-recettes-systemd-hermetiques.md
+          - Registre Incidents & Matrice de Chaos: 2026-10-20-registre-incidents-chaos-testing-et-post-mortem-vlc-hang.md
+  - 📊 Benchmarks & Preuves:
+      - Campagnes Empiriques:
+          - Dashboard Interactif E2E VLC (1 336 Tests): 2026-10-20-dashboard-interactif-e2e-vlc-corpus-nas.md
+          - Validation E2E VLC Corpus Exhaustif (1 336 Extraits): 2026-10-19-validation-e2e-vlc-vlsub-corpus-nas-exhaustif.md
+          - Validation E2E VLC & Corpus Réel NAS: 2026-10-19-validation-e2e-vlc-et-benchmarks-corpus-nas.md
+          - Évaluation 1s Random Corpus NAS: 2026-10-19-evaluation-1sec-random-corpus-nas.md
+          - Galerie 50 Captures VLC/VLSub: 2026-10-19-validation-e2e-vlc-vlsub-50-screenshots.md
+          - Stress-Test 100M Frames (MIH): 2026-10-19-mih-100m-scale-benchmark-report.md
+          - Audit Exhaustif Matching E2E (YouTube & DB): 2026-10-19-audit-exhaustif-matching-e2e-phash.md
+          - Benchmarks E2E Rust vs Python: 2026-10-15-rust-e2e-benchmarks-and-tradeoffs.md
+          - Passage à l'Échelle (5M frames): 2026-10-16-phash-dataset-scale-and-benchmarks.md
+          - Validation Empirique Synology NAS: 2026-10-17-validation-empirique-e2e-synology.md
+  - 🗺️ Roadmap & Archives:
+      - Feuilles de Route:
+          - Feuille de Route Post-Merge develop (5 Projets v0.2+): 2026-10-21-feuille-de-route-post-merge-develop-et-decoupage-projets.md
+          - Feuille de Route & Échelle (1920-2026): 2026-10-15-deep-dive-modernization-and-scaling-roadmap.md
+          - Modernization Blueprint (UV/Taskfile): 2026-10-15-modernization-blueprint.md
+      - Historique & Tags:
+          - Audit Global Initial (2026): 2026-10-15-audit-global.md
+          - Notes 2021 Fast Hamming Postgres: history/2021-04-13-fast-hamming-postgres.md
+          - 🏷️ Index des Tags: tags.md

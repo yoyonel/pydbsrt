@@ -155,6 +155,11 @@ impl SubtitleProvider for OpenSubtitlesProvider {
                 ("order_direction", "desc"),
             ]);
 
+        // OpenSubtitles 64-bit MovieHash if computed on local file
+        if let Some(ref mh) = meta.moviehash {
+            req = req.query(&[("moviehash", mh.as_str())]);
+        }
+
         // TV Show specific parameters
         let season_str = meta.season.map(|s| s.to_string());
         let episode_str = meta.episode.map(|e| e.to_string());

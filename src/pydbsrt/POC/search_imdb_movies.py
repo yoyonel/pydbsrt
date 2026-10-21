@@ -17,7 +17,7 @@ async def search_on_google(release_filename: str) -> str:
     if not google_search_results:
         raise RuntimeError(f"No result for google search on {google_search_pattern=}'")
     imdb_url = google_search_results[0]
-    return imdb_url
+    return str(imdb_url)
 
 
 def extract_imdb_movie_id(imdb_url) -> str:

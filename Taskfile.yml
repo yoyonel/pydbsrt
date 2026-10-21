@@ -13,460 +13,88 @@ vars:
   DEMO_SRT: data/SRT/big_buck_bunny_trailer_480p.en.srt
   DEMO_PHASH: /tmp/big_buck_bunny_trailer_480p.webm.25.0fps.phash
 
+includes:
+  stack:
+    taskfile: ./taskfiles/stack.yml
+    flatten: true
+  db:
+    taskfile: ./taskfiles/db.yml
+    flatten: true
+  doc:
+    taskfile: ./taskfiles/doc.yml
+    flatten: true
+  quality:
+    taskfile: ./taskfiles/quality.yml
+    flatten: true
+  vlc:
+    taskfile: ./taskfiles/vlc.yml
+    flatten: true
+  client:
+    taskfile: ./taskfiles/client.yml
+    flatten: true
+  rpi4:
+    taskfile: ./taskfiles/rpi4.yml
+    flatten: true
+  eval:
+    taskfile: ./taskfiles/eval.yml
+    flatten: true
+  demo:
+    taskfile: ./taskfiles/demo.yml
+    flatten: true
+  legacy:
+    taskfile: ./taskfiles/legacy.yml
+    flatten: true
+
 tasks:
   default:
-    desc: List available tasks
+    desc: List available high-level engineering tasks
     cmds:
       - task --list
 
-  # --- Build & Environment Management ---
+  # --- Unified Core Stack Lifecycle ---
+
+  up:
+    desc: Unified one-command stack startup (DB + PgWeb + Rust build + Certified Couplings + dbsrt-server + VLC plugins + MkDocs)
+    aliases: [dev, start]
+    cmds:
+      - task: studio
+      - task: vlc:install-plugin
+      - task: doc:daemon
+      - task: status
+
+  down:
+    desc: Unified one-command stack shutdown (stops dbsrt-server, MkDocs daemon, and Docker DB stack)
+    aliases: [stop]
+    cmds:
+      - task: server:stop
+      - task: doc:stop
+      - task: db:down
+
+  status:
+    desc: Unified health & status dashboard for all running pydbsrt services and backoffices
+    cmds:
+      - bash scripts/stack_ctl.sh status
+
+  # --- Primary Workspace Actions ---
 
   build:
-    desc: Build pydbsrt Docker image using uv multi-stage cache
+    desc: Build all Rust workspace binaries in release mode (dbsrt-cli, dbsrt-server, dbsrt-index)
+    aliases: [rs:build]
     cmds:
-      - docker build -t {{.DOCKER_IMAGE}} -f Dockerfile .
+      - cargo build --release
 
-  build-db:
-    desc: Build custom PostgreSQL 17 BK-tree Docker image
+  test:
+    desc: Run unified test suites across Rust workspace and Python tools
     cmds:
-      - docker build -t {{.DOCKER_DB_IMAGE}} docker/pg-spgist_hamming/17-develop/
+      - task: test:rs
+      - uv run pytest tests/tools/
 
-  re:
-    desc: Clean artifacts and rebuild Docker image (replaces make re)
+  clean:
+    desc: Unified purge of caches, coverage, and target/ build artifacts
     cmds:
-      - task: clean
-      - task: build
+      - bash scripts/disk_guard.sh clean
 
   sync:
     desc: Synchronize local virtualenv with uv
     cmds:
       - uv sync --all-groups
-
-  # --- Documentation Server (MkDocs Material) ---
-
-  doc:
-    desc: Shortcut for documentation server (MkDocs Material on http://127.0.0.1:8000)
-    aliases: [docs]
-    cmds:
-      - task: doc:serve
-
-  doc:serve:
-    desc: Start local responsive documentation server with auto-port discovery (MkDocs Material)
-    aliases: [docs:serve]
-    cmds:
-      - uv run python scripts/serve_docs.py
-
-  doc:build:
-    desc: Build static responsive documentation site to site/ directory
-    aliases: [docs:build]
-    cmds:
-      - uv run --no-sync mkdocs build --clean
-
-  doc:check:
-    desc: Automated documentation validator (strict build, LaTeX rendering, squashed lists, images)
-    aliases: [docs:check, doc:lint, docs:lint]
-    cmds:
-      - uv run --no-sync python scripts/validate_docs.py
-
-  doc:deploy:surge:
-    desc: Build and deploy static documentation preview to surge.sh
-    deps: [doc:build]
-    cmds:
-      - npx --yes surge site {{.SURGE_DOMAIN | default "yoyonel-pydbsrt-docs.surge.sh"}}
-
-  doc:deploy:gh-pages:
-    desc: Build and deploy static documentation to GitHub Pages (gh-deploy)
-    aliases: [doc:deploy]
-    deps: [doc:check]
-    cmds:
-      - uv run --no-sync mkdocs gh-deploy --force
-
-  lint:
-    desc: Run linters (Ruff for Python, clippy for Rust)
-    cmds:
-      - uv run ruff check src/ tests/
-      - cargo clippy --workspace -- -D warnings
-
-  fmt:
-    desc: Format code (Ruff for Python, rustfmt for Rust)
-    cmds:
-      - uv run ruff format src/ tests/
-      - uv run ruff check --fix src/ tests/
-      - cargo fmt
-
-  rs:build:
-    desc: Build Rust workspace (release)
-    cmds:
-      - cargo build --release
-
-  rs:test:
-    desc: Run all Rust tests (unit + integration + e2e)
-    cmds:
-      - cargo test --workspace
-
-  test:rs:
-    desc: Run all Rust tests (alias to rs:test)
-    cmds:
-      - cargo test --workspace
-
-  coverage:
-    desc: Generate unified Rust and Python test coverage report
-    cmds:
-      - cargo llvm-cov --workspace --json --output-path coverage-rust.json
-      - uv run pytest --cov=src --cov-report=json:coverage-python.json tests/tools/
-      - python3 scripts/generate_coverage_report.py --rust-json coverage-rust.json --python-json coverage-python.json
-      - rm -f coverage-rust.json coverage-python.json
-
-  coverage:rs:
-    desc: Run Rust code coverage using cargo-llvm-cov
-    cmds:
-      - cargo llvm-cov --workspace
-
-  coverage:rs:html:
-    desc: Generate Rust HTML coverage report in target/llvm-cov/html
-    cmds:
-      - cargo llvm-cov --workspace --html --open
-
-  coverage:py:
-    desc: Run Python code coverage using pytest-cov
-    cmds:
-      - uv run pytest --cov=src --cov-report=term-missing tests/tools/
-
-  coverage:py:html:
-    desc: Generate Python HTML coverage report in htmlcov/
-    cmds:
-      - uv run pytest --cov=src --cov-report=html:htmlcov tests/tools/
-
-  test:rs:db:
-    desc: Run Rust PostgreSQL BK-Tree integration test (requires db:up)
-    deps: [db:up, demo:import-hashes]
-    cmds:
-      - PSQL_IP=127.0.0.1 cargo test -p dbsrt-cli --test integration_test -- --nocapture
-
-  test:rs:mmap:
-    desc: Run Rust Zero-DB mmap integration test (standalone, no DB required)
-    deps: [demo:export-phash]
-    cmds:
-      - cargo test -p dbsrt-cli --test test_mmap_zero_db -- --nocapture
-
-  test:rs:retarget:
-    desc: Run Rust Subtitle retargeting E2E test (standalone, no DB required)
-    cmds:
-      - cargo test -p dbsrt-cli --test test_retarget_iso -- --nocapture
-
-  test:rs:server:
-    desc: Run dbsrt-server REST API integration tests
-    cmds:
-      - cargo test -p dbsrt-server --test test_api -- --nocapture
-
-  server:
-    desc: Shortcut to build and run dbsrt-server daemon on http://127.0.0.1:8765
-    cmds:
-      - task: server:run
-
-  server:build:
-    desc: Build dbsrt-server release binary
-    cmds:
-      - cargo build --release -p dbsrt-server
-
-  server:run:
-    desc: Run dbsrt-server daemon on http://127.0.0.1:8765
-    deps: [server:build]
-    cmds:
-      - ./target/release/dbsrt-server --host 127.0.0.1 --port 8765 --phash-dir /tmp --subtitles-dir data/SRT
-
-  vlc:
-    desc: Shortcut to install plugins and run headless VLC E2E test
-    cmds:
-      - task: vlc:install-plugin
-      - task: vlc:test-cvlc
-
-  vlc:install-plugin:
-    desc: Install dbsrt VLC Lua plugins (GUI extension and CLI interface)
-    cmds:
-      - mkdir -p ~/.local/share/vlc/lua/extensions/ ~/.local/share/vlc/lua/intf/
-      - cp -v vlc-plugin/dbsrt_subsync.lua ~/.local/share/vlc/lua/extensions/
-      - cp -v vlc-plugin/dbsrt_intf.lua ~/.local/share/vlc/lua/intf/
-      - echo "dbsrt VLC plugins installed (GUI in extensions/, CLI in intf/)."
-
-  vlc:test-cvlc:
-    desc: Test headless cvlc subtitle auto-sync with event-driven completion
-    cmds:
-      - |
-        output=$(DBSRT_AUTOKILL=1 cvlc --avcodec-hw=none --extraintf luaintf --lua-intf dbsrt_intf tests/data/big_buck_bunny_trailer_480p.mp4 2>&1)
-        echo "$output"
-        if echo "$output" | grep -q "SUCCESS! Media matched"; then
-          echo "✓ E2E VLC Integration Test Passed (Event-driven autokill)!"
-        else
-          echo "✗ E2E VLC Integration Test Failed: Subtitle was not attached!"
-          exit 1
-        fi
-
-  rs:bench:
-    desc: Run Rust pHash throughput benchmark
-    cmds:
-      - cargo run --release -p dbsrt-cli -- bench-phash
-
-  clean:
-    desc: Clean cache files, coverage, and build artifacts (replaces make fclean)
-    cmds:
-      - find . -type f -name "*.pyc" -delete
-      - find . -type d -name "__pycache__" -delete
-      - rm -rf .pytest_cache .coverage .mypy_cache dist wheels /tmp/*.phash
-
-  # --- Database Stack (Docker Compose) ---
-
-  db:up:
-    desc: Start PostgreSQL BK-tree container stack in background (replaces make db_up_detach)
-    cmds:
-      - docker compose -f {{.COMPOSE_FILE}} up -d
-
-  db:down:
-    desc: Stop PostgreSQL BK-tree container stack (replaces make db_down)
-    cmds:
-      - docker compose -f {{.COMPOSE_FILE}} down
-
-  db:logs:
-    desc: View DB container logs
-    cmds:
-      - docker compose -f {{.COMPOSE_FILE}} logs -f
-
-  db:psql:
-    desc: Open interactive psql shell inside running DB
-    interactive: true
-    cmds:
-      - docker exec -it {{.DB_HOST}} psql -U postgres -d postgres
-
-  # --- Test Suites ---
-
-  test:
-    desc: Run test suite inside Docker container (replaces make pytest)
-    deps: [db:up]
-    cmds:
-      - >
-        docker run --rm
-        --network {{.NETWORK_NAME}}
-        -e PSQL_IP={{.DB_HOST}}
-        -v "{{.ROOT_DIR}}/src:/app/src"
-        -v "{{.ROOT_DIR}}/data:/app/data"
-        -v "{{.ROOT_DIR}}/tests:/app/tests"
-        {{.DOCKER_IMAGE}}
-        pytest -o addopts="" -p no:docker-compose -v tests/
-
-  test:local:
-    desc: Run test suite locally with uv (fast, requires db:up)
-    deps: [db:up]
-    cmds:
-      - PSQL_IP=127.0.0.1 uv run pytest -o addopts="" tests/
-
-  # --- Container Execution Helpers (replaces make docker-run, docker-run-shell) ---
-
-  run:
-    desc: Run pydbsrt Docker container (replaces make docker-run)
-    cmds:
-      - docker run --rm -it --network {{.NETWORK_NAME}} -e PSQL_IP={{.DB_HOST}} {{.DOCKER_IMAGE}}
-
-  run:shell:
-    desc: Open interactive shell inside pydbsrt Docker container (replaces make docker-run-shell)
-    interactive: true
-    cmds:
-      - >
-        docker run --rm -it
-        --network {{.NETWORK_NAME}}
-        -e PSQL_IP={{.DB_HOST}}
-        -v "{{.ROOT_DIR}}/src:/app/src"
-        -v "{{.ROOT_DIR}}/data:/app/data"
-        -v "/tmp:/tmp"
-        --entrypoint bash
-        {{.DOCKER_IMAGE}}
-
-  cli:
-    desc: Run pydbsrt CLI inside Docker (e.g. task cli -- --help)
-    cmds:
-      - >
-        docker run --rm
-        --network {{.NETWORK_NAME}}
-        -e PSQL_IP={{.DB_HOST}}
-        -v "{{.ROOT_DIR}}/src:/app/src"
-        -v "{{.ROOT_DIR}}/data:/app/data"
-        -v "/tmp:/tmp"
-        {{.DOCKER_IMAGE}}
-        pydbsrt {{.CLI_ARGS}}
-
-  cli:local:
-    desc: Run pydbsrt CLI locally with uv (e.g. task cli:local -- --help)
-    cmds:
-      - PSQL_IP=127.0.0.1 uv run pydbsrt {{.CLI_ARGS}}
-
-  # --- Full Demo & Application Workflows (replaces and completes all Makefile demo targets) ---
-
-  demo:export-phash:
-    desc: Export pHash stream from sample video to /tmp (replaces make export_imghash_from_media)
-    cmds:
-      - task: cli
-        vars:
-          CLI_ARGS: export-imghash-from-media --media /app/{{.DEMO_MEDIA}}
-
-  demo:show-subtitles-media:
-    desc: Show pHash per subtitle cue directly from media (replaces make show-imghash-from-subtitles-and-media)
-    cmds:
-      - task: cli
-        vars:
-          CLI_ARGS: show-imghash-from-subtitles-and-media --media /app/{{.DEMO_MEDIA}} --subtitles /app/{{.DEMO_SRT}}
-
-  demo:export-subtitles-media:
-    desc: Show pHash per subtitle and view binary hexdump (replaces make export-imghash-from-subtitles-and-media)
-    cmds:
-      - task: demo:show-subtitles-media
-      - hexdump -C {{.DEMO_PHASH}} | head -n 10
-
-  demo:import-hashes:
-    desc: Import video pHash frames into PostgreSQL BK-Tree (Rust native COPY)
-    deps: [db:up, demo:export-phash, rs:build]
-    cmds:
-      - ./target/release/dbsrt import-phash --file {{.DEMO_PHASH}}
-
-
-  demo:import-subtitles:
-    desc: Import SRT subtitles into DB associated with media (replaces make import-subtitles-into-db)
-    deps: [demo:import-hashes]
-    cmds:
-      - task: cli
-        vars:
-          CLI_ARGS: import-subtitles-into-db --binary-img-hash-file {{.DEMO_PHASH}} --subtitles /app/{{.DEMO_SRT}}
-
-  demo:show-subtitles-db:
-    desc: Show subtitle pHash matched from DB (replaces make show-imghash-from-subtitles-and-media-in-db)
-    deps: [demo:import-hashes]
-    cmds:
-      - task: cli
-        vars:
-          CLI_ARGS: show-imghash-from-subtitles-and-media-in-db --binary-img-hash-file {{.DEMO_PHASH}} --subtitles /app/{{.DEMO_SRT}}
-
-  demo:search:
-    desc: Search video frames in PostgreSQL BK-tree with Hamming distance (replaces make search-imghash-in-db)
-    deps: [demo:import-hashes]
-    cmds:
-      - task: cli
-        vars:
-          CLI_ARGS: search-imghash-in-db --phash_file {{.DEMO_PHASH}} --distance 0
-
-  demo:retarget:
-    desc: Retarget & synchronize SRT subtitles from reference to target media (Core Feature!)
-    cmds:
-      - >
-        task cli -- retarget-subtitles
-        --ref_media /app/{{.DEMO_MEDIA}}
-        --ref_subtitles /app/{{.DEMO_SRT}}
-        --target_media /app/{{.DEMO_TARGET_MEDIA}}
-
-  demo:recognize:
-    desc: Recognize unknown media by querying DB BK-tree with fingerprint
-    deps: [demo:import-hashes]
-    cmds:
-      - task: cli
-        vars:
-          CLI_ARGS: recognize-media --media /app/{{.DEMO_MEDIA}} --search_distance 0
-
-  demo:recognize:rs:
-    desc: Recognize unknown media using full Rust standalone CLI (15x faster than Python)
-    deps: [demo:import-hashes, rs:build]
-    cmds:
-      - ./target/release/dbsrt recognize-media --media {{.DEMO_MEDIA}} --search-distance 0
-
-  demo:recognize:mmap:
-    desc: Recognize unknown media via Zero-DB mmap engine (~440x faster, no Postgres required)
-    deps: [demo:export-phash, rs:build]
-    cmds:
-      - ./target/release/dbsrt recognize-media --media {{.DEMO_MEDIA}} --no-db --phash-dir /tmp --search-distance 0
-
-  demo:scan:rs:
-    desc: Scan directory of .phash files via Zero-DB mmap engine (3 ms search)
-    deps: [demo:export-phash, rs:build]
-    cmds:
-      - ./target/release/dbsrt scan-library --phash-dir /tmp --query-media {{.DEMO_MEDIA}} --search-distance 0 --limit 3
-
-  demo:retarget:rs:
-    desc: Retarget & synchronize SRT subtitles using full standalone Rust CLI (thousands times faster than Python)
-    deps: [rs:build]
-    cmds:
-      - >
-        ./target/release/dbsrt retarget-subtitles
-        --ref-media {{.DEMO_MEDIA}}
-        --ref-subtitles {{.DEMO_SRT}}
-        --target-media {{.DEMO_TARGET_MEDIA}}
-        --phash-dir /tmp
-
-  demo:inspect:rs:
-    desc: Inspect media release metadata and embedded container subtitle streams
-    deps: [rs:build]
-    cmds:
-      - ./target/release/dbsrt inspect-media --media {{.DEMO_MEDIA}}
-
-  demo:pack:rs:
-    desc: Compile directory of .phash files into a unified high-density Hybrid .dbphash catalog
-    deps: [rs:build]
-    cmds:
-      - ./target/release/dbsrt pack --phash-dir data/__PHASH__ --output /tmp/catalog.dbphash
-
-  demo:scan:dbphash:
-    desc: Sub-millisecond search against unified Hybrid .dbphash catalog
-    deps: [demo:pack:rs]
-    cmds:
-      - >
-        ./target/release/dbsrt scan-library
-        --dbphash /tmp/catalog.dbphash
-        --query-phash data/__PHASH__/Silicon.Valley.S03E01.Founder.Friendly.1080p.AMZN.WEB-DL.DD.5.1.H.265-SiGMA.phash
-        --search-distance 0
-        --limit 5
-
-  demo:fetch:rs:
-    desc: Fetch remote subtitles with heuristic scoring, OpenSubtitles API and cache fallback
-    deps: [rs:build]
-    cmds:
-      - >
-        ./target/release/dbsrt fetch-subtitles
-        --query "Silicon.Valley.S02E01.1080p.AMZN.WEB-DL-SiGMA.mkv"
-        --language fr
-        --provider mock
-        --dry-run
-
-  # --- Massive PHASH Dataset Scale Benchmarks ---
-
-  bench:cuts-scale:
-    desc: Benchmark scene cuts detection throughput on all 5.08M frames in data/__PHASH__/ (Rust Rayon)
-    deps: [rs:build]
-    cmds:
-      - ./target/release/dbsrt bench-cuts --phash-dir data/__PHASH__
-
-  bench:cuts-scale:single:
-    desc: Benchmark scene cuts detection single-core throughput (Rust Single-thread)
-    deps: [rs:build]
-    cmds:
-      - ./target/release/dbsrt bench-cuts --phash-dir data/__PHASH__ --single-thread
-
-  bench:mmap-scale:
-    desc: Benchmark Zero-DB mmap scanner across all 125 files / 5.08M frames in data/__PHASH__/
-    deps: [rs:build]
-    cmds:
-      - >
-        ./target/release/dbsrt scan-library
-        --phash-dir data/__PHASH__
-        --query-phash data/__PHASH__/Rick.and.Morty.S01.Extras.Deleted.Scene.Pilot.1080p.BluRay.AAC2.0.H.264-BTN.phash
-        --search-distance 0
-        --limit 5
-
-  db:import:all-phash:
-    desc: Fast batch import of all 125 files / 5.08M frames into PostgreSQL 17 BK-Tree (Rust native COPY)
-    deps: [db:up, rs:build]
-    cmds:
-      - ./target/release/dbsrt import-phash --phash-dir data/__PHASH__
-
-  # --- CI/CD Local Validation ---
-
-  ci:local:
-    desc: Fast local CI reproduction suite (<10s) running lint, rust tests and docs validation
-    cmds:
-      - task: lint
-      - task: rs:test
-      - task: doc:check

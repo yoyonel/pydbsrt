@@ -60,12 +60,12 @@ async fn test_autosync_fallback_to_remote_provider_and_cache() {
 
     let cache = SubtitleCache::new(Some(cache_dir.clone()));
 
-    let app_state = AppState {
-        phash_dir: phash_dir.clone(),
-        subtitles_dir: subtitles_dir.clone(),
-        provider: mock_provider.clone(),
-        cache: cache.clone(),
-    };
+    let app_state = AppState::new(
+        phash_dir.clone(),
+        subtitles_dir.clone(),
+        mock_provider.clone(),
+        cache.clone(),
+    );
 
     let router = create_router_with_state(app_state);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -149,12 +149,12 @@ async fn test_autosync_remote_fallback_not_found() {
     let mock_provider = Arc::new(MockSubtitleProvider::new());
     let cache = SubtitleCache::new(Some(cache_dir.clone()));
 
-    let app_state = AppState {
-        phash_dir: phash_dir.clone(),
-        subtitles_dir: subtitles_dir.clone(),
-        provider: mock_provider,
+    let app_state = AppState::new(
+        phash_dir.clone(),
+        subtitles_dir.clone(),
+        mock_provider,
         cache,
-    };
+    );
 
     let router = create_router_with_state(app_state);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

@@ -1,0 +1,64 @@
+version: '3'
+
+tasks:
+  client:linux:install:
+    desc: Install dbsrt-agent and VLC plugin into ~/.local/ and configure systemd user service
+    deps: [rs:build]
+    cmds:
+      - ./scripts/install_debian.sh install {{.CLI_ARGS}}
+
+  client:linux:status:
+    desc: Check status of dbsrt-agent user systemd service
+    cmds:
+      - ./scripts/install_debian.sh status
+
+  client:linux:start:
+    desc: Start dbsrt-agent user systemd service
+    cmds:
+      - ./scripts/install_debian.sh start
+
+  client:linux:stop:
+    desc: Stop dbsrt-agent user systemd service
+    cmds:
+      - ./scripts/install_debian.sh stop
+
+  client:linux:restart:
+    desc: Restart dbsrt-agent user systemd service
+    cmds:
+      - ./scripts/install_debian.sh restart
+
+  client:linux:logs:
+    desc: View live journal logs for dbsrt-agent user systemd service
+    cmds:
+      - ./scripts/install_debian.sh logs
+
+  client:linux:uninstall:
+    desc: Completely uninstall dbsrt-agent, VLC plugin, and remove systemd service
+    cmds:
+      - ./scripts/install_debian.sh uninstall
+
+  test:recipe:debian:
+    desc: Automated hermetic integration test of Debian/Ubuntu systemd deployment recipe in isolated container
+    aliases: [client:linux:test, test:install:recipe]
+    deps: [rs:build]
+    cmds:
+      - ./scripts/test_recipe_debian.sh
+
+  stack:distributed:up:
+    desc: Start simulated distributed stack (Local Agent on :8765 relaying to Remote Server on :8766)
+    internal: true
+    deps: [rs:build]
+    cmds:
+      - ./scripts/distributed_dev_stack.sh up
+
+  stack:distributed:down:
+    desc: Stop simulated distributed stack processes
+    internal: true
+    cmds:
+      - ./scripts/distributed_dev_stack.sh down
+
+  stack:distributed:status:
+    desc: Check status and real-time metrics of Local Agent and Remote Server
+    internal: true
+    cmds:
+      - ./scripts/distributed_dev_stack.sh status

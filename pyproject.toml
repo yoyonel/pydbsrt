@@ -74,6 +74,7 @@ dev = [
     "types-click>=7.1.2",
     "waiting>=1.4.1",
     "pytest-lazy-fixtures>=1.4.1",
+    "pyright>=1.1.414",
 ]
 docs = [
     "beautifulsoup4>=4.12.0",
@@ -115,3 +116,28 @@ addopts = "-v"
 log_cli = true
 log_cli_level = "INFO"
 asyncio_mode = "auto"
+
+[tool.coverage.run]
+source = ["src/pydbsrt"]
+omit = [
+    "src/pydbsrt/POC/*",
+    "src/pydbsrt/translate/*",
+    "src/pydbsrt/applications/old/*",
+    "src/pydbsrt/applications/wip_*",
+    "src/pydbsrt/applications/extract_subtitles_from_medias.py",
+    "src/pydbsrt/applications/show_imghash_from_subtitles_and_media*.py",
+    "src/pydbsrt/tools/rick_find_emoji.py",
+    "src/pydbsrt/tools/tqdm_with_logger.py",
+    "src/pydbsrt/tools/importantframefingerprint.py",
+]
+
+[tool.pyright]
+include = ["src", "tests", "scripts"]
+exclude = [
+    "**/__pycache__",
+    ".git",
+    "notebook",
+    "data",
+]
+pythonVersion = "3.11"
+typeCheckingMode = "standard"

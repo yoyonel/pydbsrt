@@ -1,9 +1,11 @@
+from typing import Any
+
 from asyncpg import Connection
 
 from pydbsrt.models.subtitles import SubtitlesRecord
 
 
-async def insert_subtitles_in_db(conn: Connection, srt_in_db: SubtitlesRecord) -> int | None:
+async def insert_subtitles_in_db(conn: Connection | Any, srt_in_db: SubtitlesRecord) -> int | None:
     subtitles_id: int | None = await conn.fetchval(
         """
             INSERT INTO

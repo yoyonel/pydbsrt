@@ -10,6 +10,6 @@ class TimeElapsedOverRemainingColumn(TimeRemainingColumn):
     def render(self, task: Task) -> Text:
         """Show times elapsed/remaining."""
         elapsed = task.elapsed
-        elapsed_delta = timedelta(seconds=int(elapsed))
+        elapsed_delta = timedelta(seconds=int(elapsed)) if elapsed is not None else timedelta(0)
         remaining = super().render(task)
         return Text(f"{str(elapsed_delta)}/{remaining}", style="progress.remaining")

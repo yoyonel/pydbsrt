@@ -106,10 +106,16 @@ venv.bak/
 # mypy
 .mypy_cache/
 
-# Dataset perceptual hashes
+# Dataset perceptual hashes & local reference SRTs
 data/__PHASH__
 data/__PHASH__/
+data/SRT/*.srt
+data/snippets/
 *.phash
+*.dbphash
+data/*.dbphash
+*.auto.synced.srt
+*.synced.srt
 
 # Coverage reports
 .coverage*

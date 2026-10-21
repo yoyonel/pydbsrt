@@ -1,4 +1,5 @@
 import asyncio
+from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import Coroutine, Tuple
 
@@ -68,7 +69,7 @@ def db_is_ready(request):
 
 
 @pytest.fixture(scope="function")
-async def conn(db_is_ready) -> Connection:
+async def conn(db_is_ready) -> AsyncGenerator[Connection, None]:
     conn = await create_conn()
     await drop_tables(conn, tables_names=("medias", "frames", "subtitles"))
     yield conn

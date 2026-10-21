@@ -14,13 +14,7 @@ async def search(term, num_results=10, lang="en", proxy=None):
         google_url = (
             f"https://www.google.com/search?q={escaped_search_term}&num={number_results + 1}&hl={language_code}"
         )
-        proxies = None
-        if proxy:
-            if proxy[:5] == "https":
-                proxies = {"https": proxy}
-            else:
-                proxies = {"http": proxy}
-        async with httpx.AsyncClient(proxies=proxies, headers=usr_agent) as client:
+        async with httpx.AsyncClient(proxy=proxy, headers=usr_agent) as client:
             response = await client.get(google_url)
         response.raise_for_status()
 

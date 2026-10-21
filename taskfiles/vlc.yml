@@ -1,0 +1,64 @@
+version: '3'
+
+tasks:
+  vlc:install-plugin:
+    desc: Install dbsrt VLC Lua plugins (GUI extension and CLI interface)
+    cmds:
+      - bash scripts/vlc_ctl.sh install
+
+  vlc:run:
+    desc: Launch VLC media player with dbsrt VLSub extension loaded
+    cmds:
+      - bash scripts/vlc_ctl.sh run
+
+  vlc:demo:
+    desc: Interactive live demonstration of subtitle retargeting and OSD notification in VLC
+    cmds:
+      - bash scripts/vlc_ctl.sh demo
+
+  vlc:test:
+    desc: Run full testing pyramid for VLC plugins (Unit + Headless + GUI E2E)
+    cmds:
+      - task: vlc:test:unit
+      - task: vlc:test:e2e
+
+  vlc:record-demo:
+    desc: Record full HD 1080p MP4 demo of VLSub dbsrt plugin interaction on isolated Xvfb screen
+    deps: [server:daemon, vlc:install-plugin]
+    cmds:
+      - bash scripts/record_vlsub_demo.sh
+
+  vlc:
+    desc: Shortcut to run VLC Lua unit tests and headless cvlc E2E test
+    internal: true
+    cmds:
+      - task: vlc:install-plugin
+      - task: vlc:test:unit
+      - task: vlc:test-cvlc
+
+  vlc:test:unit:
+    desc: Run hermetic unit tests on VLC Lua plugins (<15ms, mocked LibVLC)
+    internal: true
+    cmds:
+      - lua tests/lua/test_vlsub_dbsrt.lua
+
+  vlc:test:e2e:
+    desc: Run comprehensive E2E Pytest suite for VLC plugins (unit, bytecode, headless cvlc, GUI Xvfb)
+    internal: true
+    deps: [server:daemon, vlc:install-plugin]
+    cmds:
+      - uv run pytest tests/test_vlc_plugin_e2e.py -v
+
+  vlc:test-cvlc:
+    desc: Test headless cvlc subtitle auto-sync with event-driven completion
+    internal: true
+    deps: [server:daemon, vlc:install-plugin]
+    cmds:
+      - bash scripts/vlc_ctl.sh test-cvlc
+
+  vlc:eval-all:
+    desc: Run exhaustive E2E VLC GUI + VLSub batch on all NAS snippets under Xvfb :98
+    internal: true
+    deps: [server:daemon, vlc:install-plugin]
+    cmds:
+      - python3 scripts/eval_vlc_vlsub_batch.py --all --resume

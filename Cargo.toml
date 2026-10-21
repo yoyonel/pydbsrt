@@ -28,8 +28,17 @@ async-trait = "0.1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tokio = { version = "1.43", features = ["full"] }
 
+[profile.dev]
+debug = 1
+incremental = true
+
+[profile.test]
+debug = 1
+incremental = true
+
 [profile.release]
 opt-level = 3
 lto = "thin"
 codegen-units = 1
 panic = "abort"
+debug = false

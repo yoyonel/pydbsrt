@@ -1,0 +1,75 @@
+version: '3'
+
+tasks:
+  eval:nas:
+    desc: Run 5-suite massive quantitative reliability evaluation across PostgreSQL 17, MmapLibrary, NAS videos, and VLC plugin
+    deps: [rs:build, server:daemon]
+    cmds:
+      - uv run python scripts/eval_nas_reliability.py
+
+  eval:nas-snippets:
+    desc: Run exhaustive quantitative evaluation matrix across all 4 batteries on real NAS snippets
+    deps: [rs:build, server:daemon]
+    cmds:
+      - uv run --no-sync python scripts/eval_exhaustive_nas_snippets.py {{.CLI_ARGS}}
+
+  eval:trailers:
+    desc: Automated empirical verification of pHash matching on remote video streams (YouTube trailers/clips)
+    deps: [rs:build]
+    cmds:
+      - uv run python scripts/download_and_audit_all_trailers.py
+
+  bench:mmap-scale:
+    desc: Benchmark Zero-DB mmap scanner across all 125 files / 5.08M frames in data/__PHASH__/
+    deps: [rs:build]
+    cmds:
+      - >
+        ./target/release/dbsrt scan-library
+        --phash-dir data/__PHASH__
+        --query-phash data/__PHASH__/Rick.and.Morty.S01.Extras.Deleted.Scene.Pilot.1080p.BluRay.AAC2.0.H.264-BTN.phash
+        --search-distance 0
+        --limit 5
+
+  bench:cuts-scale:
+    desc: Benchmark scene cuts detection throughput on all 5.08M frames in data/__PHASH__/ (Rust Rayon)
+    deps: [rs:build]
+    cmds:
+      - ./target/release/dbsrt bench-cuts --phash-dir data/__PHASH__
+
+  bench:mih:100m:
+    desc: Empirical stress test of Multi-Index Hashing (MIH) up to 100 Million frames (100M pHash)
+    cmds:
+      - cargo run --release -p dbsrt-index --example bench_100m
+
+  bench:cuts-scale:single:
+    desc: Benchmark scene cuts detection single-core throughput (Rust Single-thread)
+    internal: true
+    deps: [rs:build]
+    cmds:
+      - ./target/release/dbsrt bench-cuts --phash-dir data/__PHASH__ --single-thread
+
+  eval:scale-up:
+    desc: Extract pHash on 100+ diverse NAS videos, import millions of frames into PostgreSQL 17, and certify subtitle couplings
+    internal: true
+    deps: [db:up, rs:build]
+    cmds:
+      - uv run python scripts/scale_up_nas_dataset.py
+
+  dataset:audit:
+    desc: Audit local pHash catalog (230+ files, frame counts, size, and category distribution)
+    internal: true
+    cmds:
+      - uv run python scripts/audit_phash_catalog.py
+
+  nas:extract:snippets:
+    desc: Extract stratified 15s video snippets and compute pHashes from Synology NAS within 2GB budget
+    internal: true
+    deps: [rs:build]
+    cmds:
+      - uv run --no-sync python scripts/extract_nas_snippets.py {{.CLI_ARGS}}
+
+  nas:snippets:metadata:
+    desc: Enrich extracted NAS snippets with structured metadata (title, year, country, language, season/episode) for DB insertion
+    internal: true
+    cmds:
+      - uv run --no-sync python scripts/enrich_snippets_metadata.py {{.CLI_ARGS}}

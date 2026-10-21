@@ -302,6 +302,8 @@ pub struct MmapDbphash {
     _file: File,
     mmap: Mmap,
     header: DbphashHeader,
+    sparse_mih: std::sync::OnceLock<crate::mih::MultiIndexHash64>,
+    cuts_mih: std::sync::OnceLock<crate::mih::MultiIndexHash64>,
 }
 
 impl MmapDbphash {
@@ -345,6 +347,8 @@ impl MmapDbphash {
             _file: file,
             mmap,
             header,
+            sparse_mih: std::sync::OnceLock::new(),
+            cuts_mih: std::sync::OnceLock::new(),
         })
     }
 
@@ -404,10 +408,70 @@ impl MmapDbphash {
         entries.get(idx).filter(|e| e.media_id == media_id)
     }
 
-    /// High-throughput parallel search of query hashes against the flat cuts array.
+    #[inline]
+    pub fn sparse_mih(&self) -> &crate::mih::MultiIndexHash64 {
+        self.sparse_mih.get_or_init(|| {
+            crate::mih::MultiIndexHash64::build_from_provider(self.sparse_entries())
+        })
+    }
+
+    #[inline]
+    pub fn cuts_mih(&self) -> &crate::mih::MultiIndexHash64 {
+        self.cuts_mih
+            .get_or_init(|| crate::mih::MultiIndexHash64::build_from_provider(self.cuts_entries()))
+    }
+
+    /// High-throughput MIH-accelerated parallel search of query hashes against the cuts array.
     pub fn search_cuts(&self, query_hashes: &[u64], max_distance: u32) -> Vec<DbphashCutMatch> {
         let cuts = self.cuts_entries();
+        if cuts.is_empty() || query_hashes.is_empty() {
+            return Vec::new();
+        }
 
+        let mih = self.cuts_mih();
+        query_hashes
+            .par_iter()
+            .enumerate()
+            .flat_map_iter(|(q_idx, &q_hash)| {
+                let candidates = mih.search(q_hash, max_distance, cuts);
+                candidates.into_iter().map(move |c| DbphashCutMatch {
+                    query_idx: q_idx,
+                    cut_entry: cuts[c.index],
+                    distance: c.distance,
+                })
+            })
+            .collect()
+    }
+
+    /// High-throughput MIH-accelerated parallel search of query hashes against the sparse 1 fps array.
+    pub fn search_sparse(&self, query_hashes: &[u64], max_distance: u32) -> Vec<DbphashCutMatch> {
+        let sparse = self.sparse_entries();
+        if sparse.is_empty() || query_hashes.is_empty() {
+            return Vec::new();
+        }
+
+        let mih = self.sparse_mih();
+        query_hashes
+            .par_iter()
+            .enumerate()
+            .flat_map_iter(|(q_idx, &q_hash)| {
+                let candidates = mih.search(q_hash, max_distance, sparse);
+                candidates.into_iter().map(move |c| DbphashCutMatch {
+                    query_idx: q_idx,
+                    cut_entry: sparse[c.index],
+                    distance: c.distance,
+                })
+            })
+            .collect()
+    }
+
+    /// Linear ground-truth search of query hashes against cuts array (for verification/benchmarks).
+    pub fn search_cuts_linear(
+        &self,
+        query_hashes: &[u64],
+        max_distance: u32,
+    ) -> Vec<DbphashCutMatch> {
+        let cuts = self.cuts_entries();
         query_hashes
             .par_iter()
             .enumerate()
@@ -428,10 +492,13 @@ impl MmapDbphash {
             .collect()
     }
 
-    /// High-throughput parallel search of query hashes against the flat sparse 1 fps array.
-    pub fn search_sparse(&self, query_hashes: &[u64], max_distance: u32) -> Vec<DbphashCutMatch> {
+    /// Linear ground-truth search of query hashes against sparse array (for verification/benchmarks).
+    pub fn search_sparse_linear(
+        &self,
+        query_hashes: &[u64],
+        max_distance: u32,
+    ) -> Vec<DbphashCutMatch> {
         let sparse = self.sparse_entries();
-
         query_hashes
             .par_iter()
             .enumerate()
@@ -452,13 +519,32 @@ impl MmapDbphash {
             .collect()
     }
 
-    /// Two-tier recognition engine:
+    /// Two-tier recognition engine using accelerated MIH:
     /// - Tier 1: Identifies media candidates using sparse 1 fps frames (robust on short clips).
     /// - Tier 2: Refines time shift and confidence using scene cuts (sub-frame accuracy).
     pub fn recognize(&self, query_hashes: &[u64], max_distance: u32) -> Vec<DbphashMediaMatch> {
         let sparse_matches = self.search_sparse(query_hashes, max_distance);
         let cuts_matches = self.search_cuts(query_hashes, max_distance);
+        self.aggregate_matches(query_hashes, sparse_matches, cuts_matches)
+    }
 
+    /// Two-tier recognition engine using linear scan (ground truth / benchmarks):
+    pub fn recognize_linear(
+        &self,
+        query_hashes: &[u64],
+        max_distance: u32,
+    ) -> Vec<DbphashMediaMatch> {
+        let sparse_matches = self.search_sparse_linear(query_hashes, max_distance);
+        let cuts_matches = self.search_cuts_linear(query_hashes, max_distance);
+        self.aggregate_matches(query_hashes, sparse_matches, cuts_matches)
+    }
+
+    fn aggregate_matches(
+        &self,
+        query_hashes: &[u64],
+        sparse_matches: Vec<DbphashCutMatch>,
+        cuts_matches: Vec<DbphashCutMatch>,
+    ) -> Vec<DbphashMediaMatch> {
         if sparse_matches.is_empty() && cuts_matches.is_empty() {
             return Vec::new();
         }
@@ -496,54 +582,88 @@ impl MmapDbphash {
                 let matching_sparse = s_matches.map(|v| v.len()).unwrap_or(0);
                 let matching_cuts = c_matches.map(|v| v.len()).unwrap_or(0);
 
-                // Compute confidence based on available evidence
-                let confidence = if matching_cuts > 0 && media.cuts_count > 0 {
-                    ((matching_cuts as f64 / media.cuts_count as f64) * 100.0).clamp(50.0, 100.0)
-                } else if matching_sparse > 0 && media.sparse_count > 0 {
-                    ((matching_sparse as f64 / media.sparse_count as f64) * 100.0).clamp(30.0, 95.0)
-                } else {
-                    40.0
-                };
+                let fps = (media.fps_x1000 as f64 / 1000.0).max(1.0);
+                let expected_sparse = ((query_hashes.len() as f64 / fps).round() as usize).max(1);
 
-                // Estimate shift: prefer cuts (fine), fallback to sparse (coarse)
-                let mut estimated_shift_ms = 0i64;
+                // 1. Analyze coherent cut matches along timeline shift
+                let mut best_coherent_cuts = 0usize;
+                let mut best_cut_shift_ms = 0i64;
                 if let Some(cm) = c_matches {
                     if !cm.is_empty() {
-                        // Collect differences: cut timestamp vs query timestamp
                         let mut diffs: HashMap<i64, usize> = HashMap::new();
                         for m in cm {
-                            let query_ts_ms = (m.query_idx as f64
-                                / (media.fps_x1000 as f64 / 1000.0)
-                                * 1000.0) as i64;
+                            let query_ts_ms = (m.query_idx as f64 / fps * 1000.0) as i64;
                             let diff = m.cut_entry.timestamp_ms as i64 - query_ts_ms;
-                            // Quantize to 50ms bucket
                             let bucket = (diff / 50) * 50;
                             *diffs.entry(bucket).or_default() += 1;
                         }
-                        if let Some((&best_shift, _)) =
+                        if let Some((&shift, &count)) =
                             diffs.iter().max_by_key(|&(_, count)| *count)
                         {
-                            estimated_shift_ms = best_shift;
+                            best_cut_shift_ms = shift;
+                            best_coherent_cuts = count;
                         }
                     }
-                } else if let Some(sm) = s_matches {
+                }
+
+                // 2. Analyze coherent sparse 1 fps matches along timeline shift
+                let mut best_coherent_sparse = 0usize;
+                let mut best_sparse_shift_ms = 0i64;
+                if let Some(sm) = s_matches {
                     if !sm.is_empty() {
                         let mut diffs: HashMap<i64, usize> = HashMap::new();
                         for m in sm {
-                            let query_ts_ms = (m.query_idx as f64
-                                / (media.fps_x1000 as f64 / 1000.0)
-                                * 1000.0) as i64;
+                            let query_ts_ms = (m.query_idx as f64 / fps * 1000.0) as i64;
                             let diff = m.cut_entry.timestamp_ms as i64 - query_ts_ms;
                             let bucket = (diff / 500) * 500;
                             *diffs.entry(bucket).or_default() += 1;
                         }
-                        if let Some((&best_shift, _)) =
+                        if let Some((&shift, &count)) =
                             diffs.iter().max_by_key(|&(_, count)| *count)
                         {
-                            estimated_shift_ms = best_shift;
+                            best_sparse_shift_ms = shift;
+                            best_coherent_sparse = count;
                         }
                     }
                 }
+
+                // 3. Compute mathematically rigorous confidence based on temporal coherence:
+                // Random cross-media collisions in large indices have scattered deltas (count <= 1 or 2)
+                // and a tiny match ratio (< 5% of query frames).
+                let query_len = query_hashes.len().max(1);
+                let query_match_ratio =
+                    (matching_sparse.max(matching_cuts) as f64 / query_len as f64).min(1.0);
+
+                let (confidence, estimated_shift_ms) = if best_coherent_sparse >= 3 {
+                    let sparse_ratio =
+                        (best_coherent_sparse as f64 / expected_sparse as f64).min(1.0);
+                    let base_conf = sparse_ratio * 100.0;
+                    let conf = if best_coherent_cuts >= 2 {
+                        (base_conf * 0.7 + (best_coherent_cuts as f64 * 15.0).min(30.0)).min(100.0)
+                    } else {
+                        base_conf
+                    };
+                    let shift = if best_coherent_cuts >= 2 {
+                        best_cut_shift_ms
+                    } else {
+                        best_sparse_shift_ms
+                    };
+                    (conf, shift)
+                } else if best_coherent_cuts >= 3 {
+                    // For short 1-second queries (query_len <= 30), 3 coherent cuts correspond to a verified match
+                    let conf = if expected_sparse <= 1 && query_len <= 30 {
+                        95.0
+                    } else {
+                        (best_coherent_cuts as f64 * 25.0).min(90.0)
+                    };
+                    (conf, best_cut_shift_ms)
+                } else if query_len <= 5 && query_match_ratio >= 0.9 {
+                    // Micro-query where 100% of query frames matched both cuts and sparse
+                    (query_match_ratio * 100.0, 0i64)
+                } else {
+                    // Incoherent noise / random collision across large index: reject
+                    ((query_match_ratio * 100.0).min(30.0), 0i64)
+                };
 
                 let clean_title = self.get_title(media).to_string();
                 let year = if media.year > 0 {

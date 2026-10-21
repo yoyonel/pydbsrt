@@ -88,7 +88,7 @@ async def recognize_media(
 
     # https://github.com/pandas-dev/pandas/issues/21910#issuecomment-405109225
     df_search_results = pd.DataFrame([asdict(x) for x in search_results])
-    results_to_print: pd.Dataframe | str | None = df_search_results
+    results_to_print: pd.DataFrame | str | None = df_search_results
     if output_format == OUTPUT_FORMAT.CSV.name:
         results_to_print = df_search_results.to_csv(index=False, header=False)
     console.print(results_to_print)
