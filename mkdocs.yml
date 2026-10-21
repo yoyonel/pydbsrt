@@ -154,6 +154,7 @@ nav:
           - Validation Empirique Synology NAS: 2026-10-17-validation-empirique-e2e-synology.md
   - 🗺️ Roadmap & Archives:
       - Feuilles de Route:
+          - Feuille de Route Post-Merge develop (5 Projets v0.2+): 2026-10-21-feuille-de-route-post-merge-develop-et-decoupage-projets.md
           - Feuille de Route & Échelle (1920-2026): 2026-10-15-deep-dive-modernization-and-scaling-roadmap.md
           - Modernization Blueprint (UV/Taskfile): 2026-10-15-modernization-blueprint.md
       - Historique & Tags:
