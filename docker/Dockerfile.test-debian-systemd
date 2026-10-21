@@ -1,0 +1,30 @@
+FROM debian:bookworm-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV container=docker
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    systemd \
+    systemd-sysv \
+    dbus \
+    libpam-systemd \
+    curl \
+    sudo \
+    ca-certificates \
+    procps \
+    && rm -rf /var/lib/apt/lists/*
+
+# Mask unnecessary systemd services inside container
+RUN rm -f /lib/systemd/system/multi-user.target.wants/getty.target \
+    && rm -f /lib/systemd/system/sysinit.target.wants/systemd-udevd* \
+    && rm -f /lib/systemd/system/systemd-firstboot*
+
+# Create unprivileged test user and configure lingering for user systemd
+RUN useradd -m -s /bin/bash -u 1000 testuser \
+    && echo "testuser ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers \
+    && mkdir -p /var/lib/systemd/linger \
+    && touch /var/lib/systemd/linger/testuser
+
+STOPSIGNAL SIGRTMIN+3
+
+CMD ["/lib/systemd/systemd"]

@@ -683,6 +683,13 @@ tasks:
     cmds:
       - ./scripts/install_debian.sh uninstall
 
+  test:recipe:debian:
+    desc: Automated hermetic integration test of Debian/Ubuntu systemd deployment recipe in isolated container
+    aliases: [client:linux:test, test:install:recipe]
+    deps: [rs:build]
+    cmds:
+      - ./scripts/test_recipe_debian.sh
+
   rpi4:build:
     desc: Cross-compile dbsrt-server for aarch64 and package ARM64 Docker image
     cmds:
