@@ -30,12 +30,14 @@ flowchart TD
     P3["Projet 3 : feature/vlc-chaos-testing\nRésilience VLC & Épreuve de la Matrice de Chaos (ERR-02 -> ERR-06)"]
     P4["Projet 4 : feature/packaging-client-deb\nPackaging Binaire Client Linux (.deb / AppImage) sans Rust"]
     P5["Projet 5 : feature/mih-integration-scale\nIntégration Multi-Index Hashing au Daemon Axum (<1 ms sur 10M frames)"]
+    P6["Projet 6 : feature/refactor-cli-commands-soc\nSéparation des Responsabilités (SoC) & Modularisation CLI"]
 
     DEV --> P1
     DEV --> P2
     DEV --> P3
     DEV --> P4
     DEV --> P5
+    DEV --> P6
 ```
 
 ---
@@ -103,6 +105,16 @@ flowchart TD
   1. Module `dbsrt-index::MihIndex` branché sur le routeur Axum `POST /v1/search`.
   2. Latence p99 < 1.0 ms mesurée sur le dataset réel de 12 millions de frames.
   3. Parité stricte des résultats de matching par rapport au moteur brute-force.
+
+---
+
+### Projet 6 : Séparation des Responsabilités (SoC) & Modularisation CLI
+* **Branche Git cible** : `feature/refactor-cli-commands-soc`
+* **Objectif** : Décomposer le monolithe `crates/dbsrt-cli/src/main.rs` (1889 lignes) en modules de commandes cohésifs sous `src/commands/` selon le principe de Séparation des Responsabilités (SoC). Éliminer tous les magic numbers/literals en introduisant un module dédié `constants.rs`, formaliser `cli.rs` et exposer `lib.rs` pour permettre le test unitaire direct des fonctions CLI sans dépendance binaire stricte.
+* **Critères d'Acceptation (DoD)** :
+  1. `crates/dbsrt-cli` structuré avec `src/lib.rs`, `src/constants.rs`, `src/cli.rs`, `src/commands/` et un `main.rs` orchestrateur concis (< 100 lignes).
+  2. Zéro magic numbers : toutes les valeurs numériques, seuils et facteurs de conversion temporelle typés et documentés.
+  3. Parité stricte 100% avec les sous-commandes existantes et passage au vert de la suite de tests (`task test:rs` et tests CLI).
 
 ---
 

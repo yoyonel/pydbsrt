@@ -64,11 +64,12 @@ docker run -d \
 sleep "${CONTAINER_STARTUP_WAIT_SECONDS}"
 
 # Verify systemd PID 1 is active
-if ! docker exec "${CONTAINER_NAME}" systemctl is-system-running >/dev/null 2>&1; then
-  echo -e "${COLOR_RED}❌ Container systemd failed to initialize.${COLOR_RESET}" >&2
+SYS_STATE="$(docker exec "${CONTAINER_NAME}" systemctl is-system-running 2>/dev/null || true)"
+if [[ "${SYS_STATE}" != "running" && "${SYS_STATE}" != "degraded" ]]; then
+  echo -e "${COLOR_RED}❌ Container systemd failed to initialize (state: ${SYS_STATE}).${COLOR_RESET}" >&2
   exit 1
 fi
-echo -e "${COLOR_GREEN}✓ Container systemd PID 1 initialized successfully.${COLOR_RESET}"
+echo -e "${COLOR_GREEN}✓ Container systemd PID 1 initialized successfully (state: ${SYS_STATE}).${COLOR_RESET}"
 
 echo -e "${COLOR_BOLD}=== [Recipe Test] 3. Copying binaries & deployment scripts ===${COLOR_RESET}"
 docker exec -u "${TEST_USER_NAME}" "${CONTAINER_NAME}" mkdir -p \

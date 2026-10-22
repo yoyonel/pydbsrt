@@ -8,6 +8,15 @@ SIM_PORT=8766
 
 case "${ACTION}" in
   up)
+    HOST_ARCH="$(uname -m)"
+    if [[ "${HOST_ARCH}" != "aarch64" && "${HOST_ARCH}" != "arm64" ]]; then
+      if [[ ! -f "/proc/sys/fs/binfmt_misc/qemu-aarch64" ]]; then
+        echo "❌ Error: QEMU ARM64 binfmt emulator is not registered on host kernel."
+        echo "💡 To enable ARM64 container emulation on this ${HOST_ARCH} host, run:"
+        echo "   docker run --privileged --rm tonistiigi/binfmt --install arm64"
+        exit 1
+      fi
+    fi
     echo "Starting ARM64 simulation container on http://127.0.0.1:${SIM_PORT}..."
     docker compose -f "${COMPOSE_FILE}" up -d
     echo "Waiting for healthcheck..."

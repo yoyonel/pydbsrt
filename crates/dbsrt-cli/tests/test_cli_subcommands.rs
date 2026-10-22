@@ -298,3 +298,14 @@ fn test_cli_fetch_subtitles_mock_dry_run() {
     assert!(stdout.contains("SiGMA"));
     assert!(stdout.contains("mock"));
 }
+
+#[test]
+fn test_cli_import_phash_missing_args() {
+    let out = Command::new(env!("CARGO_BIN_EXE_dbsrt"))
+        .args(["import-phash"])
+        .output()
+        .expect("Failed to run dbsrt import-phash");
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("Either --file or --phash-dir must be specified"));
+}

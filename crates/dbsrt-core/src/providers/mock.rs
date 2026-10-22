@@ -29,6 +29,51 @@ impl MockSubtitleProvider {
         Self::default()
     }
 
+    /// Creates a mock provider pre-populated with standard testing and demonstration fixtures.
+    pub fn with_default_fixtures() -> Self {
+        let provider = Self::default();
+        let sv_cand_fr = RemoteSubtitleCandidate {
+            provider: "mock".to_string(),
+            subtitle_id: "mock-sv-fr-1".to_string(),
+            release_name: Some("Silicon.Valley.S02E01.1080p.AMZN.WEB-DL-SiGMA".to_string()),
+            language: "fr".to_string(),
+            download_url: "mock://silicon-valley-s02e01-fr".to_string(),
+            hearing_impaired: false,
+            fps: Some(23.976),
+            match_score: 0.95,
+        };
+        let sv_srt_fr = "1\n00:00:01,000 --> 00:00:04,000\nPied Piper en français\n";
+        provider.add_candidate("silicon valley", sv_cand_fr, sv_srt_fr);
+
+        let sv_cand_en = RemoteSubtitleCandidate {
+            provider: "mock".to_string(),
+            subtitle_id: "mock-sv-en-1".to_string(),
+            release_name: Some("Silicon.Valley.S02E01.1080p.AMZN.WEB-DL-SiGMA".to_string()),
+            language: "en".to_string(),
+            download_url: "mock://silicon-valley-s02e01-en".to_string(),
+            hearing_impaired: false,
+            fps: Some(23.976),
+            match_score: 0.98,
+        };
+        let sv_srt_en = "1\n00:00:01,000 --> 00:00:04,000\nPied Piper in English\n";
+        provider.add_candidate("silicon valley", sv_cand_en, sv_srt_en);
+
+        let bbb_cand_en = RemoteSubtitleCandidate {
+            provider: "mock".to_string(),
+            subtitle_id: "mock-bbb-en-1".to_string(),
+            release_name: Some("Big.Buck.Bunny.1080p".to_string()),
+            language: "en".to_string(),
+            download_url: "mock://big-buck-bunny-en".to_string(),
+            hearing_impaired: false,
+            fps: Some(24.0),
+            match_score: 0.92,
+        };
+        let bbb_srt_en = "1\n00:00:01,000 --> 00:00:04,000\nBig Buck Bunny English\n";
+        provider.add_candidate("big buck bunny", bbb_cand_en, bbb_srt_en);
+
+        provider
+    }
+
     /// Adds a mock candidate and its associated SRT content.
     pub fn add_candidate(
         &self,

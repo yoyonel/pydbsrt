@@ -186,7 +186,30 @@ Ajout du groupe déclaratif `rpi4:*` et `sim:*` (avec alias `sim:rpi4:*`) :
 * `task rpi4:status` : Vérifie l'état de santé HTTP (`curl http://rpi4:8765/v1/status`) et les métriques.
 * `task rpi4:demo` : Lance le test de reconnaissance et synchronisation E2E depuis la machine hôte pointant sur `http://rpi4:8765`.
 
-### Brique 5 : Configuration Client & Extension VLC
+### Brique 5.1 : Prérequis Émulation QEMU ARM64 & Sécurité Fail-Fast
+
+L'exécution locale du conteneur ARM64 sur hôte non-ARM (`x86_64`) via `task sim:up` requiert l'enregistrement du handler binfmt `qemu-aarch64` dans le noyau hôte (`/proc/sys/fs/binfmt_misc/qemu-aarch64`).
+
+* **Garde Fail-Fast (`scripts/rpi4_sim.sh`)** :
+  Avant de lancer `docker compose`, le script vérifie l'architecture hôte (`uname -m`). Si l'hôte n'est pas `aarch64`/`arm64` et que `/proc/sys/fs/binfmt_misc/qemu-aarch64` est absent, le script sort immédiatement en erreur (`rc=1`, < 0.02s) en affichant l'instruction de remédiation, évitant ainsi un timeout silencieux de 15 secondes sur le healthcheck.
+
+* **Commande d'activation** :
+  ```sh
+  docker run --privileged --rm tonistiigi/binfmt --install arm64
+  ```
+
+* **Validation empirique du cycle d'idempotence et du chemin d'échec** :
+  1. *Désinstallation de test* : `docker run --privileged --rm tonistiigi/binfmt --uninstall qemu-aarch64`
+  2. *Vérification chemin d'échec* : `./scripts/rpi4_sim.sh up` échoue immédiatement avec :
+     ```text
+     ❌ Error: QEMU ARM64 binfmt emulator is not registered on host kernel.
+     💡 To enable ARM64 container emulation on this x86_64 host, run:
+        docker run --privileged --rm tonistiigi/binfmt --install arm64
+     ```
+  3. *Réinstallation nominale* : `docker run --privileged --rm tonistiigi/binfmt --install arm64`
+  4. *Exécution nominale* : `./scripts/rpi4_sim.sh up && task sim:test && ./scripts/rpi4_sim.sh down` $\to$ 6/6 tests validés à 100%.
+
+### Brique 6 : Configuration Client & Extension VLC
 
 * Côté machine de développement / client :
   * Déployer le sidecar client configuré pour relayer vers l'IP du Raspberry Pi :

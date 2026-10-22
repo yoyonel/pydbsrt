@@ -1,4 +1,6 @@
-FROM debian:bookworm-slim
+ARG BASE_IMAGE=debian:trixie-slim
+# hadolint ignore=DL3006
+FROM ${BASE_IMAGE}
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV container=docker

@@ -599,6 +599,14 @@ impl DbClient {
         )?;
         Ok((row.get(0), row.get(1), row.get(2), row.get(3)))
     }
+
+    /// Deletes a media entry and its cascading child records (frames, subtitles, sub_frames) by name.
+    pub fn delete_media_by_name(&mut self, name: &str) -> Result<u64> {
+        let count = self
+            .client
+            .execute("DELETE FROM medias WHERE name = $1", &[&name])?;
+        Ok(count)
+    }
 }
 
 #[cfg(test)]
