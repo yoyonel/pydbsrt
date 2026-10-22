@@ -128,3 +128,9 @@ pub const FETCH_MAX_CANDIDATES_DISPLAY: usize = 10;
 
 /// Maximum number of candidate download attempts before giving up.
 pub const FETCH_MAX_DOWNLOAD_ATTEMPTS: usize = 3;
+
+/// Dot-prefixed .phash binary fingerprint extension.
+pub const PHASH_DOT_EXT: &str = ".phash";
+
+/// Known video extensions used for fingerprint stem conflict filtering.
+pub const KNOWN_VIDEO_EXTS: &[&str] = &[".mp4.", ".webm.", ".mkv.", ".avi.", ".mov."];

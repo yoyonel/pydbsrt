@@ -2,17 +2,16 @@
 
 use anyhow::{Context, Result};
 use clap::Args;
-use dbsrt_core::{
-    detect_cuts, extract_frames_phash, probe_video, read_phash_file, write_phash_file, SubtitleFile,
-};
-use dbsrt_index::{parse_fps_from_phash_stem, BkItem, BkTree};
+use dbsrt_core::{detect_cuts, SubtitleFile};
+use dbsrt_index::{BkItem, BkTree};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Instant;
 
+use crate::commands::shared::find_or_build_phash;
 use crate::constants::{
-    DEFAULT_BASELINE_FPS, DEFAULT_CUT_THRESHOLD, DEFAULT_EXACT_SEARCH_DISTANCE, DEFAULT_TMP_DIR,
-    MILLIS_PER_SEC, PERCENT_FACTOR, PHASH_EXT,
+    DEFAULT_CUT_THRESHOLD, DEFAULT_EXACT_SEARCH_DISTANCE, DEFAULT_TMP_DIR, MILLIS_PER_SEC,
+    PERCENT_FACTOR,
 };
 
 #[derive(Args, Debug)]
@@ -36,86 +35,6 @@ pub struct RetargetArgs {
     /// Hamming search distance for BK-Tree
     #[arg(long, default_value_t = DEFAULT_EXACT_SEARCH_DISTANCE)]
     pub search_distance: u32,
-}
-
-/// Helper resolving an existing .phash file or extracting a new one into `phash_dir`.
-pub fn find_or_build_phash(
-    media_file: &Path,
-    phash_dir: &Path,
-) -> Result<(PathBuf, Vec<u64>, f64)> {
-    let full_name = media_file
-        .file_name()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_default();
-    let stem = media_file
-        .file_stem()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_default();
-
-    if media_file.extension().and_then(|e| e.to_str()) == Some(PHASH_EXT) && media_file.exists() {
-        let hashes = read_phash_file(media_file)?;
-        let fps = parse_fps_from_phash_stem(&stem);
-        return Ok((media_file.to_path_buf(), hashes, fps));
-    }
-
-    if phash_dir.exists() {
-        if let Ok(dir_entries) = std::fs::read_dir(phash_dir) {
-            let entries: Vec<_> = dir_entries.flatten().map(|e| e.path()).collect();
-
-            // Pass 1: Prefer exact full filename prefix (e.g. `foo.mp4.25.0fps.phash` over `foo.webm.25.0fps.phash`)
-            if !full_name.is_empty() {
-                for p in &entries {
-                    if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
-                        if name.starts_with(&full_name) && name.ends_with(".phash") {
-                            let hashes = read_phash_file(p)?;
-                            let meta = probe_video(media_file)?;
-                            return Ok((p.clone(), hashes, meta.fps));
-                        }
-                    }
-                }
-            }
-
-            // Pass 2: Stem fallback without conflicting container extension
-            let known_video_exts = [".mp4.", ".webm.", ".mkv.", ".avi.", ".mov."];
-            let my_ext = media_file
-                .extension()
-                .and_then(|e| e.to_str())
-                .map(|e| format!(".{}.", e.to_lowercase()));
-            if !stem.is_empty() {
-                for p in &entries {
-                    if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
-                        if name.contains(&stem) && name.ends_with(".phash") {
-                            let name_lower = name.to_lowercase();
-                            let has_conflicting_ext = known_video_exts.iter().any(|ext| {
-                                name_lower.contains(ext) && my_ext.as_deref() != Some(*ext)
-                            });
-                            if has_conflicting_ext {
-                                continue;
-                            }
-                            let hashes = read_phash_file(p)?;
-                            let meta = probe_video(media_file)?;
-                            return Ok((p.clone(), hashes, meta.fps));
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // Otherwise probe and extract all frames
-    let meta = probe_video(media_file)?;
-    let total_frames = (meta.duration * meta.fps).floor() as usize;
-    let hashes = extract_frames_phash(media_file, 0.0, total_frames)?;
-
-    let out_name = format!(
-        "{}.{:.1}fps.phash",
-        media_file.file_name().unwrap().to_string_lossy(),
-        meta.fps
-    );
-    let out_path = phash_dir.join(&out_name);
-    write_phash_file(&out_path, &hashes)?;
-
-    Ok((out_path, hashes, meta.fps))
 }
 
 /// Run end-to-end subtitle retargeting using scene cuts BK-Tree search.
@@ -175,7 +94,7 @@ pub fn run_retarget_subtitles(args: &RetargetArgs) -> Result<()> {
         println!(
             "Nb paired frames used: {} frames ~ {:.16} seconds",
             total_paired,
-            total_paired as f64 / DEFAULT_BASELINE_FPS
+            total_paired as f64 / target_fps
         );
         println!(
             "Percent of frames used for the most common: ~ {:.2} %",

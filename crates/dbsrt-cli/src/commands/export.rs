@@ -77,7 +77,7 @@ pub fn run_export_phash(args: &ExportPhashArgs) -> Result<()> {
     };
 
     let out_path = args.output.clone().unwrap_or_else(|| {
-        let name = args.media.file_name().unwrap().to_string_lossy();
+        let name = args.media.file_name().unwrap_or_default().to_string_lossy();
         let suffix = match sampling {
             SamplingMode::KeyFrames => "keyframes.phash".to_string(),
             SamplingMode::Fps(fps) => format!("{:.1}fps.phash", fps),

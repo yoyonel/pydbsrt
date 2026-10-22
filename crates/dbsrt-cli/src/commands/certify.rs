@@ -9,7 +9,7 @@ use dbsrt_core::{
 use dbsrt_index::{parse_fps_from_phash_stem, DbClient};
 use std::path::PathBuf;
 
-use crate::commands::retarget::find_or_build_phash;
+use crate::commands::shared::find_or_build_phash;
 use crate::constants::{
     AUTO_SUBTITLE_LANG, DEFAULT_NTSC_FILM_FPS, DEFAULT_PAL_FPS, DEFAULT_POSTGRES_DB,
     DEFAULT_POSTGRES_HOST, DEFAULT_POSTGRES_PASS, DEFAULT_POSTGRES_PORT, DEFAULT_POSTGRES_USER,

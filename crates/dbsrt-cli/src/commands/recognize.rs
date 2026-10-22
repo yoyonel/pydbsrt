@@ -89,6 +89,9 @@ pub fn run_recognize_media(args: &RecognizeArgs) -> Result<()> {
     let half_divisor = 2.0;
     let start_sec = (meta.duration / half_divisor).floor();
     let nb_frames = (args.nb_seconds_to_extract * meta.fps).round() as usize;
+    if nb_frames == 0 {
+        anyhow::bail!("Number of frames to extract must be greater than 0");
+    }
 
     // 2. Extract frames & compute pHashes in streaming
     let hashes = extract_frames_phash(&args.media, start_sec, nb_frames)?;
@@ -323,5 +326,32 @@ mod tests {
         assert_eq!(format_set(&set), "{42}");
         set.insert(10);
         assert_eq!(format_set(&set), "{10, 42}");
+    }
+
+    #[test]
+    fn test_recognize_zero_frames_bail() {
+        let video = PathBuf::from("data/big_buck_bunny_trailer_480p.webm");
+        if !video.exists() {
+            return;
+        }
+        let args = RecognizeArgs {
+            media: video,
+            search_distance: crate::constants::DEFAULT_SEARCH_DISTANCE,
+            nb_seconds_to_extract: 0.0,
+            output_format: OutputFormat::DataFrame,
+            limit: crate::constants::DEFAULT_RECOGNIZE_LIMIT,
+            dbphash: None,
+            no_db: true,
+            phash_dir: None,
+            db_host: None,
+            db_port: crate::constants::DEFAULT_POSTGRES_PORT,
+            db_user: crate::constants::DEFAULT_POSTGRES_USER.to_string(),
+            db_pass: crate::constants::DEFAULT_POSTGRES_PASS.to_string(),
+            db_name: crate::constants::DEFAULT_POSTGRES_DB.to_string(),
+        };
+        let err = run_recognize_media(&args).unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("Number of frames to extract must be greater than 0"));
     }
 }
