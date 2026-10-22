@@ -134,6 +134,7 @@ nav:
           - Moteur Rust Zero-DB mmap SIMD: 2026-10-15-scaling-architecture-rust-mmap.md
           - Indexation Métrique & Multi-Index Hashing: 2026-10-19-indexing-metric-trees-and-multi-index-hashing.md
           - PostgreSQL 17 SP-GiST BK-Tree: 2026-10-15-pg17-bktree-benchmark-migration.md
+          - Sécurité SQL & Atomicité COPY: 2026-10-22-securisation-sql-et-atomicite-transactionnelle-copy-postgresql.md
       - Observabilité & Télémétrie:
           - Métriques Prometheus & Suite Grafana: 2026-10-20-observabilite-prometheus-grafana-et-telemetrie-pydbsrt.md
   - 🛡️ Fiabilité & Tests d'Infra:

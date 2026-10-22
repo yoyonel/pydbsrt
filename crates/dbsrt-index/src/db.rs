@@ -50,6 +50,89 @@ pub struct DbClient {
     client: Client,
 }
 
+/// Initial string allocation capacity for batching PostgreSQL `COPY ... FROM STDIN` rows (64 KiB).
+pub const COPY_BUFFER_INITIAL_CAPACITY: usize = 64 * 1024;
+
+/// Flush threshold buffer size before writing batch chunks to PostgreSQL `copy_in` stream (32 KiB).
+pub const COPY_BUFFER_FLUSH_THRESHOLD: usize = 32 * 1024;
+
+/// Connection timeout in seconds for PostgreSQL client.
+pub const DB_CONNECT_TIMEOUT_SECONDS: u64 = 2;
+
+/// Default baseline frame rate when media FPS cannot be parsed from file metadata.
+pub const DEFAULT_BASELINE_FPS: f64 = 25.0;
+
+/// Standard NTSC film frame rate.
+pub const NTSC_FILM_FPS: f64 = 23.976;
+
+/// Standard PAL broadcast frame rate.
+pub const PAL_FPS: f64 = 25.0;
+
+/// Minimum character length for valid ISO 639 language code (e.g. "fr", "en").
+pub const MIN_LANG_CODE_LEN: usize = 2;
+
+/// Maximum character length for valid ISO 639 / BCP 47 language code (e.g. "fra", "pt-BR").
+pub const MAX_LANG_CODE_LEN: usize = 8;
+
+/// Fallback default language code when none specified or empty.
+pub const DEFAULT_LANG_CODE: &str = "FR";
+
+/// Default PostgreSQL port for custom Docker container.
+pub const DEFAULT_POSTGRES_PORT_CUSTOM: u16 = 5433;
+
+/// Standard PostgreSQL default port.
+pub const DEFAULT_POSTGRES_PORT_STANDARD: u16 = 5432;
+
+/// Validates and normalizes an ISO 639 / BCP 47 language code:
+/// - Rejects strings containing SQL injections, metacharacters, or invalid lengths.
+/// - Requires ASCII letters and optional subtag (e.g. `FR`, `EN`, `pt-BR`, `es-419`).
+/// - Normalizes standard prefixes (`FR`, `EN`) or uppercase format.
+pub fn validate_lang_code(raw: &str) -> Result<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok(DEFAULT_LANG_CODE.to_string());
+    }
+    if trimmed.len() < MIN_LANG_CODE_LEN || trimmed.len() > MAX_LANG_CODE_LEN {
+        anyhow::bail!(
+            "Invalid language code length: expected {}-{} chars, got {:?}",
+            MIN_LANG_CODE_LEN,
+            MAX_LANG_CODE_LEN,
+            raw
+        );
+    }
+    let parts: Vec<&str> = trimmed.split('-').collect();
+    if parts.len() > 2 {
+        anyhow::bail!("Invalid language code format (multiple hyphens): {:?}", raw);
+    }
+    let primary = parts[0];
+    if primary.len() < 2 || primary.len() > 3 || !primary.chars().all(|c| c.is_ascii_alphabetic()) {
+        anyhow::bail!(
+            "Invalid primary language tag (expected 2-3 ASCII letters): {:?}",
+            raw
+        );
+    }
+    if parts.len() == 2 {
+        let subtag = parts[1];
+        if subtag.len() < 2
+            || subtag.len() > 4
+            || !subtag.chars().all(|c| c.is_ascii_alphanumeric())
+        {
+            anyhow::bail!(
+                "Invalid language subtag (expected 2-4 alphanumeric chars): {:?}",
+                raw
+            );
+        }
+    }
+    let upper = trimmed.to_ascii_uppercase();
+    if upper.starts_with("FR") {
+        Ok("FR".to_string())
+    } else if upper.starts_with("EN") {
+        Ok("EN".to_string())
+    } else {
+        Ok(upper)
+    }
+}
+
 /// Parses an optional `.XX.Xfps` suffix from a `.phash` stem.
 /// Defaults to `23.976` fps for 1080p/720p/BluRay/WEB NTSC releases and `25.0` fps otherwise.
 pub fn parse_fps_from_phash_stem(stem: &str) -> f64 {
@@ -70,7 +153,7 @@ pub fn parse_fps_from_phash_stem(stem: &str) -> f64 {
         || lower.contains("576p")
         || lower.contains("25fps")
     {
-        return 25.0;
+        return PAL_FPS;
     }
     if lower.contains("1080p")
         || lower.contains("720p")
@@ -93,16 +176,16 @@ pub fn parse_fps_from_phash_stem(stem: &str) -> f64 {
         || lower.contains("haikyuu")
         || lower.contains("anime")
     {
-        return 23.976;
+        return NTSC_FILM_FPS;
     }
-    25.0
+    DEFAULT_BASELINE_FPS
 }
 
 impl DbClient {
     pub fn connect(host: &str, port: u16, user: &str, pass: &str, dbname: &str) -> Result<Self> {
         let conn_str = format!(
-            "host={} port={} user={} password={} dbname={} connect_timeout=2",
-            host, port, user, pass, dbname
+            "host={} port={} user={} password={} dbname={} connect_timeout={}",
+            host, port, user, pass, dbname, DB_CONNECT_TIMEOUT_SECONDS
         );
         let client = Client::connect(&conn_str, NoTls)
             .with_context(|| format!("Failed to connect to PostgreSQL at {}:{}", host, port))?;
@@ -159,8 +242,23 @@ impl DbClient {
 
             ALTER TABLE subtitles ADD COLUMN IF NOT EXISTS srt_path TEXT;
             ALTER TABLE subtitles ADD COLUMN IF NOT EXISTS certified BOOLEAN DEFAULT TRUE;
-            ALTER TABLE subtitles DROP CONSTRAINT IF EXISTS subtitles_subtitles_hash_key;
-            ALTER TABLE subtitles DROP CONSTRAINT IF EXISTS subtitles_subtitles_hash_name_lang_key;
+
+            DO $$ BEGIN
+                IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'subtitles_subtitles_hash_key') THEN
+                    ALTER TABLE subtitles DROP CONSTRAINT subtitles_subtitles_hash_key;
+                END IF;
+                IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'subtitles_subtitles_hash_name_lang_key') THEN
+                    ALTER TABLE subtitles DROP CONSTRAINT subtitles_subtitles_hash_name_lang_key;
+                END IF;
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'subtitles'
+                      AND column_name = 'lang'
+                      AND udt_name != 'text'
+                ) THEN
+                    ALTER TABLE subtitles ALTER COLUMN lang TYPE TEXT;
+                END IF;
+            END $$;
 
             CREATE TABLE IF NOT EXISTS sub_frames (
                 id SERIAL PRIMARY KEY,
@@ -177,6 +275,7 @@ impl DbClient {
     }
 
     /// Import a single `.phash` file into PostgreSQL BK-Tree database.
+    /// Runs inside an explicit transaction: rolls back completely on COPY failure.
     /// Returns `(media_id, frames_inserted)`. If already exists, updates metadata and returns `(existing_id, 0)`.
     pub fn import_phash_file(&mut self, path: &Path) -> Result<(i32, usize)> {
         let name = path
@@ -194,39 +293,40 @@ impl DbClient {
         let phash_path_str = path.to_string_lossy().to_string();
         let media_hash = compute_media_phash_digest(&hashes);
 
+        let mut tx = self.client.transaction()?;
+
         // Check if media already in DB by media_hash or name
-        let check_row = self.client.query_opt(
+        let check_row = tx.query_opt(
             "SELECT id FROM medias WHERE media_hash = $1 OR name = $2",
             &[&media_hash, &name],
         )?;
 
         if let Some(row) = check_row {
             let existing_id: i32 = row.get(0);
-            let _ = self.client.execute(
+            let _ = tx.execute(
                 "UPDATE medias SET fps = $1, frame_count = $2, phash_path = $3 WHERE id = $4",
                 &[&fps, &frame_count, &phash_path_str, &existing_id],
             );
+            tx.commit()?;
             return Ok((existing_id, 0));
         }
 
         // Insert media record
-        let row = self.client.query_one(
+        let row = tx.query_one(
             "INSERT INTO medias (media_hash, name, fps, frame_count, phash_path) VALUES ($1, $2, $3, $4, $5) RETURNING id",
             &[&media_hash, &name, &fps, &frame_count, &phash_path_str],
         )?;
         let media_id: i32 = row.get(0);
 
-        // Fast COPY frames into PostgreSQL
-        let mut writer = self
-            .client
-            .copy_in("COPY frames (p_hash, frame_offset, media_id) FROM STDIN")?;
+        // Fast atomic COPY frames into PostgreSQL
+        let mut writer = tx.copy_in("COPY frames (p_hash, frame_offset, media_id) FROM STDIN")?;
 
-        let mut buffer = String::with_capacity(64 * 1024);
+        let mut buffer = String::with_capacity(COPY_BUFFER_INITIAL_CAPACITY);
         for (offset, &h) in hashes.iter().enumerate() {
             let signed_h = h as i64;
             use std::fmt::Write as FmtWrite;
             let _ = writeln!(buffer, "{}\t{}\t{}", signed_h, offset, media_id);
-            if buffer.len() >= 32 * 1024 {
+            if buffer.len() >= COPY_BUFFER_FLUSH_THRESHOLD {
                 writer.write_all(buffer.as_bytes())?;
                 buffer.clear();
             }
@@ -236,14 +336,17 @@ impl DbClient {
         }
         writer.finish()?;
 
+        tx.commit()?;
+
         Ok((media_id, hashes.len()))
     }
 
     /// Certifies and imports a subtitle file (`.srt`) coupled to a `.phash` reference media into PostgreSQL:
     /// 1. Ensures the `.phash` media is imported in `medias` and `frames`
     /// 2. Validates and computes all `SubFrameAnchor` frame offsets (`start_frame_offset .. end_frame_offset`)
-    /// 3. Inserts the record into `subtitles` (`certified = true`)
-    /// 4. Bulk-inserts all cue frame anchors into `sub_frames` via `COPY ... FROM STDIN`
+    /// 3. Validates and normalizes `lang` code securely (rejecting injections)
+    /// 4. Inserts the record into `subtitles` (`certified = true`)
+    /// 5. Bulk-inserts all cue frame anchors into `sub_frames` via atomic `COPY ... FROM STDIN`
     ///
     /// Returns `(media_id, subtitles_id, sub_frames_inserted)`.
     pub fn import_subtitle_coupling(
@@ -267,8 +370,8 @@ impl DbClient {
         let sub_file = SubtitleFile::parse(&raw_srt)?;
         let anchors = match build_and_validate_sub_frames(&sub_file, &hashes, fps) {
             Ok(a) => a,
-            Err(e) if (fps - 25.0).abs() < 1e-3 => {
-                if let Ok(a) = build_and_validate_sub_frames(&sub_file, &hashes, 23.976) {
+            Err(e) if (fps - DEFAULT_BASELINE_FPS).abs() < 1e-3 => {
+                if let Ok(a) = build_and_validate_sub_frames(&sub_file, &hashes, NTSC_FILM_FPS) {
                     a
                 } else {
                     return Err(e);
@@ -282,39 +385,37 @@ impl DbClient {
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("subtitle");
-        let lang_upper = if lang.to_lowercase().starts_with("fr") {
-            "FR".to_string()
-        } else if lang.to_lowercase().starts_with("en") {
-            "EN".to_string()
-        } else {
-            lang.to_uppercase()
-        };
+        let validated_lang = validate_lang_code(lang)?;
         let srt_path_str = srt_path.to_string_lossy().to_string();
 
+        let mut tx = self.client.transaction()?;
+
         // Check if subtitle already exists
-        let existing_sub = self.client.query_opt(
+        let existing_sub = tx.query_opt(
             "SELECT id FROM subtitles WHERE subtitles_hash = $1 AND media_id = $2",
             &[&subtitles_hash, &media_id],
         )?;
         if let Some(row) = existing_sub {
             let sub_id: i32 = row.get(0);
-            let _ = self.client.execute(
-                "UPDATE subtitles SET srt_path = $1, certified = $2 WHERE id = $3",
-                &[&srt_path_str, &certified, &sub_id],
+            let _ = tx.execute(
+                "UPDATE subtitles SET srt_path = $1, certified = $2, lang = $3 WHERE id = $4",
+                &[&srt_path_str, &certified, &validated_lang, &sub_id],
             );
+            tx.commit()?;
             return Ok((media_id, sub_id, 0));
         }
 
-        // Insert into subtitles (cast $3::text to work whether column `lang` is ENUM `LANG` or `TEXT`)
-        let sub_row = self.client.query_one(
+        // Insert into subtitles with parameterized validated_lang
+        let sub_row = tx.query_one(
             r#"
-            INSERT INTO subtitles (subtitles_hash, name, media_id, srt_path, certified)
-            VALUES ($1, $2, $3, $4, $5)
+            INSERT INTO subtitles (subtitles_hash, name, lang, media_id, srt_path, certified)
+            VALUES ($1, $2, $3, $4, $5, $6)
             RETURNING id
             "#,
             &[
                 &subtitles_hash,
                 &sub_name,
+                &validated_lang,
                 &media_id,
                 &srt_path_str,
                 &certified,
@@ -322,20 +423,11 @@ impl DbClient {
         )?;
         let subtitles_id: i32 = sub_row.get(0);
 
-        // Best-effort update of `lang` column (handles both legacy ENUM('FR','EN') and TEXT)
-        let _ = self.client.execute(
-            &format!(
-                "UPDATE subtitles SET lang = '{}' WHERE id = $1",
-                lang_upper.replace('\'', "")
-            ),
-            &[&subtitles_id],
-        );
-
-        // Bulk COPY sub_frames
-        let mut writer = self.client.copy_in(
+        // Bulk COPY sub_frames within the same atomic transaction
+        let mut writer = tx.copy_in(
             "COPY sub_frames (index, start_frame_offset, end_frame_offset, text, subtitles_id) FROM STDIN",
         )?;
-        let mut buffer = String::with_capacity(64 * 1024);
+        let mut buffer = String::with_capacity(COPY_BUFFER_INITIAL_CAPACITY);
         for anchor in &anchors {
             // Escape tabs/newlines in cue text for PostgreSQL COPY format
             let clean_text = anchor
@@ -354,7 +446,7 @@ impl DbClient {
                 clean_text,
                 subtitles_id
             );
-            if buffer.len() >= 32 * 1024 {
+            if buffer.len() >= COPY_BUFFER_FLUSH_THRESHOLD {
                 writer.write_all(buffer.as_bytes())?;
                 buffer.clear();
             }
@@ -363,6 +455,8 @@ impl DbClient {
             writer.write_all(buffer.as_bytes())?;
         }
         writer.finish()?;
+
+        tx.commit()?;
 
         Ok((media_id, subtitles_id, anchors.len()))
     }
@@ -631,8 +725,12 @@ mod tests {
             .ok()
             .and_then(|p| p.parse::<u16>().ok());
         let ports: Vec<u16> = match env_port {
-            Some(p) => vec![p, 5433, 5432],
-            None => vec![5433, 5432],
+            Some(p) => vec![
+                p,
+                DEFAULT_POSTGRES_PORT_CUSTOM,
+                DEFAULT_POSTGRES_PORT_STANDARD,
+            ],
+            None => vec![DEFAULT_POSTGRES_PORT_CUSTOM, DEFAULT_POSTGRES_PORT_STANDARD],
         };
         for port in ports {
             if let Ok(client) = DbClient::connect(&host, port, "docker", "docker", "bktreedb") {
@@ -758,5 +856,153 @@ mod tests {
             .client
             .execute("DELETE FROM medias WHERE id = $1", &[&media_id]);
         let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn test_validate_lang_code_accepts_valid() {
+        assert_eq!(validate_lang_code("fr").unwrap(), "FR");
+        assert_eq!(validate_lang_code("FR").unwrap(), "FR");
+        assert_eq!(validate_lang_code("en").unwrap(), "EN");
+        assert_eq!(validate_lang_code("EN").unwrap(), "EN");
+        assert_eq!(validate_lang_code("es").unwrap(), "ES");
+        assert_eq!(validate_lang_code("spa").unwrap(), "SPA");
+        assert_eq!(validate_lang_code("de").unwrap(), "DE");
+        assert_eq!(validate_lang_code("ja").unwrap(), "JA");
+        assert_eq!(validate_lang_code("zh").unwrap(), "ZH");
+        assert_eq!(validate_lang_code("pt-BR").unwrap(), "PT-BR");
+        assert_eq!(validate_lang_code("en-US").unwrap(), "EN");
+        assert_eq!(validate_lang_code("fr-CA").unwrap(), "FR");
+        assert_eq!(validate_lang_code("").unwrap(), "FR");
+        assert_eq!(validate_lang_code("   ").unwrap(), "FR");
+    }
+
+    #[test]
+    fn test_validate_lang_code_rejects_malicious_and_invalid() {
+        assert!(validate_lang_code("f").is_err());
+        assert!(validate_lang_code("toolongcode").is_err());
+        assert!(validate_lang_code("123").is_err());
+        assert!(validate_lang_code("fr; DROP TABLE subtitles;--").is_err());
+        assert!(validate_lang_code("' OR '1'='1").is_err());
+        assert!(validate_lang_code("fr-FR-extra").is_err());
+        assert!(validate_lang_code("fr--fr").is_err());
+        assert!(validate_lang_code("fr/en").is_err());
+        assert!(validate_lang_code("fr\x00").is_err());
+    }
+
+    #[test]
+    fn test_copy_transaction_rollback_on_failure() {
+        let Some(mut db) = try_connect_test_db() else {
+            eprintln!(
+                "PostgreSQL not reachable, skipping test_copy_transaction_rollback_on_failure"
+            );
+            return;
+        };
+
+        db.init_schema().expect("init_schema must succeed");
+
+        let unique_media_hash = format!("dummy_{:026x}", std::process::id());
+        let name = format!("test_rollback_{}", std::process::id());
+
+        // Simulate a failure during COPY: insert media, start copy, then inject invalid data
+        {
+            let mut tx = db.client.transaction().unwrap();
+            let row = tx
+                .query_one(
+                    "INSERT INTO medias (media_hash, name, fps, frame_count, phash_path) VALUES ($1, $2, $3, $4, $5) RETURNING id",
+                    &[&unique_media_hash, &name, &PAL_FPS, &100i32, &"dummy.phash"],
+                )
+                .unwrap();
+            let media_id: i32 = row.get(0);
+            assert!(media_id > 0);
+
+            let mut writer = tx
+                .copy_in("COPY frames (p_hash, frame_offset, media_id) FROM STDIN")
+                .unwrap();
+            // Write invalid/corrupted data to COPY stream to trigger failure
+            let bad_data = b"not_a_valid_row\n";
+            let _ = writer.write_all(bad_data);
+            let finish_res = writer.finish();
+            assert!(finish_res.is_err(), "COPY with invalid data must fail");
+            // Do NOT call tx.commit(); tx drops here and rolls back
+        }
+
+        // Verify that the media row was completely rolled back and DOES NOT exist in DB
+        let check = db
+            .client
+            .query_opt(
+                "SELECT id FROM medias WHERE media_hash = $1",
+                &[&unique_media_hash],
+            )
+            .unwrap();
+        assert!(
+            check.is_none(),
+            "Orphaned media record must NOT exist after failed COPY transaction"
+        );
+    }
+
+    #[test]
+    fn test_subtitle_coupling_transaction_rollback_on_failure() {
+        let Some(mut db) = try_connect_test_db() else {
+            eprintln!(
+                "PostgreSQL not reachable, skipping test_subtitle_coupling_transaction_rollback_on_failure"
+            );
+            return;
+        };
+
+        db.init_schema().expect("init_schema must succeed");
+
+        let unique_sub_hash = format!("sub_err_{:024x}", std::process::id());
+        let sub_name = format!("test_sub_rollback_{}", std::process::id());
+
+        // Insert dummy media for coupling foreign key
+        let media_hash = format!("med_for_sub_{:020x}", std::process::id());
+        let m_row = db
+            .client
+            .query_one(
+                "INSERT INTO medias (media_hash, name, fps, frame_count) VALUES ($1, $2, $3, $4) RETURNING id",
+                &[&media_hash, &media_hash, &PAL_FPS, &10i32],
+            )
+            .unwrap();
+        let media_id: i32 = m_row.get(0);
+
+        {
+            let mut tx = db.client.transaction().unwrap();
+            let row = tx
+                .query_one(
+                    "INSERT INTO subtitles (subtitles_hash, name, lang, media_id, certified) VALUES ($1, $2, $3, $4, $5) RETURNING id",
+                    &[&unique_sub_hash, &sub_name, &DEFAULT_LANG_CODE, &media_id, &true],
+                )
+                .unwrap();
+            let sub_id: i32 = row.get(0);
+            assert!(sub_id > 0);
+
+            let mut writer = tx
+                .copy_in(
+                    "COPY sub_frames (index, start_frame_offset, end_frame_offset, text, subtitles_id) FROM STDIN",
+                )
+                .unwrap();
+            let _ = writer.write_all(b"corrupted_copy_data\n");
+            let finish_res = writer.finish();
+            assert!(finish_res.is_err(), "COPY with invalid data must fail");
+            // tx drops without commit
+        }
+
+        // Verify that subtitles row was rolled back
+        let check = db
+            .client
+            .query_opt(
+                "SELECT id FROM subtitles WHERE subtitles_hash = $1",
+                &[&unique_sub_hash],
+            )
+            .unwrap();
+        assert!(
+            check.is_none(),
+            "Orphaned subtitle record must NOT exist after failed COPY transaction"
+        );
+
+        // Cleanup dummy media
+        let _ = db
+            .client
+            .execute("DELETE FROM medias WHERE id = $1", &[&media_id]);
     }
 }
