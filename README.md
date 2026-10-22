@@ -92,7 +92,28 @@ task test:recipe:debian
 
 ---
 
-## 4. Ordonnancement Modulaire Taskfile & Assurance Qualité
+## 4. Architecture Modulaire & SoC (Rust Workspace)
+
+Le projet adopte une **Séparation Stricte des Responsabilités (SoC)** répartie en crates spécialisées sous `crates/`, avec **zéro constante magique** et typage rigoureux :
+
+```mermaid
+flowchart TD
+    CLI["crates/dbsrt-cli (binaire & lib)"] --> CORE["crates/dbsrt-core (SIMD / pHash / FFmpeg)"]
+    CLI --> INDEX["crates/dbsrt-index (PostgreSQL 17 & Zero-DB mmap)"]
+    SERVER["crates/dbsrt-server (Axum API & Studio)"] --> CORE
+    SERVER --> INDEX
+```
+
+| Crate | Responsabilités & Architecture SoC |
+| :--- | :--- |
+| **[`crates/dbsrt-cli`](crates/dbsrt-cli/)** | **CLI `dbsrt` modulaire** : Dispatcher Clap épuré (`main.rs`), bibliothèque `dbsrt_cli` (`lib.rs`), constantes de domaine typées (`constants.rs`) et sous-commandes dédiées dans `src/commands/` (`bench`, `certify`, `export`, `fetch`, `import`, `inspect`, `pack`, `recognize`, `retarget`, `scan`, `shared`). |
+| **[`crates/dbsrt-server`](crates/dbsrt-server/)** | **Serveur REST Axum** : Handlers HTTP modulaires dans `src/handlers/` (`health`, `lookup`, `metrics`, `search`, `studio`, `sync`), moteur MIH unifié (< 1 ms) et UI web bicanale `dbsrt Studio` (`:8765/studio`). |
+| **[`crates/dbsrt-index`](crates/dbsrt-index/)** | **Indexation & Stockage** : Gestion relationnelle PostgreSQL 17 SP-GiST BK-Tree (`subtitles`, `sub_frames`, `medias`, `frames`) et format Zero-DB plat `.dbphash` / `.phash` par projection mémoire (`mmap`). |
+| **[`crates/dbsrt-core`](crates/dbsrt-core/)** | **Primitives Algorithmiques** : Calcul d'empreintes perceptuelles 64-bit DCT pHash, extraction de trames FFmpeg HWAccel/SW et distance de Hamming accélérée SIMD (`popcnt`). |
+
+---
+
+## 5. Ordonnancement Modulaire Taskfile & Assurance Qualité
 
 Le dépôt est orchestré par **[Taskfile (go-task)](https://taskfile.dev/)** découpé en modules spécialisés sous `taskfiles/` :
 
@@ -122,7 +143,7 @@ Le dépôt est orchestré par **[Taskfile (go-task)](https://taskfile.dev/)** d�
 
 ---
 
-## 5. Documentation & Rapports d'Architecture
+## 6. Documentation & Rapports d'Architecture
 
 Dossiers techniques détaillés disponibles dans le répertoire [`docs/`](docs) :
 
