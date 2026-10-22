@@ -12,7 +12,7 @@ use std::time::Instant;
 
 use crate::constants::{
     DEFAULT_BASELINE_FPS, DEFAULT_CUT_THRESHOLD, DEFAULT_EXACT_SEARCH_DISTANCE, DEFAULT_TMP_DIR,
-    MILLIS_PER_SEC, PERCENT_FACTOR,
+    MILLIS_PER_SEC, PERCENT_FACTOR, PHASH_EXT,
 };
 
 #[derive(Args, Debug)]
@@ -52,7 +52,7 @@ pub fn find_or_build_phash(
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_default();
 
-    if media_file.extension().and_then(|e| e.to_str()) == Some("phash") && media_file.exists() {
+    if media_file.extension().and_then(|e| e.to_str()) == Some(PHASH_EXT) && media_file.exists() {
         let hashes = read_phash_file(media_file)?;
         let fps = parse_fps_from_phash_stem(&stem);
         return Ok((media_file.to_path_buf(), hashes, fps));

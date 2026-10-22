@@ -10,8 +10,9 @@ use std::time::Instant;
 
 use crate::cli::OutputFormat;
 use crate::constants::{
-    DEFAULT_EXTRACTION_DURATION_SEC, DEFAULT_POSTGRES_DB, DEFAULT_POSTGRES_PASS,
-    DEFAULT_POSTGRES_PORT, DEFAULT_POSTGRES_USER, DEFAULT_RECOGNIZE_LIMIT, DEFAULT_SEARCH_DISTANCE,
+    DEFAULT_EXTRACTION_DURATION_SEC, DEFAULT_POSTGRES_DB, DEFAULT_POSTGRES_HOST,
+    DEFAULT_POSTGRES_PASS, DEFAULT_POSTGRES_PORT, DEFAULT_POSTGRES_USER, DEFAULT_RECOGNIZE_LIMIT,
+    DEFAULT_SEARCH_DISTANCE,
 };
 
 #[derive(Args, Debug)]
@@ -220,7 +221,7 @@ pub fn run_recognize_media(args: &RecognizeArgs) -> Result<()> {
         .db_host
         .clone()
         .or_else(|| std::env::var("PSQL_IP").ok())
-        .unwrap_or_else(|| "127.0.0.1".to_string());
+        .unwrap_or_else(|| DEFAULT_POSTGRES_HOST.to_string());
 
     let mut db = DbClient::connect(
         &host,

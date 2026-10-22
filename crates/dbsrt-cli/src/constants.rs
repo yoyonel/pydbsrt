@@ -30,8 +30,11 @@ pub const DEFAULT_BENCH_PHASH_COUNT: usize = 100_000;
 /// Dummy frame luminance byte value for benchmark synthetic frames.
 pub const DUMMY_FRAME_BYTE: u8 = 128;
 
-/// Dummy frame buffer size in bytes (32x32 grayscale).
-pub const DUMMY_FRAME_SIZE: usize = 1024;
+/// Dummy frame side length in pixels (square grayscale frame).
+pub const DUMMY_FRAME_DIM: usize = 32;
+
+/// Dummy frame buffer size in bytes (DUMMY_FRAME_DIM x DUMMY_FRAME_DIM grayscale).
+pub const DUMMY_FRAME_SIZE: usize = DUMMY_FRAME_DIM * DUMMY_FRAME_DIM;
 
 /// Default duration in seconds to extract for video decoding benchmark.
 pub const DEFAULT_BENCH_VIDEO_DURATION_SEC: f64 = 10.0;
@@ -81,11 +84,20 @@ pub const PACK_PROGRESS_INTERVAL: usize = 25;
 /// Default PostgreSQL port for pydbsrt Docker / native service.
 pub const DEFAULT_POSTGRES_PORT: u16 = 5433;
 
+/// Standard PostgreSQL port (used by CI service containers).
+pub const STANDARD_POSTGRES_PORT: u16 = 5432;
+
+/// Port with no listener, used by tests to force a connection failure.
+pub const TEST_UNREACHABLE_PORT: u16 = 59999;
+
 /// Default directory storing certified .srt files and couplings registry.
 pub const DEFAULT_SUBTITLES_DIR: &str = "data/SRT";
 
 /// Default directory storing .phash binary fingerprints.
 pub const DEFAULT_PHASH_DATA_DIR: &str = "data/__PHASH__";
+
+/// File extension of binary pHash fingerprint files (without leading dot).
+pub const PHASH_EXT: &str = "phash";
 
 /// Default system temporary directory path fallback.
 pub const DEFAULT_TMP_DIR: &str = "/tmp";

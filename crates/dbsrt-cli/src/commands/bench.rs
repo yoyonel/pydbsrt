@@ -13,7 +13,7 @@ use std::time::Instant;
 use crate::constants::{
     DEFAULT_BASELINE_FPS, DEFAULT_BENCH_VIDEO_DURATION_SEC, DEFAULT_CUT_THRESHOLD,
     DEFAULT_PHASH_DATA_DIR, DEFAULT_SPARSE_FPS, DIVISION_BY_ZERO_FALLBACK_SEC, DUMMY_FRAME_BYTE,
-    DUMMY_FRAME_SIZE, MICROS_PER_SEC, MILLIS_PER_SEC, SECONDS_PER_HOUR,
+    DUMMY_FRAME_SIZE, MICROS_PER_SEC, MILLIS_PER_SEC, PHASH_EXT, SECONDS_PER_HOUR,
 };
 
 #[derive(Args, Debug)]
@@ -137,7 +137,7 @@ pub fn run_bench_cuts(args: &BenchCutsArgs) -> Result<()> {
     for entry in std::fs::read_dir(&args.phash_dir)? {
         let entry = entry?;
         let path = entry.path();
-        if path.extension().and_then(|s| s.to_str()) == Some("phash") {
+        if path.extension().and_then(|s| s.to_str()) == Some(PHASH_EXT) {
             files.push(path);
         }
     }
@@ -182,7 +182,7 @@ pub fn run_bench_cuts(args: &BenchCutsArgs) -> Result<()> {
     };
 
     let elapsed = start.elapsed().as_secs_f64();
-    let fps = total_frames as f64 / elapsed;
+    let fps = total_frames as f64 / elapsed.max(DIVISION_BY_ZERO_FALLBACK_SEC);
     let video_hours = (total_frames as f64 / DEFAULT_BASELINE_FPS) / SECONDS_PER_HOUR;
     let speedup = (video_hours * SECONDS_PER_HOUR) / elapsed;
 
@@ -195,8 +195,8 @@ pub fn run_bench_cuts(args: &BenchCutsArgs) -> Result<()> {
         total_cuts as f64 / files.len() as f64
     );
     println!(
-        "Equivalent video time : {:>12.1} hours of 24fps media",
-        video_hours
+        "Equivalent video time : {:>12.1} hours of {:.0}fps media",
+        video_hours, DEFAULT_BASELINE_FPS
     );
     println!("Processing speedup    : {:>12.0}x real-time", speedup);
     println!("===================================================");

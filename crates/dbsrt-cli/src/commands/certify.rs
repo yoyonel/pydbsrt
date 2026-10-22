@@ -13,7 +13,7 @@ use crate::commands::retarget::find_or_build_phash;
 use crate::constants::{
     AUTO_SUBTITLE_LANG, DEFAULT_NTSC_FILM_FPS, DEFAULT_PAL_FPS, DEFAULT_POSTGRES_DB,
     DEFAULT_POSTGRES_HOST, DEFAULT_POSTGRES_PASS, DEFAULT_POSTGRES_PORT, DEFAULT_POSTGRES_USER,
-    DEFAULT_SUBTITLES_DIR, DEFAULT_TMP_DIR, EPSILON_FPS,
+    DEFAULT_SUBTITLES_DIR, DEFAULT_SUBTITLE_LANG, DEFAULT_TMP_DIR, EPSILON_FPS,
 };
 
 #[derive(Args, Debug)]
@@ -112,7 +112,7 @@ pub fn detect_cli_subtitle_lang(filename: &str, fallback: &str) -> String {
             _ => break,
         }
     }
-    "en".to_string()
+    DEFAULT_SUBTITLE_LANG.to_string()
 }
 
 /// Run subtitle coupling certification, registering ground-truth frames in couplings.json / PostgreSQL.

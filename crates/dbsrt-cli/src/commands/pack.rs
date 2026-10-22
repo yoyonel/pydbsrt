@@ -10,6 +10,7 @@ use std::time::Instant;
 use crate::constants::{
     BYTES_PER_MIB, DEFAULT_BASELINE_FPS, DEFAULT_CUT_THRESHOLD, DEFAULT_PHASH_DATA_DIR,
     MAX_VALID_FPS, MILLIS_PER_SEC, MIN_VALID_FPS, PACK_PROGRESS_INTERVAL, PERCENT_FACTOR,
+    PHASH_EXT,
 };
 
 #[derive(Args, Debug)]
@@ -36,6 +37,9 @@ pub struct PackArgs {
 }
 
 /// Helper parsing framerate from dot-separated filename stem (e.g. `foo.25fps.phash` or `foo.25.0fps.phash`).
+///
+/// Unlike `dbsrt_index::parse_fps_from_phash_stem`, it deliberately skips release-tag heuristics
+/// (PAL/NTSC fallbacks) and returns `None` instead, so `--default-fps` keeps priority.
 pub fn extract_fps_from_path(path: &Path) -> Option<f64> {
     let s = path.file_name()?.to_str()?;
     let stem = path.file_stem()?.to_str()?;
@@ -88,7 +92,7 @@ pub fn run_pack(args: &PackArgs) -> Result<()> {
         for entry in std::fs::read_dir(dir)? {
             let entry = entry?;
             let path = entry.path();
-            if path.extension().and_then(|s| s.to_str()) == Some("phash") {
+            if path.extension().and_then(|s| s.to_str()) == Some(PHASH_EXT) {
                 if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
                     if seen_stems.insert(stem.to_string()) {
                         files.push(path);

@@ -8,7 +8,7 @@ use std::time::Instant;
 
 use crate::constants::{
     DEFAULT_POSTGRES_DB, DEFAULT_POSTGRES_HOST, DEFAULT_POSTGRES_PASS, DEFAULT_POSTGRES_PORT,
-    DEFAULT_POSTGRES_USER,
+    DEFAULT_POSTGRES_USER, PHASH_EXT,
 };
 
 #[derive(Args, Debug)]
@@ -57,7 +57,7 @@ pub fn run_import_phash(args: &ImportPhashArgs) -> Result<()> {
         for entry in std::fs::read_dir(dir)? {
             let entry = entry?;
             let path = entry.path();
-            if path.extension().and_then(|s| s.to_str()) == Some("phash") {
+            if path.extension().and_then(|s| s.to_str()) == Some(PHASH_EXT) {
                 target_files.push(path);
             }
         }
@@ -148,19 +148,27 @@ pub fn run_import_phash(args: &ImportPhashArgs) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::constants::{STANDARD_POSTGRES_PORT, TEST_UNREACHABLE_PORT};
     use dbsrt_core::write_phash_file;
 
-    #[test]
-    fn test_import_phash_missing_args() {
-        let args = ImportPhashArgs {
-            file: None,
-            phash_dir: None,
+    fn create_test_import_args(
+        file: Option<PathBuf>,
+        phash_dir: Option<PathBuf>,
+    ) -> ImportPhashArgs {
+        ImportPhashArgs {
+            file,
+            phash_dir,
             db_host: None,
             db_port: DEFAULT_POSTGRES_PORT,
             db_user: DEFAULT_POSTGRES_USER.to_string(),
             db_pass: DEFAULT_POSTGRES_PASS.to_string(),
             db_name: DEFAULT_POSTGRES_DB.to_string(),
-        };
+        }
+    }
+
+    #[test]
+    fn test_import_phash_missing_args() {
+        let args = create_test_import_args(None, None);
         let err = run_import_phash(&args).unwrap_err();
         assert!(err
             .to_string()
@@ -169,30 +177,14 @@ mod tests {
 
     #[test]
     fn test_import_phash_nonexistent_file() {
-        let args = ImportPhashArgs {
-            file: Some(PathBuf::from("/nonexistent/file.phash")),
-            phash_dir: None,
-            db_host: None,
-            db_port: DEFAULT_POSTGRES_PORT,
-            db_user: DEFAULT_POSTGRES_USER.to_string(),
-            db_pass: DEFAULT_POSTGRES_PASS.to_string(),
-            db_name: DEFAULT_POSTGRES_DB.to_string(),
-        };
+        let args = create_test_import_args(Some(PathBuf::from("/nonexistent/file.phash")), None);
         let err = run_import_phash(&args).unwrap_err();
         assert!(err.to_string().contains("does not exist"));
     }
 
     #[test]
     fn test_import_phash_nonexistent_dir() {
-        let args = ImportPhashArgs {
-            file: None,
-            phash_dir: Some(PathBuf::from("/nonexistent/dir")),
-            db_host: None,
-            db_port: DEFAULT_POSTGRES_PORT,
-            db_user: DEFAULT_POSTGRES_USER.to_string(),
-            db_pass: DEFAULT_POSTGRES_PASS.to_string(),
-            db_name: DEFAULT_POSTGRES_DB.to_string(),
-        };
+        let args = create_test_import_args(None, Some(PathBuf::from("/nonexistent/dir")));
         let err = run_import_phash(&args).unwrap_err();
         assert!(err.to_string().contains("does not exist"));
     }
@@ -202,15 +194,7 @@ mod tests {
         let temp_dir =
             std::env::temp_dir().join(format!("test_import_empty_{}", std::process::id()));
         let _ = std::fs::create_dir_all(&temp_dir);
-        let args = ImportPhashArgs {
-            file: None,
-            phash_dir: Some(temp_dir.clone()),
-            db_host: None,
-            db_port: DEFAULT_POSTGRES_PORT,
-            db_user: DEFAULT_POSTGRES_USER.to_string(),
-            db_pass: DEFAULT_POSTGRES_PASS.to_string(),
-            db_name: DEFAULT_POSTGRES_DB.to_string(),
-        };
+        let args = create_test_import_args(None, Some(temp_dir.clone()));
         let err = run_import_phash(&args).unwrap_err();
         assert!(err.to_string().contains("No .phash files found to import"));
         let _ = std::fs::remove_dir_all(&temp_dir);
@@ -225,13 +209,9 @@ mod tests {
         write_phash_file(&phash_path, &[0x1111_2222_3333_4444_u64]).unwrap();
 
         let args = ImportPhashArgs {
-            file: Some(phash_path),
-            phash_dir: None,
-            db_host: Some("127.0.0.1".to_string()),
-            db_port: 59999, // Unused port to guarantee failure
-            db_user: DEFAULT_POSTGRES_USER.to_string(),
-            db_pass: DEFAULT_POSTGRES_PASS.to_string(),
-            db_name: DEFAULT_POSTGRES_DB.to_string(),
+            db_host: Some(DEFAULT_POSTGRES_HOST.to_string()),
+            db_port: TEST_UNREACHABLE_PORT,
+            ..create_test_import_args(Some(phash_path), None)
         };
         assert!(run_import_phash(&args).is_err());
         let _ = std::fs::remove_dir_all(&temp_dir);
@@ -239,22 +219,24 @@ mod tests {
 
     #[test]
     fn test_import_phash_live_db() {
-        let host = std::env::var("PSQL_IP").unwrap_or_else(|_| "127.0.0.1".to_string());
+        let host = std::env::var("PSQL_IP").unwrap_or_else(|_| DEFAULT_POSTGRES_HOST.to_string());
         let env_port = std::env::var("PSQL_PORT")
             .ok()
             .and_then(|p| p.parse::<u16>().ok());
         let ports: Vec<u16> = match env_port {
-            Some(p) => vec![p, 5433, 5432],
-            None => vec![5433, 5432],
+            Some(p) => vec![p, DEFAULT_POSTGRES_PORT, STANDARD_POSTGRES_PORT],
+            None => vec![DEFAULT_POSTGRES_PORT, STANDARD_POSTGRES_PORT],
         };
-        let mut active_port = None;
-        for port in ports {
-            if DbClient::connect(&host, port, "docker", "docker", "bktreedb").is_ok() {
-                active_port = Some(port);
-                break;
-            }
-        }
-        let Some(port) = active_port else {
+        let connect = |port: u16| {
+            DbClient::connect(
+                &host,
+                port,
+                DEFAULT_POSTGRES_USER,
+                DEFAULT_POSTGRES_PASS,
+                DEFAULT_POSTGRES_DB,
+            )
+        };
+        let Some(port) = ports.into_iter().find(|&p| connect(p).is_ok()) else {
             eprintln!("PostgreSQL BK-Tree container not available, skipping live import test");
             return;
         };
@@ -266,41 +248,30 @@ mod tests {
             "unit_test_cli_import_{}.25.0fps.phash",
             std::process::id()
         ));
-        let hashes = vec![0x1234_5678_9abc_def0_u64; 20];
+        // Unique content per run: an orphan row from a crashed run would otherwise match by
+        // media_hash and silently short-circuit the insert path.
+        let hashes =
+            vec![0x1234_5678_0000_0000_u64 | (u64::from(std::process::id()) & 0xFFFF_FFFF); 20];
         write_phash_file(&synth_file, &hashes).unwrap();
 
         // 1. Single file import
         let args_file = ImportPhashArgs {
-            file: Some(synth_file.clone()),
-            phash_dir: None,
             db_host: Some(host.clone()),
             db_port: port,
-            db_user: "docker".to_string(),
-            db_pass: "docker".to_string(),
-            db_name: "bktreedb".to_string(),
+            ..create_test_import_args(Some(synth_file.clone()), None)
         };
         assert!(run_import_phash(&args_file).is_ok());
 
         // 2. Directory import (re-import triggers idempotent skip branch)
         let args_dir = ImportPhashArgs {
-            file: None,
-            phash_dir: Some(temp_dir.clone()),
-            db_host: Some(host),
+            db_host: Some(host.clone()),
             db_port: port,
-            db_user: "docker".to_string(),
-            db_pass: "docker".to_string(),
-            db_name: "bktreedb".to_string(),
+            ..create_test_import_args(None, Some(temp_dir.clone()))
         };
         assert!(run_import_phash(&args_dir).is_ok());
 
         // Cleanup DB row
-        if let Ok(mut db) = DbClient::connect(
-            args_file.db_host.as_deref().unwrap_or("127.0.0.1"),
-            port,
-            "docker",
-            "docker",
-            "bktreedb",
-        ) {
+        if let Ok(mut db) = connect(port) {
             let stem = synth_file
                 .file_stem()
                 .and_then(|s| s.to_str())
