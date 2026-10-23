@@ -6,14 +6,14 @@ use dbsrt_core::{
     build_and_validate_sub_frames_opts, compute_bytes_digest_32, compute_media_phash_digest,
     read_phash_file, CertifiedSubtitleRecord, CouplingRegistry, SubtitleFile,
 };
-use dbsrt_index::{parse_fps_from_phash_stem, DbClient};
+use dbsrt_index::parse_fps_from_phash_stem;
 use std::path::PathBuf;
 
-use crate::commands::shared::find_or_build_phash;
+use crate::cli::PostgresArgs;
+use crate::commands::{connect_db, find_or_build_phash};
 use crate::constants::{
-    AUTO_SUBTITLE_LANG, DEFAULT_NTSC_FILM_FPS, DEFAULT_PAL_FPS, DEFAULT_POSTGRES_DB,
-    DEFAULT_POSTGRES_HOST, DEFAULT_POSTGRES_PASS, DEFAULT_POSTGRES_PORT, DEFAULT_POSTGRES_USER,
-    DEFAULT_SUBTITLES_DIR, DEFAULT_SUBTITLE_LANG, DEFAULT_TMP_DIR, EPSILON_FPS,
+    AUTO_SUBTITLE_LANG, DEFAULT_NTSC_FILM_FPS, DEFAULT_PAL_FPS, DEFAULT_SUBTITLES_DIR,
+    DEFAULT_SUBTITLE_LANG, DEFAULT_TMP_DIR, EPSILON_FPS,
 };
 
 #[derive(Args, Debug)]
@@ -62,25 +62,9 @@ pub struct CertifyCouplingArgs {
     #[arg(long)]
     pub db_only: bool,
 
-    /// PostgreSQL host (defaults to PSQL_IP env or 127.0.0.1)
-    #[arg(long)]
-    pub db_host: Option<String>,
-
-    /// PostgreSQL port
-    #[arg(long, env = "PSQL_PORT", default_value_t = DEFAULT_POSTGRES_PORT)]
-    pub db_port: u16,
-
-    /// PostgreSQL user
-    #[arg(long, default_value = DEFAULT_POSTGRES_USER)]
-    pub db_user: String,
-
-    /// PostgreSQL password
-    #[arg(long, default_value = DEFAULT_POSTGRES_PASS)]
-    pub db_pass: String,
-
-    /// PostgreSQL database name
-    #[arg(long, default_value = DEFAULT_POSTGRES_DB)]
-    pub db_name: String,
+    /// PostgreSQL connection arguments
+    #[command(flatten)]
+    pub db: PostgresArgs,
 }
 
 /// Helper detecting subtitle ISO 639-1 language code from filename tokens.
@@ -247,19 +231,8 @@ pub fn run_certify_coupling(args: &CertifyCouplingArgs) -> Result<()> {
         }
     }
 
-    if args.db_only || args.use_db || args.db_host.is_some() {
-        let host = args
-            .db_host
-            .clone()
-            .or_else(|| std::env::var("PSQL_IP").ok())
-            .unwrap_or_else(|| DEFAULT_POSTGRES_HOST.to_string());
-        match DbClient::connect(
-            &host,
-            args.db_port,
-            &args.db_user,
-            &args.db_pass,
-            &args.db_name,
-        ) {
+    if args.db_only || args.use_db || args.db.host.is_some() {
+        match connect_db(&args.db) {
             Ok(mut client) => {
                 client.init_schema()?;
                 let (media_id, sub_id, inserted_anchors) =

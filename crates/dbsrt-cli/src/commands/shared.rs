@@ -1,13 +1,38 @@
 //! Shared helpers reused across CLI subcommands.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use dbsrt_core::{extract_frames_phash, probe_video, read_phash_file, write_phash_file};
-use dbsrt_index::parse_fps_from_phash_stem;
+use dbsrt_index::{parse_fps_from_phash_stem, DbClient};
 use std::path::{Path, PathBuf};
 
-use crate::constants::{KNOWN_VIDEO_EXTS, PHASH_DOT_EXT, PHASH_EXT};
+use crate::cli::PostgresArgs;
+use crate::constants::{DEFAULT_POSTGRES_HOST, KNOWN_VIDEO_EXTS, PHASH_DOT_EXT, PHASH_EXT};
+
+/// Resolve target PostgreSQL host falling back to PSQL_IP env or DEFAULT_POSTGRES_HOST.
+pub fn resolve_db_host(db: &PostgresArgs) -> String {
+    db.host
+        .clone()
+        .or_else(|| std::env::var("PSQL_IP").ok())
+        .unwrap_or_else(|| DEFAULT_POSTGRES_HOST.to_string())
+}
+
+/// Connect to PostgreSQL using configuration from `PostgresArgs`.
+pub fn connect_db(db: &PostgresArgs) -> Result<DbClient> {
+    let host = resolve_db_host(db);
+    DbClient::connect(&host, db.port, &db.user, &db.pass, &db.name).with_context(|| {
+        format!(
+            "Failed to connect to PostgreSQL at {}:{}/{}",
+            host, db.port, db.name
+        )
+    })
+}
 
 /// Helper resolving an existing .phash file or extracting a new one into `phash_dir`.
+///
+/// # Concurrency
+/// This function is CPU-bound (FFmpeg decoding + pHash SIMD). When called
+/// from a Tokio runtime (e.g. in `dbsrt-server`), wrap in `tokio::task::spawn_blocking`
+/// to avoid starving async executors.
 pub fn find_or_build_phash(
     media_file: &Path,
     phash_dir: &Path,
@@ -75,13 +100,38 @@ pub fn find_or_build_phash(
     let total_frames = (meta.duration * meta.fps).floor() as usize;
     let hashes = extract_frames_phash(media_file, 0.0, total_frames)?;
 
-    let out_name = format!(
-        "{}.{:.1}fps.phash",
-        media_file.file_name().unwrap_or_default().to_string_lossy(),
-        meta.fps
-    );
+    let file_name = media_file.file_name().ok_or_else(|| {
+        anyhow::anyhow!("Cannot derive filename from media path {:?}", media_file)
+    })?;
+    let out_name = format!("{}.{:.1}fps.phash", file_name.to_string_lossy(), meta.fps);
     let out_path = phash_dir.join(&out_name);
     write_phash_file(&out_path, &hashes)?;
 
     Ok((out_path, hashes, meta.fps))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_resolve_db_host_explicit() {
+        let args = PostgresArgs {
+            host: Some("rpi4".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(resolve_db_host(&args), "rpi4");
+    }
+
+    #[test]
+    fn test_resolve_db_host_fallback() {
+        let args = PostgresArgs {
+            host: None,
+            ..Default::default()
+        };
+        // If PSQL_IP is set, returns that; otherwise DEFAULT_POSTGRES_HOST
+        let expected =
+            std::env::var("PSQL_IP").unwrap_or_else(|_| DEFAULT_POSTGRES_HOST.to_string());
+        assert_eq!(resolve_db_host(&args), expected);
+    }
 }

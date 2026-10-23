@@ -24,7 +24,7 @@ pub use pack::{extract_fps_from_path, run_pack, PackArgs};
 pub use recognize::{format_set, run_recognize_media, AggregatedMatch, RecognizeArgs};
 pub use retarget::{run_retarget_subtitles, RetargetArgs};
 pub use scan::{run_scan_library, ScanLibraryArgs};
-pub use shared::find_or_build_phash;
+pub use shared::{connect_db, find_or_build_phash, resolve_db_host};
 
 #[cfg(test)]
 pub(crate) static LIVE_DB_TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());

@@ -1,6 +1,6 @@
 //! CLI argument definitions and clap parser hierarchy.
 
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use dbsrt_core::HwAccel;
 
 use crate::commands::{
@@ -8,7 +8,51 @@ use crate::commands::{
     ImportPhashArgs, InspectMediaArgs, MigrateArgs, PackArgs, RecognizeArgs, RetargetArgs,
     ScanLibraryArgs,
 };
-use crate::constants::DEFAULT_BENCH_PHASH_COUNT;
+use crate::constants::{
+    DEFAULT_BENCH_PHASH_COUNT, DEFAULT_POSTGRES_DB, DEFAULT_POSTGRES_PASS, DEFAULT_POSTGRES_PORT,
+    DEFAULT_POSTGRES_USER,
+};
+
+/// Common PostgreSQL database connection CLI arguments.
+#[derive(Args, Debug, Clone, PartialEq, Eq)]
+pub struct PostgresArgs {
+    /// PostgreSQL host (defaults to PSQL_IP env or 127.0.0.1).
+    /// Note: explicitly passing --db-host also enables DB sync for certify-coupling.
+    #[arg(long = "db-host")]
+    pub host: Option<String>,
+
+    /// PostgreSQL port
+    #[arg(long = "db-port", env = "PSQL_PORT", default_value_t = DEFAULT_POSTGRES_PORT)]
+    pub port: u16,
+
+    /// PostgreSQL user
+    #[arg(long = "db-user", default_value = DEFAULT_POSTGRES_USER)]
+    pub user: String,
+
+    /// PostgreSQL password
+    #[arg(long = "db-pass", default_value = DEFAULT_POSTGRES_PASS)]
+    pub pass: String,
+
+    /// PostgreSQL database name
+    #[arg(long = "db-name", default_value = DEFAULT_POSTGRES_DB)]
+    pub name: String,
+}
+
+impl Default for PostgresArgs {
+    fn default() -> Self {
+        let port = std::env::var("PSQL_PORT")
+            .ok()
+            .and_then(|p| p.parse::<u16>().ok())
+            .unwrap_or(DEFAULT_POSTGRES_PORT);
+        Self {
+            host: None,
+            port,
+            user: DEFAULT_POSTGRES_USER.to_string(),
+            pass: DEFAULT_POSTGRES_PASS.to_string(),
+            name: DEFAULT_POSTGRES_DB.to_string(),
+        }
+    }
+}
 
 #[derive(Parser, Debug)]
 #[command(
@@ -153,5 +197,29 @@ mod tests {
             }
             _ => panic!("Expected FetchSubtitles command"),
         }
+    }
+
+    #[test]
+    fn test_postgres_args_defaults() {
+        let pg = PostgresArgs::default();
+        let expected_port = std::env::var("PSQL_PORT")
+            .ok()
+            .and_then(|p| p.parse::<u16>().ok())
+            .unwrap_or(DEFAULT_POSTGRES_PORT);
+        assert_eq!(pg.host, None);
+        assert_eq!(pg.port, expected_port);
+        assert_eq!(pg.user, DEFAULT_POSTGRES_USER);
+        assert_eq!(pg.pass, DEFAULT_POSTGRES_PASS);
+        assert_eq!(pg.name, DEFAULT_POSTGRES_DB);
+    }
+
+    #[test]
+    fn test_postgres_args_default_matches_clap_defaults() {
+        let cli = Cli::parse_from(["dbsrt", "import-phash", "--file", "x.phash"]);
+        let Commands::ImportPhash(args) = cli.command else {
+            panic!("Expected ImportPhash");
+        };
+        assert_eq!(args.db.host, None);
+        assert_eq!(args.db, PostgresArgs::default());
     }
 }

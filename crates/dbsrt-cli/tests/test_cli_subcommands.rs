@@ -321,3 +321,82 @@ fn test_cli_migrate_help() {
     assert!(stdout.contains("--status"));
     assert!(stdout.contains("--host"));
 }
+
+#[test]
+fn test_cli_postgres_args_help() {
+    let expected_flags = [
+        "--db-host",
+        "--db-port",
+        "--db-user",
+        "--db-pass",
+        "--db-name",
+    ];
+    for cmd in ["recognize-media", "import-phash", "certify-coupling"] {
+        let out = Command::new(env!("CARGO_BIN_EXE_dbsrt"))
+            .args([cmd, "--help"])
+            .output()
+            .unwrap_or_else(|e| panic!("Failed to run dbsrt {} --help: {}", cmd, e));
+        assert!(out.status.success());
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        for flag in expected_flags {
+            assert!(
+                stdout.contains(flag),
+                "Command {} missing {} in help",
+                cmd,
+                flag
+            );
+        }
+    }
+}
+
+#[test]
+fn test_certify_coupling_psql_ip_env_isolation() {
+    // When PSQL_IP is present in env, certify-coupling without --use-db/--db-host must NOT sync to DB
+    let out = Command::new(env!("CARGO_BIN_EXE_dbsrt"))
+        .env("PSQL_IP", "127.0.0.1")
+        .args(["certify-coupling", "--subtitle", "nonexistent.srt"])
+        .output()
+        .expect("Failed to run dbsrt certify-coupling");
+
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    // It should fail on subtitle validation, NOT attempt PostgreSQL sync
+    assert!(
+        !stderr.contains("PostgreSQL Sync") && !stdout.contains("PostgreSQL Sync"),
+        "Unexpected PostgreSQL sync triggered: stdout={}, stderr={}",
+        stdout,
+        stderr
+    );
+}
+
+#[test]
+fn test_cli_pack_empty_dir_warning() {
+    let temp_dir = std::env::temp_dir().join(format!("test_cli_pack_empty_{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&temp_dir);
+    let out_file = temp_dir.join("empty.dbphash");
+
+    let out = Command::new(env!("CARGO_BIN_EXE_dbsrt"))
+        .args([
+            "pack",
+            "--phash-dir",
+            temp_dir.to_str().unwrap(),
+            "--output",
+            out_file.to_str().unwrap(),
+        ])
+        .output()
+        .expect("Failed to run pack on empty dir");
+
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("Warning: Scanned directory"),
+        "stderr missing warning: {}",
+        stderr
+    );
+    assert!(
+        stderr.contains("contains no .phash files"),
+        "stderr missing file type: {}",
+        stderr
+    );
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}

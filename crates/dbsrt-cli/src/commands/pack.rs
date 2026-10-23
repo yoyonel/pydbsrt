@@ -87,8 +87,10 @@ pub fn run_pack(args: &PackArgs) -> Result<()> {
 
     for dir in &search_dirs {
         if !dir.exists() {
+            eprintln!("Warning: Scanned directory {:?} does not exist", dir);
             continue;
         }
+        let mut found_in_dir = 0;
         for entry in std::fs::read_dir(dir)? {
             let entry = entry?;
             let path = entry.path();
@@ -97,14 +99,21 @@ pub fn run_pack(args: &PackArgs) -> Result<()> {
                     if seen_stems.insert(stem.to_string()) {
                         files.push(path);
                     }
+                    found_in_dir += 1;
                 }
             }
+        }
+        if found_in_dir == 0 {
+            eprintln!(
+                "Warning: Scanned directory {:?} contains no .{} files",
+                dir, PHASH_EXT
+            );
         }
     }
     files.sort();
 
     if files.is_empty() {
-        anyhow::bail!("No .phash files found in {:?}", search_dirs);
+        anyhow::bail!("No .{} files found in {:?}", PHASH_EXT, search_dirs);
     }
 
     println!("=== DBS-RT COMPILER: UNIFIED .DBPHASH PACKER ===");
@@ -219,5 +228,24 @@ mod tests {
             extract_fps_from_path(Path::new("video.500.0fps.phash")),
             None
         );
+    }
+
+    #[test]
+    fn test_pack_empty_directory_error() {
+        let temp_dir = std::env::temp_dir().join(format!("test_pack_empty_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let out_file = temp_dir.join("empty.dbphash");
+
+        let args = PackArgs {
+            phash_dir: temp_dir.clone(),
+            extra_dirs: vec![],
+            output: out_file,
+            threshold: DEFAULT_CUT_THRESHOLD,
+            default_fps: DEFAULT_BASELINE_FPS,
+        };
+
+        let err = run_pack(&args).unwrap_err();
+        assert!(err.to_string().contains("No .phash files found"));
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

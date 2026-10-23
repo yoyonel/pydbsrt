@@ -3,16 +3,16 @@
 use anyhow::Result;
 use clap::Args;
 use dbsrt_core::{extract_frames_phash, probe_video};
-use dbsrt_index::{DbClient, MmapDbphash, MmapLibrary};
+use dbsrt_index::{MmapDbphash, MmapLibrary};
 use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
 use std::time::Instant;
 
-use crate::cli::OutputFormat;
+use crate::cli::{OutputFormat, PostgresArgs};
+use crate::commands::connect_db;
 use crate::constants::{
-    DEFAULT_EXTRACTION_DURATION_SEC, DEFAULT_POSTGRES_DB, DEFAULT_POSTGRES_HOST,
-    DEFAULT_POSTGRES_PASS, DEFAULT_POSTGRES_PORT, DEFAULT_POSTGRES_USER, DEFAULT_RECOGNIZE_LIMIT,
-    DEFAULT_SEARCH_DISTANCE,
+    DEFAULT_EXTRACTION_DURATION_SEC, DEFAULT_RECOGNIZE_LIMIT, DEFAULT_SEARCH_DISTANCE,
+    MIDPOINT_DURATION_DIVISOR,
 };
 
 #[derive(Args, Debug)]
@@ -45,25 +45,9 @@ pub struct RecognizeArgs {
     #[arg(long)]
     pub phash_dir: Option<PathBuf>,
 
-    /// PostgreSQL host (defaults to PSQL_IP env or 127.0.0.1)
-    #[arg(long)]
-    pub db_host: Option<String>,
-
-    /// PostgreSQL port
-    #[arg(long, env = "PSQL_PORT", default_value_t = DEFAULT_POSTGRES_PORT)]
-    pub db_port: u16,
-
-    /// PostgreSQL user
-    #[arg(long, default_value = DEFAULT_POSTGRES_USER)]
-    pub db_user: String,
-
-    /// PostgreSQL password
-    #[arg(long, default_value = DEFAULT_POSTGRES_PASS)]
-    pub db_pass: String,
-
-    /// PostgreSQL database name
-    #[arg(long, default_value = DEFAULT_POSTGRES_DB)]
-    pub db_name: String,
+    /// PostgreSQL connection arguments
+    #[command(flatten)]
+    pub db: PostgresArgs,
 
     /// Maximum number of matched media results to output (0 for all)
     #[arg(long, default_value_t = DEFAULT_RECOGNIZE_LIMIT)]
@@ -86,8 +70,7 @@ pub fn format_set<T: std::fmt::Display>(set: &BTreeSet<T>) -> String {
 pub fn run_recognize_media(args: &RecognizeArgs) -> Result<()> {
     // 1. Probe video
     let meta = probe_video(&args.media)?;
-    let half_divisor = 2.0;
-    let start_sec = (meta.duration / half_divisor).floor();
+    let start_sec = (meta.duration / MIDPOINT_DURATION_DIVISOR).floor();
     let nb_frames = (args.nb_seconds_to_extract * meta.fps).round() as usize;
     if nb_frames == 0 {
         anyhow::bail!("Number of frames to extract must be greater than 0");
@@ -220,19 +203,7 @@ pub fn run_recognize_media(args: &RecognizeArgs) -> Result<()> {
     }
 
     // 3. Connect to DB
-    let host = args
-        .db_host
-        .clone()
-        .or_else(|| std::env::var("PSQL_IP").ok())
-        .unwrap_or_else(|| DEFAULT_POSTGRES_HOST.to_string());
-
-    let mut db = DbClient::connect(
-        &host,
-        args.db_port,
-        &args.db_user,
-        &args.db_pass,
-        &args.db_name,
-    )?;
+    let mut db = connect_db(&args.db)?;
 
     // 4. Query DB & measure matching time
     let match_start = Instant::now();
@@ -343,11 +314,7 @@ mod tests {
             dbphash: None,
             no_db: true,
             phash_dir: None,
-            db_host: None,
-            db_port: crate::constants::DEFAULT_POSTGRES_PORT,
-            db_user: crate::constants::DEFAULT_POSTGRES_USER.to_string(),
-            db_pass: crate::constants::DEFAULT_POSTGRES_PASS.to_string(),
-            db_name: crate::constants::DEFAULT_POSTGRES_DB.to_string(),
+            db: PostgresArgs::default(),
         };
         let err = run_recognize_media(&args).unwrap_err();
         assert!(err
