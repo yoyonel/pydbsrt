@@ -77,7 +77,7 @@ flowchart LR
 | Module | Fichier | Rôle & Commandes Principales |
 | :--- | :--- | :--- |
 | **Stack & Serveur** | `taskfiles/stack.yml` | `task studio`, `task server:status`, `task coupling:certify` |
-| **Base de Données** | `taskfiles/db.yml` | `task db:up`, `task db:down`, `task db:logs`, `task db:psql` |
+| **Base de Données** | `taskfiles/db.yml` | `task db:up`, `task db:down`, `task db:migrate`, `task db:status`, `task db:logs`, `task db:psql` |
 | **Documentation** | `taskfiles/doc.yml` | `task doc` (serveur live), `task doc:check`, `task doc:build` |
 | **Qualité & Tests** | `taskfiles/quality.yml` | `task lint`, `task fmt`, `task test:rs`, `task coverage`, `task ci:local` |
 | **Lecteur VLC** | `taskfiles/vlc.yml` | `task vlc:install-plugin`, `task vlc:run`, `task vlc:demo`, `task vlc:test` |

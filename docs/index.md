@@ -99,6 +99,7 @@ hide:
       <a href="2026-10-17-etude-comparative-identification-frames-cuts-keyframes-hybride/">→ Étude Cuts, Keyframes &amp; Hybride</a>
       <a href="2026-10-15-scaling-architecture-rust-mmap/">→ Moteur Zero-DB mmap SIMD</a>
       <a href="2026-10-15-pg17-bktree-benchmark-migration/">→ PostgreSQL 17 SP-GiST BK-Tree</a>
+      <a href="2026-10-23-guide-migrations-schema-postgresql-refinery/">→ Migrations DB &amp; Refinery</a>
     </div>
   </div>
 
