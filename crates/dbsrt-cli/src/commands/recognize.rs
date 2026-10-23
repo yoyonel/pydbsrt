@@ -12,6 +12,7 @@ use crate::cli::{OutputFormat, PostgresArgs};
 use crate::commands::connect_db;
 use crate::constants::{
     DEFAULT_EXTRACTION_DURATION_SEC, DEFAULT_RECOGNIZE_LIMIT, DEFAULT_SEARCH_DISTANCE,
+    MIDPOINT_DURATION_DIVISOR,
 };
 
 #[derive(Args, Debug)]
@@ -69,8 +70,7 @@ pub fn format_set<T: std::fmt::Display>(set: &BTreeSet<T>) -> String {
 pub fn run_recognize_media(args: &RecognizeArgs) -> Result<()> {
     // 1. Probe video
     let meta = probe_video(&args.media)?;
-    let half_divisor = 2.0;
-    let start_sec = (meta.duration / half_divisor).floor();
+    let start_sec = (meta.duration / MIDPOINT_DURATION_DIVISOR).floor();
     let nb_frames = (args.nb_seconds_to_extract * meta.fps).round() as usize;
     if nb_frames == 0 {
         anyhow::bail!("Number of frames to extract must be greater than 0");

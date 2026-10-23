@@ -16,7 +16,8 @@ use crate::constants::{
 /// Common PostgreSQL database connection CLI arguments.
 #[derive(Args, Debug, Clone, PartialEq, Eq)]
 pub struct PostgresArgs {
-    /// PostgreSQL host (defaults to PSQL_IP env or 127.0.0.1)
+    /// PostgreSQL host (defaults to PSQL_IP env or 127.0.0.1).
+    /// Note: explicitly passing --db-host also enables DB sync for certify-coupling.
     #[arg(long = "db-host")]
     pub host: Option<String>,
 
@@ -202,5 +203,15 @@ mod tests {
         assert_eq!(pg.user, DEFAULT_POSTGRES_USER);
         assert_eq!(pg.pass, DEFAULT_POSTGRES_PASS);
         assert_eq!(pg.name, DEFAULT_POSTGRES_DB);
+    }
+
+    #[test]
+    fn test_postgres_args_default_matches_clap_defaults() {
+        let cli = Cli::parse_from(["dbsrt", "import-phash", "--file", "x.phash"]);
+        let Commands::ImportPhash(args) = cli.command else {
+            panic!("Expected ImportPhash");
+        };
+        assert_eq!(args.db.host, None);
+        assert_eq!(args.db, PostgresArgs::default());
     }
 }
