@@ -309,3 +309,15 @@ fn test_cli_import_phash_missing_args() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("Either --file or --phash-dir must be specified"));
 }
+
+#[test]
+fn test_cli_migrate_help() {
+    let out = Command::new(env!("CARGO_BIN_EXE_dbsrt"))
+        .args(["migrate", "--help"])
+        .output()
+        .expect("Failed to run dbsrt migrate --help");
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("--status"));
+    assert!(stdout.contains("--host"));
+}

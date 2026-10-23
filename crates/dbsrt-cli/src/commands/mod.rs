@@ -6,6 +6,7 @@ pub mod export;
 pub mod fetch;
 pub mod import;
 pub mod inspect;
+pub mod migrate;
 pub mod pack;
 pub mod recognize;
 pub mod retarget;
@@ -18,8 +19,12 @@ pub use export::{run_export_phash, ExportPhashArgs};
 pub use fetch::{run_fetch_subtitles, FetchSubtitlesArgs};
 pub use import::{run_import_phash, ImportPhashArgs};
 pub use inspect::{run_inspect_media, InspectMediaArgs};
+pub use migrate::{run_migrate, MigrateArgs};
 pub use pack::{extract_fps_from_path, run_pack, PackArgs};
 pub use recognize::{format_set, run_recognize_media, AggregatedMatch, RecognizeArgs};
 pub use retarget::{run_retarget_subtitles, RetargetArgs};
 pub use scan::{run_scan_library, ScanLibraryArgs};
 pub use shared::find_or_build_phash;
+
+#[cfg(test)]
+pub(crate) static LIVE_DB_TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());

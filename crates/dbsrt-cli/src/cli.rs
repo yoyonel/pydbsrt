@@ -5,7 +5,8 @@ use dbsrt_core::HwAccel;
 
 use crate::commands::{
     BenchCutsArgs, BenchVideoArgs, CertifyCouplingArgs, ExportPhashArgs, FetchSubtitlesArgs,
-    ImportPhashArgs, InspectMediaArgs, PackArgs, RecognizeArgs, RetargetArgs, ScanLibraryArgs,
+    ImportPhashArgs, InspectMediaArgs, MigrateArgs, PackArgs, RecognizeArgs, RetargetArgs,
+    ScanLibraryArgs,
 };
 use crate::constants::DEFAULT_BENCH_PHASH_COUNT;
 
@@ -95,6 +96,9 @@ pub enum Commands {
 
     /// Fetch subtitles from remote providers (OpenSubtitles REST) with local cache fallback
     FetchSubtitles(FetchSubtitlesArgs),
+
+    /// Apply or check versioned SQL database migrations (refinery) on PostgreSQL
+    Migrate(MigrateArgs),
 }
 
 #[cfg(test)]

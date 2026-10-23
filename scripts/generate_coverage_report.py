@@ -12,7 +12,62 @@ import argparse
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
+
+MIGRATION_PATH_PATTERNS: tuple[str, ...] = (
+    "crates/dbsrt-index/migrations/",
+    "migrations/",
+)
+SQL_FILE_EXTENSION: str = ".sql"
+MIGRATION_VERSION_PREFIX: str = "/V"
+MIGRATION_SEPARATOR: str = "__"
+
+COVERAGE_HIGH_THRESHOLD: float = 80.0
+COVERAGE_GOOD_THRESHOLD: float = 60.0
+COVERAGE_MODERATE_THRESHOLD: float = 40.0
+
+
+def detect_db_migrations(modified_files: list[str]) -> list[str]:
+    """Identify if any modified files are database schema migrations."""
+    migrations = []
+    for f in modified_files:
+        normalized = f.replace("\\", "/")
+        if any(pat in normalized for pat in MIGRATION_PATH_PATTERNS) and normalized.endswith(SQL_FILE_EXTENSION):
+            migrations.append(f)
+        elif (
+            MIGRATION_VERSION_PREFIX in normalized
+            and MIGRATION_SEPARATOR in normalized
+            and normalized.endswith(SQL_FILE_EXTENSION)
+        ):
+            migrations.append(f)
+    return sorted(list(set(migrations)))
+
+
+def format_migration_alert(migrations: list[str]) -> str:
+    """Format an actionable GitHub alert callout for detected DB migrations."""
+    if not migrations:
+        return ""
+    lines = [
+        "> [!IMPORTANT]",
+        "> ### 🐘 Database Schema Migrations Detected",
+        ">",
+        "> This PR introduces or modifies database migrations:",
+    ]
+    for mig in migrations:
+        lines.append(f"> - `{mig}`")
+    lines.extend(
+        [
+            ">",
+            "> **Operational & Deployment Checklist:**",
+            "> - [ ] Run pending migrations: `task db:migrate`",
+            "> - [ ] Verify migration status: `task db:status`",
+            "> - [ ] Verify DDL safety & PG 15/17 compatibility: `task db:lint:safety`",
+            '> - [ ] (Optional) Validate on remote host if online: `ssh rpi4 "task db:status"`',
+            "",
+        ]
+    )
+    return "\n".join(lines)
 
 
 def get_modified_files(base_ref: str = "origin/develop") -> list[str]:
@@ -158,22 +213,73 @@ def parse_python_coverage(python_json_paths: list[Path]) -> dict:
 
 
 def status_badge(percent: float) -> str:
-    if percent >= 80.0:
+    if percent >= COVERAGE_HIGH_THRESHOLD:
         return "🟢 High"
-    elif percent >= 60.0:
+    elif percent >= COVERAGE_GOOD_THRESHOLD:
         return "🟡 Good"
-    elif percent >= 40.0:
+    elif percent >= COVERAGE_MODERATE_THRESHOLD:
         return "🟠 Moderate"
     else:
         return "🔴 Low"
+
+
+def get_matched_modified_files(
+    modified_files: list[str],
+    all_files: dict[str, dict],
+) -> list[tuple[str, dict]]:
+    """Match git modified files against files present in coverage data."""
+    matched = []
+    for m in modified_files:
+        if m in all_files:
+            matched.append((m, all_files[m]))
+        else:
+            for k, v in all_files.items():
+                if k.endswith(m) or m.endswith(k):
+                    matched.append((m, v))
+                    break
+    return matched
+
+
+def check_modified_coverage_gate(
+    matched_modified: list[tuple[str, dict]],
+    min_threshold: float = COVERAGE_GOOD_THRESHOLD,
+) -> list[tuple[str, float]]:
+    """Return list of modified files failing the minimum coverage threshold (< 60.0% / Good)."""
+    return [(fname, finfo["percent"]) for fname, finfo in matched_modified if finfo["percent"] < min_threshold]
 
 
 def generate_markdown(
     rust_cov: dict,
     py_cov: dict,
     modified_files: list[str],
+    min_threshold: float = COVERAGE_GOOD_THRESHOLD,
 ) -> str:
     md = []
+
+    migrations = detect_db_migrations(modified_files)
+    if migrations:
+        md.append(format_migration_alert(migrations))
+
+    # Aggregate all files to inspect PR modified coverage
+    all_files = {}
+    if rust_cov:
+        all_files.update(rust_cov.get("files", {}))
+    if py_cov:
+        all_files.update(py_cov.get("files", {}))
+
+    matched_modified = get_matched_modified_files(modified_files, all_files)
+    failed_gate = check_modified_coverage_gate(matched_modified, min_threshold)
+
+    if failed_gate:
+        md.append("> [!CAUTION]")
+        md.append("> ### ❌ Coverage Quality Gate Failed")
+        md.append(
+            f"> The following PR modified file(s) are below the minimum required coverage of **{min_threshold:.1f}%** (Good or High):"
+        )
+        for fname, pct in failed_gate:
+            md.append(f"> - `{fname}`: **{pct:.2f}%** ({status_badge(pct)})")
+        md.append("")
+
     md.append("### 📊 Test Coverage Report (Rust & Python)\n")
 
     md.append("| Target / Component | Lines / Stmts | Covered | Coverage Rate | Status |")
@@ -215,24 +321,6 @@ def generate_markdown(
 
     md.append("\n---\n")
 
-    # Modified files section
-    all_files = {}
-    if rust_cov:
-        all_files.update(rust_cov.get("files", {}))
-    if py_cov:
-        all_files.update(py_cov.get("files", {}))
-
-    matched_modified = []
-    for m in modified_files:
-        if m in all_files:
-            matched_modified.append((m, all_files[m]))
-        else:
-            # Try partial matching
-            for k, v in all_files.items():
-                if k.endswith(m) or m.endswith(k):
-                    matched_modified.append((m, v))
-                    break
-
     if matched_modified:
         md.append("<details open>")
         md.append("<summary><b>🔍 PR Modified Files Coverage Details</b></summary>\n")
@@ -268,13 +356,27 @@ def main() -> int:
     parser.add_argument("--python-db-json", type=Path, default=Path("coverage-python-db.json"))
     parser.add_argument("--base-ref", type=str, default="origin/develop")
     parser.add_argument("--output-md", type=Path, default=None)
+    parser.add_argument(
+        "--min-modified-coverage",
+        type=float,
+        default=COVERAGE_GOOD_THRESHOLD,
+        help="Minimum coverage percent required for modified files (default: 60.0%%)",
+    )
     args = parser.parse_args()
 
     rust_cov = parse_rust_coverage(args.rust_json)
     py_cov = parse_python_coverage([args.python_json, args.python_db_json])
     modified = get_modified_files(args.base_ref)
 
-    report_md = generate_markdown(rust_cov, py_cov, modified)
+    report_md = generate_markdown(rust_cov, py_cov, modified, min_threshold=args.min_modified_coverage)
+
+    # Workflow notice if migrations detected
+    migrations = detect_db_migrations(modified)
+    if migrations:
+        joined_files = ", ".join(f"`{m}`" for m in migrations)
+        print(
+            f"::notice title=🐘 Database Schema Migrations Detected::PR introduces {len(migrations)} database migration(s): {joined_files}. Verify 'task db:migrate' and PG 15/17 compatibility before deploying."
+        )
 
     if args.output_md:
         args.output_md.write_text(report_md, encoding="utf-8")
@@ -288,6 +390,30 @@ def main() -> int:
     if step_summary:
         with open(step_summary, "a", encoding="utf-8") as f:
             f.write("\n" + report_md + "\n")
+
+    # Evaluate Quality Gate on PR modified files
+    all_files = {}
+    if rust_cov:
+        all_files.update(rust_cov.get("files", {}))
+    if py_cov:
+        all_files.update(py_cov.get("files", {}))
+
+    matched_modified = get_matched_modified_files(modified, all_files)
+    failed_gate = check_modified_coverage_gate(matched_modified, args.min_modified_coverage)
+
+    if failed_gate:
+        for fname, pct in failed_gate:
+            print(
+                f"::error file={fname},title=Coverage Quality Gate Failed::"
+                f"PR modified file coverage ({pct:.2f}%) is below required threshold of "
+                f"{args.min_modified_coverage:.1f}% (must be at least Good >= 60.0%)."
+            )
+        print(
+            f"\n❌ Coverage Quality Gate Failed: {len(failed_gate)} PR modified file(s) below "
+            f"{args.min_modified_coverage:.1f}% coverage.",
+            file=sys.stderr,
+        )
+        return 1
 
     return 0
 

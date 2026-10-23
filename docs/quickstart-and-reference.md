@@ -118,6 +118,17 @@ Conformément à la règle **Taskfile-First**, toutes les opérations récurrent
     | `task coupling:certify` | `scripts/seed_couplings.sh` | Découvre et certifie tous les couples de référence (`data/__PHASH__` $\leftrightarrow$ `data/SRT`). |
     | `task server:status` | `scripts/stack_ctl.sh server-status` | Interroge le statut du daemon via `GET /v1/status`. |
 
+=== "🐘 Base de Données & Migrations"
+
+    | Commande `task` | Script / Outil | Description Technique |
+    | :--- | :--- | :--- |
+    | `task db:migrate` | `./target/release/dbsrt migrate` | Applique les migrations déclaratives en attente (`refinery` V1, V2, V3...) de façon atomique. |
+    | `task db:status` | `./target/release/dbsrt migrate --status` | Affiche l'historique et l'état des versions appliquées (`refinery_schema_history`). |
+    | `task db:up` | `docker compose up -d` | Démarre le conteneur PostgreSQL 17 SP-GiST BK-Tree et les services associés. |
+    | `task db:down` | `docker compose down` | Arrête la stack de base de données. |
+    | `task db:psql` | `psql` | Ouvre une session interactive `psql` dans le conteneur PostgreSQL 17. |
+    | `task db:import:all-phash` | `./target/release/dbsrt import-phash` | Importe en batch les `.phash` dans PostgreSQL via streaming `COPY`. |
+
 === "🎬 Lecteur VLC & VLSub"
 
     | Commande `task` | Script / Outil | Description Technique |

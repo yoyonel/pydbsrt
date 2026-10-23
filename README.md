@@ -106,9 +106,9 @@ flowchart TD
 
 | Crate | Responsabilités & Architecture SoC |
 | :--- | :--- |
-| **[`crates/dbsrt-cli`](crates/dbsrt-cli/)** | **CLI `dbsrt` modulaire** : Dispatcher Clap épuré (`main.rs`), bibliothèque `dbsrt_cli` (`lib.rs`), constantes de domaine typées (`constants.rs`) et sous-commandes dédiées dans `src/commands/` (`bench`, `certify`, `export`, `fetch`, `import`, `inspect`, `pack`, `recognize`, `retarget`, `scan`, `shared`). |
+| **[`crates/dbsrt-cli`](crates/dbsrt-cli/)** | **CLI `dbsrt` modulaire** : Dispatcher Clap épuré (`main.rs`), bibliothèque `dbsrt_cli` (`lib.rs`), constantes de domaine typées (`constants.rs`) et sous-commandes dédiées dans `src/commands/` (`bench`, `certify`, `export`, `fetch`, `import`, `inspect`, `migrate`, `pack`, `recognize`, `retarget`, `scan`, `shared`). |
 | **[`crates/dbsrt-server`](crates/dbsrt-server/)** | **Serveur REST Axum** : Handlers HTTP modulaires dans `src/handlers/` (`health`, `lookup`, `metrics`, `search`, `studio`, `sync`), moteur MIH unifié (< 1 ms) et UI web bicanale `dbsrt Studio` (`:8765/studio`). |
-| **[`crates/dbsrt-index`](crates/dbsrt-index/)** | **Indexation & Stockage** : Gestion relationnelle PostgreSQL 17 SP-GiST BK-Tree (`subtitles`, `sub_frames`, `medias`, `frames`) et format Zero-DB plat `.dbphash` / `.phash` par projection mémoire (`mmap`). |
+| **[`crates/dbsrt-index`](crates/dbsrt-index/)** | **Indexation, Schémas & Migrations** : Gestion relationnelle PostgreSQL 17 SP-GiST BK-Tree (`subtitles`, `sub_frames`, `medias`, `frames`), migrations déclaratives versionnées Refinery (`embed_migrations!`), et format Zero-DB plat `.dbphash` / `.phash` par projection mémoire (`mmap`). |
 | **[`crates/dbsrt-core`](crates/dbsrt-core/)** | **Primitives Algorithmiques** : Calcul d'empreintes perceptuelles 64-bit DCT pHash, extraction de trames FFmpeg HWAccel/SW et distance de Hamming accélérée SIMD (`popcnt`). |
 
 ---
@@ -137,6 +137,9 @@ Le dépôt est orchestré par **[Taskfile (go-task)](https://taskfile.dev/)** d�
 | **`task vlc:install-plugin`** | Installe l'extension GUI VLSub et l'interface CLI dans le profil VLC | `taskfiles/vlc.yml` |
 | **`task vlc:test`** | Exécute la pyramide complète de tests VLC (unitaires + cvlc + GUI E2E) | `taskfiles/vlc.yml` |
 | **`task db:up` / `db:down`** | Démarre / arrête la base PostgreSQL 17 SP-GiST BK-Tree | `taskfiles/db.yml` |
+| **`task db:migrate`** | Applique les migrations déclaratives en attente (`refinery` V1, V2, V3...) | `taskfiles/db.yml` |
+| **`task db:status`** | Affiche l'historique et l'état des versions appliquées (`refinery_schema_history`) | `taskfiles/db.yml` |
+| **`task db:lint:safety`** | Vérifie statiquement la sécurité DDL, les verrous et la compatibilité PG 15/17 des migrations | `taskfiles/db.yml` |
 | **`task rpi4:build`** | Cross-compile pour ARM64 / Raspberry Pi 4 | `taskfiles/rpi4.yml` |
 | **`task sim:test`** / **`task sim:rpi4:test`** | Exécute la batterie de 6 tests API ARM64 en simulation QEMU (512 Mo RAM) | `taskfiles/rpi4.yml` |
 | **`task clean`** | Purge unifiée des artefacts et caches (`target/`, `.pytest_cache`, `.ruff_cache`) | `Taskfile.yml` |
@@ -147,6 +150,8 @@ Le dépôt est orchestré par **[Taskfile (go-task)](https://taskfile.dev/)** d�
 
 Dossiers techniques détaillés disponibles dans le répertoire [`docs/`](docs) :
 
+* [`docs/2026-10-23-guide-migrations-schema-postgresql-refinery.md`](docs/2026-10-23-guide-migrations-schema-postgresql-refinery.md) : **Guide & Architecture des Migrations PostgreSQL avec Refinery** : Migrations versionnées déclaratives (V1, V2, V3...), élimination des deadlocks en tests parallèles, commande `dbsrt migrate` et Taskfiles.
+* [`docs/2026-10-22-securisation-sql-et-atomicite-transactionnelle-copy-postgresql.md`](docs/2026-10-22-securisation-sql-et-atomicite-transactionnelle-copy-postgresql.md) : **Sécurisation SQL des Codes de Langue & Atomicité COPY** : Assainissement ISO 639 / BCP 47 (`validate_lang_code`), requêtes 100% paramétrées et transactions sans orphelins.
 * [`docs/2026-10-21-tutoriel-orchestration-taskfile-et-guide-developpeur.md`](docs/2026-10-21-tutoriel-orchestration-taskfile-et-guide-developpeur.md) : **Tutoriel Développeur & Guide d'Ordonnancement Taskfile** : Philosophie, modules `taskfiles/`, 4 workflows quotidiens et guide pas à pas pour ajouter une tâche.
 * [`docs/2026-10-21-strategie-tests-infrastructure-et-recettes-systemd-hermetiques.md`](docs/2026-10-21-strategie-tests-infrastructure-et-recettes-systemd-hermetiques.md) : **Stratégie de Test d'Infrastructure & Recettes systemd Hermétiques** : Épreuve de déploiement en conteneur Docker cgroups v2 isolé sans toucher à la machine hôte.
 

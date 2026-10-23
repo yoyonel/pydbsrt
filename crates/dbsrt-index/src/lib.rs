@@ -8,7 +8,13 @@ pub mod mih;
 pub mod mmap;
 
 pub use bktree::{BkItem, BkTree};
-pub use db::{parse_fps_from_phash_stem, DbClient, DbMatch, DbMediaRecord, DbSubtitleCoupling};
+pub use db::{
+    parse_fps_from_phash_stem, validate_lang_code, DbClient, DbMatch, DbMediaRecord,
+    DbSubtitleCoupling, COPY_BUFFER_FLUSH_THRESHOLD, COPY_BUFFER_INITIAL_CAPACITY,
+    DB_CONNECT_TIMEOUT_SECONDS, DEFAULT_BASELINE_FPS, DEFAULT_LANG_CODE,
+    DEFAULT_POSTGRES_PORT_CUSTOM, DEFAULT_POSTGRES_PORT_STANDARD, MAX_LANG_CODE_LEN,
+    MIN_LANG_CODE_LEN, NTSC_FILM_FPS, PAL_FPS,
+};
 pub use dbphash::{
     DbphashBuilder, DbphashCutEntry, DbphashCutMatch, DbphashHeader, DbphashMediaEntry,
     DbphashMediaMatch, DbphashPackStats, MmapDbphash, DBPHASH_MAGIC, DBPHASH_VERSION,
