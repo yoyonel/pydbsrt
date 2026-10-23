@@ -335,7 +335,7 @@ jobs:
             --output-md coverage-summary.md
 
       - name: Post or update sticky coverage comment on PR
-        if: github.event_name == 'pull_request'
+        if: always() && github.event_name == 'pull_request' && hashFiles('coverage-summary.md') != ''
         uses: actions/github-script@v7
         with:
           script: |
