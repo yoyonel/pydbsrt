@@ -358,3 +358,31 @@ fn test_cli_postgres_args_help() {
         );
     }
 }
+
+#[test]
+fn test_cli_pack_empty_dir_warning() {
+    let temp_dir = std::env::temp_dir().join(format!("test_cli_pack_empty_{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&temp_dir);
+    let out_file = temp_dir.join("empty.dbphash");
+
+    let out = Command::new(env!("CARGO_BIN_EXE_dbsrt"))
+        .args([
+            "pack",
+            "--phash-dir",
+            temp_dir.to_str().unwrap(),
+            "--output",
+            out_file.to_str().unwrap(),
+        ])
+        .output()
+        .expect("Failed to run pack on empty dir");
+
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("Warning: Scanned directory")
+            || stderr.contains("Warning: No .phash files found"),
+        "stderr was: {}",
+        stderr
+    );
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}
