@@ -2,10 +2,25 @@
 
 use anyhow::Result;
 use dbsrt_core::{extract_frames_phash, probe_video, read_phash_file, write_phash_file};
-use dbsrt_index::parse_fps_from_phash_stem;
+use dbsrt_index::{parse_fps_from_phash_stem, DbClient};
 use std::path::{Path, PathBuf};
 
-use crate::constants::{KNOWN_VIDEO_EXTS, PHASH_DOT_EXT, PHASH_EXT};
+use crate::cli::PostgresArgs;
+use crate::constants::{DEFAULT_POSTGRES_HOST, KNOWN_VIDEO_EXTS, PHASH_DOT_EXT, PHASH_EXT};
+
+/// Resolve target PostgreSQL host falling back to PSQL_IP env or DEFAULT_POSTGRES_HOST.
+pub fn resolve_db_host(db: &PostgresArgs) -> String {
+    db.host
+        .clone()
+        .or_else(|| std::env::var("PSQL_IP").ok())
+        .unwrap_or_else(|| DEFAULT_POSTGRES_HOST.to_string())
+}
+
+/// Connect to PostgreSQL using configuration from `PostgresArgs`.
+pub fn connect_db(db: &PostgresArgs) -> Result<DbClient> {
+    let host = resolve_db_host(db);
+    DbClient::connect(&host, db.port, &db.user, &db.pass, &db.name)
+}
 
 /// Helper resolving an existing .phash file or extracting a new one into `phash_dir`.
 pub fn find_or_build_phash(
@@ -84,4 +99,30 @@ pub fn find_or_build_phash(
     write_phash_file(&out_path, &hashes)?;
 
     Ok((out_path, hashes, meta.fps))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_resolve_db_host_explicit() {
+        let args = PostgresArgs {
+            host: Some("rpi4".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(resolve_db_host(&args), "rpi4");
+    }
+
+    #[test]
+    fn test_resolve_db_host_fallback() {
+        let args = PostgresArgs {
+            host: None,
+            ..Default::default()
+        };
+        // If PSQL_IP is set, returns that; otherwise DEFAULT_POSTGRES_HOST
+        let expected =
+            std::env::var("PSQL_IP").unwrap_or_else(|_| DEFAULT_POSTGRES_HOST.to_string());
+        assert_eq!(resolve_db_host(&args), expected);
+    }
 }

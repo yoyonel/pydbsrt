@@ -324,6 +324,13 @@ fn test_cli_migrate_help() {
 
 #[test]
 fn test_cli_postgres_args_help() {
+    let expected_flags = [
+        "--db-host",
+        "--db-port",
+        "--db-user",
+        "--db-pass",
+        "--db-name",
+    ];
     for cmd in ["recognize-media", "import-phash", "certify-coupling"] {
         let out = Command::new(env!("CARGO_BIN_EXE_dbsrt"))
             .args([cmd, "--help"])
@@ -331,32 +338,35 @@ fn test_cli_postgres_args_help() {
             .unwrap_or_else(|e| panic!("Failed to run dbsrt {} --help: {}", cmd, e));
         assert!(out.status.success());
         let stdout = String::from_utf8_lossy(&out.stdout);
-        assert!(
-            stdout.contains("--db-host"),
-            "Command {} missing --db-host in help",
-            cmd
-        );
-        assert!(
-            stdout.contains("--db-port"),
-            "Command {} missing --db-port in help",
-            cmd
-        );
-        assert!(
-            stdout.contains("--db-user"),
-            "Command {} missing --db-user in help",
-            cmd
-        );
-        assert!(
-            stdout.contains("--db-pass"),
-            "Command {} missing --db-pass in help",
-            cmd
-        );
-        assert!(
-            stdout.contains("--db-name"),
-            "Command {} missing --db-name in help",
-            cmd
-        );
+        for flag in expected_flags {
+            assert!(
+                stdout.contains(flag),
+                "Command {} missing {} in help",
+                cmd,
+                flag
+            );
+        }
     }
+}
+
+#[test]
+fn test_certify_coupling_psql_ip_env_isolation() {
+    // When PSQL_IP is present in env, certify-coupling without --use-db/--db-host must NOT sync to DB
+    let out = Command::new(env!("CARGO_BIN_EXE_dbsrt"))
+        .env("PSQL_IP", "127.0.0.1")
+        .args(["certify-coupling", "--subtitle", "nonexistent.srt"])
+        .output()
+        .expect("Failed to run dbsrt certify-coupling");
+
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    // It should fail on subtitle validation, NOT attempt PostgreSQL sync
+    assert!(
+        !stderr.contains("PostgreSQL Sync") && !stdout.contains("PostgreSQL Sync"),
+        "Unexpected PostgreSQL sync triggered: stdout={}, stderr={}",
+        stdout,
+        stderr
+    );
 }
 
 #[test]
@@ -379,9 +389,13 @@ fn test_cli_pack_empty_dir_warning() {
     assert!(!out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("Warning: Scanned directory")
-            || stderr.contains("Warning: No .phash files found"),
-        "stderr was: {}",
+        stderr.contains("Warning: Scanned directory"),
+        "stderr missing warning: {}",
+        stderr
+    );
+    assert!(
+        stderr.contains("contains no .phash files"),
+        "stderr missing file type: {}",
         stderr
     );
     let _ = std::fs::remove_dir_all(&temp_dir);

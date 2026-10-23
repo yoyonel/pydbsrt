@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use crate::cli::{OutputFormat, PostgresArgs};
+use crate::commands::connect_db;
 use crate::constants::{
     DEFAULT_EXTRACTION_DURATION_SEC, DEFAULT_RECOGNIZE_LIMIT, DEFAULT_SEARCH_DISTANCE,
 };
@@ -202,7 +203,7 @@ pub fn run_recognize_media(args: &RecognizeArgs) -> Result<()> {
     }
 
     // 3. Connect to DB
-    let mut db = args.db.connect()?;
+    let mut db = connect_db(&args.db)?;
 
     // 4. Query DB & measure matching time
     let match_start = Instant::now();

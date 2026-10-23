@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use crate::cli::PostgresArgs;
+use crate::commands::connect_db;
 use crate::constants::PHASH_EXT;
 
 #[derive(Args, Debug)]
@@ -51,7 +52,7 @@ pub fn run_import_phash(args: &ImportPhashArgs) -> Result<()> {
         anyhow::bail!("No .phash files found to import");
     }
 
-    let mut db = args.db.connect()?;
+    let mut db = connect_db(&args.db)?;
 
     println!("Ensuring BK-Tree schema & SP-GiST indexes in PostgreSQL...");
     db.init_schema()?;
@@ -179,8 +180,8 @@ mod tests {
 
         let args = ImportPhashArgs {
             db: PostgresArgs {
-                db_host: Some(DEFAULT_POSTGRES_HOST.to_string()),
-                db_port: TEST_UNREACHABLE_PORT,
+                host: Some(DEFAULT_POSTGRES_HOST.to_string()),
+                port: TEST_UNREACHABLE_PORT,
                 ..Default::default()
             },
             ..create_test_import_args(Some(phash_path), None)
@@ -230,8 +231,8 @@ mod tests {
         // 1. Single file import
         let args_file = ImportPhashArgs {
             db: PostgresArgs {
-                db_host: Some(host.clone()),
-                db_port: port,
+                host: Some(host.clone()),
+                port,
                 ..Default::default()
             },
             ..create_test_import_args(Some(synth_file.clone()), None)
@@ -241,8 +242,8 @@ mod tests {
         // 2. Directory import (re-import triggers idempotent skip branch)
         let args_dir = ImportPhashArgs {
             db: PostgresArgs {
-                db_host: Some(host.clone()),
-                db_port: port,
+                host: Some(host.clone()),
+                port,
                 ..Default::default()
             },
             ..create_test_import_args(None, Some(temp_dir.clone()))

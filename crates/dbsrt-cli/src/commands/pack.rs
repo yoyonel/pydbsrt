@@ -87,6 +87,7 @@ pub fn run_pack(args: &PackArgs) -> Result<()> {
 
     for dir in &search_dirs {
         if !dir.exists() {
+            eprintln!("Warning: Scanned directory {:?} does not exist", dir);
             continue;
         }
         let mut found_in_dir = 0;
@@ -104,19 +105,15 @@ pub fn run_pack(args: &PackArgs) -> Result<()> {
         }
         if found_in_dir == 0 {
             eprintln!(
-                "Warning: Scanned directory {:?} contains no .phash files",
-                dir
+                "Warning: Scanned directory {:?} contains no .{} files",
+                dir, PHASH_EXT
             );
         }
     }
     files.sort();
 
     if files.is_empty() {
-        eprintln!(
-            "Warning: No .phash files found in scanned directories: {:?}",
-            search_dirs
-        );
-        anyhow::bail!("No .phash files found in {:?}", search_dirs);
+        anyhow::bail!("No .{} files found in {:?}", PHASH_EXT, search_dirs);
     }
 
     println!("=== DBS-RT COMPILER: UNIFIED .DBPHASH PACKER ===");

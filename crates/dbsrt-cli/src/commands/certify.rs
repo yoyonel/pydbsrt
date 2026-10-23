@@ -10,7 +10,7 @@ use dbsrt_index::parse_fps_from_phash_stem;
 use std::path::PathBuf;
 
 use crate::cli::PostgresArgs;
-use crate::commands::shared::find_or_build_phash;
+use crate::commands::{connect_db, find_or_build_phash};
 use crate::constants::{
     AUTO_SUBTITLE_LANG, DEFAULT_NTSC_FILM_FPS, DEFAULT_PAL_FPS, DEFAULT_SUBTITLES_DIR,
     DEFAULT_SUBTITLE_LANG, DEFAULT_TMP_DIR, EPSILON_FPS,
@@ -231,8 +231,8 @@ pub fn run_certify_coupling(args: &CertifyCouplingArgs) -> Result<()> {
         }
     }
 
-    if args.db_only || args.use_db || args.db.db_host.is_some() {
-        match args.db.connect() {
+    if args.db_only || args.use_db || args.db.host.is_some() {
+        match connect_db(&args.db) {
             Ok(mut client) => {
                 client.init_schema()?;
                 let (media_id, sub_id, inserted_anchors) =
