@@ -28,6 +28,18 @@ tasks:
     cmds:
       - ./target/release/dbsrt import-phash --phash-dir data/__PHASH__
 
+  db:migrate:
+    desc: Run pending PostgreSQL database migrations via refinery
+    deps: [db:up, rs:build]
+    cmds:
+      - ./target/release/dbsrt migrate {{.CLI_ARGS}}
+
+  db:status:
+    desc: Check PostgreSQL database schema migration history and status
+    deps: [db:up, rs:build]
+    cmds:
+      - ./target/release/dbsrt migrate --status {{.CLI_ARGS}}
+
   build-db:
     desc: Build custom PostgreSQL 17 BK-tree Docker image
     internal: true
