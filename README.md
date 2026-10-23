@@ -139,6 +139,7 @@ Le dépôt est orchestré par **[Taskfile (go-task)](https://taskfile.dev/)** d�
 | **`task db:up` / `db:down`** | Démarre / arrête la base PostgreSQL 17 SP-GiST BK-Tree | `taskfiles/db.yml` |
 | **`task db:migrate`** | Applique les migrations déclaratives en attente (`refinery` V1, V2, V3...) | `taskfiles/db.yml` |
 | **`task db:status`** | Affiche l'historique et l'état des versions appliquées (`refinery_schema_history`) | `taskfiles/db.yml` |
+| **`task db:lint:safety`** | Vérifie statiquement la sécurité DDL, les verrous et la compatibilité PG 15/17 des migrations | `taskfiles/db.yml` |
 | **`task rpi4:build`** | Cross-compile pour ARM64 / Raspberry Pi 4 | `taskfiles/rpi4.yml` |
 | **`task sim:test`** / **`task sim:rpi4:test`** | Exécute la batterie de 6 tests API ARM64 en simulation QEMU (512 Mo RAM) | `taskfiles/rpi4.yml` |
 | **`task clean`** | Purge unifiée des artefacts et caches (`target/`, `.pytest_cache`, `.ruff_cache`) | `Taskfile.yml` |
