@@ -13,6 +13,7 @@ pub mod retarget;
 pub mod scan;
 pub mod shared;
 
+pub use crate::cli::PostgresArgs;
 pub use bench::{run_bench_cuts, run_bench_phash, run_bench_video, BenchCutsArgs, BenchVideoArgs};
 pub use certify::{detect_cli_subtitle_lang, run_certify_coupling, CertifyCouplingArgs};
 pub use export::{run_export_phash, ExportPhashArgs};

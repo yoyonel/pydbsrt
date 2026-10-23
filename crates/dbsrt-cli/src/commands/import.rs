@@ -2,14 +2,11 @@
 
 use anyhow::Result;
 use clap::Args;
-use dbsrt_index::DbClient;
 use std::path::PathBuf;
 use std::time::Instant;
 
-use crate::constants::{
-    DEFAULT_POSTGRES_DB, DEFAULT_POSTGRES_HOST, DEFAULT_POSTGRES_PASS, DEFAULT_POSTGRES_PORT,
-    DEFAULT_POSTGRES_USER, PHASH_EXT,
-};
+use crate::cli::PostgresArgs;
+use crate::constants::PHASH_EXT;
 
 #[derive(Args, Debug)]
 pub struct ImportPhashArgs {
@@ -21,25 +18,9 @@ pub struct ImportPhashArgs {
     #[arg(short = 'p', long)]
     pub phash_dir: Option<PathBuf>,
 
-    /// PostgreSQL host (defaults to PSQL_IP env or 127.0.0.1)
-    #[arg(long)]
-    pub db_host: Option<String>,
-
-    /// PostgreSQL port
-    #[arg(long, env = "PSQL_PORT", default_value_t = DEFAULT_POSTGRES_PORT)]
-    pub db_port: u16,
-
-    /// PostgreSQL user
-    #[arg(long, default_value = DEFAULT_POSTGRES_USER)]
-    pub db_user: String,
-
-    /// PostgreSQL password
-    #[arg(long, default_value = DEFAULT_POSTGRES_PASS)]
-    pub db_pass: String,
-
-    /// PostgreSQL database name
-    #[arg(long, default_value = DEFAULT_POSTGRES_DB)]
-    pub db_name: String,
+    /// PostgreSQL connection arguments
+    #[command(flatten)]
+    pub db: PostgresArgs,
 }
 
 /// Run batch or single .phash import into PostgreSQL BK-Tree table.
@@ -70,19 +51,7 @@ pub fn run_import_phash(args: &ImportPhashArgs) -> Result<()> {
         anyhow::bail!("No .phash files found to import");
     }
 
-    let host = args
-        .db_host
-        .clone()
-        .or_else(|| std::env::var("PSQL_IP").ok())
-        .unwrap_or_else(|| DEFAULT_POSTGRES_HOST.to_string());
-
-    let mut db = DbClient::connect(
-        &host,
-        args.db_port,
-        &args.db_user,
-        &args.db_pass,
-        &args.db_name,
-    )?;
+    let mut db = args.db.connect()?;
 
     println!("Ensuring BK-Tree schema & SP-GiST indexes in PostgreSQL...");
     db.init_schema()?;
@@ -148,8 +117,12 @@ pub fn run_import_phash(args: &ImportPhashArgs) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::constants::{STANDARD_POSTGRES_PORT, TEST_UNREACHABLE_PORT};
+    use crate::constants::{
+        DEFAULT_POSTGRES_DB, DEFAULT_POSTGRES_HOST, DEFAULT_POSTGRES_PASS, DEFAULT_POSTGRES_PORT,
+        DEFAULT_POSTGRES_USER, STANDARD_POSTGRES_PORT, TEST_UNREACHABLE_PORT,
+    };
     use dbsrt_core::write_phash_file;
+    use dbsrt_index::DbClient;
 
     fn create_test_import_args(
         file: Option<PathBuf>,
@@ -158,11 +131,7 @@ mod tests {
         ImportPhashArgs {
             file,
             phash_dir,
-            db_host: None,
-            db_port: DEFAULT_POSTGRES_PORT,
-            db_user: DEFAULT_POSTGRES_USER.to_string(),
-            db_pass: DEFAULT_POSTGRES_PASS.to_string(),
-            db_name: DEFAULT_POSTGRES_DB.to_string(),
+            db: PostgresArgs::default(),
         }
     }
 
@@ -209,8 +178,11 @@ mod tests {
         write_phash_file(&phash_path, &[0x1111_2222_3333_4444_u64]).unwrap();
 
         let args = ImportPhashArgs {
-            db_host: Some(DEFAULT_POSTGRES_HOST.to_string()),
-            db_port: TEST_UNREACHABLE_PORT,
+            db: PostgresArgs {
+                db_host: Some(DEFAULT_POSTGRES_HOST.to_string()),
+                db_port: TEST_UNREACHABLE_PORT,
+                ..Default::default()
+            },
             ..create_test_import_args(Some(phash_path), None)
         };
         assert!(run_import_phash(&args).is_err());
@@ -257,16 +229,22 @@ mod tests {
 
         // 1. Single file import
         let args_file = ImportPhashArgs {
-            db_host: Some(host.clone()),
-            db_port: port,
+            db: PostgresArgs {
+                db_host: Some(host.clone()),
+                db_port: port,
+                ..Default::default()
+            },
             ..create_test_import_args(Some(synth_file.clone()), None)
         };
         run_import_phash(&args_file).expect("run_import_phash file failed");
 
         // 2. Directory import (re-import triggers idempotent skip branch)
         let args_dir = ImportPhashArgs {
-            db_host: Some(host.clone()),
-            db_port: port,
+            db: PostgresArgs {
+                db_host: Some(host.clone()),
+                db_port: port,
+                ..Default::default()
+            },
             ..create_test_import_args(None, Some(temp_dir.clone()))
         };
         run_import_phash(&args_dir).expect("run_import_phash directory failed");

@@ -321,3 +321,40 @@ fn test_cli_migrate_help() {
     assert!(stdout.contains("--status"));
     assert!(stdout.contains("--host"));
 }
+
+#[test]
+fn test_cli_postgres_args_help() {
+    for cmd in ["recognize-media", "import-phash", "certify-coupling"] {
+        let out = Command::new(env!("CARGO_BIN_EXE_dbsrt"))
+            .args([cmd, "--help"])
+            .output()
+            .unwrap_or_else(|e| panic!("Failed to run dbsrt {} --help: {}", cmd, e));
+        assert!(out.status.success());
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            stdout.contains("--db-host"),
+            "Command {} missing --db-host in help",
+            cmd
+        );
+        assert!(
+            stdout.contains("--db-port"),
+            "Command {} missing --db-port in help",
+            cmd
+        );
+        assert!(
+            stdout.contains("--db-user"),
+            "Command {} missing --db-user in help",
+            cmd
+        );
+        assert!(
+            stdout.contains("--db-pass"),
+            "Command {} missing --db-pass in help",
+            cmd
+        );
+        assert!(
+            stdout.contains("--db-name"),
+            "Command {} missing --db-name in help",
+            cmd
+        );
+    }
+}
