@@ -40,8 +40,8 @@ def test_format_migration_alert() -> None:
     assert "Database Schema Migrations Detected" in alert
     assert "`crates/dbsrt-index/migrations/V1__initial_schema.sql`" in alert
     assert "task db:migrate" in alert
-    assert "PostgreSQL 17" in alert
-    assert "PostgreSQL 15" in alert
+    assert "task db:status" in alert
+    assert "task db:lint:safety" in alert
 
 
 def test_generate_markdown_with_migrations() -> None:

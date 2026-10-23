@@ -40,6 +40,11 @@ tasks:
     cmds:
       - ./target/release/dbsrt migrate --status {{.CLI_ARGS}}
 
+  db:lint:safety:
+    desc: Lint PostgreSQL migrations for DDL safety, non-blocking locks, and PG 15/17 compatibility
+    cmds:
+      - python3 scripts/lint_migrations.py {{.CLI_ARGS}}
+
   build-db:
     desc: Build custom PostgreSQL 17 BK-tree Docker image
     internal: true

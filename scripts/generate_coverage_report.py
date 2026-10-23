@@ -62,8 +62,8 @@ def format_migration_alert(migrations: list[str]) -> str:
             "> **Operational & Deployment Checklist:**",
             "> - [ ] Run pending migrations: `task db:migrate`",
             "> - [ ] Verify migration status: `task db:status`",
-            "> - [ ] Verify cross-version compatibility: PostgreSQL 17 (production) & PostgreSQL 15 (ARM64 / RPi)",
-            "> - [ ] Verify DDL safety: non-blocking indexes / safe locks on live tables",
+            "> - [ ] Verify DDL safety & PG 15/17 compatibility: `task db:lint:safety`",
+            '> - [ ] (Optional) Validate on remote host if online: `ssh rpi4 "task db:status"`',
             "",
         ]
     )

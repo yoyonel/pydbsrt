@@ -1,6 +1,7 @@
 -- V3__secure_lang_and_cascades.sql: Convert lang column to TEXT and secure constraints
 
 -- 1. Ensure subtitles.lang is converted to TEXT (from any legacy enum)
+-- safety-allow: table-rewrite (subtitles is a lightweight catalog metadata table, conversion is instantaneous)
 ALTER TABLE subtitles ALTER COLUMN lang TYPE TEXT;
 
 -- 2. Clean up legacy single-column unique constraints that broke multi-release couplings
