@@ -219,6 +219,7 @@ mod tests {
 
     #[test]
     fn test_import_phash_live_db() {
+        let _guard = crate::commands::LIVE_DB_TEST_MUTEX.lock().unwrap();
         let host = std::env::var("PSQL_IP").unwrap_or_else(|_| DEFAULT_POSTGRES_HOST.to_string());
         let env_port = std::env::var("PSQL_PORT")
             .ok()
@@ -260,7 +261,7 @@ mod tests {
             db_port: port,
             ..create_test_import_args(Some(synth_file.clone()), None)
         };
-        assert!(run_import_phash(&args_file).is_ok());
+        run_import_phash(&args_file).expect("run_import_phash file failed");
 
         // 2. Directory import (re-import triggers idempotent skip branch)
         let args_dir = ImportPhashArgs {
@@ -268,7 +269,7 @@ mod tests {
             db_port: port,
             ..create_test_import_args(None, Some(temp_dir.clone()))
         };
-        assert!(run_import_phash(&args_dir).is_ok());
+        run_import_phash(&args_dir).expect("run_import_phash directory failed");
 
         // Cleanup DB row
         if let Ok(mut db) = connect(port) {

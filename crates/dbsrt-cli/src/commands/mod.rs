@@ -25,3 +25,6 @@ pub use recognize::{format_set, run_recognize_media, AggregatedMatch, RecognizeA
 pub use retarget::{run_retarget_subtitles, RetargetArgs};
 pub use scan::{run_scan_library, ScanLibraryArgs};
 pub use shared::find_or_build_phash;
+
+#[cfg(test)]
+pub(crate) static LIVE_DB_TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());

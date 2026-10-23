@@ -123,6 +123,7 @@ mod tests {
 
     #[test]
     fn test_migrate_live_db_lifecycle() {
+        let _guard = crate::commands::LIVE_DB_TEST_MUTEX.lock().unwrap();
         let host = std::env::var("PSQL_IP").unwrap_or_else(|_| DEFAULT_POSTGRES_HOST.to_string());
         let env_port = std::env::var("PSQL_PORT")
             .ok()
