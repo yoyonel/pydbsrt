@@ -181,6 +181,11 @@ pub fn parse_fps_from_phash_stem(stem: &str) -> f64 {
     DEFAULT_BASELINE_FPS
 }
 
+mod embedded {
+    use refinery::embed_migrations;
+    embed_migrations!("migrations");
+}
+
 impl DbClient {
     pub fn connect(host: &str, port: u16, user: &str, pass: &str, dbname: &str) -> Result<Self> {
         let conn_str = format!(
@@ -198,80 +203,45 @@ impl DbClient {
     }
 
     /// Ensures all 4 relational tables (`medias`, `frames`, `subtitles`, `sub_frames`),
-    /// columns, and BK-tree SP-GiST indexes exist while remaining 100% backward-compatible
-    /// with the legacy Python schema.
+    /// columns, and BK-tree SP-GiST indexes exist by applying versioned `refinery` migrations.
+    /// Thread-safe and idempotent: recorded in `refinery_schema_history`.
     pub fn init_schema(&mut self) -> Result<()> {
-        self.client.batch_execute(
-            r#"
-            CREATE TABLE IF NOT EXISTS medias (
-                id SERIAL PRIMARY KEY,
-                media_hash CHAR(32) UNIQUE,
-                name TEXT UNIQUE
-            );
-
-            ALTER TABLE medias ADD COLUMN IF NOT EXISTS fps DOUBLE PRECISION DEFAULT 25.0;
-            ALTER TABLE medias ADD COLUMN IF NOT EXISTS frame_count INT DEFAULT 0;
-            ALTER TABLE medias ADD COLUMN IF NOT EXISTS phash_path TEXT;
-
-            CREATE TABLE IF NOT EXISTS frames (
-                id SERIAL PRIMARY KEY,
-                p_hash BIGINT,
-                frame_offset INT,
-                media_id INT REFERENCES medias(id) ON DELETE CASCADE
-            );
-
-            CREATE INDEX IF NOT EXISTS frames_phash_bk_tree_index
-            ON frames USING spgist ( p_hash bktree_ops );
-
-            DO $$ BEGIN
-                CREATE TYPE LANG AS ENUM ('FR', 'EN', 'ES', 'DE', 'IT', 'PT', 'JA', 'ZH');
-            EXCEPTION
-                WHEN duplicate_object THEN null;
-            END $$;
-
-            CREATE TABLE IF NOT EXISTS subtitles (
-                id SERIAL PRIMARY KEY,
-                subtitles_hash CHAR(32) NOT NULL,
-                name TEXT NOT NULL,
-                lang TEXT DEFAULT 'FR',
-                media_id INT NOT NULL REFERENCES medias(id) ON DELETE CASCADE,
-                srt_path TEXT,
-                certified BOOLEAN DEFAULT TRUE,
-                UNIQUE(media_id, subtitles_hash, lang)
-            );
-
-            ALTER TABLE subtitles ADD COLUMN IF NOT EXISTS srt_path TEXT;
-            ALTER TABLE subtitles ADD COLUMN IF NOT EXISTS certified BOOLEAN DEFAULT TRUE;
-
-            DO $$ BEGIN
-                IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'subtitles_subtitles_hash_key') THEN
-                    ALTER TABLE subtitles DROP CONSTRAINT subtitles_subtitles_hash_key;
-                END IF;
-                IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'subtitles_subtitles_hash_name_lang_key') THEN
-                    ALTER TABLE subtitles DROP CONSTRAINT subtitles_subtitles_hash_name_lang_key;
-                END IF;
-                IF EXISTS (
-                    SELECT 1 FROM information_schema.columns
-                    WHERE table_name = 'subtitles'
-                      AND column_name = 'lang'
-                      AND udt_name != 'text'
-                ) THEN
-                    ALTER TABLE subtitles ALTER COLUMN lang TYPE TEXT;
-                END IF;
-            END $$;
-
-            CREATE TABLE IF NOT EXISTS sub_frames (
-                id SERIAL PRIMARY KEY,
-                index INT NOT NULL,
-                start_frame_offset INT NOT NULL,
-                end_frame_offset INT NOT NULL,
-                text TEXT DEFAULT '',
-                subtitles_id INT NOT NULL REFERENCES subtitles(id) ON DELETE CASCADE,
-                CHECK (end_frame_offset >= start_frame_offset)
-            );
-            "#,
-        )?;
+        let _report = embedded::migrations::runner()
+            .run(&mut self.client)
+            .context("Failed to run refinery migrations on PostgreSQL")?;
         Ok(())
+    }
+
+    /// Runs pending migrations and returns the detailed refinery report.
+    pub fn run_migrations(&mut self) -> Result<refinery::Report> {
+        let report = embedded::migrations::runner()
+            .run(&mut self.client)
+            .context("Failed to run refinery migrations on PostgreSQL")?;
+        Ok(report)
+    }
+
+    /// Returns the list of applied migration versions from `refinery_schema_history`.
+    pub fn get_applied_migrations(&mut self) -> Result<Vec<(i32, String, String)>> {
+        let table_exists = self.client.query_one(
+            "SELECT EXISTS (
+                SELECT 1 FROM information_schema.tables
+                WHERE table_name = 'refinery_schema_history'
+            )",
+            &[],
+        )?;
+        let exists: bool = table_exists.get(0);
+        if !exists {
+            return Ok(Vec::new());
+        }
+
+        let rows = self.client.query(
+            "SELECT version, name, applied_on::text FROM refinery_schema_history ORDER BY version ASC",
+            &[],
+        )?;
+        Ok(rows
+            .into_iter()
+            .map(|r| (r.get(0), r.get(1), r.get(2)))
+            .collect())
     }
 
     /// Import a single `.phash` file into PostgreSQL BK-Tree database.
@@ -1004,5 +974,31 @@ mod tests {
         let _ = db
             .client
             .execute("DELETE FROM medias WHERE id = $1", &[&media_id]);
+    }
+
+    #[test]
+    fn test_refinery_migrations_lifecycle() {
+        let Some(mut db) = try_connect_test_db() else {
+            eprintln!("PostgreSQL not reachable, skipping test_refinery_migrations_lifecycle");
+            return;
+        };
+
+        db.init_schema()
+            .expect("init_schema via refinery must succeed");
+
+        let applied = db
+            .get_applied_migrations()
+            .expect("Must retrieve applied migrations");
+        assert!(
+            applied.len() >= 3,
+            "Expected at least 3 migrations (V1, V2, V3), got {}",
+            applied.len()
+        );
+        assert_eq!(applied[0].0, 1);
+        assert!(applied[0].1.contains("initial_schema"));
+        assert_eq!(applied[1].0, 2);
+        assert!(applied[1].1.contains("certified_couplings"));
+        assert_eq!(applied[2].0, 3);
+        assert!(applied[2].1.contains("secure_lang_and_cascades"));
     }
 }

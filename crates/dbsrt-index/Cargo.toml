@@ -13,5 +13,6 @@ bytemuck = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
 postgres = { workspace = true }
+refinery = { workspace = true }
 serde = { workspace = true }
 sha2 = "0.11"
