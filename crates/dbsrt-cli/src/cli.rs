@@ -40,9 +40,13 @@ pub struct PostgresArgs {
 
 impl Default for PostgresArgs {
     fn default() -> Self {
+        let port = std::env::var("PSQL_PORT")
+            .ok()
+            .and_then(|p| p.parse::<u16>().ok())
+            .unwrap_or(DEFAULT_POSTGRES_PORT);
         Self {
             host: None,
-            port: DEFAULT_POSTGRES_PORT,
+            port,
             user: DEFAULT_POSTGRES_USER.to_string(),
             pass: DEFAULT_POSTGRES_PASS.to_string(),
             name: DEFAULT_POSTGRES_DB.to_string(),
@@ -198,8 +202,12 @@ mod tests {
     #[test]
     fn test_postgres_args_defaults() {
         let pg = PostgresArgs::default();
+        let expected_port = std::env::var("PSQL_PORT")
+            .ok()
+            .and_then(|p| p.parse::<u16>().ok())
+            .unwrap_or(DEFAULT_POSTGRES_PORT);
         assert_eq!(pg.host, None);
-        assert_eq!(pg.port, DEFAULT_POSTGRES_PORT);
+        assert_eq!(pg.port, expected_port);
         assert_eq!(pg.user, DEFAULT_POSTGRES_USER);
         assert_eq!(pg.pass, DEFAULT_POSTGRES_PASS);
         assert_eq!(pg.name, DEFAULT_POSTGRES_DB);
