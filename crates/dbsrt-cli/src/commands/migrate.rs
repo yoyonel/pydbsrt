@@ -89,6 +89,7 @@ pub fn run_migrate(args: MigrateArgs) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::constants::{STANDARD_POSTGRES_PORT, TEST_UNREACHABLE_PORT};
 
     #[test]
     fn test_migrate_args_defaults() {
@@ -104,5 +105,73 @@ mod tests {
         assert_eq!(cli.migrate.host, "localhost");
         assert_eq!(cli.migrate.port, DEFAULT_POSTGRES_PORT);
         assert!(cli.migrate.status);
+    }
+
+    #[test]
+    fn test_migrate_connection_failure() {
+        let args = MigrateArgs {
+            host: DEFAULT_POSTGRES_HOST.to_string(),
+            port: TEST_UNREACHABLE_PORT,
+            user: DEFAULT_POSTGRES_USER.to_string(),
+            password: DEFAULT_POSTGRES_PASS.to_string(),
+            dbname: DEFAULT_POSTGRES_DB.to_string(),
+            status: false,
+        };
+        let err = run_migrate(args).unwrap_err();
+        assert!(err.to_string().contains("Failed to connect to PostgreSQL"));
+    }
+
+    #[test]
+    fn test_migrate_live_db_lifecycle() {
+        let host = std::env::var("PSQL_IP").unwrap_or_else(|_| DEFAULT_POSTGRES_HOST.to_string());
+        let env_port = std::env::var("PSQL_PORT")
+            .ok()
+            .and_then(|p| p.parse::<u16>().ok());
+        let ports: Vec<u16> = match env_port {
+            Some(p) => vec![p, DEFAULT_POSTGRES_PORT, STANDARD_POSTGRES_PORT],
+            None => vec![DEFAULT_POSTGRES_PORT, STANDARD_POSTGRES_PORT],
+        };
+
+        let mut reachable_port = None;
+        for port in ports {
+            if let Ok(mut client) = DbClient::connect(
+                &host,
+                port,
+                DEFAULT_POSTGRES_USER,
+                DEFAULT_POSTGRES_PASS,
+                DEFAULT_POSTGRES_DB,
+            ) {
+                let _ = client.init_schema();
+                reachable_port = Some(port);
+                break;
+            }
+        }
+
+        let Some(port) = reachable_port else {
+            eprintln!("PostgreSQL not reachable, skipping live DB test_migrate_live_db_lifecycle");
+            return;
+        };
+
+        // 1. Inspect status
+        let args_status = MigrateArgs {
+            host: host.clone(),
+            port,
+            user: DEFAULT_POSTGRES_USER.to_string(),
+            password: DEFAULT_POSTGRES_PASS.to_string(),
+            dbname: DEFAULT_POSTGRES_DB.to_string(),
+            status: true,
+        };
+        assert!(run_migrate(args_status).is_ok());
+
+        // 2. Apply migrations (idempotent)
+        let args_apply = MigrateArgs {
+            host,
+            port,
+            user: DEFAULT_POSTGRES_USER.to_string(),
+            password: DEFAULT_POSTGRES_PASS.to_string(),
+            dbname: DEFAULT_POSTGRES_DB.to_string(),
+            status: false,
+        };
+        assert!(run_migrate(args_apply).is_ok());
     }
 }
