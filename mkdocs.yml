@@ -106,6 +106,7 @@ nav:
   - 🏠 Accueil & Guide:
       - Portail & Dashboard: index.md
       - ⚡ Guide Opérationnel & CLI/API: quickstart-and-reference.md
+      - 📖 Guide Pratique Ingestion & Certification: 2026-10-24-guide-pratique-ingestion-et-certification-media.md
       - 🛠️ Tutoriel Orchestration Taskfile & Guide Dev: 2026-10-21-tutoriel-orchestration-taskfile-et-guide-developpeur.md
   - 🎬 Plugin VLC & VLSub:
       - Extension Lecteur VLC:

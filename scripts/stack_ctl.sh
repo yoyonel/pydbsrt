@@ -125,11 +125,17 @@ server_stop() {
   echo "dbsrt-server stopped."
 }
 
-server_status() {
+resolve_server_port() {
   local port="$SERVER_PORT"
   if [[ -f "$SERVER_DISCOVERY_FILE" ]]; then
     port="$(grep -o '"port": *[0-9]*' "$SERVER_DISCOVERY_FILE" | grep -o '[0-9]*' || echo "$SERVER_PORT")"
   fi
+  echo "$port"
+}
+
+server_status() {
+  local port
+  port="$(resolve_server_port)"
   local res
   if res="$(curl -s -f "http://${SERVER_HOST}:${port}/v1/status" 2>/dev/null)"; then
     local uptime version phash_cnt coup_cnt pg_conn
@@ -282,7 +288,8 @@ stack_status() {
 }
 
 server_reload() {
-  local port="${SERVER_PORT:-$DEFAULT_SERVER_PORT}"
+  local port
+  port="$(resolve_server_port)"
   local host="${SERVER_HOST:-127.0.0.1}"
   echo "Envoi du signal de rechargement atomique à chaud vers http://${host}:${port}/v1/catalog/reload..."
   if command -v jq >/dev/null 2>&1; then
@@ -294,7 +301,8 @@ server_reload() {
 }
 
 catalog_status() {
-  local port="${SERVER_PORT:-$DEFAULT_SERVER_PORT}"
+  local port
+  port="$(resolve_server_port)"
   local host="${SERVER_HOST:-127.0.0.1}"
   if command -v jq >/dev/null 2>&1; then
     curl -s -f "http://${host}:${port}/v1/catalog/status" | jq .
@@ -304,7 +312,8 @@ catalog_status() {
 }
 
 catalog_compact() {
-  local port="${SERVER_PORT:-$DEFAULT_SERVER_PORT}"
+  local port
+  port="$(resolve_server_port)"
   local host="${SERVER_HOST:-127.0.0.1}"
   echo "Déclenchement de la compaction Base + Delta vers http://${host}:${port}/v1/catalog/compact..."
   if command -v jq >/dev/null 2>&1; then
@@ -316,7 +325,8 @@ catalog_compact() {
 }
 
 catalog_ingest() {
-  local port="${SERVER_PORT:-$DEFAULT_SERVER_PORT}"
+  local port
+  port="$(resolve_server_port)"
   local host="${SERVER_HOST:-127.0.0.1}"
   local phash_file="${2:-}"
   if [[ -z "$phash_file" ]]; then
