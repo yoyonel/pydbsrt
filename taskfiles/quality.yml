@@ -73,10 +73,15 @@ tasks:
       - cargo test -p dbsrt-cli --test test_retarget_iso -- --nocapture
 
   test:rs:server:
-    desc: Run dbsrt-server REST API integration tests
+    desc: Run dbsrt-server REST API integration tests (including zero-downtime hot-reload)
     internal: true
     cmds:
-      - cargo test -p dbsrt-server --test test_api -- --nocapture
+      - cargo test -p dbsrt-server -- --nocapture
+
+  bench:hot-reload:
+    desc: Run empirical ArcSwap vs Direct pointer latency benchmark and atomic swap metrics
+    cmds:
+      - cargo run --release -p dbsrt-server --example bench_arcswap_matching
 
   test:local:
     desc: Run test suite locally with uv (fast, requires db:up)

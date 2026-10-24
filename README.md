@@ -122,6 +122,11 @@ Le dépôt est orchestré par **[Taskfile (go-task)](https://taskfile.dev/)** d�
 | Tâche | Description | Domaine (`taskfiles/`) |
 | :--- | :--- | :--- |
 | **`task dev` / `task down`** | Démarre / arrête toute la stack de dev en arrière-plan | `Taskfile.yml` |
+| **`task server:reload`** | Déclenche le rechargement atomique à chaud du catalogue (`/v1/catalog/reload`) | `taskfiles/stack.yml` |
+| **`task catalog:status`** | Affiche l'état d'indexation (Base immuable + Delta RAM + Couplages) | `taskfiles/stack.yml` |
+| **`task catalog:compact`** | Fusionne le Base et le Delta RAM dans un catalogue consolidé et swap | `taskfiles/stack.yml` |
+| **`task catalog:ingest`** | Injecte un fichier `.phash` à chaud dans le DeltaIndex en RAM | `taskfiles/stack.yml` |
+| **`task bench:hot-reload`** | Benchmark empirique de latence ArcSwap vs Pointeur direct et swap à chaud | `taskfiles/quality.yml` |
 | **`task status`** | Tableau de bord de santé unifié et compteurs PostgreSQL 17 | `Taskfile.yml` |
 | **`task build`** | Compile tous les binaires Rust en release (`dbsrt-cli`, `dbsrt-server`, `dbsrt-index`) | `Taskfile.yml` |
 | **`task test`** | Exécute l'ensemble des suites de tests Rust et Python | `Taskfile.yml` |
@@ -155,6 +160,7 @@ Le dépôt est orchestré par **[Taskfile (go-task)](https://taskfile.dev/)** d�
 
 Dossiers techniques détaillés disponibles dans le répertoire [`docs/`](docs) :
 
+* [`docs/2026-10-24-architecture-cycle-de-vie-donnees-io-et-rechargement-a-chaud.md`](docs/2026-10-24-architecture-cycle-de-vie-donnees-io-et-rechargement-a-chaud.md) : **Cycle de Vie des Données, Ingestion I/O & Rechargement à Chaud (Zero-Downtime)** : Modélisation des flux d'E/S, rechargement atomique de catalogue sans downtime via `ArcSwap`, benchmarks empiriques (< 24 ns overhead, swap en 207 ns) et Taskfiles.
 * [`docs/2026-10-24-deploiement-postgresql-17-isole-rpi4-et-orchestration-migrations.md`](docs/2026-10-24-deploiement-postgresql-17-isole-rpi4-et-orchestration-migrations.md) : **Déploiement Isolé de PostgreSQL 17 sur RPi4 & Orchestration des Migrations** : Cloisonnement strict et zéro impact sur la base PG 15.2 legacy (port 5432, 817k frames), instance PG 17 dédiée sur port 5433, automatisation Taskfile et validation empirique E2E.
 * [`docs/2026-10-23-guide-migrations-schema-postgresql-refinery.md`](docs/2026-10-23-guide-migrations-schema-postgresql-refinery.md) : **Guide & Architecture des Migrations PostgreSQL avec Refinery** : Migrations versionnées déclaratives (V1, V2, V3...), élimination des deadlocks en tests parallèles, commande `dbsrt migrate` et Taskfiles.
 * [`docs/2026-10-22-securisation-sql-et-atomicite-transactionnelle-copy-postgresql.md`](docs/2026-10-22-securisation-sql-et-atomicite-transactionnelle-copy-postgresql.md) : **Sécurisation SQL des Codes de Langue & Atomicité COPY** : Assainissement ISO 639 / BCP 47 (`validate_lang_code`), requêtes 100% paramétrées et transactions sans orphelins.

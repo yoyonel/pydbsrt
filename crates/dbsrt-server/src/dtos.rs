@@ -20,6 +20,61 @@ fn default_scan_limit() -> usize {
     5
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct CatalogReloadResponse {
+    pub success: bool,
+    pub elapsed_ms: f64,
+    pub indexed_medias: usize,
+    pub catalog_medias: usize,
+    pub cuts_entries: usize,
+    pub sparse_entries: usize,
+    pub certified_couplings: usize,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct CatalogStatusResponse {
+    pub base_medias: usize,
+    pub base_cuts: usize,
+    pub base_sparse: usize,
+    pub delta_medias: usize,
+    pub delta_cuts: usize,
+    pub delta_sparse: usize,
+    pub certified_couplings: usize,
+    pub total_medias: usize,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct CatalogIngestRequest {
+    /// Path to a .phash file on disk
+    pub phash_path: Option<String>,
+    /// Optional filename/title to parse metadata from
+    pub filename: Option<String>,
+    /// Optional raw hashes if sending directly via JSON payload
+    pub hashes: Option<Vec<u64>>,
+    /// Optional frame rate (defaults to 24.0)
+    pub fps: Option<f64>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct CatalogIngestResponse {
+    pub success: bool,
+    pub media_id: u32,
+    pub clean_title: String,
+    pub total_frames: usize,
+    pub delta_medias_count: usize,
+    pub elapsed_ms: f64,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct CatalogCompactResponse {
+    pub success: bool,
+    pub compacted: bool,
+    pub elapsed_ms: f64,
+    pub total_medias: usize,
+    pub delta_medias_flushed: usize,
+    pub message: String,
+}
+
 #[derive(Deserialize, Serialize, Debug)]
 pub struct AutoSyncRequest {
     pub media_path: String,

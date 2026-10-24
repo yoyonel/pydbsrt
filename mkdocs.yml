@@ -123,6 +123,7 @@ nav:
           - dbsrt Studio & Modèle Relationnel: 2026-10-18-studio-backoffice-and-relational-couplings.md
           - Mécanique E2E Search by pHash: 2026-10-18-e2e-phash-search-mechanics-and-roadmap.md
           - Retrait & Invalidation Globale: 2026-10-20-architecture-retrait-invalidation-donnees-globales.md
+          - Cycle de Vie des Données & Hot-Reload: 2026-10-24-architecture-cycle-de-vie-donnees-io-et-rechargement-a-chaud.md
       - Connecteurs & Distribution:
           - Providers Distants (OpenSubtitles): 2026-10-16-axe5-remote-subtitles-providers.md
           - Stockage Décentralisé & CAS: 2026-10-20-architecture-distribution-sous-titres-o2switch-et-stockage-decentralise.md

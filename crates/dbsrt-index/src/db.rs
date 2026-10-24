@@ -202,6 +202,32 @@ impl DbClient {
         self.client.is_closed()
     }
 
+    /// Returns mutable reference to the underlying `postgres::Client`.
+    pub fn client_mut(&mut self) -> &mut Client {
+        &mut self.client
+    }
+
+    /// Subscribes to a PostgreSQL LISTEN channel.
+    pub fn listen(&mut self, channel: &str) -> Result<()> {
+        self.client.execute(&format!("LISTEN {}", channel), &[])?;
+        Ok(())
+    }
+
+    /// Iterator over pending or incoming notifications from the database.
+    pub fn notifications(&mut self) -> postgres::Notifications<'_> {
+        self.client.notifications()
+    }
+
+    /// Blocks until the next notification arrives on a subscribed channel.
+    pub fn next_notification(&mut self) -> Result<Option<postgres::Notification>> {
+        use postgres::fallible_iterator::FallibleIterator;
+        self.client
+            .notifications()
+            .blocking_iter()
+            .next()
+            .map_err(|e| anyhow::anyhow!("PostgreSQL notification read error: {e}"))
+    }
+
     /// Ensures all 4 relational tables (`medias`, `frames`, `subtitles`, `sub_frames`),
     /// columns, and BK-tree SP-GiST indexes exist by applying versioned `refinery` migrations.
     /// Thread-safe and idempotent: recorded in `refinery_schema_history`.

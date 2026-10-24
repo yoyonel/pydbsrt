@@ -67,7 +67,8 @@ pub async fn recognize_handler(
         }
 
         let mut matched: Option<(String, f64, String)> = None;
-        if let Some(ref reader) = state.dbphash_reader {
+        let reader_guard = state.dbphash_reader.load();
+        if let Some(ref reader) = *reader_guard {
             let m = reader.recognize(&hashes, search_distance);
             if let Some(top) = m.into_iter().next() {
                 if top.confidence >= MIN_PHASH_RECOGNITION_CONFIDENCE_PERCENT {
@@ -76,6 +77,23 @@ pub async fn recognize_handler(
                         top.confidence,
                         "Tier 1 (RAM .dbphash MIH under 10ms)".to_string(),
                     ));
+                }
+            }
+        }
+
+        if matched.is_none() {
+            if let Ok(delta) = state.delta_index.read() {
+                if !delta.is_empty() {
+                    let m = delta.recognize(&hashes, search_distance);
+                    if let Some(top) = m.into_iter().next() {
+                        if top.confidence >= MIN_PHASH_RECOGNITION_CONFIDENCE_PERCENT {
+                            matched = Some((
+                                top.clean_title,
+                                top.confidence,
+                                "Tier 1-Delta (RAM DeltaIndex MIH under 1ms)".to_string(),
+                            ));
+                        }
+                    }
                 }
             }
         }
