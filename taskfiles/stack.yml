@@ -36,6 +36,16 @@ tasks:
     cmds:
       - bash scripts/stack_ctl.sh server-reload
 
+  catalog:notify:reload:
+    desc: Broadcast catalog_reload event to all dbsrt-server instances via PostgreSQL LISTEN/NOTIFY
+    cmds:
+      - PGPASSWORD=docker psql -h 127.0.0.1 -p 5433 -U docker -d bktreedb -c "NOTIFY dbsrt_events, 'catalog_reload'"
+
+  catalog:notify:compact:
+    desc: Broadcast catalog_compact event to all dbsrt-server instances via PostgreSQL LISTEN/NOTIFY
+    cmds:
+      - PGPASSWORD=docker psql -h 127.0.0.1 -p 5433 -U docker -d bktreedb -c "NOTIFY dbsrt_events, 'catalog_compact'"
+
   catalog:compact:
     desc: Compact Base (.dbphash) and Delta (RAM) on dbsrt-server and hot-reload (/v1/catalog/compact)
     cmds:

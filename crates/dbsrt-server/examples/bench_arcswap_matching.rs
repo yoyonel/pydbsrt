@@ -141,6 +141,70 @@ fn main() {
         ns_per_swap
     );
 
+    // 5. DeltaIndex Batch Ingestion Throughput (Arc::make_mut COW)
+    let mut delta = dbsrt_index::DeltaIndex::new();
+    let batch_medias = 200;
+    let hashes_per_media = 200;
+    let sample_hashes = vec![0xAAAA_BBBB_CCCC_DDDD_u64; hashes_per_media];
+
+    let t_ingest = Instant::now();
+    for i in 0..batch_medias {
+        let name = format!("Sample.Movie.{}.1080p.mkv", i);
+        delta.ingest_raw_frames(&name, &sample_hashes, 24.0);
+    }
+    let dur_ingest = t_ingest.elapsed();
+    let total_frames = batch_medias * hashes_per_media;
+    let fps_ingest = total_frames as f64 / dur_ingest.as_secs_f64();
+    println!(
+        "5. DeltaIndex Ingestion ({} medias, {} frames total):",
+        batch_medias, total_frames
+    );
+    println!(
+        "   - Total duration:         {:.2} ms",
+        dur_ingest.as_secs_f64() * 1000.0
+    );
+    println!(
+        "   - Ingestion throughput:   {:.0} frames/s ({:.1} medias/s)",
+        fps_ingest,
+        batch_medias as f64 / dur_ingest.as_secs_f64()
+    );
+
+    // 6. DeltaIndex Recognition Latency (HashMap O(1) lookup)
+    let t_delta_rec = Instant::now();
+    let delta_rec_iters = 1_000;
+    let query_delta = vec![0xAAAA_BBBB_CCCC_DDDD_u64; 10];
+    for _ in 0..delta_rec_iters {
+        let snap = delta.snapshot();
+        let matches = snap.recognize(black_box(&query_delta), 4);
+        black_box(matches);
+    }
+    let dur_delta_rec = t_delta_rec.elapsed();
+    let us_per_delta_rec = dur_delta_rec.as_micros() as f64 / delta_rec_iters as f64;
+    println!(
+        "6. DeltaIndex Recognition Latency ({} queries):",
+        delta_rec_iters
+    );
+    println!(
+        "   - Delta recognition:      {:.2} µs/query",
+        us_per_delta_rec
+    );
+
+    // 7. Compaction Rollback Restoration (Batch vs Iterative Rebuild)
+    let drained = delta.drain_medias();
+    let drain_count = drained.len();
+    let mut restored = dbsrt_index::DeltaIndex::new();
+    let t_rollback = Instant::now();
+    restored.add_delta_entries_batch(drained);
+    let dur_rollback = t_rollback.elapsed();
+    println!(
+        "7. Delta Rollback Restoration ({} medias restored):",
+        drain_count
+    );
+    println!(
+        "   - Batch restore duration: {:.2} ms (1 single MIH rebuild)",
+        dur_rollback.as_secs_f64() * 1000.0
+    );
+
     println!("============================================================");
     println!("✓ Empirically Proven: ArcSwap introduces ZERO detectable latency degradation.");
 }

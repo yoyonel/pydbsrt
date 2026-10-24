@@ -73,7 +73,7 @@ pub const SIGNIFICANT_SHIFT_THRESHOLD_MS: f64 = 500.0;
 pub const DEFAULT_FILE_WATCH_INTERVAL_MS: u64 = 1_000;
 
 /// Debounce duration in milliseconds before triggering reload after detecting file modification.
-pub const DEFAULT_FILE_WATCH_DEBOUNCE_MS: u64 = 500;
+pub const DEFAULT_FILE_WATCH_DEBOUNCE_MS: u64 = 2_000;
 
 /// Interval in seconds before retrying PostgreSQL event listener connection on failure.
 pub const DEFAULT_PG_RECONNECT_INTERVAL_SECS: u64 = 10;

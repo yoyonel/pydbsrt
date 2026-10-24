@@ -131,13 +131,14 @@ where
         });
     }
 
-    // Pillar 3: File Watcher with Debounce for catalog.dbphash
+    // Pillar 3: File Watcher with Debounce & Stable Size for catalog.dbphash
     let state_file_watch = state_arc.clone();
     tokio::spawn(async move {
         let watch_path = state_file_watch
             .dbphash_path()
             .unwrap_or_else(|| PathBuf::from("data/catalog.dbphash"));
         let mut last_mtime = None;
+        let mut last_size = None;
         let mut check_interval = tokio::time::interval(std::time::Duration::from_millis(
             DEFAULT_FILE_WATCH_INTERVAL_MS,
         ));
@@ -146,24 +147,37 @@ where
             check_interval.tick().await;
             if watch_path.exists() {
                 if let Ok(meta) = std::fs::metadata(&watch_path) {
-                    if let Ok(mtime) = meta.modified() {
-                        if let Some(prev) = last_mtime {
-                            if mtime > prev {
-                                // Debounce to ensure rsync or external packer has finished writing
-                                tokio::time::sleep(std::time::Duration::from_millis(
-                                    DEFAULT_FILE_WATCH_DEBOUNCE_MS,
-                                ))
-                                .await;
-                                info!(
-                                    "Detected modified catalog file on disk ({}), triggering hot-reload...",
-                                    watch_path.display()
-                                );
-                                let st = state_file_watch.clone();
-                                let _ =
-                                    tokio::task::spawn_blocking(move || st.reload_catalog()).await;
+                    let size = meta.len();
+                    if size >= std::mem::size_of::<dbsrt_index::DbphashHeader>() as u64 {
+                        if let Ok(mtime) = meta.modified() {
+                            if let (Some(prev_mtime), Some(_)) = (last_mtime, last_size) {
+                                if mtime > prev_mtime {
+                                    // Debounce to ensure rsync or external packer has finished writing
+                                    tokio::time::sleep(std::time::Duration::from_millis(
+                                        DEFAULT_FILE_WATCH_DEBOUNCE_MS,
+                                    ))
+                                    .await;
+
+                                    // Verify file size is stable before triggering reload
+                                    if let Ok(meta2) = std::fs::metadata(&watch_path) {
+                                        if meta2.len() == size {
+                                            info!(
+                                                "Detected stable modified catalog file on disk ({}, {} bytes), triggering hot-reload...",
+                                                watch_path.display(),
+                                                size
+                                            );
+                                            let st = state_file_watch.clone();
+                                            let _ = tokio::task::spawn_blocking(move || {
+                                                st.reload_catalog()
+                                            })
+                                            .await;
+                                        }
+                                    }
+                                }
                             }
+                            last_mtime = Some(mtime);
+                            last_size = Some(size);
                         }
-                        last_mtime = Some(mtime);
                     }
                 }
             }
@@ -199,10 +213,16 @@ where
                                         );
                                         match notification.payload() {
                                             "catalog_reload" | "reload" => {
-                                                let _ = state_pg.reload_catalog();
+                                                let st = state_pg.clone();
+                                                std::thread::spawn(move || {
+                                                    let _ = st.reload_catalog();
+                                                });
                                             }
                                             "catalog_compact" | "compact" => {
-                                                let _ = state_pg.compact_catalog();
+                                                let st = state_pg.clone();
+                                                std::thread::spawn(move || {
+                                                    let _ = st.compact_catalog();
+                                                });
                                             }
                                             _ => {}
                                         }

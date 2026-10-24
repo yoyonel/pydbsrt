@@ -698,8 +698,16 @@ impl MmapDbphash {
             }
         }
 
-        // Rank by weighted score: cuts weight 2x, sparse weight 1x
-        ranked.sort_by_key(|a| std::cmp::Reverse(a.matching_cuts * 2 + a.matching_sparse));
+        // Consistent ranking criteria: confidence descending, then weighted score (cuts*2 + sparse)
+        ranked.sort_by(|a, b| {
+            b.confidence
+                .partial_cmp(&a.confidence)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| {
+                    (b.matching_cuts * 2 + b.matching_sparse)
+                        .cmp(&(a.matching_cuts * 2 + a.matching_sparse))
+                })
+        });
         ranked
     }
 

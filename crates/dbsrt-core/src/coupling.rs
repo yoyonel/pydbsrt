@@ -177,7 +177,10 @@ impl CouplingRegistry {
         subtitles_dir.join(Self::REGISTRY_FILENAME)
     }
 
-    /// Loads `CouplingRegistry` from a JSON file, or returns an empty registry if the file does not exist.
+    /// Loads `CouplingRegistry` from a JSON file.
+    ///
+    /// - Returns `Ok(Self::default())` if the file does not exist.
+    /// - Returns `Err(...)` if the file exists but fails to read or parse (invalid JSON).
     pub fn load_or_default(path: &Path) -> Result<Self> {
         if !path.exists() {
             return Ok(Self::default());

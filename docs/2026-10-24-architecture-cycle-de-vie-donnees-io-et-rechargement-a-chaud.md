@@ -7,6 +7,7 @@ Ce document formalise les flux d'entrées/sorties (E/S) de données à travers l
 ## 1. Cartographie Exhaustive des Flux de Données (I/O)
 
 Le système manipule 4 types d'entités primaires :
+
 1. **Flux Vidéo Brut** (MKV, MP4, AVI sur NAS ou disque local).
 2. **Empreintes Perceptuelles pHash & Points de Coupe** (flux 64-bit DCT-II trame par trame + cuts de scènes).
 3. **Sous-Titres & CAS** (fichiers SRT/VTT/ASS, hash SHA-256 de contenu).
@@ -80,6 +81,7 @@ flowchart TD
 ### 2.2 Problème Identifié
 
 Lors de la synchronisation d'un nouveau catalogue vers une appliance distante (ex: `task rpi4:sync` vers le Raspberry Pi 4 ou futur serveur o2switch) :
+
 - Les fichiers `catalog.dbphash` et `couplings.json` sont mis à jour sur le disque via `rsync`.
 - Mais le serveur Axum `dbsrt-server` continue de tourner avec ses anciens descripteurs mémoire (`mmap` et `Arc<RwLock<CouplingRegistry>>`).
 - **Pire** : si la taille du fichier `catalog.dbphash` change alors qu'un mmap actif le lit sans coordination, l'OS peut émettre un signal fatal `SIGBUS`.
@@ -144,41 +146,54 @@ flowchart TD
 ### 4.1 Pilier 1 : Permutation Atomique de Catalogue (ArcSwap / Double-Buffering)
 
 Au lieu de conserver un `Option<Arc<MmapDbphash>>` statique dans `AppState`, le lecteur est enveloppé dans un pointeur atomique réassignable sans verrouillage bloquant pour les lecteurs :
+
 - Utilisation de la crate `arc-swap` (ou `Arc<parking_lot::RwLock<Option<Arc<MmapDbphash>>>>`).
 - **Protocole de mise à jour** :
-  1. Le thread de mise à jour ouvre le nouveau fichier `catalog.dbphash` dans une **instance indépendante** de `MmapDbphash`.
-  2. Il pré-calcule les tables de hachage MIH (`sparse_mih`, `cuts_mih`) en arrière-plan.
-  3. Il recharge le registre `couplings.json` en mémoire.
-  4. Dès que la nouvelle instance est prête et validée, il effectue un **swap atomique du pointeur** (`arc_swap.store(...)`).
-  5. Les requêtes en cours qui lisaient l'ancien index terminent normalement (conservation par comptage de références `Arc`).
-  6. Dès que la dernière requête en vol est achevée, l'ancienne mémoire est libérée automatiquement par l'OS (`unmap`).
+
+    1. Le thread de mise à jour ouvre le nouveau fichier `catalog.dbphash` dans une **instance indépendante** de `MmapDbphash`.
+    2. Il pré-calcule les tables de hachage MIH (`sparse_mih`, `cuts_mih`) en arrière-plan.
+    3. Il recharge le registre `couplings.json` en mémoire.
+    4. Dès que la nouvelle instance est prête et validée, il effectue un **swap atomique du pointeur** (`arc_swap.store(...)`).
+    5. Les requêtes en cours qui lisaient l'ancien index terminent normalement (conservation par comptage de références `Arc`).
+    6. Dès que la dernière requête en vol est achevée, l'ancienne mémoire est libérée automatiquement par l'OS (`unmap`).
+
 - **Temps d'interruption perçu par les clients : 0 milliseconde.**
 
 ### 4.2 Pilier 2 : Ingestion Hybride à Deux Étages (Base Immuable + Tampon Delta en RAM)
 
 Pour éviter de re-compiler l'intégralité du fichier binaire `catalog.dbphash` (18+ Mo) à chaque nouvel épisode ajouté :
+
 - **Étage Base (Snapshot)** : `catalog.dbphash` immuable stockant le gros corpus (ex: 800 000 trames).
 - **Étage Delta (RAM)** : Un index mémoire dynamique (`DeltaIndex`) stockant les empreintes des médias récemment ajoutés au fil de l'eau.
 - **Requête de recherche** :
-  $$\text{Résultats} = \text{Merge}(\text{BaseIndex}.\text{search}(), \text{DeltaIndex}.\text{search}())$$
+
+```text
+Résultats = Merge(BaseIndex.search(), DeltaIndex.search())
+```
+
 - **Compaction périodique** : Une fois par semaine (ou sur déclenchement manuel `task catalog:compact`), le Base et le Delta sont fusionnés dans un nouveau fichier `catalog.dbphash.next`, suivi d'un swap atomique.
 
 ### 4.3 Pilier 3 : Canaux de Déclenchement & Orchestration
 
 Le serveur Axum écoutera 3 canaux d'invalidation :
+
 1. **Endpoint REST Sécurisé** :
-   - `POST /v1/catalog/reload` : Déclenche le rechargement immédiat de `catalog.dbphash` et `couplings.json`.
-   - `POST /v1/catalog/ingest` : Injecte une nouvelle empreinte `.phash` directement dans le `DeltaIndex` sans toucher aux fichiers.
+    - `POST /v1/catalog/reload` : Déclenche le rechargement immédiat de `catalog.dbphash` et `couplings.json`.
+    - `POST /v1/catalog/ingest` : Injecte une nouvelle empreinte `.phash` directement dans le `DeltaIndex` sans toucher aux fichiers.
+
 2. **Signal Système POSIX `SIGHUP`** :
-   - Permet à `systemd` de recharger le service via `systemctl reload dbsrt-server`.
+    - Permet à `systemd` de recharger le service via `systemctl reload dbsrt-server`.
+
 3. **Synchronisation Taskfile** :
-   - La cible `task rpi4:sync` exécute :
-     ```bash
-     rsync -avz data/catalog.dbphash rpi4:~/dbsrt/data/
-     rsync -avz data/SRT rpi4:~/dbsrt/data/
-     curl -s -X POST http://${RPI_HOST}:8765/v1/catalog/reload
-     ```
-   - Zéro redémarrage du conteneur. Continuité de service absolue.
+    - La cible `task rpi4:sync` exécute :
+
+        ```bash
+        rsync -avz data/catalog.dbphash rpi4:~/dbsrt/data/
+        rsync -avz data/SRT rpi4:~/dbsrt/data/
+        curl -s -X POST http://${RPI_HOST}:8765/v1/catalog/reload
+        ```
+
+    - Zéro redémarrage du conteneur. Continuité de service absolue.
 
 ---
 
@@ -198,11 +213,15 @@ Afin de garantir que l'introduction du rechargement dynamique ne dégrade pas le
 ### 5.2 Prédictions Quantitatives
 
 1. **Surcoût sur la recherche pHash MIH** :
-   - Latence nominale d'une recherche MIH (requête 15 secondes / 360 trames) : **~2 500 000 ns à 5 000 000 ns** (2.5 ms à 5.0 ms).
-   - Surcoût d'un `ArcSwap::load()` : **~2 ns**.
-   - Ratio d'impact sur la latence de bout en bout :
-     $$\frac{2\text{ ns}}{2\,500\,000\text{ ns}} \approx 0.00008\%$$
-   - Conclusion prédictive : **Indiscernable du bruit de mesure CPU**.
+    - Latence nominale d'une recherche MIH (requête 15 secondes / 360 trames) : **~2 500 000 ns à 5 000 000 ns** (2.5 ms à 5.0 ms).
+    - Surcoût d'un `ArcSwap::load()` : **~2 ns**.
+    - Ratio d'impact sur la latence de bout en bout :
+
+```text
+2 ns / 2 500 000 ns ≈ 0.00008%
+```
+
+    - Conclusion prédictive : **Indiscernable du bruit de mesure CPU**.
 
 2. **Impact Mémoire (RAM) lors du Double-Buffering** :
    - Taille fichier `data/catalog.dbphash` : 17.7 Mo.

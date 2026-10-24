@@ -67,34 +67,58 @@ pub async fn recognize_handler(
         }
 
         let mut matched: Option<(String, f64, String)> = None;
+
+        // True unified merge between Base (.dbphash) and Delta (RAM)
+        let mut candidates: Vec<(String, f64, String, usize)> = Vec::new();
+
         let reader_guard = state.dbphash_reader.load();
         if let Some(ref reader) = *reader_guard {
-            let m = reader.recognize(&hashes, search_distance);
-            if let Some(top) = m.into_iter().next() {
-                if top.confidence >= MIN_PHASH_RECOGNITION_CONFIDENCE_PERCENT {
-                    matched = Some((
-                        top.clean_title,
-                        top.confidence,
-                        "Tier 1 (RAM .dbphash MIH under 10ms)".to_string(),
-                    ));
-                }
+            for m in reader.recognize(&hashes, search_distance) {
+                let score = m.matching_cuts * 2 + m.matching_sparse;
+                candidates.push((
+                    m.clean_title,
+                    m.confidence,
+                    "Tier 1 (RAM .dbphash MIH under 10ms)".to_string(),
+                    score,
+                ));
             }
         }
 
-        if matched.is_none() {
+        // Fast snapshot of DeltaIndex to release read lock in ~15 ns
+        let delta_snap = {
             if let Ok(delta) = state.delta_index.read() {
                 if !delta.is_empty() {
-                    let m = delta.recognize(&hashes, search_distance);
-                    if let Some(top) = m.into_iter().next() {
-                        if top.confidence >= MIN_PHASH_RECOGNITION_CONFIDENCE_PERCENT {
-                            matched = Some((
-                                top.clean_title,
-                                top.confidence,
-                                "Tier 1-Delta (RAM DeltaIndex MIH under 1ms)".to_string(),
-                            ));
-                        }
-                    }
+                    Some(delta.snapshot())
+                } else {
+                    None
                 }
+            } else {
+                None
+            }
+        };
+
+        if let Some(delta) = delta_snap {
+            for m in delta.recognize(&hashes, search_distance) {
+                let score = m.matching_cuts * 2 + m.matching_sparse;
+                candidates.push((
+                    m.clean_title,
+                    m.confidence,
+                    "Tier 1-Delta (RAM DeltaIndex MIH under 1ms)".to_string(),
+                    score,
+                ));
+            }
+        }
+
+        // Sort unified candidates by confidence descending, then score
+        candidates.sort_by(|a, b| {
+            b.1.partial_cmp(&a.1)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| b.3.cmp(&a.3))
+        });
+
+        if let Some((clean_title, conf, tier, _)) = candidates.into_iter().next() {
+            if conf >= MIN_PHASH_RECOGNITION_CONFIDENCE_PERCENT {
+                matched = Some((clean_title, conf, tier));
             }
         }
 

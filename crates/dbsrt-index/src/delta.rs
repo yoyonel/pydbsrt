@@ -12,6 +12,7 @@ use dbsrt_core::cuts::detect_cuts;
 use dbsrt_core::MediaMetadata;
 use rayon::prelude::*;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Default Hamming distance threshold for scene cut transition detection.
 pub const DEFAULT_CUT_THRESHOLD: u32 = 16;
@@ -21,6 +22,7 @@ pub const DEFAULT_CUT_THRESHOLD: u32 = 16;
 pub struct DeltaMediaEntry {
     pub media_id: u32,
     pub clean_title: String,
+    pub media_type: dbsrt_core::MediaType,
     pub year: Option<u16>,
     pub season: Option<u32>,
     pub episode: Option<u32>,
@@ -31,18 +33,37 @@ pub struct DeltaMediaEntry {
 }
 
 /// Dynamic in-memory index for perceptual hashes.
+/// Inner data structures are wrapped in `Arc` so readers can acquire a fast ~15 ns snapshot
+/// and release the read lock immediately before performing Rayon searches lock-free.
 #[derive(Debug, Clone, Default)]
 pub struct DeltaIndex {
-    medias: Vec<DeltaMediaEntry>,
-    cuts_entries: Vec<DbphashCutEntry>,
-    sparse_entries: Vec<DbphashSparseEntry>,
-    cuts_mih: Option<MultiIndexHash64>,
-    sparse_mih: Option<MultiIndexHash64>,
+    medias: Arc<Vec<DeltaMediaEntry>>,
+    cuts_entries: Arc<Vec<DbphashCutEntry>>,
+    sparse_entries: Arc<Vec<DbphashSparseEntry>>,
+    cuts_mih: Option<Arc<MultiIndexHash64>>,
+    sparse_mih: Option<Arc<MultiIndexHash64>>,
+}
+
+/// Media stream item payload for batch insertion into `DeltaIndex`.
+#[derive(Debug, Clone)]
+pub struct DeltaBatchItem<'a> {
+    pub meta: MediaMetadata,
+    pub duration_ms: u64,
+    pub fps: f64,
+    pub cuts: &'a [(u64, u32)],
+    pub sparse: &'a [(u64, u32)],
 }
 
 impl DeltaIndex {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Returns a zero-heap-allocation snapshot of the delta index (5 Arc clones, ~15 ns).
+    /// Readers can query the snapshot without holding any lock, eliminating lock contention.
+    #[inline(always)]
+    pub fn snapshot(&self) -> Self {
+        self.clone()
     }
 
     /// Returns true if no media is currently indexed in the delta tier.
@@ -76,15 +97,11 @@ impl DeltaIndex {
 
     /// Appends all media, cuts, and sparse entries in this delta index into a `DbphashBuilder`.
     pub fn export_to_builder(&self, builder: &mut DbphashBuilder) {
-        for media in &self.medias {
+        for media in self.medias.iter() {
             let meta = MediaMetadata {
                 raw_title: media.clean_title.clone(),
                 clean_title: media.clean_title.clone(),
-                media_type: if media.season.is_some() || media.episode.is_some() {
-                    dbsrt_core::MediaType::TvEpisode
-                } else {
-                    dbsrt_core::MediaType::Movie
-                },
+                media_type: media.media_type,
                 year: media.year,
                 season: media.season,
                 episode: media.episode,
@@ -111,14 +128,143 @@ impl DeltaIndex {
 
     /// Clears all entries from the delta index.
     pub fn clear(&mut self) {
-        self.medias.clear();
-        self.cuts_entries.clear();
-        self.sparse_entries.clear();
+        self.medias = Arc::new(Vec::new());
+        self.cuts_entries = Arc::new(Vec::new());
+        self.sparse_entries = Arc::new(Vec::new());
         self.cuts_mih = None;
         self.sparse_mih = None;
     }
 
-    /// Adds a media with explicit cuts and sparse hashes to the delta index.
+    /// Consumes and returns all media entries from the delta index.
+    pub fn drain_medias(&mut self) -> Vec<DeltaMediaEntry> {
+        let old_arc = std::mem::take(&mut self.medias);
+        self.cuts_entries = Arc::new(Vec::new());
+        self.sparse_entries = Arc::new(Vec::new());
+        self.cuts_mih = None;
+        self.sparse_mih = None;
+        Arc::try_unwrap(old_arc).unwrap_or_else(|arc| (*arc).clone())
+    }
+
+    /// Restores multiple delta entries in a single batch with a single MIH rebuild.
+    pub fn add_delta_entries_batch(&mut self, entries: Vec<DeltaMediaEntry>) {
+        if entries.is_empty() {
+            return;
+        }
+
+        let new_medias = Arc::make_mut(&mut self.medias);
+        let new_cuts = Arc::make_mut(&mut self.cuts_entries);
+        let new_sparse = Arc::make_mut(&mut self.sparse_entries);
+
+        for mut entry in entries {
+            let media_id = 1_000_000 + new_medias.len() as u32 + 1;
+
+            for c in &entry.cuts {
+                new_cuts.push(DbphashCutEntry {
+                    phash: c.phash,
+                    timestamp_ms: c.timestamp_ms,
+                    media_id,
+                });
+            }
+            for s in &entry.sparse {
+                new_sparse.push(DbphashSparseEntry {
+                    phash: s.phash,
+                    timestamp_ms: s.timestamp_ms,
+                    media_id,
+                });
+            }
+
+            entry.media_id = media_id;
+            new_medias.push(entry);
+        }
+
+        self.cuts_mih = if !new_cuts.is_empty() {
+            Some(Arc::new(MultiIndexHash64::build_from_provider(
+                &new_cuts[..],
+            )))
+        } else {
+            None
+        };
+        self.sparse_mih = if !new_sparse.is_empty() {
+            Some(Arc::new(MultiIndexHash64::build_from_provider(
+                &new_sparse[..],
+            )))
+        } else {
+            None
+        };
+    }
+
+    /// Restores a previously extracted delta media entry (used for rollback).
+    pub fn add_delta_entry(&mut self, entry: DeltaMediaEntry) {
+        self.add_delta_entries_batch(vec![entry]);
+    }
+
+    /// Adds multiple media streams in batch, rebuilding MIH tables once in O(N).
+    pub fn add_media_batch(&mut self, items: &[DeltaBatchItem<'_>]) -> Vec<u32> {
+        let new_medias = Arc::make_mut(&mut self.medias);
+        let new_cuts = Arc::make_mut(&mut self.cuts_entries);
+        let new_sparse = Arc::make_mut(&mut self.sparse_entries);
+        let mut ids = Vec::with_capacity(items.len());
+
+        for item in items {
+            let media_id = 1_000_000 + new_medias.len() as u32 + 1;
+            let mut delta_cuts = Vec::with_capacity(item.cuts.len());
+            for &(phash, timestamp_ms) in item.cuts {
+                let entry = DbphashCutEntry {
+                    phash,
+                    timestamp_ms,
+                    media_id,
+                };
+                new_cuts.push(entry);
+                delta_cuts.push(entry);
+            }
+
+            let mut delta_sparse = Vec::with_capacity(item.sparse.len());
+            for &(phash, timestamp_ms) in item.sparse {
+                let entry = DbphashSparseEntry {
+                    phash,
+                    timestamp_ms,
+                    media_id,
+                };
+                new_sparse.push(entry);
+                delta_sparse.push(entry);
+            }
+
+            new_medias.push(DeltaMediaEntry {
+                media_id,
+                clean_title: item.meta.clean_title.clone(),
+                media_type: item.meta.media_type,
+                year: item.meta.year,
+                season: item.meta.season,
+                episode: item.meta.episode,
+                duration_ms: item.duration_ms,
+                fps: item.fps,
+                cuts: delta_cuts,
+                sparse: delta_sparse,
+            });
+            ids.push(media_id);
+        }
+
+        // Rebuild MIH once across entire batch
+        self.cuts_mih = if !new_cuts.is_empty() {
+            Some(Arc::new(MultiIndexHash64::build_from_provider(
+                &new_cuts[..],
+            )))
+        } else {
+            None
+        };
+
+        self.sparse_mih = if !new_sparse.is_empty() {
+            Some(Arc::new(MultiIndexHash64::build_from_provider(
+                &new_sparse[..],
+            )))
+        } else {
+            None
+        };
+
+        ids
+    }
+
+    /// Adds a single media with explicit cuts and sparse hashes to the delta index.
     pub fn add_media(
         &mut self,
         meta: &MediaMetadata,
@@ -127,55 +273,13 @@ impl DeltaIndex {
         cuts: &[(u64, u32)],
         sparse: &[(u64, u32)],
     ) -> u32 {
-        let media_id = 1_000_000 + self.medias.len() as u32 + 1;
-
-        let mut delta_cuts = Vec::with_capacity(cuts.len());
-        for &(phash, timestamp_ms) in cuts {
-            let entry = DbphashCutEntry {
-                phash,
-                timestamp_ms,
-                media_id,
-            };
-            self.cuts_entries.push(entry);
-            delta_cuts.push(entry);
-        }
-
-        let mut delta_sparse = Vec::with_capacity(sparse.len());
-        for &(phash, timestamp_ms) in sparse {
-            let entry = DbphashSparseEntry {
-                phash,
-                timestamp_ms,
-                media_id,
-            };
-            self.sparse_entries.push(entry);
-            delta_sparse.push(entry);
-        }
-
-        // Rebuild MIH tables for delta entries in RAM (sub-millisecond for thousands of items)
-        if !self.cuts_entries.is_empty() {
-            self.cuts_mih = Some(MultiIndexHash64::build_from_provider(
-                &self.cuts_entries[..],
-            ));
-        }
-        if !self.sparse_entries.is_empty() {
-            self.sparse_mih = Some(MultiIndexHash64::build_from_provider(
-                &self.sparse_entries[..],
-            ));
-        }
-
-        self.medias.push(DeltaMediaEntry {
-            media_id,
-            clean_title: meta.clean_title.clone(),
-            year: meta.year,
-            season: meta.season,
-            episode: meta.episode,
+        self.add_media_batch(&[DeltaBatchItem {
+            meta: meta.clone(),
             duration_ms,
             fps,
-            cuts: delta_cuts,
-            sparse: delta_sparse,
-        });
-
-        media_id
+            cuts,
+            sparse,
+        }])[0]
     }
 
     /// Ingests a raw frame hash sequence into the delta index.
@@ -290,10 +394,13 @@ impl DeltaIndex {
         all_media_ids.extend(sparse_grouped.keys());
         all_media_ids.extend(cuts_grouped.keys());
 
+        let media_map: HashMap<u32, &DeltaMediaEntry> =
+            self.medias.iter().map(|m| (m.media_id, m)).collect();
+
         let mut ranked = Vec::new();
 
         for media_id in all_media_ids {
-            if let Some(media) = self.medias.iter().find(|m| m.media_id == media_id) {
+            if let Some(media) = media_map.get(&media_id) {
                 let s_matches = sparse_grouped.get(&media_id);
                 let c_matches = cuts_grouped.get(&media_id);
 
@@ -391,10 +498,15 @@ impl DeltaIndex {
             }
         }
 
+        // Consistent ranking criteria: confidence descending, then weighted score (cuts*2 + sparse)
         ranked.sort_by(|a, b| {
             b.confidence
                 .partial_cmp(&a.confidence)
                 .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| {
+                    (b.matching_cuts * 2 + b.matching_sparse)
+                        .cmp(&(a.matching_cuts * 2 + a.matching_sparse))
+                })
         });
         ranked
     }

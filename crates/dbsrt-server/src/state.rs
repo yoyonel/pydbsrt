@@ -164,6 +164,7 @@ pub struct AppState {
     pub is_agent: bool,
     pub log_buffer: Arc<std::sync::RwLock<VecDeque<ServerLogEntry>>>,
     pub reload_in_progress: Arc<std::sync::atomic::AtomicBool>,
+    pub compact_in_progress: Arc<std::sync::atomic::AtomicBool>,
     pub delta_index: Arc<std::sync::RwLock<DeltaIndex>>,
 }
 
@@ -220,6 +221,7 @@ impl AppState {
                 LOG_BUFFER_CAPACITY,
             ))),
             reload_in_progress: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            compact_in_progress: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             delta_index: Arc::new(std::sync::RwLock::new(DeltaIndex::new())),
         }
     }
@@ -298,7 +300,7 @@ impl AppState {
 
         // --- Phase 1: Prepare & Validate all resources (can fail without corrupting runtime) ---
         let reg_path = CouplingRegistry::default_path(&self.subtitles_dir);
-        let new_couplings = CouplingRegistry::load_or_default(&reg_path).unwrap_or_default();
+        let new_couplings = CouplingRegistry::load_or_default(&reg_path)?;
 
         let catalog_path = self.dbphash_path().or_else(|| {
             let default_catalog = PathBuf::from("data/catalog.dbphash");
@@ -386,28 +388,60 @@ impl AppState {
         })
     }
 
-    /// Sets or updates the `.dbphash` catalog and pre-warms the MIH indices in RAM.
-    pub fn set_dbphash(&self, path: Option<PathBuf>) {
+    /// Explicitly configures the target `.dbphash` catalog file path.
+    pub fn set_dbphash_path(&self, path: Option<PathBuf>) {
         if let Ok(mut p_lock) = self.dbphash_path.write() {
-            *p_lock = path.clone();
+            *p_lock = path;
         }
+    }
 
+    /// Sets or updates the `.dbphash` catalog and pre-warms the MIH indices in RAM.
+    ///
+    /// If `path` is `Some(p)`:
+    /// - If `MmapDbphash::open(p)` succeeds, `dbphash_path` is updated and readers are swapped.
+    /// - If `p` does not exist yet (pre-configuration before initial generation), `dbphash_path` is stored for subsequent reload.
+    /// - If `p` exists but is invalid/corrupt, `dbphash_path` is NOT updated, readers are cleared, and an error is logged.
+    ///
+    /// If `path` is `None`:
+    /// - `dbphash_path` is cleared to `None` and readers are cleared.
+    pub fn set_dbphash(&self, path: Option<PathBuf>) {
         if let Some(ref p) = path {
             if let Ok(reader) = MmapDbphash::open(p) {
                 let _ = reader.sparse_mih();
                 let _ = reader.cuts_mih();
                 let reader_arc = Arc::new(reader);
+                if let Ok(mut p_lock) = self.dbphash_path.write() {
+                    *p_lock = Some(p.clone());
+                }
                 self.dbphash_reader.store(Some(reader_arc.clone()));
                 if let Ok(mut eng) = self.engine.write() {
                     eng.set_dbphash(Some(reader_arc));
                 }
             } else {
+                if !p.exists() {
+                    // Pre-configured path before file creation
+                    if let Ok(mut p_lock) = self.dbphash_path.write() {
+                        *p_lock = Some(p.clone());
+                    }
+                } else {
+                    self.push_log(
+                        "CATALOG",
+                        "ERROR",
+                        format!(
+                            "Failed to open existing .dbphash at {:?}; rejecting path update",
+                            p
+                        ),
+                    );
+                }
                 self.dbphash_reader.store(None);
                 if let Ok(mut eng) = self.engine.write() {
                     eng.set_dbphash(None);
                 }
             }
         } else {
+            if let Ok(mut p_lock) = self.dbphash_path.write() {
+                *p_lock = None;
+            }
             self.dbphash_reader.store(None);
             if let Ok(mut eng) = self.engine.write() {
                 eng.set_dbphash(None);
@@ -516,15 +550,39 @@ impl AppState {
 
     /// Merges Base (.dbphash) and Delta (RAM) into a new catalog file and triggers hot-reload.
     pub fn compact_catalog(&self) -> Result<CatalogCompactResponse> {
+        // Enforce anti-stampede for compaction
+        if self
+            .compact_in_progress
+            .compare_exchange(
+                false,
+                true,
+                std::sync::atomic::Ordering::SeqCst,
+                std::sync::atomic::Ordering::SeqCst,
+            )
+            .is_err()
+        {
+            anyhow::bail!("Catalog compaction is already in progress");
+        }
+
+        struct CompactGuard(Arc<std::sync::atomic::AtomicBool>);
+        impl Drop for CompactGuard {
+            fn drop(&mut self) {
+                self.0.store(false, std::sync::atomic::Ordering::SeqCst);
+            }
+        }
+        let _guard = CompactGuard(self.compact_in_progress.clone());
+
         let t0 = Instant::now();
 
-        // 1. Snapshot and check delta
-        let delta_snapshot = {
-            let delta = self
+        // 1. Atomically swap out current delta with an empty DeltaIndex.
+        // Incoming concurrent ingestions will write to the new empty DeltaIndex.
+        // Zero media can ever be lost!
+        let old_delta = {
+            let mut delta_lock = self
                 .delta_index
-                .read()
-                .map_err(|e| anyhow::anyhow!("DeltaIndex read lock failed: {e}"))?;
-            if delta.is_empty() {
+                .write()
+                .map_err(|e| anyhow::anyhow!("DeltaIndex write lock failed: {e}"))?;
+            if delta_lock.is_empty() {
                 let elapsed_ms = t0.elapsed().as_secs_f64() * 1000.0;
                 return Ok(CatalogCompactResponse {
                     success: true,
@@ -535,21 +593,17 @@ impl AppState {
                     message: "Delta index is empty; no compaction needed".to_string(),
                 });
             }
-            delta.clone()
+            std::mem::take(&mut *delta_lock)
         };
 
-        // 2. Build combined catalog in memory
+        // 2. Build combined catalog
         let mut builder = dbsrt_index::DbphashBuilder::new();
 
-        // Export existing Base
         if let Some(ref reader) = *self.dbphash_reader.load() {
             reader.export_to_builder(&mut builder);
         }
+        old_delta.export_to_builder(&mut builder);
 
-        // Export Delta
-        delta_snapshot.export_to_builder(&mut builder);
-
-        // 3. Write to temporary file
         let target_path = self
             .dbphash_path()
             .unwrap_or_else(|| PathBuf::from("data/catalog.dbphash"));
@@ -559,20 +613,50 @@ impl AppState {
             let _ = std::fs::create_dir_all(parent);
         }
 
-        let pack_stats = builder.write_to_file(&tmp_path)?;
+        let restore_delta = |old: DeltaIndex| match self.delta_index.write() {
+            Ok(mut delta_lock) => {
+                let mut current = std::mem::take(&mut *delta_lock);
+                let mut restored = old;
+                restored.add_delta_entries_batch(current.drain_medias());
+                *delta_lock = restored;
+            }
+            Err(lock_err) => {
+                self.push_log(
+                    "COMPACT",
+                    "ERROR",
+                    format!(
+                        "CRITICAL: Delta rollback failed, lock poisoned: {}. {} medias may be lost.",
+                        lock_err,
+                        old.media_count()
+                    ),
+                );
+            }
+        };
 
-        // 4. Atomically rename tmp_path -> target_path
-        std::fs::rename(&tmp_path, &target_path)?;
+        let pack_stats = match builder.write_to_file(&tmp_path) {
+            Ok(s) => s,
+            Err(e) => {
+                restore_delta(old_delta);
+                return Err(e);
+            }
+        };
 
-        // 5. Hot-reload new catalog
-        self.reload_catalog()?;
-
-        // 6. Clear Delta index
-        let flushed_count = delta_snapshot.media_count();
-        if let Ok(mut delta) = self.delta_index.write() {
-            delta.clear();
+        if let Err(e) = std::fs::rename(&tmp_path, &target_path) {
+            restore_delta(old_delta);
+            return Err(e.into());
         }
 
+        // If dbphash_path was None, update it to target_path (Bug #7)
+        if self.dbphash_path().is_none() {
+            if let Ok(mut p_lock) = self.dbphash_path.write() {
+                *p_lock = Some(target_path.clone());
+            }
+        }
+
+        // 3. Hot-reload new catalog
+        self.reload_catalog()?;
+
+        let flushed_count = old_delta.media_count();
         let elapsed_ms = t0.elapsed().as_secs_f64() * 1000.0;
         self.push_log(
             "COMPACT",
