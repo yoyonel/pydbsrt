@@ -234,10 +234,30 @@ Pour valider objectivement ces prédictions sur le code réel, le protocole suiv
 
 ---
 
-## 7. Synthèse & Feuille de Route d'Implémentation (Pilier 1)
+## 7. Synthèse & Feuille de Route d'Implémentation
 
-1. **Étape 1** : Dépendance `arc-swap = "1.7"` dans `crates/dbsrt-server/Cargo.toml`.
-2. **Étape 2** : Refactoring de `AppState` pour héberger `dbphash_reader: Arc<ArcSwapOption<MmapDbphash>>`.
+### 7.1 Pilier 1 : Permutation Atomique de Catalogue (ArcSwap / Double-Buffering) — ✅ Implémenté
+1. Dépendance `arc-swap = "1.7"` dans `crates/dbsrt-server/Cargo.toml`.
+2. Refactoring de `AppState` pour héberger `dbphash_reader: Arc<ArcSwapOption<MmapDbphash>>`.
+3. Validation pré-swap (contrôle magic, intégrité CRC/taille, et pré-chauffe MIH avant validation).
+4. Transaction en 2 phases (Prepare-then-Commit) : aucune modification d'état en cas d'erreur de parsing/corrupt file.
+5. Verrouillage anti-stampede (`reload_in_progress: Arc<AtomicBool>`) retournant `409 Conflict`.
+6. Optimisation wait-free `load()` (emprunt de `Guard` sans incrément atomique de refcount Arc).
+7. Endpoints HTTP `POST /v1/catalog/reload` et alias `POST /v1/reload`.
+8. Écouteur de signal Unix POSIX `SIGHUP` pour rechargement daemon sans coupure (`systemctl reload dbsrt-server`).
+
+### 7.2 Pilier 2 : Ingestion Hybride à Deux Étages (Base Immuable + Tampon Delta en RAM) — ✅ Implémenté
+1. Module `dbsrt_index::delta::DeltaIndex` : stockage dynamique en mémoire vive des nouveaux médias et trames pHash.
+2. Ingestion unitaire $O(1)$ (`POST /v1/catalog/ingest`) : détection automatique des cuts, échantillonnage sparse 1 fps et construction MIH RAM immédiate.
+3. Recherche unifiée fusionnée (`POST /v1/recognize`) : interroge Base (.dbphash) puis Delta (RAM) et sélectionne le candidat de plus haute confiance temporelle.
+4. Compaction atomique (`POST /v1/catalog/compact`) : fusionne Base + Delta vers `catalog.dbphash.tmp`, substitution atomique par rename, hot-reload sans coupure et purge du Delta.
+
+### 7.3 Pilier 3 : Canaux de Déclenchement & Orchestration — ✅ Implémenté
+1. **Endpoint REST** : `POST /v1/catalog/reload`, `POST /v1/catalog/ingest`, `POST /v1/catalog/compact`, `GET /v1/catalog/status`.
+2. **Signal OS** : Signal POSIX `SIGHUP` géré nativement sous Unix.
+3. **File Watcher automatique** : Scrutation continue de `data/catalog.dbphash` avec debounce de 500 ms (protection contre écritures rsync partielles).
+4. **PostgreSQL LISTEN / NOTIFY** : Thread d'écoute dédié sur le bus d'événements `dbsrt_events` (canaux `catalog_reload`, `catalog_compact`).
+5. **Orchestrateur Taskfile** : Cibles unifiées `task catalog:status`, `task catalog:reload`, `task catalog:compact`, `task catalog:ingest`.
 3. **Étape 3** : Méthode `AppState::reload_catalog()` (asynchrone / déportée sur worker thread).
 4. **Étape 4** : Handler HTTP Axum `POST /v1/catalog/reload`.
 5. **Étape 5** : Benchmarks comparatifs & tests d'intégration automatisés.

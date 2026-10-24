@@ -123,6 +123,9 @@ Le dépôt est orchestré par **[Taskfile (go-task)](https://taskfile.dev/)** d�
 | :--- | :--- | :--- |
 | **`task dev` / `task down`** | Démarre / arrête toute la stack de dev en arrière-plan | `Taskfile.yml` |
 | **`task server:reload`** | Déclenche le rechargement atomique à chaud du catalogue (`/v1/catalog/reload`) | `taskfiles/stack.yml` |
+| **`task catalog:status`** | Affiche l'état d'indexation (Base immuable + Delta RAM + Couplages) | `taskfiles/stack.yml` |
+| **`task catalog:compact`** | Fusionne le Base et le Delta RAM dans un catalogue consolidé et swap | `taskfiles/stack.yml` |
+| **`task catalog:ingest`** | Injecte un fichier `.phash` à chaud dans le DeltaIndex en RAM | `taskfiles/stack.yml` |
 | **`task bench:hot-reload`** | Benchmark empirique de latence ArcSwap vs Pointeur direct et swap à chaud | `taskfiles/quality.yml` |
 | **`task status`** | Tableau de bord de santé unifié et compteurs PostgreSQL 17 | `Taskfile.yml` |
 | **`task build`** | Compile tous les binaires Rust en release (`dbsrt-cli`, `dbsrt-server`, `dbsrt-index`) | `Taskfile.yml` |

@@ -3,11 +3,11 @@
 use crate::constants::{
     LOG_BUFFER_CAPACITY, SECONDS_PER_DAY, SECONDS_PER_HOUR, SECONDS_PER_MINUTE,
 };
-use crate::dtos::CatalogReloadResponse;
+use crate::dtos::{CatalogCompactResponse, CatalogReloadResponse, CatalogStatusResponse};
 use anyhow::Result;
 use arc_swap::ArcSwapOption;
 use dbsrt_core::{CouplingRegistry, SubtitleCache, SubtitleProvider};
-use dbsrt_index::{DbClient, MmapDbphash, PhashEngine};
+use dbsrt_index::{DbClient, DeltaIndex, MmapDbphash, PhashEngine};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
@@ -164,6 +164,7 @@ pub struct AppState {
     pub is_agent: bool,
     pub log_buffer: Arc<std::sync::RwLock<VecDeque<ServerLogEntry>>>,
     pub reload_in_progress: Arc<std::sync::atomic::AtomicBool>,
+    pub delta_index: Arc<std::sync::RwLock<DeltaIndex>>,
 }
 
 impl AppState {
@@ -219,6 +220,7 @@ impl AppState {
                 LOG_BUFFER_CAPACITY,
             ))),
             reload_in_progress: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            delta_index: Arc::new(std::sync::RwLock::new(DeltaIndex::new())),
         }
     }
 
@@ -313,6 +315,14 @@ impl AppState {
 
         let new_reader_opt = match catalog_path {
             Some(ref p) if p.exists() => {
+                // Pre-swap validation: check file size, magic, header integrity, and prewarm MIH
+                let meta = std::fs::metadata(p)?;
+                if meta.len() < std::mem::size_of::<dbsrt_index::DbphashHeader>() as u64 {
+                    anyhow::bail!(
+                        "Corrupted .dbphash catalog: file size {} bytes is smaller than header",
+                        meta.len()
+                    );
+                }
                 let reader = MmapDbphash::open(p)?;
                 let _ = reader.sparse_mih();
                 let _ = reader.cuts_mih();
@@ -418,5 +428,168 @@ impl AppState {
             }
         }
         dirs
+    }
+
+    /// Total number of distinct indexed medias across Base, Delta, and loose files.
+    pub fn indexed_media_count(&self) -> usize {
+        let base_count = if let Some(ref r) = *self.dbphash_reader.load() {
+            r.media_entries().len()
+        } else {
+            0
+        };
+        let delta_count = self
+            .delta_index
+            .read()
+            .map(|d| d.media_count())
+            .unwrap_or(0);
+        let loose_count = self
+            .engine
+            .read()
+            .map(|e| e.library().map(|l| l.file_count()).unwrap_or(0))
+            .unwrap_or(0);
+        base_count + delta_count + loose_count
+    }
+
+    /// Returns a comprehensive snapshot of the catalog state (Base + Delta + Couplings).
+    pub fn catalog_status(&self) -> CatalogStatusResponse {
+        let (base_medias, base_cuts, base_sparse) =
+            if let Some(ref reader) = *self.dbphash_reader.load() {
+                (
+                    reader.media_entries().len(),
+                    reader.cuts_entries().len(),
+                    reader.sparse_entries().len(),
+                )
+            } else {
+                (0, 0, 0)
+            };
+
+        let (delta_medias, delta_cuts, delta_sparse) = {
+            if let Ok(delta) = self.delta_index.read() {
+                (
+                    delta.media_count(),
+                    delta.cuts_count(),
+                    delta.sparse_count(),
+                )
+            } else {
+                (0, 0, 0)
+            }
+        };
+
+        let certified_couplings = if let Ok(reg) = self.coupling_registry.read() {
+            reg.couplings.iter().map(|c| c.subtitles.len()).sum()
+        } else {
+            0
+        };
+
+        CatalogStatusResponse {
+            base_medias,
+            base_cuts,
+            base_sparse,
+            delta_medias,
+            delta_cuts,
+            delta_sparse,
+            certified_couplings,
+            total_medias: base_medias + delta_medias,
+        }
+    }
+
+    /// Ingests a new media stream into the RAM Delta Index without rewriting `catalog.dbphash`.
+    pub fn ingest_delta_frames(&self, filename: &str, hashes: &[u64], fps: f64) -> Result<u32> {
+        let mut delta = self
+            .delta_index
+            .write()
+            .map_err(|e| anyhow::anyhow!("DeltaIndex RwLock error: {e}"))?;
+        let media_id = delta.ingest_raw_frames(filename, hashes, fps);
+        self.push_log(
+            "DELTA",
+            "INFO",
+            format!(
+                "Ingested '{}' into DeltaIndex (id={}, {} frames, {} total delta medias)",
+                filename,
+                media_id,
+                hashes.len(),
+                delta.media_count()
+            ),
+        );
+        Ok(media_id)
+    }
+
+    /// Merges Base (.dbphash) and Delta (RAM) into a new catalog file and triggers hot-reload.
+    pub fn compact_catalog(&self) -> Result<CatalogCompactResponse> {
+        let t0 = Instant::now();
+
+        // 1. Snapshot and check delta
+        let delta_snapshot = {
+            let delta = self
+                .delta_index
+                .read()
+                .map_err(|e| anyhow::anyhow!("DeltaIndex read lock failed: {e}"))?;
+            if delta.is_empty() {
+                let elapsed_ms = t0.elapsed().as_secs_f64() * 1000.0;
+                return Ok(CatalogCompactResponse {
+                    success: true,
+                    compacted: false,
+                    elapsed_ms,
+                    total_medias: self.indexed_media_count(),
+                    delta_medias_flushed: 0,
+                    message: "Delta index is empty; no compaction needed".to_string(),
+                });
+            }
+            delta.clone()
+        };
+
+        // 2. Build combined catalog in memory
+        let mut builder = dbsrt_index::DbphashBuilder::new();
+
+        // Export existing Base
+        if let Some(ref reader) = *self.dbphash_reader.load() {
+            reader.export_to_builder(&mut builder);
+        }
+
+        // Export Delta
+        delta_snapshot.export_to_builder(&mut builder);
+
+        // 3. Write to temporary file
+        let target_path = self
+            .dbphash_path()
+            .unwrap_or_else(|| PathBuf::from("data/catalog.dbphash"));
+        let tmp_path = target_path.with_extension("tmp");
+
+        if let Some(parent) = target_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+
+        let pack_stats = builder.write_to_file(&tmp_path)?;
+
+        // 4. Atomically rename tmp_path -> target_path
+        std::fs::rename(&tmp_path, &target_path)?;
+
+        // 5. Hot-reload new catalog
+        self.reload_catalog()?;
+
+        // 6. Clear Delta index
+        let flushed_count = delta_snapshot.media_count();
+        if let Ok(mut delta) = self.delta_index.write() {
+            delta.clear();
+        }
+
+        let elapsed_ms = t0.elapsed().as_secs_f64() * 1000.0;
+        self.push_log(
+            "COMPACT",
+            "INFO",
+            format!(
+                "Compacted {} delta medias into {} total medias in {:.2}ms",
+                flushed_count, pack_stats.media_count, elapsed_ms
+            ),
+        );
+
+        Ok(CatalogCompactResponse {
+            success: true,
+            compacted: true,
+            elapsed_ms,
+            total_medias: pack_stats.media_count,
+            delta_medias_flushed: flushed_count,
+            message: format!("Successfully compacted into {}", target_path.display()),
+        })
     }
 }

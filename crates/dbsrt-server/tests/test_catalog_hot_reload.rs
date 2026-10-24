@@ -251,3 +251,250 @@ async fn test_zero_downtime_hot_reload_and_concurrency() {
     // Clean up
     let _ = std::fs::remove_dir_all(&tmp_dir);
 }
+
+#[tokio::test]
+async fn test_pillar2_delta_ingest_and_compaction() {
+    let tmp_dir = std::env::temp_dir().join(format!("test_pillar2_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+    std::fs::create_dir_all(&tmp_dir).unwrap();
+
+    let phash_dir = tmp_dir.join("phash");
+    let subtitles_dir = tmp_dir.join("SRT");
+    let catalog_path = tmp_dir.join("catalog.dbphash");
+    std::fs::create_dir_all(&phash_dir).unwrap();
+    std::fs::create_dir_all(&subtitles_dir).unwrap();
+
+    // 1. Initial State: Catalog with 1 Base media
+    let mut builder = DbphashBuilder::new();
+    let meta_base = MediaMetadata {
+        raw_title: "Interstellar.2014.1080p.mkv".to_string(),
+        clean_title: "Interstellar".to_string(),
+        media_type: MediaType::Movie,
+        year: Some(2014),
+        season: None,
+        episode: None,
+        resolution: Some("1080p".to_string()),
+        source: Some("BluRay".to_string()),
+        release_group: Some("SPARKS".to_string()),
+        moviehash: None,
+    };
+    let cuts_base = [(0x1111_2222_3333_4444_u64, 1000u32)];
+    let sparse_base = [(0x1111_2222_3333_4444_u64, 0u32)];
+    builder.add_media(&meta_base, 10_000_000, 24.0, &cuts_base, &sparse_base);
+    builder.write_to_file(&catalog_path).unwrap();
+
+    let state = AppState::new(
+        phash_dir.clone(),
+        subtitles_dir.clone(),
+        Arc::new(dbsrt_core::OpenSubtitlesProvider::new(None)),
+        dbsrt_core::SubtitleCache::default(),
+    );
+    state.set_dbphash(Some(catalog_path.clone()));
+    let state_arc = Arc::new(state);
+
+    let app = create_router_with_state((*state_arc).clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("Failed to bind ephemeral port");
+    let addr: SocketAddr = listener.local_addr().unwrap();
+
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    let client = reqwest::Client::new();
+    let base_url = format!("http://{}", addr);
+
+    // 2. Check initial catalog status
+    let res_status = client
+        .get(format!("{}/v1/catalog/status", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res_status.status(), reqwest::StatusCode::OK);
+    let st1: serde_json::Value = res_status.json().await.unwrap();
+    assert_eq!(st1["base_medias"], 1);
+    assert_eq!(st1["delta_medias"], 0);
+    assert_eq!(st1["total_medias"], 1);
+
+    // 3. Ingest a new media into Delta Index in RAM
+    let ingest_hashes = vec![0x9999_8888_7777_6666_u64; 100];
+    let ingest_req = serde_json::json!({
+        "filename": "Dune.Part.Two.2024.1080p.mkv",
+        "hashes": ingest_hashes,
+        "fps": 24.0
+    });
+    let ingest_res = client
+        .post(format!("{}/v1/catalog/ingest", base_url))
+        .json(&ingest_req)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(ingest_res.status(), reqwest::StatusCode::OK);
+    let ingest_json: serde_json::Value = ingest_res.json().await.unwrap();
+    assert_eq!(ingest_json["success"], true);
+    assert_eq!(ingest_json["clean_title"], "Dune Part Two");
+    assert_eq!(ingest_json["delta_medias_count"], 1);
+
+    // 4. Verify catalog status reflects Delta
+    let res_status2 = client
+        .get(format!("{}/v1/catalog/status", base_url))
+        .send()
+        .await
+        .unwrap();
+    let st2: serde_json::Value = res_status2.json().await.unwrap();
+    assert_eq!(st2["base_medias"], 1);
+    assert_eq!(st2["delta_medias"], 1);
+    assert_eq!(st2["total_medias"], 2);
+
+    // 5. Query recognize for the delta-ingested media
+    let rec_payload = RecognizeRequest {
+        media_path: "dune_query.mp4".to_string(),
+        query_fingerprint: Some(vec![
+            "0x9999888877776666".to_string(),
+            "0x9999888877776666".to_string(),
+            "0x9999888877776666".to_string(),
+        ]),
+        fps: Some(24.0),
+        language: Some("en".to_string()),
+        client_version: Some("2.1.0".to_string()),
+        search_distance: 2,
+        nb_seconds: 1.0,
+        phash_dir: None,
+    };
+    let rec_res = client
+        .post(format!("{}/v1/recognize", base_url))
+        .json(&rec_payload)
+        .send()
+        .await
+        .unwrap();
+    let rec_json: serde_json::Value = rec_res.json().await.unwrap();
+    assert_eq!(rec_json["found"], true);
+    assert_eq!(rec_json["media_match"], "Dune Part Two");
+
+    // 6. Trigger Compaction (Pillar 2: Base + Delta -> compiled catalog -> hot reload -> clear delta)
+    let compact_res = client
+        .post(format!("{}/v1/catalog/compact", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(compact_res.status(), reqwest::StatusCode::OK);
+    let compact_json: serde_json::Value = compact_res.json().await.unwrap();
+    assert_eq!(compact_json["success"], true);
+    assert_eq!(compact_json["compacted"], true);
+    assert_eq!(compact_json["total_medias"], 2);
+    assert_eq!(compact_json["delta_medias_flushed"], 1);
+
+    // 7. Verify status after compaction: base has 2, delta has 0
+    let res_status3 = client
+        .get(format!("{}/v1/catalog/status", base_url))
+        .send()
+        .await
+        .unwrap();
+    let st3: serde_json::Value = res_status3.json().await.unwrap();
+    assert_eq!(st3["base_medias"], 2);
+    assert_eq!(st3["delta_medias"], 0);
+    assert_eq!(st3["total_medias"], 2);
+
+    // 8. Recognize both media 1 and media 2 now served directly from Base
+    let rec_res_dune = client
+        .post(format!("{}/v1/recognize", base_url))
+        .json(&rec_payload)
+        .send()
+        .await
+        .unwrap();
+    let rec_dune_json: serde_json::Value = rec_res_dune.json().await.unwrap();
+    assert_eq!(rec_dune_json["found"], true);
+    assert_eq!(rec_dune_json["media_match"], "Dune Part Two");
+
+    // Clean up
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+}
+
+#[tokio::test]
+async fn test_pre_swap_validation_rejects_corrupted_file() {
+    let tmp_dir = std::env::temp_dir().join(format!("test_corrupt_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+    std::fs::create_dir_all(&tmp_dir).unwrap();
+
+    let phash_dir = tmp_dir.join("phash");
+    let subtitles_dir = tmp_dir.join("SRT");
+    let catalog_path = tmp_dir.join("catalog.dbphash");
+    std::fs::create_dir_all(&phash_dir).unwrap();
+    std::fs::create_dir_all(&subtitles_dir).unwrap();
+
+    // 1. Initial valid catalog
+    let mut builder = DbphashBuilder::new();
+    let meta = MediaMetadata {
+        raw_title: "Valid.2020.mkv".to_string(),
+        clean_title: "Valid".to_string(),
+        media_type: MediaType::Movie,
+        year: Some(2020),
+        season: None,
+        episode: None,
+        resolution: None,
+        source: None,
+        release_group: None,
+        moviehash: None,
+    };
+    builder.add_media(&meta, 1_000_000, 24.0, &[(0x1234, 100)], &[(0x1234, 0)]);
+    builder.write_to_file(&catalog_path).unwrap();
+
+    let state = AppState::new(
+        phash_dir.clone(),
+        subtitles_dir.clone(),
+        Arc::new(dbsrt_core::OpenSubtitlesProvider::new(None)),
+        dbsrt_core::SubtitleCache::default(),
+    );
+    state.set_dbphash(Some(catalog_path.clone()));
+    let state_arc = Arc::new(state);
+
+    let app = create_router_with_state((*state_arc).clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr: SocketAddr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    let client = reqwest::Client::new();
+    let base_url = format!("http://{}", addr);
+
+    // Initial status: 1 media
+    let st: serde_json::Value = client
+        .get(format!("{}/v1/catalog/status", base_url))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(st["base_medias"], 1);
+
+    // 2. Corrupt the file on disk (simulate interrupted rsync or truncated transfer)
+    std::fs::write(&catalog_path, b"CORRUPTED_TRUNCATED_BYTES").unwrap();
+
+    // 3. Trigger reload: pre-swap validation must reject it!
+    let reload_res = client
+        .post(format!("{}/v1/catalog/reload", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        reload_res.status(),
+        reqwest::StatusCode::INTERNAL_SERVER_ERROR
+    );
+
+    // 4. Runtime state must remain healthy and retain old reader!
+    let st_after: serde_json::Value = client
+        .get(format!("{}/v1/catalog/status", base_url))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(st_after["base_medias"], 1);
+
+    // Clean up
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+}

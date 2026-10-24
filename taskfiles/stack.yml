@@ -26,6 +26,26 @@ tasks:
     cmds:
       - bash scripts/stack_ctl.sh server-reload
 
+  catalog:status:
+    desc: Query catalog snapshot (Base + Delta + Couplings) on dbsrt-server (/v1/catalog/status)
+    cmds:
+      - bash scripts/stack_ctl.sh catalog-status
+
+  catalog:reload:
+    desc: Trigger atomic zero-downtime catalog reload on dbsrt-server (/v1/catalog/reload)
+    cmds:
+      - bash scripts/stack_ctl.sh server-reload
+
+  catalog:compact:
+    desc: Compact Base (.dbphash) and Delta (RAM) on dbsrt-server and hot-reload (/v1/catalog/compact)
+    cmds:
+      - bash scripts/stack_ctl.sh catalog-compact
+
+  catalog:ingest:
+    desc: "Ingest a .phash file dynamically into DeltaIndex in RAM (usage: task catalog:ingest -- <path.phash> [fps])"
+    cmds:
+      - bash scripts/stack_ctl.sh catalog-ingest {{.CLI_ARGS}}
+
   server:run:
     desc: Run dbsrt-server daemon in foreground on http://127.0.0.1:8765
     deps: [server:build]
