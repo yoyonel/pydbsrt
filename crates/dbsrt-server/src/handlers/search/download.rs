@@ -258,10 +258,11 @@ pub async fn download_handler(
             confidence_percent = 100.0;
         }
     } else if payload.resync && media_path.exists() {
+        let reader_guard = state.dbphash_reader.load();
         let (matched, target_fps, existing_phash) = identify_media_by_phash_multi_with_reader(
             &media_path,
             &phash_dirs,
-            state.dbphash_reader.as_deref(),
+            reader_guard.as_deref(),
             state.db_config.as_ref(),
             1.0,
             DEFAULT_RECOGNITION_SEARCH_DISTANCE,

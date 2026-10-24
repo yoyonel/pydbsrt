@@ -21,9 +21,10 @@ pub async fn status_handler(State(state): State<Arc<AppState>>) -> impl IntoResp
     let mut indexed_phash_count = MmapLibrary::from_directories(&dirs)
         .map(|lib| lib.file_count())
         .unwrap_or(0);
-    if let Some(ref reader) = state.dbphash_reader {
+    let reader_guard = state.dbphash_reader.load();
+    if let Some(ref reader) = *reader_guard {
         indexed_phash_count += reader.media_entries().len();
-    } else if let Some(ref dbphash) = state.dbphash_path {
+    } else if let Some(ref dbphash) = state.dbphash_path() {
         if let Ok(reader) = MmapDbphash::open(dbphash) {
             indexed_phash_count += reader.media_entries().len();
         }

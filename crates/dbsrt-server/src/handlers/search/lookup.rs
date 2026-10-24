@@ -203,14 +203,15 @@ pub async fn search_handler(
                 }
             }
         } else if phash_dirs.iter().any(|d| d.exists())
-            || state.dbphash_path.is_some()
+            || state.dbphash_path().is_some()
             || state.db_config.is_some()
         {
             let t0 = Instant::now();
+            let reader_guard = state.dbphash_reader.load();
             let (matched_routed, tfps, e_phash) = identify_media_by_phash_multi_routed(
                 &media_path,
                 &phash_dirs,
-                state.dbphash_reader.as_deref(),
+                reader_guard.as_deref(),
                 state.db_config.as_ref(),
                 1.0,
                 DEFAULT_RECOGNITION_SEARCH_DISTANCE,
@@ -244,7 +245,7 @@ pub async fn search_handler(
                 timing.query_sample_frames = DEFAULT_BASELINE_FPS.round() as usize;
             }
 
-            if let Some(ref reader) = state.dbphash_reader {
+            if let Some(ref reader) = *reader_guard {
                 let targets = reader.cuts_entries().len() + reader.sparse_entries().len();
                 timing.index_targets_count = targets;
                 timing.total_hamming_comparisons = timing.query_sample_frames * targets;

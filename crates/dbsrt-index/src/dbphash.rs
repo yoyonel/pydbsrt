@@ -97,7 +97,9 @@ impl DbphashMediaEntry {
 
 /// Fixed 16-byte cut or sparse frame entry in flat tables.
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Pod, Zeroable)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Pod, Zeroable, serde::Serialize, serde::Deserialize,
+)]
 pub struct DbphashCutEntry {
     /// 64-bit perceptual hash (2D DCT-II SIMD AVX2)
     pub phash: u64,
@@ -696,8 +698,81 @@ impl MmapDbphash {
             }
         }
 
-        // Rank by weighted score: cuts weight 2x, sparse weight 1x
-        ranked.sort_by_key(|a| std::cmp::Reverse(a.matching_cuts * 2 + a.matching_sparse));
+        // Consistent ranking criteria: confidence descending, then weighted score (cuts*2 + sparse)
+        ranked.sort_by(|a, b| {
+            b.confidence
+                .partial_cmp(&a.confidence)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| {
+                    (b.matching_cuts * 2 + b.matching_sparse)
+                        .cmp(&(a.matching_cuts * 2 + a.matching_sparse))
+                })
+        });
         ranked
+    }
+
+    /// Appends all media, cuts, and sparse entries in this memory-mapped catalog into a `DbphashBuilder`.
+    /// Enables O(N) compaction of Base + Delta without requiring loose `.phash` source files.
+    pub fn export_to_builder(&self, builder: &mut DbphashBuilder) {
+        let cuts_all = self.cuts_entries();
+        let sparse_all = self.sparse_entries();
+
+        for media in self.media_entries() {
+            let title = self.get_title(media);
+            let meta = MediaMetadata {
+                raw_title: title.to_string(),
+                clean_title: title.to_string(),
+                media_type: media.media_type_enum(),
+                year: if media.year > 0 {
+                    Some(media.year)
+                } else {
+                    None
+                },
+                season: if media.season > 0 {
+                    Some(media.season)
+                } else {
+                    None
+                },
+                episode: if media.episode > 0 {
+                    Some(media.episode)
+                } else {
+                    None
+                },
+                resolution: None,
+                source: None,
+                release_group: None,
+                moviehash: None,
+            };
+
+            let fps = (media.fps_x1000 as f64 / 1000.0).max(1.0);
+            let cuts_end = (media.cuts_start_idx + media.cuts_count as u64) as usize;
+            let cuts_slice = if (media.cuts_start_idx as usize) <= cuts_all.len()
+                && cuts_end <= cuts_all.len()
+            {
+                &cuts_all[media.cuts_start_idx as usize..cuts_end]
+            } else {
+                &[]
+            };
+
+            let sparse_end = (media.sparse_start_idx + media.sparse_count) as usize;
+            let sparse_slice = if (media.sparse_start_idx as usize) <= sparse_all.len()
+                && sparse_end <= sparse_all.len()
+            {
+                &sparse_all[media.sparse_start_idx as usize..sparse_end]
+            } else {
+                &[]
+            };
+
+            let cuts: Vec<(u64, u32)> = cuts_slice
+                .iter()
+                .map(|c| (c.phash, c.timestamp_ms))
+                .collect();
+            let sparse: Vec<(u64, u32)> = sparse_slice
+                .iter()
+                .map(|s| (s.phash, s.timestamp_ms))
+                .collect();
+
+            builder.add_media(&meta, media.duration_ms, fps, &cuts, &sparse);
+        }
     }
 }

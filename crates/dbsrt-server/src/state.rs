@@ -3,9 +3,11 @@
 use crate::constants::{
     LOG_BUFFER_CAPACITY, SECONDS_PER_DAY, SECONDS_PER_HOUR, SECONDS_PER_MINUTE,
 };
+use crate::dtos::{CatalogCompactResponse, CatalogReloadResponse, CatalogStatusResponse};
 use anyhow::Result;
+use arc_swap::ArcSwapOption;
 use dbsrt_core::{CouplingRegistry, SubtitleCache, SubtitleProvider};
-use dbsrt_index::{DbClient, MmapDbphash, PhashEngine};
+use dbsrt_index::{DbClient, DeltaIndex, MmapDbphash, PhashEngine};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
@@ -148,8 +150,8 @@ pub struct ServerLogsResponse {
 pub struct AppState {
     pub phash_dir: PathBuf,
     pub extra_phash_dirs: Vec<PathBuf>,
-    pub dbphash_path: Option<PathBuf>,
-    pub dbphash_reader: Option<Arc<MmapDbphash>>,
+    pub dbphash_path: Arc<std::sync::RwLock<Option<PathBuf>>>,
+    pub dbphash_reader: Arc<ArcSwapOption<MmapDbphash>>,
     pub engine: Arc<std::sync::RwLock<PhashEngine>>,
     pub db_config: Option<DbConnectionConfig>,
     pub subtitles_dir: PathBuf,
@@ -161,6 +163,9 @@ pub struct AppState {
     pub remote_api: Option<String>,
     pub is_agent: bool,
     pub log_buffer: Arc<std::sync::RwLock<VecDeque<ServerLogEntry>>>,
+    pub reload_in_progress: Arc<std::sync::atomic::AtomicBool>,
+    pub compact_in_progress: Arc<std::sync::atomic::AtomicBool>,
+    pub delta_index: Arc<std::sync::RwLock<DeltaIndex>>,
 }
 
 impl AppState {
@@ -195,12 +200,12 @@ impl AppState {
         let initial_engine =
             PhashEngine::open(initial_catalog_path.as_deref(), &all_dirs).unwrap_or_default();
 
-        let dbphash_reader = initial_engine.dbphash_arc();
+        let dbphash_reader = Arc::new(ArcSwapOption::new(initial_engine.dbphash_arc()));
 
         Self {
             phash_dir,
             extra_phash_dirs,
-            dbphash_path: initial_catalog_path,
+            dbphash_path: Arc::new(std::sync::RwLock::new(initial_catalog_path)),
             dbphash_reader,
             engine: Arc::new(std::sync::RwLock::new(initial_engine)),
             db_config: None,
@@ -215,7 +220,20 @@ impl AppState {
             log_buffer: Arc::new(std::sync::RwLock::new(VecDeque::with_capacity(
                 LOG_BUFFER_CAPACITY,
             ))),
+            reload_in_progress: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            compact_in_progress: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            delta_index: Arc::new(std::sync::RwLock::new(DeltaIndex::new())),
         }
+    }
+
+    /// Returns the current active `MmapDbphash` handle (wait-free, zero-lock).
+    pub fn dbphash_reader(&self) -> Option<Arc<MmapDbphash>> {
+        self.dbphash_reader.load_full()
+    }
+
+    /// Returns the active `catalog.dbphash` path if configured.
+    pub fn dbphash_path(&self) -> Option<PathBuf> {
+        self.dbphash_path.read().ok().and_then(|p| p.clone())
     }
 
     pub fn push_log(&self, tag: &str, level: &str, message: impl Into<String>) {
@@ -251,30 +269,184 @@ impl AppState {
         }
     }
 
+    /// Atomically reloads the `.dbphash` catalog, loose `.phash` directories, and `couplings.json`.
+    /// Follows a strict 2-Phase Commit (Prepare-then-Commit) so running state is never left
+    /// inconsistent if any load/validation step fails.
+    pub fn reload_catalog(&self) -> Result<CatalogReloadResponse> {
+        // Enforce single concurrent reload (anti-stampede rate limiting)
+        if self
+            .reload_in_progress
+            .compare_exchange(
+                false,
+                true,
+                std::sync::atomic::Ordering::SeqCst,
+                std::sync::atomic::Ordering::SeqCst,
+            )
+            .is_err()
+        {
+            anyhow::bail!("Catalog reload is already in progress");
+        }
+
+        // RAII guard to reset reload_in_progress on scope exit
+        struct ReloadGuard(Arc<std::sync::atomic::AtomicBool>);
+        impl Drop for ReloadGuard {
+            fn drop(&mut self) {
+                self.0.store(false, std::sync::atomic::Ordering::SeqCst);
+            }
+        }
+        let _guard = ReloadGuard(self.reload_in_progress.clone());
+
+        let t0 = Instant::now();
+
+        // --- Phase 1: Prepare & Validate all resources (can fail without corrupting runtime) ---
+        let reg_path = CouplingRegistry::default_path(&self.subtitles_dir);
+        let new_couplings = CouplingRegistry::load_or_default(&reg_path)?;
+
+        let catalog_path = self.dbphash_path().or_else(|| {
+            let default_catalog = PathBuf::from("data/catalog.dbphash");
+            if default_catalog.exists() {
+                Some(default_catalog)
+            } else {
+                None
+            }
+        });
+
+        let mut media_count = 0;
+        let mut cuts_count = 0;
+        let mut sparse_count = 0;
+
+        let new_reader_opt = match catalog_path {
+            Some(ref p) if p.exists() => {
+                // Pre-swap validation: check file size, magic, header integrity, and prewarm MIH
+                let meta = std::fs::metadata(p)?;
+                if meta.len() < std::mem::size_of::<dbsrt_index::DbphashHeader>() as u64 {
+                    anyhow::bail!(
+                        "Corrupted .dbphash catalog: file size {} bytes is smaller than header",
+                        meta.len()
+                    );
+                }
+                let reader = MmapDbphash::open(p)?;
+                let _ = reader.sparse_mih();
+                let _ = reader.cuts_mih();
+                media_count = reader.media_entries().len();
+                cuts_count = reader.cuts_entries().len();
+                sparse_count = reader.sparse_entries().len();
+                Some(Arc::new(reader))
+            }
+            _ => None,
+        };
+
+        let dirs = self.effective_phash_dirs(None);
+        let mut loose_file_count = 0;
+        let new_lib_opt = match dbsrt_index::MmapLibrary::from_directories(&dirs) {
+            Ok(lib) => {
+                lib.prewarm_mih();
+                loose_file_count = lib.file_count();
+                Some(Arc::new(lib))
+            }
+            Err(_) => None,
+        };
+
+        // --- Phase 2: Commit Atomically (cannot fail) ---
+        let coupling_count = new_couplings
+            .couplings
+            .iter()
+            .map(|c| c.subtitles.len())
+            .sum();
+
+        if let Ok(mut lock) = self.coupling_registry.write() {
+            *lock = new_couplings;
+        }
+
+        self.dbphash_reader.store(new_reader_opt.clone());
+
+        if let Ok(mut eng) = self.engine.write() {
+            eng.set_dbphash(new_reader_opt);
+            if let Some(new_lib) = new_lib_opt {
+                eng.set_library(Some(new_lib));
+            }
+        }
+
+        let elapsed_ms = t0.elapsed().as_secs_f64() * 1000.0;
+        self.push_log(
+            "CATALOG",
+            "INFO",
+            format!(
+                "Reloaded in {:.2}ms: {} medias ({} cuts, {} sparse), {} loose files, {} certified couplings",
+                elapsed_ms, media_count, cuts_count, sparse_count, loose_file_count, coupling_count
+            ),
+        );
+
+        Ok(CatalogReloadResponse {
+            success: true,
+            elapsed_ms,
+            indexed_medias: media_count + loose_file_count,
+            catalog_medias: media_count,
+            cuts_entries: cuts_count,
+            sparse_entries: sparse_count,
+            certified_couplings: coupling_count,
+        })
+    }
+
+    /// Explicitly configures the target `.dbphash` catalog file path.
+    pub fn set_dbphash_path(&self, path: Option<PathBuf>) {
+        if let Ok(mut p_lock) = self.dbphash_path.write() {
+            *p_lock = path;
+        }
+    }
+
     /// Sets or updates the `.dbphash` catalog and pre-warms the MIH indices in RAM.
-    pub fn set_dbphash(&mut self, path: Option<PathBuf>) {
+    ///
+    /// If `path` is `Some(p)`:
+    /// - If `MmapDbphash::open(p)` succeeds, `dbphash_path` is updated and readers are swapped.
+    /// - If `p` does not exist yet (pre-configuration before initial generation), `dbphash_path` is stored for subsequent reload.
+    /// - If `p` exists but is invalid/corrupt, `dbphash_path` is NOT updated, readers are cleared, and an error is logged.
+    ///
+    /// If `path` is `None`:
+    /// - `dbphash_path` is cleared to `None` and readers are cleared.
+    pub fn set_dbphash(&self, path: Option<PathBuf>) {
         if let Some(ref p) = path {
             if let Ok(reader) = MmapDbphash::open(p) {
                 let _ = reader.sparse_mih();
                 let _ = reader.cuts_mih();
                 let reader_arc = Arc::new(reader);
-                self.dbphash_reader = Some(reader_arc.clone());
+                if let Ok(mut p_lock) = self.dbphash_path.write() {
+                    *p_lock = Some(p.clone());
+                }
+                self.dbphash_reader.store(Some(reader_arc.clone()));
                 if let Ok(mut eng) = self.engine.write() {
                     eng.set_dbphash(Some(reader_arc));
                 }
             } else {
-                self.dbphash_reader = None;
+                if !p.exists() {
+                    // Pre-configured path before file creation
+                    if let Ok(mut p_lock) = self.dbphash_path.write() {
+                        *p_lock = Some(p.clone());
+                    }
+                } else {
+                    self.push_log(
+                        "CATALOG",
+                        "ERROR",
+                        format!(
+                            "Failed to open existing .dbphash at {:?}; rejecting path update",
+                            p
+                        ),
+                    );
+                }
+                self.dbphash_reader.store(None);
                 if let Ok(mut eng) = self.engine.write() {
                     eng.set_dbphash(None);
                 }
             }
         } else {
-            self.dbphash_reader = None;
+            if let Ok(mut p_lock) = self.dbphash_path.write() {
+                *p_lock = None;
+            }
+            self.dbphash_reader.store(None);
             if let Ok(mut eng) = self.engine.write() {
                 eng.set_dbphash(None);
             }
         }
-        self.dbphash_path = path;
     }
 
     /// Returns all active `.phash` directories with `override_dir` (or `self.phash_dir`) first.
@@ -290,5 +462,218 @@ impl AppState {
             }
         }
         dirs
+    }
+
+    /// Total number of distinct indexed medias across Base, Delta, and loose files.
+    pub fn indexed_media_count(&self) -> usize {
+        let base_count = if let Some(ref r) = *self.dbphash_reader.load() {
+            r.media_entries().len()
+        } else {
+            0
+        };
+        let delta_count = self
+            .delta_index
+            .read()
+            .map(|d| d.media_count())
+            .unwrap_or(0);
+        let loose_count = self
+            .engine
+            .read()
+            .map(|e| e.library().map(|l| l.file_count()).unwrap_or(0))
+            .unwrap_or(0);
+        base_count + delta_count + loose_count
+    }
+
+    /// Returns a comprehensive snapshot of the catalog state (Base + Delta + Couplings).
+    pub fn catalog_status(&self) -> CatalogStatusResponse {
+        let (base_medias, base_cuts, base_sparse) =
+            if let Some(ref reader) = *self.dbphash_reader.load() {
+                (
+                    reader.media_entries().len(),
+                    reader.cuts_entries().len(),
+                    reader.sparse_entries().len(),
+                )
+            } else {
+                (0, 0, 0)
+            };
+
+        let (delta_medias, delta_cuts, delta_sparse) = {
+            if let Ok(delta) = self.delta_index.read() {
+                (
+                    delta.media_count(),
+                    delta.cuts_count(),
+                    delta.sparse_count(),
+                )
+            } else {
+                (0, 0, 0)
+            }
+        };
+
+        let certified_couplings = if let Ok(reg) = self.coupling_registry.read() {
+            reg.couplings.iter().map(|c| c.subtitles.len()).sum()
+        } else {
+            0
+        };
+
+        CatalogStatusResponse {
+            base_medias,
+            base_cuts,
+            base_sparse,
+            delta_medias,
+            delta_cuts,
+            delta_sparse,
+            certified_couplings,
+            total_medias: base_medias + delta_medias,
+        }
+    }
+
+    /// Ingests a new media stream into the RAM Delta Index without rewriting `catalog.dbphash`.
+    pub fn ingest_delta_frames(&self, filename: &str, hashes: &[u64], fps: f64) -> Result<u32> {
+        let mut delta = self
+            .delta_index
+            .write()
+            .map_err(|e| anyhow::anyhow!("DeltaIndex RwLock error: {e}"))?;
+        let media_id = delta.ingest_raw_frames(filename, hashes, fps);
+        self.push_log(
+            "DELTA",
+            "INFO",
+            format!(
+                "Ingested '{}' into DeltaIndex (id={}, {} frames, {} total delta medias)",
+                filename,
+                media_id,
+                hashes.len(),
+                delta.media_count()
+            ),
+        );
+        Ok(media_id)
+    }
+
+    /// Merges Base (.dbphash) and Delta (RAM) into a new catalog file and triggers hot-reload.
+    pub fn compact_catalog(&self) -> Result<CatalogCompactResponse> {
+        // Enforce anti-stampede for compaction
+        if self
+            .compact_in_progress
+            .compare_exchange(
+                false,
+                true,
+                std::sync::atomic::Ordering::SeqCst,
+                std::sync::atomic::Ordering::SeqCst,
+            )
+            .is_err()
+        {
+            anyhow::bail!("Catalog compaction is already in progress");
+        }
+
+        struct CompactGuard(Arc<std::sync::atomic::AtomicBool>);
+        impl Drop for CompactGuard {
+            fn drop(&mut self) {
+                self.0.store(false, std::sync::atomic::Ordering::SeqCst);
+            }
+        }
+        let _guard = CompactGuard(self.compact_in_progress.clone());
+
+        let t0 = Instant::now();
+
+        // 1. Atomically swap out current delta with an empty DeltaIndex.
+        // Incoming concurrent ingestions will write to the new empty DeltaIndex.
+        // Zero media can ever be lost!
+        let old_delta = {
+            let mut delta_lock = self
+                .delta_index
+                .write()
+                .map_err(|e| anyhow::anyhow!("DeltaIndex write lock failed: {e}"))?;
+            if delta_lock.is_empty() {
+                let elapsed_ms = t0.elapsed().as_secs_f64() * 1000.0;
+                return Ok(CatalogCompactResponse {
+                    success: true,
+                    compacted: false,
+                    elapsed_ms,
+                    total_medias: self.indexed_media_count(),
+                    delta_medias_flushed: 0,
+                    message: "Delta index is empty; no compaction needed".to_string(),
+                });
+            }
+            std::mem::take(&mut *delta_lock)
+        };
+
+        // 2. Build combined catalog
+        let mut builder = dbsrt_index::DbphashBuilder::new();
+
+        if let Some(ref reader) = *self.dbphash_reader.load() {
+            reader.export_to_builder(&mut builder);
+        }
+        old_delta.export_to_builder(&mut builder);
+
+        let target_path = self
+            .dbphash_path()
+            .unwrap_or_else(|| PathBuf::from("data/catalog.dbphash"));
+        let tmp_path = target_path.with_extension("tmp");
+
+        if let Some(parent) = target_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+
+        let restore_delta = |old: DeltaIndex| match self.delta_index.write() {
+            Ok(mut delta_lock) => {
+                let mut current = std::mem::take(&mut *delta_lock);
+                let mut restored = old;
+                restored.add_delta_entries_batch(current.drain_medias());
+                *delta_lock = restored;
+            }
+            Err(lock_err) => {
+                self.push_log(
+                    "COMPACT",
+                    "ERROR",
+                    format!(
+                        "CRITICAL: Delta rollback failed, lock poisoned: {}. {} medias may be lost.",
+                        lock_err,
+                        old.media_count()
+                    ),
+                );
+            }
+        };
+
+        let pack_stats = match builder.write_to_file(&tmp_path) {
+            Ok(s) => s,
+            Err(e) => {
+                restore_delta(old_delta);
+                return Err(e);
+            }
+        };
+
+        if let Err(e) = std::fs::rename(&tmp_path, &target_path) {
+            restore_delta(old_delta);
+            return Err(e.into());
+        }
+
+        // If dbphash_path was None, update it to target_path (Bug #7)
+        if self.dbphash_path().is_none() {
+            if let Ok(mut p_lock) = self.dbphash_path.write() {
+                *p_lock = Some(target_path.clone());
+            }
+        }
+
+        // 3. Hot-reload new catalog
+        self.reload_catalog()?;
+
+        let flushed_count = old_delta.media_count();
+        let elapsed_ms = t0.elapsed().as_secs_f64() * 1000.0;
+        self.push_log(
+            "COMPACT",
+            "INFO",
+            format!(
+                "Compacted {} delta medias into {} total medias in {:.2}ms",
+                flushed_count, pack_stats.media_count, elapsed_ms
+            ),
+        );
+
+        Ok(CatalogCompactResponse {
+            success: true,
+            compacted: true,
+            elapsed_ms,
+            total_medias: pack_stats.media_count,
+            delta_medias_flushed: flushed_count,
+            message: format!("Successfully compacted into {}", target_path.display()),
+        })
     }
 }

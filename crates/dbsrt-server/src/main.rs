@@ -3,6 +3,10 @@
 use anyhow::Result;
 use clap::Parser;
 use dbsrt_core::{OpenSubtitlesProvider, SubtitleCache};
+use dbsrt_server::constants::{
+    DEFAULT_FILE_WATCH_DEBOUNCE_MS, DEFAULT_FILE_WATCH_INTERVAL_MS, DEFAULT_PG_ERROR_RETRY_SECS,
+    DEFAULT_PG_RECONNECT_INTERVAL_SECS,
+};
 use dbsrt_server::{
     bind_listener, create_router_with_state, remove_discovery_file, write_discovery_file, AppState,
     DbConnectionConfig, DISCOVERY_FILE,
@@ -110,7 +114,147 @@ where
     );
 
     let state = cli.into_app_state();
-    let app = create_router_with_state(state);
+    let state_arc = Arc::new(state);
+
+    #[cfg(unix)]
+    {
+        let state_sighup = state_arc.clone();
+        tokio::spawn(async move {
+            use tokio::signal::unix::{signal, SignalKind};
+            if let Ok(mut sighup_stream) = signal(SignalKind::hangup()) {
+                while sighup_stream.recv().await.is_some() {
+                    info!("Received SIGHUP, triggering atomic catalog reload...");
+                    let st = state_sighup.clone();
+                    let _ = tokio::task::spawn_blocking(move || st.reload_catalog()).await;
+                }
+            }
+        });
+    }
+
+    // Pillar 3: File Watcher with Debounce & Stable Size for catalog.dbphash
+    let state_file_watch = state_arc.clone();
+    tokio::spawn(async move {
+        let watch_path = state_file_watch
+            .dbphash_path()
+            .unwrap_or_else(|| PathBuf::from("data/catalog.dbphash"));
+        let mut last_mtime = None;
+        let mut last_size = None;
+        let mut check_interval = tokio::time::interval(std::time::Duration::from_millis(
+            DEFAULT_FILE_WATCH_INTERVAL_MS,
+        ));
+
+        loop {
+            check_interval.tick().await;
+            if watch_path.exists() {
+                if let Ok(meta) = std::fs::metadata(&watch_path) {
+                    let size = meta.len();
+                    if size >= std::mem::size_of::<dbsrt_index::DbphashHeader>() as u64 {
+                        if let Ok(mtime) = meta.modified() {
+                            if let (Some(prev_mtime), Some(_)) = (last_mtime, last_size) {
+                                if mtime > prev_mtime {
+                                    // Debounce to ensure rsync or external packer has finished writing
+                                    tokio::time::sleep(std::time::Duration::from_millis(
+                                        DEFAULT_FILE_WATCH_DEBOUNCE_MS,
+                                    ))
+                                    .await;
+
+                                    // Verify file size is stable before triggering reload
+                                    if let Ok(meta2) = std::fs::metadata(&watch_path) {
+                                        if meta2.len() == size {
+                                            info!(
+                                                "Detected stable modified catalog file on disk ({}, {} bytes), triggering hot-reload...",
+                                                watch_path.display(),
+                                                size
+                                            );
+                                            let st = state_file_watch.clone();
+                                            let _ = tokio::task::spawn_blocking(move || {
+                                                st.reload_catalog()
+                                            })
+                                            .await;
+                                        }
+                                    }
+                                }
+                            }
+                            last_mtime = Some(mtime);
+                            last_size = Some(size);
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    // Pillar 3: PostgreSQL LISTEN / NOTIFY event listener (dbsrt_events)
+    if let Some(ref db_config) = state_arc.db_config {
+        let db_cfg_clone = db_config.clone();
+        let state_pg = state_arc.clone();
+        std::thread::Builder::new()
+            .name("pg-event-listener".to_string())
+            .spawn(move || {
+                loop {
+                    match db_cfg_clone.connect() {
+                        Ok(mut client) => {
+                            if let Err(e) = client.listen("dbsrt_events") {
+                                tracing::warn!("Failed executing LISTEN dbsrt_events: {}", e);
+                                std::thread::sleep(std::time::Duration::from_secs(
+                                    DEFAULT_PG_ERROR_RETRY_SECS,
+                                ));
+                                continue;
+                            }
+                            info!("Subscribed to PostgreSQL event bus: LISTEN dbsrt_events");
+
+                            loop {
+                                match client.next_notification() {
+                                    Ok(Some(notification)) => {
+                                        info!(
+                                            "Received PostgreSQL notification: channel='{}' payload='{}'",
+                                            notification.channel(),
+                                            notification.payload()
+                                        );
+                                        match notification.payload() {
+                                            "catalog_reload" | "reload" => {
+                                                let st = state_pg.clone();
+                                                std::thread::spawn(move || {
+                                                    let _ = st.reload_catalog();
+                                                });
+                                            }
+                                            "catalog_compact" | "compact" => {
+                                                let st = state_pg.clone();
+                                                std::thread::spawn(move || {
+                                                    let _ = st.compact_catalog();
+                                                });
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+                                    Ok(None) => break,
+                                    Err(e) => {
+                                        tracing::warn!(
+                                            "PostgreSQL notification stream error: {}",
+                                            e
+                                        );
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            tracing::debug!(
+                                "PostgreSQL event listener cannot connect (retry in {}s): {}",
+                                DEFAULT_PG_RECONNECT_INTERVAL_SECS,
+                                e
+                            );
+                            std::thread::sleep(std::time::Duration::from_secs(
+                                DEFAULT_PG_RECONNECT_INTERVAL_SECS,
+                            ));
+                        }
+                    }
+                }
+            })
+            .ok();
+    }
+
+    let app = create_router_with_state((*state_arc).clone());
 
     let server = axum::serve(listener, app).with_graceful_shutdown(shutdown);
     let res = server.await;

@@ -3,6 +3,7 @@
 pub mod bktree;
 pub mod db;
 pub mod dbphash;
+pub mod delta;
 pub mod engine;
 pub mod mih;
 pub mod mmap;
@@ -17,9 +18,11 @@ pub use db::{
 };
 pub use dbphash::{
     DbphashBuilder, DbphashCutEntry, DbphashCutMatch, DbphashHeader, DbphashMediaEntry,
-    DbphashMediaMatch, DbphashPackStats, MmapDbphash, DBPHASH_MAGIC, DBPHASH_VERSION,
+    DbphashMediaMatch, DbphashPackStats, DbphashSparseEntry, MmapDbphash, DBPHASH_MAGIC,
+    DBPHASH_VERSION,
 };
 use dbsrt_core::{hamming_distance, FrameHashEntry};
+pub use delta::{DeltaIndex, DeltaMediaEntry};
 pub use engine::{PhashEngine, PhashEngineMatch, DEFAULT_MIN_RECOGNITION_CONFIDENCE};
 pub use mih::{MihCandidate, MihTable, MultiIndexHash64};
 pub use mmap::{

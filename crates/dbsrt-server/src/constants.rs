@@ -69,6 +69,18 @@ pub const MIN_CUT_CONSENSUS_CONFIDENCE: f64 = 70.0;
 /// Minimum visual shift in milliseconds to consider an offset significant enough to offer a synced candidate.
 pub const SIGNIFICANT_SHIFT_THRESHOLD_MS: f64 = 500.0;
 
+/// Interval in milliseconds between file watcher mtime polls.
+pub const DEFAULT_FILE_WATCH_INTERVAL_MS: u64 = 1_000;
+
+/// Debounce duration in milliseconds before triggering reload after detecting file modification.
+pub const DEFAULT_FILE_WATCH_DEBOUNCE_MS: u64 = 2_000;
+
+/// Interval in seconds before retrying PostgreSQL event listener connection on failure.
+pub const DEFAULT_PG_RECONNECT_INTERVAL_SECS: u64 = 10;
+
+/// Interval in seconds before retrying PostgreSQL LISTEN subscription on error.
+pub const DEFAULT_PG_ERROR_RETRY_SECS: u64 = 5;
+
 /// Minimum significant shift in milliseconds to apply subtitle timeline modification.
 pub const MIN_SIGNIFICANT_SHIFT_MS: f64 = 0.001;
 
