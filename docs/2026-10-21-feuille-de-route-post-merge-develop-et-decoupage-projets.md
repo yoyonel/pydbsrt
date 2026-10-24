@@ -75,10 +75,10 @@ flowchart TD
 * **Documents de conception associés** :
   * [Registre des incidents, matrice de chaos testing et post-mortem VLC socket hang](2026-10-20-registre-incidents-chaos-testing-et-post-mortem-vlc-hang.md)
 * **Critères d'Acceptation (DoD)** :
-  1. Traitement de `ERR-02` (latence réseau > 5s) sans déclenchement du watchdog VLC.
-  2. Traitement de `ERR-03` : échappement strict des caractères spéciaux et chemins UTF-8 NFD dans les fichiers vidéo.
-  3. Traitement de `ERR-04` : écriture dans `~/.cache/dbsrt/` lorsque le dossier source est un partage NFS/SMB monté en lecture seule.
-  4. Tests unitaires Lua et E2E validant chaque scénario de chaos.
+  1. Traitement de `ERR-02` (latence réseau > 5s) sans déclenchement du watchdog VLC (`DEFAULT_RELAY_TIMEOUT_MS = 3500ms`, `connect_timeout = 2000ms`).
+  2. Traitement de `ERR-03` : échappement strict RFC 8259 (`json_escape`) des caractères spéciaux et chemins UTF-8 NFD dans `vlsub_dbsrt.lua`.
+  3. Traitement de `ERR-04` : écriture et repli automatique dans `~/.cache/dbsrt/subtitles/` lorsque le dossier source est un partage NFS/SMB monté en lecture seule.
+  4. Tests unitaires Lua (42 assertions passées) et suite Rust dédiée `test_chaos_resilience.rs` validant chaque scénario de chaos.
 
 ---
 

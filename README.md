@@ -141,6 +141,11 @@ Le dépôt est orchestré par **[Taskfile (go-task)](https://taskfile.dev/)** d�
 | **`task db:status`** | Affiche l'historique et l'état des versions appliquées (`refinery_schema_history`) | `taskfiles/db.yml` |
 | **`task db:lint:safety`** | Vérifie statiquement la sécurité DDL, les verrous et la compatibilité PG 15/17 des migrations | `taskfiles/db.yml` |
 | **`task rpi4:build`** | Cross-compile pour ARM64 / Raspberry Pi 4 | `taskfiles/rpi4.yml` |
+| **`task rpi4:sync`** | Synchronise le catalogue pHash et les sous-titres vers le Raspberry Pi 4 | `taskfiles/rpi4.yml` |
+| **`task rpi4:db:build`** | Compile l'image PostgreSQL 17 ARM64 nativement sur le Raspberry Pi 4 | `taskfiles/rpi4.yml` |
+| **`task rpi4:db:up` / `down`** | Démarre / arrête l'instance dédiée PostgreSQL 17 sur port 5433 | `taskfiles/rpi4.yml` |
+| **`task rpi4:db:status`** | Affiche le statut du conteneur et des migrations PostgreSQL sur Raspberry Pi 4 | `taskfiles/rpi4.yml` |
+| **`task rpi4:db:migrate`** | Applique les migrations déclaratives en attente (`refinery`) sur Raspberry Pi 4 | `taskfiles/rpi4.yml` |
 | **`task sim:test`** / **`task sim:rpi4:test`** | Exécute la batterie de 6 tests API ARM64 en simulation QEMU (512 Mo RAM) | `taskfiles/rpi4.yml` |
 | **`task clean`** | Purge unifiée des artefacts et caches (`target/`, `.pytest_cache`, `.ruff_cache`) | `Taskfile.yml` |
 
@@ -150,6 +155,7 @@ Le dépôt est orchestré par **[Taskfile (go-task)](https://taskfile.dev/)** d�
 
 Dossiers techniques détaillés disponibles dans le répertoire [`docs/`](docs) :
 
+* [`docs/2026-10-24-deploiement-postgresql-17-isole-rpi4-et-orchestration-migrations.md`](docs/2026-10-24-deploiement-postgresql-17-isole-rpi4-et-orchestration-migrations.md) : **Déploiement Isolé de PostgreSQL 17 sur RPi4 & Orchestration des Migrations** : Cloisonnement strict et zéro impact sur la base PG 15.2 legacy (port 5432, 817k frames), instance PG 17 dédiée sur port 5433, automatisation Taskfile et validation empirique E2E.
 * [`docs/2026-10-23-guide-migrations-schema-postgresql-refinery.md`](docs/2026-10-23-guide-migrations-schema-postgresql-refinery.md) : **Guide & Architecture des Migrations PostgreSQL avec Refinery** : Migrations versionnées déclaratives (V1, V2, V3...), élimination des deadlocks en tests parallèles, commande `dbsrt migrate` et Taskfiles.
 * [`docs/2026-10-22-securisation-sql-et-atomicite-transactionnelle-copy-postgresql.md`](docs/2026-10-22-securisation-sql-et-atomicite-transactionnelle-copy-postgresql.md) : **Sécurisation SQL des Codes de Langue & Atomicité COPY** : Assainissement ISO 639 / BCP 47 (`validate_lang_code`), requêtes 100% paramétrées et transactions sans orphelins.
 * [`docs/2026-10-21-tutoriel-orchestration-taskfile-et-guide-developpeur.md`](docs/2026-10-21-tutoriel-orchestration-taskfile-et-guide-developpeur.md) : **Tutoriel Développeur & Guide d'Ordonnancement Taskfile** : Philosophie, modules `taskfiles/`, 4 workflows quotidiens et guide pas à pas pour ajouter une tâche.

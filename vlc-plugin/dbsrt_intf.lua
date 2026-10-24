@@ -7,6 +7,58 @@
 
 vlc.msg.info("[dbsrt-intf] Module initialized")
 
+local function json_escape(str)
+    if not str then return "" end
+    local s = tostring(str)
+    s = s:gsub('\\', '\\\\')
+    s = s:gsub('"', '\\"')
+    s = s:gsub('\b', '\\b')
+    s = s:gsub('\f', '\\f')
+    s = s:gsub('\n', '\\n')
+    s = s:gsub('\r', '\\r')
+    s = s:gsub('\t', '\\t')
+    return s
+end
+
+-- Strictly parse and unescape a JSON string field value supporting escaped quotes and backslashes (ERR-03)
+local function parse_json_string_field(json_str, key)
+    if not json_str or not key then return nil end
+    local pat = '"' .. key .. '"%s*:%s*"'
+    local s, e = string.find(json_str, pat)
+    if not s then return nil end
+    local idx = e + 1
+    local res = {}
+    local len = string.len(json_str)
+    while idx <= len do
+        local c = string.sub(json_str, idx, idx)
+        if c == '\\' then
+            idx = idx + 1
+            if idx <= len then
+                local next_c = string.sub(json_str, idx, idx)
+                if next_c == '"' then
+                    table.insert(res, '"')
+                elseif next_c == '\\' then
+                    table.insert(res, '\\')
+                elseif next_c == 'n' then
+                    table.insert(res, '\n')
+                elseif next_c == 'r' then
+                    table.insert(res, '\r')
+                elseif next_c == 't' then
+                    table.insert(res, '\t')
+                else
+                    table.insert(res, next_c)
+                end
+            end
+        elseif c == '"' then
+            break
+        else
+            table.insert(res, c)
+        end
+        idx = idx + 1
+    end
+    return table.concat(res)
+end
+
 local function run_sync()
     local item = vlc.input.item()
     if not item then
@@ -41,8 +93,8 @@ local function run_sync()
 
     local payload = string.format(
         '{"media_path":"%s","language":"%s","search_distance":0}',
-        path:gsub('\\', '\\\\'),
-        lang
+        json_escape(path),
+        json_escape(lang)
     )
 
     local req = "POST /v1/autosync HTTP/1.1\r\n"
@@ -80,7 +132,7 @@ local function run_sync()
     local header_end = string.find(resp, "\r\n\r\n")
     if header_end then
         local body = string.sub(resp, header_end + 4)
-        local out_srt = string.match(body, '"output_srt_path":%s*"([^"]+)"')
+        local out_srt = parse_json_string_field(body, "output_srt_path") or string.match(body, '"output_srt_path":%s*"([^"]+)"')
         local shift_ms = string.match(body, '"shift_ms":%s*([%d%.%-]+)')
         local conf = string.match(body, '"confidence_percent":%s*([%d%.]+)')
         local matched = string.match(body, '"matched_media":%s*"([^"]+)"') or "unknown"

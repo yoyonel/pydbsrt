@@ -59,6 +59,89 @@ def test_cvlc_headless_integration():
     assert "SUCCESS! Media matched" in res.stdout
 
 
+def test_cvlc_chaos_special_characters_and_quotes():
+    """Tier 2 Chaos: Real cvlc execution on video with quotes, accents, ampersands and brackets."""
+    cvlc_bin = shutil.which("cvlc")
+    if not cvlc_bin:
+        pytest.skip("cvlc executable not found on system")
+
+    src_video = Path("tests/data/big_buck_bunny_trailer_480p.mp4")
+    assert src_video.exists(), "Test video fixture missing"
+
+    chaos_file = Path('tests/data/L\'été "Spécial" & [Chaos] 1080p.mp4')
+    shutil.copy(src_video, chaos_file)
+    expected_srt = Path(f"{chaos_file}.auto.synced.srt")
+
+    try:
+        env = os.environ.copy()
+        env["DBSRT_AUTOKILL"] = "1"
+        cmd = [
+            "cvlc",
+            "--no-audio",
+            "--avcodec-hw=none",
+            "--extraintf",
+            "luaintf",
+            "--lua-intf",
+            "dbsrt_intf",
+            str(chaos_file),
+        ]
+        res = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=15, check=False)
+        output = res.stdout + res.stderr
+        assert res.returncode == 0, f"cvlc failed on chaotic path:\n{output}"
+        assert "SUCCESS! Media matched" in output, f"Media matching failed:\n{output}"
+        assert "Subtitle attached" in output, f"Subtitle attaching failed:\n{output}"
+        assert "No such file or directory" not in res.stderr, f"Filesystem error on chaotic path:\n{output}"
+    finally:
+        if chaos_file.exists():
+            chaos_file.unlink()
+        if expected_srt.exists():
+            expected_srt.unlink()
+
+
+def test_cvlc_chaos_readonly_directory_fallback():
+    """Tier 2 Chaos: Real cvlc execution on video inside a read-only directory (chmod 555)."""
+    cvlc_bin = shutil.which("cvlc")
+    if not cvlc_bin:
+        pytest.skip("cvlc executable not found on system")
+
+    src_video = Path("tests/data/big_buck_bunny_trailer_480p.mp4")
+    assert src_video.exists(), "Test video fixture missing"
+
+    ro_dir = Path("/tmp/pytest_chaos_readonly_vlc")
+    ro_dir.mkdir(parents=True, exist_ok=True)
+    ro_video = ro_dir / "sample_ro.mp4"
+    shutil.copy(src_video, ro_video)
+    ro_dir.chmod(0o555)
+
+    expected_cache_srt = Path.home() / ".cache/dbsrt/subtitles/sample_ro.mp4.auto.synced.srt"
+
+    try:
+        env = os.environ.copy()
+        env["DBSRT_AUTOKILL"] = "1"
+        cmd = [
+            "cvlc",
+            "--no-audio",
+            "--avcodec-hw=none",
+            "--extraintf",
+            "luaintf",
+            "--lua-intf",
+            "dbsrt_intf",
+            str(ro_video),
+        ]
+        res = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=15, check=False)
+        output = res.stdout + res.stderr
+        assert res.returncode == 0, f"cvlc failed on read-only dir:\n{output}"
+        assert "SUCCESS! Media matched" in output, f"Media matching failed:\n{output}"
+        assert ".cache/dbsrt/subtitles/sample_ro.mp4.auto.synced.srt" in output, (
+            f"Expected fallback to cache subtitles dir:\n{output}"
+        )
+    finally:
+        ro_dir.chmod(0o755)
+        shutil.rmtree(ro_dir, ignore_errors=True)
+        if expected_cache_srt.exists():
+            expected_cache_srt.unlink()
+
+
 def test_vlc_gui_phash_search_e2e():
     """Tier 3: Test GUI VLSub dialog under Xvfb with real video and Search by pHash."""
     vlc_bin = shutil.which("vlc")

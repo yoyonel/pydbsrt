@@ -122,6 +122,9 @@ pub async fn search_handler(
 
                 let endpoint = format!("{}/v1/recognize", remote_url.trim_end_matches('/'));
                 let client = reqwest::Client::builder()
+                    .connect_timeout(std::time::Duration::from_millis(
+                        crate::constants::DEFAULT_RELAY_CONNECT_TIMEOUT_MS,
+                    ))
                     .timeout(std::time::Duration::from_millis(relay_timeout_ms))
                     .build()
                     .unwrap_or_default();

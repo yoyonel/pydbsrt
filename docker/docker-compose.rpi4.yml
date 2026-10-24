@@ -1,4 +1,4 @@
-# Production Docker Compose for dbsrt-server on Raspberry Pi 4 (ARM64)
+# Production Docker Compose for dbsrt stack on Raspberry Pi 4 (ARM64)
 services:
   dbsrt-server:
     image: dbsrt-server:rpi4
@@ -15,7 +15,7 @@ services:
       - DBPHASH_PATH=/app/data/catalog.dbphash
       - SUBTITLES_DIR=/app/data/SRT
       - PSQL_HOST=${PSQL_HOST:-127.0.0.1}
-      - PSQL_PORT=${PSQL_PORT:-5432}
+      - PSQL_PORT=${PSQL_PORT:-5433}
       - PSQL_USER=${PSQL_USER:-docker}
       - PSQL_PASS=${PSQL_PASS:-docker}
       - PSQL_DBNAME=${PSQL_DBNAME:-bktreedb}
@@ -33,10 +33,28 @@ services:
       - "--db-host"
       - "127.0.0.1"
       - "--db-port"
-      - "5432"
+      - "5433"
       - "--db-user"
       - "docker"
       - "--db-pass"
       - "docker"
       - "--db-name"
       - "bktreedb"
+
+  db:
+    image: pg-spgist_hamming:17-rpi4
+    container_name: dbsrt-pg17
+    restart: unless-stopped
+    ports:
+      - "${RPI_DB_PORT:-5433}:5432"
+    environment:
+      - POSTGRES_DB=${PSQL_DBNAME:-bktreedb}
+      - POSTGRES_USER=${PSQL_USER:-docker}
+      - POSTGRES_PASSWORD=${PSQL_PASS:-docker}
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    volumes:
+      - dbsrt-pg17-data:/var/lib/postgresql/data
+
+volumes:
+  dbsrt-pg17-data:
+    name: dbsrt-pg17-data

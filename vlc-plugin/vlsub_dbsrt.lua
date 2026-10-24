@@ -228,6 +228,60 @@ function parse_url(url)
     return host, port
 end
 
+-- Strictly escape JSON string payload according to RFC 8259 (ERR-03 resilience)
+function json_escape(str)
+    if not str then return "" end
+    local s = tostring(str)
+    -- Order matters: escape backslash first
+    s = s:gsub('\\', '\\\\')
+    s = s:gsub('"', '\\"')
+    s = s:gsub('\b', '\\b')
+    s = s:gsub('\f', '\\f')
+    s = s:gsub('\n', '\\n')
+    s = s:gsub('\r', '\\r')
+    s = s:gsub('\t', '\\t')
+    return s
+end
+
+-- Strictly parse and unescape a JSON string field value supporting escaped quotes and backslashes (ERR-03)
+function parse_json_string_field(json_str, key)
+    if not json_str or not key then return nil end
+    local pat = '"' .. key .. '"%s*:%s*"'
+    local s, e = string.find(json_str, pat)
+    if not s then return nil end
+    local idx = e + 1
+    local res = {}
+    local len = string.len(json_str)
+    while idx <= len do
+        local c = string.sub(json_str, idx, idx)
+        if c == '\\' then
+            idx = idx + 1
+            if idx <= len then
+                local next_c = string.sub(json_str, idx, idx)
+                if next_c == '"' then
+                    table.insert(res, '"')
+                elseif next_c == '\\' then
+                    table.insert(res, '\\')
+                elseif next_c == 'n' then
+                    table.insert(res, '\n')
+                elseif next_c == 'r' then
+                    table.insert(res, '\r')
+                elseif next_c == 't' then
+                    table.insert(res, '\t')
+                else
+                    table.insert(res, next_c)
+                end
+            end
+        elseif c == '"' then
+            break
+        else
+            table.insert(res, c)
+        end
+        idx = idx + 1
+    end
+    return table.concat(res)
+end
+
 -- HTTP Client via TCP socket
 function send_http_request(host, port, method, path, payload)
     local t0 = os.clock()
@@ -589,10 +643,10 @@ function run_search(mode)
 
     local payload = string.format(
         '{"media_path":"%s","search_mode":"%s","language":"%s","title":"%s"',
-        file_info.path:gsub('\\', '\\\\'),
-        mode,
-        lang,
-        (title_query or ""):gsub('\\', '\\\\')
+        json_escape(file_info.path),
+        json_escape(mode),
+        json_escape(lang),
+        json_escape(title_query or "")
     )
     if season_query then
         payload = payload .. string.format(',"season":%d', season_query)
@@ -772,10 +826,10 @@ function download_selection()
     local host, port = parse_url(server_url)
     local payload = string.format(
         '{"media_path":"%s","source":"%s","candidate_id":"%s","language":"%s","resync":%s,"shift_ms":%s}',
-        file_info.path:gsub('\\', '\\\\'),
-        candidate.source,
-        (candidate.candidate_id or ""):gsub('\\', '\\\\'),
-        candidate.language,
+        json_escape(file_info.path),
+        json_escape(candidate.source),
+        json_escape(candidate.candidate_id or ""),
+        json_escape(candidate.language),
         tostring(is_resync),
         shift_param
     )
@@ -795,7 +849,7 @@ function download_selection()
     end
 
     local success = string.match(body, '"success":%s*(%a+)')
-    local out_srt = string.match(body, '"output_srt_path":%s*"([^"]+)"')
+    local out_srt = parse_json_string_field(body, "output_srt_path") or string.match(body, '"output_srt_path":%s*"([^"]+)"')
     local shift_ms = tonumber(string.match(body, '"shift_ms":%s*([%d%.%-]+)')) or 0.0
 
     if success == "true" and out_srt and out_srt ~= "" then
@@ -841,6 +895,9 @@ if _G and _G._VLSub_test_hook then
         search_by_hash = search_by_hash,
         search_by_name = search_by_name,
         download_selection = download_selection,
-        show_help = show_help
+        show_help = show_help,
+        json_escape = json_escape,
+        parse_json_string_field = parse_json_string_field,
+        display_subtitles = display_subtitles
     }
 end

@@ -41,6 +41,42 @@ tasks:
     cmds:
       - ./scripts/rpi4_deploy.sh demo
 
+  rpi4:db:build:
+    desc: Build native ARM64 PostgreSQL 17 image with BK-Tree on Raspberry Pi 4
+    cmds:
+      - ./scripts/rpi4_deploy.sh db-build
+
+  rpi4:db:up:
+    desc: Start dedicated PostgreSQL 17 container on Raspberry Pi 4 (:5433)
+    cmds:
+      - ./scripts/rpi4_deploy.sh db-up
+
+  rpi4:db:down:
+    desc: Stop dedicated PostgreSQL 17 container on Raspberry Pi 4
+    cmds:
+      - ./scripts/rpi4_deploy.sh db-down
+
+  rpi4:db:logs:
+    desc: Tail dedicated PostgreSQL 17 container logs on Raspberry Pi 4
+    cmds:
+      - ./scripts/rpi4_deploy.sh db-logs
+
+  rpi4:db:status:
+    desc: Check remote PostgreSQL 17 migration status on Raspberry Pi 4 (:5433)
+    deps: [rs:build]
+    aliases:
+      - db:status:rpi4
+    cmds:
+      - ./scripts/rpi4_deploy.sh db-status {{.CLI_ARGS}}
+
+  rpi4:db:migrate:
+    desc: Run pending PostgreSQL database migrations on Raspberry Pi 4 via refinery (:5433)
+    deps: [rs:build]
+    aliases:
+      - db:migrate:rpi4
+    cmds:
+      - ./scripts/rpi4_deploy.sh db-migrate {{.CLI_ARGS}}
+
   sim:up:
     desc: Start local ARM64 simulation container via QEMU binfmt on :8766
     aliases:

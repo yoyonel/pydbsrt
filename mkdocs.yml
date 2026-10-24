@@ -136,6 +136,7 @@ nav:
           - PostgreSQL 17 SP-GiST BK-Tree: 2026-10-15-pg17-bktree-benchmark-migration.md
           - Sécurité SQL & Atomicité COPY: 2026-10-22-securisation-sql-et-atomicite-transactionnelle-copy-postgresql.md
           - Migrations PostgreSQL & Refinery: 2026-10-23-guide-migrations-schema-postgresql-refinery.md
+          - PostgreSQL 17 Dédié RPi4 & Orchestration: 2026-10-24-deploiement-postgresql-17-isole-rpi4-et-orchestration-migrations.md
       - Observabilité & Télémétrie:
           - Métriques Prometheus & Suite Grafana: 2026-10-20-observabilite-prometheus-grafana-et-telemetrie-pydbsrt.md
   - 🛡️ Fiabilité & Tests d'Infra:
