@@ -67,7 +67,8 @@ pub async fn recognize_handler(
         }
 
         let mut matched: Option<(String, f64, String)> = None;
-        if let Some(ref reader) = state.dbphash_reader {
+        let reader_guard = state.dbphash_reader.load();
+        if let Some(ref reader) = *reader_guard {
             let m = reader.recognize(&hashes, search_distance);
             if let Some(top) = m.into_iter().next() {
                 if top.confidence >= MIN_PHASH_RECOGNITION_CONFIDENCE_PERCENT {

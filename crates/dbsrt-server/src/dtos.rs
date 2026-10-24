@@ -20,6 +20,17 @@ fn default_scan_limit() -> usize {
     5
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct CatalogReloadResponse {
+    pub success: bool,
+    pub elapsed_ms: f64,
+    pub indexed_medias: usize,
+    pub catalog_medias: usize,
+    pub cuts_entries: usize,
+    pub sparse_entries: usize,
+    pub certified_couplings: usize,
+}
+
 #[derive(Deserialize, Serialize, Debug)]
 pub struct AutoSyncRequest {
     pub media_path: String,

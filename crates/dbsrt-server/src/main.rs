@@ -110,7 +110,24 @@ where
     );
 
     let state = cli.into_app_state();
-    let app = create_router_with_state(state);
+    let state_arc = Arc::new(state);
+
+    #[cfg(unix)]
+    {
+        let state_sighup = state_arc.clone();
+        tokio::spawn(async move {
+            use tokio::signal::unix::{signal, SignalKind};
+            if let Ok(mut sighup_stream) = signal(SignalKind::hangup()) {
+                while sighup_stream.recv().await.is_some() {
+                    info!("Received SIGHUP, triggering atomic catalog reload...");
+                    let st = state_sighup.clone();
+                    let _ = tokio::task::spawn_blocking(move || st.reload_catalog()).await;
+                }
+            }
+        });
+    }
+
+    let app = create_router_with_state((*state_arc).clone());
 
     let server = axum::serve(listener, app).with_graceful_shutdown(shutdown);
     let res = server.await;

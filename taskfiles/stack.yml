@@ -21,6 +21,11 @@ tasks:
     cmds:
       - bash scripts/stack_ctl.sh server-status
 
+  server:reload:
+    desc: Trigger atomic zero-downtime catalog reload on dbsrt-server (/v1/catalog/reload)
+    cmds:
+      - bash scripts/stack_ctl.sh server-reload
+
   server:run:
     desc: Run dbsrt-server daemon in foreground on http://127.0.0.1:8765
     deps: [server:build]

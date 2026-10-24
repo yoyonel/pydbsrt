@@ -281,17 +281,30 @@ stack_status() {
   echo -e "${COLOR_BOLD}================================================================================${COLOR_RESET}"
 }
 
+server_reload() {
+  local port="${SERVER_PORT:-$DEFAULT_SERVER_PORT}"
+  local host="${SERVER_HOST:-127.0.0.1}"
+  echo "Envoi du signal de rechargement atomique à chaud vers http://${host}:${port}/v1/catalog/reload..."
+  if command -v jq >/dev/null 2>&1; then
+    curl -s -f -X POST "http://${host}:${port}/v1/catalog/reload" | jq .
+  else
+    curl -s -f -X POST "http://${host}:${port}/v1/catalog/reload"
+  fi
+  echo ""
+}
+
 case "$ACTION" in
   server-start) server_start ;;
   server-stop) server_stop ;;
   server-status) server_status ;;
   server-logs) server_logs ;;
+  server-reload) server_reload ;;
   doc-start) doc_start ;;
   doc-stop) doc_stop ;;
   doc-logs) doc_logs ;;
   status) stack_status ;;
   *)
-    echo "Usage: $0 {server-start|server-stop|server-status|server-logs|doc-start|doc-stop|doc-logs|status}" >&2
+    echo "Usage: $0 {server-start|server-stop|server-status|server-logs|server-reload|doc-start|doc-stop|doc-logs|status}" >&2
     exit 1
     ;;
 esac

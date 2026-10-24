@@ -11,6 +11,14 @@ trap 'rm -f "${TMP_HEADER}" "${TMP_REPOMIX}"' EXIT
 
 echo "Generating code review bundle comparing HEAD with ${TARGET_BRANCH}..."
 
+COMMITS_LOG="$(git log --oneline "${TARGET_BRANCH}...HEAD" 2>/dev/null || true)"
+if [[ -z "${COMMITS_LOG}" ]]; then
+  COMMITS_LOG="(Working tree uncommitted changes against ${TARGET_BRANCH})"
+fi
+
+DIFF_STAT="$(git diff --stat "${TARGET_BRANCH}" 2>/dev/null || true)"
+UNIFIED_DIFF="$(git diff "${TARGET_BRANCH}" 2>/dev/null || true)"
+
 cat <<EOF >"${TMP_HEADER}"
 # Code Review Bundle: ${TARGET_BRANCH}...HEAD
 
@@ -40,17 +48,17 @@ You are conducting an in-depth senior architectural, design, and code review of 
 
 ## Commits in this Branch
 \`\`\`text
-$(git log --oneline "${TARGET_BRANCH}...HEAD")
+${COMMITS_LOG}
 \`\`\`
 
 ## Diff Stat
 \`\`\`text
-$(git diff --stat "${TARGET_BRANCH}...HEAD")
+${DIFF_STAT}
 \`\`\`
 
 ## Unified Git Diff
 \`\`\`diff
-$(git diff "${TARGET_BRANCH}...HEAD")
+${UNIFIED_DIFF}
 \`\`\`
 
 ---
@@ -59,8 +67,19 @@ $(git diff "${TARGET_BRANCH}...HEAD")
 
 EOF
 
+# Collect all files to pack: committed differences + working tree changes + untracked files
+COMMITTED_FILES="$(git diff --name-only "${TARGET_BRANCH}...HEAD" 2>/dev/null || true)"
+WORKTREE_FILES="$(git diff --name-only "${TARGET_BRANCH}" 2>/dev/null || true)"
+UNTRACKED_FILES="$(git ls-files --others --exclude-standard 2>/dev/null || true)"
+FILES_TO_PACK="$(printf "%s\n%s\n%s" "${COMMITTED_FILES}" "${WORKTREE_FILES}" "${UNTRACKED_FILES}" | sed '/^$/d' | sort -u)"
+
+if [[ -z "${FILES_TO_PACK}" ]]; then
+  echo "⚠️ No modified or untracked files found compared to ${TARGET_BRANCH}." >&2
+  exit 1
+fi
+
 # Pack modified files via repomix
-git diff --name-only "${TARGET_BRANCH}...HEAD" | npx repomix --stdin --style markdown --no-security-check -o "${TMP_REPOMIX}"
+echo "${FILES_TO_PACK}" | npx repomix --stdin --style markdown --no-security-check -o "${TMP_REPOMIX}"
 
 # Combine header and repomix output
 cat "${TMP_HEADER}" "${TMP_REPOMIX}" >"${OUTPUT_FILE}"

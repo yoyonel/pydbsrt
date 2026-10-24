@@ -23,5 +23,6 @@ serde_json = { workspace = true }
 anyhow = { workspace = true }
 clap = { workspace = true }
 reqwest = { workspace = true }
+arc-swap = "1.7"
 
 [dev-dependencies]

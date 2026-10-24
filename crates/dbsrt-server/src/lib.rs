@@ -111,6 +111,8 @@ pub fn create_router_with_state(state: AppState) -> Router {
         .route("/v1/retarget", post(retarget_handler))
         .route("/v1/autosync", post(autosync_handler))
         .route("/v1/scan", post(scan_handler))
+        .route("/v1/catalog/reload", post(catalog_reload_handler))
+        .route("/v1/reload", post(catalog_reload_handler))
         .layer(cors)
         .layer(TraceLayer::new_for_http())
         .with_state(state)

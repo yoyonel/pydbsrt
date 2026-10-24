@@ -59,10 +59,11 @@ pub async fn autosync_handler(
         .unwrap_or("")
         .to_string();
 
+    let reader_guard = state.dbphash_reader.load();
     let (matched, target_fps, existing_phash) = identify_media_by_phash_multi_with_reader(
         &media_path,
         &phash_dirs,
-        state.dbphash_reader.as_deref(),
+        reader_guard.as_deref(),
         state.db_config.as_ref(),
         payload.nb_seconds,
         payload.search_distance,
