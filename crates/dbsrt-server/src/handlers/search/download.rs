@@ -145,7 +145,12 @@ pub async fn download_handler(
                     );
 
                     let client = reqwest::Client::builder()
-                        .timeout(std::time::Duration::from_secs(5))
+                        .connect_timeout(std::time::Duration::from_millis(
+                            crate::constants::DEFAULT_RELAY_CONNECT_TIMEOUT_MS,
+                        ))
+                        .timeout(std::time::Duration::from_millis(
+                            crate::constants::DEFAULT_DOWNLOAD_RELAY_TIMEOUT_MS,
+                        ))
                         .build()
                         .unwrap_or_default();
 
@@ -297,42 +302,89 @@ pub async fn download_handler(
     };
     let out_path = out_dir.join(&out_name);
 
-    if let Err(e) = srt_file.save(&out_path) {
-        state.push_log(
-            "DOWNLOAD",
-            "ERROR",
-            format!("Failed to write subtitle file to {:?}: {:#}", out_path, e),
-        );
-        return Json(DownloadSubtitleResponse {
-            success: false,
-            output_srt_path: String::new(),
-            shift_frames: 0,
-            shift_ms: 0.0,
-            confidence_percent: 0.0,
-            source: source_name,
-            language: payload.language,
-            error: Some(format!(
-                "Failed to write subtitle file to {:?}: {:#}",
-                out_path, e
-            )),
-        });
-    }
+    let (final_path, was_fallback) = match srt_file.save(&out_path) {
+        Ok(()) => (out_path, false),
+        Err(e) => {
+            let fallback_dir = state.cache.base_dir();
+            if let Err(mkdir_err) = std::fs::create_dir_all(fallback_dir) {
+                state.push_log(
+                    "DOWNLOAD",
+                    "ERROR",
+                    format!(
+                        "Failed to write subtitle to primary path {:?} ({:#}) and failed to create fallback cache dir {:?}: {:#}",
+                        out_path, e, fallback_dir, mkdir_err
+                    ),
+                );
+                return Json(DownloadSubtitleResponse {
+                    success: false,
+                    output_srt_path: String::new(),
+                    shift_frames: 0,
+                    shift_ms: 0.0,
+                    confidence_percent: 0.0,
+                    source: source_name,
+                    language: payload.language,
+                    error: Some(format!(
+                        "Failed to write subtitle file to {:?} ({:#}) and cache fallback failed ({:#})",
+                        out_path, e, mkdir_err
+                    )),
+                });
+            }
+            let fallback_path = fallback_dir.join(&out_name);
+            match srt_file.save(&fallback_path) {
+                Ok(()) => {
+                    state.push_log(
+                        "DOWNLOAD",
+                        "WARN",
+                        format!(
+                            "Primary write to {:?} failed ({:#}), saved to fallback cache path {:?}",
+                            out_path, e, fallback_path
+                        ),
+                    );
+                    (fallback_path, true)
+                }
+                Err(fallback_err) => {
+                    state.push_log(
+                        "DOWNLOAD",
+                        "ERROR",
+                        format!(
+                            "Primary write to {:?} failed ({:#}) and cache fallback to {:?} failed ({:#})",
+                            out_path, e, fallback_path, fallback_err
+                        ),
+                    );
+                    return Json(DownloadSubtitleResponse {
+                        success: false,
+                        output_srt_path: String::new(),
+                        shift_frames: 0,
+                        shift_ms: 0.0,
+                        confidence_percent: 0.0,
+                        source: source_name,
+                        language: payload.language,
+                        error: Some(format!(
+                            "Failed to write subtitle to {:?} ({:#}) and fallback to {:?} failed ({:#})",
+                            out_path, e, fallback_path, fallback_err
+                        )),
+                    });
+                }
+            }
+        }
+    };
 
     state.push_log(
         "DOWNLOAD",
         "INFO",
         format!(
-            "Saved subtitle to {:?} (source='{}', lang='{}', shift={:.2}ms)",
-            out_path.file_name().unwrap_or_default(),
+            "Saved subtitle to {:?} (source='{}', lang='{}', shift={:.2}ms, fallback={})",
+            final_path.file_name().unwrap_or_default(),
             source_name,
             payload.language,
-            shift_ms
+            shift_ms,
+            was_fallback
         ),
     );
 
     Json(DownloadSubtitleResponse {
         success: true,
-        output_srt_path: out_path.to_string_lossy().to_string(),
+        output_srt_path: final_path.to_string_lossy().to_string(),
         shift_frames,
         shift_ms,
         confidence_percent,

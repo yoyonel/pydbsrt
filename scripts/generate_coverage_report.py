@@ -63,7 +63,7 @@ def format_migration_alert(migrations: list[str]) -> str:
             "> - [ ] Run pending migrations: `task db:migrate`",
             "> - [ ] Verify migration status: `task db:status`",
             "> - [ ] Verify DDL safety & PG 15/17 compatibility: `task db:lint:safety`",
-            '> - [ ] (Optional) Validate on remote host if online: `ssh rpi4 "task db:status"`',
+            "> - [ ] (Optional) Validate on remote host if online: `task rpi4:db:status`",
             "",
         ]
     )

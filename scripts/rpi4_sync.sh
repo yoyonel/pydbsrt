@@ -30,4 +30,9 @@ fi
 echo "Syncing docker-compose.rpi4.yml..."
 scp "docker/docker-compose.rpi4.yml" "${RPI_HOST}:${REMOTE_BASE}/docker-compose.yml"
 
+echo "Syncing PostgreSQL 17 Dockerfile & scripts..."
+# shellcheck disable=SC2029
+ssh "${RPI_HOST}" "mkdir -p ${REMOTE_BASE}/docker/pg17"
+rsync -avz --progress "docker/pg-spgist_hamming/17-develop/" "${RPI_HOST}:${REMOTE_BASE}/docker/pg17/"
+
 echo "✓ Synchronization complete."

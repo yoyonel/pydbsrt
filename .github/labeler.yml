@@ -1,0 +1,34 @@
+# Configuration for actions/labeler v5
+# Maps modified file paths to GitHub issue/PR labels
+
+rust:
+  - changed-files:
+      - any-glob-to-any-file: ['crates/**/*.rs', 'Cargo.toml', 'Cargo.lock']
+
+scope:cli:
+  - changed-files:
+      - any-glob-to-any-file: ['crates/dbsrt-cli/**']
+
+scope:server:
+  - changed-files:
+      - any-glob-to-any-file: ['crates/dbsrt-server/**']
+
+scope:vlc:
+  - changed-files:
+      - any-glob-to-any-file: ['vlc-plugin/**', 'tests/lua/**', 'tests/test_vlc_*.py', 'taskfiles/vlc.yml']
+
+scope:db:
+  - changed-files:
+      - any-glob-to-any-file: ['crates/dbsrt-index/**', 'docker/**', 'taskfiles/db.yml']
+
+db:refinery:
+  - changed-files:
+      - any-glob-to-any-file: ['crates/dbsrt-index/migrations/**']
+
+ci:
+  - changed-files:
+      - any-glob-to-any-file: ['.github/**', 'taskfiles/**', 'Taskfile.yml', 'scripts/code_quality.sh', 'scripts/lint_*.py']
+
+benchmark:
+  - changed-files:
+      - any-glob-to-any-file: ['benches/**', 'crates/**/benches/**']

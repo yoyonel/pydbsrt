@@ -173,12 +173,12 @@ flowchart TD
 | Code | Strate | Description du Cas Limite / Scénario de Chaos | Impact Potentiel | Statut Actuel | Mitigation Prévue / Implémentée |
 | :--- | :--- | :--- | :--- | :---: | :--- |
 | `ERR-01` | **Lua** | Daemon local éteint lors d'un clic de recherche | Gel Qt VLC | **Prouvé & Résolu** | Détection immédiate via `bytes_sent <= 0`, fail-fast en 0.1 ms avec message explicite. |
-| `ERR-02` | **Lua** | Timeout réseau : le serveur distant met > 5s à répondre | Watchdog VLC | **À éprouver** | Découpler les requêtes réseau du thread d'UI ou introduire un heartbeat non bloquant. |
-| `ERR-03` | **Lua** | Chemin vidéo avec caractères spéciaux (`' " & % \ [ ]`, UTF-8 NFD) | Échec d'échappement JSON | **À éprouver** | Valider l'échappement strict JSON dans `run_search` et `download_selection`. |
-| `ERR-04` | **Agent** | Dossier vidéo en lecture seule (ex: partage SMB/NFS non inscriptible) | Échec d'écriture du `.srt` | **À éprouver** | Si l'écriture locale échoue, fallback sur `~/.cache/dbsrt/subtitles/` et chargement via ce chemin. |
+| `ERR-02` | **Lua** | Timeout réseau : le serveur distant met > 5s à répondre | Watchdog VLC | **Prouvé & Résolu** | SLA daemon borné à 3500 ms (`DEFAULT_RELAY_TIMEOUT_MS`), connect timeout à 2000 ms, évitant le watchdog UI Qt VLC. |
+| `ERR-03` | **Lua** | Chemin vidéo avec caractères spéciaux (`' " & % \ [ ]`, UTF-8 NFD) | Échec d'échappement JSON | **Prouvé & Résolu** | Échappement strict RFC 8259 (`json_escape`) dans `vlsub_dbsrt.lua` pour `media_path`, `title`, `candidate_id`. |
+| `ERR-04` | **Agent** | Dossier vidéo en lecture seule (ex: partage SMB/NFS non inscriptible) | Échec d'écriture du `.srt` | **Prouvé & Résolu** | Si l'écriture locale échoue, fallback transparent sur `~/.cache/dbsrt/subtitles/` et attachement VLC réussi. |
 | `ERR-05` | **Agent** | Port `8765` déjà réservé par un autre processus au boot | Crash au bind TCP | **À éprouver** | Bascule automatique sur port aléatoire libre et mise à jour dynamique de `/tmp/dbsrt-server.json`. |
 | `ERR-06` | **Agent** | Vidéo illisible ou corrompue (FFmpeg exit != 0) | Crash extraction pHash | **Hermétiquement Mocké** | Retourne un fingerprint vide, le serveur renvoie `found: false` sans panique. |
-| `ERR-07` | **Réseau** | Serveur distant RPi4 injoignable (firewall silencieux `DROP`) | Blocage connect TCP (30s) | **À éprouver** | Configurer un timeout de connexion strict (ex: 2000 ms) sur le client Reqwest de l'agent. |
+| `ERR-07` | **Réseau** | Serveur distant RPi4 injoignable (firewall silencieux `DROP`) | Blocage connect TCP (30s) | **Prouvé & Résolu** | Timeout de connexion strict (2000 ms via `DEFAULT_RELAY_CONNECT_TIMEOUT_MS`) sur le client Reqwest de l'agent. |
 | `ERR-08` | **Serveur** | PostgreSQL s'arrête ou crash (`docker stop bktreedb`) | Erreur 500 sur /v1/recognize | **Empiriquement Prouvé** | Fallback automatique sur Tier 1 (RAM `.dbphash`) et Tier 2 (`mmap`). |
 | `ERR-09` | **Serveur** | Média totalement absent de la base (zéro match) | Liste vide dans VLC | **Prouvé & Résolu** | Retourne `found: false, candidates: []`, VLC affiche `Complete: No subtitles found`. |
 | `ERR-10` | **Serveur** | Séquences `.phash` de référence absentes du disque serveur | Décalage $\Delta t = 0$ ms | **Prouvé & Résolu** | Synchronisation obligatoire de `data/__PHASH__` via `scripts/rpi4_sync.sh`. |

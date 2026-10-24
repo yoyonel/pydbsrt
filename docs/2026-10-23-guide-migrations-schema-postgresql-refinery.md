@@ -128,7 +128,12 @@ task db:status
 # Via binaire direct dbsrt
 ./target/release/dbsrt migrate --status
 
-# Cibler une machine distante (ex: Raspberry Pi 4 physique)
+# Cibler le Raspberry Pi 4 physique (automatisé)
+task rpi4:db:status
+# ou alias direct
+task db:status:rpi4
+
+# Cibler une machine distante personnalisée
 task db:status -- --host 192.168.1.24 --port 5432
 ```
 
@@ -150,7 +155,12 @@ task db:migrate
 # Via binaire direct
 ./target/release/dbsrt migrate
 
-# Cibler une machine distante
+# Cibler le Raspberry Pi 4 physique (automatisé)
+task rpi4:db:migrate
+# ou alias direct
+task db:migrate:rpi4
+
+# Cibler une machine distante personnalisée
 task db:migrate -- --host 192.168.1.24 --port 5432
 ```
 

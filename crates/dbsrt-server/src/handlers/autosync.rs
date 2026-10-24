@@ -240,20 +240,50 @@ pub async fn autosync_handler(
         payload.language
     );
     let out_path = out_dir.join(&out_name);
-    if let Err(e) = srt.save(&out_path) {
-        return Json(AutoSyncResponse {
-            success: false,
-            matched_media: matched_stem_opt,
-            language: payload.language,
-            shift_frames: 0,
-            shift_ms: 0.0,
-            output_srt_path: String::new(),
-            confidence_percent,
-            elapsed_seconds: start.elapsed().as_secs_f64(),
-            source: Some(subtitle_source),
-            error: Some(format!("Failed to save synced subtitle: {:#}", e)),
-        });
-    }
+    let final_path = match srt.save(&out_path) {
+        Ok(()) => out_path,
+        Err(e) => {
+            let fallback_dir = state.cache.base_dir();
+            if let Err(mkdir_err) = std::fs::create_dir_all(fallback_dir) {
+                return Json(AutoSyncResponse {
+                    success: false,
+                    matched_media: matched_stem_opt,
+                    language: payload.language,
+                    shift_frames: 0,
+                    shift_ms: 0.0,
+                    output_srt_path: String::new(),
+                    confidence_percent,
+                    elapsed_seconds: start.elapsed().as_secs_f64(),
+                    source: Some(subtitle_source),
+                    error: Some(format!(
+                        "Failed to save synced subtitle to {:?} ({:#}) and cache fallback failed ({:#})",
+                        out_path, e, mkdir_err
+                    )),
+                });
+            }
+            let fallback_path = fallback_dir.join(&out_name);
+            match srt.save(&fallback_path) {
+                Ok(()) => fallback_path,
+                Err(fallback_err) => {
+                    return Json(AutoSyncResponse {
+                        success: false,
+                        matched_media: matched_stem_opt,
+                        language: payload.language,
+                        shift_frames: 0,
+                        shift_ms: 0.0,
+                        output_srt_path: String::new(),
+                        confidence_percent,
+                        elapsed_seconds: start.elapsed().as_secs_f64(),
+                        source: Some(subtitle_source),
+                        error: Some(format!(
+                            "Failed to save synced subtitle to {:?} ({:#}) and fallback to {:?} failed ({:#})",
+                            out_path, e, fallback_path, fallback_err
+                        )),
+                    });
+                }
+            }
+        }
+    };
 
     Json(AutoSyncResponse {
         success: true,
@@ -261,7 +291,7 @@ pub async fn autosync_handler(
         language: payload.language,
         shift_frames,
         shift_ms,
-        output_srt_path: out_path.to_string_lossy().to_string(),
+        output_srt_path: final_path.to_string_lossy().to_string(),
         confidence_percent,
         elapsed_seconds: start.elapsed().as_secs_f64(),
         source: Some(subtitle_source),

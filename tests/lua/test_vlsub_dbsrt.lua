@@ -60,8 +60,9 @@ _G.vlc = {
     },
     strings = {
         decode_uri = function(s)
-            s = s:gsub("%%20", " ")
-            return s
+            return (s:gsub("%%(%x%x)", function(hex)
+                return string.char(tonumber(hex, 16))
+            end))
         end
     },
     input = {
@@ -290,7 +291,85 @@ local function test_offline_daemon_fails_gracefully()
     assert_true(err ~= nil and err:find("daemon offline") ~= nil, "Clean offline daemon error returned")
 
     _G.vlc.net.send = orig_send
-    print("  [8/8] test_offline_daemon_fails_gracefully: PASSED")
+    print("  [8/11] test_offline_daemon_fails_gracefully: PASSED")
+end
+
+local function test_json_escape_special_characters_and_unicode_nfd()
+    -- 1. Double quotes & backslashes
+    local raw1 = 'Path "with quotes" and \\backslashes\\'
+    local esc1 = S.json_escape(raw1)
+    assert_eq(esc1, 'Path \\"with quotes\\" and \\\\backslashes\\\\', "Quotes and backslashes escaped")
+
+    -- 2. Control characters
+    local raw2 = "Line 1\nLine 2\r\n\tTabbed"
+    local esc2 = S.json_escape(raw2)
+    assert_eq(esc2, "Line 1\\nLine 2\\r\\n\\tTabbed", "Control chars escaped")
+
+    -- 3. UTF-8 accents and NFD (decomposed) strings
+    local nfc = "L'été à Noël"
+    local esc_nfc = S.json_escape(nfc)
+    assert_eq(esc_nfc, "L'été à Noël", "NFC UTF-8 preserved unchanged")
+
+    -- NFD combining acute: 'e' + '\xCC\x81'
+    local nfd = "e\xCC\x81te\xCC\x81"
+    local esc_nfd = S.json_escape(nfd)
+    assert_eq(esc_nfd, "e\xCC\x81te\xCC\x81", "NFD decomposed UTF-8 bytes preserved")
+
+    -- 4. Single quotes, brackets and ampersands
+    local raw4 = "Film 'Hero' & [1080p] %20"
+    local esc4 = S.json_escape(raw4)
+    assert_eq(esc4, "Film 'Hero' & [1080p] %20", "Verbatim valid characters preserved")
+    print("  [9/11] test_json_escape_special_characters_and_unicode_nfd: PASSED")
+end
+
+local function test_search_with_quotes_and_special_paths()
+    activate()
+    mock_active_item_uri = "file:///media/Film%20%22Special%22%20%26%20%5B1080p%5D.mkv"
+    S.update_file_info()
+    assert_eq(S.file_info.path, '/media/Film "Special" & [1080p].mkv', "Path with decoded quotes")
+
+    local sample_json = '{"matched_media":"Film","total_candidates":0,"candidates":[]}'
+    local full_http = string.format("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s", string.len(sample_json), sample_json)
+    mock_tcp_responses = { full_http }
+
+    S.search_by_phash()
+
+    assert_true(mock_last_sent_payload ~= nil, "Payload was transmitted")
+    assert_true(mock_last_sent_payload:find('/media/Film \\"Special\\" & [1080p].mkv', 1, true) ~= nil, "Payload contains strictly escaped path")
+    print("  [10/11] test_search_with_quotes_and_special_paths: PASSED")
+end
+
+local function test_download_selection_with_special_characters()
+    activate()
+    mock_active_item_uri = 'file:///media/L\'été%20"Action"%20%5B2026%5D.mkv'
+    S.update_file_info()
+
+    for k in pairs(S.candidates_store) do S.candidates_store[k] = nil end
+    table.insert(S.candidates_store, {
+        title = 'Sub "Director\'s Cut" & [FR]',
+        language = "fr",
+        source = "certified",
+        candidate_id = 'data/SRT/Sub "Special" [1080p].fr.srt',
+        fps = "24.0",
+        score = 1.0,
+        shift_ms = 0.0
+    })
+    S.display_subtitles()
+
+    local mainlist = S.input_table["mainlist"]
+    mainlist._selection = { [1] = mainlist._values[1] }
+
+    local download_resp = '{"success":true,"output_srt_path":"/media/test.fr.srt","shift_ms":0.0}'
+    local full_http = string.format("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s", string.len(download_resp), download_resp)
+    mock_tcp_responses = { full_http }
+
+    mock_attached_subtitles = {}
+    S.download_selection()
+
+    assert_true(mock_last_sent_payload ~= nil, "Download payload transmitted")
+    assert_true(mock_last_sent_payload:find('data/SRT/Sub \\"Special\\" [1080p].fr.srt', 1, true) ~= nil, "Download candidate_id properly escaped")
+    assert_true(mock_last_sent_payload:find('L\'été \\"Action\\" [2026].mkv', 1, true) ~= nil, "Download media_path properly escaped")
+    print("  [11/11] test_download_selection_with_special_characters: PASSED")
 end
 
 -- Run all unit tests
@@ -302,5 +381,8 @@ test_search_by_phash_populates_mainlist()
 test_download_selection()
 test_help_dialog()
 test_offline_daemon_fails_gracefully()
+test_json_escape_special_characters_and_unicode_nfd()
+test_search_with_quotes_and_special_paths()
+test_download_selection_with_special_characters()
 
 print(string.format("=== All %d VLC Lua Plugin Unit Tests PASSED (100%%) ===", tests_passed))
