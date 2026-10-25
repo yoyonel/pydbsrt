@@ -745,3 +745,94 @@ fn test_cli_media_add_confirmed_lang_overrides_unknown() {
     assert_eq!(sub["lang_status"]["kind"], "Confirmed");
     assert_eq!(sub["lang_status"]["value"], "fr");
 }
+
+#[test]
+fn test_media_add_sidecar_priority_and_subs_english_filtering() {
+    let video = match find_fixture("tests/data/big_buck_bunny_trailer_480p.mp4") {
+        Some(v) => v,
+        None => return,
+    };
+
+    let temp = TempTestDir::new("subs_english_filtering");
+    let video_path = temp
+        .path
+        .join("Euphoria.US.S01E03.1080p.WEBRip.x265-RARBG.mp4");
+    fs::copy(&video, &video_path).unwrap();
+
+    // 1. Direct suffix-less sidecar in parent directory (French release subtitle)
+    let root_srt = temp
+        .path
+        .join("Euphoria.US.S01E03.1080p.WEBRip.x265-RARBG.srt");
+    fs::write(
+        &root_srt,
+        "1\n00:00:01,000 --> 00:00:03,000\nDialogue français\n",
+    )
+    .unwrap();
+
+    // 2. English tracks in Subs/ stem subfolder
+    let subs_stem_dir = temp
+        .path
+        .join("Subs")
+        .join("Euphoria.US.S01E03.1080p.WEBRip.x265-RARBG");
+    fs::create_dir_all(&subs_stem_dir).unwrap();
+    let srt_en1 = subs_stem_dir.join("2_English.srt");
+    let srt_en2 = subs_stem_dir.join("3_English.srt");
+    fs::write(
+        &srt_en1,
+        "1\n00:00:01,000 --> 00:00:03,000\nEnglish line 1\n",
+    )
+    .unwrap();
+    fs::write(
+        &srt_en2,
+        "1\n00:00:01,000 --> 00:00:03,000\nEnglish line 2\n",
+    )
+    .unwrap();
+
+    let phash_dir = temp.path.join("phash");
+    let subtitles_dir = temp.path.join("subtitles");
+
+    let out = Command::new(env!("CARGO_BIN_EXE_dbsrt"))
+        .args([
+            "media:add",
+            "--video",
+            video_path.to_str().unwrap(),
+            "--lang",
+            "fr",
+            "--phash-dir",
+            phash_dir.to_str().unwrap(),
+            "--subtitles-dir",
+            subtitles_dir.to_str().unwrap(),
+        ])
+        .output()
+        .expect("Failed to execute media:add");
+
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+
+    assert!(out.status.success(), "stderr: {}", stderr);
+
+    // Verify accurate discovery logs
+    assert!(stderr.contains("none in filename, will use --lang: fr"));
+    assert!(stderr.contains("detected: en"));
+
+    // Verify selection and filtering logs
+    assert!(stderr.contains("Selected: \"Euphoria.US.S01E03.1080p.WEBRip.x265-RARBG.srt\""));
+    assert!(stderr.contains("Ignored: \"2_English.srt\""));
+    assert!(stderr.contains("Ignored: \"3_English.srt\""));
+
+    // Verify ONLY 1 coupling was added (the French one, NOT the 2 English ones)
+    assert!(stdout.contains("Couplings Added  : 1"));
+
+    let couplings_file = subtitles_dir.join("couplings.json");
+    assert!(couplings_file.exists());
+    let content = fs::read_to_string(&couplings_file).unwrap();
+    let json: serde_json::Value = serde_json::from_str(&content).unwrap();
+    let couplings = &json["couplings"][0]["subtitles"];
+    assert_eq!(couplings.as_array().unwrap().len(), 1);
+    assert_eq!(
+        couplings[0]["name"],
+        "Euphoria.US.S01E03.1080p.WEBRip.x265-RARBG.srt"
+    );
+    assert_eq!(couplings[0]["lang"], "fr");
+    assert_eq!(couplings[0]["lang_status"]["kind"], "Confirmed");
+}

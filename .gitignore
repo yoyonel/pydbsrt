@@ -125,3 +125,8 @@ coverage-summary.md
 htmlcov/
 target/llvm-cov/
 repomix-*.md
+
+# Evaluation artifacts
+scripts/eval_*_report.json
+scripts/eval_*report.json
+scripts/*_report.json

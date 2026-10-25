@@ -292,10 +292,11 @@ impl SubtitleProvider for OpenSubtitlesProvider {
                                 format!("Failed to fetch subtitle content from {}", link)
                             })?;
 
-                        return content_resp
-                            .text()
+                        let bytes = content_resp
+                            .bytes()
                             .await
-                            .context("Failed to read downloaded subtitle SRT text");
+                            .context("Failed to read downloaded subtitle SRT bytes")?;
+                        return Ok(crate::srt::decode_subtitle_bytes(&bytes));
                     } else {
                         bail!(
                             "OpenSubtitles did not return download link: {:?}",
@@ -319,10 +320,11 @@ impl SubtitleProvider for OpenSubtitlesProvider {
                 bail!("Direct download failed with HTTP {}", resp.status());
             }
 
-            return resp
-                .text()
+            let bytes = resp
+                .bytes()
                 .await
-                .context("Failed to read SRT response content");
+                .context("Failed to read SRT response bytes")?;
+            return Ok(crate::srt::decode_subtitle_bytes(&bytes));
         }
 
         bail!(

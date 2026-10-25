@@ -238,11 +238,15 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
             } else {
                 eprintln!("✓ Found {} sidecar subtitle(s):", discovered.len());
                 for (path, lang_opt) in &discovered {
-                    let lang_display = lang_opt
-                        .clone()
-                        .unwrap_or_else(|| "?? (will infer)".to_string());
+                    let lang_display = match (lang_opt, &args.lang) {
+                        (Some(l), _) => format!("detected: {}", l),
+                        (None, Some(target)) => {
+                            format!("none in filename, will use --lang: {}", target)
+                        }
+                        (None, None) => "none in filename (will infer)".to_string(),
+                    };
                     eprintln!(
-                        "   • {:?} (lang from filename: {})",
+                        "   • {:?} ({})",
                         path.file_name().unwrap_or_default(),
                         lang_display
                     );
@@ -404,8 +408,9 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
                 matching
             } else {
                 let untagged: Vec<_> = discovered
-                    .into_iter()
+                    .iter()
                     .filter(|(_, lang)| lang.is_none())
+                    .cloned()
                     .collect();
                 if untagged.is_empty() {
                     bail!(
@@ -413,11 +418,46 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
                         target_lang
                     );
                 }
-                untagged
+                // Prioritize direct sidecar in video parent directory over subdirectories
+                let in_parent: Vec<_> = untagged
+                    .iter()
+                    .filter(|(p, _)| p.parent() == video_path.parent())
+                    .cloned()
+                    .collect();
+                if !in_parent.is_empty() {
+                    in_parent
+                } else {
+                    untagged
+                }
             }
         } else {
-            discovered
+            discovered.clone()
         };
+
+        if !args.json {
+            if let Some(ref target) = args.lang {
+                eprintln!(
+                    "🔍 Filtering subtitle candidates for requested language '{}':",
+                    target
+                );
+                for (p, _) in &selected {
+                    eprintln!("   ✓ Selected: {:?}", p.file_name().unwrap_or_default());
+                }
+                for (p, l) in &discovered {
+                    if !selected.iter().any(|(sp, _)| sp == p) {
+                        let reason = match l {
+                            Some(other) => format!("detected language '{}' != '{}'", other, target),
+                            None => "secondary track bypassed in favor of root sidecar".to_string(),
+                        };
+                        eprintln!(
+                            "   ⊘ Ignored: {:?} ({})",
+                            p.file_name().unwrap_or_default(),
+                            reason
+                        );
+                    }
+                }
+            }
+        }
 
         let mut final_pairs = Vec::new();
         for (path, lang_opt) in selected {

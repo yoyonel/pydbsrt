@@ -29,8 +29,8 @@ pub use cuts::{
 };
 pub use lang_status::LangStatus;
 pub use media_pairing::{
-    find_subtitle_pairs, parse_language_code, SUBTITLE_EXTENSION, SUBTITLE_SUBDIRS,
-    SUPPORTED_VIDEO_EXTENSIONS,
+    find_subtitle_pairs, parse_extended_language_token, parse_language_code, SUBTITLE_EXTENSION,
+    SUBTITLE_SUBDIRS, SUPPORTED_VIDEO_EXTENSIONS,
 };
 pub use metadata::{MediaMetadata, MediaType};
 pub use phash::{hamming_distance, phash_32x32};

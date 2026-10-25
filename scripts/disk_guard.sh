@@ -3,8 +3,8 @@
 # Monitors target/ directory and free partition space.
 set -euo pipefail
 
-MAX_TARGET_MB="${MAX_TARGET_MB:-4096}" # 4 GB threshold
-MIN_FREE_GB="${MIN_FREE_GB:-10}"       # 10 GB minimum free disk space
+MAX_TARGET_MB="${MAX_TARGET_MB:-16384}" # 16 GB threshold
+MIN_FREE_GB="${MIN_FREE_GB:-10}"        # 10 GB minimum free disk space
 
 get_target_mb() {
   if [[ -d "target" ]]; then

@@ -186,8 +186,7 @@ pub fn extract_embedded_subtitle<P: AsRef<Path>>(
         ));
     }
 
-    let srt_content = String::from_utf8(output.stdout)
-        .context("Extracted subtitle content is not valid UTF-8")?;
+    let srt_content = crate::srt::decode_subtitle_bytes(&output.stdout);
 
     Ok(srt_content)
 }
