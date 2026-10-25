@@ -35,6 +35,13 @@ for ((i = 1; i <= MAX_DB_RETRIES; i++)); do
   sleep "$DB_RETRY_INTERVAL_SECONDS"
 done
 
+# Initialize with clean CI seed fixture if registry is absent
+SEED_FIXTURE="tests/fixtures/couplings.seed.json"
+if [[ ! -f "${SUBTITLES_DIR}/couplings.json" && -f "$SEED_FIXTURE" ]]; then
+  mkdir -p "${SUBTITLES_DIR}"
+  cp "$SEED_FIXTURE" "${SUBTITLES_DIR}/couplings.json"
+fi
+
 total_certified=0
 total_errors=0
 
