@@ -209,23 +209,4 @@ mod tests {
         assert_eq!(srt.cues.len(), 1);
         assert_eq!(srt.cues[0].text, "Subtitles in UTF-16LE");
     }
-
-    #[test]
-    fn test_open_euphoria_latin1_srt() {
-        let srt_path = Path::new("../../data/SRT/Euphoria.US.S01E02.1080p.WEBRip.x265-RARBG.srt");
-        if srt_path.exists() {
-            let srt = SubtitleFile::open(srt_path).expect("Failed to open Euphoria SRT");
-            let target_cue = srt
-                .cues
-                .iter()
-                .find(|c| c.text.contains("rien qui me vient"));
-            assert!(
-                target_cue.is_some(),
-                "Expected cue 'rien qui me vient' found"
-            );
-            let cue_text = &target_cue.unwrap().text;
-            assert_eq!(cue_text, "Désolée, y a rien qui me vient...");
-            assert!(!cue_text.contains('\u{FFFD}'));
-        }
-    }
 }

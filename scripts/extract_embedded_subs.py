@@ -13,35 +13,35 @@ from pathlib import Path
 def main():
     parser = argparse.ArgumentParser(description="Extract embedded subtitles from video files")
     parser.add_argument(
-        "--nas-root",
+        "--media-root",
         type=Path,
-        default=Path(os.environ.get("NAS_ROOT", ".")),
-        help="Root path to search for video files (default: $NAS_ROOT or current directory)",
+        default=Path(os.environ.get("MEDIA_ROOT", ".")),
+        help="Root path to search for video files (default: $MEDIA_ROOT or current directory)",
     )
     args = parser.parse_args()
-    nas_root = args.nas_root
+    media_root = args.media_root
     data_srt_dir = Path("data/SRT")
     data_srt_dir.mkdir(parents=True, exist_ok=True)
 
     with open("data/snippets/metadata.json") as f:
         snippets = json.load(f)
 
-    # Map base names to full video paths on NAS
-    nas_videos: dict[str, Path] = {}
-    print("Indexing NAS video containers...")
-    for p in nas_root.rglob("*"):
+    # Map base names to full video paths
+    media_videos: dict[str, Path] = {}
+    print("Indexing media video containers...")
+    for p in media_root.rglob("*"):
         if p.is_file() and p.suffix.lower() in (".mkv", ".mp4", ".avi", ".webm"):
-            nas_videos[p.stem] = p
+            media_videos[p.stem] = p
 
-    print(f"Found {len(nas_videos)} candidate video containers on NAS.")
+    print(f"Found {len(media_videos)} candidate video containers.")
 
     extracted_count = 0
     for s_name, s_info in snippets.items():
         raw_stem = s_info.get("raw_name", "").replace("_mid15s.mp4", "")
-        if raw_stem not in nas_videos:
+        if raw_stem not in media_videos:
             continue
 
-        vpath = nas_videos[raw_stem]
+        vpath = media_videos[raw_stem]
         dst_srt = data_srt_dir / f"{s_name}.fr.srt"
         if dst_srt.exists():
             continue

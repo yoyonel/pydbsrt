@@ -211,8 +211,8 @@ def main() -> int:
     parser.add_argument(
         "--input-dir",
         type=Path,
-        default=Path(os.environ.get("MEDIA_DIR", os.environ.get("NAS_ROOT", "."))),
-        help="Root directory to search for media files",
+        default=Path(os.environ.get("MEDIA_DIR", ".")),
+        help="Root directory to search for media files (default: $MEDIA_DIR or current directory)",
     )
     parser.add_argument(
         "--pattern",
