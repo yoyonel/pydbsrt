@@ -471,10 +471,10 @@ pub async fn search_handler(
             let path_str = path.to_string_lossy().to_string();
             let canon_path = path.canonicalize().unwrap_or_else(|_| path.clone());
             let canon_str = canon_path.to_string_lossy().to_string();
-            if !seen_catalog_paths.insert(path_str.clone()) || !seen_catalog_paths.insert(canon_str)
-            {
+            if !seen_catalog_paths.insert(canon_str.clone()) {
                 continue;
             }
+            seen_catalog_paths.insert(path_str.clone());
 
             let cand_fname = path
                 .file_name()

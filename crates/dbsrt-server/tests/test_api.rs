@@ -927,3 +927,63 @@ async fn test_download_latin1_subtitle_preserves_french_accents_utf8() {
 
     let _ = std::fs::remove_dir_all(&tmp_base);
 }
+
+#[tokio::test]
+async fn test_sidecar_catalog_deduplication_lookup() {
+    let tmp_base = std::env::temp_dir().join(format!("dbsrt_sidecar_dedup_{}", std::process::id()));
+    let phash_dir = tmp_base.join("phash");
+    let srt_dir = tmp_base.join("srt");
+    let video_dir = tmp_base.join("videos");
+    let _ = std::fs::create_dir_all(&phash_dir);
+    let _ = std::fs::create_dir_all(&srt_dir);
+    let _ = std::fs::create_dir_all(&video_dir);
+
+    // Create a video file and matching sidecar subtitle
+    let video_path = video_dir.join("Carnivale.S01E01.Milfay.mkv");
+    let sidecar_srt = video_dir.join("Carnivale.S01E01.Milfay.srt");
+    std::fs::write(&video_path, b"dummy video bytes").unwrap();
+    std::fs::write(
+        &sidecar_srt,
+        b"1\r\n00:00:01,000 --> 00:00:04,000\r\nAvant le commencement...\r\n\r\n",
+    )
+    .unwrap();
+
+    let (listener, addr) = dbsrt_server::bind_listener("127.0.0.1", 0).await.unwrap();
+    let app = dbsrt_server::create_router(phash_dir.clone(), srt_dir.clone());
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    let base_url = format!("http://{}", addr);
+    let client = reqwest::Client::new();
+
+    let req = dbsrt_server::SearchSubtitlesRequest {
+        media_path: video_path.to_string_lossy().to_string(),
+        language: "fr".to_string(),
+        subtitles_dir: None,
+        phash_dir: None,
+        search_mode: Some("all".to_string()),
+        index_engine: None,
+        query_title: None,
+        season: None,
+        episode: None,
+    };
+    let res: dbsrt_server::SearchSubtitlesResponse = client
+        .post(format!("{}/v1/search", base_url))
+        .json(&req)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert!(
+        !res.candidates.is_empty(),
+        "Sidecar subtitle was unexpectedly dropped by deduplication logic!"
+    );
+    assert_eq!(res.candidates[0].title, "Carnivale.S01E01.Milfay.srt");
+    assert_eq!(res.candidates[0].source, "catalog");
+
+    let _ = std::fs::remove_dir_all(&tmp_base);
+}
