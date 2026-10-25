@@ -94,11 +94,15 @@ case "${ACTION}" in
     echo ""
 
     echo "=== [6/6] Testing /v1/subtitles/:hash (Content-Addressable Storage CAS) ==="
-    SUB_HASH=$(grep -m 1 "subtitles_hash" data/SRT/couplings.json | tr -d '", ' | cut -d: -f2)
-    if [[ -n "${SUB_HASH}" ]]; then
-      HEAD_SRT=$(curl -s -f "http://127.0.0.1:${SIM_PORT}/v1/subtitles/${SUB_HASH}" | head -n 4)
-      echo "✓ CAS successfully retrieved subtitle track for hash ${SUB_HASH}:"
-      echo "${HEAD_SRT}"
+    if [[ ! -f data/SRT/couplings.json ]]; then
+      echo "⚠ data/SRT/couplings.json not found, skipping CAS test. Run 'bash scripts/init_couplings_seed.sh' first."
+    else
+      SUB_HASH=$(grep -m 1 "subtitles_hash" data/SRT/couplings.json | tr -d '", ' | cut -d: -f2)
+      if [[ -n "${SUB_HASH}" ]]; then
+        HEAD_SRT=$(curl -s -f "http://127.0.0.1:${SIM_PORT}/v1/subtitles/${SUB_HASH}" | head -n 4)
+        echo "✓ CAS successfully retrieved subtitle track for hash ${SUB_HASH}:"
+        echo "${HEAD_SRT}"
+      fi
     fi
     echo ""
     echo "✓ All ARM64 simulated RPi4 smoke tests completed successfully!"
