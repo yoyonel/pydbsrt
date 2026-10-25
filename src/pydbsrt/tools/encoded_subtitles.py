@@ -124,10 +124,3 @@ def export_encoded_subtitles(
 
     subtitles_extracted = [srt_export_filepath for _idx, srt_export_filepath in subtitles_exported_from_paths]
     return subtitles_extracted
-
-
-if __name__ == "__main__":
-    _media_path = Path("tests/data/big_buck_bunny_trailer_480p.mp4")
-    if _media_path.exists():
-        print(extract_subtitles_streams(_media_path))
-        print(export_encoded_subtitles(_media_path))
