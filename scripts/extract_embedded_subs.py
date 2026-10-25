@@ -3,13 +3,23 @@
 
 from __future__ import annotations
 
+import argparse
 import json
+import os
 import subprocess
 from pathlib import Path
 
 
 def main():
-    nas_root = Path("/media/latty/Synology")
+    parser = argparse.ArgumentParser(description="Extract embedded subtitles from video files")
+    parser.add_argument(
+        "--nas-root",
+        type=Path,
+        default=Path(os.environ.get("NAS_ROOT", ".")),
+        help="Root path to search for video files (default: $NAS_ROOT or current directory)",
+    )
+    args = parser.parse_args()
+    nas_root = args.nas_root
     data_srt_dir = Path("data/SRT")
     data_srt_dir.mkdir(parents=True, exist_ok=True)
 
