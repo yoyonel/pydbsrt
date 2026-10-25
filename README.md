@@ -68,6 +68,9 @@ task status
 # Ouvrir dbsrt Studio (http://127.0.0.1:8765/studio), PgWeb (:8086) et MkDocs (:8000)
 task studio
 
+# Ingestion unifiée en 1 commande : extraction pHash, certification couplage et rechargement dynamique RAM
+task media:add -- <chemin_video> [chemin_srt] [--lang <lg>] [--fps <val>]
+
 # Certifier tous les couples (SRT <-> pHash) en base PostgreSQL 17 et dans data/SRT/couplings.json
 task coupling:certify
 
@@ -106,7 +109,7 @@ flowchart TD
 
 | Crate | Responsabilités & Architecture SoC |
 | :--- | :--- |
-| **[`crates/dbsrt-cli`](crates/dbsrt-cli/)** | **CLI `dbsrt` modulaire** : Dispatcher Clap épuré (`main.rs`), bibliothèque `dbsrt_cli` (`lib.rs`), constantes de domaine typées (`constants.rs`) et sous-commandes dédiées dans `src/commands/` (`bench`, `certify`, `export`, `fetch`, `import`, `inspect`, `migrate`, `pack`, `recognize`, `retarget`, `scan`, `shared`). |
+| **[`crates/dbsrt-cli`](crates/dbsrt-cli/)** | **CLI `dbsrt` modulaire** : Dispatcher Clap épuré (`main.rs`), bibliothèque `dbsrt_cli` (`lib.rs`), constantes de domaine typées (`constants.rs`) et sous-commandes dédiées dans `src/commands/` (`bench`, `certify`, `export`, `fetch`, `import`, `inspect`, `media_add`, `migrate`, `pack`, `recognize`, `retarget`, `scan`, `shared`). |
 | **[`crates/dbsrt-server`](crates/dbsrt-server/)** | **Serveur REST Axum** : Handlers HTTP modulaires dans `src/handlers/` (`health`, `lookup`, `metrics`, `search`, `studio`, `sync`), moteur MIH unifié (< 1 ms) et UI web bicanale `dbsrt Studio` (`:8765/studio`). |
 | **[`crates/dbsrt-index`](crates/dbsrt-index/)** | **Indexation, Schémas & Migrations** : Gestion relationnelle PostgreSQL 17 SP-GiST BK-Tree (`subtitles`, `sub_frames`, `medias`, `frames`), migrations déclaratives versionnées Refinery (`embed_migrations!`), et format Zero-DB plat `.dbphash` / `.phash` par projection mémoire (`mmap`). |
 | **[`crates/dbsrt-core`](crates/dbsrt-core/)** | **Primitives Algorithmiques** : Calcul d'empreintes perceptuelles 64-bit DCT pHash, extraction de trames FFmpeg HWAccel/SW et distance de Hamming accélérée SIMD (`popcnt`). |
@@ -122,6 +125,7 @@ Le dépôt est orchestré par **[Taskfile (go-task)](https://taskfile.dev/)** d�
 | Tâche | Description | Domaine (`taskfiles/`) |
 | :--- | :--- | :--- |
 | **`task dev` / `task down`** | Démarre / arrête toute la stack de dev en arrière-plan | `Taskfile.yml` |
+| **`task media:add`** | Façade unifiée d'ingestion média (pHash, certification couplage et rechargement dynamique RAM) | `taskfiles/stack.yml` |
 | **`task server:reload`** | Déclenche le rechargement atomique à chaud du catalogue (`/v1/catalog/reload`) | `taskfiles/stack.yml` |
 | **`task catalog:status`** | Affiche l'état d'indexation (Base immuable + Delta RAM + Couplages) | `taskfiles/stack.yml` |
 | **`task catalog:compact`** | Fusionne le Base et le Delta RAM dans un catalogue consolidé et swap | `taskfiles/stack.yml` |
