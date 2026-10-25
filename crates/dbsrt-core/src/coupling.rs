@@ -309,6 +309,16 @@ impl CouplingRegistry {
         }
         None
     }
+
+    /// Returns true if a coupling matching `media_hash` and `subtitles_hash` is already certified.
+    pub fn is_already_certified(&self, media_hash: &str, subtitles_hash: &str) -> bool {
+        self.couplings.iter().any(|c| {
+            c.media_hash == media_hash
+                && c.subtitles
+                    .iter()
+                    .any(|s| s.subtitles_hash == subtitles_hash && s.certified)
+        })
+    }
 }
 
 #[cfg(test)]
@@ -351,5 +361,48 @@ mod tests {
             .expect("Must find coupled media");
         assert_eq!(found.subtitles.len(), 1);
         assert_eq!(found.subtitles[0].lang, "fr");
+    }
+
+    #[test]
+    fn test_is_already_certified_behavior() {
+        let mut reg = CouplingRegistry::default();
+        let media_hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let sub_hash = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let different_sub_hash = "cccccccccccccccccccccccccccccccc";
+
+        reg.upsert_coupling(
+            media_hash.to_string(),
+            "test_movie".to_string(),
+            "test_movie.phash".to_string(),
+            24.0,
+            100,
+            CertifiedSubtitleRecord {
+                subtitles_hash: sub_hash.to_string(),
+                name: "test_movie.fr.srt".to_string(),
+                lang: "fr".to_string(),
+                srt_path: "test_movie.fr.srt".to_string(),
+                certified: true,
+                cue_count: 5,
+                sub_frames: Vec::new(),
+            },
+        );
+
+        // Identical media and subtitle hash -> already certified
+        assert!(
+            reg.is_already_certified(media_hash, sub_hash),
+            "Expected true for identical media and subtitle hash"
+        );
+
+        // Same media, different subtitle hash -> not certified yet
+        assert!(
+            !reg.is_already_certified(media_hash, different_sub_hash),
+            "Expected false for different subtitle hash"
+        );
+
+        // Unknown media -> not certified
+        assert!(
+            !reg.is_already_certified("unknown_media_hash", sub_hash),
+            "Expected false for unknown media hash"
+        );
     }
 }
