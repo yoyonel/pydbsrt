@@ -16,6 +16,12 @@ tasks:
     cmds:
       - bash scripts/seed_couplings.sh
 
+  media:add:
+    desc: "Unified media ingestion facade (usage: task media:add -- <video> [srt] [--lang <lg>] [--fps <val>])"
+    deps: [cli:build]
+    cmds:
+      - bash scripts/media_add.sh {{.CLI_ARGS}}
+
   server:status:
     desc: Query dbsrt-server telemetry status endpoint (/v1/status)
     cmds:
