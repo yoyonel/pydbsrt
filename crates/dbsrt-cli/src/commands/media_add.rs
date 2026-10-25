@@ -5,7 +5,8 @@ use clap::Args;
 use dbsrt_core::{
     build_and_validate_sub_frames_opts, compute_bytes_digest_32, compute_media_phash_digest,
     detect_media_fps, extract_embedded_subtitle, find_subtitle_pairs, inspect_container,
-    parse_language_code, CertifiedSubtitleRecord, CouplingRegistry, LangStatus, SubtitleFile,
+    language_matches, parse_language_code, CertifiedSubtitleRecord, CouplingRegistry, LangStatus,
+    SubtitleFile,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -118,7 +119,7 @@ pub struct MediaAddArgs {
     pub subtitles_dir: PathBuf,
 
     /// Dry-run mode: extract pHash fingerprint but skip coupling certification and ingest
-    #[arg(long)]
+    #[arg(long, alias = "dry-run")]
     pub skip_certify: bool,
 
     /// Output execution summary in JSON format
@@ -278,22 +279,42 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
                     let mut seen_extracted_langs = HashSet::new();
                     let mut seen_no_lang = false;
 
+                    let has_explicit_lang_match = args.lang.as_ref().is_some_and(|target| {
+                        insp.subtitle_streams.iter().any(|s| {
+                            language_matches(s.language.as_deref(), target)
+                                || s.language
+                                    .as_deref()
+                                    .and_then(parse_language_code)
+                                    .as_deref()
+                                    == Some(target.as_str())
+                        })
+                    });
+
                     for stream in &insp.subtitle_streams {
                         let stream_lang_opt =
                             stream.language.as_deref().and_then(parse_language_code);
 
                         // Honor --lang override for embedded track filtering
                         if let Some(ref target) = args.lang {
-                            let matches = match &stream_lang_opt {
-                                Some(l) => l == target,
-                                None => true,
+                            let matches = match &stream.language {
+                                Some(raw_tag) => {
+                                    language_matches(Some(raw_tag), target)
+                                        || stream_lang_opt.as_deref() == Some(target.as_str())
+                                }
+                                None => !has_explicit_lang_match,
                             };
                             if !matches {
                                 continue;
                             }
                         }
 
-                        let lang_opt = stream_lang_opt.or_else(|| args.lang.clone());
+                        let lang_opt = stream_lang_opt.or_else(|| {
+                            if let Some(ref target) = args.lang {
+                                Some(target.clone())
+                            } else {
+                                stream.language.clone()
+                            }
+                        });
 
                         if let Some(ref lang) = lang_opt {
                             if seen_extracted_langs.contains(lang) {

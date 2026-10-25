@@ -22,6 +22,12 @@ tasks:
     cmds:
       - bash scripts/media_add.sh {{.CLI_ARGS}}
 
+  coupling:relabel:
+    desc: "Relabel a certified subtitle coupling language (usage: task coupling:relabel -- --media <hash> [--sub <hash>] --lang <code>)"
+    deps: [cli:build]
+    cmds:
+      - bash scripts/coupling_relabel.sh {{.CLI_ARGS}}
+
   server:status:
     desc: Query dbsrt-server telemetry status endpoint (/v1/status)
     cmds:

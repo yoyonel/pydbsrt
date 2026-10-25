@@ -6,7 +6,7 @@ use dbsrt_core::HwAccel;
 use crate::commands::{
     BenchCutsArgs, BenchVideoArgs, CertifyCouplingArgs, ExportPhashArgs, FetchSubtitlesArgs,
     ImportPhashArgs, InspectMediaArgs, MediaAddArgs, MigrateArgs, PackArgs, RecognizeArgs,
-    RetargetArgs, ScanLibraryArgs,
+    RelabelCouplingArgs, RetargetArgs, ScanLibraryArgs,
 };
 use crate::constants::{
     DEFAULT_BENCH_PHASH_COUNT, DEFAULT_POSTGRES_DB, DEFAULT_POSTGRES_PASS, DEFAULT_POSTGRES_PORT,
@@ -147,6 +147,10 @@ pub enum Commands {
     /// Unified media ingestion facade: extract pHash, certify coupling, and hot-ingest into server
     #[command(name = "media:add", visible_alias = "media-add")]
     MediaAdd(MediaAddArgs),
+
+    /// Relabel a certified subtitle language attribution and confidence status in couplings.json
+    #[command(name = "coupling:relabel", visible_alias = "coupling-relabel")]
+    RelabelCoupling(RelabelCouplingArgs),
 }
 
 #[cfg(test)]
@@ -225,5 +229,25 @@ mod tests {
         };
         assert_eq!(args.db.host, None);
         assert_eq!(args.db, PostgresArgs::default());
+    }
+
+    #[test]
+    fn test_cli_parse_coupling_relabel() {
+        let cli = Cli::parse_from([
+            "dbsrt",
+            "coupling:relabel",
+            "--media",
+            "43d70728",
+            "--lang",
+            "fr",
+        ]);
+        match cli.command {
+            Commands::RelabelCoupling(args) => {
+                assert_eq!(args.media, "43d70728");
+                assert_eq!(args.lang, "fr");
+                assert_eq!(args.status, "confirmed");
+            }
+            _ => panic!("Expected RelabelCoupling command"),
+        }
     }
 }

@@ -231,4 +231,24 @@ Un système d'indexation certifiée ne doit jamais deviner silencieusement la la
 ### Recommandations Opérationnelles
 
 - Spécifier `--lang <code>` dès que le nom de fichier ne porte pas de suffixe clair (`.fr.srt`, etc.).
-- Si la langue n'a pu être résolue, le couplage est automatiquement enregistré avec `lang="und"`. Un avertissement console invite à utiliser la commande de requalification future (`dbsrt coupling:relabel`).
+- Si la langue n'a pu être résolue, le couplage est automatiquement enregistré avec `lang="und"`. Un avertissement console invite à utiliser la commande de requalification (`task coupling:relabel`).
+
+## 8. Requalification de Langue sans Ré-extraction (`task coupling:relabel`)
+
+Lorsqu'un couplage a été indexé avec `lang="und"` (`LangStatus::Unknown`) ou avec une langue erronée, il n'est **pas nécessaire** de ré-extraire les empreintes pHash (opération coûteuse en CPU). La commande `task coupling:relabel` met à jour le registre `couplings.json` (et la base PostgreSQL si connectée) de manière atomique :
+
+```bash
+# Requalification avec préfixe de hash média
+task coupling:relabel -- --media 43d70728 --lang fr
+
+# Requalification avec nom de fichier média
+task coupling:relabel -- --media "Euphoria.US.S01E02.1080p.WEBRip.x265-RARBG.mp4" --lang fr
+
+# Si plusieurs pistes sont couplées au même média, désigner la piste cible via --sub
+task coupling:relabel -- --media 43d70728 --sub f20c1ef6 --lang fr
+
+# Sortie structurée JSON
+task coupling:relabel -- --media 43d70728 --lang fr --json
+```
+
+Cette opération passe immédiatement le statut en `LangStatus::Confirmed("fr")`, garantissant l'intégrité du catalogue de ground-truth.

@@ -75,6 +75,9 @@ task media:add -- mes_videos/film.mkv
 # Optionnel : spécifier explicitement sous-titre, langue et framerate
 task media:add -- mes_videos/film.mkv sous_titres/film.fr.srt --lang fr --fps 24.0
 
+# Requalifier la langue d'un couplage sans ré-extraire le pHash
+task coupling:relabel -- --media <hash_ou_nom> --lang fr
+
 # Certifier tous les couples (SRT <-> pHash) en base PostgreSQL 17 et dans data/SRT/couplings.json
 task coupling:certify
 
@@ -130,6 +133,7 @@ Le dépôt est orchestré par **[Taskfile (go-task)](https://taskfile.dev/)** d�
 | :--- | :--- | :--- |
 | **`task dev` / `task down`** | Démarre / arrête toute la stack de dev en arrière-plan | `Taskfile.yml` |
 | **`task media:add`** | Façade unifiée d'ingestion média (pHash, certification couplage et rechargement dynamique RAM) | `taskfiles/stack.yml` |
+| **`task coupling:relabel`** | Requalifie la langue d'un couplage certifié dans `couplings.json` | `taskfiles/stack.yml` |
 | **`task server:reload`** | Déclenche le rechargement atomique à chaud du catalogue (`/v1/catalog/reload`) | `taskfiles/stack.yml` |
 | **`task catalog:status`** | Affiche l'état d'indexation (Base immuable + Delta RAM + Couplages) | `taskfiles/stack.yml` |
 | **`task catalog:compact`** | Fusionne le Base et le Delta RAM dans un catalogue consolidé et swap | `taskfiles/stack.yml` |

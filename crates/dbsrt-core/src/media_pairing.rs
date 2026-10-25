@@ -29,7 +29,9 @@ pub fn parse_language_code(token: &str) -> Option<String> {
         return None;
     }
     match lower.as_str() {
-        "fr" | "en" | "es" | "de" | "it" | "pt" | "ja" | "nl" | "ru" => Some(lower),
+        "fr" | "en" | "es" | "de" | "it" | "pt" | "ja" | "nl" | "ru" | "ar" | "pl" | "zh"
+        | "ko" | "sv" | "da" | "fi" | "el" | "cs" | "tr" | "uk" | "ro" | "hu" | "he" | "hr"
+        | "id" | "no" | "th" | "vi" => Some(lower),
         "fre" | "fra" => Some("fr".to_string()),
         "eng" => Some("en".to_string()),
         "spa" => Some("es".to_string()),
@@ -39,6 +41,25 @@ pub fn parse_language_code(token: &str) -> Option<String> {
         "jpn" => Some("ja".to_string()),
         "dut" | "nld" => Some("nl".to_string()),
         "rus" => Some("ru".to_string()),
+        "ara" => Some("ar".to_string()),
+        "pol" => Some("pl".to_string()),
+        "zho" | "chi" => Some("zh".to_string()),
+        "kor" => Some("ko".to_string()),
+        "swe" => Some("sv".to_string()),
+        "dan" => Some("da".to_string()),
+        "fin" => Some("fi".to_string()),
+        "ell" | "gre" => Some("el".to_string()),
+        "ces" | "cze" => Some("cs".to_string()),
+        "tur" => Some("tr".to_string()),
+        "ukr" => Some("uk".to_string()),
+        "ron" | "rum" => Some("ro".to_string()),
+        "hun" => Some("hu".to_string()),
+        "heb" => Some("he".to_string()),
+        "hrv" => Some("hr".to_string()),
+        "ind" => Some("id".to_string()),
+        "nob" | "nor" => Some("no".to_string()),
+        "tha" => Some("th".to_string()),
+        "vie" => Some("vi".to_string()),
         _ => None,
     }
 }
@@ -63,18 +84,39 @@ pub fn find_subtitle_pairs(video_path: &Path) -> Result<Vec<(PathBuf, Option<Str
         return Ok(Vec::new());
     }
 
-    let mut search_dirs = vec![parent_dir.to_path_buf()];
+    let mut search_dirs: Vec<(PathBuf, bool)> = vec![(parent_dir.to_path_buf(), false)];
+    let mut seen_dirs = HashSet::new();
+    seen_dirs.insert(fs::canonicalize(parent_dir).unwrap_or_else(|_| parent_dir.to_path_buf()));
+
+    let stem_in_parent = parent_dir.join(video_stem);
+    if stem_in_parent.is_dir() {
+        let canon = fs::canonicalize(&stem_in_parent).unwrap_or_else(|_| stem_in_parent.clone());
+        if seen_dirs.insert(canon) {
+            search_dirs.push((stem_in_parent, true));
+        }
+    }
     for subdir_name in SUBTITLE_SUBDIRS {
         let sub = parent_dir.join(subdir_name);
         if sub.is_dir() {
-            search_dirs.push(sub);
+            let canon_sub = fs::canonicalize(&sub).unwrap_or_else(|_| sub.clone());
+            if seen_dirs.insert(canon_sub) {
+                search_dirs.push((sub.clone(), false));
+            }
+            let sub_stem = sub.join(video_stem);
+            if sub_stem.is_dir() {
+                let canon_sub_stem =
+                    fs::canonicalize(&sub_stem).unwrap_or_else(|_| sub_stem.clone());
+                if seen_dirs.insert(canon_sub_stem) {
+                    search_dirs.push((sub_stem, true));
+                }
+            }
         }
     }
 
     let mut pairs = Vec::new();
     let mut seen_canonical = HashSet::new();
 
-    for dir in search_dirs {
+    for (dir, is_stem_dir) in search_dirs {
         let entries = match fs::read_dir(&dir) {
             Ok(iter) => iter,
             Err(_) => continue,
@@ -97,7 +139,15 @@ pub fn find_subtitle_pairs(video_path: &Path) -> Result<Vec<(PathBuf, Option<Str
                 _ => continue,
             };
 
-            let norm_srt_stem = srt_stem.to_lowercase();
+            let mut norm_srt_stem = srt_stem.to_lowercase();
+            // Handle double extensions like .mkv.srt, .mp4.srt
+            for vid_ext in SUPPORTED_VIDEO_EXTENSIONS {
+                let dotted = format!(".{}", vid_ext);
+                if norm_srt_stem.ends_with(&dotted) {
+                    norm_srt_stem = norm_srt_stem.strip_suffix(&dotted).unwrap().to_string();
+                    break;
+                }
+            }
 
             // Match exact stem or stem followed by delimiter (. / _ / -)
             let lang_opt = if norm_srt_stem == norm_video_stem {
@@ -109,11 +159,20 @@ pub fn find_subtitle_pairs(video_path: &Path) -> Result<Vec<(PathBuf, Option<Str
                 }
                 // Find first valid ISO language token in the remaining suffix
                 rem.split(['.', '_', '-']).find_map(parse_language_code)
+            } else if is_stem_dir {
+                // Inside video-stem dedicated directory (e.g. Subs/<video_stem>/track.srt):
+                // any .srt belongs to this video; parse ISO code if present
+                norm_srt_stem
+                    .split(['.', '_', '-'])
+                    .find_map(parse_language_code)
             } else {
                 continue;
             };
 
-            let dedup_key = fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
+            let dedup_key = fs::canonicalize(&path)
+                .unwrap_or_else(|_| path.clone())
+                .to_string_lossy()
+                .to_lowercase();
             if seen_canonical.insert(dedup_key) {
                 pairs.push((path, lang_opt));
             }
@@ -268,5 +327,37 @@ mod tests {
         assert_eq!(pairs.len(), 1);
         assert_eq!(pairs[0].0, srt);
         assert_eq!(pairs[0].1, Some("fr".to_string()));
+    }
+
+    #[test]
+    fn test_double_extension_video_srt_pairing() {
+        let temp = TempTestDir::new("double_ext");
+        let video = temp.path.join("carnivale.s01e06.mkv");
+        let srt = temp.path.join("carnivale.s01e06.mkv.srt");
+        File::create(&video).unwrap();
+        File::create(&srt).unwrap();
+
+        let pairs = find_subtitle_pairs(&video).unwrap();
+        assert_eq!(pairs.len(), 1);
+        assert_eq!(pairs[0].0, srt);
+        assert_eq!(pairs[0].1, None); // Untagged language -> LangStatus::Unknown
+    }
+
+    #[test]
+    fn test_subs_video_stem_dedicated_folder() {
+        let temp = TempTestDir::new("subs_stem_folder");
+        let video = temp.path.join("Euphoria.S01E03.mp4");
+        let subs_stem_dir = temp.path.join("Subs").join("Euphoria.S01E03");
+        fs::create_dir_all(&subs_stem_dir).unwrap();
+        let srt_en = subs_stem_dir.join("2_English.srt");
+        let srt_fr = subs_stem_dir.join("track_fr.srt");
+        File::create(&video).unwrap();
+        File::create(&srt_en).unwrap();
+        File::create(&srt_fr).unwrap();
+
+        let pairs = find_subtitle_pairs(&video).unwrap();
+        assert_eq!(pairs.len(), 2);
+        let langs: Vec<Option<String>> = pairs.iter().map(|p| p.1.clone()).collect();
+        assert!(langs.contains(&Some("fr".to_string())));
     }
 }

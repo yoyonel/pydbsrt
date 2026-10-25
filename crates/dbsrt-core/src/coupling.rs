@@ -327,6 +327,197 @@ impl CouplingRegistry {
                     .any(|s| s.subtitles_hash == subtitles_hash && s.certified)
         })
     }
+
+    /// Relabels a subtitle's language code and confidence status within a media coupling.
+    ///
+    /// - `media_selector`: matches `media_hash` (exact or prefix), `media_name`, or `phash_filename`.
+    /// - `sub_selector`: optional. If provided, matches `subtitles_hash` (exact or prefix), `name`, or `srt_path`.
+    ///   If None and exactly one subtitle is coupled to the media, that subtitle is relabeled.
+    /// - `new_lang`: validated ISO-639 language code or "und".
+    /// - `new_status`: target `LangStatus` (typically `Confirmed(new_lang)`).
+    pub fn relabel(
+        &mut self,
+        media_selector: &str,
+        sub_selector: Option<&str>,
+        new_lang: &str,
+        new_status: LangStatus,
+    ) -> Result<RelabelResult> {
+        let norm_lang = new_lang.trim().to_lowercase();
+        if norm_lang.is_empty() {
+            bail!("Language code cannot be empty");
+        }
+        if norm_lang != "und" && crate::media_pairing::parse_language_code(&norm_lang).is_none() {
+            bail!(
+                "Invalid language code '{}'. Expected ISO 639-1 (2 letters), ISO 639-2 (3 letters), or 'und'",
+                new_lang
+            );
+        }
+
+        let media_sel = media_selector.trim();
+        if media_sel.is_empty() {
+            bail!("Media selector cannot be empty");
+        }
+
+        // 1. Locate matching media
+        let matching_media_indices: Vec<usize> = self
+            .couplings
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| {
+                c.media_hash.eq_ignore_ascii_case(media_sel)
+                    || c.media_hash.starts_with(media_sel)
+                    || c.media_name == media_sel
+                    || c.phash_filename == media_sel
+                    || c.media_name.contains(media_sel)
+            })
+            .map(|(idx, _)| idx)
+            .collect();
+
+        let media_idx = match matching_media_indices.len() {
+            0 => bail!("No media coupling found matching '{}'", media_sel),
+            1 => matching_media_indices[0],
+            _ => {
+                // Try exact matches first
+                if let Some(&exact) = matching_media_indices.iter().find(|&&i| {
+                    self.couplings[i].media_hash.eq_ignore_ascii_case(media_sel)
+                        || self.couplings[i].media_name == media_sel
+                        || self.couplings[i].phash_filename == media_sel
+                }) {
+                    exact
+                } else {
+                    let candidates: Vec<String> = matching_media_indices
+                        .iter()
+                        .take(5)
+                        .map(|&i| {
+                            format!(
+                                "{} ({})",
+                                self.couplings[i].media_name,
+                                &self.couplings[i].media_hash
+                                    [..8.min(self.couplings[i].media_hash.len())]
+                            )
+                        })
+                        .collect();
+                    bail!(
+                        "Ambiguous media selector '{}' matches {} medias: {}. Please provide a longer hash prefix.",
+                        media_sel,
+                        matching_media_indices.len(),
+                        candidates.join(", ")
+                    );
+                }
+            }
+        };
+
+        let media = &mut self.couplings[media_idx];
+
+        // 2. Locate matching subtitle
+        let sub_sel_opt = sub_selector.map(str::trim).filter(|s| !s.is_empty());
+        let sub_idx = match sub_sel_opt {
+            None => {
+                if media.subtitles.is_empty() {
+                    bail!(
+                        "Media '{}' has no coupled subtitles to relabel",
+                        media.media_name
+                    );
+                }
+                if media.subtitles.len() > 1 {
+                    let subs: Vec<String> = media
+                        .subtitles
+                        .iter()
+                        .map(|s| {
+                            format!(
+                                "{} (lang={}, hash={})",
+                                s.name,
+                                s.lang,
+                                &s.subtitles_hash[..8.min(s.subtitles_hash.len())]
+                            )
+                        })
+                        .collect();
+                    bail!(
+                        "Media '{}' has {} coupled subtitles. Please specify which subtitle to relabel with --sub <hash_or_name>: {}",
+                        media.media_name,
+                        media.subtitles.len(),
+                        subs.join(", ")
+                    );
+                }
+                0
+            }
+            Some(sub_sel) => {
+                let clean_sub_sel = sub_sel
+                    .trim_start_matches("sub:sha256:")
+                    .trim_start_matches("sha256:");
+                let matching_sub_indices: Vec<usize> = media
+                    .subtitles
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, s)| {
+                        s.subtitles_hash.eq_ignore_ascii_case(clean_sub_sel)
+                            || s.subtitles_hash.starts_with(clean_sub_sel)
+                            || s.name == sub_sel
+                            || s.srt_path == sub_sel
+                            || s.name.contains(sub_sel)
+                            || s.srt_path.contains(sub_sel)
+                    })
+                    .map(|(idx, _)| idx)
+                    .collect();
+
+                match matching_sub_indices.len() {
+                    0 => bail!(
+                        "No subtitle found in media '{}' matching '{}'",
+                        media.media_name,
+                        sub_sel
+                    ),
+                    1 => matching_sub_indices[0],
+                    _ => {
+                        if let Some(&exact) = matching_sub_indices.iter().find(|&&i| {
+                            media.subtitles[i]
+                                .subtitles_hash
+                                .eq_ignore_ascii_case(clean_sub_sel)
+                                || media.subtitles[i].name == sub_sel
+                        }) {
+                            exact
+                        } else {
+                            bail!(
+                                "Ambiguous subtitle selector '{}' in media '{}'. Please specify full hash.",
+                                sub_sel,
+                                media.media_name
+                            );
+                        }
+                    }
+                }
+            }
+        };
+
+        let sub = &mut media.subtitles[sub_idx];
+        let old_lang = sub.lang.clone();
+        let old_status = sub.lang_status.clone();
+
+        sub.lang = norm_lang.clone();
+        sub.lang_status = new_status.clone();
+
+        Ok(RelabelResult {
+            media_hash: media.media_hash.clone(),
+            media_name: media.media_name.clone(),
+            subtitles_hash: sub.subtitles_hash.clone(),
+            subtitle_name: sub.name.clone(),
+            old_lang,
+            old_status,
+            new_lang: norm_lang,
+            new_status,
+        })
+    }
+}
+
+/// Result metadata from relabeling a coupled subtitle.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RelabelResult {
+    pub media_hash: String,
+    pub media_name: String,
+    pub subtitles_hash: String,
+    pub subtitle_name: String,
+    pub old_lang: String,
+    pub old_status: LangStatus,
+    pub new_lang: String,
+    pub new_status: LangStatus,
 }
 
 #[cfg(test)]
@@ -483,5 +674,124 @@ mod tests {
         assert!(by_hash.is_some());
 
         let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_coupling_relabel_lifecycle_and_edge_cases() {
+        let mut reg = CouplingRegistry::default();
+        let sub1 = CertifiedSubtitleRecord {
+            subtitles_hash: "11112222333344445555666677778888".to_string(),
+            name: "movie.srt".to_string(),
+            lang: "und".to_string(),
+            lang_status: LangStatus::Unknown,
+            srt_path: "movie.srt".to_string(),
+            certified: true,
+            cue_count: 50,
+            sub_frames: vec![],
+        };
+        reg.upsert_coupling(
+            "aaaa1111bbbb2222cccc3333dddd4444".to_string(),
+            "movie".to_string(),
+            "movie.phash".to_string(),
+            24.0,
+            1000,
+            sub1,
+        );
+
+        // 1. Relabel single subtitle without specifying sub selector
+        let res = reg
+            .relabel(
+                "aaaa1111",
+                None,
+                "fr",
+                LangStatus::Confirmed("fr".to_string()),
+            )
+            .unwrap();
+        assert_eq!(res.old_lang, "und");
+        assert_eq!(res.old_status, LangStatus::Unknown);
+        assert_eq!(res.new_lang, "fr");
+        assert_eq!(res.new_status, LangStatus::Confirmed("fr".to_string()));
+
+        let target_sub = &reg.couplings[0].subtitles[0];
+        assert_eq!(target_sub.lang, "fr");
+        assert_eq!(
+            target_sub.lang_status,
+            LangStatus::Confirmed("fr".to_string())
+        );
+
+        // 2. Add second subtitle to create ambiguity if sub_selector is None
+        let sub2 = CertifiedSubtitleRecord {
+            subtitles_hash: "99998888777766665555444433332222".to_string(),
+            name: "movie.commentary.srt".to_string(),
+            lang: "en".to_string(),
+            lang_status: LangStatus::Detected("en".to_string()),
+            srt_path: "movie.commentary.srt".to_string(),
+            certified: true,
+            cue_count: 30,
+            sub_frames: vec![],
+        };
+        reg.upsert_coupling(
+            "aaaa1111bbbb2222cccc3333dddd4444".to_string(),
+            "movie".to_string(),
+            "movie.phash".to_string(),
+            24.0,
+            1000,
+            sub2,
+        );
+
+        // Now without sub selector, should fail because 2 subtitles exist
+        let err_ambig = reg
+            .relabel(
+                "aaaa1111",
+                None,
+                "es",
+                LangStatus::Confirmed("es".to_string()),
+            )
+            .unwrap_err();
+        assert!(err_ambig.to_string().contains("has 2 coupled subtitles"));
+
+        // With explicit sub selector (prefix of sub2 hash)
+        let res2 = reg
+            .relabel(
+                "aaaa1111",
+                Some("99998888"),
+                "es",
+                LangStatus::Confirmed("es".to_string()),
+            )
+            .unwrap();
+        assert_eq!(res2.new_lang, "es");
+
+        // 3. Error case: invalid language code
+        let err_lang = reg
+            .relabel(
+                "aaaa1111",
+                Some("99998888"),
+                "french_dub_invalid",
+                LangStatus::Confirmed("fr".to_string()),
+            )
+            .unwrap_err();
+        assert!(err_lang.to_string().contains("Invalid language code"));
+
+        // 4. Error case: unknown media selector
+        let err_media = reg
+            .relabel(
+                "nonexistent_media",
+                None,
+                "fr",
+                LangStatus::Confirmed("fr".to_string()),
+            )
+            .unwrap_err();
+        assert!(err_media.to_string().contains("No media coupling found"));
+
+        // 5. Error case: unknown subtitle selector
+        let err_sub = reg
+            .relabel(
+                "aaaa1111",
+                Some("00000000"),
+                "fr",
+                LangStatus::Confirmed("fr".to_string()),
+            )
+            .unwrap_err();
+        assert!(err_sub.to_string().contains("No subtitle found in media"));
     }
 }

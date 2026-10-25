@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use crate::media_pairing::parse_language_code;
+
 /// Metadata describing an embedded subtitle track within a container.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SubtitleStreamInfo {
@@ -202,6 +204,12 @@ pub fn language_matches(stream_lang: Option<&str>, target_lang: &str) -> bool {
 
     if sl == tl {
         return true;
+    }
+
+    if let (Some(n1), Some(n2)) = (parse_language_code(&sl), parse_language_code(&tl)) {
+        if n1 == n2 {
+            return true;
+        }
     }
 
     // Common multilingual equivalents
