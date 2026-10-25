@@ -11,6 +11,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use crate::cli::PostgresArgs;
@@ -19,6 +21,66 @@ use crate::commands::shared::find_or_build_phash;
 use crate::constants::{
     DEFAULT_HTTP_TIMEOUT_SECS, DEFAULT_SERVER_URL, DEFAULT_SUBTITLES_DIR, DEFAULT_TMP_DIR,
 };
+
+/// Maximum file size in bytes considered a partial/corrupted pHash file on interrupted write.
+pub const PARTIAL_PHASH_THRESHOLD_BYTES: u64 = 1_000;
+
+/// Standard UNIX process exit code on SIGINT signal (128 + 2).
+pub const SIGINT_EXIT_CODE: i32 = 130;
+
+static CLEANUP_STATE: OnceLock<Arc<CleanupState>> = OnceLock::new();
+
+struct CleanupState {
+    srts: Mutex<Vec<PathBuf>>,
+    phash: Mutex<Option<PathBuf>>,
+    phash_done: AtomicBool,
+}
+
+impl CleanupState {
+    fn global() -> Arc<Self> {
+        CLEANUP_STATE
+            .get_or_init(|| {
+                let state = Arc::new(Self {
+                    srts: Mutex::new(Vec::new()),
+                    phash: Mutex::new(None),
+                    phash_done: AtomicBool::new(false),
+                });
+                let h_state = Arc::clone(&state);
+                let _ = ctrlc::set_handler(move || {
+                    eprintln!("\n⚠️  Received SIGINT (Ctrl+C). Cleaning up partial files...");
+                    if let Ok(guard) = h_state.phash.lock() {
+                        if let Some(ref path) = *guard {
+                            if path.exists() {
+                                let should_remove = match fs::metadata(path) {
+                                    Ok(meta) => {
+                                        meta.len() < PARTIAL_PHASH_THRESHOLD_BYTES
+                                            || !h_state.phash_done.load(Ordering::SeqCst)
+                                    }
+                                    Err(_) => false,
+                                };
+                                if should_remove {
+                                    let _ = fs::remove_file(path);
+                                    eprintln!("   Removed partial pHash: {:?}", path);
+                                }
+                            }
+                        }
+                    }
+                    if let Ok(guard) = h_state.srts.lock() {
+                        for srt in guard.iter() {
+                            if srt.exists() {
+                                let _ = fs::remove_file(srt);
+                                eprintln!("   Removed extracted SRT: {:?}", srt);
+                            }
+                        }
+                    }
+                    eprintln!("Cleanup done. Exiting.");
+                    std::process::exit(SIGINT_EXIT_CODE);
+                });
+                state
+            })
+            .clone()
+    }
+}
 
 /// CLI arguments for unified `media:add` command.
 #[derive(Args, Debug, Clone)]
@@ -88,6 +150,11 @@ pub struct MediaAddResult {
 
 /// Executes unified media addition: pHash extraction -> certification -> dynamic ingest.
 pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
+    let cleanup = CleanupState::global();
+    cleanup.srts.lock().unwrap().clear();
+    *cleanup.phash.lock().unwrap() = None;
+    cleanup.phash_done.store(false, Ordering::SeqCst);
+
     // 1. Resolve video path
     let video_path = args
         .video
@@ -132,7 +199,38 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
         };
         vec![(srt_file.clone(), Some(valid_lang))]
     } else {
+        let video_stem = video_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("unknown");
+
+        if !args.json {
+            eprintln!("🔍 Scanning for sidecar .srt files matching video stem...");
+            eprintln!("   Video stem: {}", video_stem);
+            eprintln!("   Search dirs: parent + Subs/subtitles subdirs");
+        }
+
         let mut discovered = find_subtitle_pairs(video_path)?;
+
+        if !args.json {
+            if discovered.is_empty() {
+                eprintln!(
+                    "ℹ️  No sidecar .srt found, will inspect video container for embedded tracks"
+                );
+            } else {
+                eprintln!("✓ Found {} sidecar subtitle(s):", discovered.len());
+                for (path, lang_opt) in &discovered {
+                    let lang_display = lang_opt
+                        .clone()
+                        .unwrap_or_else(|| "?? (will infer)".to_string());
+                    eprintln!(
+                        "   • {:?} (lang from filename: {})",
+                        path.file_name().unwrap_or_default(),
+                        lang_display
+                    );
+                }
+            }
+        }
 
         let sidecars_match_target = if let Some(ref target) = args.lang {
             discovered
@@ -143,13 +241,21 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
         };
 
         if !sidecars_match_target {
+            if !args.json {
+                if let Some(ref target) = args.lang {
+                    eprintln!(
+                        "ℹ️  No sidecar matches requested lang '{}', trying embedded tracks",
+                        target
+                    );
+                }
+            }
+
+            if !args.json {
+                eprintln!("🔍 Inspecting video container for embedded subtitle tracks...");
+            }
+
             match inspect_container(video_path) {
                 Ok(insp) if !insp.subtitle_streams.is_empty() => {
-                    let video_stem = video_path
-                        .file_stem()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or("unknown");
-
                     fs::create_dir_all(&args.subtitles_dir)?;
 
                     let mut seen_extracted_langs = HashSet::new();
@@ -196,6 +302,14 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
                             seen_no_lang = true;
                         }
 
+                        let lang_display = lang_opt.as_deref().unwrap_or("unknown");
+                        if !args.json {
+                            eprintln!(
+                                "📦 Extracting embedded subtitle track #{} ({})...",
+                                stream.subtitle_index, lang_display
+                            );
+                        }
+
                         match extract_embedded_subtitle(video_path, stream.subtitle_index) {
                             Ok(srt_content) => {
                                 let srt_fname = match &lang_opt {
@@ -205,11 +319,11 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
                                 let srt_path = args.subtitles_dir.join(&srt_fname);
 
                                 fs::write(&srt_path, &srt_content)?;
+                                cleanup.srts.lock().unwrap().push(srt_path.clone());
 
                                 if !args.json {
-                                    let lang_display = lang_opt.as_deref().unwrap_or("unknown");
-                                    println!(
-                                        "📦 Extracted embedded subtitle track #{} ({}) → {:?}",
+                                    eprintln!(
+                                        "   Extracted embedded subtitle track #{} ({}) → {:?}",
                                         stream.subtitle_index, lang_display, srt_path
                                     );
                                 }
@@ -266,7 +380,16 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
             let effective = lang_opt
                 .clone()
                 .or_else(|| args.lang.clone())
-                .unwrap_or_else(|| detect_cli_subtitle_lang(srt_name, "auto"));
+                .unwrap_or_else(|| {
+                    let detected = detect_cli_subtitle_lang(srt_name, "auto");
+                    if !args.json && detected != "auto" {
+                        eprintln!(
+                            "   Lang inferred from filename via detect_cli_subtitle_lang: {}",
+                            detected
+                        );
+                    }
+                    detected
+                });
             if effective == "auto" || effective.is_empty() || effective == "und" {
                 bail!(
                     "❌ Could not determine subtitle language for '{}'. Please specify it explicitly via --lang <fr|en|es|...>",
@@ -282,8 +405,33 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
 
     // 4. Extract pHash fingerprint
     fs::create_dir_all(&args.phash_dir)?;
+
+    let video_name = video_path.file_name().unwrap_or_default().to_string_lossy();
+    let estimated_phash = args
+        .phash_dir
+        .join(format!("{}.{:.1}fps.phash", video_name, fps));
+    *cleanup.phash.lock().unwrap() = Some(estimated_phash);
+
+    if !args.json {
+        eprintln!(
+            "🎬 Extracting pHash frames via ffmpeg (may take a few minutes for long videos)..."
+        );
+        eprintln!("   Video: {:?}", video_path);
+        eprintln!("   FPS detected: {:.3}", fps);
+    }
+
     let (phash_path, hashes, _detected_fps) = find_or_build_phash(video_path, &args.phash_dir)?;
+    cleanup.phash_done.store(true, Ordering::SeqCst);
+    *cleanup.phash.lock().unwrap() = Some(phash_path.clone());
     let media_hash = compute_media_phash_digest(&hashes);
+
+    if !args.json {
+        eprintln!(
+            "✓ pHash extraction completed: {} frames computed",
+            hashes.len()
+        );
+        eprintln!("   Media hash: {}", media_hash);
+    }
 
     // 5. Early exit if skip_certify
     if args.skip_certify {
@@ -299,6 +447,8 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
             message: "pHash extracted. Skipped certification and ingest (--skip-certify)"
                 .to_string(),
         };
+        cleanup.srts.lock().unwrap().clear();
+        *cleanup.phash.lock().unwrap() = None;
         if args.json {
             println!("{}", serde_json::to_string_pretty(&result)?);
         } else {
@@ -326,6 +476,10 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
         .unwrap_or(&phash_fname)
         .to_string();
 
+    if !args.json {
+        eprintln!("📋 Certifying {} subtitle coupling(s)...", pairs.len());
+    }
+
     for (srt_path, lang_opt) in &pairs {
         let raw_srt_bytes = fs::read(srt_path)?;
         let subtitles_hash = compute_bytes_digest_32(&raw_srt_bytes);
@@ -339,10 +493,19 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
         let lang = lang_opt
             .clone()
             .or_else(|| args.lang.clone())
-            .unwrap_or_else(|| detect_cli_subtitle_lang(&srt_fname, "auto"));
+            .unwrap_or_else(|| {
+                let detected = detect_cli_subtitle_lang(&srt_fname, "auto");
+                if !args.json && detected != "auto" {
+                    eprintln!(
+                        "   Lang inferred from filename via detect_cli_subtitle_lang: {}",
+                        detected
+                    );
+                }
+                detected
+            });
 
         // Validate: reject "auto" or empty language codes
-        if lang == "auto" || lang.is_empty() {
+        if lang == "auto" || lang.is_empty() || lang == "und" {
             bail!(
                 "❌ Could not determine subtitle language for '{}'. Please specify it explicitly via --lang <fr|en|es|...>",
                 srt_fname
@@ -352,7 +515,7 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
         if reg.is_already_certified(&media_hash, &subtitles_hash) {
             skipped_count += 1;
             if !args.json {
-                println!(
+                eprintln!(
                     "ℹ️  Already certified: '{}' (media_hash={}, sub_hash={}) -> skipping",
                     srt_fname, media_hash, subtitles_hash
                 );
@@ -380,6 +543,29 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
             .to_string_lossy()
             .to_string();
 
+        let source_kind = if srt_path.starts_with(&args.subtitles_dir)
+            && pairs
+                .iter()
+                .any(|(p, _)| p.starts_with(&args.subtitles_dir))
+        {
+            "embedded-extracted"
+        } else {
+            "sidecar"
+        };
+
+        if !args.json {
+            eprintln!("✓ Certified coupling #{}:", certified_count + 1);
+            eprintln!("   Source: {}", source_kind);
+            eprintln!("   SRT: {}", srt_fname);
+            eprintln!(
+                "   Final lang: {} (from: filename={}, --lang={})",
+                lang,
+                lang_opt.clone().unwrap_or_else(|| "none".into()),
+                args.lang.clone().unwrap_or_else(|| "none".into())
+            );
+            eprintln!("   Cues: {}", srt_file.cues.len());
+        }
+
         reg.upsert_coupling(
             media_hash.clone(),
             media_name.clone(),
@@ -400,6 +586,9 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
     }
 
     if certified_count > 0 {
+        if !args.json {
+            eprintln!("💾 Persisting coupling registry to disk...");
+        }
         reg.save(&reg_path)?;
     }
 
@@ -407,6 +596,9 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
     let mut server_ingested = false;
 
     if certified_count > 0 {
+        if !args.json {
+            eprintln!("🚀 Triggering dynamic RAM ingestion on dbsrt-server...");
+        }
         let ingest_url = format!(
             "{}/v1/catalog/ingest",
             args.server_url.trim_end_matches('/')
@@ -424,7 +616,7 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
             Ok(resp) if resp.status().is_success() => {
                 server_ingested = true;
                 if !args.json {
-                    println!(
+                    eprintln!(
                         "✓ Dynamic RAM ingestion succeeded on dbsrt-server ({})",
                         ingest_url
                     );
@@ -432,7 +624,7 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
             }
             Ok(resp) => {
                 if !args.json {
-                    println!(
+                    eprintln!(
                         "⚠️  dbsrt-server catalog ingest returned HTTP {}. Coupling remains certified on disk.",
                         resp.status()
                     );
@@ -440,7 +632,7 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
             }
             Err(_) => {
                 if !args.json {
-                    println!(
+                    eprintln!(
                         "⚠️  dbsrt-server offline ({}): .phash extracted and coupling certified to disk, will be loaded on next server startup.",
                         args.server_url
                     );
@@ -448,8 +640,11 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
             }
         }
     } else if !args.json {
-        println!("ℹ️  All couplings already certified (idempotent skip). Server ingest skipped.");
+        eprintln!("ℹ️  All couplings already certified (idempotent skip). Server ingest skipped.");
     }
+
+    cleanup.srts.lock().unwrap().clear();
+    *cleanup.phash.lock().unwrap() = None;
 
     let result = MediaAddResult {
         success: true,

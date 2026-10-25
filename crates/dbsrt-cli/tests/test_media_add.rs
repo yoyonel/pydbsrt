@@ -538,3 +538,80 @@ fn test_cli_media_add_mkv_no_subtitle_track() {
         stderr
     );
 }
+
+/// [EMPIRICALLY PROVEN] Verifies sidecar subtitle discovery without language suffix (Euphoria scenario).
+#[test]
+fn test_cli_media_add_sidecar_no_lang_suffix() {
+    let ffmpeg_check = Command::new("ffmpeg").arg("-version").output();
+    if ffmpeg_check.is_err() || !ffmpeg_check.unwrap().status.success() {
+        eprintln!("ffmpeg not available, skipping sidecar no lang suffix test");
+        return;
+    }
+
+    let temp = TempTestDir::new("sidecar_no_lang");
+    let stem = "Show.US.S01E01.1080p.WEBRip.x265-RARBG";
+    let video_path = temp.path.join(format!("{}.mp4", stem));
+    let srt_path = temp.path.join(format!("{}.srt", stem));
+    let phash_dir = temp.path.join("phash");
+    let subtitles_dir = temp.path.join("subtitles");
+
+    let gen_status = Command::new("ffmpeg")
+        .args([
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=duration=1:size=160x120:rate=24",
+            "-c:v",
+            "libx264",
+            "-y",
+            video_path.to_str().unwrap(),
+        ])
+        .output();
+
+    if gen_status.is_err() || !gen_status.unwrap().status.success() {
+        eprintln!("Failed to generate synthetic video, skipping");
+        return;
+    }
+
+    fs::write(
+        &srt_path,
+        "1\n00:00:00,100 --> 00:00:00,800\nEuphoria scene line\n",
+    )
+    .unwrap();
+
+    let out = Command::new(env!("CARGO_BIN_EXE_dbsrt"))
+        .args([
+            "media:add",
+            video_path.to_str().unwrap(),
+            "--phash-dir",
+            phash_dir.to_str().unwrap(),
+            "--subtitles-dir",
+            subtitles_dir.to_str().unwrap(),
+        ])
+        .output()
+        .expect("Failed to run media:add on sidecar without lang suffix");
+
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+
+    assert!(
+        out.status.success(),
+        "Expected media:add to succeed, stderr: {}",
+        stderr
+    );
+    assert!(
+        stderr.contains("Found 1 sidecar subtitle(s)"),
+        "Expected stderr to contain 'Found 1 sidecar subtitle(s)', got: {}",
+        stderr
+    );
+    assert!(
+        stderr.contains("Show.US.S01E01"),
+        "Expected stderr to contain 'Show.US.S01E01', got: {}",
+        stderr
+    );
+    assert!(
+        stdout.contains("Couplings Added  : 1"),
+        "Expected stdout to report 1 coupling added, got: {}",
+        stdout
+    );
+}
