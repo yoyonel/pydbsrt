@@ -5,8 +5,8 @@ use dbsrt_core::HwAccel;
 
 use crate::commands::{
     BenchCutsArgs, BenchVideoArgs, CertifyCouplingArgs, ExportPhashArgs, FetchSubtitlesArgs,
-    ImportPhashArgs, InspectMediaArgs, MigrateArgs, PackArgs, RecognizeArgs, RetargetArgs,
-    ScanLibraryArgs,
+    ImportPhashArgs, InspectMediaArgs, MediaAddArgs, MigrateArgs, PackArgs, RecognizeArgs,
+    RetargetArgs, ScanLibraryArgs,
 };
 use crate::constants::{
     DEFAULT_BENCH_PHASH_COUNT, DEFAULT_POSTGRES_DB, DEFAULT_POSTGRES_PASS, DEFAULT_POSTGRES_PORT,
@@ -143,6 +143,10 @@ pub enum Commands {
 
     /// Apply or check versioned SQL database migrations (refinery) on PostgreSQL
     Migrate(MigrateArgs),
+
+    /// Unified media ingestion facade: extract pHash, certify coupling, and hot-ingest into server
+    #[command(name = "media:add", visible_alias = "media-add")]
+    MediaAdd(MediaAddArgs),
 }
 
 #[cfg(test)]

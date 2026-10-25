@@ -1,0 +1,422 @@
+//! Unified CLI facade subcommand orchestrating pHash extraction, coupling certification, and catalog ingestion.
+
+use anyhow::{anyhow, bail, Result};
+use clap::Args;
+use dbsrt_core::{
+    build_and_validate_sub_frames_opts, compute_bytes_digest_32, compute_media_phash_digest,
+    detect_media_fps, find_subtitle_pairs, parse_language_code, CertifiedSubtitleRecord,
+    CouplingRegistry, SubtitleFile,
+};
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::PathBuf;
+use std::time::Duration;
+
+use crate::cli::PostgresArgs;
+use crate::commands::certify::detect_cli_subtitle_lang;
+use crate::commands::shared::find_or_build_phash;
+use crate::constants::{
+    DEFAULT_HTTP_TIMEOUT_SECS, DEFAULT_SERVER_URL, DEFAULT_SUBTITLES_DIR, DEFAULT_TMP_DIR,
+};
+
+/// CLI arguments for unified `media:add` command.
+#[derive(Args, Debug, Clone)]
+pub struct MediaAddArgs {
+    /// Reference media video file (.mkv, .mp4, .webm, etc.)
+    #[arg(short, long, value_name = "VIDEO")]
+    pub video: Option<PathBuf>,
+
+    /// Positional video path if not passed with --video
+    #[arg(value_name = "VIDEO_PATH")]
+    pub video_pos: Option<PathBuf>,
+
+    /// Reference subtitle file (.srt)
+    #[arg(short, long, value_name = "SRT")]
+    pub srt: Option<PathBuf>,
+
+    /// Positional subtitle path if not passed with --srt
+    #[arg(value_name = "SRT_PATH")]
+    pub srt_pos: Option<PathBuf>,
+
+    /// Subtitle ISO language code (e.g. "fr", "en")
+    #[arg(short, long)]
+    pub lang: Option<String>,
+
+    /// Explicit framerate override (e.g. 23.976, 24.0, 25.0)
+    #[arg(long)]
+    pub fps: Option<f64>,
+
+    /// Output directory storing .phash binary fingerprints
+    #[arg(long, default_value = DEFAULT_TMP_DIR)]
+    pub phash_dir: PathBuf,
+
+    /// Directory storing certified .srt files and couplings.json
+    #[arg(long, default_value = DEFAULT_SUBTITLES_DIR)]
+    pub subtitles_dir: PathBuf,
+
+    /// Dry-run mode: extract pHash fingerprint but skip coupling certification and ingest
+    #[arg(long)]
+    pub skip_certify: bool,
+
+    /// Output execution summary in JSON format
+    #[arg(long)]
+    pub json: bool,
+
+    /// HTTP URL of dbsrt-server for live catalog ingestion
+    #[arg(long, default_value = DEFAULT_SERVER_URL)]
+    pub server_url: String,
+
+    /// Database connection arguments (if syncing to PostgreSQL)
+    #[command(flatten)]
+    pub db: PostgresArgs,
+}
+
+/// Structured summary of media:add operations.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MediaAddResult {
+    pub success: bool,
+    pub video_path: String,
+    pub phash_path: String,
+    pub fps: f64,
+    pub media_hash: String,
+    pub certified_couplings: usize,
+    pub skipped_idempotent: usize,
+    pub server_ingested: bool,
+    pub message: String,
+}
+
+/// Executes unified media addition: pHash extraction -> certification -> dynamic ingest.
+pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
+    // 1. Resolve video path
+    let video_path = args
+        .video
+        .as_ref()
+        .or(args.video_pos.as_ref())
+        .ok_or_else(|| {
+            anyhow!("Error: No media video file specified. Usage: dbsrt media:add <video_file> [srt_file] [--lang <code>] [--fps <val>]")
+        })?;
+
+    if !video_path.exists() {
+        bail!("Media video file not found: {:?}", video_path);
+    }
+
+    // 2. Resolve subtitle pairs
+    let explicit_srt = args.srt.as_ref().or(args.srt_pos.as_ref());
+    let pairs: Vec<(PathBuf, Option<String>)> = if let Some(srt_file) = explicit_srt {
+        if !srt_file.exists() {
+            bail!("Specified subtitle file not found: {:?}", srt_file);
+        }
+        let srt_name = srt_file
+            .file_name()
+            .and_then(|f| f.to_str())
+            .unwrap_or_default();
+        let lang = args
+            .lang
+            .clone()
+            .or_else(|| parse_language_code(srt_name))
+            .or_else(|| {
+                let detected = detect_cli_subtitle_lang(srt_name, "auto");
+                if detected != "auto" && !detected.is_empty() {
+                    Some(detected)
+                } else {
+                    None
+                }
+            });
+        vec![(srt_file.clone(), lang)]
+    } else {
+        let discovered = find_subtitle_pairs(video_path)?;
+        if discovered.is_empty() {
+            bail!(
+                "❌ No matching .srt file found for '{:?}'. Specify a subtitle file with '--srt <path>' or download one using 'dbsrt fetch-subtitles -q \"<title>\" -l fr'.",
+                video_path
+            );
+        }
+        if let Some(ref target_lang) = args.lang {
+            let filtered: Vec<_> = discovered
+                .into_iter()
+                .filter(|(_, lang)| lang.as_deref() == Some(target_lang.as_str()))
+                .collect();
+            if filtered.is_empty() {
+                bail!(
+                    "❌ Discovered subtitle files did not match requested language '{}'",
+                    target_lang
+                );
+            }
+            filtered
+        } else {
+            discovered
+        }
+    };
+
+    // 3. Detect FPS
+    let fps = detect_media_fps(video_path, args.fps);
+
+    // 4. Extract pHash fingerprint
+    fs::create_dir_all(&args.phash_dir)?;
+    let (phash_path, hashes, _detected_fps) = find_or_build_phash(video_path, &args.phash_dir)?;
+    let media_hash = compute_media_phash_digest(&hashes);
+
+    // 5. Early exit if skip_certify
+    if args.skip_certify {
+        let result = MediaAddResult {
+            success: true,
+            video_path: video_path.to_string_lossy().to_string(),
+            phash_path: phash_path.to_string_lossy().to_string(),
+            fps,
+            media_hash,
+            certified_couplings: 0,
+            skipped_idempotent: 0,
+            server_ingested: false,
+            message: "pHash extracted. Skipped certification and ingest (--skip-certify)"
+                .to_string(),
+        };
+        if args.json {
+            println!("{}", serde_json::to_string_pretty(&result)?);
+        } else {
+            println!("✓ pHash extracted to {:?}", phash_path);
+            println!("  [DRY-RUN] Certification and catalog ingest skipped (--skip-certify)");
+        }
+        return Ok(result);
+    }
+
+    // 6. Certification & CAS Idempotence
+    fs::create_dir_all(&args.subtitles_dir)?;
+    let reg_path = CouplingRegistry::default_path(&args.subtitles_dir);
+    let mut reg = CouplingRegistry::load_or_default(&reg_path)?;
+
+    let mut certified_count = 0;
+    let mut skipped_count = 0;
+
+    let phash_fname = phash_path
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+    let media_name = phash_fname
+        .strip_suffix(".phash")
+        .unwrap_or(&phash_fname)
+        .to_string();
+
+    for (srt_path, lang_opt) in &pairs {
+        let raw_srt_bytes = fs::read(srt_path)?;
+        let subtitles_hash = compute_bytes_digest_32(&raw_srt_bytes);
+
+        let srt_fname = srt_path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+
+        let lang = lang_opt
+            .clone()
+            .or_else(|| args.lang.clone())
+            .unwrap_or_else(|| detect_cli_subtitle_lang(&srt_fname, "auto"));
+
+        if reg.is_already_certified(&media_hash, &subtitles_hash) {
+            skipped_count += 1;
+            if !args.json {
+                println!(
+                    "ℹ️  Already certified: '{}' (media_hash={}, sub_hash={}) -> skipping",
+                    srt_fname, media_hash, subtitles_hash
+                );
+            }
+            continue;
+        }
+
+        // Copy subtitle into subtitles_dir if needed
+        let dest_srt_path = if srt_path.starts_with(&args.subtitles_dir) {
+            srt_path.clone()
+        } else {
+            let dest = args.subtitles_dir.join(&srt_fname);
+            if dest != *srt_path {
+                fs::copy(srt_path, &dest)?;
+            }
+            dest
+        };
+
+        let srt_file = SubtitleFile::open(&dest_srt_path)?;
+        let sub_frames = build_and_validate_sub_frames_opts(&srt_file, &hashes, fps, true)?;
+
+        let rel_srt_name = dest_srt_path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+
+        reg.upsert_coupling(
+            media_hash.clone(),
+            media_name.clone(),
+            phash_fname.clone(),
+            fps,
+            hashes.len(),
+            CertifiedSubtitleRecord {
+                name: rel_srt_name.clone(),
+                srt_path: rel_srt_name.clone(),
+                lang: lang.clone(),
+                subtitles_hash: subtitles_hash.clone(),
+                certified: true,
+                cue_count: srt_file.cues.len(),
+                sub_frames,
+            },
+        );
+        certified_count += 1;
+    }
+
+    if certified_count > 0 {
+        reg.save(&reg_path)?;
+    }
+
+    // 7. Dynamic Catalog RAM Ingestion
+    let mut server_ingested = false;
+    let ingest_url = format!(
+        "{}/v1/catalog/ingest",
+        args.server_url.trim_end_matches('/')
+    );
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
+        .build()?;
+
+    let payload = serde_json::json!({
+        "phash_path": phash_path.to_string_lossy(),
+        "fps": fps
+    });
+
+    match client.post(&ingest_url).json(&payload).send().await {
+        Ok(resp) if resp.status().is_success() => {
+            server_ingested = true;
+            if !args.json {
+                println!(
+                    "✓ Dynamic RAM ingestion succeeded on dbsrt-server ({})",
+                    ingest_url
+                );
+            }
+        }
+        Ok(resp) => {
+            if !args.json {
+                println!(
+                    "⚠️  dbsrt-server catalog ingest returned HTTP {}. Coupling remains certified on disk.",
+                    resp.status()
+                );
+            }
+        }
+        Err(_) => {
+            if !args.json {
+                println!(
+                    "⚠️  dbsrt-server offline ({}): .phash extracted and coupling certified to disk, will be loaded on next server startup.",
+                    args.server_url
+                );
+            }
+        }
+    }
+
+    let result = MediaAddResult {
+        success: true,
+        video_path: video_path.to_string_lossy().to_string(),
+        phash_path: phash_path.to_string_lossy().to_string(),
+        fps,
+        media_hash,
+        certified_couplings: certified_count,
+        skipped_idempotent: skipped_count,
+        server_ingested,
+        message: format!(
+            "Ingestion completed: {} certified, {} skipped (idempotent)",
+            certified_count, skipped_count
+        ),
+    };
+
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&result)?);
+    } else {
+        println!("=== MEDIA:ADD INGESTION SUMMARY ===");
+        println!("Media Video      : {:?}", video_path);
+        println!("Framerate (FPS)  : {:.3}", fps);
+        println!("pHash File       : {:?}", phash_path);
+        println!("Couplings Added  : {}", certified_count);
+        println!("Couplings Skipped: {}", skipped_count);
+        println!("Catalog Ingested : {}", server_ingested);
+    }
+
+    Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs::File;
+
+    struct TempTestDir {
+        path: PathBuf,
+    }
+
+    impl TempTestDir {
+        fn new(name: &str) -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "dbsrt_test_media_add_{}_{}_{}",
+                name,
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            fs::create_dir_all(&path).expect("Failed to create temp test directory");
+            Self { path }
+        }
+    }
+
+    impl Drop for TempTestDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_media_add_missing_video_returns_error() {
+        let args = MediaAddArgs {
+            video: Some(PathBuf::from("non_existent_file.mkv")),
+            video_pos: None,
+            srt: None,
+            srt_pos: None,
+            lang: None,
+            fps: None,
+            phash_dir: PathBuf::from("/tmp"),
+            subtitles_dir: PathBuf::from("/tmp"),
+            skip_certify: false,
+            json: false,
+            server_url: DEFAULT_SERVER_URL.to_string(),
+            db: PostgresArgs::default(),
+        };
+
+        let res = run_media_add(&args).await;
+        assert!(res.is_err(), "Expected error for non-existent video");
+    }
+
+    #[tokio::test]
+    async fn test_media_add_missing_srt_returns_clear_error() {
+        let temp = TempTestDir::new("no_srt");
+        let video = temp.path.join("sample.mp4");
+        File::create(&video).unwrap();
+
+        let args = MediaAddArgs {
+            video: Some(video),
+            video_pos: None,
+            srt: None,
+            srt_pos: None,
+            lang: None,
+            fps: None,
+            phash_dir: temp.path.join("phash"),
+            subtitles_dir: temp.path.join("subtitles"),
+            skip_certify: false,
+            json: false,
+            server_url: DEFAULT_SERVER_URL.to_string(),
+            db: PostgresArgs::default(),
+        };
+
+        let err = run_media_add(&args).await.unwrap_err();
+        assert!(
+            err.to_string().contains("No matching .srt file found"),
+            "Expected clear error message about missing SRT: {}",
+            err
+        );
+    }
+}
