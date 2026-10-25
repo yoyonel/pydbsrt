@@ -128,6 +128,12 @@ data/*.dbphash
 # Coverage reports
 .coverage*
 coverage*.json
+
+# E2E VLC screenshots bulk archive (purged in Issue #26, 20 samples retained for docs)
+docs/screenshots/e2e_vlc_all/*.webp
+!docs/screenshots/e2e_vlc_all/000[1-9]_*
+!docs/screenshots/e2e_vlc_all/001[0-9]_*
+!docs/screenshots/e2e_vlc_all/0020_*
 coverage*.xml
 coverage-summary.md
 htmlcov/

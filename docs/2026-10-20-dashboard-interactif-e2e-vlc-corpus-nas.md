@@ -245,7 +245,7 @@ $(document).ready(function() {
                 title: "Miniature",
                 orderable: false,
                 render: function(data, type, row) {
-                    return '<img class="table-thumb off-glb" src="' + data + '" loading="lazy" alt="Miniature" data-url="' + data + '" data-title="' + encodeURIComponent(row[2]) + '">';
+                    return '<img class="table-thumb off-glb" src="' + data + '" loading="lazy" alt="Miniature" data-url="' + data + '" data-title="' + encodeURIComponent(row[2]) + '" onerror="this.onerror=null;this.style.opacity=\'0.3\';this.title=\'Capture archivée (Issue #26)\';">';
                 }
             },
             {
