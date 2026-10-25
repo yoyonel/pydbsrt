@@ -3,6 +3,8 @@ use std::process::Command;
 
 fn get_canonical_demo_media() -> Option<PathBuf> {
     let candidates = [
+        Path::new("tests/data/big_buck_bunny_trailer_480p.mp4"),
+        Path::new("../../tests/data/big_buck_bunny_trailer_480p.mp4"),
         Path::new("data/big_buck_bunny_trailer_480p.webm"),
         Path::new("../../data/big_buck_bunny_trailer_480p.webm"),
     ];

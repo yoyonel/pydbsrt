@@ -194,8 +194,8 @@ jobs:
 
       - name: Seed database with sample media
         run: |
-          ./target/debug/dbsrt export-phash --media data/big_buck_bunny_trailer_480p.webm -o /tmp/big_buck_bunny_trailer_480p.webm.25.0fps.phash
-          ./target/debug/dbsrt import-phash --file /tmp/big_buck_bunny_trailer_480p.webm.25.0fps.phash
+          ./target/debug/dbsrt export-phash --media tests/data/big_buck_bunny_trailer_480p.mp4 -o /tmp/big_buck_bunny_trailer_480p.mp4.25.0fps.phash
+          ./target/debug/dbsrt import-phash --file /tmp/big_buck_bunny_trailer_480p.mp4.25.0fps.phash
 
       - name: Run Rust DB integration tests
         run: |
@@ -205,8 +205,8 @@ jobs:
         run: |
           mkdir -p /tmp/dbsrt-ci-subs
           ./target/debug/dbsrt certify-coupling \
-            --phash-file /tmp/big_buck_bunny_trailer_480p.webm.25.0fps.phash \
-            --subtitle data/SRT/big_buck_bunny_trailer_480p.fr.srt \
+            --phash-file /tmp/big_buck_bunny_trailer_480p.mp4.25.0fps.phash \
+            --subtitle tests/data/big_buck_bunny_trailer_480p.fr.srt \
             --lang fr \
             --subtitles-dir /tmp/dbsrt-ci-subs
 

@@ -216,9 +216,9 @@ def run_battery_3_true_negatives(server_url: str) -> dict:
     print("================================================================================")
 
     dummy_files = [
-        Path("data/white_frames.mp4"),
-        Path("data/black_frames.mp4"),
-        Path("data/big_buck_bunny_trailer_480p.webm"),
+        Path("tests/data/white_frames.mp4"),
+        Path("tests/data/black_frames.mp4"),
+        Path("tests/data/big_buck_bunny_trailer_480p.mp4"),
     ]
 
     total_tested = 0

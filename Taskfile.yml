@@ -9,10 +9,10 @@ vars:
   NETWORK_NAME: docker_default
   DB_HOST: docker-bktreedb-1
   PGWEB_PORT: '{{.PGWEB_PORT | default 8086}}'
-  DEMO_MEDIA: data/big_buck_bunny_trailer_480p.webm
+  DEMO_MEDIA: tests/data/big_buck_bunny_trailer_480p.mp4
   DEMO_TARGET_MEDIA: tests/data/big_buck_bunny_trailer_480p.mp4
-  DEMO_SRT: data/SRT/big_buck_bunny_trailer_480p.en.srt
-  DEMO_PHASH: /tmp/big_buck_bunny_trailer_480p.webm.25.0fps.phash
+  DEMO_SRT: tests/data/big_buck_bunny_trailer_480p.en.srt
+  DEMO_PHASH: /tmp/big_buck_bunny_trailer_480p.mp4.25.0fps.phash
 
 includes:
   stack:

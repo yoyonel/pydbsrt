@@ -3,15 +3,24 @@ use std::process::Command;
 
 #[test]
 fn test_recognize_media_mmap_zero_db() {
-    let media = Path::new("../../data/big_buck_bunny_trailer_480p.webm");
-    if !media.exists() {
-        eprintln!("Media file not found at {:?}, skipping test", media);
+    let mp4_media = Path::new("../../tests/data/big_buck_bunny_trailer_480p.mp4");
+    let webm_media = Path::new("../../data/big_buck_bunny_trailer_480p.webm");
+    let media = if mp4_media.exists() {
+        mp4_media
+    } else if webm_media.exists() {
+        webm_media
+    } else {
+        eprintln!(
+            "Media file not found at {:?} or {:?}, skipping test",
+            mp4_media, webm_media
+        );
         return;
-    }
+    };
 
     let tmp_dir = std::env::temp_dir().join(format!("test_mmap_zero_db_{}", std::process::id()));
     let _ = std::fs::create_dir_all(&tmp_dir);
-    let expected_phash = tmp_dir.join("big_buck_bunny_trailer_480p.webm.25.0fps.phash");
+    let stem = media.file_name().unwrap().to_str().unwrap();
+    let expected_phash = tmp_dir.join(format!("{}.25.0fps.phash", stem));
 
     let export_output = Command::new(env!("CARGO_BIN_EXE_dbsrt"))
         .args([

@@ -192,7 +192,9 @@ mod tests {
 
     #[test]
     fn test_import_phash_live_db() {
-        let _guard = crate::commands::LIVE_DB_TEST_MUTEX.lock().unwrap();
+        let _guard = crate::commands::LIVE_DB_TEST_MUTEX
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let host = std::env::var("PSQL_IP").unwrap_or_else(|_| DEFAULT_POSTGRES_HOST.to_string());
         let env_port = std::env::var("PSQL_PORT")
             .ok()
@@ -214,6 +216,10 @@ mod tests {
             eprintln!("PostgreSQL BK-Tree container not available, skipping live import test");
             return;
         };
+
+        if let Ok(mut client) = connect(port) {
+            let _ = client.init_schema();
+        }
 
         let temp_dir =
             std::env::temp_dir().join(format!("test_import_live_{}", std::process::id()));
