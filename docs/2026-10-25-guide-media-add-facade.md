@@ -70,12 +70,11 @@ Le framerate est déterminé selon la hiérarchie de priorité suivante :
 
 ### Détection de la Langue
 
-Le code langue normalisé ISO 639-1 est extrait du suffixe :
+Le code langue normalisé ISO 639-1 est extrait du suffixe ou du nom de piste dans les sous-dossiers `Subs/` :
 
-- `film.fr.srt`, `film.fre.srt`, `film.fra.srt` -> `fr`
-- `film.en.srt`, `film.eng.srt` -> `en`
-- `film.es.srt`, `film.spa.srt` -> `es`
-- `film.de.srt`, `film.ger.srt` -> `de`
+- Codes ISO 639-1 / 639-2 : `film.fr.srt`, `film.fre.srt`, `film.fra.srt` -> `fr` ; `film.en.srt`, `film.eng.srt` -> `en` ; `film.es.srt` -> `es` ; `film.de.srt` -> `de`
+- Noms complets de langues & tags de release (dans `Subs/<stem>/`) : `2_English.srt` -> `en` ; `3_French.srt`, `film.vostfr.srt`, `film.vf.srt` -> `fr` ; `4_Spanish.srt` -> `es`
+- Priorité racine : En présence d'un sidecar exact au niveau de la vidéo (`film.srt`), il est prioritaire sur les pistes secondaires de `Subs/` lors de l'application d'un `--lang <cible>` explicite. Les pistes secondaires dont la langue détectée diffère sont strictement ignorées.
 
 ---
 

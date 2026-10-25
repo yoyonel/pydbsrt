@@ -84,13 +84,13 @@ tasks:
     desc: Build dbsrt CLI release binary
     internal: true
     cmds:
-      - cargo build --release -p dbsrt-cli
+      - cargo build --release --bin dbsrt
 
   server:build:
     desc: Build dbsrt-server release binary
     internal: true
     cmds:
-      - cargo build --release -p dbsrt-server
+      - cargo build --release --bin dbsrt-server
 
   server:daemon:
     desc: Start dbsrt-server daemon in background with logging to /tmp/dbsrt-server.log

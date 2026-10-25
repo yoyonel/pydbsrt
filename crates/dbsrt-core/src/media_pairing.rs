@@ -64,6 +64,43 @@ pub fn parse_language_code(token: &str) -> Option<String> {
     }
 }
 
+/// Matches ISO 639-1 / 639-2 codes as well as common natural language names
+/// and release tags (e.g. "English", "French", "VF", "VOSTFR", "Spanish", "German").
+///
+/// Safe for subtitle track pairing where the video stem has already been stripped
+/// or where tracks are inside a dedicated subtitle directory (`Subs/<stem>/`).
+pub fn parse_extended_language_token(token: &str) -> Option<String> {
+    if let Some(code) = parse_language_code(token) {
+        return Some(code);
+    }
+    let lower = token.trim().to_lowercase();
+    match lower.as_str() {
+        "english" => Some("en".to_string()),
+        "french" | "francais" | "vff" | "vf" | "vostfr" => Some("fr".to_string()),
+        "spanish" | "espanol" => Some("es".to_string()),
+        "german" | "deutsch" => Some("de".to_string()),
+        "italian" | "italiano" => Some("it".to_string()),
+        "portuguese" | "portugues" => Some("pt".to_string()),
+        "dutch" | "nederlands" => Some("nl".to_string()),
+        "russian" => Some("ru".to_string()),
+        "japanese" => Some("ja".to_string()),
+        "chinese" => Some("zh".to_string()),
+        "korean" => Some("ko".to_string()),
+        "arabic" => Some("ar".to_string()),
+        "polish" => Some("pl".to_string()),
+        "swedish" => Some("sv".to_string()),
+        "norwegian" => Some("no".to_string()),
+        "danish" => Some("da".to_string()),
+        "finnish" => Some("fi".to_string()),
+        "greek" => Some("el".to_string()),
+        "czech" => Some("cs".to_string()),
+        "turkish" => Some("tr".to_string()),
+        "hungarian" => Some("hu".to_string()),
+        "romanian" => Some("ro".to_string()),
+        _ => None,
+    }
+}
+
 /// Discovers subtitle `.srt` files matching the video filename stem.
 ///
 /// Returns a list of `(subtitle_path, detected_lang)` pairs.
@@ -157,14 +194,15 @@ pub fn find_subtitle_pairs(video_path: &Path) -> Result<Vec<(PathBuf, Option<Str
                 if !rem.starts_with(['.', '_', '-']) {
                     continue;
                 }
-                // Find first valid ISO language token in the remaining suffix
-                rem.split(['.', '_', '-']).find_map(parse_language_code)
+                // Find first valid language token in the remaining suffix
+                rem.split(['.', '_', '-'])
+                    .find_map(parse_extended_language_token)
             } else if is_stem_dir {
                 // Inside video-stem dedicated directory (e.g. Subs/<video_stem>/track.srt):
-                // any .srt belongs to this video; parse ISO code if present
+                // any .srt belongs to this video; parse language token if present
                 norm_srt_stem
                     .split(['.', '_', '-'])
-                    .find_map(parse_language_code)
+                    .find_map(parse_extended_language_token)
             } else {
                 continue;
             };
@@ -240,6 +278,32 @@ mod tests {
             None,
             "Should reject 1-char tokens"
         );
+    }
+
+    #[test]
+    fn test_parse_extended_language_token() {
+        assert_eq!(
+            parse_extended_language_token("English"),
+            Some("en".to_string())
+        );
+        assert_eq!(
+            parse_extended_language_token("French"),
+            Some("fr".to_string())
+        );
+        assert_eq!(
+            parse_extended_language_token("vostfr"),
+            Some("fr".to_string())
+        );
+        assert_eq!(
+            parse_extended_language_token("Spanish"),
+            Some("es".to_string())
+        );
+        assert_eq!(
+            parse_extended_language_token("German"),
+            Some("de".to_string())
+        );
+        assert_eq!(parse_extended_language_token("ita"), Some("it".to_string()));
+        assert_eq!(parse_extended_language_token("unknown_token"), None);
     }
 
     #[test]
@@ -358,6 +422,7 @@ mod tests {
         let pairs = find_subtitle_pairs(&video).unwrap();
         assert_eq!(pairs.len(), 2);
         let langs: Vec<Option<String>> = pairs.iter().map(|p| p.1.clone()).collect();
+        assert!(langs.contains(&Some("en".to_string())));
         assert!(langs.contains(&Some("fr".to_string())));
     }
 }
