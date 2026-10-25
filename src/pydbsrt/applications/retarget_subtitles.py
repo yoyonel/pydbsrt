@@ -14,10 +14,10 @@ Options:
 # Example
 ➜ uv run python src/pydbsrt/app_cli.py \
     retarget-subtitles \
-        --ref_subtitles "/media/nas/volume1/video/Dallas Buyers Club (2013) [1080p]/Dallas.Buyers.Club.2013.1080p.BluRay.x264.YIFY.fr.srt"
-        --ref_media "/media/nas/volume1/video/Dallas Buyers Club (2013) [1080p]/Dallas.Buyers.Club.2013.1080p.BluRay.x264.YIFY.mp4"
-        --target_media "/media/nas/volume1/video/Dallas Buyers Club (2013)[1080p-RARBG][en srt, pas fr]/Dallas.Buyers.Club.2013.1080p.BluRay.x265-RARBG.mp4"
-        --phash_dir "/media/nas/volume1/video/__PHASH__"
+        --ref_subtitles "data/SRT/big_buck_bunny_trailer_480p.en.srt"
+        --ref_media "tests/data/big_buck_bunny_trailer_480p.mp4"
+        --target_media "tests/data/big_buck_bunny_trailer_480p.mp4"
+        --phash_dir "data/__PHASH__"
 
 ref_phash_file_hash='88935221d94ee19b085ca771c53b65be'
 target_phash_file_hash='f09252dfd8e1cada8486c937dcd6dbad'
