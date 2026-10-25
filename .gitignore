@@ -110,9 +110,15 @@ venv.bak/
 data/__PHASH__
 data/__PHASH__/
 data/SRT/*.srt
+# Runtime databases (NEVER track these)
 data/SRT/couplings.json
 couplings.json
+data/catalog.dbphash
+data/__PHASH__/
 data/snippets/
+data/SRT/manifest.json
+data/SRT/metadata.json
+data/SRT/medias_metadata.sql
 *.phash
 *.dbphash
 data/*.dbphash
