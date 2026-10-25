@@ -52,6 +52,12 @@ tasks:
     cmds:
       - ./scripts/pack_review.sh {{.CLI_ARGS}}
 
+  repo:pack:
+    desc: Pack entire repository source code into an AI-friendly markdown bundle via repomix
+    aliases: [review:pack-all]
+    cmds:
+      - ./scripts/pack_repo.sh {{.CLI_ARGS}}
+
   test:rs:db:
     desc: Run Rust PostgreSQL BK-Tree integration test (requires db:up)
     internal: true

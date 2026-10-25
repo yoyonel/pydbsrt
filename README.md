@@ -148,6 +148,8 @@ Le dépôt est orchestré par **[Taskfile (go-task)](https://taskfile.dev/)** d�
 | **`task lint`** | Exécute les 9 linters (Rust, Python, Shell, Lua, Docker, YAML, web AST) | `taskfiles/quality.yml` |
 | **`task typecheck`** | Vérifie le typage statique strict Python via Pyright | `taskfiles/quality.yml` |
 | **`task coverage`** | Génère la couverture unifiée (1:1 parité CI GitHub Actions) | `taskfiles/quality.yml` |
+| **`task review:pack`** | Génère un bundle Markdown consolidé des diffs de branche pour revue IA via Repomix | `taskfiles/quality.yml` |
+| **`task repo:pack`** | Génère un bundle Markdown complet de l'ensemble du code source du dépôt via Repomix | `taskfiles/quality.yml` |
 | **`task ci:local`** | Suite rapide de validation pré-push (< 10s chrono) | `taskfiles/quality.yml` |
 | **`task doc`** | Lance le serveur local de documentation MkDocs Material (`:8000`) | `taskfiles/doc.yml` |
 | **`task doc:check`** | Validateur strict de documentation (liens, LaTeX, AST HTML, Chrome headless) | `taskfiles/doc.yml` |

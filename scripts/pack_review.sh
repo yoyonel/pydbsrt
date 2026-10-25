@@ -26,6 +26,7 @@ FILES_TO_PACK="$(printf "%s\n%s\n%s" "${COMMITTED_FILES}" "${WORKTREE_FILES}" "$
 
 if [[ -z "${FILES_TO_PACK}" ]]; then
   echo "⚠️ No modified or untracked source files found compared to ${TARGET_BRANCH}." >&2
+  echo "💡 Tip: If this branch was already merged, specify the base commit (e.g. 'task review:pack -- HEAD~1')." >&2
   exit 1
 fi
 
