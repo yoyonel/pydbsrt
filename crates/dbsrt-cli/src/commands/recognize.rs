@@ -301,7 +301,11 @@ mod tests {
 
     #[test]
     fn test_recognize_zero_frames_bail() {
-        let video = PathBuf::from("data/big_buck_bunny_trailer_480p.webm");
+        let video = if std::path::Path::new("tests/data/big_buck_bunny_trailer_480p.mp4").exists() {
+            PathBuf::from("tests/data/big_buck_bunny_trailer_480p.mp4")
+        } else {
+            PathBuf::from("data/big_buck_bunny_trailer_480p.webm")
+        };
         if !video.exists() {
             return;
         }

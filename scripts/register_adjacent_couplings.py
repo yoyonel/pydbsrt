@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 from pathlib import Path
@@ -23,7 +24,28 @@ def count_cues(srt_path: Path) -> int:
 
 
 def main():
-    couplings_path = Path("data/SRT/couplings.json")
+    parser = argparse.ArgumentParser(description="Register adjacent .srt files into couplings.json")
+    parser.add_argument(
+        "--couplings-file",
+        type=Path,
+        default=Path("data/SRT/couplings.json"),
+        help="Path to couplings registry (default: data/SRT/couplings.json)",
+    )
+    parser.add_argument(
+        "--srt-dir",
+        type=Path,
+        default=Path("data/SRT"),
+        help="Path to SRT directory (default: data/SRT)",
+    )
+    parser.add_argument(
+        "--snippets-dir",
+        type=Path,
+        default=Path("data/snippets"),
+        help="Path to snippets directory (default: data/snippets)",
+    )
+    args = parser.parse_args()
+
+    couplings_path = args.couplings_file
     if couplings_path.exists():
         with open(couplings_path, encoding="utf-8") as f:
             registry = json.load(f)
@@ -32,8 +54,8 @@ def main():
 
     existing_media_names = {c["media_name"] for c in registry.get("couplings", [])}
 
-    data_srt_dir = Path("data/SRT")
-    snippets_dir = Path("data/snippets")
+    data_srt_dir = args.srt_dir
+    snippets_dir = args.snippets_dir
 
     added = 0
     for srt in data_srt_dir.glob("*_mid15s.srt"):

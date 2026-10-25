@@ -87,7 +87,7 @@ case "${ACTION}" in
     curl -s -f -X POST "http://127.0.0.1:${SIM_PORT}/v1/search" \
       -H "Content-Type: application/json" \
       -d '{
-      "media_path": "/app/data/big_buck_bunny_trailer_480p.webm",
+      "media_path": "/app/tests/data/big_buck_bunny_trailer_480p.mp4",
       "language": "en",
       "search_mode": "catalog"
     }' | jq .

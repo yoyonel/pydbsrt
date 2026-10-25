@@ -124,13 +124,3 @@ def export_encoded_subtitles(
 
     subtitles_extracted = [srt_export_filepath for _idx, srt_export_filepath in subtitles_exported_from_paths]
     return subtitles_extracted
-
-
-if __name__ == "__main__":
-    _media_path = Path(
-        "/media/nas/volume1/tvshow/The.Office.US.S04.1080p.BluRay.x264-BTN[rartv]/"
-        "The.Office.US.S04E03E04.Dunder.Mifflin.Infinity.1080p.BluRay.DDP5.1.x264-BTN.mkv"
-    )
-    if _media_path.exists():
-        print(extract_subtitles_streams(_media_path))
-        print(export_encoded_subtitles(_media_path))

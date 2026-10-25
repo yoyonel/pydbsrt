@@ -778,7 +778,7 @@ def main() -> int:
     parser.add_argument("--dbsrt-bin", type=Path, default=Path("./target/release/dbsrt"))
     parser.add_argument("--server-url", type=str, default="http://127.0.0.1:8765")
     parser.add_argument("--db-host", type=str, default=os.environ.get("PSQL_IP", "127.0.0.1"))
-    parser.add_argument("--db-port", type=int, default=int(os.environ.get("PSQL_PORT", "5433")))
+    parser.add_argument("--db-port", type=int, default=int(os.environ.get("PSQL_PORT", "5432")))
     parser.add_argument("--output-json", type=Path, default=Path("/tmp/nas_eval_report.json"))
     args = parser.parse_args()
 

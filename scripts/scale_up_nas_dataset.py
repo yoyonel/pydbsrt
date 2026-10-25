@@ -456,7 +456,7 @@ def main() -> int:
     parser.add_argument("--target-new-videos", type=int, default=108)
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--db-host", type=str, default=os.environ.get("PSQL_IP", "127.0.0.1"))
-    parser.add_argument("--db-port", type=int, default=int(os.environ.get("PSQL_PORT", "5433")))
+    parser.add_argument("--db-port", type=int, default=int(os.environ.get("PSQL_PORT", "5432")))
     parser.add_argument("--summary-out", type=Path, default=Path("/tmp/nas_scale_up_summary.json"))
     args = parser.parse_args()
 

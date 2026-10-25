@@ -62,7 +62,6 @@ def test_cli_export_imghash_from_white_frames(resource_colors_video_path, cli_ru
         assert sum(diffs) == 0
 
 
-@pytest.mark.xfail(raises=ValueError)
 def test_cli_export_imghash_from_black_frames(resource_colors_video_path, cli_runner, tmpdir):
     """
     Test pour montrer que l'algo d'hashing (et reconnaissance) ne fonctionne pas dans certain cas de figure ("pathologique").
@@ -92,4 +91,4 @@ def test_cli_export_imghash_from_black_frames(resource_colors_video_path, cli_ru
         if sum_diffs != 0:
             # 5 bits de différences sur chaque frame (lié à un encodage spécifique)
             assert sum_diffs >= 25 * 5
-            ValueError(f"{sum_diffs=} not equal to 0 !")
+            raise ValueError(f"{sum_diffs=} not equal to 0 !")

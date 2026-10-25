@@ -245,7 +245,7 @@ $(document).ready(function() {
                 title: "Miniature",
                 orderable: false,
                 render: function(data, type, row) {
-                    return '<img class="table-thumb off-glb" src="' + data + '" loading="lazy" alt="Miniature" data-url="' + data + '" data-title="' + encodeURIComponent(row[2]) + '">';
+                    return '<img class="table-thumb off-glb" src="' + data + '" loading="lazy" alt="Miniature" onerror="this.style.opacity=0.3;this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22128%22 height=%2272%22><rect width=%22100%25%22 height=%22100%25%22 fill=%22%23334155%22/><text x=%2250%25%22 y=%2255%25%22 text-anchor=%22middle%22 fill=%22%2394a3b8%22 font-size=%2212%22>N/A</text></svg>';" data-url="' + data + '" data-title="' + encodeURIComponent(row[2]) + '">';
                 }
             },
             {

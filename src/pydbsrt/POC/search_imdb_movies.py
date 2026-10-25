@@ -68,12 +68,8 @@ async def main():
                 # "Space.Adventure.Cobra.1982.REPACK.1080p.BluRay.x264.AAC5.1-[YTS.MX].mp4",
                 # "Gi-Juk.2021.1080p.WEBRip.x264.AAC-[YTS.MX].mp4",
                 # "Primer.2004.1080p.WEBRip.x264-[YTS.AM].mp4",
-                Path(
-                    "/media/nas/volume1/video/Dallas Buyers Club (2013) [1080p]/Dallas.Buyers.Club.2013.1080p.BluRay.x264.YIFY.mp4"
-                ),
-                Path(
-                    "/media/nas/volume1/video/Dallas Buyers Club (2013)[1080p-RARBG][en srt, pas fr]/Dallas.Buyers.Club.2013.1080p.BluRay.x265-RARBG.mp4"
-                ),
+                Path("Dallas.Buyers.Club.2013.1080p.BluRay.x264.YIFY.mp4"),
+                Path("Dallas.Buyers.Club.2013.1080p.BluRay.x265-RARBG.mp4"),
             )
         ],
         return_exceptions=True,

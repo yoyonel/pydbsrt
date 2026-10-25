@@ -3,8 +3,16 @@ use std::process::Command;
 
 #[test]
 fn test_retarget_subtitles_e2e_iso() {
-    let ref_media = Path::new("../../data/big_buck_bunny_trailer_480p.webm");
-    let ref_srt = Path::new("../../data/SRT/big_buck_bunny_trailer_480p.en.srt");
+    let ref_media = if Path::new("../../tests/data/big_buck_bunny_trailer_480p.mp4").exists() {
+        Path::new("../../tests/data/big_buck_bunny_trailer_480p.mp4")
+    } else {
+        Path::new("../../data/big_buck_bunny_trailer_480p.webm")
+    };
+    let ref_srt = if Path::new("../../tests/data/big_buck_bunny_trailer_480p.en.srt").exists() {
+        Path::new("../../tests/data/big_buck_bunny_trailer_480p.en.srt")
+    } else {
+        Path::new("../../data/SRT/big_buck_bunny_trailer_480p.en.srt")
+    };
     let target_media = Path::new("../../tests/data/big_buck_bunny_trailer_480p.mp4");
 
     if !ref_media.exists() || !ref_srt.exists() || !target_media.exists() {
