@@ -186,6 +186,9 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
+      - name: Initialize coupling registry from CI seed fixture
+        run: bash scripts/init_couplings_seed.sh
+
       - name: Build dbsrt binary and integration tests
         run: cargo test -p dbsrt-cli --test integration_test --no-run
 

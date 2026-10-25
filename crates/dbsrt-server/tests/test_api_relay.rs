@@ -15,9 +15,16 @@ async fn test_dual_process_remote_relay_e2e() {
     let srt_dir = repo_root.join("data/SRT");
     let snippet_video = repo_root.join("data/snippets/Andor.S01E01.1080p.WEB.h264-KOGi_mid15s.mp4");
     let couplings_file = srt_dir.join("couplings.json");
+    let has_andor_coupling = if couplings_file.exists() {
+        std::fs::read_to_string(&couplings_file)
+            .map(|s| s.contains("Andor"))
+            .unwrap_or(false)
+    } else {
+        false
+    };
 
-    if !phash_dir.exists() || !snippet_video.exists() || !couplings_file.exists() {
-        eprintln!("Skipping test: test fixtures or couplings.json not found");
+    if !phash_dir.exists() || !snippet_video.exists() || !has_andor_coupling {
+        eprintln!("Skipping test: test fixtures or Andor coupling not found");
         return;
     }
 
