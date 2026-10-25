@@ -37,6 +37,32 @@ pub fn format_timecode(ms: i64) -> String {
     format!("{:02}:{:02}:{:02},{:03}", h, m, s, millis)
 }
 
+/// Decodes raw subtitle bytes into a clean UTF-8 string, handling BOM and detecting
+/// legacy encodings (e.g. Windows-1252, ISO-8859-1, ISO-8859-15, UTF-16LE/BE).
+pub fn decode_subtitle_bytes(bytes: &[u8]) -> String {
+    if bytes.is_empty() {
+        return String::new();
+    }
+
+    // 1. Check for byte-order mark (BOM) for UTF-8, UTF-16LE, UTF-16BE
+    if let Some((encoding, bom_len)) = encoding_rs::Encoding::for_bom(bytes) {
+        let (cow, _) = encoding.decode_without_bom_handling(&bytes[bom_len..]);
+        return cow.into_owned();
+    }
+
+    // 2. Strict UTF-8 validation (zero-copy fast-path)
+    if let Ok(utf8_str) = std::str::from_utf8(bytes) {
+        return utf8_str.to_string();
+    }
+
+    // 3. Fallback to chardetng statistical encoding detector
+    let mut detector = chardetng::EncodingDetector::new(chardetng::Iso2022JpDetection::Deny);
+    detector.feed(bytes, true);
+    let encoding = detector.guess(None, chardetng::Utf8Detection::Allow);
+    let (cow, _) = encoding.decode_without_bom_handling(bytes);
+    cow.into_owned()
+}
+
 pub struct SubtitleFile {
     pub cues: Vec<SubtitleCue>,
 }
@@ -46,10 +72,13 @@ impl SubtitleFile {
     pub fn open(path: &Path) -> Result<Self> {
         let bytes =
             fs::read(path).with_context(|| format!("Failed to read subtitle file {:?}", path))?;
-        let content = match String::from_utf8(bytes.clone()) {
-            Ok(s) => s,
-            Err(_) => String::from_utf8_lossy(&bytes).into_owned(),
-        };
+        let content = decode_subtitle_bytes(&bytes);
+        Self::parse(&content)
+    }
+
+    /// Parses raw bytes into SubtitleFile.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
+        let content = decode_subtitle_bytes(bytes);
         Self::parse(&content)
     }
 
@@ -145,5 +174,58 @@ mod tests {
 
         let out = srt.to_string();
         assert!(out.contains("00:00:02,500 --> 00:00:05,500"));
+    }
+
+    #[test]
+    fn test_decode_subtitle_bytes_windows1252_accents() {
+        // "Désolée, y a rien qui me vient..." in Windows-1252 / ISO-8859-1
+        // 'é' is 0xE9
+        let latin1_bytes = b"1\r\n00:00:01,000 --> 00:00:04,000\r\nD\xe9sol\xe9e, y a rien qui me vient...\r\n\r\n";
+        let srt = SubtitleFile::from_bytes(latin1_bytes).expect("Failed to parse Latin-1 bytes");
+        assert_eq!(srt.cues.len(), 1);
+        assert_eq!(srt.cues[0].text, "Désolée, y a rien qui me vient...");
+        assert!(!srt.cues[0].text.contains('\u{FFFD}'));
+    }
+
+    #[test]
+    fn test_decode_subtitle_bytes_utf8_bom() {
+        let mut bytes = vec![0xEF, 0xBB, 0xBF];
+        bytes.extend_from_slice(
+            "1\n00:00:01,000 --> 00:00:04,000\nÇa fonctionne parfaitement !\n\n".as_bytes(),
+        );
+        let srt = SubtitleFile::from_bytes(&bytes).expect("Failed to parse UTF-8 with BOM");
+        assert_eq!(srt.cues.len(), 1);
+        assert_eq!(srt.cues[0].text, "Ça fonctionne parfaitement !");
+    }
+
+    #[test]
+    fn test_decode_subtitle_bytes_utf16le_bom() {
+        let text = "1\n00:00:01,000 --> 00:00:04,000\nSubtitles in UTF-16LE\n\n";
+        let mut bytes = vec![0xFF, 0xFE]; // UTF-16LE BOM
+        for u in text.encode_utf16() {
+            bytes.extend_from_slice(&u.to_le_bytes());
+        }
+        let srt = SubtitleFile::from_bytes(&bytes).expect("Failed to parse UTF-16LE with BOM");
+        assert_eq!(srt.cues.len(), 1);
+        assert_eq!(srt.cues[0].text, "Subtitles in UTF-16LE");
+    }
+
+    #[test]
+    fn test_open_euphoria_latin1_srt() {
+        let srt_path = Path::new("../../data/SRT/Euphoria.US.S01E02.1080p.WEBRip.x265-RARBG.srt");
+        if srt_path.exists() {
+            let srt = SubtitleFile::open(srt_path).expect("Failed to open Euphoria SRT");
+            let target_cue = srt
+                .cues
+                .iter()
+                .find(|c| c.text.contains("rien qui me vient"));
+            assert!(
+                target_cue.is_some(),
+                "Expected cue 'rien qui me vient' found"
+            );
+            let cue_text = &target_cue.unwrap().text;
+            assert_eq!(cue_text, "Désolée, y a rien qui me vient...");
+            assert!(!cue_text.contains('\u{FFFD}'));
+        }
     }
 }

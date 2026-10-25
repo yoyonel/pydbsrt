@@ -156,15 +156,15 @@ pub async fn download_handler(
 
                     match client.get(&url).send().await {
                         Ok(resp) if resp.status().is_success() => {
-                            if let Ok(text) = resp.text().await {
-                                match SubtitleFile::parse(&text) {
+                            if let Ok(bytes) = resp.bytes().await {
+                                match SubtitleFile::from_bytes(&bytes) {
                                     Ok(s) => {
                                         fetched_file = Some(s);
                                         let cache_dir = state.cache.base_dir();
                                         let _ = std::fs::create_dir_all(cache_dir);
                                         let cache_file =
                                             cache_dir.join(format!("{}.srt", clean_hash));
-                                        let _ = std::fs::write(&cache_file, &text);
+                                        let _ = std::fs::write(&cache_file, &bytes);
                                     }
                                     Err(e) => {
                                         state.push_log(

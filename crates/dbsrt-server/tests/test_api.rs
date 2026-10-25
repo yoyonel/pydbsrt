@@ -858,3 +858,72 @@ async fn test_certify_and_certified_search_download_e2e() {
     // Cleanup
     let _ = std::fs::remove_dir_all(&tmp_base);
 }
+
+#[tokio::test]
+async fn test_download_latin1_subtitle_preserves_french_accents_utf8() {
+    let tmp_base = std::env::temp_dir().join(format!("dbsrt_latin1_e2e_{}", std::process::id()));
+    let phash_dir = tmp_base.join("phash");
+    let srt_dir = tmp_base.join("srt");
+    let _ = std::fs::create_dir_all(&phash_dir);
+    let _ = std::fs::create_dir_all(&srt_dir);
+
+    // Create a Latin-1 / Windows-1252 SRT file containing French accents: "Désolée, y a rien qui me vient..."
+    // 0xE9 is 'é' in ISO-8859-1 / Windows-1252
+    let latin1_bytes =
+        b"1\r\n00:00:01,000 --> 00:00:04,000\r\nD\xe9sol\xe9e, y a rien qui me vient...\r\n\r\n";
+    let latin1_srt_path = srt_dir.join("test_media.fr.srt");
+    std::fs::write(&latin1_srt_path, latin1_bytes).expect("Failed to write Latin-1 SRT");
+
+    let fake_video = tmp_base.join("test_media.mp4");
+    std::fs::write(&fake_video, b"fake video content").unwrap();
+
+    let (listener, addr) = dbsrt_server::bind_listener("127.0.0.1", 0).await.unwrap();
+    let app = create_router(phash_dir.clone(), srt_dir.clone());
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    let base_url = format!("http://{}", addr);
+    let client = reqwest::Client::new();
+
+    let dl_req = dbsrt_server::DownloadSubtitleRequest {
+        media_path: fake_video.to_string_lossy().to_string(),
+        source: "catalog".to_string(),
+        candidate_id: Some(latin1_srt_path.to_string_lossy().to_string()),
+        language: "fr".to_string(),
+        resync: false,
+        shift_ms: None,
+        subtitles_dir: Some(srt_dir.to_string_lossy().to_string()),
+        phash_dir: Some(phash_dir.to_string_lossy().to_string()),
+    };
+
+    let dl_res: dbsrt_server::DownloadSubtitleResponse = client
+        .post(format!("{}/v1/download", base_url))
+        .json(&dl_req)
+        .send()
+        .await
+        .expect("Download request failed")
+        .json()
+        .await
+        .expect("Parse download response");
+
+    assert!(dl_res.success, "Download failed: {:?}", dl_res.error);
+    let out_path = std::path::PathBuf::from(&dl_res.output_srt_path);
+    assert!(out_path.exists(), "Output SRT file does not exist");
+
+    let downloaded_bytes = std::fs::read(&out_path).expect("Read downloaded SRT");
+    // Verify valid UTF-8
+    let utf8_text =
+        std::str::from_utf8(&downloaded_bytes).expect("Downloaded subtitle must be valid UTF-8");
+    assert!(
+        utf8_text.contains("Désolée, y a rien qui me vient..."),
+        "Accents missing or mangled in: {}",
+        utf8_text
+    );
+    assert!(
+        !utf8_text.contains('\u{FFFD}'),
+        "Found Unicode replacement character (U+FFFD)!"
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp_base);
+}
