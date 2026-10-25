@@ -16,6 +16,15 @@ tags:
 
 ---
 
+## 📸 Aperçu du Quadrant Explications
+
+<figure markdown="1">
+  <img src="../assets/screenshots/portal_explanation_1080p.webp" alt="Architecture et Explications dbsrt" width="100%">
+  <figcaption>Figure 1 : Interface du portail des explications conceptuelles et d'architecture.</figcaption>
+</figure>
+
+---
+
 ## 🧠 Concepts & Fondations Théoriques
 
 <div class="dbsrt-bento-grid">

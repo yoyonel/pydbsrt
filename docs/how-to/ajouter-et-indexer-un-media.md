@@ -39,6 +39,11 @@ La façade :
 4. Certifie le couplage dans `couplings.json` et PostgreSQL.
 5. Déclenche un rechargement à chaud atomique (`zero-downtime reload`) du serveur.
 
+<figure markdown="1">
+  <img src="../../assets/casts/term_media_add.svg" alt="Enregistrement Terminal - dbsrt media:add" width="100%">
+  <figcaption>Enregistrement terminal interactif : Ingestion unifiée, auto-découverte et options de ligne de commande.</figcaption>
+</figure>
+
 ### 2. Spécification Explicite du Fichier SRT et de la Langue
 
 Lorsque le fichier de sous-titres porte un nom arbitraire :

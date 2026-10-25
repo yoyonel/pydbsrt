@@ -133,6 +133,7 @@ Le dépôt est orchestré par **[Taskfile (go-task)](https://taskfile.dev/)** d�
 | :--- | :--- | :--- |
 | **`task dev` / `task down`** | Démarre / arrête toute la stack de dev en arrière-plan | `Taskfile.yml` |
 | **`task media:add`** | Façade unifiée d'ingestion média (pHash, certification couplage et rechargement dynamique RAM) | `taskfiles/stack.yml` |
+| **`task media:batch:tvshow`** | Batch nocturne profilé d'import TVShow (multilingue, résilience coupure WiFi 01h00, buffer NVMe) | `taskfiles/stack.yml` |
 | **`task coupling:relabel`** | Requalifie la langue d'un couplage certifié dans `couplings.json` | `taskfiles/stack.yml` |
 | **`task server:reload`** | Déclenche le rechargement atomique à chaud du catalogue (`/v1/catalog/reload`) | `taskfiles/stack.yml` |
 | **`task catalog:status`** | Affiche l'état d'indexation (Base immuable + Delta RAM + Couplages) | `taskfiles/stack.yml` |

@@ -16,6 +16,15 @@ tags:
 
 ---
 
+## 📸 Aperçu du Quadrant Guides Pratiques
+
+<figure markdown="1">
+  <img src="../assets/screenshots/portal_howto_1080p.webp" alt="Catalogue des Guides Pratiques dbsrt" width="100%">
+  <figcaption>Figure 1 : Interface du catalogue des guides pratiques et recettes d'ingénierie.</figcaption>
+</figure>
+
+---
+
 ## 📋 Catalogue des Recettes par Domaine
 
 ### 🎬 Lecteur Multimédia & Client VLC

@@ -53,6 +53,11 @@ task status
 
 Le terminal affiche un rapport de santé vert indiquant la disponibilité du démon HTTP, de PostgreSQL et du portail de documentation.
 
+<figure markdown="1">
+  <img src="../../assets/casts/term_status.svg" alt="Enregistrement Terminal - task status" width="100%">
+  <figcaption>Enregistrement terminal interactif : Vérification unifiée de la stack de services.</figcaption>
+</figure>
+
 ---
 
 ## 3. Étape 2 : Lancer VLC avec un Extrait Vidéo de Démonstration
@@ -80,6 +85,13 @@ VLC s'ouvre et commence la lecture de l'extrait.
 [dbsrt] Sous-titre synchronisé (offset: +0ms, confiance: 100%)
 ```
 
+<figure markdown="1">
+  <video autoplay loop muted playsinline width="100%">
+    <source src="../../assets/vlc-v2/bbb_vlc_workflow_1080p.mp4" type="video/mp4">
+  </video>
+  <figcaption>Démonstration vidéo 1080p : Recherche par pHash, recalage automatique et notification OSD dans VLC.</figcaption>
+</figure>
+
 ---
 
 ## 5. Étape 4 : Constater le Résultat dans le Backoffice Studio
@@ -94,6 +106,11 @@ Vous visualisez l'interface de **dbsrt Studio** :
 
 - La liste des médias certifiés dans la base locale.
 - La piste bi-temporelle associant chaque trame clé vidéo à son segment de sous-titres correspondant.
+
+<figure markdown="1">
+  <img src="../../assets/screenshots/studio_backoffice_1080p.webp" alt="Backoffice dbsrt Studio" width="100%">
+  <figcaption>Interface web dbsrt Studio : Timeline bi-piste et validation relationnelle.</figcaption>
+</figure>
 
 ---
 

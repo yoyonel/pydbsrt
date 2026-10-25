@@ -14,6 +14,15 @@ tags:
 
 ---
 
+## 📸 Aperçu du Portail Bento Diátaxis
+
+<figure markdown="1">
+  <img src="../assets/screenshots/portal_home_1080p.webp" alt="Portail Documentaire Diátaxis - 4 Quadrants" width="100%">
+  <figcaption>Figure 1 : Page d'accueil du portail documentaire avec navigation par quadrant Diátaxis.</figcaption>
+</figure>
+
+---
+
 ## 1. La Matrice des 4 Quadrants Diátaxis
 
 La structure documentaire est organisée selon deux axes orthogonaux :

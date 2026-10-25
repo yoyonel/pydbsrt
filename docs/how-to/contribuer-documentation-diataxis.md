@@ -180,6 +180,11 @@ Avant de soumettre votre modification documentaire, appliquez ces contrôles str
    ```
    Cette commande exécute le build strict MkDocs (0 avertissement toléré), l'analyse AST BeautifulSoup (0 fuite LaTeX, 0 liste écrasée) et le smoke test Chrome headless.
 
+<figure markdown="1">
+  <img src="../../assets/casts/term_doc_check.svg" alt="Validation Qualité Documentaire" width="100%">
+  <figcaption>Enregistrement terminal interactif : Exécution de task doc:check et contrôle des 4 paliers d'intégrité.</figcaption>
+</figure>
+
 5. **Synchronisation MkDocs & README** :
    - Déclarer chaque nouveau document dans l'arborescence `nav:` de `mkdocs.yml`.
    - Si une nouvelle commande CLI ou cible Taskfile a été introduite, répercuter son existence dans `README.md`.

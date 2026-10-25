@@ -35,6 +35,11 @@ dbsrt [OPTIONS] <SOUS_COMMANDE> [ARGUMENTS...]
 | `2` | Erreur de validation d'argument ou syntaxe CLI invalide. |
 | `3` | Échec de connexion réseau ou base de données. |
 
+<figure markdown="1">
+  <img src="../../assets/casts/term_cli_help.svg" alt="Aide CLI Standalone dbsrt" width="100%">
+  <figcaption>Enregistrement terminal interactif : Aide complète et catalogue des sous-commandes de dbsrt.</figcaption>
+</figure>
+
 ---
 
 ## 2. Dictionnaire des Sous-Commandes

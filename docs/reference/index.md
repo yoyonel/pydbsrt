@@ -17,6 +17,15 @@ tags:
 
 ---
 
+## 📸 Aperçu du Quadrant Référence
+
+<figure markdown="1">
+  <img src="../assets/screenshots/portal_reference_1080p.webp" alt="Référence Technique dbsrt" width="100%">
+  <figcaption>Figure 1 : Interface du portail de référence technique et spécifications formelles.</figcaption>
+</figure>
+
+---
+
 ## 📑 Sommaire des Spécifications
 
 <div class="dbsrt-bento-grid">

@@ -69,6 +69,11 @@ Couplings Skipped: 0
 Catalog Ingested : true
 ```
 
+<figure markdown="1">
+  <img src="../../assets/casts/term_media_add.svg" alt="Enregistrement Terminal - Ingestion Média" width="100%">
+  <figcaption>Enregistrement terminal interactif : Ingestion déclarative et options de la façade media:add.</figcaption>
+</figure>
+
 ---
 
 ## 4. Étape 3 : Inspecter l'Enregistrement dans PostgreSQL
@@ -108,6 +113,11 @@ http://127.0.0.1:8765/studio
    - En haut : les vignettes visuelles et leurs hashes 64-bit respectifs.
    - En bas : les blocs de sous-titres synchronisés avec leurs timestamps précis.
 3. Cliquez sur une trame pour zoomer dans la matrice pHash 8×8.
+
+<figure markdown="1">
+  <img src="../../assets/screenshots/studio_backoffice_1080p.webp" alt="dbsrt Studio Timeline" width="100%">
+  <figcaption>Inspection dans dbsrt Studio : Visualisation bi-piste et validation des trames vérité terrain.</figcaption>
+</figure>
 
 ---
 

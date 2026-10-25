@@ -57,6 +57,18 @@ task server:daemon
 [dbsrt] Alignement appliqué : +1250ms (confiance 99.4%)
 ```
 
+<figure markdown="1">
+  <video autoplay loop muted playsinline width="100%">
+    <source src="../../assets/vlc-v2/theboys_vlc_subtitles_1080p.mp4" type="video/mp4">
+  </video>
+  <figcaption>Démonstration vidéo 1080p : Recalage et rendu en direct de sous-titres synchronisés dans VLC.</figcaption>
+</figure>
+
+<figure markdown="1">
+  <img src="../../assets/vlc-v2/02_search_candidates_result.png" alt="Interface VLSub dbsrt" width="100%">
+  <figcaption>Interface graphique VLSub : Liste des candidats pHash et sélection du sous-titre certifié.</figcaption>
+</figure>
+
 ### 4. Diagnostiquer en Cas d'Échec de Reconnaissance
 
 Si le message OSD affiche `[dbsrt] Aucun couplage trouvé` :

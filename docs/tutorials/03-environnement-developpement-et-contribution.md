@@ -117,6 +117,11 @@ Pour valider l'intégrité globale de la documentation (liens internes, rendu La
 task doc:check
 ```
 
+<figure markdown="1">
+  <img src="../../assets/casts/term_doc_check.svg" alt="Enregistrement Terminal - task doc:check" width="100%">
+  <figcaption>Enregistrement terminal interactif : Validation automatisée stricte de la documentation.</figcaption>
+</figure>
+
 ---
 
 ## 6. Étape 5 : Votre Premier Cycle de Contribution

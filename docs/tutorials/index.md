@@ -15,6 +15,15 @@ tags:
 
 ---
 
+## 📸 Aperçu du Quadrant Tutoriels
+
+<figure markdown="1">
+  <img src="../assets/screenshots/portal_tutorials_1080p.webp" alt="Portail des Tutoriels dbsrt" width="100%">
+  <figcaption>Figure 1 : Interface du catalogue des parcours d'apprentissage pas à pas.</figcaption>
+</figure>
+
+---
+
 ## 🗺️ Choisissez votre Parcours
 
 <div class="dbsrt-bento-grid">
