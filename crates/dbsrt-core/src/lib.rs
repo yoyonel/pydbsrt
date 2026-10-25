@@ -38,9 +38,11 @@ pub use providers::{
 };
 pub use srt::{SubtitleCue, SubtitleFile};
 pub use video::{
-    extract_frames_advanced, extract_frames_phash, extract_keyframes_phash, extract_sparse_phash,
-    probe_keyframe_timestamps, probe_video, FrameSample, HwAccel, ResolvedFfmpeg, SamplingMode,
-    VideoExtractionOptions, VideoMetadata,
+    detect_media_fps, extract_frames_advanced, extract_frames_phash, extract_keyframes_phash,
+    extract_sparse_phash, parse_fps_from_stem, probe_keyframe_timestamps, probe_video,
+    probe_video_with_cmd, probe_video_with_timeout, FrameSample, HwAccel, ResolvedFfmpeg,
+    SamplingMode, VideoExtractionOptions, VideoMetadata, DEFAULT_BASELINE_FPS,
+    FFPROBE_TIMEOUT_SECS, NTSC_FILM_FPS, PAL_FPS,
 };
 
 /// A timestamped frame hash entry.

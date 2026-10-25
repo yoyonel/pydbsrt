@@ -59,14 +59,9 @@ pub const COPY_BUFFER_FLUSH_THRESHOLD: usize = 32 * 1024;
 /// Connection timeout in seconds for PostgreSQL client.
 pub const DB_CONNECT_TIMEOUT_SECONDS: u64 = 2;
 
-/// Default baseline frame rate when media FPS cannot be parsed from file metadata.
-pub const DEFAULT_BASELINE_FPS: f64 = 25.0;
-
-/// Standard NTSC film frame rate.
-pub const NTSC_FILM_FPS: f64 = 23.976;
-
-/// Standard PAL broadcast frame rate.
-pub const PAL_FPS: f64 = 25.0;
+pub use dbsrt_core::{
+    parse_fps_from_stem as parse_fps_from_phash_stem, DEFAULT_BASELINE_FPS, NTSC_FILM_FPS, PAL_FPS,
+};
 
 /// Minimum character length for valid ISO 639 language code (e.g. "fr", "en").
 pub const MIN_LANG_CODE_LEN: usize = 2;
@@ -131,54 +126,6 @@ pub fn validate_lang_code(raw: &str) -> Result<String> {
     } else {
         Ok(upper)
     }
-}
-
-/// Parses an optional `.XX.Xfps` suffix from a `.phash` stem.
-/// Defaults to `23.976` fps for 1080p/720p/BluRay/WEB NTSC releases and `25.0` fps otherwise.
-pub fn parse_fps_from_phash_stem(stem: &str) -> f64 {
-    if let Some(fps_str) = stem.strip_suffix("fps") {
-        if let Some(dot_idx) = fps_str.rfind('.') {
-            if let Some(prev_dot) = fps_str[..dot_idx].rfind('.') {
-                if let Ok(fps) = fps_str[prev_dot + 1..].parse::<f64>() {
-                    if fps > 0.0 {
-                        return fps;
-                    }
-                }
-            }
-        }
-    }
-    let lower = stem.to_lowercase();
-    if lower.contains("pal")
-        || lower.contains("576i")
-        || lower.contains("576p")
-        || lower.contains("25fps")
-    {
-        return PAL_FPS;
-    }
-    if lower.contains("1080p")
-        || lower.contains("720p")
-        || lower.contains("2160p")
-        || lower.contains("480p")
-        || lower.contains("bluray")
-        || lower.contains("web-dl")
-        || lower.contains("webrip")
-        || lower.contains("web")
-        || lower.contains("h264")
-        || lower.contains("x264")
-        || lower.contains("h265")
-        || lower.contains("x265")
-        || lower.contains("hevc")
-        || lower.contains("ntsc")
-        || lower.contains("[ember]")
-        || lower.contains("[erai-raws]")
-        || lower.contains("[subsplease]")
-        || lower.contains("kimetsu")
-        || lower.contains("haikyuu")
-        || lower.contains("anime")
-    {
-        return NTSC_FILM_FPS;
-    }
-    DEFAULT_BASELINE_FPS
 }
 
 mod embedded {

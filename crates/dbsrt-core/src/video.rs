@@ -6,6 +6,22 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
+use std::time::{Duration, Instant};
+
+/// Execution timeout in seconds for invoking ffprobe.
+pub const FFPROBE_TIMEOUT_SECS: u64 = 5;
+
+/// Polling interval for checking child process completion.
+pub const CHILD_POLL_INTERVAL: Duration = Duration::from_millis(50);
+
+/// Default baseline frame rate when media FPS cannot be parsed or probed.
+pub const DEFAULT_BASELINE_FPS: f64 = 24.0;
+
+/// Standard PAL broadcast frame rate.
+pub const PAL_FPS: f64 = 25.0;
+
+/// Standard NTSC film frame rate.
+pub const NTSC_FILM_FPS: f64 = 23.976;
 
 #[derive(Debug, Clone)]
 pub struct VideoMetadata {
@@ -97,9 +113,84 @@ struct FfprobeFormat {
     duration: Option<String>,
 }
 
-/// Probes a video file using ffprobe.
+/// Heuristic stem parser returning framerate if detected in filename tokens.
+pub fn parse_fps_from_stem(stem: &str) -> f64 {
+    let lower = stem.to_lowercase();
+    if let Some(before_fps) = lower.strip_suffix("fps") {
+        if let Some(dec_dot) = before_fps.rfind('.') {
+            let start = before_fps[..dec_dot]
+                .rfind(|c: char| !c.is_ascii_digit())
+                .map(|i| i + 1)
+                .unwrap_or(0);
+            if let Ok(fps) = before_fps[start..].parse::<f64>() {
+                if fps > 0.0 {
+                    return fps;
+                }
+            }
+        } else {
+            let start = before_fps
+                .rfind(|c: char| !c.is_ascii_digit())
+                .map(|i| i + 1)
+                .unwrap_or(0);
+            if let Ok(fps) = before_fps[start..].parse::<f64>() {
+                if fps > 0.0 {
+                    return fps;
+                }
+            }
+        }
+    }
+
+    if lower.contains("pal")
+        || lower.contains("576i")
+        || lower.contains("576p")
+        || lower.contains("25fps")
+    {
+        return PAL_FPS;
+    }
+    if lower.contains("1080p")
+        || lower.contains("720p")
+        || lower.contains("2160p")
+        || lower.contains("480p")
+        || lower.contains("bluray")
+        || lower.contains("web-dl")
+        || lower.contains("webrip")
+        || lower.contains("web")
+        || lower.contains("h264")
+        || lower.contains("x264")
+        || lower.contains("h265")
+        || lower.contains("x265")
+        || lower.contains("hevc")
+        || lower.contains("ntsc")
+        || lower.contains("[ember]")
+        || lower.contains("[erai-raws]")
+        || lower.contains("[subsplease]")
+        || lower.contains("kimetsu")
+        || lower.contains("haikyuu")
+        || lower.contains("anime")
+    {
+        return NTSC_FILM_FPS;
+    }
+
+    DEFAULT_BASELINE_FPS
+}
+
+/// Probes a video file using ffprobe with a bounded execution timeout.
 pub fn probe_video(path: &Path) -> Result<VideoMetadata> {
-    let output = Command::new("ffprobe")
+    probe_video_with_timeout(path, FFPROBE_TIMEOUT_SECS)
+}
+
+/// Probes a video file using ffprobe with a custom timeout.
+pub fn probe_video_with_timeout(path: &Path, timeout_secs: u64) -> Result<VideoMetadata> {
+    probe_video_with_cmd(path, "ffprobe", timeout_secs)
+}
+
+/// Probes a video file with a specific command/binary and timeout.
+pub fn probe_video_with_cmd(
+    path: &Path,
+    ffprobe_bin: &str,
+    timeout_secs: u64,
+) -> Result<VideoMetadata> {
+    let mut child = Command::new(ffprobe_bin)
         .args([
             "-v",
             "error",
@@ -111,18 +202,51 @@ pub fn probe_video(path: &Path) -> Result<VideoMetadata> {
             "json",
         ])
         .arg(path)
-        .output()
-        .with_context(|| format!("Failed to execute ffprobe on {:?}", path))?;
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .with_context(|| format!("Failed to execute '{}' on {:?}", ffprobe_bin, path))?;
 
-    if !output.status.success() {
-        return Err(anyhow!(
-            "ffprobe failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ));
+    let start = Instant::now();
+    let timeout = Duration::from_secs(timeout_secs);
+
+    loop {
+        match child.try_wait()? {
+            Some(status) => {
+                let mut stdout = Vec::new();
+                if let Some(mut out) = child.stdout.take() {
+                    out.read_to_end(&mut stdout)?;
+                }
+                let mut stderr = String::new();
+                if let Some(mut err) = child.stderr.take() {
+                    err.read_to_string(&mut stderr)?;
+                }
+
+                if !status.success() {
+                    anyhow::bail!("{} failed: {}", ffprobe_bin, stderr);
+                }
+                return parse_ffprobe_json_output(&stdout);
+            }
+            None => {
+                if start.elapsed() > timeout {
+                    let _ = child.kill();
+                    anyhow::bail!(
+                        "Execution of '{}' on {:?} timed out after {} seconds",
+                        ffprobe_bin,
+                        path,
+                        timeout_secs
+                    );
+                }
+                std::thread::sleep(CHILD_POLL_INTERVAL);
+            }
+        }
     }
+}
 
-    let parsed: FfprobeOutput = serde_json::from_slice(&output.stdout)
-        .with_context(|| "Failed to parse ffprobe json output")?;
+/// Parses raw JSON output from ffprobe into VideoMetadata.
+pub fn parse_ffprobe_json_output(bytes: &[u8]) -> Result<VideoMetadata> {
+    let parsed: FfprobeOutput =
+        serde_json::from_slice(bytes).with_context(|| "Failed to parse ffprobe json output")?;
 
     // Parse FPS
     let fps_str = parsed
@@ -161,6 +285,34 @@ pub fn probe_video(path: &Path) -> Result<VideoMetadata> {
         .unwrap_or(0.0);
 
     Ok(VideoMetadata { duration, fps })
+}
+
+/// Detects framerate for a media file applying strict precedence:
+/// 1. Explicit CLI argument (`explicit_fps`).
+/// 2. Container probe via `ffprobe` with timeout (`FFPROBE_TIMEOUT_SECS`).
+/// 3. Filename stem heuristic (`parse_fps_from_stem`).
+/// 4. Baseline default (`DEFAULT_BASELINE_FPS` = 24.0).
+pub fn detect_media_fps(video_path: &Path, explicit_fps: Option<f64>) -> f64 {
+    if let Some(fps) = explicit_fps {
+        if fps > 0.0 {
+            return fps;
+        }
+    }
+
+    if let Ok(meta) = probe_video(video_path) {
+        if meta.fps > 0.0 {
+            return meta.fps;
+        }
+    }
+
+    if let Some(stem) = video_path.file_stem().and_then(|s| s.to_str()) {
+        let stem_fps = parse_fps_from_stem(stem);
+        if stem_fps > 0.0 {
+            return stem_fps;
+        }
+    }
+
+    DEFAULT_BASELINE_FPS
 }
 
 /// Discovered FFmpeg binary and supported hardware acceleration.
@@ -546,4 +698,61 @@ pub fn extract_frames_phash(path: &Path, start_sec: f64, nb_frames: usize) -> Re
     };
     let samples = extract_frames_advanced(path, &opts)?;
     Ok(samples.into_iter().map(|s| s.phash).collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_detect_media_fps_explicit_priority() {
+        let dummy = Path::new("non_existent_movie.mkv");
+        assert_eq!(detect_media_fps(dummy, Some(29.97)), 29.97);
+        assert_eq!(detect_media_fps(dummy, Some(60.0)), 60.0);
+    }
+
+    #[test]
+    fn test_detect_media_fps_stem_heuristics() {
+        let nts_movie = Path::new("Show.S01E01.1080p.WEB-DL.mkv");
+        assert_eq!(detect_media_fps(nts_movie, None), NTSC_FILM_FPS);
+
+        let pal_movie = Path::new("BBC.Documentary.576i.PAL.mkv");
+        assert_eq!(detect_media_fps(pal_movie, None), PAL_FPS);
+
+        let explicit_stem = Path::new("custom_clip.29.97fps.mkv");
+        assert!((detect_media_fps(explicit_stem, None) - 29.97).abs() < 1e-4);
+
+        let direct_fps_stem = Path::new("23.976fps.mkv");
+        assert!((detect_media_fps(direct_fps_stem, None) - 23.976).abs() < 1e-4);
+    }
+
+    #[test]
+    fn test_detect_media_fps_default_baseline() {
+        let unknown = Path::new("unnamed_clip.mkv");
+        assert_eq!(detect_media_fps(unknown, None), DEFAULT_BASELINE_FPS);
+    }
+
+    #[test]
+    fn test_parse_ffprobe_json_output_fractional() {
+        let json = br#"{
+            "streams": [{"r_frame_rate": "24000/1001", "duration": "120.5"}],
+            "format": {"duration": "120.5"}
+        }"#;
+        let meta = parse_ffprobe_json_output(json).expect("Should parse json");
+        assert!((meta.fps - 23.976023976).abs() < 1e-5);
+        assert!((meta.duration - 120.5).abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_parse_ffprobe_json_output_invalid() {
+        let json = b"not json";
+        assert!(parse_ffprobe_json_output(json).is_err());
+    }
+
+    #[test]
+    fn test_probe_video_invalid_command_returns_error() {
+        let dummy = Path::new("dummy.mkv");
+        let result = probe_video_with_cmd(dummy, "non_existent_binary_xyz", 1);
+        assert!(result.is_err());
+    }
 }
