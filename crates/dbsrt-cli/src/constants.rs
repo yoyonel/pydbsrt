@@ -135,5 +135,11 @@ pub const PHASH_DOT_EXT: &str = ".phash";
 /// Divisor used to seek to the temporal midpoint of a media stream.
 pub const MIDPOINT_DURATION_DIVISOR: f64 = 2.0;
 
+/// Default HTTP URL of dbsrt-server for live catalog telemetry and ingest.
+pub const DEFAULT_SERVER_URL: &str = "http://127.0.0.1:8765";
+
+/// Default HTTP request timeout in seconds for server catalog ingest.
+pub const DEFAULT_HTTP_TIMEOUT_SECS: u64 = 2;
+
 /// Known video extensions used for fingerprint stem conflict filtering.
 pub const KNOWN_VIDEO_EXTS: &[&str] = &[".mp4.", ".webm.", ".mkv.", ".avi.", ".mov."];

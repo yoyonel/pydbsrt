@@ -3,8 +3,8 @@ use clap::Parser;
 use dbsrt_cli::cli::{Cli, Commands};
 use dbsrt_cli::commands::{
     run_bench_cuts, run_bench_phash, run_bench_video, run_certify_coupling, run_export_phash,
-    run_fetch_subtitles, run_import_phash, run_inspect_media, run_migrate, run_pack,
-    run_recognize_media, run_retarget_subtitles, run_scan_library,
+    run_fetch_subtitles, run_import_phash, run_inspect_media, run_media_add, run_migrate, run_pack,
+    run_recognize_media, run_relabel_coupling, run_retarget_subtitles, run_scan_library,
 };
 
 fn main() -> Result<()> {
@@ -49,6 +49,13 @@ fn main() -> Result<()> {
         }
         Commands::Migrate(args) => {
             run_migrate(args)?;
+        }
+        Commands::MediaAdd(args) => {
+            let rt = tokio::runtime::Runtime::new()?;
+            rt.block_on(run_media_add(&args))?;
+        }
+        Commands::RelabelCoupling(args) => {
+            run_relabel_coupling(args)?;
         }
     }
     Ok(())

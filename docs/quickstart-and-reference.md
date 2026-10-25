@@ -115,8 +115,11 @@ Conformément à la règle **Taskfile-First**, toutes les opérations récurrent
     | `task down` | `scripts/stack_ctl.sh` | Arrête proprement le daemon `dbsrt-server`, MkDocs et les conteneurs Docker. |
     | `task status` | `scripts/stack_ctl.sh status` | Affiche l'état HTTP 200 des 4 services et les compteurs d'entités PostgreSQL. |
     | `task studio` | `Taskfile.yml` | Démarre le socle backend seul (Docker + seed couplages + daemon `dbsrt-server`). |
+    | `task media:add` | `scripts/media_add.sh` | Façade unifiée d'ingestion média (pHash, extraction MKV/MP4 embarqué, certification couplage et rechargement dynamique RAM). [Voir guide](2026-10-25-guide-media-add-facade.md). |
     | `task coupling:certify` | `scripts/seed_couplings.sh` | Découvre et certifie tous les couples de référence (`data/__PHASH__` $\leftrightarrow$ `data/SRT`). |
     | `task server:status` | `scripts/stack_ctl.sh server-status` | Interroge le statut du daemon via `GET /v1/status`. |
+    | `task server:reload` | `scripts/stack_ctl.sh server-reload` | Déclenche le rechargement atomique à chaud du catalogue (`/v1/catalog/reload`). |
+    | `task catalog:status`| `scripts/stack_ctl.sh catalog-status`| Affiche l'état d'indexation (Base immuable + Delta RAM + Couplages). |
 
 === "🐘 Base de Données & Migrations"
 

@@ -68,6 +68,16 @@ task status
 # Ouvrir dbsrt Studio (http://127.0.0.1:8765/studio), PgWeb (:8086) et MkDocs (:8000)
 task studio
 
+# Ingestion unifiée en 1 commande : extraction pHash, certification couplage et rechargement dynamique RAM
+# (Auto-découverte SRT sidecars, extraction automatique de pistes MKV/MP4 embarquées, sondage FPS ffprobe)
+task media:add -- mes_videos/film.mkv
+
+# Optionnel : spécifier explicitement sous-titre, langue et framerate
+task media:add -- mes_videos/film.mkv sous_titres/film.fr.srt --lang fr --fps 24.0
+
+# Requalifier la langue d'un couplage sans ré-extraire le pHash
+task coupling:relabel -- --media <hash_ou_nom> --lang fr
+
 # Certifier tous les couples (SRT <-> pHash) en base PostgreSQL 17 et dans data/SRT/couplings.json
 task coupling:certify
 
@@ -106,7 +116,7 @@ flowchart TD
 
 | Crate | Responsabilités & Architecture SoC |
 | :--- | :--- |
-| **[`crates/dbsrt-cli`](crates/dbsrt-cli/)** | **CLI `dbsrt` modulaire** : Dispatcher Clap épuré (`main.rs`), bibliothèque `dbsrt_cli` (`lib.rs`), constantes de domaine typées (`constants.rs`) et sous-commandes dédiées dans `src/commands/` (`bench`, `certify`, `export`, `fetch`, `import`, `inspect`, `migrate`, `pack`, `recognize`, `retarget`, `scan`, `shared`). |
+| **[`crates/dbsrt-cli`](crates/dbsrt-cli/)** | **CLI `dbsrt` modulaire** : Dispatcher Clap épuré (`main.rs`), bibliothèque `dbsrt_cli` (`lib.rs`), constantes de domaine typées (`constants.rs`) et sous-commandes dédiées dans `src/commands/` (`bench`, `certify`, `export`, `fetch`, `import`, `inspect`, `media_add`, `migrate`, `pack`, `recognize`, `retarget`, `scan`, `shared`). |
 | **[`crates/dbsrt-server`](crates/dbsrt-server/)** | **Serveur REST Axum** : Handlers HTTP modulaires dans `src/handlers/` (`health`, `lookup`, `metrics`, `search`, `studio`, `sync`), moteur MIH unifié (< 1 ms) et UI web bicanale `dbsrt Studio` (`:8765/studio`). |
 | **[`crates/dbsrt-index`](crates/dbsrt-index/)** | **Indexation, Schémas & Migrations** : Gestion relationnelle PostgreSQL 17 SP-GiST BK-Tree (`subtitles`, `sub_frames`, `medias`, `frames`), migrations déclaratives versionnées Refinery (`embed_migrations!`), et format Zero-DB plat `.dbphash` / `.phash` par projection mémoire (`mmap`). |
 | **[`crates/dbsrt-core`](crates/dbsrt-core/)** | **Primitives Algorithmiques** : Calcul d'empreintes perceptuelles 64-bit DCT pHash, extraction de trames FFmpeg HWAccel/SW et distance de Hamming accélérée SIMD (`popcnt`). |
@@ -122,6 +132,8 @@ Le dépôt est orchestré par **[Taskfile (go-task)](https://taskfile.dev/)** d�
 | Tâche | Description | Domaine (`taskfiles/`) |
 | :--- | :--- | :--- |
 | **`task dev` / `task down`** | Démarre / arrête toute la stack de dev en arrière-plan | `Taskfile.yml` |
+| **`task media:add`** | Façade unifiée d'ingestion média (pHash, certification couplage et rechargement dynamique RAM) | `taskfiles/stack.yml` |
+| **`task coupling:relabel`** | Requalifie la langue d'un couplage certifié dans `couplings.json` | `taskfiles/stack.yml` |
 | **`task server:reload`** | Déclenche le rechargement atomique à chaud du catalogue (`/v1/catalog/reload`) | `taskfiles/stack.yml` |
 | **`task catalog:status`** | Affiche l'état d'indexation (Base immuable + Delta RAM + Couplages) | `taskfiles/stack.yml` |
 | **`task catalog:compact`** | Fusionne le Base et le Delta RAM dans un catalogue consolidé et swap | `taskfiles/stack.yml` |
@@ -160,6 +172,7 @@ Le dépôt est orchestré par **[Taskfile (go-task)](https://taskfile.dev/)** d�
 
 Dossiers techniques détaillés disponibles dans le répertoire [`docs/`](docs) :
 
+* [`docs/2026-10-25-guide-media-add-facade.md`](docs/2026-10-25-guide-media-add-facade.md) : **Guide Pratique : Façade Unifiée d'Ingestion Média (`task media:add`)** : Spécification et guide pas à pas de la commande unifiée (RFC #22 Phase 1) : auto-appairage sidecar & extraction de pistes embarquées MKV/MP4, auto-détection FPS `ffprobe` / langue ISO, déduplication CAS, logs temps réel et interruption propre SIGINT.
 * [`docs/2026-10-24-architecture-cycle-de-vie-donnees-io-et-rechargement-a-chaud.md`](docs/2026-10-24-architecture-cycle-de-vie-donnees-io-et-rechargement-a-chaud.md) : **Cycle de Vie des Données, Ingestion I/O & Rechargement à Chaud (Zero-Downtime)** : Modélisation des flux d'E/S, rechargement atomique de catalogue sans downtime via `ArcSwap`, benchmarks empiriques (< 24 ns overhead, swap en 207 ns) et Taskfiles.
 * [`docs/2026-10-24-deploiement-postgresql-17-isole-rpi4-et-orchestration-migrations.md`](docs/2026-10-24-deploiement-postgresql-17-isole-rpi4-et-orchestration-migrations.md) : **Déploiement Isolé de PostgreSQL 17 sur RPi4 & Orchestration des Migrations** : Cloisonnement strict et zéro impact sur la base PG 15.2 legacy (port 5432, 817k frames), instance PG 17 dédiée sur port 5433, automatisation Taskfile et validation empirique E2E.
 * [`docs/2026-10-23-guide-migrations-schema-postgresql-refinery.md`](docs/2026-10-23-guide-migrations-schema-postgresql-refinery.md) : **Guide & Architecture des Migrations PostgreSQL avec Refinery** : Migrations versionnées déclaratives (V1, V2, V3...), élimination des deadlocks en tests parallèles, commande `dbsrt migrate` et Taskfiles.

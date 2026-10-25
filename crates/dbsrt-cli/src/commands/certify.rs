@@ -4,7 +4,7 @@ use anyhow::Result;
 use clap::Args;
 use dbsrt_core::{
     build_and_validate_sub_frames_opts, compute_bytes_digest_32, compute_media_phash_digest,
-    read_phash_file, CertifiedSubtitleRecord, CouplingRegistry, SubtitleFile,
+    read_phash_file, CertifiedSubtitleRecord, CouplingRegistry, LangStatus, SubtitleFile,
 };
 use dbsrt_index::parse_fps_from_phash_stem;
 use std::path::PathBuf;
@@ -67,10 +67,10 @@ pub struct CertifyCouplingArgs {
     pub db: PostgresArgs,
 }
 
-/// Helper detecting subtitle ISO 639-1 language code from filename tokens.
-pub fn detect_cli_subtitle_lang(filename: &str, fallback: &str) -> String {
+/// Helper detecting subtitle ISO language code and confidence status from filename tokens.
+pub fn detect_cli_subtitle_lang_status(filename: &str, fallback: &str) -> LangStatus {
     if fallback != AUTO_SUBTITLE_LANG && !fallback.is_empty() {
-        return fallback.to_lowercase();
+        return LangStatus::Confirmed(fallback.to_lowercase());
     }
     let stem = filename
         .strip_suffix(".srt")
@@ -87,16 +87,29 @@ pub fn detect_cli_subtitle_lang(filename: &str, fallback: &str) -> String {
             continue;
         }
         match token {
-            "fr" | "fre" | "fra" | "french" | "vff" | "vf" | "vostfr" => return "fr".to_string(),
-            "en" | "eng" | "english" => return "en".to_string(),
-            "es" | "spa" | "spanish" => return "es".to_string(),
-            "de" | "ger" | "deu" | "german" => return "de".to_string(),
-            "it" | "ita" | "italian" => return "it".to_string(),
-            "pt" | "por" | "pob" | "portuguese" => return "pt".to_string(),
+            "fr" | "fre" | "fra" | "french" | "vff" | "vf" | "vostfr" => {
+                return LangStatus::Detected("fr".to_string())
+            }
+            "en" | "eng" | "english" => return LangStatus::Detected("en".to_string()),
+            "es" | "spa" | "spanish" => return LangStatus::Detected("es".to_string()),
+            "de" | "ger" | "deu" | "german" => return LangStatus::Detected("de".to_string()),
+            "it" | "ita" | "italian" => return LangStatus::Detected("it".to_string()),
+            "pt" | "por" | "pob" | "portuguese" => return LangStatus::Detected("pt".to_string()),
             _ => break,
         }
     }
-    DEFAULT_SUBTITLE_LANG.to_string()
+    LangStatus::Unknown
+}
+
+/// Helper detecting subtitle ISO 639-1 language code from filename tokens.
+#[allow(deprecated)]
+#[deprecated(note = "Use detect_cli_subtitle_lang_status() for proper confidence tracking")]
+pub fn detect_cli_subtitle_lang(filename: &str, fallback: &str) -> String {
+    let status = detect_cli_subtitle_lang_status(filename, fallback);
+    match status {
+        LangStatus::Unknown => DEFAULT_SUBTITLE_LANG.to_string(),
+        other => other.to_lang_code(),
+    }
 }
 
 /// Run subtitle coupling certification, registering ground-truth frames in couplings.json / PostgreSQL.
@@ -154,7 +167,8 @@ pub fn run_certify_coupling(args: &CertifyCouplingArgs) -> Result<()> {
         .unwrap_or_default()
         .to_string_lossy()
         .to_string();
-    let lang = detect_cli_subtitle_lang(&srt_fname, &args.lang);
+    let lang_status = detect_cli_subtitle_lang_status(&srt_fname, &args.lang);
+    let lang = lang_status.to_lang_code();
 
     let phash_fname = phash_path
         .file_name()
@@ -200,6 +214,7 @@ pub fn run_certify_coupling(args: &CertifyCouplingArgs) -> Result<()> {
                 name: rel_srt_name.clone(),
                 srt_path: rel_srt_name.clone(),
                 lang: lang.clone(),
+                lang_status: lang_status.clone(),
                 subtitles_hash: subtitles_hash.clone(),
                 certified: true,
                 cue_count: srt_file.cues.len(),
@@ -263,6 +278,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[allow(deprecated)]
     fn test_detect_cli_subtitle_lang_tokens() {
         assert_eq!(detect_cli_subtitle_lang("movie.en.srt", "auto"), "en");
         assert_eq!(detect_cli_subtitle_lang("movie.fre.srt", "auto"), "fr");
@@ -278,5 +294,33 @@ mod tests {
         assert_eq!(detect_cli_subtitle_lang("movie.unknown.srt", "auto"), "en");
         assert_eq!(detect_cli_subtitle_lang("movie.srt", "auto"), "en");
         assert_eq!(detect_cli_subtitle_lang("movie.srt", "fr"), "fr");
+    }
+
+    #[test]
+    fn test_detect_cli_subtitle_lang_status_tokens() {
+        assert_eq!(
+            detect_cli_subtitle_lang_status("movie.en.srt", "auto"),
+            LangStatus::Detected("en".to_string())
+        );
+        assert_eq!(
+            detect_cli_subtitle_lang_status("movie.fre.srt", "auto"),
+            LangStatus::Detected("fr".to_string())
+        );
+        assert_eq!(
+            detect_cli_subtitle_lang_status("movie.vostfr.srt", "auto"),
+            LangStatus::Detected("fr".to_string())
+        );
+        assert_eq!(
+            detect_cli_subtitle_lang_status("movie.unknown.srt", "auto"),
+            LangStatus::Unknown
+        );
+        assert_eq!(
+            detect_cli_subtitle_lang_status("movie.srt", "auto"),
+            LangStatus::Unknown
+        );
+        assert_eq!(
+            detect_cli_subtitle_lang_status("movie.srt", "fr"),
+            LangStatus::Confirmed("fr".to_string())
+        );
     }
 }

@@ -11,13 +11,33 @@ trap 'rm -f "${TMP_HEADER}" "${TMP_REPOMIX}"' EXIT
 
 echo "Generating code review bundle comparing HEAD with ${TARGET_BRANCH}..."
 
+# Collect all files to pack: committed differences + working tree changes + untracked files
+COMMITTED_FILES="$(git diff --name-only "${TARGET_BRANCH}...HEAD" 2>/dev/null || true)"
+WORKTREE_FILES="$(git diff --name-only "${TARGET_BRANCH}" 2>/dev/null || true)"
+UNTRACKED_FILES="$(git ls-files --others --exclude-standard 2>/dev/null || true)"
+
+# Filter strictly to source implementations (Rust, Python, Shell, Lua, Taskfile/Cargo configs)
+# Exclude: data payloads (data/**, *.json, *.phash, *.srt), dependency locks (Cargo.lock), docs (*.md, docs/**, mkdocs.yml)
+FILES_TO_PACK="$(printf "%s\n%s\n%s" "${COMMITTED_FILES}" "${WORKTREE_FILES}" "${UNTRACKED_FILES}" |
+  sed '/^$/d' |
+  grep -E '\.(rs|py|sh|lua|toml|ya?ml)$' |
+  grep -v -E '^(Cargo\.lock|data/|\.tmp/|target/|mkdocs\.yml)' |
+  sort -u)"
+
+if [[ -z "${FILES_TO_PACK}" ]]; then
+  echo "⚠️ No modified or untracked source files found compared to ${TARGET_BRANCH}." >&2
+  exit 1
+fi
+
+mapfile -t SOURCE_FILES_ARRAY <<<"${FILES_TO_PACK}"
+
 COMMITS_LOG="$(git log --oneline "${TARGET_BRANCH}...HEAD" 2>/dev/null || true)"
 if [[ -z "${COMMITS_LOG}" ]]; then
   COMMITS_LOG="(Working tree uncommitted changes against ${TARGET_BRANCH})"
 fi
 
-DIFF_STAT="$(git diff --stat "${TARGET_BRANCH}" 2>/dev/null || true)"
-UNIFIED_DIFF="$(git diff "${TARGET_BRANCH}" 2>/dev/null || true)"
+DIFF_STAT="$(git diff --stat "${TARGET_BRANCH}" -- "${SOURCE_FILES_ARRAY[@]}" 2>/dev/null || true)"
+UNIFIED_DIFF="$(git diff "${TARGET_BRANCH}" -- "${SOURCE_FILES_ARRAY[@]}" 2>/dev/null || true)"
 
 cat <<EOF >"${TMP_HEADER}"
 # Code Review Bundle: ${TARGET_BRANCH}...HEAD
@@ -67,18 +87,7 @@ ${UNIFIED_DIFF}
 
 EOF
 
-# Collect all files to pack: committed differences + working tree changes + untracked files
-COMMITTED_FILES="$(git diff --name-only "${TARGET_BRANCH}...HEAD" 2>/dev/null || true)"
-WORKTREE_FILES="$(git diff --name-only "${TARGET_BRANCH}" 2>/dev/null || true)"
-UNTRACKED_FILES="$(git ls-files --others --exclude-standard 2>/dev/null || true)"
-FILES_TO_PACK="$(printf "%s\n%s\n%s" "${COMMITTED_FILES}" "${WORKTREE_FILES}" "${UNTRACKED_FILES}" | sed '/^$/d' | sort -u)"
-
-if [[ -z "${FILES_TO_PACK}" ]]; then
-  echo "⚠️ No modified or untracked files found compared to ${TARGET_BRANCH}." >&2
-  exit 1
-fi
-
-# Pack modified files via repomix
+# Pack modified source files via repomix
 echo "${FILES_TO_PACK}" | npx repomix --stdin --style markdown --no-security-check -o "${TMP_REPOMIX}"
 
 # Combine header and repomix output

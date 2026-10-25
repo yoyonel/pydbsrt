@@ -1,7 +1,7 @@
 //! Integration test suite for Zero-Downtime Catalog Hot-Reload via ArcSwap.
 
 use dbsrt_core::metadata::{MediaMetadata, MediaType};
-use dbsrt_core::{CertifiedMediaCoupling, CertifiedSubtitleRecord, CouplingRegistry};
+use dbsrt_core::{CertifiedMediaCoupling, CertifiedSubtitleRecord, CouplingRegistry, LangStatus};
 use dbsrt_index::dbphash::DbphashBuilder;
 use dbsrt_server::{create_router_with_state, AppState, CatalogReloadResponse, RecognizeRequest};
 use std::net::SocketAddr;
@@ -136,6 +136,7 @@ async fn test_zero_downtime_hot_reload_and_concurrency() {
             subtitles_hash: "abcdef0123456789".to_string(),
             name: "Silicon.Valley.S01E01.fr.srt".to_string(),
             lang: "fr".to_string(),
+            lang_status: LangStatus::Detected("fr".to_string()),
             srt_path: "Silicon.Valley.S01E01.fr.srt".to_string(),
             certified: true,
             cue_count: 450,
@@ -636,6 +637,7 @@ async fn test_corrupted_couplings_json_fails_reload_without_clearing_state() {
             subtitles_hash: "abcdef0123456789".to_string(),
             name: "Certified.Movie.fr.srt".to_string(),
             lang: "fr".to_string(),
+            lang_status: LangStatus::Detected("fr".to_string()),
             srt_path: "Certified.Movie.fr.srt".to_string(),
             certified: true,
             cue_count: 100,

@@ -76,7 +76,7 @@ flowchart LR
 
 | Module | Fichier | Rôle & Commandes Principales |
 | :--- | :--- | :--- |
-| **Stack & Serveur** | `taskfiles/stack.yml` | `task studio`, `task server:status`, `task coupling:certify` |
+| **Stack & Serveur** | `taskfiles/stack.yml` | `task dev`, `task media:add`, `task studio`, `task server:status`, `task server:reload`, `task coupling:certify` |
 | **Base de Données** | `taskfiles/db.yml` | `task db:up`, `task db:down`, `task db:migrate`, `task db:status`, `task db:logs`, `task db:psql` |
 | **Documentation** | `taskfiles/doc.yml` | `task doc` (serveur live), `task doc:check`, `task doc:build` |
 | **Qualité & Tests** | `taskfiles/quality.yml` | `task lint`, `task fmt`, `task test:rs`, `task coverage`, `task ci:local` |
