@@ -33,7 +33,7 @@ from typing import Any
 
 
 def default_nas_root() -> Path:
-    env_root = os.environ.get("NAS_ROOT")
+    env_root = os.environ.get("MEDIA_ROOT") or os.environ.get("NAS_ROOT")
     if env_root:
         return Path(env_root)
     return Path("/media") / getpass.getuser() / "Synology"
@@ -390,16 +390,18 @@ def run_suite_2_real_video_recognition(
                 vp = Path(root) / f
                 nas_videos_by_stem[vp.stem] = vp
 
-    # 1. Explicit cross-release / multi-encode pairs
-    the_boys_720p = nas_root / "tvshow/The Boys/S02/The Boys S02E03 [720p].mkv"
-    if the_boys_720p.exists() and "The.Boys.S02E03.1080p.AMZN.WEBRip.DDP5.1.x264-NTb" in indexed_stems:
-        cross_release_candidates.append(
-            (
-                "Cross-Release 720p -> 1080p AMZN WEBRip",
-                the_boys_720p,
-                "The.Boys.S02E03.1080p.AMZN.WEBRip.DDP5.1.x264-NTb",
+    # 1. Configurable cross-release / multi-encode pairs via CROSS_RELEASE_SAMPLE
+    custom_cross = os.environ.get("CROSS_RELEASE_SAMPLE")
+    if custom_cross:
+        custom_cross_path = Path(custom_cross)
+        if custom_cross_path.exists():
+            cross_release_candidates.append(
+                (
+                    f"Custom Cross-Release ({custom_cross_path.name})",
+                    custom_cross_path,
+                    custom_cross_path.stem,
+                )
             )
-        )
 
     bbb_mp4 = Path("tests/data/big_buck_bunny_trailer_480p.mp4")
     if bbb_mp4.exists():
