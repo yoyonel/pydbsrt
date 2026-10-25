@@ -19,7 +19,7 @@ use axum::Json;
 use dbsrt_core::{
     build_and_validate_sub_frames, compute_bytes_digest_32, compute_media_phash_digest,
     detect_cuts, extract_embedded_subtitle, inspect_container, CertifiedSubtitleRecord,
-    CouplingRegistry, MediaMetadata, SubtitleFile,
+    CouplingRegistry, LangStatus, MediaMetadata, SubtitleFile,
 };
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -572,6 +572,7 @@ pub async fn certify_handler(
             name: rel_srt_name.clone(),
             srt_path: rel_srt_name,
             lang: lang.clone(),
+            lang_status: LangStatus::Detected(lang.clone()),
             subtitles_hash: subtitles_hash.clone(),
             certified: true,
             cue_count: srt_file.cues.len(),

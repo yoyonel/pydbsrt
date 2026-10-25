@@ -15,7 +15,11 @@ pub mod scan;
 pub mod shared;
 
 pub use bench::{run_bench_cuts, run_bench_phash, run_bench_video, BenchCutsArgs, BenchVideoArgs};
-pub use certify::{detect_cli_subtitle_lang, run_certify_coupling, CertifyCouplingArgs};
+#[allow(deprecated)]
+pub use certify::{
+    detect_cli_subtitle_lang, detect_cli_subtitle_lang_status, run_certify_coupling,
+    CertifyCouplingArgs,
+};
 pub use export::{run_export_phash, ExportPhashArgs};
 pub use fetch::{run_fetch_subtitles, FetchSubtitlesArgs};
 pub use import::{run_import_phash, ImportPhashArgs};

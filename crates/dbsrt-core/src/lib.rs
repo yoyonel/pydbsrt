@@ -6,6 +6,7 @@
 pub mod container;
 pub mod coupling;
 pub mod cuts;
+pub mod lang_status;
 pub mod media_pairing;
 pub mod metadata;
 pub mod phash;
@@ -26,6 +27,7 @@ pub use cuts::{
     detect_cuts, detect_cuts_timestamped, is_blank_phash, read_phash_file, write_phash_file,
     CutItem, TimestampedCutItem,
 };
+pub use lang_status::LangStatus;
 pub use media_pairing::{
     find_subtitle_pairs, parse_language_code, SUBTITLE_EXTENSION, SUBTITLE_SUBDIRS,
     SUPPORTED_VIDEO_EXTENSIONS,

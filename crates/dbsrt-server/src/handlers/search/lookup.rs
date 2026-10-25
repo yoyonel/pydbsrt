@@ -584,7 +584,8 @@ pub async fn search_handler(
 mod tests {
     use super::*;
     use dbsrt_core::{
-        CertifiedMediaCoupling, CertifiedSubtitleRecord, MockSubtitleProvider, SubtitleCache,
+        CertifiedMediaCoupling, CertifiedSubtitleRecord, LangStatus, MockSubtitleProvider,
+        SubtitleCache,
     };
     use std::path::PathBuf;
 
@@ -722,6 +723,7 @@ mod tests {
                     subtitles_hash: "dummy_sub_hash_bbb".to_string(),
                     name: "big_buck_bunny_trailer_480p.en".to_string(),
                     lang: "en".to_string(),
+                    lang_status: LangStatus::Detected("en".to_string()),
                     srt_path: root
                         .join("tests/data/big_buck_bunny_trailer_480p.en.srt")
                         .to_string_lossy()

@@ -7,6 +7,10 @@ Ce guide opérationnel pas-à-pas (format Diátaxis *How-to Guide*) détaille la
 3. Rendre ce couplage immédiatement interrogeable par l'extension VLC sans redémarrer le serveur (`dbsrt-server`).
 4. Consolider les données dynamiques via la compaction.
 
+> [!TIP]
+> **Façade Unifiée (RFC #22 Phase 1) : `task media:add`**
+> Pour automatiser l'intégralité de ces étapes en une seule commande déclarative (auto-découverte SRT sidecars / extraction MKV embarqués, extraction pHash, certification et injection dynamique RAM), consultez le **[Guide Façade Unifiée media:add](2026-10-25-guide-media-add-facade.md)** ou lancez simplement `task media:add -- mon_film.mkv`. La suite de ce document détaille les primitives sous-jacentes (niveau L3).
+
 ---
 
 ## 1. Prérequis & Modèle Conceptuel

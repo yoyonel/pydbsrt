@@ -615,3 +615,133 @@ fn test_cli_media_add_sidecar_no_lang_suffix() {
         stdout
     );
 }
+
+#[test]
+fn test_cli_media_add_unknown_lang_certified_as_und() {
+    let video = match find_fixture("tests/data/big_buck_bunny_trailer_480p.mp4") {
+        Some(v) => v,
+        None => return,
+    };
+
+    let temp = TempTestDir::new("unknown_lang");
+    let srt_path = temp.path.join("random_name.srt");
+    let phash_dir = temp.path.join("phash");
+    let subtitles_dir = temp.path.join("subtitles");
+
+    fs::write(
+        &srt_path,
+        "1\n00:00:01,000 --> 00:00:03,000\nUnknown language cue\n",
+    )
+    .unwrap();
+
+    let out = Command::new(env!("CARGO_BIN_EXE_dbsrt"))
+        .args([
+            "media:add",
+            "--video",
+            video.to_str().unwrap(),
+            "--srt",
+            srt_path.to_str().unwrap(),
+            "--phash-dir",
+            phash_dir.to_str().unwrap(),
+            "--subtitles-dir",
+            subtitles_dir.to_str().unwrap(),
+        ])
+        .output()
+        .expect("Failed to run media:add with unknown language");
+
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+
+    assert!(
+        out.status.success(),
+        "Expected success exit code, stderr: {}",
+        stderr
+    );
+    assert!(
+        stderr.contains("Language could not be determined"),
+        "Expected warning about language determination, got: {}",
+        stderr
+    );
+    assert!(
+        stderr.contains("certified with lang=\"und\""),
+        "Expected note about certified with lang=\"und\", got: {}",
+        stderr
+    );
+    assert!(
+        stdout.contains("Couplings Added  : 1"),
+        "Expected 1 coupling added, got: {}",
+        stdout
+    );
+
+    let couplings_file = subtitles_dir.join("couplings.json");
+    assert!(couplings_file.exists());
+    let content = fs::read_to_string(&couplings_file).unwrap();
+    let json: serde_json::Value = serde_json::from_str(&content).unwrap();
+    let sub = &json["couplings"][0]["subtitles"][0];
+    assert_eq!(sub["lang"], "und");
+    assert_eq!(sub["lang_status"]["kind"], "Unknown");
+}
+
+#[test]
+fn test_cli_media_add_confirmed_lang_overrides_unknown() {
+    let video = match find_fixture("tests/data/big_buck_bunny_trailer_480p.mp4") {
+        Some(v) => v,
+        None => return,
+    };
+
+    let temp = TempTestDir::new("confirmed_lang");
+    let srt_path = temp.path.join("random_name.srt");
+    let phash_dir = temp.path.join("phash");
+    let subtitles_dir = temp.path.join("subtitles");
+
+    fs::write(
+        &srt_path,
+        "1\n00:00:01,000 --> 00:00:03,000\nConfirmed language cue\n",
+    )
+    .unwrap();
+
+    let out = Command::new(env!("CARGO_BIN_EXE_dbsrt"))
+        .args([
+            "media:add",
+            "--video",
+            video.to_str().unwrap(),
+            "--srt",
+            srt_path.to_str().unwrap(),
+            "--lang",
+            "fr",
+            "--phash-dir",
+            phash_dir.to_str().unwrap(),
+            "--subtitles-dir",
+            subtitles_dir.to_str().unwrap(),
+        ])
+        .output()
+        .expect("Failed to run media:add with confirmed language override");
+
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+
+    assert!(
+        out.status.success(),
+        "Expected success exit code, stderr: {}",
+        stderr
+    );
+    assert!(
+        !stderr.contains("could not be determined"),
+        "Expected no unknown language warning, got: {}",
+        stderr
+    );
+    assert!(
+        stdout.contains("Couplings Added  : 1"),
+        "Expected 1 coupling added, got: {}",
+        stdout
+    );
+
+    let couplings_file = subtitles_dir.join("couplings.json");
+    assert!(couplings_file.exists());
+    let content = fs::read_to_string(&couplings_file).unwrap();
+    let json: serde_json::Value = serde_json::from_str(&content).unwrap();
+    let sub = &json["couplings"][0]["subtitles"][0];
+    assert_eq!(sub["lang"], "fr");
+    assert_eq!(sub["lang_status"]["kind"], "Confirmed");
+    assert_eq!(sub["lang_status"]["value"], "fr");
+}

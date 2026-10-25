@@ -2,12 +2,17 @@
 //! and relational data model shared between PostgreSQL (`DbClient`) and the
 //! local Zero-DB JSON registry (`couplings.json`).
 
+use crate::lang_status::LangStatus;
 use crate::srt::SubtitleFile;
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
+
+fn default_lang_status_for_legacy() -> LangStatus {
+    LangStatus::Inferred("und".to_string())
+}
 
 /// A single cue's frame-offset anchor on its reference media stream.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -33,6 +38,9 @@ pub struct CertifiedSubtitleRecord {
     pub name: String,
     /// Normalized ISO-639-1 language code (`"fr"`, `"en"`, `"es"`, etc.)
     pub lang: String,
+    /// Confidence level of the subtitle language attribution
+    #[serde(default = "default_lang_status_for_legacy")]
+    pub lang_status: LangStatus,
     /// Relative or canonical path to the `.srt` file in `--subtitles-dir`
     pub srt_path: String,
     /// Whether this coupling has been certified as ground-truth
@@ -349,6 +357,7 @@ mod tests {
                 subtitles_hash: sub_hash,
                 name: "sample_movie.fr.srt".to_string(),
                 lang: "fr".to_string(),
+                lang_status: LangStatus::Detected("fr".to_string()),
                 srt_path: "sample_movie.fr.srt".to_string(),
                 certified: true,
                 cue_count: 2,
@@ -380,6 +389,7 @@ mod tests {
                 subtitles_hash: sub_hash.to_string(),
                 name: "test_movie.fr.srt".to_string(),
                 lang: "fr".to_string(),
+                lang_status: LangStatus::Detected("fr".to_string()),
                 srt_path: "test_movie.fr.srt".to_string(),
                 certified: true,
                 cue_count: 5,
@@ -404,5 +414,74 @@ mod tests {
             !reg.is_already_certified("unknown_media_hash", sub_hash),
             "Expected false for unknown media hash"
         );
+    }
+
+    #[test]
+    fn test_legacy_coupling_without_lang_status_deserialization() {
+        let json = r#"{
+            "subtitles_hash": "abc",
+            "name": "legacy.srt",
+            "lang": "en",
+            "srt_path": "legacy.srt",
+            "certified": true,
+            "cue_count": 10
+        }"#;
+        let record: CertifiedSubtitleRecord = serde_json::from_str(json).unwrap();
+        assert_eq!(record.lang, "en");
+        assert_eq!(record.lang_status, LangStatus::Inferred("und".to_string()));
+    }
+
+    #[test]
+    fn test_coupling_registry_persistence_and_queries() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("test_coupling_reg_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&temp_dir);
+        fs::create_dir_all(&temp_dir).unwrap();
+
+        let default_path = CouplingRegistry::default_path(&temp_dir);
+        assert_eq!(default_path, temp_dir.join("couplings.json"));
+
+        let loaded_default = CouplingRegistry::load_or_default(&default_path).unwrap();
+        assert!(loaded_default.couplings.is_empty());
+
+        let mut reg = CouplingRegistry::default();
+        let sub = CertifiedSubtitleRecord {
+            subtitles_hash: "1234567890abcdef1234567890abcdef".to_string(),
+            name: "movie.fr.srt".to_string(),
+            lang: "fr".to_string(),
+            lang_status: LangStatus::Confirmed("fr".to_string()),
+            srt_path: "movie.fr.srt".to_string(),
+            certified: true,
+            cue_count: 10,
+            sub_frames: vec![],
+        };
+
+        reg.upsert_coupling(
+            "hash1".to_string(),
+            "movie".to_string(),
+            "movie.phash".to_string(),
+            24.0,
+            100,
+            sub.clone(),
+        );
+
+        // Upsert again to exercise existing coupling update branch
+        reg.upsert_coupling(
+            "hash1".to_string(),
+            "movie".to_string(),
+            "movie.phash".to_string(),
+            24.0,
+            100,
+            sub.clone(),
+        );
+
+        reg.save(&default_path).unwrap();
+        let loaded = CouplingRegistry::load_or_default(&default_path).unwrap();
+        assert_eq!(loaded.couplings.len(), 1);
+
+        let by_hash = loaded.find_subtitle_by_hash("sub:sha256:1234567890abcdef");
+        assert!(by_hash.is_some());
+
+        let _ = fs::remove_dir_all(&temp_dir);
     }
 }

@@ -5,7 +5,7 @@ use clap::Args;
 use dbsrt_core::{
     build_and_validate_sub_frames_opts, compute_bytes_digest_32, compute_media_phash_digest,
     detect_media_fps, extract_embedded_subtitle, find_subtitle_pairs, inspect_container,
-    parse_language_code, CertifiedSubtitleRecord, CouplingRegistry, SubtitleFile,
+    parse_language_code, CertifiedSubtitleRecord, CouplingRegistry, LangStatus, SubtitleFile,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use crate::cli::PostgresArgs;
-use crate::commands::certify::detect_cli_subtitle_lang;
+use crate::commands::certify::detect_cli_subtitle_lang_status;
 use crate::commands::shared::find_or_build_phash;
 use crate::constants::{
     DEFAULT_HTTP_TIMEOUT_SECS, DEFAULT_SERVER_URL, DEFAULT_SUBTITLES_DIR, DEFAULT_TMP_DIR,
@@ -170,7 +170,7 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
 
     // 2. Resolve subtitle pairs
     let explicit_srt = args.srt.as_ref().or(args.srt_pos.as_ref());
-    let pairs: Vec<(PathBuf, Option<String>)> = if let Some(srt_file) = explicit_srt {
+    let pairs: Vec<(PathBuf, LangStatus)> = if let Some(srt_file) = explicit_srt {
         if !srt_file.exists() {
             bail!("Specified subtitle file not found: {:?}", srt_file);
         }
@@ -178,26 +178,43 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
             .file_name()
             .and_then(|f| f.to_str())
             .unwrap_or_default();
-        let lang = args
-            .lang
-            .clone()
-            .or_else(|| parse_language_code(srt_name))
-            .or_else(|| {
-                let detected = detect_cli_subtitle_lang(srt_name, "auto");
-                if detected != "auto" && !detected.is_empty() {
-                    Some(detected)
-                } else {
-                    None
+        let lang_status = if let Some(ref l) = args.lang {
+            LangStatus::Confirmed(l.to_lowercase())
+        } else if let Some(code) = parse_language_code(srt_name) {
+            if !args.json {
+                eprintln!("   Lang detected from filename: {}", code);
+            }
+            LangStatus::Detected(code)
+        } else {
+            let status = detect_cli_subtitle_lang_status(srt_name, "auto");
+            match status {
+                LangStatus::Detected(code) => {
+                    if !args.json {
+                        eprintln!("   Lang detected from filename: {}", code);
+                    }
+                    LangStatus::Detected(code)
                 }
-            });
-        let valid_lang = match lang {
-            Some(l) if l != "auto" && !l.is_empty() && l != "und" => l,
-            _ => bail!(
+                _ => {
+                    if !args.json {
+                        eprintln!("⚠️  Language could not be determined from filename.");
+                        eprintln!(
+                            "   Coupling will be certified with lang=\"und\" (undetermined)."
+                        );
+                        eprintln!("   To fix later: dbsrt coupling:relabel --media <hash> --sub <hash> --lang <code>");
+                        eprintln!("   Or specify --lang <code> now to set it explicitly.");
+                    }
+                    LangStatus::Unknown
+                }
+            }
+        };
+        let lang_code = lang_status.to_lang_code();
+        if lang_code == "auto" || lang_code.is_empty() {
+            bail!(
                 "❌ Could not determine subtitle language for '{}'. Please specify it explicitly via --lang <fr|en|es|...>",
                 srt_name
-            ),
-        };
-        vec![(srt_file.clone(), Some(valid_lang))]
+            );
+        }
+        vec![(srt_file.clone(), lang_status)]
     } else {
         let video_stem = video_path
             .file_stem()
@@ -235,7 +252,7 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
         let sidecars_match_target = if let Some(ref target) = args.lang {
             discovered
                 .iter()
-                .any(|(_, l)| l.as_deref() == Some(target.as_str()))
+                .any(|(_, l)| l.as_deref() == Some(target.as_str()) || l.is_none())
         } else {
             !discovered.is_empty()
         };
@@ -357,47 +374,73 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
             );
         }
         let selected: Vec<_> = if let Some(ref target_lang) = args.lang {
-            let filtered: Vec<_> = discovered
-                .into_iter()
+            let matching: Vec<_> = discovered
+                .iter()
                 .filter(|(_, lang)| lang.as_deref() == Some(target_lang.as_str()))
+                .cloned()
                 .collect();
-            if filtered.is_empty() {
-                bail!(
-                    "❌ Discovered subtitle files did not match requested language '{}'",
-                    target_lang
-                );
+            if !matching.is_empty() {
+                matching
+            } else {
+                let untagged: Vec<_> = discovered
+                    .into_iter()
+                    .filter(|(_, lang)| lang.is_none())
+                    .collect();
+                if untagged.is_empty() {
+                    bail!(
+                        "❌ Discovered subtitle files did not match requested language '{}'",
+                        target_lang
+                    );
+                }
+                untagged
             }
-            filtered
         } else {
             discovered
         };
 
-        for (path, lang_opt) in &selected {
+        let mut final_pairs = Vec::new();
+        for (path, lang_opt) in selected {
             let srt_name = path
                 .file_name()
                 .and_then(|f| f.to_str())
                 .unwrap_or_default();
-            let effective = lang_opt
-                .clone()
-                .or_else(|| args.lang.clone())
-                .unwrap_or_else(|| {
-                    let detected = detect_cli_subtitle_lang(srt_name, "auto");
-                    if !args.json && detected != "auto" {
-                        eprintln!(
-                            "   Lang inferred from filename via detect_cli_subtitle_lang: {}",
-                            detected
-                        );
+            let lang_status = if let Some(ref target) = args.lang {
+                LangStatus::Confirmed(target.to_lowercase())
+            } else if let Some(ref l) = lang_opt {
+                LangStatus::Detected(l.clone())
+            } else {
+                let status = detect_cli_subtitle_lang_status(srt_name, "auto");
+                if !args.json {
+                    eprintln!(
+                        "   Lang inferred from filename via detect_cli_subtitle_lang: {}",
+                        status.to_lang_code()
+                    );
+                }
+                match status {
+                    LangStatus::Detected(code) => LangStatus::Detected(code),
+                    _ => {
+                        if !args.json {
+                            eprintln!("⚠️  Language could not be determined from filename.");
+                            eprintln!(
+                                "   Coupling will be certified with lang=\"und\" (undetermined)."
+                            );
+                            eprintln!("   To fix later: dbsrt coupling:relabel --media <hash> --sub <hash> --lang <code>");
+                            eprintln!("   Or specify --lang <code> now to set it explicitly.");
+                        }
+                        LangStatus::Unknown
                     }
-                    detected
-                });
-            if effective == "auto" || effective.is_empty() || effective == "und" {
+                }
+            };
+            let lang_code = lang_status.to_lang_code();
+            if lang_code == "auto" || lang_code.is_empty() {
                 bail!(
                     "❌ Could not determine subtitle language for '{}'. Please specify it explicitly via --lang <fr|en|es|...>",
                     srt_name
                 );
             }
+            final_pairs.push((path, lang_status));
         }
-        selected
+        final_pairs
     };
 
     // 3. Detect FPS
@@ -480,7 +523,7 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
         eprintln!("📋 Certifying {} subtitle coupling(s)...", pairs.len());
     }
 
-    for (srt_path, lang_opt) in &pairs {
+    for (srt_path, lang_status) in &pairs {
         let raw_srt_bytes = fs::read(srt_path)?;
         let subtitles_hash = compute_bytes_digest_32(&raw_srt_bytes);
 
@@ -490,22 +533,10 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
             .to_string_lossy()
             .to_string();
 
-        let lang = lang_opt
-            .clone()
-            .or_else(|| args.lang.clone())
-            .unwrap_or_else(|| {
-                let detected = detect_cli_subtitle_lang(&srt_fname, "auto");
-                if !args.json && detected != "auto" {
-                    eprintln!(
-                        "   Lang inferred from filename via detect_cli_subtitle_lang: {}",
-                        detected
-                    );
-                }
-                detected
-            });
+        let lang = lang_status.to_lang_code();
 
         // Validate: reject "auto" or empty language codes
-        if lang == "auto" || lang.is_empty() || lang == "und" {
+        if lang == "auto" || lang.is_empty() {
             bail!(
                 "❌ Could not determine subtitle language for '{}'. Please specify it explicitly via --lang <fr|en|es|...>",
                 srt_fname
@@ -558,11 +589,17 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
             eprintln!("   Source: {}", source_kind);
             eprintln!("   SRT: {}", srt_fname);
             eprintln!(
-                "   Final lang: {} (from: filename={}, --lang={})",
-                lang,
-                lang_opt.clone().unwrap_or_else(|| "none".into()),
-                args.lang.clone().unwrap_or_else(|| "none".into())
+                "   Final lang: {} (from: lang_status={:?})",
+                lang, lang_status
             );
+            match lang_status {
+                LangStatus::Unknown => {
+                    eprintln!("   Lang status: Unknown (certified as 'und' — needs relabel)");
+                }
+                other => {
+                    eprintln!("   Lang status: {:?}", other);
+                }
+            }
             eprintln!("   Cues: {}", srt_file.cues.len());
         }
 
@@ -576,6 +613,7 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
                 name: rel_srt_name.clone(),
                 srt_path: rel_srt_name.clone(),
                 lang: lang.clone(),
+                lang_status: lang_status.clone(),
                 subtitles_hash: subtitles_hash.clone(),
                 certified: true,
                 cue_count: srt_file.cues.len(),

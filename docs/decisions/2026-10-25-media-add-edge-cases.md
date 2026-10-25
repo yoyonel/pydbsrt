@@ -163,3 +163,34 @@ Pour garantir une couverture > 60% et satisfaire les critères de validation :
 6. `docs(diataxis): add media:add unified facade user guide`
     - Documentation utilisateur `docs/2026-10-25-guide-media-add-facade.md`
     - Enregistrement dans `mkdocs.yml` sous *Accueil & Guide*
+
+---
+
+## 6. Phase 1.5 : Élimination de la Corruption Silencieuse de Langue (`LangStatus` Enum)
+
+### Problématique & Cas Réel Reproduit (Euphoria US S01E02)
+
+Lors des tests sur des fichiers réels de la scène (`Euphoria.US.S01E02.1080p.WEBRip.x265-RARBG.mp4` avec `Euphoria.US.S01E02.1080p.WEBRip.x265-RARBG.srt` en contenu français) :
+
+- L'analyseur lexical rencontrait le token `"rarbg"`, qui provoquait une interruption prématurée (`break`) de la boucle `rsplit`.
+- Le fallback historique renvoyait alors `DEFAULT_SUBTITLE_LANG = "en"`.
+- Le couplage était certifié silencieusement avec la langue `"en"`, créant une corruption de vérité-terrain (*ground-truth*).
+
+**Règle d'ingénierie fondamentale** : Un système de vérité-terrain ne doit **jamais** deviner la langue. S'il ne peut pas déterminer le code langue avec certitude, il doit l'expliciter via `lang="und"` (ISO 639-2 *undetermined*) et tracer le niveau de confiance via un statut dédié.
+
+### Architecture du Type `LangStatus`
+
+Dans `dbsrt_core::lang_status` :
+
+- `Confirmed(String)` : Langue explicitement fournie par l'utilisateur via `--lang <code_iso>`. Confiance maximale.
+- `Detected(String)` : Langue extraite d'un suffixe ou jeton ISO 639 valide (`.fr.srt`, `.en.srt`, métadonnées conteneur). Confiance haute.
+- `Inferred(String)` : Repli heuristique historique. Niveau incertain. Conservé pour rétrocompatibilité des anciens registres.
+- `Unknown` : Langue indéterminée. Le couplage est certifié avec `lang="und"`. L'utilisateur est notifié et invité à spécifier `--lang` ou à requalifier ultérieurement.
+
+### Stratégie de Migration des Couplages Existants
+
+Les entrées `couplings.json` générées avant cette mise à jour ne possèdent pas le champ `lang_status`. Lors de la désérialisation, l'attribut `#[serde(default = "default_lang_status_for_legacy")]` leur assigne automatiquement `LangStatus::Inferred("und")`.
+
+- Aucun écrasement ni perte de données : la valeur de `lang` d'origine est préservée.
+- La recherche peut filtrer via `is_certain()` pour ne pas exposer de couplages incertains sur des requêtes linguistiques strictes.
+- Une commande ultérieure (`dbsrt coupling:relabel`, Phase 3) permettra de requalifier formellement les entrées legacy.

@@ -178,6 +178,27 @@ Pour tester l'extraction sans modifier les registres ni notifier le serveur :
 task media:add -- tests/data/big_buck_bunny_trailer_480p.mp4 --skip-certify
 ```
 
+### Progression Temps Réel & Observabilité (`stderr`)
+
+Pour accompagner les étapes longues (extraction vidéo pouvant durer plusieurs minutes sur de longs métrages), la commande journalise chaque phase sur le canal `stderr` :
+
+- Scan des sous-titres sidecars (`==> Scanning for sidecar subtitles...`) et langue inférée (`detect_cli_subtitle_lang`).
+- Inspection conteneur et extraction de flux internes (`==> Extracting embedded subtitle stream #0 (fr)...`).
+- Début et fin d'extraction des trames pHash avec comptage exact (`==> Extracted 1200 perceptual hash frames...`).
+- Certification du couplage avec distinction explicite de source (`[sidecar]` vs `[embedded-extracted]`).
+
+> [!NOTE]
+> En mode `--json`, tous les logs textuels de progression sont automatiquement masqués afin de garantir une sortie JSON pure sur `stdout`.
+
+### Nettoyage Garanti sur Interruption (`SIGINT` / Ctrl+C)
+
+Si l'utilisateur interrompt le processus (`Ctrl+C`) pendant l'extraction pHash :
+
+- Un gestionnaire de signal `ctrlc` intercepte immédiatement le signal.
+- Le fichier `.phash` incomplet ou partiel (< 1 000 octets) est atomiquement supprimé du disque.
+- Les fichiers `.srt` temporaires extraits sont nettoyés pour éviter de polluer le système de fichiers.
+- Le processus se termine proprement avec le code de sortie POSIX standard `130`.
+
 ---
 
 ## 6. Référence des Options CLI
@@ -193,3 +214,21 @@ task media:add -- tests/data/big_buck_bunny_trailer_480p.mp4 --skip-certify
 | `--skip-certify` | `false` | Mode simulation : extrait l'empreinte sans enregistrer le couplage |
 | `--json` | `false` | Affiche le rapport d'exécution au format JSON structuré |
 | `--server-url <URL>` | `http://127.0.0.1:8765` | URL de l'instance `dbsrt-server` pour l'ingestion RAM |
+
+---
+
+## 7. Langue des Sous-Titres : Confiance & Fallback Explicite (`LangStatus`)
+
+Un système d'indexation certifiée ne doit jamais deviner silencieusement la langue d'un sous-titre. `dbsrt` associe à chaque couplage un niveau de confiance formel (`LangStatus`) :
+
+| Statut `LangStatus` | Confiance | Détection | Code dans `couplings.json` |
+| :--- | :--- | :--- | :--- |
+| **`Confirmed(lang)`** | Maximale | Fourni explicitement via `--lang <code>` | Code utilisateur (ex: `"fr"`) |
+| **`Detected(lang)`** | Haute | Suffixe normalisé (`.fr.srt`, `.en.srt`) ou métadonnées MKV/MP4 | Code ISO détecté (ex: `"fr"`) |
+| **`Inferred(lang)`** | Faible | Rétrocompatibilité des anciens registres Phase 1 | Conservé pour compatibilité |
+| **`Unknown`** | Nulle | Aucun jeton linguistique reconnu | `"und"` (ISO 639-2 non déterminé) |
+
+### Recommandations Opérationnelles
+
+- Spécifier `--lang <code>` dès que le nom de fichier ne porte pas de suffixe clair (`.fr.srt`, etc.).
+- Si la langue n'a pu être résolue, le couplage est automatiquement enregistré avec `lang="und"`. Un avertissement console invite à utiliser la commande de requalification future (`dbsrt coupling:relabel`).
