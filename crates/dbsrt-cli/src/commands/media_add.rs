@@ -122,7 +122,14 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
                     None
                 }
             });
-        vec![(srt_file.clone(), lang)]
+        let valid_lang = match lang {
+            Some(l) if l != "auto" && !l.is_empty() => l,
+            _ => bail!(
+                "❌ Could not determine subtitle language for '{}'. Please specify it explicitly via --lang <fr|en|es|...>",
+                srt_name
+            ),
+        };
+        vec![(srt_file.clone(), Some(valid_lang))]
     } else {
         let discovered = find_subtitle_pairs(video_path)?;
         if discovered.is_empty() {
@@ -131,7 +138,7 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
                 video_path
             );
         }
-        if let Some(ref target_lang) = args.lang {
+        let selected: Vec<_> = if let Some(ref target_lang) = args.lang {
             let filtered: Vec<_> = discovered
                 .into_iter()
                 .filter(|(_, lang)| lang.as_deref() == Some(target_lang.as_str()))
@@ -145,7 +152,25 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
             filtered
         } else {
             discovered
+        };
+
+        for (path, lang_opt) in &selected {
+            let srt_name = path
+                .file_name()
+                .and_then(|f| f.to_str())
+                .unwrap_or_default();
+            let effective = lang_opt
+                .clone()
+                .or_else(|| args.lang.clone())
+                .unwrap_or_else(|| detect_cli_subtitle_lang(srt_name, "auto"));
+            if effective == "auto" || effective.is_empty() {
+                bail!(
+                    "❌ Could not determine subtitle language for '{}'. Please specify it explicitly via --lang <fr|en|es|...>",
+                    srt_name
+                );
+            }
         }
+        selected
     };
 
     // 3. Detect FPS
@@ -212,6 +237,14 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
             .or_else(|| args.lang.clone())
             .unwrap_or_else(|| detect_cli_subtitle_lang(&srt_fname, "auto"));
 
+        // Validate: reject "auto" or empty language codes
+        if lang == "auto" || lang.is_empty() {
+            bail!(
+                "❌ Could not determine subtitle language for '{}'. Please specify it explicitly via --lang <fr|en|es|...>",
+                srt_fname
+            );
+        }
+
         if reg.is_already_certified(&media_hash, &subtitles_hash) {
             skipped_count += 1;
             if !args.json {
@@ -266,47 +299,52 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
         reg.save(&reg_path)?;
     }
 
-    // 7. Dynamic Catalog RAM Ingestion
+    // 7. Dynamic Catalog RAM Ingestion (only if new couplings were certified)
     let mut server_ingested = false;
-    let ingest_url = format!(
-        "{}/v1/catalog/ingest",
-        args.server_url.trim_end_matches('/')
-    );
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
-        .build()?;
 
-    let payload = serde_json::json!({
-        "phash_path": phash_path.to_string_lossy(),
-        "fps": fps
-    });
+    if certified_count > 0 {
+        let ingest_url = format!(
+            "{}/v1/catalog/ingest",
+            args.server_url.trim_end_matches('/')
+        );
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
+            .build()?;
 
-    match client.post(&ingest_url).json(&payload).send().await {
-        Ok(resp) if resp.status().is_success() => {
-            server_ingested = true;
-            if !args.json {
-                println!(
-                    "✓ Dynamic RAM ingestion succeeded on dbsrt-server ({})",
-                    ingest_url
-                );
+        let payload = serde_json::json!({
+            "phash_path": phash_path.to_string_lossy(),
+            "fps": fps
+        });
+
+        match client.post(&ingest_url).json(&payload).send().await {
+            Ok(resp) if resp.status().is_success() => {
+                server_ingested = true;
+                if !args.json {
+                    println!(
+                        "✓ Dynamic RAM ingestion succeeded on dbsrt-server ({})",
+                        ingest_url
+                    );
+                }
+            }
+            Ok(resp) => {
+                if !args.json {
+                    println!(
+                        "⚠️  dbsrt-server catalog ingest returned HTTP {}. Coupling remains certified on disk.",
+                        resp.status()
+                    );
+                }
+            }
+            Err(_) => {
+                if !args.json {
+                    println!(
+                        "⚠️  dbsrt-server offline ({}): .phash extracted and coupling certified to disk, will be loaded on next server startup.",
+                        args.server_url
+                    );
+                }
             }
         }
-        Ok(resp) => {
-            if !args.json {
-                println!(
-                    "⚠️  dbsrt-server catalog ingest returned HTTP {}. Coupling remains certified on disk.",
-                    resp.status()
-                );
-            }
-        }
-        Err(_) => {
-            if !args.json {
-                println!(
-                    "⚠️  dbsrt-server offline ({}): .phash extracted and coupling certified to disk, will be loaded on next server startup.",
-                    args.server_url
-                );
-            }
-        }
+    } else if !args.json {
+        println!("ℹ️  All couplings already certified (idempotent skip). Server ingest skipped.");
     }
 
     let result = MediaAddResult {
@@ -416,6 +454,38 @@ mod tests {
         assert!(
             err.to_string().contains("No matching .srt file found"),
             "Expected clear error message about missing SRT: {}",
+            err
+        );
+    }
+
+    #[tokio::test]
+    async fn test_media_add_unknown_language_rejects_auto() {
+        let temp = TempTestDir::new("auto_lang");
+        let video = temp.path.join("sample.mp4");
+        let srt = temp.path.join("random_unnamed_sub.srt");
+        File::create(&video).unwrap();
+        fs::write(&srt, "1\n00:00:01,000 --> 00:00:02,000\nHello\n").unwrap();
+
+        let args = MediaAddArgs {
+            video: Some(video),
+            video_pos: None,
+            srt: Some(srt),
+            srt_pos: None,
+            lang: Some("auto".to_string()),
+            fps: Some(24.0),
+            phash_dir: temp.path.join("phash"),
+            subtitles_dir: temp.path.join("subtitles"),
+            skip_certify: false,
+            json: false,
+            server_url: DEFAULT_SERVER_URL.to_string(),
+            db: PostgresArgs::default(),
+        };
+
+        let err = run_media_add(&args).await.unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("Could not determine subtitle language"),
+            "Expected error rejecting 'auto' language: {}",
             err
         );
     }
