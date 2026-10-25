@@ -1,4 +1,5 @@
 {
+  "version": 1,
   "couplings": [
     {
       "media_hash": "3c9a66708998e2e0e006f1609c6c46d5",
@@ -12,8 +13,8 @@
           "name": "big_buck_bunny_trailer_480p.fr.srt",
           "lang": "fr",
           "lang_status": {
-            "kind": "Inferred",
-            "value": "und"
+            "kind": "Confirmed",
+            "value": "fr"
           },
           "srt_path": "big_buck_bunny_trailer_480p.fr.srt",
           "certified": true,
@@ -23,7 +24,7 @@
               "index": 1,
               "start_frame_offset": 0,
               "end_frame_offset": 95,
-              "text": "Le peach open movie project présente",
+              "text": "Le peach open movie project pr\u00e9sente",
               "anchor_phash": 15408268795152968404
             },
             {
@@ -44,14 +45,14 @@
               "index": 4,
               "start_frame_offset": 410,
               "end_frame_offset": 474,
-              "text": "Et une vengeance géante",
+              "text": "Et une vengeance g\u00e9ante",
               "anchor_phash": 14335057725108914612
             },
             {
               "index": 5,
               "start_frame_offset": 574,
               "end_frame_offset": 625,
-              "text": "Préparez-vous",
+              "text": "Pr\u00e9parez-vous",
               "anchor_phash": 18247127210181431685
             },
             {
@@ -65,7 +66,7 @@
               "index": 7,
               "start_frame_offset": 750,
               "end_frame_offset": 778,
-              "text": "Bientôt disponible",
+              "text": "Bient\u00f4t disponible",
               "anchor_phash": 13296845186135458439
             },
             {
@@ -82,8 +83,8 @@
           "name": "big_buck_bunny_trailer_480p.en.srt",
           "lang": "en",
           "lang_status": {
-            "kind": "Inferred",
-            "value": "und"
+            "kind": "Confirmed",
+            "value": "en"
           },
           "srt_path": "big_buck_bunny_trailer_480p.en.srt",
           "certified": true,
@@ -144,155 +145,6 @@
               "end_frame_offset": 811,
               "text": "www.bigbuckbunny.org",
               "anchor_phash": 17693115870695101797
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "media_hash": "d52aafdabdb4c82378eac57f50295c01",
-      "media_name": "big_buck_bunny_trailer_480p.mp4.25.0fps",
-      "phash_filename": "big_buck_bunny_trailer_480p.mp4.25.0fps.phash",
-      "fps": 25.0,
-      "frame_count": 812,
-      "subtitles": [
-        {
-          "subtitles_hash": "ef916eb1cffa1e561f5d8649f5158b1a",
-          "name": "big_buck_bunny_trailer_480p.fr.srt",
-          "lang": "fr",
-          "lang_status": {
-            "kind": "Inferred",
-            "value": "und"
-          },
-          "srt_path": "big_buck_bunny_trailer_480p.fr.srt",
-          "certified": true,
-          "cue_count": 8,
-          "sub_frames": [
-            {
-              "index": 1,
-              "start_frame_offset": 0,
-              "end_frame_offset": 95,
-              "text": "Le peach open movie project présente",
-              "anchor_phash": 15408268795152968404
-            },
-            {
-              "index": 2,
-              "start_frame_offset": 150,
-              "end_frame_offset": 225,
-              "text": "Un gros lapin",
-              "anchor_phash": 14005263982633964423
-            },
-            {
-              "index": 3,
-              "start_frame_offset": 273,
-              "end_frame_offset": 325,
-              "text": "Trois rongeurs",
-              "anchor_phash": 9268638141603356670
-            },
-            {
-              "index": 4,
-              "start_frame_offset": 410,
-              "end_frame_offset": 474,
-              "text": "Et une vengeance géante",
-              "anchor_phash": 14335057725108914612
-            },
-            {
-              "index": 5,
-              "start_frame_offset": 574,
-              "end_frame_offset": 625,
-              "text": "Préparez-vous",
-              "anchor_phash": 18247127210181431685
-            },
-            {
-              "index": 6,
-              "start_frame_offset": 668,
-              "end_frame_offset": 750,
-              "text": "Big Buck Bunny",
-              "anchor_phash": 15408268795152968404
-            },
-            {
-              "index": 7,
-              "start_frame_offset": 750,
-              "end_frame_offset": 778,
-              "text": "Bientôt disponible",
-              "anchor_phash": 13296845186135458439
-            },
-            {
-              "index": 8,
-              "start_frame_offset": 778,
-              "end_frame_offset": 811,
-              "text": "www.bigbuckbunny.org",
-              "anchor_phash": 17697900945299178852
-            }
-          ]
-        },
-        {
-          "subtitles_hash": "bcb3b4368427decfefbaa148fd4da74c",
-          "name": "big_buck_bunny_trailer_480p.en.srt",
-          "lang": "en",
-          "lang_status": {
-            "kind": "Inferred",
-            "value": "und"
-          },
-          "srt_path": "big_buck_bunny_trailer_480p.en.srt",
-          "certified": true,
-          "cue_count": 8,
-          "sub_frames": [
-            {
-              "index": 1,
-              "start_frame_offset": 0,
-              "end_frame_offset": 95,
-              "text": "The peach open movie project presents",
-              "anchor_phash": 15408268795152968404
-            },
-            {
-              "index": 2,
-              "start_frame_offset": 150,
-              "end_frame_offset": 225,
-              "text": "One big rabbit",
-              "anchor_phash": 14005263982633964423
-            },
-            {
-              "index": 3,
-              "start_frame_offset": 273,
-              "end_frame_offset": 325,
-              "text": "Three rodents",
-              "anchor_phash": 9268638141603356670
-            },
-            {
-              "index": 4,
-              "start_frame_offset": 410,
-              "end_frame_offset": 474,
-              "text": "And one giant payback",
-              "anchor_phash": 14335057725108914612
-            },
-            {
-              "index": 5,
-              "start_frame_offset": 574,
-              "end_frame_offset": 625,
-              "text": "Get ready",
-              "anchor_phash": 18247127210181431685
-            },
-            {
-              "index": 6,
-              "start_frame_offset": 668,
-              "end_frame_offset": 750,
-              "text": "Big Buck Bunny",
-              "anchor_phash": 15408268795152968404
-            },
-            {
-              "index": 7,
-              "start_frame_offset": 750,
-              "end_frame_offset": 778,
-              "text": "Coming soon",
-              "anchor_phash": 13296845186135458439
-            },
-            {
-              "index": 8,
-              "start_frame_offset": 778,
-              "end_frame_offset": 811,
-              "text": "www.bigbuckbunny.org",
-              "anchor_phash": 17697900945299178852
             }
           ]
         }
