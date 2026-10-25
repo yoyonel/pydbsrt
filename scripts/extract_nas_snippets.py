@@ -22,7 +22,7 @@ from pathlib import Path
 
 
 def default_nas_root() -> Path:
-    env_root = os.environ.get("NAS_ROOT")
+    env_root = os.environ.get("MEDIA_ROOT") or os.environ.get("NAS_ROOT")
     if env_root:
         return Path(env_root)
     return Path("/media") / getpass.getuser() / "Synology"

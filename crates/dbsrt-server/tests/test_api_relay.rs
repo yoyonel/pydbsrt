@@ -14,9 +14,10 @@ async fn test_dual_process_remote_relay_e2e() {
     let phash_dir = repo_root.join("data/__PHASH__");
     let srt_dir = repo_root.join("data/SRT");
     let snippet_video = repo_root.join("data/snippets/Andor.S01E01.1080p.WEB.h264-KOGi_mid15s.mp4");
+    let couplings_file = srt_dir.join("couplings.json");
 
-    if !phash_dir.exists() || !snippet_video.exists() {
-        eprintln!("Skipping test: test fixtures not found");
+    if !phash_dir.exists() || !snippet_video.exists() || !couplings_file.exists() {
+        eprintln!("Skipping test: test fixtures or couplings.json not found");
         return;
     }
 
