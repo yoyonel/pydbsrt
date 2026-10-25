@@ -61,7 +61,7 @@ def purge_couplings(stem: str) -> bool:
 
 def purge_postgres(stem: str):
     """Purges media record in PostgreSQL 17 (ON DELETE CASCADE handles frames/subs)."""
-    psql_port = os.environ.get("PSQL_PORT", "5433")
+    psql_port = os.environ.get("PSQL_PORT", "5432")
     cmd = [
         "psql",
         "-h",

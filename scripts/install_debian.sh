@@ -7,7 +7,7 @@ BIN_DIR="${HOME}/.local/bin"
 SYSTEMD_USER_DIR="${HOME}/.config/systemd/user"
 SERVICE_NAME="dbsrt-agent.service"
 VLC_EXT_DIR="${HOME}/.local/share/vlc/lua/extensions"
-DEFAULT_REMOTE_API="http://192.168.1.24:8765"
+DEFAULT_REMOTE_API="${DEFAULT_REMOTE_API:-http://127.0.0.1:8765}"
 DEFAULT_PORT=8765
 
 ACTION="${1:-install}"
