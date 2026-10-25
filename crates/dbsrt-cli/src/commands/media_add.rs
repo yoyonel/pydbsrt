@@ -4,10 +4,11 @@ use anyhow::{anyhow, bail, Result};
 use clap::Args;
 use dbsrt_core::{
     build_and_validate_sub_frames_opts, compute_bytes_digest_32, compute_media_phash_digest,
-    detect_media_fps, find_subtitle_pairs, parse_language_code, CertifiedSubtitleRecord,
-    CouplingRegistry, SubtitleFile,
+    detect_media_fps, extract_embedded_subtitle, find_subtitle_pairs, inspect_container,
+    parse_language_code, CertifiedSubtitleRecord, CouplingRegistry, SubtitleFile,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -123,7 +124,7 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
                 }
             });
         let valid_lang = match lang {
-            Some(l) if l != "auto" && !l.is_empty() => l,
+            Some(l) if l != "auto" && !l.is_empty() && l != "und" => l,
             _ => bail!(
                 "❌ Could not determine subtitle language for '{}'. Please specify it explicitly via --lang <fr|en|es|...>",
                 srt_name
@@ -131,7 +132,110 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
         };
         vec![(srt_file.clone(), Some(valid_lang))]
     } else {
-        let discovered = find_subtitle_pairs(video_path)?;
+        let mut discovered = find_subtitle_pairs(video_path)?;
+
+        let sidecars_match_target = if let Some(ref target) = args.lang {
+            discovered
+                .iter()
+                .any(|(_, l)| l.as_deref() == Some(target.as_str()))
+        } else {
+            !discovered.is_empty()
+        };
+
+        if !sidecars_match_target {
+            match inspect_container(video_path) {
+                Ok(insp) if !insp.subtitle_streams.is_empty() => {
+                    let video_stem = video_path
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("unknown");
+
+                    fs::create_dir_all(&args.subtitles_dir)?;
+
+                    let mut seen_extracted_langs = HashSet::new();
+                    let mut seen_no_lang = false;
+
+                    for stream in &insp.subtitle_streams {
+                        let stream_lang_opt =
+                            stream.language.as_deref().and_then(parse_language_code);
+
+                        // Honor --lang override for embedded track filtering
+                        if let Some(ref target) = args.lang {
+                            let matches = match &stream_lang_opt {
+                                Some(l) => l == target,
+                                None => true,
+                            };
+                            if !matches {
+                                continue;
+                            }
+                        }
+
+                        let lang_opt = stream_lang_opt.or_else(|| args.lang.clone());
+
+                        if let Some(ref lang) = lang_opt {
+                            if seen_extracted_langs.contains(lang) {
+                                if !args.json {
+                                    eprintln!(
+                                        "ℹ️  Skipping duplicate {} track (stream #{})",
+                                        lang, stream.subtitle_index
+                                    );
+                                }
+                                continue;
+                            }
+                            seen_extracted_langs.insert(lang.clone());
+                        } else {
+                            if seen_no_lang {
+                                if !args.json {
+                                    eprintln!(
+                                        "ℹ️  Skipping duplicate untagged track (stream #{})",
+                                        stream.subtitle_index
+                                    );
+                                }
+                                continue;
+                            }
+                            seen_no_lang = true;
+                        }
+
+                        match extract_embedded_subtitle(video_path, stream.subtitle_index) {
+                            Ok(srt_content) => {
+                                let srt_fname = match &lang_opt {
+                                    Some(lang) => format!("{}.{}.srt", video_stem, lang),
+                                    None => format!("{}.srt", video_stem),
+                                };
+                                let srt_path = args.subtitles_dir.join(&srt_fname);
+
+                                fs::write(&srt_path, &srt_content)?;
+
+                                if !args.json {
+                                    let lang_display = lang_opt.as_deref().unwrap_or("unknown");
+                                    println!(
+                                        "📦 Extracted embedded subtitle track #{} ({}) → {:?}",
+                                        stream.subtitle_index, lang_display, srt_path
+                                    );
+                                }
+
+                                discovered.push((srt_path, lang_opt));
+                            }
+                            Err(e) => {
+                                if !args.json {
+                                    eprintln!(
+                                        "⚠️  Failed to extract subtitle track #{}: {}",
+                                        stream.subtitle_index, e
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    if !args.json {
+                        eprintln!("⚠️  Could not inspect video container: {}", e);
+                    }
+                }
+            }
+        }
+
         if discovered.is_empty() {
             bail!(
                 "❌ No matching .srt file found for '{:?}'. Specify a subtitle file with '--srt <path>' or download one using 'dbsrt fetch-subtitles -q \"<title>\" -l fr'.",
@@ -163,7 +267,7 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
                 .clone()
                 .or_else(|| args.lang.clone())
                 .unwrap_or_else(|| detect_cli_subtitle_lang(srt_name, "auto"));
-            if effective == "auto" || effective.is_empty() {
+            if effective == "auto" || effective.is_empty() || effective == "und" {
                 bail!(
                     "❌ Could not determine subtitle language for '{}'. Please specify it explicitly via --lang <fr|en|es|...>",
                     srt_name

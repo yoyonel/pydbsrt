@@ -43,8 +43,11 @@ Ce document consigne les décisions d'architecture et la résolution systématiq
 
 **Règles de Résolution (Convention over Configuration)** :
 
-1. **Recherche de paires par stem** : Le système extrait le stem du média (nom de fichier dépouillé de son extension conteneur `.mkv`, `.mp4`, `.webm`, `.avi`, `.mov`) et recherche les fichiers `*.srt` résidant dans le même répertoire (recherche insensible à la casse).
-2. **Scénario 0 SRT trouvé** : Émission d'une erreur bloquante claire avec suggestion d'action immédiate. Message : `Aucun sous-titre .srt trouvé pour '<video>'. Spécifiez un fichier via '--srt <path>' ou téléchargez-le via 'dbsrt fetch-subtitles -q \"<titre>\" -l fr'.` Code de sortie : `1`.
+1. **Recherche de paires par stem** : Le système extrait le stem du média (nom de fichier dépouillé de son extension conteneur `.mkv`, `.mp4`, `.webm`, `.avi`, `.mov`) et recherche les fichiers `*.srt` résidant dans le même répertoire ou sous-dossiers `Subs/` (recherche insensible à la casse).
+2. **Scénario 0 SRT sidecar trouvé (Fallback Conteneur Embarqué)** :
+    - *Inspection automatique du conteneur* : Le système inspecte le conteneur vidéo via `dbsrt_core::inspect_container` (`ffprobe`).
+    - *Extraction des flux embarqués* : Si des pistes de sous-titres internes sont détectées, elles sont extraites sans ré-encodage via `dbsrt_core::extract_embedded_subtitle` (`ffmpeg`) et écrites dans `data/SRT/<video_stem>.<lang>.srt`.
+    - *Erreur bloquante uniquement si aucun flux détecté* : Si aucun flux interne n'existe ou si l'inspection échoue, émission d'une erreur bloquante : `Aucun sous-titre .srt trouvé pour '<video>'. Spécifiez un fichier via '--srt <path>' ou téléchargez-le via 'dbsrt fetch-subtitles -q \"<titre>\" -l fr'.` Code de sortie : `1`.
 3. **Scénario 1 SRT trouvé** : Association automatique transparente, détection de la langue via le stem/suffixe ou repli.
 4. **Scénario N (2+) SRT trouvés** : Si tous les SRT découverts portent le même stem avec des suffixes linguistiques distincts et valides (ex: `film.fr.srt` et `film.en.srt`), le système traite et certifie chaque couple linguistique séquentiellement. Si les fichiers trouvés sont ambigus ou ne suivent pas la convention de nommage par langue, l'opération s'interrompt avec une erreur explicite demandant d'indiquer le sous-titre cible via `--srt <path>`.
 

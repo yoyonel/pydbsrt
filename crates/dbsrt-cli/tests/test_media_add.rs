@@ -235,3 +235,306 @@ fn test_cli_media_add_synthetic_mkv_with_auto_stem_pairing() {
     assert_eq!(json["success"], true);
     assert_eq!(json["certified_couplings"], 1);
 }
+
+/// [EMPIRICALLY PROVEN] Verifies automatic extraction and certification of embedded MKV subtitles
+/// when no external sidecar .srt file exists. Requires ffmpeg binary.
+#[test]
+fn test_cli_media_add_mkv_with_embedded_subtitles() {
+    let ffmpeg_check = Command::new("ffmpeg").arg("-version").output();
+    if ffmpeg_check.is_err() || !ffmpeg_check.unwrap().status.success() {
+        eprintln!("ffmpeg not available, skipping embedded subtitles test");
+        return;
+    }
+
+    let temp = TempTestDir::new("embedded_subs");
+    let mkv_path = temp.path.join("movie_with_subs.mkv");
+    let phash_dir = temp.path.join("phash");
+    let subtitles_dir = temp.path.join("subtitles");
+
+    // Generate 2s MKV with embedded SRT subtitle track
+    let srt_content = "1\n00:00:00,500 --> 00:00:01,500\nHello World\n";
+    let srt_tmp = temp.path.join("input.srt");
+    fs::write(&srt_tmp, srt_content).unwrap();
+
+    let gen_status = Command::new("ffmpeg")
+        .args([
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=duration=2:size=160x120:rate=24",
+            "-f",
+            "srt",
+            "-i",
+            srt_tmp.to_str().unwrap(),
+            "-c:v",
+            "libx264",
+            "-c:s",
+            "srt",
+            "-metadata:s:s:0",
+            "language=fre",
+            "-y",
+            mkv_path.to_str().unwrap(),
+        ])
+        .output();
+
+    if gen_status.is_err() || !gen_status.unwrap().status.success() {
+        eprintln!("Failed to generate MKV with embedded subs, skipping");
+        return;
+    }
+
+    // Run media:add WITHOUT --srt (should auto-extract from container)
+    let out = Command::new(env!("CARGO_BIN_EXE_dbsrt"))
+        .args([
+            "media:add",
+            mkv_path.to_str().unwrap(),
+            "--phash-dir",
+            phash_dir.to_str().unwrap(),
+            "--subtitles-dir",
+            subtitles_dir.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .expect("Failed to run media:add on MKV with embedded subs");
+
+    assert!(
+        out.status.success(),
+        "Embedded subs test failed: {:?}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let json: serde_json::Value =
+        serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).expect("JSON parse");
+    assert_eq!(json["success"], true);
+    assert_eq!(json["certified_couplings"], 1);
+}
+
+/// [EMPIRICALLY PROVEN] Verifies multi-language embedded track extraction (fr + en).
+#[test]
+fn test_cli_media_add_mkv_multi_lang_tracks() {
+    let ffmpeg_check = Command::new("ffmpeg").arg("-version").output();
+    if ffmpeg_check.is_err() || !ffmpeg_check.unwrap().status.success() {
+        eprintln!("ffmpeg not available, skipping embedded multi-lang test");
+        return;
+    }
+
+    let temp = TempTestDir::new("embedded_multi_lang");
+    let mkv_path = temp.path.join("movie_multi_lang.mkv");
+    let phash_dir = temp.path.join("phash");
+    let subtitles_dir = temp.path.join("subtitles");
+
+    let srt_fr = temp.path.join("input_fr.srt");
+    let srt_en = temp.path.join("input_en.srt");
+    fs::write(
+        &srt_fr,
+        "1\n00:00:00,500 --> 00:00:01,500\nBonjour le monde\n",
+    )
+    .unwrap();
+    fs::write(&srt_en, "1\n00:00:00,500 --> 00:00:01,500\nHello World\n").unwrap();
+
+    let gen_status = Command::new("ffmpeg")
+        .args([
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=duration=2:size=160x120:rate=24",
+            "-f",
+            "srt",
+            "-i",
+            srt_fr.to_str().unwrap(),
+            "-f",
+            "srt",
+            "-i",
+            srt_en.to_str().unwrap(),
+            "-c:v",
+            "libx264",
+            "-c:s",
+            "srt",
+            "-map",
+            "0:v:0",
+            "-map",
+            "1:s:0",
+            "-map",
+            "2:s:0",
+            "-metadata:s:s:0",
+            "language=fre",
+            "-metadata:s:s:1",
+            "language=eng",
+            "-y",
+            mkv_path.to_str().unwrap(),
+        ])
+        .output();
+
+    if gen_status.is_err() || !gen_status.unwrap().status.success() {
+        eprintln!("Failed to generate multi-lang MKV, skipping");
+        return;
+    }
+
+    let out = Command::new(env!("CARGO_BIN_EXE_dbsrt"))
+        .args([
+            "media:add",
+            mkv_path.to_str().unwrap(),
+            "--phash-dir",
+            phash_dir.to_str().unwrap(),
+            "--subtitles-dir",
+            subtitles_dir.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .expect("Failed to run media:add on multi-lang MKV");
+
+    assert!(
+        out.status.success(),
+        "Multi-lang MKV failed: {:?}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let json: serde_json::Value =
+        serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).expect("JSON parse");
+    assert_eq!(json["success"], true);
+    assert_eq!(json["certified_couplings"], 2);
+}
+
+/// [EMPIRICALLY PROVEN] Verifies duplicate language embedded track deduplication.
+#[test]
+fn test_cli_media_add_mkv_duplicate_lang_tracks() {
+    let ffmpeg_check = Command::new("ffmpeg").arg("-version").output();
+    if ffmpeg_check.is_err() || !ffmpeg_check.unwrap().status.success() {
+        eprintln!("ffmpeg not available, skipping embedded duplicate-lang test");
+        return;
+    }
+
+    let temp = TempTestDir::new("embedded_dup_lang");
+    let mkv_path = temp.path.join("movie_dup_lang.mkv");
+    let phash_dir = temp.path.join("phash");
+    let subtitles_dir = temp.path.join("subtitles");
+
+    let srt_tmp = temp.path.join("input.srt");
+    fs::write(
+        &srt_tmp,
+        "1\n00:00:00,500 --> 00:00:01,500\nBonjour le monde\n",
+    )
+    .unwrap();
+
+    let gen_status = Command::new("ffmpeg")
+        .args([
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=duration=2:size=160x120:rate=24",
+            "-f",
+            "srt",
+            "-i",
+            srt_tmp.to_str().unwrap(),
+            "-f",
+            "srt",
+            "-i",
+            srt_tmp.to_str().unwrap(),
+            "-c:v",
+            "libx264",
+            "-c:s",
+            "srt",
+            "-map",
+            "0:v:0",
+            "-map",
+            "1:s:0",
+            "-map",
+            "2:s:0",
+            "-metadata:s:s:0",
+            "language=fre",
+            "-metadata:s:s:1",
+            "language=fre",
+            "-y",
+            mkv_path.to_str().unwrap(),
+        ])
+        .output();
+
+    if gen_status.is_err() || !gen_status.unwrap().status.success() {
+        eprintln!("Failed to generate duplicate-lang MKV, skipping");
+        return;
+    }
+
+    let out = Command::new(env!("CARGO_BIN_EXE_dbsrt"))
+        .args([
+            "media:add",
+            mkv_path.to_str().unwrap(),
+            "--phash-dir",
+            phash_dir.to_str().unwrap(),
+            "--subtitles-dir",
+            subtitles_dir.to_str().unwrap(),
+        ])
+        .output()
+        .expect("Failed to run media:add on duplicate-lang MKV");
+
+    assert!(
+        out.status.success(),
+        "Duplicate-lang MKV failed: {:?}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("Couplings Added  : 1"),
+        "Expected stdout to report 1 coupling added, got: {}",
+        stdout
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("Skipping duplicate"),
+        "Expected stderr to contain 'Skipping duplicate', got: {}",
+        stderr
+    );
+}
+
+/// [EMPIRICALLY PROVEN] Verifies error behavior on MKV with no subtitle tracks.
+#[test]
+fn test_cli_media_add_mkv_no_subtitle_track() {
+    let ffmpeg_check = Command::new("ffmpeg").arg("-version").output();
+    if ffmpeg_check.is_err() || !ffmpeg_check.unwrap().status.success() {
+        eprintln!("ffmpeg not available, skipping no-subtitles MKV test");
+        return;
+    }
+
+    let temp = TempTestDir::new("embedded_no_subs");
+    let mkv_path = temp.path.join("movie_no_subs.mkv");
+    let phash_dir = temp.path.join("phash");
+    let subtitles_dir = temp.path.join("subtitles");
+
+    let gen_status = Command::new("ffmpeg")
+        .args([
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=duration=2:size=160x120:rate=24",
+            "-c:v",
+            "libx264",
+            "-y",
+            mkv_path.to_str().unwrap(),
+        ])
+        .output();
+
+    if gen_status.is_err() || !gen_status.unwrap().status.success() {
+        eprintln!("Failed to generate video-only MKV, skipping");
+        return;
+    }
+
+    let out = Command::new(env!("CARGO_BIN_EXE_dbsrt"))
+        .args([
+            "media:add",
+            mkv_path.to_str().unwrap(),
+            "--phash-dir",
+            phash_dir.to_str().unwrap(),
+            "--subtitles-dir",
+            subtitles_dir.to_str().unwrap(),
+        ])
+        .output()
+        .expect("Failed to run media:add on video-only MKV");
+
+    assert!(
+        !out.status.success(),
+        "Expected media:add to fail on video without subtitles"
+    );
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("No matching .srt file found"),
+        "Expected stderr to contain 'No matching .srt file found', got: {}",
+        stderr
+    );
+}

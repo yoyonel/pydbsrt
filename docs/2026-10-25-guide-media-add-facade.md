@@ -129,6 +129,27 @@ task media:add -- --video video_brute.mp4 --srt sous_titre_externe.srt --lang fr
 
 ---
 
+### Scénario 4 : Fichier MKV/MP4 avec Sous-Titres Embarqués
+
+Arborescence :
+```text
+mes_videos/
+└── Film.2024.1080p.mkv   (contient des flux de sous-titres internes fr/en)
+```
+
+Commande :
+```bash
+task media:add -- mes_videos/Film.2024.1080p.mkv
+```
+
+Résultat :
+
+1. Aucun fichier `.srt` sidecar n'étant présent, le conteneur est inspecté via `ffprobe`.
+2. Les flux internes de sous-titres sont identifiés et démultiplexés via `ffmpeg` vers `data/SRT/Film.2024.1080p.<lang>.srt`.
+3. Les sous-titres extraits sont certifiés et couplés à l'empreinte pHash calculée.
+
+---
+
 ## 5. Gestion des Cas Limites et Robustesse
 
 ### Idempotence et Déduplication CAS
