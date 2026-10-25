@@ -1,6 +1,7 @@
 ---
 title: Méthode Diátaxis & Cadre Documentaire
 tags:
+
   - diataxis
   - documentation
   - architecture
@@ -16,6 +17,7 @@ tags:
 ## 1. La Matrice des 4 Quadrants Diátaxis
 
 La structure documentaire est organisée selon deux axes orthogonaux :
+
 1. **L'axe Pratique vs Théorique** : orienté vers l'action concrète ou orienté vers la connaissance abstraite.
 2. **L'axe Acquisition vs Application** : orienté vers l'apprentissage (pour celui qui découvre) ou orienté vers le travail effectif (pour celui qui produit).
 

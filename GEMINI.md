@@ -13,7 +13,15 @@
 - **Human Approval Before Commit/Push**: STRICTLY FORBIDDEN from executing `git commit` or `git push` automatically. Always present summary and proposed commit message, and wait for explicit human validation.
 - **Zero Diffs in Chat Responses**: STRICTLY FORBIDDEN from printing code diffs or `git diff` in chat responses (the user uses Git and IDE to inspect diffs). Provide concise summaries, modified file links, and proposed commit message only.
 - **Taskfile-First Execution**: All recurring commands, builds, tests, demos, benchmarks must be in `Taskfile.yml` and invoked via `task <name>`.
-- **Continuous Documentation & README Synchronization**: The root `README.md` and technical documentation MUST ALWAYS remain 100% synchronized with the actual codebase state, available CLI commands, and Taskfile targets. Any addition, refactoring, or deprecation of user-facing features, CLI subcommands, or Taskfile actions must immediately update `README.md` in the exact same PR/commit.
+## Continuous Documentation, Diátaxis & README Synchronization
+- **Mandatory Diátaxis 4-Quadrant Architecture**: All documentation in `docs/` MUST strictly comply with the Diátaxis framework (https://diataxis.fr/):
+  1. **🎓 Tutorials (`docs/tutorials/`)**: Learning-oriented step-by-step lessons for beginners (linear, zero alternatives, guaranteed success).
+  2. **🛠️ How-To Guides (`docs/how-to/`)**: Problem-oriented recipes for practitioners solving real-world tasks.
+  3. **📖 Reference (`docs/reference/`)**: Information-oriented technical descriptions (CLI, REST API, SQL schema, binary formats, Taskfile, config).
+  4. **💡 Explanation (`docs/explanation/`)**: Understanding-oriented discussions of architecture, algorithms, and design tradeoffs.
+- **Incremental Documentation Coverage**: Any addition, refactoring, or evolution of user-facing features, CLI subcommands, REST endpoints, or database tables MUST simultaneously update the relevant Diátaxis quadrant (`docs/reference/` for specs, `docs/how-to/` for operational tasks) in the exact same PR/commit.
+- **Automated Validation Gate**: All documentation MUST pass `task doc:check` (strict build, 0 warnings, zero unrendered LaTeX markers, zero local absolute paths, valid HTML AST).
+- **README & Taskfile Synchronization**: The root `README.md` and technical documentation MUST ALWAYS remain 100% synchronized with the actual codebase state, available CLI commands, and Taskfile targets.
 - **Pure Taskfile Orchestrator (Zero Inline Logic / Hardcoded Data Lists)**: `Taskfile.yml` is strictly a declarative task orchestrator, NEVER a storage dump for inline shell/Python scripts, PID management blocks, loops, or hardcoded lists of media files. Any operational logic, daemon control, or dataset discovery/seeding MUST be placed in dedicated external scripts under `scripts/` so `Taskfile.yml` remains concise, readable, and maintainable.
 - **Zero Local Absolute Paths**: Never write machine-local absolute paths or `file://` URIs in any versioned file.
 

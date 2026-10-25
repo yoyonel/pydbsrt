@@ -170,9 +170,32 @@ Le dépôt est orchestré par **[Taskfile (go-task)](https://taskfile.dev/)** d�
 
 ---
 
-## 6. Documentation & Rapports d'Architecture
+## 6. Documentation & Architecture Diátaxis
 
-Dossiers techniques détaillés disponibles dans le répertoire [`docs/`](docs) :
+L'ensemble de la documentation technique est structuré selon la méthodologie **[Diátaxis](https://diataxis.fr/)** en 4 quadrants orthogonaux :
+
+* 🧭 **[Cadre Méthodologique Diátaxis](docs/diataxis.md)** : Charte, matrice des 4 quadrants et consignes pour documenter de nouvelles fonctionnalités.
+
+```mermaid
+flowchart TD
+    subgraph Diataxis ["Architecture Documentaire Diátaxis"]
+        T["🎓 Tutoriels (Learning)<br/>docs/tutorials/<br/>01. Premiers pas VLC<br/>02. Ingestion média<br/>03. Guide dev<br/>04. Appliance RPi4"]
+        H["🛠️ Guides Pratiques (How-To)<br/>docs/how-to/<br/>• Recalage dans VLC<br/>• Façade task media:add<br/>• Certification couplages<br/>• Migrations Refinery<br/>• Prometheus & Grafana"]
+        R["📖 Référence Technique<br/>docs/reference/<br/>• CLI dbsrt<br/>• API REST Axum<br/>• Schéma PostgreSQL 17<br/>• Formats .dbphash v2<br/>• Catalogue Taskfile<br/>• Configuration & Ports"]
+        E["💡 Explications (Understanding)<br/>docs/explanation/<br/>• Principe pHash (2 flux requis)<br/>• Échantillonnage hybride (Cuts + 1fps)<br/>• Indexation MIH vs BK-Tree<br/>• Vérité terrain relationnelle<br/>• Concurrence Axum & VLC OSD<br/>• Stockage décentralisé CAS"]
+    end
+```
+
+### Accès Rapide par Quadrant
+
+| Quadrant Diátaxis | Intention & Cible | Documents Phares |
+| :--- | :--- | :--- |
+| **🎓 [Tutoriels](docs/tutorials/)** | Apprentissage guidé pas à pas pour débutants | [Premiers Pas VLC](docs/tutorials/01-premiers-pas-synchronisation-vlc.md) • [Ingestion Média](docs/tutorials/02-ingestion-et-certification-premier-media.md) • [Guide Dév](docs/tutorials/03-environnement-developpement-et-contribution.md) • [Appliance RPi4](docs/tutorials/04-deploiement-appliance-rpi4.md) |
+| **🛠️ [Guides Pratiques](docs/how-to/)** | Résolution concrète de tâches opérationnelles | [Synchroniser dans VLC](docs/how-to/synchroniser-sous-titres-vlc.md) • [Façade media:add](docs/how-to/ajouter-et-indexer-un-media.md) • [Certifier un couplage](docs/how-to/certifier-un-couplage.md) • [Migrer PostgreSQL](docs/how-to/migrer-schema-postgresql.md) • [Surveiller la stack](docs/how-to/surveiller-stack-telemetrie.md) • [Contribuer selon Diátaxis](docs/how-to/contribuer-documentation-diataxis.md) |
+| **📖 [Référence](docs/reference/)** | Description formelle et austère des machines | [CLI dbsrt](docs/reference/cli.md) • [API REST Axum](docs/reference/api-rest.md) • [Schéma PostgreSQL 17](docs/reference/schema-postgresql.md) • [Formats Binaires](docs/reference/formats-fichiers.md) • [Catalogue Taskfile](docs/reference/taskfile.md) • [Configuration & Ports](docs/reference/configuration.md) |
+| **💡 [Explications](docs/explanation/)** | Clarification conceptuelle, théorique et choix d'architecture | [Principe pHash & 2 flux requis](docs/explanation/principe-fondamental-phash-et-retargeting.md) • [Échantillonnage hybride](docs/explanation/echantillonnage-hybride-cuts-et-1fps.md) • [MIH vs BK-Tree](docs/explanation/indexation-metrique-mih-vs-bktree.md) • [Vérité terrain & Modèle N:M](docs/explanation/modele-relationnel-couplages-certifies.md) • [Architecture Axum/VLC](docs/explanation/architecture-daemon-axum-et-vlc-osd.md) • [Stockage CAS](docs/explanation/stockage-decentralise-cas-et-distribution.md) |
+
+### Rapports Techniques Horodatés & Décisions (ADR)
 
 * [`docs/decisions/2026-10-25-subtitle-encoding-detection.md`](docs/decisions/2026-10-25-subtitle-encoding-detection.md) : **ADR : Détection Universelle d'Encodage Sous-Titres** : Architecture de décodage 3-niveaux (`encoding_rs` + `chardetng`) avec suppression de BOM (UTF-8, UTF-16LE/BE), fast-path UTF-8 strict et détection statistique des encodages historiques (Windows-1252, ISO-8859-1).
 * [`docs/2026-10-25-guide-media-add-facade.md`](docs/2026-10-25-guide-media-add-facade.md) : **Guide Pratique : Façade Unifiée d'Ingestion Média (`task media:add`)** : Spécification et guide pas à pas de la commande unifiée (RFC #22 Phase 1) : auto-appairage sidecar & extraction de pistes embarquées MKV/MP4, auto-détection FPS `ffprobe` / langue ISO, déduplication CAS, logs temps réel et interruption propre SIGINT.
@@ -182,7 +205,6 @@ Dossiers techniques détaillés disponibles dans le répertoire [`docs/`](docs) 
 * [`docs/2026-10-22-securisation-sql-et-atomicite-transactionnelle-copy-postgresql.md`](docs/2026-10-22-securisation-sql-et-atomicite-transactionnelle-copy-postgresql.md) : **Sécurisation SQL des Codes de Langue & Atomicité COPY** : Assainissement ISO 639 / BCP 47 (`validate_lang_code`), requêtes 100% paramétrées et transactions sans orphelins.
 * [`docs/2026-10-21-tutoriel-orchestration-taskfile-et-guide-developpeur.md`](docs/2026-10-21-tutoriel-orchestration-taskfile-et-guide-developpeur.md) : **Tutoriel Développeur & Guide d'Ordonnancement Taskfile** : Philosophie, modules `taskfiles/`, 4 workflows quotidiens et guide pas à pas pour ajouter une tâche.
 * [`docs/2026-10-21-strategie-tests-infrastructure-et-recettes-systemd-hermetiques.md`](docs/2026-10-21-strategie-tests-infrastructure-et-recettes-systemd-hermetiques.md) : **Stratégie de Test d'Infrastructure & Recettes systemd Hermétiques** : Épreuve de déploiement en conteneur Docker cgroups v2 isolé sans toucher à la machine hôte.
-
 * [`docs/2026-10-20-dashboard-interactif-e2e-vlc-corpus-nas.md`](docs/2026-10-20-dashboard-interactif-e2e-vlc-corpus-nas.md) : Dashboard interactif sur 1 334 vidéos réelles (99.8% succès), navigation plein écran par flèches clavier, synchronisation bidirectionnelle du curseur et captures WebP 720p.
 * [`docs/2026-10-20-architecture-retrait-invalidation-donnees-globales.md`](docs/2026-10-20-architecture-retrait-invalidation-donnees-globales.md) : Architecture de retrait et invalidation globale sur 5 paliers synchronisés (FS, Zero-DB JSON, PostgreSQL 17 `ON DELETE CASCADE`, `.dbphash` mmap).
 * [`docs/2026-10-18-studio-backoffice-and-relational-couplings.md`](docs/2026-10-18-studio-backoffice-and-relational-couplings.md) : Architecture des couplages relationnels certifiés (`medias`/`frames`/`subtitles`/`sub_frames`), backoffice `dbsrt Studio` (`/studio`) + `PgWeb` (`:8086`), Taskfile déclaratif et pipeline qualité `17/17` hooks.

@@ -103,49 +103,58 @@ markdown_extensions:
   - md_in_html
 
 nav:
-  - 🏠 Accueil & Guide:
+  - 🏠 Accueil & Méthode:
       - Portail & Dashboard: index.md
+      - 🧭 Cadre Diátaxis & Charte: diataxis.md
       - ⚡ Guide Opérationnel & CLI/API: quickstart-and-reference.md
-      - 🚀 Guide Façade Unifiée media:add: 2026-10-25-guide-media-add-facade.md
-      - 📖 Guide Pratique Ingestion & Certification: 2026-10-24-guide-pratique-ingestion-et-certification-media.md
-      - 🛠️ Tutoriel Orchestration Taskfile & Guide Dev: 2026-10-21-tutoriel-orchestration-taskfile-et-guide-developpeur.md
-  - 🎬 Plugin VLC & VLSub:
-      - Extension Lecteur VLC:
-          - Fork VLSub & Démo 1080p: 2026-10-18-vlsub-fork-and-restoration.md
-          - Plugin VLC v2.0 & OSD: 2026-10-17-validation-ui-ux-vlc-plugin-v2.md
-          - Daemon Axum & Plugins Lua: 2026-10-15-vlc-integration-daemon-and-plugins.md
-          - Client Daemon Sidecar & Packaging: 2026-10-20-architecture-client-daemon-sidecar-et-deploiement-o2switch.md
-          - Déploiement Remote o2switch & VLSub++: 2026-10-19-etude-deploiement-remote-o2switch-et-dimensionnement-vlsub.md
-          - Tutoriel Client Linux & systemd: 2026-10-20-tutoriel-installation-client-linux-vlc-et-service-systemd.md
-          - Déploiement & Intégration RPi4: 2026-10-20-plan-deploiement-et-integration-remote-rpi4.md
-      - Rétro-Ingénierie:
-          - Audit Legacy VLSub: 2026-10-18-vlsub-legacy-audit.md
-  - 🎛️ Studio & Couplages:
-      - Vérité Terrain & Backoffice:
-          - dbsrt Studio & Modèle Relationnel: 2026-10-18-studio-backoffice-and-relational-couplings.md
-          - Mécanique E2E Search by pHash: 2026-10-18-e2e-phash-search-mechanics-and-roadmap.md
-          - Retrait & Invalidation Globale: 2026-10-20-architecture-retrait-invalidation-donnees-globales.md
-          - Cycle de Vie des Données & Hot-Reload: 2026-10-24-architecture-cycle-de-vie-donnees-io-et-rechargement-a-chaud.md
-      - Connecteurs & Distribution:
-          - Providers Distants (OpenSubtitles): 2026-10-16-axe5-remote-subtitles-providers.md
-          - Stockage Décentralisé & CAS: 2026-10-20-architecture-distribution-sous-titres-o2switch-et-stockage-decentralise.md
-          - Service CAS Subtitles (REST vs gRPC): 2026-10-20-architecture-subtitle-service-cas-et-comparatif-rest-grpc.md
-  - ⚡ Moteur pHash & DB:
-      - Empreintes Visuelles & Stockage:
-          - Profiling Latences & Mécanique E2E VLSub: 2026-10-19-profiling-latences-recherche-phash-et-e2e.md
-          - Format .dbphash Hybride (Cuts + 1fps): 2026-10-17-etude-comparative-identification-frames-cuts-keyframes-hybride.md
-          - Moteur Rust Zero-DB mmap SIMD: 2026-10-15-scaling-architecture-rust-mmap.md
-          - Indexation Métrique & Multi-Index Hashing: 2026-10-19-indexing-metric-trees-and-multi-index-hashing.md
-          - PostgreSQL 17 SP-GiST BK-Tree: 2026-10-15-pg17-bktree-benchmark-migration.md
-          - Sécurité SQL & Atomicité COPY: 2026-10-22-securisation-sql-et-atomicite-transactionnelle-copy-postgresql.md
-          - Migrations PostgreSQL & Refinery: 2026-10-23-guide-migrations-schema-postgresql-refinery.md
-          - PostgreSQL 17 Dédié RPi4 & Orchestration: 2026-10-24-deploiement-postgresql-17-isole-rpi4-et-orchestration-migrations.md
-      - Observabilité & Télémétrie:
-          - Métriques Prometheus & Suite Grafana: 2026-10-20-observabilite-prometheus-grafana-et-telemetrie-pydbsrt.md
-  - 🛡️ Fiabilité & Tests d'Infra:
-      - Recettes & Robustesse:
-          - Tests d'Infra & Recettes systemd Hermétiques: 2026-10-21-strategie-tests-infrastructure-et-recettes-systemd-hermetiques.md
-          - Registre Incidents & Matrice de Chaos: 2026-10-20-registre-incidents-chaos-testing-et-post-mortem-vlc-hang.md
+  - 🎓 Tutoriels (Learning):
+      - Vue d'Ensemble des Tutoriels: tutorials/index.md
+      - 1. Premiers Pas & Synchronisation VLC: tutorials/01-premiers-pas-synchronisation-vlc.md
+      - 2. Ingestion & Certification Média: tutorials/02-ingestion-et-certification-premier-media.md
+      - 3. Environnement de Dév & Contribution: tutorials/03-environnement-developpement-et-contribution.md
+      - 4. Déploiement Appliance RPi4: tutorials/04-deploiement-appliance-rpi4.md
+      - Tutoriel Orchestration Taskfile & Dev: 2026-10-21-tutoriel-orchestration-taskfile-et-guide-developpeur.md
+      - Tutoriel Client Linux & systemd: 2026-10-20-tutoriel-installation-client-linux-vlc-et-service-systemd.md
+  - 🛠️ Guides Pratiques (How-To):
+      - Catalogue des Recettes: how-to/index.md
+      - Synchroniser des Sous-Titres dans VLC: how-to/synchroniser-sous-titres-vlc.md
+      - Ajouter et Indexer un Média (media:add): how-to/ajouter-et-indexer-un-media.md
+      - Guide Façade Unifiée media:add: 2026-10-25-guide-media-add-facade.md
+      - Certifier un Couplage Média-Sous-Titres: how-to/certifier-un-couplage.md
+      - Guide Pratique Ingestion & Certification: 2026-10-24-guide-pratique-ingestion-et-certification-media.md
+      - Migrer le Schéma PostgreSQL avec Refinery: how-to/migrer-schema-postgresql.md
+      - Guide Migrations Refinery: 2026-10-23-guide-migrations-schema-postgresql-refinery.md
+      - Surveiller la Stack avec Prometheus & Grafana: how-to/surveiller-stack-telemetrie.md
+      - Invalider et Purger des Données pHash: how-to/invalider-donnees-phash.md
+      - Exécuter les Recettes de Chaos Testing: how-to/executer-recettes-chaos-testing.md
+      - Contribuer à la Documentation Diátaxis: how-to/contribuer-documentation-diataxis.md
+  - 📖 Référence Technique:
+      - Index des Spécifications: reference/index.md
+      - CLI Standalone Rust (dbsrt): reference/cli.md
+      - API REST Axum (dbsrt-server): reference/api-rest.md
+      - Schéma PostgreSQL 17 & SP-GiST: reference/schema-postgresql.md
+      - Formats de Fichiers & Spécifications: reference/formats-fichiers.md
+      - Catalogue des Commandes Taskfile: reference/taskfile.md
+      - Configuration & Variables d'Environnement: reference/configuration.md
+  - 💡 Explications & Architecture:
+      - Vue d'Ensemble Conceptuelle: explanation/index.md
+      - Principe Fondamental du pHash & Retargeting: explanation/principe-fondamental-phash-et-retargeting.md
+      - Échantillonnage Hybride (Cuts + 1fps): explanation/echantillonnage-hybride-cuts-et-1fps.md
+      - Étude Cuts, Keyframes & Hybride: 2026-10-17-etude-comparative-identification-frames-cuts-keyframes-hybride.md
+      - Indexation Métrique (MIH vs BK-Tree): explanation/indexation-metrique-mih-vs-bktree.md
+      - Modèle Relationnel & Couplages Certifiés: explanation/modele-relationnel-couplages-certifies.md
+      - Architecture Démon Axum & VLC OSD: explanation/architecture-daemon-axum-et-vlc-osd.md
+      - Stockage Décentralisé CAS & Distribution: explanation/stockage-decentralise-cas-et-distribution.md
+      - Moteur Zero-DB mmap SIMD: 2026-10-15-scaling-architecture-rust-mmap.md
+      - PostgreSQL 17 SP-GiST BK-Tree: 2026-10-15-pg17-bktree-benchmark-migration.md
+      - Sécurité SQL & Atomicité COPY: 2026-10-22-securisation-sql-et-atomicite-transactionnelle-copy-postgresql.md
+      - Retrait & Invalidation Globale: 2026-10-20-architecture-retrait-invalidation-donnees-globales.md
+      - Cycle de Vie des Données & Hot-Reload: 2026-10-24-architecture-cycle-de-vie-donnees-io-et-rechargement-a-chaud.md
+      - Providers Distants (OpenSubtitles): 2026-10-16-axe5-remote-subtitles-providers.md
+      - Architecture Sidecar Client & Déploiement: 2026-10-20-architecture-client-daemon-sidecar-et-deploiement-o2switch.md
+      - Plan Déploiement & Intégration RPi4: 2026-10-20-plan-deploiement-et-integration-remote-rpi4.md
+      - Déploiement PostgreSQL 17 Dédié RPi4: 2026-10-24-deploiement-postgresql-17-isole-rpi4-et-orchestration-migrations.md
+      - Audit Legacy VLSub: 2026-10-18-vlsub-legacy-audit.md
   - 📊 Benchmarks & Preuves:
       - Campagnes Empiriques:
           - Dashboard Interactif E2E VLC (1 336 Tests): 2026-10-20-dashboard-interactif-e2e-vlc-corpus-nas.md
@@ -155,9 +164,14 @@ nav:
           - Galerie 50 Captures VLC/VLSub: 2026-10-19-validation-e2e-vlc-vlsub-50-screenshots.md
           - Stress-Test 100M Frames (MIH): 2026-10-19-mih-100m-scale-benchmark-report.md
           - Audit Exhaustif Matching E2E (YouTube & DB): 2026-10-19-audit-exhaustif-matching-e2e-phash.md
+          - Profiling Latences Recherche pHash & E2E: 2026-10-19-profiling-latences-recherche-phash-et-e2e.md
+          - Tests d'Infra & Recettes systemd Hermétiques: 2026-10-21-strategie-tests-infrastructure-et-recettes-systemd-hermetiques.md
+          - Registre Incidents & Matrice de Chaos: 2026-10-20-registre-incidents-chaos-testing-et-post-mortem-vlc-hang.md
           - Benchmarks E2E Rust vs Python: 2026-10-15-rust-e2e-benchmarks-and-tradeoffs.md
           - Passage à l'Échelle (5M frames): 2026-10-16-phash-dataset-scale-and-benchmarks.md
           - Validation Empirique Synology NAS: 2026-10-17-validation-empirique-e2e-synology.md
+          - Plugin VLC v2.0 & OSD: 2026-10-17-validation-ui-ux-vlc-plugin-v2.md
+          - Fork VLSub & Démo 1080p: 2026-10-18-vlsub-fork-and-restoration.md
   - 🗺️ Roadmap & Archives:
       - Feuilles de Route:
           - Feuille de Route Post-Merge develop (5 Projets v0.2+): 2026-10-21-feuille-de-route-post-merge-develop-et-decoupage-projets.md
