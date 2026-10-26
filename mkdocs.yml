@@ -143,6 +143,7 @@ nav:
   - 💡 Explications & Architecture:
       - Vue d'Ensemble Conceptuelle: explanation/index.md
       - Principe Fondamental du pHash & Retargeting: explanation/principe-fondamental-phash-et-retargeting.md
+      - Performances Décodage pHash & Contentions: explanation/performances-decodage-phash-et-contentions.md
       - Échantillonnage Hybride (Cuts + 1fps): explanation/echantillonnage-hybride-cuts-et-1fps.md
       - Étude Cuts, Keyframes & Hybride: 2026-10-17-etude-comparative-identification-frames-cuts-keyframes-hybride.md
       - Indexation Métrique (MIH vs BK-Tree): explanation/indexation-metrique-mih-vs-bktree.md
@@ -161,6 +162,7 @@ nav:
       - Audit Legacy VLSub: 2026-10-18-vlsub-legacy-audit.md
   - 📊 Benchmarks & Preuves:
       - Campagnes Empiriques:
+          - Rapport Batch TVShow Synology: 2026-10-25-rapport-batch-import-tvshow-synology.md
           - Dashboard Interactif E2E VLC (1 336 Tests): 2026-10-20-dashboard-interactif-e2e-vlc-corpus-nas.md
           - Validation E2E VLC Corpus Exhaustif (1 336 Extraits): 2026-10-19-validation-e2e-vlc-vlsub-corpus-nas-exhaustif.md
           - Validation E2E VLC & Corpus Réel NAS: 2026-10-19-validation-e2e-vlc-et-benchmarks-corpus-nas.md

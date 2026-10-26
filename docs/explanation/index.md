@@ -55,6 +55,18 @@ tags:
   <div class="dbsrt-bento-card bento-emerald">
     <div class="bento-header">
       <span class="bento-icon">⚡</span>
+      <span class="bento-badge">BENCHMARKS &amp; ACCÉLÉRATION</span>
+    </div>
+    <h3>Performances Décodage &amp; Accélération GPU</h3>
+    <p>Démystification de la contention CIFS (108 MB/s réels) et accélération par 4x à 9x via décodage matériel GPU VA-API face au CPU.</p>
+    <div class="bento-links">
+      <a href="performances-decodage-phash-et-contentions/">→ Comprendre les performances &amp; GPU</a>
+    </div>
+  </div>
+
+  <div class="dbsrt-bento-card bento-emerald">
+    <div class="bento-header">
+      <span class="bento-icon">⚡</span>
       <span class="bento-badge">STRUCTURES DE DONNÉES</span>
     </div>
     <h3>Indexation Métrique : MIH vs BK-Tree</h3>

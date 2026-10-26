@@ -33,6 +33,8 @@ Cette page dresse le dictionnaire exhaustif de toutes les cibles d'orchestration
 | Commande | Syntaxe & Arguments | Description |
 | :--- | :--- | :--- |
 | `task media:add` | `task media:add -- <video> [srt] [--lang <lg>] [--fps <val>]` | Façade unifiée d'ingestion média avec auto-détection et injection à chaud. |
+| `task media:batch:tvshow` | `task media:batch:tvshow -- [--until <HH:MM>] [--workers <N>]` | Ingestion batch parallélisée de séries TV en direct depuis montage CIFS. |
+| `task media:top` | `task media:top -- [--stats] [--refresh <sec>]` | Moniteur TUI temps réel (style ctop/btop) et analyse statistique post-traitement. |
 | `task coupling:certify` | `task coupling:certify` | Découvre et certifie en lot tous les fichiers `.phash` et `.srt` présents. |
 | `task coupling:relabel` | `task coupling:relabel -- --media <hash> [--sub <hash>] --lang <code>` | Modifie la langue ou la confiance d'un couplage existant. |
 

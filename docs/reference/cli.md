@@ -55,6 +55,8 @@ dbsrt media:add <VIDEO_PATH> [SRT_PATH] [OPTIONS]
 - `[SRT_PATH]` : *(Optionnel)* Chemin vers la piste de sous-titres de référence. Si omis, auto-découvert par stem.
 - `--lang <code>` : Code de langue ISO-639-1 (`fr`, `en`, etc.). Par défaut : `fr` ou détecté via le suffixe du fichier.
 - `--fps <val>` : Forcer le framerate d'échantillonnage. Par défaut : sondé via `ffprobe`.
+- `--all-embedded` : Extraire et certifier tous les flux de sous-titres textuels intégrés au conteneur vidéo.
+- `--hwaccel <mode>` : Moteur d'accélération matérielle (`auto`, `vaapi`, `cuda`, `qsv`, `disabled`). Par défaut : `auto` (utilise le GPU matériel si présent, avec fallback CPU automatique).
 - `--force` : Forcer le recalcul et l'écrasement des empreintes existantes.
 - `--no-reload` : Désactiver l'appel de hot-reload vers `dbsrt-server`.
 
