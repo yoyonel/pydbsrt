@@ -112,4 +112,16 @@ tags:
       <a href="constants/">→ Consulter les constantes</a>
     </div>
   </div>
+
+  <div class="dbsrt-bento-card bento-emerald">
+    <div class="bento-header">
+      <span class="bento-icon">🔄</span>
+      <span class="bento-badge">INTÉGRATION CONTINUE</span>
+    </div>
+    <h3>Architecture & Pipelines CI/CD</h3>
+    <p>Spécification formelle des 5 workflows GitHub Actions, jobs d'intégrité multi-langages, gates documentaires et optimisation FFmpeg.</p>
+    <div class="bento-links">
+      <a href="ci-cd/">→ Consulter l'architecture CI/CD</a>
+    </div>
+  </div>
 </div>

@@ -139,6 +139,7 @@ nav:
       - Catalogue des Commandes Taskfile: reference/taskfile.md
       - Configuration & Variables d'Environnement: reference/configuration.md
       - Constantes Nommées & Seuils Algorithmiques: reference/constants.md
+      - Architecture CI/CD & Pipelines: reference/ci-cd.md
   - 💡 Explications & Architecture:
       - Vue d'Ensemble Conceptuelle: explanation/index.md
       - Principe Fondamental du pHash & Retargeting: explanation/principe-fondamental-phash-et-retargeting.md
