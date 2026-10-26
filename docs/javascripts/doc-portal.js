@@ -14,6 +14,43 @@
     initCatalogFilters();
     enhanceArticleMetadataBanner();
     probeLocalServicesIfLocalhost();
+    initAsciinemaPlayers();
+  }
+
+  function initAsciinemaPlayers() {
+    if (typeof AsciinemaPlayer === "undefined" || !AsciinemaPlayer.create) {
+      return;
+    }
+    const elements = document.querySelectorAll(".asciinema-cast:not([data-initialized])");
+    elements.forEach((el) => {
+      el.setAttribute("data-initialized", "true");
+      const castUrl = el.getAttribute("data-cast");
+      if (!castUrl) return;
+
+      const rows = parseInt(el.getAttribute("data-rows") || "22", 10);
+      const cols = parseInt(el.getAttribute("data-cols") || "92", 10);
+      const speed = parseFloat(el.getAttribute("data-speed") || "1.0");
+      const autoPlay = el.getAttribute("data-autoplay") !== "false";
+      const loop = el.getAttribute("data-loop") !== "false";
+
+      try {
+        AsciinemaPlayer.create(castUrl, el, {
+          rows: rows,
+          cols: cols,
+          autoPlay: autoPlay,
+          loop: loop,
+          speed: speed,
+          theme: "nord",
+          terminalFontFamily: "'JetBrains Mono', 'Fira Code', Monaco, Menlo, Consolas, monospace",
+          terminalFontSize: "13px",
+          terminalLineHeight: 1.3,
+          fit: "width",
+          preload: true,
+        });
+      } catch (err) {
+        console.error("Failed to mount Asciinema player on", el, err);
+      }
+    });
   }
 
   function initCatalogFilters() {

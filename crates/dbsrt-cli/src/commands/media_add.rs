@@ -118,6 +118,10 @@ pub struct MediaAddArgs {
     #[arg(long, default_value = DEFAULT_SUBTITLES_DIR)]
     pub subtitles_dir: PathBuf,
 
+    /// Extract all embedded subtitle tracks from container even if sidecar subtitles exist
+    #[arg(long)]
+    pub all_embedded: bool,
+
     /// Dry-run mode: extract pHash fingerprint but skip coupling certification and ingest
     #[arg(long, alias = "dry-run")]
     pub skip_certify: bool,
@@ -254,7 +258,9 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
             }
         }
 
-        let sidecars_match_target = if let Some(ref target) = args.lang {
+        let sidecars_match_target = if args.all_embedded {
+            false
+        } else if let Some(ref target) = args.lang {
             discovered
                 .iter()
                 .any(|(_, l)| l.as_deref() == Some(target.as_str()) || l.is_none())
@@ -282,6 +288,7 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
 
                     let mut seen_extracted_langs = HashSet::new();
                     let mut seen_no_lang = false;
+                    let mut candidates = Vec::new();
 
                     let has_explicit_lang_match = args.lang.as_ref().is_some_and(|target| {
                         insp.subtitle_streams.iter().any(|s| {
@@ -295,6 +302,25 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
                     });
 
                     for stream in &insp.subtitle_streams {
+                        const BITMAP_SUB_CODECS: &[&str] = &[
+                            "hdmv_pgs_subtitle",
+                            "dvd_subtitle",
+                            "pgssub",
+                            "vobsub",
+                            "dvdsub",
+                        ];
+                        if BITMAP_SUB_CODECS
+                            .iter()
+                            .any(|c| stream.codec_name.eq_ignore_ascii_case(c))
+                        {
+                            if !args.json {
+                                eprintln!(
+                                    "ℹ️  Skipping bitmap subtitle track #{} (codec: {})",
+                                    stream.subtitle_index, stream.codec_name
+                                );
+                            }
+                            continue;
+                        }
                         let stream_lang_opt =
                             stream.language.as_deref().and_then(parse_language_code);
 
@@ -344,40 +370,54 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
                             seen_no_lang = true;
                         }
 
-                        let lang_display = lang_opt.as_deref().unwrap_or("unknown");
+                        let srt_fname = match &lang_opt {
+                            Some(lang) => format!("{}.{}.srt", video_stem, lang),
+                            None => format!("{}.srt", video_stem),
+                        };
+                        let srt_path = args.subtitles_dir.join(&srt_fname);
+                        candidates.push((stream.subtitle_index, lang_opt, srt_path));
+                    }
+
+                    if !candidates.is_empty() {
+                        let lang_tags: Vec<String> = candidates
+                            .iter()
+                            .map(|(_, l, _)| l.as_deref().unwrap_or("und").to_string())
+                            .collect();
+
                         if !args.json {
                             eprintln!(
-                                "📦 Extracting embedded subtitle track #{} ({})...",
-                                stream.subtitle_index, lang_display
+                                "📦 Extracting {} embedded subtitle track(s) in single pass: {:?}",
+                                candidates.len(),
+                                lang_tags
                             );
                         }
 
-                        match extract_embedded_subtitle(video_path, stream.subtitle_index) {
-                            Ok(srt_content) => {
-                                let srt_fname = match &lang_opt {
-                                    Some(lang) => format!("{}.{}.srt", video_stem, lang),
-                                    None => format!("{}.srt", video_stem),
-                                };
-                                let srt_path = args.subtitles_dir.join(&srt_fname);
+                        let mut cmd = std::process::Command::new("ffmpeg");
+                        cmd.args(["-v", "error", "-y", "-i"]).arg(video_path);
+                        for (idx, _lang, dest) in &candidates {
+                            let map_arg = format!("0:s:{}", idx);
+                            cmd.args(["-map", &map_arg, "-f", "srt"]).arg(dest);
+                        }
 
-                                fs::write(&srt_path, &srt_content)?;
-                                cleanup.srts.lock().unwrap().push(srt_path.clone());
-
-                                if !args.json {
-                                    eprintln!(
-                                        "   Extracted embedded subtitle track #{} ({}) → {:?}",
-                                        stream.subtitle_index, lang_display, srt_path
-                                    );
+                        let batch_ok = cmd.status().map(|s| s.success()).unwrap_or(false);
+                        if batch_ok {
+                            for (_idx, lang_opt, srt_path) in candidates {
+                                if srt_path.exists()
+                                    && srt_path.metadata().map(|m| m.len() > 0).unwrap_or(false)
+                                {
+                                    cleanup.srts.lock().unwrap().push(srt_path.clone());
+                                    discovered.push((srt_path, lang_opt));
                                 }
-
-                                discovered.push((srt_path, lang_opt));
                             }
-                            Err(e) => {
-                                if !args.json {
-                                    eprintln!(
-                                        "⚠️  Failed to extract subtitle track #{}: {}",
-                                        stream.subtitle_index, e
-                                    );
+                        } else {
+                            // Fallback to sequential extraction
+                            for (idx, lang_opt, srt_path) in candidates {
+                                if let Ok(srt_content) = extract_embedded_subtitle(video_path, idx)
+                                {
+                                    if fs::write(&srt_path, &srt_content).is_ok() {
+                                        cleanup.srts.lock().unwrap().push(srt_path.clone());
+                                        discovered.push((srt_path, lang_opt));
+                                    }
                                 }
                             }
                         }
@@ -565,6 +605,7 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
     // 6. Certification & CAS Idempotence
     fs::create_dir_all(&args.subtitles_dir)?;
     let reg_path = CouplingRegistry::default_path(&args.subtitles_dir);
+    let _reg_lock = dbsrt_core::RegistryLock::acquire(&reg_path)?;
     let mut reg = CouplingRegistry::load_or_default(&reg_path)?;
 
     let mut certified_count = 0;
@@ -817,6 +858,7 @@ mod tests {
             fps: None,
             phash_dir: PathBuf::from("/tmp"),
             subtitles_dir: PathBuf::from("/tmp"),
+            all_embedded: false,
             skip_certify: false,
             json: false,
             server_url: DEFAULT_SERVER_URL.to_string(),
@@ -842,6 +884,7 @@ mod tests {
             fps: None,
             phash_dir: temp.path.join("phash"),
             subtitles_dir: temp.path.join("subtitles"),
+            all_embedded: false,
             skip_certify: false,
             json: false,
             server_url: DEFAULT_SERVER_URL.to_string(),
@@ -873,6 +916,7 @@ mod tests {
             fps: Some(24.0),
             phash_dir: temp.path.join("phash"),
             subtitles_dir: temp.path.join("subtitles"),
+            all_embedded: false,
             skip_certify: false,
             json: false,
             server_url: DEFAULT_SERVER_URL.to_string(),

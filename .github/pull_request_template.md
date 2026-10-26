@@ -33,11 +33,14 @@ Closes #
 
 ---
 
-## 📚 Documentation & Synchronisation
+## 📚 Documentation & Synchronisation Diátaxis (https://diataxis.fr/)
 
-- [ ] Rapport technique horodaté ajouté sous `docs/YYYY-MM-DD-*.md` (si évolution d'architecture)
-- [ ] Documentation Diátaxis mise à jour dans `mkdocs.yml`
-- [ ] Tableaux des commandes Taskfile et architecture synchronisés dans `README.md`
+- [ ] **🎓 Tutoriels** (`docs/tutorials/`) : Nouveau parcours d'apprentissage guidé (si nouveau sous-système)
+- [ ] **🛠️ Guides Pratiques** (`docs/how-to/`) : Recette opérationnelle orientée tâche résolue
+- [ ] **📖 Référence** (`docs/reference/`) : Commandes CLI (`cli.md`), API Axum (`api-rest.md`), schéma SQL ou formats mis à jour
+- [ ] **💡 Explications** (`docs/explanation/`) : Choix d'architecture et compromis clarifiés
+- [ ] **Navigation & Portail** : `mkdocs.yml` et `README.md` synchronisés avec les nouvelles cibles
+- [ ] **Validation Qualité** : `task doc:check` exécuté et 100% vert (strict build, zéro fuite LaTeX, 0 chemin absolu)
 
 ---
 

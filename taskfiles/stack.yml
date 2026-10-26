@@ -22,6 +22,12 @@ tasks:
     cmds:
       - bash scripts/media_add.sh {{.CLI_ARGS}}
 
+  media:batch:tvshow:
+    desc: "Overnight profiling batch ingestion for TVShow videos and multilingual subtitles from Synology NAS"
+    deps: [cli:build]
+    cmds:
+      - uv run python scripts/batch_media_add_tvshow.py {{.CLI_ARGS}}
+
   coupling:relabel:
     desc: "Relabel a certified subtitle coupling language (usage: task coupling:relabel -- --media <hash> [--sub <hash>] --lang <code>)"
     deps: [cli:build]

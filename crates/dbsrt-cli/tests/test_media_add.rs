@@ -836,3 +836,129 @@ fn test_media_add_sidecar_priority_and_subs_english_filtering() {
     assert_eq!(couplings[0]["lang"], "fr");
     assert_eq!(couplings[0]["lang_status"]["kind"], "Confirmed");
 }
+
+/// [EMPIRICALLY PROVEN] Verifies --all-embedded flag extracts non-Latin alphabets (ja, ru, ar)
+/// even when a sidecar subtitle exists.
+#[test]
+fn test_cli_media_add_all_embedded_multilingual_alphabets() {
+    let ffmpeg_check = Command::new("ffmpeg").arg("-version").output();
+    if ffmpeg_check.is_err() || !ffmpeg_check.unwrap().status.success() {
+        eprintln!("ffmpeg not available, skipping all-embedded test");
+        return;
+    }
+
+    let temp = TempTestDir::new("all_embedded_multilingual");
+    let mkv_path = temp.path.join("show_s01e01.mkv");
+    let sidecar_fr = temp.path.join("show_s01e01.fr.srt");
+    let phash_dir = temp.path.join("phash");
+    let subtitles_dir = temp.path.join("subtitles");
+
+    // 1. Create a sidecar FR subtitle
+    fs::write(
+        &sidecar_fr,
+        "1\n00:00:00,100 --> 00:00:00,800\nBonjour tout le monde\n",
+    )
+    .unwrap();
+
+    // 2. Create embedded subtitles: Japanese, Russian, Arabic
+    let srt_ja = temp.path.join("input_ja.srt");
+    let srt_ru = temp.path.join("input_ru.srt");
+    let srt_ar = temp.path.join("input_ar.srt");
+    fs::write(
+        &srt_ja,
+        "1\n00:00:00,200 --> 00:00:00,900\nこんにちは世界\n",
+    )
+    .unwrap();
+    fs::write(&srt_ru, "1\n00:00:00,200 --> 00:00:00,900\nПривет мир\n").unwrap();
+    fs::write(
+        &srt_ar,
+        "1\n00:00:00,200 --> 00:00:00,900\n\\u{202b}مرحبا بالعالم\\u{202c}\n",
+    )
+    .unwrap();
+
+    let gen_status = Command::new("ffmpeg")
+        .args([
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=duration=2:size=160x120:rate=24",
+            "-f",
+            "srt",
+            "-i",
+            srt_ja.to_str().unwrap(),
+            "-f",
+            "srt",
+            "-i",
+            srt_ru.to_str().unwrap(),
+            "-f",
+            "srt",
+            "-i",
+            srt_ar.to_str().unwrap(),
+            "-c:v",
+            "libx264",
+            "-c:s",
+            "srt",
+            "-map",
+            "0:v:0",
+            "-map",
+            "1:0",
+            "-map",
+            "2:0",
+            "-map",
+            "3:0",
+            "-metadata:s:s:0",
+            "language=jpn",
+            "-metadata:s:s:1",
+            "language=rus",
+            "-metadata:s:s:2",
+            "language=ara",
+            "-y",
+            mkv_path.to_str().unwrap(),
+        ])
+        .output();
+
+    if gen_status.is_err() || !gen_status.unwrap().status.success() {
+        eprintln!("Failed to generate multilingual MKV, skipping");
+        return;
+    }
+
+    let out = Command::new(env!("CARGO_BIN_EXE_dbsrt"))
+        .args([
+            "media:add",
+            mkv_path.to_str().unwrap(),
+            "--all-embedded",
+            "--phash-dir",
+            phash_dir.to_str().unwrap(),
+            "--subtitles-dir",
+            subtitles_dir.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .expect("Failed to run media:add with --all-embedded");
+
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "stderr: {}", stderr);
+
+    let json: serde_json::Value =
+        serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).expect("JSON parse");
+    assert_eq!(json["success"], true);
+
+    // Verify 4 couplings certified: 1 sidecar (fr) + 3 embedded (ja, ru, ar)
+    assert_eq!(json["certified_couplings"], 4);
+
+    let couplings_file = subtitles_dir.join("couplings.json");
+    let content = fs::read_to_string(&couplings_file).unwrap();
+    let reg_json: serde_json::Value = serde_json::from_str(&content).unwrap();
+    let subs = &reg_json["couplings"][0]["subtitles"];
+    let langs: Vec<&str> = subs
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["lang"].as_str().unwrap())
+        .collect();
+
+    assert!(langs.contains(&"fr"));
+    assert!(langs.contains(&"ja"));
+    assert!(langs.contains(&"ru"));
+    assert!(langs.contains(&"ar"));
+}

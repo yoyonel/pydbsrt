@@ -1,196 +1,275 @@
 # pydbsrt & dbsrt-rs
 
-> High-performance SubRip (SRT) subtitle synchronization and perceptual hash video frame matching.
+> High-Performance Perceptual Hash (pHash) Video Frame Matching, SubRip (SRT) Subtitle Retargeting & Streaming Architecture.
 
-Stack moderne propulsée par **Rust (`dbsrt-rs`)**, **PostgreSQL 17 (SP-GiST BK-Tree)**, **uv** et **Taskfile**.
+[![ci](https://github.com/yoyonel/pydbsrt/actions/workflows/main.yml/badge.svg?branch=develop)](https://github.com/yoyonel/pydbsrt/actions/workflows/main.yml)
+[![pr-preview](https://github.com/yoyonel/pydbsrt/actions/workflows/pr-preview.yml/badge.svg)](https://github.com/yoyonel/pydbsrt/actions/workflows/pr-preview.yml)
+[![docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue.svg)](https://yoyonel.github.io/pydbsrt/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Rust](https://img.shields.io/badge/Rust-1.80%2B-orange.svg)](https://www.rust-lang.org/)
+[![Python](https://img.shields.io/badge/Python-3.11%2B%20%7C%20uv-blue.svg)](https://github.com/astral-sh/uv)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17%20BK--Tree-336791.svg)](https://www.postgresql.org/)
 
 ---
 
-## 1. Deux Approches Complémentaires
+## 🚀 Présentation
 
-Le projet supporte deux moteurs d'indexation selon le cas d'usage :
+`pydbsrt` est une suite logicielle haute performance conçue pour résoudre définitivement le problème de désynchronisation des sous-titres (`.srt`) entre différentes versions d'une même œuvre vidéo (Blu-ray, WEB-DL, HDTV, Remaster, DVD). Les variations de logos d'introduction, de cadences d'images (23.976, 24, 25, 29.97 fps) et de coupures de scènes rendent souvent inopérants les sous-titres récupérés sur Internet.
+
+En calculant des empreintes perceptuelles compactes (**DCT pHash 64-bit**, 8 octets par image) sur les flux vidéo décodés, `pydbsrt` compare visuellement le média inconnu à un média de référence certifié, calcule un décalage temporel millimétrique par consensus de Hamming, et recalibre automatiquement les sous-titres sans intervention humaine.
+
+La documentation technique interactive complète, structurée selon la méthodologie **[Diátaxis](https://diataxis.fr/)**, est disponible sur le **[Portail GitHub Pages du Projet](https://yoyonel.github.io/pydbsrt/)**.
+
+---
+
+## 🎥 Démonstrations & Preuves Vidéo
+
+### 1. Recalage Temps Réel dans VLC Media Player (`vlsub_dbsrt.lua`)
+Extension VLSub bonifiée connectée en tâche de fond au démon local Axum, avec téléchargement immédiat et affichage des décalages calculés sur l'OSD :
+
+<figure markdown="1">
+  <video autoplay loop muted playsinline width="100%">
+    <source src="docs/assets/vlsub-dbsrt/vlsub_dbsrt_workflow_1080p.mp4" type="video/mp4">
+  </video>
+  <figcaption>Démonstration VLC : Recherche par pHash, recalage instantané (+1.5s visual shift) et notification OSD.</figcaption>
+</figure>
+
+### 2. Backoffice Visuel & Loupe Hamming (`dbsrt Studio`)
+Interface web bicanale (`http://127.0.0.1:8765/studio`) permettant de confronter deux timelines vidéo, d'inspecter visuellement les matrices de Hamming 8x8 et d'auditer les couplages :
+
+<figure markdown="1">
+  <img src="docs/assets/screenshots/studio_backoffice_1080p.webp" alt="Interface dbsrt Studio" width="100%">
+  <figcaption>Interface dbsrt Studio : Navigation comparative, loupe pHash et certification des couplages.</figcaption>
+</figure>
+
+---
+
+## 🎯 Objectifs & Philosophie d'Ingénierie
+
+- **Réalité Architecturale : Zéro Recalage Magique sans Référence Certifiée** : Un fichier `.srt` seul ne contient aucune information visuelle. `pydbsrt` ne prétend pas resynchroniser un sous-titre isolé sans disposer des pHashes certifiés du média source correspondant. Le recalage visuel opère strictement entre **deux flux vidéo** (source certifiée vs cible).
+- **Vérité Terrain Relationnelle N:M** : Les associations certifiées entre vidéos, trames pHash et sous-titres sont scellées à la fois dans PostgreSQL 17 (`medias` ↔ `frames` ↔ `subtitles` ↔ `sub_frames`) et dans le registre portable Zero-DB `data/SRT/couplings.json`.
+- **Zero Magic Constants** : Aucun chiffre magique, seuil arbitraire ou timeout non documenté dans le code. Toutes les constantes sont typées, nommées et centralisées dans [`docs/reference/constants.md`](docs/reference/constants.md).
+- **Zéro Allocation en Chemin Chaud & SIMD** : Comparaisons de distance de Hamming accélérées par instructions matérielles CPU (`POPCNT`), projections mémoire `mmap` sans désérialisation, et représentations binaires compactes (8 octets / frame).
+- **Ordonnancement Pur via Taskfile** : Zéro script shell inline complexe dans `Taskfile.yml`. Toutes les opérations récurrentes sont encapsulées dans des scripts modulaires sous `scripts/` et déclarées sous `taskfiles/`.
+- **Fact-First Rigor & Preuves Empiriques** : Tout algorithme ou optimisation fait l'objet de benchmarks mesurés sur corpus réels (1 336 extraits vidéo, 5.08 millions de trames pHash sous `data/__PHASH__/`).
+
+---
+
+## 🧩 Fonctionnalités Clés
+
+- **Façade Unifiée d'Ingestion Média (`task media:add`)** :
+  - Auto-découverte des fichiers `.srt` sidecars homonymes.
+  - Extraction automatique des pistes de sous-titres embarquées dans les conteneurs MKV / MP4 via FFmpeg.
+  - Sondage FPS natif par `ffprobe` et identification ISO de langue.
+  - Détection universelle des encodages (UTF-8, UTF-16LE/BE avec BOM, Windows-1252, ISO-8859-1) via `encoding_rs` et `chardetng`.
+  - Rechargement atomique à chaud du catalogue en RAM sans arrêt de service (`zero-downtime hot reload`).
+- **Deux Moteurs d'Indexation Complémentaires** :
+  - **Zero-DB `mmap` (Option 2)** : Moteur autonome CLI / NAS sans dépendance, matching SIMD en **~3.2 ms** sur 5+ millions de frames.
+  - **PostgreSQL 17 SP-GiST BK-Tree (Voie B)** : Extension native C `bktree.so`, indexation métrique SP-GiST, transactions ACID et requêtes multi-critères.
+- **Microservice Axum & API REST (`dbsrt-server`)** :
+  - API HTTP/JSON ultra-rapide (`/v1/search/phash`, `/v1/subtitles/sync`, `/v1/catalog/status`).
+  - Index Multi-Index Hashing (MIH) en mémoire vive pour des recherches en sous-milliseconde.
+  - Serveur web intégré pour `dbsrt Studio` (`/studio`).
+- **Extension VLC Moderne & Protocole Local** :
+  - Remplacement direct de VLSub (`vlsub_dbsrt.lua`) dialoguant avec le démon local.
+  - Affichage direct des candidats avec leur distance de Hamming et application automatique du décalage calculé.
+- **Observabilité & Télémétrie** :
+  - Métriques Prometheus natives exposées par le serveur Axum (`/metrics`).
+  - Dashboards Grafana provisionnés automatiquement sous `docker/grafana/`.
+
+---
+
+## 🏗️ Deux Moteurs Complémentaires
+
+Le projet s'adapte aux contraintes d'infrastructure en proposant deux topologies d'exécution :
 
 ```mermaid
 flowchart LR
-    subgraph Mode_ZeroDB["Option 2 : Zero-DB mmap (CLI / Desktop / NAS)"]
-        CLI_Z["dbsrt CLI (Rust)"] -->|mmap 2 Zero-Copy| MMAP["Fichiers .phash plats (8 octets/frame)"]
-        MMAP -->|SIMD POPCNT + Rayon CPU| FAST["~3.2 ms matching (0 dépendance)"]
+    subgraph Mode_ZeroDB["Option 2 : Zero-DB mmap (CLI / Desktop / NAS / Appliance)"]
+        CLI_Z["dbsrt CLI (Rust)"] -->|mmap Zero-Copy| MMAP["Fichiers .phash plats (8 octets/frame)"]
+        MMAP -->|SIMD POPCNT + Rayon CPU| FAST["~3.2 ms matching (0 dépendance externe)"]
     end
 
-    subgraph Mode_DB["Voie B : PostgreSQL 17 BK-Tree (Serveur / API)"]
-        CLI_D["dbsrt CLI / Python"] -->|TCP Wire Protocol| PG["PostgreSQL 17 SP-GiST"]
-        PG -->|bktree.so C extension| SQL["Jointures relationnelles, ACID, multi-clients"]
+    subgraph Mode_DB["Voie B : PostgreSQL 17 BK-Tree (Serveur / Studio / API Cloud)"]
+        CLI_D["dbsrt CLI / Axum Server"] -->|TCP Wire Protocol| PG["PostgreSQL 17 SP-GiST"]
+        PG -->|Extension C bktree.so| SQL["Jointures relationnelles, ACID, multi-clients"]
     end
 ```
 
-| Critère | Zero-DB `mmap` (Option 2) | PostgreSQL 17 BK-Tree (Voie B) |
+| Critère | Zero-DB `mmap` (Option 2) | PostgreSQL 17 SP-GiST BK-Tree (Voie B) |
 | :--- | :--- | :--- |
-| **Cas d'usage** | CLI local, desktop, NAS, CI rapide, one-shot | Serveur API centralisé, multi-utilisateurs, catalogue partagé |
-| **Dépendances** | **0 dépendance** (binaire autonome unique) | PostgreSQL 17 + extension `bktree.so`, Docker |
-| **Vitesse matching** | **~3.2 ms** (~440x plus rapide que Python) | **~22.8 ms** (~15x plus rapide que Python) |
-| **Stockage** | Fichiers `.phash` (8 Go / milliard de frames) | Table SQL `frames` avec index SP-GiST |
-| **ACID / Transactions**| Non (fichiers immuables) | Oui (concurrence ACID complète) |
+| **Cas d'usage** | CLI local, appliance RPi4, NAS Synology, CI rapide | Serveur API d'équipe, backoffice Studio, catalogue multi-utilisateurs |
+| **Dépendances** | **0 dépendance** (binaire autonome unique) | PostgreSQL 17 + extension `bktree.so` (Docker) |
+| **Vitesse matching** | **~3.2 ms** (SIMD AVX2/NEON multi-cœur) | **~22.8 ms** (parcours d'index SP-GiST) |
+| **Empreinte disque** | Compacte (8 octets par trame pHash) | Index relationnel SQL + tables de trames |
+| **ACID / Concurrence** | Non (fichiers plats immuables) | Oui (transactions ACID, concurrence complète) |
 
 ---
 
-## 2. Prérequis & Installation
+## 🔄 Pipeline CI/CD & Assurance Qualité
 
+Le dépôt implémente une politique d'intégrité logicielle stricte validée sur GitHub Actions :
+
+- 📖 **[Consulter la Référence Technique Complète de l'Architecture CI/CD](docs/reference/ci-cd.md)**.
+
+```mermaid
+flowchart TD
+    PUSH["Push / PR (develop, master)"] --> CI["Workflow CI (main.yml)"]
+    PUSH --> PREVIEW["Surge Preview (pr-preview.yml)"]
+
+    subgraph Jobs ["6 Jobs Parallèles Haute Performance"]
+        QG["Multi-Language Quality Gate<br/>(9 linters : Python, Rust, Shell, Lua, YAML, Docker)"]
+        PY["Python Unit Tests<br/>(Pytest + Couverture)"]
+        RS["Rust Quality & Test Suite<br/>(clippy, fmt, cargo-llvm-cov)"]
+        DB["PostgreSQL 17 BK-Tree Integration<br/>(Conteneur éphémère + certify-coupling)"]
+        DOC["Documentation Quality Gate<br/>(MkDocs strict, LaTeX AST, Chrome headless)"]
+        COV["Unified Test Coverage & PR Report<br/>(Commentaire sticky PR automatique)"]
+    end
+
+    CI --> Jobs
+```
+
+### Optimisations Majeures de Pipeline :
+- **Installation FFmpeg Éclair via `AnimMouse/setup-ffmpeg@v1`** : Utilisation des builds statiques officiels [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds/releases) servis par le CDN GitHub Releases. Temps d'installation réduit de **3m 55s (APT) à 13s** (gain de **94.5%**).
+- **Mise en Cache Déclarative** : Caches Cargo (`Swatinem/rust-cache@v2`), cache d'environnements Python (`astral-sh/setup-uv@v5`) et caches d'images Docker.
+- **Quality Gate Documentaire Diátaxis** : Vérification stricte sans avertissement (`task doc:check`), compilation vectorielle MathJax et smoke tests DOM via Headless Chrome.
+
+---
+
+## 🛠️ Prérequis & Installation
+
+### Outils Recommandés :
 * [Rust](https://rustup.rs/) (>= 1.80)
-* [uv](https://github.com/astral-sh/uv) (pour l'environnement Python legacy)
-* [Taskfile](https://taskfile.dev/)
-* Docker / Docker Compose (uniquement pour l'approche base de données PostgreSQL)
+* [uv](https://github.com/astral-sh/uv) (gestionnaire Python ultra-rapide)
+* [Taskfile](https://taskfile.dev/) (orchestrateur de commandes)
+* FFmpeg (pour l'extraction de trames et sondage audio/vidéo)
+* Docker & Docker Compose (uniquement pour le mode PostgreSQL 17 / Studio)
 
 ```bash
-# Compiler l'ensemble du workspace Rust dbsrt en mode release
+# 1. Cloner le dépôt
+git clone https://github.com/yoyonel/pydbsrt.git
+cd pydbsrt
+
+# 2. Compiler l'ensemble des binaires Rust en release (dbsrt, dbsrt-server, dbsrt-index)
 task build
 
-# Installer l'environnement de développement et les pre-commits
+# 3. Synchroniser l'environnement virtuel Python et installer les pre-commits
 task sync
 uv run pre-commit install
 ```
 
 ---
 
-## 3. Stack Unifiée, Backoffice `dbsrt Studio` & Démos
+## ⚡ Quickstart & Scénarios Fréquents
 
-### Orchestration Complète de la Stack (`task dev` / `task up`)
+### 1. Ingestion d'un Nouveau Média en 1 Commande
 ```bash
-# Démarrer toute la stack (PostgreSQL 17 SP-GiST + PgWeb + dbsrt-server + MkDocs + Seed Couplings)
-task dev
-
-# Astuce multi-projets : en cas de conflit sur le port 8086 (ex: pods/conteneurs professionnels déjà actifs)
-# Surcharger simplement la variable sans impacter vos autres services :
-PGWEB_PORT=8088 task dev
-
-# Afficher l'état de tous les services et les compteurs relationnels (medias, frames, subtitles, sub_frames)
-task status
-
-# Ouvrir dbsrt Studio (http://127.0.0.1:8765/studio), PgWeb (:8086) et MkDocs (:8000)
-task studio
-
-# Ingestion unifiée en 1 commande : extraction pHash, certification couplage et rechargement dynamique RAM
-# (Auto-découverte SRT sidecars, extraction automatique de pistes MKV/MP4 embarquées, sondage FPS ffprobe)
+# Ingestion unifiée : calcule le pHash, auto-détecte le .srt sidecar, certifie le couplage et recharge la RAM
 task media:add -- mes_videos/film.mkv
 
-# Optionnel : spécifier explicitement sous-titre, langue et framerate
-task media:add -- mes_videos/film.mkv sous_titres/film.fr.srt --lang fr --fps 24.0
+# Spécification manuelle du sous-titre et de la langue
+task media:add -- mes_videos/film.mkv mes_subs/film.fr.srt --lang fr --fps 24.0
+```
 
-# Requalifier la langue d'un couplage sans ré-extraire le pHash
-task coupling:relabel -- --media <hash_ou_nom> --lang fr
+### 2. Démarrage de Toute la Stack Locale
+```bash
+# Démarre PostgreSQL 17 SP-GiST, PgWeb (:8086), dbsrt-server (:8765) et MkDocs (:8000)
+task dev
 
-# Certifier tous les couples (SRT <-> pHash) en base PostgreSQL 17 et dans data/SRT/couplings.json
-task coupling:certify
+# Afficher le tableau de bord de santé et compteurs relationnels
+task status
 
-# Arrêter proprement tous les démons et conteneurs
+# Ouvrir dbsrt Studio dans votre navigateur
+task studio
+
+# Arrêter proprement tous les services
 task down
 ```
 
-### Démos Clés & Recalage Temps Réel
+### 3. Recalage Standalone d'un Sous-Titre
 ```bash
-# Recaler et synchroniser des sous-titres SRT via le moteur Rust natif (en ~0.5 ms)
+# Recale un sous-titre désynchronisé contre un média ou son pHash en mode Zero-DB (en < 1 ms)
 task demo:sync
+```
 
-# Démonstration interactive VLC avec extension VLSub bonifiée et affichage OSD
-task demo:vlc
+### 4. Lancement de la Documentation Interactive
+```bash
+# Lance le serveur local avec rechargement à chaud automatique
+task doc
 
-# Lancer dbsrt Studio (interface web bi-piste et loupe 8x8 pHash sur :8765/studio)
-task demo:studio
-
-# Tester le cycle de vie systemd et l'installation client en conteneur hermétique
-task test:recipe:debian
+# Valide l'intégrité Diátaxis (liens, formules LaTeX, terminaux Asciinema)
+task doc:check
 ```
 
 ---
 
-## 4. Architecture Modulaire & SoC (Rust Workspace)
+## 🏛️ Architecture Modulaire & SoC (Rust Workspace)
 
-Le projet adopte une **Séparation Stricte des Responsabilités (SoC)** répartie en crates spécialisées sous `crates/`, avec **zéro constante magique** et typage rigoureux :
+Le cœur de `pydbsrt` est découpé selon le principe de **Séparation des Responsabilités (SoC)** sous `crates/` :
 
 ```mermaid
 flowchart TD
-    CLI["crates/dbsrt-cli (binaire & lib)"] --> CORE["crates/dbsrt-core (SIMD / pHash / FFmpeg)"]
+    CLI["crates/dbsrt-cli (binaire autonome dbsrt)"] --> CORE["crates/dbsrt-core (SIMD / pHash / FFmpeg)"]
     CLI --> INDEX["crates/dbsrt-index (PostgreSQL 17 & Zero-DB mmap)"]
     SERVER["crates/dbsrt-server (Axum API & Studio)"] --> CORE
     SERVER --> INDEX
 ```
 
-| Crate | Responsabilités & Architecture SoC |
+| Crate | Responsabilités & Périmètre SoC |
 | :--- | :--- |
-| **[`crates/dbsrt-cli`](crates/dbsrt-cli/)** | **CLI `dbsrt` modulaire** : Dispatcher Clap épuré (`main.rs`), bibliothèque `dbsrt_cli` (`lib.rs`), constantes de domaine typées (`constants.rs`) et sous-commandes dédiées dans `src/commands/` (`bench`, `certify`, `export`, `fetch`, `import`, `inspect`, `media_add`, `migrate`, `pack`, `recognize`, `retarget`, `scan`, `shared`). |
-| **[`crates/dbsrt-server`](crates/dbsrt-server/)** | **Serveur REST Axum** : Handlers HTTP modulaires dans `src/handlers/` (`health`, `lookup`, `metrics`, `search`, `studio`, `sync`), moteur MIH unifié (< 1 ms) et UI web bicanale `dbsrt Studio` (`:8765/studio`). |
-| **[`crates/dbsrt-index`](crates/dbsrt-index/)** | **Indexation, Schémas & Migrations** : Gestion relationnelle PostgreSQL 17 SP-GiST BK-Tree (`subtitles`, `sub_frames`, `medias`, `frames`), migrations déclaratives versionnées Refinery (`embed_migrations!`), et format Zero-DB plat `.dbphash` / `.phash` par projection mémoire (`mmap`). |
-| **[`crates/dbsrt-core`](crates/dbsrt-core/)** | **Primitives Algorithmiques** : Calcul d'empreintes perceptuelles 64-bit DCT pHash, extraction de trames FFmpeg HWAccel/SW et distance de Hamming accélérée SIMD (`popcnt`). |
+| **[`crates/dbsrt-cli`](crates/dbsrt-cli/)** | **CLI Standalone & Dispatcher** : Point d'entrée de commande (`main.rs`), bibliothèque modulaire (`lib.rs`), sous-commandes dédiées dans `src/commands/` (`media_add`, `certify`, `export`, `import`, `recognize`, `retarget`, `scan`, `bench`, `migrate`). |
+| **[`crates/dbsrt-server`](crates/dbsrt-server/)** | **Serveur REST Axum & Backoffice** : Handlers HTTP modulaires (`health`, `lookup`, `metrics`, `search`, `studio`, `sync`), indexation mémoire MIH et interface web `dbsrt Studio`. |
+| **[`crates/dbsrt-index`](crates/dbsrt-index/)** | **Indexation & Persistance** : Modèle relationnel PostgreSQL 17 SP-GiST, gestionnaire de migrations versionnées Refinery (`embed_migrations!`), et moteur `mmap` Zero-DB (`.dbphash` / `.phash`). |
+| **[`crates/dbsrt-core`](crates/dbsrt-core/)** | **Primitives Algorithmiques** : Calcul d'empreintes perceptuelles 64-bit DCT pHash, décodage FFmpeg HWAccel/SW, détection d'encodages de sous-titres et distance de Hamming SIMD (`popcnt`). |
 
 ---
 
-## 5. Ordonnancement Modulaire Taskfile & Assurance Qualité
+## 📖 Documentation Diátaxis (4 Quadrants)
 
-Le dépôt est orchestré par **[Taskfile (go-task)](https://taskfile.dev/)** découpé en modules spécialisés sous `taskfiles/` :
+La documentation est structurée selon la norme **[Diátaxis](https://diataxis.fr/)** :
 
-* 📚 **[Consulter le Tutoriel Développeur & Guide d'Ordonnancement Taskfile](docs/2026-10-21-tutoriel-orchestration-taskfile-et-guide-developpeur.md)** pour le guide pas à pas.
+```mermaid
+flowchart TD
+    subgraph Diataxis ["Architecture Documentaire Diátaxis"]
+        T["🎓 1. Tutoriels (Learning)<br/>docs/tutorials/<br/>01. Premiers pas VLC<br/>02. Ingestion média<br/>03. Guide contribution<br/>04. Appliance RPi4"]
+        H["🛠️ 2. Guides Pratiques (How-To)<br/>docs/how-to/<br/>• Recalage dans VLC<br/>• Façade task media:add<br/>• Certification couplages<br/>• Migrations Refinery<br/>• Télémétrie Prometheus"]
+        R["📖 3. Référence Technique<br/>docs/reference/<br/>• CLI dbsrt<br/>• API REST Axum<br/>• Schéma PostgreSQL 17<br/>• Architecture CI/CD<br/>• Constantes & Seuils<br/>• Formats Binaires"]
+        E["💡 4. Explications (Understanding)<br/>docs/explanation/<br/>• Principe pHash (2 flux requis)<br/>• Échantillonnage hybride<br/>• Indexation MIH vs BK-Tree<br/>• Modèle Relationnel Couplages<br/>• Architecture Démon & VLC OSD"]
+    end
+```
 
-| Tâche | Description | Domaine (`taskfiles/`) |
+### Accès Rapide par Quadrant
+
+| Quadrant | Intention | Liens Phares |
 | :--- | :--- | :--- |
-| **`task dev` / `task down`** | Démarre / arrête toute la stack de dev en arrière-plan | `Taskfile.yml` |
-| **`task media:add`** | Façade unifiée d'ingestion média (pHash, certification couplage et rechargement dynamique RAM) | `taskfiles/stack.yml` |
-| **`task coupling:relabel`** | Requalifie la langue d'un couplage certifié dans `couplings.json` | `taskfiles/stack.yml` |
-| **`task server:reload`** | Déclenche le rechargement atomique à chaud du catalogue (`/v1/catalog/reload`) | `taskfiles/stack.yml` |
-| **`task catalog:status`** | Affiche l'état d'indexation (Base immuable + Delta RAM + Couplages) | `taskfiles/stack.yml` |
-| **`task catalog:compact`** | Fusionne le Base et le Delta RAM dans un catalogue consolidé et swap | `taskfiles/stack.yml` |
-| **`task catalog:ingest`** | Injecte un fichier `.phash` à chaud dans le DeltaIndex en RAM | `taskfiles/stack.yml` |
-| **`task bench:hot-reload`** | Benchmark empirique de latence ArcSwap vs Pointeur direct et swap à chaud | `taskfiles/quality.yml` |
-| **`task status`** | Tableau de bord de santé unifié et compteurs PostgreSQL 17 | `Taskfile.yml` |
-| **`task build`** | Compile tous les binaires Rust en release (`dbsrt-cli`, `dbsrt-server`, `dbsrt-index`) | `Taskfile.yml` |
-| **`task test`** | Exécute l'ensemble des suites de tests Rust et Python | `Taskfile.yml` |
-| **`task test:rs`** | Exécute tous les tests unitaires, d'intégration et E2E Rust | `taskfiles/quality.yml` |
-| **`task test:recipe:debian`**| Teste la recette de déploiement client en conteneur Docker systemd isolé | `taskfiles/client.yml` |
-| **`task fmt`** | Formate automatiquement le code (`cargo fmt`, `ruff`, `shfmt`, `stylua`) | `taskfiles/quality.yml` |
-| **`task lint`** | Exécute les 9 linters (Rust, Python, Shell, Lua, Docker, YAML, web AST) | `taskfiles/quality.yml` |
-| **`task typecheck`** | Vérifie le typage statique strict Python via Pyright | `taskfiles/quality.yml` |
-| **`task coverage`** | Génère la couverture unifiée (1:1 parité CI GitHub Actions) | `taskfiles/quality.yml` |
-| **`task review:pack`** | Génère un bundle Markdown consolidé des diffs de branche pour revue IA via Repomix | `taskfiles/quality.yml` |
-| **`task repo:pack`** | Génère un bundle Markdown complet de l'ensemble du code source du dépôt via Repomix | `taskfiles/quality.yml` |
-| **`task ci:local`** | Suite rapide de validation pré-push (< 10s chrono) | `taskfiles/quality.yml` |
-| **`task doc`** | Lance le serveur local de documentation MkDocs Material (`:8000`) | `taskfiles/doc.yml` |
-| **`task doc:check`** | Validateur strict de documentation (liens, LaTeX, AST HTML, Chrome headless) | `taskfiles/doc.yml` |
-| **`task vlc:install-plugin`** | Installe l'extension GUI VLSub et l'interface CLI dans le profil VLC | `taskfiles/vlc.yml` |
-| **`task vlc:test`** | Exécute la pyramide complète de tests VLC (unitaires + cvlc + GUI E2E) | `taskfiles/vlc.yml` |
-| **`task db:up` / `db:down`** | Démarre / arrête la base PostgreSQL 17 SP-GiST BK-Tree | `taskfiles/db.yml` |
-| **`task db:migrate`** | Applique les migrations déclaratives en attente (`refinery` V1, V2, V3...) | `taskfiles/db.yml` |
-| **`task db:status`** | Affiche l'historique et l'état des versions appliquées (`refinery_schema_history`) | `taskfiles/db.yml` |
-| **`task db:lint:safety`** | Vérifie statiquement la sécurité DDL, les verrous et la compatibilité PG 15/17 des migrations | `taskfiles/db.yml` |
-| **`task rpi4:build`** | Cross-compile pour ARM64 / Raspberry Pi 4 | `taskfiles/rpi4.yml` |
-| **`task rpi4:sync`** | Synchronise le catalogue pHash et les sous-titres vers le Raspberry Pi 4 | `taskfiles/rpi4.yml` |
-| **`task rpi4:db:build`** | Compile l'image PostgreSQL 17 ARM64 nativement sur le Raspberry Pi 4 | `taskfiles/rpi4.yml` |
-| **`task rpi4:db:up` / `down`** | Démarre / arrête l'instance dédiée PostgreSQL 17 sur port 5433 | `taskfiles/rpi4.yml` |
-| **`task rpi4:db:status`** | Affiche le statut du conteneur et des migrations PostgreSQL sur Raspberry Pi 4 | `taskfiles/rpi4.yml` |
-| **`task rpi4:db:migrate`** | Applique les migrations déclaratives en attente (`refinery`) sur Raspberry Pi 4 | `taskfiles/rpi4.yml` |
-| **`task sim:test`** / **`task sim:rpi4:test`** | Exécute la batterie de 6 tests API ARM64 en simulation QEMU (512 Mo RAM) | `taskfiles/rpi4.yml` |
-| **`task clean`** | Purge unifiée des artefacts et caches (`target/`, `.pytest_cache`, `.ruff_cache`) | `Taskfile.yml` |
+| **🎓 [Tutoriels](docs/tutorials/)** | Apprentissage guidé pas à pas pour débutants | [Premiers Pas VLC](docs/tutorials/01-premiers-pas-synchronisation-vlc.md) • [Ingestion Média](docs/tutorials/02-ingestion-et-certification-premier-media.md) • [Guide Contribution](docs/tutorials/03-environnement-developpement-et-contribution.md) • [Appliance RPi4](docs/tutorials/04-deploiement-appliance-rpi4.md) |
+| **🛠️ [Guides Pratiques](docs/how-to/)** | Résolution concrète de tâches opérationnelles | [Synchroniser dans VLC](docs/how-to/synchroniser-sous-titres-vlc.md) • [Façade media:add](docs/how-to/ajouter-et-indexer-un-media.md) • [Certifier un couplage](docs/how-to/certifier-un-couplage.md) • [Migrer PostgreSQL](docs/how-to/migrer-schema-postgresql.md) • [Surveiller la stack](docs/how-to/surveiller-stack-telemetrie.md) |
+| **📖 [Référence](docs/reference/)** | Description formelle des interfaces et de la machine | [CLI dbsrt](docs/reference/cli.md) • [API REST Axum](docs/reference/api-rest.md) • [Schéma PostgreSQL 17](docs/reference/schema-postgresql.md) • [Architecture CI/CD](docs/reference/ci-cd.md) • [Constantes & Seuils](docs/reference/constants.md) • [Catalogue Taskfile](docs/reference/taskfile.md) |
+| **💡 [Explications](docs/explanation/)** | Clarification conceptuelle, théorique et choix d'architecture | [Principe pHash & 2 flux requis](docs/explanation/principe-fondamental-phash-et-retargeting.md) • [Échantillonnage hybride](docs/explanation/echantillonnage-hybride-cuts-et-1fps.md) • [MIH vs BK-Tree](docs/explanation/indexation-metrique-mih-vs-bktree.md) • [Vérité terrain & Modèle N:M](docs/explanation/modele-relationnel-couplages-certifies.md) |
 
 ---
 
-## 6. Documentation & Rapports d'Architecture
+## 📋 Catalogue des Commandes Clés (Taskfile)
 
-Dossiers techniques détaillés disponibles dans le répertoire [`docs/`](docs) :
+| Commande | Action | Module |
+| :--- | :--- | :--- |
+| `task dev` | Démarre toute la stack de développement en arrière-plan | `Taskfile.yml` |
+| `task down` | Arrête proprement tous les conteneurs et démons | `Taskfile.yml` |
+| `task status` | Tableau de bord de santé et compteurs relationnels PostgreSQL 17 | `Taskfile.yml` |
+| `task build` | Compile l'ensemble des binaires Rust en release | `Taskfile.yml` |
+| `task media:add` | Façade unifiée d'ingestion média (pHash, sidecar, certification, reload) | `taskfiles/stack.yml` |
+| `task coupling:certify` | Certifie les couples vidéo/sous-titres dans la base et dans JSON | `taskfiles/stack.yml` |
+| `task demo:vlc` | Démonstration interactive VLC avec extension VLSub bonifiée | `taskfiles/demo.yml` |
+| `task demo:studio` | Démarre l'interface web dbsrt Studio (`:8765/studio`) | `taskfiles/demo.yml` |
+| `task lint` | Exécute l'ensemble des 9 linters polyglottes | `taskfiles/quality.yml` |
+| `task test:rs` | Exécute la suite complète de tests Rust | `taskfiles/quality.yml` |
+| `task ci:local` | Suite rapide de vérification pré-push (< 10 secondes) | `taskfiles/quality.yml` |
+| `task coverage` | Rapport unifié de couverture de code (Rust + Python) | `taskfiles/quality.yml` |
+| `task doc` | Serveur de documentation MkDocs Material avec rechargement en direct | `taskfiles/doc.yml` |
+| `task doc:check` | Validateur strict de documentation (liens, LaTeX, AST, Headless Chrome) | `taskfiles/doc.yml` |
 
-* [`docs/decisions/2026-10-25-subtitle-encoding-detection.md`](docs/decisions/2026-10-25-subtitle-encoding-detection.md) : **ADR : Détection Universelle d'Encodage Sous-Titres** : Architecture de décodage 3-niveaux (`encoding_rs` + `chardetng`) avec suppression de BOM (UTF-8, UTF-16LE/BE), fast-path UTF-8 strict et détection statistique des encodages historiques (Windows-1252, ISO-8859-1).
-* [`docs/2026-10-25-guide-media-add-facade.md`](docs/2026-10-25-guide-media-add-facade.md) : **Guide Pratique : Façade Unifiée d'Ingestion Média (`task media:add`)** : Spécification et guide pas à pas de la commande unifiée (RFC #22 Phase 1) : auto-appairage sidecar & extraction de pistes embarquées MKV/MP4, auto-détection FPS `ffprobe` / langue ISO, déduplication CAS, logs temps réel et interruption propre SIGINT.
-* [`docs/2026-10-24-architecture-cycle-de-vie-donnees-io-et-rechargement-a-chaud.md`](docs/2026-10-24-architecture-cycle-de-vie-donnees-io-et-rechargement-a-chaud.md) : **Cycle de Vie des Données, Ingestion I/O & Rechargement à Chaud (Zero-Downtime)** : Modélisation des flux d'E/S, rechargement atomique de catalogue sans downtime via `ArcSwap`, benchmarks empiriques (< 24 ns overhead, swap en 207 ns) et Taskfiles.
-* [`docs/2026-10-24-deploiement-postgresql-17-isole-rpi4-et-orchestration-migrations.md`](docs/2026-10-24-deploiement-postgresql-17-isole-rpi4-et-orchestration-migrations.md) : **Déploiement Isolé de PostgreSQL 17 sur RPi4 & Orchestration des Migrations** : Cloisonnement strict et zéro impact sur la base PG 15.2 legacy (port 5432, 817k frames), instance PG 17 dédiée sur port 5433, automatisation Taskfile et validation empirique E2E.
-* [`docs/2026-10-23-guide-migrations-schema-postgresql-refinery.md`](docs/2026-10-23-guide-migrations-schema-postgresql-refinery.md) : **Guide & Architecture des Migrations PostgreSQL avec Refinery** : Migrations versionnées déclaratives (V1, V2, V3...), élimination des deadlocks en tests parallèles, commande `dbsrt migrate` et Taskfiles.
-* [`docs/2026-10-22-securisation-sql-et-atomicite-transactionnelle-copy-postgresql.md`](docs/2026-10-22-securisation-sql-et-atomicite-transactionnelle-copy-postgresql.md) : **Sécurisation SQL des Codes de Langue & Atomicité COPY** : Assainissement ISO 639 / BCP 47 (`validate_lang_code`), requêtes 100% paramétrées et transactions sans orphelins.
-* [`docs/2026-10-21-tutoriel-orchestration-taskfile-et-guide-developpeur.md`](docs/2026-10-21-tutoriel-orchestration-taskfile-et-guide-developpeur.md) : **Tutoriel Développeur & Guide d'Ordonnancement Taskfile** : Philosophie, modules `taskfiles/`, 4 workflows quotidiens et guide pas à pas pour ajouter une tâche.
-* [`docs/2026-10-21-strategie-tests-infrastructure-et-recettes-systemd-hermetiques.md`](docs/2026-10-21-strategie-tests-infrastructure-et-recettes-systemd-hermetiques.md) : **Stratégie de Test d'Infrastructure & Recettes systemd Hermétiques** : Épreuve de déploiement en conteneur Docker cgroups v2 isolé sans toucher à la machine hôte.
+---
 
-* [`docs/2026-10-20-dashboard-interactif-e2e-vlc-corpus-nas.md`](docs/2026-10-20-dashboard-interactif-e2e-vlc-corpus-nas.md) : Dashboard interactif sur 1 334 vidéos réelles (99.8% succès), navigation plein écran par flèches clavier, synchronisation bidirectionnelle du curseur et captures WebP 720p.
-* [`docs/2026-10-20-architecture-retrait-invalidation-donnees-globales.md`](docs/2026-10-20-architecture-retrait-invalidation-donnees-globales.md) : Architecture de retrait et invalidation globale sur 5 paliers synchronisés (FS, Zero-DB JSON, PostgreSQL 17 `ON DELETE CASCADE`, `.dbphash` mmap).
-* [`docs/2026-10-18-studio-backoffice-and-relational-couplings.md`](docs/2026-10-18-studio-backoffice-and-relational-couplings.md) : Architecture des couplages relationnels certifiés (`medias`/`frames`/`subtitles`/`sub_frames`), backoffice `dbsrt Studio` (`/studio`) + `PgWeb` (`:8086`), Taskfile déclaratif et pipeline qualité `17/17` hooks.
-* [`docs/2026-10-18-e2e-phash-search-mechanics-and-roadmap.md`](docs/2026-10-18-e2e-phash-search-mechanics-and-roadmap.md) : Analyse mécanique E2E de `Search by pHash`, résolution prioritaire par couplages certifiés et certification `dbsrt certify-coupling`.
-* [`docs/2026-10-18-vlsub-fork-and-restoration.md`](docs/2026-10-18-vlsub-fork-and-restoration.md) : Fork bonifié de VLSub (`vlsub_dbsrt.lua`), backend REST Axum et démonstration vidéo 1080p MP4.
-* [`docs/2026-10-17-etude-comparative-identification-frames-cuts-keyframes-hybride.md`](docs/2026-10-17-etude-comparative-identification-frames-cuts-keyframes-hybride.md) : Étude empirique comparative (5M frames, 125 épisodes, 5 encodages) et validation du format Hybride v2.0.
-* [`docs/2026-10-16-axe5-remote-subtitles-providers.md`](docs/2026-10-16-axe5-remote-subtitles-providers.md) : Spécification technique du moteur de récupération et d'agrégation de sous-titres distants.
-* [`docs/2026-10-15-scaling-architecture-rust-mmap.md`](docs/2026-10-15-scaling-architecture-rust-mmap.md) : Étude d'ingénierie sur le passage à l'échelle (milliards de frames) et moteur `mmap`.
-* [`docs/2026-10-15-rust-e2e-benchmarks-and-tradeoffs.md`](docs/2026-10-15-rust-e2e-benchmarks-and-tradeoffs.md) : Analyse comparative des performances Rust vs Python et compromis techniques.
-* [`docs/2026-10-15-pg17-bktree-benchmark-migration.md`](docs/2026-10-15-pg17-bktree-benchmark-migration.md) : Migration de l'extension C BK-Tree sur PostgreSQL 17.
-* [`docs/2026-10-15-audit-global.md`](docs/2026-10-15-audit-global.md) : Audit exhaustif du dépôt avant modernisation.
+## 📄 Licence
+
+Ce projet est distribué sous licence MIT. Consultez le fichier [LICENSE](LICENSE) pour plus de détails.

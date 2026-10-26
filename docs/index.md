@@ -43,63 +43,76 @@ hide:
   </div>
 </div>
 
-## 🧭 Par où commencer ? (Parcours Guidés par Besoin)
+## 🧭 Les 4 Quadrants Documentaires Diátaxis
 
 <div class="dbsrt-bento-grid">
   <div class="dbsrt-bento-card bento-cyan">
     <div class="bento-header">
-      <span class="bento-icon">⚡</span>
-      <span class="bento-badge">OPÉRATIONS &amp; API</span>
+      <span class="bento-icon">🎓</span>
+      <span class="bento-badge">TUTORIELS • APPRENTISSAGE</span>
     </div>
-    <h3>Démarrage Rapide, Taskfile &amp; REST API</h3>
-    <p>Lancer la stack complète en 1 commande (<code>task stack:up</code>), explorer les cibles <code>Taskfile.yml</code> et interroger les endpoints REST <code>:8085</code>.</p>
+    <h3>Parcours Débutants &amp; Prise en Main Pas à Pas</h3>
+    <p>Leçons guidées linéaires, sans alternative ni bifurcation, garantissant une réussite immédiate pour découvrir la stack et le recalage.</p>
     <div class="bento-links">
-      <a href="quickstart-and-reference/">→ Guide Opérationnel &amp; CLI/API</a>
-      <a href="2026-10-15-modernization-blueprint/">→ Blueprint UV, Taskfile &amp; Qualité</a>
+      <a href="tutorials/01-premiers-pas-synchronisation-vlc/">→ 1. Premiers Pas &amp; Synchronisation VLC</a>
+      <a href="tutorials/02-ingestion-et-certification-premier-media/">→ 2. Ingestion &amp; Certification Média</a>
+      <a href="tutorials/03-environnement-developpement-et-contribution/">→ 3. Environnement Dév &amp; Contribution</a>
+      <a href="tutorials/04-deploiement-appliance-rpi4/">→ 4. Déploiement Appliance RPi4</a>
+      <a href="tutorials/index.md">→ Explorer l'index des Tutoriels</a>
     </div>
   </div>
 
   <div class="dbsrt-bento-card bento-indigo">
     <div class="bento-header">
-      <span class="bento-icon">🎬</span>
-      <span class="bento-badge">LECTEUR VIDÉO</span>
+      <span class="bento-icon">🛠️</span>
+      <span class="bento-badge">GUIDES PRATIQUES • HOW-TO</span>
     </div>
-    <h3>Plugin VLC v2.0 &amp; Fork VLSub</h3>
-    <p>Rechercher, télécharger et recaler automatiquement un sous-titre directement depuis l'interface Qt de VLC avec notification OSD native.</p>
+    <h3>Recettes Opérationnelles &amp; Résolution de Tâches</h3>
+    <p>Guides directs orientés résolution de problème pour les utilisateurs et développeurs autonomes en situation réelle.</p>
     <div class="bento-links">
-      <a href="2026-10-20-dashboard-interactif-e2e-vlc-corpus-nas/">→ ⚡ Dashboard E2E VLC GUI (1 334 Tests)</a>
-      <a href="2026-10-18-vlsub-fork-and-restoration/">→ Fork VLSub &amp; Démo Vidéo 1080p</a>
-      <a href="2026-10-17-validation-ui-ux-vlc-plugin-v2/">→ Validation UI/UX Plugin VLC v2.0</a>
-      <a href="2026-10-15-vlc-integration-daemon-and-plugins/">→ Daemon Axum &amp; Plugins Lua</a>
+      <a href="how-to/synchroniser-sous-titres-vlc/">→ Synchroniser des Sous-Titres dans VLC</a>
+      <a href="how-to/ajouter-et-indexer-un-media/">→ Façade Unifiée (task media:add)</a>
+      <a href="how-to/certifier-un-couplage/">→ Certifier un Couplage Vérité Terrain</a>
+      <a href="how-to/migrer-schema-postgresql/">→ Migrer PostgreSQL avec Refinery</a>
+      <a href="how-to/surveiller-stack-telemetrie/">→ Surveiller avec Prometheus &amp; Grafana</a>
+      <a href="how-to/contribuer-documentation-diataxis/">→ ✍️ Contribuer à la Doc selon Diátaxis</a>
+      <a href="how-to/index.md">→ Explorer tous les Guides Pratiques</a>
     </div>
   </div>
 
   <div class="dbsrt-bento-card bento-emerald">
     <div class="bento-header">
-      <span class="bento-icon">🎛️</span>
-      <span class="bento-badge">BACKOFFICE &amp; VÉRITÉ TERRAIN</span>
+      <span class="bento-icon">📖</span>
+      <span class="bento-badge">RÉFÉRENCE • INFORMATION</span>
     </div>
-    <h3>dbsrt Studio &amp; Couplages Certifiés</h3>
-    <p>Inspecter la timeline bi-piste (Frames ↔ SRT), la loupe pHash 8×8 et le schéma relationnel PostgreSQL 17 (<code>medias</code>, <code>frames</code>, <code>subtitles</code>, <code>sub_frames</code>).</p>
+    <h3>Spécifications Exhaustives &amp; Descriptions Neutres</h3>
+    <p>Description factuelle et austère des machines : options CLI, contrats d'API HTTP, schémas relationnels et formats binaires.</p>
     <div class="bento-links">
-      <a href="2026-10-18-studio-backoffice-and-relational-couplings/">→ dbsrt Studio &amp; Schéma Relationnel</a>
-      <a href="2026-10-18-e2e-phash-search-mechanics-and-roadmap/">→ Mécanique E2E Search by pHash</a>
-      <a href="2026-10-16-axe5-remote-subtitles-providers/">→ Connecteurs Distants (OpenSubtitles)</a>
+      <a href="reference/cli/">→ CLI Standalone Rust (dbsrt)</a>
+      <a href="reference/api-rest/">→ API REST Axum (:8765)</a>
+      <a href="reference/schema-postgresql/">→ Schéma PostgreSQL 17 &amp; SP-GiST</a>
+      <a href="reference/formats-fichiers/">→ Formats .dbphash v2 &amp; Couplings JSON</a>
+      <a href="reference/taskfile/">→ Catalogue des Commandes Taskfile</a>
+      <a href="reference/configuration/">→ Configuration &amp; Variables d'Environnement</a>
+      <a href="reference/index.md">→ Explorer l'index de Référence</a>
     </div>
   </div>
 
   <div class="dbsrt-bento-card bento-amber">
     <div class="bento-header">
-      <span class="bento-icon">🧠</span>
-      <span class="bento-badge">ALGORITHMES &amp; STOCKAGE</span>
+      <span class="bento-icon">💡</span>
+      <span class="bento-badge">EXPLICATIONS • COMPRÉHENSION</span>
     </div>
-    <h3>Moteur pHash Hybride, mmap &amp; PG17</h3>
-    <p>Pourquoi l'échantillonnage hybride (Cuts + Keyframes 1 fps) élimine les zones aveugles VOD et comment le moteur Rust SIMD / SP-GiST indexe des millions de frames.</p>
+    <h3>Architecture, Théorie &amp; Analyse des Choix</h3>
+    <p>Articles discursifs apportant du recul, éclairant les modèles mathématiques et déconstruisant les fausses intuitions.</p>
     <div class="bento-links">
-      <a href="2026-10-17-etude-comparative-identification-frames-cuts-keyframes-hybride/">→ Étude Cuts, Keyframes &amp; Hybride</a>
-      <a href="2026-10-15-scaling-architecture-rust-mmap/">→ Moteur Zero-DB mmap SIMD</a>
-      <a href="2026-10-15-pg17-bktree-benchmark-migration/">→ PostgreSQL 17 SP-GiST BK-Tree</a>
-      <a href="2026-10-23-guide-migrations-schema-postgresql-refinery/">→ Migrations DB &amp; Refinery</a>
+      <a href="explanation/principe-fondamental-phash-et-retargeting/">→ Pourquoi le pHash Requièrt 2 Flux Vidéo</a>
+      <a href="explanation/echantillonnage-hybride-cuts-et-1fps/">→ Échantillonnage Hybride (Cuts + 1 fps)</a>
+      <a href="explanation/indexation-metrique-mih-vs-bktree/">→ Indexation Métrique : MIH vs BK-Tree</a>
+      <a href="explanation/modele-relationnel-couplages-certifies/">→ Vérité Terrain &amp; Couplages Certifiés</a>
+      <a href="explanation/architecture-daemon-axum-et-vlc-osd/">→ Architecture Démon Axum &amp; VLC OSD</a>
+      <a href="explanation/stockage-decentralise-cas-et-distribution/">→ Stockage Décentralisé CAS &amp; Distribution</a>
+      <a href="explanation/index.md">→ Explorer l'index des Explications</a>
     </div>
   </div>
 
@@ -111,9 +124,10 @@ hide:
     <h3>Benchmarks E2E &amp; Dataset Réel (5M Frames)</h3>
     <p>Campagnes de mesures sur 125 épisodes (5,08M frames), comparatifs Rust vs Python et validation E2E sur NAS Synology.</p>
     <div class="bento-links">
+      <a href="2026-10-20-dashboard-interactif-e2e-vlc-corpus-nas/">→ ⚡ Dashboard E2E VLC GUI (1 336 Tests)</a>
       <a href="2026-10-15-rust-e2e-benchmarks-and-tradeoffs/">→ Benchmarks E2E Rust vs Python</a>
       <a href="2026-10-16-phash-dataset-scale-and-benchmarks/">→ Passage à l'Échelle (5,08M frames)</a>
-      <a href="2026-10-17-validation-empirique-e2e-synology/">→ Validation Empirique Synology NAS</a>
+      <a href="2026-10-19-mih-100m-scale-benchmark-report/">→ Stress-Test 100M Frames (MIH)</a>
     </div>
   </div>
 
@@ -123,9 +137,10 @@ hide:
       <span class="bento-badge">VISION &amp; ARCHIVES</span>
     </div>
     <h3>Feuille de Route (1920–2026) &amp; Audits</h3>
-    <p>Régression affine 2D (drift PAL/NTSC), décodage matériel GPU, audits techniques de l'existant et notes historiques 2021.</p>
+    <p>Régression affine 2D (drift PAL/NTSC), décodage matériel GPU, audits techniques de l'existant et index des tags.</p>
     <div class="bento-links">
-      <a href="2026-10-15-deep-dive-modernization-and-scaling-roadmap/">→ Feuille de Route &amp; Échelle (1920-2026)</a>
+      <a href="diataxis/">→ 🧭 Cadre Méthodologique Diátaxis</a>
+      <a href="2026-10-21-feuille-de-route-post-merge-develop-et-decoupage-projets/">→ Feuilles de Route (5 Projets v0.2+)</a>
       <a href="2026-10-18-vlsub-legacy-audit/">→ Audit Technique Legacy VLSub</a>
       <a href="tags/">→ Explorer l'Index des Tags</a>
     </div>

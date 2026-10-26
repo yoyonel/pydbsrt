@@ -17,17 +17,34 @@ Checks:
 from __future__ import annotations
 
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 from bs4 import BeautifulSoup
 
+CHROME_CANDIDATES: tuple[str, ...] = (
+    "google-chrome",
+    "google-chrome-stable",
+    "chromium",
+    "chromium-browser",
+)
+
+
+def find_chrome_binary() -> str | None:
+    """Locate the first available Chrome/Chromium executable binary on PATH."""
+    for candidate in CHROME_CANDIDATES:
+        if shutil.which(candidate):
+            return candidate
+    return None
+
 
 def check_html_files(site_dir: Path) -> list[str]:
     """Scan all generated HTML files for formatting and rendering defects."""
     errors: list[str] = []
     html_files = list(site_dir.rglob("*.html"))
+    total_casts_found: int = 0
 
     if not html_files:
         return [f"No HTML files found in {site_dir}. Run mkdocs build first."]
@@ -92,12 +109,35 @@ def check_html_files(site_dir: Path) -> list[str]:
                 if not target.exists():
                     errors.append(f"{rel_path}: Broken local video/media src: '{src}'")
 
+        # 5. Check local asciinema cast sources
+        for cast_tag in article.find_all(class_="asciinema-cast"):
+            total_casts_found += 1
+            src_val = cast_tag.get("data-cast", "")
+            src = src_val[0] if isinstance(src_val, list) else str(src_val or "")
+            if src and not src.startswith(("http://", "https://", "data:")):
+                clean_src = src.split("?")[0].split("#")[0]
+                target = (html_path.parent / clean_src).resolve()
+                if not target.exists():
+                    errors.append(f"{rel_path}: Broken local asciinema cast src: '{src}'")
+
+    if total_casts_found == 0:
+        errors.append(
+            f"Zero .asciinema-cast elements detected across {len(html_files)} HTML pages. "
+            "Verify that terminal sessions are properly embedded via class='asciinema-cast' "
+            "and hydrated by docs/javascripts/doc-portal.js."
+        )
+
     return errors
 
 
 def run_chrome_smoke_test(site_dir: Path) -> list[str]:
     """Verify headless Chrome can render math pages without JS errors."""
     errors: list[str] = []
+    chrome_bin = find_chrome_binary()
+    if not chrome_bin:
+        print("ℹ️  Chrome/Chromium binary not found on PATH; skipping headless smoke test.")
+        return []
+
     # Test file URL directly on site/ index
     test_page = (site_dir / "2026-10-15-scaling-architecture-rust-mmap" / "index.html").resolve()
     if not test_page.exists():
@@ -105,7 +145,7 @@ def run_chrome_smoke_test(site_dir: Path) -> list[str]:
 
     file_url = f"file://{test_page}"
     cmd = [
-        "google-chrome",
+        chrome_bin,
         "--headless=new",
         "--no-sandbox",
         "--disable-dev-shm-usage",
@@ -143,6 +183,7 @@ def check_docs_filetypes() -> list[str]:
         ".css",
         ".pdf",
         ".svg",
+        ".cast",
         ".woff2",
         ".ttf",
     }

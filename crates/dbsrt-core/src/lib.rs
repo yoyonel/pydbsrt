@@ -21,7 +21,7 @@ pub use container::{
 pub use coupling::{
     build_and_validate_sub_frames, build_and_validate_sub_frames_opts, compute_bytes_digest_32,
     compute_media_phash_digest, CertifiedMediaCoupling, CertifiedSubtitleRecord, CouplingRegistry,
-    RelabelResult, SubFrameAnchor,
+    RegistryLock, RelabelResult, SubFrameAnchor,
 };
 pub use cuts::{
     detect_cuts, detect_cuts_timestamped, is_blank_phash, read_phash_file, write_phash_file,
