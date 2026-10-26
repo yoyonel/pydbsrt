@@ -34,6 +34,12 @@ tasks:
     cmds:
       - ./target/release/dbsrt top {{.CLI_ARGS}}
 
+  top:recette:
+    desc: "Execute full end-to-end recipe and ASCIInema recording on native Rust top TUI with real NAS data (usage: task top:recette)"
+    deps: [cli:build]
+    cmds:
+      - uv run python scripts/recette_top_e2e.py
+
   media:top:py:
     desc: "Legacy Python Rich process monitor (usage: task media:top:py)"
     cmds:

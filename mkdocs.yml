@@ -128,6 +128,7 @@ nav:
       - Guide Migrations Refinery: 2026-10-23-guide-migrations-schema-postgresql-refinery.md
       - Surveiller la Stack avec Prometheus & Grafana: how-to/surveiller-stack-telemetrie.md
       - Invalider et Purger des Données pHash: how-to/invalider-donnees-phash.md
+      - Recette E2E du Moniteur TUI Rust (dbsrt top): how-to/2026-10-26-recette-e2e-tui-rust.md
       - Exécuter les Recettes de Chaos Testing: how-to/executer-recettes-chaos-testing.md
       - Contribuer à la Documentation Diátaxis: how-to/contribuer-documentation-diataxis.md
   - 📖 Référence Technique:
