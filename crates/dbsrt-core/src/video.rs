@@ -9,7 +9,8 @@ use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 /// Execution timeout in seconds for invoking ffprobe.
-pub const FFPROBE_TIMEOUT_SECS: u64 = 5;
+/// Accommodates network CIFS/NFS SMB filesystem latency under heavy concurrent worker loads.
+pub const FFPROBE_TIMEOUT_SECS: u64 = 60;
 
 /// Polling interval for checking child process completion.
 pub const CHILD_POLL_INTERVAL: Duration = Duration::from_millis(50);
@@ -371,7 +372,22 @@ fn detect_best_hw_ffmpeg() -> ResolvedFfmpeg {
     // 1. Check VA-API (Intel/AMD render node)
     let has_dri = Path::new("/dev/dri/renderD128").exists() || Path::new("/dev/dri/card0").exists();
     if has_dri {
-        if let Some(bin) = find_ffmpeg_supporting(HwAccel::Vaapi) {
+        let dri_node = if Path::new("/dev/dri/renderD128").exists() {
+            "/dev/dri/renderD128"
+        } else {
+            "/dev/dri/card0"
+        };
+        let can_access = std::fs::OpenOptions::new()
+            .read(true)
+            .open(dri_node)
+            .is_ok();
+        if !can_access {
+            eprintln!(
+                "⚠️  VA-API device '{}' exists but is not accessible. \
+                 Ensure user is in 'render' or 'video' group. Falling back to CPU.",
+                dri_node
+            );
+        } else if let Some(bin) = find_ffmpeg_supporting(HwAccel::Vaapi) {
             return ResolvedFfmpeg {
                 binary: bin,
                 hwaccel: HwAccel::Vaapi,
@@ -491,15 +507,24 @@ pub fn extract_frames_advanced(
         Ok(samples) if !samples.is_empty() => Ok(samples),
         other => {
             if resolved.hwaccel != HwAccel::Disabled {
-                // Hardware acceleration failed or produced 0 frames -> fallback to CPU software decoding
+                let err_detail = match &other {
+                    Ok(empty) => format!("produced {} frames", empty.len()),
+                    Err(e) => format!("failed: {:#}", e),
+                };
+                eprintln!(
+                    "⚠️  HWAccel {:?} decoding {} on {:?}, falling back to CPU software decoding.",
+                    resolved.hwaccel, err_detail, path
+                );
                 let fallback = ResolvedFfmpeg {
                     binary: PathBuf::from("ffmpeg"),
                     hwaccel: HwAccel::Disabled,
                 };
                 let fallback_res = run_extraction_process(path, options, &fallback);
                 if fallback_res.is_ok() {
+                    eprintln!("✓ CPU software decoding fallback succeeded on {:?}", path);
                     return fallback_res;
                 }
+                eprintln!("✗ CPU software decoding fallback also failed on {:?}", path);
             }
             other
         }
@@ -606,10 +631,11 @@ fn run_extraction_process(
         )
     })?;
 
-    let mut stdout = child
+    let stdout = child
         .stdout
         .take()
         .ok_or_else(|| anyhow!("Cannot capture ffmpeg stdout"))?;
+    let mut reader = std::io::BufReader::with_capacity(1024 * 1024, stdout);
 
     let mut buf = [0u8; 1024];
     let capacity = options.max_frames.unwrap_or(256);
@@ -625,7 +651,7 @@ fn run_extraction_process(
     let start_ms = (options.start_sec * 1000.0).round() as u64;
 
     while options.max_frames.is_none_or(|m| samples.len() < m) {
-        match stdout.read_exact(&mut buf) {
+        match reader.read_exact(&mut buf) {
             Ok(()) => {
                 let frame_idx = samples.len();
                 let phash = crate::phash::phash_32x32(&buf);
@@ -688,16 +714,28 @@ pub fn extract_keyframes_phash(path: &Path) -> Result<Vec<FrameSample>> {
 
 /// Extracts a stream of 32x32 grayscale frames using ffmpeg and computes pHash on each.
 /// Preserved for backward compatibility.
-pub fn extract_frames_phash(path: &Path, start_sec: f64, nb_frames: usize) -> Result<Vec<u64>> {
+/// Extracts a stream of 32x32 grayscale frames using ffmpeg with specified hardware acceleration.
+pub fn extract_frames_phash_with_hwaccel(
+    path: &Path,
+    start_sec: f64,
+    nb_frames: usize,
+    hwaccel: HwAccel,
+) -> Result<Vec<u64>> {
     let opts = VideoExtractionOptions {
         start_sec,
         max_frames: Some(nb_frames),
         sampling: SamplingMode::Full,
-        hwaccel: HwAccel::Disabled,
+        hwaccel,
         ..Default::default()
     };
     let samples = extract_frames_advanced(path, &opts)?;
     Ok(samples.into_iter().map(|s| s.phash).collect())
+}
+
+/// Extracts a stream of 32x32 grayscale frames using ffmpeg and computes pHash on each.
+/// Preserved for backward compatibility (CPU software decoding for exact bit-level parity).
+pub fn extract_frames_phash(path: &Path, start_sec: f64, nb_frames: usize) -> Result<Vec<u64>> {
+    extract_frames_phash_with_hwaccel(path, start_sec, nb_frames, HwAccel::Disabled)
 }
 
 #[cfg(test)]
