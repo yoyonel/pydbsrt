@@ -11,14 +11,14 @@ use dbsrt_core::{
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use crate::cli::PostgresArgs;
 use crate::commands::certify::detect_cli_subtitle_lang_status;
-use crate::commands::shared::find_or_build_phash;
+use crate::commands::shared::find_or_build_phash_with_hwaccel;
 use crate::constants::{
     DEFAULT_HTTP_TIMEOUT_SECS, DEFAULT_SERVER_URL, DEFAULT_SUBTITLES_DIR, DEFAULT_TMP_DIR,
 };
@@ -28,6 +28,194 @@ pub const PARTIAL_PHASH_THRESHOLD_BYTES: u64 = 1_000;
 
 /// Standard UNIX process exit code on SIGINT signal (128 + 2).
 pub const SIGINT_EXIT_CODE: i32 = 130;
+
+/// Codecs considered bitmap subtitles that cannot be converted directly to SRT text.
+pub const BITMAP_SUB_CODECS: &[&str] = &[
+    "hdmv_pgs_subtitle",
+    "dvd_subtitle",
+    "pgssub",
+    "vobsub",
+    "dvdsub",
+];
+
+enum SubtitleJob {
+    AlreadyResolved(Vec<(PathBuf, LangStatus)>),
+    NeedsExtraction {
+        candidates: Vec<(usize, Option<String>, PathBuf)>,
+        discovered: Vec<(PathBuf, Option<String>)>,
+    },
+}
+
+fn select_and_validate_subtitle_pairs(
+    discovered: &[(PathBuf, Option<String>)],
+    video_path: &Path,
+    target_lang: Option<&str>,
+    is_json: bool,
+) -> Result<Vec<(PathBuf, LangStatus)>> {
+    let selected: Vec<_> = if let Some(target) = target_lang {
+        let matching: Vec<_> = discovered
+            .iter()
+            .filter(|(_, lang)| lang.as_deref() == Some(target))
+            .cloned()
+            .collect();
+        if !matching.is_empty() {
+            matching
+        } else {
+            let untagged: Vec<_> = discovered
+                .iter()
+                .filter(|(_, lang)| lang.is_none())
+                .cloned()
+                .collect();
+            if untagged.is_empty() {
+                bail!(
+                    "❌ Discovered subtitle files did not match requested language '{}'",
+                    target
+                );
+            }
+            let in_parent: Vec<_> = untagged
+                .iter()
+                .filter(|(p, _)| p.parent() == video_path.parent())
+                .cloned()
+                .collect();
+            if !in_parent.is_empty() {
+                in_parent
+            } else {
+                untagged
+            }
+        }
+    } else {
+        discovered.to_vec()
+    };
+
+    if !is_json {
+        if let Some(target) = target_lang {
+            eprintln!(
+                "🔍 Filtering subtitle candidates for requested language '{}':",
+                target
+            );
+            for (p, _) in &selected {
+                eprintln!("   ✓ Selected: {:?}", p.file_name().unwrap_or_default());
+            }
+            for (p, l) in discovered {
+                if !selected.iter().any(|(sp, _)| sp == p) {
+                    let reason = match l {
+                        Some(other) => format!("detected language '{}' != '{}'", other, target),
+                        None => "secondary track bypassed in favor of root sidecar".to_string(),
+                    };
+                    eprintln!(
+                        "   ⊘ Ignored: {:?} ({})",
+                        p.file_name().unwrap_or_default(),
+                        reason
+                    );
+                }
+            }
+        }
+    }
+
+    let mut final_pairs = Vec::new();
+    for (path, lang_opt) in selected {
+        let srt_name = path
+            .file_name()
+            .and_then(|f| f.to_str())
+            .unwrap_or_default();
+        let lang_status = if let Some(target) = target_lang {
+            LangStatus::Confirmed(target.to_lowercase())
+        } else if let Some(ref l) = lang_opt {
+            LangStatus::Detected(l.clone())
+        } else {
+            let status = detect_cli_subtitle_lang_status(srt_name, "auto");
+            if !is_json {
+                eprintln!(
+                    "   Lang inferred from filename via detect_cli_subtitle_lang: {}",
+                    status.to_lang_code()
+                );
+            }
+            match status {
+                LangStatus::Detected(code) => LangStatus::Detected(code),
+                _ => {
+                    if !is_json {
+                        eprintln!("⚠️  Language could not be determined from filename.");
+                        eprintln!(
+                            "   Coupling will be certified with lang=\"und\" (undetermined)."
+                        );
+                        eprintln!("   To fix later: dbsrt coupling:relabel --media <hash> --sub <hash> --lang <code>");
+                        eprintln!("   Or specify --lang <code> now to set it explicitly.");
+                    }
+                    LangStatus::Unknown
+                }
+            }
+        };
+        let lang_code = lang_status.to_lang_code();
+        if lang_code == "auto" || lang_code.is_empty() {
+            bail!(
+                "❌ Could not determine subtitle language for '{}'. Please specify it explicitly via --lang <fr|en|es|...>",
+                srt_name
+            );
+        }
+        final_pairs.push((path, lang_status));
+    }
+    Ok(final_pairs)
+}
+
+fn extract_embedded_subtitles_and_select(
+    video_path: &Path,
+    candidates: Vec<(usize, Option<String>, PathBuf)>,
+    mut discovered: Vec<(PathBuf, Option<String>)>,
+    target_lang: Option<&str>,
+    is_json: bool,
+) -> Result<Vec<(PathBuf, LangStatus)>> {
+    let cleanup = CleanupState::global();
+    if !candidates.is_empty() {
+        let lang_tags: Vec<String> = candidates
+            .iter()
+            .map(|(_, l, _)| l.as_deref().unwrap_or("und").to_string())
+            .collect();
+
+        if !is_json {
+            eprintln!(
+                "📦 Extracting {} embedded subtitle track(s) in single pass: {:?}",
+                candidates.len(),
+                lang_tags
+            );
+        }
+
+        let mut cmd = std::process::Command::new("ffmpeg");
+        cmd.args(["-v", "error", "-y", "-i"]).arg(video_path);
+        for (idx, _lang, dest) in &candidates {
+            let map_arg = format!("0:s:{}", idx);
+            cmd.args(["-map", &map_arg, "-f", "srt"]).arg(dest);
+        }
+
+        let batch_ok = cmd.status().map(|s| s.success()).unwrap_or(false);
+        if batch_ok {
+            for (_idx, lang_opt, srt_path) in candidates {
+                if srt_path.exists() && srt_path.metadata().map(|m| m.len() > 0).unwrap_or(false) {
+                    cleanup.srts.lock().unwrap().push(srt_path.clone());
+                    discovered.push((srt_path, lang_opt));
+                }
+            }
+        } else {
+            // Fallback to sequential extraction
+            for (idx, lang_opt, srt_path) in candidates {
+                if let Ok(srt_content) = extract_embedded_subtitle(video_path, idx) {
+                    if fs::write(&srt_path, &srt_content).is_ok() {
+                        cleanup.srts.lock().unwrap().push(srt_path.clone());
+                        discovered.push((srt_path, lang_opt));
+                    }
+                }
+            }
+        }
+    }
+
+    if discovered.is_empty() {
+        bail!(
+            "❌ No matching .srt file found for '{:?}'. Specify a subtitle file with '--srt <path>' or download one using 'dbsrt fetch-subtitles -q \"<title>\" -l fr'.",
+            video_path
+        );
+    }
+
+    select_and_validate_subtitle_pairs(&discovered, video_path, target_lang, is_json)
+}
 
 static CLEANUP_STATE: OnceLock<Arc<CleanupState>> = OnceLock::new();
 
@@ -130,6 +318,10 @@ pub struct MediaAddArgs {
     #[arg(long)]
     pub json: bool,
 
+    /// Hardware acceleration backend (auto, vaapi, cuda, qsv, disabled)
+    #[arg(long, default_value = "auto")]
+    pub hwaccel: String,
+
     /// HTTP URL of dbsrt-server for live catalog ingestion
     #[arg(long, default_value = DEFAULT_SERVER_URL)]
     pub server_url: String,
@@ -173,9 +365,9 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
         bail!("Media video file not found: {:?}", video_path);
     }
 
-    // 2. Resolve subtitle pairs
+    // 2. Resolve subtitle pairs / pre-flight
     let explicit_srt = args.srt.as_ref().or(args.srt_pos.as_ref());
-    let pairs: Vec<(PathBuf, LangStatus)> = if let Some(srt_file) = explicit_srt {
+    let sub_job: SubtitleJob = if let Some(srt_file) = explicit_srt {
         if !srt_file.exists() {
             bail!("Specified subtitle file not found: {:?}", srt_file);
         }
@@ -219,7 +411,7 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
                 srt_name
             );
         }
-        vec![(srt_file.clone(), lang_status)]
+        SubtitleJob::AlreadyResolved(vec![(srt_file.clone(), lang_status)])
     } else {
         let video_stem = video_path
             .file_stem()
@@ -232,7 +424,7 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
             eprintln!("   Search dirs: parent + Subs/subtitles subdirs");
         }
 
-        let mut discovered = find_subtitle_pairs(video_path)?;
+        let discovered = find_subtitle_pairs(video_path)?;
 
         if !args.json {
             if discovered.is_empty() {
@@ -268,7 +460,15 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
             !discovered.is_empty()
         };
 
-        if !sidecars_match_target {
+        if sidecars_match_target {
+            let pairs = select_and_validate_subtitle_pairs(
+                &discovered,
+                video_path,
+                args.lang.as_deref(),
+                args.json,
+            )?;
+            SubtitleJob::AlreadyResolved(pairs)
+        } else {
             if !args.json {
                 if let Some(ref target) = args.lang {
                     eprintln!(
@@ -282,13 +482,13 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
                 eprintln!("🔍 Inspecting video container for embedded subtitle tracks...");
             }
 
+            let mut candidates = Vec::new();
             match inspect_container(video_path) {
                 Ok(insp) if !insp.subtitle_streams.is_empty() => {
                     fs::create_dir_all(&args.subtitles_dir)?;
 
                     let mut seen_extracted_langs = HashSet::new();
                     let mut seen_no_lang = false;
-                    let mut candidates = Vec::new();
 
                     let has_explicit_lang_match = args.lang.as_ref().is_some_and(|target| {
                         insp.subtitle_streams.iter().any(|s| {
@@ -302,13 +502,6 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
                     });
 
                     for stream in &insp.subtitle_streams {
-                        const BITMAP_SUB_CODECS: &[&str] = &[
-                            "hdmv_pgs_subtitle",
-                            "dvd_subtitle",
-                            "pgssub",
-                            "vobsub",
-                            "dvdsub",
-                        ];
                         if BITMAP_SUB_CODECS
                             .iter()
                             .any(|c| stream.codec_name.eq_ignore_ascii_case(c))
@@ -324,7 +517,6 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
                         let stream_lang_opt =
                             stream.language.as_deref().and_then(parse_language_code);
 
-                        // Honor --lang override for embedded track filtering
                         if let Some(ref target) = args.lang {
                             let matches = match &stream.language {
                                 Some(raw_tag) => {
@@ -377,51 +569,6 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
                         let srt_path = args.subtitles_dir.join(&srt_fname);
                         candidates.push((stream.subtitle_index, lang_opt, srt_path));
                     }
-
-                    if !candidates.is_empty() {
-                        let lang_tags: Vec<String> = candidates
-                            .iter()
-                            .map(|(_, l, _)| l.as_deref().unwrap_or("und").to_string())
-                            .collect();
-
-                        if !args.json {
-                            eprintln!(
-                                "📦 Extracting {} embedded subtitle track(s) in single pass: {:?}",
-                                candidates.len(),
-                                lang_tags
-                            );
-                        }
-
-                        let mut cmd = std::process::Command::new("ffmpeg");
-                        cmd.args(["-v", "error", "-y", "-i"]).arg(video_path);
-                        for (idx, _lang, dest) in &candidates {
-                            let map_arg = format!("0:s:{}", idx);
-                            cmd.args(["-map", &map_arg, "-f", "srt"]).arg(dest);
-                        }
-
-                        let batch_ok = cmd.status().map(|s| s.success()).unwrap_or(false);
-                        if batch_ok {
-                            for (_idx, lang_opt, srt_path) in candidates {
-                                if srt_path.exists()
-                                    && srt_path.metadata().map(|m| m.len() > 0).unwrap_or(false)
-                                {
-                                    cleanup.srts.lock().unwrap().push(srt_path.clone());
-                                    discovered.push((srt_path, lang_opt));
-                                }
-                            }
-                        } else {
-                            // Fallback to sequential extraction
-                            for (idx, lang_opt, srt_path) in candidates {
-                                if let Ok(srt_content) = extract_embedded_subtitle(video_path, idx)
-                                {
-                                    if fs::write(&srt_path, &srt_content).is_ok() {
-                                        cleanup.srts.lock().unwrap().push(srt_path.clone());
-                                        discovered.push((srt_path, lang_opt));
-                                    }
-                                }
-                            }
-                        }
-                    }
                 }
                 Ok(_) => {}
                 Err(e) => {
@@ -430,124 +577,38 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
                     }
                 }
             }
-        }
 
-        if discovered.is_empty() {
-            bail!(
-                "❌ No matching .srt file found for '{:?}'. Specify a subtitle file with '--srt <path>' or download one using 'dbsrt fetch-subtitles -q \"<title>\" -l fr'.",
-                video_path
-            );
-        }
-        let selected: Vec<_> = if let Some(ref target_lang) = args.lang {
-            let matching: Vec<_> = discovered
-                .iter()
-                .filter(|(_, lang)| lang.as_deref() == Some(target_lang.as_str()))
-                .cloned()
-                .collect();
-            if !matching.is_empty() {
-                matching
-            } else {
-                let untagged: Vec<_> = discovered
-                    .iter()
-                    .filter(|(_, lang)| lang.is_none())
-                    .cloned()
-                    .collect();
-                if untagged.is_empty() {
-                    bail!(
-                        "❌ Discovered subtitle files did not match requested language '{}'",
-                        target_lang
-                    );
-                }
-                // Prioritize direct sidecar in video parent directory over subdirectories
-                let in_parent: Vec<_> = untagged
-                    .iter()
-                    .filter(|(p, _)| p.parent() == video_path.parent())
-                    .cloned()
-                    .collect();
-                if !in_parent.is_empty() {
-                    in_parent
-                } else {
-                    untagged
-                }
-            }
-        } else {
-            discovered.clone()
-        };
-
-        if !args.json {
-            if let Some(ref target) = args.lang {
-                eprintln!(
-                    "🔍 Filtering subtitle candidates for requested language '{}':",
-                    target
-                );
-                for (p, _) in &selected {
-                    eprintln!("   ✓ Selected: {:?}", p.file_name().unwrap_or_default());
-                }
-                for (p, l) in &discovered {
-                    if !selected.iter().any(|(sp, _)| sp == p) {
-                        let reason = match l {
-                            Some(other) => format!("detected language '{}' != '{}'", other, target),
-                            None => "secondary track bypassed in favor of root sidecar".to_string(),
-                        };
-                        eprintln!(
-                            "   ⊘ Ignored: {:?} ({})",
-                            p.file_name().unwrap_or_default(),
-                            reason
+            if candidates.is_empty() {
+                if discovered.is_empty() {
+                    if !args.skip_certify {
+                        bail!(
+                            "❌ No matching .srt file found for '{:?}'. Specify a subtitle file with '--srt <path>' or download one using 'dbsrt fetch-subtitles -q \"<title>\" -l fr'.",
+                            video_path
                         );
                     }
+                    SubtitleJob::AlreadyResolved(Vec::new())
+                } else {
+                    let pairs = select_and_validate_subtitle_pairs(
+                        &discovered,
+                        video_path,
+                        args.lang.as_deref(),
+                        args.json,
+                    )?;
+                    SubtitleJob::AlreadyResolved(pairs)
                 }
-            }
-        }
-
-        let mut final_pairs = Vec::new();
-        for (path, lang_opt) in selected {
-            let srt_name = path
-                .file_name()
-                .and_then(|f| f.to_str())
-                .unwrap_or_default();
-            let lang_status = if let Some(ref target) = args.lang {
-                LangStatus::Confirmed(target.to_lowercase())
-            } else if let Some(ref l) = lang_opt {
-                LangStatus::Detected(l.clone())
             } else {
-                let status = detect_cli_subtitle_lang_status(srt_name, "auto");
-                if !args.json {
-                    eprintln!(
-                        "   Lang inferred from filename via detect_cli_subtitle_lang: {}",
-                        status.to_lang_code()
-                    );
+                SubtitleJob::NeedsExtraction {
+                    candidates,
+                    discovered,
                 }
-                match status {
-                    LangStatus::Detected(code) => LangStatus::Detected(code),
-                    _ => {
-                        if !args.json {
-                            eprintln!("⚠️  Language could not be determined from filename.");
-                            eprintln!(
-                                "   Coupling will be certified with lang=\"und\" (undetermined)."
-                            );
-                            eprintln!("   To fix later: dbsrt coupling:relabel --media <hash> --sub <hash> --lang <code>");
-                            eprintln!("   Or specify --lang <code> now to set it explicitly.");
-                        }
-                        LangStatus::Unknown
-                    }
-                }
-            };
-            let lang_code = lang_status.to_lang_code();
-            if lang_code == "auto" || lang_code.is_empty() {
-                bail!(
-                    "❌ Could not determine subtitle language for '{}'. Please specify it explicitly via --lang <fr|en|es|...>",
-                    srt_name
-                );
             }
-            final_pairs.push((path, lang_status));
         }
-        final_pairs
     };
 
     // 3. Detect FPS
     let fps = detect_media_fps(video_path, args.fps);
 
-    // 4. Extract pHash fingerprint
+    // 4. Extract pHash fingerprint (concurrently with subtitle extraction if needed)
     fs::create_dir_all(&args.phash_dir)?;
 
     let video_name = video_path.file_name().unwrap_or_default().to_string_lossy();
@@ -564,7 +625,62 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
         eprintln!("   FPS detected: {:.3}", fps);
     }
 
-    let (phash_path, hashes, _detected_fps) = find_or_build_phash(video_path, &args.phash_dir)?;
+    let hw_backend = match args.hwaccel.to_lowercase().as_str() {
+        "vaapi" => dbsrt_core::HwAccel::Vaapi,
+        "cuda" => dbsrt_core::HwAccel::Cuda,
+        "qsv" => dbsrt_core::HwAccel::Qsv,
+        "disabled" | "none" | "cpu" => dbsrt_core::HwAccel::Disabled,
+        _ => dbsrt_core::HwAccel::Auto,
+    };
+
+    let (pairs, phash_path, hashes, _detected_fps) = match sub_job {
+        SubtitleJob::AlreadyResolved(pairs) => {
+            let (phash_path, hashes, detected_fps) =
+                find_or_build_phash_with_hwaccel(video_path, &args.phash_dir, hw_backend)?;
+            (pairs, phash_path, hashes, detected_fps)
+        }
+        SubtitleJob::NeedsExtraction {
+            candidates,
+            discovered,
+        } => {
+            let video_path_sub = video_path.to_path_buf();
+            let video_path_phash = video_path.to_path_buf();
+            let phash_dir = args.phash_dir.clone();
+            let target_lang = args.lang.clone();
+            let is_json = args.json;
+
+            let sub_task =
+                tokio::task::spawn_blocking(move || -> Result<Vec<(PathBuf, LangStatus)>> {
+                    extract_embedded_subtitles_and_select(
+                        &video_path_sub,
+                        candidates,
+                        discovered,
+                        target_lang.as_deref(),
+                        is_json,
+                    )
+                });
+
+            let phash_task =
+                tokio::task::spawn_blocking(move || -> Result<(PathBuf, Vec<u64>, f64)> {
+                    find_or_build_phash_with_hwaccel(&video_path_phash, &phash_dir, hw_backend)
+                });
+
+            let sub_future = async {
+                sub_task
+                    .await
+                    .map_err(|e| anyhow!("Subtitle extraction task panicked: {}", e))?
+            };
+            let phash_future = async {
+                phash_task
+                    .await
+                    .map_err(|e| anyhow!("pHash extraction task panicked: {}", e))?
+            };
+            let (pairs, (phash_path, hashes, detected_fps)) =
+                tokio::try_join!(sub_future, phash_future)?;
+            (pairs, phash_path, hashes, detected_fps)
+        }
+    };
+
     cleanup.phash_done.store(true, Ordering::SeqCst);
     *cleanup.phash.lock().unwrap() = Some(phash_path.clone());
     let media_hash = compute_media_phash_digest(&hashes);
@@ -860,6 +976,7 @@ mod tests {
             subtitles_dir: PathBuf::from("/tmp"),
             all_embedded: false,
             skip_certify: false,
+            hwaccel: "auto".to_string(),
             json: false,
             server_url: DEFAULT_SERVER_URL.to_string(),
             db: PostgresArgs::default(),
@@ -886,6 +1003,7 @@ mod tests {
             subtitles_dir: temp.path.join("subtitles"),
             all_embedded: false,
             skip_certify: false,
+            hwaccel: "auto".to_string(),
             json: false,
             server_url: DEFAULT_SERVER_URL.to_string(),
             db: PostgresArgs::default(),
@@ -918,6 +1036,7 @@ mod tests {
             subtitles_dir: temp.path.join("subtitles"),
             all_embedded: false,
             skip_certify: false,
+            hwaccel: "auto".to_string(),
             json: false,
             server_url: DEFAULT_SERVER_URL.to_string(),
             db: PostgresArgs::default(),
