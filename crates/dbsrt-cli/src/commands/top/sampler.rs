@@ -14,9 +14,14 @@ use sysinfo::{
 };
 
 use crate::commands::top::constants::{
-    BYTES_PER_GIB_F64, BYTES_PER_MIB_F64, MIN_DELTA_TIME_FLOOR_SECS, MIN_PROGRESS_THRESHOLD,
+    BYTES_PER_GIB_F64, BYTES_PER_MIB_F64, DEFAULT_BATCH_EVENTS_PATH, DEFAULT_COUPLINGS_PATH,
+    DEFAULT_COUPLING_BASELINE_FPS, MIN_DELTA_TIME_FLOOR_SECS, MIN_PROGRESS_THRESHOLD,
+    SESSION_WINDOW_SECS,
 };
-use crate::commands::top::model::{ActiveJobTelemetry, GpuTelemetry, SystemTelemetry};
+use crate::commands::top::model::{
+    calculate_overall_stats, parse_iso_to_unix_secs, ActiveJobTelemetry, GpuTelemetry,
+    HistoricalRecord, SessionThroughput, SystemTelemetry,
+};
 
 /// Shared handle for background GPU monitoring process.
 static GPU_CHILD: Mutex<Option<Child>> = Mutex::new(None);
@@ -214,6 +219,185 @@ pub fn is_thread_task(pid: u32) -> bool {
     false
 }
 
+/// Loads historical processing profile records from the batch events NDJSON log with couplings fallback.
+pub fn load_historical_records(events_path: &Path, couplings_path: &Path) -> Vec<HistoricalRecord> {
+    let mut raw_records = Vec::new();
+    if events_path.exists() {
+        if let Ok(file) = fs::File::open(events_path) {
+            let reader = BufReader::new(file);
+            for line in reader.lines().map_while(Result::ok) {
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(trimmed) {
+                    if let Some(stem) = v.get("video_stem").and_then(|s| s.as_str()) {
+                        let success = v.get("success").and_then(|s| s.as_bool()).unwrap_or(false);
+                        let wall_duration_secs = v
+                            .get("wall_duration_secs")
+                            .and_then(|w| w.as_f64())
+                            .unwrap_or(0.0);
+                        let rate = v
+                            .get("cifs_read_rate_mib_s")
+                            .or_else(|| v.get("io_read_rate_mib_s"))
+                            .and_then(|r| r.as_f64())
+                            .unwrap_or(0.0);
+                        let file_size_bytes = v
+                            .get("file_size_bytes")
+                            .and_then(|s| s.as_u64())
+                            .unwrap_or(0);
+                        let certified_couplings_count =
+                            v.get("certified_couplings_count")
+                                .and_then(|c| c.as_u64())
+                                .unwrap_or(0) as usize;
+                        let start_iso = v
+                            .get("start_iso")
+                            .and_then(|s| s.as_str())
+                            .map(|s| s.to_string());
+                        let end_iso = v
+                            .get("end_iso")
+                            .and_then(|s| s.as_str())
+                            .map(|s| s.to_string());
+
+                        raw_records.push(HistoricalRecord {
+                            video_stem: stem.to_string(),
+                            success,
+                            wall_duration_secs,
+                            cifs_read_rate_mib_s: rate,
+                            file_size_bytes,
+                            certified_couplings_count,
+                            start_iso,
+                            end_iso,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    // Deduplicate keeping max wall_duration_secs per video_stem
+    let mut by_stem: HashMap<String, HistoricalRecord> = HashMap::new();
+    for r in raw_records {
+        match by_stem.get(&r.video_stem) {
+            Some(existing) if existing.wall_duration_secs >= r.wall_duration_secs => {}
+            _ => {
+                by_stem.insert(r.video_stem.clone(), r);
+            }
+        }
+    }
+
+    // Fallback to couplings.json if no batch records exist
+    if by_stem.is_empty() && couplings_path.exists() {
+        if let Ok(content) = fs::read_to_string(couplings_path) {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&content) {
+                if let Some(couplings_arr) = v.get("couplings").and_then(|c| c.as_array()) {
+                    for c in couplings_arr {
+                        if let Some(media_name) = c.get("media_name").and_then(|m| m.as_str()) {
+                            let frame_count =
+                                c.get("frame_count").and_then(|f| f.as_f64()).unwrap_or(0.0);
+                            let fps = c
+                                .get("fps")
+                                .and_then(|f| f.as_f64())
+                                .unwrap_or(DEFAULT_COUPLING_BASELINE_FPS);
+                            let dur_secs = if fps > 0.0 { frame_count / fps } else { 0.0 };
+                            let subs_count = c
+                                .get("subtitles")
+                                .and_then(|s| s.as_array())
+                                .map(|a| a.len())
+                                .unwrap_or(0);
+
+                            by_stem.insert(
+                                media_name.to_string(),
+                                HistoricalRecord {
+                                    video_stem: media_name.to_string(),
+                                    success: true,
+                                    wall_duration_secs: dur_secs,
+                                    cifs_read_rate_mib_s: 0.0,
+                                    file_size_bytes: 0,
+                                    certified_couplings_count: subs_count,
+                                    start_iso: None,
+                                    end_iso: None,
+                                },
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let mut items: Vec<HistoricalRecord> = by_stem.into_values().collect();
+    items.sort_by(|a, b| {
+        let key_a = a
+            .end_iso
+            .as_deref()
+            .or(a.start_iso.as_deref())
+            .unwrap_or(&a.video_stem);
+        let key_b = b
+            .end_iso
+            .as_deref()
+            .or(b.start_iso.as_deref())
+            .unwrap_or(&b.video_stem);
+        key_a.cmp(key_b)
+    });
+    items
+}
+
+/// Computes global session throughput across recent batch records (within rolling 2 hours) and active jobs.
+pub fn compute_session_throughput(
+    history_records: &[HistoricalRecord],
+    active_jobs: &[ActiveJobTelemetry],
+    now_unix_secs: f64,
+) -> SessionThroughput {
+    let mut recent_session_records = Vec::new();
+    for r in history_records {
+        if let Some(ref end_iso) = r.end_iso {
+            if let Some(end_unix) = parse_iso_to_unix_secs(end_iso) {
+                let diff = now_unix_secs - end_unix;
+                if (0.0..SESSION_WINDOW_SECS).contains(&diff) {
+                    recent_session_records.push(r);
+                }
+            }
+        }
+    }
+
+    let history_bytes: u64 = recent_session_records
+        .iter()
+        .map(|r| r.file_size_bytes)
+        .sum();
+    let active_bytes: u64 = active_jobs.iter().map(|j| j.read_bytes).sum();
+    let session_bytes = history_bytes + active_bytes;
+
+    let mut session_starts = Vec::new();
+    for r in &recent_session_records {
+        if let Some(ref start_iso) = r.start_iso {
+            if let Some(start_unix) = parse_iso_to_unix_secs(start_iso) {
+                session_starts.push(start_unix);
+            }
+        }
+    }
+    for j in active_jobs {
+        session_starts.push(now_unix_secs - j.elapsed_secs);
+    }
+
+    let mut session_dur_secs = 0.0;
+    let mut session_rate_mib_s = 0.0;
+    if !session_starts.is_empty() {
+        let earliest = session_starts.iter().fold(f64::INFINITY, |a, &b| a.min(b));
+        session_dur_secs = (now_unix_secs - earliest).max(1.0);
+        session_rate_mib_s = (session_bytes as f64 / BYTES_PER_MIB_F64) / session_dur_secs;
+    }
+
+    let stream_count = recent_session_records.len() + active_jobs.len();
+
+    SessionThroughput {
+        session_bytes,
+        session_duration_secs: session_dur_secs,
+        session_rate_mib_s,
+        stream_count,
+    }
+}
+
 /// Background sampler worker updating the shared telemetry state at regular intervals.
 pub fn run_telemetry_sampler_loop(
     shared_state: Arc<RwLock<SystemTelemetry>>,
@@ -226,18 +410,39 @@ pub fn run_telemetry_sampler_loop(
     let mut last_net_instant = Instant::now();
     let mut previous_io_samples: HashMap<u32, (Instant, u64)> = HashMap::new();
 
+    let events_path = PathBuf::from(DEFAULT_BATCH_EVENTS_PATH);
+    let couplings_path = PathBuf::from(DEFAULT_COUPLINGS_PATH);
+    let mut last_events_mtime = fs::metadata(&events_path)
+        .ok()
+        .and_then(|m| m.modified().ok());
+    let mut cached_history_records = load_historical_records(&events_path, &couplings_path);
+    let mut cached_stats = calculate_overall_stats(&cached_history_records);
+
     preload_stem_size_cache();
 
     while !stop_flag.load(Ordering::Relaxed) {
         let now = Instant::now();
+
+        // 0. Check for historical record log updates
+        if let Ok(meta) = fs::metadata(&events_path) {
+            if let Ok(mtime) = meta.modified() {
+                if last_events_mtime != Some(mtime) {
+                    cached_history_records = load_historical_records(&events_path, &couplings_path);
+                    cached_stats = calculate_overall_stats(&cached_history_records);
+                    last_events_mtime = Some(mtime);
+                }
+            }
+        }
 
         // 1. Refresh system-wide CPU and memory
         system.refresh_cpu_specifics(CpuRefreshKind::everything());
         system.refresh_memory_specifics(MemoryRefreshKind::everything());
         system.refresh_processes_specifics(
             ProcessesToUpdate::All,
-            false,
-            ProcessRefreshKind::everything(),
+            true, // remove_dead_processes: purge terminated processes on each tick
+            ProcessRefreshKind::everything()
+                .without_user()
+                .without_environ(),
         );
 
         let host_cpu = system.global_cpu_usage();
@@ -264,14 +469,6 @@ pub fn run_telemetry_sampler_loop(
         let mut raw_candidates = Vec::new();
 
         for (pid_obj, proc) in system.processes() {
-            let pid = pid_obj.as_u32();
-
-            // Strict process filter: exclude individual thread tasks to prevent thread duplication
-            if proc.thread_kind().is_some() || is_thread_task(pid) {
-                continue;
-            }
-
-            let ppid = proc.parent().map(|p| p.as_u32()).unwrap_or(0);
             let cmdline: Vec<String> = proc
                 .cmd()
                 .iter()
@@ -289,6 +486,20 @@ pub fn run_telemetry_sampler_loop(
             if !is_dbsrt && !is_ffmpeg {
                 continue;
             }
+
+            let pid = pid_obj.as_u32();
+
+            // Strict liveness check: exclude dead, zombie or already terminated processes
+            if unsafe { libc::kill(pid as libc::pid_t, 0) } != 0 {
+                continue;
+            }
+
+            // Strict process filter: exclude individual thread tasks to prevent thread duplication
+            if proc.thread_kind().is_some() || is_thread_task(pid) {
+                continue;
+            }
+
+            let ppid = proc.parent().map(|p| p.as_u32()).unwrap_or(0);
 
             if is_dbsrt {
                 dbsrt_pids.push(pid);
@@ -318,6 +529,13 @@ pub fn run_telemetry_sampler_loop(
         let total_rate_mib_s: f64 = active_jobs.iter().map(|j| j.current_rate_mib_s).sum();
         let gpu_snap = gpu_state.read().unwrap().clone();
 
+        let now_unix_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs_f64())
+            .unwrap_or(0.0);
+        let session =
+            compute_session_throughput(&cached_history_records, &active_jobs, now_unix_secs);
+
         {
             let mut state = shared_state.write().unwrap();
             state.host_cpu_pct = host_cpu;
@@ -327,6 +545,9 @@ pub fn run_telemetry_sampler_loop(
             state.active_jobs = active_jobs;
             state.total_rate_mib_s = total_rate_mib_s;
             state.net_rx_mib_s = net_rx_mib_s;
+            state.session = session;
+            state.history_records = cached_history_records.clone();
+            state.stats = cached_stats.clone();
         }
 
         std::thread::sleep(std::time::Duration::from_millis(refresh_interval_ms));

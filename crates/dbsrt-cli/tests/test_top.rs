@@ -4,14 +4,16 @@ use crossterm::event::KeyCode;
 use dbsrt_cli::commands::top::app::{handle_key_event, AppState};
 use dbsrt_cli::commands::top::constants::*;
 use dbsrt_cli::commands::top::model::{
-    default_progress_bar, format_duration, format_progress_bar, ActiveJobTelemetry, GpuTelemetry,
-    SystemTelemetry, ViewPage,
+    calculate_dimension_stats, calculate_overall_stats, default_progress_bar, format_duration,
+    format_progress_bar, parse_iso_to_unix_secs, ActiveJobTelemetry, GpuTelemetry,
+    HistoricalRecord, SessionThroughput, SystemTelemetry, ViewPage,
 };
 use dbsrt_cli::commands::top::process_ctl::{
     check_if_stopped, inspect_job_details, kill_job, stop_job, toggle_pause_job,
 };
 use dbsrt_cli::commands::top::sampler::{
-    is_thread_task, preload_stem_size_cache, read_proc_io_bytes,
+    compute_session_throughput, is_thread_task, load_historical_records, preload_stem_size_cache,
+    read_proc_io_bytes,
 };
 use dbsrt_cli::commands::top::ui::{render_ui, UiContext};
 use dbsrt_cli::commands::top::{probe_telemetry_snapshot, run_top, TopArgs};
@@ -156,6 +158,40 @@ fn test_ui_rendering_all_pages() {
     let backend = TestBackend::new(140, 45);
     let mut terminal = Terminal::new(backend).unwrap();
 
+    let history = vec![
+        HistoricalRecord {
+            video_stem: "Series.S01E01.1080p".to_string(),
+            success: true,
+            wall_duration_secs: 120.0,
+            cifs_read_rate_mib_s: 24.5,
+            file_size_bytes: 1024 * BYTES_PER_MIB,
+            certified_couplings_count: 2,
+            start_iso: Some("2026-10-26T14:00:00".to_string()),
+            end_iso: Some("2026-10-26T14:02:00".to_string()),
+        },
+        HistoricalRecord {
+            video_stem: "Series.S01E02.1080p".to_string(),
+            success: true,
+            wall_duration_secs: 0.5,
+            cifs_read_rate_mib_s: 600.0,
+            file_size_bytes: 500 * BYTES_PER_MIB,
+            certified_couplings_count: 1,
+            start_iso: Some("2026-10-26T14:03:00".to_string()),
+            end_iso: Some("2026-10-26T14:03:01".to_string()),
+        },
+        HistoricalRecord {
+            video_stem: "Series.S01E03.1080p".to_string(),
+            success: false,
+            wall_duration_secs: 45.0,
+            cifs_read_rate_mib_s: 10.0,
+            file_size_bytes: 800 * BYTES_PER_MIB,
+            certified_couplings_count: 0,
+            start_iso: Some("2026-10-26T14:05:00".to_string()),
+            end_iso: Some("2026-10-26T14:05:45".to_string()),
+        },
+    ];
+    let stats = dbsrt_cli::commands::top::model::calculate_overall_stats(&history);
+
     let tel = SystemTelemetry {
         host_cpu_pct: 25.0,
         ram_used_gib: 8.5,
@@ -209,6 +245,14 @@ fn test_ui_rendering_all_pages() {
         ],
         total_rate_mib_s: 43.5,
         net_rx_mib_s: 38.2,
+        session: SessionThroughput {
+            session_bytes: 2 * BYTES_PER_GIB,
+            session_duration_secs: 120.0,
+            session_rate_mib_s: 17.5,
+            stream_count: 3,
+        },
+        history_records: history,
+        stats,
     };
 
     // 1. Render ActiveJobs view
@@ -216,20 +260,32 @@ fn test_ui_rendering_all_pages() {
         telemetry: &tel,
         view: ViewPage::ActiveJobs,
         selected_index: 0,
+        completed_scroll_index: 0,
         feedback_msg: Some("Test Feedback Message"),
     };
     terminal.draw(|f| render_ui(f, &ctx)).unwrap();
 
-    // 2. Render ActiveJobs view with moderate GPU
+    // 2. Render ActiveJobs view with moderate GPU and unavailable GPU
     let mut tel_mod = tel.clone();
     tel_mod.gpu.video_busy_pct = 40.0;
     let ctx_mod = UiContext {
         telemetry: &tel_mod,
         view: ViewPage::ActiveJobs,
         selected_index: 0,
+        completed_scroll_index: 0,
         feedback_msg: None,
     };
     terminal.draw(|f| render_ui(f, &ctx_mod)).unwrap();
+
+    tel_mod.gpu.available = false;
+    let ctx_no_gpu = UiContext {
+        telemetry: &tel_mod,
+        view: ViewPage::ActiveJobs,
+        selected_index: 0,
+        completed_scroll_index: 0,
+        feedback_msg: None,
+    };
+    terminal.draw(|f| render_ui(f, &ctx_no_gpu)).unwrap();
 
     // 3. Render ActiveJobs view empty
     let empty_tel = SystemTelemetry::default();
@@ -237,24 +293,59 @@ fn test_ui_rendering_all_pages() {
         telemetry: &empty_tel,
         view: ViewPage::ActiveJobs,
         selected_index: 0,
+        completed_scroll_index: 0,
         feedback_msg: None,
     };
     terminal.draw(|f| render_ui(f, &ctx_empty)).unwrap();
 
-    // 4. Render JobInspection view
+    // 4. Render StatsHistory view
+    let ctx_stats = UiContext {
+        telemetry: &tel,
+        view: ViewPage::StatsHistory,
+        selected_index: 0,
+        completed_scroll_index: 0,
+        feedback_msg: None,
+    };
+    terminal.draw(|f| render_ui(f, &ctx_stats)).unwrap();
+
+    // 5. Render CompletedMedia view
+    let ctx_completed = UiContext {
+        telemetry: &tel,
+        view: ViewPage::CompletedMedia,
+        selected_index: 0,
+        completed_scroll_index: 1,
+        feedback_msg: None,
+    };
+    terminal.draw(|f| render_ui(f, &ctx_completed)).unwrap();
+
+    // 6. Render CompletedMedia view empty
+    let ctx_completed_empty = UiContext {
+        telemetry: &empty_tel,
+        view: ViewPage::CompletedMedia,
+        selected_index: 0,
+        completed_scroll_index: 0,
+        feedback_msg: None,
+    };
+    terminal
+        .draw(|f| render_ui(f, &ctx_completed_empty))
+        .unwrap();
+
+    // 7. Render JobInspection view
     let ctx_inspect = UiContext {
         telemetry: &tel,
         view: ViewPage::JobInspection,
         selected_index: 0,
+        completed_scroll_index: 0,
         feedback_msg: None,
     };
     terminal.draw(|f| render_ui(f, &ctx_inspect)).unwrap();
 
-    // 5. Render Help view
+    // 8. Render Help view
     let ctx_help = UiContext {
         telemetry: &tel,
         view: ViewPage::Help,
         selected_index: 0,
+        completed_scroll_index: 0,
         feedback_msg: None,
     };
     terminal.draw(|f| render_ui(f, &ctx_help)).unwrap();
@@ -327,7 +418,7 @@ fn test_app_state_and_key_handling() {
     assert_eq!(app.view, ViewPage::Help);
 
     // '?' again -> ActiveJobs
-    handle_key_event(KeyCode::Char('h'), &mut app, &tel);
+    handle_key_event(KeyCode::Char('?'), &mut app, &tel);
     assert_eq!(app.view, ViewPage::ActiveJobs);
 
     // 'p' -> Pause feedback
@@ -570,4 +661,411 @@ fn test_get_file_size_cache_and_fallbacks() {
     // Without target_path
     let size_empty = get_file_size("unknown_no_path", None);
     assert_eq!(size_empty, 0);
+}
+
+#[test]
+fn test_parse_iso_to_unix_secs() {
+    // Exact Unix Epoch
+    assert_eq!(parse_iso_to_unix_secs("1970-01-01T00:00:00"), Some(0.0));
+
+    // Year 2000 milestone
+    assert_eq!(
+        parse_iso_to_unix_secs("2000-01-01T00:00:00"),
+        Some(946684800.0)
+    );
+
+    // Space delimiter instead of 'T'
+    assert_eq!(
+        parse_iso_to_unix_secs("2000-01-01 00:00:00"),
+        Some(946684800.0)
+    );
+
+    // Valid ISO with microseconds
+    let res = parse_iso_to_unix_secs("2026-10-25T22:36:56.415607");
+    assert!(res.is_some());
+    assert!(res.unwrap() > 1_700_000_000.0);
+
+    // Invalid formatting boundaries
+    assert_eq!(parse_iso_to_unix_secs("too_short"), None);
+    assert_eq!(parse_iso_to_unix_secs("2026/10/25T22:36:56"), None);
+    assert_eq!(parse_iso_to_unix_secs("2026-13-25T22:36:56"), None); // Invalid month 13
+    assert_eq!(parse_iso_to_unix_secs("2026-00-25T22:36:56"), None); // Invalid month 0
+    assert_eq!(parse_iso_to_unix_secs("2026-10-32T22:36:56"), None); // Invalid day 32
+    assert_eq!(parse_iso_to_unix_secs("2026-10-25T25:36:56"), None); // Invalid hour 25
+    assert_eq!(parse_iso_to_unix_secs("2026-10-25T22:65:56"), None); // Invalid minute 65
+    assert_eq!(parse_iso_to_unix_secs("2026-10-25T22:36:70"), None); // Invalid second 70
+}
+
+#[test]
+fn test_calculate_dimension_stats() {
+    // Empty series
+    let empty = calculate_dimension_stats(&[]);
+    assert_eq!(empty.min, 0.0);
+    assert_eq!(empty.median, 0.0);
+    assert_eq!(empty.mean, 0.0);
+    assert_eq!(empty.p90, 0.0);
+    assert_eq!(empty.max, 0.0);
+    assert_eq!(empty.stdev, 0.0);
+
+    // Single item
+    let single = calculate_dimension_stats(&[42.0]);
+    assert_eq!(single.min, 42.0);
+    assert_eq!(single.median, 42.0);
+    assert_eq!(single.mean, 42.0);
+    assert_eq!(single.p90, 42.0);
+    assert_eq!(single.max, 42.0);
+    assert_eq!(single.stdev, 0.0);
+
+    // Odd count series [10, 20, 30]
+    let odd = calculate_dimension_stats(&[10.0, 30.0, 20.0]);
+    assert_eq!(odd.min, 10.0);
+    assert_eq!(odd.median, 20.0);
+    assert_eq!(odd.mean, 20.0);
+    assert_eq!(odd.max, 30.0);
+    assert_eq!(odd.p90, 30.0);
+    assert_eq!(odd.stdev, 10.0);
+
+    // Even count series [10, 20, 30, 40]
+    let even = calculate_dimension_stats(&[40.0, 10.0, 30.0, 20.0]);
+    assert_eq!(even.min, 10.0);
+    assert_eq!(even.median, 25.0);
+    assert_eq!(even.mean, 25.0);
+    assert_eq!(even.max, 40.0);
+    assert_eq!(even.p90, 40.0);
+    assert!(even.stdev > 0.0);
+}
+
+#[test]
+fn test_calculate_overall_stats() {
+    // Empty records
+    let empty = calculate_overall_stats(&[]);
+    assert_eq!(empty.sample_count, 0);
+
+    // Filter out short duration (< 60s) or failed jobs
+    let records = vec![
+        HistoricalRecord {
+            video_stem: "Failed".to_string(),
+            success: false,
+            wall_duration_secs: 150.0,
+            cifs_read_rate_mib_s: 20.0,
+            file_size_bytes: 100 * BYTES_PER_MIB,
+            certified_couplings_count: 1,
+            start_iso: None,
+            end_iso: None,
+        },
+        HistoricalRecord {
+            video_stem: "CachedOrSkipped".to_string(),
+            success: true,
+            wall_duration_secs: 5.0, // < 60.0s
+            cifs_read_rate_mib_s: 50.0,
+            file_size_bytes: 100 * BYTES_PER_MIB,
+            certified_couplings_count: 1,
+            start_iso: None,
+            end_iso: None,
+        },
+        HistoricalRecord {
+            video_stem: "SuccessFull1".to_string(),
+            success: true,
+            wall_duration_secs: 120.0, // 2 mins
+            cifs_read_rate_mib_s: 20.0,
+            file_size_bytes: 1024 * BYTES_PER_MIB,
+            certified_couplings_count: 2,
+            start_iso: None,
+            end_iso: None,
+        },
+        HistoricalRecord {
+            video_stem: "SuccessFull2".to_string(),
+            success: true,
+            wall_duration_secs: 240.0, // 4 mins
+            cifs_read_rate_mib_s: 30.0,
+            file_size_bytes: 2048 * BYTES_PER_MIB,
+            certified_couplings_count: 4,
+            start_iso: None,
+            end_iso: None,
+        },
+    ];
+
+    let overall = calculate_overall_stats(&records);
+    assert_eq!(overall.sample_count, 2);
+    assert_eq!(overall.rate.min, 20.0);
+    assert_eq!(overall.rate.max, 30.0);
+    assert_eq!(overall.duration_mins.min, 2.0);
+    assert_eq!(overall.duration_mins.max, 4.0);
+    assert_eq!(overall.couplings.min, 2.0);
+    assert_eq!(overall.couplings.max, 4.0);
+}
+
+#[test]
+fn test_compute_session_throughput() {
+    let recent_iso_end = "2023-11-14T22:00:00"; // within 2h if now is aligned
+    let old_iso_end = "2020-01-01T00:00:00";
+
+    let history = vec![
+        HistoricalRecord {
+            video_stem: "RecentJob".to_string(),
+            success: true,
+            wall_duration_secs: 60.0,
+            cifs_read_rate_mib_s: 20.0,
+            file_size_bytes: 50 * BYTES_PER_MIB,
+            certified_couplings_count: 1,
+            start_iso: Some("2023-11-14T21:50:00".to_string()),
+            end_iso: Some(recent_iso_end.to_string()),
+        },
+        HistoricalRecord {
+            video_stem: "AncientJob".to_string(),
+            success: true,
+            wall_duration_secs: 60.0,
+            cifs_read_rate_mib_s: 20.0,
+            file_size_bytes: 100 * BYTES_PER_MIB,
+            certified_couplings_count: 1,
+            start_iso: Some("2020-01-01T00:00:00".to_string()),
+            end_iso: Some(old_iso_end.to_string()),
+        },
+    ];
+
+    let active = vec![ActiveJobTelemetry {
+        pid: 9999,
+        media_name: "ActiveStream".to_string(),
+        engine: "GPU (VA-API)".to_string(),
+        elapsed_secs: 50.0,
+        read_bytes: 25 * BYTES_PER_MIB,
+        total_bytes: 100 * BYTES_PER_MIB,
+        progress_ratio: 0.25,
+        current_rate_mib_s: 15.0,
+        eta_secs: Some(30.0),
+        cpu_percent: 10.0,
+        ram_rss_mib: 45.0,
+        status: "RUNNING".to_string(),
+        cmdline: vec![],
+    }];
+
+    // Compute session throughput with aligned timestamp
+    let recent_unix = parse_iso_to_unix_secs(recent_iso_end).unwrap();
+    let throughput = compute_session_throughput(&history, &active, recent_unix + 100.0);
+
+    assert_eq!(throughput.stream_count, 2); // 1 recent + 1 active
+    assert_eq!(throughput.session_bytes, 75 * BYTES_PER_MIB);
+    assert!(throughput.session_duration_secs > 0.0);
+    assert!(throughput.session_rate_mib_s > 0.0);
+}
+
+#[test]
+fn test_load_historical_records_and_deduplication() {
+    use std::io::Write;
+
+    let dir = std::env::temp_dir().join(format!("pydbsrt_test_load_{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+
+    let events_path = dir.join("events.jsonl");
+    let couplings_path = dir.join("couplings.json");
+
+    // Write events with duplicates (stem 'Duplicate' has shorter and longer duration)
+    {
+        let mut f = std::fs::File::create(&events_path).unwrap();
+        writeln!(
+            f,
+            r#"{{"video_stem": "Duplicate", "success": true, "wall_duration_secs": 10.0, "cifs_read_rate_mib_s": 5.0, "file_size_bytes": 1000, "certified_couplings_count": 1, "start_iso": "2026-10-25T10:00:00", "end_iso": "2026-10-25T10:00:10"}}"#
+        ).unwrap();
+        writeln!(
+            f,
+            r#"{{"video_stem": "Duplicate", "success": true, "wall_duration_secs": 120.0, "cifs_read_rate_mib_s": 25.0, "file_size_bytes": 2000, "certified_couplings_count": 2, "start_iso": "2026-10-25T10:00:00", "end_iso": "2026-10-25T10:02:00"}}"#
+        ).unwrap();
+        writeln!(
+            f,
+            r#"{{"video_stem": "Unique", "success": false, "wall_duration_secs": 5.0, "io_read_rate_mib_s": 12.0, "file_size_bytes": 500, "certified_couplings_count": 0, "start_iso": "2026-10-25T11:00:00", "end_iso": "2026-10-25T11:00:05"}}"#
+        ).unwrap();
+    }
+
+    let loaded = load_historical_records(&events_path, &couplings_path);
+    assert_eq!(loaded.len(), 2);
+
+    let dup = loaded.iter().find(|r| r.video_stem == "Duplicate").unwrap();
+    assert_eq!(dup.wall_duration_secs, 120.0); // kept the maximum wall duration
+    assert_eq!(dup.cifs_read_rate_mib_s, 25.0);
+
+    let unq = loaded.iter().find(|r| r.video_stem == "Unique").unwrap();
+    assert_eq!(unq.cifs_read_rate_mib_s, 12.0); // fell back to io_read_rate_mib_s
+
+    // Test fallback to couplings.json when events file does not exist
+    let non_existent_events = dir.join("non_existent_events.jsonl");
+    {
+        let mut f = std::fs::File::create(&couplings_path).unwrap();
+        writeln!(
+            f,
+            r#"{{"couplings": [{{"media_name": "CouplingRef", "frame_count": 2500, "fps": 25.0, "subtitles": ["track1", "track2"]}}]}}"#
+        ).unwrap();
+    }
+
+    let fallback_loaded = load_historical_records(&non_existent_events, &couplings_path);
+    assert_eq!(fallback_loaded.len(), 1);
+    let c_item = &fallback_loaded[0];
+    assert_eq!(c_item.video_stem, "CouplingRef");
+    assert_eq!(c_item.wall_duration_secs, 100.0); // 2500 / 25.0
+    assert_eq!(c_item.certified_couplings_count, 2);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn test_app_state_new_tabs_and_scrolling() {
+    let mut app = AppState::new();
+
+    let tel = SystemTelemetry {
+        active_jobs: vec![
+            ActiveJobTelemetry {
+                pid: 1234,
+                media_name: "Job1".to_string(),
+                engine: "GPU".to_string(),
+                elapsed_secs: 10.0,
+                read_bytes: 10,
+                total_bytes: 100,
+                progress_ratio: 0.1,
+                current_rate_mib_s: 1.0,
+                eta_secs: None,
+                cpu_percent: 1.0,
+                ram_rss_mib: 10.0,
+                status: "RUNNING".to_string(),
+                cmdline: vec![],
+            },
+            ActiveJobTelemetry {
+                pid: 1235,
+                media_name: "Job2".to_string(),
+                engine: "GPU".to_string(),
+                elapsed_secs: 12.0,
+                read_bytes: 20,
+                total_bytes: 100,
+                progress_ratio: 0.2,
+                current_rate_mib_s: 2.0,
+                eta_secs: None,
+                cpu_percent: 2.0,
+                ram_rss_mib: 12.0,
+                status: "RUNNING".to_string(),
+                cmdline: vec![],
+            },
+        ],
+        history_records: vec![
+            HistoricalRecord {
+                video_stem: "Rec1".to_string(),
+                success: true,
+                wall_duration_secs: 10.0,
+                cifs_read_rate_mib_s: 1.0,
+                file_size_bytes: 100,
+                certified_couplings_count: 1,
+                start_iso: None,
+                end_iso: None,
+            },
+            HistoricalRecord {
+                video_stem: "Rec2".to_string(),
+                success: true,
+                wall_duration_secs: 20.0,
+                cifs_read_rate_mib_s: 2.0,
+                file_size_bytes: 200,
+                certified_couplings_count: 2,
+                start_iso: None,
+                end_iso: None,
+            },
+            HistoricalRecord {
+                video_stem: "Rec3".to_string(),
+                success: true,
+                wall_duration_secs: 30.0,
+                cifs_read_rate_mib_s: 3.0,
+                file_size_bytes: 300,
+                certified_couplings_count: 3,
+                start_iso: None,
+                end_iso: None,
+            },
+        ],
+        ..Default::default()
+    };
+
+    // Tab key cycling: ActiveJobs -> StatsHistory -> CompletedMedia -> ActiveJobs
+    handle_key_event(KeyCode::Tab, &mut app, &tel);
+    assert_eq!(app.view, ViewPage::StatsHistory);
+
+    handle_key_event(KeyCode::Tab, &mut app, &tel);
+    assert_eq!(app.view, ViewPage::CompletedMedia);
+
+    handle_key_event(KeyCode::Tab, &mut app, &tel);
+    assert_eq!(app.view, ViewPage::ActiveJobs);
+
+    // BackTab cycling: ActiveJobs -> CompletedMedia -> StatsHistory -> ActiveJobs
+    handle_key_event(KeyCode::BackTab, &mut app, &tel);
+    assert_eq!(app.view, ViewPage::CompletedMedia);
+
+    handle_key_event(KeyCode::BackTab, &mut app, &tel);
+    assert_eq!(app.view, ViewPage::StatsHistory);
+
+    handle_key_event(KeyCode::BackTab, &mut app, &tel);
+    assert_eq!(app.view, ViewPage::ActiveJobs);
+
+    // Direct key shortcuts '1', '2', '3'
+    handle_key_event(KeyCode::Char('2'), &mut app, &tel);
+    assert_eq!(app.view, ViewPage::StatsHistory);
+
+    handle_key_event(KeyCode::Char('3'), &mut app, &tel);
+    assert_eq!(app.view, ViewPage::CompletedMedia);
+
+    handle_key_event(KeyCode::Char('1'), &mut app, &tel);
+    assert_eq!(app.view, ViewPage::ActiveJobs);
+
+    // 'h' toggles StatsHistory, 'r' toggles CompletedMedia
+    handle_key_event(KeyCode::Char('h'), &mut app, &tel);
+    assert_eq!(app.view, ViewPage::StatsHistory);
+    handle_key_event(KeyCode::Char('h'), &mut app, &tel);
+    assert_eq!(app.view, ViewPage::ActiveJobs);
+
+    handle_key_event(KeyCode::Char('r'), &mut app, &tel);
+    assert_eq!(app.view, ViewPage::CompletedMedia);
+    handle_key_event(KeyCode::Char('r'), &mut app, &tel);
+    assert_eq!(app.view, ViewPage::ActiveJobs);
+
+    // Scrolling in CompletedMedia
+    app.view = ViewPage::CompletedMedia;
+    assert_eq!(app.completed_scroll_index, 0);
+
+    handle_key_event(KeyCode::Down, &mut app, &tel);
+    assert_eq!(app.completed_scroll_index, 1);
+
+    handle_key_event(KeyCode::Char('j'), &mut app, &tel);
+    assert_eq!(app.completed_scroll_index, 2);
+
+    // Down beyond limit clamps to max index (2)
+    handle_key_event(KeyCode::Down, &mut app, &tel);
+    assert_eq!(app.completed_scroll_index, 2);
+
+    handle_key_event(KeyCode::Up, &mut app, &tel);
+    assert_eq!(app.completed_scroll_index, 1);
+
+    handle_key_event(KeyCode::Char('k'), &mut app, &tel);
+    assert_eq!(app.completed_scroll_index, 0);
+
+    // Home, End, PageUp, PageDown in CompletedMedia
+    handle_key_event(KeyCode::End, &mut app, &tel);
+    assert_eq!(app.completed_scroll_index, 2);
+
+    handle_key_event(KeyCode::Home, &mut app, &tel);
+    assert_eq!(app.completed_scroll_index, 0);
+
+    handle_key_event(KeyCode::PageDown, &mut app, &tel);
+    assert_eq!(app.completed_scroll_index, 2);
+
+    handle_key_event(KeyCode::PageUp, &mut app, &tel);
+    assert_eq!(app.completed_scroll_index, 0);
+
+    // Esc from CompletedMedia returns to ActiveJobs
+    handle_key_event(KeyCode::Esc, &mut app, &tel);
+    assert_eq!(app.view, ViewPage::ActiveJobs);
+
+    // Home, End, PageUp, PageDown in ActiveJobs
+    handle_key_event(KeyCode::End, &mut app, &tel);
+    assert_eq!(app.selected_index, 1);
+
+    handle_key_event(KeyCode::Home, &mut app, &tel);
+    assert_eq!(app.selected_index, 0);
+
+    handle_key_event(KeyCode::PageDown, &mut app, &tel);
+    assert_eq!(app.selected_index, 1);
+
+    handle_key_event(KeyCode::PageUp, &mut app, &tel);
+    assert_eq!(app.selected_index, 0);
 }

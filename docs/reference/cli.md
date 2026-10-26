@@ -167,23 +167,53 @@ dbsrt fetch-subtitles --imdb-id <ID> --lang <LANG> --output <DIR>
 ---
 
 ### `top`
-Moniteur interactif TUI temps réel en Rust natif (full-frame) affichant les tâches de décodage et extraction pHash en cours, l'état d'accélération matérielle GPU VA-API, le débit CIFS/SMB, les barres d'avancement et prédictions d'ETA.
+Moniteur interactif TUI temps réel en Rust natif (Ratatui, full-frame) affichant les tâches de décodage et extraction pHash en cours, les métriques matérielles GPU VA-API, les débits réseau CIFS/SMB, les statistiques descriptives complètes et le registre des médias complétés.
 
 ```text
 dbsrt top [OPTIONS]
 ```
 
 - `--refresh-ms <REFRESH_MS>` : Intervalle de rafraîchissement des télémesures et de l'UI en millisecondes (défaut : `1000`).
-- `--json` : Échantillonne et affiche un instantané unique de la télémétrie au format JSON (mode sonde automatisée non-interactif).
+- `--json` : Échantillonne et affiche un instantané unique de la télémétrie complète (actifs, statistiques, session, historique) au format JSON (mode sonde automatisée non-interactif).
 
-Raccourcis clavier :
-- `[↑]` / `[k]` : Déplacer le curseur vers la tâche précédente
-- `[↓]` / `[j]` : Déplacer le curseur vers la tâche suivante
-- `[Enter]` / `[l]` : Basculer sur la page d'Inspection Complète (full-frame)
+<div class="asciinema-wrapper">
+  <div class="asciinema-cast" data-cast="../../assets/casts/term_top_recette.cast" data-rows="26" data-cols="140" data-autoplay="false"></div>
+  <figcaption>Enregistrement terminal interactif : Recette E2E du moniteur Rust TUI dbsrt top sur flux réel NAS Synology (Asciinema).</figcaption>
+</div>
+
+#### Structure de l'Interface Full-Frame
+
+1. **Bannière d'En-Tête Système Multi-Lignes** :
+   - Ligne 1 : Horloge locale temps réel (`HH:MM:SS`), nombre de workers actifs, pourcentage CPU global hôte, mémoire vive consommée / totale (`RAM: X.X/Y.Y GiB`).
+   - Ligne 2 : Télémesures GPU matériel Intel Iris Xe (`intel_gpu_top`) : Moteur de décodage vidéo (`Video Engine: X.X% [bar]`), Render/3D, fréquence d'horloge GPU (`MHz`) et puissance électrique consommée (`W`).
+   - Ligne 3 : Débits réseau CIFS/SMB : Instantané combiné (`Net RX` physique et lecture `VFS`), ainsi que le débit cumulé global de la session courante (`X.X MB/s` sur `Y.Y GiB` en `XhYYm` sur `N` flux).
+
+2. **Onglet 1 : Tâches en Cours (`[1]`)** :
+   - Table interactive des processus actifs (`dbsrt` et `ffmpeg`), moteurs d'exécution (`GPU VA-API`, `CPU Software`, `Sub Extraction`), débits instantanés, barres de progression textuelles, ETA et consommation mémoire/CPU.
+
+3. **Onglet 2 : Historique & Statistiques Réelles (`[2]` ou `[h]`)** :
+   - Tableau de distribution statistique descriptive (Min, Médiane, Moyenne, 90e percentile P90, Max, Écart-type $\sigma$) sur les décodages intégraux pHash (durée > 60s) : débits effectifs (`MB/s`), durées de traitement (`minutes`), tailles des fichiers (`GiB`) et couplings de sous-titres certifiés.
+
+4. **Onglet 3 : Derniers Traitements Complétés & Certifiés (`[3]` ou `[r]`)** :
+   - Journal complet et scrollable de l'ensemble des médias traités, statuts de succès (`✓ OK`, `✓ CACHE`, `✗ FAIL`), durées, volumes et horodatages.
+
+#### Raccourcis Clavier
+
+- `[1]` : Afficher l'onglet des tâches en cours
+- `[2]` / `[h]` : Afficher l'onglet des statistiques historiques réelles
+- `[3]` / `[r]` : Afficher l'onglet des traitements complétés et certifiés
+- `[Tab]` / `[Shift+Tab]` : Navigation circulaire entre les onglets
+- `[↑]` / `[k]` : Déplacer le curseur vers le haut / tâche précédente
+- `[↓]` / `[j]` : Déplacer le curseur vers le bas / tâche suivante
+- `[PgUp]` / `[PgDn]` : Défilement rapide par page (onglet 3)
+- `[Home]` / `[End]` : Saut direct en début ou fin de liste (onglet 3)
+- `[Enter]` / `[l]` : Basculer sur la page d'inspection détaillée du processus (dans l'onglet 1)
+- `[Esc]` / `[Backspace]` : Revenir à l'onglet principal des tâches (ou quitter depuis l'onglet 1)
 - `[p]` : Mettre en pause ou reprendre la tâche sélectionnée (`SIGSTOP` / `SIGCONT`)
 - `[s]` : Arrêter proprement la tâche sélectionnée (`SIGTERM`)
-- `[?]` / `[h]` : Afficher / masquer la page d'aide
-- `[q]` : Quitter le moniteur
+- `[K]` : Tuer immédiatement le processus en mode inspection (`SIGKILL`)
+- `[?]` : Afficher / masquer la page d'aide
+- `[q]` : Quitter le moniteur TUI
 
 ---
 

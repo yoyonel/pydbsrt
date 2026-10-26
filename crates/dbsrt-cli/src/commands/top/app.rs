@@ -13,10 +13,18 @@ use crossterm::{
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
 
-use crate::commands::top::constants::{FEEDBACK_DISPLAY_DURATION_SECS, KEY_EVENT_POLL_TIMEOUT_MS};
-use crate::commands::top::model::{GpuTelemetry, SystemTelemetry, ViewPage};
+use crate::commands::top::constants::{
+    BYTES_PER_GIB_F64, DEFAULT_BATCH_EVENTS_PATH, DEFAULT_COUPLINGS_PATH,
+    FEEDBACK_DISPLAY_DURATION_SECS, KEY_EVENT_POLL_TIMEOUT_MS, PAGE_SCROLL_STEP,
+};
+use crate::commands::top::model::{
+    calculate_overall_stats, GpuTelemetry, SystemTelemetry, ViewPage,
+};
 use crate::commands::top::process_ctl::{kill_job, stop_job, toggle_pause_job};
-use crate::commands::top::sampler::{run_telemetry_sampler_loop, start_gpu_sampler};
+use crate::commands::top::sampler::{
+    compute_session_throughput, load_historical_records, preload_stem_size_cache,
+    run_telemetry_sampler_loop, start_gpu_sampler,
+};
 use crate::commands::top::ui::{render_ui, UiContext};
 
 /// State of the TUI application.
@@ -24,6 +32,7 @@ use crate::commands::top::ui::{render_ui, UiContext};
 pub struct AppState {
     pub view: ViewPage,
     pub selected_index: usize,
+    pub completed_scroll_index: usize,
     pub feedback_message: Option<(String, Instant)>,
     pub should_quit: bool,
 }
@@ -63,7 +72,37 @@ pub fn run_top_app(refresh_interval_ms: u64) -> Result<()> {
         original_hook(panic_info);
     }));
 
-    let shared_state = Arc::new(RwLock::new(SystemTelemetry::default()));
+    // Pre-warm static history, statistics, and system memory to prevent initial frame lag
+    let events_path = std::path::PathBuf::from(DEFAULT_BATCH_EVENTS_PATH);
+    let couplings_path = std::path::PathBuf::from(DEFAULT_COUPLINGS_PATH);
+    let initial_history = load_historical_records(&events_path, &couplings_path);
+    let initial_stats = calculate_overall_stats(&initial_history);
+    preload_stem_size_cache();
+
+    let mut initial_sys = sysinfo::System::new();
+    initial_sys.refresh_cpu_specifics(sysinfo::CpuRefreshKind::everything());
+    initial_sys.refresh_memory_specifics(sysinfo::MemoryRefreshKind::everything());
+    let ram_used = initial_sys.used_memory() as f64 / BYTES_PER_GIB_F64;
+    let ram_total = initial_sys.total_memory() as f64 / BYTES_PER_GIB_F64;
+    let host_cpu = initial_sys.global_cpu_usage();
+
+    let now_unix_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs_f64())
+        .unwrap_or(0.0);
+    let initial_session = compute_session_throughput(&initial_history, &[], now_unix_secs);
+
+    let initial_telemetry = SystemTelemetry {
+        host_cpu_pct: host_cpu,
+        ram_used_gib: ram_used,
+        ram_total_gib: ram_total,
+        history_records: initial_history,
+        stats: initial_stats,
+        session: initial_session,
+        ..Default::default()
+    };
+
+    let shared_state = Arc::new(RwLock::new(initial_telemetry));
     let gpu_state = Arc::new(RwLock::new(GpuTelemetry::default()));
     let stop_flag = Arc::new(AtomicBool::new(false));
 
@@ -112,6 +151,12 @@ pub fn event_loop_step<B: ratatui::backend::Backend>(
         app.selected_index = telemetry.active_jobs.len().saturating_sub(1);
     }
 
+    if telemetry.history_records.is_empty() {
+        app.completed_scroll_index = 0;
+    } else if app.completed_scroll_index >= telemetry.history_records.len() {
+        app.completed_scroll_index = telemetry.history_records.len().saturating_sub(1);
+    }
+
     let feedback = app.current_feedback();
 
     terminal.draw(|f| {
@@ -119,6 +164,7 @@ pub fn event_loop_step<B: ratatui::backend::Backend>(
             telemetry: &telemetry,
             view: app.view,
             selected_index: app.selected_index,
+            completed_scroll_index: app.completed_scroll_index,
             feedback_msg: feedback,
         };
         render_ui(f, &ctx);
@@ -159,26 +205,114 @@ pub fn handle_key_event(code: KeyCode, app: &mut AppState, telemetry: &SystemTel
             ViewPage::ActiveJobs => {
                 app.should_quit = true;
             }
-            ViewPage::JobInspection | ViewPage::Help => {
+            ViewPage::JobInspection
+            | ViewPage::Help
+            | ViewPage::StatsHistory
+            | ViewPage::CompletedMedia => {
                 app.view = ViewPage::ActiveJobs;
             }
         },
         KeyCode::Backspace if app.view != ViewPage::ActiveJobs => {
             app.view = ViewPage::ActiveJobs;
         }
-        KeyCode::Up | KeyCode::Char('k') => {
-            if app.view == ViewPage::ActiveJobs && app.selected_index > 0 {
-                app.selected_index -= 1;
+        KeyCode::Char('1') => {
+            app.view = ViewPage::ActiveJobs;
+        }
+        KeyCode::Char('2') | KeyCode::Char('h') => {
+            if app.view == ViewPage::StatsHistory {
+                app.view = ViewPage::ActiveJobs;
+            } else {
+                app.view = ViewPage::StatsHistory;
             }
         }
-        KeyCode::Down | KeyCode::Char('j') => {
-            if app.view == ViewPage::ActiveJobs
-                && !telemetry.active_jobs.is_empty()
-                && app.selected_index + 1 < telemetry.active_jobs.len()
+        KeyCode::Char('3') | KeyCode::Char('r') => {
+            if app.view == ViewPage::CompletedMedia {
+                app.view = ViewPage::ActiveJobs;
+            } else {
+                app.view = ViewPage::CompletedMedia;
+            }
+        }
+        KeyCode::Tab => {
+            app.view = match app.view {
+                ViewPage::ActiveJobs => ViewPage::StatsHistory,
+                ViewPage::StatsHistory => ViewPage::CompletedMedia,
+                ViewPage::CompletedMedia | ViewPage::JobInspection | ViewPage::Help => {
+                    ViewPage::ActiveJobs
+                }
+            };
+        }
+        KeyCode::BackTab => {
+            app.view = match app.view {
+                ViewPage::ActiveJobs => ViewPage::CompletedMedia,
+                ViewPage::StatsHistory => ViewPage::ActiveJobs,
+                ViewPage::CompletedMedia => ViewPage::StatsHistory,
+                ViewPage::JobInspection | ViewPage::Help => ViewPage::ActiveJobs,
+            };
+        }
+        KeyCode::Up | KeyCode::Char('k') => match app.view {
+            ViewPage::ActiveJobs if app.selected_index > 0 => {
+                app.selected_index -= 1;
+            }
+            ViewPage::CompletedMedia if app.completed_scroll_index > 0 => {
+                app.completed_scroll_index -= 1;
+            }
+            _ => {}
+        },
+        KeyCode::Down | KeyCode::Char('j') => match app.view {
+            ViewPage::ActiveJobs
+                if !telemetry.active_jobs.is_empty()
+                    && app.selected_index + 1 < telemetry.active_jobs.len() =>
             {
                 app.selected_index += 1;
             }
-        }
+            ViewPage::CompletedMedia
+                if !telemetry.history_records.is_empty()
+                    && app.completed_scroll_index + 1 < telemetry.history_records.len() =>
+            {
+                app.completed_scroll_index += 1;
+            }
+            _ => {}
+        },
+        KeyCode::PageUp => match app.view {
+            ViewPage::ActiveJobs => {
+                app.selected_index = app.selected_index.saturating_sub(PAGE_SCROLL_STEP);
+            }
+            ViewPage::CompletedMedia => {
+                app.completed_scroll_index =
+                    app.completed_scroll_index.saturating_sub(PAGE_SCROLL_STEP);
+            }
+            _ => {}
+        },
+        KeyCode::PageDown => match app.view {
+            ViewPage::ActiveJobs => {
+                let max_idx = telemetry.active_jobs.len().saturating_sub(1);
+                app.selected_index = (app.selected_index + PAGE_SCROLL_STEP).min(max_idx);
+            }
+            ViewPage::CompletedMedia => {
+                let max_idx = telemetry.history_records.len().saturating_sub(1);
+                app.completed_scroll_index =
+                    (app.completed_scroll_index + PAGE_SCROLL_STEP).min(max_idx);
+            }
+            _ => {}
+        },
+        KeyCode::Home => match app.view {
+            ViewPage::ActiveJobs => {
+                app.selected_index = 0;
+            }
+            ViewPage::CompletedMedia => {
+                app.completed_scroll_index = 0;
+            }
+            _ => {}
+        },
+        KeyCode::End => match app.view {
+            ViewPage::ActiveJobs => {
+                app.selected_index = telemetry.active_jobs.len().saturating_sub(1);
+            }
+            ViewPage::CompletedMedia => {
+                app.completed_scroll_index = telemetry.history_records.len().saturating_sub(1);
+            }
+            _ => {}
+        },
         KeyCode::Enter | KeyCode::Char('l') => {
             if app.view == ViewPage::ActiveJobs && !telemetry.active_jobs.is_empty() {
                 app.view = ViewPage::JobInspection;
@@ -186,7 +320,7 @@ pub fn handle_key_event(code: KeyCode, app: &mut AppState, telemetry: &SystemTel
                 app.view = ViewPage::ActiveJobs;
             }
         }
-        KeyCode::Char('?') | KeyCode::Char('h') => {
+        KeyCode::Char('?') => {
             if app.view == ViewPage::Help {
                 app.view = ViewPage::ActiveJobs;
             } else {
