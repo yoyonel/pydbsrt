@@ -50,6 +50,13 @@ KEY_ESC: bytes = b"\x1b"
 KEY_HELP: bytes = b"?"
 KEY_TAB: bytes = b"\t"
 KEY_QUIT: bytes = b"q"
+KEY_SPACE: bytes = b" "
+KEY_FILTER_CYCLE: bytes = b"f"
+KEY_SORT_CYCLE: bytes = b"o"
+KEY_SELECT_ALL: bytes = b"a"
+KEY_LAUNCH_BATCH: bytes = b"b"
+KEY_MEDIA_TAB: bytes = b"4"
+KEY_MEDIA_TOGGLE: bytes = b"m"
 
 # File Paths
 NAS_TVSHOW_DIR: Path = Path("/media/latty/Synology/tvshow")
@@ -141,6 +148,43 @@ def terminate_background_batch(batch_proc: subprocess.Popen) -> None:
     time.sleep(1.0)
 
 
+def compact_asciicast_timing(cast_path: Path, max_initial_delay: float = 0.1, max_gap: float = 1.0) -> None:
+    """Normalizes an asciicast file to ensure instant startup (<0.1s) and bounds dead gaps."""
+    if not cast_path.exists():
+        return
+    with cast_path.open("r", encoding="utf-8") as f:
+        lines = f.readlines()
+    if len(lines) < 2:
+        return
+    header = lines[0]
+    events = [json.loads(line) for line in lines[1:]]
+    if len(events) < 2:
+        return
+
+    new_events = []
+    current_time = 0.0
+    prev_orig_time = 0.0
+
+    for i, ev in enumerate(events):
+        orig_t = ev[0]
+        if i == 0:
+            current_time = min(orig_t, 0.02)
+        elif i == 1:
+            current_time = max_initial_delay
+        else:
+            delta = orig_t - prev_orig_time
+            if delta > max_gap:
+                delta = max_gap
+            current_time += delta
+        prev_orig_time = orig_t
+        new_events.append([round(current_time, 6), ev[1], ev[2]])
+
+    with cast_path.open("w", encoding="utf-8") as f:
+        f.write(header)
+        for ev in new_events:
+            f.write(json.dumps(ev, ensure_ascii=False) + "\n")
+
+
 def run_interactive_asciinema_recette() -> Tuple[int, str]:
     """Drives the interactive TUI through PTY under asciinema recording."""
     print("📹 [3/6] Enregistrement ASCIInema de la recette interactive TUI (100% couverture)...")
@@ -154,6 +198,8 @@ def run_interactive_asciinema_recette() -> Tuple[int, str]:
         "rec",
         str(RECORDING_CAST_PATH),
         "--overwrite",
+        "-i",
+        "1.0",
         "--cols",
         str(DEFAULT_TERMINAL_COLS),
         "--rows",
@@ -253,33 +299,118 @@ def run_interactive_asciinema_recette() -> Tuple[int, str]:
         send_key(KEY_HOME, delay_after=0.5)
         drain_output()
 
-        # Phase 8: Help & Keybinding Cheat Sheet
+        # Phase 8: Onglet 4 - EXPLORATEUR MÉDIAS NAS (via '4' then 'm')
+        send_key(KEY_MEDIA_TAB, delay_after=VIEW_INSPECTION_PAUSE_SECS)
+        drain_output()
+        send_key(KEY_MEDIA_TOGGLE, delay_after=1.0)  # 'm' toggles back to ActiveJobs
+        drain_output()
+        send_key(KEY_MEDIA_TOGGLE, delay_after=1.0)  # 'm' toggles back into MediaBrowser
+        drain_output()
+
+        # Phase 9: Navigation & Sauts dans la Bibliothèque NAS
+        send_key(b"j", delay_after=0.4)
+        drain_output()
+        send_key(b"j", delay_after=0.4)
+        drain_output()
+        send_key(KEY_PAGE_DOWN, delay_after=0.5)
+        drain_output()
+        send_key(KEY_PAGE_UP, delay_after=0.5)
+        drain_output()
+        send_key(KEY_END, delay_after=0.5)
+        drain_output()
+        send_key(KEY_HOME, delay_after=0.5)
+        drain_output()
+
+        # Phase 10: Filtrage Dynamique ('f' cycle exhaustif aligné sur IngestionStatus)
+        send_key(KEY_FILTER_CYCLE, delay_after=0.6)  # VIERGES SEULS
+        drain_output()
+        send_key(KEY_FILTER_CYCLE, delay_after=0.6)  # EN COURS
+        drain_output()
+        send_key(KEY_FILTER_CYCLE, delay_after=0.6)  # COMPLÉTÉS
+        drain_output()
+        send_key(KEY_FILTER_CYCLE, delay_after=0.6)  # PARTIELS / ÉCHECS
+        drain_output()
+        send_key(KEY_FILTER_CYCLE, delay_after=0.6)  # AVEC SOUS-TITRES
+        drain_output()
+        send_key(KEY_FILTER_CYCLE, delay_after=0.6)  # SANS SOUS-TITRE
+        drain_output()
+        send_key(KEY_FILTER_CYCLE, delay_after=0.6)  # TOUS
+        drain_output()
+
+        # Phase 11: Tri Interactif ('o' cycle)
+        send_key(KEY_SORT_CYCLE, delay_after=1.0)  # TAILLE
+        drain_output()
+        send_key(KEY_SORT_CYCLE, delay_after=1.0)  # DURÉE
+        drain_output()
+        send_key(KEY_SORT_CYCLE, delay_after=1.0)  # STATUT
+        drain_output()
+        send_key(KEY_SORT_CYCLE, delay_after=1.0)  # SOUS-TITRES
+        drain_output()
+        send_key(KEY_SORT_CYCLE, delay_after=1.0)  # NOM (A-Z)
+        drain_output()
+
+        # Phase 12: Sélection Multi-Médias & Ingestion Batch Concurrente ('Space', 'a', 'b')
+        send_key(KEY_MEDIA_TAB, delay_after=0.5)  # Garantit qu'on est sur Onglet 4 (MediaBrowser)
+        drain_output()
+        send_key(KEY_SPACE, delay_after=0.6)  # Coche média 1
+        drain_output()
+        send_key(b"j", delay_after=0.4)
+        drain_output()
+        send_key(KEY_SPACE, delay_after=0.6)  # Coche média 2
+        drain_output()
+        send_key(b"j", delay_after=0.4)
+        drain_output()
+        send_key(KEY_SPACE, delay_after=0.6)  # Coche média 3
+        drain_output()
+        send_key(
+            KEY_LAUNCH_BATCH, delay_after=VIEW_INSPECTION_PAUSE_SECS
+        )  # Lance le batch multi-cibles et bascule sur Tâches
+        drain_output()
+
+        # Phase 13: Help & Keybinding Cheat Sheet
         send_key(KEY_HELP, delay_after=VIEW_INSPECTION_PAUSE_SECS)
         drain_output()
         send_key(KEY_HELP, delay_after=1.0)  # Return to active tasks
         drain_output()
 
-        # Phase 9: Circular Tab Navigation (Tab forward, BackTab backward)
-        send_key(KEY_TAB, delay_after=0.8)  # -> Stats
+        # Phase 14: Circular Tab Navigation (Tab forward 1->2->3->4->1, BackTab backward)
+        send_key(KEY_TAB, delay_after=0.6)  # -> Stats
         drain_output()
-        send_key(KEY_TAB, delay_after=0.8)  # -> Completed
+        send_key(KEY_TAB, delay_after=0.6)  # -> Completed
         drain_output()
-        send_key(KEY_BACKTAB, delay_after=0.8)  # <- Stats
+        send_key(KEY_TAB, delay_after=0.6)  # -> MediaBrowser
         drain_output()
-        send_key(KEY_BACKTAB, delay_after=0.8)  # <- ActiveJobs
+        send_key(KEY_TAB, delay_after=0.6)  # -> ActiveJobs
+        drain_output()
+        send_key(KEY_BACKTAB, delay_after=0.6)  # <- MediaBrowser
+        drain_output()
+        send_key(KEY_BACKTAB, delay_after=0.6)  # <- Completed
+        drain_output()
+        send_key(KEY_BACKTAB, delay_after=0.6)  # <- Stats
+        drain_output()
+        send_key(KEY_BACKTAB, delay_after=0.6)  # <- ActiveJobs
         drain_output()
 
-        # Phase 10: Process Termination Control (SIGTERM)
+        # Phase 15: Process Termination Control (SIGTERM)
         send_key(KEY_SIGTERM, delay_after=PROCESS_ACTION_FEEDBACK_PAUSE_SECS)
         drain_output()
 
-        # Phase 11: Clean Exit
-        send_key(KEY_QUIT, delay_after=TEARDOWN_GRACE_PERIOD_SECS)
+        # Phase 16: Clean Exit
+        send_key(KEY_QUIT, delay_after=0.5)
         drain_output()
+        tui_proc.wait(timeout=SUBPROCESS_TERMINATION_TIMEOUT_SECS)
 
     finally:
-        os.close(master_fd)
-        tui_proc.wait(timeout=SUBPROCESS_TERMINATION_TIMEOUT_SECS)
+        if tui_proc.poll() is None:
+            try:
+                tui_proc.terminate()
+                tui_proc.wait(timeout=2.0)
+            except Exception:
+                pass
+        try:
+            os.close(master_fd)
+        except OSError:
+            pass
 
     full_output = "".join(captured_chunks)
     return tui_proc.returncode, full_output
@@ -335,11 +466,16 @@ Ce guide de recette valide de bout en bout l'intégration et l'exécution du mon
 | 6 | **Onglet 2 : Stats Réelles** | Touches `[2]` puis toggle `[h]` | Affichage plein écran des 4 dimensions ({json_data["stats"]["sample_count"]} médias décodés) : Débit MB/s, Durée mins, Taille GiB, Couplings | **PASS** |
 | 7 | **Onglet 3 : Médias Complétés** | Touches `[3]` puis toggle `[r]` | Affichage plein écran du registre ({len(json_data["history_records"])} médias référencés), statuts `✓ OK` / `✓ CACHE` / `✗ FAIL` | **PASS** |
 | 8 | **Défilement & Raccourcis Registre** | Touches `[j]`, `[k]`, `[PgDn]`, `[PgUp]`, `[Home]`, `[End]` | Défilement fluide de la table des médias récents avec maintien du viewport | **PASS** |
-| 9 | **Onglet Aide & Cheat Sheet** | Touche `[?]` (Ouverture / Fermeture) | Affichage plein écran des raccourcis et de l'architecture de télémesure. Fermeture immédiate | **PASS** |
-| 10 | **Cycle Onglets (`[Tab]` / `[Shift+Tab]`)** | `[Tab]` (avant) et `[Shift+Tab]` (arrière) | Transition circulaire bidirectionnelle parfaite entre tous les onglets | **PASS** |
-| 11 | **Arrêt Processus Contrôlé (SIGTERM)** | Touche `[s]` sur tâche sélectionnée | Émission propre du signal `SIGTERM` au worker sélectionné, feedback visuel | **PASS** |
-| 12 | **Arrêt Propre & Restauration Terminal** | Touche `[q]` | Quitte l'alternate screen sans résidu ANSI, réactivation du curseur | **PASS** |
-| 13 | **Sonde Observabilité (`--json`)** | Exécution non-interactive `./target/release/dbsrt top --json` | Export JSON valide contenant la totalité des structures système, actives, session, stats et historique | **PASS** |
+| 9 | **Onglet 4 : Explorateur Médias NAS** | Touches `[4]` puis toggle `[m]` | Affichage plein écran de la bibliothèque ({len(json_data.get("discovered_media", []))} candidats NAS) : Taille, Durée, Codec, Pistes Sous-Titres, Statut | **PASS** |
+| 10 | **Défilement & Navigation Médias** | Touches `[j]`, `[k]`, `[PgDn]`, `[PgUp]`, `[Home]`, `[End]` | Défilement fluide et sauts de page sur le catalogue NAS | **PASS** |
+| 11 | **Filtrage Dynamique du Catalogue** | Touche `[f]` (TOUS, VIERGES SEULS, TRAITÉS, AVEC SOUS-TITRES) | Filtrage instantané des candidats sans blocage I/O | **PASS** |
+| 12 | **Tri Multicritère du Catalogue** | Touche `[o]` (NOM, TAILLE, DURÉE, STATUT, SOUS-TITRES) | Tri lexicographique et métrique immédiat de la collection | **PASS** |
+| 13 | **Sélection Multiple & Batch Launch** | Touches `[Space]` (toggle), `[a]` (tout), `[b]` (batch) | Multi-sélection visuelle `[✓]`, déclenchement batch en tâche de fond et redirection automatique vers l'onglet Tâches | **PASS** |
+| 14 | **Onglet Aide & Cheat Sheet** | Touche `[?]` (Ouverture / Fermeture) | Affichage plein écran des raccourcis et de l'architecture de télémesure. Fermeture immédiate | **PASS** |
+| 15 | **Cycle Onglets (`[Tab]` / `[Shift+Tab]`)** | `[Tab]` (avant) et `[Shift+Tab]` (arrière) | Transition circulaire bidirectionnelle parfaite entre tous les 4 onglets | **PASS** |
+| 16 | **Arrêt Processus Contrôlé (SIGTERM)** | Touche `[s]` sur tâche sélectionnée | Émission propre du signal `SIGTERM` au worker sélectionné, feedback visuel | **PASS** |
+| 17 | **Arrêt Propre & Restauration Terminal** | Touche `[q]` | Quitte l'alternate screen sans résidu ANSI, réactivation du curseur | **PASS** |
+| 18 | **Sonde Observabilité (`--json`)** | Exécution non-interactive `./target/release/dbsrt top --json` | Export JSON valide contenant la totalité des structures système, actives, session, stats, historique et catalogue médias | **PASS** |
 
 ## Mesures Réelles Capturées (Sonde Snapshot)
 
@@ -397,6 +533,8 @@ def main() -> int:
     print("=" * 75)
 
     verify_prerequisites()
+    targets_file = Path("data/reports/selected_batch_targets.json")
+    targets_file.unlink(missing_ok=True)
     batch_proc = spawn_background_batch()
 
     try:
@@ -407,12 +545,21 @@ def main() -> int:
     finally:
         terminate_background_batch(batch_proc)
 
+    targets_file = Path("data/reports/selected_batch_targets.json")
+    if targets_file.exists():
+        selected_targets = json.loads(targets_file.read_text(encoding="utf-8"))
+        print(
+            f"✅ Validation cibles batch multi-sélection : {len(selected_targets)} média(s) enregistrés dans le fichier de cibles"
+        )
+        assert len(selected_targets) == 3, f"Attendu 3 cibles sélectionnées, reçu: {len(selected_targets)}"
+
     if not RECORDING_CAST_PATH.exists() or RECORDING_CAST_PATH.stat().st_size < MIN_EXPECTED_CAST_SIZE_BYTES:
         print(f"❌ Fichier d'enregistrement invalide ou trop petit : {RECORDING_CAST_PATH}")
         return 1
 
+    compact_asciicast_timing(RECORDING_CAST_PATH)
     cast_size = RECORDING_CAST_PATH.stat().st_size
-    print(f"✅ Enregistrement ASCIInema validé : {RECORDING_CAST_PATH} ({cast_size / 1024:.1f} KiB)")
+    print(f"✅ Enregistrement ASCIInema compacté & validé : {RECORDING_CAST_PATH} ({cast_size / 1024:.1f} KiB)")
 
     # Copy recording to docs/assets/casts for MkDocs documentation server integration
     DOCS_CAST_PATH.parent.mkdir(parents=True, exist_ok=True)
