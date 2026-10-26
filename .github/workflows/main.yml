@@ -53,12 +53,10 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Ensure FFmpeg is installed
-        run: |
-          if ! command -v ffmpeg >/dev/null 2>&1; then
-            sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
-          fi
-          ffmpeg -version | head -n 1
+      - name: Setup FFmpeg
+        uses: AnimMouse/setup-ffmpeg@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
@@ -92,12 +90,10 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Ensure FFmpeg is installed
-        run: |
-          if ! command -v ffmpeg >/dev/null 2>&1; then
-            sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
-          fi
-          ffmpeg -version | head -n 1
+      - name: Setup FFmpeg
+        uses: AnimMouse/setup-ffmpeg@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Start PostgreSQL 17 BK-Tree container for DB coverage
         run: |
@@ -149,12 +145,10 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Ensure FFmpeg is installed
-        run: |
-          if ! command -v ffmpeg >/dev/null 2>&1; then
-            sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
-          fi
-          ffmpeg -version | head -n 1
+      - name: Setup FFmpeg
+        uses: AnimMouse/setup-ffmpeg@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Start PostgreSQL 17 BK-Tree container
         run: |
