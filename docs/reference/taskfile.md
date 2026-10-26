@@ -64,6 +64,7 @@ Cette page dresse le dictionnaire exhaustif de toutes les cibles d'orchestration
 | `task server:status` | Interroge l'endpoint `/v1/status` pour valider la réponse HTTP et la mémoire. |
 | `task server:reload` | Déclenche le rechargement à chaud atomique (`/v1/catalog/reload`) sans coupure de service. |
 | `task catalog:status` | Inspecte l'état des index en mémoire vive (Base `.dbphash` + Delta RAM). |
+| `task catalog:verify` | Exécute l'audit programmatique exhaustif d'intégrité du catalogue (dbphash, couplings, PostgreSQL, phash). |
 | `task catalog:compact` | Fusionne l'index Delta en mémoire dans le fichier binaire `.dbphash` consolidé. |
 
 ---

@@ -91,6 +91,12 @@ tasks:
     cmds:
       - bash scripts/stack_ctl.sh catalog-ingest {{.CLI_ARGS}}
 
+  catalog:verify:
+    desc: "Exhaustive programmatic audit of catalog and storage tiers (Zero-DB dbphash, couplings, PostgreSQL, and .phash files)"
+    aliases: [catalog:check, db:verify]
+    cmds:
+      - uv run python scripts/verify_catalog_integrity.py {{.CLI_ARGS}}
+
   server:run:
     desc: Run dbsrt-server daemon in foreground on http://127.0.0.1:8765
     deps: [server:build]
