@@ -28,6 +28,11 @@ tasks:
     cmds:
       - uv run python scripts/batch_media_add_tvshow.py {{.CLI_ARGS}}
 
+  media:top:
+    desc: "Real-time TUI process and ingestion monitor for pHash decoding, rates and ETAs (usage: task media:top [--stats])"
+    cmds:
+      - uv run python scripts/dbsrt_top.py {{.CLI_ARGS}}
+
   coupling:relabel:
     desc: "Relabel a certified subtitle coupling language (usage: task coupling:relabel -- --media <hash> [--sub <hash>] --lang <code>)"
     deps: [cli:build]

@@ -125,7 +125,6 @@ data/SRT/medias_metadata.sql
 data/*.dbphash
 *.auto.synced.srt
 *.synced.srt
-data/reports/
 
 # Coverage reports
 .coverage*
