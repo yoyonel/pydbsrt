@@ -8,6 +8,7 @@ and captures high-resolution screenshots for visual verification.
 
 from __future__ import annotations
 
+import shutil
 import socketserver
 import subprocess
 import threading
@@ -23,6 +24,26 @@ VERIFY_PORT: int = 8019
 CHROME_TIMEOUT_SEC: int = 25
 CHROME_WINDOW_WIDTH: int = 1920
 CHROME_WINDOW_HEIGHT: int = 1400
+
+CHROME_CANDIDATES: tuple[str, ...] = (
+    "google-chrome",
+    "google-chrome-stable",
+    "chromium",
+    "chromium-browser",
+)
+
+
+def find_chrome_binary() -> str:
+    """Locate the first available Chrome/Chromium executable binary on PATH."""
+    for candidate in CHROME_CANDIDATES:
+        if shutil.which(candidate):
+            return candidate
+    raise RuntimeError(
+        "No Chrome/Chromium binary found for terminal verification. "
+        f"Probed candidates: {', '.join(CHROME_CANDIDATES)}. "
+        "Install google-chrome or chromium on your system."
+    )
+
 
 VERIFY_PAGES: List[Tuple[str, str, str]] = [
     (
@@ -66,8 +87,9 @@ def start_test_server(port: int) -> socketserver.TCPServer:
 
 def run_chrome_dom_check(url: str) -> str:
     """Run headless Chrome with virtual time budget to allow fetch + JS DOM hydration."""
+    chrome_bin = find_chrome_binary()
     cmd = [
-        "google-chrome",
+        chrome_bin,
         "--headless=new",
         "--no-sandbox",
         "--disable-dev-shm-usage",
@@ -83,8 +105,9 @@ def run_chrome_dom_check(url: str) -> str:
 
 def run_chrome_screenshot(url: str, out_png: Path) -> None:
     """Capture a crisp screenshot with virtual time budget."""
+    chrome_bin = find_chrome_binary()
     cmd = [
-        "google-chrome",
+        chrome_bin,
         "--headless=new",
         "--no-sandbox",
         "--disable-dev-shm-usage",
@@ -101,6 +124,13 @@ def run_chrome_screenshot(url: str, out_png: Path) -> None:
 def main() -> int:
     if not SITE_DIR.exists():
         print("❌ Error: site/ directory does not exist. Run task doc:build first.")
+        return 1
+
+    try:
+        chrome_bin = find_chrome_binary()
+        print(f"🌐 Found Chrome/Chromium executable: {chrome_bin}")
+    except RuntimeError as e:
+        print(f"❌ {e}")
         return 1
 
     print(f"🚀 Starting static test server on http://127.0.0.1:{VERIFY_PORT}...")

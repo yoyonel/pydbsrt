@@ -138,6 +138,7 @@ nav:
       - Formats de Fichiers & Spécifications: reference/formats-fichiers.md
       - Catalogue des Commandes Taskfile: reference/taskfile.md
       - Configuration & Variables d'Environnement: reference/configuration.md
+      - Constantes Nommées & Seuils Algorithmiques: reference/constants.md
   - 💡 Explications & Architecture:
       - Vue d'Ensemble Conceptuelle: explanation/index.md
       - Principe Fondamental du pHash & Retargeting: explanation/principe-fondamental-phash-et-retargeting.md
@@ -190,7 +191,6 @@ nav:
           - Distribution Décentralisée o2switch: 2026-10-20-architecture-distribution-sous-titres-o2switch-et-stockage-decentralise.md
           - Service CAS Subtitles (REST vs gRPC): 2026-10-20-architecture-subtitle-service-cas-et-comparatif-rest-grpc.md
           - Observabilité Prometheus & Grafana: 2026-10-20-observabilite-prometheus-grafana-et-telemetrie-pydbsrt.md
-          - Rapport Ingestion TV Shows (NAS): 2026-10-25-rapport-batch-import-tvshow-synology.md
           - Audit Global Initial (2026): 2026-10-15-audit-global.md
           - Notes 2021 Fast Hamming Postgres: history/2021-04-13-fast-hamming-postgres.md
           - 🏷️ Index des Tags: tags.md

@@ -100,4 +100,16 @@ tags:
       <a href="configuration/">→ Consulter la configuration</a>
     </div>
   </div>
+
+  <div class="dbsrt-bento-card bento-cyan">
+    <div class="bento-header">
+      <span class="bento-icon">📐</span>
+      <span class="bento-badge">ZERO MAGIC CONSTANTS</span>
+    </div>
+    <h3>Constantes Nommées & Seuils Algorithmiques</h3>
+    <p>Répertoire centralisé de toutes les constantes typées du codebase (Rust & Python) : seuils pHash, facteurs temporels et timeouts réseau.</p>
+    <div class="bento-links">
+      <a href="constants/">→ Consulter les constantes</a>
+    </div>
+  </div>
 </div>

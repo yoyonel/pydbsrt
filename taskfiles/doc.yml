@@ -55,6 +55,7 @@ tasks:
 
   doc:record-casts:
     desc: Record interactive Asciinema .cast terminal sessions for documentation
+    deps: [build]
     cmds:
       - uv run python scripts/record_casts.py
 

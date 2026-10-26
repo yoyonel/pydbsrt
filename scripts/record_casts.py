@@ -131,8 +131,15 @@ def generate_status_cast() -> None:
 
 
 def generate_doc_check_cast() -> None:
-    """Generate cast for task doc:check."""
+    """Generate cast for task doc:check.
+
+    NOTE: Uses synthetic hardcoded output (not a recursive `task doc:check` execution)
+    to ensure a deterministic, polished, and rapid cast generation for documentation.
+    Real run output varies with timings and would trigger recursive validation.
+    If the doc:check validation pipeline changes, update the lines below to match.
+    """
     lines = [
+        # Synthetic output - do not replace with recursive subprocess call
         "task: [doc:check] uv run --no-sync python scripts/validate_docs.py",
         "🔍 [0/4] Checking file extensions and forbidden machine-local paths in docs/...",
         "✅ Zero unauthorized files & zero machine-local paths: OK",
