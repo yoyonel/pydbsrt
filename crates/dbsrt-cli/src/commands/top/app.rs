@@ -95,6 +95,38 @@ pub fn run_top_app(refresh_interval_ms: u64) -> Result<()> {
     loop_res
 }
 
+/// Single step of the UI render cycle: clamps selected index and draws full-frame UI.
+pub fn event_loop_step<B: ratatui::backend::Backend>(
+    terminal: &mut Terminal<B>,
+    app: &mut AppState,
+    shared_state: &Arc<RwLock<SystemTelemetry>>,
+) -> Result<SystemTelemetry> {
+    let telemetry = {
+        let lock = shared_state.read().unwrap();
+        lock.clone()
+    };
+
+    if telemetry.active_jobs.is_empty() {
+        app.selected_index = 0;
+    } else if app.selected_index >= telemetry.active_jobs.len() {
+        app.selected_index = telemetry.active_jobs.len().saturating_sub(1);
+    }
+
+    let feedback = app.current_feedback();
+
+    terminal.draw(|f| {
+        let ctx = UiContext {
+            telemetry: &telemetry,
+            view: app.view,
+            selected_index: app.selected_index,
+            feedback_msg: feedback,
+        };
+        render_ui(f, &ctx);
+    })?;
+
+    Ok(telemetry)
+}
+
 /// Main non-blocking event loop handling user input and screen rendering.
 fn event_loop<B: ratatui::backend::Backend>(
     terminal: &mut Terminal<B>,
@@ -102,31 +134,7 @@ fn event_loop<B: ratatui::backend::Backend>(
     shared_state: &Arc<RwLock<SystemTelemetry>>,
 ) -> Result<()> {
     while !app.should_quit {
-        // Read current telemetry snapshot
-        let telemetry = {
-            let lock = shared_state.read().unwrap();
-            lock.clone()
-        };
-
-        // Clamp selected index within available tasks
-        if telemetry.active_jobs.is_empty() {
-            app.selected_index = 0;
-        } else if app.selected_index >= telemetry.active_jobs.len() {
-            app.selected_index = telemetry.active_jobs.len().saturating_sub(1);
-        }
-
-        let feedback = app.current_feedback();
-
-        // Render fullframe UI
-        terminal.draw(|f| {
-            let ctx = UiContext {
-                telemetry: &telemetry,
-                view: app.view,
-                selected_index: app.selected_index,
-                feedback_msg: feedback,
-            };
-            render_ui(f, &ctx);
-        })?;
+        let telemetry = event_loop_step(terminal, app, shared_state)?;
 
         // Non-blocking poll for keyboard events (< 20ms response time)
         if event::poll(Duration::from_millis(KEY_EVENT_POLL_TIMEOUT_MS))? {
@@ -142,7 +150,7 @@ fn event_loop<B: ratatui::backend::Backend>(
 }
 
 /// Dispatches key press events to application actions.
-fn handle_key_event(code: KeyCode, app: &mut AppState, telemetry: &SystemTelemetry) {
+pub fn handle_key_event(code: KeyCode, app: &mut AppState, telemetry: &SystemTelemetry) {
     match code {
         KeyCode::Char('q') | KeyCode::Char('Q') => {
             app.should_quit = true;
