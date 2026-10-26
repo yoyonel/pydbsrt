@@ -112,6 +112,7 @@ data/__PHASH__/
 data/SRT/*.srt
 # Runtime databases (NEVER track these)
 data/SRT/couplings.json
+data/SRT/*.lock
 couplings.json
 data/catalog.dbphash
 data/__PHASH__/
@@ -124,6 +125,7 @@ data/SRT/medias_metadata.sql
 data/*.dbphash
 *.auto.synced.srt
 *.synced.srt
+data/reports/
 
 # Coverage reports
 .coverage*

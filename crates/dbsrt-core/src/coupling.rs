@@ -526,14 +526,15 @@ pub struct RelabelResult {
     pub new_status: LangStatus,
 }
 
-/// RAII advisory file lock protecting concurrent read-modify-write on coupling registry.
+/// RAII advisory kernel file lock protecting concurrent read-modify-write on coupling registry.
+/// Uses POSIX flock; automatically released by the kernel when the file descriptor is closed (drop/exit/SIGKILL).
 pub struct RegistryLock {
-    path: PathBuf,
+    _file: fs::File,
+    pub path: PathBuf,
 }
 
 impl RegistryLock {
     pub const DEFAULT_LOCK_TIMEOUT: Duration = Duration::from_secs(30);
-    pub const STALE_LOCK_THRESHOLD: Duration = Duration::from_secs(60);
     pub const RETRY_INTERVAL: Duration = Duration::from_millis(50);
 
     pub fn acquire(registry_path: &Path) -> Result<Self> {
@@ -542,35 +543,33 @@ impl RegistryLock {
 
     pub fn acquire_timeout(registry_path: &Path, timeout: Duration) -> Result<Self> {
         let lock_path = registry_path.with_extension("lock");
+        if let Some(parent) = lock_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&lock_path)
+            .with_context(|| format!("Failed to open registry lock file {:?}", lock_path))?;
+
         let start = std::time::Instant::now();
         while start.elapsed() < timeout {
-            match fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&lock_path)
-            {
-                Ok(_) => return Ok(Self { path: lock_path }),
-                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                    if let Ok(meta) = lock_path.metadata() {
-                        if let Ok(modified) = meta.modified() {
-                            if modified.elapsed().unwrap_or_default() > Self::STALE_LOCK_THRESHOLD {
-                                let _ = fs::remove_file(&lock_path);
-                                continue;
-                            }
-                        }
-                    }
+            match rustix::fs::flock(&file, rustix::fs::FlockOperation::NonBlockingLockExclusive) {
+                Ok(()) => {
+                    return Ok(Self {
+                        _file: file,
+                        path: lock_path,
+                    })
+                }
+                Err(rustix::io::Errno::WOULDBLOCK) => {
                     std::thread::sleep(Self::RETRY_INTERVAL);
                 }
-                Err(e) => return Err(e.into()),
+                Err(e) => return Err(anyhow::anyhow!("flock failed on {:?}: {}", lock_path, e)),
             }
         }
         bail!("Timed out waiting for registry lock on {:?}", lock_path);
-    }
-}
-
-impl Drop for RegistryLock {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.path);
     }
 }
 
@@ -847,5 +846,42 @@ mod tests {
             )
             .unwrap_err();
         assert!(err_sub.to_string().contains("No subtitle found in media"));
+    }
+
+    #[test]
+    fn test_registry_lock_concurrency() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        use std::thread;
+
+        let temp_dir = std::env::temp_dir().join(format!("test_reg_lock_{}", std::process::id()));
+        let _ = fs::create_dir_all(&temp_dir);
+        let reg_path = temp_dir.join("couplings.json");
+
+        let counter = Arc::new(AtomicUsize::new(0));
+        let mut handles = Vec::new();
+
+        for _ in 0..10 {
+            let path = reg_path.clone();
+            let c = Arc::clone(&counter);
+            handles.push(thread::spawn(move || {
+                let lock = RegistryLock::acquire_timeout(&path, Duration::from_secs(5));
+                assert!(lock.is_ok(), "Thread must acquire lock");
+                let prev = c.fetch_add(1, Ordering::SeqCst);
+                thread::sleep(Duration::from_millis(10));
+                assert_eq!(
+                    c.load(Ordering::SeqCst),
+                    prev + 1,
+                    "Lock must guarantee mutual exclusion"
+                );
+            }));
+        }
+
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        assert_eq!(counter.load(Ordering::SeqCst), 10);
+        let _ = fs::remove_dir_all(&temp_dir);
     }
 }

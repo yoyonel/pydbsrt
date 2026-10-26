@@ -16,6 +16,7 @@ reqwest = { workspace = true }
 sha2 = "0.10"
 encoding_rs = { workspace = true }
 chardetng = { workspace = true }
+rustix = { version = "1.0", features = ["fs"] }
 
 [dev-dependencies]
 criterion = "0.5"

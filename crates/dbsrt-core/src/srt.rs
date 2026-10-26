@@ -1,6 +1,6 @@
 //! SubRip (.srt) and SubStation Alpha (.ass/.ssa) subtitle parser, time-shifter, and serializer.
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use std::fs;
 use std::path::Path;
 
@@ -23,17 +23,55 @@ pub struct SubtitleCue {
     pub text: String,
 }
 
-/// Parses "HH:MM:SS,mmm" or "HH:MM:SS.mmm" into milliseconds.
+/// Parses "HH:MM:SS,mmm" or "HH:MM:SS.mmm" into milliseconds with strict format validation.
 pub fn parse_timecode(tc: &str) -> Result<i64> {
     let tc = tc.trim();
-    let parts: Vec<&str> = tc.split([':', ',', '.']).collect();
-    if parts.len() != 4 {
-        return Err(anyhow!("Invalid timecode format: '{}'", tc));
+    let (hms_part, ms_part) = if let Some(idx) = tc.rfind([',', '.']) {
+        (&tc[..idx], &tc[idx + 1..])
+    } else {
+        bail!(
+            "Invalid timecode format: '{}' (missing millisecond separator ',' or '.')",
+            tc
+        );
+    };
+
+    let hms_parts: Vec<&str> = hms_part.split(':').collect();
+    if hms_parts.len() != 3 {
+        bail!(
+            "Invalid timecode format: '{}' (expected HH:MM:SS[,.]mmm)",
+            tc
+        );
     }
-    let h: i64 = parts[0].parse().context("Invalid hours")?;
-    let m: i64 = parts[1].parse().context("Invalid minutes")?;
-    let s: i64 = parts[2].parse().context("Invalid seconds")?;
-    let ms: i64 = parts[3].parse().context("Invalid milliseconds")?;
+
+    let h: i64 = hms_parts[0].parse().context("Invalid hours in timecode")?;
+    let m: i64 = hms_parts[1]
+        .parse()
+        .context("Invalid minutes in timecode")?;
+    let s: i64 = hms_parts[2]
+        .parse()
+        .context("Invalid seconds in timecode")?;
+
+    if m >= 60 || s >= 60 || h < 0 || m < 0 || s < 0 {
+        bail!(
+            "Timecode '{}' has out-of-range minutes ({}) or seconds ({})",
+            tc,
+            m,
+            s
+        );
+    }
+
+    if ms_part.is_empty() || ms_part.len() > 3 || !ms_part.chars().all(|c| c.is_ascii_digit()) {
+        bail!("Invalid milliseconds in timecode: '{}'", tc);
+    }
+
+    let ms_raw: i64 = ms_part.parse().context("Invalid milliseconds")?;
+    let ms = match ms_part.len() {
+        1 => ms_raw * 100,
+        2 => ms_raw * 10,
+        3 => ms_raw,
+        _ => unreachable!(),
+    };
+
     Ok((h * SECONDS_PER_HOUR + m * SECONDS_PER_MINUTE + s) * MILLIS_PER_SECOND + ms)
 }
 
@@ -334,5 +372,28 @@ Dialogue: 0,0:00:10.80,0:00:13.13,Default,,0000,0000,0000,,{\an8}Mérite-t-il no
         assert_eq!(srt.cues[2].start_ms, 10800);
         assert_eq!(srt.cues[2].end_ms, 13130);
         assert_eq!(srt.cues[2].text, "Mérite-t-il notre indulgence ?");
+    }
+
+    #[test]
+    fn test_parse_timecode_strict_format() {
+        assert_eq!(parse_timecode("00:00:01,000").unwrap(), 1000);
+        assert_eq!(parse_timecode("00:00:01.500").unwrap(), 1500);
+        assert_eq!(
+            parse_timecode("01:02:03,456").unwrap(),
+            (SECONDS_PER_HOUR + 2 * SECONDS_PER_MINUTE + 3) * MILLIS_PER_SECOND + 456
+        );
+        assert_eq!(parse_timecode("00:00:01,5").unwrap(), 1500);
+        assert_eq!(parse_timecode("00:00:01,50").unwrap(), 1500);
+    }
+
+    #[test]
+    fn test_parse_timecode_rejects_invalid_formats() {
+        assert!(parse_timecode("00:00.01,500").is_err());
+        assert!(parse_timecode("00,00.01:500").is_err());
+        assert!(parse_timecode("00:00:01").is_err());
+        assert!(parse_timecode("00:00:01:500").is_err());
+        assert!(parse_timecode("00:60:01,500").is_err());
+        assert!(parse_timecode("00:00:60,500").is_err());
+        assert!(parse_timecode("00:00:01,abcd").is_err());
     }
 }
