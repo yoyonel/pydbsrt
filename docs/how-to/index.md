@@ -49,6 +49,6 @@ tags:
 
 ## 🧭 Différence avec les Autres Quadrants
 
-* Pour une prise en main pas à pas d'un système sans prérequis : **[Tutoriels](../tutorials/)**.
-* Pour la spécification formelle des paramètres, tables SQL ou routes API : **[Référence Technique](../reference/)**.
-* Pour comprendre les concepts algorithmiques sous-jacents (MIH, CAS, pHash) : **[Explications & Architecture](../explanation/)**.
+* Pour une prise en main pas à pas d'un système sans prérequis : **[Tutoriels](../tutorials/index.md)**.
+* Pour la spécification formelle des paramètres, tables SQL ou routes API : **[Référence Technique](../reference/index.md)**.
+* Pour comprendre les concepts algorithmiques sous-jacents (MIH, CAS, pHash) : **[Explications & Architecture](../explanation/index.md)**.

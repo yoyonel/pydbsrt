@@ -69,10 +69,10 @@ Couplings Skipped: 0
 Catalog Ingested : true
 ```
 
-<figure markdown="1">
-  <img src="../../assets/casts/term_media_add.svg" alt="Enregistrement Terminal - Ingestion Média" width="100%">
-  <figcaption>Enregistrement terminal interactif : Ingestion déclarative et options de la façade media:add.</figcaption>
-</figure>
+<div class="asciinema-wrapper">
+  <div class="asciinema-cast" data-cast="../../assets/casts/term_media_add.cast" data-rows="24"></div>
+  <figcaption>Enregistrement terminal interactif : Ingestion déclarative et options de la façade media:add (Asciinema).</figcaption>
+</div>
 
 ---
 

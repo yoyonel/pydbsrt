@@ -95,7 +95,12 @@ pub fn detect_cli_subtitle_lang_status(filename: &str, fallback: &str) -> LangSt
             "de" | "ger" | "deu" | "german" => return LangStatus::Detected("de".to_string()),
             "it" | "ita" | "italian" => return LangStatus::Detected("it".to_string()),
             "pt" | "por" | "pob" | "portuguese" => return LangStatus::Detected("pt".to_string()),
-            _ => break,
+            other => {
+                if let Some(code) = dbsrt_core::parse_extended_language_token(other) {
+                    return LangStatus::Detected(code);
+                }
+                break;
+            }
         }
     }
     LangStatus::Unknown

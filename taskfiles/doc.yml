@@ -53,6 +53,17 @@ tasks:
     cmds:
       - bash scripts/stack_ctl.sh doc-logs
 
+  doc:record-casts:
+    desc: Record interactive Asciinema .cast terminal sessions for documentation
+    cmds:
+      - uv run python scripts/record_casts.py
+
+  doc:verify-terminal:
+    desc: Formally verify Asciinema terminal playback and DOM rendering with Headless Chrome
+    deps: [doc:build]
+    cmds:
+      - uv run python scripts/verify_terminal_rendering.py
+
   doc:optimize-images:
     desc: Batch convert heavy PNG screenshots in docs/ to lightweight 720p WebP
     internal: true

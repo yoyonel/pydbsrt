@@ -53,10 +53,10 @@ task status
 
 Le terminal affiche un rapport de santé vert indiquant la disponibilité du démon HTTP, de PostgreSQL et du portail de documentation.
 
-<figure markdown="1">
-  <img src="../../assets/casts/term_status.svg" alt="Enregistrement Terminal - task status" width="100%">
-  <figcaption>Enregistrement terminal interactif : Vérification unifiée de la stack de services.</figcaption>
-</figure>
+<div class="asciinema-wrapper">
+  <div class="asciinema-cast" data-cast="../../assets/casts/term_status.cast" data-rows="26"></div>
+  <figcaption>Enregistrement terminal interactif : Vérification unifiée de la stack de services (Asciinema).</figcaption>
+</div>
 
 ---
 

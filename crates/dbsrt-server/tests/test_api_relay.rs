@@ -28,6 +28,8 @@ async fn test_dual_process_remote_relay_e2e() {
         return;
     }
 
+    std::env::set_var("DBSRT_RELAY_TIMEOUT_MS", "15000");
+
     // 1. Start Server B (Simulated Remote / o2switch / NAS)
     let remote_state = AppState::new(
         phash_dir.clone(),
@@ -46,7 +48,6 @@ async fn test_dual_process_remote_relay_e2e() {
         axum::serve(remote_listener, remote_app).await.unwrap();
     });
 
-    // 2. Start Server A (Local Sidecar Agent) with remote_api set to Server B
     let mut local_state = AppState::new(
         std::env::temp_dir(), // Empty local phash dir!
         std::env::temp_dir(), // Empty local srt dir!

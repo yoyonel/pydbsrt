@@ -31,7 +31,7 @@ pub fn parse_language_code(token: &str) -> Option<String> {
     match lower.as_str() {
         "fr" | "en" | "es" | "de" | "it" | "pt" | "ja" | "nl" | "ru" | "ar" | "pl" | "zh"
         | "ko" | "sv" | "da" | "fi" | "el" | "cs" | "tr" | "uk" | "ro" | "hu" | "he" | "hr"
-        | "id" | "no" | "th" | "vi" => Some(lower),
+        | "id" | "no" | "th" | "vi" | "tl" | "ms" | "bg" | "sl" | "sk" | "ca" => Some(lower),
         "fre" | "fra" => Some("fr".to_string()),
         "eng" => Some("en".to_string()),
         "spa" => Some("es".to_string()),
@@ -60,6 +60,12 @@ pub fn parse_language_code(token: &str) -> Option<String> {
         "nob" | "nor" => Some("no".to_string()),
         "tha" => Some("th".to_string()),
         "vie" => Some("vi".to_string()),
+        "fil" | "tgl" => Some("tl".to_string()),
+        "may" | "msa" => Some("ms".to_string()),
+        "bul" => Some("bg".to_string()),
+        "slv" => Some("sl".to_string()),
+        "slk" | "slo" => Some("sk".to_string()),
+        "cat" => Some("ca".to_string()),
         _ => None,
     }
 }

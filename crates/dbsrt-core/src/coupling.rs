@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 fn default_lang_status_for_legacy() -> LangStatus {
     LangStatus::Inferred("und".to_string())
@@ -217,6 +218,11 @@ impl CouplingRegistry {
             format!("Failed to rename temporary coupling registry to {:?}", path)
         })?;
         Ok(())
+    }
+
+    /// Acquires a safe file lock on the registry path to synchronize concurrent writers.
+    pub fn lock(path: &Path) -> Result<RegistryLock> {
+        RegistryLock::acquire(path)
     }
 
     /// Upserts a certified `(media <-> subtitle)` coupling into the registry.
@@ -518,6 +524,54 @@ pub struct RelabelResult {
     pub old_status: LangStatus,
     pub new_lang: String,
     pub new_status: LangStatus,
+}
+
+/// RAII advisory file lock protecting concurrent read-modify-write on coupling registry.
+pub struct RegistryLock {
+    path: PathBuf,
+}
+
+impl RegistryLock {
+    pub const DEFAULT_LOCK_TIMEOUT: Duration = Duration::from_secs(30);
+    pub const STALE_LOCK_THRESHOLD: Duration = Duration::from_secs(60);
+    pub const RETRY_INTERVAL: Duration = Duration::from_millis(50);
+
+    pub fn acquire(registry_path: &Path) -> Result<Self> {
+        Self::acquire_timeout(registry_path, Self::DEFAULT_LOCK_TIMEOUT)
+    }
+
+    pub fn acquire_timeout(registry_path: &Path, timeout: Duration) -> Result<Self> {
+        let lock_path = registry_path.with_extension("lock");
+        let start = std::time::Instant::now();
+        while start.elapsed() < timeout {
+            match fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&lock_path)
+            {
+                Ok(_) => return Ok(Self { path: lock_path }),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    if let Ok(meta) = lock_path.metadata() {
+                        if let Ok(modified) = meta.modified() {
+                            if modified.elapsed().unwrap_or_default() > Self::STALE_LOCK_THRESHOLD {
+                                let _ = fs::remove_file(&lock_path);
+                                continue;
+                            }
+                        }
+                    }
+                    std::thread::sleep(Self::RETRY_INTERVAL);
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+        bail!("Timed out waiting for registry lock on {:?}", lock_path);
+    }
+}
+
+impl Drop for RegistryLock {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
 }
 
 #[cfg(test)]

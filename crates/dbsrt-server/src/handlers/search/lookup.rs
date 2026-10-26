@@ -179,6 +179,12 @@ pub async fn search_handler(
                         }
                     }
                     Err(e) => {
+                        let mut full_err = format!("{}", e);
+                        let mut cur: Option<&dyn std::error::Error> = std::error::Error::source(&e);
+                        while let Some(src) = cur {
+                            full_err.push_str(&format!(" -> {}", src));
+                            cur = src.source();
+                        }
                         state
                             .metrics
                             .remote_errors
@@ -186,7 +192,7 @@ pub async fn search_handler(
                         state.push_log(
                             "RELAY",
                             "WARN",
-                            format!("✗ Remote relay error to {}: {:#}", endpoint, e),
+                            format!("✗ Remote relay error to {}: {}", endpoint, full_err),
                         );
                     }
                     _ => {

@@ -1,8 +1,19 @@
-//! SubRip (.srt) subtitle parser, time-shifter, and serializer.
+//! SubRip (.srt) and SubStation Alpha (.ass/.ssa) subtitle parser, time-shifter, and serializer.
 
 use anyhow::{anyhow, Context, Result};
 use std::fs;
 use std::path::Path;
+
+pub const MILLIS_PER_HOUR: i64 = 3_600_000;
+pub const MILLIS_PER_MINUTE: i64 = 60_000;
+pub const MILLIS_PER_SECOND: i64 = 1_000;
+pub const MILLIS_PER_CENTISECOND: i64 = 10;
+pub const SECONDS_PER_MINUTE: i64 = 60;
+pub const SECONDS_PER_HOUR: i64 = 3_600;
+pub const ASS_DIALOGUE_FIELD_COUNT: usize = 10;
+pub const ASS_START_TIME_FIELD_INDEX: usize = 1;
+pub const ASS_END_TIME_FIELD_INDEX: usize = 2;
+pub const ASS_TEXT_FIELD_INDEX: usize = 9;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SubtitleCue {
@@ -23,7 +34,39 @@ pub fn parse_timecode(tc: &str) -> Result<i64> {
     let m: i64 = parts[1].parse().context("Invalid minutes")?;
     let s: i64 = parts[2].parse().context("Invalid seconds")?;
     let ms: i64 = parts[3].parse().context("Invalid milliseconds")?;
-    Ok((h * 3600 + m * 60 + s) * 1000 + ms)
+    Ok((h * SECONDS_PER_HOUR + m * SECONDS_PER_MINUTE + s) * MILLIS_PER_SECOND + ms)
+}
+
+/// Parses ASS/SSA timecode "H:MM:SS.CC" or "H:MM:SS.mmm" into milliseconds.
+pub fn parse_ass_timecode(tc: &str) -> Result<i64> {
+    let tc = tc.trim();
+    let parts: Vec<&str> = tc.split(':').collect();
+    if parts.len() != 3 {
+        return Err(anyhow!("Invalid ASS timecode format: '{}'", tc));
+    }
+    let h: i64 = parts[0].parse().context("Invalid hours in ASS timecode")?;
+    let m: i64 = parts[1]
+        .parse()
+        .context("Invalid minutes in ASS timecode")?;
+    let sec_cs: Vec<&str> = parts[2].split('.').collect();
+    if sec_cs.len() != 2 {
+        return Err(anyhow!("Invalid ASS seconds.centiseconds: '{}'", parts[2]));
+    }
+    let s: i64 = sec_cs[0]
+        .parse()
+        .context("Invalid seconds in ASS timecode")?;
+    let cs_str = sec_cs[1].trim();
+    let ms: i64 = match cs_str.len() {
+        1 => cs_str.parse::<i64>().context("Invalid single-digit cs")? * 100,
+        2 => cs_str.parse::<i64>().context("Invalid two-digit cs")? * MILLIS_PER_CENTISECOND,
+        3 => cs_str.parse::<i64>().context("Invalid three-digit ms")?,
+        _ => cs_str
+            .get(..3)
+            .unwrap_or("0")
+            .parse::<i64>()
+            .context("Invalid long ms")?,
+    };
+    Ok(h * MILLIS_PER_HOUR + m * MILLIS_PER_MINUTE + s * MILLIS_PER_SECOND + ms)
 }
 
 /// Formats milliseconds into "HH:MM:SS,mmm".
@@ -110,6 +153,59 @@ impl SubtitleFile {
             }
         }
 
+        if cues.is_empty()
+            && (normalized.contains("[Script Info]") || normalized.contains("Dialogue:"))
+        {
+            return Self::parse_ass(&normalized);
+        }
+
+        Ok(Self { cues })
+    }
+
+    /// Parses ASS/SSA subtitle dialogue events into standard SubtitleCues.
+    pub fn parse_ass(content: &str) -> Result<Self> {
+        let mut cues = Vec::new();
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if let Some(rest) = trimmed.strip_prefix("Dialogue:") {
+                let parts: Vec<&str> = rest.splitn(ASS_DIALOGUE_FIELD_COUNT, ',').collect();
+                if parts.len() < ASS_DIALOGUE_FIELD_COUNT {
+                    continue;
+                }
+                let start_str = parts[ASS_START_TIME_FIELD_INDEX].trim();
+                let end_str = parts[ASS_END_TIME_FIELD_INDEX].trim();
+                let raw_text = parts[ASS_TEXT_FIELD_INDEX].trim();
+
+                let start_ms = parse_ass_timecode(start_str)?;
+                let end_ms = parse_ass_timecode(end_str)?;
+
+                // Strip ASS style overrides (e.g. {\an8}, {\b1})
+                let mut text = String::new();
+                let mut in_tag = false;
+                for ch in raw_text.chars() {
+                    if ch == '{' {
+                        in_tag = true;
+                    } else if ch == '}' {
+                        in_tag = false;
+                    } else if !in_tag {
+                        text.push(ch);
+                    }
+                }
+                let cleaned_text = text
+                    .replace("\\N", "\n")
+                    .replace("\\n", "\n")
+                    .trim()
+                    .to_string();
+                if !cleaned_text.is_empty() {
+                    cues.push(SubtitleCue {
+                        index: (cues.len() + 1) as u32,
+                        start_ms,
+                        end_ms,
+                        text: cleaned_text,
+                    });
+                }
+            }
+        }
         Ok(Self { cues })
     }
 
@@ -208,5 +304,35 @@ mod tests {
         let srt = SubtitleFile::from_bytes(&bytes).expect("Failed to parse UTF-16LE with BOM");
         assert_eq!(srt.cues.len(), 1);
         assert_eq!(srt.cues[0].text, "Subtitles in UTF-16LE");
+    }
+
+    #[test]
+    fn test_parse_ass_subtitles_auto_fallback() {
+        let raw_ass = r#"[Script Info]
+Title: Test ASS
+ScriptType: v4.00+
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:02.54,0:00:04.17,Default,,0000,0000,0000,,Amenez le prisonnier !
+Dialogue: 0,0:00:06.00,0:00:10.46,Default,,0000,0000,0000,,Cet homme est accusé de conspiration\Navec les Valdrogiens.
+Dialogue: 0,0:00:10.80,0:00:13.13,Default,,0000,0000,0000,,{\an8}Mérite-t-il notre indulgence ?
+"#;
+        let srt = SubtitleFile::parse(raw_ass).expect("Failed to parse ASS content");
+        assert_eq!(srt.cues.len(), 3);
+        assert_eq!(srt.cues[0].start_ms, 2540);
+        assert_eq!(srt.cues[0].end_ms, 4170);
+        assert_eq!(srt.cues[0].text, "Amenez le prisonnier !");
+
+        assert_eq!(srt.cues[1].start_ms, 6000);
+        assert_eq!(srt.cues[1].end_ms, 10460);
+        assert_eq!(
+            srt.cues[1].text,
+            "Cet homme est accusé de conspiration\navec les Valdrogiens."
+        );
+
+        assert_eq!(srt.cues[2].start_ms, 10800);
+        assert_eq!(srt.cues[2].end_ms, 13130);
+        assert_eq!(srt.cues[2].text, "Mérite-t-il notre indulgence ?");
     }
 }

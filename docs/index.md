@@ -58,7 +58,7 @@ hide:
       <a href="tutorials/02-ingestion-et-certification-premier-media/">→ 2. Ingestion &amp; Certification Média</a>
       <a href="tutorials/03-environnement-developpement-et-contribution/">→ 3. Environnement Dév &amp; Contribution</a>
       <a href="tutorials/04-deploiement-appliance-rpi4/">→ 4. Déploiement Appliance RPi4</a>
-      <a href="tutorials/">→ Explorer l'index des Tutoriels</a>
+      <a href="tutorials/index.md">→ Explorer l'index des Tutoriels</a>
     </div>
   </div>
 
@@ -76,7 +76,7 @@ hide:
       <a href="how-to/migrer-schema-postgresql/">→ Migrer PostgreSQL avec Refinery</a>
       <a href="how-to/surveiller-stack-telemetrie/">→ Surveiller avec Prometheus &amp; Grafana</a>
       <a href="how-to/contribuer-documentation-diataxis/">→ ✍️ Contribuer à la Doc selon Diátaxis</a>
-      <a href="how-to/">→ Explorer tous les Guides Pratiques</a>
+      <a href="how-to/index.md">→ Explorer tous les Guides Pratiques</a>
     </div>
   </div>
 
@@ -94,7 +94,7 @@ hide:
       <a href="reference/formats-fichiers/">→ Formats .dbphash v2 &amp; Couplings JSON</a>
       <a href="reference/taskfile/">→ Catalogue des Commandes Taskfile</a>
       <a href="reference/configuration/">→ Configuration &amp; Variables d'Environnement</a>
-      <a href="reference/">→ Explorer l'index de Référence</a>
+      <a href="reference/index.md">→ Explorer l'index de Référence</a>
     </div>
   </div>
 
@@ -112,7 +112,7 @@ hide:
       <a href="explanation/modele-relationnel-couplages-certifies/">→ Vérité Terrain &amp; Couplages Certifiés</a>
       <a href="explanation/architecture-daemon-axum-et-vlc-osd/">→ Architecture Démon Axum &amp; VLC OSD</a>
       <a href="explanation/stockage-decentralise-cas-et-distribution/">→ Stockage Décentralisé CAS &amp; Distribution</a>
-      <a href="explanation/">→ Explorer l'index des Explications</a>
+      <a href="explanation/index.md">→ Explorer l'index des Explications</a>
     </div>
   </div>
 

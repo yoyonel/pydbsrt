@@ -92,6 +92,16 @@ def check_html_files(site_dir: Path) -> list[str]:
                 if not target.exists():
                     errors.append(f"{rel_path}: Broken local video/media src: '{src}'")
 
+        # 5. Check local asciinema cast sources
+        for cast_tag in article.find_all(class_="asciinema-cast"):
+            src_val = cast_tag.get("data-cast", "")
+            src = src_val[0] if isinstance(src_val, list) else str(src_val or "")
+            if src and not src.startswith(("http://", "https://", "data:")):
+                clean_src = src.split("?")[0].split("#")[0]
+                target = (html_path.parent / clean_src).resolve()
+                if not target.exists():
+                    errors.append(f"{rel_path}: Broken local asciinema cast src: '{src}'")
+
     return errors
 
 
@@ -143,6 +153,7 @@ def check_docs_filetypes() -> list[str]:
         ".css",
         ".pdf",
         ".svg",
+        ".cast",
         ".woff2",
         ".ttf",
     }

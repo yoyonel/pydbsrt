@@ -998,3 +998,28 @@ article img:hover {
   background: #000;
   margin: 1rem 0;
 }
+
+/* ==========================================================================
+   Asciinema Player Container & Integration
+   ========================================================================== */
+.asciinema-wrapper {
+  margin: 1.5rem 0;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  background-color: #2e3440;
+}
+
+.asciinema-wrapper figcaption {
+  padding: 0.6rem 1rem;
+  font-size: 0.82rem;
+  background-color: rgba(0, 0, 0, 0.25);
+  color: var(--md-default-fg-color--light);
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  text-align: center;
+}
+
+.asciinema-cast {
+  width: 100%;
+}

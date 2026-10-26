@@ -117,10 +117,10 @@ Pour valider l'intégrité globale de la documentation (liens internes, rendu La
 task doc:check
 ```
 
-<figure markdown="1">
-  <img src="../../assets/casts/term_doc_check.svg" alt="Enregistrement Terminal - task doc:check" width="100%">
-  <figcaption>Enregistrement terminal interactif : Validation automatisée stricte de la documentation.</figcaption>
-</figure>
+<div class="asciinema-wrapper">
+  <div class="asciinema-cast" data-cast="../../assets/casts/term_doc_check.cast" data-rows="20"></div>
+  <figcaption>Enregistrement terminal interactif : Validation automatisée stricte de la documentation (Asciinema).</figcaption>
+</div>
 
 ---
 
@@ -148,4 +148,4 @@ Pour proposer une modification au projet :
 ## 7. Félicitations !
 
 Votre poste de travail est opérationnel et configuré selon les plus hauts standards d'ingénierie logicielle du projet.
-Consultez le quadrant **[Guides Pratiques (How-To)](../how-to/)** pour découvrir les recettes avancées.
+Consultez le quadrant **[Guides Pratiques (How-To)](../how-to/index.md)** pour découvrir les recettes avancées.

@@ -68,11 +68,13 @@ plugins:
 
 extra_css:
   - stylesheets/extra.css
+  - stylesheets/asciinema-player.css
 
 extra_javascript:
   - javascripts/mathjax.js
   - https://unpkg.com/mathjax@3/es5/tex-mml-svg.js
   - javascripts/panzoom.js
+  - javascripts/asciinema-player.min.js
   - javascripts/doc-portal.js
 
 markdown_extensions:
@@ -173,11 +175,22 @@ nav:
           - Plugin VLC v2.0 & OSD: 2026-10-17-validation-ui-ux-vlc-plugin-v2.md
           - Fork VLSub & Démo 1080p: 2026-10-18-vlsub-fork-and-restoration.md
   - 🗺️ Roadmap & Archives:
-      - Feuilles de Route:
+      - Feuilles de Route & Décisions (ADR):
           - Feuille de Route Post-Merge develop (5 Projets v0.2+): 2026-10-21-feuille-de-route-post-merge-develop-et-decoupage-projets.md
           - Feuille de Route & Échelle (1920-2026): 2026-10-15-deep-dive-modernization-and-scaling-roadmap.md
           - Modernization Blueprint (UV/Taskfile): 2026-10-15-modernization-blueprint.md
-      - Historique & Tags:
+          - ADR Détection Encodage Sous-Titres: decisions/2026-10-25-subtitle-encoding-detection.md
+          - ADR Cas Limites Façade Ingestion: decisions/2026-10-25-media-add-edge-cases.md
+      - Archives & Rapports Techniques:
+          - Intégration Daemon Axum & VLC: 2026-10-15-vlc-integration-daemon-and-plugins.md
+          - Mécanique E2E Search by pHash: 2026-10-18-e2e-phash-search-mechanics-and-roadmap.md
+          - Studio Backoffice & Couplages: 2026-10-18-studio-backoffice-and-relational-couplings.md
+          - Déploiement Remote o2switch: 2026-10-19-etude-deploiement-remote-o2switch-et-dimensionnement-vlsub.md
+          - Indexation Métrique & MIH: 2026-10-19-indexing-metric-trees-and-multi-index-hashing.md
+          - Distribution Décentralisée o2switch: 2026-10-20-architecture-distribution-sous-titres-o2switch-et-stockage-decentralise.md
+          - Service CAS Subtitles (REST vs gRPC): 2026-10-20-architecture-subtitle-service-cas-et-comparatif-rest-grpc.md
+          - Observabilité Prometheus & Grafana: 2026-10-20-observabilite-prometheus-grafana-et-telemetrie-pydbsrt.md
+          - Rapport Ingestion TV Shows (NAS): 2026-10-25-rapport-batch-import-tvshow-synology.md
           - Audit Global Initial (2026): 2026-10-15-audit-global.md
           - Notes 2021 Fast Hamming Postgres: history/2021-04-13-fast-hamming-postgres.md
           - 🏷️ Index des Tags: tags.md

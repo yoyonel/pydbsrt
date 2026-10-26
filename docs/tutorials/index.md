@@ -80,6 +80,6 @@ tags:
 
 ## 🧭 Différence avec les Guides Pratiques (How-To)
 
-* Si vous cherchez à **résoudre un problème précis** ou à exécuter une tâche technique ciblée (par exemple *Comment créer une migration PostgreSQL avec Refinery* ou *Comment lancer le chaos testing*), consultez le quadrant **[Guides Pratiques (How-To)](../how-to/)**.
-* Si vous cherchez la **liste des options d'une commande** ou les spécifications des schémas SQL, consultez le quadrant **[Référence Technique](../reference/)**.
-* Si vous souhaitez comprendre **pourquoi le pHash requiert 2 flux vidéo**, consultez le quadrant **[Explications](../explanation/)**.
+* Si vous cherchez à **résoudre un problème précis** ou à exécuter une tâche technique ciblée (par exemple *Comment créer une migration PostgreSQL avec Refinery* ou *Comment lancer le chaos testing*), consultez le quadrant **[Guides Pratiques (How-To)](../how-to/index.md)**.
+* Si vous cherchez la **liste des options d'une commande** ou les spécifications des schémas SQL, consultez le quadrant **[Référence Technique](../reference/index.md)**.
+* Si vous souhaitez comprendre **pourquoi le pHash requiert 2 flux vidéo**, consultez le quadrant **[Explications](../explanation/index.md)**.
