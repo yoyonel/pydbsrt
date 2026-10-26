@@ -93,6 +93,35 @@ pub fn inspect_job_details(job: &ActiveJobTelemetry) -> Vec<String> {
         lines.push(format!("ETA estimé: {}", format_duration(eta)));
     }
 
+    lines.push(String::new());
+    lines.push("--- Diagnostic Moteur & Accélération Matérielle ---".to_string());
+    if let Some(ref reason) = job.engine_reason {
+        lines.push(format!("  • Moteur sélectionné : {}", job.engine));
+        lines.push(format!("  • Diagnostic matériel: {reason}"));
+    } else if job.engine.contains("Hi10P") {
+        lines.push(format!("  • Moteur sélectionné : {}", job.engine));
+        lines.push(
+            "  • Incompatibilité ASIC: Codec H.264 Hi10P (High 10 Profile, 10-bit color)."
+                .to_string(),
+        );
+        lines.push("  • Raison repli CPU   : Les puces GPU grand public (Intel Iris Xe, Nvidia NVDEC, AMD VCN) ne disposent".to_string());
+        lines.push("                         d'aucun décodeur matériel pour le H.264 10-bit (uniquement 8-bit supporté).".to_string());
+        lines.push("  • Comportement       : dbsrt bascule automatiquement en décodage logiciel CPU multi-cœurs (consommation normale ~800%).".to_string());
+    } else if job.engine.contains("GPU") {
+        lines.push("  • Moteur sélectionné : GPU (VA-API)".to_string());
+        lines.push("  • Accélération active: Décodage matériel ASIC GPU actif via Intel QuickSync / VA-API (/dev/dri/renderD128).".to_string());
+        lines.push("  • Efficacité         : Déchargement CPU quasi-total (< 20% CPU hôte) et débit de décodage maximal.".to_string());
+    } else if job.engine.contains("Sub") {
+        lines.push("  • Moteur sélectionné : Sub Extraction".to_string());
+        lines.push("  • Opération active   : Démultiplexage et extraction brute des pistes SRT (flux texte léger, aucun décodage vidéo).".to_string());
+    } else {
+        lines.push(format!("  • Moteur sélectionné : {}", job.engine));
+        lines.push(
+            "  • Mode Décodage      : Décodage logiciel CPU (sans accélération matérielle VA-API)."
+                .to_string(),
+        );
+    }
+
     if !job.cmdline.is_empty() {
         lines.push(String::new());
         lines.push("--- Ligne de Commande Exécutée ---".to_string());

@@ -197,16 +197,29 @@ dbsrt top [OPTIONS]
 4. **Onglet 3 : Derniers Traitements Complétés & Certifiés (`[3]` ou `[r]`)** :
    - Journal complet et scrollable de l'ensemble des médias traités, statuts de succès (`✓ OK`, `✓ CACHE`, `✗ FAIL`), durées, volumes et horodatages.
 
+5. **Onglet 4 : Explorateur Médias NAS (`[4]` ou `[m]`)** :
+   - Catalogue interactif de la bibliothèque NAS (`/media/latty/Synology/tvshow`), présentant l'inventaire des fichiers vidéo, tailles, durées estimées, codecs vidéo détectés (`hevc`, `h264`, etc.), présence et langues des pistes de sous-titres intégrées, ainsi que le cycle de vie d'ingestion (`VIERGE`, `EN COURS`, `COMPLÉTÉ`, `PARTIEL`).
+   - Filtrage dynamique cyclique (`[f]`) : `TOUS`, `VIERGES SEULS`, `TRAITÉS`, `AVEC SOUS-TITRES`.
+   - Tri multicritère cyclique (`[o]`) : `NOM (A-Z)`, `TAILLE`, `DURÉE`, `STATUT`, `SOUS-TITRES`.
+   - Sélection multiple par case à cocher : touche `[Espace]` pour cocher/décocher le média pointé, touche `[a]` pour tout cocher/décocher.
+   - Déclenchement de lot ciblé (`[b]`) : exécute le batch d'ingestion en tâche de fond exclusivement sur les médias sélectionnés et rebascule automatiquement sur l'onglet des Tâches avec notification.
+
 #### Raccourcis Clavier
 
 - `[1]` : Afficher l'onglet des tâches en cours
 - `[2]` / `[h]` : Afficher l'onglet des statistiques historiques réelles
 - `[3]` / `[r]` : Afficher l'onglet des traitements complétés et certifiés
-- `[Tab]` / `[Shift+Tab]` : Navigation circulaire entre les onglets
-- `[↑]` / `[k]` : Déplacer le curseur vers le haut / tâche précédente
-- `[↓]` / `[j]` : Déplacer le curseur vers le bas / tâche suivante
-- `[PgUp]` / `[PgDn]` : Défilement rapide par page (onglet 3)
-- `[Home]` / `[End]` : Saut direct en début ou fin de liste (onglet 3)
+- `[4]` / `[m]` : Afficher l'onglet de l'explorateur de médias NAS
+- `[Tab]` / `[Shift+Tab]` : Navigation circulaire bidirectionnelle entre les 4 onglets
+- `[↑]` / `[k]` : Déplacer le curseur vers le haut / élément précédent
+- `[↓]` / `[j]` : Déplacer le curseur vers le bas / élément suivant
+- `[PgUp]` / `[PgDn]` : Défilement rapide par page (onglets 1, 3 et 4)
+- `[Home]` / `[End]` : Saut direct en début ou fin de liste (onglets 1, 3 et 4)
+- `[Espace]` : Cocher / décocher un média (onglet 4)
+- `[a]` : Cocher / décocher tous les médias visibles (onglet 4)
+- `[f]` : Changer le filtre des médias visibles (onglet 4)
+- `[o]` : Changer le critère de tri des médias (onglet 4)
+- `[b]` : Lancer l'ingestion batch sur les médias cochés (onglet 4)
 - `[Enter]` / `[l]` : Basculer sur la page d'inspection détaillée du processus (dans l'onglet 1)
 - `[Esc]` / `[Backspace]` : Revenir à l'onglet principal des tâches (ou quitter depuis l'onglet 1)
 - `[p]` : Mettre en pause ou reprendre la tâche sélectionnée (`SIGSTOP` / `SIGCONT`)

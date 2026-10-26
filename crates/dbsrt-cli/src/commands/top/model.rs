@@ -1,5 +1,7 @@
 //! Data models and application state types for the TUI monitor.
 
+use std::path::PathBuf;
+
 use serde::{Deserialize, Serialize};
 
 use crate::commands::top::constants::{
@@ -24,6 +26,8 @@ pub struct ActiveJobTelemetry {
     pub pid: u32,
     pub media_name: String,
     pub engine: String,
+    #[serde(default)]
+    pub engine_reason: Option<String>,
     pub elapsed_secs: f64,
     pub read_bytes: u64,
     pub total_bytes: u64,
@@ -47,6 +51,162 @@ pub struct HistoricalRecord {
     pub certified_couplings_count: usize,
     pub start_iso: Option<String>,
     pub end_iso: Option<String>,
+}
+
+/// Ingestion and certification lifecycle status of a media release.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum IngestionStatus {
+    /// Fresh, un-processed release with zero precomputed fingerprints.
+    #[default]
+    Virgin,
+    /// Currently being decoded or processed by an active background worker.
+    InProgress,
+    /// Fully processed with ground-truth subtitle couplings stored.
+    Completed,
+    /// Processed or fingerprinted with missing or failed subtitle tracks.
+    PartialFail,
+}
+
+impl IngestionStatus {
+    /// Exhaustive slice of all variants for testing, cycling and reflection.
+    pub const ALL: &'static [Self] = &[
+        Self::Virgin,
+        Self::InProgress,
+        Self::Completed,
+        Self::PartialFail,
+    ];
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Virgin => "VIERGE",
+            Self::InProgress => "EN COURS",
+            Self::Completed => "COMPLÉTÉ",
+            Self::PartialFail => "HACHÉ SEUL",
+        }
+    }
+}
+
+/// Information about precomputed or existing pHash visual fingerprint on disk.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct PhashFingerprintInfo {
+    pub exists: bool,
+    pub frame_count: usize,
+    pub size_bytes: u64,
+}
+
+/// Metadata for an embedded or sidecar subtitle track.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MediaSubtrackInfo {
+    pub index: usize,
+    pub lang: String,
+    pub codec: String,
+    pub title: String,
+}
+
+/// Detailed metadata for a candidate video release discovered in the library.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DiscoveredMediaItem {
+    pub path: PathBuf,
+    pub stem: String,
+    pub size_bytes: u64,
+    pub duration_secs: Option<f64>,
+    pub video_codec: Option<String>,
+    pub subtitles: Vec<MediaSubtrackInfo>,
+    #[serde(default)]
+    pub phash: Option<PhashFingerprintInfo>,
+    pub status: IngestionStatus,
+}
+
+/// Filtering predicate applied in the media browser view.
+/// Structurally and mathematically guaranteed 100% aligned with IngestionStatus
+/// through the `Status(IngestionStatus)` variant and exhaustive pattern matching.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MediaFilter {
+    #[default]
+    All,
+    Status(IngestionStatus),
+    WithSubtitles,
+    WithoutSubtitles,
+}
+
+impl From<IngestionStatus> for MediaFilter {
+    fn from(status: IngestionStatus) -> Self {
+        Self::Status(status)
+    }
+}
+
+impl MediaFilter {
+    /// Ordered list of all filter variants for cycler [f].
+    pub fn all_variants() -> Vec<Self> {
+        let mut variants = vec![Self::All];
+        for &status in IngestionStatus::ALL {
+            variants.push(Self::Status(status));
+        }
+        variants.push(Self::WithSubtitles);
+        variants.push(Self::WithoutSubtitles);
+        variants
+    }
+
+    pub fn next(&self) -> Self {
+        let variants = Self::all_variants();
+        let idx = variants.iter().position(|v| v == self).unwrap_or(0);
+        let next_idx = (idx + 1) % variants.len();
+        variants[next_idx]
+    }
+
+    pub fn target_status(&self) -> Option<IngestionStatus> {
+        match self {
+            Self::Status(s) => Some(*s),
+            _ => None,
+        }
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::All => "TOUS",
+            Self::Status(s) => match s {
+                IngestionStatus::Virgin => "VIERGES SEULS",
+                IngestionStatus::InProgress => "EN COURS",
+                IngestionStatus::Completed => "COMPLÉTÉS",
+                IngestionStatus::PartialFail => "HACHÉS SEULS",
+            },
+            Self::WithSubtitles => "AVEC SOUS-TITRES",
+            Self::WithoutSubtitles => "SANS SOUS-TITRE",
+        }
+    }
+}
+
+/// Sorting order criterion for the media browser.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MediaSort {
+    #[default]
+    Name,
+    Size,
+    Duration,
+    Status,
+    Subtitles,
+}
+
+impl MediaSort {
+    pub fn next(&self) -> Self {
+        match self {
+            Self::Name => Self::Size,
+            Self::Size => Self::Duration,
+            Self::Duration => Self::Status,
+            Self::Status => Self::Subtitles,
+            Self::Subtitles => Self::Name,
+        }
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Name => "NOM (A-Z)",
+            Self::Size => "TAILLE",
+            Self::Duration => "DURÉE",
+            Self::Status => "STATUT",
+            Self::Subtitles => "SOUS-TITRES",
+        }
+    }
 }
 
 /// Descriptive statistics across a single performance dimension.
@@ -89,8 +249,12 @@ pub enum ViewPage {
     StatsHistory,
     /// Full-frame scrollable log of all certified and completed media.
     CompletedMedia,
+    /// Full-frame interactive browser of available media files on storage source.
+    MediaBrowser,
     /// Full-frame inspection view of selected task (cmdline, I/O, threads, memory, logs).
     JobInspection,
+    /// Full-frame inspection and diagnostic view of candidate media release.
+    MediaInspection,
     /// Full-frame keybinding and operational cheat sheet.
     Help,
 }
@@ -108,6 +272,7 @@ pub struct SystemTelemetry {
     pub session: SessionThroughput,
     pub history_records: Vec<HistoricalRecord>,
     pub stats: OverallStats,
+    pub discovered_media: Vec<DiscoveredMediaItem>,
 }
 
 /// Computes descriptive statistics (min, max, mean, median, p90, stdev) for a series of values.
@@ -258,4 +423,53 @@ pub fn format_progress_bar(ratio: f64, width: usize) -> String {
 /// Formats progress bar with default width.
 pub fn default_progress_bar(ratio: f64) -> String {
     format_progress_bar(ratio, PROGRESS_BAR_CHAR_WIDTH)
+}
+
+/// Filters and sorts a slice of discovered media items according to the active criteria.
+pub fn filter_and_sort_media(
+    items: &[DiscoveredMediaItem],
+    filter: MediaFilter,
+    sort: MediaSort,
+) -> Vec<DiscoveredMediaItem> {
+    let mut filtered: Vec<DiscoveredMediaItem> = items
+        .iter()
+        .filter(|item| match filter {
+            MediaFilter::All => true,
+            MediaFilter::Status(expected) => item.status == expected,
+            MediaFilter::WithSubtitles => !item.subtitles.is_empty(),
+            MediaFilter::WithoutSubtitles => item.subtitles.is_empty(),
+        })
+        .cloned()
+        .collect();
+
+    match sort {
+        MediaSort::Name => {
+            filtered.sort_by_key(|a| a.stem.to_lowercase());
+        }
+        MediaSort::Size => {
+            filtered.sort_by_key(|a| std::cmp::Reverse(a.size_bytes));
+        }
+        MediaSort::Duration => {
+            filtered.sort_by(|a, b| {
+                let dur_a = a.duration_secs.unwrap_or(0.0);
+                let dur_b = b.duration_secs.unwrap_or(0.0);
+                dur_b
+                    .partial_cmp(&dur_a)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+        }
+        MediaSort::Status => {
+            filtered.sort_by_key(|a| match a.status {
+                IngestionStatus::Virgin => 0,
+                IngestionStatus::InProgress => 1,
+                IngestionStatus::PartialFail => 2,
+                IngestionStatus::Completed => 3,
+            });
+        }
+        MediaSort::Subtitles => {
+            filtered.sort_by_key(|a| std::cmp::Reverse(a.subtitles.len()));
+        }
+    }
+
+    filtered
 }

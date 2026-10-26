@@ -32,7 +32,13 @@ pub fn probe_telemetry_snapshot(refresh_ms: u64) -> Result<SystemTelemetry> {
     use std::sync::{Arc, RwLock};
 
     let interval = refresh_ms.clamp(200, 1000);
-    let shared_state = Arc::new(RwLock::new(SystemTelemetry::default()));
+    let mut initial_tel = SystemTelemetry::default();
+    let mut sys = sysinfo::System::new();
+    sys.refresh_memory_specifics(sysinfo::MemoryRefreshKind::everything());
+    initial_tel.ram_total_gib = sys.total_memory() as f64 / constants::BYTES_PER_GIB_F64;
+    initial_tel.ram_used_gib = sys.used_memory() as f64 / constants::BYTES_PER_GIB_F64;
+
+    let shared_state = Arc::new(RwLock::new(initial_tel));
     let gpu_state = Arc::new(RwLock::new(GpuTelemetry::default()));
     let stop_flag = Arc::new(AtomicBool::new(false));
 

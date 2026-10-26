@@ -1,6 +1,6 @@
 //! High-performance telemetry sampler decoupling process/kernel polling from TUI rendering.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -15,12 +15,15 @@ use sysinfo::{
 
 use crate::commands::top::constants::{
     BYTES_PER_GIB_F64, BYTES_PER_MIB_F64, DEFAULT_BATCH_EVENTS_PATH, DEFAULT_COUPLINGS_PATH,
-    DEFAULT_COUPLING_BASELINE_FPS, MIN_DELTA_TIME_FLOOR_SECS, MIN_PROGRESS_THRESHOLD,
-    SESSION_WINDOW_SECS,
+    DEFAULT_COUPLING_BASELINE_FPS, DEFAULT_MEDIA_CACHE_PATH, DEFAULT_MEDIA_SCAN_INTERVAL_SECS,
+    DEFAULT_NAS_TVSHOW_PATH, DEFAULT_PHASH_DIR, DEFAULT_SELECTED_BATCH_REPORT_PATH,
+    DEFAULT_SELECTED_BATCH_TARGETS_PATH, MAX_MEDIA_SCAN_LIMIT, MAX_SELECTED_BATCH_WORKERS,
+    MIN_DELTA_TIME_FLOOR_SECS, MIN_PROGRESS_THRESHOLD, NAS_TVSHOW_DIR_ENV, SESSION_WINDOW_SECS,
 };
 use crate::commands::top::model::{
-    calculate_overall_stats, parse_iso_to_unix_secs, ActiveJobTelemetry, GpuTelemetry,
-    HistoricalRecord, SessionThroughput, SystemTelemetry,
+    calculate_overall_stats, parse_iso_to_unix_secs, ActiveJobTelemetry, DiscoveredMediaItem,
+    GpuTelemetry, HistoricalRecord, IngestionStatus, MediaSubtrackInfo, PhashFingerprintInfo,
+    SessionThroughput, SystemTelemetry,
 };
 
 /// Shared handle for background GPU monitoring process.
@@ -29,7 +32,10 @@ static GPU_CHILD: Mutex<Option<Child>> = Mutex::new(None);
 /// Global file size cache by stem to eliminate blocking CIFS network metadata calls.
 static STEM_SIZE_CACHE: Mutex<Option<HashMap<String, u64>>> = Mutex::new(None);
 
-/// Initializes the file size cache from batch reports and couplings if available.
+/// Global video codec cache by stem to eliminate blocking CIFS network metadata calls.
+static STEM_CODEC_CACHE: Mutex<Option<HashMap<String, String>>> = Mutex::new(None);
+
+/// Initializes the file size and codec cache from batch reports and media cache if available.
 pub fn preload_stem_size_cache() {
     let mut map = HashMap::new();
     let events_file = Path::new("data/reports/batch_tvshow_nightly.jsonl");
@@ -50,8 +56,36 @@ pub fn preload_stem_size_cache() {
         }
     }
 
+    let mut codec_map = HashMap::new();
+    let media_cache_file = Path::new(DEFAULT_MEDIA_CACHE_PATH);
+    if media_cache_file.exists() {
+        let cached = load_media_cache(media_cache_file);
+        for (stem, item) in cached {
+            if item.size_bytes > 0 {
+                map.entry(stem.clone()).or_insert(item.size_bytes);
+            }
+            if let Some(codec) = item.video_codec {
+                codec_map.insert(stem, codec);
+            }
+        }
+    }
+
     let mut lock = STEM_SIZE_CACHE.lock().unwrap();
     *lock = Some(map);
+
+    let mut c_lock = STEM_CODEC_CACHE.lock().unwrap();
+    *c_lock = Some(codec_map);
+}
+
+/// Helper to get cached video codec for a given stem.
+pub fn get_file_codec(media_name: &str) -> Option<String> {
+    let lock = STEM_CODEC_CACHE.lock().unwrap();
+    if let Some(ref map) = *lock {
+        if let Some(codec) = map.get(media_name) {
+            return Some(codec.clone());
+        }
+    }
+    None
 }
 
 /// Helper to get or insert file size for a given stem or path.
@@ -66,13 +100,16 @@ pub fn get_file_size(media_name: &str, target_path: Option<&Path>) -> u64 {
     }
 
     if let Some(path) = target_path {
-        if let Ok(metadata) = fs::metadata(path) {
-            let size = metadata.len();
-            let mut lock = STEM_SIZE_CACHE.lock().unwrap();
-            if let Some(ref mut map) = *lock {
+        let is_remote_mount = path.starts_with("/media/latty/Synology")
+            || path.to_string_lossy().contains("Synology");
+        if !is_remote_mount {
+            if let Ok(metadata) = fs::metadata(path) {
+                let size = metadata.len();
+                let mut lock = STEM_SIZE_CACHE.lock().unwrap();
+                let map = lock.get_or_insert_with(HashMap::new);
                 map.insert(media_name.to_string(), size);
+                return size;
             }
-            return size;
         }
     }
 
@@ -398,6 +435,396 @@ pub fn compute_session_throughput(
     }
 }
 
+/// Recursively scans a directory for video files up to a maximum limit.
+pub fn collect_video_files(dir: &Path, files: &mut Vec<PathBuf>, max_limit: usize) {
+    if files.len() >= max_limit {
+        return;
+    }
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.filter_map(Result::ok) {
+            if files.len() >= max_limit {
+                return;
+            }
+            let p = entry.path();
+            if p.is_dir() {
+                collect_video_files(&p, files, max_limit);
+            } else if let Some(ext) = p.extension().and_then(|e| e.to_str()) {
+                let ext_lower = ext.to_lowercase();
+                if ext_lower == "mkv"
+                    || ext_lower == "mp4"
+                    || ext_lower == "webm"
+                    || ext_lower == "avi"
+                {
+                    files.push(p);
+                }
+            }
+        }
+    }
+}
+
+/// Extracts the set of all certified media stems from couplings.json and events log.
+pub fn get_certified_stems(events_path: &Path, couplings_path: &Path) -> HashSet<String> {
+    let mut stems = HashSet::new();
+    if events_path.exists() {
+        if let Ok(file) = fs::File::open(events_path) {
+            let reader = BufReader::new(file);
+            for line in reader.lines().map_while(Result::ok) {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(line.trim()) {
+                    if v.get("success").and_then(|s| s.as_bool()).unwrap_or(false) {
+                        if let Some(stem) = v.get("video_stem").and_then(|s| s.as_str()) {
+                            stems.insert(stem.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if couplings_path.exists() {
+        if let Ok(content) = fs::read_to_string(couplings_path) {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&content) {
+                if let Some(arr) = v.get("couplings").and_then(|c| c.as_array()) {
+                    for c in arr {
+                        if let Some(m) = c.get("media_name").and_then(|m| m.as_str()) {
+                            stems.insert(m.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    stems
+}
+
+/// Loads cached discovered media items from disk, enriching with local pHash metadata if present.
+pub fn load_media_cache(cache_path: &Path) -> HashMap<String, DiscoveredMediaItem> {
+    let mut map = HashMap::new();
+    let phash_dir = Path::new(DEFAULT_PHASH_DIR);
+    if cache_path.exists() {
+        if let Ok(content) = fs::read_to_string(cache_path) {
+            if let Ok(items) = serde_json::from_str::<Vec<DiscoveredMediaItem>>(&content) {
+                for mut item in items {
+                    if item.phash.is_none() {
+                        let phash_file = phash_dir.join(format!("{}.phash", item.stem));
+                        if let Ok(meta) = fs::metadata(&phash_file) {
+                            let bytes = meta.len();
+                            let frame_count = (bytes / 8) as usize;
+                            item.phash = Some(PhashFingerprintInfo {
+                                exists: true,
+                                frame_count,
+                                size_bytes: bytes,
+                            });
+                        }
+                    }
+                    map.insert(item.stem.clone(), item);
+                }
+            }
+        }
+    }
+    map
+}
+
+/// Persists discovered media items into the disk cache.
+pub fn save_media_cache(cache_path: &Path, items: &[DiscoveredMediaItem]) {
+    if let Some(parent) = cache_path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    if let Ok(json) = serde_json::to_string_pretty(items) {
+        let _ = fs::write(cache_path, json);
+    }
+}
+
+/// Inspects container metadata, duration, video codec, and subtitle tracks via ffprobe.
+pub fn probe_media_file(path: &Path) -> (Option<f64>, Option<String>, Vec<MediaSubtrackInfo>) {
+    let output = Command::new("ffprobe")
+        .args([
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration:stream=index,codec_type,codec_name,profile,pix_fmt:stream_tags=language,title",
+            "-of",
+            "json",
+        ])
+        .arg(path)
+        .output();
+
+    if let Ok(out) = output {
+        if out.status.success() {
+            if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&out.stdout) {
+                let duration_secs = v.pointer("/format/duration").and_then(|d| {
+                    d.as_str()
+                        .and_then(|s| s.parse::<f64>().ok())
+                        .or_else(|| d.as_f64())
+                });
+
+                let mut video_codec = None;
+                let mut subtitles = Vec::new();
+
+                if let Some(streams) = v.get("streams").and_then(|s| s.as_array()) {
+                    for s in streams {
+                        let ctype = s.get("codec_type").and_then(|c| c.as_str()).unwrap_or("");
+                        let codec = s
+                            .get("codec_name")
+                            .and_then(|c| c.as_str())
+                            .unwrap_or("unknown")
+                            .to_string();
+                        if ctype == "video" && video_codec.is_none() {
+                            let profile = s.get("profile").and_then(|p| p.as_str()).unwrap_or("");
+                            let pix_fmt = s.get("pix_fmt").and_then(|p| p.as_str()).unwrap_or("");
+                            let display_codec = if codec == "h264"
+                                && (profile.contains("High 10")
+                                    || pix_fmt.contains("10le")
+                                    || pix_fmt.contains("10"))
+                            {
+                                "h264 Hi10P".to_string()
+                            } else {
+                                codec
+                            };
+                            video_codec = Some(display_codec);
+                        } else if ctype == "subtitle" {
+                            let idx = s.get("index").and_then(|i| i.as_u64()).unwrap_or(0) as usize;
+                            let lang = s
+                                .pointer("/tags/language")
+                                .or_else(|| s.pointer("/tags/LANGUAGE"))
+                                .and_then(|l| l.as_str())
+                                .unwrap_or("und")
+                                .to_string();
+                            let title = s
+                                .pointer("/tags/title")
+                                .or_else(|| s.pointer("/tags/TITLE"))
+                                .and_then(|t| t.as_str())
+                                .unwrap_or("")
+                                .to_string();
+                            subtitles.push(MediaSubtrackInfo {
+                                index: idx,
+                                lang,
+                                codec,
+                                title,
+                            });
+                        }
+                    }
+                }
+                return (duration_secs, video_codec, subtitles);
+            }
+        }
+    }
+    (None, None, Vec::new())
+}
+
+/// Scans the NAS library directory, cross-referencing candidate media against certified couplings and active jobs.
+pub fn scan_nas_tvshows(
+    nas_root: &Path,
+    couplings_path: &Path,
+    events_path: &Path,
+    phash_dir: &Path,
+    active_jobs: &[ActiveJobTelemetry],
+    cache_path: &Path,
+) -> Vec<DiscoveredMediaItem> {
+    let mut cached_map = load_media_cache(cache_path);
+    let certified_stems = get_certified_stems(events_path, couplings_path);
+
+    let mut discovered = Vec::new();
+    let mut video_paths = Vec::new();
+
+    if nas_root.exists() && nas_root.is_dir() {
+        collect_video_files(nas_root, &mut video_paths, MAX_MEDIA_SCAN_LIMIT);
+    }
+
+    if video_paths.is_empty() && !cached_map.is_empty() {
+        discovered = cached_map.into_values().collect();
+    } else {
+        for p in video_paths {
+            let stem = p
+                .file_stem()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_default();
+            if stem.is_empty() {
+                continue;
+            }
+
+            let size = fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
+
+            // Re-use cached metadata if file size matches, otherwise probe
+            let (dur, codec, subs) = if let Some(item) = cached_map.get(&stem) {
+                if item.size_bytes == size && item.duration_secs.is_some() {
+                    (
+                        item.duration_secs,
+                        item.video_codec.clone(),
+                        item.subtitles.clone(),
+                    )
+                } else {
+                    probe_media_file(&p)
+                }
+            } else {
+                probe_media_file(&p)
+            };
+
+            let phash_path = phash_dir.join(format!("{stem}.phash"));
+            let phash_info = if let Ok(meta) = fs::metadata(&phash_path) {
+                let bytes = meta.len();
+                let frame_count = (bytes / 8) as usize;
+                Some(PhashFingerprintInfo {
+                    exists: true,
+                    frame_count,
+                    size_bytes: bytes,
+                })
+            } else {
+                None
+            };
+
+            let status = if active_jobs.iter().any(|j| j.media_name == stem) {
+                IngestionStatus::InProgress
+            } else if certified_stems.contains(&stem) {
+                IngestionStatus::Completed
+            } else if phash_info.is_some() {
+                IngestionStatus::PartialFail
+            } else {
+                IngestionStatus::Virgin
+            };
+
+            let item = DiscoveredMediaItem {
+                path: p,
+                stem: stem.clone(),
+                size_bytes: size,
+                duration_secs: dur,
+                video_codec: codec,
+                subtitles: subs,
+                phash: phash_info,
+                status,
+            };
+
+            cached_map.insert(stem, item.clone());
+            discovered.push(item);
+        }
+
+        save_media_cache(cache_path, &discovered);
+    }
+
+    if let Ok(mut c_lock) = STEM_CODEC_CACHE.lock() {
+        let map = c_lock.get_or_insert_with(HashMap::new);
+        for item in &discovered {
+            if let Some(ref codec) = item.video_codec {
+                map.insert(item.stem.clone(), codec.clone());
+            }
+        }
+    }
+
+    discovered.sort_by_key(|a| a.stem.to_lowercase());
+    discovered
+}
+
+/// Spawns background batch execution on the selected media paths with custom target and report file paths.
+pub fn launch_selected_batch_with_target_file(
+    media_paths: &[PathBuf],
+    targets_file: &Path,
+    report_file: &Path,
+) -> (bool, String) {
+    if media_paths.is_empty() {
+        return (false, "Aucun média sélectionné pour le batch.".to_string());
+    }
+
+    let count = media_paths.len();
+    if let Some(parent) = targets_file.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+
+    let paths_json = match serde_json::to_string_pretty(media_paths) {
+        Ok(j) => j,
+        Err(e) => return (false, format!("Erreur sérialisation cibles batch : {e}")),
+    };
+
+    if let Err(e) = fs::write(targets_file, paths_json) {
+        return (false, format!("Erreur écriture cibles batch : {e}"));
+    }
+
+    let workers_count = count.clamp(1, MAX_SELECTED_BATCH_WORKERS);
+
+    let res = Command::new("uv")
+        .args([
+            "run",
+            "python",
+            "scripts/batch_media_add_tvshow.py",
+            "--targets-file",
+            targets_file
+                .to_str()
+                .unwrap_or(DEFAULT_SELECTED_BATCH_TARGETS_PATH),
+            "--report-path",
+            report_file
+                .to_str()
+                .unwrap_or(DEFAULT_SELECTED_BATCH_REPORT_PATH),
+            "--workers",
+            &workers_count.to_string(),
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn();
+
+    match res {
+        Ok(_) => (
+            true,
+            format!(
+                "Batch démarré sur {count} média(s) ({workers_count} workers parallèles). Bascule vers Tâches..."
+            ),
+        ),
+        Err(e) => (false, format!("Échec du lancement batch : {e}")),
+    }
+}
+
+/// Spawns a background worker thread periodically refreshing NAS candidate media without blocking the telemetry loop.
+pub fn start_nas_media_scanner(
+    shared_state: Arc<RwLock<SystemTelemetry>>,
+    stop_flag: Arc<AtomicBool>,
+) {
+    std::thread::spawn(move || {
+        let events_path = PathBuf::from(DEFAULT_BATCH_EVENTS_PATH);
+        let couplings_path = PathBuf::from(DEFAULT_COUPLINGS_PATH);
+        let nas_root = std::env::var(NAS_TVSHOW_DIR_ENV)
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from(DEFAULT_NAS_TVSHOW_PATH));
+        let phash_dir = PathBuf::from(DEFAULT_PHASH_DIR);
+        let media_cache_path = PathBuf::from(DEFAULT_MEDIA_CACHE_PATH);
+
+        while !stop_flag.load(Ordering::Relaxed) {
+            let sleep_ticks = DEFAULT_MEDIA_SCAN_INTERVAL_SECS * 10;
+            for _ in 0..sleep_ticks {
+                if stop_flag.load(Ordering::Relaxed) {
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+
+            let active_jobs = {
+                shared_state
+                    .read()
+                    .map(|s| s.active_jobs.clone())
+                    .unwrap_or_default()
+            };
+
+            let items = scan_nas_tvshows(
+                &nas_root,
+                &couplings_path,
+                &events_path,
+                &phash_dir,
+                &active_jobs,
+                &media_cache_path,
+            );
+
+            if let Ok(mut state) = shared_state.write() {
+                state.discovered_media = items;
+            }
+        }
+    });
+}
+
+/// Spawns background batch execution on the selected media paths using default paths.
+pub fn launch_selected_batch(media_paths: &[PathBuf]) -> (bool, String) {
+    launch_selected_batch_with_target_file(
+        media_paths,
+        Path::new(DEFAULT_SELECTED_BATCH_TARGETS_PATH),
+        Path::new(DEFAULT_SELECTED_BATCH_REPORT_PATH),
+    )
+}
+
 /// Background sampler worker updating the shared telemetry state at regular intervals.
 pub fn run_telemetry_sampler_loop(
     shared_state: Arc<RwLock<SystemTelemetry>>,
@@ -412,11 +839,16 @@ pub fn run_telemetry_sampler_loop(
 
     let events_path = PathBuf::from(DEFAULT_BATCH_EVENTS_PATH);
     let couplings_path = PathBuf::from(DEFAULT_COUPLINGS_PATH);
+    let media_cache_path = PathBuf::from(DEFAULT_MEDIA_CACHE_PATH);
+
     let mut last_events_mtime = fs::metadata(&events_path)
         .ok()
         .and_then(|m| m.modified().ok());
     let mut cached_history_records = load_historical_records(&events_path, &couplings_path);
     let mut cached_stats = calculate_overall_stats(&cached_history_records);
+    let cached_map = load_media_cache(&media_cache_path);
+    let mut cached_media_items: Vec<DiscoveredMediaItem> = cached_map.into_values().collect();
+    cached_media_items.sort_by_key(|a| a.stem.to_lowercase());
 
     preload_stem_size_cache();
 
@@ -542,12 +974,23 @@ pub fn run_telemetry_sampler_loop(
             state.ram_used_gib = ram_used;
             state.ram_total_gib = ram_total;
             state.gpu = gpu_snap;
-            state.active_jobs = active_jobs;
             state.total_rate_mib_s = total_rate_mib_s;
             state.net_rx_mib_s = net_rx_mib_s;
             state.session = session;
             state.history_records = cached_history_records.clone();
             state.stats = cached_stats.clone();
+
+            if state.discovered_media.is_empty() {
+                state.discovered_media = cached_media_items.clone();
+            }
+
+            for item in &mut state.discovered_media {
+                if active_jobs.iter().any(|j| j.media_name == item.stem) {
+                    item.status = IngestionStatus::InProgress;
+                }
+            }
+
+            state.active_jobs = active_jobs;
         }
 
         std::thread::sleep(std::time::Duration::from_millis(refresh_interval_ms));
@@ -596,18 +1039,53 @@ pub fn process_candidate_jobs(
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_else(|| "Tâche Active".to_string());
 
-        let engine = if is_dbsrt {
+        let is_hi10p = cmd_str.contains("Hi10P")
+            || target_path.as_ref().is_some_and(|p| {
+                p.to_string_lossy().contains("Hi10P")
+                    || get_file_codec(&media_name).is_some_and(|c| c.contains("Hi10P"))
+            })
+            || get_file_codec(&media_name).is_some_and(|c| c.contains("Hi10P"));
+
+        let (engine, engine_reason) = if is_dbsrt {
             if cmd_str.contains("--hwaccel disabled") || cmd_str.contains("--hwaccel cpu") {
-                "CPU (Software)".to_string()
+                (
+                    "CPU (Software)".to_string(),
+                    Some(
+                        "Décodage logiciel CPU forcé par option CLI (--hwaccel disabled/cpu)."
+                            .to_string(),
+                    ),
+                )
+            } else if is_hi10p {
+                (
+                    "CPU (Hi10P)".to_string(),
+                    Some("H.264 Hi10P (10-bit) non supporté par l'ASIC matériel GPU (Intel/Nvidia/AMD). Repli automatique en décodage logiciel CPU multi-thread.".to_string()),
+                )
             } else {
-                "GPU (VA-API)".to_string()
+                (
+                    "GPU (VA-API)".to_string(),
+                    Some("Accélération matérielle Intel QuickSync / VA-API active (/dev/dri/renderD128).".to_string()),
+                )
             }
         } else if cmd_str.contains("-f srt") || cmd_str.contains("0:s:") {
-            "Sub Extraction".to_string()
+            (
+                "Sub Extraction".to_string(),
+                Some("Extraction de flux sous-titre texte/SRT (démultiplexage rapide, aucun décodage vidéo).".to_string()),
+            )
         } else if cmd_str.contains("-hwaccel vaapi") {
-            "GPU (VA-API)".to_string()
+            (
+                "GPU (VA-API)".to_string(),
+                Some("Accélération matérielle Intel QuickSync / VA-API active (/dev/dri/renderD128).".to_string()),
+            )
+        } else if is_hi10p {
+            (
+                "CPU (Hi10P)".to_string(),
+                Some("H.264 Hi10P (10-bit) non supporté par l'ASIC matériel GPU (Intel/Nvidia/AMD). Repli automatique en décodage logiciel CPU multi-thread.".to_string()),
+            )
         } else {
-            "CPU (Software)".to_string()
+            (
+                "CPU (Software)".to_string(),
+                Some("Décodage logiciel CPU multi-cœurs (sans accélération matérielle GPU détectée).".to_string()),
+            )
         };
 
         let elapsed = (run_time_secs as f64).max(1.0);
@@ -651,6 +1129,7 @@ pub fn process_candidate_jobs(
             pid,
             media_name,
             engine,
+            engine_reason,
             elapsed_secs: elapsed,
             read_bytes,
             total_bytes,

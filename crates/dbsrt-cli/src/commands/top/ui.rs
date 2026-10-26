@@ -1,5 +1,8 @@
 //! Full-frame UI rendering for the dbsrt top process monitor.
 
+use std::collections::HashSet;
+use std::path::PathBuf;
+
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -9,13 +12,15 @@ use ratatui::{
 };
 
 use crate::commands::top::constants::{
-    BYTES_PER_GIB_F64, BYTES_PER_MIB_F64, FOOTER_BLOCK_HEIGHT, GPU_HIGH_LOAD_THRESHOLD_PCT,
-    GPU_MODERATE_LOAD_THRESHOLD_PCT, GPU_PROGRESS_BAR_CHAR_WIDTH, HEADER_BLOCK_HEIGHT,
-    MAX_COMPLETED_MEDIA_NAME_DISPLAY_CHARS, MAX_MEDIA_NAME_DISPLAY_CHARS, MAX_SENSIBLE_RATE_MIB_S,
-    MIN_BODY_HEIGHT, MIN_SESSION_DURATION_DISPLAY_SECS, MIN_WALL_DURATION_NON_CACHE_SECS,
+    BYTES_PER_GIB, BYTES_PER_GIB_F64, BYTES_PER_MIB_F64, FOOTER_BLOCK_HEIGHT,
+    GPU_HIGH_LOAD_THRESHOLD_PCT, GPU_MODERATE_LOAD_THRESHOLD_PCT, GPU_PROGRESS_BAR_CHAR_WIDTH,
+    HEADER_BLOCK_HEIGHT, MAX_COMPLETED_MEDIA_NAME_DISPLAY_CHARS, MAX_MEDIA_BROWSER_NAME_CHARS,
+    MAX_MEDIA_NAME_DISPLAY_CHARS, MAX_SENSIBLE_RATE_MIB_S, MIN_BODY_HEIGHT,
+    MIN_SESSION_DURATION_DISPLAY_SECS, MIN_WALL_DURATION_NON_CACHE_SECS,
 };
 use crate::commands::top::model::{
-    default_progress_bar, format_duration, format_progress_bar, SystemTelemetry, ViewPage,
+    default_progress_bar, filter_and_sort_media, format_duration, format_progress_bar,
+    IngestionStatus, MediaFilter, MediaSort, SystemTelemetry, ViewPage,
 };
 
 /// UI rendering application context.
@@ -24,6 +29,10 @@ pub struct UiContext<'a> {
     pub view: ViewPage,
     pub selected_index: usize,
     pub completed_scroll_index: usize,
+    pub media_scroll_index: usize,
+    pub selected_media_paths: &'a HashSet<PathBuf>,
+    pub media_filter: MediaFilter,
+    pub media_sort: MediaSort,
     pub feedback_msg: Option<&'a str>,
 }
 
@@ -47,7 +56,9 @@ pub fn render_ui(frame: &mut Frame, ctx: &UiContext) {
         ViewPage::ActiveJobs => render_active_jobs_page(frame, chunks[1], ctx),
         ViewPage::StatsHistory => render_stats_page(frame, chunks[1], ctx),
         ViewPage::CompletedMedia => render_completed_page(frame, chunks[1], ctx),
+        ViewPage::MediaBrowser => render_media_browser_page(frame, chunks[1], ctx),
         ViewPage::JobInspection => render_inspection_page(frame, chunks[1], ctx),
+        ViewPage::MediaInspection => render_media_inspection_page(frame, chunks[1], ctx),
         ViewPage::Help => render_help_page(frame, chunks[1]),
     }
 
@@ -334,6 +345,10 @@ fn render_active_jobs_page(frame: &mut Frame, area: Rect, ctx: &UiContext) {
                     .add_modifier(Modifier::BOLD)
             } else if job.engine.contains("Sub") {
                 Style::default().fg(Color::Magenta)
+            } else if job.engine.contains("Hi10P") {
+                Style::default()
+                    .fg(Color::LightYellow)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::LightYellow)
             };
@@ -783,6 +798,655 @@ fn render_completed_page(frame: &mut Frame, area: Rect, ctx: &UiContext) {
     frame.render_stateful_widget(table, area, &mut state);
 }
 
+/// Renders the interactive media browser allowing inspection, filtering, sorting and batch execution.
+fn render_media_browser_page(frame: &mut Frame, area: Rect, ctx: &UiContext) {
+    let items = filter_and_sort_media(
+        &ctx.telemetry.discovered_media,
+        ctx.media_filter,
+        ctx.media_sort,
+    );
+
+    let total_count = ctx.telemetry.discovered_media.len();
+    let visible_count = items.len();
+    let selected_count = ctx.selected_media_paths.len();
+
+    let title = format!(
+        " 📂 EXPLORATEUR DE MÉDIAS SYNOLOGY NAS [{visible_count}/{total_count} DISPONIBLES] "
+    );
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan))
+        .title(Span::styled(
+            title,
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ));
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let sub_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(2), Constraint::Min(3)])
+        .split(inner);
+
+    let bar_spans = vec![
+        Span::styled(" [f] Filtre: ", Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            format!("[{}]", ctx.media_filter.label()),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("   "),
+        Span::styled(" [o] Tri: ", Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            format!("[{}]", ctx.media_sort.label()),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("   "),
+        Span::styled(" Sélection: ", Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            format!("{selected_count} média(s) coché(s)"),
+            if selected_count > 0 {
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::DarkGray)
+            },
+        ),
+    ];
+    let bar_p = Paragraph::new(Line::from(bar_spans));
+    frame.render_widget(bar_p, sub_chunks[0]);
+
+    if items.is_empty() {
+        let empty_msg = vec![
+            Line::from(""),
+            Line::from(Span::styled(
+                "Aucun média disponible ne correspond au filtre actif.",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                "Appuyez sur [f] pour modifier le filtre ou vérifiez la liaison NAS Synology.",
+                Style::default().fg(Color::DarkGray),
+            )),
+        ];
+        let p = Paragraph::new(empty_msg).alignment(Alignment::Center);
+        frame.render_widget(p, sub_chunks[1]);
+        return;
+    }
+
+    let header_cells = [
+        " ",
+        "SEL",
+        "MÉDIA / RELEASE NAS",
+        "TAILLE",
+        "DURÉE",
+        "EMPREINTE PHASH",
+        "SOUS-TITRES",
+        "ENCODAGE",
+        "STATUT",
+    ]
+    .iter()
+    .map(|h| {
+        Cell::from(*h).style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )
+    });
+    let header = Row::new(header_cells).height(1).bottom_margin(0);
+
+    let rows: Vec<Row> = items
+        .iter()
+        .enumerate()
+        .map(|(idx, item)| {
+            let is_cursor = idx == ctx.media_scroll_index;
+            let cursor = if is_cursor { "► " } else { "  " };
+            let cursor_span = Span::styled(
+                cursor,
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            );
+
+            let is_checked = ctx.selected_media_paths.contains(&item.path);
+            let sel_span = if is_checked {
+                Span::styled(
+                    "[✓]",
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD),
+                )
+            } else {
+                Span::styled("[ ]", Style::default().fg(Color::DarkGray))
+            };
+
+            let mut media_display = item.stem.clone();
+            if media_display.chars().count() > MAX_MEDIA_BROWSER_NAME_CHARS {
+                media_display = media_display
+                    .chars()
+                    .take(MAX_MEDIA_BROWSER_NAME_CHARS - 3)
+                    .collect::<String>()
+                    + "...";
+            }
+
+            let size_str = if item.size_bytes > 0 {
+                if item.size_bytes >= BYTES_PER_GIB {
+                    format!("{:.1} GiB", item.size_bytes as f64 / BYTES_PER_GIB_F64)
+                } else {
+                    format!("{:.0} MiB", item.size_bytes as f64 / BYTES_PER_MIB_F64)
+                }
+            } else {
+                "-".to_string()
+            };
+
+            let dur_str = item
+                .duration_secs
+                .map(format_duration)
+                .unwrap_or_else(|| "-".to_string());
+
+            let phash_span = if let Some(ref phi) = item.phash {
+                if phi.exists && phi.frame_count > 0 {
+                    let k_frames = phi.frame_count as f64 / 1000.0;
+                    let k_bytes = phi.size_bytes as f64 / 1024.0;
+                    Span::styled(
+                        format!("✓ {:>4.1}kf ({:>3.0}K)", k_frames, k_bytes),
+                        Style::default()
+                            .fg(Color::Green)
+                            .add_modifier(Modifier::BOLD),
+                    )
+                } else {
+                    Span::styled("- Non calculé", Style::default().fg(Color::DarkGray))
+                }
+            } else {
+                Span::styled("- Non calculé", Style::default().fg(Color::DarkGray))
+            };
+
+            let subs_str = if item.subtitles.is_empty() {
+                "0 (Aucun)".to_string()
+            } else {
+                let langs: Vec<&str> = item
+                    .subtitles
+                    .iter()
+                    .map(|s| s.lang.as_str())
+                    .take(3)
+                    .collect();
+                format!("{} ({})", item.subtitles.len(), langs.join(","))
+            };
+
+            let codec_str = item.video_codec.as_deref().unwrap_or("-");
+
+            let status_span = match item.status {
+                IngestionStatus::Virgin => {
+                    Span::styled("VIERGE", Style::default().fg(Color::Yellow))
+                }
+                IngestionStatus::InProgress => Span::styled(
+                    "EN COURS",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                IngestionStatus::Completed => Span::styled(
+                    "COMPLÉTÉ",
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                IngestionStatus::PartialFail => Span::styled(
+                    "HACHÉ SEUL",
+                    Style::default()
+                        .fg(Color::LightBlue)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            };
+
+            let row_cells = vec![
+                Cell::from(cursor_span),
+                Cell::from(sel_span),
+                Cell::from(media_display),
+                Cell::from(size_str),
+                Cell::from(dur_str),
+                Cell::from(phash_span),
+                Cell::from(subs_str),
+                Cell::from(codec_str.to_string()),
+                Cell::from(status_span),
+            ];
+
+            let row_style = if is_cursor {
+                Style::default()
+                    .bg(Color::DarkGray)
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default()
+            };
+
+            Row::new(row_cells).style(row_style)
+        })
+        .collect();
+
+    let widths = [
+        Constraint::Length(3),
+        Constraint::Length(5),
+        Constraint::Percentage(33),
+        Constraint::Length(10),
+        Constraint::Length(9),
+        Constraint::Length(18),
+        Constraint::Length(15),
+        Constraint::Length(10),
+        Constraint::Length(14),
+    ];
+
+    let mut table_state = TableState::default();
+    table_state.select(Some(ctx.media_scroll_index));
+
+    let table = Table::new(rows, widths)
+        .header(header)
+        .row_highlight_style(Style::default());
+
+    frame.render_stateful_widget(table, sub_chunks[1], &mut table_state);
+}
+
+/// Renders the full-frame diagnostic and inspection sheet for a candidate media.
+fn render_media_inspection_page(frame: &mut Frame, area: Rect, ctx: &UiContext) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan))
+        .title(Span::styled(
+            " 🔍 FICHE DÉTAILLÉE & DIAGNOSTIC D'INGESTION DU MÉDIA (FULL-FRAME) ",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ));
+
+    let visible_media = filter_and_sort_media(
+        &ctx.telemetry.discovered_media,
+        ctx.media_filter,
+        ctx.media_sort,
+    );
+
+    if visible_media.is_empty() || ctx.media_scroll_index >= visible_media.len() {
+        let p = Paragraph::new("Aucun média sélectionné pour l'inspection.")
+            .block(block)
+            .alignment(Alignment::Center);
+        frame.render_widget(p, area);
+        return;
+    }
+
+    let item = &visible_media[ctx.media_scroll_index];
+    let size_gib = item.size_bytes as f64 / BYTES_PER_GIB_F64;
+    let dur_str = item
+        .duration_secs
+        .map(format_duration)
+        .unwrap_or_else(|| "Inconnue".to_string());
+    let codec_str = item.video_codec.as_deref().unwrap_or("Inconnu");
+
+    let is_selected = ctx.selected_media_paths.contains(&item.path);
+    let sel_status = if is_selected {
+        "☑ COCHÉ pour batch"
+    } else {
+        "☐ NON COCHÉ"
+    };
+
+    let mut lines = Vec::new();
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![
+        Span::styled("  Release : ", Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            &item.stem,
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("  Chemin  : ", Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            item.path.display().to_string(),
+            Style::default().fg(Color::Cyan),
+        ),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("  Taille  : ", Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            format!("{:.2} GiB ({} octets)", size_gib, item.size_bytes),
+            Style::default().fg(Color::White),
+        ),
+        Span::raw("    "),
+        Span::styled("Durée : ", Style::default().fg(Color::DarkGray)),
+        Span::styled(dur_str, Style::default().fg(Color::White)),
+        Span::raw("    "),
+        Span::styled("Codec Vidéo : ", Style::default().fg(Color::DarkGray)),
+        Span::styled(codec_str, Style::default().fg(Color::Yellow)),
+        Span::raw("    "),
+        Span::styled("Sélection : ", Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            sel_status,
+            if is_selected {
+                Style::default().fg(Color::Green)
+            } else {
+                Style::default().fg(Color::DarkGray)
+            },
+        ),
+    ]));
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "─── PROPRIÉTÉS VIDÉO & COMPATIBILITÉ MOTEUR DÉCODAGE ─────────────────────────",
+        Style::default().fg(Color::DarkGray),
+    )));
+
+    if codec_str.contains("Hi10P") || codec_str.contains("High 10") {
+        lines.push(Line::from(vec![
+            Span::styled(
+                "  Codec & Profil   : ",
+                Style::default().fg(Color::DarkGray),
+            ),
+            Span::styled(
+                format!("{codec_str} (yuv420p10le / 10-bit color)"),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled(
+                "  Accélération GPU : ",
+                Style::default().fg(Color::DarkGray),
+            ),
+            Span::styled(
+                "✗ NON COMPATIBLE (Incompatibilité ASIC Silicium)",
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(
+                " — Les puces GPU (Intel Iris/UHD, Nvidia, AMD) ne décodent pas le H.264 10-bit.",
+            ),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled("  Moteur Décodage  : ", Style::default().fg(Color::DarkGray)),
+            Span::styled("CPU (Software Multithread)", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+            Span::raw(" — Repli automatique et transparent sur CPU multi-cœurs (charge CPU ~800% normale)."),
+        ]));
+    } else {
+        lines.push(Line::from(vec![
+            Span::styled(
+                "  Codec & Profil   : ",
+                Style::default().fg(Color::DarkGray),
+            ),
+            Span::styled(codec_str, Style::default().fg(Color::White)),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled(
+                "  Accélération GPU : ",
+                Style::default().fg(Color::DarkGray),
+            ),
+            Span::styled(
+                "✓ COMPATIBLE GPU VA-API (Intel Iris Xe)",
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled(
+                "  Moteur Décodage  : ",
+                Style::default().fg(Color::DarkGray),
+            ),
+            Span::styled("GPU (VA-API / QSV)", Style::default().fg(Color::Green)),
+            Span::raw(" — Décodage matériel ASIC ultra-rapide à faible consommation CPU."),
+        ]));
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "─── EMPREINTE VISUELLE PHASH (HASHING VIDÉO DCT-II) ─────────────────────────",
+        Style::default().fg(Color::DarkGray),
+    )));
+
+    if let Some(ref phi) = item.phash {
+        if phi.exists && phi.frame_count > 0 {
+            let k_bytes = phi.size_bytes as f64 / 1024.0;
+            let m_bytes = phi.size_bytes as f64 / (1024.0 * 1024.0);
+            lines.push(Line::from(vec![
+                Span::styled("  Statut pHash : ", Style::default().fg(Color::White)),
+                Span::styled(
+                    "✓ HACHAGE EFFECTUÉ (Empreinte calculée & enregistrée)",
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]));
+            lines.push(Line::from(vec![
+                Span::styled("  Volume pHash : ", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    format!("{} frames échantillonnées", phi.frame_count),
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw("    "),
+                Span::styled(
+                    "Taille Fichier/Disque : ",
+                    Style::default().fg(Color::DarkGray),
+                ),
+                Span::styled(
+                    format!(
+                        "{:.1} KiB ({:.2} MiB / {} octets)",
+                        k_bytes, m_bytes, phi.size_bytes
+                    ),
+                    Style::default().fg(Color::White),
+                ),
+            ]));
+            lines.push(Line::from(vec![
+                Span::styled("  Stockage DB  : ", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    format!("{:.1} KiB en RAM / B-K-Tree (8 octets / frame)", k_bytes),
+                    Style::default().fg(Color::Yellow),
+                ),
+                Span::raw("    "),
+                Span::styled("Fichier Local : ", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    format!("data/__PHASH__/{}.phash", item.stem),
+                    Style::default().fg(Color::DarkGray),
+                ),
+            ]));
+        } else {
+            lines.push(Line::from(Span::styled(
+                "  - AUCUN HACHAGE EFFECTUÉ (0 frame échantillonnée, aucun fichier .phash).",
+                Style::default().fg(Color::DarkGray),
+            )));
+        }
+    } else {
+        lines.push(Line::from(Span::styled(
+            "  - AUCUN HACHAGE EFFECTUÉ (0 frame échantillonnée, aucun fichier .phash).",
+            Style::default().fg(Color::DarkGray),
+        )));
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "─── PISTES DE SOUS-TITRES DÉTECTÉES ──────────────────────────────────────────",
+        Style::default().fg(Color::DarkGray),
+    )));
+
+    if item.subtitles.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "  ❌ AUCUN SOUS-TITRE DÉTECTÉ (0 flux incorporé, 0 fichier .srt sidecar).",
+            Style::default()
+                .fg(Color::LightRed)
+                .add_modifier(Modifier::BOLD),
+        )));
+        lines.push(Line::from(Span::styled(
+            "     ↳ Ce conteneur vidéo ne possède aucun sous-titre textuel pour établir un couplage.",
+            Style::default().fg(Color::Red),
+        )));
+    } else {
+        for (i, sub) in item.subtitles.iter().enumerate() {
+            let title_info = if !sub.title.is_empty() {
+                format!(" ({})", sub.title)
+            } else {
+                String::new()
+            };
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("  • Piste #{}: ", i + 1),
+                    Style::default().fg(Color::White),
+                ),
+                Span::styled(
+                    format!("Langue '{}' ", sub.lang),
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("| Codec: {} ", sub.codec),
+                    Style::default().fg(Color::Yellow),
+                ),
+                Span::styled(title_info, Style::default().fg(Color::DarkGray)),
+            ]));
+        }
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "─── STATUT DU CYCLE DE VIE & DIAGNOSTIC TECHNIQUE ─────────────────────────────",
+        Style::default().fg(Color::DarkGray),
+    )));
+
+    let status_style = match item.status {
+        IngestionStatus::Virgin => Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD),
+        IngestionStatus::InProgress => Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+        IngestionStatus::Completed => Style::default()
+            .fg(Color::Green)
+            .add_modifier(Modifier::BOLD),
+        IngestionStatus::PartialFail => Style::default()
+            .fg(Color::LightRed)
+            .add_modifier(Modifier::BOLD),
+    };
+
+    lines.push(Line::from(vec![
+        Span::styled("  Statut Actuel : ", Style::default().fg(Color::White)),
+        Span::styled(format!("[{}]", item.status.label()), status_style),
+    ]));
+    lines.push(Line::from(""));
+
+    match item.status {
+        IngestionStatus::Virgin => {
+            lines.push(Line::from(Span::styled(
+                "  ℹ️  MÉDIA VIERGE : Ce média n'a jamais été analysé ni indexé.",
+                Style::default().fg(Color::White),
+            )));
+            if item.subtitles.is_empty() {
+                lines.push(Line::from(Span::styled(
+                    "  ⚠️  ATTENTION : Média sans sous-titre. Le batch ignorera ce fichier sans sous-titres.",
+                    Style::default().fg(Color::LightYellow),
+                )));
+            } else {
+                lines.push(Line::from(Span::styled(
+                    "  👉 ACTION DISPONIBLE : Cochez avec [Space] et pressez [b] pour lancer l'ingestion par lot.",
+                    Style::default().fg(Color::Green),
+                )));
+            }
+        }
+        IngestionStatus::InProgress => {
+            lines.push(Line::from(Span::styled(
+                "  ⏳ EN COURS DE TRAITEMENT : Un worker actif traite ce média (décodage pHash / extraction).",
+                Style::default().fg(Color::Cyan),
+            )));
+            lines.push(Line::from(Span::styled(
+                "  👉 Consultez l'onglet [1/Tâches] pour suivre la progression, le débit VFS et l'ETA en direct.",
+                Style::default().fg(Color::White),
+            )));
+        }
+        IngestionStatus::Completed => {
+            lines.push(Line::from(Span::styled(
+                "  ✅ CERTIFICATION RÉUSSIE : L'empreinte visuelle pHash et les sous-titres sont synchronisés.",
+                Style::default().fg(Color::Green),
+            )));
+            lines.push(Line::from(Span::styled(
+                "  👉 Enregistrement disponible dans 'data/SRT/couplings.json' et l'onglet [3/Récents].",
+                Style::default().fg(Color::White),
+            )));
+        }
+        IngestionStatus::PartialFail => {
+            lines.push(Line::from(Span::styled(
+                "  ℹ️  DIAGNOSTIC DU STATUT 'HACHÉ SEUL' :",
+                Style::default()
+                    .fg(Color::LightBlue)
+                    .add_modifier(Modifier::BOLD),
+            )));
+            lines.push(Line::from(Span::styled(
+                "     1. Empreinte pHash entièrement calculée et enregistrée dans data/__PHASH__/<stem>.phash.",
+                Style::default().fg(Color::White),
+            )));
+            lines.push(Line::from(Span::styled(
+                "     2. Le média est 100% opérationnel pour la reconnaissance visuelle directe.",
+                Style::default().fg(Color::Green),
+            )));
+            lines.push(Line::from(Span::styled(
+                "     3. Aucun sous-titre n'est couplé dans data/SRT/couplings.json (0 piste textuelle).",
+                Style::default().fg(Color::DarkGray),
+            )));
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                "  💡 POUR CERTIFIER UN COUPLAGE ULTÉRIEUR (OPTIONNEL) :",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            )));
+            lines.push(Line::from(Span::styled(
+                "     Déposez un fichier sous-titre .srt dans le même dossier sur le NAS, ex :",
+                Style::default().fg(Color::White),
+            )));
+            let parent_dir = item
+                .path
+                .parent()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default();
+            lines.push(Line::from(Span::styled(
+                format!("     {parent_dir}/{}.fr.srt", item.stem),
+                Style::default().fg(Color::Cyan),
+            )));
+            lines.push(Line::from(Span::styled(
+                "     Puis relancez le batch [b] : le sous-titre sera certifié instantanément (pHash déjà précalculé).",
+                Style::default().fg(Color::White),
+            )));
+        }
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "─── RÈGLES DU MOTEUR D'INGESTION PYDBSRT ──────────────────────────────────────",
+        Style::default().fg(Color::DarkGray),
+    )));
+    lines.push(Line::from(Span::styled(
+        "  • But Premier : Hachage perceptuel DCT-II des frames vidéo pour la recherche visuelle rapide.",
+        Style::default().fg(Color::DarkGray),
+    )));
+    lines.push(Line::from(Span::styled(
+        "  • Couplage Certifié : Associe l'empreinte vidéo à une piste SRT de référence lorsque disponible.",
+        Style::default().fg(Color::DarkGray),
+    )));
+
+    let p = Paragraph::new(lines)
+        .block(block)
+        .wrap(Wrap { trim: false });
+    frame.render_widget(p, area);
+}
+
 /// Renders the fullframe help and keybinding cheat sheet.
 fn render_help_page(frame: &mut Frame, area: Rect) {
     let block = Block::default()
@@ -876,6 +1540,16 @@ fn render_footer(frame: &mut Frame, area: Rect, ctx: &UiContext) {
         Style::default().fg(Color::DarkGray)
     };
 
+    let tab_media_style =
+        if ctx.view == ViewPage::MediaBrowser || ctx.view == ViewPage::MediaInspection {
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Cyan)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+
     let mut footer_spans = vec![
         Span::raw(" "),
         Span::styled(" [1] Tâches ", tab_jobs_style),
@@ -883,6 +1557,8 @@ fn render_footer(frame: &mut Frame, area: Rect, ctx: &UiContext) {
         Span::styled(" [2/h] Stats ", tab_stats_style),
         Span::raw(" "),
         Span::styled(" [3/r] Récents ", tab_recents_style),
+        Span::raw(" "),
+        Span::styled(" [4/m] Médias ", tab_media_style),
         Span::raw(" │ "),
     ];
 
@@ -891,10 +1567,16 @@ fn render_footer(frame: &mut Frame, area: Rect, ctx: &UiContext) {
             "[↑/k] Haut  [↓/j] Bas  [PgUp/Dn] Saut  [Home/End] Début/Fin  [p] Pause  [s] Stop  [Enter/l] Inspecter  [?] Aide  [q] Quitter"
         }
         ViewPage::StatsHistory => {
-            "[Esc/1] Tâches  [3/r] Récents  [?] Aide  [q] Quitter"
+            "[Esc/1] Tâches  [3/r] Récents  [4/m] Médias  [?] Aide  [q] Quitter"
         }
         ViewPage::CompletedMedia => {
-            "[↑/k] Défiler  [PgUp/Dn] Saut  [Home/End] Début/Fin  [Esc/1] Tâches  [2/h] Stats  [?] Aide  [q] Quitter"
+            "[↑/k] Défiler  [PgUp/Dn] Saut  [Home/End] Début/Fin  [Esc/1] Tâches  [2/h] Stats  [4/m] Médias  [?] Aide  [q] Quitter"
+        }
+        ViewPage::MediaBrowser => {
+            "[Enter/i] Fiche/Diag  [Space] Cocher  [a] Tout Sel  [f] Filtre  [o] Tri  [b] Batch  [↑/k] Défiler  [?] Aide  [q] Quitter"
+        }
+        ViewPage::MediaInspection => {
+            "[Esc/Backspace/Enter] Retour Catalogue  [Space] Cocher/Décocher  [b] Batch  [q] Quitter"
         }
         ViewPage::JobInspection => {
             "[Esc/Backspace] Retour Liste  [p] Pause  [s] Arrêter  [K] Kill  [q] Quitter"

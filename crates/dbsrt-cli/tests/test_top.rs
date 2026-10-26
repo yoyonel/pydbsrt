@@ -1,19 +1,24 @@
 //! Integration and unit tests for the native Rust TUI top process monitor.
 
+use std::collections::HashSet;
+use std::path::PathBuf;
+
 use crossterm::event::KeyCode;
 use dbsrt_cli::commands::top::app::{handle_key_event, AppState};
 use dbsrt_cli::commands::top::constants::*;
 use dbsrt_cli::commands::top::model::{
-    calculate_dimension_stats, calculate_overall_stats, default_progress_bar, format_duration,
-    format_progress_bar, parse_iso_to_unix_secs, ActiveJobTelemetry, GpuTelemetry,
-    HistoricalRecord, SessionThroughput, SystemTelemetry, ViewPage,
+    calculate_dimension_stats, calculate_overall_stats, default_progress_bar,
+    filter_and_sort_media, format_duration, format_progress_bar, parse_iso_to_unix_secs,
+    ActiveJobTelemetry, DiscoveredMediaItem, GpuTelemetry, HistoricalRecord, IngestionStatus,
+    MediaFilter, MediaSort, MediaSubtrackInfo, SessionThroughput, SystemTelemetry, ViewPage,
 };
 use dbsrt_cli::commands::top::process_ctl::{
     check_if_stopped, inspect_job_details, kill_job, stop_job, toggle_pause_job,
 };
 use dbsrt_cli::commands::top::sampler::{
-    compute_session_throughput, is_thread_task, load_historical_records, preload_stem_size_cache,
-    read_proc_io_bytes,
+    compute_session_throughput, is_thread_task, launch_selected_batch,
+    launch_selected_batch_with_target_file, load_historical_records, load_media_cache,
+    preload_stem_size_cache, read_proc_io_bytes, save_media_cache,
 };
 use dbsrt_cli::commands::top::ui::{render_ui, UiContext};
 use dbsrt_cli::commands::top::{probe_telemetry_snapshot, run_top, TopArgs};
@@ -75,6 +80,7 @@ fn test_active_job_telemetry_instantiation() {
         pid: 12345,
         media_name: "Silicon.Valley.S01E01.mkv".to_string(),
         engine: "GPU (VA-API)".to_string(),
+        engine_reason: None,
         elapsed_secs: 42.5,
         read_bytes: 500 * BYTES_PER_MIB,
         total_bytes: 1000 * BYTES_PER_MIB,
@@ -120,6 +126,7 @@ fn test_system_telemetry_aggregation() {
         pid: 101,
         media_name: "Test1".to_string(),
         engine: "GPU (VA-API)".to_string(),
+        engine_reason: None,
         elapsed_secs: 10.0,
         read_bytes: 100,
         total_bytes: 200,
@@ -136,6 +143,7 @@ fn test_system_telemetry_aggregation() {
         pid: 102,
         media_name: "Test2".to_string(),
         engine: "CPU (Software)".to_string(),
+        engine_reason: None,
         elapsed_secs: 5.0,
         read_bytes: 50,
         total_bytes: 200,
@@ -208,6 +216,7 @@ fn test_ui_rendering_all_pages() {
                 pid: 1111,
                 media_name: "Series.S01E01.1080p.mkv".to_string(),
                 engine: "GPU (VA-API)".to_string(),
+                engine_reason: None,
                 elapsed_secs: 65.0,
                 read_bytes: 5 * BYTES_PER_MIB,
                 total_bytes: 500 * BYTES_PER_MIB,
@@ -227,6 +236,7 @@ fn test_ui_rendering_all_pages() {
                 pid: 2222,
                 media_name: "Series.S01E02.1080p.mkv".to_string(),
                 engine: "Sub Extraction".to_string(),
+                engine_reason: None,
                 elapsed_secs: 10.0,
                 read_bytes: 50 * BYTES_PER_MIB,
                 total_bytes: 100 * BYTES_PER_MIB,
@@ -253,7 +263,36 @@ fn test_ui_rendering_all_pages() {
         },
         history_records: history,
         stats,
+        discovered_media: vec![
+            DiscoveredMediaItem {
+                path: PathBuf::from("/media/video1.mkv"),
+                stem: "video1".to_string(),
+                size_bytes: 1024 * 1024 * 500,
+                duration_secs: Some(1500.0),
+                video_codec: Some("hevc".to_string()),
+                subtitles: vec![MediaSubtrackInfo {
+                    index: 0,
+                    lang: "en".to_string(),
+                    codec: "subrip".to_string(),
+                    title: "English".to_string(),
+                }],
+                phash: None,
+                status: IngestionStatus::Virgin,
+            },
+            DiscoveredMediaItem {
+                path: PathBuf::from("/media/video2.mkv"),
+                stem: "video2".to_string(),
+                size_bytes: 1024 * 1024 * 1500,
+                duration_secs: Some(3000.0),
+                video_codec: Some("h264".to_string()),
+                subtitles: vec![],
+                phash: None,
+                status: IngestionStatus::Completed,
+            },
+        ],
     };
+
+    let empty_set = HashSet::new();
 
     // 1. Render ActiveJobs view
     let ctx = UiContext {
@@ -261,6 +300,10 @@ fn test_ui_rendering_all_pages() {
         view: ViewPage::ActiveJobs,
         selected_index: 0,
         completed_scroll_index: 0,
+        media_scroll_index: 0,
+        selected_media_paths: &empty_set,
+        media_filter: MediaFilter::All,
+        media_sort: MediaSort::Name,
         feedback_msg: Some("Test Feedback Message"),
     };
     terminal.draw(|f| render_ui(f, &ctx)).unwrap();
@@ -273,6 +316,10 @@ fn test_ui_rendering_all_pages() {
         view: ViewPage::ActiveJobs,
         selected_index: 0,
         completed_scroll_index: 0,
+        media_scroll_index: 0,
+        selected_media_paths: &empty_set,
+        media_filter: MediaFilter::All,
+        media_sort: MediaSort::Name,
         feedback_msg: None,
     };
     terminal.draw(|f| render_ui(f, &ctx_mod)).unwrap();
@@ -283,6 +330,10 @@ fn test_ui_rendering_all_pages() {
         view: ViewPage::ActiveJobs,
         selected_index: 0,
         completed_scroll_index: 0,
+        media_scroll_index: 0,
+        selected_media_paths: &empty_set,
+        media_filter: MediaFilter::All,
+        media_sort: MediaSort::Name,
         feedback_msg: None,
     };
     terminal.draw(|f| render_ui(f, &ctx_no_gpu)).unwrap();
@@ -294,6 +345,10 @@ fn test_ui_rendering_all_pages() {
         view: ViewPage::ActiveJobs,
         selected_index: 0,
         completed_scroll_index: 0,
+        media_scroll_index: 0,
+        selected_media_paths: &empty_set,
+        media_filter: MediaFilter::All,
+        media_sort: MediaSort::Name,
         feedback_msg: None,
     };
     terminal.draw(|f| render_ui(f, &ctx_empty)).unwrap();
@@ -304,6 +359,10 @@ fn test_ui_rendering_all_pages() {
         view: ViewPage::StatsHistory,
         selected_index: 0,
         completed_scroll_index: 0,
+        media_scroll_index: 0,
+        selected_media_paths: &empty_set,
+        media_filter: MediaFilter::All,
+        media_sort: MediaSort::Name,
         feedback_msg: None,
     };
     terminal.draw(|f| render_ui(f, &ctx_stats)).unwrap();
@@ -314,6 +373,10 @@ fn test_ui_rendering_all_pages() {
         view: ViewPage::CompletedMedia,
         selected_index: 0,
         completed_scroll_index: 1,
+        media_scroll_index: 0,
+        selected_media_paths: &empty_set,
+        media_filter: MediaFilter::All,
+        media_sort: MediaSort::Name,
         feedback_msg: None,
     };
     terminal.draw(|f| render_ui(f, &ctx_completed)).unwrap();
@@ -324,6 +387,10 @@ fn test_ui_rendering_all_pages() {
         view: ViewPage::CompletedMedia,
         selected_index: 0,
         completed_scroll_index: 0,
+        media_scroll_index: 0,
+        selected_media_paths: &empty_set,
+        media_filter: MediaFilter::All,
+        media_sort: MediaSort::Name,
         feedback_msg: None,
     };
     terminal
@@ -336,6 +403,10 @@ fn test_ui_rendering_all_pages() {
         view: ViewPage::JobInspection,
         selected_index: 0,
         completed_scroll_index: 0,
+        media_scroll_index: 0,
+        selected_media_paths: &empty_set,
+        media_filter: MediaFilter::All,
+        media_sort: MediaSort::Name,
         feedback_msg: None,
     };
     terminal.draw(|f| render_ui(f, &ctx_inspect)).unwrap();
@@ -346,8 +417,42 @@ fn test_ui_rendering_all_pages() {
         view: ViewPage::Help,
         selected_index: 0,
         completed_scroll_index: 0,
+        media_scroll_index: 0,
+        selected_media_paths: &empty_set,
+        media_filter: MediaFilter::All,
+        media_sort: MediaSort::Name,
         feedback_msg: None,
     };
+    terminal.draw(|f| render_ui(f, &ctx_help)).unwrap();
+
+    // 9. Render MediaBrowser view (with items and empty)
+    let mut selected_paths = HashSet::new();
+    selected_paths.insert(PathBuf::from("/media/video1.mkv"));
+    let ctx_media = UiContext {
+        telemetry: &tel,
+        view: ViewPage::MediaBrowser,
+        selected_index: 0,
+        completed_scroll_index: 0,
+        media_scroll_index: 0,
+        selected_media_paths: &selected_paths,
+        media_filter: MediaFilter::All,
+        media_sort: MediaSort::Name,
+        feedback_msg: None,
+    };
+    terminal.draw(|f| render_ui(f, &ctx_media)).unwrap();
+
+    let ctx_media_empty = UiContext {
+        telemetry: &empty_tel,
+        view: ViewPage::MediaBrowser,
+        selected_index: 0,
+        completed_scroll_index: 0,
+        media_scroll_index: 0,
+        selected_media_paths: &empty_set,
+        media_filter: MediaFilter::Status(IngestionStatus::Virgin),
+        media_sort: MediaSort::Size,
+        feedback_msg: None,
+    };
+    terminal.draw(|f| render_ui(f, &ctx_media_empty)).unwrap();
     terminal.draw(|f| render_ui(f, &ctx_help)).unwrap();
 }
 
@@ -367,6 +472,7 @@ fn test_app_state_and_key_handling() {
                 pid: 5555,
                 media_name: "Job1".to_string(),
                 engine: "GPU (VA-API)".to_string(),
+                engine_reason: None,
                 elapsed_secs: 10.0,
                 read_bytes: 10,
                 total_bytes: 100,
@@ -382,6 +488,7 @@ fn test_app_state_and_key_handling() {
                 pid: 6666,
                 media_name: "Job2".to_string(),
                 engine: "CPU (Software)".to_string(),
+                engine_reason: None,
                 elapsed_secs: 10.0,
                 read_bytes: 10,
                 total_bytes: 100,
@@ -452,6 +559,7 @@ fn test_process_ctl_and_inspection() {
         pid: self_pid,
         media_name: "SelfTestProcess".to_string(),
         engine: "GPU (VA-API)".to_string(),
+        engine_reason: None,
         elapsed_secs: 15.0,
         read_bytes: 50 * BYTES_PER_MIB,
         total_bytes: 100 * BYTES_PER_MIB,
@@ -467,6 +575,34 @@ fn test_process_ctl_and_inspection() {
     let details = inspect_job_details(&dummy_job);
     assert!(!details.is_empty());
     assert!(details.iter().any(|l| l.contains("PID:")));
+    assert!(details
+        .iter()
+        .any(|l| l.contains("Diagnostic Moteur & Accélération Matérielle")));
+    assert!(details
+        .iter()
+        .any(|l| l.contains("Intel QuickSync / VA-API")));
+
+    let hi10p_job = ActiveJobTelemetry {
+        pid: 8888,
+        media_name: "The.Office.US.S06E11.mkv".to_string(),
+        engine: "CPU (Hi10P)".to_string(),
+        engine_reason: Some("H.264 Hi10P (10-bit) non supporté par l'ASIC matériel GPU. Repli automatique CPU multi-thread.".to_string()),
+        elapsed_secs: 10.0,
+        read_bytes: 10,
+        total_bytes: 100,
+        progress_ratio: 0.1,
+        current_rate_mib_s: 1.0,
+        eta_secs: None,
+        cpu_percent: 800.0,
+        ram_rss_mib: 150.0,
+        status: "RUNNING".to_string(),
+        cmdline: vec!["ffmpeg".to_string(), "-i".to_string(), "The.Office.US.S06E11.mkv".to_string()],
+    };
+    let hi10p_details = inspect_job_details(&hi10p_job);
+    assert!(hi10p_details.iter().any(|l| l.contains("CPU (Hi10P)")));
+    assert!(hi10p_details
+        .iter()
+        .any(|l| l.contains("H.264 Hi10P (10-bit) non supporté par l'ASIC")));
 
     // Test non-existent PID error branches
     let (ok, msg) = toggle_pause_job(99_999_999);
@@ -510,6 +646,7 @@ fn test_event_loop_step_execution() {
             pid: 1234,
             media_name: "TestMovie.mkv".to_string(),
             engine: "GPU (VA-API)".to_string(),
+            engine_reason: None,
             elapsed_secs: 10.0,
             read_bytes: 100,
             total_bytes: 200,
@@ -827,6 +964,7 @@ fn test_compute_session_throughput() {
         pid: 9999,
         media_name: "ActiveStream".to_string(),
         engine: "GPU (VA-API)".to_string(),
+        engine_reason: None,
         elapsed_secs: 50.0,
         read_bytes: 25 * BYTES_PER_MIB,
         total_bytes: 100 * BYTES_PER_MIB,
@@ -916,6 +1054,7 @@ fn test_app_state_new_tabs_and_scrolling() {
                 pid: 1234,
                 media_name: "Job1".to_string(),
                 engine: "GPU".to_string(),
+                engine_reason: None,
                 elapsed_secs: 10.0,
                 read_bytes: 10,
                 total_bytes: 100,
@@ -931,6 +1070,7 @@ fn test_app_state_new_tabs_and_scrolling() {
                 pid: 1235,
                 media_name: "Job2".to_string(),
                 engine: "GPU".to_string(),
+                engine_reason: None,
                 elapsed_secs: 12.0,
                 read_bytes: 20,
                 total_bytes: 100,
@@ -975,10 +1115,37 @@ fn test_app_state_new_tabs_and_scrolling() {
                 end_iso: None,
             },
         ],
+        discovered_media: vec![
+            DiscoveredMediaItem {
+                path: PathBuf::from("/media/video1.mkv"),
+                stem: "video1".to_string(),
+                size_bytes: 1_000_000,
+                duration_secs: Some(120.0),
+                video_codec: Some("h264".to_string()),
+                subtitles: vec![MediaSubtrackInfo {
+                    index: 0,
+                    lang: "fr".to_string(),
+                    codec: "subrip".to_string(),
+                    title: "French".to_string(),
+                }],
+                phash: None,
+                status: IngestionStatus::Virgin,
+            },
+            DiscoveredMediaItem {
+                path: PathBuf::from("/media/video2.mkv"),
+                stem: "video2".to_string(),
+                size_bytes: 2_000_000,
+                duration_secs: Some(240.0),
+                video_codec: Some("hevc".to_string()),
+                subtitles: vec![],
+                phash: None,
+                status: IngestionStatus::Completed,
+            },
+        ],
         ..Default::default()
     };
 
-    // Tab key cycling: ActiveJobs -> StatsHistory -> CompletedMedia -> ActiveJobs
+    // Tab key cycling: ActiveJobs -> StatsHistory -> CompletedMedia -> MediaBrowser -> ActiveJobs
     handle_key_event(KeyCode::Tab, &mut app, &tel);
     assert_eq!(app.view, ViewPage::StatsHistory);
 
@@ -986,9 +1153,15 @@ fn test_app_state_new_tabs_and_scrolling() {
     assert_eq!(app.view, ViewPage::CompletedMedia);
 
     handle_key_event(KeyCode::Tab, &mut app, &tel);
+    assert_eq!(app.view, ViewPage::MediaBrowser);
+
+    handle_key_event(KeyCode::Tab, &mut app, &tel);
     assert_eq!(app.view, ViewPage::ActiveJobs);
 
-    // BackTab cycling: ActiveJobs -> CompletedMedia -> StatsHistory -> ActiveJobs
+    // BackTab cycling: ActiveJobs -> MediaBrowser -> CompletedMedia -> StatsHistory -> ActiveJobs
+    handle_key_event(KeyCode::BackTab, &mut app, &tel);
+    assert_eq!(app.view, ViewPage::MediaBrowser);
+
     handle_key_event(KeyCode::BackTab, &mut app, &tel);
     assert_eq!(app.view, ViewPage::CompletedMedia);
 
@@ -998,17 +1171,20 @@ fn test_app_state_new_tabs_and_scrolling() {
     handle_key_event(KeyCode::BackTab, &mut app, &tel);
     assert_eq!(app.view, ViewPage::ActiveJobs);
 
-    // Direct key shortcuts '1', '2', '3'
+    // Direct key shortcuts '1', '2', '3', '4'
     handle_key_event(KeyCode::Char('2'), &mut app, &tel);
     assert_eq!(app.view, ViewPage::StatsHistory);
 
     handle_key_event(KeyCode::Char('3'), &mut app, &tel);
     assert_eq!(app.view, ViewPage::CompletedMedia);
 
+    handle_key_event(KeyCode::Char('4'), &mut app, &tel);
+    assert_eq!(app.view, ViewPage::MediaBrowser);
+
     handle_key_event(KeyCode::Char('1'), &mut app, &tel);
     assert_eq!(app.view, ViewPage::ActiveJobs);
 
-    // 'h' toggles StatsHistory, 'r' toggles CompletedMedia
+    // 'h' toggles StatsHistory, 'r' toggles CompletedMedia, 'm' toggles MediaBrowser
     handle_key_event(KeyCode::Char('h'), &mut app, &tel);
     assert_eq!(app.view, ViewPage::StatsHistory);
     handle_key_event(KeyCode::Char('h'), &mut app, &tel);
@@ -1017,6 +1193,11 @@ fn test_app_state_new_tabs_and_scrolling() {
     handle_key_event(KeyCode::Char('r'), &mut app, &tel);
     assert_eq!(app.view, ViewPage::CompletedMedia);
     handle_key_event(KeyCode::Char('r'), &mut app, &tel);
+    assert_eq!(app.view, ViewPage::ActiveJobs);
+
+    handle_key_event(KeyCode::Char('m'), &mut app, &tel);
+    assert_eq!(app.view, ViewPage::MediaBrowser);
+    handle_key_event(KeyCode::Char('m'), &mut app, &tel);
     assert_eq!(app.view, ViewPage::ActiveJobs);
 
     // Scrolling in CompletedMedia
@@ -1068,4 +1249,362 @@ fn test_app_state_new_tabs_and_scrolling() {
 
     handle_key_event(KeyCode::PageUp, &mut app, &tel);
     assert_eq!(app.selected_index, 0);
+
+    // MediaBrowser key events: spacebar selection, all selection, filter cycle, sort cycle
+    app.view = ViewPage::MediaBrowser;
+    assert_eq!(app.media_scroll_index, 0);
+
+    // Spacebar toggles selection
+    handle_key_event(KeyCode::Char(' '), &mut app, &tel);
+    assert!(app
+        .selected_media_paths
+        .contains(&PathBuf::from("/media/video1.mkv")));
+
+    handle_key_event(KeyCode::Char(' '), &mut app, &tel);
+    assert!(!app
+        .selected_media_paths
+        .contains(&PathBuf::from("/media/video1.mkv")));
+
+    // 'a' selects all visible items
+    handle_key_event(KeyCode::Char('a'), &mut app, &tel);
+    assert_eq!(app.selected_media_paths.len(), 2);
+
+    // 'a' again unselects all visible items
+    handle_key_event(KeyCode::Char('a'), &mut app, &tel);
+    assert_eq!(app.selected_media_paths.len(), 0);
+
+    // Filter cycling: All -> Virgin -> InProgress -> Completed -> PartialFail -> WithSubtitles -> WithoutSubtitles -> All
+    assert_eq!(app.media_filter, MediaFilter::All);
+    handle_key_event(KeyCode::Char('f'), &mut app, &tel);
+    assert_eq!(
+        app.media_filter,
+        MediaFilter::Status(IngestionStatus::Virgin)
+    );
+    handle_key_event(KeyCode::Char('f'), &mut app, &tel);
+    assert_eq!(
+        app.media_filter,
+        MediaFilter::Status(IngestionStatus::InProgress)
+    );
+    handle_key_event(KeyCode::Char('f'), &mut app, &tel);
+    assert_eq!(
+        app.media_filter,
+        MediaFilter::Status(IngestionStatus::Completed)
+    );
+    handle_key_event(KeyCode::Char('f'), &mut app, &tel);
+    assert_eq!(
+        app.media_filter,
+        MediaFilter::Status(IngestionStatus::PartialFail)
+    );
+    handle_key_event(KeyCode::Char('f'), &mut app, &tel);
+    assert_eq!(app.media_filter, MediaFilter::WithSubtitles);
+    handle_key_event(KeyCode::Char('f'), &mut app, &tel);
+    assert_eq!(app.media_filter, MediaFilter::WithoutSubtitles);
+    handle_key_event(KeyCode::Char('f'), &mut app, &tel);
+    assert_eq!(app.media_filter, MediaFilter::All);
+
+    // Sort cycling
+    assert_eq!(app.media_sort, MediaSort::Name);
+    handle_key_event(KeyCode::Char('o'), &mut app, &tel);
+    assert_eq!(app.media_sort, MediaSort::Size);
+
+    // Navigation in MediaBrowser
+    handle_key_event(KeyCode::Down, &mut app, &tel);
+    handle_key_event(KeyCode::Up, &mut app, &tel);
+    handle_key_event(KeyCode::End, &mut app, &tel);
+    handle_key_event(KeyCode::Home, &mut app, &tel);
+    handle_key_event(KeyCode::PageDown, &mut app, &tel);
+    handle_key_event(KeyCode::PageUp, &mut app, &tel);
+
+    // Enter / 'i' opens MediaInspection sheet
+    handle_key_event(KeyCode::Enter, &mut app, &tel);
+    assert_eq!(app.view, ViewPage::MediaInspection);
+    handle_key_event(KeyCode::Esc, &mut app, &tel);
+    assert_eq!(app.view, ViewPage::MediaBrowser);
+
+    handle_key_event(KeyCode::Char('i'), &mut app, &tel);
+    assert_eq!(app.view, ViewPage::MediaInspection);
+    handle_key_event(KeyCode::Backspace, &mut app, &tel);
+    assert_eq!(app.view, ViewPage::MediaBrowser);
+
+    // 'b' with selection on video (even without subtitles) triggers batch for hashing and switches to ActiveJobs
+    app.selected_media_paths
+        .insert(PathBuf::from("/media/video2.mkv"));
+    handle_key_event(KeyCode::Char('b'), &mut app, &tel);
+    assert_eq!(app.view, ViewPage::ActiveJobs);
+    assert!(app.selected_media_paths.is_empty());
+    app.view = ViewPage::MediaBrowser;
+
+    // 'b' with empty selection auto-selects current row and triggers batch
+    handle_key_event(KeyCode::Char('b'), &mut app, &tel);
+    assert_eq!(app.view, ViewPage::ActiveJobs);
+    assert!(app.feedback_message.is_some());
+}
+
+#[test]
+fn test_filter_and_sort_media_logic() {
+    let items = vec![
+        DiscoveredMediaItem {
+            path: PathBuf::from("/nas/b_show.mkv"),
+            stem: "b_show".to_string(),
+            size_bytes: 2000,
+            duration_secs: Some(100.0),
+            video_codec: Some("hevc".to_string()),
+            subtitles: vec![MediaSubtrackInfo {
+                index: 0,
+                lang: "fr".to_string(),
+                codec: "subrip".to_string(),
+                title: "French".to_string(),
+            }],
+            phash: None,
+            status: IngestionStatus::Virgin,
+        },
+        DiscoveredMediaItem {
+            path: PathBuf::from("/nas/a_show.mkv"),
+            stem: "a_show".to_string(),
+            size_bytes: 5000,
+            duration_secs: Some(250.0),
+            video_codec: Some("h264".to_string()),
+            subtitles: vec![],
+            phash: None,
+            status: IngestionStatus::Completed,
+        },
+        DiscoveredMediaItem {
+            path: PathBuf::from("/nas/c_show.mkv"),
+            stem: "c_show".to_string(),
+            size_bytes: 1000,
+            duration_secs: Some(50.0),
+            video_codec: Some("vp9".to_string()),
+            subtitles: vec![
+                MediaSubtrackInfo {
+                    index: 0,
+                    lang: "en".to_string(),
+                    codec: "subrip".to_string(),
+                    title: "English".to_string(),
+                },
+                MediaSubtrackInfo {
+                    index: 1,
+                    lang: "es".to_string(),
+                    codec: "subrip".to_string(),
+                    title: "Spanish".to_string(),
+                },
+            ],
+            phash: None,
+            status: IngestionStatus::InProgress,
+        },
+    ];
+
+    // 1. Filter: Virgin
+    let virgins = filter_and_sort_media(
+        &items,
+        MediaFilter::Status(IngestionStatus::Virgin),
+        MediaSort::Name,
+    );
+    assert_eq!(virgins.len(), 1);
+    assert_eq!(virgins[0].stem, "b_show");
+
+    // 2. Filter: Completed (strictly Completed)
+    let completed = filter_and_sort_media(
+        &items,
+        MediaFilter::Status(IngestionStatus::Completed),
+        MediaSort::Name,
+    );
+    assert_eq!(completed.len(), 1);
+    assert_eq!(completed[0].stem, "a_show");
+
+    // 3. Filter: InProgress
+    let in_progress = filter_and_sort_media(
+        &items,
+        MediaFilter::Status(IngestionStatus::InProgress),
+        MediaSort::Name,
+    );
+    assert_eq!(in_progress.len(), 1);
+    assert_eq!(in_progress[0].stem, "c_show");
+
+    // 4. Filter: WithSubtitles / WithoutSubtitles
+    let with_subs = filter_and_sort_media(&items, MediaFilter::WithSubtitles, MediaSort::Name);
+    assert_eq!(with_subs.len(), 2);
+    let without_subs =
+        filter_and_sort_media(&items, MediaFilter::WithoutSubtitles, MediaSort::Name);
+    assert_eq!(without_subs.len(), 1);
+    assert_eq!(without_subs[0].stem, "a_show");
+
+    // 4. Sort: Name (A-Z)
+    let sorted_name = filter_and_sort_media(&items, MediaFilter::All, MediaSort::Name);
+    assert_eq!(sorted_name[0].stem, "a_show");
+    assert_eq!(sorted_name[1].stem, "b_show");
+    assert_eq!(sorted_name[2].stem, "c_show");
+
+    // 5. Sort: Size (Largest first)
+    let sorted_size = filter_and_sort_media(&items, MediaFilter::All, MediaSort::Size);
+    assert_eq!(sorted_size[0].stem, "a_show"); // 5000
+    assert_eq!(sorted_size[1].stem, "b_show"); // 2000
+    assert_eq!(sorted_size[2].stem, "c_show"); // 1000
+
+    // 6. Sort: Duration (Longest first)
+    let sorted_dur = filter_and_sort_media(&items, MediaFilter::All, MediaSort::Duration);
+    assert_eq!(sorted_dur[0].stem, "a_show"); // 250s
+    assert_eq!(sorted_dur[1].stem, "b_show"); // 100s
+    assert_eq!(sorted_dur[2].stem, "c_show"); // 50s
+
+    // 7. Sort: Subtitles (Most first)
+    let sorted_subs = filter_and_sort_media(&items, MediaFilter::All, MediaSort::Subtitles);
+    assert_eq!(sorted_subs[0].stem, "c_show"); // 2 subs
+    assert_eq!(sorted_subs[1].stem, "b_show"); // 1 sub
+    assert_eq!(sorted_subs[2].stem, "a_show"); // 0 subs
+
+    // 8. Sort: Status (Virgin -> InProgress -> PartialFail -> Completed)
+    let sorted_stat = filter_and_sort_media(&items, MediaFilter::All, MediaSort::Status);
+    assert_eq!(sorted_stat[0].status, IngestionStatus::Virgin);
+    assert_eq!(sorted_stat[1].status, IngestionStatus::InProgress);
+    assert_eq!(sorted_stat[2].status, IngestionStatus::Completed);
+}
+
+#[test]
+fn test_media_cache_save_and_load_roundtrip() {
+    let tmp_dir = std::env::temp_dir().join("pydbsrt_test_media_cache");
+    let _ = std::fs::create_dir_all(&tmp_dir);
+    let cache_file = tmp_dir.join("cache.json");
+
+    let sample_items = vec![DiscoveredMediaItem {
+        path: PathBuf::from("/nas/sample.mkv"),
+        stem: "sample".to_string(),
+        size_bytes: 1234567,
+        duration_secs: Some(360.0),
+        video_codec: Some("hevc".to_string()),
+        subtitles: vec![MediaSubtrackInfo {
+            index: 0,
+            lang: "en".to_string(),
+            codec: "subrip".to_string(),
+            title: "English".to_string(),
+        }],
+        phash: None,
+        status: IngestionStatus::Virgin,
+    }];
+
+    save_media_cache(&cache_file, &sample_items);
+    assert!(cache_file.exists());
+
+    let loaded = load_media_cache(&cache_file);
+    assert_eq!(loaded.len(), 1);
+    let item = loaded.get("sample").unwrap();
+    assert_eq!(item.stem, "sample");
+    assert_eq!(item.size_bytes, 1234567);
+    assert_eq!(item.duration_secs, Some(360.0));
+    assert_eq!(item.subtitles.len(), 1);
+
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+}
+
+#[test]
+fn test_batch_launch_validation() {
+    // Empty paths
+    let (ok_empty, msg_empty) = launch_selected_batch(&[]);
+    assert!(!ok_empty);
+    assert!(msg_empty.contains("Aucun média"));
+
+    // Multi-path validation with 5 distinct media paths in an isolated test temp file
+    let tmp_dir = std::env::temp_dir().join(format!("pydbsrt_batch_test_{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&tmp_dir);
+    let targets_file = tmp_dir.join("isolated_targets.json");
+    let report_file = tmp_dir.join("isolated_report.md");
+
+    let paths = vec![
+        PathBuf::from("/nas/show1/ep1.mkv"),
+        PathBuf::from("/nas/show1/ep2.mkv"),
+        PathBuf::from("/nas/show1/ep3.mkv"),
+        PathBuf::from("/nas/show2/ep1.mkv"),
+        PathBuf::from("/nas/show2/ep2.mkv"),
+    ];
+
+    let (ok, msg) = launch_selected_batch_with_target_file(&paths, &targets_file, &report_file);
+    assert!(ok);
+    assert!(msg.contains("5 média(s)"));
+    assert!(msg.contains("4 workers"));
+
+    // Verify targets JSON file was actually written with all 5 paths
+    assert!(targets_file.exists());
+    let raw = std::fs::read_to_string(&targets_file).expect("read targets file");
+    let loaded: Vec<PathBuf> = serde_json::from_str(&raw).expect("parse json targets");
+    assert_eq!(loaded.len(), 5);
+    assert_eq!(loaded, paths);
+
+    // Clean up test file
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+}
+
+#[test]
+fn test_ingestion_status_media_filter_strict_bijection_and_partition() {
+    // 1. Compile-time exhaustive check: will break compilation if a status variant is added
+    // without updating this pattern match.
+    fn compile_time_exhaustive_check(s: IngestionStatus) {
+        match s {
+            IngestionStatus::Virgin => (),
+            IngestionStatus::InProgress => (),
+            IngestionStatus::Completed => (),
+            IngestionStatus::PartialFail => (),
+        }
+    }
+
+    // 2. Assert IngestionStatus::ALL contains all variants and maps 1:1 to MediaFilter::Status
+    assert_eq!(IngestionStatus::ALL.len(), 4);
+    for &status in IngestionStatus::ALL {
+        compile_time_exhaustive_check(status);
+        let filter = MediaFilter::from(status);
+        assert_eq!(filter, MediaFilter::Status(status));
+        assert_eq!(filter.target_status(), Some(status));
+        assert!(!filter.label().is_empty());
+    }
+
+    // 3. Assert all_variants includes All, every Status, and Subtitle orthogonal filters
+    let all_filters = MediaFilter::all_variants();
+    assert_eq!(all_filters.len(), 1 + IngestionStatus::ALL.len() + 2);
+    assert_eq!(all_filters[0], MediaFilter::All);
+    for &status in IngestionStatus::ALL {
+        assert!(all_filters.contains(&MediaFilter::Status(status)));
+    }
+    assert!(all_filters.contains(&MediaFilter::WithSubtitles));
+    assert!(all_filters.contains(&MediaFilter::WithoutSubtitles));
+
+    // 4. Assert strict disjoint partition: an item with status S matches ONLY MediaFilter::Status(S)
+    for &status in IngestionStatus::ALL {
+        let item = DiscoveredMediaItem {
+            path: PathBuf::from(format!("/nas/test_{:?}.mkv", status)),
+            stem: format!("test_{:?}", status),
+            size_bytes: 1024,
+            duration_secs: Some(60.0),
+            video_codec: Some("h264".to_string()),
+            subtitles: vec![],
+            phash: None,
+            status,
+        };
+        let items = vec![item];
+
+        // Must match its own status filter
+        let matched = filter_and_sort_media(&items, MediaFilter::Status(status), MediaSort::Name);
+        assert_eq!(
+            matched.len(),
+            1,
+            "Status {:?} must match its corresponding filter",
+            status
+        );
+
+        // Must match MediaFilter::All
+        let all_matched = filter_and_sort_media(&items, MediaFilter::All, MediaSort::Name);
+        assert_eq!(all_matched.len(), 1);
+
+        // Must NEVER match any other status filter
+        for &other in IngestionStatus::ALL {
+            if other != status {
+                let mismatched =
+                    filter_and_sort_media(&items, MediaFilter::Status(other), MediaSort::Name);
+                assert_eq!(
+                    mismatched.len(),
+                    0,
+                    "Item with status {:?} must NEVER match other status filter {:?}",
+                    status,
+                    other
+                );
+            }
+        }
+    }
 }

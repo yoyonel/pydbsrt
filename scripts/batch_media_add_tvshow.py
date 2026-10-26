@@ -739,8 +739,10 @@ def process_single_video(
     dur, fps, sub_streams = probe_video_container(nas_video_path)
     has_sidecars = any(nas_video_path.parent.glob(f"{nas_video_path.stem}*.srt"))
     if not sub_streams and not has_sidecars:
-        print(f"ℹ️ Skipping video without subtitles (0 tracks, no sidecar): {nas_video_path.name[:50]}")
-        return None
+        print(
+            f"ℹ️ Processing video for pHash visual fingerprint only (0 subtitle tracks): {nas_video_path.name[:50]}",
+            flush=True,
+        )
 
     try:
         file_size = nas_video_path.stat().st_size
@@ -802,6 +804,34 @@ def process_single_video(
     )
 
 
+def load_targets_from_file(targets_file: Path) -> List[Tuple[Path, str]]:
+    """Loads video target paths from JSON or plaintext file."""
+    if not targets_file.exists():
+        return []
+    raw_content = targets_file.read_text(encoding="utf-8").strip()
+    if not raw_content:
+        return []
+
+    paths: List[str] = []
+    if raw_content.startswith("["):
+        try:
+            paths = json.loads(raw_content)
+        except json.JSONDecodeError:
+            paths = []
+    else:
+        paths = [line.strip() for line in raw_content.splitlines() if line.strip()]
+
+    queue: List[Tuple[Path, str]] = []
+    seen: set = set()
+    for p_str in paths:
+        p = Path(p_str)
+        if p.exists() and p not in seen:
+            seen.add(p)
+            series_name = p.parent.name if p.parent.name and p.parent.name != "." else "SelectedBatch"
+            queue.append((p, series_name))
+    return queue
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Direct NAS TVShow Batch Ingestion & Profiling (Zero Local Copy)")
     parser.add_argument("--nas-root", type=Path, default=default_nas_tvshow_path())
@@ -809,6 +839,12 @@ def main() -> int:
     parser.add_argument("--subtitles-dir", type=Path, default=DEFAULT_SUBTITLES_DIR)
     parser.add_argument("--report-path", type=Path, default=DEFAULT_REPORT_PATH)
     parser.add_argument("--events-log", type=Path, default=DEFAULT_EVENTS_LOG_PATH)
+    parser.add_argument(
+        "--targets-file",
+        type=Path,
+        default=None,
+        help="Path to JSON or plaintext file containing explicit video paths to process in batch",
+    )
     parser.add_argument(
         "--max-videos", "--limit", type=int, default=None, dest="max_videos", help="Maximum videos to process"
     )
@@ -853,6 +889,10 @@ def main() -> int:
 
     if args.single_video:
         queue: List[Tuple[Path, str]] = [(args.single_video, "SingleTest")]
+    elif args.targets_file:
+        queue = load_targets_from_file(args.targets_file)
+        if args.max_videos is not None:
+            queue = queue[: args.max_videos]
     else:
         print("🔍 Scanning NAS library for TVShow releases...")
         queue = discover_stratified_tvshows(

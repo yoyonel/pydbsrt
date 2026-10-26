@@ -119,3 +119,36 @@ pub const DEFAULT_COUPLING_BASELINE_FPS: f64 = 25.0;
 
 /// Number of items to skip during PageUp / PageDown navigation.
 pub const PAGE_SCROLL_STEP: usize = 10;
+
+/// Default filesystem directory path for Synology NAS TVShow library.
+pub const DEFAULT_NAS_TVSHOW_PATH: &str = "/media/latty/Synology/tvshow";
+
+/// Environment variable overriding the NAS TVShow library directory path.
+pub const NAS_TVSHOW_DIR_ENV: &str = "NAS_TVSHOW_DIR";
+
+/// Default path to discovered media metadata JSON cache.
+pub const DEFAULT_MEDIA_CACHE_PATH: &str = "data/reports/media_browser_cache.json";
+
+/// Default directory storing precomputed pHash binary fingerprints.
+pub const DEFAULT_PHASH_DIR: &str = "data/__PHASH__";
+
+/// Maximum display character width for media stems in the media browser table.
+pub const MAX_MEDIA_BROWSER_NAME_CHARS: usize = 40;
+
+/// Maximum number of discovered video files displayed in the interactive browser.
+pub const MAX_MEDIA_SCAN_LIMIT: usize = 200;
+
+/// Timeout in seconds for container probing with ffprobe.
+pub const FAST_PROBE_TIMEOUT_SECS: u64 = 4;
+
+/// Interval in seconds between periodic background scans of the NAS library.
+pub const DEFAULT_MEDIA_SCAN_INTERVAL_SECS: u64 = 30;
+
+/// Default path to selected batch targets JSON file.
+pub const DEFAULT_SELECTED_BATCH_TARGETS_PATH: &str = "data/reports/selected_batch_targets.json";
+
+/// Default path to output report for interactive selected batches.
+pub const DEFAULT_SELECTED_BATCH_REPORT_PATH: &str = "data/reports/selected_batch_report.md";
+
+/// Maximum concurrent workers spawned for interactive selected batch execution.
+pub const MAX_SELECTED_BATCH_WORKERS: usize = 4;

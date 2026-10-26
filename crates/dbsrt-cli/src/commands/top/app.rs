@@ -1,6 +1,8 @@
 //! Application lifecycle and event loop for dbsrt top.
 
+use std::collections::HashSet;
 use std::io::{self, stdout};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
@@ -14,16 +16,18 @@ use crossterm::{
 use ratatui::{backend::CrosstermBackend, Terminal};
 
 use crate::commands::top::constants::{
-    BYTES_PER_GIB_F64, DEFAULT_BATCH_EVENTS_PATH, DEFAULT_COUPLINGS_PATH,
+    BYTES_PER_GIB_F64, DEFAULT_BATCH_EVENTS_PATH, DEFAULT_COUPLINGS_PATH, DEFAULT_MEDIA_CACHE_PATH,
     FEEDBACK_DISPLAY_DURATION_SECS, KEY_EVENT_POLL_TIMEOUT_MS, PAGE_SCROLL_STEP,
 };
 use crate::commands::top::model::{
-    calculate_overall_stats, GpuTelemetry, SystemTelemetry, ViewPage,
+    calculate_overall_stats, filter_and_sort_media, GpuTelemetry, MediaFilter, MediaSort,
+    SystemTelemetry, ViewPage,
 };
 use crate::commands::top::process_ctl::{kill_job, stop_job, toggle_pause_job};
 use crate::commands::top::sampler::{
-    compute_session_throughput, load_historical_records, preload_stem_size_cache,
-    run_telemetry_sampler_loop, start_gpu_sampler,
+    compute_session_throughput, launch_selected_batch, load_historical_records, load_media_cache,
+    preload_stem_size_cache, run_telemetry_sampler_loop, start_gpu_sampler,
+    start_nas_media_scanner,
 };
 use crate::commands::top::ui::{render_ui, UiContext};
 
@@ -33,6 +37,10 @@ pub struct AppState {
     pub view: ViewPage,
     pub selected_index: usize,
     pub completed_scroll_index: usize,
+    pub media_scroll_index: usize,
+    pub selected_media_paths: HashSet<PathBuf>,
+    pub media_filter: MediaFilter,
+    pub media_sort: MediaSort,
     pub feedback_message: Option<(String, Instant)>,
     pub should_quit: bool,
 }
@@ -92,6 +100,11 @@ pub fn run_top_app(refresh_interval_ms: u64) -> Result<()> {
         .unwrap_or(0.0);
     let initial_session = compute_session_throughput(&initial_history, &[], now_unix_secs);
 
+    let media_cache_path = PathBuf::from(DEFAULT_MEDIA_CACHE_PATH);
+    let cached_map = load_media_cache(&media_cache_path);
+    let mut initial_media: Vec<_> = cached_map.into_values().collect();
+    initial_media.sort_by_key(|a| a.stem.to_lowercase());
+
     let initial_telemetry = SystemTelemetry {
         host_cpu_pct: host_cpu,
         ram_used_gib: ram_used,
@@ -99,6 +112,7 @@ pub fn run_top_app(refresh_interval_ms: u64) -> Result<()> {
         history_records: initial_history,
         stats: initial_stats,
         session: initial_session,
+        discovered_media: initial_media,
         ..Default::default()
     };
 
@@ -108,6 +122,9 @@ pub fn run_top_app(refresh_interval_ms: u64) -> Result<()> {
 
     // Spawn GPU monitor thread
     start_gpu_sampler(Arc::clone(&gpu_state), Arc::clone(&stop_flag));
+
+    // Spawn non-blocking background NAS media scanner thread
+    start_nas_media_scanner(Arc::clone(&shared_state), Arc::clone(&stop_flag));
 
     // Spawn system and process sampler thread
     {
@@ -157,6 +174,17 @@ pub fn event_loop_step<B: ratatui::backend::Backend>(
         app.completed_scroll_index = telemetry.history_records.len().saturating_sub(1);
     }
 
+    let visible_media = filter_and_sort_media(
+        &telemetry.discovered_media,
+        app.media_filter,
+        app.media_sort,
+    );
+    if visible_media.is_empty() {
+        app.media_scroll_index = 0;
+    } else if app.media_scroll_index >= visible_media.len() {
+        app.media_scroll_index = visible_media.len().saturating_sub(1);
+    }
+
     let feedback = app.current_feedback();
 
     terminal.draw(|f| {
@@ -165,6 +193,10 @@ pub fn event_loop_step<B: ratatui::backend::Backend>(
             view: app.view,
             selected_index: app.selected_index,
             completed_scroll_index: app.completed_scroll_index,
+            media_scroll_index: app.media_scroll_index,
+            selected_media_paths: &app.selected_media_paths,
+            media_filter: app.media_filter,
+            media_sort: app.media_sort,
             feedback_msg: feedback,
         };
         render_ui(f, &ctx);
@@ -205,15 +237,23 @@ pub fn handle_key_event(code: KeyCode, app: &mut AppState, telemetry: &SystemTel
             ViewPage::ActiveJobs => {
                 app.should_quit = true;
             }
+            ViewPage::MediaInspection => {
+                app.view = ViewPage::MediaBrowser;
+            }
             ViewPage::JobInspection
             | ViewPage::Help
             | ViewPage::StatsHistory
-            | ViewPage::CompletedMedia => {
+            | ViewPage::CompletedMedia
+            | ViewPage::MediaBrowser => {
                 app.view = ViewPage::ActiveJobs;
             }
         },
         KeyCode::Backspace if app.view != ViewPage::ActiveJobs => {
-            app.view = ViewPage::ActiveJobs;
+            if app.view == ViewPage::MediaInspection {
+                app.view = ViewPage::MediaBrowser;
+            } else {
+                app.view = ViewPage::ActiveJobs;
+            }
         }
         KeyCode::Char('1') => {
             app.view = ViewPage::ActiveJobs;
@@ -232,21 +272,33 @@ pub fn handle_key_event(code: KeyCode, app: &mut AppState, telemetry: &SystemTel
                 app.view = ViewPage::CompletedMedia;
             }
         }
+        KeyCode::Char('4') | KeyCode::Char('m') | KeyCode::Char('M') => {
+            if app.view == ViewPage::MediaBrowser {
+                app.view = ViewPage::ActiveJobs;
+            } else {
+                app.view = ViewPage::MediaBrowser;
+            }
+        }
         KeyCode::Tab => {
             app.view = match app.view {
                 ViewPage::ActiveJobs => ViewPage::StatsHistory,
                 ViewPage::StatsHistory => ViewPage::CompletedMedia,
-                ViewPage::CompletedMedia | ViewPage::JobInspection | ViewPage::Help => {
-                    ViewPage::ActiveJobs
-                }
+                ViewPage::CompletedMedia => ViewPage::MediaBrowser,
+                ViewPage::MediaBrowser
+                | ViewPage::JobInspection
+                | ViewPage::MediaInspection
+                | ViewPage::Help => ViewPage::ActiveJobs,
             };
         }
         KeyCode::BackTab => {
             app.view = match app.view {
-                ViewPage::ActiveJobs => ViewPage::CompletedMedia,
-                ViewPage::StatsHistory => ViewPage::ActiveJobs,
+                ViewPage::ActiveJobs => ViewPage::MediaBrowser,
+                ViewPage::MediaBrowser => ViewPage::CompletedMedia,
                 ViewPage::CompletedMedia => ViewPage::StatsHistory,
-                ViewPage::JobInspection | ViewPage::Help => ViewPage::ActiveJobs,
+                ViewPage::StatsHistory => ViewPage::ActiveJobs,
+                ViewPage::JobInspection | ViewPage::MediaInspection | ViewPage::Help => {
+                    ViewPage::ActiveJobs
+                }
             };
         }
         KeyCode::Up | KeyCode::Char('k') => match app.view {
@@ -255,6 +307,9 @@ pub fn handle_key_event(code: KeyCode, app: &mut AppState, telemetry: &SystemTel
             }
             ViewPage::CompletedMedia if app.completed_scroll_index > 0 => {
                 app.completed_scroll_index -= 1;
+            }
+            ViewPage::MediaBrowser if app.media_scroll_index > 0 => {
+                app.media_scroll_index -= 1;
             }
             _ => {}
         },
@@ -271,6 +326,16 @@ pub fn handle_key_event(code: KeyCode, app: &mut AppState, telemetry: &SystemTel
             {
                 app.completed_scroll_index += 1;
             }
+            ViewPage::MediaBrowser => {
+                let visible = filter_and_sort_media(
+                    &telemetry.discovered_media,
+                    app.media_filter,
+                    app.media_sort,
+                );
+                if !visible.is_empty() && app.media_scroll_index + 1 < visible.len() {
+                    app.media_scroll_index += 1;
+                }
+            }
             _ => {}
         },
         KeyCode::PageUp => match app.view {
@@ -280,6 +345,9 @@ pub fn handle_key_event(code: KeyCode, app: &mut AppState, telemetry: &SystemTel
             ViewPage::CompletedMedia => {
                 app.completed_scroll_index =
                     app.completed_scroll_index.saturating_sub(PAGE_SCROLL_STEP);
+            }
+            ViewPage::MediaBrowser => {
+                app.media_scroll_index = app.media_scroll_index.saturating_sub(PAGE_SCROLL_STEP);
             }
             _ => {}
         },
@@ -293,6 +361,15 @@ pub fn handle_key_event(code: KeyCode, app: &mut AppState, telemetry: &SystemTel
                 app.completed_scroll_index =
                     (app.completed_scroll_index + PAGE_SCROLL_STEP).min(max_idx);
             }
+            ViewPage::MediaBrowser => {
+                let visible = filter_and_sort_media(
+                    &telemetry.discovered_media,
+                    app.media_filter,
+                    app.media_sort,
+                );
+                let max_idx = visible.len().saturating_sub(1);
+                app.media_scroll_index = (app.media_scroll_index + PAGE_SCROLL_STEP).min(max_idx);
+            }
             _ => {}
         },
         KeyCode::Home => match app.view {
@@ -301,6 +378,9 @@ pub fn handle_key_event(code: KeyCode, app: &mut AppState, telemetry: &SystemTel
             }
             ViewPage::CompletedMedia => {
                 app.completed_scroll_index = 0;
+            }
+            ViewPage::MediaBrowser => {
+                app.media_scroll_index = 0;
             }
             _ => {}
         },
@@ -311,13 +391,122 @@ pub fn handle_key_event(code: KeyCode, app: &mut AppState, telemetry: &SystemTel
             ViewPage::CompletedMedia => {
                 app.completed_scroll_index = telemetry.history_records.len().saturating_sub(1);
             }
+            ViewPage::MediaBrowser => {
+                let visible = filter_and_sort_media(
+                    &telemetry.discovered_media,
+                    app.media_filter,
+                    app.media_sort,
+                );
+                app.media_scroll_index = visible.len().saturating_sub(1);
+            }
             _ => {}
         },
+        KeyCode::Char(' ') if app.view == ViewPage::MediaBrowser => {
+            let visible = filter_and_sort_media(
+                &telemetry.discovered_media,
+                app.media_filter,
+                app.media_sort,
+            );
+            if let Some(item) = visible.get(app.media_scroll_index) {
+                if app.selected_media_paths.contains(&item.path) {
+                    app.selected_media_paths.remove(&item.path);
+                } else {
+                    app.selected_media_paths.insert(item.path.clone());
+                }
+            }
+        }
+        KeyCode::Char('a') | KeyCode::Char('A') if app.view == ViewPage::MediaBrowser => {
+            let visible = filter_and_sort_media(
+                &telemetry.discovered_media,
+                app.media_filter,
+                app.media_sort,
+            );
+            let all_selected = !visible.is_empty()
+                && visible
+                    .iter()
+                    .all(|item| app.selected_media_paths.contains(&item.path));
+            if all_selected {
+                for item in &visible {
+                    app.selected_media_paths.remove(&item.path);
+                }
+            } else {
+                for item in &visible {
+                    app.selected_media_paths.insert(item.path.clone());
+                }
+            }
+        }
+        KeyCode::Char('f') | KeyCode::Char('F') if app.view == ViewPage::MediaBrowser => {
+            app.media_filter = app.media_filter.next();
+            app.media_scroll_index = 0;
+            app.set_feedback(format!("Filtre actif : {}", app.media_filter.label()));
+        }
+        KeyCode::Char('o') | KeyCode::Char('O') if app.view == ViewPage::MediaBrowser => {
+            app.media_sort = app.media_sort.next();
+            app.media_scroll_index = 0;
+            app.set_feedback(format!("Tri actif : {}", app.media_sort.label()));
+        }
+        KeyCode::Char('b') | KeyCode::Char('B')
+            if app.view == ViewPage::MediaBrowser || app.view == ViewPage::MediaInspection =>
+        {
+            if app.selected_media_paths.is_empty() {
+                let visible = filter_and_sort_media(
+                    &telemetry.discovered_media,
+                    app.media_filter,
+                    app.media_sort,
+                );
+                if app.media_scroll_index < visible.len() {
+                    let item = &visible[app.media_scroll_index];
+                    app.selected_media_paths.insert(item.path.clone());
+                } else {
+                    app.set_feedback(
+                        "Aucun média sélectionné pour le traitement par lot. Cochez avec [Space]."
+                            .to_string(),
+                    );
+                    return;
+                }
+            }
+
+            let paths: Vec<PathBuf> = app.selected_media_paths.iter().cloned().collect();
+            let (_ok, msg) = launch_selected_batch(&paths);
+            app.set_feedback(msg);
+            app.selected_media_paths.clear();
+            app.view = ViewPage::ActiveJobs;
+        }
         KeyCode::Enter | KeyCode::Char('l') => {
             if app.view == ViewPage::ActiveJobs && !telemetry.active_jobs.is_empty() {
                 app.view = ViewPage::JobInspection;
             } else if app.view == ViewPage::JobInspection {
                 app.view = ViewPage::ActiveJobs;
+            } else if app.view == ViewPage::MediaBrowser {
+                app.view = ViewPage::MediaInspection;
+            } else if app.view == ViewPage::MediaInspection {
+                app.view = ViewPage::MediaBrowser;
+            }
+        }
+        KeyCode::Char('i') | KeyCode::Char('I') => {
+            if app.view == ViewPage::ActiveJobs && !telemetry.active_jobs.is_empty() {
+                app.view = ViewPage::JobInspection;
+            } else if app.view == ViewPage::MediaBrowser {
+                app.view = ViewPage::MediaInspection;
+            } else if app.view == ViewPage::MediaInspection {
+                app.view = ViewPage::MediaBrowser;
+            }
+        }
+        KeyCode::Char(' ') if app.view == ViewPage::MediaInspection => {
+            let visible = filter_and_sort_media(
+                &telemetry.discovered_media,
+                app.media_filter,
+                app.media_sort,
+            );
+            if app.media_scroll_index < visible.len() {
+                let p = &visible[app.media_scroll_index].path;
+                if app.selected_media_paths.contains(p) {
+                    app.selected_media_paths.remove(p);
+                    app.set_feedback("Média décoché.".to_string());
+                } else {
+                    app.selected_media_paths.insert(p.clone());
+                    app.set_feedback("Média coché pour batch.".to_string());
+                }
             }
         }
         KeyCode::Char('?') => {
