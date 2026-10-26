@@ -166,5 +166,26 @@ dbsrt fetch-subtitles --imdb-id <ID> --lang <LANG> --output <DIR>
 
 ---
 
+### `top`
+Moniteur interactif TUI temps réel en Rust natif (full-frame) affichant les tâches de décodage et extraction pHash en cours, l'état d'accélération matérielle GPU VA-API, le débit CIFS/SMB, les barres d'avancement et prédictions d'ETA.
+
+```text
+dbsrt top [OPTIONS]
+```
+
+- `--refresh-ms <REFRESH_MS>` : Intervalle de rafraîchissement des télémesures et de l'UI en millisecondes (défaut : `1000`).
+- `--json` : Échantillonne et affiche un instantané unique de la télémétrie au format JSON (mode sonde automatisée non-interactif).
+
+Raccourcis clavier :
+- `[↑]` / `[k]` : Déplacer le curseur vers la tâche précédente
+- `[↓]` / `[j]` : Déplacer le curseur vers la tâche suivante
+- `[Enter]` / `[l]` : Basculer sur la page d'Inspection Complète (full-frame)
+- `[p]` : Mettre en pause ou reprendre la tâche sélectionnée (`SIGSTOP` / `SIGCONT`)
+- `[s]` : Arrêter proprement la tâche sélectionnée (`SIGTERM`)
+- `[?]` / `[h]` : Afficher / masquer la page d'aide
+- `[q]` : Quitter le moniteur
+
+---
+
 ### `bench-phash`, `bench-video`, `bench-cuts`
 Micro-benchmarks de performance matérielle (débit de calcul pHash en frames/sec, décodage vidéo matériel vs CPU, détection des changements de plan).

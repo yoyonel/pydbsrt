@@ -14,6 +14,7 @@ pub mod relabel;
 pub mod retarget;
 pub mod scan;
 pub mod shared;
+pub mod top;
 
 pub use bench::{run_bench_cuts, run_bench_phash, run_bench_video, BenchCutsArgs, BenchVideoArgs};
 #[allow(deprecated)]
@@ -33,6 +34,7 @@ pub use relabel::{run_relabel_coupling, RelabelCouplingArgs};
 pub use retarget::{run_retarget_subtitles, RetargetArgs};
 pub use scan::{run_scan_library, ScanLibraryArgs};
 pub use shared::{connect_db, find_or_build_phash, resolve_db_host};
+pub use top::{run_top, TopArgs};
 
 #[cfg(test)]
 pub(crate) static LIVE_DB_TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());

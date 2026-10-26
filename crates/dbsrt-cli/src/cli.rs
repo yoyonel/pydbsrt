@@ -6,7 +6,7 @@ use dbsrt_core::HwAccel;
 use crate::commands::{
     BenchCutsArgs, BenchVideoArgs, CertifyCouplingArgs, ExportPhashArgs, FetchSubtitlesArgs,
     ImportPhashArgs, InspectMediaArgs, MediaAddArgs, MigrateArgs, PackArgs, RecognizeArgs,
-    RelabelCouplingArgs, RetargetArgs, ScanLibraryArgs,
+    RelabelCouplingArgs, RetargetArgs, ScanLibraryArgs, TopArgs,
 };
 use crate::constants::{
     DEFAULT_BENCH_PHASH_COUNT, DEFAULT_POSTGRES_DB, DEFAULT_POSTGRES_PASS, DEFAULT_POSTGRES_PORT,
@@ -151,6 +151,10 @@ pub enum Commands {
     /// Relabel a certified subtitle language attribution and confidence status in couplings.json
     #[command(name = "coupling:relabel", visible_alias = "coupling-relabel")]
     RelabelCoupling(RelabelCouplingArgs),
+
+    /// Real-time full-frame TUI process monitor for decoding tasks, CIFS throughput, and pHash
+    #[command(name = "top")]
+    Top(TopArgs),
 }
 
 #[cfg(test)]
@@ -248,6 +252,31 @@ mod tests {
                 assert_eq!(args.status, "confirmed");
             }
             _ => panic!("Expected RelabelCoupling command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_top_defaults() {
+        let cli = Cli::parse_from(["dbsrt", "top"]);
+        match cli.command {
+            Commands::Top(args) => {
+                assert_eq!(
+                    args.refresh_ms,
+                    crate::commands::top::DEFAULT_REFRESH_INTERVAL_MS
+                );
+            }
+            _ => panic!("Expected Top command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_top_custom_refresh() {
+        let cli = Cli::parse_from(["dbsrt", "top", "--refresh-ms", "500"]);
+        match cli.command {
+            Commands::Top(args) => {
+                assert_eq!(args.refresh_ms, 500);
+            }
+            _ => panic!("Expected Top command"),
         }
     }
 }

@@ -29,7 +29,13 @@ tasks:
       - uv run python scripts/batch_media_add_tvshow.py {{.CLI_ARGS}}
 
   media:top:
-    desc: "Real-time TUI process and ingestion monitor for pHash decoding, rates and ETAs (usage: task media:top [--stats])"
+    desc: "Native Rust full-frame real-time TUI process monitor for pHash decoding, rates and ETAs (usage: task media:top)"
+    deps: [cli:build]
+    cmds:
+      - ./target/release/dbsrt top {{.CLI_ARGS}}
+
+  media:top:py:
+    desc: "Legacy Python Rich process monitor (usage: task media:top:py)"
     cmds:
       - uv run python scripts/dbsrt_top.py {{.CLI_ARGS}}
 

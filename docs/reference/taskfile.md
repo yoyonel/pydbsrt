@@ -34,7 +34,8 @@ Cette page dresse le dictionnaire exhaustif de toutes les cibles d'orchestration
 | :--- | :--- | :--- |
 | `task media:add` | `task media:add -- <video> [srt] [--lang <lg>] [--fps <val>]` | Façade unifiée d'ingestion média avec auto-détection et injection à chaud. |
 | `task media:batch:tvshow` | `task media:batch:tvshow -- [--until <HH:MM>] [--workers <N>]` | Ingestion batch parallélisée de séries TV en direct depuis montage CIFS. |
-| `task media:top` | `task media:top -- [--stats] [--refresh <sec>]` | Moniteur TUI temps réel (style ctop/btop) et analyse statistique post-traitement. |
+| `task media:top` | `task media:top -- [--refresh-ms <ms>]` | Moniteur TUI natif Rust temps réel (full-frame) pour les tâches de décodage, débits CIFS et ETA. |
+| `task media:top:py` | `task media:top:py -- [--stats]` | Prototype historique Python Rich du moniteur TUI. |
 | `task coupling:certify` | `task coupling:certify` | Découvre et certifie en lot tous les fichiers `.phash` et `.srt` présents. |
 | `task coupling:relabel` | `task coupling:relabel -- --media <hash> [--sub <hash>] --lang <code>` | Modifie la langue ou la confiance d'un couplage existant. |
 
