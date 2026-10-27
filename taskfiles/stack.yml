@@ -30,6 +30,7 @@ tasks:
 
   media:top:
     desc: "Native Rust full-frame real-time TUI process monitor for pHash decoding, rates and ETAs (usage: task media:top)"
+    aliases: [top, studio:tui, ops]
     deps: [cli:build]
     cmds:
       - ./target/release/dbsrt top {{.CLI_ARGS}}

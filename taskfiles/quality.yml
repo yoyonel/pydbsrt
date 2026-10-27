@@ -23,6 +23,12 @@ tasks:
     cmds:
       - cargo test --workspace
 
+  test:scenarios:
+    desc: "Run native Rust TUI headless declarative user scenario tests (<0.5s)"
+    aliases: [test:tui]
+    cmds:
+      - cargo test --package dbsrt-cli --test test_scenarios -- --nocapture
+
   coverage:
     desc: Run unified Rust & Python coverage pipeline (1:1 parity with GitHub Actions CI)
     cmds:

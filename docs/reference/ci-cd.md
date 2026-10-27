@@ -110,7 +110,7 @@ flowchart TD
 - **Vérifications & Commandes** :
   1. Formatage : `cargo fmt --all -- --check`
   2. Linting : `cargo clippy --workspace --all-targets -- -D warnings`
-  3. Tests & Couverture : `cargo llvm-cov --workspace --json --output-path coverage-rust.json`
+  3. Tests & Couverture : `cargo llvm-cov --workspace --json --output-path coverage-rust.json` (englobe l'intégralité des tests unitaires, d'intégration et les scénarios TUI déclaratifs `test_scenarios.rs` en mode headless).
 - **Artefact produit** : `rust-coverage` (`coverage-rust.json`, rétention 1 jour).
 
 ### 3.4. `db-integration` : PostgreSQL 17 BK-Tree Integration

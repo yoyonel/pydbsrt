@@ -93,6 +93,7 @@ Cette page dresse le dictionnaire exhaustif de toutes les cibles d'orchestration
 | `task typecheck` | Analyse statique de types Python via Pyright en mode strict. |
 | `task test` | Exécute l'intégralité des suites de tests unitaires et intégration (Rust + Python). |
 | `task test:rs` | Exécute la suite de tests Cargo du workspace Rust. |
+| `task test:scenarios` | Exécute la suite de scénarios TUI déclaratifs headless (`test_scenarios.rs`) en moins de 0.5s. (Alias : `task test:tui`). |
 | `task test:infra` | Exécute le harnais de tests d'infrastructure et chaos testing. |
 
 ---
