@@ -494,8 +494,8 @@
     "scope": "mod",
     "function_name": "render_media_browser_page",
     "start_line": 1263,
-    "max_loc": 419,
-    "max_ccn": 35,
+    "max_loc": 397,
+    "max_ccn": 31,
     "max_parameters": 3,
     "max_nesting": 5
   },
