@@ -144,11 +144,15 @@ pub const HELP_TAB_HEADER_HEIGHT: u16 = 3;
 /// Default directory storing precomputed pHash binary fingerprints.
 pub const DEFAULT_PHASH_DIR: &str = "data/__PHASH__";
 
-/// Maximum display character width for media stems in the media browser table.
-pub const MAX_MEDIA_BROWSER_NAME_CHARS: usize = 40;
+/// Cumulative width of all fixed non-stem columns and inter-column spacers in the media browser table.
+/// 3 (cursor) + 5 (sel) + 10 (size) + 9 (duration) + 18 (phash) + 15 (subs) + 10 (codec) + 14 (status) + 8 (spacers) = 92.
+pub const MEDIA_BROWSER_NON_STEM_COLUMNS_WIDTH: u16 = 92;
 
-/// Maximum number of discovered video files displayed in the interactive browser.
-pub const MAX_MEDIA_SCAN_LIMIT: usize = 200;
+/// Maximum number of discovered video files collected per media source (safety ceiling against filesystem loops).
+pub const MAX_MEDIA_SCAN_LIMIT: usize = 50_000;
+
+/// Number of items processed per batch chunk for progressive streaming updates to the TUI.
+pub const SCAN_STREAMING_CHUNK_SIZE: usize = 200;
 
 /// Timeout in seconds for container probing with ffprobe.
 pub const FAST_PROBE_TIMEOUT_SECS: u64 = 4;

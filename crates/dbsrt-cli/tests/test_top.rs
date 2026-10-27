@@ -305,6 +305,7 @@ fn test_ui_rendering_all_pages() {
             last_scan_added: 0,
             last_scan_iso: Some("2026-10-26T21:00:00Z".to_string()),
         }],
+        is_scanning: false,
     };
 
     let empty_set = HashSet::new();

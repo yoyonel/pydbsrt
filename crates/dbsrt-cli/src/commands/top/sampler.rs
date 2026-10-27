@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Instant;
 
+use rayon::prelude::*;
 use sysinfo::{
     CpuRefreshKind, MemoryRefreshKind, Networks, ProcessRefreshKind, ProcessesToUpdate, System,
 };
@@ -20,7 +21,7 @@ use crate::commands::top::constants::{
     DEFAULT_SELECTED_BATCH_REPORT_PATH, DEFAULT_SELECTED_BATCH_TARGETS_PATH,
     DEFAULT_SOURCE_ID_TVSHOW, DEFAULT_SOURCE_NAME_TVSHOW, MAX_MEDIA_SCAN_LIMIT,
     MAX_SELECTED_BATCH_WORKERS, MIN_DELTA_TIME_FLOOR_SECS, MIN_PROGRESS_THRESHOLD,
-    NAS_TVSHOW_DIR_ENV, SESSION_WINDOW_SECS,
+    NAS_TVSHOW_DIR_ENV, SCAN_STREAMING_CHUNK_SIZE, SESSION_WINDOW_SECS,
 };
 use crate::commands::top::model::{
     calculate_overall_stats, format_unix_to_iso, parse_iso_to_unix_secs, ActiveJobTelemetry,
@@ -550,6 +551,9 @@ pub fn save_media_cache(cache_path: &Path, items: &[DiscoveredMediaItem]) {
 /// Inspects container metadata, duration, video codec, and subtitle tracks via ffprobe.
 pub fn probe_media_file(path: &Path) -> (Option<f64>, Option<String>, Vec<MediaSubtrackInfo>) {
     let output = Command::new("ffprobe")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
         .args([
             "-v",
             "error",
@@ -730,8 +734,12 @@ pub fn scan_nas_tvshows(
 /// Global trigger flag to request an immediate asynchronous rescan across all media sources.
 pub static MEDIA_RESCAN_REQUESTED: AtomicBool = AtomicBool::new(false);
 
+/// Global flag signaling whether media library scanner is actively traversing disks and probing containers.
+pub static IS_MEDIA_SCANNING: AtomicBool = AtomicBool::new(false);
+
 /// Signals background scanner thread to trigger an immediate multi-source scan.
 pub fn trigger_media_sources_rescan() {
+    IS_MEDIA_SCANNING.store(true, Ordering::SeqCst);
     MEDIA_RESCAN_REQUESTED.store(true, Ordering::Relaxed);
 }
 
@@ -773,6 +781,22 @@ pub fn save_media_sources(path: &Path, sources: &[MediaSourceConfig]) -> std::io
     let json = serde_json::to_string_pretty(sources)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     fs::write(path, json)
+}
+
+/// Merges scan metrics (media_count, last_scan_added, last_scan_iso) into target sources without modifying user-configured flags (enabled, name, path).
+pub fn merge_scanned_source_metrics(
+    target_sources: &mut [MediaSourceConfig],
+    scanned_sources: &[MediaSourceConfig],
+) {
+    for target in target_sources.iter_mut() {
+        if let Some(scanned) = scanned_sources.iter().find(|s| s.id == target.id) {
+            target.media_count = scanned.media_count;
+            target.last_scan_added = scanned.last_scan_added;
+            if scanned.last_scan_iso.is_some() {
+                target.last_scan_iso = scanned.last_scan_iso.clone();
+            }
+        }
+    }
 }
 
 /// Adds a new media source to the configuration.
@@ -891,20 +915,29 @@ pub fn toggle_media_source(
     }
 }
 
-/// Scans all configured and enabled media sources, discovering candidate media and assigning source IDs.
-pub fn scan_all_media_sources(
+/// Scans all configured and enabled media sources with progressive chunk updates to the UI.
+pub fn scan_all_media_sources_with_progress<F>(
     sources: &[MediaSourceConfig],
     couplings_path: &Path,
     events_path: &Path,
     phash_dir: &Path,
     active_jobs: &[ActiveJobTelemetry],
     cache_path: &Path,
-) -> (Vec<DiscoveredMediaItem>, Vec<MediaSourceConfig>) {
+    mut on_chunk: F,
+) -> (Vec<DiscoveredMediaItem>, Vec<MediaSourceConfig>)
+where
+    F: FnMut(&[DiscoveredMediaItem], &[MediaSourceConfig]),
+{
     let mut cached_map = load_media_cache(cache_path);
     let certified_stems = get_certified_stems(events_path, couplings_path);
 
     let mut discovered = Vec::new();
     let mut updated_sources = sources.to_vec();
+
+    let has_enabled_sources = sources.iter().any(|s| s.enabled);
+    if !has_enabled_sources {
+        return (Vec::new(), updated_sources);
+    }
 
     let now_secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -912,95 +945,123 @@ pub fn scan_all_media_sources(
         .unwrap_or(0);
     let now_iso = format_unix_to_iso(now_secs);
 
-    for src in &mut updated_sources {
-        if !src.enabled {
+    for src_idx in 0..updated_sources.len() {
+        if !updated_sources[src_idx].enabled {
             continue;
         }
 
         let mut video_paths = Vec::new();
-        if src.path.exists() && src.path.is_dir() {
-            collect_video_files(&src.path, &mut video_paths, MAX_MEDIA_SCAN_LIMIT);
+        let src_path = updated_sources[src_idx].path.clone();
+        let src_id = updated_sources[src_idx].id.clone();
+        if src_path.exists() && src_path.is_dir() {
+            collect_video_files(&src_path, &mut video_paths, MAX_MEDIA_SCAN_LIMIT);
         }
 
         let mut count = 0;
         let mut added_count = 0;
-        for p in video_paths {
-            let stem = p
-                .file_stem()
-                .map(|s| s.to_string_lossy().to_string())
-                .unwrap_or_default();
-            if stem.is_empty() {
-                continue;
-            }
 
-            if !cached_map.contains_key(&stem) {
-                added_count += 1;
-            }
+        for chunk in video_paths.chunks(SCAN_STREAMING_CHUNK_SIZE) {
+            let chunk_items: Vec<DiscoveredMediaItem> = chunk
+                .par_iter()
+                .filter_map(|p| {
+                    let stem = p
+                        .file_stem()
+                        .map(|s| s.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    if stem.is_empty() {
+                        return None;
+                    }
 
-            let size = fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
+                    let size = fs::metadata(p).map(|m| m.len()).unwrap_or(0);
 
-            let (dur, codec, subs) = if let Some(item) = cached_map.get(&stem) {
-                if item.size_bytes == size && item.duration_secs.is_some() {
-                    (
-                        item.duration_secs,
-                        item.video_codec.clone(),
-                        item.subtitles.clone(),
-                    )
-                } else {
-                    probe_media_file(&p)
-                }
-            } else {
-                probe_media_file(&p)
-            };
+                    let (dur, codec, subs) = if let Some(item) = cached_map.get(&stem) {
+                        if item.size_bytes == size && item.duration_secs.is_some() {
+                            (
+                                item.duration_secs,
+                                item.video_codec.clone(),
+                                item.subtitles.clone(),
+                            )
+                        } else {
+                            probe_media_file(p)
+                        }
+                    } else {
+                        probe_media_file(p)
+                    };
 
-            let phash_path = phash_dir.join(format!("{stem}.phash"));
-            let phash_info = if let Ok(meta) = fs::metadata(&phash_path) {
-                let bytes = meta.len();
-                let frame_count = (bytes / 8) as usize;
-                Some(PhashFingerprintInfo {
-                    exists: true,
-                    frame_count,
-                    size_bytes: bytes,
+                    let phash_path = phash_dir.join(format!("{stem}.phash"));
+                    let phash_info = if let Ok(meta) = fs::metadata(&phash_path) {
+                        let bytes = meta.len();
+                        let frame_count = (bytes / 8) as usize;
+                        Some(PhashFingerprintInfo {
+                            exists: true,
+                            frame_count,
+                            size_bytes: bytes,
+                        })
+                    } else {
+                        None
+                    };
+
+                    let status = if active_jobs.iter().any(|j| j.media_name == stem) {
+                        IngestionStatus::InProgress
+                    } else if certified_stems.contains(&stem) {
+                        IngestionStatus::Completed
+                    } else if phash_info.is_some() {
+                        IngestionStatus::PartialFail
+                    } else {
+                        IngestionStatus::Virgin
+                    };
+
+                    Some(DiscoveredMediaItem {
+                        path: p.clone(),
+                        stem,
+                        size_bytes: size,
+                        duration_secs: dur,
+                        video_codec: codec,
+                        subtitles: subs,
+                        phash: phash_info,
+                        source_id: Some(src_id.clone()),
+                        status,
+                    })
                 })
-            } else {
-                None
-            };
+                .collect();
 
-            let status = if active_jobs.iter().any(|j| j.media_name == stem) {
-                IngestionStatus::InProgress
-            } else if certified_stems.contains(&stem) {
-                IngestionStatus::Completed
-            } else if phash_info.is_some() {
-                IngestionStatus::PartialFail
-            } else {
-                IngestionStatus::Virgin
-            };
+            for item in chunk_items {
+                if !cached_map.contains_key(&item.stem) {
+                    added_count += 1;
+                }
+                cached_map.insert(item.stem.clone(), item.clone());
+                discovered.push(item);
+                count += 1;
+            }
 
-            let item = DiscoveredMediaItem {
-                path: p,
-                stem: stem.clone(),
-                size_bytes: size,
-                duration_secs: dur,
-                video_codec: codec,
-                subtitles: subs,
-                phash: phash_info,
-                source_id: Some(src.id.clone()),
-                status,
-            };
+            updated_sources[src_idx].media_count = count;
+            updated_sources[src_idx].last_scan_added = added_count;
+            updated_sources[src_idx].last_scan_iso = Some(now_iso.clone());
 
-            cached_map.insert(stem, item.clone());
-            discovered.push(item);
-            count += 1;
+            let mut progressive_items = discovered.clone();
+            progressive_items.sort_by_key(|a| a.stem.to_lowercase());
+            on_chunk(&progressive_items, &updated_sources);
         }
-
-        src.media_count = count;
-        src.last_scan_added = added_count;
-        src.last_scan_iso = Some(now_iso.clone());
     }
 
     if discovered.is_empty() && !cached_map.is_empty() {
-        discovered = cached_map.into_values().collect();
-    } else {
+        if has_enabled_sources {
+            let enabled_ids: std::collections::HashSet<String> = sources
+                .iter()
+                .filter(|s| s.enabled)
+                .map(|s| s.id.clone())
+                .collect();
+            discovered = cached_map
+                .into_values()
+                .filter(|item| {
+                    item.source_id
+                        .as_ref()
+                        .map(|id| enabled_ids.contains(id))
+                        .unwrap_or(false)
+                })
+                .collect();
+        }
+    } else if has_enabled_sources {
         save_media_cache(cache_path, &discovered);
     }
 
@@ -1015,6 +1076,26 @@ pub fn scan_all_media_sources(
 
     discovered.sort_by_key(|a| a.stem.to_lowercase());
     (discovered, updated_sources)
+}
+
+/// Scans all configured and enabled media sources, discovering candidate media and assigning source IDs.
+pub fn scan_all_media_sources(
+    sources: &[MediaSourceConfig],
+    couplings_path: &Path,
+    events_path: &Path,
+    phash_dir: &Path,
+    active_jobs: &[ActiveJobTelemetry],
+    cache_path: &Path,
+) -> (Vec<DiscoveredMediaItem>, Vec<MediaSourceConfig>) {
+    scan_all_media_sources_with_progress(
+        sources,
+        couplings_path,
+        events_path,
+        phash_dir,
+        active_jobs,
+        cache_path,
+        |_, _| {},
+    )
 }
 
 /// Spawns background batch execution on the selected media paths with custom target and report file paths.
@@ -1087,7 +1168,41 @@ pub fn start_media_sources_scanner(
         let phash_dir = PathBuf::from(DEFAULT_PHASH_DIR);
         let media_cache_path = PathBuf::from(DEFAULT_MEDIA_CACHE_PATH);
 
+        let publish_scan_update = |partial_items: &[DiscoveredMediaItem],
+                                   scanned_sources: &[MediaSourceConfig],
+                                   is_scanning: bool| {
+            if let Ok(mut state) = shared_state.write() {
+                if state.media_sources.is_empty() {
+                    state.media_sources = scanned_sources.to_vec();
+                } else {
+                    merge_scanned_source_metrics(&mut state.media_sources, scanned_sources);
+                }
+                let active_ids: std::collections::HashSet<String> = state
+                    .media_sources
+                    .iter()
+                    .filter(|s| s.enabled)
+                    .map(|s| s.id.clone())
+                    .collect();
+                state.discovered_media = partial_items
+                    .iter()
+                    .filter(|item| {
+                        item.source_id
+                            .as_ref()
+                            .is_none_or(|id| active_ids.contains(id))
+                    })
+                    .cloned()
+                    .collect();
+                state.is_scanning = is_scanning;
+                let _ = save_media_sources(&sources_path, &state.media_sources);
+            }
+        };
+
         // Run initial scan once at startup
+        IS_MEDIA_SCANNING.store(true, Ordering::SeqCst);
+        if let Ok(mut state) = shared_state.write() {
+            state.is_scanning = true;
+        }
+
         let initial_sources = load_media_sources(&sources_path);
         let active_jobs = {
             shared_state
@@ -1095,19 +1210,19 @@ pub fn start_media_sources_scanner(
                 .map(|s| s.active_jobs.clone())
                 .unwrap_or_default()
         };
-        let (items, updated_sources) = scan_all_media_sources(
+        let (items, updated_sources) = scan_all_media_sources_with_progress(
             &initial_sources,
             &couplings_path,
             &events_path,
             &phash_dir,
             &active_jobs,
             &media_cache_path,
+            |partial_items, partial_sources| {
+                publish_scan_update(partial_items, partial_sources, true);
+            },
         );
-        let _ = save_media_sources(&sources_path, &updated_sources);
-        if let Ok(mut state) = shared_state.write() {
-            state.discovered_media = items;
-            state.media_sources = updated_sources;
-        }
+        IS_MEDIA_SCANNING.store(false, Ordering::SeqCst);
+        publish_scan_update(&items, &updated_sources, false);
 
         while !stop_flag.load(Ordering::Relaxed) {
             let sleep_ticks = DEFAULT_MEDIA_SCAN_INTERVAL_SECS * 10;
@@ -1121,27 +1236,31 @@ pub fn start_media_sources_scanner(
                 std::thread::sleep(std::time::Duration::from_millis(100));
             }
 
+            IS_MEDIA_SCANNING.store(true, Ordering::SeqCst);
+            if let Ok(mut state) = shared_state.write() {
+                state.is_scanning = true;
+            }
+
             let sources = load_media_sources(&sources_path);
             let active_jobs = shared_state
                 .read()
                 .map(|s| s.active_jobs.clone())
                 .unwrap_or_default();
 
-            let (items, updated_sources) = scan_all_media_sources(
+            let (items, updated_sources) = scan_all_media_sources_with_progress(
                 &sources,
                 &couplings_path,
                 &events_path,
                 &phash_dir,
                 &active_jobs,
                 &media_cache_path,
+                |partial_items, partial_sources| {
+                    publish_scan_update(partial_items, partial_sources, true);
+                },
             );
 
-            let _ = save_media_sources(&sources_path, &updated_sources);
-
-            if let Ok(mut state) = shared_state.write() {
-                state.discovered_media = items;
-                state.media_sources = updated_sources;
-            }
+            IS_MEDIA_SCANNING.store(false, Ordering::SeqCst);
+            publish_scan_update(&items, &updated_sources, false);
         }
     });
 }
@@ -1318,6 +1437,7 @@ pub fn run_telemetry_sampler_loop(
             state.session = session;
             state.history_records = cached_history_records.clone();
             state.stats = cached_stats.clone();
+            state.is_scanning = IS_MEDIA_SCANNING.load(Ordering::Relaxed);
 
             if state.discovered_media.is_empty() {
                 state.discovered_media = cached_media_items.clone();

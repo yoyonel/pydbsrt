@@ -530,6 +530,7 @@ pub struct SystemTelemetry {
     pub stats: OverallStats,
     pub discovered_media: Vec<DiscoveredMediaItem>,
     pub media_sources: Vec<MediaSourceConfig>,
+    pub is_scanning: bool,
 }
 
 /// Active field focus within the source configuration modal.

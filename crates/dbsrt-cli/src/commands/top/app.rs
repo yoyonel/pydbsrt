@@ -142,6 +142,7 @@ pub fn run_top_app(refresh_interval_ms: u64) -> Result<()> {
         session: initial_session,
         discovered_media: initial_media,
         media_sources: initial_sources,
+        is_scanning: true,
         ..Default::default()
     };
 
@@ -439,6 +440,13 @@ pub fn handle_key_event_with_state(
                 app.help_tab = HelpTab::Completed;
                 app.help_scroll_index = 0;
             } else if app.view == ViewPage::MediaSources {
+                crate::commands::top::sampler::IS_MEDIA_SCANNING
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
+                if let Some(shared) = shared_state {
+                    if let Ok(mut state) = shared.write() {
+                        state.is_scanning = true;
+                    }
+                }
                 trigger_media_sources_rescan();
                 app.set_feedback("⟳ Rescan de toutes les sources lancé...".to_string());
             } else if app.view == ViewPage::CompletedMedia {
@@ -653,6 +661,12 @@ pub fn handle_key_event_with_state(
                     .map(|s| s.id.clone())
                     .collect();
 
+                if let Some(ref filter_id) = app.selected_source_filter {
+                    if !active_source_ids.contains(filter_id) || active_source_ids.len() <= 1 {
+                        app.selected_source_filter = None;
+                    }
+                }
+
                 if let Some(shared) = shared_state {
                     if let Ok(mut state) = shared.write() {
                         state.media_sources = sources.clone();
@@ -661,6 +675,17 @@ pub fn handle_key_event_with_state(
                                 .as_ref()
                                 .is_none_or(|id| active_source_ids.contains(id))
                         });
+                        let active_paths: std::collections::HashSet<_> = state
+                            .discovered_media
+                            .iter()
+                            .map(|m| m.path.clone())
+                            .collect();
+                        app.selected_media_paths
+                            .retain(|p| active_paths.contains(p));
+                        let max_media_idx = state.discovered_media.len().saturating_sub(1);
+                        if app.media_scroll_index > max_media_idx {
+                            app.media_scroll_index = max_media_idx;
+                        }
                     }
                 }
                 let name = sources
@@ -713,6 +738,12 @@ pub fn handle_key_event_with_state(
                         .map(|s| s.id.clone())
                         .collect();
 
+                    if let Some(ref filter_id) = app.selected_source_filter {
+                        if !active_source_ids.contains(filter_id) || active_source_ids.len() <= 1 {
+                            app.selected_source_filter = None;
+                        }
+                    }
+
                     if let Some(shared) = shared_state {
                         if let Ok(mut state) = shared.write() {
                             state.media_sources = sources.clone();
@@ -721,6 +752,17 @@ pub fn handle_key_event_with_state(
                                     .as_ref()
                                     .is_none_or(|id| active_source_ids.contains(id))
                             });
+                            let active_paths: std::collections::HashSet<_> = state
+                                .discovered_media
+                                .iter()
+                                .map(|m| m.path.clone())
+                                .collect();
+                            app.selected_media_paths
+                                .retain(|p| active_paths.contains(p));
+                            let max_media_idx = state.discovered_media.len().saturating_sub(1);
+                            if app.media_scroll_index > max_media_idx {
+                                app.media_scroll_index = max_media_idx;
+                            }
                         }
                     }
                     app.set_feedback(format!("✓ Source supprimée : {}", src.name));
@@ -775,8 +817,16 @@ pub fn handle_key_event_with_state(
                 .iter()
                 .filter(|s| s.enabled)
                 .collect();
-            if active_sources.is_empty() {
+            if active_sources.len() <= 1 {
                 app.selected_source_filter = None;
+                if active_sources.len() == 1 {
+                    app.set_feedback(format!(
+                        "Une seule source active : '{}'",
+                        active_sources[0].name
+                    ));
+                } else {
+                    app.set_feedback("Aucune source active.".to_string());
+                }
             } else {
                 let current_idx = app
                     .selected_source_filter
