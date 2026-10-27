@@ -1,12 +1,12 @@
 # Recette de Test E2E : Moniteur TUI Rust `dbsrt top` & Ingestion Synology NAS
 
-Ce guide de recette valide de bout en bout l'intégration et l'exécution du moniteur de processus natif en Rust (`dbsrt top`) face à un flux réel d'ingestion et de décodage vidéo pHash depuis le NAS Synology (`/media/latty/Synology/tvshow`).
+Ce guide de recette valide de bout en bout l'intégration et l'exécution du moniteur de processus natif en Rust (`dbsrt top`) face à un flux réel d'ingestion et de décodage vidéo pHash depuis le NAS Synology (`$NAS_TVSHOW_DIR` ou point de montage CIFS/NFS).
 
 ## Contexte d'Exécution & Environnement
 
 - **Système d'Exploitation** : Linux x86_64
 - **Binaire Testé** : `target/release/dbsrt top` (Rust 1.84+, Ratatui 0.29, Sysinfo 0.33)
-- **Source des Médias Réels** : Synology NAS CIFS (`/media/latty/Synology/tvshow`)
+- **Source des Médias Réels** : Synology NAS CIFS (`$NAS_TVSHOW_DIR`)
 - **Accélération Matérielle** : Intel Iris Xe Graphics (VA-API `/dev/dri/renderD128`)
 - **Télémétrie GPU** : `intel_gpu_top` JSON streaming daemon
 - **Enregistrement ASCIInema** : `data/reports/dbsrt_top_e2e_recette.cast` (335.4 KiB)
@@ -21,18 +21,22 @@ Ce guide de recette valide de bout en bout l'intégration et l'exécution du mon
 | 4 | **Contrôle Processus (SIGSTOP / SIGCONT)** | Touche `[p]` sur tâche sélectionnée | Pause immédiate du worker (`SIGSTOP`) puis reprise (`SIGCONT`), bandeau d'accusé affiché | **PASS** |
 | 5 | **Inspection Complète (Full-Frame)** | Touche `[Enter]` sur tâche active | Affichage plein écran de la ligne de commande, fichiers ouverts, threads et RSS. Retour propre via `[Esc]` | **PASS** |
 | 6 | **Onglet 2 : Stats Réelles** | Touches `[2]` puis toggle `[h]` | Affichage plein écran des 4 dimensions (118 médias décodés) : Débit MB/s, Durée mins, Taille GiB, Couplings | **PASS** |
-| 7 | **Onglet 3 : Médias Complétés** | Touches `[3]` puis toggle `[r]` | Affichage plein écran du registre (235 médias référencés), statuts `✓ OK` / `✓ CACHE` / `✗ FAIL` | **PASS** |
+| 7 | **Onglet 3 : Médias Complétés** | Touches `[3]` puis toggle `[r]` | Affichage plein écran du registre, qualification granularisée des statuts (`✓ OK`, `✓ CACHE`, `⚠ NO_SRT`, `⏹ CANCEL`, `✗ FAIL`) | **PASS** |
 | 8 | **Défilement & Raccourcis Registre** | Touches `[j]`, `[k]`, `[PgDn]`, `[PgUp]`, `[Home]`, `[End]` | Défilement fluide de la table des médias récents avec maintien du viewport | **PASS** |
-| 9 | **Onglet 4 : Explorateur Médias NAS** | Touches `[4]` puis toggle `[m]` | Affichage plein écran de la bibliothèque (200 candidats NAS) : Taille, Durée, Codec, Pistes Sous-Titres, Statut | **PASS** |
-| 10 | **Défilement & Navigation Médias** | Touches `[j]`, `[k]`, `[PgDn]`, `[PgUp]`, `[Home]`, `[End]` | Défilement fluide et sauts de page sur le catalogue NAS | **PASS** |
-| 11 | **Filtrage Dynamique du Catalogue** | Touche `[f]` (TOUS, VIERGES SEULS, EN COURS, COMPLÉTÉS, PARTIELS / ÉCHECS, AVEC SOUS-TITRES, SANS SOUS-TITRE) | Filtrage instantané des candidats aligné 1:1 sur le cycle de vie IngestionStatus sans blocage I/O | **PASS** |
+| 9 | **Onglet 4 : Explorateur Médias Multi-Sources** | Touches `[4]` puis toggle `[m]` | Affichage unifié multi-sources des candidats vidéo : Taille, Durée, Codec, Pistes Sous-Titres, Statut d'ingestion | **PASS** |
+| 10 | **Défilement & Navigation Médias** | Touches `[j]`, `[k]`, `[PgDn]`, `[PgUp]`, `[Home]`, `[End]` | Défilement fluide et sauts de page sur le catalogue de médias | **PASS** |
+| 11 | **Filtrage Dynamique du Catalogue** | Touche `[f]` (TOUS, VIERGES SEULS, EN COURS, COMPLÉTÉS, HACHÉS SEULS, AVEC SOUS-TITRES, SANS SOUS-TITRE) | Filtrage instantané des candidats aligné 1:1 sur le cycle de vie IngestionStatus sans blocage I/O | **PASS** |
 | 12 | **Tri Multicritère du Catalogue** | Touche `[o]` (NOM, TAILLE, DURÉE, STATUT, SOUS-TITRES) | Tri lexicographique et métrique immédiat de la collection | **PASS** |
 | 13 | **Sélection Multiple & Batch Launch** | Touches `[Space]` (toggle), `[a]` (tout), `[b]` (batch) | Multi-sélection visuelle `[✓]`, déclenchement batch en tâche de fond et redirection automatique vers l'onglet Tâches | **PASS** |
-| 14 | **Onglet Aide & Cheat Sheet** | Touche `[?]` (Ouverture / Fermeture) | Affichage plein écran des raccourcis et de l'architecture de télémesure. Fermeture immédiate | **PASS** |
-| 15 | **Cycle Onglets (`[Tab]` / `[Shift+Tab]`)** | `[Tab]` (avant) et `[Shift+Tab]` (arrière) | Transition circulaire bidirectionnelle parfaite entre tous les 4 onglets | **PASS** |
+| 14 | **Aide Contextuelle par Vue & Glossaire** | Touche `[?]` (Ouverture contextuelle / Navigation [0-5]) | Ouverture automatique calée sur l'onglet d'appel, glossaire complet des colonnes et statuts, navigation par onglets | **PASS** |
+| 15 | **Cycle Onglets (`[Tab]` / `[Shift+Tab]`)** | `[Tab]` (avant) et `[Shift+Tab]` (arrière) | Transition circulaire bidirectionnelle parfaite entre tous les 5 onglets | **PASS** |
 | 16 | **Arrêt Processus Contrôlé (SIGTERM)** | Touche `[s]` sur tâche sélectionnée | Émission propre du signal `SIGTERM` au worker sélectionné, feedback visuel | **PASS** |
-| 17 | **Arrêt Propre & Restauration Terminal** | Touche `[q]` | Quitte l'alternate screen sans résidu ANSI, réactivation du curseur | **PASS** |
-| 18 | **Sonde Observabilité (`--json`)** | Exécution non-interactive `./target/release/dbsrt top --json` | Export JSON valide contenant la totalité des structures système, actives, session, stats, historique et catalogue médias | **PASS** |
+| 17 | **Arrêt Global de Batch (`[x]` / `[X]`)** | Touche `[x]` (SIGTERM) ou `[X]` (SIGKILL) | Arrêt immédiat du coordinateur de batch et terminaison en cascade de l'ensemble des workers ffmpeg actifs | **PASS** |
+| 18 | **Gestionnaire CRUD des Sources (`[5/s]`)** | Ajout `[a]`, Édition `[e]`, On/Off `[Space]`, Suppr `[d]` | Gestion dynamique des répertoires vidéo, purge instantanée à 0ms en mémoire et rescan multi-sources | **PASS** |
+| 19 | **Filtrage & Tri Récents (`[3/r]`)** | Touche `[f]` (filtre) et `[o]` (tri statut/date/couplings) | Ségrégation immédiate des échecs réels, des annulations et des avertissements sans sous-titres | **PASS** |
+| 20 | **Fiche Diagnostic & Erreur FAIL** | Touche `[Enter]` ou `[i]` sur média récent | Inspection plein écran du motif d'échec précis (`error_summary`), chemin complet et découverte automatique des logs | **PASS** |
+| 21 | **Arrêt Propre & Restauration Terminal** | Touche `[q]` | Quitte l'alternate screen sans résidu ANSI, réactivation du curseur | **PASS** |
+| 22 | **Sonde Observabilité (`--json`)** | Exécution non-interactive `./target/release/dbsrt top --json` | Export JSON valide contenant la totalité des structures système, actives, session, stats, historique et catalogue médias | **PASS** |
 
 ## Mesures Réelles Capturées (Sonde Snapshot)
 

@@ -25,6 +25,11 @@
 - **Pure Taskfile Orchestrator (Zero Inline Logic / Hardcoded Data Lists)**: `Taskfile.yml` is strictly a declarative task orchestrator, NEVER a storage dump for inline shell/Python scripts, PID management blocks, loops, or hardcoded lists of media files. Any operational logic, daemon control, or dataset discovery/seeding MUST be placed in dedicated external scripts under `scripts/` so `Taskfile.yml` remains concise, readable, and maintainable.
 - **Zero Local Absolute Paths**: Never write machine-local absolute paths or `file://` URIs in any versioned file.
 
+## Strict TUI Views & Contextual Help Synchronization
+- **Mandatory 1:1 Parity between TUI Views & Contextual Help (`HelpTab`)**: Any addition, modification, renaming, or refactoring of columns, badges, enums, status values, operational actions, or keyboard shortcuts across the native Rust TUI (`dbsrt top` in `crates/dbsrt-cli`) MUST simultaneously update the corresponding contextual Help view (`render_help_page` / `HelpTab` / `build_help_*`) in the exact same commit.
+- **Exhaustive Domain Glossary**: The Help view MUST provide an unambiguous, technical definition for every single column header and every possible status value (e.g. `CompletedStatus`, `IngestionStatus`), explicitly detailing the operational severity level (Nominal, Cache, Functional Warning, Operator Cancel, Fatal Error).
+- **Zero Drift Tolerance**: Unit and integration tests (`tests/test_top.rs`) MUST assert the presence and alignment of all key domain terms between the TUI display buffers and the Help screen contents to mathematically prevent any documentation drift.
+
 ## Architectural Reality: Subtitle Retargeting & Ground Truth Couplings
 - **NO Magical Resync of Random Subtitles**: `pydbsrt` CANNOT magically resynchronize random, uncoupled subtitles (from OpenSubtitles or elsewhere) against a video using pHash alone. Perceptual hashing (`pHash`) operates strictly between TWO video streams: a reference video (whose timeline and subtitle alignment are certified) and a target video. A subtitle file alone contains zero visual fingerprints.
 - **Current Reality of Remote Providers (Axe 5)**:

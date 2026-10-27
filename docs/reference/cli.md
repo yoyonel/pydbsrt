@@ -195,36 +195,55 @@ dbsrt top [OPTIONS]
    - Tableau de distribution statistique descriptive (Min, Médiane, Moyenne, 90e percentile P90, Max, Écart-type $\sigma$) sur les décodages intégraux pHash (durée > 60s) : débits effectifs (`MB/s`), durées de traitement (`minutes`), tailles des fichiers (`GiB`) et couplings de sous-titres certifiés.
 
 4. **Onglet 3 : Derniers Traitements Complétés & Certifiés (`[3]` ou `[r]`)** :
-   - Journal complet et scrollable de l'ensemble des médias traités, statuts de succès (`✓ OK`, `✓ CACHE`, `✗ FAIL`), durées, volumes et horodatages.
+   - Journal complet et scrollable de l'ensemble des médias traités, avec hiérarchie rigoureuse des statuts et sévérités : succès (`✓ OK`, `✓ CACHE`), avertissement fonctionnel sans sous-titres (`⚠ NO_SRT`), interruption volontaire opérateur (`⏹ CANCEL`) et échecs critiques système (`✗ FAIL`).
+   - Filtrage dynamique cyclique (`[f]`) : `TOUS`, `SUCCÈS (OK/CACHE)`, `FAIL (ERREURS SEULES)`, `SANS SOUS-TITRES (NO_SRT)`, `ANNULÉS (CANCEL)`.
+   - Tri multicritère cyclique (`[o]`) : `DATE (RÉCENT)`, `DATE (ANCIEN)`, `STATUT (FAIL / CANCEL / NO_SRT)`, `NOM (A-Z)`, `DURÉE`, `TAILLE`, `DÉBIT CIFS`, `COUPLINGS`.
+   - Fiche Diagnostic & Erreur (`[Enter]` ou `[i]`) : inspection plein écran affichant l'explication textuelle complète de l'échec ou de l'annulation (`error_summary`), le chemin vidéo complet, les métriques d'exécution et la découverte automatique des logs d'exécution sur disque (`data/logs/` et `/tmp`).
 
-5. **Onglet 4 : Explorateur Médias NAS (`[4]` ou `[m]`)** :
-   - Catalogue interactif de la bibliothèque NAS (`/media/latty/Synology/tvshow`), présentant l'inventaire des fichiers vidéo, tailles, durées estimées, codecs vidéo détectés (`hevc`, `h264`, etc.), présence et langues des pistes de sous-titres intégrées, ainsi que le cycle de vie d'ingestion (`VIERGE`, `EN COURS`, `COMPLÉTÉ`, `PARTIEL`).
-   - Filtrage dynamique cyclique (`[f]`) : `TOUS`, `VIERGES SEULS`, `TRAITÉS`, `AVEC SOUS-TITRES`.
+5. **Onglet 4 : Explorateur de Médias Multi-Sources (`[4]` ou `[m]`)** :
+   - Catalogue unifié de tous les répertoires sources configurés et actifs, présentant l'inventaire des fichiers vidéo, source d'origine, tailles, durées estimées, codecs vidéo détectés (`hevc`, `h264`, `h264 Hi10P`, etc.), présence et langues des pistes de sous-titres intégrées, ainsi que le cycle de vie d'ingestion (`VIERGE`, `EN COURS`, `COMPLÉTÉ`, `HACHÉ SEUL`).
+   - Filtrage dynamique cyclique (`[f]`) : `TOUS`, `VIERGES SEULS`, `EN COURS`, `COMPLÉTÉS`, `HACHÉS SEULS`, `AVEC SOUS-TITRES`, `SANS SOUS-TITRES`.
    - Tri multicritère cyclique (`[o]`) : `NOM (A-Z)`, `TAILLE`, `DURÉE`, `STATUT`, `SOUS-TITRES`.
    - Sélection multiple par case à cocher : touche `[Espace]` pour cocher/décocher le média pointé, touche `[a]` pour tout cocher/décocher.
    - Déclenchement de lot ciblé (`[b]`) : exécute le batch d'ingestion en tâche de fond exclusivement sur les médias sélectionnés et rebascule automatiquement sur l'onglet des Tâches avec notification.
+
+6. **Onglet 5 : Gestion des Sources de Médias (`[5]` ou `[s]`)** :
+   - Gestionnaire interactif CRUD complet des répertoires de stockage vidéo scannés en parallèle (stocké dans `data/reports/media_sources.json`).
+   - Initialisation automatique par défaut avec la source NAS (`$NAS_TVSHOW_DIR` ou bibliothèque TVShow par défaut).
+   - `[a]` : Ajout interactif d'une nouvelle source via modal (saisie du chemin absolu/relatif et du nom d'affichage).
+   - `[e]` : Édition du chemin et du nom de la source sélectionnée.
+   - `[Espace]` : Activation / désactivation dynamique de la source (prise en compte immédiate dans l'indexation globale).
+   - `[d]` : Suppression de la source sélectionnée (protection contre la suppression de la dernière source restante).
+   - `[r]` : Déclenchement d'un rescan asynchrone immédiat de l'ensemble des sources actives.
 
 #### Raccourcis Clavier
 
 - `[1]` : Afficher l'onglet des tâches en cours
 - `[2]` / `[h]` : Afficher l'onglet des statistiques historiques réelles
 - `[3]` / `[r]` : Afficher l'onglet des traitements complétés et certifiés
-- `[4]` / `[m]` : Afficher l'onglet de l'explorateur de médias NAS
-- `[Tab]` / `[Shift+Tab]` : Navigation circulaire bidirectionnelle entre les 4 onglets
+- `[4]` / `[m]` : Afficher l'onglet de l'explorateur de médias multi-sources
+- `[5]` / `[s]` : Afficher l'onglet de gestion des sources de médias (ou `[s]` pour arrêter une tâche dans l'onglet 1)
+- `[Tab]` / `[Shift+Tab]` : Navigation circulaire bidirectionnelle entre les 5 onglets
 - `[↑]` / `[k]` : Déplacer le curseur vers le haut / élément précédent
 - `[↓]` / `[j]` : Déplacer le curseur vers le bas / élément suivant
-- `[PgUp]` / `[PgDn]` : Défilement rapide par page (onglets 1, 3 et 4)
-- `[Home]` / `[End]` : Saut direct en début ou fin de liste (onglets 1, 3 et 4)
-- `[Espace]` : Cocher / décocher un média (onglet 4)
-- `[a]` : Cocher / décocher tous les médias visibles (onglet 4)
-- `[f]` : Changer le filtre des médias visibles (onglet 4)
-- `[o]` : Changer le critère de tri des médias (onglet 4)
+- `[PgUp]` / `[PgDn]` : Défilement rapide par page (onglets 1, 3, 4 et 5)
+- `[Home]` / `[End]` : Saut direct en début ou fin de liste (onglets 1, 3, 4 et 5)
+- `[Espace]` : Cocher / décocher un média (onglet 4) ou activer/désactiver une source (onglet 5)
+- `[a]` : Cocher / décocher tous les médias visibles (onglet 4) ou ajouter une source (onglet 5)
+- `[e]` : Éditer la source sélectionnée (onglet 5)
+- `[d]` : Supprimer la source sélectionnée (onglet 5)
+- `[r]` : Déclencher un rescan complet des sources (onglet 5)
+- `[f]` : Changer le filtre des éléments visibles (onglets 3 et 4)
+- `[o]` : Changer le critère de tri (onglets 3 et 4)
 - `[b]` : Lancer l'ingestion batch sur les médias cochés (onglet 4)
-- `[Enter]` / `[l]` : Basculer sur la page d'inspection détaillée du processus (dans l'onglet 1)
-- `[Esc]` / `[Backspace]` : Revenir à l'onglet principal des tâches (ou quitter depuis l'onglet 1)
-- `[p]` : Mettre en pause ou reprendre la tâche sélectionnée (`SIGSTOP` / `SIGCONT`)
-- `[s]` : Arrêter proprement la tâche sélectionnée (`SIGTERM`)
-- `[K]` : Tuer immédiatement le processus en mode inspection (`SIGKILL`)
+- `[S]` : Filtrer les médias par source d'origine (cyclique : toutes -> source 1 -> source 2...) (onglet 4)
+- `[p]` : Mettre en pause ou reprendre le processus sélectionné (SIGSTOP / SIGCONT) (onglet 1)
+- `[s]` : Arrêter proprement le processus sélectionné (SIGTERM) (onglet 1)
+- `[K]` : Tuer immédiatement le processus sélectionné (SIGKILL en inspection) (onglet 1)
+- `[x]` : Arrêter proprement TOUT le batch en cours (coordinateur Python + workers ffmpeg via SIGTERM) (onglets 1 et 4)
+- `[X]` : Tuer immédiatement (SIGKILL) TOUT le batch en cours (onglets 1 et 4)
+- `[Enter]` / `[i]` / `[l]` : Basculer sur la page d'inspection / diagnostic (onglets 1, 3 et 4)
+- `[Esc]` / `[Backspace]` : Revenir à l'onglet précédent ou à la liste principale (ou quitter depuis l'onglet 1)
 - `[?]` : Afficher / masquer la page d'aide
 - `[q]` : Quitter le moniteur TUI
 
