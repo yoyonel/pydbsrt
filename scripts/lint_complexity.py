@@ -100,6 +100,28 @@ def count_parameters(param_str: str) -> int:
     return len(parts)
 
 
+def find_char_literal_end(content: str, i: int) -> int | None:
+    """If content[i] starts a Rust char literal ('c', '\\n', '\\u{...}'), return closing quote index."""
+    if content[i] != "'":
+        return None
+    n = len(content)
+    # If preceded by alphanumeric, it's not a char literal (e.g. foo' or lifetime in some contexts)
+    if i > 0 and (content[i - 1].isalnum() or content[i - 1] == "_"):
+        return None
+    # 'x'
+    if i + 2 < n and content[i + 2] == "'" and content[i + 1] != "\\":
+        return i + 2
+    # '\\x' (e.g. '\\n', '\\'', '\\\\')
+    if i + 3 < n and content[i + 1] == "\\" and content[i + 3] == "'":
+        return i + 3
+    # '\\u{...}' or '\\xNN'
+    if i + 1 < n and content[i + 1] == "\\":
+        end_idx = content.find("'", i + 2)
+        if end_idx != -1 and end_idx - i <= 10 and "\n" not in content[i:end_idx]:
+            return end_idx
+    return None
+
+
 def parse_function_metrics(file_path: Path) -> list[FunctionMetrics]:
     """Parses a Rust source file and computes metrics for each function with enclosing scope."""
     content = file_path.read_text(encoding="utf-8")
@@ -115,7 +137,6 @@ def parse_function_metrics(file_path: Path) -> list[FunctionMetrics]:
     # State machine to track depth and impl scope
     depth = 0
     in_string = False
-    in_char = False
     in_line_comment = False
     in_block_comment = False
     impl_stack: list[tuple[int, str]] = []  # (depth_at_opening, type_name)
@@ -137,11 +158,6 @@ def parse_function_metrics(file_path: Path) -> list[FunctionMetrics]:
                 i += 1
             elif c == '"':
                 in_string = False
-        elif in_char:
-            if c == "\\":
-                i += 1
-            elif c == "'":
-                in_char = False
         else:
             if c == "/" and i + 1 < n and content[i + 1] == "/":
                 in_line_comment = True
@@ -152,7 +168,9 @@ def parse_function_metrics(file_path: Path) -> list[FunctionMetrics]:
             elif c == '"':
                 in_string = True
             elif c == "'":
-                in_char = True
+                char_end = find_char_literal_end(content, i)
+                if char_end is not None:
+                    i = char_end
             elif c == "{":
                 depth += 1
             elif c == "}":
@@ -201,7 +219,6 @@ def parse_function_metrics(file_path: Path) -> list[FunctionMetrics]:
                             fn_end_char = -1
                             fn_max_nesting = 0
                             body_in_str = False
-                            body_in_char = False
                             body_in_lcomment = False
                             body_in_bcomment = False
 
@@ -220,11 +237,6 @@ def parse_function_metrics(file_path: Path) -> list[FunctionMetrics]:
                                         j += 1
                                     elif bj == '"':
                                         body_in_str = False
-                                elif body_in_char:
-                                    if bj == "\\":
-                                        j += 1
-                                    elif bj == "'":
-                                        body_in_char = False
                                 else:
                                     if bj == "/" and j + 1 < n and content[j + 1] == "/":
                                         body_in_lcomment = True
@@ -235,7 +247,9 @@ def parse_function_metrics(file_path: Path) -> list[FunctionMetrics]:
                                     elif bj == '"':
                                         body_in_str = True
                                     elif bj == "'":
-                                        body_in_char = True
+                                        char_end = find_char_literal_end(content, j)
+                                        if char_end is not None:
+                                            j = char_end
                                     elif bj == "{":
                                         body_depth += 1
                                         if body_depth > fn_max_nesting:
