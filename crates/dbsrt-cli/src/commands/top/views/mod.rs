@@ -5,5 +5,7 @@ pub mod completed;
 pub mod completed_inspection;
 pub mod footer;
 pub mod header;
+pub mod media_browser;
+pub mod media_inspection;
 pub mod stats;
 pub mod widgets;
