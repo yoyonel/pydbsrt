@@ -6,7 +6,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use sysinfo::{ProcessesToUpdate, System};
+use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System};
 
 use crate::commands::top::constants::{
     BATCH_COORDINATOR_PATTERN, BATCH_GRACEFUL_SHUTDOWN_PAUSE_MS, BATCH_WORKER_CMD_PATTERN_1,
@@ -15,10 +15,28 @@ use crate::commands::top::constants::{
 };
 use crate::commands::top::model::{format_duration, ActiveJobTelemetry};
 
+/// Checks whether a process command line and attributes qualify it as a batch worker or decoding task.
+///
+/// # Arguments
+/// - `cmd`: Process command line joined as a string.
+/// - `name`: Process executable name.
+/// - `ppid`: Parent process ID.
+/// - `known_pids`: Known active worker process IDs from telemetry.
+pub fn is_batch_worker_candidate(cmd: &str, name: &str, ppid: u32, known_pids: &[u32]) -> bool {
+    if cmd.contains(BATCH_WORKER_CMD_PATTERN_1) || cmd.contains(BATCH_WORKER_CMD_PATTERN_2) {
+        return true;
+    }
+    if cmd.contains("ffmpeg") && (cmd.contains("-i") || cmd.contains("-f")) {
+        return true;
+    }
+    name.contains("ffmpeg") && (ppid != 0 && known_pids.contains(&ppid))
+}
+
 /// Stops or hard-kills an entire batch execution tree (coordinators, workers, ffmpeg processes).
 ///
 /// # Arguments
 /// - `force`: If `true`, sends immediate uncatchable `SIGKILL`. If `false`, sends graceful `SIGTERM`.
+/// - `known_worker_pids`: Slice of active worker process IDs tracked by the UI telemetry.
 ///
 /// # Returns
 /// A tuple `(success, message)`:
@@ -26,20 +44,26 @@ use crate::commands::top::model::{format_duration, ActiveJobTelemetry};
 /// - `message`: Descriptive status string reporting the count of coordinators and workers signaled.
 ///
 /// # Data Flow & Invariants
-/// 1. Scans all system processes via `sysinfo` to discover coordinator scripts and worker processes.
-/// 2. Deletes batch target manifest file (`DEFAULT_SELECTED_BATCH_TARGETS_PATH`) to prevent respawn.
-/// 3. Signals parent coordinator scripts first. If `force` is false, sleeps [`BATCH_GRACEFUL_SHUTDOWN_PAUSE_MS`] (200ms).
-/// 4. Signals all active child worker and `ffmpeg` decoding processes.
-pub fn stop_entire_batch(force: bool) -> (bool, String) {
+/// 1. Seeds worker list with `known_worker_pids` from the active telemetry view.
+/// 2. Scans system processes via `sysinfo` to discover coordinator scripts, child workers, and decoding subprocesses.
+/// 3. Deletes batch target manifest file (`DEFAULT_SELECTED_BATCH_TARGETS_PATH`) to prevent respawn.
+/// 4. Signals parent coordinator scripts first. If `force` is false, sleeps [`BATCH_GRACEFUL_SHUTDOWN_PAUSE_MS`].
+/// 5. Signals all active child worker and `ffmpeg` decoding processes and their process groups.
+pub fn stop_entire_batch(force: bool, known_worker_pids: &[u32]) -> (bool, String) {
     let mut system = System::new();
-    system.refresh_processes(ProcessesToUpdate::All, true);
+    system.refresh_processes_specifics(
+        ProcessesToUpdate::All,
+        true,
+        ProcessRefreshKind::everything(),
+    );
 
     let signal = if force { libc::SIGKILL } else { libc::SIGTERM };
 
     let mut coordinator_pids = Vec::new();
-    let mut worker_pids = Vec::new();
+    let mut worker_pids: Vec<u32> = known_worker_pids.to_vec();
 
     for (pid, proc_) in system.processes() {
+        let p_u32 = pid.as_u32();
         let cmd = proc_
             .cmd()
             .iter()
@@ -47,18 +71,14 @@ pub fn stop_entire_batch(force: bool) -> (bool, String) {
             .collect::<Vec<_>>()
             .join(" ");
         let name = proc_.name().to_string_lossy();
+        let ppid = proc_.parent().map(|p| p.as_u32()).unwrap_or(0);
 
         if cmd.contains(BATCH_COORDINATOR_PATTERN) {
-            coordinator_pids.push(pid.as_u32());
-        } else if cmd.contains(BATCH_WORKER_CMD_PATTERN_1)
-            || cmd.contains(BATCH_WORKER_CMD_PATTERN_2)
-            || (name.contains("ffmpeg")
-                && (cmd.contains("dbsrt")
-                    || cmd.contains("Synology")
-                    || cmd.contains("tvshow")
-                    || cmd.contains("video")))
+            coordinator_pids.push(p_u32);
+        } else if is_batch_worker_candidate(&cmd, &name, ppid, known_worker_pids)
+            && !worker_pids.contains(&p_u32)
         {
-            worker_pids.push(pid.as_u32());
+            worker_pids.push(p_u32);
         }
     }
 
@@ -75,7 +95,9 @@ pub fn stop_entire_batch(force: bool) -> (bool, String) {
     // 1. Terminate coordinators first so they don't respawn new workers
     for pid in &coordinator_pids {
         unsafe {
-            libc::kill(*pid as i32, signal);
+            if libc::kill(-(*pid as i32), signal) != 0 {
+                libc::kill(*pid as i32, signal);
+            }
         }
     }
 
@@ -85,10 +107,12 @@ pub fn stop_entire_batch(force: bool) -> (bool, String) {
         ));
     }
 
-    // 2. Terminate child worker processes
+    // 2. Terminate child worker processes and their process groups
     for pid in &worker_pids {
         unsafe {
-            libc::kill(*pid as i32, signal);
+            if libc::kill(-(*pid as i32), signal) != 0 {
+                libc::kill(*pid as i32, signal);
+            }
         }
     }
 

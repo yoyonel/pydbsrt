@@ -12,6 +12,12 @@ tasks:
     cmds:
       - uv run python scripts/lint_complexity.py {{.CLI_ARGS}}
 
+  complexity:report:
+    desc: Display comprehensive ASCII table of Rust architectural metrics (LOC, CCN, Arity, Nesting) grouped by crate, module, and file
+    aliases: [complexity:table]
+    cmds:
+      - uv run python scripts/lint_complexity.py --table {{.CLI_ARGS}}
+
   typecheck:
     desc: Run static type checker across Python codebase (Pyright)
     aliases: [types, lint:types]

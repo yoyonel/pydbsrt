@@ -181,6 +181,9 @@ pub const SOURCE_MODAL_WIDTH_PERCENT: u16 = 65;
 /// Default modal height lines for source configuration dialog.
 pub const SOURCE_MODAL_HEIGHT_LINES: u16 = 13;
 
+/// Default modal height lines for source deletion confirmation dialog.
+pub const DELETE_CONFIRM_MODAL_HEIGHT_LINES: u16 = 11;
+
 /// Process command line pattern identifying batch coordinator processes.
 pub const BATCH_COORDINATOR_PATTERN: &str = "batch_media_add";
 

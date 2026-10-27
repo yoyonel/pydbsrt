@@ -419,6 +419,218 @@ def run_check(
     return len(violations), ratcheted_count, violations
 
 
+def truncate_str(text: str, max_len: int) -> str:
+    """Truncates text with ellipsis if length exceeds max_len."""
+    if len(text) <= max_len:
+        return text
+    return text[: max_len - 3] + "..."
+
+
+def format_cell(text: str, width: int, align: str = "<", color_code: str | None = None, use_color: bool = True) -> str:
+    """Pads plain text to exact width, then optionally wraps with ANSI color."""
+    if align == ">":
+        padded = f"{text:>{width}}"
+    elif align == "^":
+        padded = f"{text:^{width}}"
+    else:
+        padded = f"{text:<{width}}"
+    if color_code and use_color:
+        return f"{color_code}{padded}\033[0m"
+    return padded
+
+
+def print_complexity_table(
+    metrics: list[FunctionMetrics],
+    baseline: dict[str, dict[str, Any]],
+    filter_query: str | None = None,
+    violations_only: bool = False,
+) -> int:
+    """Renders structured ASCII tables grouping functions by crate, file, and scope with architectural metrics."""
+    use_color = sys.stdout.isatty()
+
+    def c(text: str, code: str) -> str:
+        return f"{code}{text}\033[0m" if use_color else text
+
+    cyan = "\033[1;36m"
+    green = "\033[1;32m"
+    yellow = "\033[1;33m"
+    red = "\033[1;31m"
+    magenta = "\033[1;35m"
+    bold = "\033[1m"
+    dim = "\033[2m"
+
+    # Group by crate -> file
+    grouped: dict[str, dict[str, list[FunctionMetrics]]] = {}
+    for m in metrics:
+        if filter_query and (
+            filter_query.lower() not in m.file_path.lower()
+            and filter_query.lower() not in m.function_name.lower()
+            and filter_query.lower() not in m.scope.lower()
+        ):
+            continue
+
+        parts = Path(m.file_path).parts
+        crate_name = parts[1] if len(parts) >= 2 and parts[0] == "crates" else "root"
+        grouped.setdefault(crate_name, {}).setdefault(m.file_path, []).append(m)
+
+    if not grouped:
+        print("⚠️ No functions matched the specified criteria.")
+        return 0
+
+    total_funcs = 0
+    total_nominal = 0
+    total_tolerated = 0
+    total_legacy = 0
+    total_violations = 0
+
+    w_scope = 16
+    w_fn = 38
+    w_lines = 11
+    w_loc = 5
+    w_ccn = 5
+    w_arity = 5
+    w_nest = 5
+    w_status = 12
+
+    banner_len = 104
+
+    for crate_name in sorted(grouped.keys()):
+        crate_files = grouped[crate_name]
+        crate_func_count = sum(len(fns) for fns in crate_files.values())
+
+        crate_title = f" 📦 PROJET / CRATE: {crate_name} ({crate_func_count} fonction(s)) "
+        print("\n" + c("╔" + "═" * (banner_len - 2) + "╗", cyan))
+        print(c(f"║ {crate_title:<{banner_len - 4}} ║", cyan))
+        print(c("╚" + "═" * (banner_len - 2) + "╝", cyan))
+
+        for file_path in sorted(crate_files.keys()):
+            fns = crate_files[file_path]
+            fns.sort(key=lambda x: x.start_line)
+
+            displayed_fns = []
+            for m in fns:
+                is_legacy = m.key in baseline
+                exceeds = (
+                    m.loc > MAX_FUNCTION_LOC
+                    or m.ccn > MAX_CYCLOMATIC_COMPLEXITY
+                    or m.parameters > MAX_FUNCTION_PARAMETERS
+                    or m.nesting > MAX_NESTING_DEPTH
+                )
+                warn = (100 < m.loc <= MAX_FUNCTION_LOC) or (15 < m.ccn <= MAX_CYCLOMATIC_COMPLEXITY)
+                if violations_only and not (exceeds or warn or is_legacy):
+                    continue
+                displayed_fns.append(m)
+
+            if not displayed_fns:
+                continue
+
+            print(c(f"\n  📄 Module / Fichier : {file_path} ({len(displayed_fns)} fonction(s))", bold))
+            sep_top = f"  ┌{'─' * (w_scope + 2)}┬{'─' * (w_fn + 2)}┬{'─' * (w_lines + 2)}┬{'─' * (w_loc + 2)}┬{'─' * (w_ccn + 2)}┬{'─' * (w_arity + 2)}┬{'─' * (w_nest + 2)}┬{'─' * (w_status + 2)}┐"
+            sep_mid = f"  ├{'─' * (w_scope + 2)}┼{'─' * (w_fn + 2)}┼{'─' * (w_lines + 2)}┼{'─' * (w_loc + 2)}┼{'─' * (w_ccn + 2)}┼{'─' * (w_arity + 2)}┼{'─' * (w_nest + 2)}┼{'─' * (w_status + 2)}┤"
+            sep_bot = f"  └{'─' * (w_scope + 2)}┴{'─' * (w_fn + 2)}┴{'─' * (w_lines + 2)}┴{'─' * (w_loc + 2)}┴{'─' * (w_ccn + 2)}┴{'─' * (w_arity + 2)}┴{'─' * (w_nest + 2)}┴{'─' * (w_status + 2)}┘"
+
+            print(sep_top)
+            header_line = (
+                "  │ "
+                + format_cell("Scope", w_scope, "<", bold, use_color)
+                + " │ "
+                + format_cell("Fonction / Méthode", w_fn, "<", bold, use_color)
+                + " │ "
+                + format_cell("Lignes", w_lines, "<", bold, use_color)
+                + " │ "
+                + format_cell("LOC", w_loc, ">", bold, use_color)
+                + " │ "
+                + format_cell("CCN", w_ccn, ">", bold, use_color)
+                + " │ "
+                + format_cell("Arity", w_arity, ">", bold, use_color)
+                + " │ "
+                + format_cell("Nest", w_nest, ">", bold, use_color)
+                + " │ "
+                + format_cell("Statut", w_status, "<", bold, use_color)
+                + " │"
+            )
+            print(header_line)
+            print(sep_mid)
+
+            for m in displayed_fns:
+                total_funcs += 1
+                is_legacy = m.key in baseline
+                exceeds = (
+                    m.loc > MAX_FUNCTION_LOC
+                    or m.ccn > MAX_CYCLOMATIC_COMPLEXITY
+                    or m.parameters > MAX_FUNCTION_PARAMETERS
+                    or m.nesting > MAX_NESTING_DEPTH
+                )
+                warn = (100 < m.loc <= MAX_FUNCTION_LOC) or (15 < m.ccn <= MAX_CYCLOMATIC_COMPLEXITY)
+
+                if exceeds and not is_legacy:
+                    status_label = "[VIOLATION]"
+                    status_color = red
+                    total_violations += 1
+                elif is_legacy:
+                    status_label = "[LEGACY]"
+                    status_color = magenta
+                    total_legacy += 1
+                elif warn:
+                    status_label = "[TOLERATED]"
+                    status_color = yellow
+                    total_tolerated += 1
+                else:
+                    status_label = "[OK]"
+                    status_color = green
+                    total_nominal += 1
+
+                loc_color = red if m.loc > MAX_FUNCTION_LOC else (yellow if m.loc > 100 else dim)
+                ccn_color = red if m.ccn > MAX_CYCLOMATIC_COMPLEXITY else (yellow if m.ccn > 15 else dim)
+                arity_color = red if m.parameters > MAX_FUNCTION_PARAMETERS else dim
+                nest_color = red if m.nesting > MAX_NESTING_DEPTH else dim
+
+                scope_disp = truncate_str(m.scope, w_scope)
+                fn_disp = truncate_str(m.function_name, w_fn)
+                lines_disp = f"{m.start_line}-{m.end_line}"
+
+                row_line = (
+                    "  │ "
+                    + format_cell(scope_disp, w_scope, "<", None, use_color)
+                    + " │ "
+                    + format_cell(fn_disp, w_fn, "<", None, use_color)
+                    + " │ "
+                    + format_cell(lines_disp, w_lines, "<", None, use_color)
+                    + " │ "
+                    + format_cell(str(m.loc), w_loc, ">", loc_color, use_color)
+                    + " │ "
+                    + format_cell(str(m.ccn), w_ccn, ">", ccn_color, use_color)
+                    + " │ "
+                    + format_cell(str(m.parameters), w_arity, ">", arity_color, use_color)
+                    + " │ "
+                    + format_cell(str(m.nesting), w_nest, ">", nest_color, use_color)
+                    + " │ "
+                    + format_cell(status_label, w_status, "<", status_color, use_color)
+                    + " │"
+                )
+                print(row_line)
+
+            print(sep_bot)
+
+    print("\n" + c("═" * banner_len, bold))
+    print(c("📊 SYNTHÈSE QUALITÉ & COMPLEXITÉ ARCHITECTURALE RUST (pydbsrt)", bold))
+    print(c("═" * banner_len, bold))
+    pct_nom = (total_nominal * 100) // max(1, total_funcs)
+    print(f"  • Fonctions analysées   : {c(str(total_funcs), bold)}")
+    print(
+        f"  • Conformité nominale   : {c(f'{total_nominal} ({pct_nom}%)', green)} [LOC <= 100, CCN <= 15, Arity <= 4, Nesting <= 4]"
+    )
+    print(f"  • Tolérance cible (warn): {c(str(total_tolerated), yellow)} [100 < LOC <= 150 ou 15 < CCN <= 20]")
+    print(
+        f"  • Grandfathered (figé)  : {c(str(total_legacy), magenta)} [Plafonds verrouillés via complexity_baseline.json]"
+    )
+    viol_color = red if total_violations > 0 else green
+    print(f"  • Violations bloquantes : {c(str(total_violations), viol_color)}")
+    print(c("═" * banner_len, bold))
+
+    return 1 if total_violations > 0 else 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Enforce strict Rust architectural complexity and function size limits."
@@ -445,9 +657,36 @@ def main() -> int:
         action="store_true",
         help="Automatically remove cleaned grandfathered functions from baseline",
     )
+    parser.add_argument(
+        "--table",
+        "-t",
+        action="store_true",
+        help="Print comprehensive ASCII table of Rust functions and complexity metrics",
+    )
+    parser.add_argument(
+        "--filter",
+        type=str,
+        default=None,
+        help="Filter functions or files by name or module substring",
+    )
+    parser.add_argument(
+        "--violations-only",
+        action="store_true",
+        help="Only display functions that exceed target or baseline thresholds in table",
+    )
     args = parser.parse_args()
 
     metrics = scan_all_crates(args.crates_dir)
+
+    if args.table:
+        baseline = load_baseline(args.baseline)
+        return print_complexity_table(
+            metrics,
+            baseline,
+            filter_query=args.filter,
+            violations_only=args.violations_only,
+        )
+
     print(f"🔍 Scanned {len(metrics)} Rust production functions across {args.crates_dir}/...")
 
     if args.update_baseline:

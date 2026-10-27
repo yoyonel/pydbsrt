@@ -10,9 +10,9 @@ expression: grid
 ┌ 🗄️  GESTION DES SOURCES DE MÉDIAS (RÉPERTOIRES VIDÉO) [2] ────────────────────────────────────────────────────────────────────────────────┐
 │ [a] Ajouter Source    [e] Éditer    [Space] Activer/Désactiver    [d] Supprimer    [r] Rescanner Tout    [4/m] Voir Médias Détectés      │
 │                                                                                                                                          │
-│    STATUT          NOM┌ ➕  AJOUTER UNE NOUVELLE SOURCE DE MÉDIAS ───────────────────────────────────────────────┐HEMIN DU RÉPERTOIRE     │
-│►   [✓] ACTIF       Syn│ Astuce : Indiquez un chemin local ou un point de montage CIFS/NFS (/media/..., /mnt/...)│mnt/nas/video           │
-│    [✓] ACTIF       Syn│┌ Chemin du Répertoire (obligatoire) ───────────────────────────────────────────────────┐│mnt/nas/tvshow          │
+│    STATUT           NO┌ ➕  AJOUTER UNE NOUVELLE SOURCE DE MÉDIAS ───────────────────────────────────────────────┐N DU RÉPERTOIRE         │
+│►   [✓] ACTIF        Sy│ Astuce : Indiquez un chemin local ou un point de montage CIFS/NFS (/media/..., /mnt/...)│nas/video               │
+│    [✓] ACTIF        Sy│┌ Chemin du Répertoire (obligatoire) ───────────────────────────────────────────────────┐│nas/tvshow              │
 │                       ││/mnt/nas/demo█                                                                         ││                        │
 │                       │└───────────────────────────────────────────────────────────────────────────────────────┘│                        │
 │                       │┌ Nom d'affichage (optionnel, auto-déduit si vide) ─────────────────────────────────────┐│                        │

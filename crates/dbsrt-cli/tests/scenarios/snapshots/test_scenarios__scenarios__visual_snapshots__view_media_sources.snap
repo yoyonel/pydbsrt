@@ -10,9 +10,9 @@ expression: grid
 ┌ 🗄️  GESTION DES SOURCES DE MÉDIAS (RÉPERTOIRES VIDÉO) [2] ────────────────────────────────────────────────────────────────────────────────┐
 │ [a] Ajouter Source    [e] Éditer    [Space] Activer/Désactiver    [d] Supprimer    [r] Rescanner Tout    [4/m] Voir Médias Détectés      │
 │                                                                                                                                          │
-│    STATUT          NOM DE LA SOURCE ACCÈS DISQUE     SCAN DISQUE        DISPONIBLES      DERNIER SCAN           CHEMIN DU RÉPERTOIRE     │
-│►   [✓] ACTIF       Synology NAS (vi ✗ INACCESSIBLE   3 (+1 nouv.)       3 dispo          2026-10-27T08:00:00Z   /mnt/nas/video           │
-│    [✓] ACTIF       Synology NAS (tv ✗ INACCESSIBLE   2 fichier(s)       2 dispo          2026-10-27T08:00:00Z   /mnt/nas/tvshow          │
+│    STATUT           NOM DE LA SOURCE           SCAN DISQUE          DISPONIBLES      DERNIER SCAN           CHEMIN DU RÉPERTOIRE         │
+│►   [✓] ACTIF        Synology NAS (video)       3 (+1 nouv.)         3 dispo          2026-10-27T08:00:00Z   /mnt/nas/video               │
+│    [✓] ACTIF        Synology NAS (tvshow)      2 fichier(s)         2 dispo          2026-10-27T08:00:00Z   /mnt/nas/tvshow              │
 │                                                                                                                                          │
 │                                                                                                                                          │
 │                                                                                                                                          │

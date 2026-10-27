@@ -592,12 +592,9 @@ fn test_ui_rendering_all_pages() {
     };
     terminal.draw(|f| render_ui(f, &ctx_sources)).unwrap();
 
-    let modal = dbsrt_cli::commands::top::model::SourceInputModalState {
-        mode: dbsrt_cli::commands::top::model::SourceModalMode::Add,
-        name_input: "Test NAS".to_string(),
-        path_input: "/media/test".to_string(),
-        active_field: dbsrt_cli::commands::top::model::SourceModalField::Path,
-    };
+    let mut modal = dbsrt_cli::commands::top::model::SourceInputModalState::new_add();
+    modal.name_input = "Test NAS".to_string();
+    modal.path_input = "/media/test".to_string();
     let ctx_sources_modal = UiContext {
         telemetry: &tel,
         view: ViewPage::MediaSources,
@@ -2001,6 +1998,96 @@ fn test_scan_all_media_sources_multi_dir() {
 }
 
 #[test]
+fn test_cache_preservation_when_source_is_unmounted_or_empty() {
+    let tmp_dir =
+        std::env::temp_dir().join(format!("pydbsrt_cache_preserv_{}", std::process::id()));
+    let mount_dir = tmp_dir.join("synology_share");
+    let _ = std::fs::create_dir_all(&mount_dir);
+
+    let file_1 = mount_dir.join("movie_one.mp4");
+    let file_2 = mount_dir.join("movie_two.mkv");
+    let _ = std::fs::write(&file_1, b"video dummy 1");
+    let _ = std::fs::write(&file_2, b"video dummy 2");
+
+    let sources = vec![dbsrt_cli::commands::top::model::MediaSourceConfig {
+        id: "syno_vid".to_string(),
+        name: "Synology Video".to_string(),
+        path: mount_dir.clone(),
+        enabled: true,
+        media_count: 0,
+        last_scan_added: 0,
+        last_scan_iso: None,
+    }];
+
+    let couplings_file = tmp_dir.join("couplings.json");
+    let events_file = tmp_dir.join("events.jsonl");
+    let phash_dir = tmp_dir.join("__PHASH__");
+    let cache_file = tmp_dir.join("discovered_media.json");
+    let _ = std::fs::create_dir_all(&phash_dir);
+
+    // Scan 1: initial discovery
+    let (items_1, sources_1) = dbsrt_cli::commands::top::sampler::scan_all_media_sources(
+        &sources,
+        &couplings_file,
+        &events_file,
+        &phash_dir,
+        &[],
+        &cache_file,
+    );
+    assert_eq!(items_1.len(), 2);
+    assert_eq!(sources_1[0].media_count, 2);
+    assert_eq!(sources_1[0].last_scan_added, 2);
+
+    let disk_cache_1 = dbsrt_cli::commands::top::sampler::load_media_cache(&cache_file);
+    assert_eq!(disk_cache_1.len(), 2, "Disk cache must store 2 items");
+
+    // Scan 2: volume unmounted / empty directory
+    let _ = std::fs::remove_file(&file_1);
+    let _ = std::fs::remove_file(&file_2);
+
+    let (items_2, sources_2) = dbsrt_cli::commands::top::sampler::scan_all_media_sources(
+        &sources,
+        &couplings_file,
+        &events_file,
+        &phash_dir,
+        &[],
+        &cache_file,
+    );
+    // Active available media should be 0 because volume has no files right now (0 dispo)
+    assert_eq!(items_2.len(), 0, "No active media when unmounted");
+    assert_eq!(sources_2[0].media_count, 0);
+
+    // CRITICAL: Disk cache must NOT have been wiped out!
+    let disk_cache_2 = dbsrt_cli::commands::top::sampler::load_media_cache(&cache_file);
+    assert_eq!(
+        disk_cache_2.len(),
+        2,
+        "Persistent disk cache must preserve metadata across unmounts!"
+    );
+
+    // Scan 3: volume remounted
+    let _ = std::fs::write(&file_1, b"video dummy 1");
+    let _ = std::fs::write(&file_2, b"video dummy 2");
+
+    let (items_3, sources_3) = dbsrt_cli::commands::top::sampler::scan_all_media_sources(
+        &sources,
+        &couplings_file,
+        &events_file,
+        &phash_dir,
+        &[],
+        &cache_file,
+    );
+    assert_eq!(items_3.len(), 2, "Remounted volume restores active media");
+    assert_eq!(sources_3[0].media_count, 2);
+    assert_eq!(
+        sources_3[0].last_scan_added, 0,
+        "Zero new additions because both were instant cache hits!"
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+}
+
+#[test]
 fn test_e2e_sources_add_and_render_flow() {
     use std::sync::{Arc, RwLock};
 
@@ -2033,14 +2120,19 @@ fn test_e2e_sources_add_and_render_flow() {
     handle_key_event_with_state(KeyCode::Char('a'), &mut app, &tel, Some(&shared_state));
     assert!(app.source_modal.is_some());
 
-    // 3. User types path: "/mnt/nas/Synology/video/"
-    for c in "/mnt/nas/Synology/video/".chars() {
-        handle_key_event_with_state(KeyCode::Char(c), &mut app, &tel, Some(&shared_state));
-    }
-    assert_eq!(
-        app.source_modal.as_ref().unwrap().path_input,
-        "/mnt/nas/Synology/video/"
-    );
+    // Validation: relative path "toto" is rejected and modal remains open
+    app.source_modal.as_mut().unwrap().path_input = "toto".to_string();
+    handle_key_event_with_state(KeyCode::Enter, &mut app, &tel, Some(&shared_state));
+    assert!(app.source_modal.is_some());
+    assert!(app.source_modal.as_ref().unwrap().error_msg.is_some());
+
+    // 3. User types valid existing directory path
+    let test_dir = std::env::temp_dir()
+        .join(format!("pydbsrt_test_add_{}", std::process::id()))
+        .join("video");
+    std::fs::create_dir_all(&test_dir).unwrap();
+    let test_dir_str = test_dir.display().to_string();
+    app.source_modal.as_mut().unwrap().path_input = test_dir_str;
 
     // 4. User presses Enter to validate and save
     handle_key_event_with_state(KeyCode::Enter, &mut app, &tel, Some(&shared_state));
@@ -2063,10 +2155,7 @@ fn test_e2e_sources_add_and_render_flow() {
         "shared_state must have 2 sources!"
     );
     assert_eq!(updated_tel.media_sources[1].name, "video");
-    assert_eq!(
-        updated_tel.media_sources[1].path,
-        PathBuf::from("/mnt/nas/Synology/video/")
-    );
+    assert_eq!(updated_tel.media_sources[1].path, test_dir);
 }
 
 #[test]
@@ -2102,8 +2191,12 @@ fn test_e2e_sources_edit_and_render_flow() {
     assert!(app.source_modal.is_some());
 
     // 2. Clear path and write new path
+    let test_dir = std::env::temp_dir().join(format!("pydbsrt_test_edit_{}", std::process::id()));
+    std::fs::create_dir_all(&test_dir).unwrap();
+    let test_dir_str = test_dir.display().to_string();
+
     let modal = app.source_modal.as_mut().unwrap();
-    modal.path_input = "/media/src1_renamed".to_string();
+    modal.path_input = test_dir_str.clone();
     modal.name_input = "Updated Name".to_string();
 
     // 3. Press Enter
@@ -2115,10 +2208,7 @@ fn test_e2e_sources_edit_and_render_flow() {
         dbsrt_cli::commands::top::app::event_loop_step(&mut terminal, &mut app, &shared_state)
             .unwrap();
     assert_eq!(updated_tel.media_sources[0].name, "Updated Name");
-    assert_eq!(
-        updated_tel.media_sources[0].path,
-        PathBuf::from("/media/src1_renamed")
-    );
+    assert_eq!(updated_tel.media_sources[0].path, test_dir);
 }
 
 #[test]
@@ -2231,9 +2321,29 @@ fn test_e2e_sources_delete_and_protection_flow() {
         dbsrt_cli::commands::top::app::event_loop_step(&mut terminal, &mut app, &shared_state)
             .unwrap();
 
-    // 1. Delete source 1 (when 2 sources exist -> succeeds)
+    // 1. Delete source 1: press 'd' opens confirmation modal
     app.source_scroll_index = 1;
     handle_key_event_with_state(KeyCode::Char('d'), &mut app, &tel, Some(&shared_state));
+    assert!(app.source_modal.is_some());
+    assert!(matches!(
+        app.source_modal.as_ref().unwrap().mode,
+        dbsrt_cli::commands::top::model::SourceModalMode::DeleteConfirm(1)
+    ));
+
+    // Cancel deletion with 'n'
+    handle_key_event_with_state(KeyCode::Char('n'), &mut app, &tel, Some(&shared_state));
+    assert!(app.source_modal.is_none());
+    assert_eq!(
+        app.current_feedback().unwrap(),
+        "Suppression de la source annulée."
+    );
+
+    // Press 'd' again and confirm deletion with 'y'
+    handle_key_event_with_state(KeyCode::Char('d'), &mut app, &tel, Some(&shared_state));
+    assert!(app.source_modal.is_some());
+    handle_key_event_with_state(KeyCode::Char('y'), &mut app, &tel, Some(&shared_state));
+    assert!(app.source_modal.is_none());
+
     let after_delete =
         dbsrt_cli::commands::top::app::event_loop_step(&mut terminal, &mut app, &shared_state)
             .unwrap();
@@ -2495,7 +2605,7 @@ fn test_e2e_stop_entire_batch_cleans_targets_and_returns_status() {
     let _ = std::fs::write(targets_file, "[\"/dummy/path.mkv\"]");
 
     // Call stop_entire_batch
-    let (handled, msg) = dbsrt_cli::commands::top::process_ctl::stop_entire_batch(false);
+    let (handled, msg) = dbsrt_cli::commands::top::process_ctl::stop_entire_batch(false, &[]);
     // Even if no process was running, the targets file must be cleaned or the call reports accurately
     assert!(msg.contains("batch") || msg.contains("Batch"));
     let _ = handled;

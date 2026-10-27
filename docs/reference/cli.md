@@ -210,11 +210,11 @@ dbsrt top [OPTIONS]
 6. **Onglet 5 : Gestion des Sources de Médias (`[5]` ou `[s]`)** :
    - Gestionnaire interactif CRUD complet des répertoires de stockage vidéo scannés en parallèle (stocké dans `data/reports/media_sources.json`).
    - Initialisation automatique par défaut avec la source NAS (`$NAS_TVSHOW_DIR` ou bibliothèque TVShow par défaut).
-   - `[a]` : Ajout interactif d'une nouvelle source via modal (saisie du chemin absolu/relatif et du nom d'affichage).
-   - `[e]` : Édition du chemin et du nom de la source sélectionnée.
-   - `[Espace]` : Activation / désactivation dynamique de la source (prise en compte immédiate dans l'indexation globale).
-   - `[d]` : Suppression de la source sélectionnée (protection contre la suppression de la dernière source restante).
-   - `[r]` : Déclenchement d'un rescan asynchrone immédiat de l'ensemble des sources actives.
+   - `[a]` : Ajout interactif d'une nouvelle source via modal (validation stricte : chemin absolu obligatoire et répertoire existant).
+   - `[e]` : Édition du chemin et du nom de la source sélectionnée (validation du répertoire).
+   - `[Espace]` : Activation / désactivation dynamique de la source (statut `[✓] ACTIF` vs `[ ] DÉSACTIVÉ`).
+   - `[d]` : Suppression de la source sélectionnée avec dialogue modal de confirmation (protection de la dernière source restante).
+   - `[r]` : Déclenchement d'un rescan asynchrone immédiat de l'ensemble des sources actives (préservation du cache des métadonnées pour éviter tout recomputing superflu).
 
 #### Raccourcis Clavier
 

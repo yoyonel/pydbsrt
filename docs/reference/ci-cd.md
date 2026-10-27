@@ -88,7 +88,7 @@ flowchart TD
   5. YAML : Validation syntaxique de tous les `.yml` et Docker Compose.
   6. Docker : Audit statique des Dockerfiles avec Hadolint.
   7. Web & JSON : Intégrité des assets JSON et HTML/JS.
-  8. Rust Complexity Gate : Contrôle strict de complexité cyclomatique (CCN $\le$ 20) et taille des fonctions (LOC $\le$ 150, nesting $\le$ 4, arguments $\le$ 4) via `scripts/lint_complexity.py` avec mécanisme anti-régression ratchet.
+  8. Rust Complexity Gate : Contrôle strict de complexité cyclomatique (CCN $\le$ 20) et taille des fonctions (LOC $\le$ 150, nesting $\le$ 4, arguments $\le$ 4) via `scripts/lint_complexity.py` avec mécanisme anti-régression ratchet (inspection tabulaire complète via `task complexity:report`).
 
 ### 3.2. `python-unit` : Python Unit Tests
 - **Image** : `ubuntu-latest`

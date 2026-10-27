@@ -56,7 +56,7 @@ use crate::commands::top::model::{
 use crate::commands::top::process_ctl::{kill_job, stop_entire_batch, stop_job, toggle_pause_job};
 use crate::commands::top::sampler::{
     add_media_source, compute_session_throughput, delete_media_source, launch_selected_batch,
-    load_historical_records, load_media_cache, load_media_sources, preload_stem_size_cache,
+    load_historical_records, load_media_sources, preload_stem_size_cache,
     run_telemetry_sampler_loop, save_media_cache, start_gpu_sampler, start_media_sources_scanner,
     toggle_media_source, trigger_media_sources_rescan, update_media_source,
 };
@@ -321,11 +321,6 @@ pub fn run_top_app(refresh_interval_ms: u64) -> Result<()> {
         .unwrap_or(0.0);
     let initial_session = compute_session_throughput(&initial_history, &[], now_unix_secs);
 
-    let media_cache_path = PathBuf::from(DEFAULT_MEDIA_CACHE_PATH);
-    let cached_map = load_media_cache(&media_cache_path);
-    let mut initial_media: Vec<_> = cached_map.into_values().collect();
-    initial_media.sort_by_key(|a| a.stem.to_lowercase());
-
     let media_sources_path = PathBuf::from(DEFAULT_MEDIA_SOURCES_PATH);
     let initial_sources = load_media_sources(&media_sources_path);
 
@@ -336,7 +331,7 @@ pub fn run_top_app(refresh_interval_ms: u64) -> Result<()> {
         history_records: initial_history,
         stats: initial_stats,
         session: initial_session,
-        discovered_media: initial_media,
+        discovered_media: Vec::new(),
         media_sources: initial_sources,
         is_scanning: true,
         ..Default::default()
@@ -551,6 +546,23 @@ pub fn handle_key_event_with_state(
     handle_view_specific_key_event(code, app, telemetry, shared_state);
 }
 
+/// Dispatches source modal addition or modification action to persistent storage.
+fn apply_source_modal_action(
+    mode: &SourceModalMode,
+    sources: &mut Vec<MediaSourceConfig>,
+    name: String,
+    path: PathBuf,
+) -> Result<String, String> {
+    let sources_path = std::path::Path::new(DEFAULT_MEDIA_SOURCES_PATH);
+    match mode {
+        SourceModalMode::Add => add_media_source(sources_path, sources, name, path)
+            .map(|s| format!("✓ Source ajoutée : {}", s.name)),
+        SourceModalMode::Edit(idx) => update_media_source(sources_path, sources, *idx, name, path)
+            .map(|s| format!("✓ Source modifiée : {}", s.name)),
+        SourceModalMode::DeleteConfirm(_) => Err("Action invalide".to_string()),
+    }
+}
+
 /// Handles keyboard interactions when the interactive source modal is active.
 ///
 /// # Arguments
@@ -571,12 +583,122 @@ pub fn handle_key_event_with_state(
 /// # Data Flow & Invariants
 /// Intercepts Esc (dismissal), Tab/BackTab/Up/Down (field toggling),
 /// Backspace/Char (text mutation), and Enter (validation & file persistence).
-fn handle_modal_key_event(
+/// Validates directory path and persists added or edited media source.
+///
+/// # Arguments
+/// * `modal` - Mutable reference to source input dialog state.
+/// * `telemetry` - Active system telemetry snapshot.
+/// * `shared_state` - Optional shared telemetry reference for thread-safe mutations.
+///
+/// # Returns
+/// Pair `(success, optional_feedback_message)`.
+fn validate_and_save_source_modal(
+    modal: &mut SourceInputModalState,
+    telemetry: &SystemTelemetry,
+    shared_state: Option<&Arc<RwLock<SystemTelemetry>>>,
+) -> (bool, Option<String>) {
+    let path_str = modal.path_input.trim();
+    if path_str.is_empty() {
+        modal.error_msg = Some("Le chemin du répertoire est obligatoire.".to_string());
+        return (false, None);
+    }
+    let path = PathBuf::from(path_str);
+    if !path.is_absolute() {
+        modal.error_msg =
+            Some("Le chemin doit être absolu (ex: /media/... ou /mnt/...).".to_string());
+        return (false, None);
+    }
+    if !path.exists() || !path.is_dir() {
+        modal.error_msg = Some(format!(
+            "Répertoire introuvable ou inaccessible : '{}'",
+            path.display()
+        ));
+        return (false, None);
+    }
+
+    let name = modal.name_input.trim().to_string();
+    let sources_path = std::path::Path::new(DEFAULT_MEDIA_SOURCES_PATH);
+    let mut sources = if !telemetry.media_sources.is_empty() {
+        telemetry.media_sources.clone()
+    } else {
+        load_media_sources(sources_path)
+    };
+
+    let (success, feedback_msg) =
+        match apply_source_modal_action(&modal.mode, &mut sources, name, path) {
+            Ok(msg) => (true, Some(msg)),
+            Err(err) => {
+                modal.error_msg = Some(err);
+                (false, None)
+            }
+        };
+
+    if !success {
+        return (false, None);
+    }
+
+    if let Some(shared) = shared_state {
+        if let Ok(mut state) = shared.write() {
+            state.media_sources = sources;
+        }
+    }
+    (true, feedback_msg)
+}
+
+/// Mutates the active text input buffer in the source modal on typing or deletion.
+///
+/// # Arguments
+/// * `modal` - Mutable modal dialog state holding input buffers.
+/// * `is_backspace` - True if pop operation, false if push.
+/// * `ch` - Character to append if typing.
+fn mutate_modal_input_field(
+    modal: &mut SourceInputModalState,
+    is_backspace: bool,
+    ch: Option<char>,
+) {
+    let target = match modal.active_field {
+        SourceModalField::Name => &mut modal.name_input,
+        SourceModalField::Path => &mut modal.path_input,
+    };
+    if is_backspace {
+        target.pop();
+    } else if let Some(c) = ch {
+        target.push(c);
+    }
+}
+
+/// Handles keystrokes when the source addition or edition input form is focused.
+///
+/// # Arguments
+/// * `code` - Input keyboard event code.
+/// * `app` - Mutable reference to application state.
+/// * `telemetry` - Active system telemetry snapshot.
+/// * `shared_state` - Optional shared telemetry reference for thread-safe mutations.
+///
+/// # Returns
+/// Always returns `true` to signal key event consumption.
+fn handle_source_input_modal_key_event(
     code: KeyCode,
     app: &mut AppState,
     telemetry: &SystemTelemetry,
     shared_state: Option<&Arc<RwLock<SystemTelemetry>>>,
 ) -> bool {
+    if code == KeyCode::Enter {
+        let (success, feedback) = {
+            let Some(ref mut modal) = app.source_modal else {
+                return false;
+            };
+            validate_and_save_source_modal(modal, telemetry, shared_state)
+        };
+        if success {
+            app.source_modal = None;
+            if let Some(msg) = feedback {
+                app.set_feedback(msg);
+            }
+        }
+        return true;
+    }
+
     let Some(ref mut modal) = app.source_modal else {
         return false;
     };
@@ -591,75 +713,95 @@ fn handle_modal_key_event(
                 SourceModalField::Path => SourceModalField::Name,
             };
         }
-        KeyCode::Backspace => match modal.active_field {
-            SourceModalField::Name => {
-                modal.name_input.pop();
-            }
-            SourceModalField::Path => {
-                modal.path_input.pop();
-            }
-        },
-        KeyCode::Char(c) => match modal.active_field {
-            SourceModalField::Name => {
-                modal.name_input.push(c);
-            }
-            SourceModalField::Path => {
-                modal.path_input.push(c);
-            }
-        },
-        KeyCode::Enter => {
-            let path_str = modal.path_input.trim();
-            if path_str.is_empty() {
-                app.set_feedback("Erreur : Le chemin du répertoire est obligatoire.".to_string());
-                return true;
-            }
-            let path = PathBuf::from(path_str);
-            let name = modal.name_input.trim().to_string();
-            let sources_path = std::path::Path::new(DEFAULT_MEDIA_SOURCES_PATH);
-            let mut sources = if !telemetry.media_sources.is_empty() {
-                telemetry.media_sources.clone()
-            } else {
-                load_media_sources(sources_path)
-            };
-
-            match modal.mode {
-                SourceModalMode::Add => {
-                    match add_media_source(sources_path, &mut sources, name, path) {
-                        Ok(src) => {
-                            if let Some(shared) = shared_state {
-                                if let Ok(mut state) = shared.write() {
-                                    state.media_sources = sources.clone();
-                                }
-                            }
-                            app.set_feedback(format!("✓ Source ajoutée : {}", src.name));
-                            app.source_modal = None;
-                        }
-                        Err(err) => {
-                            app.set_feedback(format!("Erreur : {err}"));
-                        }
-                    }
-                }
-                SourceModalMode::Edit(idx) => {
-                    match update_media_source(sources_path, &mut sources, idx, name, path) {
-                        Ok(src) => {
-                            if let Some(shared) = shared_state {
-                                if let Ok(mut state) = shared.write() {
-                                    state.media_sources = sources.clone();
-                                }
-                            }
-                            app.set_feedback(format!("✓ Source modifiée : {}", src.name));
-                            app.source_modal = None;
-                        }
-                        Err(err) => {
-                            app.set_feedback(format!("Erreur : {err}"));
-                        }
-                    }
-                }
-            }
+        KeyCode::Backspace => {
+            modal.error_msg = None;
+            mutate_modal_input_field(modal, true, None);
+        }
+        KeyCode::Char(c) => {
+            modal.error_msg = None;
+            mutate_modal_input_field(modal, false, Some(c));
         }
         _ => {}
     }
     true
+}
+
+/// Handles keyboard inputs when the deletion confirmation popup is active.
+///
+/// # Arguments
+/// * `code` - Input keyboard event code.
+/// * `app` - Mutable reference to application state.
+/// * `telemetry` - Active system telemetry snapshot.
+/// * `shared_state` - Optional shared telemetry reference for thread-safe mutations.
+///
+/// # Returns
+/// Always returns `true` to indicate modal event consumption.
+fn handle_delete_confirm_modal_key_event(
+    code: KeyCode,
+    app: &mut AppState,
+    telemetry: &SystemTelemetry,
+    shared_state: Option<&Arc<RwLock<SystemTelemetry>>>,
+) -> bool {
+    let Some(ref modal) = app.source_modal else {
+        return false;
+    };
+    let SourceModalMode::DeleteConfirm(idx) = modal.mode else {
+        return false;
+    };
+
+    match code {
+        KeyCode::Char('y')
+        | KeyCode::Char('Y')
+        | KeyCode::Char('o')
+        | KeyCode::Char('O')
+        | KeyCode::Enter => {
+            app.source_modal = None;
+            execute_media_source_deletion(app, telemetry, shared_state, idx);
+        }
+        KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
+            app.source_modal = None;
+            app.set_feedback("Suppression de la source annulée.".to_string());
+        }
+        _ => {}
+    }
+    true
+}
+
+/// Intercepts and dispatches keystrokes targeted at open modal dialogs.
+///
+/// # Arguments
+/// * `code` - Input keyboard event code.
+/// * `app` - Mutable reference to application state.
+/// * `telemetry` - Active system telemetry snapshot.
+/// * `shared_state` - Optional shared telemetry reference for thread-safe mutations.
+///
+/// # Returns
+/// `true` if an active modal intercepted the event, `false` otherwise.
+///
+/// # Errors
+/// None. Persistence failures surface via `app.set_feedback`.
+///
+/// # Panics
+/// Guaranteed panic-free.
+///
+/// # Data Flow & Invariants
+/// Dispatches directly to [`handle_delete_confirm_modal_key_event`] if mode is DeleteConfirm,
+/// or [`handle_source_input_modal_key_event`] for Add/Edit configuration forms.
+fn handle_modal_key_event(
+    code: KeyCode,
+    app: &mut AppState,
+    telemetry: &SystemTelemetry,
+    shared_state: Option<&Arc<RwLock<SystemTelemetry>>>,
+) -> bool {
+    let Some(ref modal) = app.source_modal else {
+        return false;
+    };
+
+    if matches!(modal.mode, SourceModalMode::DeleteConfirm(_)) {
+        handle_delete_confirm_modal_key_event(code, app, telemetry, shared_state)
+    } else {
+        handle_source_input_modal_key_event(code, app, telemetry, shared_state)
+    }
 }
 
 /// Handles keystrokes when interactive search mode is active.
@@ -1300,12 +1442,9 @@ fn handle_active_jobs_view_keys(code: KeyCode, app: &mut AppState, telemetry: &S
             let (_ok, msg) = kill_job(pid);
             app.set_feedback(msg);
         }
-        KeyCode::Char('x') => {
-            let (_ok, msg) = stop_entire_batch(false);
-            app.set_feedback(msg);
-        }
-        KeyCode::Char('X') => {
-            let (_ok, msg) = stop_entire_batch(true);
+        KeyCode::Char('x') | KeyCode::Char('X') => {
+            let active_pids: Vec<u32> = telemetry.active_jobs.iter().map(|j| j.pid).collect();
+            let (_ok, msg) = stop_entire_batch(code == KeyCode::Char('X'), &active_pids);
             app.set_feedback(msg);
         }
         KeyCode::Enter | KeyCode::Char('l') | KeyCode::Char('i') | KeyCode::Char('I') => {
@@ -1580,13 +1719,9 @@ fn handle_media_browser_batch_keys(
             app.view = ViewPage::ActiveJobs;
             true
         }
-        KeyCode::Char('x') => {
-            let (_ok, msg) = stop_entire_batch(false);
-            app.set_feedback(msg);
-            true
-        }
-        KeyCode::Char('X') => {
-            let (_ok, msg) = stop_entire_batch(true);
+        KeyCode::Char('x') | KeyCode::Char('X') => {
+            let active_pids: Vec<u32> = telemetry.active_jobs.iter().map(|j| j.pid).collect();
+            let (_ok, msg) = stop_entire_batch(code == KeyCode::Char('X'), &active_pids);
             app.set_feedback(msg);
             true
         }
@@ -1650,6 +1785,94 @@ fn handle_media_browser_view_keys(
     }
 }
 
+/// Evicts cached media records belonging to a deleted source from memory and persistent cache.
+///
+/// # Arguments
+/// * `shared_state` - Thread-safe handle to shared telemetry state.
+/// * `source_id` - Identifier of the media source being purged.
+/// * `app` - Mutable reference to application navigation state.
+///
+/// # Data Flow & Invariants
+/// Retains only items from other sources, persists updated cache to disk, and clamps selection cursors.
+fn cleanup_shared_source_media(
+    shared_state: &Arc<RwLock<SystemTelemetry>>,
+    source_id: &str,
+    app: &mut AppState,
+) {
+    let Ok(mut state) = shared_state.write() else {
+        return;
+    };
+    state
+        .discovered_media
+        .retain(|item| item.source_id.as_deref() != Some(source_id));
+    let cache_path = std::path::Path::new(DEFAULT_MEDIA_CACHE_PATH);
+    save_media_cache(cache_path, &state.discovered_media);
+    let active_paths: std::collections::HashSet<_> = state
+        .discovered_media
+        .iter()
+        .map(|m| m.path.clone())
+        .collect();
+    app.selected_media_paths
+        .retain(|p| active_paths.contains(p));
+    let max_media_idx = state.discovered_media.len().saturating_sub(1);
+    if app.media_scroll_index > max_media_idx {
+        app.media_scroll_index = max_media_idx;
+    }
+}
+
+/// Deletes a configured media source from disk, updates shared memory, and adjusts catalog indexes.
+///
+/// # Arguments
+/// * `app` - Mutable application state containing source cursor and filters.
+/// * `telemetry` - Active system telemetry snapshot.
+/// * `shared_state` - Optional shared telemetry reference for thread-safe mutations.
+/// * `index` - Index of the target source within the media sources list.
+///
+/// # Data Flow & Invariants
+/// 1. Persists removal in `media_sources.json`.
+/// 2. Evicts associated cached media items from `discovered_media` and `media_cache.json`.
+/// 3. Resets `app.source_filter` to `ActiveOnly` if the currently filtered source was deleted.
+/// 4. Adjusts `source_scroll_index` and `media_scroll_index` within safe valid bounds.
+fn execute_media_source_deletion(
+    app: &mut AppState,
+    telemetry: &SystemTelemetry,
+    shared_state: Option<&Arc<RwLock<SystemTelemetry>>>,
+    index: usize,
+) {
+    let sources_path = std::path::Path::new(DEFAULT_MEDIA_SOURCES_PATH);
+    let mut sources = if !telemetry.media_sources.is_empty() {
+        telemetry.media_sources.clone()
+    } else {
+        load_media_sources(sources_path)
+    };
+
+    let src = match delete_media_source(sources_path, &mut sources, index) {
+        Ok(s) => s,
+        Err(err) => {
+            app.set_feedback(format!("Erreur : {err}"));
+            return;
+        }
+    };
+
+    if let MediaSourceFilter::Specific(ref filter_id) = app.source_filter {
+        if filter_id == &src.id {
+            app.source_filter = MediaSourceFilter::ActiveOnly;
+        }
+    }
+
+    if let Some(shared) = shared_state {
+        if let Ok(mut state) = shared.write() {
+            state.media_sources = sources.clone();
+        }
+        cleanup_shared_source_media(shared, &src.id, app);
+    }
+
+    app.set_feedback(format!("✓ Source supprimée : {}", src.name));
+    if app.source_scroll_index >= sources.len() {
+        app.source_scroll_index = sources.len().saturating_sub(1);
+    }
+}
+
 /// Handles keypresses specific to the MediaSources configuration view.
 ///
 /// # Arguments
@@ -1706,12 +1929,7 @@ fn handle_media_sources_view_keys(
             }
         }
         KeyCode::Char('a') | KeyCode::Char('A') => {
-            app.source_modal = Some(SourceInputModalState {
-                mode: SourceModalMode::Add,
-                name_input: String::new(),
-                path_input: String::new(),
-                active_field: SourceModalField::Path,
-            });
+            app.source_modal = Some(SourceInputModalState::new_add());
         }
         KeyCode::Char('e') | KeyCode::Char('E') => {
             let sources = if !telemetry.media_sources.is_empty() {
@@ -1720,58 +1938,31 @@ fn handle_media_sources_view_keys(
                 load_media_sources(std::path::Path::new(DEFAULT_MEDIA_SOURCES_PATH))
             };
             if let Some(src) = sources.get(app.source_scroll_index) {
-                app.source_modal = Some(SourceInputModalState {
-                    mode: SourceModalMode::Edit(app.source_scroll_index),
-                    name_input: src.name.clone(),
-                    path_input: src.path.display().to_string(),
-                    active_field: SourceModalField::Path,
-                });
+                app.source_modal = Some(SourceInputModalState::new_edit(
+                    app.source_scroll_index,
+                    src.name.clone(),
+                    src.path.display().to_string(),
+                    src.enabled,
+                ));
             }
         }
         KeyCode::Char('d') | KeyCode::Char('D') => {
-            let sources_path = std::path::Path::new(DEFAULT_MEDIA_SOURCES_PATH);
-            let mut sources = if !telemetry.media_sources.is_empty() {
+            let sources = if !telemetry.media_sources.is_empty() {
                 telemetry.media_sources.clone()
             } else {
-                load_media_sources(sources_path)
+                load_media_sources(std::path::Path::new(DEFAULT_MEDIA_SOURCES_PATH))
             };
-            match delete_media_source(sources_path, &mut sources, app.source_scroll_index) {
-                Ok(src) => {
-                    if let MediaSourceFilter::Specific(ref filter_id) = app.source_filter {
-                        if !sources.iter().any(|s| &s.id == filter_id) {
-                            app.source_filter = MediaSourceFilter::ActiveOnly;
-                        }
-                    }
-
-                    if let Some(shared) = shared_state {
-                        if let Ok(mut state) = shared.write() {
-                            state.media_sources = sources.clone();
-                            state
-                                .discovered_media
-                                .retain(|item| item.source_id.as_deref() != Some(&src.id));
-                            let cache_path = std::path::Path::new(DEFAULT_MEDIA_CACHE_PATH);
-                            save_media_cache(cache_path, &state.discovered_media);
-                            let active_paths: std::collections::HashSet<_> = state
-                                .discovered_media
-                                .iter()
-                                .map(|m| m.path.clone())
-                                .collect();
-                            app.selected_media_paths
-                                .retain(|p| active_paths.contains(p));
-                            let max_media_idx = state.discovered_media.len().saturating_sub(1);
-                            if app.media_scroll_index > max_media_idx {
-                                app.media_scroll_index = max_media_idx;
-                            }
-                        }
-                    }
-                    app.set_feedback(format!("✓ Source supprimée : {}", src.name));
-                    if app.source_scroll_index >= sources.len() {
-                        app.source_scroll_index = sources.len().saturating_sub(1);
-                    }
-                }
-                Err(err) => {
-                    app.set_feedback(format!("Erreur : {err}"));
-                }
+            if sources.len() <= 1 {
+                app.set_feedback("Impossible de supprimer la seule source restante.".to_string());
+                return;
+            }
+            if let Some(src) = sources.get(app.source_scroll_index) {
+                app.source_modal = Some(SourceInputModalState::new_delete(
+                    app.source_scroll_index,
+                    src.name.clone(),
+                    src.path.display().to_string(),
+                    src.enabled,
+                ));
             }
         }
         KeyCode::Char('r') | KeyCode::Char('R') => {

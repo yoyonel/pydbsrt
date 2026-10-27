@@ -867,15 +867,84 @@ pub enum SourceModalMode {
     Add,
     /// Editing an existing media source at the given index in `media_sources`.
     Edit(usize),
+    /// Confirming deletion of an existing media source at the given index.
+    DeleteConfirm(usize),
 }
 
-/// State of the interactive modal dialog for adding or editing a media source.
+/// State of the interactive modal dialog for adding, editing, or deleting a media source.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceInputModalState {
+    /// Active dialog operational mode (Add, Edit, DeleteConfirm).
     pub mode: SourceModalMode,
+    /// Text input buffer for custom source display name.
     pub name_input: String,
+    /// Text input buffer for filesystem path.
     pub path_input: String,
+    /// Currently focused text field for keyboard input.
     pub active_field: SourceModalField,
+    /// Indicates whether target source is currently active (used for delete warnings).
+    pub is_active_source: bool,
+    /// Transient inline validation error message rendered inside the modal.
+    pub error_msg: Option<String>,
+}
+
+impl SourceInputModalState {
+    /// Instantiates modal state for adding a new media source.
+    ///
+    /// # Returns
+    /// Initialized [`SourceInputModalState`] in [`SourceModalMode::Add`] mode.
+    pub fn new_add() -> Self {
+        Self {
+            mode: SourceModalMode::Add,
+            name_input: String::new(),
+            path_input: String::new(),
+            active_field: SourceModalField::Path,
+            is_active_source: false,
+            error_msg: None,
+        }
+    }
+
+    /// Instantiates modal state for editing an existing media source.
+    ///
+    /// # Arguments
+    /// * `index` - Index of the target media source in the sources collection.
+    /// * `name` - Initial display name.
+    /// * `path` - Initial filesystem path.
+    /// * `is_active` - Whether the target source is currently enabled.
+    ///
+    /// # Returns
+    /// Initialized [`SourceInputModalState`] in [`SourceModalMode::Edit`] mode.
+    pub fn new_edit(index: usize, name: String, path: String, is_active: bool) -> Self {
+        Self {
+            mode: SourceModalMode::Edit(index),
+            name_input: name,
+            path_input: path,
+            active_field: SourceModalField::Path,
+            is_active_source: is_active,
+            error_msg: None,
+        }
+    }
+
+    /// Instantiates modal state for confirming deletion of a media source.
+    ///
+    /// # Arguments
+    /// * `index` - Index of the target media source to delete.
+    /// * `name` - Source display name.
+    /// * `path` - Source filesystem path.
+    /// * `is_active` - Whether the target source is currently enabled.
+    ///
+    /// # Returns
+    /// Initialized [`SourceInputModalState`] in [`SourceModalMode::DeleteConfirm`] mode.
+    pub fn new_delete(index: usize, name: String, path: String, is_active: bool) -> Self {
+        Self {
+            mode: SourceModalMode::DeleteConfirm(index),
+            name_input: name,
+            path_input: path,
+            active_field: SourceModalField::Path,
+            is_active_source: is_active,
+            error_msg: None,
+        }
+    }
 }
 
 /// Computes descriptive statistics (min, max, mean, median, p90, stdev) for a series of values.
