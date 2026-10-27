@@ -3,10 +3,92 @@
 use std::fs;
 use std::path::PathBuf;
 
+use sysinfo::{ProcessesToUpdate, System};
+
 use crate::commands::top::constants::{
-    BYTES_PER_MIB_F64, MAX_LOG_LINES_PREVIEW, MAX_OPEN_FILES_PREVIEW,
+    BATCH_COORDINATOR_PATTERN, BATCH_GRACEFUL_SHUTDOWN_PAUSE_MS, BATCH_WORKER_CMD_PATTERN_1,
+    BATCH_WORKER_CMD_PATTERN_2, BYTES_PER_MIB_F64, DEFAULT_SELECTED_BATCH_TARGETS_PATH,
+    MAX_LOG_LINES_PREVIEW, MAX_OPEN_FILES_PREVIEW,
 };
 use crate::commands::top::model::{format_duration, ActiveJobTelemetry};
+
+/// Stops or hard-kills an entire batch execution tree (coordinators, workers, ffmpeg processes).
+pub fn stop_entire_batch(force: bool) -> (bool, String) {
+    let mut system = System::new();
+    system.refresh_processes(ProcessesToUpdate::All, true);
+
+    let signal = if force { libc::SIGKILL } else { libc::SIGTERM };
+
+    let mut coordinator_pids = Vec::new();
+    let mut worker_pids = Vec::new();
+
+    for (pid, proc_) in system.processes() {
+        let cmd = proc_
+            .cmd()
+            .iter()
+            .map(|s| s.to_string_lossy())
+            .collect::<Vec<_>>()
+            .join(" ");
+        let name = proc_.name().to_string_lossy();
+
+        if cmd.contains(BATCH_COORDINATOR_PATTERN) {
+            coordinator_pids.push(pid.as_u32());
+        } else if cmd.contains(BATCH_WORKER_CMD_PATTERN_1)
+            || cmd.contains(BATCH_WORKER_CMD_PATTERN_2)
+            || (name.contains("ffmpeg")
+                && (cmd.contains("dbsrt")
+                    || cmd.contains("Synology")
+                    || cmd.contains("tvshow")
+                    || cmd.contains("video")))
+        {
+            worker_pids.push(pid.as_u32());
+        }
+    }
+
+    // Always clean up the batch targets file to prevent re-execution
+    let _ = std::fs::remove_file(DEFAULT_SELECTED_BATCH_TARGETS_PATH);
+
+    if coordinator_pids.is_empty() && worker_pids.is_empty() {
+        return (
+            false,
+            "Aucun batch en cours d'exécution détecté.".to_string(),
+        );
+    }
+
+    // 1. Terminate coordinators first so they don't respawn new workers
+    for pid in &coordinator_pids {
+        unsafe {
+            libc::kill(*pid as i32, signal);
+        }
+    }
+
+    if !force && !coordinator_pids.is_empty() {
+        std::thread::sleep(std::time::Duration::from_millis(
+            BATCH_GRACEFUL_SHUTDOWN_PAUSE_MS,
+        ));
+    }
+
+    // 2. Terminate child worker processes
+    for pid in &worker_pids {
+        unsafe {
+            libc::kill(*pid as i32, signal);
+        }
+    }
+
+    let action_str = if force {
+        "tué (SIGKILL)"
+    } else {
+        "arrêté (SIGTERM)"
+    };
+    (
+        true,
+        format!(
+            "🛑 Batch complet {action_str} : {} coordinateur(s), {} worker(s).",
+            coordinator_pids.len(),
+            worker_pids.len()
+        ),
+    )
+}
 
 /// Toggles pause state of a job process using POSIX SIGSTOP / SIGCONT.
 pub fn toggle_pause_job(pid: u32) -> (bool, String) {

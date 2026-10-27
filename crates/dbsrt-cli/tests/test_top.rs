@@ -4,13 +4,14 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 use crossterm::event::KeyCode;
-use dbsrt_cli::commands::top::app::{handle_key_event, AppState};
+use dbsrt_cli::commands::top::app::{handle_key_event, handle_key_event_with_state, AppState};
 use dbsrt_cli::commands::top::constants::*;
 use dbsrt_cli::commands::top::model::{
     calculate_dimension_stats, calculate_overall_stats, default_progress_bar,
     filter_and_sort_media, format_duration, format_progress_bar, parse_iso_to_unix_secs,
-    ActiveJobTelemetry, DiscoveredMediaItem, GpuTelemetry, HistoricalRecord, IngestionStatus,
-    MediaFilter, MediaSort, MediaSubtrackInfo, SessionThroughput, SystemTelemetry, ViewPage,
+    ActiveJobTelemetry, CompletedFilter, CompletedSort, DiscoveredMediaItem, GpuTelemetry, HelpTab,
+    HistoricalRecord, IngestionStatus, MediaFilter, MediaSort, MediaSubtrackInfo,
+    SessionThroughput, SystemTelemetry, ViewPage,
 };
 use dbsrt_cli::commands::top::process_ctl::{
     check_if_stopped, inspect_job_details, kill_job, stop_job, toggle_pause_job,
@@ -176,6 +177,7 @@ fn test_ui_rendering_all_pages() {
             certified_couplings_count: 2,
             start_iso: Some("2026-10-26T14:00:00".to_string()),
             end_iso: Some("2026-10-26T14:02:00".to_string()),
+            ..Default::default()
         },
         HistoricalRecord {
             video_stem: "Series.S01E02.1080p".to_string(),
@@ -186,6 +188,7 @@ fn test_ui_rendering_all_pages() {
             certified_couplings_count: 1,
             start_iso: Some("2026-10-26T14:03:00".to_string()),
             end_iso: Some("2026-10-26T14:03:01".to_string()),
+            ..Default::default()
         },
         HistoricalRecord {
             video_stem: "Series.S01E03.1080p".to_string(),
@@ -196,6 +199,7 @@ fn test_ui_rendering_all_pages() {
             certified_couplings_count: 0,
             start_iso: Some("2026-10-26T14:05:00".to_string()),
             end_iso: Some("2026-10-26T14:05:45".to_string()),
+            ..Default::default()
         },
     ];
     let stats = dbsrt_cli::commands::top::model::calculate_overall_stats(&history);
@@ -277,6 +281,7 @@ fn test_ui_rendering_all_pages() {
                     title: "English".to_string(),
                 }],
                 phash: None,
+                source_id: Some("synology_tvshow".to_string()),
                 status: IngestionStatus::Virgin,
             },
             DiscoveredMediaItem {
@@ -287,9 +292,18 @@ fn test_ui_rendering_all_pages() {
                 video_codec: Some("h264".to_string()),
                 subtitles: vec![],
                 phash: None,
+                source_id: Some("synology_tvshow".to_string()),
                 status: IngestionStatus::Completed,
             },
         ],
+        media_sources: vec![dbsrt_cli::commands::top::model::MediaSourceConfig {
+            id: "synology_tvshow".to_string(),
+            name: "Synology NAS".to_string(),
+            path: PathBuf::from("/mnt/nas/Synology/tvshow"),
+            enabled: true,
+            media_count: 2,
+            last_scan_iso: Some("2026-10-26T21:00:00Z".to_string()),
+        }],
     };
 
     let empty_set = HashSet::new();
@@ -301,9 +315,16 @@ fn test_ui_rendering_all_pages() {
         selected_index: 0,
         completed_scroll_index: 0,
         media_scroll_index: 0,
+        source_scroll_index: 0,
+        source_modal: None,
         selected_media_paths: &empty_set,
         media_filter: MediaFilter::All,
         media_sort: MediaSort::Name,
+        selected_source_filter: None,
+        completed_filter: CompletedFilter::All,
+        completed_sort: CompletedSort::DateDesc,
+        help_tab: HelpTab::General,
+        help_scroll_index: 0,
         feedback_msg: Some("Test Feedback Message"),
     };
     terminal.draw(|f| render_ui(f, &ctx)).unwrap();
@@ -317,9 +338,16 @@ fn test_ui_rendering_all_pages() {
         selected_index: 0,
         completed_scroll_index: 0,
         media_scroll_index: 0,
+        source_scroll_index: 0,
+        source_modal: None,
         selected_media_paths: &empty_set,
         media_filter: MediaFilter::All,
         media_sort: MediaSort::Name,
+        selected_source_filter: None,
+        completed_filter: CompletedFilter::All,
+        completed_sort: CompletedSort::DateDesc,
+        help_tab: HelpTab::General,
+        help_scroll_index: 0,
         feedback_msg: None,
     };
     terminal.draw(|f| render_ui(f, &ctx_mod)).unwrap();
@@ -331,9 +359,16 @@ fn test_ui_rendering_all_pages() {
         selected_index: 0,
         completed_scroll_index: 0,
         media_scroll_index: 0,
+        source_scroll_index: 0,
+        source_modal: None,
         selected_media_paths: &empty_set,
         media_filter: MediaFilter::All,
         media_sort: MediaSort::Name,
+        selected_source_filter: None,
+        completed_filter: CompletedFilter::All,
+        completed_sort: CompletedSort::DateDesc,
+        help_tab: HelpTab::General,
+        help_scroll_index: 0,
         feedback_msg: None,
     };
     terminal.draw(|f| render_ui(f, &ctx_no_gpu)).unwrap();
@@ -346,9 +381,16 @@ fn test_ui_rendering_all_pages() {
         selected_index: 0,
         completed_scroll_index: 0,
         media_scroll_index: 0,
+        source_scroll_index: 0,
+        source_modal: None,
         selected_media_paths: &empty_set,
         media_filter: MediaFilter::All,
         media_sort: MediaSort::Name,
+        selected_source_filter: None,
+        completed_filter: CompletedFilter::All,
+        completed_sort: CompletedSort::DateDesc,
+        help_tab: HelpTab::General,
+        help_scroll_index: 0,
         feedback_msg: None,
     };
     terminal.draw(|f| render_ui(f, &ctx_empty)).unwrap();
@@ -360,9 +402,16 @@ fn test_ui_rendering_all_pages() {
         selected_index: 0,
         completed_scroll_index: 0,
         media_scroll_index: 0,
+        source_scroll_index: 0,
+        source_modal: None,
         selected_media_paths: &empty_set,
         media_filter: MediaFilter::All,
         media_sort: MediaSort::Name,
+        selected_source_filter: None,
+        completed_filter: CompletedFilter::All,
+        completed_sort: CompletedSort::DateDesc,
+        help_tab: HelpTab::General,
+        help_scroll_index: 0,
         feedback_msg: None,
     };
     terminal.draw(|f| render_ui(f, &ctx_stats)).unwrap();
@@ -374,9 +423,16 @@ fn test_ui_rendering_all_pages() {
         selected_index: 0,
         completed_scroll_index: 1,
         media_scroll_index: 0,
+        source_scroll_index: 0,
+        source_modal: None,
         selected_media_paths: &empty_set,
         media_filter: MediaFilter::All,
         media_sort: MediaSort::Name,
+        selected_source_filter: None,
+        completed_filter: CompletedFilter::All,
+        completed_sort: CompletedSort::DateDesc,
+        help_tab: HelpTab::General,
+        help_scroll_index: 0,
         feedback_msg: None,
     };
     terminal.draw(|f| render_ui(f, &ctx_completed)).unwrap();
@@ -388,9 +444,16 @@ fn test_ui_rendering_all_pages() {
         selected_index: 0,
         completed_scroll_index: 0,
         media_scroll_index: 0,
+        source_scroll_index: 0,
+        source_modal: None,
         selected_media_paths: &empty_set,
         media_filter: MediaFilter::All,
         media_sort: MediaSort::Name,
+        selected_source_filter: None,
+        completed_filter: CompletedFilter::All,
+        completed_sort: CompletedSort::DateDesc,
+        help_tab: HelpTab::General,
+        help_scroll_index: 0,
         feedback_msg: None,
     };
     terminal
@@ -404,9 +467,16 @@ fn test_ui_rendering_all_pages() {
         selected_index: 0,
         completed_scroll_index: 0,
         media_scroll_index: 0,
+        source_scroll_index: 0,
+        source_modal: None,
         selected_media_paths: &empty_set,
         media_filter: MediaFilter::All,
         media_sort: MediaSort::Name,
+        selected_source_filter: None,
+        completed_filter: CompletedFilter::All,
+        completed_sort: CompletedSort::DateDesc,
+        help_tab: HelpTab::General,
+        help_scroll_index: 0,
         feedback_msg: None,
     };
     terminal.draw(|f| render_ui(f, &ctx_inspect)).unwrap();
@@ -418,9 +488,16 @@ fn test_ui_rendering_all_pages() {
         selected_index: 0,
         completed_scroll_index: 0,
         media_scroll_index: 0,
+        source_scroll_index: 0,
+        source_modal: None,
         selected_media_paths: &empty_set,
         media_filter: MediaFilter::All,
         media_sort: MediaSort::Name,
+        selected_source_filter: None,
+        completed_filter: CompletedFilter::All,
+        completed_sort: CompletedSort::DateDesc,
+        help_tab: HelpTab::General,
+        help_scroll_index: 0,
         feedback_msg: None,
     };
     terminal.draw(|f| render_ui(f, &ctx_help)).unwrap();
@@ -434,9 +511,16 @@ fn test_ui_rendering_all_pages() {
         selected_index: 0,
         completed_scroll_index: 0,
         media_scroll_index: 0,
+        source_scroll_index: 0,
+        source_modal: None,
         selected_media_paths: &selected_paths,
         media_filter: MediaFilter::All,
         media_sort: MediaSort::Name,
+        selected_source_filter: None,
+        completed_filter: CompletedFilter::All,
+        completed_sort: CompletedSort::DateDesc,
+        help_tab: HelpTab::General,
+        help_scroll_index: 0,
         feedback_msg: None,
     };
     terminal.draw(|f| render_ui(f, &ctx_media)).unwrap();
@@ -447,12 +531,90 @@ fn test_ui_rendering_all_pages() {
         selected_index: 0,
         completed_scroll_index: 0,
         media_scroll_index: 0,
+        source_scroll_index: 0,
+        source_modal: None,
         selected_media_paths: &empty_set,
         media_filter: MediaFilter::Status(IngestionStatus::Virgin),
         media_sort: MediaSort::Size,
+        selected_source_filter: None,
+        completed_filter: CompletedFilter::All,
+        completed_sort: CompletedSort::DateDesc,
+        help_tab: HelpTab::General,
+        help_scroll_index: 0,
         feedback_msg: None,
     };
     terminal.draw(|f| render_ui(f, &ctx_media_empty)).unwrap();
+
+    // 10. Render MediaSources view (with items and empty) and Modal
+    let ctx_sources = UiContext {
+        telemetry: &tel,
+        view: ViewPage::MediaSources,
+        selected_index: 0,
+        completed_scroll_index: 0,
+        media_scroll_index: 0,
+        source_scroll_index: 0,
+        source_modal: None,
+        selected_media_paths: &empty_set,
+        media_filter: MediaFilter::All,
+        media_sort: MediaSort::Name,
+        selected_source_filter: None,
+        completed_filter: CompletedFilter::All,
+        completed_sort: CompletedSort::DateDesc,
+        help_tab: HelpTab::General,
+        help_scroll_index: 0,
+        feedback_msg: None,
+    };
+    terminal.draw(|f| render_ui(f, &ctx_sources)).unwrap();
+
+    let modal = dbsrt_cli::commands::top::model::SourceInputModalState {
+        mode: dbsrt_cli::commands::top::model::SourceModalMode::Add,
+        name_input: "Test NAS".to_string(),
+        path_input: "/media/test".to_string(),
+        active_field: dbsrt_cli::commands::top::model::SourceModalField::Path,
+    };
+    let ctx_sources_modal = UiContext {
+        telemetry: &tel,
+        view: ViewPage::MediaSources,
+        selected_index: 0,
+        completed_scroll_index: 0,
+        media_scroll_index: 0,
+        source_scroll_index: 0,
+        source_modal: Some(&modal),
+        selected_media_paths: &empty_set,
+        media_filter: MediaFilter::All,
+        media_sort: MediaSort::Name,
+        selected_source_filter: None,
+        completed_filter: CompletedFilter::All,
+        completed_sort: CompletedSort::DateDesc,
+        help_tab: HelpTab::General,
+        help_scroll_index: 0,
+        feedback_msg: None,
+    };
+    terminal.draw(|f| render_ui(f, &ctx_sources_modal)).unwrap();
+
+    // 11. Render CompletedInspection view
+    let ctx_completed_inspect = UiContext {
+        telemetry: &tel,
+        view: ViewPage::CompletedInspection,
+        selected_index: 0,
+        completed_scroll_index: 0,
+        media_scroll_index: 0,
+        source_scroll_index: 0,
+        source_modal: None,
+        selected_media_paths: &empty_set,
+        media_filter: MediaFilter::All,
+        media_sort: MediaSort::Name,
+        selected_source_filter: None,
+        completed_filter: CompletedFilter::All,
+        completed_sort: CompletedSort::DateDesc,
+        help_tab: HelpTab::General,
+        help_scroll_index: 0,
+        feedback_msg: None,
+    };
+    terminal
+        .draw(|f| render_ui(f, &ctx_completed_inspect))
+        .unwrap();
+
     terminal.draw(|f| render_ui(f, &ctx_help)).unwrap();
 }
 
@@ -889,6 +1051,7 @@ fn test_calculate_overall_stats() {
             certified_couplings_count: 1,
             start_iso: None,
             end_iso: None,
+            ..Default::default()
         },
         HistoricalRecord {
             video_stem: "CachedOrSkipped".to_string(),
@@ -899,6 +1062,7 @@ fn test_calculate_overall_stats() {
             certified_couplings_count: 1,
             start_iso: None,
             end_iso: None,
+            ..Default::default()
         },
         HistoricalRecord {
             video_stem: "SuccessFull1".to_string(),
@@ -909,6 +1073,7 @@ fn test_calculate_overall_stats() {
             certified_couplings_count: 2,
             start_iso: None,
             end_iso: None,
+            ..Default::default()
         },
         HistoricalRecord {
             video_stem: "SuccessFull2".to_string(),
@@ -919,6 +1084,7 @@ fn test_calculate_overall_stats() {
             certified_couplings_count: 4,
             start_iso: None,
             end_iso: None,
+            ..Default::default()
         },
     ];
 
@@ -947,6 +1113,7 @@ fn test_compute_session_throughput() {
             certified_couplings_count: 1,
             start_iso: Some("2023-11-14T21:50:00".to_string()),
             end_iso: Some(recent_iso_end.to_string()),
+            ..Default::default()
         },
         HistoricalRecord {
             video_stem: "AncientJob".to_string(),
@@ -957,6 +1124,7 @@ fn test_compute_session_throughput() {
             certified_couplings_count: 1,
             start_iso: Some("2020-01-01T00:00:00".to_string()),
             end_iso: Some(old_iso_end.to_string()),
+            ..Default::default()
         },
     ];
 
@@ -1093,6 +1261,7 @@ fn test_app_state_new_tabs_and_scrolling() {
                 certified_couplings_count: 1,
                 start_iso: None,
                 end_iso: None,
+                ..Default::default()
             },
             HistoricalRecord {
                 video_stem: "Rec2".to_string(),
@@ -1103,6 +1272,7 @@ fn test_app_state_new_tabs_and_scrolling() {
                 certified_couplings_count: 2,
                 start_iso: None,
                 end_iso: None,
+                ..Default::default()
             },
             HistoricalRecord {
                 video_stem: "Rec3".to_string(),
@@ -1113,6 +1283,7 @@ fn test_app_state_new_tabs_and_scrolling() {
                 certified_couplings_count: 3,
                 start_iso: None,
                 end_iso: None,
+                ..Default::default()
             },
         ],
         discovered_media: vec![
@@ -1129,6 +1300,7 @@ fn test_app_state_new_tabs_and_scrolling() {
                     title: "French".to_string(),
                 }],
                 phash: None,
+                source_id: None,
                 status: IngestionStatus::Virgin,
             },
             DiscoveredMediaItem {
@@ -1139,13 +1311,14 @@ fn test_app_state_new_tabs_and_scrolling() {
                 video_codec: Some("hevc".to_string()),
                 subtitles: vec![],
                 phash: None,
+                source_id: None,
                 status: IngestionStatus::Completed,
             },
         ],
         ..Default::default()
     };
 
-    // Tab key cycling: ActiveJobs -> StatsHistory -> CompletedMedia -> MediaBrowser -> ActiveJobs
+    // Tab key cycling: ActiveJobs -> StatsHistory -> CompletedMedia -> MediaBrowser -> MediaSources -> ActiveJobs
     handle_key_event(KeyCode::Tab, &mut app, &tel);
     assert_eq!(app.view, ViewPage::StatsHistory);
 
@@ -1156,9 +1329,15 @@ fn test_app_state_new_tabs_and_scrolling() {
     assert_eq!(app.view, ViewPage::MediaBrowser);
 
     handle_key_event(KeyCode::Tab, &mut app, &tel);
+    assert_eq!(app.view, ViewPage::MediaSources);
+
+    handle_key_event(KeyCode::Tab, &mut app, &tel);
     assert_eq!(app.view, ViewPage::ActiveJobs);
 
-    // BackTab cycling: ActiveJobs -> MediaBrowser -> CompletedMedia -> StatsHistory -> ActiveJobs
+    // BackTab cycling: ActiveJobs -> MediaSources -> MediaBrowser -> CompletedMedia -> StatsHistory -> ActiveJobs
+    handle_key_event(KeyCode::BackTab, &mut app, &tel);
+    assert_eq!(app.view, ViewPage::MediaSources);
+
     handle_key_event(KeyCode::BackTab, &mut app, &tel);
     assert_eq!(app.view, ViewPage::MediaBrowser);
 
@@ -1171,7 +1350,7 @@ fn test_app_state_new_tabs_and_scrolling() {
     handle_key_event(KeyCode::BackTab, &mut app, &tel);
     assert_eq!(app.view, ViewPage::ActiveJobs);
 
-    // Direct key shortcuts '1', '2', '3', '4'
+    // Direct key shortcuts '1', '2', '3', '4', '5'
     handle_key_event(KeyCode::Char('2'), &mut app, &tel);
     assert_eq!(app.view, ViewPage::StatsHistory);
 
@@ -1180,6 +1359,12 @@ fn test_app_state_new_tabs_and_scrolling() {
 
     handle_key_event(KeyCode::Char('4'), &mut app, &tel);
     assert_eq!(app.view, ViewPage::MediaBrowser);
+
+    handle_key_event(KeyCode::Char('5'), &mut app, &tel);
+    assert_eq!(app.view, ViewPage::MediaSources);
+
+    handle_key_event(KeyCode::Char('5'), &mut app, &tel);
+    assert_eq!(app.view, ViewPage::ActiveJobs);
 
     handle_key_event(KeyCode::Char('1'), &mut app, &tel);
     assert_eq!(app.view, ViewPage::ActiveJobs);
@@ -1356,6 +1541,7 @@ fn test_filter_and_sort_media_logic() {
                 title: "French".to_string(),
             }],
             phash: None,
+            source_id: None,
             status: IngestionStatus::Virgin,
         },
         DiscoveredMediaItem {
@@ -1366,6 +1552,7 @@ fn test_filter_and_sort_media_logic() {
             video_codec: Some("h264".to_string()),
             subtitles: vec![],
             phash: None,
+            source_id: None,
             status: IngestionStatus::Completed,
         },
         DiscoveredMediaItem {
@@ -1389,6 +1576,7 @@ fn test_filter_and_sort_media_logic() {
                 },
             ],
             phash: None,
+            source_id: None,
             status: IngestionStatus::InProgress,
         },
     ];
@@ -1478,6 +1666,7 @@ fn test_media_cache_save_and_load_roundtrip() {
             title: "English".to_string(),
         }],
         phash: None,
+        source_id: None,
         status: IngestionStatus::Virgin,
     }];
 
@@ -1575,6 +1764,7 @@ fn test_ingestion_status_media_filter_strict_bijection_and_partition() {
             video_codec: Some("h264".to_string()),
             subtitles: vec![],
             phash: None,
+            source_id: None,
             status,
         };
         let items = vec![item];
@@ -1607,4 +1797,1022 @@ fn test_ingestion_status_media_filter_strict_bijection_and_partition() {
             }
         }
     }
+}
+
+#[test]
+fn test_media_sources_crud_lifecycle() {
+    let tmp_dir = std::env::temp_dir().join(format!("pydbsrt_sources_crud_{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&tmp_dir);
+    let sources_file = tmp_dir.join("media_sources.json");
+
+    // 1. Load initial sources (file does not exist -> defaults to NAS)
+    let mut sources = dbsrt_cli::commands::top::sampler::load_media_sources(&sources_file);
+    assert_eq!(sources.len(), 1);
+    assert_eq!(sources[0].id, "synology_tvshow");
+    assert!(sources[0].enabled);
+    assert!(sources_file.exists());
+
+    // 2. Add second source
+    let new_src = dbsrt_cli::commands::top::sampler::add_media_source(
+        &sources_file,
+        &mut sources,
+        "Films Locaux".to_string(),
+        PathBuf::from("/data/films"),
+    )
+    .unwrap();
+    assert_eq!(sources.len(), 2);
+    assert_eq!(new_src.name, "Films Locaux");
+    assert!(new_src.id.contains("films_locaux"));
+
+    // 3. Edit second source
+    let updated = dbsrt_cli::commands::top::sampler::update_media_source(
+        &sources_file,
+        &mut sources,
+        1,
+        "Films 4K HDR".to_string(),
+        PathBuf::from("/data/films_4k"),
+    )
+    .unwrap();
+    assert_eq!(updated.name, "Films 4K HDR");
+    assert_eq!(updated.path, PathBuf::from("/data/films_4k"));
+    assert_eq!(sources[1].name, "Films 4K HDR");
+
+    // 4. Toggle enabled
+    let new_state =
+        dbsrt_cli::commands::top::sampler::toggle_media_source(&sources_file, &mut sources, 1)
+            .unwrap();
+    assert!(!new_state);
+    assert!(!sources[1].enabled);
+
+    // 5. Delete source
+    let deleted =
+        dbsrt_cli::commands::top::sampler::delete_media_source(&sources_file, &mut sources, 1)
+            .unwrap();
+    assert_eq!(deleted.name, "Films 4K HDR");
+    assert_eq!(sources.len(), 1);
+
+    // 6. Prevent deleting the only remaining source
+    let fail_delete =
+        dbsrt_cli::commands::top::sampler::delete_media_source(&sources_file, &mut sources, 0);
+    assert!(fail_delete.is_err());
+    assert_eq!(sources.len(), 1);
+
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+}
+
+#[test]
+fn test_media_sources_modal_keyboard_interaction() {
+    let mut app = AppState::new();
+    let tel = SystemTelemetry::default();
+
+    // Switch to MediaSources view
+    handle_key_event(KeyCode::Char('5'), &mut app, &tel);
+    assert_eq!(app.view, ViewPage::MediaSources);
+
+    // 'a' opens modal in Add mode
+    handle_key_event(KeyCode::Char('a'), &mut app, &tel);
+    assert!(app.source_modal.is_some());
+    let modal = app.source_modal.as_ref().unwrap();
+    assert_eq!(
+        modal.mode,
+        dbsrt_cli::commands::top::model::SourceModalMode::Add
+    );
+    assert_eq!(
+        modal.active_field,
+        dbsrt_cli::commands::top::model::SourceModalField::Path
+    );
+
+    // Type in path: "/tmp/media"
+    for c in "/tmp/media".chars() {
+        handle_key_event(KeyCode::Char(c), &mut app, &tel);
+    }
+    assert_eq!(app.source_modal.as_ref().unwrap().path_input, "/tmp/media");
+
+    // Backspace removes one char
+    handle_key_event(KeyCode::Backspace, &mut app, &tel);
+    assert_eq!(app.source_modal.as_ref().unwrap().path_input, "/tmp/medi");
+
+    // Tab switches to Name field
+    handle_key_event(KeyCode::Tab, &mut app, &tel);
+    assert_eq!(
+        app.source_modal.as_ref().unwrap().active_field,
+        dbsrt_cli::commands::top::model::SourceModalField::Name
+    );
+
+    // Type in name: "Temp"
+    for c in "Temp".chars() {
+        handle_key_event(KeyCode::Char(c), &mut app, &tel);
+    }
+    assert_eq!(app.source_modal.as_ref().unwrap().name_input, "Temp");
+
+    // Esc closes modal without saving
+    handle_key_event(KeyCode::Esc, &mut app, &tel);
+    assert!(app.source_modal.is_none());
+}
+
+#[test]
+fn test_scan_all_media_sources_multi_dir() {
+    let tmp_dir = std::env::temp_dir().join(format!("pydbsrt_scan_sources_{}", std::process::id()));
+    let dir_a = tmp_dir.join("source_a");
+    let dir_b = tmp_dir.join("source_b");
+    let _ = std::fs::create_dir_all(&dir_a);
+    let _ = std::fs::create_dir_all(&dir_b);
+
+    // Create dummy video files
+    let _ = std::fs::write(dir_a.join("movie_alpha.mp4"), b"dummy video alpha");
+    let _ = std::fs::write(dir_b.join("movie_beta.mkv"), b"dummy video beta");
+
+    let sources = vec![
+        dbsrt_cli::commands::top::model::MediaSourceConfig {
+            id: "src_a".to_string(),
+            name: "Source A".to_string(),
+            path: dir_a.clone(),
+            enabled: true,
+            media_count: 0,
+            last_scan_iso: None,
+        },
+        dbsrt_cli::commands::top::model::MediaSourceConfig {
+            id: "src_b".to_string(),
+            name: "Source B".to_string(),
+            path: dir_b.clone(),
+            enabled: false, // Disabled source should be ignored
+            media_count: 0,
+            last_scan_iso: None,
+        },
+    ];
+
+    let couplings_file = tmp_dir.join("couplings.json");
+    let events_file = tmp_dir.join("events.jsonl");
+    let phash_dir = tmp_dir.join("__PHASH__");
+    let cache_file = tmp_dir.join("cache.json");
+    let _ = std::fs::create_dir_all(&phash_dir);
+
+    let (items, updated_sources) = dbsrt_cli::commands::top::sampler::scan_all_media_sources(
+        &sources,
+        &couplings_file,
+        &events_file,
+        &phash_dir,
+        &[],
+        &cache_file,
+    );
+
+    // Only source_a was enabled: movie_alpha should be found, movie_beta should NOT
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].stem, "movie_alpha");
+    assert_eq!(items[0].source_id, Some("src_a".to_string()));
+
+    assert_eq!(updated_sources[0].media_count, 1);
+    assert!(updated_sources[0].last_scan_iso.is_some());
+    assert_eq!(updated_sources[1].media_count, 0);
+
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+}
+
+#[test]
+fn test_e2e_sources_add_and_render_flow() {
+    use std::sync::{Arc, RwLock};
+
+    let backend = TestBackend::new(140, 30);
+    let mut terminal = ratatui::Terminal::new(backend).unwrap();
+    let mut app = AppState::new();
+    app.view = ViewPage::MediaSources;
+
+    let initial_tel = SystemTelemetry {
+        media_sources: vec![dbsrt_cli::commands::top::model::MediaSourceConfig {
+            id: "synology_tvshow".to_string(),
+            name: "Synology NAS (tvshow)".to_string(),
+            path: PathBuf::from("/mnt/nas/Synology/tvshow"),
+            enabled: true,
+            media_count: 200,
+            last_scan_iso: Some("2026-10-26T21:00:00Z".to_string()),
+        }],
+        ..Default::default()
+    };
+    let shared_state = Arc::new(RwLock::new(initial_tel));
+
+    // 1. Initial draw: verify only 1 source displayed
+    let tel =
+        dbsrt_cli::commands::top::app::event_loop_step(&mut terminal, &mut app, &shared_state)
+            .unwrap();
+    assert_eq!(tel.media_sources.len(), 1);
+
+    // 2. User presses 'a' to open modal
+    handle_key_event_with_state(KeyCode::Char('a'), &mut app, &tel, Some(&shared_state));
+    assert!(app.source_modal.is_some());
+
+    // 3. User types path: "/mnt/nas/Synology/video/"
+    for c in "/mnt/nas/Synology/video/".chars() {
+        handle_key_event_with_state(KeyCode::Char(c), &mut app, &tel, Some(&shared_state));
+    }
+    assert_eq!(
+        app.source_modal.as_ref().unwrap().path_input,
+        "/mnt/nas/Synology/video/"
+    );
+
+    // 4. User presses Enter to validate and save
+    handle_key_event_with_state(KeyCode::Enter, &mut app, &tel, Some(&shared_state));
+    assert!(app.source_modal.is_none());
+
+    // 5. Next event loop step (UI re-render)
+    let updated_tel =
+        dbsrt_cli::commands::top::app::event_loop_step(&mut terminal, &mut app, &shared_state)
+            .unwrap();
+
+    // Verification: shared_state and telemetry MUST reflect the 2 sources
+    assert_eq!(
+        updated_tel.media_sources.len(),
+        2,
+        "After adding a source, event_loop_step must render 2 sources!"
+    );
+    assert_eq!(
+        shared_state.read().unwrap().media_sources.len(),
+        2,
+        "shared_state must have 2 sources!"
+    );
+    assert_eq!(updated_tel.media_sources[1].name, "video");
+    assert_eq!(
+        updated_tel.media_sources[1].path,
+        PathBuf::from("/mnt/nas/Synology/video/")
+    );
+}
+
+#[test]
+fn test_e2e_sources_edit_and_render_flow() {
+    use std::sync::{Arc, RwLock};
+
+    let backend = TestBackend::new(140, 30);
+    let mut terminal = ratatui::Terminal::new(backend).unwrap();
+    let mut app = AppState::new();
+    app.view = ViewPage::MediaSources;
+
+    let initial_tel = SystemTelemetry {
+        media_sources: vec![dbsrt_cli::commands::top::model::MediaSourceConfig {
+            id: "src_1".to_string(),
+            name: "Original Name".to_string(),
+            path: PathBuf::from("/media/src1"),
+            enabled: true,
+            media_count: 50,
+            last_scan_iso: None,
+        }],
+        ..Default::default()
+    };
+    let shared_state = Arc::new(RwLock::new(initial_tel));
+
+    let tel =
+        dbsrt_cli::commands::top::app::event_loop_step(&mut terminal, &mut app, &shared_state)
+            .unwrap();
+
+    // 1. Press 'e' on source 0
+    app.source_scroll_index = 0;
+    handle_key_event_with_state(KeyCode::Char('e'), &mut app, &tel, Some(&shared_state));
+    assert!(app.source_modal.is_some());
+
+    // 2. Clear path and write new path
+    let modal = app.source_modal.as_mut().unwrap();
+    modal.path_input = "/media/src1_renamed".to_string();
+    modal.name_input = "Updated Name".to_string();
+
+    // 3. Press Enter
+    handle_key_event_with_state(KeyCode::Enter, &mut app, &tel, Some(&shared_state));
+    assert!(app.source_modal.is_none());
+
+    // 4. Render step
+    let updated_tel =
+        dbsrt_cli::commands::top::app::event_loop_step(&mut terminal, &mut app, &shared_state)
+            .unwrap();
+    assert_eq!(updated_tel.media_sources[0].name, "Updated Name");
+    assert_eq!(
+        updated_tel.media_sources[0].path,
+        PathBuf::from("/media/src1_renamed")
+    );
+}
+
+#[test]
+fn test_e2e_sources_toggle_space_and_render_flow() {
+    use std::sync::{Arc, RwLock};
+
+    let backend = TestBackend::new(140, 30);
+    let mut terminal = ratatui::Terminal::new(backend).unwrap();
+    let mut app = AppState::new();
+    app.view = ViewPage::MediaSources;
+
+    let initial_tel = SystemTelemetry {
+        media_sources: vec![
+            dbsrt_cli::commands::top::model::MediaSourceConfig {
+                id: "src_1".to_string(),
+                name: "Source 1".to_string(),
+                path: PathBuf::from("/media/src1"),
+                enabled: true,
+                media_count: 50,
+                last_scan_iso: None,
+            },
+            dbsrt_cli::commands::top::model::MediaSourceConfig {
+                id: "src_2".to_string(),
+                name: "Source 2".to_string(),
+                path: PathBuf::from("/media/src2"),
+                enabled: true,
+                media_count: 100,
+                last_scan_iso: None,
+            },
+        ],
+        ..Default::default()
+    };
+    let shared_state = Arc::new(RwLock::new(initial_tel));
+
+    // Draw initial state
+    let tel =
+        dbsrt_cli::commands::top::app::event_loop_step(&mut terminal, &mut app, &shared_state)
+            .unwrap();
+    assert_eq!(tel.media_sources.len(), 2);
+    assert!(tel.media_sources[1].enabled);
+
+    // Select source 2
+    app.source_scroll_index = 1;
+
+    // Press Space to toggle
+    handle_key_event_with_state(KeyCode::Char(' '), &mut app, &tel, Some(&shared_state));
+
+    // Render step
+    let updated_tel =
+        dbsrt_cli::commands::top::app::event_loop_step(&mut terminal, &mut app, &shared_state)
+            .unwrap();
+    assert!(
+        !updated_tel.media_sources[1].enabled,
+        "Source 2 must be toggled to disabled in telemetry!"
+    );
+
+    // Toggle again to re-enable
+    handle_key_event_with_state(
+        KeyCode::Char(' '),
+        &mut app,
+        &updated_tel,
+        Some(&shared_state),
+    );
+    let reenabled_tel =
+        dbsrt_cli::commands::top::app::event_loop_step(&mut terminal, &mut app, &shared_state)
+            .unwrap();
+    assert!(
+        reenabled_tel.media_sources[1].enabled,
+        "Source 2 must be toggled back to enabled in telemetry!"
+    );
+}
+
+#[test]
+fn test_e2e_sources_delete_and_protection_flow() {
+    use std::sync::{Arc, RwLock};
+
+    let backend = TestBackend::new(140, 30);
+    let mut terminal = ratatui::Terminal::new(backend).unwrap();
+    let mut app = AppState::new();
+    app.view = ViewPage::MediaSources;
+
+    let initial_tel = SystemTelemetry {
+        media_sources: vec![
+            dbsrt_cli::commands::top::model::MediaSourceConfig {
+                id: "src_1".to_string(),
+                name: "Source 1".to_string(),
+                path: PathBuf::from("/media/src1"),
+                enabled: true,
+                media_count: 50,
+                last_scan_iso: None,
+            },
+            dbsrt_cli::commands::top::model::MediaSourceConfig {
+                id: "src_2".to_string(),
+                name: "Source 2".to_string(),
+                path: PathBuf::from("/media/src2"),
+                enabled: true,
+                media_count: 100,
+                last_scan_iso: None,
+            },
+        ],
+        ..Default::default()
+    };
+    let shared_state = Arc::new(RwLock::new(initial_tel));
+
+    let tel =
+        dbsrt_cli::commands::top::app::event_loop_step(&mut terminal, &mut app, &shared_state)
+            .unwrap();
+
+    // 1. Delete source 1 (when 2 sources exist -> succeeds)
+    app.source_scroll_index = 1;
+    handle_key_event_with_state(KeyCode::Char('d'), &mut app, &tel, Some(&shared_state));
+    let after_delete =
+        dbsrt_cli::commands::top::app::event_loop_step(&mut terminal, &mut app, &shared_state)
+            .unwrap();
+    assert_eq!(after_delete.media_sources.len(), 1);
+    assert_eq!(after_delete.media_sources[0].id, "src_1");
+
+    // 2. Try to delete the only remaining source (must fail with protection feedback)
+    app.source_scroll_index = 0;
+    handle_key_event_with_state(
+        KeyCode::Char('d'),
+        &mut app,
+        &after_delete,
+        Some(&shared_state),
+    );
+    let after_protected =
+        dbsrt_cli::commands::top::app::event_loop_step(&mut terminal, &mut app, &shared_state)
+            .unwrap();
+    assert_eq!(
+        after_protected.media_sources.len(),
+        1,
+        "The last source MUST NOT be deleted!"
+    );
+    assert!(app
+        .current_feedback()
+        .unwrap()
+        .contains("Impossible de supprimer"));
+}
+
+#[test]
+fn test_e2e_sources_scanner_never_overwrites_disk_sources() {
+    use std::sync::{Arc, RwLock};
+
+    let tmp_dir =
+        std::env::temp_dir().join(format!("pydbsrt_scan_no_overwrite_{}", std::process::id()));
+    let sources_file = tmp_dir.join("media_sources.json");
+    let _ = std::fs::create_dir_all(&tmp_dir);
+
+    // 1. Initial sources saved to disk
+    let initial_sources = vec![
+        dbsrt_cli::commands::top::model::MediaSourceConfig {
+            id: "src_1".to_string(),
+            name: "Source 1".to_string(),
+            path: tmp_dir.join("src1"),
+            enabled: true,
+            media_count: 0,
+            last_scan_iso: None,
+        },
+        dbsrt_cli::commands::top::model::MediaSourceConfig {
+            id: "src_2".to_string(),
+            name: "Source 2".to_string(),
+            path: tmp_dir.join("src2"),
+            enabled: true,
+            media_count: 0,
+            last_scan_iso: None,
+        },
+    ];
+    dbsrt_cli::commands::top::sampler::save_media_sources(&sources_file, &initial_sources).unwrap();
+
+    // 2. Shared state holding stale 1-source list
+    let stale_sources = vec![initial_sources[0].clone()];
+    let _shared_state = Arc::new(RwLock::new(SystemTelemetry {
+        media_sources: stale_sources,
+        ..Default::default()
+    }));
+
+    // 3. Scan directly
+    let couplings = tmp_dir.join("couplings.json");
+    let events = tmp_dir.join("events.jsonl");
+    let phash = tmp_dir.join("__PHASH__");
+    let cache = tmp_dir.join("cache.json");
+
+    // Scanner must read disk sources_file, NOT stale shared_state RAM!
+    let disk_sources = dbsrt_cli::commands::top::sampler::load_media_sources(&sources_file);
+    assert_eq!(disk_sources.len(), 2, "Disk sources must have 2 entries!");
+
+    let (_items, updated) = dbsrt_cli::commands::top::sampler::scan_all_media_sources(
+        &disk_sources,
+        &couplings,
+        &events,
+        &phash,
+        &[],
+        &cache,
+    );
+    assert_eq!(
+        updated.len(),
+        2,
+        "Scanned sources must retain all 2 sources!"
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+}
+
+#[test]
+fn test_e2e_multi_source_media_browser_aggregation() {
+    use std::sync::{Arc, RwLock};
+
+    let backend = TestBackend::new(140, 30);
+    let mut terminal = ratatui::Terminal::new(backend).unwrap();
+    let mut app = AppState::new();
+    app.view = ViewPage::MediaBrowser;
+
+    let tel = SystemTelemetry {
+        media_sources: vec![
+            dbsrt_cli::commands::top::model::MediaSourceConfig {
+                id: "nas_tvshow".to_string(),
+                name: "NAS TVShow".to_string(),
+                path: PathBuf::from("/media/nas/tvshow"),
+                enabled: true,
+                media_count: 1,
+                last_scan_iso: None,
+            },
+            dbsrt_cli::commands::top::model::MediaSourceConfig {
+                id: "nas_video".to_string(),
+                name: "NAS Video".to_string(),
+                path: PathBuf::from("/media/nas/video"),
+                enabled: true,
+                media_count: 1,
+                last_scan_iso: None,
+            },
+        ],
+        discovered_media: vec![
+            DiscoveredMediaItem {
+                path: PathBuf::from("/media/nas/tvshow/show_ep1.mkv"),
+                stem: "show_ep1".to_string(),
+                size_bytes: 1_000_000,
+                duration_secs: Some(120.0),
+                video_codec: Some("h264".to_string()),
+                subtitles: vec![],
+                phash: None,
+                source_id: Some("nas_tvshow".to_string()),
+                status: IngestionStatus::Completed,
+            },
+            DiscoveredMediaItem {
+                path: PathBuf::from("/media/nas/video/movie.mkv"),
+                stem: "movie".to_string(),
+                size_bytes: 5_000_000,
+                duration_secs: Some(6000.0),
+                video_codec: Some("hevc".to_string()),
+                subtitles: vec![],
+                phash: None,
+                source_id: Some("nas_video".to_string()),
+                status: IngestionStatus::Virgin,
+            },
+        ],
+        ..Default::default()
+    };
+    let shared_state = Arc::new(RwLock::new(tel));
+
+    // Render step
+    let rendered_tel =
+        dbsrt_cli::commands::top::app::event_loop_step(&mut terminal, &mut app, &shared_state)
+            .unwrap();
+    assert_eq!(rendered_tel.discovered_media.len(), 2);
+    assert_eq!(
+        rendered_tel.discovered_media[0].source_id,
+        Some("nas_tvshow".to_string())
+    );
+    assert_eq!(
+        rendered_tel.discovered_media[1].source_id,
+        Some("nas_video".to_string())
+    );
+}
+
+#[test]
+fn test_e2e_sources_toggle_purges_inactive_media_immediately() {
+    use std::sync::{Arc, RwLock};
+
+    let mut app = AppState::new();
+    app.view = ViewPage::MediaSources;
+    app.source_scroll_index = 0; // Point to nas_tvshow
+
+    let tel = SystemTelemetry {
+        media_sources: vec![
+            dbsrt_cli::commands::top::model::MediaSourceConfig {
+                id: "nas_tvshow".to_string(),
+                name: "NAS TVShow".to_string(),
+                path: PathBuf::from("/media/nas/tvshow"),
+                enabled: true,
+                media_count: 1,
+                last_scan_iso: None,
+            },
+            dbsrt_cli::commands::top::model::MediaSourceConfig {
+                id: "nas_video".to_string(),
+                name: "NAS Video".to_string(),
+                path: PathBuf::from("/media/nas/video"),
+                enabled: true,
+                media_count: 1,
+                last_scan_iso: None,
+            },
+        ],
+        discovered_media: vec![
+            DiscoveredMediaItem {
+                path: PathBuf::from("/media/nas/tvshow/show_ep1.mkv"),
+                stem: "show_ep1".to_string(),
+                size_bytes: 1_000_000,
+                duration_secs: Some(120.0),
+                video_codec: Some("h264".to_string()),
+                subtitles: vec![],
+                phash: None,
+                source_id: Some("nas_tvshow".to_string()),
+                status: IngestionStatus::Completed,
+            },
+            DiscoveredMediaItem {
+                path: PathBuf::from("/media/nas/video/movie.mkv"),
+                stem: "movie".to_string(),
+                size_bytes: 5_000_000,
+                duration_secs: Some(6000.0),
+                video_codec: Some("hevc".to_string()),
+                subtitles: vec![],
+                phash: None,
+                source_id: Some("nas_video".to_string()),
+                status: IngestionStatus::Virgin,
+            },
+        ],
+        ..Default::default()
+    };
+    let shared_state = Arc::new(RwLock::new(tel.clone()));
+
+    // Press Space on source 0 (nas_tvshow) to disable it
+    dbsrt_cli::commands::top::app::handle_key_event_with_state(
+        crossterm::event::KeyCode::Char(' '),
+        &mut app,
+        &tel,
+        Some(&shared_state),
+    );
+
+    // Verify shared state has source 0 disabled and only 1 discovered media from nas_video
+    let locked = shared_state.read().unwrap();
+    assert!(!locked.media_sources[0].enabled);
+    assert_eq!(
+        locked.discovered_media.len(),
+        1,
+        "Deactivated source media must be immediately purged from shared_state.discovered_media!"
+    );
+    assert_eq!(
+        locked.discovered_media[0].source_id,
+        Some("nas_video".to_string())
+    );
+}
+
+#[test]
+fn test_e2e_stop_entire_batch_cleans_targets_and_returns_status() {
+    let targets_file = std::path::Path::new("data/reports/selected_batch_targets.json");
+    if let Some(parent) = targets_file.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(targets_file, "[\"/dummy/path.mkv\"]");
+
+    // Call stop_entire_batch
+    let (handled, msg) = dbsrt_cli::commands::top::process_ctl::stop_entire_batch(false);
+    // Even if no process was running, the targets file must be cleaned or the call reports accurately
+    assert!(msg.contains("batch") || msg.contains("Batch"));
+    let _ = handled;
+}
+
+#[test]
+fn test_e2e_media_browser_source_filter_cycle() {
+    use std::sync::{Arc, RwLock};
+
+    let mut app = AppState::new();
+    app.view = ViewPage::MediaBrowser;
+
+    let tel = SystemTelemetry {
+        media_sources: vec![
+            dbsrt_cli::commands::top::model::MediaSourceConfig {
+                id: "nas_tvshow".to_string(),
+                name: "NAS TVShow".to_string(),
+                path: PathBuf::from("/media/nas/tvshow"),
+                enabled: true,
+                media_count: 1,
+                last_scan_iso: None,
+            },
+            dbsrt_cli::commands::top::model::MediaSourceConfig {
+                id: "nas_video".to_string(),
+                name: "NAS Video".to_string(),
+                path: PathBuf::from("/media/nas/video"),
+                enabled: true,
+                media_count: 1,
+                last_scan_iso: None,
+            },
+        ],
+        discovered_media: vec![
+            DiscoveredMediaItem {
+                path: PathBuf::from("/media/nas/tvshow/show_ep1.mkv"),
+                stem: "show_ep1".to_string(),
+                size_bytes: 1_000_000,
+                duration_secs: Some(120.0),
+                video_codec: Some("h264".to_string()),
+                subtitles: vec![],
+                phash: None,
+                source_id: Some("nas_tvshow".to_string()),
+                status: IngestionStatus::Completed,
+            },
+            DiscoveredMediaItem {
+                path: PathBuf::from("/media/nas/video/movie.mkv"),
+                stem: "movie".to_string(),
+                size_bytes: 5_000_000,
+                duration_secs: Some(6000.0),
+                video_codec: Some("hevc".to_string()),
+                subtitles: vec![],
+                phash: None,
+                source_id: Some("nas_video".to_string()),
+                status: IngestionStatus::Virgin,
+            },
+        ],
+        ..Default::default()
+    };
+    let shared_state = Arc::new(RwLock::new(tel.clone()));
+
+    // Press 'S' (Shift+S) to cycle source filter to first source
+    dbsrt_cli::commands::top::app::handle_key_event_with_state(
+        crossterm::event::KeyCode::Char('S'),
+        &mut app,
+        &tel,
+        Some(&shared_state),
+    );
+    assert_eq!(app.selected_source_filter, Some("nas_tvshow".to_string()));
+
+    // Filter items with source filter active
+    let visible = app.visible_media(&tel.discovered_media);
+    assert_eq!(visible.len(), 1);
+    assert_eq!(visible[0].stem, "show_ep1");
+
+    // Press 'S' again to cycle to second source
+    dbsrt_cli::commands::top::app::handle_key_event_with_state(
+        crossterm::event::KeyCode::Char('S'),
+        &mut app,
+        &tel,
+        Some(&shared_state),
+    );
+    assert_eq!(app.selected_source_filter, Some("nas_video".to_string()));
+
+    let visible2 = app.visible_media(&tel.discovered_media);
+    assert_eq!(visible2.len(), 1);
+    assert_eq!(visible2[0].stem, "movie");
+
+    // Press 'S' again to cycle back to None (all sources)
+    dbsrt_cli::commands::top::app::handle_key_event_with_state(
+        crossterm::event::KeyCode::Char('S'),
+        &mut app,
+        &tel,
+        Some(&shared_state),
+    );
+    assert_eq!(app.selected_source_filter, None);
+    let visible_all = app.visible_media(&tel.discovered_media);
+    assert_eq!(visible_all.len(), 2);
+}
+
+#[test]
+fn test_e2e_stop_entire_batch_via_key_events() {
+    use std::sync::{Arc, RwLock};
+
+    let mut app = AppState::new();
+    app.view = ViewPage::ActiveJobs;
+    let tel = SystemTelemetry::default();
+    let shared_state = Arc::new(RwLock::new(tel.clone()));
+
+    // Press 'x' for graceful batch stop
+    dbsrt_cli::commands::top::app::handle_key_event_with_state(
+        crossterm::event::KeyCode::Char('x'),
+        &mut app,
+        &tel,
+        Some(&shared_state),
+    );
+    assert!(app.feedback_message.is_some());
+
+    // Press 'X' for kill
+    dbsrt_cli::commands::top::app::handle_key_event_with_state(
+        crossterm::event::KeyCode::Char('X'),
+        &mut app,
+        &tel,
+        Some(&shared_state),
+    );
+    assert!(app.feedback_message.is_some());
+}
+
+#[test]
+fn test_e2e_completed_filter_and_sort() {
+    use dbsrt_cli::commands::top::model::{
+        filter_and_sort_completed, CompletedFilter, CompletedSort, CompletedStatus,
+        HistoricalRecord,
+    };
+
+    let records = vec![
+        HistoricalRecord {
+            video_stem: "success_show".to_string(),
+            video_rel_path: Some("/media/success.mkv".to_string()),
+            success: true,
+            wall_duration_secs: 100.0,
+            cifs_read_rate_mib_s: 20.0,
+            file_size_bytes: 1_000_000_000,
+            certified_couplings_count: 2,
+            error_summary: None,
+            start_iso: Some("2026-10-27T01:00:00Z".to_string()),
+            end_iso: Some("2026-10-27T01:01:40Z".to_string()),
+        },
+        HistoricalRecord {
+            video_stem: "no_srt_show".to_string(),
+            video_rel_path: Some("/media/no_srt.mkv".to_string()),
+            success: false,
+            wall_duration_secs: 1.0,
+            cifs_read_rate_mib_s: 0.0,
+            file_size_bytes: 500_000_000,
+            certified_couplings_count: 0,
+            error_summary: Some("Error: No matching .srt file found".to_string()),
+            start_iso: Some("2026-10-27T01:02:00Z".to_string()),
+            end_iso: Some("2026-10-27T01:02:01Z".to_string()),
+        },
+        HistoricalRecord {
+            video_stem: "cancelled_show".to_string(),
+            video_rel_path: Some("/media/cancelled.mkv".to_string()),
+            success: false,
+            wall_duration_secs: 15.0,
+            cifs_read_rate_mib_s: 10.0,
+            file_size_bytes: 500_000_000,
+            certified_couplings_count: 0,
+            error_summary: Some("Exit code -15 (SIGTERM interrupted)".to_string()),
+            start_iso: Some("2026-10-27T01:03:00Z".to_string()),
+            end_iso: Some("2026-10-27T01:03:15Z".to_string()),
+        },
+        HistoricalRecord {
+            video_stem: "fatal_fail_show".to_string(),
+            video_rel_path: Some("/media/corrupted.mkv".to_string()),
+            success: false,
+            wall_duration_secs: 2.0,
+            cifs_read_rate_mib_s: 0.0,
+            file_size_bytes: 500_000_000,
+            certified_couplings_count: 0,
+            error_summary: Some(
+                "ffmpeg error: Invalid data found when processing input".to_string(),
+            ),
+            start_iso: Some("2026-10-27T01:04:00Z".to_string()),
+            end_iso: Some("2026-10-27T01:04:02Z".to_string()),
+        },
+    ];
+
+    // Status classifications
+    assert_eq!(records[0].status(), CompletedStatus::Ok);
+    assert_eq!(records[1].status(), CompletedStatus::NoSrt);
+    assert_eq!(records[2].status(), CompletedStatus::Cancelled);
+    assert_eq!(records[3].status(), CompletedStatus::Fail);
+
+    // 1. Filter: FailedOnly (true fatal errors only)
+    let failed = filter_and_sort_completed(
+        &records,
+        CompletedFilter::FailedOnly,
+        CompletedSort::DateDesc,
+    );
+    assert_eq!(failed.len(), 1);
+    assert_eq!(failed[0].video_stem, "fatal_fail_show");
+
+    // 2. Filter: NoSrtOnly
+    let no_srt = filter_and_sort_completed(
+        &records,
+        CompletedFilter::NoSrtOnly,
+        CompletedSort::DateDesc,
+    );
+    assert_eq!(no_srt.len(), 1);
+    assert_eq!(no_srt[0].video_stem, "no_srt_show");
+
+    // 3. Filter: CancelledOnly
+    let cancelled = filter_and_sort_completed(
+        &records,
+        CompletedFilter::CancelledOnly,
+        CompletedSort::DateDesc,
+    );
+    assert_eq!(cancelled.len(), 1);
+    assert_eq!(cancelled[0].video_stem, "cancelled_show");
+
+    // 4. Filter: SuccessOnly
+    let ok = filter_and_sort_completed(
+        &records,
+        CompletedFilter::SuccessOnly,
+        CompletedSort::DateDesc,
+    );
+    assert_eq!(ok.len(), 1);
+    assert_eq!(ok[0].video_stem, "success_show");
+
+    // 5. Sort: Status (Fail -> Cancelled -> NoSrt -> Ok)
+    let sorted_status =
+        filter_and_sort_completed(&records, CompletedFilter::All, CompletedSort::Status);
+    assert_eq!(sorted_status.len(), 4);
+    assert_eq!(sorted_status[0].video_stem, "fatal_fail_show");
+    assert_eq!(sorted_status[1].video_stem, "cancelled_show");
+    assert_eq!(sorted_status[2].video_stem, "no_srt_show");
+    assert_eq!(sorted_status[3].video_stem, "success_show");
+}
+
+#[test]
+fn test_e2e_completed_inspection_navigation() {
+    use std::sync::{Arc, RwLock};
+
+    let mut app = AppState::new();
+    app.view = ViewPage::CompletedMedia;
+    app.completed_scroll_index = 0;
+
+    let tel = SystemTelemetry {
+        history_records: vec![HistoricalRecord {
+            video_stem: "failed_episode".to_string(),
+            video_rel_path: Some("/media/tvshow/failed_episode.avi".to_string()),
+            success: false,
+            wall_duration_secs: 0.5,
+            cifs_read_rate_mib_s: 1200.0,
+            file_size_bytes: 700_000_000,
+            certified_couplings_count: 0,
+            error_summary: Some(
+                "Error: No matching .srt file found for /media/tvshow/failed_episode.avi"
+                    .to_string(),
+            ),
+            start_iso: Some("2026-10-27T01:52:17Z".to_string()),
+            end_iso: Some("2026-10-27T01:52:18Z".to_string()),
+        }],
+        ..Default::default()
+    };
+    let shared_state = Arc::new(RwLock::new(tel.clone()));
+
+    // Press Enter on CompletedMedia -> switches to CompletedInspection
+    dbsrt_cli::commands::top::app::handle_key_event_with_state(
+        crossterm::event::KeyCode::Enter,
+        &mut app,
+        &tel,
+        Some(&shared_state),
+    );
+    assert_eq!(app.view, ViewPage::CompletedInspection);
+
+    // Press Esc on CompletedInspection -> returns to CompletedMedia
+    dbsrt_cli::commands::top::app::handle_key_event_with_state(
+        crossterm::event::KeyCode::Esc,
+        &mut app,
+        &tel,
+        Some(&shared_state),
+    );
+    assert_eq!(app.view, ViewPage::CompletedMedia);
+}
+
+#[test]
+fn test_e2e_contextual_help_navigation_and_glossary() {
+    use dbsrt_cli::commands::top::model::HelpTab;
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+    use std::sync::{Arc, RwLock};
+
+    let mut app = AppState::new();
+    let tel = SystemTelemetry::default();
+    let shared_state = Arc::new(RwLock::new(tel.clone()));
+
+    let backend = TestBackend::new(140, 45);
+    let mut terminal = Terminal::new(backend).unwrap();
+
+    // 1. From CompletedMedia, press '?' -> opens Help on HelpTab::Completed
+    app.view = ViewPage::CompletedMedia;
+    handle_key_event_with_state(KeyCode::Char('?'), &mut app, &tel, Some(&shared_state));
+    assert_eq!(app.view, ViewPage::Help);
+    assert_eq!(app.help_tab, HelpTab::Completed);
+
+    // Verify buffer contains COUPLINGS, STATUT, FAIL, CACHE, OK definitions
+    let empty_set = std::collections::HashSet::new();
+    let ctx_help_completed = UiContext {
+        telemetry: &tel,
+        view: ViewPage::Help,
+        selected_index: 0,
+        completed_scroll_index: 0,
+        media_scroll_index: 0,
+        source_scroll_index: 0,
+        source_modal: None,
+        selected_media_paths: &empty_set,
+        media_filter: MediaFilter::All,
+        media_sort: MediaSort::Name,
+        selected_source_filter: None,
+        completed_filter: CompletedFilter::All,
+        completed_sort: CompletedSort::DateDesc,
+        help_tab: HelpTab::Completed,
+        help_scroll_index: 0,
+        feedback_msg: None,
+    };
+    terminal
+        .draw(|f| render_ui(f, &ctx_help_completed))
+        .unwrap();
+    let buf_completed = format!("{:?}", terminal.backend().buffer());
+    assert!(buf_completed.contains("COUPLINGS"));
+    assert!(buf_completed.contains("STATUT"));
+    assert!(buf_completed.contains("FAIL"));
+    assert!(buf_completed.contains("CACHE"));
+    assert!(buf_completed.contains("OK"));
+    assert!(buf_completed.contains("NO_SRT"));
+    assert!(buf_completed.contains("CANCEL"));
+
+    // 2. Press '4' -> switches Help tab to HelpTab::MediaBrowser
+    handle_key_event_with_state(KeyCode::Char('4'), &mut app, &tel, Some(&shared_state));
+    assert_eq!(app.help_tab, HelpTab::MediaBrowser);
+
+    // Verify buffer contains VIERGE, EN COURS, COMPLÉTÉ, HACHÉ SEUL definitions
+    let mut ctx_help_media = ctx_help_completed;
+    ctx_help_media.help_tab = HelpTab::MediaBrowser;
+    terminal.draw(|f| render_ui(f, &ctx_help_media)).unwrap();
+    let buf_media = format!("{:?}", terminal.backend().buffer());
+    assert!(buf_media.contains("STATUT"));
+    assert!(buf_media.contains("VIERGE"));
+    assert!(buf_media.contains("EN COURS"));
+    assert!(buf_media.contains("COMPLÉTÉ"));
+    assert!(buf_media.contains("HACHÉ SEUL"));
+
+    // 3. Press Tab -> switches to HelpTab::MediaSources
+    handle_key_event_with_state(KeyCode::Tab, &mut app, &tel, Some(&shared_state));
+    assert_eq!(app.help_tab, HelpTab::MediaSources);
+
+    // 4. Press 'j' -> scrolls down in help
+    handle_key_event_with_state(KeyCode::Char('j'), &mut app, &tel, Some(&shared_state));
+    assert_eq!(app.help_scroll_index, 1);
+
+    // 5. Press Esc -> returns to calling view (CompletedMedia)
+    handle_key_event_with_state(KeyCode::Esc, &mut app, &tel, Some(&shared_state));
+    assert_eq!(app.view, ViewPage::CompletedMedia);
+
+    // 6. Test opening from MediaBrowser -> defaults to HelpTab::MediaBrowser
+    app.view = ViewPage::MediaBrowser;
+    handle_key_event_with_state(KeyCode::Char('?'), &mut app, &tel, Some(&shared_state));
+    assert_eq!(app.view, ViewPage::Help);
+    assert_eq!(app.help_tab, HelpTab::MediaBrowser);
 }

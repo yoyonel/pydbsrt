@@ -50,6 +50,7 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 data/reports/*cache*.json
+data/reports/media_sources.json
 data/reports/selected_batch_targets.json
 data/reports/selected_batch_report.md
 crates/dbsrt-cli/data/

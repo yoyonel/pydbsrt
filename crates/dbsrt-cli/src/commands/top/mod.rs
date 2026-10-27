@@ -12,7 +12,7 @@ use clap::Args;
 
 pub use app::run_top_app;
 pub use constants::DEFAULT_REFRESH_INTERVAL_MS;
-pub use model::{ActiveJobTelemetry, GpuTelemetry, SystemTelemetry, ViewPage};
+pub use model::{ActiveJobTelemetry, GpuTelemetry, MediaSourceConfig, SystemTelemetry, ViewPage};
 
 /// Command line arguments for `dbsrt top`.
 #[derive(Args, Debug, Clone, PartialEq, Eq)]
@@ -37,6 +37,9 @@ pub fn probe_telemetry_snapshot(refresh_ms: u64) -> Result<SystemTelemetry> {
     sys.refresh_memory_specifics(sysinfo::MemoryRefreshKind::everything());
     initial_tel.ram_total_gib = sys.total_memory() as f64 / constants::BYTES_PER_GIB_F64;
     initial_tel.ram_used_gib = sys.used_memory() as f64 / constants::BYTES_PER_GIB_F64;
+
+    let sources_path = std::path::PathBuf::from(constants::DEFAULT_MEDIA_SOURCES_PATH);
+    initial_tel.media_sources = sampler::load_media_sources(&sources_path);
 
     let shared_state = Arc::new(RwLock::new(initial_tel));
     let gpu_state = Arc::new(RwLock::new(GpuTelemetry::default()));

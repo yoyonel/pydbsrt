@@ -16,14 +16,16 @@ use sysinfo::{
 use crate::commands::top::constants::{
     BYTES_PER_GIB_F64, BYTES_PER_MIB_F64, DEFAULT_BATCH_EVENTS_PATH, DEFAULT_COUPLINGS_PATH,
     DEFAULT_COUPLING_BASELINE_FPS, DEFAULT_MEDIA_CACHE_PATH, DEFAULT_MEDIA_SCAN_INTERVAL_SECS,
-    DEFAULT_NAS_TVSHOW_PATH, DEFAULT_PHASH_DIR, DEFAULT_SELECTED_BATCH_REPORT_PATH,
-    DEFAULT_SELECTED_BATCH_TARGETS_PATH, MAX_MEDIA_SCAN_LIMIT, MAX_SELECTED_BATCH_WORKERS,
-    MIN_DELTA_TIME_FLOOR_SECS, MIN_PROGRESS_THRESHOLD, NAS_TVSHOW_DIR_ENV, SESSION_WINDOW_SECS,
+    DEFAULT_MEDIA_SOURCES_PATH, DEFAULT_NAS_TVSHOW_PATH, DEFAULT_PHASH_DIR,
+    DEFAULT_SELECTED_BATCH_REPORT_PATH, DEFAULT_SELECTED_BATCH_TARGETS_PATH,
+    DEFAULT_SOURCE_ID_TVSHOW, DEFAULT_SOURCE_NAME_TVSHOW, MAX_MEDIA_SCAN_LIMIT,
+    MAX_SELECTED_BATCH_WORKERS, MIN_DELTA_TIME_FLOOR_SECS, MIN_PROGRESS_THRESHOLD,
+    NAS_TVSHOW_DIR_ENV, SESSION_WINDOW_SECS,
 };
 use crate::commands::top::model::{
-    calculate_overall_stats, parse_iso_to_unix_secs, ActiveJobTelemetry, DiscoveredMediaItem,
-    GpuTelemetry, HistoricalRecord, IngestionStatus, MediaSubtrackInfo, PhashFingerprintInfo,
-    SessionThroughput, SystemTelemetry,
+    calculate_overall_stats, format_unix_to_iso, parse_iso_to_unix_secs, ActiveJobTelemetry,
+    DiscoveredMediaItem, GpuTelemetry, HistoricalRecord, IngestionStatus, MediaSourceConfig,
+    MediaSubtrackInfo, PhashFingerprintInfo, SessionThroughput, SystemTelemetry,
 };
 
 /// Shared handle for background GPU monitoring process.
@@ -269,6 +271,14 @@ pub fn load_historical_records(events_path: &Path, couplings_path: &Path) -> Vec
                 }
                 if let Ok(v) = serde_json::from_str::<serde_json::Value>(trimmed) {
                     if let Some(stem) = v.get("video_stem").and_then(|s| s.as_str()) {
+                        let video_rel_path = v
+                            .get("video_rel_path")
+                            .and_then(|p| p.as_str())
+                            .map(|s| s.to_string());
+                        let error_summary = v
+                            .get("error_summary")
+                            .and_then(|e| e.as_str())
+                            .map(|s| s.to_string());
                         let success = v.get("success").and_then(|s| s.as_bool()).unwrap_or(false);
                         let wall_duration_secs = v
                             .get("wall_duration_secs")
@@ -298,11 +308,13 @@ pub fn load_historical_records(events_path: &Path, couplings_path: &Path) -> Vec
 
                         raw_records.push(HistoricalRecord {
                             video_stem: stem.to_string(),
+                            video_rel_path,
                             success,
                             wall_duration_secs,
                             cifs_read_rate_mib_s: rate,
                             file_size_bytes,
                             certified_couplings_count,
+                            error_summary,
                             start_iso,
                             end_iso,
                         });
@@ -347,11 +359,13 @@ pub fn load_historical_records(events_path: &Path, couplings_path: &Path) -> Vec
                                 media_name.to_string(),
                                 HistoricalRecord {
                                     video_stem: media_name.to_string(),
+                                    video_rel_path: None,
                                     success: true,
                                     wall_duration_secs: dur_secs,
                                     cifs_read_rate_mib_s: 0.0,
                                     file_size_bytes: 0,
                                     certified_couplings_count: subs_count,
+                                    error_summary: None,
                                     start_iso: None,
                                     end_iso: None,
                                 },
@@ -689,6 +703,7 @@ pub fn scan_nas_tvshows(
                 video_codec: codec,
                 subtitles: subs,
                 phash: phash_info,
+                source_id: Some(DEFAULT_SOURCE_ID_TVSHOW.to_string()),
                 status,
             };
 
@@ -710,6 +725,288 @@ pub fn scan_nas_tvshows(
 
     discovered.sort_by_key(|a| a.stem.to_lowercase());
     discovered
+}
+
+/// Global trigger flag to request an immediate asynchronous rescan across all media sources.
+pub static MEDIA_RESCAN_REQUESTED: AtomicBool = AtomicBool::new(false);
+
+/// Signals background scanner thread to trigger an immediate multi-source scan.
+pub fn trigger_media_sources_rescan() {
+    MEDIA_RESCAN_REQUESTED.store(true, Ordering::Relaxed);
+}
+
+/// Loads configured media sources from disk, initializing default NAS TVShow source if unconfigured.
+pub fn load_media_sources(path: &Path) -> Vec<MediaSourceConfig> {
+    if path.exists() {
+        if let Ok(content) = fs::read_to_string(path) {
+            if let Ok(sources) = serde_json::from_str::<Vec<MediaSourceConfig>>(&content) {
+                if !sources.is_empty() {
+                    return sources;
+                }
+            }
+        }
+    }
+
+    let default_path = std::env::var(NAS_TVSHOW_DIR_ENV)
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from(DEFAULT_NAS_TVSHOW_PATH));
+
+    let default_sources = vec![MediaSourceConfig {
+        id: DEFAULT_SOURCE_ID_TVSHOW.to_string(),
+        name: DEFAULT_SOURCE_NAME_TVSHOW.to_string(),
+        path: default_path,
+        enabled: true,
+        media_count: 0,
+        last_scan_iso: None,
+    }];
+
+    let _ = save_media_sources(path, &default_sources);
+    default_sources
+}
+
+/// Persists configured media sources to disk.
+pub fn save_media_sources(path: &Path, sources: &[MediaSourceConfig]) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let json = serde_json::to_string_pretty(sources)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    fs::write(path, json)
+}
+
+/// Adds a new media source to the configuration.
+pub fn add_media_source(
+    sources_path: &Path,
+    sources: &mut Vec<MediaSourceConfig>,
+    name: String,
+    path: PathBuf,
+) -> Result<MediaSourceConfig, String> {
+    if path.as_os_str().is_empty() {
+        return Err("Le chemin du répertoire ne peut pas être vide.".to_string());
+    }
+
+    let id_base = if !name.trim().is_empty() {
+        name.trim()
+            .to_lowercase()
+            .replace(|c: char| !c.is_alphanumeric(), "_")
+    } else {
+        path.file_name()
+            .map(|s| {
+                s.to_string_lossy()
+                    .to_lowercase()
+                    .replace(|c: char| !c.is_alphanumeric(), "_")
+            })
+            .unwrap_or_else(|| "source".to_string())
+    };
+
+    let mut id = id_base.clone();
+    let mut counter = 1;
+    while sources.iter().any(|s| s.id == id) {
+        id = format!("{id_base}_{counter}");
+        counter += 1;
+    }
+
+    let display_name = if !name.trim().is_empty() {
+        name.trim().to_string()
+    } else {
+        path.file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "Nouvelle Source".to_string())
+    };
+
+    let new_source = MediaSourceConfig {
+        id,
+        name: display_name,
+        path,
+        enabled: true,
+        media_count: 0,
+        last_scan_iso: None,
+    };
+
+    sources.push(new_source.clone());
+    let _ = save_media_sources(sources_path, sources);
+    trigger_media_sources_rescan();
+    Ok(new_source)
+}
+
+/// Updates an existing media source's name and path.
+pub fn update_media_source(
+    sources_path: &Path,
+    sources: &mut [MediaSourceConfig],
+    index: usize,
+    name: String,
+    path: PathBuf,
+) -> Result<MediaSourceConfig, String> {
+    if path.as_os_str().is_empty() {
+        return Err("Le chemin du répertoire ne peut pas être vide.".to_string());
+    }
+    if let Some(src) = sources.get_mut(index) {
+        if !name.trim().is_empty() {
+            src.name = name.trim().to_string();
+        }
+        src.path = path;
+        let updated = src.clone();
+        let _ = save_media_sources(sources_path, sources);
+        trigger_media_sources_rescan();
+        Ok(updated)
+    } else {
+        Err("Index de source introuvable.".to_string())
+    }
+}
+
+/// Deletes a media source by index.
+pub fn delete_media_source(
+    sources_path: &Path,
+    sources: &mut Vec<MediaSourceConfig>,
+    index: usize,
+) -> Result<MediaSourceConfig, String> {
+    if sources.len() <= 1 {
+        return Err("Impossible de supprimer la seule source restante.".to_string());
+    }
+    if index >= sources.len() {
+        return Err("Index de source invalide.".to_string());
+    }
+    let removed = sources.remove(index);
+    let _ = save_media_sources(sources_path, sources);
+    trigger_media_sources_rescan();
+    Ok(removed)
+}
+
+/// Toggles enabled state of a media source by index.
+pub fn toggle_media_source(
+    sources_path: &Path,
+    sources: &mut [MediaSourceConfig],
+    index: usize,
+) -> Option<bool> {
+    if let Some(src) = sources.get_mut(index) {
+        src.enabled = !src.enabled;
+        let new_state = src.enabled;
+        let _ = save_media_sources(sources_path, sources);
+        trigger_media_sources_rescan();
+        Some(new_state)
+    } else {
+        None
+    }
+}
+
+/// Scans all configured and enabled media sources, discovering candidate media and assigning source IDs.
+pub fn scan_all_media_sources(
+    sources: &[MediaSourceConfig],
+    couplings_path: &Path,
+    events_path: &Path,
+    phash_dir: &Path,
+    active_jobs: &[ActiveJobTelemetry],
+    cache_path: &Path,
+) -> (Vec<DiscoveredMediaItem>, Vec<MediaSourceConfig>) {
+    let mut cached_map = load_media_cache(cache_path);
+    let certified_stems = get_certified_stems(events_path, couplings_path);
+
+    let mut discovered = Vec::new();
+    let mut updated_sources = sources.to_vec();
+
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let now_iso = format_unix_to_iso(now_secs);
+
+    for src in &mut updated_sources {
+        if !src.enabled {
+            continue;
+        }
+
+        let mut video_paths = Vec::new();
+        if src.path.exists() && src.path.is_dir() {
+            collect_video_files(&src.path, &mut video_paths, MAX_MEDIA_SCAN_LIMIT);
+        }
+
+        let mut count = 0;
+        for p in video_paths {
+            let stem = p
+                .file_stem()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_default();
+            if stem.is_empty() {
+                continue;
+            }
+
+            let size = fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
+
+            let (dur, codec, subs) = if let Some(item) = cached_map.get(&stem) {
+                if item.size_bytes == size && item.duration_secs.is_some() {
+                    (
+                        item.duration_secs,
+                        item.video_codec.clone(),
+                        item.subtitles.clone(),
+                    )
+                } else {
+                    probe_media_file(&p)
+                }
+            } else {
+                probe_media_file(&p)
+            };
+
+            let phash_path = phash_dir.join(format!("{stem}.phash"));
+            let phash_info = if let Ok(meta) = fs::metadata(&phash_path) {
+                let bytes = meta.len();
+                let frame_count = (bytes / 8) as usize;
+                Some(PhashFingerprintInfo {
+                    exists: true,
+                    frame_count,
+                    size_bytes: bytes,
+                })
+            } else {
+                None
+            };
+
+            let status = if active_jobs.iter().any(|j| j.media_name == stem) {
+                IngestionStatus::InProgress
+            } else if certified_stems.contains(&stem) {
+                IngestionStatus::Completed
+            } else if phash_info.is_some() {
+                IngestionStatus::PartialFail
+            } else {
+                IngestionStatus::Virgin
+            };
+
+            let item = DiscoveredMediaItem {
+                path: p,
+                stem: stem.clone(),
+                size_bytes: size,
+                duration_secs: dur,
+                video_codec: codec,
+                subtitles: subs,
+                phash: phash_info,
+                source_id: Some(src.id.clone()),
+                status,
+            };
+
+            cached_map.insert(stem, item.clone());
+            discovered.push(item);
+            count += 1;
+        }
+
+        src.media_count = count;
+        src.last_scan_iso = Some(now_iso.clone());
+    }
+
+    if discovered.is_empty() && !cached_map.is_empty() {
+        discovered = cached_map.into_values().collect();
+    } else {
+        save_media_cache(cache_path, &discovered);
+    }
+
+    if let Ok(mut c_lock) = STEM_CODEC_CACHE.lock() {
+        let map = c_lock.get_or_insert_with(HashMap::new);
+        for item in &discovered {
+            if let Some(ref codec) = item.video_codec {
+                map.insert(item.stem.clone(), codec.clone());
+            }
+        }
+    }
+
+    discovered.sort_by_key(|a| a.stem.to_lowercase());
+    (discovered, updated_sources)
 }
 
 /// Spawns background batch execution on the selected media paths with custom target and report file paths.
@@ -770,19 +1067,39 @@ pub fn launch_selected_batch_with_target_file(
     }
 }
 
-/// Spawns a background worker thread periodically refreshing NAS candidate media without blocking the telemetry loop.
-pub fn start_nas_media_scanner(
+/// Spawns a background worker thread periodically refreshing candidate media across all configured sources.
+pub fn start_media_sources_scanner(
     shared_state: Arc<RwLock<SystemTelemetry>>,
     stop_flag: Arc<AtomicBool>,
 ) {
     std::thread::spawn(move || {
         let events_path = PathBuf::from(DEFAULT_BATCH_EVENTS_PATH);
         let couplings_path = PathBuf::from(DEFAULT_COUPLINGS_PATH);
-        let nas_root = std::env::var(NAS_TVSHOW_DIR_ENV)
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from(DEFAULT_NAS_TVSHOW_PATH));
+        let sources_path = PathBuf::from(DEFAULT_MEDIA_SOURCES_PATH);
         let phash_dir = PathBuf::from(DEFAULT_PHASH_DIR);
         let media_cache_path = PathBuf::from(DEFAULT_MEDIA_CACHE_PATH);
+
+        // Run initial scan once at startup
+        let initial_sources = load_media_sources(&sources_path);
+        let active_jobs = {
+            shared_state
+                .read()
+                .map(|s| s.active_jobs.clone())
+                .unwrap_or_default()
+        };
+        let (items, updated_sources) = scan_all_media_sources(
+            &initial_sources,
+            &couplings_path,
+            &events_path,
+            &phash_dir,
+            &active_jobs,
+            &media_cache_path,
+        );
+        let _ = save_media_sources(&sources_path, &updated_sources);
+        if let Ok(mut state) = shared_state.write() {
+            state.discovered_media = items;
+            state.media_sources = updated_sources;
+        }
 
         while !stop_flag.load(Ordering::Relaxed) {
             let sleep_ticks = DEFAULT_MEDIA_SCAN_INTERVAL_SECS * 10;
@@ -790,18 +1107,20 @@ pub fn start_nas_media_scanner(
                 if stop_flag.load(Ordering::Relaxed) {
                     return;
                 }
+                if MEDIA_RESCAN_REQUESTED.swap(false, Ordering::Relaxed) {
+                    break;
+                }
                 std::thread::sleep(std::time::Duration::from_millis(100));
             }
 
-            let active_jobs = {
-                shared_state
-                    .read()
-                    .map(|s| s.active_jobs.clone())
-                    .unwrap_or_default()
-            };
+            let sources = load_media_sources(&sources_path);
+            let active_jobs = shared_state
+                .read()
+                .map(|s| s.active_jobs.clone())
+                .unwrap_or_default();
 
-            let items = scan_nas_tvshows(
-                &nas_root,
+            let (items, updated_sources) = scan_all_media_sources(
+                &sources,
                 &couplings_path,
                 &events_path,
                 &phash_dir,
@@ -809,11 +1128,23 @@ pub fn start_nas_media_scanner(
                 &media_cache_path,
             );
 
+            let _ = save_media_sources(&sources_path, &updated_sources);
+
             if let Ok(mut state) = shared_state.write() {
                 state.discovered_media = items;
+                state.media_sources = updated_sources;
             }
         }
     });
+}
+
+/// Spawns a background worker thread periodically refreshing NAS candidate media without blocking the telemetry loop.
+/// Backward compatibility alias for start_media_sources_scanner.
+pub fn start_nas_media_scanner(
+    shared_state: Arc<RwLock<SystemTelemetry>>,
+    stop_flag: Arc<AtomicBool>,
+) {
+    start_media_sources_scanner(shared_state, stop_flag);
 }
 
 /// Spawns background batch execution on the selected media paths using default paths.

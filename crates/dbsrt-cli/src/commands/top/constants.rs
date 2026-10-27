@@ -129,6 +129,18 @@ pub const NAS_TVSHOW_DIR_ENV: &str = "NAS_TVSHOW_DIR";
 /// Default path to discovered media metadata JSON cache.
 pub const DEFAULT_MEDIA_CACHE_PATH: &str = "data/reports/media_browser_cache.json";
 
+/// Default path to media sources configuration JSON file.
+pub const DEFAULT_MEDIA_SOURCES_PATH: &str = "data/reports/media_sources.json";
+
+/// Default display name for the default Synology NAS TVShow source.
+pub const DEFAULT_SOURCE_NAME_TVSHOW: &str = "Synology NAS (tvshow)";
+
+/// Default identifier for the primary NAS source.
+pub const DEFAULT_SOURCE_ID_TVSHOW: &str = "synology_tvshow";
+
+/// Default height in lines for the contextual help tab selector bar.
+pub const HELP_TAB_HEADER_HEIGHT: u16 = 3;
+
 /// Default directory storing precomputed pHash binary fingerprints.
 pub const DEFAULT_PHASH_DIR: &str = "data/__PHASH__";
 
@@ -152,3 +164,27 @@ pub const DEFAULT_SELECTED_BATCH_REPORT_PATH: &str = "data/reports/selected_batc
 
 /// Maximum concurrent workers spawned for interactive selected batch execution.
 pub const MAX_SELECTED_BATCH_WORKERS: usize = 4;
+
+/// Maximum display character width for source names in the sources table.
+pub const MAX_SOURCE_NAME_CHARS: usize = 28;
+
+/// Maximum display character width for source paths in the sources table.
+pub const MAX_SOURCE_PATH_CHARS: usize = 50;
+
+/// Default modal width percentage for source configuration dialog.
+pub const SOURCE_MODAL_WIDTH_PERCENT: u16 = 65;
+
+/// Default modal height lines for source configuration dialog.
+pub const SOURCE_MODAL_HEIGHT_LINES: u16 = 13;
+
+/// Process command line pattern identifying batch coordinator processes.
+pub const BATCH_COORDINATOR_PATTERN: &str = "batch_media_add";
+
+/// Process command line pattern identifying dbsrt media add worker processes.
+pub const BATCH_WORKER_CMD_PATTERN_1: &str = "dbsrt media:add";
+
+/// Process command line pattern identifying alternate dbsrt worker processes.
+pub const BATCH_WORKER_CMD_PATTERN_2: &str = "dbsrt media add";
+
+/// Brief pause in milliseconds allowing coordinators to terminate child process groups gracefully.
+pub const BATCH_GRACEFUL_SHUTDOWN_PAUSE_MS: u64 = 50;
