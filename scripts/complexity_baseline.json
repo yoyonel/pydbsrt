@@ -479,46 +479,6 @@
     "max_parameters": 5,
     "max_nesting": 3
   },
-  "crates/dbsrt-cli/src/commands/top/ui.rs::mod::render_completed_inspection_page": {
-    "file_path": "crates/dbsrt-cli/src/commands/top/ui.rs",
-    "scope": "mod",
-    "function_name": "render_completed_inspection_page",
-    "start_line": 1021,
-    "max_loc": 240,
-    "max_ccn": 27,
-    "max_parameters": 3,
-    "max_nesting": 8
-  },
-  "crates/dbsrt-cli/src/commands/top/ui.rs::mod::render_media_browser_page": {
-    "file_path": "crates/dbsrt-cli/src/commands/top/ui.rs",
-    "scope": "mod",
-    "function_name": "render_media_browser_page",
-    "start_line": 1263,
-    "max_loc": 397,
-    "max_ccn": 31,
-    "max_parameters": 3,
-    "max_nesting": 5
-  },
-  "crates/dbsrt-cli/src/commands/top/ui.rs::mod::render_media_inspection_page": {
-    "file_path": "crates/dbsrt-cli/src/commands/top/ui.rs",
-    "scope": "mod",
-    "function_name": "render_media_inspection_page",
-    "start_line": 1684,
-    "max_loc": 438,
-    "max_ccn": 26,
-    "max_parameters": 3,
-    "max_nesting": 4
-  },
-  "crates/dbsrt-cli/src/commands/top/ui.rs::mod::render_media_sources_page": {
-    "file_path": "crates/dbsrt-cli/src/commands/top/ui.rs",
-    "scope": "mod",
-    "function_name": "render_media_sources_page",
-    "start_line": 2124,
-    "max_loc": 280,
-    "max_ccn": 16,
-    "max_parameters": 3,
-    "max_nesting": 4
-  },
   "crates/dbsrt-cli/src/main.rs::mod::main": {
     "file_path": "crates/dbsrt-cli/src/main.rs",
     "scope": "mod",
