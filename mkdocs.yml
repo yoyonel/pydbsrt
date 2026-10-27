@@ -129,6 +129,7 @@ nav:
       - Surveiller la Stack avec Prometheus & Grafana: how-to/surveiller-stack-telemetrie.md
       - Invalider et Purger des Données pHash: how-to/invalider-donnees-phash.md
       - Recette E2E du Moniteur TUI Rust (dbsrt top): how-to/2026-10-26-recette-e2e-tui-rust.md
+      - Guide Tests Scénarios TUI Headless: how-to/2026-10-27-guide-tests-scenarios-tui.md
       - Audit d'Intégrité Catalogue & Stockage: how-to/2026-10-26-audit-integrite-catalogue-et-stockage.md
       - Exécuter les Recettes de Chaos Testing: how-to/executer-recettes-chaos-testing.md
       - Contribuer à la Documentation Diátaxis: how-to/contribuer-documentation-diataxis.md
@@ -162,6 +163,7 @@ nav:
       - Plan Déploiement & Intégration RPi4: 2026-10-20-plan-deploiement-et-integration-remote-rpi4.md
       - Déploiement PostgreSQL 17 Dédié RPi4: 2026-10-24-deploiement-postgresql-17-isole-rpi4-et-orchestration-migrations.md
       - Audit Legacy VLSub: 2026-10-18-vlsub-legacy-audit.md
+      - Testabilité TUI & Stratégies de Couverture: explanation/2026-10-27-analyse-testabilite-et-couverture-tui-open-source.md
   - 📊 Benchmarks & Preuves:
       - Campagnes Empiriques:
           - Rapport Batch TVShow Synology: 2026-10-25-rapport-batch-import-tvshow-synology.md
