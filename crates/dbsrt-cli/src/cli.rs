@@ -152,8 +152,8 @@ pub enum Commands {
     #[command(name = "coupling:relabel", visible_alias = "coupling-relabel")]
     RelabelCoupling(RelabelCouplingArgs),
 
-    /// Real-time full-frame TUI process monitor for decoding tasks, CIFS throughput, and pHash
-    #[command(name = "top")]
+    /// Real-time full-frame TUI process monitor and media studio
+    #[command(name = "top", visible_aliases = ["studio", "ops"])]
     Top(TopArgs),
 }
 
@@ -278,5 +278,14 @@ mod tests {
             }
             _ => panic!("Expected Top command"),
         }
+    }
+
+    #[test]
+    fn test_cli_parse_studio_and_ops_aliases() {
+        let cli_studio = Cli::parse_from(["dbsrt", "studio"]);
+        assert!(matches!(cli_studio.command, Commands::Top(_)));
+
+        let cli_ops = Cli::parse_from(["dbsrt", "ops"]);
+        assert!(matches!(cli_ops.command, Commands::Top(_)));
     }
 }

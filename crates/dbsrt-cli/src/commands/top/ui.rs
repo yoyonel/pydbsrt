@@ -1957,7 +1957,8 @@ fn render_media_sources_page(frame: &mut Frame, area: Rect, ctx: &UiContext) {
         "STATUT",
         "NOM DE LA SOURCE",
         "ACCÈS DISQUE",
-        "MÉDIAS",
+        "SCAN DISQUE",
+        "DISPONIBLES",
         "DERNIER SCAN",
         "CHEMIN DU RÉPERTOIRE",
     ]
@@ -2021,10 +2022,42 @@ fn render_media_sources_page(frame: &mut Frame, area: Rect, ctx: &UiContext) {
                 )
             };
 
-            let count_str = if src.enabled {
-                format!("{} fichier(s)", src.media_count)
+            let scan_result_span = if src.last_scan_iso.is_some() {
+                if src.last_scan_added > 0 {
+                    Span::styled(
+                        format!("{} (+{} nouv.)", src.media_count, src.last_scan_added),
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD),
+                    )
+                } else {
+                    Span::styled(
+                        format!("{} fichier(s)", src.media_count),
+                        Style::default().fg(Color::White),
+                    )
+                }
             } else {
-                "- (inactif)".to_string()
+                Span::styled("- (en attente)", Style::default().fg(Color::DarkGray))
+            };
+
+            let in_mem_count = ctx
+                .telemetry
+                .discovered_media
+                .iter()
+                .filter(|m| m.source_id.as_deref() == Some(&src.id))
+                .count();
+
+            let dispo_span = if !src.enabled {
+                Span::styled("0 (inactif)", Style::default().fg(Color::DarkGray))
+            } else if in_mem_count > 0 {
+                Span::styled(
+                    format!("{in_mem_count} dispo"),
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD),
+                )
+            } else {
+                Span::styled("0 dispo", Style::default().fg(Color::Yellow))
             };
 
             let scan_str = src.last_scan_iso.as_deref().unwrap_or("En attente...");
@@ -2043,7 +2076,8 @@ fn render_media_sources_page(frame: &mut Frame, area: Rect, ctx: &UiContext) {
                 Cell::from(status_span),
                 Cell::from(name_display),
                 Cell::from(access_span),
-                Cell::from(count_str),
+                Cell::from(scan_result_span),
+                Cell::from(dispo_span),
                 Cell::from(scan_str.to_string()),
                 Cell::from(path_display),
             ];
@@ -2064,9 +2098,10 @@ fn render_media_sources_page(frame: &mut Frame, area: Rect, ctx: &UiContext) {
     let widths = [
         Constraint::Length(3),
         Constraint::Length(15),
-        Constraint::Length(28),
+        Constraint::Length(26),
         Constraint::Length(16),
-        Constraint::Length(15),
+        Constraint::Length(20),
+        Constraint::Length(16),
         Constraint::Length(22),
         Constraint::Min(25),
     ];
@@ -2463,10 +2498,11 @@ fn build_help_media_sources() -> Vec<Line<'static>> {
         Line::from("  Gestionnaire interactif CRUD des répertoires vidéo scannés en parallèle (stocké dans data/reports/media_sources.json)."),
         Line::from(""),
         Line::from(Span::styled("  Glossaire des Colonnes :", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))),
-        Line::from("    • STATUT                 : [✓] ACTIF (inclus dans l'indexation) ou [ ] INACTIF (désactivé temporairement)."),
+        Line::from("    • STATUT                 : [✓] ACTIF (inclus dans l'indexation) ou [ ] DÉSACTIVÉ (désactivé temporairement)."),
         Line::from("    • NOM DE LA SOURCE       : Libellé convivial (auto-déduit depuis le dossier ou personnalisé)."),
         Line::from("    • ACCÈS DISQUE           : '✓ DISPONIBLE' (chemin accessible en lecture) ou '✗ INACCESSIBLE' (point de montage démonté)."),
-        Line::from("    • MÉDIAS                 : Nombre total de fichiers vidéo découverts dans cette source."),
+        Line::from("    • SCAN DISQUE            : Nombre total de fichiers vidéo recensés lors du dernier scan sur disque, avec mention des nouveaux ajouts (+X nouv.)."),
+        Line::from("    • DISPONIBLES            : Nombre effectif de médias de cette source chargés en mémoire vive dans le catalogue actif (onglet [4/m] Médias). Si la source est désactivée, cette valeur passe immédiatement à 0 (inactif)."),
         Line::from("    • DERNIER SCAN           : Horodatage ISO de la dernière exploration du dossier."),
         Line::from("    • CHEMIN DU RÉPERTOIRE   : Chemin absolu ou relatif sur le système de fichiers ou partage réseau CIFS/NFS."),
         Line::from(""),

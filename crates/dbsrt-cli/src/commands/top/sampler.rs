@@ -757,6 +757,7 @@ pub fn load_media_sources(path: &Path) -> Vec<MediaSourceConfig> {
         path: default_path,
         enabled: true,
         media_count: 0,
+        last_scan_added: 0,
         last_scan_iso: None,
     }];
 
@@ -820,6 +821,7 @@ pub fn add_media_source(
         path,
         enabled: true,
         media_count: 0,
+        last_scan_added: 0,
         last_scan_iso: None,
     };
 
@@ -921,6 +923,7 @@ pub fn scan_all_media_sources(
         }
 
         let mut count = 0;
+        let mut added_count = 0;
         for p in video_paths {
             let stem = p
                 .file_stem()
@@ -928,6 +931,10 @@ pub fn scan_all_media_sources(
                 .unwrap_or_default();
             if stem.is_empty() {
                 continue;
+            }
+
+            if !cached_map.contains_key(&stem) {
+                added_count += 1;
             }
 
             let size = fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
@@ -987,6 +994,7 @@ pub fn scan_all_media_sources(
         }
 
         src.media_count = count;
+        src.last_scan_added = added_count;
         src.last_scan_iso = Some(now_iso.clone());
     }
 

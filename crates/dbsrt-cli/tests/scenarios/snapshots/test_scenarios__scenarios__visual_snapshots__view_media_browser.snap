@@ -1,0 +1,34 @@
+---
+source: crates/dbsrt-cli/tests/scenarios/visual_snapshots.rs
+expression: grid
+---
+┌ pydbsrt top ── Moniteur de Décodage pHash & Ingestion Temps Réel ────────────────────────────────────────────────────────────────────────┐
+│ ⏱️   HH:MM:SS │ Workers Actifs: 2 │ Host CPU: 18% │ RAM:  8.4/31.0 GiB                                                                    │
+│ 🎮  GPU INTEL IRIS XE : Non disponible (Mode CPU Multithread)                                                                             │
+│ ⚡  DÉBITS RÉSEAU CIFS : Instantané:   0.0 MB/s (Net RX:   0.0 MB/s, VFS:   0.0 MB/s)                                                     │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌ 📂  EXPLORATEUR DE MÉDIAS MULTI-SOURCES [5/5 DISPONIBLES sur 2 sources] ──────────────────────────────────────────────────────────────────┐
+│ [f] Filtre: [TOUS]    [o] Tri: [NOM (A-Z)]    [S] Source: [TOUTES]    Sélection: 0 média(s) coché(s)                                     │
+│                                                                                                                                          │
+│    SEL   MÉDIA / RELEASE NAS                            TAILLE     DURÉE     EMPREINTE PHASH    SOUS-TITRES     ENCODAGE   STATUT        │
+│►   [ ]   [video] Movie.A.2024                           4.2 GiB    2h00m     - Non calculé      0 (Aucun)       hevc       VIERGE        │
+│    [ ]   [video] Movie.B.2023                           2.0 GiB    1h30m     ✓  5.4kf ( 42K)    1 (fre)         h264       COMPLÉTÉ      │
+│    [ ]   [video] Movie.C.2022                           1.1 GiB    1h00m     - Non calculé      0 (Aucun)       h264       VIERGE        │
+│    [ ]   [tvshow] Show.S01E01                           763 MiB    45m00s    ✓  2.7kf ( 21K)    0 (Aucun)       h264       HACHÉ SEUL    │
+│    [ ]   [tvshow] Show.S01E02                           811 MiB    46m40s    - Non calculé      0 (Aucun)       h264       VIERGE        │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+  [1] Tâches   [2/h] Stats   [3/r] Récents   [4/m] Médias   [5/s] Sources  │ [↑/k] Défiler  [Enter/i] Fiche  [Space] Cocher  [a] Tout  [f] F

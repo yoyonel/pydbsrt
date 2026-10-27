@@ -302,6 +302,7 @@ fn test_ui_rendering_all_pages() {
             path: PathBuf::from("/mnt/nas/Synology/tvshow"),
             enabled: true,
             media_count: 2,
+            last_scan_added: 0,
             last_scan_iso: Some("2026-10-26T21:00:00Z".to_string()),
         }],
     };
@@ -1929,6 +1930,7 @@ fn test_scan_all_media_sources_multi_dir() {
             path: dir_a.clone(),
             enabled: true,
             media_count: 0,
+            last_scan_added: 0,
             last_scan_iso: None,
         },
         dbsrt_cli::commands::top::model::MediaSourceConfig {
@@ -1937,6 +1939,7 @@ fn test_scan_all_media_sources_multi_dir() {
             path: dir_b.clone(),
             enabled: false, // Disabled source should be ignored
             media_count: 0,
+            last_scan_added: 0,
             last_scan_iso: None,
         },
     ];
@@ -1984,6 +1987,7 @@ fn test_e2e_sources_add_and_render_flow() {
             path: PathBuf::from("/mnt/nas/Synology/tvshow"),
             enabled: true,
             media_count: 200,
+            last_scan_added: 0,
             last_scan_iso: Some("2026-10-26T21:00:00Z".to_string()),
         }],
         ..Default::default()
@@ -2052,6 +2056,7 @@ fn test_e2e_sources_edit_and_render_flow() {
             path: PathBuf::from("/media/src1"),
             enabled: true,
             media_count: 50,
+            last_scan_added: 0,
             last_scan_iso: None,
         }],
         ..Default::default()
@@ -2104,6 +2109,7 @@ fn test_e2e_sources_toggle_space_and_render_flow() {
                 path: PathBuf::from("/media/src1"),
                 enabled: true,
                 media_count: 50,
+                last_scan_added: 0,
                 last_scan_iso: None,
             },
             dbsrt_cli::commands::top::model::MediaSourceConfig {
@@ -2112,6 +2118,7 @@ fn test_e2e_sources_toggle_space_and_render_flow() {
                 path: PathBuf::from("/media/src2"),
                 enabled: true,
                 media_count: 100,
+                last_scan_added: 0,
                 last_scan_iso: None,
             },
         ],
@@ -2174,6 +2181,7 @@ fn test_e2e_sources_delete_and_protection_flow() {
                 path: PathBuf::from("/media/src1"),
                 enabled: true,
                 media_count: 50,
+                last_scan_added: 0,
                 last_scan_iso: None,
             },
             dbsrt_cli::commands::top::model::MediaSourceConfig {
@@ -2182,6 +2190,7 @@ fn test_e2e_sources_delete_and_protection_flow() {
                 path: PathBuf::from("/media/src2"),
                 enabled: true,
                 media_count: 100,
+                last_scan_added: 0,
                 last_scan_iso: None,
             },
         ],
@@ -2241,6 +2250,7 @@ fn test_e2e_sources_scanner_never_overwrites_disk_sources() {
             path: tmp_dir.join("src1"),
             enabled: true,
             media_count: 0,
+            last_scan_added: 0,
             last_scan_iso: None,
         },
         dbsrt_cli::commands::top::model::MediaSourceConfig {
@@ -2249,6 +2259,7 @@ fn test_e2e_sources_scanner_never_overwrites_disk_sources() {
             path: tmp_dir.join("src2"),
             enabled: true,
             media_count: 0,
+            last_scan_added: 0,
             last_scan_iso: None,
         },
     ];
@@ -2305,6 +2316,7 @@ fn test_e2e_multi_source_media_browser_aggregation() {
                 path: PathBuf::from("/media/nas/tvshow"),
                 enabled: true,
                 media_count: 1,
+                last_scan_added: 0,
                 last_scan_iso: None,
             },
             dbsrt_cli::commands::top::model::MediaSourceConfig {
@@ -2313,6 +2325,7 @@ fn test_e2e_multi_source_media_browser_aggregation() {
                 path: PathBuf::from("/media/nas/video"),
                 enabled: true,
                 media_count: 1,
+                last_scan_added: 0,
                 last_scan_iso: None,
             },
         ],
@@ -2375,6 +2388,7 @@ fn test_e2e_sources_toggle_purges_inactive_media_immediately() {
                 path: PathBuf::from("/media/nas/tvshow"),
                 enabled: true,
                 media_count: 1,
+                last_scan_added: 0,
                 last_scan_iso: None,
             },
             dbsrt_cli::commands::top::model::MediaSourceConfig {
@@ -2383,6 +2397,7 @@ fn test_e2e_sources_toggle_purges_inactive_media_immediately() {
                 path: PathBuf::from("/media/nas/video"),
                 enabled: true,
                 media_count: 1,
+                last_scan_added: 0,
                 last_scan_iso: None,
             },
         ],
@@ -2466,6 +2481,7 @@ fn test_e2e_media_browser_source_filter_cycle() {
                 path: PathBuf::from("/media/nas/tvshow"),
                 enabled: true,
                 media_count: 1,
+                last_scan_added: 0,
                 last_scan_iso: None,
             },
             dbsrt_cli::commands::top::model::MediaSourceConfig {
@@ -2474,6 +2490,7 @@ fn test_e2e_media_browser_source_filter_cycle() {
                 path: PathBuf::from("/media/nas/video"),
                 enabled: true,
                 media_count: 1,
+                last_scan_added: 0,
                 last_scan_iso: None,
             },
         ],

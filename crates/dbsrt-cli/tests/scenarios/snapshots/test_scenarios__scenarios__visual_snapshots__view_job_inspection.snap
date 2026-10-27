@@ -1,0 +1,34 @@
+---
+source: crates/dbsrt-cli/tests/scenarios/visual_snapshots.rs
+expression: grid
+---
+┌ pydbsrt top ── Moniteur de Décodage pHash & Ingestion Temps Réel ────────────────────────────────────────────────────────────────────────┐
+│ ⏱️   HH:MM:SS │ Workers Actifs: 2 │ Host CPU: 18% │ RAM:  8.4/31.0 GiB                                                                    │
+│ 🎮  GPU INTEL IRIS XE : Non disponible (Mode CPU Multithread)                                                                             │
+│ ⚡  DÉBITS RÉSEAU CIFS : Instantané:   0.0 MB/s (Net RX:   0.0 MB/s, VFS:   0.0 MB/s)                                                     │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌ INSPECTION DÉTAILLÉE DU PROCESSUS (FULL-FRAME) ──────────────────────────────────────────────────────────────────────────────────────────┐
+│PID: 50101    │ Moteur: GPU (VA-API)     │ État: RUNNING                                                                                  │
+│Écoulé: 42s      │ Débit CIFS:   24.5 MB/s │ CPU: 15.0% │ RAM:  64.0 MB                                                                   │
+│Progression:  30.0% │ Lus:  420.0 MB / Total: 1400.0 MB                                                                                   │
+│ETA estimé: 1m25s                                                                                                                         │
+│                                                                                                                                          │
+│--- Diagnostic Moteur & Accélération Matérielle ---                                                                                       │
+│  • Moteur sélectionné : GPU (VA-API)                                                                                                     │
+│  • Accélération active: Décodage matériel ASIC GPU actif via Intel QuickSync / VA-API (/dev/dri/renderD128).                             │
+│  • Efficacité         : Déchargement CPU quasi-total (< 20% CPU hôte) et débit de décodage maximal.                                      │
+│                                                                                                                                          │
+│--- Ligne de Commande Exécutée ---                                                                                                        │
+│ffmpeg -vaapi_device /dev/dri/renderD128 -i The.Wire.S01E01.1080p.mkv                                                                     │
+│                                                                                                                                          │
+│--- Descripteurs Fichiers & I/O Actifs ---                                                                                                │
+│  • Aucun fichier physique direct ouvert détecté                                                                                          │
+│                                                                                                                                          │
+│--- Extrait Derniers Logs d'Exécution ---                                                                                                 │
+│  (Aucun fichier log dédié trouvé pour ce PID / média)                                                                                    │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+  [1] Tâches   [2/h] Stats   [3/r] Récents   [4/m] Médias   [5/s] Sources  │ [Esc/Backspace] Retour Liste  [p] Pause  [s] Arrêter  [K] Kill

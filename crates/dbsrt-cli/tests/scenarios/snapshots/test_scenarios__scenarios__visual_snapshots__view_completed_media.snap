@@ -1,0 +1,34 @@
+---
+source: crates/dbsrt-cli/tests/scenarios/visual_snapshots.rs
+expression: grid
+---
+┌ pydbsrt top ── Moniteur de Décodage pHash & Ingestion Temps Réel ────────────────────────────────────────────────────────────────────────┐
+│ ⏱️   HH:MM:SS │ Workers Actifs: 2 │ Host CPU: 18% │ RAM:  8.4/31.0 GiB                                                                    │
+│ 🎮  GPU INTEL IRIS XE : Non disponible (Mode CPU Multithread)                                                                             │
+│ ⚡  DÉBITS RÉSEAU CIFS : Instantané:   0.0 MB/s (Net RX:   0.0 MB/s, VFS:   0.0 MB/s)                                                     │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌ 📋  DERNIERS TRAITEMENTS COMPLÉTÉS & CERTIFIÉS [5/5 RÉFÉRENCÉS] ──────────────────────────────────────────────────────────────────────────┐
+│ [f] Filtre: [TOUS]    [o] Tri: [DATE FIN (RÉCENT -> ANCIEN)]   [Enter/i] Fiche Diagnostic & Erreur                                       │
+│                                                                                                                                          │
+│    MÉDIA / ÉPISODE TRAITÉ                           STATUT     TAILLE      DURÉE       COUPLINGS    DÉBIT CIFS     DATE FIN              │
+│►   The.Expanse.S04E08.HDR.2160p                     ✗ FAIL     5748 MB     2m09s       +0            44.4 MB/s     2026-10-27T01:40:34Z  │
+│    The Leftovers S01E05                             ⏹ CANCEL   547 MB      0s          +0             0.0 MB/s     2026-10-27T01:40:35Z  │
+│    The Leftovers S01E01                             ⚠ NO_SRT   698 MB      0s          +0             0.0 MB/s     2026-10-27T01:52:18Z  │
+│    The.Expanse.S02E03.1080p                         ✓ OK       3355 MB     1m15s       +1            44.6 MB/s     2026-10-27T02:00:00Z  │
+│    Carnivàle (2003) - S02E08                        ✓ OK       1611 MB     7m27s       +2             3.6 MB/s     2026-10-27T02:08:27Z  │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+  [1] Tâches   [2/h] Stats   [3/r] Récents   [4/m] Médias   [5/s] Sources  │ [↑/k] Défiler  [Enter/i] Fiche/Erreur  [f] Filtre  [o] Tri  [?]

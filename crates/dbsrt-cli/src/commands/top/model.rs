@@ -272,7 +272,7 @@ pub struct MediaSubtrackInfo {
 }
 
 /// Persistent configuration and operational state for a media storage source.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct MediaSourceConfig {
     pub id: String,
     pub name: String,
@@ -280,6 +280,8 @@ pub struct MediaSourceConfig {
     pub enabled: bool,
     #[serde(default)]
     pub media_count: usize,
+    #[serde(default)]
+    pub last_scan_added: usize,
     #[serde(default)]
     pub last_scan_iso: Option<String>,
 }
