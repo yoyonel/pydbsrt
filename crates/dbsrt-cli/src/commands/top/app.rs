@@ -514,152 +514,255 @@ pub fn handle_key_event(code: KeyCode, app: &mut AppState, telemetry: &SystemTel
 /// - `telemetry`: Immutable reference to active telemetry snapshot.
 /// - `shared_state`: Optional atomic reference to update shared state on source changes.
 ///
+/// # Returns
+/// None.
+///
+/// # Errors
+/// None.
+///
+/// # Panics
+/// Guaranteed panic-free.
+///
 /// # Data Flow & Invariants
 /// Priority dispatch hierarchy:
 /// 1. **Modal Interception**: If `app.source_modal` is open, intercepts typing, Tab, Backspace, Esc, and Enter.
 /// 2. **Interactive Search Input**: If `app.search_active` is true, routes keystrokes to active query buffer.
 /// 3. **Global Navigation**: Number keys (`1`..`5`), view hotkeys (`g`, `h`, `r`, `m`, `s`), help (`?`), quit (`q`).
-/// 4. **View-Specific Actions**:
-///    - Active Jobs: Spacebar (pause/resume SIGSTOP/CONT), `s` (SIGTERM), `k` (SIGKILL), Enter (Inspect).
-///    - Completed: `f` (filter), `o` (sort), Enter (Inspect).
-///    - Media Browser: `Space` (batch multi-select), `b` (launch batch), `f` (filter), `o` (sort), `s` (source filter).
-///    - Media Sources: `a` (add), `e` (edit), `d` (delete), `Space` (toggle), `r` (rescan).
+/// 4. **Viewport Cursor & Scroll**: Up/Down/'j'/'k', PageUp/PageDown, Home/End.
+/// 5. **View-Specific Actions**: Dedicated handlers per active page.
 pub fn handle_key_event_with_state(
     code: KeyCode,
     app: &mut AppState,
     telemetry: &SystemTelemetry,
     shared_state: Option<&Arc<RwLock<SystemTelemetry>>>,
 ) {
-    // 1. Interactive modal keyboard handling (when modal is active)
-    if let Some(ref mut modal) = app.source_modal {
-        match code {
-            KeyCode::Esc => {
-                app.source_modal = None;
-            }
-            KeyCode::Tab | KeyCode::BackTab | KeyCode::Up | KeyCode::Down => {
-                modal.active_field = match modal.active_field {
-                    SourceModalField::Name => SourceModalField::Path,
-                    SourceModalField::Path => SourceModalField::Name,
-                };
-            }
-            KeyCode::Backspace => match modal.active_field {
-                SourceModalField::Name => {
-                    modal.name_input.pop();
-                }
-                SourceModalField::Path => {
-                    modal.path_input.pop();
-                }
-            },
-            KeyCode::Char(c) => match modal.active_field {
-                SourceModalField::Name => {
-                    modal.name_input.push(c);
-                }
-                SourceModalField::Path => {
-                    modal.path_input.push(c);
-                }
-            },
-            KeyCode::Enter => {
-                let path_str = modal.path_input.trim();
-                if path_str.is_empty() {
-                    app.set_feedback(
-                        "Erreur : Le chemin du répertoire est obligatoire.".to_string(),
-                    );
-                    return;
-                }
-                let path = PathBuf::from(path_str);
-                let name = modal.name_input.trim().to_string();
-                let sources_path = std::path::Path::new(DEFAULT_MEDIA_SOURCES_PATH);
-                let mut sources = if !telemetry.media_sources.is_empty() {
-                    telemetry.media_sources.clone()
-                } else {
-                    load_media_sources(sources_path)
-                };
-
-                match modal.mode {
-                    SourceModalMode::Add => {
-                        match add_media_source(sources_path, &mut sources, name, path) {
-                            Ok(src) => {
-                                if let Some(shared) = shared_state {
-                                    if let Ok(mut state) = shared.write() {
-                                        state.media_sources = sources.clone();
-                                    }
-                                }
-                                app.set_feedback(format!("✓ Source ajoutée : {}", src.name));
-                                app.source_modal = None;
-                            }
-                            Err(err) => {
-                                app.set_feedback(format!("Erreur : {err}"));
-                            }
-                        }
-                    }
-                    SourceModalMode::Edit(idx) => {
-                        match update_media_source(sources_path, &mut sources, idx, name, path) {
-                            Ok(src) => {
-                                if let Some(shared) = shared_state {
-                                    if let Ok(mut state) = shared.write() {
-                                        state.media_sources = sources.clone();
-                                    }
-                                }
-                                app.set_feedback(format!("✓ Source modifiée : {}", src.name));
-                                app.source_modal = None;
-                            }
-                            Err(err) => {
-                                app.set_feedback(format!("Erreur : {err}"));
-                            }
-                        }
-                    }
-                }
-            }
-            _ => {}
-        }
+    if handle_modal_key_event(code, app, telemetry, shared_state) {
         return;
     }
+    if handle_search_active_key_event(code, app) {
+        return;
+    }
+    if handle_global_navigation_key_event(code, app) {
+        return;
+    }
+    if handle_scroll_navigation_key_event(code, app, telemetry) {
+        return;
+    }
+    handle_view_specific_key_event(code, app, telemetry, shared_state);
+}
 
-    // 1b. Interactive search mode inside searchable views (ActiveJobs, CompletedMedia, MediaBrowser)
-    if app.search_active {
-        match code {
-            KeyCode::Esc => {
-                app.search_active = false;
+/// Handles keyboard interactions when the interactive source modal is active.
+///
+/// # Arguments
+/// - `code`: Crossterm [`KeyCode`] received from the terminal event loop.
+/// - `app`: Mutable reference to application state holding the active modal buffer.
+/// - `telemetry`: Immutable reference to active telemetry snapshot.
+/// - `shared_state`: Optional atomic reference to update shared state on source changes.
+///
+/// # Returns
+/// `true` if a modal was active and processed the keystroke; `false` otherwise.
+///
+/// # Errors
+/// None. Persistence failures surface via `app.set_feedback`.
+///
+/// # Panics
+/// Guaranteed panic-free.
+///
+/// # Data Flow & Invariants
+/// Intercepts Esc (dismissal), Tab/BackTab/Up/Down (field toggling),
+/// Backspace/Char (text mutation), and Enter (validation & file persistence).
+fn handle_modal_key_event(
+    code: KeyCode,
+    app: &mut AppState,
+    telemetry: &SystemTelemetry,
+    shared_state: Option<&Arc<RwLock<SystemTelemetry>>>,
+) -> bool {
+    let Some(ref mut modal) = app.source_modal else {
+        return false;
+    };
+
+    match code {
+        KeyCode::Esc => {
+            app.source_modal = None;
+        }
+        KeyCode::Tab | KeyCode::BackTab | KeyCode::Up | KeyCode::Down => {
+            modal.active_field = match modal.active_field {
+                SourceModalField::Name => SourceModalField::Path,
+                SourceModalField::Path => SourceModalField::Name,
+            };
+        }
+        KeyCode::Backspace => match modal.active_field {
+            SourceModalField::Name => {
+                modal.name_input.pop();
+            }
+            SourceModalField::Path => {
+                modal.path_input.pop();
+            }
+        },
+        KeyCode::Char(c) => match modal.active_field {
+            SourceModalField::Name => {
+                modal.name_input.push(c);
+            }
+            SourceModalField::Path => {
+                modal.path_input.push(c);
+            }
+        },
+        KeyCode::Enter => {
+            let path_str = modal.path_input.trim();
+            if path_str.is_empty() {
+                app.set_feedback("Erreur : Le chemin du répertoire est obligatoire.".to_string());
+                return true;
+            }
+            let path = PathBuf::from(path_str);
+            let name = modal.name_input.trim().to_string();
+            let sources_path = std::path::Path::new(DEFAULT_MEDIA_SOURCES_PATH);
+            let mut sources = if !telemetry.media_sources.is_empty() {
+                telemetry.media_sources.clone()
+            } else {
+                load_media_sources(sources_path)
+            };
+
+            match modal.mode {
+                SourceModalMode::Add => {
+                    match add_media_source(sources_path, &mut sources, name, path) {
+                        Ok(src) => {
+                            if let Some(shared) = shared_state {
+                                if let Ok(mut state) = shared.write() {
+                                    state.media_sources = sources.clone();
+                                }
+                            }
+                            app.set_feedback(format!("✓ Source ajoutée : {}", src.name));
+                            app.source_modal = None;
+                        }
+                        Err(err) => {
+                            app.set_feedback(format!("Erreur : {err}"));
+                        }
+                    }
+                }
+                SourceModalMode::Edit(idx) => {
+                    match update_media_source(sources_path, &mut sources, idx, name, path) {
+                        Ok(src) => {
+                            if let Some(shared) = shared_state {
+                                if let Ok(mut state) = shared.write() {
+                                    state.media_sources = sources.clone();
+                                }
+                            }
+                            app.set_feedback(format!("✓ Source modifiée : {}", src.name));
+                            app.source_modal = None;
+                        }
+                        Err(err) => {
+                            app.set_feedback(format!("Erreur : {err}"));
+                        }
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    true
+}
+
+/// Handles keystrokes when interactive search mode is active.
+///
+/// # Arguments
+/// - `code`: Crossterm [`KeyCode`] received from the terminal event loop.
+/// - `app`: Mutable reference to application state holding search query buffers.
+///
+/// # Returns
+/// `true` if search mode was active and handled the key event; `false` otherwise.
+///
+/// # Errors
+/// None.
+///
+/// # Panics
+/// Guaranteed panic-free.
+///
+/// # Data Flow & Invariants
+/// Intercepts Esc (cancel query & deactivate), Enter (validate query & deactivate),
+/// Backspace (pop character), and Char (append character). Viewport scroll index
+/// is reset to 0 on any query buffer mutation.
+fn handle_search_active_key_event(code: KeyCode, app: &mut AppState) -> bool {
+    if !app.search_active {
+        return false;
+    }
+
+    match code {
+        KeyCode::Esc => {
+            app.search_active = false;
+            if let Some(query) = app.current_search_query_mut() {
+                query.clear();
+            }
+            app.reset_current_view_scroll();
+            app.set_feedback("Recherche annulée.".to_string());
+        }
+        KeyCode::Enter => {
+            app.search_active = false;
+            app.reset_current_view_scroll();
+            let q = app.current_search_query().to_string();
+            if q.trim().is_empty() {
                 if let Some(query) = app.current_search_query_mut() {
                     query.clear();
                 }
-                app.reset_current_view_scroll();
-                app.set_feedback("Recherche annulée.".to_string());
+                app.set_feedback("Filtre de recherche désactivé.".to_string());
+            } else {
+                app.set_feedback(format!("Recherche active : \"{q}\""));
             }
-            KeyCode::Enter => {
-                app.search_active = false;
-                app.reset_current_view_scroll();
-                let q = app.current_search_query().to_string();
-                if q.trim().is_empty() {
-                    if let Some(query) = app.current_search_query_mut() {
-                        query.clear();
-                    }
-                    app.set_feedback("Filtre de recherche désactivé.".to_string());
-                } else {
-                    app.set_feedback(format!("Recherche active : \"{q}\""));
-                }
-            }
-            KeyCode::Backspace => {
-                if let Some(query) = app.current_search_query_mut() {
-                    query.pop();
-                }
-                app.reset_current_view_scroll();
-            }
-            KeyCode::Char(c) => {
-                if let Some(query) = app.current_search_query_mut() {
-                    query.push(c);
-                }
-                app.reset_current_view_scroll();
-            }
-            _ => {}
         }
-        return;
+        KeyCode::Backspace => {
+            if let Some(query) = app.current_search_query_mut() {
+                query.pop();
+            }
+            app.reset_current_view_scroll();
+        }
+        KeyCode::Char(c) => {
+            if let Some(query) = app.current_search_query_mut() {
+                query.push(c);
+            }
+            app.reset_current_view_scroll();
+        }
+        _ => {}
+    }
+    true
+}
+
+/// Handles global application navigation, view switching, and search activation.
+///
+/// # Arguments
+/// - `code`: Crossterm [`KeyCode`] received from the terminal event loop.
+/// - `app`: Mutable reference to application state.
+///
+/// # Returns
+/// `true` if a global key was processed; `false` if the event should fall through to view handlers.
+///
+/// # Errors
+/// None.
+///
+/// # Panics
+/// Guaranteed panic-free.
+///
+/// # Data Flow & Invariants
+/// Intercepts 'q'/'Q' (quit flag), '?' (help view toggle), Esc/Backspace (hierarchical back navigation),
+/// tab cycling, direct view shortcuts, and '/' (search activation in searchable views).
+fn handle_global_navigation_key_event(code: KeyCode, app: &mut AppState) -> bool {
+    if handle_tab_cycling(code, app) || handle_direct_view_shortcuts(code, app) {
+        return true;
     }
 
-    // 2. Main top application key dispatching
     match code {
         KeyCode::Char('q') | KeyCode::Char('Q') => {
             app.should_quit = true;
+            true
+        }
+        KeyCode::Char('?') => {
+            if app.view == ViewPage::Help {
+                app.view = app.help_caller_view;
+            } else {
+                app.help_caller_view = app.view;
+                app.help_tab = HelpTab::from_view(app.view);
+                app.help_scroll_index = 0;
+                app.view = ViewPage::Help;
+            }
+            true
         }
         KeyCode::Esc => {
             if !app.current_search_query().is_empty() {
@@ -691,6 +794,7 @@ pub fn handle_key_event_with_state(
                     }
                 }
             }
+            true
         }
         KeyCode::Backspace if app.view != ViewPage::ActiveJobs => {
             if app.view == ViewPage::MediaInspection {
@@ -702,81 +806,44 @@ pub fn handle_key_event_with_state(
             } else {
                 app.view = ViewPage::ActiveJobs;
             }
+            true
         }
-        KeyCode::Char('0') | KeyCode::Char('g') | KeyCode::Char('G')
-            if app.view == ViewPage::Help =>
+        KeyCode::Char('/')
+            if matches!(
+                app.view,
+                ViewPage::ActiveJobs | ViewPage::CompletedMedia | ViewPage::MediaBrowser
+            ) =>
         {
-            app.help_tab = HelpTab::General;
-            app.help_scroll_index = 0;
+            app.search_active = true;
+            app.set_feedback(
+                "Recherche : tapez votre texte (Entrée pour valider, Échap pour annuler)..."
+                    .to_string(),
+            );
+            true
         }
-        KeyCode::Char('1') => {
-            if app.view == ViewPage::Help {
-                app.help_tab = HelpTab::ActiveJobs;
-                app.help_scroll_index = 0;
-            } else {
-                app.view = ViewPage::ActiveJobs;
-            }
-        }
-        KeyCode::Char('2') | KeyCode::Char('h') | KeyCode::Char('H') => {
-            if app.view == ViewPage::Help {
-                app.help_tab = HelpTab::StatsHistory;
-                app.help_scroll_index = 0;
-            } else if app.view == ViewPage::StatsHistory {
-                app.view = ViewPage::ActiveJobs;
-            } else {
-                app.view = ViewPage::StatsHistory;
-            }
-        }
-        KeyCode::Char('3') => {
-            if app.view == ViewPage::Help {
-                app.help_tab = HelpTab::Completed;
-                app.help_scroll_index = 0;
-            } else if app.view == ViewPage::CompletedMedia {
-                app.view = ViewPage::ActiveJobs;
-            } else {
-                app.view = ViewPage::CompletedMedia;
-            }
-        }
-        KeyCode::Char('r') | KeyCode::Char('R') => {
-            if app.view == ViewPage::Help {
-                app.help_tab = HelpTab::Completed;
-                app.help_scroll_index = 0;
-            } else if app.view == ViewPage::MediaSources {
-                crate::commands::top::sampler::IS_MEDIA_SCANNING
-                    .store(true, std::sync::atomic::Ordering::SeqCst);
-                if let Some(shared) = shared_state {
-                    if let Ok(mut state) = shared.write() {
-                        state.is_scanning = true;
-                    }
-                }
-                trigger_media_sources_rescan();
-                app.set_feedback("⟳ Rescan de toutes les sources lancé...".to_string());
-            } else if app.view == ViewPage::CompletedMedia {
-                app.view = ViewPage::ActiveJobs;
-            } else {
-                app.view = ViewPage::CompletedMedia;
-            }
-        }
-        KeyCode::Char('4') | KeyCode::Char('m') | KeyCode::Char('M') => {
-            if app.view == ViewPage::Help {
-                app.help_tab = HelpTab::MediaBrowser;
-                app.help_scroll_index = 0;
-            } else if app.view == ViewPage::MediaBrowser {
-                app.view = ViewPage::ActiveJobs;
-            } else {
-                app.view = ViewPage::MediaBrowser;
-            }
-        }
-        KeyCode::Char('5') => {
-            if app.view == ViewPage::Help {
-                app.help_tab = HelpTab::MediaSources;
-                app.help_scroll_index = 0;
-            } else if app.view == ViewPage::MediaSources {
-                app.view = ViewPage::ActiveJobs;
-            } else {
-                app.view = ViewPage::MediaSources;
-            }
-        }
+        _ => false,
+    }
+}
+
+/// Handles linear tab navigation cycling between views.
+///
+/// # Arguments
+/// - `code`: Crossterm [`KeyCode`] received from the terminal event loop.
+/// - `app`: Mutable reference to application state.
+///
+/// # Returns
+/// `true` if a tab cycling key was processed; `false` otherwise.
+///
+/// # Errors
+/// None.
+///
+/// # Panics
+/// Guaranteed panic-free.
+///
+/// # Data Flow & Invariants
+/// Tab/Right advances to the next view/help tab, BackTab/Left retreats to the previous view/help tab.
+fn handle_tab_cycling(code: KeyCode, app: &mut AppState) -> bool {
+    match code {
         KeyCode::Tab | KeyCode::Right => {
             if app.view == ViewPage::Help {
                 app.help_tab = app.help_tab.next();
@@ -794,6 +861,7 @@ pub fn handle_key_event_with_state(
                     | ViewPage::Help => ViewPage::ActiveJobs,
                 };
             }
+            true
         }
         KeyCode::BackTab | KeyCode::Left => {
             if app.view == ViewPage::Help {
@@ -812,145 +880,805 @@ pub fn handle_key_event_with_state(
                     | ViewPage::Help => ViewPage::ActiveJobs,
                 };
             }
+            true
         }
-        KeyCode::Up | KeyCode::Char('k') => match app.view {
-            ViewPage::ActiveJobs if app.selected_index > 0 => {
-                app.selected_index -= 1;
-            }
-            ViewPage::CompletedMedia if app.completed_scroll_index > 0 => {
-                app.completed_scroll_index -= 1;
-            }
-            ViewPage::MediaBrowser if app.media_scroll_index > 0 => {
-                app.media_scroll_index -= 1;
-            }
-            ViewPage::MediaSources if app.source_scroll_index > 0 => {
-                app.source_scroll_index -= 1;
-            }
-            ViewPage::Help if app.help_scroll_index > 0 => {
-                app.help_scroll_index -= 1;
-            }
-            _ => {}
-        },
-        KeyCode::Down | KeyCode::Char('j') => match app.view {
-            ViewPage::ActiveJobs
-                if !telemetry.active_jobs.is_empty()
-                    && app.selected_index + 1 < telemetry.active_jobs.len() =>
-            {
-                app.selected_index += 1;
-            }
-            ViewPage::CompletedMedia => {
-                let visible = app.visible_completed(&telemetry.history_records);
-                if !visible.is_empty() && app.completed_scroll_index + 1 < visible.len() {
-                    app.completed_scroll_index += 1;
-                }
-            }
-            ViewPage::MediaBrowser => {
-                let visible =
-                    app.visible_media(&telemetry.discovered_media, &telemetry.media_sources);
-                if !visible.is_empty() && app.media_scroll_index + 1 < visible.len() {
-                    app.media_scroll_index += 1;
-                }
-            }
-            ViewPage::MediaSources => {
-                let count = if !telemetry.media_sources.is_empty() {
-                    telemetry.media_sources.len()
-                } else {
-                    1
-                };
-                if app.source_scroll_index + 1 < count {
-                    app.source_scroll_index += 1;
-                }
-            }
-            ViewPage::Help => {
-                app.help_scroll_index += 1;
-            }
-            _ => {}
-        },
-        KeyCode::PageUp => match app.view {
-            ViewPage::ActiveJobs => {
-                app.selected_index = app.selected_index.saturating_sub(PAGE_SCROLL_STEP);
-            }
-            ViewPage::CompletedMedia => {
-                app.completed_scroll_index =
-                    app.completed_scroll_index.saturating_sub(PAGE_SCROLL_STEP);
-            }
-            ViewPage::MediaBrowser => {
-                app.media_scroll_index = app.media_scroll_index.saturating_sub(PAGE_SCROLL_STEP);
-            }
-            ViewPage::MediaSources => {
-                app.source_scroll_index = app.source_scroll_index.saturating_sub(PAGE_SCROLL_STEP);
-            }
-            ViewPage::Help => {
-                app.help_scroll_index = app.help_scroll_index.saturating_sub(PAGE_SCROLL_STEP);
-            }
-            _ => {}
-        },
-        KeyCode::PageDown => match app.view {
-            ViewPage::ActiveJobs => {
-                let max_idx = telemetry.active_jobs.len().saturating_sub(1);
-                app.selected_index = (app.selected_index + PAGE_SCROLL_STEP).min(max_idx);
-            }
-            ViewPage::CompletedMedia => {
-                let visible = app.visible_completed(&telemetry.history_records);
-                let max_idx = visible.len().saturating_sub(1);
-                app.completed_scroll_index =
-                    (app.completed_scroll_index + PAGE_SCROLL_STEP).min(max_idx);
-            }
-            ViewPage::MediaBrowser => {
-                let visible =
-                    app.visible_media(&telemetry.discovered_media, &telemetry.media_sources);
-                let max_idx = visible.len().saturating_sub(1);
-                app.media_scroll_index = (app.media_scroll_index + PAGE_SCROLL_STEP).min(max_idx);
-            }
-            ViewPage::MediaSources => {
-                let max_idx = telemetry.media_sources.len().saturating_sub(1);
-                app.source_scroll_index = (app.source_scroll_index + PAGE_SCROLL_STEP).min(max_idx);
-            }
-            ViewPage::Help => {
-                app.help_scroll_index += PAGE_SCROLL_STEP;
-            }
-            _ => {}
-        },
-        KeyCode::Home => match app.view {
-            ViewPage::ActiveJobs => {
-                app.selected_index = 0;
-            }
-            ViewPage::CompletedMedia => {
-                app.completed_scroll_index = 0;
-            }
-            ViewPage::MediaBrowser => {
-                app.media_scroll_index = 0;
-            }
-            ViewPage::MediaSources => {
-                app.source_scroll_index = 0;
-            }
-            ViewPage::Help => {
+        _ => false,
+    }
+}
+
+/// Handles numeric and mnemonic direct view switching shortcuts.
+///
+/// # Arguments
+/// - `code`: Crossterm [`KeyCode`] received from the terminal event loop.
+/// - `app`: Mutable reference to application state.
+///
+/// # Returns
+/// `true` if a direct view shortcut key was processed; `false` otherwise.
+///
+/// # Errors
+/// None.
+///
+/// # Panics
+/// Guaranteed panic-free.
+///
+/// # Data Flow & Invariants
+/// Direct routing to views 1..5 and aliases ('h' for StatsHistory, 'm' for MediaBrowser).
+fn handle_direct_view_shortcuts(code: KeyCode, app: &mut AppState) -> bool {
+    match code {
+        KeyCode::Char('1') => {
+            if app.view == ViewPage::Help {
+                app.help_tab = HelpTab::ActiveJobs;
                 app.help_scroll_index = 0;
+            } else {
+                app.view = ViewPage::ActiveJobs;
             }
-            _ => {}
-        },
-        KeyCode::End => match app.view {
-            ViewPage::ActiveJobs => {
-                app.selected_index = telemetry.active_jobs.len().saturating_sub(1);
+            true
+        }
+        KeyCode::Char('2') | KeyCode::Char('h') | KeyCode::Char('H') => {
+            if app.view == ViewPage::Help {
+                app.help_tab = HelpTab::StatsHistory;
+                app.help_scroll_index = 0;
+            } else if app.view == ViewPage::StatsHistory {
+                app.view = ViewPage::ActiveJobs;
+            } else {
+                app.view = ViewPage::StatsHistory;
             }
-            ViewPage::CompletedMedia => {
-                let visible = app.visible_completed(&telemetry.history_records);
-                app.completed_scroll_index = visible.len().saturating_sub(1);
+            true
+        }
+        KeyCode::Char('3') => {
+            if app.view == ViewPage::Help {
+                app.help_tab = HelpTab::Completed;
+                app.help_scroll_index = 0;
+            } else if app.view == ViewPage::CompletedMedia {
+                app.view = ViewPage::ActiveJobs;
+            } else {
+                app.view = ViewPage::CompletedMedia;
             }
-            ViewPage::MediaBrowser => {
+            true
+        }
+        KeyCode::Char('4') | KeyCode::Char('m') | KeyCode::Char('M') => {
+            if app.view == ViewPage::Help {
+                app.help_tab = HelpTab::MediaBrowser;
+                app.help_scroll_index = 0;
+            } else if app.view == ViewPage::MediaBrowser {
+                app.view = ViewPage::ActiveJobs;
+            } else {
+                app.view = ViewPage::MediaBrowser;
+            }
+            true
+        }
+        KeyCode::Char('5') => {
+            if app.view == ViewPage::Help {
+                app.help_tab = HelpTab::MediaSources;
+                app.help_scroll_index = 0;
+            } else if app.view == ViewPage::MediaSources {
+                app.view = ViewPage::ActiveJobs;
+            } else {
+                app.view = ViewPage::MediaSources;
+            }
+            true
+        }
+        _ => false,
+    }
+}
+
+/// Handles vertical scrolling and cursor movement across all scrollable views.
+///
+/// # Arguments
+/// - `code`: Crossterm [`KeyCode`] received from the terminal event loop.
+/// - `app`: Mutable reference to application state holding scroll indexes.
+/// - `telemetry`: Immutable reference to active telemetry snapshot.
+///
+/// # Returns
+/// `true` if a scroll navigation key was processed; `false` otherwise.
+///
+/// # Errors
+/// None.
+///
+/// # Panics
+/// Guaranteed panic-free.
+///
+/// # Data Flow & Invariants
+/// Modifies view-specific scroll cursor (ActiveJobs, CompletedMedia, MediaBrowser, MediaSources, Help)
+/// with safe boundary clamping against collection length. Supports single-step navigation (Up/Down/'k'/'j'),
+/// paging (PageUp/PageDown by [`PAGE_SCROLL_STEP`]), and jump-to-boundary (Home/End).
+/// Scrolls one step upward across the active view.
+fn scroll_up(app: &mut AppState) {
+    match app.view {
+        ViewPage::ActiveJobs if app.selected_index > 0 => {
+            app.selected_index -= 1;
+        }
+        ViewPage::CompletedMedia if app.completed_scroll_index > 0 => {
+            app.completed_scroll_index -= 1;
+        }
+        ViewPage::MediaBrowser if app.media_scroll_index > 0 => {
+            app.media_scroll_index -= 1;
+        }
+        ViewPage::MediaSources if app.source_scroll_index > 0 => {
+            app.source_scroll_index -= 1;
+        }
+        ViewPage::Help if app.help_scroll_index > 0 => {
+            app.help_scroll_index -= 1;
+        }
+        _ => {}
+    }
+}
+
+fn handle_scroll_navigation_key_event(
+    code: KeyCode,
+    app: &mut AppState,
+    telemetry: &SystemTelemetry,
+) -> bool {
+    match code {
+        KeyCode::Up | KeyCode::Char('k') => {
+            scroll_up(app);
+            true
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            scroll_down(app, telemetry);
+            true
+        }
+        KeyCode::PageUp => {
+            scroll_page_up(app);
+            true
+        }
+        KeyCode::PageDown => {
+            scroll_page_down(app, telemetry);
+            true
+        }
+        KeyCode::Home => {
+            scroll_home(app);
+            true
+        }
+        KeyCode::End => {
+            scroll_end(app, telemetry);
+            true
+        }
+        _ => false,
+    }
+}
+
+/// Scrolls one step downward across the active view.
+fn scroll_down(app: &mut AppState, telemetry: &SystemTelemetry) {
+    match app.view {
+        ViewPage::ActiveJobs
+            if !telemetry.active_jobs.is_empty()
+                && app.selected_index + 1 < telemetry.active_jobs.len() =>
+        {
+            app.selected_index += 1;
+        }
+        ViewPage::CompletedMedia => {
+            let visible = app.visible_completed(&telemetry.history_records);
+            if !visible.is_empty() && app.completed_scroll_index + 1 < visible.len() {
+                app.completed_scroll_index += 1;
+            }
+        }
+        ViewPage::MediaBrowser => {
+            let visible = app.visible_media(&telemetry.discovered_media, &telemetry.media_sources);
+            if !visible.is_empty() && app.media_scroll_index + 1 < visible.len() {
+                app.media_scroll_index += 1;
+            }
+        }
+        ViewPage::MediaSources => {
+            let count = if !telemetry.media_sources.is_empty() {
+                telemetry.media_sources.len()
+            } else {
+                1
+            };
+            if app.source_scroll_index + 1 < count {
+                app.source_scroll_index += 1;
+            }
+        }
+        ViewPage::Help => {
+            app.help_scroll_index += 1;
+        }
+        _ => {}
+    }
+}
+
+/// Scrolls one page upward across the active view.
+fn scroll_page_up(app: &mut AppState) {
+    match app.view {
+        ViewPage::ActiveJobs => {
+            app.selected_index = app.selected_index.saturating_sub(PAGE_SCROLL_STEP);
+        }
+        ViewPage::CompletedMedia => {
+            app.completed_scroll_index =
+                app.completed_scroll_index.saturating_sub(PAGE_SCROLL_STEP);
+        }
+        ViewPage::MediaBrowser => {
+            app.media_scroll_index = app.media_scroll_index.saturating_sub(PAGE_SCROLL_STEP);
+        }
+        ViewPage::MediaSources => {
+            app.source_scroll_index = app.source_scroll_index.saturating_sub(PAGE_SCROLL_STEP);
+        }
+        ViewPage::Help => {
+            app.help_scroll_index = app.help_scroll_index.saturating_sub(PAGE_SCROLL_STEP);
+        }
+        _ => {}
+    }
+}
+
+/// Scrolls one page downward across the active view.
+fn scroll_page_down(app: &mut AppState, telemetry: &SystemTelemetry) {
+    match app.view {
+        ViewPage::ActiveJobs => {
+            let max_idx = telemetry.active_jobs.len().saturating_sub(1);
+            app.selected_index = (app.selected_index + PAGE_SCROLL_STEP).min(max_idx);
+        }
+        ViewPage::CompletedMedia => {
+            let visible = app.visible_completed(&telemetry.history_records);
+            let max_idx = visible.len().saturating_sub(1);
+            app.completed_scroll_index =
+                (app.completed_scroll_index + PAGE_SCROLL_STEP).min(max_idx);
+        }
+        ViewPage::MediaBrowser => {
+            let visible = app.visible_media(&telemetry.discovered_media, &telemetry.media_sources);
+            let max_idx = visible.len().saturating_sub(1);
+            app.media_scroll_index = (app.media_scroll_index + PAGE_SCROLL_STEP).min(max_idx);
+        }
+        ViewPage::MediaSources => {
+            let max_idx = telemetry.media_sources.len().saturating_sub(1);
+            app.source_scroll_index = (app.source_scroll_index + PAGE_SCROLL_STEP).min(max_idx);
+        }
+        ViewPage::Help => {
+            app.help_scroll_index += PAGE_SCROLL_STEP;
+        }
+        _ => {}
+    }
+}
+
+/// Scrolls to the beginning of the active view.
+fn scroll_home(app: &mut AppState) {
+    match app.view {
+        ViewPage::ActiveJobs => {
+            app.selected_index = 0;
+        }
+        ViewPage::CompletedMedia => {
+            app.completed_scroll_index = 0;
+        }
+        ViewPage::MediaBrowser => {
+            app.media_scroll_index = 0;
+        }
+        ViewPage::MediaSources => {
+            app.source_scroll_index = 0;
+        }
+        ViewPage::Help => {
+            app.help_scroll_index = 0;
+        }
+        _ => {}
+    }
+}
+
+/// Scrolls to the end of the active view.
+fn scroll_end(app: &mut AppState, telemetry: &SystemTelemetry) {
+    match app.view {
+        ViewPage::ActiveJobs => {
+            app.selected_index = telemetry.active_jobs.len().saturating_sub(1);
+        }
+        ViewPage::CompletedMedia => {
+            let visible = app.visible_completed(&telemetry.history_records);
+            app.completed_scroll_index = visible.len().saturating_sub(1);
+        }
+        ViewPage::MediaBrowser => {
+            let visible = app.visible_media(&telemetry.discovered_media, &telemetry.media_sources);
+            app.media_scroll_index = visible.len().saturating_sub(1);
+        }
+        ViewPage::MediaSources => {
+            app.source_scroll_index = telemetry.media_sources.len().saturating_sub(1);
+        }
+        ViewPage::Help => {
+            app.help_scroll_index = 100;
+        }
+        _ => {}
+    }
+}
+
+/// Dispatches view-specific operational keys to dedicated page sub-handlers.
+///
+/// # Arguments
+/// - `code`: Crossterm [`KeyCode`] received from the terminal event loop.
+/// - `app`: Mutable reference to application state.
+/// - `telemetry`: Immutable reference to active telemetry snapshot.
+/// - `shared_state`: Optional atomic reference to update shared state.
+///
+/// # Returns
+/// None.
+///
+/// # Errors
+/// None.
+///
+/// # Panics
+/// Guaranteed panic-free.
+///
+/// # Data Flow & Invariants
+/// Routes keystroke events depending on `app.view` to the corresponding view handler.
+fn handle_view_specific_key_event(
+    code: KeyCode,
+    app: &mut AppState,
+    telemetry: &SystemTelemetry,
+    shared_state: Option<&Arc<RwLock<SystemTelemetry>>>,
+) {
+    match app.view {
+        ViewPage::Help => handle_help_view_keys(code, app),
+        ViewPage::ActiveJobs | ViewPage::JobInspection => {
+            handle_active_jobs_view_keys(code, app, telemetry);
+        }
+        ViewPage::CompletedMedia | ViewPage::CompletedInspection => {
+            handle_completed_media_view_keys(code, app);
+        }
+        ViewPage::MediaBrowser | ViewPage::MediaInspection => {
+            handle_media_browser_view_keys(code, app, telemetry, shared_state);
+        }
+        ViewPage::MediaSources => {
+            handle_media_sources_view_keys(code, app, telemetry, shared_state);
+        }
+        ViewPage::StatsHistory => {
+            handle_stats_history_view_keys(code, app);
+        }
+    }
+}
+
+/// Handles keypresses specific to the Help screen tabs.
+///
+/// # Arguments
+/// - `code`: Crossterm [`KeyCode`] received from the terminal event loop.
+/// - `app`: Mutable reference to application state.
+///
+/// # Returns
+/// None. Mutates `app.help_tab`.
+///
+/// # Errors
+/// None.
+///
+/// # Panics
+/// Guaranteed panic-free.
+///
+/// # Data Flow & Invariants
+/// Direct mnemonic shortcut routing to help tabs ('0'/'g' for General, 'r' for Completed, 's' for MediaSources).
+fn handle_help_view_keys(code: KeyCode, app: &mut AppState) {
+    match code {
+        KeyCode::Char('0') | KeyCode::Char('g') | KeyCode::Char('G') => {
+            app.help_tab = HelpTab::General;
+            app.help_scroll_index = 0;
+        }
+        KeyCode::Char('r') | KeyCode::Char('R') => {
+            app.help_tab = HelpTab::Completed;
+            app.help_scroll_index = 0;
+        }
+        KeyCode::Char('s') | KeyCode::Char('S') => {
+            app.help_tab = HelpTab::MediaSources;
+            app.help_scroll_index = 0;
+        }
+        _ => {}
+    }
+}
+
+/// Handles keypresses specific to ActiveJobs and JobInspection views.
+///
+/// # Arguments
+/// - `code`: Crossterm [`KeyCode`] received from the terminal event loop.
+/// - `app`: Mutable reference to application state.
+/// - `telemetry`: Immutable reference to active telemetry snapshot.
+///
+/// # Returns
+/// None. Mutates application view or signals external processes.
+///
+/// # Errors
+/// None. Process signaling failures surface via `app.set_feedback`.
+///
+/// # Panics
+/// Guaranteed panic-free.
+///
+/// # Data Flow & Invariants
+/// Intercepts 'p'/'P' (pause/resume SIGSTOP/CONT), 's'/'S' (stop SIGTERM), 'K' (kill SIGKILL),
+/// 'x'/'X' (batch termination), Enter/'l'/'i'/'I' (inspection toggle), and 'r'/'R' (Completed view jump).
+fn handle_active_jobs_view_keys(code: KeyCode, app: &mut AppState, telemetry: &SystemTelemetry) {
+    match code {
+        KeyCode::Char('p') | KeyCode::Char('P') => {
+            if !telemetry.active_jobs.is_empty() && app.selected_index < telemetry.active_jobs.len()
+            {
+                let pid = telemetry.active_jobs[app.selected_index].pid;
+                let (_ok, msg) = toggle_pause_job(pid);
+                app.set_feedback(msg);
+            }
+        }
+        KeyCode::Char('s') | KeyCode::Char('S') => {
+            if !telemetry.active_jobs.is_empty() && app.selected_index < telemetry.active_jobs.len()
+            {
+                let pid = telemetry.active_jobs[app.selected_index].pid;
+                let (_ok, msg) = stop_job(pid);
+                app.set_feedback(msg);
+            }
+        }
+        KeyCode::Char('K')
+            if app.view == ViewPage::JobInspection
+                && !telemetry.active_jobs.is_empty()
+                && app.selected_index < telemetry.active_jobs.len() =>
+        {
+            let pid = telemetry.active_jobs[app.selected_index].pid;
+            let (_ok, msg) = kill_job(pid);
+            app.set_feedback(msg);
+        }
+        KeyCode::Char('x') => {
+            let (_ok, msg) = stop_entire_batch(false);
+            app.set_feedback(msg);
+        }
+        KeyCode::Char('X') => {
+            let (_ok, msg) = stop_entire_batch(true);
+            app.set_feedback(msg);
+        }
+        KeyCode::Enter | KeyCode::Char('l') | KeyCode::Char('i') | KeyCode::Char('I') => {
+            if app.view == ViewPage::ActiveJobs && !telemetry.active_jobs.is_empty() {
+                app.view = ViewPage::JobInspection;
+            } else if app.view == ViewPage::JobInspection {
+                app.view = ViewPage::ActiveJobs;
+            }
+        }
+        KeyCode::Char('r') | KeyCode::Char('R') => {
+            app.view = ViewPage::CompletedMedia;
+        }
+        _ => {}
+    }
+}
+
+/// Handles keypresses specific to CompletedMedia and CompletedInspection views.
+///
+/// # Arguments
+/// - `code`: Crossterm [`KeyCode`] received from the terminal event loop.
+/// - `app`: Mutable reference to application state.
+///
+/// # Returns
+/// None. Mutates filters, sorts, or inspection view state.
+///
+/// # Errors
+/// None.
+///
+/// # Panics
+/// Guaranteed panic-free.
+///
+/// # Data Flow & Invariants
+/// Intercepts 'f'/'F' (filter rotation), 'o'/'O' (sort rotation), Enter/'l'/'i'/'I' (inspection toggle),
+/// 'r'/'R' (toggle back to ActiveJobs), and 's'/'S' (jump to MediaSources).
+fn handle_completed_media_view_keys(code: KeyCode, app: &mut AppState) {
+    match code {
+        KeyCode::Char('f') | KeyCode::Char('F') if app.view == ViewPage::CompletedMedia => {
+            app.completed_filter = app.completed_filter.next();
+            app.completed_scroll_index = 0;
+            app.set_feedback(format!("Filtre Récents : {}", app.completed_filter.label()));
+        }
+        KeyCode::Char('o') | KeyCode::Char('O') if app.view == ViewPage::CompletedMedia => {
+            app.completed_sort = app.completed_sort.next();
+            app.completed_scroll_index = 0;
+            app.set_feedback(format!("Tri Récents : {}", app.completed_sort.label()));
+        }
+        KeyCode::Enter | KeyCode::Char('l') | KeyCode::Char('i') | KeyCode::Char('I') => {
+            if app.view == ViewPage::CompletedMedia {
+                app.view = ViewPage::CompletedInspection;
+            } else if app.view == ViewPage::CompletedInspection {
+                app.view = ViewPage::CompletedMedia;
+            }
+        }
+        KeyCode::Char('r') | KeyCode::Char('R') if app.view == ViewPage::CompletedMedia => {
+            app.view = ViewPage::ActiveJobs;
+        }
+        KeyCode::Char('s') | KeyCode::Char('S') => {
+            app.view = ViewPage::MediaSources;
+        }
+        _ => {}
+    }
+}
+
+/// Handles item selection toggling in media browser and inspection views.
+fn handle_media_browser_selection_keys(
+    code: KeyCode,
+    app: &mut AppState,
+    telemetry: &SystemTelemetry,
+) -> bool {
+    match code {
+        KeyCode::Char(' ') if app.view == ViewPage::MediaBrowser => {
+            let visible = app.visible_media(&telemetry.discovered_media, &telemetry.media_sources);
+            if let Some(item) = visible.get(app.media_scroll_index) {
+                if app.selected_media_paths.contains(&item.path) {
+                    app.selected_media_paths.remove(&item.path);
+                } else {
+                    app.selected_media_paths.insert(item.path.clone());
+                }
+            }
+            true
+        }
+        KeyCode::Char(' ') if app.view == ViewPage::MediaInspection => {
+            let visible = app.visible_media(&telemetry.discovered_media, &telemetry.media_sources);
+            if app.media_scroll_index < visible.len() {
+                let p = &visible[app.media_scroll_index].path;
+                if app.selected_media_paths.contains(p) {
+                    app.selected_media_paths.remove(p);
+                    app.set_feedback("Média décoché.".to_string());
+                } else {
+                    app.selected_media_paths.insert(p.clone());
+                    app.set_feedback("Média coché pour batch.".to_string());
+                }
+            }
+            true
+        }
+        KeyCode::Char('a') | KeyCode::Char('A') if app.view == ViewPage::MediaBrowser => {
+            let visible = app.visible_media(&telemetry.discovered_media, &telemetry.media_sources);
+            let all_selected = !visible.is_empty()
+                && visible
+                    .iter()
+                    .all(|item| app.selected_media_paths.contains(&item.path));
+            if all_selected {
+                for item in &visible {
+                    app.selected_media_paths.remove(&item.path);
+                }
+            } else {
+                for item in &visible {
+                    app.selected_media_paths.insert(item.path.clone());
+                }
+            }
+            true
+        }
+        _ => false,
+    }
+}
+
+/// Handles filter and sort toggling in media browser.
+fn handle_media_browser_filter_sort_keys(
+    code: KeyCode,
+    app: &mut AppState,
+    telemetry: &SystemTelemetry,
+) -> bool {
+    match code {
+        KeyCode::Char('f') | KeyCode::Char('F') if app.view == ViewPage::MediaBrowser => {
+            app.media_filter = app.media_filter.next();
+            app.media_scroll_index = 0;
+            app.set_feedback(format!("Filtre actif : {}", app.media_filter.label()));
+            true
+        }
+        KeyCode::Char('o') | KeyCode::Char('O') if app.view == ViewPage::MediaBrowser => {
+            app.media_sort = app.media_sort.next();
+            app.media_scroll_index = 0;
+            app.set_feedback(format!("Tri actif : {}", app.media_sort.label()));
+            true
+        }
+        KeyCode::Char('S') if app.view == ViewPage::MediaBrowser => {
+            let next_filter = match &app.source_filter {
+                MediaSourceFilter::ActiveOnly => MediaSourceFilter::All,
+                MediaSourceFilter::All => {
+                    if let Some(first) = telemetry.media_sources.first() {
+                        MediaSourceFilter::Specific(first.id.clone())
+                    } else {
+                        MediaSourceFilter::ActiveOnly
+                    }
+                }
+                MediaSourceFilter::Specific(current_id) => {
+                    if let Some(pos) = telemetry
+                        .media_sources
+                        .iter()
+                        .position(|s| &s.id == current_id)
+                    {
+                        if pos + 1 < telemetry.media_sources.len() {
+                            MediaSourceFilter::Specific(telemetry.media_sources[pos + 1].id.clone())
+                        } else {
+                            MediaSourceFilter::ActiveOnly
+                        }
+                    } else {
+                        MediaSourceFilter::ActiveOnly
+                    }
+                }
+            };
+            app.source_filter = next_filter;
+            app.media_scroll_index = 0;
+            app.set_feedback(format!(
+                "Filtre source : [{}]",
+                app.source_filter.label(&telemetry.media_sources)
+            ));
+            true
+        }
+        KeyCode::Char('s') if app.view == ViewPage::MediaBrowser => {
+            app.view = ViewPage::MediaSources;
+            true
+        }
+        _ => false,
+    }
+}
+
+/// Handles persistent deletion of media items from memory and disk cache.
+fn handle_media_browser_deletion_keys(
+    code: KeyCode,
+    app: &mut AppState,
+    telemetry: &SystemTelemetry,
+    shared_state: Option<&Arc<RwLock<SystemTelemetry>>>,
+) -> bool {
+    match code {
+        KeyCode::Char('d') | KeyCode::Delete if app.view == ViewPage::MediaBrowser => {
+            let visible = app.visible_media(&telemetry.discovered_media, &telemetry.media_sources);
+            let to_delete: std::collections::HashSet<PathBuf> =
+                if !app.selected_media_paths.is_empty() {
+                    app.selected_media_paths.clone()
+                } else if app.media_scroll_index < visible.len() {
+                    std::iter::once(visible[app.media_scroll_index].path.clone()).collect()
+                } else {
+                    std::collections::HashSet::new()
+                };
+
+            if !to_delete.is_empty() {
+                let count = to_delete.len();
+                if let Some(shared) = shared_state {
+                    if let Ok(mut state) = shared.write() {
+                        state
+                            .discovered_media
+                            .retain(|m| !to_delete.contains(&m.path));
+                        let cache_path = std::path::Path::new(DEFAULT_MEDIA_CACHE_PATH);
+                        save_media_cache(cache_path, &state.discovered_media);
+                    }
+                }
+                app.selected_media_paths.retain(|p| !to_delete.contains(p));
+                let max_idx = visible.len().saturating_sub(count).saturating_sub(1);
+                if app.media_scroll_index > max_idx {
+                    app.media_scroll_index = max_idx;
+                }
+                app.set_feedback(format!(
+                    "{count} média(s) supprimé(s) du catalogue persistant."
+                ));
+            }
+            true
+        }
+        KeyCode::Char('d') | KeyCode::Delete if app.view == ViewPage::MediaInspection => {
+            let visible = app.visible_media(&telemetry.discovered_media, &telemetry.media_sources);
+            if app.media_scroll_index < visible.len() {
+                let target_path = visible[app.media_scroll_index].path.clone();
+                let stem = visible[app.media_scroll_index].stem.clone();
+                if let Some(shared) = shared_state {
+                    if let Ok(mut state) = shared.write() {
+                        state.discovered_media.retain(|m| m.path != target_path);
+                        let cache_path = std::path::Path::new(DEFAULT_MEDIA_CACHE_PATH);
+                        save_media_cache(cache_path, &state.discovered_media);
+                    }
+                }
+                app.selected_media_paths.remove(&target_path);
+                app.view = ViewPage::MediaBrowser;
+                let max_idx = visible.len().saturating_sub(2);
+                if app.media_scroll_index > max_idx {
+                    app.media_scroll_index = max_idx;
+                }
+                app.set_feedback(format!("Média '{stem}' supprimé du catalogue persistant."));
+            }
+            true
+        }
+        _ => false,
+    }
+}
+
+/// Handles batch launching and terminating across media views.
+fn handle_media_browser_batch_keys(
+    code: KeyCode,
+    app: &mut AppState,
+    telemetry: &SystemTelemetry,
+) -> bool {
+    match code {
+        KeyCode::Char('b') | KeyCode::Char('B') => {
+            if app.selected_media_paths.is_empty() {
                 let visible =
                     app.visible_media(&telemetry.discovered_media, &telemetry.media_sources);
-                app.media_scroll_index = visible.len().saturating_sub(1);
+                if app.media_scroll_index < visible.len() {
+                    let item = &visible[app.media_scroll_index];
+                    app.selected_media_paths.insert(item.path.clone());
+                } else {
+                    app.set_feedback(
+                        "Aucun média sélectionné pour le traitement par lot. Cochez avec [Space]."
+                            .to_string(),
+                    );
+                    return true;
+                }
             }
-            ViewPage::MediaSources => {
-                app.source_scroll_index = telemetry.media_sources.len().saturating_sub(1);
+
+            let paths: Vec<PathBuf> = app.selected_media_paths.iter().cloned().collect();
+            let (_ok, msg) = launch_selected_batch(&paths);
+            app.set_feedback(msg);
+            app.selected_media_paths.clear();
+            app.view = ViewPage::ActiveJobs;
+            true
+        }
+        KeyCode::Char('x') => {
+            let (_ok, msg) = stop_entire_batch(false);
+            app.set_feedback(msg);
+            true
+        }
+        KeyCode::Char('X') => {
+            let (_ok, msg) = stop_entire_batch(true);
+            app.set_feedback(msg);
+            true
+        }
+        _ => false,
+    }
+}
+
+/// Handles keypresses specific to MediaBrowser and MediaInspection views.
+///
+/// # Arguments
+/// - `code`: Crossterm [`KeyCode`] received from the terminal event loop.
+/// - `app`: Mutable reference to application state.
+/// - `telemetry`: Immutable reference to active telemetry snapshot.
+/// - `shared_state`: Optional atomic reference to update shared state on deletions.
+///
+/// # Returns
+/// None. Mutates batch selections, filters, sorts, cache persistence, or transitions view.
+///
+/// # Errors
+/// None.
+///
+/// # Panics
+/// Guaranteed panic-free.
+///
+/// # Data Flow & Invariants
+/// Supports space selection (single / inspected), 'a'/'A' select-all toggle, 'f'/'F' filter cycling,
+/// 'o'/'O' sort cycling, 'S' (capital) source filter cycling, 's' (lowercase) jump to MediaSources,
+/// 'b'/'B' batch launch, 'x'/'X' batch kill, 'd'/Delete (removal from memory and disk cache),
+/// Enter/'l'/'i'/'I' (inspection toggle), and 'r'/'R' (jump to CompletedMedia).
+fn handle_media_browser_view_keys(
+    code: KeyCode,
+    app: &mut AppState,
+    telemetry: &SystemTelemetry,
+    shared_state: Option<&Arc<RwLock<SystemTelemetry>>>,
+) {
+    if handle_media_browser_selection_keys(code, app, telemetry) {
+        return;
+    }
+    if handle_media_browser_filter_sort_keys(code, app, telemetry) {
+        return;
+    }
+    if handle_media_browser_deletion_keys(code, app, telemetry, shared_state) {
+        return;
+    }
+    if handle_media_browser_batch_keys(code, app, telemetry) {
+        return;
+    }
+
+    match code {
+        KeyCode::Enter | KeyCode::Char('l') | KeyCode::Char('i') | KeyCode::Char('I') => {
+            if app.view == ViewPage::MediaBrowser {
+                app.view = ViewPage::MediaInspection;
+            } else if app.view == ViewPage::MediaInspection {
+                app.view = ViewPage::MediaBrowser;
             }
-            ViewPage::Help => {
-                app.help_scroll_index = 100;
-            }
-            _ => {}
-        },
-        KeyCode::Char(' ') if app.view == ViewPage::MediaSources => {
+        }
+        KeyCode::Char('r') | KeyCode::Char('R') => {
+            app.view = ViewPage::CompletedMedia;
+        }
+        _ => {}
+    }
+}
+
+/// Handles keypresses specific to the MediaSources configuration view.
+///
+/// # Arguments
+/// - `code`: Crossterm [`KeyCode`] received from the terminal event loop.
+/// - `app`: Mutable reference to application state.
+/// - `telemetry`: Immutable reference to active telemetry snapshot.
+/// - `shared_state`: Optional atomic reference to update shared state on modifications.
+///
+/// # Returns
+/// None. Mutates source activation, spawns modals, deletes sources, or initiates rescans.
+///
+/// # Errors
+/// None. Deletion or persistence errors surface via `app.set_feedback`.
+///
+/// # Panics
+/// Guaranteed panic-free.
+///
+/// # Data Flow & Invariants
+/// Intercepts Space (toggle source active flag), 'a'/'A' (spawn Add modal),
+/// 'e'/'E' (spawn Edit modal), 'd'/'D' (delete source and evict cached media),
+/// 'r'/'R' (trigger asynchronous directory rescanning), and 's'/'S' (jump back to ActiveJobs).
+fn handle_media_sources_view_keys(
+    code: KeyCode,
+    app: &mut AppState,
+    telemetry: &SystemTelemetry,
+    shared_state: Option<&Arc<RwLock<SystemTelemetry>>>,
+) {
+    match code {
+        KeyCode::Char(' ') => {
             let sources_path = std::path::Path::new(DEFAULT_MEDIA_SOURCES_PATH);
             let mut sources = if !telemetry.media_sources.is_empty() {
                 telemetry.media_sources.clone()
@@ -977,7 +1705,7 @@ pub fn handle_key_event_with_state(
                 app.set_feedback(format!("Source '{name}' {state_str}."));
             }
         }
-        KeyCode::Char('a') | KeyCode::Char('A') if app.view == ViewPage::MediaSources => {
+        KeyCode::Char('a') | KeyCode::Char('A') => {
             app.source_modal = Some(SourceInputModalState {
                 mode: SourceModalMode::Add,
                 name_input: String::new(),
@@ -985,7 +1713,7 @@ pub fn handle_key_event_with_state(
                 active_field: SourceModalField::Path,
             });
         }
-        KeyCode::Char('e') | KeyCode::Char('E') if app.view == ViewPage::MediaSources => {
+        KeyCode::Char('e') | KeyCode::Char('E') => {
             let sources = if !telemetry.media_sources.is_empty() {
                 telemetry.media_sources.clone()
             } else {
@@ -1000,7 +1728,7 @@ pub fn handle_key_event_with_state(
                 });
             }
         }
-        KeyCode::Char('d') | KeyCode::Char('D') if app.view == ViewPage::MediaSources => {
+        KeyCode::Char('d') | KeyCode::Char('D') => {
             let sources_path = std::path::Path::new(DEFAULT_MEDIA_SOURCES_PATH);
             let mut sources = if !telemetry.media_sources.is_empty() {
                 telemetry.media_sources.clone()
@@ -1046,277 +1774,48 @@ pub fn handle_key_event_with_state(
                 }
             }
         }
-        KeyCode::Char(' ') if app.view == ViewPage::MediaBrowser => {
-            let visible = app.visible_media(&telemetry.discovered_media, &telemetry.media_sources);
-            if let Some(item) = visible.get(app.media_scroll_index) {
-                if app.selected_media_paths.contains(&item.path) {
-                    app.selected_media_paths.remove(&item.path);
-                } else {
-                    app.selected_media_paths.insert(item.path.clone());
+        KeyCode::Char('r') | KeyCode::Char('R') => {
+            crate::commands::top::sampler::IS_MEDIA_SCANNING
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            if let Some(shared) = shared_state {
+                if let Ok(mut state) = shared.write() {
+                    state.is_scanning = true;
                 }
             }
-        }
-        KeyCode::Char('a') | KeyCode::Char('A') if app.view == ViewPage::MediaBrowser => {
-            let visible = app.visible_media(&telemetry.discovered_media, &telemetry.media_sources);
-            let all_selected = !visible.is_empty()
-                && visible
-                    .iter()
-                    .all(|item| app.selected_media_paths.contains(&item.path));
-            if all_selected {
-                for item in &visible {
-                    app.selected_media_paths.remove(&item.path);
-                }
-            } else {
-                for item in &visible {
-                    app.selected_media_paths.insert(item.path.clone());
-                }
-            }
-        }
-        KeyCode::Char('f') | KeyCode::Char('F') if app.view == ViewPage::MediaBrowser => {
-            app.media_filter = app.media_filter.next();
-            app.media_scroll_index = 0;
-            app.set_feedback(format!("Filtre actif : {}", app.media_filter.label()));
-        }
-        KeyCode::Char('f') | KeyCode::Char('F') if app.view == ViewPage::CompletedMedia => {
-            app.completed_filter = app.completed_filter.next();
-            app.completed_scroll_index = 0;
-            app.set_feedback(format!("Filtre Récents : {}", app.completed_filter.label()));
-        }
-        KeyCode::Char('/')
-            if matches!(
-                app.view,
-                ViewPage::ActiveJobs | ViewPage::CompletedMedia | ViewPage::MediaBrowser
-            ) =>
-        {
-            app.search_active = true;
-            app.set_feedback(
-                "Recherche : tapez votre texte (Entrée pour valider, Échap pour annuler)..."
-                    .to_string(),
-            );
-        }
-        KeyCode::Char('S') if app.view == ViewPage::MediaBrowser => {
-            let next_filter = match &app.source_filter {
-                MediaSourceFilter::ActiveOnly => MediaSourceFilter::All,
-                MediaSourceFilter::All => {
-                    if let Some(first) = telemetry.media_sources.first() {
-                        MediaSourceFilter::Specific(first.id.clone())
-                    } else {
-                        MediaSourceFilter::ActiveOnly
-                    }
-                }
-                MediaSourceFilter::Specific(current_id) => {
-                    if let Some(pos) = telemetry
-                        .media_sources
-                        .iter()
-                        .position(|s| &s.id == current_id)
-                    {
-                        if pos + 1 < telemetry.media_sources.len() {
-                            MediaSourceFilter::Specific(telemetry.media_sources[pos + 1].id.clone())
-                        } else {
-                            MediaSourceFilter::ActiveOnly
-                        }
-                    } else {
-                        MediaSourceFilter::ActiveOnly
-                    }
-                }
-            };
-            app.source_filter = next_filter;
-            app.media_scroll_index = 0;
-            app.set_feedback(format!(
-                "Filtre source : [{}]",
-                app.source_filter.label(&telemetry.media_sources)
-            ));
-        }
-        KeyCode::Char('d') | KeyCode::Delete if app.view == ViewPage::MediaBrowser => {
-            let visible = app.visible_media(&telemetry.discovered_media, &telemetry.media_sources);
-            let to_delete: std::collections::HashSet<PathBuf> =
-                if !app.selected_media_paths.is_empty() {
-                    app.selected_media_paths.clone()
-                } else if app.media_scroll_index < visible.len() {
-                    std::iter::once(visible[app.media_scroll_index].path.clone()).collect()
-                } else {
-                    std::collections::HashSet::new()
-                };
-
-            if !to_delete.is_empty() {
-                let count = to_delete.len();
-                if let Some(shared) = shared_state {
-                    if let Ok(mut state) = shared.write() {
-                        state
-                            .discovered_media
-                            .retain(|m| !to_delete.contains(&m.path));
-                        let cache_path = std::path::Path::new(DEFAULT_MEDIA_CACHE_PATH);
-                        save_media_cache(cache_path, &state.discovered_media);
-                    }
-                }
-                app.selected_media_paths.retain(|p| !to_delete.contains(p));
-                let max_idx = visible.len().saturating_sub(count).saturating_sub(1);
-                if app.media_scroll_index > max_idx {
-                    app.media_scroll_index = max_idx;
-                }
-                app.set_feedback(format!(
-                    "{count} média(s) supprimé(s) du catalogue persistant."
-                ));
-            }
-        }
-        KeyCode::Char('d') | KeyCode::Delete if app.view == ViewPage::MediaInspection => {
-            let visible = app.visible_media(&telemetry.discovered_media, &telemetry.media_sources);
-            if app.media_scroll_index < visible.len() {
-                let target_path = visible[app.media_scroll_index].path.clone();
-                let stem = visible[app.media_scroll_index].stem.clone();
-                if let Some(shared) = shared_state {
-                    if let Ok(mut state) = shared.write() {
-                        state.discovered_media.retain(|m| m.path != target_path);
-                        let cache_path = std::path::Path::new(DEFAULT_MEDIA_CACHE_PATH);
-                        save_media_cache(cache_path, &state.discovered_media);
-                    }
-                }
-                app.selected_media_paths.remove(&target_path);
-                app.view = ViewPage::MediaBrowser;
-                let max_idx = visible.len().saturating_sub(2);
-                if app.media_scroll_index > max_idx {
-                    app.media_scroll_index = max_idx;
-                }
-                app.set_feedback(format!("Média '{stem}' supprimé du catalogue persistant."));
-            }
-        }
-        KeyCode::Char('o') | KeyCode::Char('O') if app.view == ViewPage::MediaBrowser => {
-            app.media_sort = app.media_sort.next();
-            app.media_scroll_index = 0;
-            app.set_feedback(format!("Tri actif : {}", app.media_sort.label()));
-        }
-        KeyCode::Char('o') | KeyCode::Char('O') if app.view == ViewPage::CompletedMedia => {
-            app.completed_sort = app.completed_sort.next();
-            app.completed_scroll_index = 0;
-            app.set_feedback(format!("Tri Récents : {}", app.completed_sort.label()));
-        }
-        KeyCode::Char('b') | KeyCode::Char('B')
-            if app.view == ViewPage::MediaBrowser || app.view == ViewPage::MediaInspection =>
-        {
-            if app.selected_media_paths.is_empty() {
-                let visible =
-                    app.visible_media(&telemetry.discovered_media, &telemetry.media_sources);
-                if app.media_scroll_index < visible.len() {
-                    let item = &visible[app.media_scroll_index];
-                    app.selected_media_paths.insert(item.path.clone());
-                } else {
-                    app.set_feedback(
-                        "Aucun média sélectionné pour le traitement par lot. Cochez avec [Space]."
-                            .to_string(),
-                    );
-                    return;
-                }
-            }
-
-            let paths: Vec<PathBuf> = app.selected_media_paths.iter().cloned().collect();
-            let (_ok, msg) = launch_selected_batch(&paths);
-            app.set_feedback(msg);
-            app.selected_media_paths.clear();
-            app.view = ViewPage::ActiveJobs;
-        }
-        KeyCode::Char('x') => {
-            if app.view == ViewPage::ActiveJobs
-                || app.view == ViewPage::JobInspection
-                || app.view == ViewPage::MediaBrowser
-            {
-                let (_ok, msg) = stop_entire_batch(false);
-                app.set_feedback(msg);
-            }
-        }
-        KeyCode::Char('X') => {
-            if app.view == ViewPage::ActiveJobs
-                || app.view == ViewPage::JobInspection
-                || app.view == ViewPage::MediaBrowser
-            {
-                let (_ok, msg) = stop_entire_batch(true);
-                app.set_feedback(msg);
-            }
-        }
-        KeyCode::Enter | KeyCode::Char('l') => {
-            if app.view == ViewPage::ActiveJobs && !telemetry.active_jobs.is_empty() {
-                app.view = ViewPage::JobInspection;
-            } else if app.view == ViewPage::JobInspection {
-                app.view = ViewPage::ActiveJobs;
-            } else if app.view == ViewPage::MediaBrowser {
-                app.view = ViewPage::MediaInspection;
-            } else if app.view == ViewPage::MediaInspection {
-                app.view = ViewPage::MediaBrowser;
-            } else if app.view == ViewPage::CompletedMedia {
-                app.view = ViewPage::CompletedInspection;
-            } else if app.view == ViewPage::CompletedInspection {
-                app.view = ViewPage::CompletedMedia;
-            }
-        }
-        KeyCode::Char('i') | KeyCode::Char('I') => {
-            if app.view == ViewPage::ActiveJobs && !telemetry.active_jobs.is_empty() {
-                app.view = ViewPage::JobInspection;
-            } else if app.view == ViewPage::MediaBrowser {
-                app.view = ViewPage::MediaInspection;
-            } else if app.view == ViewPage::MediaInspection {
-                app.view = ViewPage::MediaBrowser;
-            } else if app.view == ViewPage::CompletedMedia {
-                app.view = ViewPage::CompletedInspection;
-            } else if app.view == ViewPage::CompletedInspection {
-                app.view = ViewPage::CompletedMedia;
-            }
-        }
-        KeyCode::Char(' ') if app.view == ViewPage::MediaInspection => {
-            let visible = app.visible_media(&telemetry.discovered_media, &telemetry.media_sources);
-            if app.media_scroll_index < visible.len() {
-                let p = &visible[app.media_scroll_index].path;
-                if app.selected_media_paths.contains(p) {
-                    app.selected_media_paths.remove(p);
-                    app.set_feedback("Média décoché.".to_string());
-                } else {
-                    app.selected_media_paths.insert(p.clone());
-                    app.set_feedback("Média coché pour batch.".to_string());
-                }
-            }
-        }
-        KeyCode::Char('?') => {
-            if app.view == ViewPage::Help {
-                app.view = app.help_caller_view;
-            } else {
-                app.help_caller_view = app.view;
-                app.help_tab = HelpTab::from_view(app.view);
-                app.help_scroll_index = 0;
-                app.view = ViewPage::Help;
-            }
-        }
-        KeyCode::Char('p') | KeyCode::Char('P') => {
-            if !telemetry.active_jobs.is_empty() && app.selected_index < telemetry.active_jobs.len()
-            {
-                let pid = telemetry.active_jobs[app.selected_index].pid;
-                let (_ok, msg) = toggle_pause_job(pid);
-                app.set_feedback(msg);
-            }
+            trigger_media_sources_rescan();
+            app.set_feedback("⟳ Rescan de toutes les sources lancé...".to_string());
         }
         KeyCode::Char('s') | KeyCode::Char('S') => {
-            if app.view == ViewPage::Help {
-                app.help_tab = HelpTab::MediaSources;
-                app.help_scroll_index = 0;
-            } else if app.view == ViewPage::ActiveJobs || app.view == ViewPage::JobInspection {
-                if !telemetry.active_jobs.is_empty()
-                    && app.selected_index < telemetry.active_jobs.len()
-                {
-                    let pid = telemetry.active_jobs[app.selected_index].pid;
-                    let (_ok, msg) = stop_job(pid);
-                    app.set_feedback(msg);
-                }
-            } else if app.view == ViewPage::MediaSources {
-                app.view = ViewPage::ActiveJobs;
-            } else {
-                app.view = ViewPage::MediaSources;
-            }
+            app.view = ViewPage::ActiveJobs;
         }
-        KeyCode::Char('K')
-            if app.view == ViewPage::JobInspection
-                && !telemetry.active_jobs.is_empty()
-                && app.selected_index < telemetry.active_jobs.len() =>
-        {
-            let pid = telemetry.active_jobs[app.selected_index].pid;
-            let (_ok, msg) = kill_job(pid);
-            app.set_feedback(msg);
+        _ => {}
+    }
+}
+
+/// Handles keypresses specific to the StatsHistory view.
+///
+/// # Arguments
+/// - `code`: Crossterm [`KeyCode`] received from the terminal event loop.
+/// - `app`: Mutable reference to application state.
+///
+/// # Returns
+/// None. Transitions active view.
+///
+/// # Errors
+/// None.
+///
+/// # Panics
+/// Guaranteed panic-free.
+///
+/// # Data Flow & Invariants
+/// Handles mnemonic jumps from stats history ('r'/'R' to CompletedMedia, 's'/'S' to MediaSources).
+fn handle_stats_history_view_keys(code: KeyCode, app: &mut AppState) {
+    match code {
+        KeyCode::Char('r') | KeyCode::Char('R') => {
+            app.view = ViewPage::CompletedMedia;
+        }
+        KeyCode::Char('s') | KeyCode::Char('S') => {
+            app.view = ViewPage::MediaSources;
         }
         _ => {}
     }
