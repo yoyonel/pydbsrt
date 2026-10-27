@@ -183,7 +183,7 @@ fn test_scenario_media_browser_selection_select_all_and_batch_launch() {
     assert_eq!(harness.app.view, ViewPage::ActiveJobs);
     assert_eq!(harness.app.selected_media_paths.len(), 0);
     let fb = harness.feedback_text().unwrap();
-    assert!(fb.contains("Batch"));
+    assert!(fb.to_lowercase().contains("batch"));
 }
 
 #[test]

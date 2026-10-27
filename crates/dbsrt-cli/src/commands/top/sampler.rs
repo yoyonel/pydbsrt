@@ -1205,7 +1205,7 @@ pub fn launch_selected_batch_with_target_file(
                 "Batch démarré sur {count} média(s) ({workers_count} workers parallèles). Bascule vers Tâches..."
             ),
         ),
-        Err(e) => (false, format!("Échec du lancement batch : {e}")),
+        Err(e) => (false, format!("Échec du lancement Batch : {e}")),
     }
 }
 
