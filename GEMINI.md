@@ -39,6 +39,19 @@
   - Certified ground-truth couplings are stored both in PostgreSQL 17 (`subtitles` + `sub_frames` linked to `medias` and `frames`) and in the Zero-DB registry `data/SRT/couplings.json` via `dbsrt certify-coupling` / `task coupling:certify`.
   - Only when this ground-truth coupling `(Certified Subtitles <-> Video Frames / pHash)` is established can that subtitle serve as reference to automatically retarget other releases via pHash consensus.
 
+## Strict Rust Architectural Complexity & Function Size Gate
+- **Ceiling Thresholds (Hard Limits)**:
+  - **Maximum Function Size**: Max **150 LOC** (target $\le$ 100 LOC). Any new or modified function exceeding 150 LOC is rejected by CI/CD.
+  - **Maximum Cyclomatic Complexity (CCN)**: Max **20** (target $\le$ 10-15).
+  - **Maximum Function Arity**: Max **4 arguments**. If more parameters are needed, mandate a dedicated `Context` / `Criteria` / `Request` struct.
+  - **Maximum Nesting Depth**: Max **4 levels**.
+- **Ratchet Anti-Regression Mechanism**:
+  - Legacy functions currently exceeding these thresholds are grandfathered in `scripts/complexity_baseline.json`.
+  - STRICTLY FORBIDDEN for any grandfathered function to increase in LOC, CCN, arity, or nesting depth.
+  - Once a grandfathered function is refactored, its baseline entry is ratcheted down (`task complexity -- --ratchet`) or removed, preventing any regression.
+- **Automated CI/CD Validation Gate**:
+  - Enforced via `scripts/lint_complexity.py` invoked via `task complexity` (and wired into `task lint`, pre-commit hook `rust-complexity-gate`, and `.github/workflows/main.yml`).
+
 ## Code Quality & Zero Magic Constants (Strictly Enforced)
 - **Zero Inline Language Nesting (Anti-Pattern Ban)**: STRICTLY FORBIDDEN from embedding multi-line inline scripts of one language inside another (e.g. `python -c "..."` or `python - <<'EOF'` heredocs inside shell scripts, inline shell inside Python via string interpolation, or inline Lua/JS strings). Every language runtime MUST reside in its own dedicated, first-class file (`.py`, `.sh`, `.rs`, `.lua`) under `scripts/` or the source tree, fully typed, formatted, and linted by its native toolchain. Shell scripts are strictly orchestrators of native CLI commands, NEVER container shells for inline Python code.
 - **STRICTLY FORBIDDEN from using Magic Constants / Numbers / Unnamed Literals**: Hardcoded numeric literals, timeouts, buffer sizes, frame counts, bit depths, and thresholds are strictly forbidden in business logic, HTTP endpoints, parsers, and data pipelines across Rust, Python, and Lua.

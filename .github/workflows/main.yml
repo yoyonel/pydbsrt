@@ -130,6 +130,9 @@ jobs:
       - name: Linting (cargo clippy)
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      - name: Rust Architectural Complexity Gate (LOC <= 150, CCN <= 20)
+        run: uv run python scripts/lint_complexity.py
+
       - name: Unit & Integration tests with coverage (cargo llvm-cov)
         run: cargo llvm-cov --workspace --json --output-path coverage-rust.json
 

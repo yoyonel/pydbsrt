@@ -1,0 +1,1152 @@
+{
+  "crates/dbsrt-cli/src/commands/certify.rs::mod::detect_cli_subtitle_lang_status": {
+    "file_path": "crates/dbsrt-cli/src/commands/certify.rs",
+    "scope": "mod",
+    "function_name": "detect_cli_subtitle_lang_status",
+    "start_line": 71,
+    "max_loc": 37,
+    "max_ccn": 15,
+    "max_parameters": 2,
+    "max_nesting": 5
+  },
+  "crates/dbsrt-cli/src/commands/certify.rs::mod::run_certify_coupling": {
+    "file_path": "crates/dbsrt-cli/src/commands/certify.rs",
+    "scope": "mod",
+    "function_name": "run_certify_coupling",
+    "start_line": 121,
+    "max_loc": 159,
+    "max_ccn": 44,
+    "max_parameters": 1,
+    "max_nesting": 5
+  },
+  "crates/dbsrt-cli/src/commands/fetch.rs::mod::run_fetch_subtitles": {
+    "file_path": "crates/dbsrt-cli/src/commands/fetch.rs",
+    "scope": "mod",
+    "function_name": "run_fetch_subtitles",
+    "start_line": 52,
+    "max_loc": 144,
+    "max_ccn": 30,
+    "max_parameters": 1,
+    "max_nesting": 4
+  },
+  "crates/dbsrt-cli/src/commands/media_add.rs::CleanupState::global": {
+    "file_path": "crates/dbsrt-cli/src/commands/media_add.rs",
+    "scope": "CleanupState",
+    "function_name": "global",
+    "start_line": 229,
+    "max_loc": 43,
+    "max_ccn": 15,
+    "max_parameters": 0,
+    "max_nesting": 8
+  },
+  "crates/dbsrt-cli/src/commands/media_add.rs::mod::certify_subtitles_in_registry": {
+    "file_path": "crates/dbsrt-cli/src/commands/media_add.rs",
+    "scope": "mod",
+    "function_name": "certify_subtitles_in_registry",
+    "start_line": 830,
+    "max_loc": 136,
+    "max_ccn": 27,
+    "max_parameters": 2,
+    "max_nesting": 5
+  },
+  "crates/dbsrt-cli/src/commands/media_add.rs::mod::extract_embedded_subtitles_and_select": {
+    "file_path": "crates/dbsrt-cli/src/commands/media_add.rs",
+    "scope": "mod",
+    "function_name": "extract_embedded_subtitles_and_select",
+    "start_line": 160,
+    "max_loc": 59,
+    "max_ccn": 15,
+    "max_parameters": 2,
+    "max_nesting": 6
+  },
+  "crates/dbsrt-cli/src/commands/media_add.rs::mod::extract_phash_and_subtitles": {
+    "file_path": "crates/dbsrt-cli/src/commands/media_add.rs",
+    "scope": "mod",
+    "function_name": "extract_phash_and_subtitles",
+    "start_line": 720,
+    "max_loc": 83,
+    "max_ccn": 18,
+    "max_parameters": 5,
+    "max_nesting": 4
+  },
+  "crates/dbsrt-cli/src/commands/media_add.rs::mod::plan_subtitle_job": {
+    "file_path": "crates/dbsrt-cli/src/commands/media_add.rs",
+    "scope": "mod",
+    "function_name": "plan_subtitle_job",
+    "start_line": 630,
+    "max_loc": 66,
+    "max_ccn": 19,
+    "max_parameters": 2,
+    "max_nesting": 6
+  },
+  "crates/dbsrt-cli/src/commands/media_add.rs::mod::resolve_container_embedded_subtitles": {
+    "file_path": "crates/dbsrt-cli/src/commands/media_add.rs",
+    "scope": "mod",
+    "function_name": "resolve_container_embedded_subtitles",
+    "start_line": 473,
+    "max_loc": 136,
+    "max_ccn": 34,
+    "max_parameters": 4,
+    "max_nesting": 7
+  },
+  "crates/dbsrt-cli/src/commands/media_add.rs::mod::resolve_explicit_subtitle_pair": {
+    "file_path": "crates/dbsrt-cli/src/commands/media_add.rs",
+    "scope": "mod",
+    "function_name": "resolve_explicit_subtitle_pair",
+    "start_line": 400,
+    "max_loc": 50,
+    "max_ccn": 13,
+    "max_parameters": 3,
+    "max_nesting": 5
+  },
+  "crates/dbsrt-cli/src/commands/media_add.rs::mod::select_and_validate_subtitle_pairs": {
+    "file_path": "crates/dbsrt-cli/src/commands/media_add.rs",
+    "scope": "mod",
+    "function_name": "select_and_validate_subtitle_pairs",
+    "start_line": 49,
+    "max_loc": 110,
+    "max_ccn": 25,
+    "max_parameters": 1,
+    "max_nesting": 6
+  },
+  "crates/dbsrt-cli/src/commands/pack.rs::mod::extract_fps_from_path": {
+    "file_path": "crates/dbsrt-cli/src/commands/pack.rs",
+    "scope": "mod",
+    "function_name": "extract_fps_from_path",
+    "start_line": 43,
+    "max_loc": 36,
+    "max_ccn": 17,
+    "max_parameters": 1,
+    "max_nesting": 5
+  },
+  "crates/dbsrt-cli/src/commands/pack.rs::mod::run_pack": {
+    "file_path": "crates/dbsrt-cli/src/commands/pack.rs",
+    "scope": "mod",
+    "function_name": "run_pack",
+    "start_line": 81,
+    "max_loc": 125,
+    "max_ccn": 24,
+    "max_parameters": 1,
+    "max_nesting": 6
+  },
+  "crates/dbsrt-cli/src/commands/recognize.rs::mod::run_recognize_media": {
+    "file_path": "crates/dbsrt-cli/src/commands/recognize.rs",
+    "scope": "mod",
+    "function_name": "run_recognize_media",
+    "start_line": 70,
+    "max_loc": 217,
+    "max_ccn": 43,
+    "max_parameters": 1,
+    "max_nesting": 6
+  },
+  "crates/dbsrt-cli/src/commands/retarget.rs::mod::run_retarget_subtitles": {
+    "file_path": "crates/dbsrt-cli/src/commands/retarget.rs",
+    "scope": "mod",
+    "function_name": "run_retarget_subtitles",
+    "start_line": 41,
+    "max_loc": 103,
+    "max_ccn": 29,
+    "max_parameters": 1,
+    "max_nesting": 3
+  },
+  "crates/dbsrt-cli/src/commands/scan.rs::mod::run_scan_library": {
+    "file_path": "crates/dbsrt-cli/src/commands/scan.rs",
+    "scope": "mod",
+    "function_name": "run_scan_library",
+    "start_line": 55,
+    "max_loc": 123,
+    "max_ccn": 25,
+    "max_parameters": 1,
+    "max_nesting": 5
+  },
+  "crates/dbsrt-cli/src/commands/shared.rs::mod::find_or_build_phash_with_hwaccel": {
+    "file_path": "crates/dbsrt-cli/src/commands/shared.rs",
+    "scope": "mod",
+    "function_name": "find_or_build_phash_with_hwaccel",
+    "start_line": 46,
+    "max_loc": 77,
+    "max_ccn": 28,
+    "max_parameters": 3,
+    "max_nesting": 8
+  },
+  "crates/dbsrt-cli/src/commands/top/app.rs::mod::event_loop": {
+    "file_path": "crates/dbsrt-cli/src/commands/top/app.rs",
+    "scope": "mod",
+    "function_name": "event_loop",
+    "start_line": 478,
+    "max_loc": 20,
+    "max_ccn": 9,
+    "max_parameters": 3,
+    "max_nesting": 5
+  },
+  "crates/dbsrt-cli/src/commands/top/app.rs::mod::handle_global_navigation_key_event": {
+    "file_path": "crates/dbsrt-cli/src/commands/top/app.rs",
+    "scope": "mod",
+    "function_name": "handle_global_navigation_key_event",
+    "start_line": 746,
+    "max_loc": 81,
+    "max_ccn": 23,
+    "max_parameters": 2,
+    "max_nesting": 6
+  },
+  "crates/dbsrt-cli/src/commands/top/app.rs::mod::handle_media_browser_batch_keys": {
+    "file_path": "crates/dbsrt-cli/src/commands/top/app.rs",
+    "scope": "mod",
+    "function_name": "handle_media_browser_batch_keys",
+    "start_line": 1554,
+    "max_loc": 42,
+    "max_ccn": 7,
+    "max_parameters": 3,
+    "max_nesting": 5
+  },
+  "crates/dbsrt-cli/src/commands/top/app.rs::mod::handle_media_browser_deletion_keys": {
+    "file_path": "crates/dbsrt-cli/src/commands/top/app.rs",
+    "scope": "mod",
+    "function_name": "handle_media_browser_deletion_keys",
+    "start_line": 1487,
+    "max_loc": 65,
+    "max_ccn": 16,
+    "max_parameters": 4,
+    "max_nesting": 6
+  },
+  "crates/dbsrt-cli/src/commands/top/app.rs::mod::handle_media_browser_filter_sort_keys": {
+    "file_path": "crates/dbsrt-cli/src/commands/top/app.rs",
+    "scope": "mod",
+    "function_name": "handle_media_browser_filter_sort_keys",
+    "start_line": 1426,
+    "max_loc": 59,
+    "max_ccn": 16,
+    "max_parameters": 3,
+    "max_nesting": 7
+  },
+  "crates/dbsrt-cli/src/commands/top/app.rs::mod::handle_media_browser_selection_keys": {
+    "file_path": "crates/dbsrt-cli/src/commands/top/app.rs",
+    "scope": "mod",
+    "function_name": "handle_media_browser_selection_keys",
+    "start_line": 1373,
+    "max_loc": 51,
+    "max_ccn": 16,
+    "max_parameters": 3,
+    "max_nesting": 5
+  },
+  "crates/dbsrt-cli/src/commands/top/app.rs::mod::handle_media_sources_view_keys": {
+    "file_path": "crates/dbsrt-cli/src/commands/top/app.rs",
+    "scope": "mod",
+    "function_name": "handle_media_sources_view_keys",
+    "start_line": 1674,
+    "max_loc": 120,
+    "max_ccn": 26,
+    "max_parameters": 4,
+    "max_nesting": 8
+  },
+  "crates/dbsrt-cli/src/commands/top/app.rs::mod::handle_modal_key_event": {
+    "file_path": "crates/dbsrt-cli/src/commands/top/app.rs",
+    "scope": "mod",
+    "function_name": "handle_modal_key_event",
+    "start_line": 574,
+    "max_loc": 90,
+    "max_ccn": 25,
+    "max_parameters": 4,
+    "max_nesting": 9
+  },
+  "crates/dbsrt-cli/src/commands/top/app.rs::mod::handle_search_active_key_event": {
+    "file_path": "crates/dbsrt-cli/src/commands/top/app.rs",
+    "scope": "mod",
+    "function_name": "handle_search_active_key_event",
+    "start_line": 684,
+    "max_loc": 43,
+    "max_ccn": 12,
+    "max_parameters": 2,
+    "max_nesting": 5
+  },
+  "crates/dbsrt-cli/src/commands/top/app.rs::mod::handle_tab_cycling": {
+    "file_path": "crates/dbsrt-cli/src/commands/top/app.rs",
+    "scope": "mod",
+    "function_name": "handle_tab_cycling",
+    "start_line": 845,
+    "max_loc": 43,
+    "max_ccn": 17,
+    "max_parameters": 2,
+    "max_nesting": 5
+  },
+  "crates/dbsrt-cli/src/commands/top/model.rs::mod::filter_and_sort_media_with_source": {
+    "file_path": "crates/dbsrt-cli/src/commands/top/model.rs",
+    "scope": "mod",
+    "function_name": "filter_and_sort_media_with_source",
+    "start_line": 1312,
+    "max_loc": 9,
+    "max_ccn": 1,
+    "max_parameters": 5,
+    "max_nesting": 1
+  },
+  "crates/dbsrt-cli/src/commands/top/model.rs::mod::filter_and_sort_media_with_source_and_search": {
+    "file_path": "crates/dbsrt-cli/src/commands/top/model.rs",
+    "scope": "mod",
+    "function_name": "filter_and_sort_media_with_source_and_search",
+    "start_line": 1215,
+    "max_loc": 85,
+    "max_ccn": 22,
+    "max_parameters": 6,
+    "max_nesting": 5
+  },
+  "crates/dbsrt-cli/src/commands/top/model.rs::mod::parse_iso_to_unix_secs": {
+    "file_path": "crates/dbsrt-cli/src/commands/top/model.rs",
+    "scope": "mod",
+    "function_name": "parse_iso_to_unix_secs",
+    "start_line": 998,
+    "max_loc": 35,
+    "max_ccn": 23,
+    "max_parameters": 1,
+    "max_nesting": 2
+  },
+  "crates/dbsrt-cli/src/commands/top/process_ctl.rs::mod::inspect_job_details": {
+    "file_path": "crates/dbsrt-cli/src/commands/top/process_ctl.rs",
+    "scope": "mod",
+    "function_name": "inspect_job_details",
+    "start_line": 211,
+    "max_loc": 156,
+    "max_ccn": 28,
+    "max_parameters": 1,
+    "max_nesting": 9
+  },
+  "crates/dbsrt-cli/src/commands/top/sampler.rs::mod::collect_video_files": {
+    "file_path": "crates/dbsrt-cli/src/commands/top/sampler.rs",
+    "scope": "mod",
+    "function_name": "collect_video_files",
+    "start_line": 516,
+    "max_loc": 25,
+    "max_ccn": 11,
+    "max_parameters": 3,
+    "max_nesting": 5
+  },
+  "crates/dbsrt-cli/src/commands/top/sampler.rs::mod::compute_session_throughput": {
+    "file_path": "crates/dbsrt-cli/src/commands/top/sampler.rs",
+    "scope": "mod",
+    "function_name": "compute_session_throughput",
+    "start_line": 461,
+    "max_loc": 53,
+    "max_ccn": 10,
+    "max_parameters": 3,
+    "max_nesting": 5
+  },
+  "crates/dbsrt-cli/src/commands/top/sampler.rs::mod::get_certified_stems": {
+    "file_path": "crates/dbsrt-cli/src/commands/top/sampler.rs",
+    "scope": "mod",
+    "function_name": "get_certified_stems",
+    "start_line": 543,
+    "max_loc": 31,
+    "max_ccn": 13,
+    "max_parameters": 2,
+    "max_nesting": 7
+  },
+  "crates/dbsrt-cli/src/commands/top/sampler.rs::mod::load_historical_records": {
+    "file_path": "crates/dbsrt-cli/src/commands/top/sampler.rs",
+    "scope": "mod",
+    "function_name": "load_historical_records",
+    "start_line": 325,
+    "max_loc": 134,
+    "max_ccn": 21,
+    "max_parameters": 2,
+    "max_nesting": 8
+  },
+  "crates/dbsrt-cli/src/commands/top/sampler.rs::mod::load_media_cache": {
+    "file_path": "crates/dbsrt-cli/src/commands/top/sampler.rs",
+    "scope": "mod",
+    "function_name": "load_media_cache",
+    "start_line": 576,
+    "max_loc": 26,
+    "max_ccn": 7,
+    "max_parameters": 1,
+    "max_nesting": 8
+  },
+  "crates/dbsrt-cli/src/commands/top/sampler.rs::mod::load_media_sources": {
+    "file_path": "crates/dbsrt-cli/src/commands/top/sampler.rs",
+    "scope": "mod",
+    "function_name": "load_media_sources",
+    "start_line": 809,
+    "max_loc": 28,
+    "max_ccn": 5,
+    "max_parameters": 1,
+    "max_nesting": 5
+  },
+  "crates/dbsrt-cli/src/commands/top/sampler.rs::mod::preload_stem_size_cache": {
+    "file_path": "crates/dbsrt-cli/src/commands/top/sampler.rs",
+    "scope": "mod",
+    "function_name": "preload_stem_size_cache",
+    "start_line": 50,
+    "max_loc": 40,
+    "max_ccn": 10,
+    "max_parameters": 0,
+    "max_nesting": 6
+  },
+  "crates/dbsrt-cli/src/commands/top/sampler.rs::mod::probe_media_file": {
+    "file_path": "crates/dbsrt-cli/src/commands/top/sampler.rs",
+    "scope": "mod",
+    "function_name": "probe_media_file",
+    "start_line": 614,
+    "max_loc": 78,
+    "max_ccn": 16,
+    "max_parameters": 1,
+    "max_nesting": 8
+  },
+  "crates/dbsrt-cli/src/commands/top/sampler.rs::mod::process_candidate_jobs": {
+    "file_path": "crates/dbsrt-cli/src/commands/top/sampler.rs",
+    "scope": "mod",
+    "function_name": "process_candidate_jobs",
+    "start_line": 1500,
+    "max_loc": 146,
+    "max_ccn": 28,
+    "max_parameters": 1,
+    "max_nesting": 4
+  },
+  "crates/dbsrt-cli/src/commands/top/sampler.rs::mod::read_proc_io_bytes": {
+    "file_path": "crates/dbsrt-cli/src/commands/top/sampler.rs",
+    "scope": "mod",
+    "function_name": "read_proc_io_bytes",
+    "start_line": 254,
+    "max_loc": 21,
+    "max_ccn": 7,
+    "max_parameters": 1,
+    "max_nesting": 5
+  },
+  "crates/dbsrt-cli/src/commands/top/sampler.rs::mod::run_telemetry_sampler_loop": {
+    "file_path": "crates/dbsrt-cli/src/commands/top/sampler.rs",
+    "scope": "mod",
+    "function_name": "run_telemetry_sampler_loop",
+    "start_line": 1326,
+    "max_loc": 171,
+    "max_ccn": 22,
+    "max_parameters": 4,
+    "max_nesting": 5
+  },
+  "crates/dbsrt-cli/src/commands/top/sampler.rs::mod::scan_all_media_sources": {
+    "file_path": "crates/dbsrt-cli/src/commands/top/sampler.rs",
+    "scope": "mod",
+    "function_name": "scan_all_media_sources",
+    "start_line": 1135,
+    "max_loc": 18,
+    "max_ccn": 1,
+    "max_parameters": 6,
+    "max_nesting": 2
+  },
+  "crates/dbsrt-cli/src/commands/top/sampler.rs::mod::scan_all_media_sources_with_progress": {
+    "file_path": "crates/dbsrt-cli/src/commands/top/sampler.rs",
+    "scope": "mod",
+    "function_name": "scan_all_media_sources_with_progress",
+    "start_line": 981,
+    "max_loc": 152,
+    "max_ccn": 22,
+    "max_parameters": 7,
+    "max_nesting": 6
+  },
+  "crates/dbsrt-cli/src/commands/top/sampler.rs::mod::scan_nas_tvshows": {
+    "file_path": "crates/dbsrt-cli/src/commands/top/sampler.rs",
+    "scope": "mod",
+    "function_name": "scan_nas_tvshows",
+    "start_line": 694,
+    "max_loc": 101,
+    "max_ccn": 18,
+    "max_parameters": 6,
+    "max_nesting": 5
+  },
+  "crates/dbsrt-cli/src/commands/top/sampler.rs::mod::start_gpu_sampler": {
+    "file_path": "crates/dbsrt-cli/src/commands/top/sampler.rs",
+    "scope": "mod",
+    "function_name": "start_gpu_sampler",
+    "start_line": 156,
+    "max_loc": 86,
+    "max_ccn": 16,
+    "max_parameters": 2,
+    "max_nesting": 6
+  },
+  "crates/dbsrt-cli/src/commands/top/sampler.rs::mod::start_media_sources_scanner": {
+    "file_path": "crates/dbsrt-cli/src/commands/top/sampler.rs",
+    "scope": "mod",
+    "function_name": "start_media_sources_scanner",
+    "start_line": 1213,
+    "max_loc": 93,
+    "max_ccn": 10,
+    "max_parameters": 2,
+    "max_nesting": 5
+  },
+  "crates/dbsrt-cli/src/commands/top/sampler.rs::mod::update_media_source": {
+    "file_path": "crates/dbsrt-cli/src/commands/top/sampler.rs",
+    "scope": "mod",
+    "function_name": "update_media_source",
+    "start_line": 921,
+    "max_loc": 23,
+    "max_ccn": 4,
+    "max_parameters": 5,
+    "max_nesting": 3
+  },
+  "crates/dbsrt-cli/src/commands/top/ui.rs::mod::render_completed_inspection_page": {
+    "file_path": "crates/dbsrt-cli/src/commands/top/ui.rs",
+    "scope": "mod",
+    "function_name": "render_completed_inspection_page",
+    "start_line": 1021,
+    "max_loc": 240,
+    "max_ccn": 27,
+    "max_parameters": 3,
+    "max_nesting": 8
+  },
+  "crates/dbsrt-cli/src/commands/top/ui.rs::mod::render_media_browser_page": {
+    "file_path": "crates/dbsrt-cli/src/commands/top/ui.rs",
+    "scope": "mod",
+    "function_name": "render_media_browser_page",
+    "start_line": 1263,
+    "max_loc": 419,
+    "max_ccn": 35,
+    "max_parameters": 3,
+    "max_nesting": 5
+  },
+  "crates/dbsrt-cli/src/commands/top/ui.rs::mod::render_media_inspection_page": {
+    "file_path": "crates/dbsrt-cli/src/commands/top/ui.rs",
+    "scope": "mod",
+    "function_name": "render_media_inspection_page",
+    "start_line": 1684,
+    "max_loc": 438,
+    "max_ccn": 26,
+    "max_parameters": 3,
+    "max_nesting": 4
+  },
+  "crates/dbsrt-cli/src/commands/top/ui.rs::mod::render_media_sources_page": {
+    "file_path": "crates/dbsrt-cli/src/commands/top/ui.rs",
+    "scope": "mod",
+    "function_name": "render_media_sources_page",
+    "start_line": 2124,
+    "max_loc": 280,
+    "max_ccn": 16,
+    "max_parameters": 3,
+    "max_nesting": 4
+  },
+  "crates/dbsrt-cli/src/main.rs::mod::main": {
+    "file_path": "crates/dbsrt-cli/src/main.rs",
+    "scope": "mod",
+    "function_name": "main",
+    "start_line": 10,
+    "max_loc": 56,
+    "max_ccn": 35,
+    "max_parameters": 0,
+    "max_nesting": 3
+  },
+  "crates/dbsrt-core/src/coupling.rs::CouplingRegistry::relabel": {
+    "file_path": "crates/dbsrt-core/src/coupling.rs",
+    "scope": "CouplingRegistry",
+    "function_name": "relabel",
+    "start_line": 504,
+    "max_loc": 170,
+    "max_ccn": 31,
+    "max_parameters": 5,
+    "max_nesting": 6
+  },
+  "crates/dbsrt-core/src/coupling.rs::RegistryLock::acquire_timeout": {
+    "file_path": "crates/dbsrt-core/src/coupling.rs",
+    "scope": "RegistryLock",
+    "function_name": "acquire_timeout",
+    "start_line": 704,
+    "max_loc": 30,
+    "max_ccn": 13,
+    "max_parameters": 2,
+    "max_nesting": 5
+  },
+  "crates/dbsrt-core/src/cuts.rs::mod::detect_cuts": {
+    "file_path": "crates/dbsrt-core/src/cuts.rs",
+    "scope": "mod",
+    "function_name": "detect_cuts",
+    "start_line": 42,
+    "max_loc": 24,
+    "max_ccn": 7,
+    "max_parameters": 2,
+    "max_nesting": 5
+  },
+  "crates/dbsrt-core/src/cuts.rs::mod::detect_cuts_timestamped": {
+    "file_path": "crates/dbsrt-core/src/cuts.rs",
+    "scope": "mod",
+    "function_name": "detect_cuts_timestamped",
+    "start_line": 69,
+    "max_loc": 32,
+    "max_ccn": 7,
+    "max_parameters": 2,
+    "max_nesting": 5
+  },
+  "crates/dbsrt-core/src/media_pairing.rs::mod::find_subtitle_pairs": {
+    "file_path": "crates/dbsrt-core/src/media_pairing.rs",
+    "scope": "mod",
+    "function_name": "find_subtitle_pairs",
+    "start_line": 113,
+    "max_loc": 116,
+    "max_ccn": 32,
+    "max_parameters": 1,
+    "max_nesting": 5
+  },
+  "crates/dbsrt-core/src/media_pairing.rs::mod::parse_extended_language_token": {
+    "file_path": "crates/dbsrt-core/src/media_pairing.rs",
+    "scope": "mod",
+    "function_name": "parse_extended_language_token",
+    "start_line": 78,
+    "max_loc": 31,
+    "max_ccn": 25,
+    "max_parameters": 1,
+    "max_nesting": 2
+  },
+  "crates/dbsrt-core/src/media_pairing.rs::mod::parse_language_code": {
+    "file_path": "crates/dbsrt-core/src/media_pairing.rs",
+    "scope": "mod",
+    "function_name": "parse_language_code",
+    "start_line": 23,
+    "max_loc": 49,
+    "max_ccn": 40,
+    "max_parameters": 1,
+    "max_nesting": 2
+  },
+  "crates/dbsrt-core/src/metadata.rs::mod::parse_resolution_token": {
+    "file_path": "crates/dbsrt-core/src/metadata.rs",
+    "scope": "mod",
+    "function_name": "parse_resolution_token",
+    "start_line": 508,
+    "max_loc": 21,
+    "max_ccn": 11,
+    "max_parameters": 1,
+    "max_nesting": 6
+  },
+  "crates/dbsrt-core/src/metadata.rs::mod::parse_scene_convention": {
+    "file_path": "crates/dbsrt-core/src/metadata.rs",
+    "scope": "mod",
+    "function_name": "parse_scene_convention",
+    "start_line": 199,
+    "max_loc": 161,
+    "max_ccn": 41,
+    "max_parameters": 2,
+    "max_nesting": 5
+  },
+  "crates/dbsrt-core/src/metadata.rs::mod::parse_season_episode": {
+    "file_path": "crates/dbsrt-core/src/metadata.rs",
+    "scope": "mod",
+    "function_name": "parse_season_episode",
+    "start_line": 440,
+    "max_loc": 40,
+    "max_ccn": 11,
+    "max_parameters": 1,
+    "max_nesting": 7
+  },
+  "crates/dbsrt-core/src/providers/cache.rs::SubtitleCache::put": {
+    "file_path": "crates/dbsrt-core/src/providers/cache.rs",
+    "scope": "SubtitleCache",
+    "function_name": "put",
+    "start_line": 89,
+    "max_loc": 18,
+    "max_ccn": 8,
+    "max_parameters": 5,
+    "max_nesting": 2
+  },
+  "crates/dbsrt-core/src/srt.rs::SubtitleFile::parse_ass": {
+    "file_path": "crates/dbsrt-core/src/srt.rs",
+    "scope": "SubtitleFile",
+    "function_name": "parse_ass",
+    "start_line": 204,
+    "max_loc": 45,
+    "max_ccn": 11,
+    "max_parameters": 1,
+    "max_nesting": 5
+  },
+  "crates/dbsrt-core/src/video.rs::mod::extract_frames_advanced": {
+    "file_path": "crates/dbsrt-core/src/video.rs",
+    "scope": "mod",
+    "function_name": "extract_frames_advanced",
+    "start_line": 498,
+    "max_loc": 35,
+    "max_ccn": 13,
+    "max_parameters": 2,
+    "max_nesting": 5
+  },
+  "crates/dbsrt-core/src/video.rs::mod::find_ffmpeg_supporting": {
+    "file_path": "crates/dbsrt-core/src/video.rs",
+    "scope": "mod",
+    "function_name": "find_ffmpeg_supporting",
+    "start_line": 416,
+    "max_loc": 25,
+    "max_ccn": 10,
+    "max_parameters": 1,
+    "max_nesting": 5
+  },
+  "crates/dbsrt-core/src/video.rs::mod::parse_fps_from_stem": {
+    "file_path": "crates/dbsrt-core/src/video.rs",
+    "scope": "mod",
+    "function_name": "parse_fps_from_stem",
+    "start_line": 118,
+    "max_loc": 59,
+    "max_ccn": 31,
+    "max_parameters": 1,
+    "max_nesting": 5
+  },
+  "crates/dbsrt-core/src/video.rs::mod::probe_video_with_cmd": {
+    "file_path": "crates/dbsrt-core/src/video.rs",
+    "scope": "mod",
+    "function_name": "probe_video_with_cmd",
+    "start_line": 189,
+    "max_loc": 57,
+    "max_ccn": 15,
+    "max_parameters": 3,
+    "max_nesting": 5
+  },
+  "crates/dbsrt-core/src/video.rs::mod::run_extraction_process": {
+    "file_path": "crates/dbsrt-core/src/video.rs",
+    "scope": "mod",
+    "function_name": "run_extraction_process",
+    "start_line": 534,
+    "max_loc": 160,
+    "max_ccn": 39,
+    "max_parameters": 3,
+    "max_nesting": 7
+  },
+  "crates/dbsrt-index/src/db.rs::DbClient::connect": {
+    "file_path": "crates/dbsrt-index/src/db.rs",
+    "scope": "DbClient",
+    "function_name": "connect",
+    "start_line": 137,
+    "max_loc": 9,
+    "max_ccn": 3,
+    "max_parameters": 5,
+    "max_nesting": 2
+  },
+  "crates/dbsrt-index/src/dbphash.rs::DbphashBuilder::add_media": {
+    "file_path": "crates/dbsrt-index/src/dbphash.rs",
+    "scope": "DbphashBuilder",
+    "function_name": "add_media",
+    "start_line": 160,
+    "max_loc": 60,
+    "max_ccn": 7,
+    "max_parameters": 5,
+    "max_nesting": 3
+  },
+  "crates/dbsrt-index/src/dbphash.rs::MmapDbphash::aggregate_matches": {
+    "file_path": "crates/dbsrt-index/src/dbphash.rs",
+    "scope": "MmapDbphash",
+    "function_name": "aggregate_matches",
+    "start_line": 544,
+    "max_loc": 169,
+    "max_ccn": 27,
+    "max_parameters": 4,
+    "max_nesting": 6
+  },
+  "crates/dbsrt-index/src/dbphash.rs::MmapDbphash::search_cuts_linear": {
+    "file_path": "crates/dbsrt-index/src/dbphash.rs",
+    "scope": "MmapDbphash",
+    "function_name": "search_cuts_linear",
+    "start_line": 471,
+    "max_loc": 25,
+    "max_ccn": 2,
+    "max_parameters": 3,
+    "max_nesting": 5
+  },
+  "crates/dbsrt-index/src/dbphash.rs::MmapDbphash::search_sparse_linear": {
+    "file_path": "crates/dbsrt-index/src/dbphash.rs",
+    "scope": "MmapDbphash",
+    "function_name": "search_sparse_linear",
+    "start_line": 498,
+    "max_loc": 25,
+    "max_ccn": 2,
+    "max_parameters": 3,
+    "max_nesting": 5
+  },
+  "crates/dbsrt-index/src/delta.rs::mod::add_media": {
+    "file_path": "crates/dbsrt-index/src/delta.rs",
+    "scope": "mod",
+    "function_name": "add_media",
+    "start_line": 268,
+    "max_loc": 16,
+    "max_ccn": 1,
+    "max_parameters": 5,
+    "max_nesting": 2
+  },
+  "crates/dbsrt-index/src/delta.rs::mod::aggregate_matches": {
+    "file_path": "crates/dbsrt-index/src/delta.rs",
+    "scope": "mod",
+    "function_name": "aggregate_matches",
+    "start_line": 367,
+    "max_loc": 146,
+    "max_ccn": 24,
+    "max_parameters": 4,
+    "max_nesting": 6
+  },
+  "crates/dbsrt-index/src/mih.rs::MultiIndexHash64::search": {
+    "file_path": "crates/dbsrt-index/src/mih.rs",
+    "scope": "MultiIndexHash64",
+    "function_name": "search",
+    "start_line": 209,
+    "max_loc": 71,
+    "max_ccn": 13,
+    "max_parameters": 4,
+    "max_nesting": 7
+  },
+  "crates/dbsrt-index/src/mmap.rs::MmapLibrary::recognize_two_windows": {
+    "file_path": "crates/dbsrt-index/src/mmap.rs",
+    "scope": "MmapLibrary",
+    "function_name": "recognize_two_windows",
+    "start_line": 344,
+    "max_loc": 88,
+    "max_ccn": 19,
+    "max_parameters": 5,
+    "max_nesting": 4
+  },
+  "crates/dbsrt-index/src/mmap.rs::mod::compute_temporal_coherence_with_delta": {
+    "file_path": "crates/dbsrt-index/src/mmap.rs",
+    "scope": "mod",
+    "function_name": "compute_temporal_coherence_with_delta",
+    "start_line": 21,
+    "max_loc": 44,
+    "max_ccn": 13,
+    "max_parameters": 2,
+    "max_nesting": 5
+  },
+  "crates/dbsrt-server/src/handlers/autosync.rs::mod::autosync_handler": {
+    "file_path": "crates/dbsrt-server/src/handlers/autosync.rs",
+    "scope": "mod",
+    "function_name": "autosync_handler",
+    "start_line": 28,
+    "max_loc": 274,
+    "max_ccn": 39,
+    "max_parameters": 1,
+    "max_nesting": 9
+  },
+  "crates/dbsrt-server/src/handlers/autosync.rs::mod::certify_handler": {
+    "file_path": "crates/dbsrt-server/src/handlers/autosync.rs",
+    "scope": "mod",
+    "function_name": "certify_handler",
+    "start_line": 432,
+    "max_loc": 186,
+    "max_ccn": 35,
+    "max_parameters": 1,
+    "max_nesting": 4
+  },
+  "crates/dbsrt-server/src/handlers/autosync.rs::mod::retarget_handler": {
+    "file_path": "crates/dbsrt-server/src/handlers/autosync.rs",
+    "scope": "mod",
+    "function_name": "retarget_handler",
+    "start_line": 303,
+    "max_loc": 128,
+    "max_ccn": 14,
+    "max_parameters": 1,
+    "max_nesting": 5
+  },
+  "crates/dbsrt-server/src/handlers/catalog_handlers.rs::mod::catalog_ingest_handler": {
+    "file_path": "crates/dbsrt-server/src/handlers/catalog_handlers.rs",
+    "scope": "mod",
+    "function_name": "catalog_ingest_handler",
+    "start_line": 59,
+    "max_loc": 105,
+    "max_ccn": 12,
+    "max_parameters": 1,
+    "max_nesting": 5
+  },
+  "crates/dbsrt-server/src/handlers/search/cas.rs::mod::get_subtitle_by_hash_handler": {
+    "file_path": "crates/dbsrt-server/src/handlers/search/cas.rs",
+    "scope": "mod",
+    "function_name": "get_subtitle_by_hash_handler",
+    "start_line": 14,
+    "max_loc": 111,
+    "max_ccn": 26,
+    "max_parameters": 1,
+    "max_nesting": 8
+  },
+  "crates/dbsrt-server/src/handlers/search/download.rs::mod::fetch_cas_or_catalog_subtitle": {
+    "file_path": "crates/dbsrt-server/src/handlers/search/download.rs",
+    "scope": "mod",
+    "function_name": "fetch_cas_or_catalog_subtitle",
+    "start_line": 87,
+    "max_loc": 109,
+    "max_ccn": 25,
+    "max_parameters": 3,
+    "max_nesting": 8
+  },
+  "crates/dbsrt-server/src/handlers/search/download.rs::mod::persist_retargeted_subtitle": {
+    "file_path": "crates/dbsrt-server/src/handlers/search/download.rs",
+    "scope": "mod",
+    "function_name": "persist_retargeted_subtitle",
+    "start_line": 381,
+    "max_loc": 72,
+    "max_ccn": 19,
+    "max_parameters": 5,
+    "max_nesting": 5
+  },
+  "crates/dbsrt-server/src/handlers/search/download.rs::mod::resolve_subtitle_content": {
+    "file_path": "crates/dbsrt-server/src/handlers/search/download.rs",
+    "scope": "mod",
+    "function_name": "resolve_subtitle_content",
+    "start_line": 265,
+    "max_loc": 28,
+    "max_ccn": 7,
+    "max_parameters": 6,
+    "max_nesting": 3
+  },
+  "crates/dbsrt-server/src/handlers/search/lookup.rs::mod::execute_local_phash_recognition": {
+    "file_path": "crates/dbsrt-server/src/handlers/search/lookup.rs",
+    "scope": "mod",
+    "function_name": "execute_local_phash_recognition",
+    "start_line": 441,
+    "max_loc": 67,
+    "max_ccn": 10,
+    "max_parameters": 5,
+    "max_nesting": 3
+  },
+  "crates/dbsrt-server/src/handlers/search/lookup.rs::mod::execute_phash_recognition": {
+    "file_path": "crates/dbsrt-server/src/handlers/search/lookup.rs",
+    "scope": "mod",
+    "function_name": "execute_phash_recognition",
+    "start_line": 532,
+    "max_loc": 47,
+    "max_ccn": 7,
+    "max_parameters": 7,
+    "max_nesting": 2
+  },
+  "crates/dbsrt-server/src/handlers/search/lookup.rs::mod::execute_remote_relay_recognition": {
+    "file_path": "crates/dbsrt-server/src/handlers/search/lookup.rs",
+    "scope": "mod",
+    "function_name": "execute_remote_relay_recognition",
+    "start_line": 226,
+    "max_loc": 117,
+    "max_ccn": 8,
+    "max_parameters": 7,
+    "max_nesting": 6
+  },
+  "crates/dbsrt-server/src/handlers/search/lookup.rs::mod::extract_embedded_container_subtitles": {
+    "file_path": "crates/dbsrt-server/src/handlers/search/lookup.rs",
+    "scope": "mod",
+    "function_name": "extract_embedded_container_subtitles",
+    "start_line": 792,
+    "max_loc": 44,
+    "max_ccn": 9,
+    "max_parameters": 4,
+    "max_nesting": 5
+  },
+  "crates/dbsrt-server/src/handlers/search/lookup.rs::mod::fetch_remote_provider_and_filter": {
+    "file_path": "crates/dbsrt-server/src/handlers/search/lookup.rs",
+    "scope": "mod",
+    "function_name": "fetch_remote_provider_and_filter",
+    "start_line": 999,
+    "max_loc": 78,
+    "max_ccn": 17,
+    "max_parameters": 7,
+    "max_nesting": 5
+  },
+  "crates/dbsrt-server/src/handlers/search/lookup.rs::mod::finalize_search_response": {
+    "file_path": "crates/dbsrt-server/src/handlers/search/lookup.rs",
+    "scope": "mod",
+    "function_name": "finalize_search_response",
+    "start_line": 1104,
+    "max_loc": 48,
+    "max_ccn": 1,
+    "max_parameters": 9,
+    "max_nesting": 2
+  },
+  "crates/dbsrt-server/src/handlers/search/lookup.rs::mod::match_certified_couplings_and_shifts": {
+    "file_path": "crates/dbsrt-server/src/handlers/search/lookup.rs",
+    "scope": "mod",
+    "function_name": "match_certified_couplings_and_shifts",
+    "start_line": 689,
+    "max_loc": 82,
+    "max_ccn": 10,
+    "max_parameters": 15,
+    "max_nesting": 5
+  },
+  "crates/dbsrt-server/src/handlers/search/lookup.rs::mod::search_disk_catalog_subtitles": {
+    "file_path": "crates/dbsrt-server/src/handlers/search/lookup.rs",
+    "scope": "mod",
+    "function_name": "search_disk_catalog_subtitles",
+    "start_line": 868,
+    "max_loc": 106,
+    "max_ccn": 17,
+    "max_parameters": 13,
+    "max_nesting": 5
+  },
+  "crates/dbsrt-server/src/handlers/search/lookup.rs::mod::search_handler": {
+    "file_path": "crates/dbsrt-server/src/handlers/search/lookup.rs",
+    "scope": "mod",
+    "function_name": "search_handler",
+    "start_line": 44,
+    "max_loc": 157,
+    "max_ccn": 10,
+    "max_parameters": 1,
+    "max_nesting": 2
+  },
+  "crates/dbsrt-server/src/handlers/search/recognize.rs::mod::calculate_best_sequence_shift": {
+    "file_path": "crates/dbsrt-server/src/handlers/search/recognize.rs",
+    "scope": "mod",
+    "function_name": "calculate_best_sequence_shift",
+    "start_line": 154,
+    "max_loc": 44,
+    "max_ccn": 14,
+    "max_parameters": 4,
+    "max_nesting": 9
+  },
+  "crates/dbsrt-server/src/handlers/search/recognize.rs::mod::recognize_from_fingerprint": {
+    "file_path": "crates/dbsrt-server/src/handlers/search/recognize.rs",
+    "scope": "mod",
+    "function_name": "recognize_from_fingerprint",
+    "start_line": 288,
+    "max_loc": 75,
+    "max_ccn": 6,
+    "max_parameters": 5,
+    "max_nesting": 3
+  },
+  "crates/dbsrt-server/src/handlers/search/recognize.rs::mod::resolve_certified_candidates_with_shift": {
+    "file_path": "crates/dbsrt-server/src/handlers/search/recognize.rs",
+    "scope": "mod",
+    "function_name": "resolve_certified_candidates_with_shift",
+    "start_line": 221,
+    "max_loc": 43,
+    "max_ccn": 5,
+    "max_parameters": 5,
+    "max_nesting": 5
+  },
+  "crates/dbsrt-server/src/lib.rs::mod::bind_listener": {
+    "file_path": "crates/dbsrt-server/src/lib.rs",
+    "scope": "mod",
+    "function_name": "bind_listener",
+    "start_line": 42,
+    "max_loc": 35,
+    "max_ccn": 14,
+    "max_parameters": 2,
+    "max_nesting": 5
+  },
+  "crates/dbsrt-server/src/main.rs::mod::run_server_until": {
+    "file_path": "crates/dbsrt-server/src/main.rs",
+    "scope": "mod",
+    "function_name": "run_server_until",
+    "start_line": 103,
+    "max_loc": 162,
+    "max_ccn": 34,
+    "max_parameters": 2,
+    "max_nesting": 12
+  },
+  "crates/dbsrt-server/src/services/catalog.rs::mod::collect_subtitle_search_dirs": {
+    "file_path": "crates/dbsrt-server/src/services/catalog.rs",
+    "scope": "mod",
+    "function_name": "collect_subtitle_search_dirs",
+    "start_line": 109,
+    "max_loc": 29,
+    "max_ccn": 9,
+    "max_parameters": 3,
+    "max_nesting": 5
+  },
+  "crates/dbsrt-server/src/services/catalog.rs::mod::detect_subtitle_file_language": {
+    "file_path": "crates/dbsrt-server/src/services/catalog.rs",
+    "scope": "mod",
+    "function_name": "detect_subtitle_file_language",
+    "start_line": 48,
+    "max_loc": 51,
+    "max_ccn": 31,
+    "max_parameters": 1,
+    "max_nesting": 3
+  },
+  "crates/dbsrt-server/src/services/catalog.rs::mod::lookup_certified_couplings": {
+    "file_path": "crates/dbsrt-server/src/services/catalog.rs",
+    "scope": "mod",
+    "function_name": "lookup_certified_couplings",
+    "start_line": 350,
+    "max_loc": 173,
+    "max_ccn": 40,
+    "max_parameters": 7,
+    "max_nesting": 7
+  },
+  "crates/dbsrt-server/src/services/catalog.rs::mod::search_subtitles_in_catalog": {
+    "file_path": "crates/dbsrt-server/src/services/catalog.rs",
+    "scope": "mod",
+    "function_name": "search_subtitles_in_catalog",
+    "start_line": 155,
+    "max_loc": 138,
+    "max_ccn": 39,
+    "max_parameters": 6,
+    "max_nesting": 5
+  },
+  "crates/dbsrt-server/src/services/phash.rs::mod::compute_media_phash_shift": {
+    "file_path": "crates/dbsrt-server/src/services/phash.rs",
+    "scope": "mod",
+    "function_name": "compute_media_phash_shift",
+    "start_line": 450,
+    "max_loc": 19,
+    "max_ccn": 1,
+    "max_parameters": 7,
+    "max_nesting": 1
+  },
+  "crates/dbsrt-server/src/services/phash.rs::mod::compute_media_phash_shift_multi": {
+    "file_path": "crates/dbsrt-server/src/services/phash.rs",
+    "scope": "mod",
+    "function_name": "compute_media_phash_shift_multi",
+    "start_line": 470,
+    "max_loc": 55,
+    "max_ccn": 10,
+    "max_parameters": 7,
+    "max_nesting": 5
+  },
+  "crates/dbsrt-server/src/services/phash.rs::mod::extract_media_query_sample": {
+    "file_path": "crates/dbsrt-server/src/services/phash.rs",
+    "scope": "mod",
+    "function_name": "extract_media_query_sample",
+    "start_line": 203,
+    "max_loc": 98,
+    "max_ccn": 15,
+    "max_parameters": 3,
+    "max_nesting": 7
+  },
+  "crates/dbsrt-server/src/services/phash.rs::mod::find_existing_phash": {
+    "file_path": "crates/dbsrt-server/src/services/phash.rs",
+    "scope": "mod",
+    "function_name": "find_existing_phash",
+    "start_line": 77,
+    "max_loc": 68,
+    "max_ccn": 21,
+    "max_parameters": 2,
+    "max_nesting": 6
+  },
+  "crates/dbsrt-server/src/services/phash.rs::mod::read_ref_phash_for_media": {
+    "file_path": "crates/dbsrt-server/src/services/phash.rs",
+    "scope": "mod",
+    "function_name": "read_ref_phash_for_media",
+    "start_line": 166,
+    "max_loc": 36,
+    "max_ccn": 17,
+    "max_parameters": 2,
+    "max_nesting": 5
+  },
+  "crates/dbsrt-server/src/services/recognition.rs::mod::identify_media_by_phash": {
+    "file_path": "crates/dbsrt-server/src/services/recognition.rs",
+    "scope": "mod",
+    "function_name": "identify_media_by_phash",
+    "start_line": 19,
+    "max_loc": 16,
+    "max_ccn": 1,
+    "max_parameters": 5,
+    "max_nesting": 1
+  },
+  "crates/dbsrt-server/src/services/recognition.rs::mod::identify_media_by_phash_multi": {
+    "file_path": "crates/dbsrt-server/src/services/recognition.rs",
+    "scope": "mod",
+    "function_name": "identify_media_by_phash_multi",
+    "start_line": 38,
+    "max_loc": 18,
+    "max_ccn": 1,
+    "max_parameters": 6,
+    "max_nesting": 1
+  },
+  "crates/dbsrt-server/src/services/recognition.rs::mod::identify_media_by_phash_multi_routed": {
+    "file_path": "crates/dbsrt-server/src/services/recognition.rs",
+    "scope": "mod",
+    "function_name": "identify_media_by_phash_multi_routed",
+    "start_line": 79,
+    "max_loc": 152,
+    "max_ccn": 27,
+    "max_parameters": 7,
+    "max_nesting": 5
+  },
+  "crates/dbsrt-server/src/services/recognition.rs::mod::identify_media_by_phash_multi_with_reader": {
+    "file_path": "crates/dbsrt-server/src/services/recognition.rs",
+    "scope": "mod",
+    "function_name": "identify_media_by_phash_multi_with_reader",
+    "start_line": 57,
+    "max_loc": 20,
+    "max_ccn": 1,
+    "max_parameters": 6,
+    "max_nesting": 1
+  }
+}

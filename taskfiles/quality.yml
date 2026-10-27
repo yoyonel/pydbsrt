@@ -6,6 +6,12 @@ tasks:
     cmds:
       - bash scripts/code_quality.sh lint
 
+  complexity:
+    desc: Run Rust architectural complexity and function size gate (LOC <= 150, CCN <= 20)
+    aliases: [lint:complexity]
+    cmds:
+      - uv run python scripts/lint_complexity.py {{.CLI_ARGS}}
+
   typecheck:
     desc: Run static type checker across Python codebase (Pyright)
     aliases: [types, lint:types]
