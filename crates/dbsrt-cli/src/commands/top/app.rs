@@ -1,4 +1,30 @@
-//! Application lifecycle and event loop for dbsrt top.
+//! # Application Lifecycle, State Machine & TUI Event Loop for `dbsrt top`
+//!
+//! This module coordinates the top monitor execution loop, terminal setup/teardown,
+//! cross-thread telemetry synchronization via `Arc<RwLock<SystemTelemetry>>`, non-blocking
+//! keyboard event dispatching, and view-level modal management.
+//!
+//! ## Architectural Topology
+//! ```text
+//! ┌─────────────────────────────────────────────────────────────┐
+//! │                        crossterm                            │
+//! │             Raw Mode Terminal Backend (Alternate Screen)     │
+//! └──────────────────────────────┬──────────────────────────────┘
+//!                                │ draw / poll
+//!                                ▼
+//! ┌─────────────────────────────────────────────────────────────┐
+//! │                          AppState                           │
+//! │   (ViewPage, Selections, Filters, Search Queries, Modals)    │
+//! └──────────────────────────────┬──────────────────────────────┘
+//!                                │ read telemetry
+//!                                ▼
+//! ┌─────────────────────────────────────────────────────────────┐
+//! │                Arc<RwLock<SystemTelemetry>>                 │
+//! │  ◄── GPU Telemetry Loop (sysfs/intel_gpu_top)               │
+//! │  ◄── ProcFS Telemetry Loop (CPU, RAM, CIFS read bytes)      │
+//! │  ◄── Multi-Source Scanner Thread (media disk discovery)     │
+//! └─────────────────────────────────────────────────────────────┘
+//! ```
 
 use std::collections::HashSet;
 use std::io::{self, stdout};
@@ -21,10 +47,11 @@ use crate::commands::top::constants::{
     PAGE_SCROLL_STEP,
 };
 use crate::commands::top::model::{
-    calculate_overall_stats, filter_and_sort_completed, filter_and_sort_media_with_source,
-    CompletedFilter, CompletedSort, DiscoveredMediaItem, GpuTelemetry, HelpTab, HistoricalRecord,
-    MediaFilter, MediaSort, MediaSourceConfig, MediaSourceFilter, SourceInputModalState,
-    SourceModalField, SourceModalMode, SystemTelemetry, ViewPage,
+    calculate_overall_stats, filter_active_jobs_with_search, filter_and_sort_completed_with_search,
+    filter_and_sort_media_with_source_and_search, ActiveJobTelemetry, CompletedFilter,
+    CompletedSort, DiscoveredMediaItem, GpuTelemetry, HelpTab, HistoricalRecord, MediaFilter,
+    MediaSort, MediaSourceConfig, MediaSourceFilter, SourceInputModalState, SourceModalField,
+    SourceModalMode, SystemTelemetry, ViewPage,
 };
 use crate::commands::top::process_ctl::{kill_job, stop_entire_batch, stop_job, toggle_pause_job};
 use crate::commands::top::sampler::{
@@ -35,55 +62,196 @@ use crate::commands::top::sampler::{
 };
 use crate::commands::top::ui::{render_ui, UiContext};
 
-/// State of the TUI application.
+/// State of the TUI interactive session and navigational cursor offsets.
+///
+/// # Invariants
+/// Maintains active view page, table row selection indices, filter enums, sort orders,
+/// search input buffers, modal popups, and transient feedback messages.
 #[derive(Default)]
 pub struct AppState {
+    /// Active full-frame view or diagnostic drill-down page.
     pub view: ViewPage,
+    /// Selected row index in Active Jobs table (`[1]`).
     pub selected_index: usize,
+    /// Scroll offset index in Completed Media table (`[3/r]`).
     pub completed_scroll_index: usize,
+    /// Scroll offset index in Media Browser table (`[4/m]`).
     pub media_scroll_index: usize,
+    /// Scroll offset index in Media Sources table (`[5/s]`).
     pub source_scroll_index: usize,
+    /// Modal state when adding or editing a media storage source.
     pub source_modal: Option<SourceInputModalState>,
+    /// Set of multi-selected candidate media paths tagged with Spacebar (`[Space]`).
     pub selected_media_paths: HashSet<PathBuf>,
+    /// Active filter criterion in Media Browser (`[f]`).
     pub media_filter: MediaFilter,
+    /// Active sort criterion in Media Browser (`[o]`).
     pub media_sort: MediaSort,
+    /// Active source filter in Media Browser (`[s]`).
     pub source_filter: MediaSourceFilter,
+    /// Active filter criterion in Completed Media (`[f]`).
     pub completed_filter: CompletedFilter,
+    /// Active sort criterion in Completed Media (`[o]`).
     pub completed_sort: CompletedSort,
+    /// Interactive fuzzy search query string for Active Jobs view.
+    pub jobs_search: String,
+    /// Interactive fuzzy search query string for Completed Media view.
+    pub completed_search: String,
+    /// Interactive fuzzy search query string for Media Browser view.
+    pub media_search: String,
+    /// Flag indicating whether the interactive search input bar is currently focused (`/`).
+    pub search_active: bool,
+    /// Active tab in fullframe contextual Help view (`[?]`).
     pub help_tab: HelpTab,
+    /// Scroll line offset in Help view.
     pub help_scroll_index: usize,
+    /// Previous view page that requested help, for seamless restoration on Esc.
     pub help_caller_view: ViewPage,
+    /// Ephemeral feedback toast message with timestamp: `(message, instant)`.
     pub feedback_message: Option<(String, Instant)>,
+    /// Termination sentinel flag to break the main event loop.
     pub should_quit: bool,
 }
 
 impl AppState {
+    /// Instantiates default initial application state.
+    ///
+    /// # Returns
+    /// Initialized [`AppState`] with default zeroed cursors and active filters.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Retrieves the active search query string for the currently focused view page.
+    ///
+    /// # Arguments
+    /// None (reads `&self`).
+    ///
+    /// # Returns
+    /// String slice of the active view's search filter, or `""` if view does not support search.
+    pub fn current_search_query(&self) -> &str {
+        match self.view {
+            ViewPage::ActiveJobs | ViewPage::JobInspection => &self.jobs_search,
+            ViewPage::CompletedMedia | ViewPage::CompletedInspection => &self.completed_search,
+            ViewPage::MediaBrowser | ViewPage::MediaInspection => &self.media_search,
+            _ => "",
+        }
+    }
+
+    /// Retrieves a mutable reference to the active view page's search query string.
+    ///
+    /// # Arguments
+    /// None (operates on `&mut self`).
+    ///
+    /// # Returns
+    /// `Some(&mut String)` pointing to `jobs_search`, `completed_search`, or `media_search`.
+    /// `None` if the active view is not searchable.
+    pub fn current_search_query_mut(&mut self) -> Option<&mut String> {
+        match self.view {
+            ViewPage::ActiveJobs | ViewPage::JobInspection => Some(&mut self.jobs_search),
+            ViewPage::CompletedMedia | ViewPage::CompletedInspection => {
+                Some(&mut self.completed_search)
+            }
+            ViewPage::MediaBrowser | ViewPage::MediaInspection => Some(&mut self.media_search),
+            _ => None,
+        }
+    }
+
+    /// Resets the table row cursor offset to 0 for the active view.
+    ///
+    /// # Data Flow & Invariants
+    /// Invoked whenever the search query, filter predicate, or sort criteria change
+    /// to avoid leaving the cursor pointing beyond the newly filtered item count.
+    pub fn reset_current_view_scroll(&mut self) {
+        match self.view {
+            ViewPage::ActiveJobs => self.selected_index = 0,
+            ViewPage::CompletedMedia => self.completed_scroll_index = 0,
+            ViewPage::MediaBrowser => self.media_scroll_index = 0,
+            _ => {}
+        }
+    }
+
+    /// Filters raw active job snapshots using the current search query.
+    ///
+    /// # Arguments
+    /// - `jobs`: Slice of active job telemetry metrics.
+    ///
+    /// # Returns
+    /// Filtered vector of active job telemetry items.
+    pub fn visible_jobs(&self, jobs: &[ActiveJobTelemetry]) -> Vec<ActiveJobTelemetry> {
+        filter_active_jobs_with_search(
+            jobs,
+            if self.jobs_search.is_empty() {
+                None
+            } else {
+                Some(&self.jobs_search)
+            },
+        )
+    }
+
+    /// Filters and sorts candidate media items in the library according to active view settings.
+    ///
+    /// # Arguments
+    /// - `discovered`: Slice of candidate media items from library catalog.
+    /// - `sources`: Configured media sources slice.
+    ///
+    /// # Returns
+    /// Filtered and sorted vector of media items.
     pub fn visible_media(
         &self,
         discovered: &[DiscoveredMediaItem],
         sources: &[MediaSourceConfig],
     ) -> Vec<DiscoveredMediaItem> {
-        filter_and_sort_media_with_source(
+        filter_and_sort_media_with_source_and_search(
             discovered,
             self.media_filter,
             self.media_sort,
             &self.source_filter,
             sources,
+            if self.media_search.is_empty() {
+                None
+            } else {
+                Some(&self.media_search)
+            },
         )
     }
 
+    /// Filters and sorts historical batch records according to active view settings.
+    ///
+    /// # Arguments
+    /// - `records`: Historical execution records from batch execution logs.
+    ///
+    /// # Returns
+    /// Filtered and sorted vector of historical execution records.
     pub fn visible_completed(&self, records: &[HistoricalRecord]) -> Vec<HistoricalRecord> {
-        filter_and_sort_completed(records, self.completed_filter, self.completed_sort)
+        filter_and_sort_completed_with_search(
+            records,
+            self.completed_filter,
+            self.completed_sort,
+            if self.completed_search.is_empty() {
+                None
+            } else {
+                Some(&self.completed_search)
+            },
+        )
     }
 
+    /// Sets an ephemeral status bar feedback toast message.
+    ///
+    /// # Arguments
+    /// - `msg`: Formatted message string to display in header.
+    ///
+    /// # Data Flow & Invariants
+    /// Stores the message paired with `Instant::now()`. Automatically expires
+    /// after [`FEEDBACK_DISPLAY_DURATION_SECS`].
     pub fn set_feedback(&mut self, msg: String) {
         self.feedback_message = Some((msg, Instant::now()));
     }
 
+    /// Returns the active feedback message if it has not expired.
+    ///
+    /// # Returns
+    /// `Some(&str)` if within the TTL window, `None` if absent or expired.
     pub fn current_feedback(&self) -> Option<&str> {
         if let Some((ref msg, instant)) = self.feedback_message {
             if instant.elapsed().as_secs_f64() < FEEDBACK_DISPLAY_DURATION_SECS {
@@ -94,7 +262,30 @@ impl AppState {
     }
 }
 
-/// Sets up terminal, panic hooks, and launches the TUI event loop.
+/// Sets up raw terminal mode, panic recovery hooks, spawns telemetry background threads,
+/// and runs the interactive TUI event loop until user exit (`[q]` or Ctrl-C).
+///
+/// # Arguments
+/// - `refresh_interval_ms`: Sampling and render refresh cycle in milliseconds (typically 500ms to 1000ms).
+///
+/// # Returns
+/// - `Ok(())` on clean exit.
+/// - `Err(anyhow::Error)` if raw mode initialization, terminal alternate screen, or event loop fails.
+///
+/// # Errors
+/// Propagates `std::io::Error` during terminal mode configuration or backend rendering.
+///
+/// # Panics
+/// Panic hook is registered to intercept unhandled panics, cleanly restoring raw mode and
+/// restoring standard terminal buffer before forwarding to original panic hook.
+///
+/// # Data Flow & Invariants
+/// 1. Switches standard output to alternate screen and enables raw mode via `crossterm`.
+/// 2. Pre-warms historical batch JSONL records and computes initial statistical moments.
+/// 3. Instantiates `SystemTelemetry` wrapped inside thread-safe `Arc<RwLock<SystemTelemetry>>`.
+/// 4. Spawns GPU sampler thread, filesystem media discovery scanner, and ProcFS polling loop.
+/// 5. Executes [`event_loop`], waiting for terminal key inputs.
+/// 6. Signals worker termination via atomic `stop_flag`, leaves alternate screen, and shows cursor.
 pub fn run_top_app(refresh_interval_ms: u64) -> Result<()> {
     enable_raw_mode()?;
     let mut stdout = stdout();
@@ -186,7 +377,22 @@ pub fn run_top_app(refresh_interval_ms: u64) -> Result<()> {
     loop_res
 }
 
-/// Single step of the UI render cycle: clamps selected index and draws full-frame UI.
+/// Executes a single discrete iteration of the UI render pipeline:
+/// clamps navigational indices against filtered lengths and paints widgets to terminal.
+///
+/// # Arguments
+/// - `terminal`: Mutable reference to ratatui terminal backend.
+/// - `app`: Mutable reference to active application state.
+/// - `shared_state`: Atomic reference to shared system telemetry snapshot.
+///
+/// # Returns
+/// - `Ok(SystemTelemetry)`: Cloned copy of the telemetry state rendered during this frame.
+/// - `Err(anyhow::Error)`: If ratatui backend drawing encounters an IO error.
+///
+/// # Data Flow & Invariants
+/// Clones `SystemTelemetry` from `shared_state` under read lock.
+/// Clamps `selected_index`, `completed_scroll_index`, `media_scroll_index`, and `source_scroll_index`
+/// to the boundaries of the visible filtered lists to prevent rendering out-of-bound cursors.
 pub fn event_loop_step<B: ratatui::backend::Backend>(
     terminal: &mut Terminal<B>,
     app: &mut AppState,
@@ -197,10 +403,11 @@ pub fn event_loop_step<B: ratatui::backend::Backend>(
         lock.clone()
     };
 
-    if telemetry.active_jobs.is_empty() {
+    let visible_jobs = app.visible_jobs(&telemetry.active_jobs);
+    if visible_jobs.is_empty() {
         app.selected_index = 0;
-    } else if app.selected_index >= telemetry.active_jobs.len() {
-        app.selected_index = telemetry.active_jobs.len().saturating_sub(1);
+    } else if app.selected_index >= visible_jobs.len() {
+        app.selected_index = visible_jobs.len().saturating_sub(1);
     }
 
     let visible_completed = app.visible_completed(&telemetry.history_records);
@@ -224,6 +431,8 @@ pub fn event_loop_step<B: ratatui::backend::Backend>(
     }
 
     let feedback = app.current_feedback();
+    let search_query = app.current_search_query();
+    let search_active = app.search_active;
 
     terminal.draw(|f| {
         let ctx = UiContext {
@@ -240,6 +449,8 @@ pub fn event_loop_step<B: ratatui::backend::Backend>(
             source_filter: &app.source_filter,
             completed_filter: app.completed_filter,
             completed_sort: app.completed_sort,
+            search_query,
+            search_active,
             help_tab: app.help_tab,
             help_scroll_index: app.help_scroll_index,
             feedback_msg: feedback,
@@ -250,7 +461,20 @@ pub fn event_loop_step<B: ratatui::backend::Backend>(
     Ok(telemetry)
 }
 
-/// Main non-blocking event loop handling user input and screen rendering.
+/// Main non-blocking event loop handling user input polling and screen refresh.
+///
+/// # Arguments
+/// - `terminal`: Mutable reference to ratatui terminal backend.
+/// - `app`: Application state container.
+/// - `shared_state`: Thread-safe shared telemetry snapshot.
+///
+/// # Returns
+/// - `Ok(())` when `app.should_quit` becomes true.
+/// - `Err(anyhow::Error)` on IO or drawing error.
+///
+/// # Data Flow & Invariants
+/// Loops until `app.should_quit` is set. In each iteration, executes [`event_loop_step`],
+/// then polls for keyboard events with timeout [`KEY_EVENT_POLL_TIMEOUT_MS`] (20ms).
 fn event_loop<B: ratatui::backend::Backend>(
     terminal: &mut Terminal<B>,
     app: &mut AppState,
@@ -272,12 +496,34 @@ fn event_loop<B: ratatui::backend::Backend>(
     Ok(())
 }
 
-/// Dispatches key press events to application actions.
+/// Dispatches key press events to application actions without shared state synchronization.
+///
+/// # Arguments
+/// - `code`: The crossterm [`KeyCode`] received.
+/// - `app`: Mutable reference to application state.
+/// - `telemetry`: Immutable reference to active telemetry snapshot.
 pub fn handle_key_event(code: KeyCode, app: &mut AppState, telemetry: &SystemTelemetry) {
     handle_key_event_with_state(code, app, telemetry, None);
 }
 
 /// Dispatches key press events to application actions with optional live shared_state synchronization.
+///
+/// # Arguments
+/// - `code`: The crossterm [`KeyCode`] received.
+/// - `app`: Mutable reference to application state.
+/// - `telemetry`: Immutable reference to active telemetry snapshot.
+/// - `shared_state`: Optional atomic reference to update shared state on source changes.
+///
+/// # Data Flow & Invariants
+/// Priority dispatch hierarchy:
+/// 1. **Modal Interception**: If `app.source_modal` is open, intercepts typing, Tab, Backspace, Esc, and Enter.
+/// 2. **Interactive Search Input**: If `app.search_active` is true, routes keystrokes to active query buffer.
+/// 3. **Global Navigation**: Number keys (`1`..`5`), view hotkeys (`g`, `h`, `r`, `m`, `s`), help (`?`), quit (`q`).
+/// 4. **View-Specific Actions**:
+///    - Active Jobs: Spacebar (pause/resume SIGSTOP/CONT), `s` (SIGTERM), `k` (SIGKILL), Enter (Inspect).
+///    - Completed: `f` (filter), `o` (sort), Enter (Inspect).
+///    - Media Browser: `Space` (batch multi-select), `b` (launch batch), `f` (filter), `o` (sort), `s` (source filter).
+///    - Media Sources: `a` (add), `e` (edit), `d` (delete), `Space` (toggle), `r` (rescan).
 pub fn handle_key_event_with_state(
     code: KeyCode,
     app: &mut AppState,
@@ -369,32 +615,83 @@ pub fn handle_key_event_with_state(
         return;
     }
 
+    // 1b. Interactive search mode inside searchable views (ActiveJobs, CompletedMedia, MediaBrowser)
+    if app.search_active {
+        match code {
+            KeyCode::Esc => {
+                app.search_active = false;
+                if let Some(query) = app.current_search_query_mut() {
+                    query.clear();
+                }
+                app.reset_current_view_scroll();
+                app.set_feedback("Recherche annulée.".to_string());
+            }
+            KeyCode::Enter => {
+                app.search_active = false;
+                app.reset_current_view_scroll();
+                let q = app.current_search_query().to_string();
+                if q.trim().is_empty() {
+                    if let Some(query) = app.current_search_query_mut() {
+                        query.clear();
+                    }
+                    app.set_feedback("Filtre de recherche désactivé.".to_string());
+                } else {
+                    app.set_feedback(format!("Recherche active : \"{q}\""));
+                }
+            }
+            KeyCode::Backspace => {
+                if let Some(query) = app.current_search_query_mut() {
+                    query.pop();
+                }
+                app.reset_current_view_scroll();
+            }
+            KeyCode::Char(c) => {
+                if let Some(query) = app.current_search_query_mut() {
+                    query.push(c);
+                }
+                app.reset_current_view_scroll();
+            }
+            _ => {}
+        }
+        return;
+    }
+
     // 2. Main top application key dispatching
     match code {
         KeyCode::Char('q') | KeyCode::Char('Q') => {
             app.should_quit = true;
         }
-        KeyCode::Esc => match app.view {
-            ViewPage::ActiveJobs => {
-                app.should_quit = true;
+        KeyCode::Esc => {
+            if !app.current_search_query().is_empty() {
+                if let Some(query) = app.current_search_query_mut() {
+                    query.clear();
+                }
+                app.reset_current_view_scroll();
+                app.set_feedback("Recherche effacée.".to_string());
+            } else {
+                match app.view {
+                    ViewPage::ActiveJobs => {
+                        app.should_quit = true;
+                    }
+                    ViewPage::MediaInspection => {
+                        app.view = ViewPage::MediaBrowser;
+                    }
+                    ViewPage::CompletedInspection => {
+                        app.view = ViewPage::CompletedMedia;
+                    }
+                    ViewPage::Help => {
+                        app.view = app.help_caller_view;
+                    }
+                    ViewPage::JobInspection
+                    | ViewPage::StatsHistory
+                    | ViewPage::CompletedMedia
+                    | ViewPage::MediaBrowser
+                    | ViewPage::MediaSources => {
+                        app.view = ViewPage::ActiveJobs;
+                    }
+                }
             }
-            ViewPage::MediaInspection => {
-                app.view = ViewPage::MediaBrowser;
-            }
-            ViewPage::CompletedInspection => {
-                app.view = ViewPage::CompletedMedia;
-            }
-            ViewPage::Help => {
-                app.view = app.help_caller_view;
-            }
-            ViewPage::JobInspection
-            | ViewPage::StatsHistory
-            | ViewPage::CompletedMedia
-            | ViewPage::MediaBrowser
-            | ViewPage::MediaSources => {
-                app.view = ViewPage::ActiveJobs;
-            }
-        },
+        }
         KeyCode::Backspace if app.view != ViewPage::ActiveJobs => {
             if app.view == ViewPage::MediaInspection {
                 app.view = ViewPage::MediaBrowser;
@@ -784,6 +1081,18 @@ pub fn handle_key_event_with_state(
             app.completed_filter = app.completed_filter.next();
             app.completed_scroll_index = 0;
             app.set_feedback(format!("Filtre Récents : {}", app.completed_filter.label()));
+        }
+        KeyCode::Char('/')
+            if matches!(
+                app.view,
+                ViewPage::ActiveJobs | ViewPage::CompletedMedia | ViewPage::MediaBrowser
+            ) =>
+        {
+            app.search_active = true;
+            app.set_feedback(
+                "Recherche : tapez votre texte (Entrée pour valider, Échap pour annuler)..."
+                    .to_string(),
+            );
         }
         KeyCode::Char('S') if app.view == ViewPage::MediaBrowser => {
             let next_filter = match &app.source_filter {

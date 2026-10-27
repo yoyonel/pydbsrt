@@ -8,7 +8,7 @@ expression: grid
 │ ⚡  DÉBITS RÉSEAU CIFS : Instantané:   0.0 MB/s (Net RX:   0.0 MB/s, VFS:   0.0 MB/s)                                                     │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ┌ 📋  DERNIERS TRAITEMENTS COMPLÉTÉS & CERTIFIÉS [5/5 RÉFÉRENCÉS] ──────────────────────────────────────────────────────────────────────────┐
-│ [f] Filtre: [TOUS]    [o] Tri: [DATE FIN (RÉCENT -> ANCIEN)]   [Enter/i] Fiche Diagnostic & Erreur                                       │
+│ [f] Filtre: [TOUS]    [o] Tri: [DATE FIN (RÉCENT -> ANCIEN)]   [/] Chercher   [Enter/i] Fiche Diagnostic & Erreur                        │
 │                                                                                                                                          │
 │    MÉDIA / ÉPISODE TRAITÉ                           STATUT     TAILLE      DURÉE       COUPLINGS    DÉBIT CIFS     DATE FIN              │
 │►   The.Expanse.S04E08.HDR.2160p                     ✗ FAIL     5748 MB     2m09s       +0            44.4 MB/s     2026-10-27T01:40:34Z  │
@@ -31,4 +31,4 @@ expression: grid
 │                                                                                                                                          │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 
-  [1] Tâches   [2/h] Stats   [3/r] Récents   [4/m] Médias   [5/s] Sources  │ [↑/k] Défiler  [Enter/i] Fiche/Erreur  [f] Filtre  [o] Tri  [?]
+  [1] Tâches   [2/h] Stats   [3/r] Récents   [4/m] Médias   [5/s] Sources  │ [↑/k] Défiler  [/] Chercher  [Enter/i] Fiche/Erreur  [f] Filtre

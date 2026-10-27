@@ -8,7 +8,13 @@ use dbsrt_index::DbSubtitleCoupling;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-/// Normalizes a language code (ISO 639-1 / 639-2) to canonical 2-letter lowercase where known.
+/// Normalizes a language code (ISO 639-1 / 639-2 or common name) to canonical 2-letter lowercase.
+///
+/// # Arguments
+/// - `lang`: Raw language string (e.g. `"fre"`, `"French"`, `"VF"`, `"en"`).
+///
+/// # Returns
+/// Canonical 2-letter ISO code (`"fr"`, `"en"`, `"es"`, etc.) or unchanged lowercase string.
 pub fn normalize_lang_code(lang: &str) -> String {
     match lang.trim().to_lowercase().as_str() {
         "fr" | "fre" | "fra" | "french" => "fr".to_string(),
@@ -28,6 +34,17 @@ pub fn normalize_lang_code(lang: &str) -> String {
 }
 
 /// Extracts explicit language tag from a subtitle filename.
+///
+/// # Arguments
+/// - `filename`: Basename of the subtitle file (e.g. `"movie.1080p.NF.fr.srt"`).
+///
+/// # Returns
+/// - `Some(String)`: Canonical 2-letter language code if detected.
+/// - `None`: If no language token is identified in the trailing segments.
+///
+/// # Data Flow & Invariants
+/// Tokenizes the filename from right to left across separators (`.`, `_`, `-`, ` `)
+/// ignoring noise tokens (`"forced"`, `"sdh"`, `"synced"`) and maps common language abbreviations.
 pub fn detect_subtitle_file_language(filename: &str) -> Option<String> {
     let base = filename.strip_suffix(".srt").unwrap_or(filename);
     for token in base
@@ -81,6 +98,14 @@ pub fn detect_subtitle_file_language(filename: &str) -> Option<String> {
 }
 
 /// Collects candidate subtitle directories: `primary_dir` plus optional sidecar folders.
+///
+/// # Arguments
+/// - `primary_dir`: Server default subtitles directory (`data/SRT`).
+/// - `media_path`: Filesystem path of the media file being played.
+/// - `allow_sidecars`: Whether adjacent folders (parent, parent/SRT, parent/Subs) should be included.
+///
+/// # Returns
+/// Deduplicated vector of filesystem paths where subtitles may reside.
 pub fn collect_subtitle_search_dirs(
     primary_dir: &Path,
     media_path: &Path,
@@ -111,7 +136,22 @@ pub fn collect_subtitle_search_dirs(
     dirs
 }
 
-/// Unified catalog search returning `(score, PathBuf, detected_language)` sorted by relevance.
+/// Unified catalog search returning ranked candidates matching release identity and requested language.
+///
+/// # Arguments
+/// - `subtitles_dir`: Directory to search within.
+/// - `media_stems`: Recognized or queried media stems to match against.
+/// - `query_title`: Optional explicit show/movie title.
+/// - `season`: Optional season filter.
+/// - `episode`: Optional episode filter.
+/// - `language`: Target language code (`"fr"`, `"en"`, or `"auto"`).
+///
+/// # Returns
+/// Vector of tuples `(score, path, detected_lang)` sorted by descending relevance score.
+///
+/// # Data Flow & Invariants
+/// Enforces strict season and episode consistency to prevent cross-episode leakage.
+/// Scores matches based on exact stem overlap, title containment, and release tags.
 pub fn search_subtitles_in_catalog(
     subtitles_dir: &Path,
     media_stems: &[String],
@@ -283,12 +323,36 @@ pub async fn fetch_or_cache_remote_subtitle(
     SubtitleFile::parse(&raw)
 }
 
-/// Resolves certified subtitle couplings from PostgreSQL and/or the local `couplings.json` registry.
-/// Returns (candidates, pg_lookup_ms, json_lookup_ms, pg_cached).
+/// Resolves certified subtitle couplings from PostgreSQL and/or the local `couplings.json` registry,
+/// enforcing strict Season and Episode compatibility when specified.
+///
+/// # Arguments
+/// - `state`: Shared server application state.
+/// - `subtitles_dir`: Subtitles root directory.
+/// - `matched_media`: Media release name or stem identified by visual pHash.
+/// - `season`: Expected season number if known.
+/// - `episode`: Expected episode number if known.
+/// - `language`: Requested subtitle language (e.g. `"fr"` or `"auto"`).
+/// - `phash_conf`: Visual recognition confidence score (0.0 to 1.0).
+///
+/// # Returns
+/// A tuple `(candidates, pg_lookup_ms, json_lookup_ms, pg_cached)`:
+/// - `candidates`: Vector of resolved certified [`SubtitleCandidate`] items.
+/// - `pg_lookup_ms`: PostgreSQL query latency in milliseconds.
+/// - `json_lookup_ms`: In-memory `couplings.json` query latency in milliseconds.
+/// - `pg_cached`: Whether PostgreSQL connection pool hit local cache.
+///
+/// # Data Flow & Invariants
+/// Prevents false-positive subtitle matching across episodes of the same series:
+/// 1. Queries `CouplingRegistry` using `find_all_by_matched_media_opts`.
+/// 2. Verifies subtitle and media metadata parsed from filenames do not contradict `season` and `episode`.
+/// 3. Normalizes subtitle language codes to prevent mismatch between `"French"`, `"fre"`, and `"fr"`.
 pub fn lookup_certified_couplings(
     state: &AppState,
     subtitles_dir: &Path,
     matched_media: &str,
+    season: Option<u32>,
+    episode: Option<u32>,
     language: &str,
     phash_conf: f64,
 ) -> (Vec<SubtitleCandidate>, f64, f64, bool) {
@@ -318,12 +382,40 @@ pub fn lookup_certified_couplings(
     };
 
     if let Some(reg) = reg_ref {
-        if let Some(coupling) = reg.find_by_matched_media(matched_media) {
+        let matching_couplings = reg.find_all_by_matched_media_opts(matched_media, season, episode);
+        for coupling in matching_couplings {
             for sub in &coupling.subtitles {
                 let sub_lang = normalize_lang_code(&sub.lang);
                 if !any_lang && sub_lang != req_lang {
                     continue;
                 }
+
+                // Verify subtitle metadata doesn't contradict requested season/episode
+                let sub_meta = MediaMetadata::parse(&sub.name);
+                let c_meta = MediaMetadata::parse(&coupling.media_name);
+                let sub_s = sub_meta.season.or(c_meta.season);
+                let sub_e = sub_meta.episode.or(c_meta.episode);
+                if let Some(req_s) = season {
+                    if let Some(s) = sub_s {
+                        if s != req_s {
+                            continue;
+                        }
+                    }
+                }
+                if let Some(req_e) = episode {
+                    if let Some(e) = sub_e {
+                        if e != req_e
+                            && !sub.name.to_lowercase().contains(&format!("e{:02}", req_e))
+                            && !coupling
+                                .media_name
+                                .to_lowercase()
+                                .contains(&format!("e{:02}", req_e))
+                        {
+                            continue;
+                        }
+                    }
+                }
+
                 let cas_id = format!("sub:sha256:{}", sub.subtitles_hash);
                 if seen_paths.insert(sub.subtitles_hash.clone()) {
                     certified_candidates.push(SubtitleCandidate {
@@ -370,6 +462,36 @@ pub fn lookup_certified_couplings(
                 ..
             } in db_subs
             {
+                let sub_lang = normalize_lang_code(&lang);
+                if !any_lang && sub_lang != req_lang {
+                    continue;
+                }
+
+                // Verify DB subtitle metadata doesn't contradict requested season/episode
+                let sub_meta = MediaMetadata::parse(&name);
+                let med_meta = MediaMetadata::parse(&media_name);
+                let sub_s = sub_meta.season.or(med_meta.season);
+                let sub_e = sub_meta.episode.or(med_meta.episode);
+                if let Some(req_s) = season {
+                    if let Some(s) = sub_s {
+                        if s != req_s {
+                            continue;
+                        }
+                    }
+                }
+                if let Some(req_e) = episode {
+                    if let Some(e) = sub_e {
+                        if e != req_e
+                            && !name.to_lowercase().contains(&format!("e{:02}", req_e))
+                            && !media_name
+                                .to_lowercase()
+                                .contains(&format!("e{:02}", req_e))
+                        {
+                            continue;
+                        }
+                    }
+                }
+
                 let clean_h = subtitles_hash.trim().to_string();
                 let cas_id = format!("sub:sha256:{}", clean_h);
                 if seen_paths.insert(clean_h) {

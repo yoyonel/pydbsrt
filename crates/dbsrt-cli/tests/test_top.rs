@@ -8,10 +8,10 @@ use dbsrt_cli::commands::top::app::{handle_key_event, handle_key_event_with_stat
 use dbsrt_cli::commands::top::constants::*;
 use dbsrt_cli::commands::top::model::{
     calculate_dimension_stats, calculate_overall_stats, default_progress_bar,
-    filter_and_sort_media, format_duration, format_progress_bar, parse_iso_to_unix_secs,
-    ActiveJobTelemetry, CompletedFilter, CompletedSort, DiscoveredMediaItem, GpuTelemetry, HelpTab,
-    HistoricalRecord, IngestionStatus, MediaFilter, MediaSort, MediaSourceFilter,
-    MediaSubtrackInfo, SessionThroughput, SystemTelemetry, ViewPage,
+    filter_and_sort_media, format_duration, format_progress_bar, matches_fuzzy_search,
+    parse_iso_to_unix_secs, ActiveJobTelemetry, CompletedFilter, CompletedSort,
+    DiscoveredMediaItem, GpuTelemetry, HelpTab, HistoricalRecord, IngestionStatus, MediaFilter,
+    MediaSort, MediaSourceFilter, MediaSubtrackInfo, SessionThroughput, SystemTelemetry, ViewPage,
 };
 use dbsrt_cli::commands::top::process_ctl::{
     check_if_stopped, inspect_job_details, kill_job, stop_job, toggle_pause_job,
@@ -325,6 +325,8 @@ fn test_ui_rendering_all_pages() {
         source_filter: &MediaSourceFilter::ActiveOnly,
         completed_filter: CompletedFilter::All,
         completed_sort: CompletedSort::DateDesc,
+        search_query: "",
+        search_active: false,
         help_tab: HelpTab::General,
         help_scroll_index: 0,
         feedback_msg: Some("Test Feedback Message"),
@@ -348,6 +350,8 @@ fn test_ui_rendering_all_pages() {
         source_filter: &MediaSourceFilter::ActiveOnly,
         completed_filter: CompletedFilter::All,
         completed_sort: CompletedSort::DateDesc,
+        search_query: "",
+        search_active: false,
         help_tab: HelpTab::General,
         help_scroll_index: 0,
         feedback_msg: None,
@@ -369,6 +373,8 @@ fn test_ui_rendering_all_pages() {
         source_filter: &MediaSourceFilter::ActiveOnly,
         completed_filter: CompletedFilter::All,
         completed_sort: CompletedSort::DateDesc,
+        search_query: "",
+        search_active: false,
         help_tab: HelpTab::General,
         help_scroll_index: 0,
         feedback_msg: None,
@@ -391,6 +397,8 @@ fn test_ui_rendering_all_pages() {
         source_filter: &MediaSourceFilter::ActiveOnly,
         completed_filter: CompletedFilter::All,
         completed_sort: CompletedSort::DateDesc,
+        search_query: "",
+        search_active: false,
         help_tab: HelpTab::General,
         help_scroll_index: 0,
         feedback_msg: None,
@@ -412,6 +420,8 @@ fn test_ui_rendering_all_pages() {
         source_filter: &MediaSourceFilter::ActiveOnly,
         completed_filter: CompletedFilter::All,
         completed_sort: CompletedSort::DateDesc,
+        search_query: "",
+        search_active: false,
         help_tab: HelpTab::General,
         help_scroll_index: 0,
         feedback_msg: None,
@@ -433,6 +443,8 @@ fn test_ui_rendering_all_pages() {
         source_filter: &MediaSourceFilter::ActiveOnly,
         completed_filter: CompletedFilter::All,
         completed_sort: CompletedSort::DateDesc,
+        search_query: "",
+        search_active: false,
         help_tab: HelpTab::General,
         help_scroll_index: 0,
         feedback_msg: None,
@@ -454,6 +466,8 @@ fn test_ui_rendering_all_pages() {
         source_filter: &MediaSourceFilter::ActiveOnly,
         completed_filter: CompletedFilter::All,
         completed_sort: CompletedSort::DateDesc,
+        search_query: "",
+        search_active: false,
         help_tab: HelpTab::General,
         help_scroll_index: 0,
         feedback_msg: None,
@@ -477,6 +491,8 @@ fn test_ui_rendering_all_pages() {
         source_filter: &MediaSourceFilter::ActiveOnly,
         completed_filter: CompletedFilter::All,
         completed_sort: CompletedSort::DateDesc,
+        search_query: "",
+        search_active: false,
         help_tab: HelpTab::General,
         help_scroll_index: 0,
         feedback_msg: None,
@@ -498,6 +514,8 @@ fn test_ui_rendering_all_pages() {
         source_filter: &MediaSourceFilter::ActiveOnly,
         completed_filter: CompletedFilter::All,
         completed_sort: CompletedSort::DateDesc,
+        search_query: "",
+        search_active: false,
         help_tab: HelpTab::General,
         help_scroll_index: 0,
         feedback_msg: None,
@@ -521,6 +539,8 @@ fn test_ui_rendering_all_pages() {
         source_filter: &MediaSourceFilter::ActiveOnly,
         completed_filter: CompletedFilter::All,
         completed_sort: CompletedSort::DateDesc,
+        search_query: "",
+        search_active: false,
         help_tab: HelpTab::General,
         help_scroll_index: 0,
         feedback_msg: None,
@@ -541,6 +561,8 @@ fn test_ui_rendering_all_pages() {
         source_filter: &MediaSourceFilter::ActiveOnly,
         completed_filter: CompletedFilter::All,
         completed_sort: CompletedSort::DateDesc,
+        search_query: "",
+        search_active: false,
         help_tab: HelpTab::General,
         help_scroll_index: 0,
         feedback_msg: None,
@@ -562,6 +584,8 @@ fn test_ui_rendering_all_pages() {
         source_filter: &MediaSourceFilter::ActiveOnly,
         completed_filter: CompletedFilter::All,
         completed_sort: CompletedSort::DateDesc,
+        search_query: "",
+        search_active: false,
         help_tab: HelpTab::General,
         help_scroll_index: 0,
         feedback_msg: None,
@@ -588,6 +612,8 @@ fn test_ui_rendering_all_pages() {
         source_filter: &MediaSourceFilter::ActiveOnly,
         completed_filter: CompletedFilter::All,
         completed_sort: CompletedSort::DateDesc,
+        search_query: "",
+        search_active: false,
         help_tab: HelpTab::General,
         help_scroll_index: 0,
         feedback_msg: None,
@@ -609,6 +635,8 @@ fn test_ui_rendering_all_pages() {
         source_filter: &MediaSourceFilter::ActiveOnly,
         completed_filter: CompletedFilter::All,
         completed_sort: CompletedSort::DateDesc,
+        search_query: "",
+        search_active: false,
         help_tab: HelpTab::General,
         help_scroll_index: 0,
         feedback_msg: None,
@@ -2815,6 +2843,8 @@ fn test_e2e_contextual_help_navigation_and_glossary() {
         source_filter: &MediaSourceFilter::ActiveOnly,
         completed_filter: CompletedFilter::All,
         completed_sort: CompletedSort::DateDesc,
+        search_query: "",
+        search_active: false,
         help_tab: HelpTab::Completed,
         help_scroll_index: 0,
         feedback_msg: None,
@@ -2863,4 +2893,250 @@ fn test_e2e_contextual_help_navigation_and_glossary() {
     handle_key_event_with_state(KeyCode::Char('?'), &mut app, &tel, Some(&shared_state));
     assert_eq!(app.view, ViewPage::Help);
     assert_eq!(app.help_tab, HelpTab::MediaBrowser);
+}
+
+#[test]
+fn test_matches_fuzzy_search_logic() {
+    // Empty query matches anything
+    assert!(matches_fuzzy_search("What.If.S02E01", ""));
+    assert!(matches_fuzzy_search("What.If.S02E01", "   "));
+
+    // Case-insensitive substring
+    assert!(matches_fuzzy_search("What.If.S02E01", "what"));
+    assert!(matches_fuzzy_search("What.If.S02E01", "s02e01"));
+
+    // Multi-token and delimiter matching
+    assert!(matches_fuzzy_search("What.If.2021.S02E01.mkv", "what s02"));
+    assert!(matches_fuzzy_search("The.Office.US.S04E01", "office s04"));
+    assert!(!matches_fuzzy_search("What.If.2021.S02E01.mkv", "what s03"));
+    assert!(!matches_fuzzy_search(
+        "Beacon.23.S01E02.Wreckers",
+        "What.If"
+    ));
+
+    // Normalized punctuation matching
+    assert!(matches_fuzzy_search("What.If.2021.S02E01", "whatif"));
+    assert!(matches_fuzzy_search("The_Office_US", "the office"));
+}
+
+#[test]
+fn test_completed_media_interactive_fuzzy_search() {
+    let mut app = AppState::new();
+    app.view = ViewPage::CompletedMedia;
+
+    let records = vec![
+        HistoricalRecord {
+            video_stem: "What.If.2021.S02E01.Nebula".to_string(),
+            video_rel_path: Some("What If/What.If.S02E01.mkv".to_string()),
+            success: true,
+            wall_duration_secs: 120.0,
+            cifs_read_rate_mib_s: 45.0,
+            file_size_bytes: 1_000_000,
+            certified_couplings_count: 20,
+            error_summary: None,
+            start_iso: None,
+            end_iso: None,
+        },
+        HistoricalRecord {
+            video_stem: "The.Office.US.S04E01.Fun.Run".to_string(),
+            video_rel_path: Some("The Office/S04E01.mkv".to_string()),
+            success: true,
+            wall_duration_secs: 90.0,
+            cifs_read_rate_mib_s: 30.0,
+            file_size_bytes: 800_000,
+            certified_couplings_count: 1,
+            error_summary: None,
+            start_iso: None,
+            end_iso: None,
+        },
+        HistoricalRecord {
+            video_stem: "Demon.Slayer.S01E01.Cruaute".to_string(),
+            video_rel_path: None,
+            success: false,
+            wall_duration_secs: 10.0,
+            cifs_read_rate_mib_s: 5.0,
+            file_size_bytes: 500_000,
+            certified_couplings_count: 0,
+            error_summary: Some("No matching .srt subtitle found".to_string()),
+            start_iso: None,
+            end_iso: None,
+        },
+    ];
+
+    let tel = SystemTelemetry {
+        history_records: records,
+        ..Default::default()
+    };
+
+    // Initially, all 3 are visible
+    assert_eq!(app.visible_completed(&tel.history_records).len(), 3);
+
+    // 1. Press '/' to trigger search
+    handle_key_event(KeyCode::Char('/'), &mut app, &tel);
+    assert!(app.search_active);
+    assert_eq!(app.completed_search, "");
+
+    // 2. Type 'w', 'h', 'a', 't'
+    handle_key_event(KeyCode::Char('w'), &mut app, &tel);
+    handle_key_event(KeyCode::Char('h'), &mut app, &tel);
+    handle_key_event(KeyCode::Char('a'), &mut app, &tel);
+    handle_key_event(KeyCode::Char('t'), &mut app, &tel);
+    assert_eq!(app.completed_search, "what");
+
+    // Filtered list dynamically matches only What If
+    let visible = app.visible_completed(&tel.history_records);
+    assert_eq!(visible.len(), 1);
+    assert_eq!(visible[0].video_stem, "What.If.2021.S02E01.Nebula");
+
+    // 3. Press Enter to validate and exit search input mode
+    handle_key_event(KeyCode::Enter, &mut app, &tel);
+    assert!(!app.search_active);
+    assert_eq!(app.completed_search, "what");
+    assert_eq!(app.visible_completed(&tel.history_records).len(), 1);
+
+    // 4. Press Esc to clear search
+    handle_key_event(KeyCode::Esc, &mut app, &tel);
+    assert_eq!(app.completed_search, "");
+    assert_eq!(app.visible_completed(&tel.history_records).len(), 3);
+    assert_eq!(app.view, ViewPage::CompletedMedia);
+
+    // 5. Test searching with "What.If " (multi-token with dot)
+    handle_key_event(KeyCode::Char('/'), &mut app, &tel);
+    for c in "What.If ".chars() {
+        handle_key_event(KeyCode::Char(c), &mut app, &tel);
+    }
+    handle_key_event(KeyCode::Enter, &mut app, &tel);
+    let visible_whatif = app.visible_completed(&tel.history_records);
+    assert_eq!(visible_whatif.len(), 1);
+    assert_eq!(visible_whatif[0].video_stem, "What.If.2021.S02E01.Nebula");
+    handle_key_event(KeyCode::Esc, &mut app, &tel);
+
+    // 6. Test searching by error summary ("no .srt")
+    handle_key_event(KeyCode::Char('/'), &mut app, &tel);
+    for c in "no srt".chars() {
+        handle_key_event(KeyCode::Char(c), &mut app, &tel);
+    }
+    handle_key_event(KeyCode::Enter, &mut app, &tel);
+    let visible_err = app.visible_completed(&tel.history_records);
+    assert_eq!(visible_err.len(), 1);
+    assert_eq!(visible_err[0].video_stem, "Demon.Slayer.S01E01.Cruaute");
+
+    // 7. Test Backspace during active search
+    handle_key_event(KeyCode::Char('/'), &mut app, &tel);
+    handle_key_event(KeyCode::Backspace, &mut app, &tel);
+    handle_key_event(KeyCode::Esc, &mut app, &tel);
+    assert_eq!(app.completed_search, "");
+}
+
+#[test]
+fn test_active_jobs_and_media_browser_search() {
+    let mut app = AppState::new();
+
+    // 1. Test ActiveJobs search
+    app.view = ViewPage::ActiveJobs;
+    let jobs = vec![
+        ActiveJobTelemetry {
+            pid: 1234,
+            media_name: "The.Office.US.S04E01.mkv".to_string(),
+            engine: "GPU (VA-API)".to_string(),
+            engine_reason: None,
+            elapsed_secs: 10.0,
+            read_bytes: 1000,
+            total_bytes: 10000,
+            progress_ratio: 0.1,
+            current_rate_mib_s: 25.0,
+            eta_secs: Some(90.0),
+            cpu_percent: 15.0,
+            ram_rss_mib: 120.0,
+            status: "RUNNING".to_string(),
+            cmdline: vec![
+                "ffmpeg".to_string(),
+                "-hwaccel".to_string(),
+                "vaapi".to_string(),
+            ],
+        },
+        ActiveJobTelemetry {
+            pid: 5678,
+            media_name: "What.If.S02E01.mkv".to_string(),
+            engine: "CPU Multithread".to_string(),
+            engine_reason: None,
+            elapsed_secs: 5.0,
+            read_bytes: 500,
+            total_bytes: 5000,
+            progress_ratio: 0.1,
+            current_rate_mib_s: 10.0,
+            eta_secs: Some(45.0),
+            cpu_percent: 85.0,
+            ram_rss_mib: 250.0,
+            status: "RUNNING".to_string(),
+            cmdline: vec![
+                "ffmpeg".to_string(),
+                "-threads".to_string(),
+                "8".to_string(),
+            ],
+        },
+    ];
+
+    let tel = SystemTelemetry {
+        active_jobs: jobs,
+        ..Default::default()
+    };
+
+    assert_eq!(app.visible_jobs(&tel.active_jobs).len(), 2);
+
+    // Trigger search in ActiveJobs
+    handle_key_event(KeyCode::Char('/'), &mut app, &tel);
+    assert!(app.search_active);
+    for c in "office".chars() {
+        handle_key_event(KeyCode::Char(c), &mut app, &tel);
+    }
+    handle_key_event(KeyCode::Enter, &mut app, &tel);
+    assert_eq!(app.visible_jobs(&tel.active_jobs).len(), 1);
+    assert_eq!(app.visible_jobs(&tel.active_jobs)[0].pid, 1234);
+
+    // Esc clears search
+    handle_key_event(KeyCode::Esc, &mut app, &tel);
+    assert_eq!(app.visible_jobs(&tel.active_jobs).len(), 2);
+
+    // 2. Test MediaBrowser search
+    app.view = ViewPage::MediaBrowser;
+    app.source_filter = MediaSourceFilter::All;
+    let media = vec![
+        DiscoveredMediaItem {
+            path: PathBuf::from("/media/tvshow/What If/What.If.S02E01.mkv"),
+            stem: "What.If.S02E01".to_string(),
+            size_bytes: 1_000_000,
+            duration_secs: Some(1800.0),
+            video_codec: Some("hevc".to_string()),
+            subtitles: vec![],
+            phash: None,
+            source_id: Some("tvshow".to_string()),
+            status: IngestionStatus::Virgin,
+        },
+        DiscoveredMediaItem {
+            path: PathBuf::from("/media/video/Inception.2010.mkv"),
+            stem: "Inception.2010".to_string(),
+            size_bytes: 2_000_000,
+            duration_secs: Some(7200.0),
+            video_codec: Some("h264".to_string()),
+            subtitles: vec![],
+            phash: None,
+            source_id: Some("video".to_string()),
+            status: IngestionStatus::Virgin,
+        },
+    ];
+
+    assert_eq!(app.visible_media(&media, &[]).len(), 2);
+
+    handle_key_event(KeyCode::Char('/'), &mut app, &tel);
+    assert!(app.search_active);
+    for c in "what.if".chars() {
+        handle_key_event(KeyCode::Char(c), &mut app, &tel);
+    }
+    handle_key_event(KeyCode::Enter, &mut app, &tel);
+    assert_eq!(app.visible_media(&media, &[]).len(), 1);
+    assert_eq!(app.visible_media(&media, &[])[0].stem, "What.If.S02E01");
+
+    handle_key_event(KeyCode::Esc, &mut app, &tel);
+    assert_eq!(app.visible_media(&media, &[]).len(), 2);
 }

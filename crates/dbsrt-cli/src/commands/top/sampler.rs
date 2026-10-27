@@ -38,7 +38,15 @@ static STEM_SIZE_CACHE: Mutex<Option<HashMap<String, u64>>> = Mutex::new(None);
 /// Global video codec cache by stem to eliminate blocking CIFS network metadata calls.
 static STEM_CODEC_CACHE: Mutex<Option<HashMap<String, String>>> = Mutex::new(None);
 
-/// Initializes the file size and codec cache from batch reports and media cache if available.
+/// Initializes the file size and video codec in-memory caches from reports and media cache.
+///
+/// # Arguments
+/// None (initializes global static caches).
+///
+/// # Data Flow & Invariants
+/// Pre-populates [`STEM_SIZE_CACHE`] and [`STEM_CODEC_CACHE`] by scanning
+/// `data/reports/batch_tvshow_nightly.jsonl` and `data/cache/discovered_media.json`.
+/// Eliminates network latency spikes by avoiding blocking metadata lookups across remote CIFS shares.
 pub fn preload_stem_size_cache() {
     let mut map = HashMap::new();
     let events_file = Path::new("data/reports/batch_tvshow_nightly.jsonl");
@@ -80,7 +88,13 @@ pub fn preload_stem_size_cache() {
     *c_lock = Some(codec_map);
 }
 
-/// Helper to get cached video codec for a given stem.
+/// Retrieves the cached video codecmoniker for a given media stem.
+///
+/// # Arguments
+/// - `media_name`: Filename stem of the video (e.g. `"The.Office.US.S04E01"`).
+///
+/// # Returns
+/// `Some(String)` if found in the pre-warmed cache, `None` otherwise.
 pub fn get_file_codec(media_name: &str) -> Option<String> {
     let lock = STEM_CODEC_CACHE.lock().unwrap();
     if let Some(ref map) = *lock {
@@ -91,7 +105,18 @@ pub fn get_file_codec(media_name: &str) -> Option<String> {
     None
 }
 
-/// Helper to get or insert file size for a given stem or path.
+/// Retrieves file size in bytes for a media item, consulting in-memory cache before touching filesystem.
+///
+/// # Arguments
+/// - `media_name`: Filename stem of the video container.
+/// - `target_path`: Optional direct filesystem path.
+///
+/// # Returns
+/// File size in bytes, or `0` if unknown or inaccessible.
+///
+/// # Data Flow & Invariants
+/// First checks [`STEM_SIZE_CACHE`]. If absent and `target_path` is not a remote CIFS share,
+/// executes `fs::metadata`. For remote shares, avoids blocking synchronous stat calls.
 pub fn get_file_size(media_name: &str, target_path: Option<&Path>) -> u64 {
     {
         let lock = STEM_SIZE_CACHE.lock().unwrap();
@@ -119,7 +144,15 @@ pub fn get_file_size(media_name: &str, target_path: Option<&Path>) -> u64 {
     0
 }
 
-/// Spawns a background worker thread streaming JSON telemetry from intel_gpu_top.
+/// Spawns a background thread streaming real-time JSON telemetry from `intel_gpu_top`.
+///
+/// # Arguments
+/// - `gpu_state`: Shared `GpuTelemetry` state container protected by `RwLock`.
+/// - `stop_flag`: Atomic cancellation token.
+///
+/// # Data Flow & Invariants
+/// Executes `/usr/bin/intel_gpu_top -J -s 1000`. Parses engine metrics (`Video/busy`,
+/// `Render/3D/busy`, actual frequency, power wattage) and writes to `gpu_state`.
 pub fn start_gpu_sampler(gpu_state: Arc<RwLock<GpuTelemetry>>, stop_flag: Arc<AtomicBool>) {
     let gpu_bin = Path::new("/usr/bin/intel_gpu_top");
     if !gpu_bin.exists() {
@@ -207,8 +240,17 @@ pub fn start_gpu_sampler(gpu_state: Arc<RwLock<GpuTelemetry>>, stop_flag: Arc<At
     });
 }
 
-/// Reads `/proc/{pid}/io` on Linux to extract `rchar` and `read_bytes`.
-/// Network mounts (CIFS/SMB) increment `rchar` rather than physical `read_bytes`.
+/// Reads `/proc/{pid}/io` on Linux to extract cumulative `rchar` and `read_bytes`.
+///
+/// # Arguments
+/// - `pid`: Linux process identifier to inspect.
+///
+/// # Returns
+/// Cumulative read bytes. Returns `0` if `/proc/[pid]/io` is missing or access is denied.
+///
+/// # Data Flow & Invariants
+/// Network filesystem mounts (CIFS/SMB) increment virtual `rchar` rather than physical block `read_bytes`.
+/// Computes `rchar.max(read_bytes)` to guarantee accurate throughput across both local and network storage.
 pub fn read_proc_io_bytes(pid: u32) -> u64 {
     let io_path = format!("/proc/{pid}/io");
     let mut rchar = 0u64;
@@ -231,7 +273,14 @@ pub fn read_proc_io_bytes(pid: u32) -> u64 {
     rchar.max(read_bytes)
 }
 
-/// Checks if the given PID is a thread task rather than a main process leader (Tgid != Pid).
+/// Checks if the given PID is a child thread task rather than a main process thread group leader.
+///
+/// # Arguments
+/// - `pid`: Linux process / task identifier.
+///
+/// # Returns
+/// - `true` if `Tgid != Pid` in `/proc/[pid]/status` (sub-thread).
+/// - `false` if `Tgid == Pid` (main process leader).
 pub fn is_thread_task(pid: u32) -> bool {
     if let Ok(content) = fs::read_to_string(format!("/proc/{pid}/status")) {
         let mut tgid = None;
@@ -259,7 +308,20 @@ pub fn is_thread_task(pid: u32) -> bool {
     false
 }
 
-/// Loads historical processing profile records from the batch events NDJSON log with couplings fallback.
+/// Loads historical execution records from batch report NDJSON logs with certified couplings cross-referencing.
+///
+/// # Arguments
+/// - `events_path`: Path to batch execution report (`data/reports/batch_tvshow_nightly.jsonl`).
+/// - `couplings_path`: Path to Zero-DB certified couplings registry (`data/SRT/couplings.json`).
+///
+/// # Returns
+/// Chronological vector of [`HistoricalRecord`] entries with deduped stems and accurate coupling counts.
+///
+/// # Data Flow & Invariants
+/// 1. Reads events file line by line, parsing JSON record payloads.
+/// 2. If `certified_couplings_count == 0` but coupling registry contains entries for the stem,
+///    backfills coupling counts from ground-truth registry.
+/// 3. Retains latest record per media stem to eliminate stale runs.
 pub fn load_historical_records(events_path: &Path, couplings_path: &Path) -> Vec<HistoricalRecord> {
     let mut raw_records = Vec::new();
     if events_path.exists() {

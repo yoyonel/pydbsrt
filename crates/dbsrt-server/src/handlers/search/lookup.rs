@@ -25,6 +25,22 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
+/// Axum handler for `POST /v1/search`: discovers, matches, and ranks subtitles for a video.
+///
+/// # Arguments
+/// - `state`: Shared server state container (`Arc<AppState>`).
+/// - `payload`: JSON request specifying `media_path`, `language`, `search_mode`, `title`, `season`, `episode`.
+///
+/// # Returns
+/// `Json<SearchSubtitlesResponse>` containing ranked subtitle candidates, visual shift, and timing diagnostics.
+///
+/// # Data Flow & Invariants
+/// 1. Extracts video container metadata (duration, FPS, embedded tracks).
+/// 2. If `search_mode == "phash"` or `"all"`, samples visual fingerprints from target video.
+/// 3. Identifies reference media release in Tier-1 RAM index or PostgreSQL.
+/// 4. Queries certified ground-truth subtitle couplings using episodic isolation constraints.
+/// 5. Computes visual frame offset and millisecond shift (`vshift_ms`) between reference and target stream.
+/// 6. Collects catalog and OpenSubtitles fallback candidates, scoring and ranking them before returning.
 pub async fn search_handler(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<SearchSubtitlesRequest>,
@@ -296,6 +312,9 @@ pub async fn search_handler(
     };
     timing.moviehash_ms = t_meta.elapsed().as_secs_f64() * 1000.0;
 
+    let effective_season = payload.season.or(meta.season);
+    let effective_episode = payload.episode.or(meta.episode);
+
     let fingerprint_preview = query_sample_opt
         .as_deref()
         .or_else(|| {
@@ -304,9 +323,23 @@ pub async fn search_handler(
                 .map(|(_, hashes, _)| hashes.as_slice())
         })
         .map(|hashes| {
-            hashes
+            let non_blank: Vec<_> = hashes
                 .iter()
+                .copied()
+                .filter(|&h| !dbsrt_core::is_blank_phash(h))
                 .take(FINGERPRINT_PREVIEW_SAMPLE_COUNT)
+                .collect();
+            let chosen = if non_blank.len() >= FINGERPRINT_PREVIEW_SAMPLE_COUNT {
+                non_blank
+            } else {
+                hashes
+                    .iter()
+                    .copied()
+                    .take(FINGERPRINT_PREVIEW_SAMPLE_COUNT)
+                    .collect()
+            };
+            chosen
+                .into_iter()
                 .map(|h| format!("{:#018x}", h))
                 .collect::<Vec<_>>()
         });
@@ -340,6 +373,8 @@ pub async fn search_handler(
                 &state,
                 &subtitles_dir,
                 m_name,
+                effective_season,
+                effective_episode,
                 &payload.language,
                 phash_conf,
             );
@@ -461,12 +496,11 @@ pub async fn search_handler(
         payload.query_title.as_deref()
     };
 
-    let effective_season = payload.season.or(meta.season);
-    let effective_episode = payload.episode.or(meta.episode);
     let search_dirs = collect_subtitle_search_dirs(&subtitles_dir, &media_path, include_sidecars);
+    let mut catalog_results = Vec::new();
 
     for dir in &search_dirs {
-        for (_, path, resolved_lang) in search_subtitles_in_catalog(
+        for (score, path, resolved_lang) in search_subtitles_in_catalog(
             dir,
             &stems,
             catalog_query_title,
@@ -491,6 +525,20 @@ pub async fn search_handler(
                 continue;
             }
 
+            let mut final_score = score;
+            let cand_stem = cand_fname.strip_suffix(".srt").unwrap_or(&cand_fname);
+            if !file_stem.is_empty()
+                && (cand_stem == file_stem
+                    || cand_stem.starts_with(&file_stem)
+                    || file_stem.starts_with(cand_stem))
+            {
+                final_score += 1000;
+            } else if let Some(parent) = media_path.parent() {
+                if path.parent() == Some(parent) {
+                    final_score += 500;
+                }
+            }
+
             let details = if let Some(ref m) = matched_media {
                 format!(
                     "pHash matched '{}' ({:.0}% conf) — {}",
@@ -501,16 +549,24 @@ pub async fn search_handler(
             } else {
                 path_str.clone()
             };
-            candidates.push(SubtitleCandidate {
-                source: SubtitleSource::Catalog.as_str().to_string(),
-                language: resolved_lang,
-                title: cand_fname,
-                release: matched_media.clone().or_else(|| Some(file_stem.clone())),
-                details: Some(details),
-                candidate_id: Some(path_str),
-                shift_ms: None,
-            });
+            catalog_results.push((
+                final_score,
+                SubtitleCandidate {
+                    source: SubtitleSource::Catalog.as_str().to_string(),
+                    language: resolved_lang,
+                    title: cand_fname,
+                    release: matched_media.clone().or_else(|| Some(file_stem.clone())),
+                    details: Some(details),
+                    candidate_id: Some(path_str),
+                    shift_ms: None,
+                },
+            ));
         }
+    }
+
+    catalog_results.sort_by_key(|a| std::cmp::Reverse(a.0));
+    for (_, cand) in catalog_results {
+        candidates.push(cand);
     }
     timing.disk_catalog_ms = t_disk.elapsed().as_secs_f64() * 1000.0;
 
@@ -546,6 +602,42 @@ pub async fn search_handler(
                 });
             }
         }
+    }
+
+    // Final safety filter: enforce Season and Episode consistency across all candidate sources
+    if let Some(req_s) = effective_season {
+        candidates.retain(|c| {
+            let c_meta = MediaMetadata::parse(&c.title);
+            let r_meta = c.release.as_deref().map(MediaMetadata::parse);
+            let cand_s = c_meta
+                .season
+                .or_else(|| r_meta.as_ref().and_then(|m| m.season));
+            if let Some(cs) = cand_s {
+                cs == req_s
+            } else {
+                true
+            }
+        });
+    }
+    if let Some(req_e) = effective_episode {
+        candidates.retain(|c| {
+            let c_meta = MediaMetadata::parse(&c.title);
+            let r_meta = c.release.as_deref().map(MediaMetadata::parse);
+            let cand_e = c_meta
+                .episode
+                .or_else(|| r_meta.as_ref().and_then(|m| m.episode));
+            if let Some(ce) = cand_e {
+                ce == req_e
+                    || c.title.to_lowercase().contains(&format!("e{:02}", req_e))
+                    || c.release
+                        .as_deref()
+                        .unwrap_or("")
+                        .to_lowercase()
+                        .contains(&format!("e{:02}", req_e))
+            } else {
+                true
+            }
+        });
     }
 
     let total_candidates = candidates.len();
@@ -857,5 +949,84 @@ mod tests {
         };
         let res = search_handler(State(state), Json(req)).await;
         assert!(res.0.total_candidates > 0);
+    }
+
+    #[tokio::test]
+    async fn test_search_strict_season_episode_filtering() {
+        let root = get_repo_root();
+        let state = test_app_state();
+
+        // Seed with What If S2E3 and S2E1, and The Office S5E1
+        if let Ok(mut reg) = state.coupling_registry.write() {
+            let make_coupling = |name: &str| CertifiedMediaCoupling {
+                media_hash: format!("hash_{}", name),
+                media_name: name.to_string(),
+                phash_filename: format!("{}.phash", name),
+                fps: 24.0,
+                frame_count: 100,
+                subtitles: vec![CertifiedSubtitleRecord {
+                    subtitles_hash: format!("sub_hash_{}", name),
+                    name: format!("{}.fr.srt", name),
+                    lang: "fr".to_string(),
+                    lang_status: LangStatus::Confirmed("fr".to_string()),
+                    srt_path: format!("{}.fr.srt", name),
+                    certified: true,
+                    cue_count: 50,
+                    sub_frames: vec![],
+                }],
+            };
+
+            reg.couplings.push(make_coupling(
+                "What.If.2021.S02E03.What.if.Happy.Hogan.Saved.Christmas.2160p",
+            ));
+            reg.couplings.push(make_coupling(
+                "What.If.2021.S02E01.What.if.Nebula.Joined.the.Nova.Corps.2160p",
+            ));
+            reg.couplings
+                .push(make_coupling("The.Office.US.S05E01.1080p.NF.WEB.x264-MRSK"));
+        }
+
+        // Test 1: Query What If Season 2 Episode 1
+        let req_what_if = SearchSubtitlesRequest {
+            media_path: "What.If.2021.S02E01.What.if.Nebula.Joined.the.Nova.Corps.2160p.mkv"
+                .to_string(),
+            language: "fr".to_string(),
+            search_mode: Some("name".to_string()),
+            query_title: Some("What If".to_string()),
+            season: Some(2),
+            episode: Some(1),
+            subtitles_dir: Some(root.join("data/SRT").to_string_lossy().to_string()),
+            phash_dir: None,
+            index_engine: None,
+        };
+        let res_what_if = search_handler(State(state.clone()), Json(req_what_if)).await;
+        for c in &res_what_if.0.candidates {
+            assert!(
+                !c.title.contains("S02E03"),
+                "Candidate list must NEVER contain S02E03 when searching for S02E01: {}",
+                c.title
+            );
+        }
+
+        // Test 2: Query The Office Season 4 Episode 1
+        let req_office = SearchSubtitlesRequest {
+            media_path: "The.Office.US.S04E01E02.Fun.Run.1080p.mkv".to_string(),
+            language: "fr".to_string(),
+            search_mode: Some("name".to_string()),
+            query_title: Some("The Office US".to_string()),
+            season: Some(4),
+            episode: Some(1),
+            subtitles_dir: Some(root.join("data/SRT").to_string_lossy().to_string()),
+            phash_dir: None,
+            index_engine: None,
+        };
+        let res_office = search_handler(State(state.clone()), Json(req_office)).await;
+        for c in &res_office.0.candidates {
+            assert!(
+                !c.title.contains("S05E01"),
+                "Candidate list must NEVER contain S05E01 when searching for S04E01: {}",
+                c.title
+            );
+        }
     }
 }

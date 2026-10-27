@@ -1,4 +1,7 @@
-//! Process signal dispatching and inspection logic.
+//! # Process Lifecycle, Signals & ProcFS Inspection
+//!
+//! This module provides safe POSIX process signaling (SIGSTOP, SIGCONT, SIGTERM, SIGKILL)
+//! and diagnostics inspection via the Linux `/proc` filesystem (`/proc/[pid]/fd`, `/proc/[pid]/status`).
 
 use std::fs;
 use std::path::PathBuf;
@@ -13,6 +16,20 @@ use crate::commands::top::constants::{
 use crate::commands::top::model::{format_duration, ActiveJobTelemetry};
 
 /// Stops or hard-kills an entire batch execution tree (coordinators, workers, ffmpeg processes).
+///
+/// # Arguments
+/// - `force`: If `true`, sends immediate uncatchable `SIGKILL`. If `false`, sends graceful `SIGTERM`.
+///
+/// # Returns
+/// A tuple `(success, message)`:
+/// - `success`: `true` if at least one process was targeted and signaled, `false` otherwise.
+/// - `message`: Descriptive status string reporting the count of coordinators and workers signaled.
+///
+/// # Data Flow & Invariants
+/// 1. Scans all system processes via `sysinfo` to discover coordinator scripts and worker processes.
+/// 2. Deletes batch target manifest file (`DEFAULT_SELECTED_BATCH_TARGETS_PATH`) to prevent respawn.
+/// 3. Signals parent coordinator scripts first. If `force` is false, sleeps [`BATCH_GRACEFUL_SHUTDOWN_PAUSE_MS`] (200ms).
+/// 4. Signals all active child worker and `ffmpeg` decoding processes.
 pub fn stop_entire_batch(force: bool) -> (bool, String) {
     let mut system = System::new();
     system.refresh_processes(ProcessesToUpdate::All, true);
@@ -90,7 +107,19 @@ pub fn stop_entire_batch(force: bool) -> (bool, String) {
     )
 }
 
-/// Toggles pause state of a job process using POSIX SIGSTOP / SIGCONT.
+/// Toggles the pause state of a running job process using POSIX `SIGSTOP` or `SIGCONT`.
+///
+/// # Arguments
+/// - `pid`: Linux process identifier to signal.
+///
+/// # Returns
+/// A tuple `(success, message)`:
+/// - `success`: `true` if POSIX `kill(2)` returned 0, `false` otherwise.
+/// - `message`: Notification string describing the action taken or error details.
+///
+/// # Data Flow & Invariants
+/// Checks process execution state in `/proc/[pid]/status` via [`check_if_stopped`].
+/// If currently stopped (`T`), sends `SIGCONT` to resume. Otherwise, sends `SIGSTOP` to pause.
 pub fn toggle_pause_job(pid: u32) -> (bool, String) {
     let is_stopped = check_if_stopped(pid);
     let signal = if is_stopped {
@@ -111,7 +140,13 @@ pub fn toggle_pause_job(pid: u32) -> (bool, String) {
     }
 }
 
-/// Sends graceful termination SIGTERM to a job process.
+/// Sends graceful termination `SIGTERM` to a specific job process.
+///
+/// # Arguments
+/// - `pid`: Target Linux process identifier.
+///
+/// # Returns
+/// `(success, message)` tuple indicating whether signal transmission succeeded.
 pub fn stop_job(pid: u32) -> (bool, String) {
     let ret = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
     if ret == 0 {
@@ -122,7 +157,13 @@ pub fn stop_job(pid: u32) -> (bool, String) {
     }
 }
 
-/// Sends immediate termination SIGKILL to a job process.
+/// Sends uncatchable immediate termination `SIGKILL` to a specific job process.
+///
+/// # Arguments
+/// - `pid`: Target Linux process identifier.
+///
+/// # Returns
+/// `(success, message)` tuple indicating whether signal transmission succeeded.
 pub fn kill_job(pid: u32) -> (bool, String) {
     let ret = unsafe { libc::kill(pid as i32, libc::SIGKILL) };
     if ret == 0 {
@@ -133,7 +174,14 @@ pub fn kill_job(pid: u32) -> (bool, String) {
     }
 }
 
-/// Checks if process status is currently STOPPED ('T' or 't').
+/// Probes whether a process is currently in a stopped state (`T` or `t`) via `/proc/[pid]/status`.
+///
+/// # Arguments
+/// - `pid`: Target Linux process identifier.
+///
+/// # Returns
+/// - `true` if `State:` line starts with `'T'` or `'t'` (job control stop or tracing stop).
+/// - `false` if running, sleeping, zombie, or process does not exist.
 pub fn check_if_stopped(pid: u32) -> bool {
     let status_path = format!("/proc/{pid}/status");
     if let Ok(content) = fs::read_to_string(status_path) {
@@ -147,7 +195,19 @@ pub fn check_if_stopped(pid: u32) -> bool {
     false
 }
 
-/// Inspects process details and returns structured text lines for full-frame inspection.
+/// Generates a comprehensive multi-section diagnostic report for an active job process.
+///
+/// # Arguments
+/// - `job`: The active job telemetry snapshot to inspect.
+///
+/// # Returns
+/// Vector of formatted strings ready for rendering in the fullframe inspection modal.
+///
+/// # Data Flow & Invariants
+/// 1. Formats PID, hardware engine, and CIFS read rate headers.
+/// 2. Analyzes hardware acceleration codec compatibility (e.g. explains H.264 Hi10P ASIC CPU fallbacks).
+/// 3. Inspects active file descriptors by reading symlinks in `/proc/[pid]/fd`.
+/// 4. Tails candidate execution logs under `data/logs/`, `/tmp/`, and `data/reports/`.
 pub fn inspect_job_details(job: &ActiveJobTelemetry) -> Vec<String> {
     let mut lines = Vec::new();
 

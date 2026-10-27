@@ -19,6 +19,22 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
+/// Axum handler for `POST /v1/recognize`: identifies a video release by its visual pHash fingerprint.
+///
+/// # Arguments
+/// - `state`: Shared server state container (`Arc<AppState>`).
+/// - `payload`: JSON request specifying `media_path`, optional `query_fingerprint`, `phash_dir`.
+///
+/// # Returns
+/// - `Ok(Json<RecognizeResponse>)`: Matched release name, confidence score, tier index engine used, and latency.
+/// - `Err((StatusCode, String))`: HTTP 400 if media cannot be probed, opened, or fingerprinted.
+///
+/// # Data Flow & Invariants
+/// 1. Checks if client provided an explicit `query_fingerprint` or extracts a 30-frame visual sample.
+/// 2. Queries multi-tier recognition engine (`identify_media_by_phash_multi_routed`).
+/// 3. Tier 1: In-memory MIH `.dbphash` index lookup (< 10ms).
+/// 4. Tier 2: PostgreSQL pgvector / Hamming index lookup.
+/// 5. Tier 3: Direct filesystem multi-core scanning across configured directories.
 pub async fn recognize_handler(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<RecognizeRequest>,
@@ -212,6 +228,8 @@ pub async fn recognize_handler(
                 &state,
                 &state.subtitles_dir,
                 &media_match,
+                None,
+                None,
                 req_lang,
                 confidence,
             );

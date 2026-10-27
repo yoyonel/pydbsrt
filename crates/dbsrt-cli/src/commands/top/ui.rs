@@ -20,10 +20,11 @@ use crate::commands::top::constants::{
     SOURCE_MODAL_HEIGHT_LINES, SOURCE_MODAL_WIDTH_PERCENT,
 };
 use crate::commands::top::model::{
-    default_progress_bar, filter_and_sort_completed, filter_and_sort_media_with_source,
-    format_duration, format_progress_bar, CompletedFilter, CompletedSort, CompletedStatus, HelpTab,
-    IngestionStatus, MediaFilter, MediaSort, MediaSourceFilter, SourceInputModalState,
-    SourceModalField, SourceModalMode, SystemTelemetry, ViewPage,
+    default_progress_bar, filter_active_jobs_with_search, filter_and_sort_completed_with_search,
+    filter_and_sort_media_with_source_and_search, format_duration, format_progress_bar,
+    CompletedFilter, CompletedSort, CompletedStatus, HelpTab, IngestionStatus, MediaFilter,
+    MediaSort, MediaSourceFilter, SourceInputModalState, SourceModalField, SourceModalMode,
+    SystemTelemetry, ViewPage,
 };
 
 /// UI rendering application context.
@@ -41,6 +42,8 @@ pub struct UiContext<'a> {
     pub source_filter: &'a MediaSourceFilter,
     pub completed_filter: CompletedFilter,
     pub completed_sort: CompletedSort,
+    pub search_query: &'a str,
+    pub search_active: bool,
     pub help_tab: HelpTab,
     pub help_scroll_index: usize,
     pub feedback_msg: Option<&'a str>,
@@ -269,10 +272,19 @@ fn render_header(frame: &mut Frame, area: Rect, tel: &SystemTelemetry) {
 
 /// Renders the fullframe table of active decoding/pHash jobs.
 fn render_active_jobs_page(frame: &mut Frame, area: Rect, ctx: &UiContext) {
-    let title = format!(
-        " TÂCHES EN COURS (DÉCODAGE & PHASH TEMPS RÉEL) [{}] ",
-        ctx.telemetry.active_jobs.len()
+    let jobs = filter_active_jobs_with_search(
+        &ctx.telemetry.active_jobs,
+        if ctx.search_query.is_empty() {
+            None
+        } else {
+            Some(ctx.search_query)
+        },
     );
+
+    let total_count = ctx.telemetry.active_jobs.len();
+    let visible_count = jobs.len();
+    let title =
+        format!(" TÂCHES EN COURS (DÉCODAGE & PHASH TEMPS RÉEL) [{visible_count}/{total_count}] ");
 
     let block = Block::default()
         .borders(Borders::ALL)
@@ -284,34 +296,102 @@ fn render_active_jobs_page(frame: &mut Frame, area: Rect, ctx: &UiContext) {
                 .add_modifier(Modifier::BOLD),
         ));
 
-    if ctx.telemetry.active_jobs.is_empty() {
-        let empty_msg =
-            vec![
-            Line::from(""),
-            Line::from(Span::styled(
-                "Aucune tâche de décodage ou pHash active détectée.",
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-            )),
-            Line::from(""),
-            Line::from(Span::styled(
-                "Pour lancer un traitement de masse avec monitoring en direct :",
-                Style::default().fg(Color::DarkGray),
-            )),
-            Line::from(Span::styled(
-                "  task media:batch:tvshow -- --workers 4 --limit 4 --fresh-only",
-                Style::default().fg(Color::Green),
-            )),
-            Line::from(""),
-            Line::from(Span::styled(
-                "Le moniteur détecte automatiquement ffmpeg (GPU VA-API/CPU) et dbsrt media:add.",
-                Style::default().fg(Color::DarkGray),
-            )),
-        ];
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
 
-        let p = Paragraph::new(empty_msg)
-            .block(block)
-            .alignment(Alignment::Center);
-        frame.render_widget(p, area);
+    let sub_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(2), Constraint::Min(3)])
+        .split(inner);
+
+    let mut bar_spans = Vec::new();
+    if ctx.search_active {
+        bar_spans.push(Span::styled(
+            format!(
+                " [/] RECHERCHE: \"{}█\" (Entrée: Valider, Échap: Annuler)",
+                ctx.search_query
+            ),
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ));
+    } else if !ctx.search_query.is_empty() {
+        bar_spans.push(Span::styled(
+            " [/] Recherche: ",
+            Style::default().fg(Color::DarkGray),
+        ));
+        bar_spans.push(Span::styled(
+            format!("\"{}\" ", ctx.search_query),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ));
+        bar_spans.push(Span::styled(
+            "[Échap: Effacer]",
+            Style::default().fg(Color::DarkGray),
+        ));
+    } else {
+        bar_spans.push(Span::styled(
+            " [/] Chercher",
+            Style::default().fg(Color::DarkGray),
+        ));
+    }
+
+    bar_spans.push(Span::raw("   "));
+    bar_spans.push(Span::styled(
+        "[Enter/i] Inspecter   [p] Pause   [s] Stop   [x/X] Arrêter Batch",
+        Style::default().fg(Color::DarkGray),
+    ));
+
+    let bar_p = Paragraph::new(Line::from(bar_spans));
+    frame.render_widget(bar_p, sub_chunks[0]);
+
+    if jobs.is_empty() {
+        let empty_msg = if !ctx.search_query.is_empty() {
+            vec![
+                Line::from(""),
+                Line::from(Span::styled(
+                    format!(
+                        "Aucune tâche ne correspond à la recherche \"{}\".",
+                        ctx.search_query
+                    ),
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                )),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "Appuyez sur [Échap] pour effacer la recherche.",
+                    Style::default().fg(Color::DarkGray),
+                )),
+            ]
+        } else {
+            vec![
+                Line::from(""),
+                Line::from(Span::styled(
+                    "Aucune tâche de décodage ou pHash active détectée.",
+                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                )),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "Pour lancer un traitement de masse avec monitoring en direct :",
+                    Style::default().fg(Color::DarkGray),
+                )),
+                Line::from(Span::styled(
+                    "  task media:batch:tvshow -- --workers 4 --limit 4 --fresh-only",
+                    Style::default().fg(Color::Green),
+                )),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "Le moniteur détecte automatiquement ffmpeg (GPU VA-API/CPU) et dbsrt media:add.",
+                    Style::default().fg(Color::DarkGray),
+                )),
+            ]
+        };
+
+        let p = Paragraph::new(empty_msg).alignment(Alignment::Center);
+        frame.render_widget(p, sub_chunks[1]);
         return;
     }
 
@@ -337,9 +417,7 @@ fn render_active_jobs_page(frame: &mut Frame, area: Rect, ctx: &UiContext) {
     });
     let header = Row::new(header_cells).height(1).bottom_margin(0);
 
-    let rows: Vec<Row> = ctx
-        .telemetry
-        .active_jobs
+    let rows: Vec<Row> = jobs
         .iter()
         .enumerate()
         .map(|(idx, job)| {
@@ -432,15 +510,24 @@ fn render_active_jobs_page(frame: &mut Frame, area: Rect, ctx: &UiContext) {
         Constraint::Length(11),     // RAM
     ];
 
-    let table = Table::new(rows, widths).header(header).block(block);
+    let table = Table::new(rows, widths).header(header);
 
     let mut state = TableState::default();
     state.select(Some(ctx.selected_index));
-    frame.render_stateful_widget(table, area, &mut state);
+    frame.render_stateful_widget(table, sub_chunks[1], &mut state);
 }
 
 /// Renders the fullframe deep inspection view for the selected job.
 fn render_inspection_page(frame: &mut Frame, area: Rect, ctx: &UiContext) {
+    let jobs = filter_active_jobs_with_search(
+        &ctx.telemetry.active_jobs,
+        if ctx.search_query.is_empty() {
+            None
+        } else {
+            Some(ctx.search_query)
+        },
+    );
+
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Magenta))
@@ -451,8 +538,7 @@ fn render_inspection_page(frame: &mut Frame, area: Rect, ctx: &UiContext) {
                 .add_modifier(Modifier::BOLD),
         ));
 
-    if ctx.telemetry.active_jobs.is_empty() || ctx.selected_index >= ctx.telemetry.active_jobs.len()
-    {
+    if jobs.is_empty() || ctx.selected_index >= jobs.len() {
         let p = Paragraph::new("Aucun processus sélectionné pour l'inspection.")
             .block(block)
             .alignment(Alignment::Center);
@@ -460,7 +546,7 @@ fn render_inspection_page(frame: &mut Frame, area: Rect, ctx: &UiContext) {
         return;
     }
 
-    let job = &ctx.telemetry.active_jobs[ctx.selected_index];
+    let job = &jobs[ctx.selected_index];
     let details = crate::commands::top::process_ctl::inspect_job_details(job);
 
     let lines: Vec<Line> = details.into_iter().map(Line::from).collect();
@@ -660,10 +746,15 @@ fn render_stats_page(frame: &mut Frame, area: Rect, ctx: &UiContext) {
 
 /// Renders the fullframe scrollable list of completed and certified media releases.
 fn render_completed_page(frame: &mut Frame, area: Rect, ctx: &UiContext) {
-    let records = filter_and_sort_completed(
+    let records = filter_and_sort_completed_with_search(
         &ctx.telemetry.history_records,
         ctx.completed_filter,
         ctx.completed_sort,
+        if ctx.search_query.is_empty() {
+            None
+        } else {
+            Some(ctx.search_query)
+        },
     );
 
     let total_count = ctx.telemetry.history_records.len();
@@ -699,7 +790,7 @@ fn render_completed_page(frame: &mut Frame, area: Rect, ctx: &UiContext) {
         CompletedFilter::CancelledOnly => Color::Magenta,
     };
 
-    let bar_spans = vec![
+    let mut bar_spans = vec![
         Span::styled(" [f] Filtre: ", Style::default().fg(Color::DarkGray)),
         Span::styled(
             format!("[{}]", ctx.completed_filter.label()),
@@ -716,26 +807,70 @@ fn render_completed_page(frame: &mut Frame, area: Rect, ctx: &UiContext) {
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw("   "),
-        Span::styled(
-            "[Enter/i] Fiche Diagnostic & Erreur",
-            Style::default().fg(Color::DarkGray),
-        ),
     ];
+
+    if ctx.search_active {
+        bar_spans.push(Span::styled(
+            format!(
+                " [/] RECHERCHE: \"{}█\" (Entrée: Valider, Échap: Annuler)",
+                ctx.search_query
+            ),
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ));
+    } else if !ctx.search_query.is_empty() {
+        bar_spans.push(Span::styled(
+            " [/] Recherche: ",
+            Style::default().fg(Color::DarkGray),
+        ));
+        bar_spans.push(Span::styled(
+            format!("\"{}\" ", ctx.search_query),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ));
+        bar_spans.push(Span::styled(
+            "[Échap: Effacer]",
+            Style::default().fg(Color::DarkGray),
+        ));
+    } else {
+        bar_spans.push(Span::styled(
+            "[/] Chercher",
+            Style::default().fg(Color::DarkGray),
+        ));
+    }
+
+    bar_spans.push(Span::raw("   "));
+    bar_spans.push(Span::styled(
+        "[Enter/i] Fiche Diagnostic & Erreur",
+        Style::default().fg(Color::DarkGray),
+    ));
+
     let bar_p = Paragraph::new(Line::from(bar_spans));
     frame.render_widget(bar_p, sub_chunks[0]);
 
     if records.is_empty() {
+        let msg_detail = if !ctx.search_query.is_empty() {
+            format!(
+                "Aucun résultat pour la recherche \"{}\". Appuyez sur [Échap] pour réinitialiser.",
+                ctx.search_query
+            )
+        } else {
+            "Appuyez sur [f] pour modifier le filtre ou vérifiez l'indexation de data/reports/batch_tvshow_nightly.jsonl.".to_string()
+        };
         let empty_msg = vec![
             Line::from(""),
             Line::from(Span::styled(
-                "Aucun enregistrement ne correspond au filtre actif.",
+                "Aucun enregistrement ne correspond aux critères actifs.",
                 Style::default()
                     .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD),
             )),
             Line::from(""),
             Line::from(Span::styled(
-                "Appuyez sur [f] pour modifier le filtre ou vérifiez l'indexation de data/reports/batch_tvshow_nightly.jsonl.",
+                msg_detail,
                 Style::default().fg(Color::DarkGray),
             )),
         ];
@@ -884,10 +1019,15 @@ fn render_completed_page(frame: &mut Frame, area: Rect, ctx: &UiContext) {
 
 /// Renders the fullframe detailed inspection and error diagnosis for a selected historical record.
 fn render_completed_inspection_page(frame: &mut Frame, area: Rect, ctx: &UiContext) {
-    let records = filter_and_sort_completed(
+    let records = filter_and_sort_completed_with_search(
         &ctx.telemetry.history_records,
         ctx.completed_filter,
         ctx.completed_sort,
+        if ctx.search_query.is_empty() {
+            None
+        } else {
+            Some(ctx.search_query)
+        },
     );
 
     let block = Block::default()
@@ -1121,12 +1261,17 @@ fn render_completed_inspection_page(frame: &mut Frame, area: Rect, ctx: &UiConte
 
 /// Renders the interactive media browser allowing inspection, filtering, sorting and batch execution.
 fn render_media_browser_page(frame: &mut Frame, area: Rect, ctx: &UiContext) {
-    let items = filter_and_sort_media_with_source(
+    let items = filter_and_sort_media_with_source_and_search(
         &ctx.telemetry.discovered_media,
         ctx.media_filter,
         ctx.media_sort,
         ctx.source_filter,
         &ctx.telemetry.media_sources,
+        if ctx.search_query.is_empty() {
+            None
+        } else {
+            Some(ctx.search_query)
+        },
     );
 
     let total_count = ctx.telemetry.discovered_media.len();
@@ -1231,6 +1376,42 @@ fn render_media_browser_page(frame: &mut Frame, area: Rect, ctx: &UiContext) {
         ));
     }
 
+    if ctx.search_active {
+        bar_spans.push(Span::raw("   "));
+        bar_spans.push(Span::styled(
+            format!(
+                "[/] RECHERCHE: \"{}█\" (Entrée: Valider, Échap: Annuler)",
+                ctx.search_query
+            ),
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ));
+    } else if !ctx.search_query.is_empty() {
+        bar_spans.push(Span::raw("   "));
+        bar_spans.push(Span::styled(
+            " [/] Recherche: ",
+            Style::default().fg(Color::DarkGray),
+        ));
+        bar_spans.push(Span::styled(
+            format!("\"{}\" ", ctx.search_query),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ));
+        bar_spans.push(Span::styled(
+            "[Échap: Effacer]",
+            Style::default().fg(Color::DarkGray),
+        ));
+    } else {
+        bar_spans.push(Span::raw("   "));
+        bar_spans.push(Span::styled(
+            "[/] Chercher",
+            Style::default().fg(Color::DarkGray),
+        ));
+    }
+
     bar_spans.push(Span::raw("   "));
     bar_spans.push(Span::styled(
         " Sélection: ",
@@ -1255,17 +1436,26 @@ fn render_media_browser_page(frame: &mut Frame, area: Rect, ctx: &UiContext) {
     frame.render_widget(bar_p, sub_chunks[0]);
 
     if items.is_empty() {
+        let msg_detail = if !ctx.search_query.is_empty() {
+            format!(
+                "Aucun média ne correspond à la recherche \"{}\". Appuyez sur [Échap] pour réinitialiser.",
+                ctx.search_query
+            )
+        } else {
+            "Appuyez sur [f] pour modifier le filtre ou vérifiez la liaison NAS Synology."
+                .to_string()
+        };
         let empty_msg = vec![
             Line::from(""),
             Line::from(Span::styled(
-                "Aucun média disponible ne correspond au filtre actif.",
+                "Aucun média disponible ne correspond aux critères actifs.",
                 Style::default()
                     .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD),
             )),
             Line::from(""),
             Line::from(Span::styled(
-                "Appuyez sur [f] pour modifier le filtre ou vérifiez la liaison NAS Synology.",
+                msg_detail,
                 Style::default().fg(Color::DarkGray),
             )),
         ];
@@ -1502,12 +1692,17 @@ fn render_media_inspection_page(frame: &mut Frame, area: Rect, ctx: &UiContext) 
                 .add_modifier(Modifier::BOLD),
         ));
 
-    let visible_media = filter_and_sort_media_with_source(
+    let visible_media = filter_and_sort_media_with_source_and_search(
         &ctx.telemetry.discovered_media,
         ctx.media_filter,
         ctx.media_sort,
         ctx.source_filter,
         &ctx.telemetry.media_sources,
+        if ctx.search_query.is_empty() {
+            None
+        } else {
+            Some(ctx.search_query)
+        },
     );
 
     if visible_media.is_empty() || ctx.media_scroll_index >= visible_media.len() {
@@ -2463,6 +2658,8 @@ fn build_help_active_jobs() -> Vec<Line<'static>> {
         Line::from("    • CPU / RAM    : Pourcentage d'utilisation processeur instantané et mémoire vive RSS consommée."),
         Line::from(""),
         Line::from(Span::styled("  Commandes & Actions :", Style::default().fg(Color::LightGreen).add_modifier(Modifier::BOLD))),
+        Line::from("    [/]            : Recherche interactive (fuzzy search) par nom de média, PID, moteur ou commande."),
+        Line::from("                     En saisie : [Entrée] valide et filtre, [Échap] annule. Hors saisie : [Échap] efface le filtre."),
         Line::from("    [Enter] / [i]  : Ouvrir la fiche d'inspection détaillée du processus (I/O, threads, mémoire, logs)."),
         Line::from("    [p]            : Mettre en pause ou reprendre la tâche pointée (signaux SIGSTOP / SIGCONT)."),
         Line::from("    [s]            : Arrêter proprement la tâche pointée (signal SIGTERM)."),
@@ -2533,6 +2730,8 @@ fn build_help_completed() -> Vec<Line<'static>> {
         Line::from("                 corruption de conteneur ou erreur de lecture disque/réseau."),
         Line::from(""),
         Line::from(Span::styled("  Diagnostics & Commandes :", Style::default().fg(Color::LightGreen).add_modifier(Modifier::BOLD))),
+        Line::from("    [/]            : Recherche interactive (fuzzy search) par nom de vidéo, chemin, statut ou motif d'erreur."),
+        Line::from("                     En saisie : [Entrée] valide et filtre, [Échap] annule. Hors saisie : [Échap] efface le filtre."),
         Line::from("    [Enter] ou [i] : Ouvre la FICHE DIAGNOSTIC & ERREUR plein écran affichant l'explication textuelle"),
         Line::from("                     complète de l'erreur (error_summary), le chemin absolu et la fin des logs d'exécution."),
         Line::from("    [f]            : Filtrage cyclique : [TOUS] -> [SUCCÈS] -> [ÉCHECS (FAIL)] -> [SANS SOUS-TITRES (NO_SRT)] -> [ANNULÉS (CANCEL)]."),
@@ -2568,6 +2767,8 @@ fn build_help_media_browser() -> Vec<Line<'static>> {
         Line::from("      HACHÉ SEUL : Empreinte pHash de la vidéo calculée et stockée, mais aucun sous-titre n'a pu être couplé."),
         Line::from(""),
         Line::from(Span::styled("  Commandes & Actions :", Style::default().fg(Color::LightGreen).add_modifier(Modifier::BOLD))),
+        Line::from("    [/]            : Recherche interactive (fuzzy search) par nom de vidéo, chemin, codec ou source."),
+        Line::from("                     En saisie : [Entrée] valide et filtre, [Échap] annule. Hors saisie : [Échap] efface le filtre."),
         Line::from("    [Space]        : Cocher / décocher le média pointé pour le lot."),
         Line::from("    [a]            : Cocher / décocher TOUS les médias visibles selon le filtre actif."),
         Line::from("    [b]            : Lancer l'ingestion batch ciblée exclusivement sur les médias cochés."),
@@ -2692,26 +2893,44 @@ fn render_footer(frame: &mut Frame, area: Rect, ctx: &UiContext) {
 
     let shortcuts = match ctx.view {
         ViewPage::ActiveJobs => {
-            "[↑/k] Défiler  [Enter/i] Inspecter  [p] Pause  [s] Stop  [x/X] Arrêter Batch  [?] Aide  [q] Quitter"
+            if ctx.search_active {
+                "[Entrée] Valider recherche  [Échap] Annuler  [Texte] Filtrer  [?] Aide"
+            } else if !ctx.search_query.is_empty() {
+                "[↑/k] Défiler  [/] Chercher  [Échap] Effacer recherche  [Enter/i] Inspecter  [p] Pause  [s] Stop  [x/X] Arrêter Batch  [?] Aide  [q] Quitter"
+            } else {
+                "[↑/k] Défiler  [/] Chercher  [Enter/i] Inspecter  [p] Pause  [s] Stop  [x/X] Arrêter Batch  [?] Aide  [q] Quitter"
+            }
         }
         ViewPage::StatsHistory => "[↑/k] Défiler  [?] Aide  [q] Quitter",
         ViewPage::CompletedMedia => {
-            "[↑/k] Défiler  [Enter/i] Fiche/Erreur  [f] Filtre  [o] Tri  [?] Aide  [q] Quitter"
+            if ctx.search_active {
+                "[Entrée] Valider recherche  [Échap] Annuler  [Texte] Filtrer  [?] Aide"
+            } else if !ctx.search_query.is_empty() {
+                "[↑/k] Défiler  [/] Chercher  [Échap] Effacer recherche  [Enter/i] Fiche/Erreur  [f] Filtre  [o] Tri  [?] Aide  [q] Quitter"
+            } else {
+                "[↑/k] Défiler  [/] Chercher  [Enter/i] Fiche/Erreur  [f] Filtre  [o] Tri  [?] Aide  [q] Quitter"
+            }
         }
         ViewPage::CompletedInspection => {
             "[Esc/Backspace/Enter] Retour Liste  [?] Aide  [q] Quitter"
         }
         ViewPage::MediaBrowser => {
-            let active_sources = ctx
-                .telemetry
-                .media_sources
-                .iter()
-                .filter(|s| s.enabled)
-                .count();
-            if active_sources > 1 {
-                "[↑/k] Défiler  [Enter/i] Fiche  [Space] Cocher  [a] Tout  [f] Filtre  [S] Source  [o] Tri  [b] Batch  [x/X] Arrêter Batch  [?] Aide  [q] Quitter"
+            if ctx.search_active {
+                "[Entrée] Valider recherche  [Échap] Annuler  [Texte] Filtrer  [?] Aide"
             } else {
-                "[↑/k] Défiler  [Enter/i] Fiche  [Space] Cocher  [a] Tout  [f] Filtre  [o] Tri  [b] Batch  [x/X] Arrêter Batch  [?] Aide  [q] Quitter"
+                let active_sources = ctx
+                    .telemetry
+                    .media_sources
+                    .iter()
+                    .filter(|s| s.enabled)
+                    .count();
+                if !ctx.search_query.is_empty() {
+                    "[↑/k] Défiler  [/] Chercher  [Échap] Effacer  [Enter/i] Fiche  [Space] Cocher  [a] Tout  [f] Filtre  [o] Tri  [b] Batch  [?] Aide  [q] Quitter"
+                } else if active_sources > 1 {
+                    "[↑/k] Défiler  [/] Chercher  [Enter/i] Fiche  [Space] Cocher  [a] Tout  [f] Filtre  [S] Source  [o] Tri  [b] Batch  [x/X] Arrêter Batch  [?] Aide  [q] Quitter"
+                } else {
+                    "[↑/k] Défiler  [/] Chercher  [Enter/i] Fiche  [Space] Cocher  [a] Tout  [f] Filtre  [o] Tri  [b] Batch  [x/X] Arrêter Batch  [?] Aide  [q] Quitter"
+                }
             }
         }
         ViewPage::MediaSources => {

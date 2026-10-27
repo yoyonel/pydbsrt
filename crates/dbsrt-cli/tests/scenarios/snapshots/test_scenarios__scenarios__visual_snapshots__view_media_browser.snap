@@ -8,7 +8,7 @@ expression: grid
 │ ⚡  DÉBITS RÉSEAU CIFS : Instantané:   0.0 MB/s (Net RX:   0.0 MB/s, VFS:   0.0 MB/s)                                                     │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ┌ 📂  EXPLORATEUR DE MÉDIAS MULTI-SOURCES [5/5 DISPONIBLES sur 2 sources] ──────────────────────────────────────────────────────────────────┐
-│ [f] Filtre: [TOUS]    [o] Tri: [NOM (A-Z)]    [S] Source: [ACTIVES]    Sélection: 0 média(s) coché(s)    [d] Supprimer                   │
+│ [f] Filtre: [TOUS]    [o] Tri: [NOM (A-Z)]    [S] Source: [ACTIVES]   [/] Chercher    Sélection: 0 média(s) coché(s)    [d] Supprimer    │
 │                                                                                                                                          │
 │    SEL   MÉDIA / RELEASE NAS                            TAILLE     DURÉE     EMPREINTE PHASH    SOUS-TITRES     ENCODAGE   STATUT        │
 │►   [ ]   [video] Movie.A.2024                           4.2 GiB    2h00m     - Non calculé      0 (Aucun)       hevc       VIERGE        │
@@ -31,4 +31,4 @@ expression: grid
 │                                                                                                                                          │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 
-  [1] Tâches   [2/h] Stats   [3/r] Récents   [4/m] Médias   [5/s] Sources  │ [↑/k] Défiler  [Enter/i] Fiche  [Space] Cocher  [a] Tout  [f] F
+  [1] Tâches   [2/h] Stats   [3/r] Récents   [4/m] Médias   [5/s] Sources  │ [↑/k] Défiler  [/] Chercher  [Enter/i] Fiche  [Space] Cocher  [

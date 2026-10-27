@@ -47,6 +47,17 @@
 - **Zero Inline Conversions**: Temporal arithmetic (e.g. `% 86400`, `/ 3600`, `* 1000.0`, `/ 60.0`) MUST reference standard named factors (`SECONDS_PER_DAY`, `SECONDS_PER_HOUR`, `MILLIS_PER_SEC`, `SECONDS_PER_MINUTE`).
 - **Strict Justification Exception**: Standard radix literals in language-native parsing routines (e.g. `u64::from_str_radix(s, 16)` for hex, base-10/2) and structural 0/1 identity boundaries in loops are tolerated ONLY where defining an external constant degrades readability. All other domain values require explicit named constants.
 
+## Mandatory Normalized Rustdoc Markdown Architecture
+- **Standardized Docstring Sections (Strictly Enforced)**: Every new, modified, or refactored Rust struct, enum, function, method, and module MUST systematically include standardized Markdown sections (`# Arguments`, `# Returns`, `# Errors`, `# Panics`, `# Data Flow & Invariants`):
+  1. **Top Summary & Rationale**: High-level explanation of the component's purpose, design decisions, and architectural role.
+  2. **`# Arguments`**: Technical description of every input argument, its units, domain constraints, and boundaries.
+  3. **`# Returns`**: Output semantics, edge conditions (e.g. empty inputs, zero matches), and default value behavior.
+  4. **`# Errors`**: Exhaustive conditions causing `Err(E)` returns when the function returns `Result`.
+  5. **`# Panics`**: Explicit statement of panic absence or edge cases that trigger panics.
+  6. **`# Data Flow & Invariants`**: Step-by-step trace of how data flows through the algorithm, internal state mutations, thread-safety guarantees, caching strategies, and mathematical invariants.
+- **Zero Doc Drift**: Any change to function parameters, return types, or algorithmic behaviors MUST simultaneously update its corresponding Rustdoc section in the exact same commit.
+- **Safe Doctests**: Code blocks in Rustdoc that depend on internal state, private APIs, or mocks MUST use ````rust,ignore` or ````rust,no_run` so `cargo test --doc` passes with zero failures.
+
 ## Communication
 - **Caveman Mode**: Always terse, ultra-compressed, 100% technical accuracy, zero filler words.
 

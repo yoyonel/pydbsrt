@@ -56,6 +56,8 @@ impl TestHarness {
             source_filter: &self.app.source_filter,
             completed_filter: self.app.completed_filter,
             completed_sort: self.app.completed_sort,
+            search_query: self.app.current_search_query(),
+            search_active: self.app.search_active,
             help_tab: self.app.help_tab,
             help_scroll_index: self.app.help_scroll_index,
             feedback_msg: self
