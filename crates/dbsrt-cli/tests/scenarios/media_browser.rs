@@ -88,30 +88,47 @@ fn test_scenario_media_browser_source_filter_cycling() {
     let mut harness = TestHarness::new(240, 45, mock_complete_telemetry());
     harness.send_key(KeyCode::Char('4'));
 
-    // Toggle source filter with 'S'
-    // 1st press -> Filter by first active source: nas_video
+    // Initial default: MediaSourceFilter::ActiveOnly (both sources enabled -> 5/5 visible)
+    assert_eq!(
+        harness.app.source_filter,
+        dbsrt_cli::commands::top::model::MediaSourceFilter::ActiveOnly
+    );
+    harness.assert_buffer_contains("5/5 DISPONIBLES");
+
+    // 1st press -> All sources (explicit TOUTES)
     harness.send_key(KeyCode::Char('S'));
     assert_eq!(
-        harness.app.selected_source_filter.as_deref(),
-        Some("nas_video")
+        harness.app.source_filter,
+        dbsrt_cli::commands::top::model::MediaSourceFilter::All
+    );
+    harness.assert_buffer_contains("5/5 DISPONIBLES");
+
+    // 2nd press -> Filter by first source: nas_video
+    harness.send_key(KeyCode::Char('S'));
+    assert_eq!(
+        harness.app.source_filter,
+        dbsrt_cli::commands::top::model::MediaSourceFilter::Specific("nas_video".to_string())
     );
     harness.assert_buffer_contains("3/5 DISPONIBLES");
     harness.assert_buffer_contains("Movie.A.2024");
     harness.assert_buffer_does_not_contain("Show.S01E01");
 
-    // 2nd press -> Filter by second active source: nas_tvshow
+    // 3rd press -> Filter by second source: nas_tvshow
     harness.send_key(KeyCode::Char('S'));
     assert_eq!(
-        harness.app.selected_source_filter.as_deref(),
-        Some("nas_tvshow")
+        harness.app.source_filter,
+        dbsrt_cli::commands::top::model::MediaSourceFilter::Specific("nas_tvshow".to_string())
     );
     harness.assert_buffer_contains("2/5 DISPONIBLES");
     harness.assert_buffer_contains("Show.S01E01");
     harness.assert_buffer_does_not_contain("Movie.A.2024");
 
-    // 3rd press -> All sources (None)
+    // 4th press -> Back to ActiveOnly
     harness.send_key(KeyCode::Char('S'));
-    assert_eq!(harness.app.selected_source_filter, None);
+    assert_eq!(
+        harness.app.source_filter,
+        dbsrt_cli::commands::top::model::MediaSourceFilter::ActiveOnly
+    );
     harness.assert_buffer_contains("5/5 DISPONIBLES");
 }
 

@@ -10,8 +10,8 @@ use dbsrt_cli::commands::top::model::{
     calculate_dimension_stats, calculate_overall_stats, default_progress_bar,
     filter_and_sort_media, format_duration, format_progress_bar, parse_iso_to_unix_secs,
     ActiveJobTelemetry, CompletedFilter, CompletedSort, DiscoveredMediaItem, GpuTelemetry, HelpTab,
-    HistoricalRecord, IngestionStatus, MediaFilter, MediaSort, MediaSubtrackInfo,
-    SessionThroughput, SystemTelemetry, ViewPage,
+    HistoricalRecord, IngestionStatus, MediaFilter, MediaSort, MediaSourceFilter,
+    MediaSubtrackInfo, SessionThroughput, SystemTelemetry, ViewPage,
 };
 use dbsrt_cli::commands::top::process_ctl::{
     check_if_stopped, inspect_job_details, kill_job, stop_job, toggle_pause_job,
@@ -322,7 +322,7 @@ fn test_ui_rendering_all_pages() {
         selected_media_paths: &empty_set,
         media_filter: MediaFilter::All,
         media_sort: MediaSort::Name,
-        selected_source_filter: None,
+        source_filter: &MediaSourceFilter::ActiveOnly,
         completed_filter: CompletedFilter::All,
         completed_sort: CompletedSort::DateDesc,
         help_tab: HelpTab::General,
@@ -345,7 +345,7 @@ fn test_ui_rendering_all_pages() {
         selected_media_paths: &empty_set,
         media_filter: MediaFilter::All,
         media_sort: MediaSort::Name,
-        selected_source_filter: None,
+        source_filter: &MediaSourceFilter::ActiveOnly,
         completed_filter: CompletedFilter::All,
         completed_sort: CompletedSort::DateDesc,
         help_tab: HelpTab::General,
@@ -366,7 +366,7 @@ fn test_ui_rendering_all_pages() {
         selected_media_paths: &empty_set,
         media_filter: MediaFilter::All,
         media_sort: MediaSort::Name,
-        selected_source_filter: None,
+        source_filter: &MediaSourceFilter::ActiveOnly,
         completed_filter: CompletedFilter::All,
         completed_sort: CompletedSort::DateDesc,
         help_tab: HelpTab::General,
@@ -388,7 +388,7 @@ fn test_ui_rendering_all_pages() {
         selected_media_paths: &empty_set,
         media_filter: MediaFilter::All,
         media_sort: MediaSort::Name,
-        selected_source_filter: None,
+        source_filter: &MediaSourceFilter::ActiveOnly,
         completed_filter: CompletedFilter::All,
         completed_sort: CompletedSort::DateDesc,
         help_tab: HelpTab::General,
@@ -409,7 +409,7 @@ fn test_ui_rendering_all_pages() {
         selected_media_paths: &empty_set,
         media_filter: MediaFilter::All,
         media_sort: MediaSort::Name,
-        selected_source_filter: None,
+        source_filter: &MediaSourceFilter::ActiveOnly,
         completed_filter: CompletedFilter::All,
         completed_sort: CompletedSort::DateDesc,
         help_tab: HelpTab::General,
@@ -430,7 +430,7 @@ fn test_ui_rendering_all_pages() {
         selected_media_paths: &empty_set,
         media_filter: MediaFilter::All,
         media_sort: MediaSort::Name,
-        selected_source_filter: None,
+        source_filter: &MediaSourceFilter::ActiveOnly,
         completed_filter: CompletedFilter::All,
         completed_sort: CompletedSort::DateDesc,
         help_tab: HelpTab::General,
@@ -451,7 +451,7 @@ fn test_ui_rendering_all_pages() {
         selected_media_paths: &empty_set,
         media_filter: MediaFilter::All,
         media_sort: MediaSort::Name,
-        selected_source_filter: None,
+        source_filter: &MediaSourceFilter::ActiveOnly,
         completed_filter: CompletedFilter::All,
         completed_sort: CompletedSort::DateDesc,
         help_tab: HelpTab::General,
@@ -474,7 +474,7 @@ fn test_ui_rendering_all_pages() {
         selected_media_paths: &empty_set,
         media_filter: MediaFilter::All,
         media_sort: MediaSort::Name,
-        selected_source_filter: None,
+        source_filter: &MediaSourceFilter::ActiveOnly,
         completed_filter: CompletedFilter::All,
         completed_sort: CompletedSort::DateDesc,
         help_tab: HelpTab::General,
@@ -495,7 +495,7 @@ fn test_ui_rendering_all_pages() {
         selected_media_paths: &empty_set,
         media_filter: MediaFilter::All,
         media_sort: MediaSort::Name,
-        selected_source_filter: None,
+        source_filter: &MediaSourceFilter::ActiveOnly,
         completed_filter: CompletedFilter::All,
         completed_sort: CompletedSort::DateDesc,
         help_tab: HelpTab::General,
@@ -518,7 +518,7 @@ fn test_ui_rendering_all_pages() {
         selected_media_paths: &selected_paths,
         media_filter: MediaFilter::All,
         media_sort: MediaSort::Name,
-        selected_source_filter: None,
+        source_filter: &MediaSourceFilter::ActiveOnly,
         completed_filter: CompletedFilter::All,
         completed_sort: CompletedSort::DateDesc,
         help_tab: HelpTab::General,
@@ -538,7 +538,7 @@ fn test_ui_rendering_all_pages() {
         selected_media_paths: &empty_set,
         media_filter: MediaFilter::Status(IngestionStatus::Virgin),
         media_sort: MediaSort::Size,
-        selected_source_filter: None,
+        source_filter: &MediaSourceFilter::ActiveOnly,
         completed_filter: CompletedFilter::All,
         completed_sort: CompletedSort::DateDesc,
         help_tab: HelpTab::General,
@@ -559,7 +559,7 @@ fn test_ui_rendering_all_pages() {
         selected_media_paths: &empty_set,
         media_filter: MediaFilter::All,
         media_sort: MediaSort::Name,
-        selected_source_filter: None,
+        source_filter: &MediaSourceFilter::ActiveOnly,
         completed_filter: CompletedFilter::All,
         completed_sort: CompletedSort::DateDesc,
         help_tab: HelpTab::General,
@@ -585,7 +585,7 @@ fn test_ui_rendering_all_pages() {
         selected_media_paths: &empty_set,
         media_filter: MediaFilter::All,
         media_sort: MediaSort::Name,
-        selected_source_filter: None,
+        source_filter: &MediaSourceFilter::ActiveOnly,
         completed_filter: CompletedFilter::All,
         completed_sort: CompletedSort::DateDesc,
         help_tab: HelpTab::General,
@@ -606,7 +606,7 @@ fn test_ui_rendering_all_pages() {
         selected_media_paths: &empty_set,
         media_filter: MediaFilter::All,
         media_sort: MediaSort::Name,
-        selected_source_filter: None,
+        source_filter: &MediaSourceFilter::ActiveOnly,
         completed_filter: CompletedFilter::All,
         completed_sort: CompletedSort::DateDesc,
         help_tab: HelpTab::General,
@@ -2438,18 +2438,24 @@ fn test_e2e_sources_toggle_purges_inactive_media_immediately() {
         Some(&shared_state),
     );
 
-    // Verify shared state has source 0 disabled and only 1 discovered media from nas_video
+    // Verify shared state has source 0 disabled, but persistent catalog preserves all media (len == 2)
     let locked = shared_state.read().unwrap();
     assert!(!locked.media_sources[0].enabled);
     assert_eq!(
         locked.discovered_media.len(),
-        1,
-        "Deactivated source media must be immediately purged from shared_state.discovered_media!"
+        2,
+        "Deactivated source media must be preserved in persistent catalog without destructive purge!"
     );
-    assert_eq!(
-        locked.discovered_media[0].source_id,
-        Some("nas_video".to_string())
-    );
+
+    // Under default ActiveOnly source filter, visible media displays only active nas_video
+    let visible = app.visible_media(&locked.discovered_media, &locked.media_sources);
+    assert_eq!(visible.len(), 1);
+    assert_eq!(visible[0].source_id, Some("nas_video".to_string()));
+
+    // When switching to All sources filter, both items are accessible
+    app.source_filter = MediaSourceFilter::All;
+    let visible_all = app.visible_media(&locked.discovered_media, &locked.media_sources);
+    assert_eq!(visible_all.len(), 2);
 }
 
 #[test]
@@ -2523,43 +2529,67 @@ fn test_e2e_media_browser_source_filter_cycle() {
     };
     let shared_state = Arc::new(RwLock::new(tel.clone()));
 
-    // Press 'S' (Shift+S) to cycle source filter to first source
+    // Initial state: MediaSourceFilter::ActiveOnly (both sources active -> 2 items)
+    let visible_init = app.visible_media(&tel.discovered_media, &tel.media_sources);
+    assert_eq!(visible_init.len(), 2);
+
+    // Press 'S' to cycle to All
     dbsrt_cli::commands::top::app::handle_key_event_with_state(
         crossterm::event::KeyCode::Char('S'),
         &mut app,
         &tel,
         Some(&shared_state),
     );
-    assert_eq!(app.selected_source_filter, Some("nas_tvshow".to_string()));
+    assert_eq!(
+        app.source_filter,
+        dbsrt_cli::commands::top::model::MediaSourceFilter::All
+    );
 
-    // Filter items with source filter active
-    let visible = app.visible_media(&tel.discovered_media);
+    // Press 'S' again to cycle to first source (nas_tvshow)
+    dbsrt_cli::commands::top::app::handle_key_event_with_state(
+        crossterm::event::KeyCode::Char('S'),
+        &mut app,
+        &tel,
+        Some(&shared_state),
+    );
+    assert_eq!(
+        app.source_filter,
+        dbsrt_cli::commands::top::model::MediaSourceFilter::Specific("nas_tvshow".to_string())
+    );
+
+    let visible = app.visible_media(&tel.discovered_media, &tel.media_sources);
     assert_eq!(visible.len(), 1);
     assert_eq!(visible[0].stem, "show_ep1");
 
-    // Press 'S' again to cycle to second source
+    // Press 'S' again to cycle to second source (nas_video)
     dbsrt_cli::commands::top::app::handle_key_event_with_state(
         crossterm::event::KeyCode::Char('S'),
         &mut app,
         &tel,
         Some(&shared_state),
     );
-    assert_eq!(app.selected_source_filter, Some("nas_video".to_string()));
+    assert_eq!(
+        app.source_filter,
+        dbsrt_cli::commands::top::model::MediaSourceFilter::Specific("nas_video".to_string())
+    );
 
-    let visible2 = app.visible_media(&tel.discovered_media);
+    let visible2 = app.visible_media(&tel.discovered_media, &tel.media_sources);
     assert_eq!(visible2.len(), 1);
     assert_eq!(visible2[0].stem, "movie");
 
-    // Press 'S' again to cycle back to None (all sources)
+    // Press 'S' again to cycle back to ActiveOnly
     dbsrt_cli::commands::top::app::handle_key_event_with_state(
         crossterm::event::KeyCode::Char('S'),
         &mut app,
         &tel,
         Some(&shared_state),
     );
-    assert_eq!(app.selected_source_filter, None);
-    let visible_all = app.visible_media(&tel.discovered_media);
-    assert_eq!(visible_all.len(), 2);
+    assert_eq!(
+        app.source_filter,
+        dbsrt_cli::commands::top::model::MediaSourceFilter::ActiveOnly
+    );
+    let visible_active = app.visible_media(&tel.discovered_media, &tel.media_sources);
+    assert_eq!(visible_active.len(), 2);
 }
 
 #[test]
@@ -2782,7 +2812,7 @@ fn test_e2e_contextual_help_navigation_and_glossary() {
         selected_media_paths: &empty_set,
         media_filter: MediaFilter::All,
         media_sort: MediaSort::Name,
-        selected_source_filter: None,
+        source_filter: &MediaSourceFilter::ActiveOnly,
         completed_filter: CompletedFilter::All,
         completed_sort: CompletedSort::DateDesc,
         help_tab: HelpTab::Completed,

@@ -931,12 +931,13 @@ where
     let mut cached_map = load_media_cache(cache_path);
     let certified_stems = get_certified_stems(events_path, couplings_path);
 
-    let mut discovered = Vec::new();
     let mut updated_sources = sources.to_vec();
 
     let has_enabled_sources = sources.iter().any(|s| s.enabled);
     if !has_enabled_sources {
-        return (Vec::new(), updated_sources);
+        let mut full_catalog: Vec<_> = cached_map.into_values().collect();
+        full_catalog.sort_by_key(|a| a.stem.to_lowercase());
+        return (full_catalog, updated_sources);
     }
 
     let now_secs = std::time::SystemTime::now()
@@ -956,6 +957,15 @@ where
         if src_path.exists() && src_path.is_dir() {
             collect_video_files(&src_path, &mut video_paths, MAX_MEDIA_SCAN_LIMIT);
         }
+
+        // Clean up entries deleted from disk for this active source only
+        let found_stems: std::collections::HashSet<String> = video_paths
+            .iter()
+            .filter_map(|p| p.file_stem().map(|s| s.to_string_lossy().to_string()))
+            .collect();
+        cached_map.retain(|stem, item| {
+            item.source_id.as_deref() != Some(&src_id) || found_stems.contains(stem)
+        });
 
         let mut count = 0;
         let mut added_count = 0;
@@ -1029,8 +1039,7 @@ where
                 if !cached_map.contains_key(&item.stem) {
                     added_count += 1;
                 }
-                cached_map.insert(item.stem.clone(), item.clone());
-                discovered.push(item);
+                cached_map.insert(item.stem.clone(), item);
                 count += 1;
             }
 
@@ -1038,44 +1047,26 @@ where
             updated_sources[src_idx].last_scan_added = added_count;
             updated_sources[src_idx].last_scan_iso = Some(now_iso.clone());
 
-            let mut progressive_items = discovered.clone();
+            let mut progressive_items: Vec<_> = cached_map.values().cloned().collect();
             progressive_items.sort_by_key(|a| a.stem.to_lowercase());
             on_chunk(&progressive_items, &updated_sources);
         }
     }
 
-    if discovered.is_empty() && !cached_map.is_empty() {
-        if has_enabled_sources {
-            let enabled_ids: std::collections::HashSet<String> = sources
-                .iter()
-                .filter(|s| s.enabled)
-                .map(|s| s.id.clone())
-                .collect();
-            discovered = cached_map
-                .into_values()
-                .filter(|item| {
-                    item.source_id
-                        .as_ref()
-                        .map(|id| enabled_ids.contains(id))
-                        .unwrap_or(false)
-                })
-                .collect();
-        }
-    } else if has_enabled_sources {
-        save_media_cache(cache_path, &discovered);
-    }
+    let mut full_catalog: Vec<_> = cached_map.into_values().collect();
+    save_media_cache(cache_path, &full_catalog);
 
     if let Ok(mut c_lock) = STEM_CODEC_CACHE.lock() {
         let map = c_lock.get_or_insert_with(HashMap::new);
-        for item in &discovered {
+        for item in &full_catalog {
             if let Some(ref codec) = item.video_codec {
                 map.insert(item.stem.clone(), codec.clone());
             }
         }
     }
 
-    discovered.sort_by_key(|a| a.stem.to_lowercase());
-    (discovered, updated_sources)
+    full_catalog.sort_by_key(|a| a.stem.to_lowercase());
+    (full_catalog, updated_sources)
 }
 
 /// Scans all configured and enabled media sources, discovering candidate media and assigning source IDs.
@@ -1168,7 +1159,7 @@ pub fn start_media_sources_scanner(
         let phash_dir = PathBuf::from(DEFAULT_PHASH_DIR);
         let media_cache_path = PathBuf::from(DEFAULT_MEDIA_CACHE_PATH);
 
-        let publish_scan_update = |partial_items: &[DiscoveredMediaItem],
+        let publish_scan_update = |catalog_items: &[DiscoveredMediaItem],
                                    scanned_sources: &[MediaSourceConfig],
                                    is_scanning: bool| {
             if let Ok(mut state) = shared_state.write() {
@@ -1177,21 +1168,7 @@ pub fn start_media_sources_scanner(
                 } else {
                     merge_scanned_source_metrics(&mut state.media_sources, scanned_sources);
                 }
-                let active_ids: std::collections::HashSet<String> = state
-                    .media_sources
-                    .iter()
-                    .filter(|s| s.enabled)
-                    .map(|s| s.id.clone())
-                    .collect();
-                state.discovered_media = partial_items
-                    .iter()
-                    .filter(|item| {
-                        item.source_id
-                            .as_ref()
-                            .is_none_or(|id| active_ids.contains(id))
-                    })
-                    .cloned()
-                    .collect();
+                state.discovered_media = catalog_items.to_vec();
                 state.is_scanning = is_scanning;
                 let _ = save_media_sources(&sources_path, &state.media_sources);
             }

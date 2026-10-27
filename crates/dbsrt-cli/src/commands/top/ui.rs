@@ -22,8 +22,8 @@ use crate::commands::top::constants::{
 use crate::commands::top::model::{
     default_progress_bar, filter_and_sort_completed, filter_and_sort_media_with_source,
     format_duration, format_progress_bar, CompletedFilter, CompletedSort, CompletedStatus, HelpTab,
-    IngestionStatus, MediaFilter, MediaSort, SourceInputModalState, SourceModalField,
-    SourceModalMode, SystemTelemetry, ViewPage,
+    IngestionStatus, MediaFilter, MediaSort, MediaSourceFilter, SourceInputModalState,
+    SourceModalField, SourceModalMode, SystemTelemetry, ViewPage,
 };
 
 /// UI rendering application context.
@@ -38,7 +38,7 @@ pub struct UiContext<'a> {
     pub selected_media_paths: &'a HashSet<PathBuf>,
     pub media_filter: MediaFilter,
     pub media_sort: MediaSort,
-    pub selected_source_filter: Option<&'a str>,
+    pub source_filter: &'a MediaSourceFilter,
     pub completed_filter: CompletedFilter,
     pub completed_sort: CompletedSort,
     pub help_tab: HelpTab,
@@ -1125,7 +1125,8 @@ fn render_media_browser_page(frame: &mut Frame, area: Rect, ctx: &UiContext) {
         &ctx.telemetry.discovered_media,
         ctx.media_filter,
         ctx.media_sort,
-        ctx.selected_source_filter,
+        ctx.source_filter,
+        &ctx.telemetry.media_sources,
     );
 
     let total_count = ctx.telemetry.discovered_media.len();
@@ -1139,17 +1140,33 @@ fn render_media_browser_page(frame: &mut Frame, area: Rect, ctx: &UiContext) {
         .count();
     let total_sources = ctx.telemetry.media_sources.len();
 
-    let title = if total_sources <= 1 {
-        format!(" 📂 EXPLORATEUR DE MÉDIAS [{visible_count}/{total_count} DISPONIBLES] ")
-    } else if active_sources == 0 {
-        " 📂 EXPLORATEUR DE MÉDIAS MULTI-SOURCES [0/0 DISPONIBLES (toutes sources inactives)] "
-            .to_string()
-    } else if active_sources == 1 {
-        format!(" 📂 EXPLORATEUR DE MÉDIAS MULTI-SOURCES [{visible_count}/{total_count} DISPONIBLES sur 1/{total_sources} source active] ")
-    } else if active_sources < total_sources {
-        format!(" 📂 EXPLORATEUR DE MÉDIAS MULTI-SOURCES [{visible_count}/{total_count} DISPONIBLES sur {active_sources}/{total_sources} sources actives] ")
-    } else {
-        format!(" 📂 EXPLORATEUR DE MÉDIAS MULTI-SOURCES [{visible_count}/{total_count} DISPONIBLES sur {total_sources} sources] ")
+    let title = match ctx.source_filter {
+        MediaSourceFilter::ActiveOnly => {
+            if total_sources <= 1 {
+                format!(" 📂 EXPLORATEUR DE MÉDIAS [{visible_count}/{total_count} DISPONIBLES] ")
+            } else if active_sources == 0 {
+                format!(" 📂 EXPLORATEUR DE MÉDIAS MULTI-SOURCES [0/{total_count} DISPONIBLES (toutes sources inactives)] ")
+            } else if active_sources == 1 {
+                format!(" 📂 EXPLORATEUR DE MÉDIAS MULTI-SOURCES [{visible_count}/{total_count} DISPONIBLES sur 1/{total_sources} source active] ")
+            } else if active_sources < total_sources {
+                format!(" 📂 EXPLORATEUR DE MÉDIAS MULTI-SOURCES [{visible_count}/{total_count} DISPONIBLES sur {active_sources}/{total_sources} sources actives] ")
+            } else {
+                format!(" 📂 EXPLORATEUR DE MÉDIAS MULTI-SOURCES [{visible_count}/{total_count} DISPONIBLES sur {total_sources} sources] ")
+            }
+        }
+        MediaSourceFilter::All => {
+            format!(" 📂 EXPLORATEUR DE MÉDIAS MULTI-SOURCES [{visible_count}/{total_count} DISPONIBLES (Toutes sources)] ")
+        }
+        MediaSourceFilter::Specific(id) => {
+            let name = ctx
+                .telemetry
+                .media_sources
+                .iter()
+                .find(|s| &s.id == id)
+                .map(|s| s.name.as_str())
+                .unwrap_or(id.as_str());
+            format!(" 📂 EXPLORATEUR DE MÉDIAS MULTI-SOURCES [{visible_count}/{total_count} DISPONIBLES (Source: {name})] ")
+        }
     };
 
     let mut browser_title_spans = vec![Span::styled(
@@ -1199,28 +1216,8 @@ fn render_media_browser_page(frame: &mut Frame, area: Rect, ctx: &UiContext) {
         ),
     ];
 
-    if active_sources > 1 {
-        let source_filter_name = if let Some(src_id) = ctx.selected_source_filter {
-            ctx.telemetry
-                .media_sources
-                .iter()
-                .find(|s| s.id == src_id)
-                .map(|s| {
-                    let clean = s
-                        .name
-                        .trim_start_matches("Synology NAS (")
-                        .trim_end_matches(')')
-                        .trim();
-                    if clean.is_empty() {
-                        s.id.as_str()
-                    } else {
-                        clean
-                    }
-                })
-                .unwrap_or(src_id)
-        } else {
-            "TOUTES"
-        };
+    if total_sources > 1 {
+        let source_filter_name = ctx.source_filter.label(&ctx.telemetry.media_sources);
         bar_spans.push(Span::raw("   "));
         bar_spans.push(Span::styled(
             " [S] Source: ",
@@ -1248,6 +1245,11 @@ fn render_media_browser_page(frame: &mut Frame, area: Rect, ctx: &UiContext) {
         } else {
             Style::default().fg(Color::DarkGray)
         },
+    ));
+    bar_spans.push(Span::raw("   "));
+    bar_spans.push(Span::styled(
+        " [d] Supprimer",
+        Style::default().fg(Color::Red),
     ));
     let bar_p = Paragraph::new(Line::from(bar_spans));
     frame.render_widget(bar_p, sub_chunks[0]);
@@ -1504,7 +1506,8 @@ fn render_media_inspection_page(frame: &mut Frame, area: Rect, ctx: &UiContext) 
         &ctx.telemetry.discovered_media,
         ctx.media_filter,
         ctx.media_sort,
-        ctx.selected_source_filter,
+        ctx.source_filter,
+        &ctx.telemetry.media_sources,
     );
 
     if visible_media.is_empty() || ctx.media_scroll_index >= visible_media.len() {
@@ -1528,6 +1531,21 @@ fn render_media_inspection_page(frame: &mut Frame, area: Rect, ctx: &UiContext) 
         "☑ COCHÉ pour batch"
     } else {
         "☐ NON COCHÉ"
+    };
+
+    let is_accessible = item.path.exists();
+    let access_span = if is_accessible {
+        Span::styled(
+            "✓ ACCESSIBLE (Fichier présent sur le disque)",
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+        )
+    } else {
+        Span::styled(
+            "✗ INACCESSIBLE (Fichier introuvable sur le disque / montage déconnecté)",
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        )
     };
 
     let mut lines = Vec::new();
@@ -1570,6 +1588,10 @@ fn render_media_inspection_page(frame: &mut Frame, area: Rect, ctx: &UiContext) 
             item.path.display().to_string(),
             Style::default().fg(Color::Cyan),
         ),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("  Accès Disque: ", Style::default().fg(Color::DarkGray)),
+        access_span,
     ]));
     lines.push(Line::from(vec![
         Span::styled("  Taille  : ", Style::default().fg(Color::DarkGray)),
@@ -2550,8 +2572,9 @@ fn build_help_media_browser() -> Vec<Line<'static>> {
         Line::from("    [a]            : Cocher / décocher TOUS les médias visibles selon le filtre actif."),
         Line::from("    [b]            : Lancer l'ingestion batch ciblée exclusivement sur les médias cochés."),
         Line::from("    [f]            : Filtrer par statut : [TOUS], [VIERGES SEULS], [EN COURS], [COMPLÉTÉS], [HACHÉS SEULS], [AVEC SOUS-TITRES], [SANS SOUS-TITRES]."),
-        Line::from("    [S]            : Filtrer par source d'origine : cycle entre les sources actives (si >= 2 sources actives)."),
+        Line::from("    [S]            : Filtrer par source d'origine : cycle entre [ACTIVES], [TOUTES] et chaque source spécifique."),
         Line::from("    [o]            : Trier par critère : NOM (A-Z), TAILLE, DURÉE, STATUT, SOUS-TITRES."),
+        Line::from("    [d] / [Suppr]  : Supprimer le(s) média(s) sélectionné(s) du catalogue persistant."),
         Line::from("    [Enter] / [i]  : Ouvrir la fiche d'inspection détaillée du média candidat."),
         Line::from("    [x] / [X]      : Arrêt propre (SIGTERM) ou forcé (SIGKILL) de tout le batch."),
     ]
@@ -2578,7 +2601,7 @@ fn build_help_media_sources() -> Vec<Line<'static>> {
         Line::from(Span::styled("  Actions CRUD & Raccourcis :", Style::default().fg(Color::LightGreen).add_modifier(Modifier::BOLD))),
         Line::from("    [a]            : Ajouter une nouvelle source via le formulaire modal interactif."),
         Line::from("    [e]            : Éditer le chemin ou le libellé de la source sélectionnée."),
-        Line::from("    [Space]        : Activer / Désactiver la source sélectionnée (invalidation mémoire et purge instantanée à 0ms)."),
+        Line::from("    [Space]        : Activer / Désactiver la source sélectionnée pour les scans disque (catalogue persistant préservé)."),
         Line::from("    [d]            : Supprimer la source sélectionnée (sécurité : interdit la suppression de la dernière source restante)."),
         Line::from("    [r]            : Déclencher un rescan complet immédiat de l'ensemble des sources actives en tâche de fond."),
     ]

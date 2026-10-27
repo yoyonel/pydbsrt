@@ -8,7 +8,7 @@ expression: grid
 │ ⚡  DÉBITS RÉSEAU CIFS : Instantané:   0.0 MB/s (Net RX:   0.0 MB/s, VFS:   0.0 MB/s)                                                     │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ┌ 📂  EXPLORATEUR DE MÉDIAS MULTI-SOURCES [5/5 DISPONIBLES sur 2 sources] ──────────────────────────────────────────────────────────────────┐
-│ [f] Filtre: [TOUS]    [o] Tri: [NOM (A-Z)]    [S] Source: [TOUTES]    Sélection: 0 média(s) coché(s)                                     │
+│ [f] Filtre: [TOUS]    [o] Tri: [NOM (A-Z)]    [S] Source: [ACTIVES]    Sélection: 0 média(s) coché(s)    [d] Supprimer                   │
 │                                                                                                                                          │
 │    SEL   MÉDIA / RELEASE NAS                            TAILLE     DURÉE     EMPREINTE PHASH    SOUS-TITRES     ENCODAGE   STATUT        │
 │►   [ ]   [video] Movie.A.2024                           4.2 GiB    2h00m     - Non calculé      0 (Aucun)       hevc       VIERGE        │

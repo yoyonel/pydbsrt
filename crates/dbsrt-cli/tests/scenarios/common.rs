@@ -53,7 +53,7 @@ impl TestHarness {
             selected_media_paths: &self.app.selected_media_paths,
             media_filter: self.app.media_filter,
             media_sort: self.app.media_sort,
-            selected_source_filter: self.app.selected_source_filter.as_deref(),
+            source_filter: &self.app.source_filter,
             completed_filter: self.app.completed_filter,
             completed_sort: self.app.completed_sort,
             help_tab: self.app.help_tab,

@@ -23,14 +23,14 @@ use crate::commands::top::constants::{
 use crate::commands::top::model::{
     calculate_overall_stats, filter_and_sort_completed, filter_and_sort_media_with_source,
     CompletedFilter, CompletedSort, DiscoveredMediaItem, GpuTelemetry, HelpTab, HistoricalRecord,
-    MediaFilter, MediaSort, SourceInputModalState, SourceModalField, SourceModalMode,
-    SystemTelemetry, ViewPage,
+    MediaFilter, MediaSort, MediaSourceConfig, MediaSourceFilter, SourceInputModalState,
+    SourceModalField, SourceModalMode, SystemTelemetry, ViewPage,
 };
 use crate::commands::top::process_ctl::{kill_job, stop_entire_batch, stop_job, toggle_pause_job};
 use crate::commands::top::sampler::{
     add_media_source, compute_session_throughput, delete_media_source, launch_selected_batch,
     load_historical_records, load_media_cache, load_media_sources, preload_stem_size_cache,
-    run_telemetry_sampler_loop, start_gpu_sampler, start_media_sources_scanner,
+    run_telemetry_sampler_loop, save_media_cache, start_gpu_sampler, start_media_sources_scanner,
     toggle_media_source, trigger_media_sources_rescan, update_media_source,
 };
 use crate::commands::top::ui::{render_ui, UiContext};
@@ -47,7 +47,7 @@ pub struct AppState {
     pub selected_media_paths: HashSet<PathBuf>,
     pub media_filter: MediaFilter,
     pub media_sort: MediaSort,
-    pub selected_source_filter: Option<String>,
+    pub source_filter: MediaSourceFilter,
     pub completed_filter: CompletedFilter,
     pub completed_sort: CompletedSort,
     pub help_tab: HelpTab,
@@ -62,12 +62,17 @@ impl AppState {
         Self::default()
     }
 
-    pub fn visible_media(&self, discovered: &[DiscoveredMediaItem]) -> Vec<DiscoveredMediaItem> {
+    pub fn visible_media(
+        &self,
+        discovered: &[DiscoveredMediaItem],
+        sources: &[MediaSourceConfig],
+    ) -> Vec<DiscoveredMediaItem> {
         filter_and_sort_media_with_source(
             discovered,
             self.media_filter,
             self.media_sort,
-            self.selected_source_filter.as_deref(),
+            &self.source_filter,
+            sources,
         )
     }
 
@@ -205,7 +210,7 @@ pub fn event_loop_step<B: ratatui::backend::Backend>(
         app.completed_scroll_index = visible_completed.len().saturating_sub(1);
     }
 
-    let visible_media = app.visible_media(&telemetry.discovered_media);
+    let visible_media = app.visible_media(&telemetry.discovered_media, &telemetry.media_sources);
     if visible_media.is_empty() {
         app.media_scroll_index = 0;
     } else if app.media_scroll_index >= visible_media.len() {
@@ -232,7 +237,7 @@ pub fn event_loop_step<B: ratatui::backend::Backend>(
             selected_media_paths: &app.selected_media_paths,
             media_filter: app.media_filter,
             media_sort: app.media_sort,
-            selected_source_filter: app.selected_source_filter.as_deref(),
+            source_filter: &app.source_filter,
             completed_filter: app.completed_filter,
             completed_sort: app.completed_sort,
             help_tab: app.help_tab,
@@ -543,7 +548,8 @@ pub fn handle_key_event_with_state(
                 }
             }
             ViewPage::MediaBrowser => {
-                let visible = app.visible_media(&telemetry.discovered_media);
+                let visible =
+                    app.visible_media(&telemetry.discovered_media, &telemetry.media_sources);
                 if !visible.is_empty() && app.media_scroll_index + 1 < visible.len() {
                     app.media_scroll_index += 1;
                 }
@@ -594,7 +600,8 @@ pub fn handle_key_event_with_state(
                     (app.completed_scroll_index + PAGE_SCROLL_STEP).min(max_idx);
             }
             ViewPage::MediaBrowser => {
-                let visible = app.visible_media(&telemetry.discovered_media);
+                let visible =
+                    app.visible_media(&telemetry.discovered_media, &telemetry.media_sources);
                 let max_idx = visible.len().saturating_sub(1);
                 app.media_scroll_index = (app.media_scroll_index + PAGE_SCROLL_STEP).min(max_idx);
             }
@@ -634,7 +641,8 @@ pub fn handle_key_event_with_state(
                 app.completed_scroll_index = visible.len().saturating_sub(1);
             }
             ViewPage::MediaBrowser => {
-                let visible = app.visible_media(&telemetry.discovered_media);
+                let visible =
+                    app.visible_media(&telemetry.discovered_media, &telemetry.media_sources);
                 app.media_scroll_index = visible.len().saturating_sub(1);
             }
             ViewPage::MediaSources => {
@@ -655,37 +663,9 @@ pub fn handle_key_event_with_state(
             if let Some(new_state) =
                 toggle_media_source(sources_path, &mut sources, app.source_scroll_index)
             {
-                let active_source_ids: std::collections::HashSet<String> = sources
-                    .iter()
-                    .filter(|s| s.enabled)
-                    .map(|s| s.id.clone())
-                    .collect();
-
-                if let Some(ref filter_id) = app.selected_source_filter {
-                    if !active_source_ids.contains(filter_id) || active_source_ids.len() <= 1 {
-                        app.selected_source_filter = None;
-                    }
-                }
-
                 if let Some(shared) = shared_state {
                     if let Ok(mut state) = shared.write() {
                         state.media_sources = sources.clone();
-                        state.discovered_media.retain(|item| {
-                            item.source_id
-                                .as_ref()
-                                .is_none_or(|id| active_source_ids.contains(id))
-                        });
-                        let active_paths: std::collections::HashSet<_> = state
-                            .discovered_media
-                            .iter()
-                            .map(|m| m.path.clone())
-                            .collect();
-                        app.selected_media_paths
-                            .retain(|p| active_paths.contains(p));
-                        let max_media_idx = state.discovered_media.len().saturating_sub(1);
-                        if app.media_scroll_index > max_media_idx {
-                            app.media_scroll_index = max_media_idx;
-                        }
                     }
                 }
                 let name = sources
@@ -693,9 +673,9 @@ pub fn handle_key_event_with_state(
                     .map(|s| s.name.as_str())
                     .unwrap_or("Source");
                 let state_str = if new_state {
-                    "activée"
+                    "activée (incluse dans les futurs scans)"
                 } else {
-                    "désactivée"
+                    "désactivée (ignorée lors des scans)"
                 };
                 app.set_feedback(format!("Source '{name}' {state_str}."));
             }
@@ -732,26 +712,20 @@ pub fn handle_key_event_with_state(
             };
             match delete_media_source(sources_path, &mut sources, app.source_scroll_index) {
                 Ok(src) => {
-                    let active_source_ids: std::collections::HashSet<String> = sources
-                        .iter()
-                        .filter(|s| s.enabled)
-                        .map(|s| s.id.clone())
-                        .collect();
-
-                    if let Some(ref filter_id) = app.selected_source_filter {
-                        if !active_source_ids.contains(filter_id) || active_source_ids.len() <= 1 {
-                            app.selected_source_filter = None;
+                    if let MediaSourceFilter::Specific(ref filter_id) = app.source_filter {
+                        if !sources.iter().any(|s| &s.id == filter_id) {
+                            app.source_filter = MediaSourceFilter::ActiveOnly;
                         }
                     }
 
                     if let Some(shared) = shared_state {
                         if let Ok(mut state) = shared.write() {
                             state.media_sources = sources.clone();
-                            state.discovered_media.retain(|item| {
-                                item.source_id
-                                    .as_ref()
-                                    .is_none_or(|id| active_source_ids.contains(id))
-                            });
+                            state
+                                .discovered_media
+                                .retain(|item| item.source_id.as_deref() != Some(&src.id));
+                            let cache_path = std::path::Path::new(DEFAULT_MEDIA_CACHE_PATH);
+                            save_media_cache(cache_path, &state.discovered_media);
                             let active_paths: std::collections::HashSet<_> = state
                                 .discovered_media
                                 .iter()
@@ -776,7 +750,7 @@ pub fn handle_key_event_with_state(
             }
         }
         KeyCode::Char(' ') if app.view == ViewPage::MediaBrowser => {
-            let visible = app.visible_media(&telemetry.discovered_media);
+            let visible = app.visible_media(&telemetry.discovered_media, &telemetry.media_sources);
             if let Some(item) = visible.get(app.media_scroll_index) {
                 if app.selected_media_paths.contains(&item.path) {
                     app.selected_media_paths.remove(&item.path);
@@ -786,7 +760,7 @@ pub fn handle_key_event_with_state(
             }
         }
         KeyCode::Char('a') | KeyCode::Char('A') if app.view == ViewPage::MediaBrowser => {
-            let visible = app.visible_media(&telemetry.discovered_media);
+            let visible = app.visible_media(&telemetry.discovered_media, &telemetry.media_sources);
             let all_selected = !visible.is_empty()
                 && visible
                     .iter()
@@ -812,45 +786,90 @@ pub fn handle_key_event_with_state(
             app.set_feedback(format!("Filtre Récents : {}", app.completed_filter.label()));
         }
         KeyCode::Char('S') if app.view == ViewPage::MediaBrowser => {
-            let active_sources: Vec<&crate::commands::top::model::MediaSourceConfig> = telemetry
-                .media_sources
-                .iter()
-                .filter(|s| s.enabled)
-                .collect();
-            if active_sources.len() <= 1 {
-                app.selected_source_filter = None;
-                if active_sources.len() == 1 {
-                    app.set_feedback(format!(
-                        "Une seule source active : '{}'",
-                        active_sources[0].name
-                    ));
-                } else {
-                    app.set_feedback("Aucune source active.".to_string());
-                }
-            } else {
-                let current_idx = app
-                    .selected_source_filter
-                    .as_ref()
-                    .and_then(|id| active_sources.iter().position(|s| &s.id == id));
-                match current_idx {
-                    None => {
-                        app.selected_source_filter = Some(active_sources[0].id.clone());
-                        app.set_feedback(format!("Filtre Source : {}", active_sources[0].name));
-                    }
-                    Some(idx) if idx + 1 < active_sources.len() => {
-                        app.selected_source_filter = Some(active_sources[idx + 1].id.clone());
-                        app.set_feedback(format!(
-                            "Filtre Source : {}",
-                            active_sources[idx + 1].name
-                        ));
-                    }
-                    _ => {
-                        app.selected_source_filter = None;
-                        app.set_feedback("Filtre Source : TOUTES".to_string());
+            let next_filter = match &app.source_filter {
+                MediaSourceFilter::ActiveOnly => MediaSourceFilter::All,
+                MediaSourceFilter::All => {
+                    if let Some(first) = telemetry.media_sources.first() {
+                        MediaSourceFilter::Specific(first.id.clone())
+                    } else {
+                        MediaSourceFilter::ActiveOnly
                     }
                 }
-            }
+                MediaSourceFilter::Specific(current_id) => {
+                    if let Some(pos) = telemetry
+                        .media_sources
+                        .iter()
+                        .position(|s| &s.id == current_id)
+                    {
+                        if pos + 1 < telemetry.media_sources.len() {
+                            MediaSourceFilter::Specific(telemetry.media_sources[pos + 1].id.clone())
+                        } else {
+                            MediaSourceFilter::ActiveOnly
+                        }
+                    } else {
+                        MediaSourceFilter::ActiveOnly
+                    }
+                }
+            };
+            app.source_filter = next_filter;
             app.media_scroll_index = 0;
+            app.set_feedback(format!(
+                "Filtre source : [{}]",
+                app.source_filter.label(&telemetry.media_sources)
+            ));
+        }
+        KeyCode::Char('d') | KeyCode::Delete if app.view == ViewPage::MediaBrowser => {
+            let visible = app.visible_media(&telemetry.discovered_media, &telemetry.media_sources);
+            let to_delete: std::collections::HashSet<PathBuf> =
+                if !app.selected_media_paths.is_empty() {
+                    app.selected_media_paths.clone()
+                } else if app.media_scroll_index < visible.len() {
+                    std::iter::once(visible[app.media_scroll_index].path.clone()).collect()
+                } else {
+                    std::collections::HashSet::new()
+                };
+
+            if !to_delete.is_empty() {
+                let count = to_delete.len();
+                if let Some(shared) = shared_state {
+                    if let Ok(mut state) = shared.write() {
+                        state
+                            .discovered_media
+                            .retain(|m| !to_delete.contains(&m.path));
+                        let cache_path = std::path::Path::new(DEFAULT_MEDIA_CACHE_PATH);
+                        save_media_cache(cache_path, &state.discovered_media);
+                    }
+                }
+                app.selected_media_paths.retain(|p| !to_delete.contains(p));
+                let max_idx = visible.len().saturating_sub(count).saturating_sub(1);
+                if app.media_scroll_index > max_idx {
+                    app.media_scroll_index = max_idx;
+                }
+                app.set_feedback(format!(
+                    "{count} média(s) supprimé(s) du catalogue persistant."
+                ));
+            }
+        }
+        KeyCode::Char('d') | KeyCode::Delete if app.view == ViewPage::MediaInspection => {
+            let visible = app.visible_media(&telemetry.discovered_media, &telemetry.media_sources);
+            if app.media_scroll_index < visible.len() {
+                let target_path = visible[app.media_scroll_index].path.clone();
+                let stem = visible[app.media_scroll_index].stem.clone();
+                if let Some(shared) = shared_state {
+                    if let Ok(mut state) = shared.write() {
+                        state.discovered_media.retain(|m| m.path != target_path);
+                        let cache_path = std::path::Path::new(DEFAULT_MEDIA_CACHE_PATH);
+                        save_media_cache(cache_path, &state.discovered_media);
+                    }
+                }
+                app.selected_media_paths.remove(&target_path);
+                app.view = ViewPage::MediaBrowser;
+                let max_idx = visible.len().saturating_sub(2);
+                if app.media_scroll_index > max_idx {
+                    app.media_scroll_index = max_idx;
+                }
+                app.set_feedback(format!("Média '{stem}' supprimé du catalogue persistant."));
+            }
         }
         KeyCode::Char('o') | KeyCode::Char('O') if app.view == ViewPage::MediaBrowser => {
             app.media_sort = app.media_sort.next();
@@ -866,7 +885,8 @@ pub fn handle_key_event_with_state(
             if app.view == ViewPage::MediaBrowser || app.view == ViewPage::MediaInspection =>
         {
             if app.selected_media_paths.is_empty() {
-                let visible = app.visible_media(&telemetry.discovered_media);
+                let visible =
+                    app.visible_media(&telemetry.discovered_media, &telemetry.media_sources);
                 if app.media_scroll_index < visible.len() {
                     let item = &visible[app.media_scroll_index];
                     app.selected_media_paths.insert(item.path.clone());
@@ -932,7 +952,7 @@ pub fn handle_key_event_with_state(
             }
         }
         KeyCode::Char(' ') if app.view == ViewPage::MediaInspection => {
-            let visible = app.visible_media(&telemetry.discovered_media);
+            let visible = app.visible_media(&telemetry.discovered_media, &telemetry.media_sources);
             if app.media_scroll_index < visible.len() {
                 let p = &visible[app.media_scroll_index].path;
                 if app.selected_media_paths.contains(p) {

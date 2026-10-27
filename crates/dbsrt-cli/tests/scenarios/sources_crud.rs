@@ -44,26 +44,25 @@ fn test_scenario_source_instant_invalidation_on_space_toggle() {
     harness.assert_buffer_contains("0 (inactif)");
     harness.assert_buffer_contains("2 dispo");
 
-    // Verify 0ms memory invalidation
+    // Verify non-destructive toggle: persistent catalog in memory preserves all 5 items
     {
         let tel = harness.shared_state.read().unwrap();
         assert!(!tel.media_sources[0].enabled);
-        // Video items purged, only tvshow items remain (2 items)
-        assert_eq!(tel.discovered_media.len(), 2);
-        assert!(tel
-            .discovered_media
-            .iter()
-            .all(|m| m.source_id.as_deref() == Some("nas_tvshow")));
+        assert_eq!(tel.discovered_media.len(), 5);
     }
-    assert!(MEDIA_RESCAN_REQUESTED.load(Ordering::Relaxed));
 
-    // 4. Return to MediaBrowser: buffer shows only tvshow items with origin badge preserved
+    // 4. Return to MediaBrowser: default ActiveOnly filter shows only active tvshow items (2/5)
     harness.send_key(KeyCode::Char('4'));
-    harness.assert_buffer_contains("2/2 DISPONIBLES sur 1/2 source active");
+    harness.assert_buffer_contains("2/5 DISPONIBLES sur 1/2 source active");
     harness.assert_buffer_contains("Show.S01E01");
     harness.assert_buffer_does_not_contain("Movie.A.2024");
     // Origin source badge is always preserved so operator knows where the media comes from
     harness.assert_buffer_contains("[tvshow] Show.S01E01");
+
+    // 5. Press 'S' to switch filter to [TOUTES]: all 5 items in persistent catalog are visible!
+    harness.send_key(KeyCode::Char('S'));
+    harness.assert_buffer_contains("5/5 DISPONIBLES (Toutes sources)");
+    harness.assert_buffer_contains("Movie.A.2024");
 }
 
 #[test]
@@ -226,13 +225,13 @@ fn test_scenario_sources_crud_disk_operations_and_solitary_protection() {
 fn test_scenario_multi_source_synchronization_and_table_expansion() {
     let mut harness = TestHarness::new(240, 45, mock_complete_telemetry());
 
-    // 1. Initial nominal multi-source state: 2 active sources
+    // 1. Initial nominal multi-source state: 2 active sources, ActiveOnly default
     harness.send_key(KeyCode::Char('4'));
     assert_eq!(harness.app.view, ViewPage::MediaBrowser);
     harness.assert_buffer_contains("5/5 DISPONIBLES sur 2 sources");
     harness.assert_buffer_contains("[video] Movie.A.2024");
     harness.assert_buffer_contains("[tvshow] Show.S01E01");
-    harness.assert_buffer_contains("[S] Source: [TOUTES]");
+    harness.assert_buffer_contains("[S] Source: [ACTIVES]");
 
     // 2. Switch to Sources view: displays [2]
     harness.send_key(KeyCode::Char('5'));
@@ -246,16 +245,16 @@ fn test_scenario_multi_source_synchronization_and_table_expansion() {
     harness.assert_buffer_contains("0 (inactif)");
     harness.assert_buffer_contains("2 dispo");
 
-    // 4. Return to MediaBrowser: title and rows reflect solitary active source, keeping source badge
+    // 4. Return to MediaBrowser: title and rows reflect solitary active source under ActiveOnly default
     harness.send_key(KeyCode::Char('4'));
-    harness.assert_buffer_contains("2/2 DISPONIBLES sur 1/2 source active");
-    harness.assert_buffer_does_not_contain("[S] Source:");
+    harness.assert_buffer_contains("2/5 DISPONIBLES sur 1/2 source active");
+    harness.assert_buffer_contains("[S] Source: [ACTIVES]");
     harness.assert_buffer_contains("[tvshow] Show.S01E01");
 
-    // 5. Press [S] when solitary: informs operator and preserves view
+    // 5. Press [S] to cycle to TOUTES: shows all 5 items from persistent catalog
     harness.send_key(KeyCode::Char('S'));
-    harness.assert_buffer_contains("Une seule source active");
-    assert_eq!(harness.app.selected_source_filter, None);
+    harness.assert_buffer_contains("5/5 DISPONIBLES (Toutes sources)");
+    harness.assert_buffer_contains("[S] Source: [TOUTES]");
 
     // 6. Disable second source as well via Tab 5
     harness.send_key(KeyCode::Char('5'));
@@ -264,9 +263,13 @@ fn test_scenario_multi_source_synchronization_and_table_expansion() {
     harness
         .assert_buffer_contains("GESTION DES SOURCES DE MÉDIAS (RÉPERTOIRES VIDÉO) [0/2 ACTIVES]");
 
-    // 7. MediaBrowser reflects 0 active sources
+    // 7. MediaBrowser reflects 0 active sources when under ActiveOnly
     harness.send_key(KeyCode::Char('4'));
-    harness.assert_buffer_contains("0/0 DISPONIBLES (toutes sources inactives)");
+    // Press 'S' three times to cycle back to ActiveOnly
+    harness.send_key(KeyCode::Char('S'));
+    harness.send_key(KeyCode::Char('S'));
+    harness.send_key(KeyCode::Char('S'));
+    harness.assert_buffer_contains("0/5 DISPONIBLES (toutes sources inactives)");
 }
 
 #[test]
@@ -341,7 +344,7 @@ fn test_merge_scanned_source_metrics_preserves_operator_toggle_and_config() {
 }
 
 #[test]
-fn test_scan_all_media_sources_returns_empty_when_all_disabled() {
+fn test_scan_all_media_sources_preserves_persistent_catalog_when_all_disabled() {
     let tmp_dir = std::env::temp_dir().join(format!("test_all_disabled_{}", std::process::id()));
     let _ = fs::create_dir_all(&tmp_dir);
     let sources = vec![
@@ -370,7 +373,7 @@ fn test_scan_all_media_sources_returns_empty_when_all_disabled() {
     let phash_dir = tmp_dir.join("phash");
     let cache_path = tmp_dir.join("media_cache.json");
 
-    // Create a non-empty cache to verify cache fallback is NOT activated
+    // Create a non-empty cache to verify persistent catalog is preserved
     let fake_cached_item = dbsrt_cli::commands::top::model::DiscoveredMediaItem {
         path: tmp_dir.join("dir1/sample.mkv"),
         stem: "sample".to_string(),
@@ -399,8 +402,8 @@ fn test_scan_all_media_sources_returns_empty_when_all_disabled() {
 
     assert_eq!(
         discovered.len(),
-        0,
-        "Discovered media must be 0 when all sources are disabled"
+        1,
+        "Persistent catalog items must be preserved even when all sources are disabled"
     );
     assert_eq!(
         callback_invocations, 0,
@@ -409,4 +412,29 @@ fn test_scan_all_media_sources_returns_empty_when_all_disabled() {
     assert_eq!(updated_sources.len(), 2);
 
     let _ = fs::remove_dir_all(&tmp_dir);
+}
+
+#[test]
+fn test_scenario_media_browser_item_deletion_via_key_d() {
+    let mut harness = TestHarness::new(240, 45, mock_complete_telemetry());
+    harness.send_key(KeyCode::Char('4'));
+    assert_eq!(harness.app.view, ViewPage::MediaBrowser);
+
+    // Initial count: 5 items in catalog
+    {
+        let tel = harness.shared_state.read().unwrap();
+        assert_eq!(tel.discovered_media.len(), 5);
+    }
+    harness.assert_buffer_contains("5/5 DISPONIBLES");
+
+    // Press 'd' to delete current item
+    harness.send_key(KeyCode::Char('d'));
+
+    // Catalog length drops to 4 in shared state and on screen
+    {
+        let tel = harness.shared_state.read().unwrap();
+        assert_eq!(tel.discovered_media.len(), 4);
+    }
+    harness.assert_buffer_contains("4/4 DISPONIBLES");
+    harness.assert_buffer_contains("1 média(s) supprimé(s) du catalogue persistant.");
 }

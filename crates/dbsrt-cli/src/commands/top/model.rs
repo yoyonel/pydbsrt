@@ -725,13 +725,50 @@ pub fn default_progress_bar(ratio: f64) -> String {
     format_progress_bar(ratio, PROGRESS_BAR_CHAR_WIDTH)
 }
 
+/// Selection criteria for filtering media items by their source origin in the catalog.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum MediaSourceFilter {
+    /// Show only media from sources marked active/enabled in Tab 5 (default).
+    #[default]
+    ActiveOnly,
+    /// Show all media in the persistent catalog regardless of source active state.
+    All,
+    /// Show only media from a specific source ID.
+    Specific(String),
+}
+
+impl MediaSourceFilter {
+    pub fn label<'a>(&'a self, sources: &'a [MediaSourceConfig]) -> &'a str {
+        match self {
+            MediaSourceFilter::ActiveOnly => "ACTIVES",
+            MediaSourceFilter::All => "TOUTES",
+            MediaSourceFilter::Specific(id) => sources
+                .iter()
+                .find(|s| &s.id == id)
+                .map(|s| {
+                    let clean = s
+                        .name
+                        .trim_start_matches("Synology NAS (")
+                        .trim_end_matches(')')
+                        .trim();
+                    if clean.is_empty() {
+                        s.id.as_str()
+                    } else {
+                        clean
+                    }
+                })
+                .unwrap_or(id.as_str()),
+        }
+    }
+}
+
 /// Filters and sorts a slice of discovered media items according to the active criteria.
 pub fn filter_and_sort_media(
     items: &[DiscoveredMediaItem],
     filter: MediaFilter,
     sort: MediaSort,
 ) -> Vec<DiscoveredMediaItem> {
-    filter_and_sort_media_with_source(items, filter, sort, None)
+    filter_and_sort_media_with_source(items, filter, sort, &MediaSourceFilter::All, &[])
 }
 
 /// Filters and sorts a slice of discovered media items according to active criteria and optional source ID.
@@ -739,14 +776,33 @@ pub fn filter_and_sort_media_with_source(
     items: &[DiscoveredMediaItem],
     filter: MediaFilter,
     sort: MediaSort,
-    source_id_filter: Option<&str>,
+    source_filter: &MediaSourceFilter,
+    sources: &[MediaSourceConfig],
 ) -> Vec<DiscoveredMediaItem> {
+    let active_source_ids: std::collections::HashSet<&str> = sources
+        .iter()
+        .filter(|s| s.enabled)
+        .map(|s| s.id.as_str())
+        .collect();
+
     let mut filtered: Vec<DiscoveredMediaItem> = items
         .iter()
         .filter(|item| {
-            if let Some(expected_source) = source_id_filter {
-                if item.source_id.as_deref() != Some(expected_source) {
-                    return false;
+            match source_filter {
+                MediaSourceFilter::ActiveOnly => {
+                    if !item
+                        .source_id
+                        .as_deref()
+                        .is_none_or(|id| active_source_ids.contains(id))
+                    {
+                        return false;
+                    }
+                }
+                MediaSourceFilter::All => {}
+                MediaSourceFilter::Specific(ref expected_source) => {
+                    if item.source_id.as_deref() != Some(expected_source.as_str()) {
+                        return false;
+                    }
                 }
             }
             match filter {
