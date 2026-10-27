@@ -6,6 +6,7 @@ pub mod model;
 pub mod process_ctl;
 pub mod sampler;
 pub mod ui;
+pub mod views;
 
 use anyhow::Result;
 use clap::Args;

@@ -26,6 +26,9 @@ use crate::commands::top::model::{
     MediaSort, MediaSourceFilter, SourceInputModalState, SourceModalField, SourceModalMode,
     SystemTelemetry, ViewPage,
 };
+use crate::commands::top::views::widgets::{
+    centered_rect, completed_status_badge, get_current_time_str, ingestion_status_badge,
+};
 
 /// UI rendering application context.
 pub struct UiContext<'a> {
@@ -82,26 +85,6 @@ pub fn render_ui(frame: &mut Frame, ctx: &UiContext) {
     if let Some(modal) = ctx.source_modal {
         render_source_modal(frame, size, modal);
     }
-}
-
-/// Returns formatted current local time HH:MM:SS via POSIX localtime_r.
-fn get_current_time_str() -> String {
-    let mut tm = libc::tm {
-        tm_sec: 0,
-        tm_min: 0,
-        tm_hour: 0,
-        tm_mday: 0,
-        tm_mon: 0,
-        tm_year: 0,
-        tm_wday: 0,
-        tm_yday: 0,
-        tm_isdst: 0,
-        tm_gmtoff: 0,
-        tm_zone: std::ptr::null(),
-    };
-    let now = unsafe { libc::time(std::ptr::null_mut()) };
-    unsafe { libc::localtime_r(&now, &mut tm) };
-    format!("{:02}:{:02}:{:02}", tm.tm_hour, tm.tm_min, tm.tm_sec)
 }
 
 /// Renders the top real-time telemetry header banner with system, GPU, and network metrics.
@@ -912,33 +895,7 @@ fn render_completed_page(frame: &mut Frame, area: Rect, ctx: &UiContext) {
                     .add_modifier(Modifier::BOLD),
             );
 
-            let status_cell = match r.status() {
-                CompletedStatus::Ok => Span::styled(
-                    "✓ OK",
-                    Style::default()
-                        .fg(Color::Green)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                CompletedStatus::Cache => {
-                    Span::styled("✓ CACHE", Style::default().fg(Color::Yellow))
-                }
-                CompletedStatus::NoSrt => Span::styled(
-                    "⚠ NO_SRT",
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                CompletedStatus::Cancelled => Span::styled(
-                    "⏹ CANCEL",
-                    Style::default()
-                        .fg(Color::Magenta)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                CompletedStatus::Fail => Span::styled(
-                    "✗ FAIL",
-                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-                ),
-            };
+            let status_cell = completed_status_badge(r.status());
 
             let mut media_display = r.video_stem.clone();
             if media_display.chars().count() > MAX_COMPLETED_MEDIA_NAME_DISPLAY_CHARS {
@@ -1609,29 +1566,7 @@ fn render_media_browser_page(frame: &mut Frame, area: Rect, ctx: &UiContext) {
 
             let codec_str = item.video_codec.as_deref().unwrap_or("-");
 
-            let status_span = match item.status {
-                IngestionStatus::Virgin => {
-                    Span::styled("VIERGE", Style::default().fg(Color::Yellow))
-                }
-                IngestionStatus::InProgress => Span::styled(
-                    "EN COURS",
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                IngestionStatus::Completed => Span::styled(
-                    "COMPLÉTÉ",
-                    Style::default()
-                        .fg(Color::Green)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                IngestionStatus::PartialFail => Span::styled(
-                    "HACHÉ SEUL",
-                    Style::default()
-                        .fg(Color::LightBlue)
-                        .add_modifier(Modifier::BOLD),
-                ),
-            };
+            let status_span = ingestion_status_badge(item.status);
 
             let row_cells = vec![
                 Cell::from(cursor_span),
@@ -2400,27 +2335,6 @@ fn render_media_sources_page(frame: &mut Frame, area: Rect, ctx: &UiContext) {
         .row_highlight_style(Style::default());
 
     frame.render_stateful_widget(table, sub_chunks[1], &mut table_state);
-}
-
-/// Helper to center a rect inside another rect.
-fn centered_rect(percent_x: u16, height_lines: u16, r: Rect) -> Rect {
-    let popup_layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(r.height.saturating_sub(height_lines) / 2),
-            Constraint::Length(height_lines),
-            Constraint::Min(0),
-        ])
-        .split(r);
-
-    Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage((100 - percent_x) / 2),
-            Constraint::Percentage(percent_x),
-            Constraint::Percentage((100 - percent_x) / 2),
-        ])
-        .split(popup_layout[1])[1]
 }
 
 /// Renders the interactive source addition / edition popup modal.
