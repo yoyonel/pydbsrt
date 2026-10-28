@@ -36,6 +36,9 @@ includes:
   rpi4:
     taskfile: ./taskfiles/rpi4.yml
     flatten: true
+  o2switch:
+    taskfile: ./taskfiles/o2switch.yml
+    flatten: true
   eval:
     taskfile: ./taskfiles/eval.yml
     flatten: true
@@ -53,6 +56,26 @@ tasks:
       - task --list
 
   # --- Unified Core Stack Lifecycle ---
+
+  target:status:
+    desc: Inspect active VLC backend target mode (Local, Cloud o2switch, or RPi4)
+    cmds:
+      - ./scripts/switch_target.sh status
+
+  target:local:
+    desc: Switch VLC backend to 100% Local Standalone server (Zero-DB / RAM MIH)
+    cmds:
+      - ./scripts/switch_target.sh local
+
+  target:o2switch:
+    desc: Switch VLC backend to Cloud o2switch relay (https://2026-pydbsrt.fr/dbsrt)
+    cmds:
+      - ./scripts/switch_target.sh o2switch
+
+  target:rpi4:
+    desc: Switch VLC backend to Raspberry Pi 4 appliance relay
+    cmds:
+      - ./scripts/switch_target.sh rpi4
 
   up:
     desc: Unified one-command stack startup (DB + PgWeb + Rust build + Certified Couplings + dbsrt-server + VLC plugins + MkDocs)
