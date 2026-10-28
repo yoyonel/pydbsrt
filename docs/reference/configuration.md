@@ -64,3 +64,24 @@ Le projet applique une règle stricte de **zéro constante magique** : toutes le
 | `DEFAULT_RELAY_TIMEOUT_MS` | `1500` | Délai maximal d'attente sur les requêtes distribuées avant dégradation gracieuse |
 | `PHASH_BIT_LENGTH` | `64` | Longueur binaire de l'empreinte perceptuelle d'une trame visuelle |
 | `MIH_CHUNK_COUNT` | `4` | Nombre de sous-divisions de 16 bits pour l'indexation Multi-Index Hashing |
+
+---
+
+## 4. Paramètres de Déploiement Multi-Cibles (o2switch & Raspberry Pi 4)
+
+Ces variables pilotent les scripts d'orchestration et cibles Taskfile pour les déploiements physiques et hébergés :
+
+### Cible Hébergement Mutualisé o2switch (`scripts/o2switch_ctl.sh`)
+- `O2SWITCH_HOST` (défaut : `o2switch`) : Hôte SSH ou alias configuré dans `~/.ssh/config`.
+- `SERVER_PORT` (défaut : `8765`) : Port d'écoute interne du démon sur l'hôte distant (`127.0.0.1`).
+- `REMOTE_BASE` (défaut : `dbsrt`) : Répertoire racine du projet sur l'hébergement mutualisé.
+- `REMOTE_PUBLIC_HTML` (défaut : `public_html/dbsrt`) : Répertoire web public recevant la règle de reverse-proxy `.htaccess`.
+- `O2SWITCH_URL` (défaut : *vide*) : URL publique HTTPS du reverse-proxy pour les tests de démonstration (ex. `https://votredomaine.fr/dbsrt`).
+- `O2SWITCH_API_KEY` (défaut : auto-résolu depuis `pass show services/pydbsrt/o2switch_api_key`) : Clé secrète d'API (256 bits) envoyée dans l'en-tête `X-API-Key` pour s'authentifier auprès de la passerelle.
+- `DEFAULT_RSYNC_BWLIMIT_KBPS` (valeur : `20000`) : Plafond strict de bande passante rsync (20 Mo/s) pour respecter le quota CloudLinux LVE I/O de 42 MiB/s.
+
+### Cible Appliance Raspberry Pi 4 (`scripts/rpi4_*.sh`)
+- `RPI_HOST` (défaut : `rpi4`) : Hôte SSH ou alias pour le Raspberry Pi 4.
+- `REMOTE_BIN_DIR` (défaut : `~/.local/bin`) : Répertoire d'installation des exécutables autonomes `dbsrt` et `dbsrt-server`.
+- `REMOTE_BASE` (défaut : `~/dbsrt`) : Répertoire racine des données et configurations sur le Raspberry Pi.
+- `REMOTE_SYSTEMD_DIR` (défaut : `~/.config/systemd/user`) : Répertoire des unités de service systemd en mode utilisateur.

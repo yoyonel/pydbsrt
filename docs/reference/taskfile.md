@@ -69,7 +69,7 @@ Cette page dresse le dictionnaire exhaustif de toutes les cibles d'orchestration
 
 ---
 
-## 5. Lecteur Multimédia & Client Linux (`vlc:*` & `client:*`)
+## 5. Lecteur Multimédia & Client Linux (`vlc:*`, `client:*` & `target:*`)
 
 | Commande | Description |
 | :--- | :--- |
@@ -78,6 +78,10 @@ Cette page dresse le dictionnaire exhaustif de toutes les cibles d'orchestration
 | `task client:linux:install` | Installe l'agent client `dbsrt` et configure le service systemd utilisateur. |
 | `task client:linux:status` | Affiche le statut du service systemd `dbsrt-agent`. |
 | `task client:linux:logs` | Affiche les logs en direct du service client Linux via `journalctl`. |
+| `task target:status` | Inspecte le mode actif du démon pour VLC (Local Zero-DB, Cloud o2switch ou RPi4). |
+| `task target:local` | Bascule le backend VLC en mode 100% Local autonome (Zero-DB / RAM MIH). |
+| `task target:o2switch` | Bascule le backend VLC en mode relais Cloud o2switch (`https://2026-pydbsrt.fr/dbsrt`). |
+| `task target:rpi4` | Bascule le backend VLC en mode relais sur l'appliance Raspberry Pi 4 locale. |
 
 ---
 
@@ -102,8 +106,53 @@ Cette page dresse le dictionnaire exhaustif de toutes les cibles d'orchestration
 
 | Commande | Description |
 | :--- | :--- |
-| `task rpi4:build` | Cross-compile le binaire aarch64 et génère l'image Docker ARM64. |
+| `task rpi4:build` | Cross-compile le binaire aarch64 et génère l'image Docker ARM64 de `dbsrt-server`. |
 | `task rpi4:push` | Transfère l'image Docker vers le Raspberry Pi 4 via SSH. |
 | `task rpi4:up` | Démarre la pile de conteneurs sur le Raspberry Pi distant. |
+| `task rpi4:down` | Arrête la pile de conteneurs sur le Raspberry Pi distant. |
 | `task rpi4:status` | Interroge la sonde de santé HTTP du Raspberry Pi 4. |
+| `task rpi4:logs` | Suit les journaux en direct de `dbsrt-server` sur le Raspberry Pi. |
+| `task rpi4:sync` | Synchronise le catalogue Zero-DB et les sous-titres par rsync vers le Raspberry Pi. |
 | `task rpi4:demo` | Teste la reconnaissance d'un extrait de 200 octets sur l'appliance distante. |
+| `task rpi4:cli:build` | Cross-compile le binaire standalone ARM64 `dbsrt` avec parité Debian Bullseye GLIBC 2.31. |
+| `task rpi4:cli:test` | Valide localement sur l'hôte le binaire ARM64 sous Debian Bullseye via émulation QEMU binfmt. |
+| `task rpi4:cli:deploy` | Déploie le binaire standalone ARM64 `dbsrt` vers `~/.local/bin/dbsrt` sur le Raspberry Pi 4 via SSH. |
+| `task rpi4:top` | Lance une session interactive SSH de `dbsrt top` directement sur le Raspberry Pi 4. |
+| `task rpi4:server:deploy` | Déploie le binaire standalone ARM64 `dbsrt-server` et configure le service systemd utilisateur. |
+| `task rpi4:server:start` | Démarre le service systemd utilisateur `dbsrt-server` sur le Raspberry Pi 4. |
+| `task rpi4:server:stop` | Arrête le service systemd utilisateur `dbsrt-server` sur le Raspberry Pi 4. |
+| `task rpi4:server:restart` | Redémarre le service systemd utilisateur `dbsrt-server` sur le Raspberry Pi 4. |
+| `task rpi4:server:status` | Vérifie l'état du service systemd et interroge la sonde `/v1/status` sur le Raspberry Pi 4. |
+| `task rpi4:server:logs` | Suit en direct les logs journald du service systemd `dbsrt-server` sur le Raspberry Pi 4. |
+| `task rpi4:server:demo` | Exécute un test de reconnaissance et de téléchargement CAS sur le serveur standalone RPi4. |
+| `task rpi4:db:up` | Démarre le conteneur PostgreSQL 17 SP-GiST BK-Tree sur le Raspberry Pi 4 (port 5433). |
+| `task rpi4:db:status` | Vérifie l'état des migrations Refinery sur l'instance PostgreSQL distante du Raspberry Pi 4. |
+| `task rpi4:db:migrate` | Applique les migrations Refinery sur l'instance PostgreSQL distante du Raspberry Pi 4. |
+| `task rpi4:db:down` | Arrête le conteneur PostgreSQL 17 sur le Raspberry Pi 4. |
+
+---
+
+## 8. Hébergement Mutualisé o2switch (`o2switch:*`)
+
+| Commande | Description |
+| :--- | :--- |
+| `task o2switch:build` | Cross-compile les exécutables statiques autonomes `x86_64-unknown-linux-musl` (`dbsrt`, `dbsrt-server`) et applique `strip`. |
+| `task o2switch:test-local` | Valide empiriquement le binaire musl en mode Zero-DB localement sur le port `8769`. |
+| `task o2switch:sync` | Synchronise les binaires statiques, le catalogue `catalog.dbphash`, les sous-titres et `.htaccess` par rsync. |
+| `task o2switch:start` | Démarre le démon en arrière-plan sans root sur o2switch et attend la validation de la sonde `/v1/health`. |
+| `task o2switch:stop` | Arrête proprement le démon à distance via signal `SIGTERM` (avec bascule `SIGKILL` de sécurité). |
+| `task o2switch:restart` | Redémarre le démon `dbsrt-server` sur o2switch. |
+| `task o2switch:status` | Affiche l'état du processus (PID, mémoire RSS, CPU) et la télémétrie de l'API `/v1/status`. |
+| `task o2switch:logs` | Suit en temps réel le fichier journal `dbsrt-server.log` sur o2switch via SSH. |
+| `task o2switch:demo` | Teste la reconnaissance d'empreintes et la récupération CAS de sous-titres sur o2switch. |
+| `task o2switch:setup-cron` | Installe le watchdog utilisateur non-root dans la crontab (`*/5 * * * *`). |
+| `task o2switch:remove-cron` | Supprime le watchdog utilisateur de la crontab. |
+| `task o2switch:rotate-key` | Génère, déploie et valide une nouvelle clé API 256 bits avec synchronisation dans `pass`. |
+| `task o2switch:sync-nas` | Compile le catalogue binaire depuis le NAS Synology et synchronise l'index et les sous-titres sur o2switch. |
+| `task o2switch:sync-nas:dry-run` | Simule à sec la synchronisation du catalogue NAS vers o2switch sans transfert effectif ni redémarrage. |
+| `task o2switch:agent:start` | Démarre l'agent relais local connecté au Cloud o2switch pour VLC et le NAS Synology. |
+| `task o2switch:agent:stop` | Arrête l'agent relais local. |
+| `task o2switch:agent:restart` | Redémarre l'agent relais local. |
+| `task o2switch:agent:status` | Affiche l'état et les métriques des requêtes relayées de l'agent local. |
+| `task o2switch:agent:logs` | Suit en direct les logs d'exécution de l'agent relais local. |
+| `task o2switch:agent:demo` | Valide de bout en bout la reconnaissance d'un fichier réel du NAS via le Cloud. |

@@ -100,6 +100,18 @@ tags:
     </div>
   </div>
 
+  <div class="dbsrt-bento-card bento-cyan">
+    <div class="bento-header">
+      <span class="bento-icon">⚡</span>
+      <span class="bento-badge">CACHE &amp; CLOUD</span>
+    </div>
+    <h3>Cache Hybride Local-First &amp; Cloud o2switch</h3>
+    <p>Hiérarchie des tiers de latence (Tier 0 RAM < 2ms vs Tier 1 Cloud ~70ms), anti-collision sur écrans noirs et filtrage linguistique strict.</p>
+    <div class="bento-links">
+      <a href="architecture-cache-hybride-local-cloud/">→ Comprendre le cache hybride</a>
+    </div>
+  </div>
+
   <div class="dbsrt-bento-card bento-purple">
     <div class="bento-header">
       <span class="bento-icon">☁️</span>

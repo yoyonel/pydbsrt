@@ -113,7 +113,53 @@ Le serveur distant répond avec le titre du média appairé et le code de statut
 
 ---
 
-## 7. Félicitations !
+## 7. Étape 6 : Déployer et Lancer le Moniteur Temps Réel TUI (`dbsrt top`)
+
+Pour superviser les métriques matérielles (CPU, RAM, débits réseau) et les tâches de traitement en direct sur l'appliance Raspberry Pi 4 :
+
+1. Validez d'abord le binaire ARM64 localement sur votre poste de développement via l'émulateur QEMU :
+   ```bash
+   task rpi4:cli:test
+   ```
+2. Déployez le binaire compilé `dbsrt` vers `~/.local/bin/dbsrt` sur le Raspberry Pi :
+   ```bash
+   task rpi4:cli:deploy
+   ```
+3. Lancez le moniteur plein écran interactif à distance via SSH :
+   ```bash
+   task rpi4:top
+   ```
+
+---
+
+## 8. Alternative Légère : Serveur Standalone sans Docker (`rpi4:server:*`)
+
+Si vous préférez exécuter `dbsrt-server` sans surcharge de conteneur Docker ni dépendance PostgreSQL (mode **Zero-DB pur** avec index `catalog.dbphash` en RAM) :
+
+1. Déployez le binaire autonome ARM64 et installez l'unité de service systemd en mode utilisateur :
+   ```bash
+   task rpi4:server:deploy
+   ```
+2. Démarrez le service systemd :
+   ```bash
+   task rpi4:server:start
+   ```
+3. Contrôlez le statut du service et la télémétrie de l'API :
+   ```bash
+   task rpi4:server:status
+   ```
+4. Suivez les journaux journald en direct :
+   ```bash
+   task rpi4:server:logs
+   ```
+5. Validez le fonctionnement avec la requête test :
+   ```bash
+   task rpi4:server:demo
+   ```
+
+---
+
+## 9. Félicitations !
 
 Votre Raspberry Pi 4 est désormais une **appliance domestique autonome** de reconnaissance et d'alignement de sous-titres :
 

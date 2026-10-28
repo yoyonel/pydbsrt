@@ -120,6 +120,7 @@ nav:
   - 🛠️ Guides Pratiques (How-To):
       - Catalogue des Recettes: how-to/index.md
       - Synchroniser des Sous-Titres dans VLC: how-to/synchroniser-sous-titres-vlc.md
+      - Basculer les Cibles de Backend VLC: how-to/basculer-cibles-vlc-local-cloud-rpi4.md
       - Ajouter et Indexer un Média (media:add): how-to/ajouter-et-indexer-un-media.md
       - Guide Façade Unifiée media:add: 2026-10-25-guide-media-add-facade.md
       - Certifier un Couplage Média-Sous-Titres: how-to/certifier-un-couplage.md
@@ -143,6 +144,7 @@ nav:
       - Configuration & Variables d'Environnement: reference/configuration.md
       - Constantes Nommées & Seuils Algorithmiques: reference/constants.md
       - Architecture CI/CD & Pipelines: reference/ci-cd.md
+      - Étalon Sanity Check Multi-Cibles VLC: reference/2026-10-28-etalon-sanity-check-multi-cibles-vlc.md
   - 💡 Explications & Architecture:
       - Vue d'Ensemble Conceptuelle: explanation/index.md
       - Principe Fondamental du pHash & Retargeting: explanation/principe-fondamental-phash-et-retargeting.md
@@ -151,6 +153,7 @@ nav:
       - Étude Cuts, Keyframes & Hybride: 2026-10-17-etude-comparative-identification-frames-cuts-keyframes-hybride.md
       - Indexation Métrique (MIH vs BK-Tree): explanation/indexation-metrique-mih-vs-bktree.md
       - Modèle Relationnel & Couplages Certifiés: explanation/modele-relationnel-couplages-certifies.md
+      - Architecture Cache Hybride Local & Cloud o2switch: explanation/architecture-cache-hybride-local-cloud.md
       - Architecture Démon Axum & VLC OSD: explanation/architecture-daemon-axum-et-vlc-osd.md
       - Stockage Décentralisé CAS & Distribution: explanation/stockage-decentralise-cas-et-distribution.md
       - Moteur Zero-DB mmap SIMD: 2026-10-15-scaling-architecture-rust-mmap.md

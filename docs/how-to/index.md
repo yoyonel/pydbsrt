@@ -29,6 +29,7 @@ tags:
 
 ### 🎬 Lecteur Multimédia & Client VLC
 * [Comment synchroniser des sous-titres dans VLC](synchroniser-sous-titres-vlc.md) : Utiliser VLSub, gérer les décalages audio/vidéo et diagnostiquer les erreurs de reconnaissance.
+* [Comment basculer les cibles de backend VLC (Local, Cloud o2switch, RPi4)](basculer-cibles-vlc-local-cloud-rpi4.md) : Choisir facilement la cible de calcul et d'indexation sans modifier la configuration VLC.
 
 ### 🎛️ Ingestion, Indexation & Vérité Terrain
 * [Comment ajouter et indexer un média via la façade unifiée](ajouter-et-indexer-un-media.md) : Automatiser l'extraction pHash et l'appairage en 1 commande (`task media:add`).
@@ -42,6 +43,9 @@ tags:
 ### 📊 Observabilité, Surveillance & Fiabilité
 * [Comment surveiller la stack avec Prometheus & Grafana](surveiller-stack-telemetrie.md) : Accéder aux métriques temps réel, surveiller les latences d'interrogation et la mémoire vive.
 * [Comment exécuter les recettes de chaos testing et tests d'infra](executer-recettes-chaos-testing.md) : Valider la résilience du démon face aux coupures réseau, plantages de sockets et redémarrages inopinés.
+
+### 🌐 Déploiement Multi-Cibles & Hébergement
+* [Comment déployer sur un hébergement mutualisé o2switch](deployer-o2switch-cloud-cpanel.md) : Orchestrer le démon statique musl en mode Zero-DB avec reverse-proxy LiteSpeed sans root.
 
 ### ✍️ Gouvernance & Standards Documentaires
 * [Comment contribuer à la documentation selon Diátaxis](contribuer-documentation-diataxis.md) : Consignes méthodologiques, gabarits et checklists pour enrichir incrémentalement les 4 quadrants.
