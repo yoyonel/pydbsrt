@@ -145,7 +145,7 @@ pub fn build_help_active_jobs() -> Vec<Line<'static>> {
         Line::from("                     En saisie : [Entrée] valide et filtre, [Échap] annule. Hors saisie : [Échap] efface le filtre."),
         Line::from("    [Enter] / [i]  : Ouvrir la fiche d'inspection détaillée du processus (I/O, threads, mémoire, logs)."),
         Line::from("    [p]            : Mettre en pause ou reprendre la tâche pointée (signaux SIGSTOP / SIGCONT)."),
-        Line::from("    [s]            : Arrêter proprement la tâche pointée (signal SIGTERM)."),
+        Line::from("    [c]            : Arrêter proprement la tâche pointée (signal SIGTERM)."),
         Line::from("    [K] (en inspect): Forcer l'arrêt immédiat de la tâche (signal SIGKILL)."),
         Line::from("    [x]            : Arrêter proprement TOUT le batch (coordinateur batch_media_add + tous les workers)."),
         Line::from("    [X]            : Tuer immédiatement (SIGKILL) TOUT le batch et tous les processus enfants."),

@@ -721,8 +721,8 @@ fn test_app_state_and_key_handling() {
     handle_key_event(KeyCode::Char('p'), &mut app, &tel);
     assert!(app.current_feedback().is_some());
 
-    // 's' -> Stop feedback
-    handle_key_event(KeyCode::Char('s'), &mut app, &tel);
+    // 'c' -> Stop feedback
+    handle_key_event(KeyCode::Char('c'), &mut app, &tel);
     assert!(app.current_feedback().is_some());
 
     // Switch to inspection and press 'K'

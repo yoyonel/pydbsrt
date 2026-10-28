@@ -8,7 +8,7 @@ expression: grid
 │ ⚡  DÉBITS RÉSEAU CIFS : Instantané:   0.0 MB/s (Net RX:   0.0 MB/s, VFS:   0.0 MB/s)                                                     │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ┌ TÂCHES EN COURS (DÉCODAGE & PHASH TEMPS RÉEL) [2/2] ─────────────────────────────────────────────────────────────────────────────────────┐
-│ [/] Chercher   [Enter/i] Inspecter   [p] Pause   [s] Stop   [x/X] Arrêter Batch                                                          │
+│ [/] Chercher   [Enter/i] Inspecter   [p] Pause   [c] Stop   [x/X] Arrêter Batch                                                          │
 │                                                                                                                                          │
 │      PID      MÉDIA                   MOTEUR             PROGRESSION                        DÉBIT VFS     ETA        CPU      RAM        │
 │► ▶   50101    The.Wire.S01E01.1080p.m GPU (VA-API)       [████░░░░░░░░░░]  30.0% (420/1400   24.5 MB/s      1m25s    15.0%     64.0 MB   │
@@ -31,4 +31,4 @@ expression: grid
 │                                                                                                                                          │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 
-  [1] Tâches   [2/h] Stats   [3/r] Récents   [4/m] Médias   [5/s] Sources  │ [↑/k] Défiler  [/] Chercher  [Enter/i] Inspecter  [p] Pause  [s
+  [1] Tâches   [2/h] Stats   [3/r] Récents   [4/m] Médias   [5/s] Sources  │ [↑/k] Défiler  [/] Chercher  [Enter/i] Inspecter  [p] Pause  [c

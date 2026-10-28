@@ -133,9 +133,9 @@ fn build_shortcuts_text(ctx: &UiContext) -> &'static str {
             if ctx.search_active {
                 "[Entrée] Valider recherche  [Échap] Annuler  [Texte] Filtrer  [?] Aide"
             } else if !ctx.search_query.is_empty() {
-                "[↑/k] Défiler  [/] Chercher  [Échap] Effacer recherche  [Enter/i] Inspecter  [p] Pause  [s] Stop  [x/X] Arrêter Batch  [?] Aide  [q] Quitter"
+                "[↑/k] Défiler  [/] Chercher  [Échap] Effacer recherche  [Enter/i] Inspecter  [p] Pause  [c] Stop  [x/X] Arrêter Batch  [?] Aide  [q] Quitter"
             } else {
-                "[↑/k] Défiler  [/] Chercher  [Enter/i] Inspecter  [p] Pause  [s] Stop  [x/X] Arrêter Batch  [?] Aide  [q] Quitter"
+                "[↑/k] Défiler  [/] Chercher  [Enter/i] Inspecter  [p] Pause  [c] Stop  [x/X] Arrêter Batch  [?] Aide  [q] Quitter"
             }
         }
         ViewPage::StatsHistory => "[↑/k] Défiler  [?] Aide  [q] Quitter",
@@ -177,7 +177,7 @@ fn build_shortcuts_text(ctx: &UiContext) -> &'static str {
             "[Esc/Backspace/Enter] Retour Catalogue  [Space] Cocher  [b] Batch  [q] Quitter"
         }
         ViewPage::JobInspection => {
-            "[Esc/Backspace] Retour Liste  [p] Pause  [s] Arrêter  [K] Kill  [x/X] Arrêter Batch  [q] Quitter"
+            "[Esc/Backspace] Retour Liste  [p] Pause  [c] Arrêter  [K] Kill  [x/X] Arrêter Batch  [q] Quitter"
         }
         ViewPage::Help => {
             "[0-5/Tab] Onglet Aide  [↑/↓/k/j] Défiler  [Esc/Backspace/?] Revenir  [q] Quitter"

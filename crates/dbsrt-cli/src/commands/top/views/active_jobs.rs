@@ -153,7 +153,7 @@ fn build_search_and_actions_bar(ctx: &UiContext) -> Line<'static> {
 
     bar_spans.push(Span::raw("   "));
     bar_spans.push(Span::styled(
-        "[Enter/i] Inspecter   [p] Pause   [s] Stop   [x/X] Arrêter Batch",
+        "[Enter/i] Inspecter   [p] Pause   [c] Stop   [x/X] Arrêter Batch",
         Style::default().fg(Color::DarkGray),
     ));
 

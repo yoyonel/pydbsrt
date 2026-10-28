@@ -214,8 +214,8 @@
     "scope": "mod",
     "function_name": "handle_media_browser_filter_sort_keys",
     "start_line": 1426,
-    "max_loc": 59,
-    "max_ccn": 16,
+    "max_loc": 55,
+    "max_ccn": 14,
     "max_parameters": 3,
     "max_nesting": 7
   },
@@ -234,8 +234,8 @@
     "scope": "mod",
     "function_name": "handle_media_sources_view_keys",
     "start_line": 1674,
-    "max_loc": 88,
-    "max_ccn": 20,
+    "max_loc": 85,
+    "max_ccn": 19,
     "max_parameters": 4,
     "max_nesting": 6
   },
@@ -354,7 +354,7 @@
     "scope": "mod",
     "function_name": "load_media_sources",
     "start_line": 809,
-    "max_loc": 28,
+    "max_loc": 26,
     "max_ccn": 5,
     "max_parameters": 1,
     "max_nesting": 5

@@ -42,7 +42,7 @@ use crossterm::{
 use ratatui::{backend::CrosstermBackend, Terminal};
 
 use crate::commands::top::constants::{
-    BYTES_PER_GIB_F64, DEFAULT_BATCH_EVENTS_PATH, DEFAULT_COUPLINGS_PATH, DEFAULT_MEDIA_CACHE_PATH,
+    BYTES_PER_GIB_F64, DEFAULT_COUPLINGS_PATH, DEFAULT_MEDIA_CACHE_PATH,
     DEFAULT_MEDIA_SOURCES_PATH, FEEDBACK_DISPLAY_DURATION_SECS, KEY_EVENT_POLL_TIMEOUT_MS,
     PAGE_SCROLL_STEP,
 };
@@ -56,7 +56,7 @@ use crate::commands::top::model::{
 use crate::commands::top::process_ctl::{kill_job, stop_entire_batch, stop_job, toggle_pause_job};
 use crate::commands::top::sampler::{
     add_media_source, compute_session_throughput, delete_media_source, launch_selected_batch,
-    load_historical_records, load_media_sources, preload_stem_size_cache,
+    load_historical_records, load_media_sources, preload_stem_size_cache, resolve_events_log_path,
     run_telemetry_sampler_loop, save_media_cache, start_gpu_sampler, start_media_sources_scanner,
     toggle_media_source, trigger_media_sources_rescan, update_media_source,
 };
@@ -302,7 +302,7 @@ pub fn run_top_app(refresh_interval_ms: u64) -> Result<()> {
     }));
 
     // Pre-warm static history, statistics, and system memory to prevent initial frame lag
-    let events_path = std::path::PathBuf::from(DEFAULT_BATCH_EVENTS_PATH);
+    let events_path = resolve_events_log_path();
     let couplings_path = std::path::PathBuf::from(DEFAULT_COUPLINGS_PATH);
     let initial_history = load_historical_records(&events_path, &couplings_path);
     let initial_stats = calculate_overall_stats(&initial_history);
@@ -1028,6 +1028,79 @@ fn handle_tab_cycling(code: KeyCode, app: &mut AppState) -> bool {
     }
 }
 
+/// Resolves destination ViewPage and HelpTab for numeric and mnemonic direct shortcuts.
+///
+/// # Arguments
+/// - `code`: Crossterm [`KeyCode`] received from the terminal event loop.
+/// - `current_view`: Active [`ViewPage`] used for contextual discrimination.
+///
+/// # Returns
+/// `Some((target_view, help_tab))` if the key matches a direct navigation shortcut, `None` otherwise.
+///
+/// # Errors
+/// None.
+///
+/// # Panics
+/// Guaranteed panic-free.
+///
+/// # Data Flow & Invariants
+/// Direct routing: '1' -> ActiveJobs, '2'/'h' -> StatsHistory, '3'/'r' -> CompletedMedia
+/// (unless in MediaSources where 'r' rescans), '4'/'m' -> MediaBrowser, '5'/'s' -> MediaSources
+/// (unless in MediaBrowser where uppercase 'S' cycles the source filter).
+fn resolve_shortcut_target(code: KeyCode, current_view: ViewPage) -> Option<(ViewPage, HelpTab)> {
+    match code {
+        KeyCode::Char('1') => Some((ViewPage::ActiveJobs, HelpTab::ActiveJobs)),
+        KeyCode::Char('2') | KeyCode::Char('h') | KeyCode::Char('H') => {
+            Some((ViewPage::StatsHistory, HelpTab::StatsHistory))
+        }
+        KeyCode::Char('3') | KeyCode::Char('r') | KeyCode::Char('R')
+            if current_view != ViewPage::MediaSources
+                || (code != KeyCode::Char('r') && code != KeyCode::Char('R')) =>
+        {
+            Some((ViewPage::CompletedMedia, HelpTab::Completed))
+        }
+        KeyCode::Char('4') | KeyCode::Char('m') | KeyCode::Char('M') => {
+            Some((ViewPage::MediaBrowser, HelpTab::MediaBrowser))
+        }
+        KeyCode::Char('5') | KeyCode::Char('s') | KeyCode::Char('S')
+            if current_view != ViewPage::MediaBrowser || code != KeyCode::Char('S') =>
+        {
+            Some((ViewPage::MediaSources, HelpTab::MediaSources))
+        }
+        _ => None,
+    }
+}
+
+/// Applies direct view switching or double-tap toggle logic.
+///
+/// # Arguments
+/// - `target_view`: Desired destination [`ViewPage`].
+/// - `help_tab`: Corresponding [`HelpTab`] when navigating inside the help overlay.
+/// - `app`: Mutable reference to application state.
+///
+/// # Returns
+/// None. Mutates application view or help tab in place.
+///
+/// # Errors
+/// None.
+///
+/// # Panics
+/// Guaranteed panic-free.
+///
+/// # Data Flow & Invariants
+/// If current view is Help, switches the help tab. If current view already equals target view
+/// (and is not ActiveJobs), toggles back to ActiveJobs. Otherwise switches to target view.
+fn switch_or_toggle_view(target_view: ViewPage, help_tab: HelpTab, app: &mut AppState) {
+    if app.view == ViewPage::Help {
+        app.help_tab = help_tab;
+        app.help_scroll_index = 0;
+    } else if app.view == target_view && target_view != ViewPage::ActiveJobs {
+        app.view = ViewPage::ActiveJobs;
+    } else {
+        app.view = target_view;
+    }
+}
+
 /// Handles numeric and mnemonic direct view switching shortcuts.
 ///
 /// # Arguments
@@ -1044,63 +1117,13 @@ fn handle_tab_cycling(code: KeyCode, app: &mut AppState) -> bool {
 /// Guaranteed panic-free.
 ///
 /// # Data Flow & Invariants
-/// Direct routing to views 1..5 and aliases ('h' for StatsHistory, 'm' for MediaBrowser).
+/// Delegates resolution to [`resolve_shortcut_target`] and state mutation to [`switch_or_toggle_view`].
 fn handle_direct_view_shortcuts(code: KeyCode, app: &mut AppState) -> bool {
-    match code {
-        KeyCode::Char('1') => {
-            if app.view == ViewPage::Help {
-                app.help_tab = HelpTab::ActiveJobs;
-                app.help_scroll_index = 0;
-            } else {
-                app.view = ViewPage::ActiveJobs;
-            }
-            true
-        }
-        KeyCode::Char('2') | KeyCode::Char('h') | KeyCode::Char('H') => {
-            if app.view == ViewPage::Help {
-                app.help_tab = HelpTab::StatsHistory;
-                app.help_scroll_index = 0;
-            } else if app.view == ViewPage::StatsHistory {
-                app.view = ViewPage::ActiveJobs;
-            } else {
-                app.view = ViewPage::StatsHistory;
-            }
-            true
-        }
-        KeyCode::Char('3') => {
-            if app.view == ViewPage::Help {
-                app.help_tab = HelpTab::Completed;
-                app.help_scroll_index = 0;
-            } else if app.view == ViewPage::CompletedMedia {
-                app.view = ViewPage::ActiveJobs;
-            } else {
-                app.view = ViewPage::CompletedMedia;
-            }
-            true
-        }
-        KeyCode::Char('4') | KeyCode::Char('m') | KeyCode::Char('M') => {
-            if app.view == ViewPage::Help {
-                app.help_tab = HelpTab::MediaBrowser;
-                app.help_scroll_index = 0;
-            } else if app.view == ViewPage::MediaBrowser {
-                app.view = ViewPage::ActiveJobs;
-            } else {
-                app.view = ViewPage::MediaBrowser;
-            }
-            true
-        }
-        KeyCode::Char('5') => {
-            if app.view == ViewPage::Help {
-                app.help_tab = HelpTab::MediaSources;
-                app.help_scroll_index = 0;
-            } else if app.view == ViewPage::MediaSources {
-                app.view = ViewPage::ActiveJobs;
-            } else {
-                app.view = ViewPage::MediaSources;
-            }
-            true
-        }
-        _ => false,
+    if let Some((target_view, help_tab)) = resolve_shortcut_target(code, app.view) {
+        switch_or_toggle_view(target_view, help_tab, app);
+        true
+    } else {
+        false
     }
 }
 
@@ -1425,7 +1448,7 @@ fn handle_active_jobs_view_keys(code: KeyCode, app: &mut AppState, telemetry: &S
                 app.set_feedback(msg);
             }
         }
-        KeyCode::Char('s') | KeyCode::Char('S') => {
+        KeyCode::Char('c') | KeyCode::Char('C') => {
             if !telemetry.active_jobs.is_empty() && app.selected_index < telemetry.active_jobs.len()
             {
                 let pid = telemetry.active_jobs[app.selected_index].pid;
@@ -1453,9 +1476,6 @@ fn handle_active_jobs_view_keys(code: KeyCode, app: &mut AppState, telemetry: &S
             } else if app.view == ViewPage::JobInspection {
                 app.view = ViewPage::ActiveJobs;
             }
-        }
-        KeyCode::Char('r') | KeyCode::Char('R') => {
-            app.view = ViewPage::CompletedMedia;
         }
         _ => {}
     }
@@ -1497,12 +1517,6 @@ fn handle_completed_media_view_keys(code: KeyCode, app: &mut AppState) {
             } else if app.view == ViewPage::CompletedInspection {
                 app.view = ViewPage::CompletedMedia;
             }
-        }
-        KeyCode::Char('r') | KeyCode::Char('R') if app.view == ViewPage::CompletedMedia => {
-            app.view = ViewPage::ActiveJobs;
-        }
-        KeyCode::Char('s') | KeyCode::Char('S') => {
-            app.view = ViewPage::MediaSources;
         }
         _ => {}
     }
@@ -1612,10 +1626,6 @@ fn handle_media_browser_filter_sort_keys(
                 "Filtre source : [{}]",
                 app.source_filter.label(&telemetry.media_sources)
             ));
-            true
-        }
-        KeyCode::Char('s') if app.view == ViewPage::MediaBrowser => {
-            app.view = ViewPage::MediaSources;
             true
         }
         _ => false,
@@ -1975,9 +1985,6 @@ fn handle_media_sources_view_keys(
             }
             trigger_media_sources_rescan();
             app.set_feedback("⟳ Rescan de toutes les sources lancé...".to_string());
-        }
-        KeyCode::Char('s') | KeyCode::Char('S') => {
-            app.view = ViewPage::ActiveJobs;
         }
         _ => {}
     }

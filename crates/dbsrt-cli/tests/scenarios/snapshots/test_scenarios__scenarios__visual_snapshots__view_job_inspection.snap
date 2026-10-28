@@ -31,4 +31,4 @@ expression: grid
 │                                                                                                                                          │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 
-  [1] Tâches   [2/h] Stats   [3/r] Récents   [4/m] Médias   [5/s] Sources  │ [Esc/Backspace] Retour Liste  [p] Pause  [s] Arrêter  [K] Kill
+  [1] Tâches   [2/h] Stats   [3/r] Récents   [4/m] Médias   [5/s] Sources  │ [Esc/Backspace] Retour Liste  [p] Pause  [c] Arrêter  [K] Kill

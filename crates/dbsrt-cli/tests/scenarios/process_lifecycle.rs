@@ -49,8 +49,8 @@ fn test_scenario_process_signals_pause_stop_kill() {
     harness.send_key(KeyCode::Char('p'));
     assert!(harness.feedback_text().is_some());
 
-    // 2. Stop single task with 's'
-    harness.send_key(KeyCode::Char('s'));
+    // 2. Stop single task with 'c'
+    harness.send_key(KeyCode::Char('c'));
     assert!(harness.feedback_text().is_some());
 
     // 3. Open fullframe inspection with 'Enter'
