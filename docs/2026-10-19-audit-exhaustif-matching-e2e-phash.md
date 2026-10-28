@@ -287,13 +287,13 @@ flowchart TD
 
 ## 7. Prérequis de Validation Finale & Suite du Protocole
 
-Conformément à la règle de **vérité terrain stricte et zéro extrapolation**, la validation définitive du moteur et la clôture de la feature branch requièrent la reconnexion au réseau domestique pour accéder au stockage réel du NAS Synology (`/media/latty/Synology`).
+Conformément à la règle de **vérité terrain stricte et zéro extrapolation**, la validation définitive du moteur et la clôture de la feature branch requièrent la reconnexion au réseau domestique pour accéder au stockage réel du NAS Synology (`/media/storage/Synology`).
 
 ### Protocole de Clôture (Dès Reconnexion au NAS)
 
 ```mermaid
 flowchart LR
-    A["1. Reconnexion NAS Synology<br/>(/media/latty/Synology)"] --> B["2. Vérification Services<br/>task db:up && task server:daemon"]
+    A["1. Reconnexion NAS Synology<br/>(/media/storage/Synology)"] --> B["2. Vérification Services<br/>task db:up && task server:daemon"]
     B --> C["3. Exécution task eval:nas<br/>Suites 2 à 5 sur données réelles"]
     C --> D["4. Rapport Empirique Final<br/>nas_reliability_evaluation_report.md"]
     D --> E["5. Contrôles Qualité<br/>task fmt && task lint && task rs:test"]

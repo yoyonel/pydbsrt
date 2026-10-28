@@ -1,15 +1,15 @@
 # Recette de Test E2E : Moniteur TUI Rust `dbsrt top` & Ingestion Synology NAS
 
-Ce guide de recette valide de bout en bout l'intégration et l'exécution du moniteur de processus natif en Rust (`dbsrt top`) face à un flux réel d'ingestion et de décodage vidéo pHash depuis le NAS Synology (`/media/latty/Synology/tvshow`).
+Ce guide de recette valide de bout en bout l'intégration et l'exécution du moniteur de processus natif en Rust (`dbsrt top`) face à un flux réel d'ingestion et de décodage vidéo pHash depuis le NAS Synology (`/media/storage/tvshow`).
 
 ## Contexte d'Exécution & Environnement
 
 - **Système d'Exploitation** : Linux x86_64
 - **Binaire Testé** : `target/release/dbsrt top` (Rust 1.84+, Ratatui 0.29, Sysinfo 0.33)
-- **Source des Médias Réels** : Synology NAS CIFS (`/media/latty/Synology/tvshow`)
+- **Source des Médias Réels** : Synology NAS CIFS (`/media/storage/tvshow`)
 - **Accélération Matérielle** : Intel Iris Xe Graphics (VA-API `/dev/dri/renderD128`)
 - **Télémétrie GPU** : `intel_gpu_top` JSON streaming daemon
-- **Enregistrement ASCIInema** : `data/reports/dbsrt_top_e2e_recette.cast` (466.3 KiB)
+- **Enregistrement ASCIInema** : `docs/assets/casts/term_top_recette.cast` (466.3 KiB)
 
 ## Scénarios de Test Exécutés & Résultats
 
@@ -65,7 +65,7 @@ Ce guide de recette valide de bout en bout l'intégration et l'exécution du mon
 
 ## Relecture de la Session ASCIInema en CLI
 
-La session complète enregistrée est archivée au format standard asciicast v2 dans `docs/assets/casts/term_top_recette.cast` et `data/reports/dbsrt_top_e2e_recette.cast`.
+La session complète enregistrée est archivée au format standard asciicast v2 dans `docs/assets/casts/term_top_recette.cast`.
 
 Pour rejouer fidèlement l'intégralité de la recette dans le terminal :
 

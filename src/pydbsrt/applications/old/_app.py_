@@ -479,7 +479,7 @@ def find_video_sequence_in_tree(
 def main():
     search_tree = SearchTree()
 
-    root_media_path = Path("/home/latty/NAS/tvshow/Silicon Valley/S04/")
+    root_media_path = Path("/media/storage/tvshow/Silicon Valley/S04/")
     logger.debug("root_media_path: %s", root_media_path)
 
     export_root_dir = Path.home() / "tmp/"

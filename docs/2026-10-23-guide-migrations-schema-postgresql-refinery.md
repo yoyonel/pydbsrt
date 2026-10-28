@@ -134,7 +134,7 @@ task rpi4:db:status
 task db:status:rpi4
 
 # Cibler une machine distante personnalisée
-task db:status -- --host 192.168.1.24 --port 5432
+task db:status -- --host rpi4.local --port 5432
 ```
 
 Exemple de sortie :
@@ -161,7 +161,7 @@ task rpi4:db:migrate
 task db:migrate:rpi4
 
 # Cibler une machine distante personnalisée
-task db:migrate -- --host 192.168.1.24 --port 5432
+task db:migrate -- --host rpi4.local --port 5432
 ```
 
 Exemple de sortie nominale :

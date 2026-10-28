@@ -20,7 +20,7 @@ tags:
 
 ## 1. Bilan de Constitution du Corpus Réel NAS
 
-Pour confronter le moteur d'empreinte perceptive `pydbsrt` à un dataset volumineux et diversifié, un pipeline d'extraction automatique a été déployé sur les répertoires `/media/latty/Synology/tvshow/` et `/media/latty/Synology/video/`.
+Pour confronter le moteur d'empreinte perceptive `pydbsrt` à un dataset volumineux et diversifié, un pipeline d'extraction automatique a été déployé sur les répertoires `/media/storage/Synology/tvshow/` et `/media/storage/Synology/video/`.
 
 ```mermaid
 flowchart LR

@@ -8,6 +8,7 @@ samples intel_gpu_top in real time, and prints empirical throughput and saturati
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -35,7 +36,13 @@ class BenchmarkRunResult:
 
 def find_distinct_synology_media(count: int = 15) -> List[Path]:
     """Finds distinct large video files across different TV shows to prevent pagecache hits."""
-    tvshow = Path("/media/latty/Synology/tvshow")
+    env_dir = os.environ.get("NAS_TVSHOW_DIR")
+    if env_dir:
+        tvshow = Path(env_dir)
+    else:
+        user = os.environ.get("USER", "storage")
+        candidate = Path("/media") / user / "Synology" / "tvshow"
+        tvshow = candidate if candidate.exists() else Path("/media/storage/tvshow")
     found: List[Path] = []
     seen_dirs: set[Path] = set()
 

@@ -213,7 +213,7 @@ sequenceDiagram
 
 ## 7. Gestion de File Batch : Tâches Inachevées vs Épisodes Vierges
 
-L'audit direct de la bibliothèque Synology NAS (`//192.168.1.58/tvshow`) dénombre trois statuts opérationnels distincts :
+L'audit direct de la bibliothèque Synology NAS (`//synology.local/tvshow`) dénombre trois statuts opérationnels distincts :
 
 ```mermaid
 pie title Répartition des Épisodes sur le NAS Synology

@@ -94,7 +94,7 @@ Dans une architecture de production et d'appliance 24/7, **cette coupure est ina
 ## 3. Scénarios Métier d'Entrée / Sortie
 
 ### Scénario 1 : Ingestion d'un nouveau film ou épisode sur le NAS
-1. **Événement** : Un fichier `The_Last_of_Us_S02E01.mkv` arrive sur `/media/latty/Synology/tvshow/`.
+1. **Événement** : Un fichier `The_Last_of_Us_S02E01.mkv` arrive sur `/media/storage/tvshow/`.
 2. **Extraction** : Le poste de dev calcule l'empreinte pHash complète (24 fps) + détection des cuts.
 3. **Persistance locale** :
    - Fichier brut : `data/__PHASH__/The_Last_of_Us_S02E01.phash`

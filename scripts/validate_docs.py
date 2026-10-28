@@ -196,15 +196,18 @@ def check_docs_filetypes() -> list[str]:
 
 
 def check_no_local_paths() -> list[str]:
-    """Ensure no machine-local paths (/home/latty or file:///home/) exist in versioned docs/code."""
+    """Ensure no machine-local paths or private RFC 1918 IPs exist in versioned docs/code."""
     errors: list[str] = []
     targets = [
         Path("README.md"),
         *Path("docs").rglob("*.md"),
         *Path("src").rglob("*.py"),
         *Path("crates").rglob("*.rs"),
+        *[p for p in Path("scripts").rglob("*.py") if p.name != "validate_docs.py"],
     ]
-    pattern = re.compile(r"(/home/latty|file:///home/|/pydbsrt/(?:screenshots|assets)/)")
+    pattern = re.compile(
+        r"(/home/latty|/media/latty|file:///home/|192\.168\.\d+\.\d+|/pydbsrt/(?:screenshots|assets)/)"
+    )
     for p in targets:
         if not p.exists():
             continue

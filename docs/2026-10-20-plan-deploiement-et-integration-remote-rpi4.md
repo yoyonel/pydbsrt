@@ -214,9 +214,9 @@ L'exécution locale du conteneur ARM64 sur hôte non-ARM (`x86_64`) via `task si
 * Côté machine de développement / client :
   * Déployer le sidecar client configuré pour relayer vers l'IP du Raspberry Pi :
     ```sh
-    task client:linux:install -- http://192.168.1.XX:8765
+    task client:linux:install -- http://rpi4.local:8765
     ```
-  * L'extension VLC `vlsub_dbsrt.lua` communique avec le sidecar local (`127.0.0.1:8765`), qui relaie en 200 octets vers le RPi4 (`http://192.168.1.XX:8765/v1/recognize`).
+  * L'extension VLC `vlsub_dbsrt.lua` communique avec le sidecar local (`127.0.0.1:8765`), qui relaie en 200 octets vers le RPi4 (`http://rpi4.local:8765/v1/recognize`).
 
 ---
 
@@ -230,7 +230,7 @@ L'exécution locale du conteneur ARM64 sur hôte non-ARM (`x86_64`) via `task si
 | **P3** | **Création de `docker/docker-compose.rpi4.yml`** | **Fait (Empiriquement prouvé)** | Service en `network_mode: host` connecté à PostgreSQL 15.2. |
 | **P4** | **Script de synchronisation `scripts/rpi4_sync.sh` (catalog + SRT)** | **Fait (Empiriquement prouvé)** | Synchronisation live de `catalog.dbphash` (18 Mo) et `data/SRT` (20 Mo). |
 | **P5** | **Ajout des tâches `rpi4:*` et `sim:rpi4:*` dans `Taskfile.yml`** | **Fait (Empiriquement prouvé)** | Toutes les cibles déclarées et testées. |
-| **P6** | **Livraison par stream SSH (`docker save | ssh rpi4 docker load`) & run** | **Fait (Empiriquement prouvé)** | Image chargée et conteneur sain sur RPi4 (`http://192.168.1.24:8765`). |
+| **P6** | **Livraison par stream SSH (`docker save | ssh rpi4 docker load`) & run** | **Fait (Empiriquement prouvé)** | Image chargée et conteneur sain sur RPi4 (`http://rpi4.local:8765`). |
 | **P7** | **Connexion PostgreSQL 15.2 SP-GiST BK-tree existant** | **Fait (Empiriquement prouvé)** | `postgres_connected: true` avec 817 370 frames et 1566 pHashes. |
 | **P8** | **Validation E2E : Requête PC Client Sidecar -> RPi4 -> Subtitle Synced** | **Fait (Empiriquement prouvé)** | Latence totale E2E de 31 ms (match en 4.6 ms sur Cortex-A72). |
 
@@ -240,7 +240,7 @@ L'exécution locale du conteneur ARM64 sur hôte non-ARM (`x86_64`) via `task si
 
 Le test de bout en bout a été exécuté depuis le poste de développement vers le Raspberry Pi 4 :
 
-1. **État du service remote sur le RPi4 (`http://192.168.1.24:8765/v1/status`)** :
+1. **État du service remote sur le RPi4 (`http://rpi4.local:8765/v1/status`)** :
    ```json
    {
      "status": "ok",
@@ -289,7 +289,7 @@ flowchart TD
         end
 
         subgraph Sidecar_Daemon ["Agent Sidecar Local (127.0.0.1:8765)"]
-            AGENT["dbsrt-server --agent\n--remote-api http://192.168.1.24:8765"]
+            AGENT["dbsrt-server --agent\n--remote-api http://rpi4.local:8765"]
             FFMPEG["Extracteur pHash Local\n(FFmpeg / LibAV HW Accel)"]
             AGENT --- FFMPEG
         end
@@ -301,7 +301,7 @@ flowchart TD
         OUT_SRT -.->|"6. vlc.input.add_subtitle()\nAttachement automatique"| VLC
     end
 
-    subgraph Remote_RPi4 ["Serveur Central Distant (Raspberry Pi 4 - 192.168.1.24)"]
+    subgraph Remote_RPi4 ["Serveur Central Distant (Raspberry Pi 4 - rpi4.local)"]
         CONTAINER["Conteneur Docker dbsrt-remote-server\n(aarch64 - network: host :8765)"]
 
         subgraph Storage_RPi4 ["Données Centrales Distantes"]
@@ -341,8 +341,8 @@ flowchart TD
 
 * **Média testé** : Extrait vidéo de 15 secondes `data/snippets/The.Boys.S02E03.1080p.AMZN.WEBRip.DDP5.1.x264-NTb_mid15s.mp4`.
 * **Client** : VLC Media Player avec extension `vlsub_dbsrt.lua` activée.
-* **Agent local** : `dbsrt-server --agent --remote-api http://192.168.1.24:8765` sur port `8765`.
-* **Serveur distant** : `dbsrt-remote-server` sur Raspberry Pi 4 (`192.168.1.24:8765`).
+* **Agent local** : `dbsrt-server --agent --remote-api http://rpi4.local:8765` sur port `8765`.
+* **Serveur distant** : `dbsrt-remote-server` sur Raspberry Pi 4 (`rpi4.local:8765`).
 
 ### 7.2 Incident Rencontré : Absence de Décalage Temporel ($\Delta t = 0.0$ ms)
 

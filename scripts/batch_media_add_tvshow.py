@@ -2,7 +2,7 @@
 """Direct NAS TVShow Batch Ingestion & Profiling (Zero Local Video Copy).
 
 Orchestrates automated `dbsrt media:add --all-embedded` batch processing streaming
-directly from Synology NAS CIFS mount (`//192.168.1.58/tvshow`) without copying
+directly from Synology NAS CIFS mount (`//synology.local/tvshow`) without copying
 any video files to the local SSD.
 Monitors CPU load, RAM footprint, CIFS I/O read bandwidth, validates all language
 scripts and encodings (Latin, Cyrillic, CJK, Arabic, Hebrew, Greek, Thai, Vietnamese),
@@ -110,9 +110,15 @@ def normalize_lang_code(raw: str) -> str:
 
 
 def default_nas_tvshow_path() -> Path:
-    """Resolves default TVShow path using current user environment."""
-    username = os.environ.get("USER", "latty")
-    return Path("/media") / username / "Synology" / "tvshow"
+    """Resolves default TVShow path using current user environment or environment override."""
+    env_dir = os.environ.get("NAS_TVSHOW_DIR")
+    if env_dir:
+        return Path(env_dir)
+    user = os.environ.get("USER", "storage")
+    candidate = Path("/media") / user / "Synology" / "tvshow"
+    if candidate.exists():
+        return candidate
+    return Path("/media/storage/tvshow")
 
 
 @dataclass
@@ -651,7 +657,7 @@ def generate_nightly_report(
     md: List[str] = [
         "# Rapport d'Exécution & Profiling Batch TVShow (Synology NAS)\n",
         f"**Date d'exécution** : {now_iso}  ",
-        "**Cible** : `//192.168.1.58/tvshow` (Stream CIFS direct, 0 Mo copié en local)  ",
+        f"**Cible** : `{os.environ.get('NAS_CIFS_SHARE', '//synology.local/tvshow')}` (Stream CIFS direct, 0 Mo copié en local)  ",
         f"**Statut Global** : `{'SUCCÈS PARTIEL' if failed else '100% NOMINAL'}`  \n",
         "## 1. Synthèse Exécutive & Métriques Clés\n",
         "| Métrique | Valeur Mesurée | Note Opérationnelle |",

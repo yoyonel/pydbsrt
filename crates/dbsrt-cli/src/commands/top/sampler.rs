@@ -16,9 +16,9 @@ use sysinfo::{
 
 use crate::commands::top::constants::{
     BYTES_PER_GIB_F64, BYTES_PER_MIB_F64, DEFAULT_BATCH_EVENTS_PATH, DEFAULT_COUPLINGS_PATH,
-    DEFAULT_COUPLING_BASELINE_FPS, DEFAULT_MEDIA_CACHE_PATH, DEFAULT_MEDIA_SCAN_INTERVAL_SECS,
-    DEFAULT_MEDIA_SOURCES_PATH, DEFAULT_NAS_TVSHOW_PATH, DEFAULT_PHASH_DIR,
-    DEFAULT_SELECTED_BATCH_REPORT_PATH, DEFAULT_SELECTED_BATCH_TARGETS_PATH,
+    DEFAULT_COUPLING_BASELINE_FPS, DEFAULT_HISTORY_SEED_PATH, DEFAULT_MEDIA_CACHE_PATH,
+    DEFAULT_MEDIA_SCAN_INTERVAL_SECS, DEFAULT_MEDIA_SOURCES_PATH, DEFAULT_NAS_TVSHOW_PATH,
+    DEFAULT_PHASH_DIR, DEFAULT_SELECTED_BATCH_REPORT_PATH, DEFAULT_SELECTED_BATCH_TARGETS_PATH,
     DEFAULT_SOURCE_ID_TVSHOW, DEFAULT_SOURCE_NAME_TVSHOW, MAX_MEDIA_SCAN_LIMIT,
     MAX_SELECTED_BATCH_WORKERS, MIN_DELTA_TIME_FLOOR_SECS, MIN_PROGRESS_THRESHOLD,
     NAS_TVSHOW_DIR_ENV, SCAN_STREAMING_CHUNK_SIZE, SESSION_WINDOW_SECS,
@@ -38,6 +38,32 @@ static STEM_SIZE_CACHE: Mutex<Option<HashMap<String, u64>>> = Mutex::new(None);
 /// Global video codec cache by stem to eliminate blocking CIFS network metadata calls.
 static STEM_CODEC_CACHE: Mutex<Option<HashMap<String, String>>> = Mutex::new(None);
 
+/// Resolves the path to the events NDJSON log, falling back to history seed when live report is absent.
+///
+/// # Arguments
+/// None.
+///
+/// # Returns
+/// A [`PathBuf`] pointing to [`DEFAULT_BATCH_EVENTS_PATH`] or [`DEFAULT_HISTORY_SEED_PATH`].
+///
+/// # Errors
+/// None.
+///
+/// # Panics
+/// None.
+///
+/// # Data Flow & Invariants
+/// Checks if [`DEFAULT_BATCH_EVENTS_PATH`] exists on disk; if so, uses it so local developer
+/// batch telemetry is live. Otherwise falls back to repository history seed [`DEFAULT_HISTORY_SEED_PATH`].
+pub fn resolve_events_log_path() -> PathBuf {
+    let primary = PathBuf::from(DEFAULT_BATCH_EVENTS_PATH);
+    if primary.exists() {
+        primary
+    } else {
+        PathBuf::from(DEFAULT_HISTORY_SEED_PATH)
+    }
+}
+
 /// Initializes the file size and video codec in-memory caches from reports and media cache.
 ///
 /// # Arguments
@@ -45,13 +71,13 @@ static STEM_CODEC_CACHE: Mutex<Option<HashMap<String, String>>> = Mutex::new(Non
 ///
 /// # Data Flow & Invariants
 /// Pre-populates [`STEM_SIZE_CACHE`] and [`STEM_CODEC_CACHE`] by scanning
-/// `data/reports/batch_tvshow_nightly.jsonl` and `data/cache/discovered_media.json`.
+/// batch events log and `data/cache/discovered_media.json`.
 /// Eliminates network latency spikes by avoiding blocking metadata lookups across remote CIFS shares.
 pub fn preload_stem_size_cache() {
     let mut map = HashMap::new();
-    let events_file = Path::new("data/reports/batch_tvshow_nightly.jsonl");
+    let events_file = resolve_events_log_path();
     if events_file.exists() {
-        if let Ok(file) = fs::File::open(events_file) {
+        if let Ok(file) = fs::File::open(&events_file) {
             let reader = BufReader::new(file);
             for line in reader.lines().map_while(Result::ok) {
                 let trimmed = line.trim();
@@ -128,8 +154,8 @@ pub fn get_file_size(media_name: &str, target_path: Option<&Path>) -> u64 {
     }
 
     if let Some(path) = target_path {
-        let is_remote_mount = path.starts_with("/media/latty/Synology")
-            || path.to_string_lossy().contains("Synology");
+        let is_remote_mount = path.to_string_lossy().contains("Synology")
+            || path.to_string_lossy().contains("Freebox");
         if !is_remote_mount {
             if let Ok(metadata) = fs::metadata(path) {
                 let size = metadata.len();
@@ -805,6 +831,39 @@ pub fn trigger_media_sources_rescan() {
     MEDIA_RESCAN_REQUESTED.store(true, Ordering::Relaxed);
 }
 
+/// Resolves the default NAS TVShow directory path dynamically without hardcoded machine paths.
+///
+/// # Arguments
+/// None.
+///
+/// # Returns
+/// A [`PathBuf`] determined by environment variable, dynamic user mount, or fallback constant.
+///
+/// # Errors
+/// None.
+///
+/// # Panics
+/// None.
+///
+/// # Data Flow & Invariants
+/// 1. Prioritizes `NAS_TVSHOW_DIR` environment variable if present.
+/// 2. Checks `/media/$USER/Synology/tvshow` if that directory actually exists on disk.
+/// 3. Falls back to [`DEFAULT_NAS_TVSHOW_PATH`] (`/media/storage/tvshow`).
+pub fn resolve_default_nas_tvshow_path() -> PathBuf {
+    if let Ok(dir) = std::env::var(NAS_TVSHOW_DIR_ENV) {
+        if !dir.trim().is_empty() {
+            return PathBuf::from(dir);
+        }
+    }
+    if let Ok(user) = std::env::var("USER") {
+        let user_synology = PathBuf::from(format!("/media/{}/Synology/tvshow", user));
+        if user_synology.exists() {
+            return user_synology;
+        }
+    }
+    PathBuf::from(DEFAULT_NAS_TVSHOW_PATH)
+}
+
 /// Loads configured media sources from disk, initializing default NAS TVShow source if unconfigured.
 pub fn load_media_sources(path: &Path) -> Vec<MediaSourceConfig> {
     if path.exists() {
@@ -817,9 +876,7 @@ pub fn load_media_sources(path: &Path) -> Vec<MediaSourceConfig> {
         }
     }
 
-    let default_path = std::env::var(NAS_TVSHOW_DIR_ENV)
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from(DEFAULT_NAS_TVSHOW_PATH));
+    let default_path = resolve_default_nas_tvshow_path();
 
     let default_sources = vec![MediaSourceConfig {
         id: DEFAULT_SOURCE_ID_TVSHOW.to_string(),
@@ -1327,7 +1384,7 @@ pub fn start_media_sources_scanner(
     stop_flag: Arc<AtomicBool>,
 ) {
     std::thread::spawn(move || {
-        let events_path = PathBuf::from(DEFAULT_BATCH_EVENTS_PATH);
+        let events_path = resolve_events_log_path();
         let couplings_path = PathBuf::from(DEFAULT_COUPLINGS_PATH);
         let sources_path = PathBuf::from(DEFAULT_MEDIA_SOURCES_PATH);
         let phash_dir = PathBuf::from(DEFAULT_PHASH_DIR);
@@ -1446,7 +1503,7 @@ pub fn run_telemetry_sampler_loop(
     let mut last_net_instant = Instant::now();
     let mut previous_io_samples: HashMap<u32, (Instant, u64)> = HashMap::new();
 
-    let events_path = PathBuf::from(DEFAULT_BATCH_EVENTS_PATH);
+    let events_path = resolve_events_log_path();
     let couplings_path = PathBuf::from(DEFAULT_COUPLINGS_PATH);
 
     let mut last_events_mtime = fs::metadata(&events_path)

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import os
 import statistics
 from pathlib import Path
 from typing import Any, Dict, List
@@ -88,7 +89,7 @@ def main() -> int:
     md: List[str] = [
         "# Rapport d'Exécution & Profiling Batch TVShow (Synology NAS)\n",
         f"**Date d'exécution** : {execution_date}  ",
-        "**Cible** : `//192.168.1.58/tvshow` (Stream CIFS direct, 0 Mo copié en local)  ",
+        f"**Cible** : `{os.environ.get('NAS_CIFS_SHARE', '//synology.local/tvshow')}` (Stream CIFS direct, 0 Mo copié en local)  ",
         f"**Statut Global** : `{'100% NOMINAL' if failed == 0 else 'SUCCÈS PARTIEL'}`  \n",
         "## 1. Synthèse Exécutive & Métriques Clés\n",
         "| Métrique | Valeur Mesurée | Note Opérationnelle |",

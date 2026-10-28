@@ -51,7 +51,7 @@ flowchart TD
     end
 
     subgraph Central_Server ["Serveur Central Distant"]
-        REMOTE["Serveur pydbsrt (RPi4 / NAS / o2switch)\nhttp://192.168.1.24:8765"]
+        REMOTE["Serveur pydbsrt (RPi4 / NAS / o2switch)\nhttp://rpi4.local:8765"]
     end
 
     DAEMON -->|"2. POST /v1/recognize (200 octets)"| REMOTE
@@ -64,7 +64,7 @@ flowchart TD
 
 * Un système Linux basé sur Debian / Ubuntu (ou toute distribution moderne avec `systemd`).
 * Le lecteur VLC installé (`sudo apt install vlc` ou paquet natif).
-* L'URL réseau du serveur central `dbsrt-server` (ex: `http://192.168.1.24:8765` sur votre LAN, ou une URL Cloud/o2switch).
+* L'URL réseau du serveur central `dbsrt-server` (ex: `http://rpi4.local:8765` sur votre LAN, ou une URL Cloud/o2switch).
 
 ---
 
@@ -74,7 +74,7 @@ L'installation orchestre la compilation release, le déploiement des binaires da
 
 ```bash
 # Pointer vers l'adresse de votre serveur distant (ex: RPi4)
-task client:linux:install -- http://192.168.1.24:8765
+task client:linux:install -- http://rpi4.local:8765
 ```
 
 ### Ce que réalise cette commande :

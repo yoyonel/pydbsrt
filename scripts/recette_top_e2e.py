@@ -58,8 +58,19 @@ KEY_LAUNCH_BATCH: bytes = b"b"
 KEY_MEDIA_TAB: bytes = b"4"
 KEY_MEDIA_TOGGLE: bytes = b"m"
 
+
+def resolve_nas_tvshow_dir() -> Path:
+    """Resolves default TVShow path using current user environment or override."""
+    env_dir = os.environ.get("NAS_TVSHOW_DIR")
+    if env_dir:
+        return Path(env_dir)
+    user = os.environ.get("USER", "storage")
+    candidate = Path("/media") / user / "Synology" / "tvshow"
+    return candidate if candidate.exists() else Path("/media/storage/tvshow")
+
+
 # File Paths
-NAS_TVSHOW_DIR: Path = Path("/media/latty/Synology/tvshow")
+NAS_TVSHOW_DIR: Path = resolve_nas_tvshow_dir()
 TARGET_BINARY_PATH: Path = Path("./target/release/dbsrt")
 RECORDING_CAST_PATH: Path = Path("data/reports/dbsrt_top_e2e_recette.cast")
 DOCS_CAST_PATH: Path = Path("docs/assets/casts/term_top_recette.cast")
@@ -443,16 +454,16 @@ def generate_recette_report(json_data: dict, cast_size: int) -> None:
 
     content = f"""# Recette de Test E2E : Moniteur TUI Rust `dbsrt top` & Ingestion Synology NAS
 
-Ce guide de recette valide de bout en bout l'intégration et l'exécution du moniteur de processus natif en Rust (`dbsrt top`) face à un flux réel d'ingestion et de décodage vidéo pHash depuis le NAS Synology (`/media/latty/Synology/tvshow`).
+Ce guide de recette valide de bout en bout l'intégration et l'exécution du moniteur de processus natif en Rust (`dbsrt top`) face à un flux réel d'ingestion et de décodage vidéo pHash depuis le NAS Synology (`{NAS_TVSHOW_DIR}`).
 
 ## Contexte d'Exécution & Environnement
 
 - **Système d'Exploitation** : Linux x86_64
 - **Binaire Testé** : `target/release/dbsrt top` (Rust 1.84+, Ratatui 0.29, Sysinfo 0.33)
-- **Source des Médias Réels** : Synology NAS CIFS (`/media/latty/Synology/tvshow`)
+- **Source des Médias Réels** : Synology NAS CIFS (`{NAS_TVSHOW_DIR}`)
 - **Accélération Matérielle** : Intel Iris Xe Graphics (VA-API `/dev/dri/renderD128`)
 - **Télémétrie GPU** : `intel_gpu_top` JSON streaming daemon
-- **Enregistrement ASCIInema** : `data/reports/dbsrt_top_e2e_recette.cast` ({cast_size_kb:.1f} KiB)
+- **Enregistrement ASCIInema** : `docs/assets/casts/term_top_recette.cast` ({cast_size_kb:.1f} KiB)
 
 ## Scénarios de Test Exécutés & Résultats
 
@@ -508,7 +519,7 @@ Ce guide de recette valide de bout en bout l'intégration et l'exécution du mon
 
 ## Relecture de la Session ASCIInema en CLI
 
-La session complète enregistrée est archivée au format standard asciicast v2 dans `docs/assets/casts/term_top_recette.cast` et `data/reports/dbsrt_top_e2e_recette.cast`.
+La session complète enregistrée est archivée au format standard asciicast v2 dans `docs/assets/casts/term_top_recette.cast`.
 
 Pour rejouer fidèlement l'intégralité de la recette dans le terminal :
 

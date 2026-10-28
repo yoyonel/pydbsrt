@@ -72,6 +72,9 @@ pub const MAX_LOG_LINES_PREVIEW: usize = 30;
 /// Default relative path to batch ingestion telemetry NDJSON log.
 pub const DEFAULT_BATCH_EVENTS_PATH: &str = "data/reports/batch_tvshow_nightly.jsonl";
 
+/// Default relative path to history seed NDJSON log used when live batch report is absent.
+pub const DEFAULT_HISTORY_SEED_PATH: &str = "data/seed/history_seed.jsonl";
+
 /// Default relative path to certified subtitle couplings JSON registry.
 pub const DEFAULT_COUPLINGS_PATH: &str = "data/SRT/couplings.json";
 
@@ -120,8 +123,8 @@ pub const DEFAULT_COUPLING_BASELINE_FPS: f64 = 25.0;
 /// Number of items to skip during PageUp / PageDown navigation.
 pub const PAGE_SCROLL_STEP: usize = 10;
 
-/// Default filesystem directory path for Synology NAS TVShow library.
-pub const DEFAULT_NAS_TVSHOW_PATH: &str = "/media/latty/Synology/tvshow";
+/// Default filesystem directory path fallback for Synology NAS TVShow library.
+pub const DEFAULT_NAS_TVSHOW_PATH: &str = "/media/storage/tvshow";
 
 /// Environment variable overriding the NAS TVShow library directory path.
 pub const NAS_TVSHOW_DIR_ENV: &str = "NAS_TVSHOW_DIR";
