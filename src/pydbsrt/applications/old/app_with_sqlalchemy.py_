@@ -175,7 +175,7 @@ def insert_medias_into_db():
     base.metadata.create_all(db)
     create_indexes_in_db(db)
 
-    root_media_path = Path("/home/latty/NAS/tvshow/Silicon Valley/")
+    root_media_path = Path("/media/storage/tvshow/Silicon Valley/")
     for media_path in islice(root_media_path.glob("S02/*Homicide*.mkv"), 10):
         logger.info("media_path: %s", str(media_path))
         with _Timer("Insert ImageHashes (from media) into db"):

@@ -40,17 +40,20 @@ run_lint_fast() {
     echo "⊘ hadolint not found, skipping Dockerfile lint"
   fi
 
-  echo "=== [7/7] HTML / Embedded JS / JSON Assets ==="
+  echo "=== [7/8] HTML / Embedded JS / JSON Assets ==="
   uv run python scripts/validate_web_assets.py
+
+  echo "=== [8/8] Rust Architectural Complexity Gate (LOC <= 150, CCN <= 20) ==="
+  uv run python scripts/lint_complexity.py
 }
 
 run_lint() {
   run_lint_fast
-  echo "=== [8/9] Rust (cargo fmt --check & clippy) ==="
+  echo "=== [9/10] Rust (cargo fmt --check & clippy) ==="
   cargo fmt --all -- --check
   cargo clippy --workspace --all-targets -- -D warnings
 
-  echo "=== [9/9] Disk Space Safety Guard ==="
+  echo "=== [10/10] Disk Space Safety Guard ==="
   bash scripts/disk_guard.sh check
 }
 

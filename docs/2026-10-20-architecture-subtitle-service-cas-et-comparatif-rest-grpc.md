@@ -193,7 +193,7 @@ Le binaire unifié `dbsrt-server` (Rust) s'adapte à tous les modes d'exécution
 | `--host` | `HOST` ou `DBSRT_HOST` | `127.0.0.1` (`0.0.0.0` sur serveur) | Interface réseau d'écoute TCP. |
 | `--port` | `PORT` ou `DBSRT_PORT` | `8765` | Port d'écoute du serveur HTTP. |
 | `--agent` | `DBSRT_AGENT` | `false` | Active le mode sidecar client (zéro base locale, relais systématique). |
-| `--remote-api` | `DBSRT_REMOTE_API` | `""` | URL du serveur maître (ex: `http://192.168.1.24:8765`). |
+| `--remote-api` | `DBSRT_REMOTE_API` | `""` | URL du serveur maître (ex: `http://rpi4.local:8765`). |
 | `--dbphash` | `DBSRT_DBPHASH` | `""` | Chemin vers `catalog.dbphash` (index compact RAM MIH Tier 1). |
 | `--phash-dir` | `DBSRT_PHASH_DIR` | `/tmp` | Dossier des séquences `.phash` complètes (requis pour calculer $\Delta t$). |
 | `--subtitles-dir` | `DBSRT_SUBTITLES_DIR` | `data/SRT` | Dossier des sous-titres `.srt` certifiés pour le service CAS. |
@@ -203,7 +203,7 @@ Le binaire unifié `dbsrt-server` (Rust) s'adapte à tous les modes d'exécution
 
 | Cible d'Hébergement | Mode de Déploiement | Ressources (RAM / CPU) | Latence de Réponse | Faisabilité & Spécificités |
 | :--- | :--- | :--- | :--- | :--- |
-| **Raspberry Pi 4** (Validé) | Docker Compose `aarch64` (`network: host`) | ~25 Mo RAM / 0% CPU repos | **2.5 ms** (MIH) / **8 ms** (Postgres) | **Empiriquement prouvé** : conteneur Docker en production sur `192.168.1.24`. |
+| **Raspberry Pi 4** (Validé) | Docker Compose `aarch64` (`network: host`) | ~25 Mo RAM / 0% CPU repos | **2.5 ms** (MIH) / **8 ms** (Postgres) | **Empiriquement prouvé** : conteneur Docker en production sur `rpi4.local`. |
 | **NAS Synology / QNAP** | Docker Compose x86_64 ou ARM64 (Container Manager) | ~25 Mo RAM / < 1% CPU | **< 2 ms** (CPU Intel/AMD) | **100% compatible** : Container Manager natif, montage direct des volumes `/data`. |
 | **Serveur o2switch** (Mutualisé) | Binaire statique standalone Rust (`x86_64-unknown-linux-musl`) | ~20 Mo RAM / CPU négligeable | **< 3 ms** | **100% compatible via Zero-DB** : sur hébergement mutualisé cPanel sans Docker ni Postgres personnalisé, le serveur tourne en mémoire avec `catalog.dbphash` + dossier `data/SRT/`. L'API REST traverse Apache sans aucune restriction. |
 
@@ -221,7 +221,7 @@ Le binaire unifié `dbsrt-server` (Rust) s'adapte à tous les modes d'exécution
 L'implémentation a été déployée et validée de bout en bout en production sur le Raspberry Pi 4 :
 
 1. **Route Serveur Opérationnelle** :
-   * Requête directe : `curl -i http://192.168.1.24:8765/v1/subtitles/acb608834838e4d473b296694fa23529`
+   * Requête directe : `curl -i http://rpi4.local:8765/v1/subtitles/acb608834838e4d473b296694fa23529`
    * En-têtes validés : `HTTP/1.1 200 OK`, `Content-Type: text/plain; charset=utf-8`, `Cache-Control: public, max-age=31536000, immutable`, `ETag: "acb608834838e4d473b296694fa23529"`.
 2. **Intégration Client / VLC** :
    * L'extension VLC `vlsub_dbsrt.lua` reçoit les candidats identifiés sous forme `sub:sha256:<hash>` (zéro fuite de chemin de fichier interne).

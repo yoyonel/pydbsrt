@@ -33,6 +33,9 @@ Cette page dresse le dictionnaire exhaustif de toutes les cibles d'orchestration
 | Commande | Syntaxe & Arguments | Description |
 | :--- | :--- | :--- |
 | `task media:add` | `task media:add -- <video> [srt] [--lang <lg>] [--fps <val>]` | Façade unifiée d'ingestion média avec auto-détection et injection à chaud. |
+| `task media:batch:tvshow` | `task media:batch:tvshow -- [--until <HH:MM>] [--workers <N>]` | Ingestion batch parallélisée de séries TV en direct depuis montage CIFS. |
+| `task media:top` | `task media:top -- [--refresh-ms <ms>]` | Moniteur TUI natif Rust temps réel (full-frame) pour les tâches de décodage, débits CIFS et ETA. |
+| `task media:top:py` | `task media:top:py -- [--stats]` | Prototype historique Python Rich du moniteur TUI. |
 | `task coupling:certify` | `task coupling:certify` | Découvre et certifie en lot tous les fichiers `.phash` et `.srt` présents. |
 | `task coupling:relabel` | `task coupling:relabel -- --media <hash> [--sub <hash>] --lang <code>` | Modifie la langue ou la confiance d'un couplage existant. |
 
@@ -61,6 +64,7 @@ Cette page dresse le dictionnaire exhaustif de toutes les cibles d'orchestration
 | `task server:status` | Interroge l'endpoint `/v1/status` pour valider la réponse HTTP et la mémoire. |
 | `task server:reload` | Déclenche le rechargement à chaud atomique (`/v1/catalog/reload`) sans coupure de service. |
 | `task catalog:status` | Inspecte l'état des index en mémoire vive (Base `.dbphash` + Delta RAM). |
+| `task catalog:verify` | Exécute l'audit programmatique exhaustif d'intégrité du catalogue (dbphash, couplings, PostgreSQL, phash). |
 | `task catalog:compact` | Fusionne l'index Delta en mémoire dans le fichier binaire `.dbphash` consolidé. |
 
 ---
@@ -89,6 +93,7 @@ Cette page dresse le dictionnaire exhaustif de toutes les cibles d'orchestration
 | `task typecheck` | Analyse statique de types Python via Pyright en mode strict. |
 | `task test` | Exécute l'intégralité des suites de tests unitaires et intégration (Rust + Python). |
 | `task test:rs` | Exécute la suite de tests Cargo du workspace Rust. |
+| `task test:scenarios` | Exécute la suite de scénarios TUI déclaratifs headless (`test_scenarios.rs`) en moins de 0.5s. (Alias : `task test:tui`). |
 | `task test:infra` | Exécute le harnais de tests d'infrastructure et chaos testing. |
 
 ---

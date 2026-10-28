@@ -259,6 +259,7 @@ flowchart TD
 | `task build` | Compile l'ensemble des binaires Rust en release | `Taskfile.yml` |
 | `task media:add` | Façade unifiée d'ingestion média (pHash, sidecar, certification, reload) | `taskfiles/stack.yml` |
 | `task coupling:certify` | Certifie les couples vidéo/sous-titres dans la base et dans JSON | `taskfiles/stack.yml` |
+| `task catalog:verify` | Audit programmatique d'intégrité du catalogue (dbphash, couplings, PostgreSQL, phash) | `taskfiles/stack.yml` |
 | `task demo:vlc` | Démonstration interactive VLC avec extension VLSub bonifiée | `taskfiles/demo.yml` |
 | `task demo:studio` | Démarre l'interface web dbsrt Studio (`:8765/studio`) | `taskfiles/demo.yml` |
 | `task lint` | Exécute l'ensemble des 9 linters polyglottes | `taskfiles/quality.yml` |

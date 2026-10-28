@@ -303,10 +303,15 @@ catalog_status() {
   local port
   port="$(resolve_server_port)"
   local host="${SERVER_HOST:-127.0.0.1}"
+  local res
+  if ! res="$(curl -s -f "http://${host}:${port}/v1/catalog/status" 2>/dev/null)"; then
+    echo "❌ dbsrt-server est hors-ligne (port ${port}). Démarrez-le avec 'task server:daemon' ou 'task studio'." >&2
+    exit 1
+  fi
   if command -v jq >/dev/null 2>&1; then
-    curl -s -f "http://${host}:${port}/v1/catalog/status" | jq .
+    echo "$res" | jq .
   else
-    curl -s -f "http://${host}:${port}/v1/catalog/status"
+    echo "$res"
   fi
 }
 

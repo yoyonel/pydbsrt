@@ -16,6 +16,7 @@ Checks:
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import subprocess
@@ -195,15 +196,18 @@ def check_docs_filetypes() -> list[str]:
 
 
 def check_no_local_paths() -> list[str]:
-    """Ensure no machine-local paths (/home/latty or file:///home/) exist in versioned docs/code."""
+    """Ensure no machine-local paths or private RFC 1918 IPs exist in versioned docs/code."""
     errors: list[str] = []
     targets = [
         Path("README.md"),
         *Path("docs").rglob("*.md"),
         *Path("src").rglob("*.py"),
         *Path("crates").rglob("*.rs"),
+        *[p for p in Path("scripts").rglob("*.py") if p.name != "validate_docs.py"],
     ]
-    pattern = re.compile(r"(/home/latty|file:///home/|/pydbsrt/(?:screenshots|assets)/)")
+    pattern = re.compile(
+        r"(/home/latty|/media/latty|file:///home/|192\.168\.\d+\.\d+|/pydbsrt/(?:screenshots|assets)/)"
+    )
     for p in targets:
         if not p.exists():
             continue
@@ -214,10 +218,86 @@ def check_no_local_paths() -> list[str]:
     return errors
 
 
+MAX_CAST_INITIAL_BLANK_SECS: float = 1.0
+MAX_CAST_IDLE_GAP_SECS: float = 2.5
+MIN_CAST_EVENTS_COUNT: int = 5
+
+
+def check_asciinema_casts() -> list[str]:
+    """Verify that all recorded asciinema casts (.cast) start promptly without dead blank screens."""
+    errors: list[str] = []
+    cast_dirs = [Path("docs/assets/casts"), Path("data/reports")]
+
+    for cdir in cast_dirs:
+        if not cdir.exists():
+            continue
+        for cast_path in cdir.glob("*.cast"):
+            try:
+                with open(cast_path, encoding="utf-8") as f:
+                    lines = f.readlines()
+            except Exception as e:
+                errors.append(f"{cast_path}: Erreur lecture .cast : {e}")
+                continue
+
+            if len(lines) < MIN_CAST_EVENTS_COUNT:
+                errors.append(f"{cast_path}: Fichier .cast trop court ({len(lines)} lignes)")
+                continue
+
+            try:
+                header = json.loads(lines[0])
+                if header.get("version") != 2:
+                    errors.append(f"{cast_path}: Version asciicast v2 attendue (reçu: {header.get('version')})")
+            except Exception as e:
+                errors.append(f"{cast_path}: En-tête JSON .cast invalide : {e}")
+                continue
+
+            events = []
+            for line_no, line in enumerate(lines[1:], start=2):
+                try:
+                    ev = json.loads(line)
+                    events.append(ev)
+                except Exception as e:
+                    errors.append(f"{cast_path}:{line_no}: Événement JSON invalide : {e}")
+                    break
+
+            if not events:
+                continue
+
+            # First visible content check
+            first_content_t = None
+            for ev in events:
+                if len(ev) >= 3 and ev[1] == "o":
+                    text = str(ev[2])
+                    if len(text.replace("\x1b[?1049h", "").strip()) > 0:
+                        first_content_t = float(ev[0])
+                        break
+
+            if first_content_t is not None and first_content_t > MAX_CAST_INITIAL_BLANK_SECS:
+                errors.append(
+                    f"{cast_path}: Écran noir initial inacceptable ({first_content_t:.2f}s > {MAX_CAST_INITIAL_BLANK_SECS}s). "
+                    "Le premier contenu du terminal doit apparaître en moins de 1 seconde."
+                )
+
+            # Max idle gap check
+            prev_t = 0.0
+            for ev in events:
+                t = float(ev[0])
+                gap = t - prev_t
+                if gap > MAX_CAST_IDLE_GAP_SECS:
+                    errors.append(
+                        f"{cast_path}: Période d'inactivité excessive détectée ({gap:.2f}s > {MAX_CAST_IDLE_GAP_SECS}s à t={t:.2f}s). "
+                        "Compacter l'enregistrement via idle-time-limit ou compact_asciicast_timing()."
+                    )
+                    break
+                prev_t = t
+
+    return errors
+
+
 def main() -> int:
     site_dir = Path("site")
 
-    print("🔍 [0/4] Checking file extensions and forbidden machine-local paths in docs/...")
+    print("🔍 [0/5] Checking file extensions and forbidden machine-local paths in docs/...")
     filetype_errors = check_docs_filetypes()
     if filetype_errors:
         print(f"❌ Found {len(filetype_errors)} unauthorized file(s) in docs/:")
@@ -233,7 +313,7 @@ def main() -> int:
         return 1
     print("✅ Zero unauthorized files & zero machine-local paths: OK")
 
-    print("🔍 [1/4] Building documentation with mkdocs build --strict...")
+    print("🔍 [1/5] Building documentation with mkdocs build --strict...")
     res = subprocess.run(["uv", "run", "--no-sync", "mkdocs", "build", "--strict"], capture_output=True, text=True)
     if res.returncode != 0:
         print("❌ MkDocs strict build failed:")
@@ -241,7 +321,7 @@ def main() -> int:
         return 1
     print("✅ MkDocs strict build: OK")
 
-    print("🔍 [2/4] Validating rendered HTML AST & integrity...")
+    print("🔍 [2/5] Validating rendered HTML AST & integrity...")
     html_errors = check_html_files(site_dir)
     if html_errors:
         print(f"❌ Found {len(html_errors)} documentation integrity error(s):")
@@ -250,7 +330,16 @@ def main() -> int:
         return 1
     print("✅ HTML AST & LaTeX validation: 0 errors")
 
-    print("🔍 [3/4] Running Headless Chrome DOM & MathJax check...")
+    print("🔍 [3/5] Validating Asciinema cast timing and instant playback...")
+    cast_errors = check_asciinema_casts()
+    if cast_errors:
+        print(f"❌ Found {len(cast_errors)} Asciinema cast timing error(s):")
+        for err in cast_errors:
+            print(f"   • {err}")
+        return 1
+    print("✅ Asciinema casts timing (<1.0s start, <2.5s gaps): OK")
+
+    print("🔍 [4/5] Running Headless Chrome DOM & MathJax check...")
     chrome_errors = run_chrome_smoke_test(site_dir)
     if chrome_errors:
         print("❌ Chrome smoke test error(s):")

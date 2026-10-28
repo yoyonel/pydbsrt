@@ -9,7 +9,7 @@ Auteur : Équipe pydbsrt
 
 ## 1. Contexte & Problématique Initiale
 
-Dans le cadre du pilotage de la base de données relationnelle du nœud domestique Raspberry Pi 4 (`192.168.1.24`), l'exécution de la commande distante suivante avait échoué :
+Dans le cadre du pilotage de la base de données relationnelle du nœud domestique Raspberry Pi 4 (`rpi4.local`), l'exécution de la commande distante suivante avait échoué :
 
 ```bash
 ssh rpi4 "task db:status"
@@ -125,7 +125,7 @@ volumes:
 - Sous-commandes dédiées sans constantes magiques :
   - `db-build` : Compile nativement l'image `pg-spgist_hamming:17-rpi4` sur l'architecture ARM64 du RPi4.
   - `db-up` / `db-down` : Démarre/arrête le conteneur avec boucle de readiness `pg_isready`.
-  - `db-status` : Affiche l'état du conteneur et interroge `dbsrt migrate --status --host 192.168.1.24 --port 5433`.
+  - `db-status` : Affiche l'état du conteneur et interroge `dbsrt migrate --status --host rpi4.local --port 5433`.
   - `db-migrate` : Applique les migrations déclaratives Refinery sur le port 5433.
 
 ### 3. Cibles Taskfile
@@ -175,14 +175,14 @@ Toutes les étapes ont été exécutées en direct sur le matériel réel avec v
 ```text
 ❯ task rpi4:db:up
 === Starting dedicated PostgreSQL 17 container on rpi4 (port 5433) ===
-Waiting for PostgreSQL 17 to become ready on 192.168.1.24:5433...
-✓ Remote PostgreSQL 17 is active and ready on 192.168.1.24:5433
+Waiting for PostgreSQL 17 to become ready on rpi4.local:5433...
+✓ Remote PostgreSQL 17 is active and ready on rpi4.local:5433
 ```
 
 ### 2. Application des Migrations Refinery
 ```text
 ❯ task rpi4:db:migrate
-Applying pending refinery migrations on 192.168.1.24:5433...
+Applying pending refinery migrations on rpi4.local:5433...
 ✓ Successfully applied 3 migration(s):
   + [V1] initial_schema
   + [V2] certified_couplings
@@ -197,7 +197,7 @@ NAMES        STATUS         PORTS
 dbsrt-pg17   Up 39 seconds  0.0.0.0:5433->5432/tcp, [::]:5433->5432/tcp
 
 === PostgreSQL Migration Status ===
-Target Database: 192.168.1.24:5433 (bktreedb)
+Target Database: rpi4.local:5433 (bktreedb)
   [V1] initial_schema (applied on 2026-10-24T11:36:12Z)
   [V2] certified_couplings (applied on 2026-10-24T11:36:12Z)
   [V3] secure_lang_and_cascades (applied on 2026-10-24T11:36:12Z)
@@ -214,7 +214,7 @@ ssh rpi4 "docker exec -e PGPASSWORD=docker pg-spgist_hamming_bktreedb_1 psql -h 
 ### 5. Test E2E Serveur Axum & Recherche pHash
 ```text
 ❯ task rpi4:demo
-=== Testing Remote Recognize API on http://192.168.1.24:8765 ===
+=== Testing Remote Recognize API on http://rpi4.local:8765 ===
 found: true, media_match: "Andor", confidence: 100.0%
 timer_seconds: 0.0042s (4.2 ms)
 ✓ Remote CAS Subtitle Download verified!

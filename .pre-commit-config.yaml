@@ -90,6 +90,13 @@ repos:
         types: [rust]
         pass_filenames: false
 
+      - id: rust-complexity-gate
+        name: rust architectural complexity & function size gate
+        entry: uv run python scripts/lint_complexity.py
+        language: system
+        types: [rust]
+        pass_filenames: false
+
       - id: cargo-test
         name: cargo test (.rs)
         entry: cargo test --workspace

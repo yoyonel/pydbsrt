@@ -3,6 +3,7 @@
 //! local Zero-DB JSON registry (`couplings.json`).
 
 use crate::lang_status::LangStatus;
+use crate::metadata::MediaMetadata;
 use crate::srt::SubtitleFile;
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -181,15 +182,28 @@ impl CouplingRegistry {
     /// Default filename inside `--subtitles-dir`.
     pub const REGISTRY_FILENAME: &'static str = "couplings.json";
 
-    /// Resolves the path to `couplings.json` inside `subtitles_dir`.
+    /// Resolves the canonical path to `couplings.json` inside a given directory.
+    ///
+    /// # Arguments
+    /// - `subtitles_dir`: Base directory path hosting subtitle catalogs and coupling definitions.
+    ///
+    /// # Returns
+    /// PathBuf pointing to `<subtitles_dir>/couplings.json`.
     pub fn default_path(subtitles_dir: &Path) -> PathBuf {
         subtitles_dir.join(Self::REGISTRY_FILENAME)
     }
 
-    /// Loads `CouplingRegistry` from a JSON file.
+    /// Loads `CouplingRegistry` from disk, or instantiates a blank registry if missing.
     ///
-    /// - Returns `Ok(Self::default())` if the file does not exist.
-    /// - Returns `Err(...)` if the file exists but fails to read or parse (invalid JSON).
+    /// # Arguments
+    /// - `path`: Filesystem path to `couplings.json`.
+    ///
+    /// # Returns
+    /// - `Ok(Self)`: Parsed registry or default empty registry if the file does not exist.
+    /// - `Err(anyhow::Error)`: If the file exists but cannot be read or contains invalid JSON.
+    ///
+    /// # Errors
+    /// Returns error with context if filesystem permissions fail or JSON syntax is invalid.
     pub fn load_or_default(path: &Path) -> Result<Self> {
         if !path.exists() {
             return Ok(Self::default());
@@ -201,7 +215,23 @@ impl CouplingRegistry {
         Ok(reg)
     }
 
-    /// Saves `CouplingRegistry` atomically to `path` using a temporary file and rename.
+    /// Saves `CouplingRegistry` atomically using a temporary file and atomic rename.
+    ///
+    /// # Arguments
+    /// - `path`: Destination filesystem path.
+    ///
+    /// # Returns
+    /// - `Ok(())` on successful atomic write.
+    /// - `Err(anyhow::Error)` on serialization, write, or rename error.
+    ///
+    /// # Errors
+    /// Propagates filesystem and serde serialization errors.
+    ///
+    /// # Data Flow & Invariants
+    /// 1. Creates parent directories if they do not exist.
+    /// 2. Pretty-prints registry to JSON.
+    /// 3. Writes payload to a process-isolated temporary file (`<path>.tmp.<pid>`).
+    /// 4. Atomically replaces target file using `fs::rename` to prevent tearing or corrupted state.
     pub fn save(&self, path: &Path) -> Result<()> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
@@ -220,12 +250,31 @@ impl CouplingRegistry {
         Ok(())
     }
 
-    /// Acquires a safe file lock on the registry path to synchronize concurrent writers.
+    /// Acquires a safe file lock on the registry path to synchronize concurrent batch writers.
+    ///
+    /// # Arguments
+    /// - `path`: Target file to lock.
+    ///
+    /// # Returns
+    /// - `Ok(RegistryLock)` guard maintaining the exclusive lock until dropped.
+    /// - `Err(anyhow::Error)` on lock acquisition failure.
     pub fn lock(path: &Path) -> Result<RegistryLock> {
         RegistryLock::acquire(path)
     }
 
-    /// Upserts a certified `(media <-> subtitle)` coupling into the registry.
+    /// Upserts a certified `(media <-> subtitle)` coupling record into the registry.
+    ///
+    /// # Arguments
+    /// - `media_hash`: 32-character hex SHA-256 fingerprint of the reference pHash stream.
+    /// - `media_name`: Canonical release name or stem of reference media.
+    /// - `phash_filename`: Name of `.phash` file in catalog.
+    /// - `fps`: Reference video stream framerate.
+    /// - `frame_count`: Total count of sampled video frames.
+    /// - `sub_record`: Certified subtitle track metadata.
+    ///
+    /// # Data Flow & Invariants
+    /// If an entry matches `media_hash`, `phash_filename`, or `media_name`, updates metadata in place.
+    /// Otherwise appends a new [`CertifiedMediaCoupling`]. Then deduplicates or inserts `sub_record`.
     pub fn upsert_coupling(
         &mut self,
         media_hash: String,
@@ -268,38 +317,149 @@ impl CouplingRegistry {
     }
 
     /// Finds a media coupling matching a recognized `.phash` filename, media name, clean title, or media hash.
+    ///
+    /// # Arguments
+    /// - `matched_media`: Matched identifier string from pHash lookup or media release recognition.
+    ///
+    /// # Returns
+    /// `Some(&CertifiedMediaCoupling)` if a matching reference media is found, `None` otherwise.
     pub fn find_by_matched_media(&self, matched_media: &str) -> Option<&CertifiedMediaCoupling> {
+        self.find_by_matched_media_opts(matched_media, None, None)
+    }
+
+    /// Finds a media coupling matching a recognized `.phash` filename or title, with strict season and episode isolation.
+    ///
+    /// # Arguments
+    /// - `matched_media`: Media filename, stem, or clean title.
+    /// - `season`: Expected season number (e.g. `Some(2)`).
+    /// - `episode`: Expected episode number (e.g. `Some(1)`).
+    ///
+    /// # Returns
+    /// `Some(&CertifiedMediaCoupling)` matching both media identity and episodic constraints, `None` otherwise.
+    pub fn find_by_matched_media_opts(
+        &self,
+        matched_media: &str,
+        season: Option<u32>,
+        episode: Option<u32>,
+    ) -> Option<&CertifiedMediaCoupling> {
+        self.find_all_by_matched_media_opts(matched_media, season, episode)
+            .into_iter()
+            .next()
+    }
+
+    /// Finds all media couplings matching a recognized media identifier, with strict season and episode compatibility.
+    ///
+    /// # Arguments
+    /// - `matched_media`: Target identifier string.
+    /// - `season`: Optional season filter.
+    /// - `episode`: Optional episode filter.
+    ///
+    /// # Returns
+    /// Vector of matching [`CertifiedMediaCoupling`] references.
+    ///
+    /// # Data Flow & Invariants
+    /// Prevents cross-season and cross-episode subtitle contamination:
+    /// - Extracts season and episode from both reference coupling and search query via [`MediaMetadata::parse`].
+    /// - First pass: evaluates exact matches on filename, media name, clean title, or media hash.
+    /// - Second pass: evaluates normalized fuzzy prefix matches only if season and episode match strictly.
+    pub fn find_all_by_matched_media_opts(
+        &self,
+        matched_media: &str,
+        season: Option<u32>,
+        episode: Option<u32>,
+    ) -> Vec<&CertifiedMediaCoupling> {
         let clean = matched_media
             .strip_suffix(".phash")
             .unwrap_or(matched_media);
         let norm_matched = matched_media.replace(['_', '.', '-'], " ").to_lowercase();
         let norm_clean = norm_matched.trim();
 
-        self.couplings.iter().find(|c| {
-            if c.phash_filename == matched_media
+        let matches_se = |c: &CertifiedMediaCoupling| -> bool {
+            let c_meta = MediaMetadata::parse(&c.media_name);
+            let p_meta = MediaMetadata::parse(&c.phash_filename);
+            let c_season = c_meta.season.or(p_meta.season);
+            let c_episode = c_meta.episode.or(p_meta.episode);
+
+            if let Some(req_s) = season {
+                match c_season {
+                    Some(cs) if cs != req_s => return false,
+                    None => return false,
+                    _ => {}
+                }
+            }
+            if let Some(req_e) = episode {
+                match c_episode {
+                    Some(ce) if ce != req_e => {
+                        let ep_tag = format!("e{:02}", req_e);
+                        let name_lower = c.media_name.to_lowercase();
+                        let phash_lower = c.phash_filename.to_lowercase();
+                        if !name_lower.contains(&ep_tag) && !phash_lower.contains(&ep_tag) {
+                            return false;
+                        }
+                    }
+                    None => {
+                        let ep_tag = format!("e{:02}", req_e);
+                        let name_lower = c.media_name.to_lowercase();
+                        let phash_lower = c.phash_filename.to_lowercase();
+                        if !name_lower.contains(&ep_tag) && !phash_lower.contains(&ep_tag) {
+                            return false;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            true
+        };
+
+        let mut results = Vec::new();
+
+        // Pass 1: Exact matches on filename, media_name, or media_hash
+        for c in &self.couplings {
+            if (c.phash_filename == matched_media
                 || c.media_name == matched_media
                 || c.media_name == clean
                 || c.phash_filename.strip_suffix(".phash") == Some(clean)
-                || c.media_hash == matched_media
+                || c.media_hash == matched_media)
+                && matches_se(c)
             {
-                return true;
+                results.push(c);
             }
-            if !norm_clean.is_empty() {
+        }
+
+        if !results.is_empty() {
+            return results;
+        }
+
+        // Pass 2: Fuzzy / prefix match requiring strict season & episode compatibility
+        if !norm_clean.is_empty() {
+            for c in &self.couplings {
+                if !matches_se(c) {
+                    continue;
+                }
+                let c_meta = MediaMetadata::parse(&c.media_name);
                 let norm_c_name = c.media_name.replace(['_', '.', '-'], " ").to_lowercase();
                 let norm_c_phash = c
                     .phash_filename
                     .replace(['_', '.', '-'], " ")
                     .to_lowercase();
-                if norm_c_name.starts_with(norm_clean)
+                let norm_c_clean = c_meta
+                    .clean_title
+                    .replace(['_', '.', '-'], " ")
+                    .to_lowercase();
+
+                if norm_c_clean == norm_clean
+                    || norm_c_name.starts_with(norm_clean)
                     || norm_c_phash.starts_with(norm_clean)
                     || norm_clean.starts_with(&norm_c_name)
                     || norm_clean.starts_with(&norm_c_phash)
+                    || norm_clean.starts_with(&norm_c_clean)
                 {
-                    return true;
+                    results.push(c);
                 }
             }
-            false
-        })
+        }
+
+        results
     }
 
     /// Finds a subtitle record by its full or partial SHA-256 hash.
@@ -526,14 +686,15 @@ pub struct RelabelResult {
     pub new_status: LangStatus,
 }
 
-/// RAII advisory file lock protecting concurrent read-modify-write on coupling registry.
+/// RAII advisory kernel file lock protecting concurrent read-modify-write on coupling registry.
+/// Uses POSIX flock; automatically released by the kernel when the file descriptor is closed (drop/exit/SIGKILL).
 pub struct RegistryLock {
-    path: PathBuf,
+    _file: fs::File,
+    pub path: PathBuf,
 }
 
 impl RegistryLock {
     pub const DEFAULT_LOCK_TIMEOUT: Duration = Duration::from_secs(30);
-    pub const STALE_LOCK_THRESHOLD: Duration = Duration::from_secs(60);
     pub const RETRY_INTERVAL: Duration = Duration::from_millis(50);
 
     pub fn acquire(registry_path: &Path) -> Result<Self> {
@@ -542,35 +703,33 @@ impl RegistryLock {
 
     pub fn acquire_timeout(registry_path: &Path, timeout: Duration) -> Result<Self> {
         let lock_path = registry_path.with_extension("lock");
+        if let Some(parent) = lock_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&lock_path)
+            .with_context(|| format!("Failed to open registry lock file {:?}", lock_path))?;
+
         let start = std::time::Instant::now();
         while start.elapsed() < timeout {
-            match fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&lock_path)
-            {
-                Ok(_) => return Ok(Self { path: lock_path }),
-                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                    if let Ok(meta) = lock_path.metadata() {
-                        if let Ok(modified) = meta.modified() {
-                            if modified.elapsed().unwrap_or_default() > Self::STALE_LOCK_THRESHOLD {
-                                let _ = fs::remove_file(&lock_path);
-                                continue;
-                            }
-                        }
-                    }
+            match rustix::fs::flock(&file, rustix::fs::FlockOperation::NonBlockingLockExclusive) {
+                Ok(()) => {
+                    return Ok(Self {
+                        _file: file,
+                        path: lock_path,
+                    })
+                }
+                Err(rustix::io::Errno::WOULDBLOCK) => {
                     std::thread::sleep(Self::RETRY_INTERVAL);
                 }
-                Err(e) => return Err(e.into()),
+                Err(e) => return Err(anyhow::anyhow!("flock failed on {:?}: {}", lock_path, e)),
             }
         }
         bail!("Timed out waiting for registry lock on {:?}", lock_path);
-    }
-}
-
-impl Drop for RegistryLock {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.path);
     }
 }
 
@@ -847,5 +1006,111 @@ mod tests {
             )
             .unwrap_err();
         assert!(err_sub.to_string().contains("No subtitle found in media"));
+    }
+
+    #[test]
+    fn test_registry_lock_concurrency() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        use std::thread;
+
+        let temp_dir = std::env::temp_dir().join(format!("test_reg_lock_{}", std::process::id()));
+        let _ = fs::create_dir_all(&temp_dir);
+        let reg_path = temp_dir.join("couplings.json");
+
+        let counter = Arc::new(AtomicUsize::new(0));
+        let mut handles = Vec::new();
+
+        for _ in 0..10 {
+            let path = reg_path.clone();
+            let c = Arc::clone(&counter);
+            handles.push(thread::spawn(move || {
+                let lock = RegistryLock::acquire_timeout(&path, Duration::from_secs(5));
+                assert!(lock.is_ok(), "Thread must acquire lock");
+                let prev = c.fetch_add(1, Ordering::SeqCst);
+                thread::sleep(Duration::from_millis(10));
+                assert_eq!(
+                    c.load(Ordering::SeqCst),
+                    prev + 1,
+                    "Lock must guarantee mutual exclusion"
+                );
+            }));
+        }
+
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        assert_eq!(counter.load(Ordering::SeqCst), 10);
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_find_by_matched_media_opts_strict_season_episode() {
+        let mut reg = CouplingRegistry::default();
+
+        let make_coupling = |name: &str, lang: &str| CertifiedMediaCoupling {
+            media_hash: format!("hash_{}", name),
+            media_name: name.to_string(),
+            phash_filename: format!("{}.phash", name),
+            fps: 24.0,
+            frame_count: 100,
+            subtitles: vec![CertifiedSubtitleRecord {
+                subtitles_hash: format!("sub_hash_{}", name),
+                name: format!("{}.{}.srt", name, lang),
+                lang: lang.to_string(),
+                lang_status: LangStatus::Confirmed(lang.to_string()),
+                srt_path: format!("{}.{}.srt", name, lang),
+                certified: true,
+                cue_count: 50,
+                sub_frames: vec![],
+            }],
+        };
+
+        // Seed with What If S2E3 and S2E1, and The Office S5E1
+        reg.couplings.push(make_coupling(
+            "What.If.2021.S02E03.What.if.Happy.Hogan.Saved.Christmas.2160p",
+            "fr",
+        ));
+        reg.couplings.push(make_coupling(
+            "What.If.2021.S02E01.What.if.Nebula.Joined.the.Nova.Corps.2160p",
+            "fr",
+        ));
+        reg.couplings.push(make_coupling(
+            "The.Office.US.S05E01.1080p.NF.WEB.x264-MRSK",
+            "fr",
+        ));
+
+        // 1. Query What If with S2E1 -> MUST match S2E1, NOT S2E3 (even though S2E3 is first in array!)
+        let match_s2e1 = reg.find_by_matched_media_opts("What If", Some(2), Some(1));
+        assert!(match_s2e1.is_some());
+        assert_eq!(
+            match_s2e1.unwrap().media_name,
+            "What.If.2021.S02E01.What.if.Nebula.Joined.the.Nova.Corps.2160p"
+        );
+
+        // 2. Query What If with S2E3 -> MUST match S2E3
+        let match_s2e3 = reg.find_by_matched_media_opts("What If", Some(2), Some(3));
+        assert!(match_s2e3.is_some());
+        assert_eq!(
+            match_s2e3.unwrap().media_name,
+            "What.If.2021.S02E03.What.if.Happy.Hogan.Saved.Christmas.2160p"
+        );
+
+        // 3. Query What If with S1E1 -> MUST NOT match any (no S1 in registry)
+        let match_s1e1 = reg.find_by_matched_media_opts("What If", Some(1), Some(1));
+        assert!(match_s1e1.is_none());
+
+        // 4. Query The Office with S4E1 -> MUST return None (MUST NOT match S5E1!)
+        let match_off_s4e1 = reg.find_by_matched_media_opts("The Office US", Some(4), Some(1));
+        assert!(match_off_s4e1.is_none());
+
+        // 5. Query The Office with S5E1 -> MUST match S5E1
+        let match_off_s5e1 = reg.find_by_matched_media_opts("The Office US", Some(5), Some(1));
+        assert!(match_off_s5e1.is_some());
+        assert_eq!(
+            match_off_s5e1.unwrap().media_name,
+            "The.Office.US.S05E01.1080p.NF.WEB.x264-MRSK"
+        );
     }
 }

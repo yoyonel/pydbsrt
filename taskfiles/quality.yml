@@ -6,6 +6,18 @@ tasks:
     cmds:
       - bash scripts/code_quality.sh lint
 
+  complexity:
+    desc: Run Rust architectural complexity and function size gate (LOC <= 150, CCN <= 20)
+    aliases: [lint:complexity]
+    cmds:
+      - uv run python scripts/lint_complexity.py {{.CLI_ARGS}}
+
+  complexity:report:
+    desc: Display comprehensive ASCII table of Rust architectural metrics (LOC, CCN, Arity, Nesting) grouped by crate, module, and file
+    aliases: [complexity:table]
+    cmds:
+      - uv run python scripts/lint_complexity.py --table {{.CLI_ARGS}}
+
   typecheck:
     desc: Run static type checker across Python codebase (Pyright)
     aliases: [types, lint:types]
@@ -22,6 +34,12 @@ tasks:
     aliases: [rs:test]
     cmds:
       - cargo test --workspace
+
+  test:scenarios:
+    desc: "Run native Rust TUI headless declarative user scenario tests (<0.5s)"
+    aliases: [test:tui]
+    cmds:
+      - cargo test --package dbsrt-cli --test test_scenarios -- --nocapture
 
   coverage:
     desc: Run unified Rust & Python coverage pipeline (1:1 parity with GitHub Actions CI)

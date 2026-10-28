@@ -28,7 +28,10 @@ async fn test_dual_process_remote_relay_e2e() {
         return;
     }
 
-    std::env::set_var("DBSRT_RELAY_TIMEOUT_MS", "15000");
+    // SAFETY: Test setup before any async tasks or server instances spawn.
+    unsafe {
+        std::env::set_var("DBSRT_RELAY_TIMEOUT_MS", "15000");
+    }
 
     // 1. Start Server B (Simulated Remote / o2switch / NAS)
     let remote_state = AppState::new(

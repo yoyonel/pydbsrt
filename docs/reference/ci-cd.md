@@ -88,6 +88,7 @@ flowchart TD
   5. YAML : Validation syntaxique de tous les `.yml` et Docker Compose.
   6. Docker : Audit statique des Dockerfiles avec Hadolint.
   7. Web & JSON : Intégrité des assets JSON et HTML/JS.
+  8. Rust Complexity Gate : Contrôle strict de complexité cyclomatique (CCN $\le$ 20) et taille des fonctions (LOC $\le$ 150, nesting $\le$ 4, arguments $\le$ 4) via `scripts/lint_complexity.py` avec mécanisme anti-régression ratchet (inspection tabulaire complète via `task complexity:report`).
 
 ### 3.2. `python-unit` : Python Unit Tests
 - **Image** : `ubuntu-latest`
@@ -110,7 +111,8 @@ flowchart TD
 - **Vérifications & Commandes** :
   1. Formatage : `cargo fmt --all -- --check`
   2. Linting : `cargo clippy --workspace --all-targets -- -D warnings`
-  3. Tests & Couverture : `cargo llvm-cov --workspace --json --output-path coverage-rust.json`
+  3. Verrou de Complexité Architecturale : `uv run python scripts/lint_complexity.py` (interdit toute nouvelle fonction > 150 LOC ou CCN > 20 et bloque toute dégradation de fonctions historiques)
+  4. Tests & Couverture : `cargo llvm-cov --workspace --json --output-path coverage-rust.json` (englobe l'intégralité des tests unitaires, d'intégration et les scénarios TUI déclaratifs `test_scenarios.rs` en mode headless).
 - **Artefact produit** : `rust-coverage` (`coverage-rust.json`, rétention 1 jour).
 
 ### 3.4. `db-integration` : PostgreSQL 17 BK-Tree Integration

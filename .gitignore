@@ -49,6 +49,8 @@ coverage.xml
 *.cover
 .hypothesis/
 .pytest_cache/
+data/reports/
+crates/dbsrt-cli/data/
 
 # Translations
 *.mo
@@ -112,6 +114,7 @@ data/__PHASH__/
 data/SRT/*.srt
 # Runtime databases (NEVER track these)
 data/SRT/couplings.json
+data/SRT/*.lock
 couplings.json
 data/catalog.dbphash
 data/__PHASH__/

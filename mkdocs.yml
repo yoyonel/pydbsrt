@@ -128,6 +128,9 @@ nav:
       - Guide Migrations Refinery: 2026-10-23-guide-migrations-schema-postgresql-refinery.md
       - Surveiller la Stack avec Prometheus & Grafana: how-to/surveiller-stack-telemetrie.md
       - Invalider et Purger des Données pHash: how-to/invalider-donnees-phash.md
+      - Recette E2E du Moniteur TUI Rust (dbsrt top): how-to/2026-10-26-recette-e2e-tui-rust.md
+      - Guide Tests Scénarios TUI Headless: how-to/2026-10-27-guide-tests-scenarios-tui.md
+      - Audit d'Intégrité Catalogue & Stockage: how-to/2026-10-26-audit-integrite-catalogue-et-stockage.md
       - Exécuter les Recettes de Chaos Testing: how-to/executer-recettes-chaos-testing.md
       - Contribuer à la Documentation Diátaxis: how-to/contribuer-documentation-diataxis.md
   - 📖 Référence Technique:
@@ -143,6 +146,7 @@ nav:
   - 💡 Explications & Architecture:
       - Vue d'Ensemble Conceptuelle: explanation/index.md
       - Principe Fondamental du pHash & Retargeting: explanation/principe-fondamental-phash-et-retargeting.md
+      - Performances Décodage pHash & Contentions: explanation/performances-decodage-phash-et-contentions.md
       - Échantillonnage Hybride (Cuts + 1fps): explanation/echantillonnage-hybride-cuts-et-1fps.md
       - Étude Cuts, Keyframes & Hybride: 2026-10-17-etude-comparative-identification-frames-cuts-keyframes-hybride.md
       - Indexation Métrique (MIH vs BK-Tree): explanation/indexation-metrique-mih-vs-bktree.md
@@ -159,8 +163,11 @@ nav:
       - Plan Déploiement & Intégration RPi4: 2026-10-20-plan-deploiement-et-integration-remote-rpi4.md
       - Déploiement PostgreSQL 17 Dédié RPi4: 2026-10-24-deploiement-postgresql-17-isole-rpi4-et-orchestration-migrations.md
       - Audit Legacy VLSub: 2026-10-18-vlsub-legacy-audit.md
+      - Testabilité TUI & Stratégies de Couverture: explanation/2026-10-27-analyse-testabilite-et-couverture-tui-open-source.md
+      - Audit Qualité & Complexité Fonctions Rust: explanation/2026-10-27-audit-qualite-et-complexite-fonctions-rust.md
   - 📊 Benchmarks & Preuves:
       - Campagnes Empiriques:
+          - Rapport Batch TVShow Synology: 2026-10-25-rapport-batch-import-tvshow-synology.md
           - Dashboard Interactif E2E VLC (1 336 Tests): 2026-10-20-dashboard-interactif-e2e-vlc-corpus-nas.md
           - Validation E2E VLC Corpus Exhaustif (1 336 Extraits): 2026-10-19-validation-e2e-vlc-vlsub-corpus-nas-exhaustif.md
           - Validation E2E VLC & Corpus Réel NAS: 2026-10-19-validation-e2e-vlc-et-benchmarks-corpus-nas.md

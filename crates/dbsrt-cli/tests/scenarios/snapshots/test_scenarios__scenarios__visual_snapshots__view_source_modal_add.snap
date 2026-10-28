@@ -1,0 +1,34 @@
+---
+source: crates/dbsrt-cli/tests/scenarios/visual_snapshots.rs
+expression: grid
+---
+┌ pydbsrt top ── Moniteur de Décodage pHash & Ingestion Temps Réel ────────────────────────────────────────────────────────────────────────┐
+│ ⏱️   HH:MM:SS │ Workers Actifs: 2 │ Host CPU: 18% │ RAM:  8.4/31.0 GiB                                                                    │
+│ 🎮  GPU INTEL IRIS XE : Non disponible (Mode CPU Multithread)                                                                             │
+│ ⚡  DÉBITS RÉSEAU CIFS : Instantané:   0.0 MB/s (Net RX:   0.0 MB/s, VFS:   0.0 MB/s)                                                     │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌ 🗄️  GESTION DES SOURCES DE MÉDIAS (RÉPERTOIRES VIDÉO) [2] ────────────────────────────────────────────────────────────────────────────────┐
+│ [a] Ajouter Source    [e] Éditer    [Space] Activer/Désactiver    [d] Supprimer    [r] Rescanner Tout    [4/m] Voir Médias Détectés      │
+│                                                                                                                                          │
+│    STATUT           NO┌ ➕  AJOUTER UNE NOUVELLE SOURCE DE MÉDIAS ───────────────────────────────────────────────┐N DU RÉPERTOIRE         │
+│►   [✓] ACTIF        Sy│ Astuce : Indiquez un chemin local ou un point de montage CIFS/NFS (/media/..., /mnt/...)│nas/video               │
+│    [✓] ACTIF        Sy│┌ Chemin du Répertoire (obligatoire) ───────────────────────────────────────────────────┐│nas/tvshow              │
+│                       ││/mnt/nas/demo█                                                                         ││                        │
+│                       │└───────────────────────────────────────────────────────────────────────────────────────┘│                        │
+│                       │┌ Nom d'affichage (optionnel, auto-déduit si vide) ─────────────────────────────────────┐│                        │
+│                       ││                                                                                       ││                        │
+│                       │└───────────────────────────────────────────────────────────────────────────────────────┘│                        │
+│                       │          [Tab/↑/↓] Changer champ    [Enter] Valider & Scanner    [Esc] Annuler          │                        │
+│                       │                                                                                         │                        │
+│                       │                                                                                         │                        │
+│                       │                                                                                         │                        │
+│                       └─────────────────────────────────────────────────────────────────────────────────────────┘                        │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+  [1] Tâches   [2/h] Stats   [3/r] Récents   [4/m] Médias   [5/s] Sources  │ [↑/k] Défiler  [a] Ajouter  [e] Éditer  [Space] On/Off  [d] Sup

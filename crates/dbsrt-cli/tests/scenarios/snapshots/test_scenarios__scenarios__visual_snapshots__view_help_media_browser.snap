@@ -1,0 +1,34 @@
+---
+source: crates/dbsrt-cli/tests/scenarios/visual_snapshots.rs
+expression: grid
+---
+┌ pydbsrt top ── Moniteur de Décodage pHash & Ingestion Temps Réel ────────────────────────────────────────────────────────────────────────┐
+│ ⏱️   HH:MM:SS │ Workers Actifs: 2 │ Host CPU: 18% │ RAM:  8.4/31.0 GiB                                                                    │
+│ 🎮  GPU INTEL IRIS XE : Non disponible (Mode CPU Multithread)                                                                             │
+│ ⚡  DÉBITS RÉSEAU CIFS : Instantané:   0.0 MB/s (Net RX:   0.0 MB/s, VFS:   0.0 MB/s)                                                     │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌ 📚  AIDE CONTEXTUELLE, GLOSSAIRE TECHNIQUE & COMMANDES D'EXPLOITATION (FULL-FRAME) ───────────────────────────────────────────────────────┐
+│  [0/g] Général   [1] Tâches   [2/h] Stats   [3/r] Récents   [4/m] Médias   [5/s] Sources                                                 │
+│  [0-5] ou [Tab/Shift+Tab / ←/→] Naviguer entre onglets d'aide  │  [↑/↓/k/j/PgUp/PgDn] Défiler  │  [Esc/?] Revenir à la vue précédente    │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│  📁  ONGLET [4/m] EXPLORATEUR DE MÉDIAS MULTI-SOURCES                                                                                     │
+│  Catalogue interactif unifié des vidéos disponibles sur l'ensemble des sources configurées et actives.                                   │
+│                                                                                                                                          │
+│  Glossaire des Colonnes :                                                                                                                │
+│    • SEL                    : Case à cocher pour traitement par lot ([x] coché, [ ] vierge).                                             │
+│    • MÉDIA / RELEASE NAS    : Nom du fichier vidéo précédé du badge source en Cyan ([video], [tvshow]) si multi-sources.                 │
+│    • TAILLE                 : Taille du fichier (en GiB ou MB).                                                                          │
+│    • DURÉE                  : Durée temporelle estimée du flux vidéo via métadonnées conteneur.                                          │
+│    • EMPREINTE PHASH        : Statut du hachage perceptuel :                                                                             │
+│                               - '✓ 65.5kf (512K)' : 65 500 frames analysées et index binaire généré.                                     │
+│                               - '- Non calculé'   : Vidéo non encore décodée pour pHash.                                                 │
+│    • SOUS-TITRES            : Nombre de flux internes intégrés au fichier conteneur et langues détectées (eng, fre...).                  │
+│    • ENCODAGE               : Codec vidéo détecté (hevc, h264, mpeg4, vp9...).                                                           │
+│                                                                                                                                          │
+│    • STATUT (Toutes les Valeurs Possibles) :                                                                                             │
+│      VIERGE     : Fichier découvert lors du scan mais JAMAIS traité. Aucune empreinte pHash ni sous-titre.                               │
+│                   Prêt à être coché ([Space]) pour ingestion par lot ([b]).                                                              │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+  [1] Tâches   [2/h] Stats   [3/r] Récents   [4/m] Médias   [5/s] Sources  │ [0-5/Tab] Onglet Aide  [↑/↓/k/j] Défiler  [Esc/Backspace/?] Rev

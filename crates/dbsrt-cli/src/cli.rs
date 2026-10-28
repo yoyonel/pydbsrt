@@ -6,7 +6,7 @@ use dbsrt_core::HwAccel;
 use crate::commands::{
     BenchCutsArgs, BenchVideoArgs, CertifyCouplingArgs, ExportPhashArgs, FetchSubtitlesArgs,
     ImportPhashArgs, InspectMediaArgs, MediaAddArgs, MigrateArgs, PackArgs, RecognizeArgs,
-    RelabelCouplingArgs, RetargetArgs, ScanLibraryArgs,
+    RelabelCouplingArgs, RetargetArgs, ScanLibraryArgs, TopArgs,
 };
 use crate::constants::{
     DEFAULT_BENCH_PHASH_COUNT, DEFAULT_POSTGRES_DB, DEFAULT_POSTGRES_PASS, DEFAULT_POSTGRES_PORT,
@@ -151,6 +151,10 @@ pub enum Commands {
     /// Relabel a certified subtitle language attribution and confidence status in couplings.json
     #[command(name = "coupling:relabel", visible_alias = "coupling-relabel")]
     RelabelCoupling(RelabelCouplingArgs),
+
+    /// Real-time full-frame TUI process monitor and media studio
+    #[command(name = "top", visible_aliases = ["studio", "ops"])]
+    Top(TopArgs),
 }
 
 #[cfg(test)]
@@ -249,5 +253,39 @@ mod tests {
             }
             _ => panic!("Expected RelabelCoupling command"),
         }
+    }
+
+    #[test]
+    fn test_cli_parse_top_defaults() {
+        let cli = Cli::parse_from(["dbsrt", "top"]);
+        match cli.command {
+            Commands::Top(args) => {
+                assert_eq!(
+                    args.refresh_ms,
+                    crate::commands::top::DEFAULT_REFRESH_INTERVAL_MS
+                );
+            }
+            _ => panic!("Expected Top command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_top_custom_refresh() {
+        let cli = Cli::parse_from(["dbsrt", "top", "--refresh-ms", "500"]);
+        match cli.command {
+            Commands::Top(args) => {
+                assert_eq!(args.refresh_ms, 500);
+            }
+            _ => panic!("Expected Top command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_studio_and_ops_aliases() {
+        let cli_studio = Cli::parse_from(["dbsrt", "studio"]);
+        assert!(matches!(cli_studio.command, Commands::Top(_)));
+
+        let cli_ops = Cli::parse_from(["dbsrt", "ops"]);
+        assert!(matches!(cli_ops.command, Commands::Top(_)));
     }
 }

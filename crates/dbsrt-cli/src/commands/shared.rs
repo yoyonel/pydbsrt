@@ -1,7 +1,9 @@
 //! Shared helpers reused across CLI subcommands.
 
 use anyhow::{Context, Result};
-use dbsrt_core::{extract_frames_phash, probe_video, read_phash_file, write_phash_file};
+use dbsrt_core::{
+    extract_frames_phash_with_hwaccel, probe_video, read_phash_file, write_phash_file,
+};
 use dbsrt_index::{parse_fps_from_phash_stem, DbClient};
 use std::path::{Path, PathBuf};
 
@@ -36,6 +38,15 @@ pub fn connect_db(db: &PostgresArgs) -> Result<DbClient> {
 pub fn find_or_build_phash(
     media_file: &Path,
     phash_dir: &Path,
+) -> Result<(PathBuf, Vec<u64>, f64)> {
+    find_or_build_phash_with_hwaccel(media_file, phash_dir, dbsrt_core::HwAccel::Auto)
+}
+
+/// Discovers existing .phash file or extracts full perceptual hash fingerprint with hardware acceleration.
+pub fn find_or_build_phash_with_hwaccel(
+    media_file: &Path,
+    phash_dir: &Path,
+    hwaccel: dbsrt_core::HwAccel,
 ) -> Result<(PathBuf, Vec<u64>, f64)> {
     let full_name = media_file
         .file_name()
@@ -98,7 +109,7 @@ pub fn find_or_build_phash(
     // Otherwise probe and extract all frames
     let meta = probe_video(media_file)?;
     let total_frames = (meta.duration * meta.fps).floor() as usize;
-    let hashes = extract_frames_phash(media_file, 0.0, total_frames)?;
+    let hashes = extract_frames_phash_with_hwaccel(media_file, 0.0, total_frames, hwaccel)?;
 
     let file_name = media_file.file_name().ok_or_else(|| {
         anyhow::anyhow!("Cannot derive filename from media path {:?}", media_file)

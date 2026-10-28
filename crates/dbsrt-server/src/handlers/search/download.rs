@@ -15,253 +15,324 @@ use dbsrt_core::{extract_embedded_subtitle, probe_video, MediaMetadata, Subtitle
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-pub async fn download_handler(
-    State(state): State<Arc<AppState>>,
-    Json(payload): Json<DownloadSubtitleRequest>,
+/// Helper to construct uniform failure response payloads.
+fn error_download_response(
+    source: String,
+    language: String,
+    error: String,
 ) -> Json<DownloadSubtitleResponse> {
-    state
-        .metrics
-        .total_requests
-        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let media_path = PathBuf::from(&payload.media_path);
-    let subtitles_dir = payload
-        .subtitles_dir
-        .map(PathBuf::from)
-        .unwrap_or_else(|| state.subtitles_dir.clone());
-    let override_phash_dir = payload.phash_dir.map(PathBuf::from);
-    let phash_dirs = state.effective_phash_dirs(override_phash_dir.as_deref());
+    Json(DownloadSubtitleResponse {
+        success: false,
+        output_srt_path: String::new(),
+        shift_frames: 0,
+        shift_ms: 0.0,
+        confidence_percent: 0.0,
+        source,
+        language,
+        error: Some(error),
+    })
+}
 
-    let parsed_source = match payload.source.parse::<SubtitleSource>() {
-        Ok(s) => s,
-        Err(other) => {
-            return Json(DownloadSubtitleResponse {
-                success: false,
-                output_srt_path: String::new(),
-                shift_frames: 0,
-                shift_ms: 0.0,
-                confidence_percent: 0.0,
-                source: other.clone(),
-                language: payload.language,
-                error: Some(format!("Unknown subtitle source: {}", other)),
-            });
-        }
-    };
+/// Extracts and parses an embedded subtitle stream from a video container.
+///
+/// # Arguments
+/// * `media_path` - Path to source video file.
+/// * `candidate_id` - Optional string representation of stream index.
+///
+/// # Returns
+/// * `Result<SubtitleFile, String>` - Parsed subtitle file or descriptive error.
+///
+/// # Errors
+/// * Returns `Err` if track extraction or SRT parsing fails.
+///
+/// # Panics
+/// * Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// 1. Parses stream index defaulting to 0 if omitted or invalid.
+/// 2. Invokes `extract_embedded_subtitle`.
+/// 3. Parses raw bytes into structured `SubtitleFile`.
+pub fn extract_container_subtitle(
+    media_path: &Path,
+    candidate_id: Option<&str>,
+) -> Result<SubtitleFile, String> {
+    let idx: usize = candidate_id.and_then(|s| s.parse().ok()).unwrap_or(0);
+    let raw = extract_embedded_subtitle(media_path, idx)
+        .map_err(|e| format!("Failed to extract container subtitle track: {:#}", e))?;
+    SubtitleFile::parse(&raw).map_err(|e| format!("Failed to parse container subtitle: {:#}", e))
+}
 
-    let (mut srt_file, source_name) = match parsed_source {
-        SubtitleSource::Container => {
-            let idx: usize = payload
-                .candidate_id
-                .as_deref()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(0);
-            match extract_embedded_subtitle(&media_path, idx) {
-                Ok(raw) => match SubtitleFile::parse(&raw) {
-                    Ok(s) => (s, SubtitleSource::Container.as_str().to_string()),
-                    Err(e) => {
-                        return Json(DownloadSubtitleResponse {
-                            success: false,
-                            output_srt_path: String::new(),
-                            shift_frames: 0,
-                            shift_ms: 0.0,
-                            confidence_percent: 0.0,
-                            source: payload.source,
-                            language: payload.language,
-                            error: Some(format!("Failed to parse container subtitle: {:#}", e)),
-                        });
-                    }
-                },
-                Err(e) => {
-                    return Json(DownloadSubtitleResponse {
-                        success: false,
-                        output_srt_path: String::new(),
-                        shift_frames: 0,
-                        shift_ms: 0.0,
-                        confidence_percent: 0.0,
-                        source: payload.source,
-                        language: payload.language,
-                        error: Some(format!(
-                            "Failed to extract container subtitle track: {:#}",
-                            e
-                        )),
-                    });
-                }
+/// Resolves a subtitle by CAS SHA256 digest or filesystem path across local registry and remote relay.
+///
+/// # Arguments
+/// * `state` - Application state with registry, cache, and optional remote relay configuration.
+/// * `candidate_id` - CAS hash or filesystem path of candidate.
+/// * `subtitles_dir` - Directory containing reference subtitles.
+///
+/// # Returns
+/// * `Result<SubtitleFile, String>` - Resolved subtitle file or descriptive error.
+///
+/// # Errors
+/// * Returns `Err` if subtitle file cannot be located or downloaded.
+///
+/// # Panics
+/// * Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// 1. Detects whether `candidate_id` is a CAS SHA256 identifier (`sub:sha256:` / `sha256:`).
+/// 2. If non-CAS, attempts direct local filesystem open.
+/// 3. If CAS, queries in-memory `CouplingRegistry` for certified couplings and opens file.
+/// 4. If still unresolved and `remote_api` is configured, queries remote `/v1/subtitles/{hash}` and caches result.
+/// 5. As last fallback, tries opening `candidate_id` as direct filesystem path.
+pub async fn fetch_cas_or_catalog_subtitle(
+    state: &AppState,
+    candidate_id: &str,
+    subtitles_dir: &Path,
+) -> Result<SubtitleFile, String> {
+    let is_cas_hash =
+        candidate_id.starts_with("sub:sha256:") || candidate_id.starts_with("sha256:");
+    let clean_hash = candidate_id
+        .trim_start_matches("sub:sha256:")
+        .trim_start_matches("sha256:")
+        .trim();
+
+    let mut fetched_file: Option<SubtitleFile> = None;
+
+    if !is_cas_hash {
+        let local_path = PathBuf::from(candidate_id);
+        if local_path.exists() {
+            if let Ok(s) = SubtitleFile::open(&local_path) {
+                fetched_file = Some(s);
             }
         }
-        SubtitleSource::Certified | SubtitleSource::Catalog => {
-            let cand_id = payload.candidate_id.as_deref().unwrap_or_default();
-            let is_cas_hash = cand_id.starts_with("sub:sha256:") || cand_id.starts_with("sha256:");
-            let clean_hash = cand_id
-                .trim_start_matches("sub:sha256:")
-                .trim_start_matches("sha256:")
-                .trim();
-
-            let mut fetched_file: Option<SubtitleFile> = None;
-
-            if !is_cas_hash {
-                let local_path = PathBuf::from(cand_id);
-                if local_path.exists() {
-                    if let Ok(s) = SubtitleFile::open(&local_path) {
-                        fetched_file = Some(s);
-                    }
-                }
-            } else if let Ok(reg) = state.coupling_registry.read() {
-                if let Some((_coupling, sub)) = reg.find_subtitle_by_hash(clean_hash) {
-                    let p = if Path::new(&sub.srt_path).is_absolute()
-                        || Path::new(&sub.srt_path).exists()
-                    {
-                        PathBuf::from(&sub.srt_path)
-                    } else {
-                        subtitles_dir.join(&sub.srt_path)
-                    };
-                    if p.exists() {
-                        if let Ok(s) = SubtitleFile::open(&p) {
-                            fetched_file = Some(s);
-                        }
-                    }
+    } else if let Ok(reg) = state.coupling_registry.read() {
+        if let Some((_coupling, sub)) = reg.find_subtitle_by_hash(clean_hash) {
+            let p = if Path::new(&sub.srt_path).is_absolute() || Path::new(&sub.srt_path).exists() {
+                PathBuf::from(&sub.srt_path)
+            } else {
+                subtitles_dir.join(&sub.srt_path)
+            };
+            if p.exists() {
+                if let Ok(s) = SubtitleFile::open(&p) {
+                    fetched_file = Some(s);
                 }
             }
-
-            if fetched_file.is_none() && state.remote_api.is_some() {
-                if let Some(ref remote_url) = state.remote_api {
-                    let fetch_target = if is_cas_hash {
-                        clean_hash.to_string()
-                    } else {
-                        Path::new(cand_id)
-                            .file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or(cand_id)
-                            .to_string()
-                    };
-
-                    let url = format!(
-                        "{}/v1/subtitles/{}",
-                        remote_url.trim_end_matches('/'),
-                        fetch_target
-                    );
-                    state.push_log(
-                        "REMOTE_CAS",
-                        "INFO",
-                        format!("Fetching subtitle from remote Subtitle Service: {}", url),
-                    );
-
-                    let client = reqwest::Client::builder()
-                        .connect_timeout(std::time::Duration::from_millis(
-                            crate::constants::DEFAULT_RELAY_CONNECT_TIMEOUT_MS,
-                        ))
-                        .timeout(std::time::Duration::from_millis(
-                            crate::constants::DEFAULT_DOWNLOAD_RELAY_TIMEOUT_MS,
-                        ))
-                        .build()
-                        .unwrap_or_default();
-
-                    match client.get(&url).send().await {
-                        Ok(resp) if resp.status().is_success() => {
-                            if let Ok(bytes) = resp.bytes().await {
-                                match SubtitleFile::from_bytes(&bytes) {
-                                    Ok(s) => {
-                                        fetched_file = Some(s);
-                                        let cache_dir = state.cache.base_dir();
-                                        let _ = std::fs::create_dir_all(cache_dir);
-                                        let cache_file =
-                                            cache_dir.join(format!("{}.srt", clean_hash));
-                                        let _ = std::fs::write(&cache_file, &bytes);
-                                    }
-                                    Err(e) => {
-                                        state.push_log(
-                                            "REMOTE_CAS",
-                                            "ERROR",
-                                            format!(
-                                                "Failed to parse remote subtitle content: {:#}",
-                                                e
-                                            ),
-                                        );
-                                    }
-                                }
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-
-            if fetched_file.is_none() {
-                let path = PathBuf::from(cand_id);
-                match SubtitleFile::open(&path) {
-                    Ok(s) => fetched_file = Some(s),
-                    Err(e) => {
-                        return Json(DownloadSubtitleResponse {
-                            success: false,
-                            output_srt_path: String::new(),
-                            shift_frames: 0,
-                            shift_ms: 0.0,
-                            confidence_percent: 0.0,
-                            source: payload.source,
-                            language: payload.language,
-                            error: Some(format!(
-                                "Failed to resolve subtitle (CAS hash '{}'): {:#}",
-                                clean_hash, e
-                            )),
-                        });
-                    }
-                }
-            }
-
-            let s = fetched_file.unwrap();
-            (s, parsed_source.as_str().to_string())
         }
-        SubtitleSource::OpenSubtitles => {
-            let sub_id = payload.candidate_id.clone().unwrap_or_default();
-            let meta = MediaMetadata::parse_from_path(&media_path);
-            let cand = dbsrt_core::RemoteSubtitleCandidate {
-                provider: SubtitleSource::OpenSubtitles.as_str().to_string(),
-                subtitle_id: sub_id.clone(),
-                release_name: None,
-                language: payload.language.clone(),
-                download_url: String::new(),
-                hearing_impaired: false,
-                fps: None,
-                match_score: 1.0,
+    }
+
+    if fetched_file.is_none() && state.remote_api.is_some() {
+        if let Some(ref remote_url) = state.remote_api {
+            let fetch_target = if is_cas_hash {
+                clean_hash.to_string()
+            } else {
+                Path::new(candidate_id)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or(candidate_id)
+                    .to_string()
             };
 
-            match fetch_or_cache_remote_subtitle(&state, &meta, &payload.language, &cand).await {
-                Ok(s) => (s, SubtitleSource::OpenSubtitles.as_str().to_string()),
-                Err(e) => {
-                    return Json(DownloadSubtitleResponse {
-                        success: false,
-                        output_srt_path: String::new(),
-                        shift_frames: 0,
-                        shift_ms: 0.0,
-                        confidence_percent: 0.0,
-                        source: payload.source,
-                        language: payload.language,
-                        error: Some(format!(
-                            "Failed to download/parse subtitle ID '{}': {:#}",
-                            sub_id, e
-                        )),
-                    });
+            let url = format!(
+                "{}/v1/subtitles/{}",
+                remote_url.trim_end_matches('/'),
+                fetch_target
+            );
+            state.push_log(
+                "REMOTE_CAS",
+                "INFO",
+                format!("Fetching subtitle from remote Subtitle Service: {}", url),
+            );
+
+            let client = reqwest::Client::builder()
+                .connect_timeout(std::time::Duration::from_millis(
+                    crate::constants::DEFAULT_RELAY_CONNECT_TIMEOUT_MS,
+                ))
+                .timeout(std::time::Duration::from_millis(
+                    crate::constants::DEFAULT_DOWNLOAD_RELAY_TIMEOUT_MS,
+                ))
+                .build()
+                .unwrap_or_default();
+
+            if let Ok(resp) = client.get(&url).send().await {
+                if resp.status().is_success() {
+                    if let Ok(bytes) = resp.bytes().await {
+                        match SubtitleFile::from_bytes(&bytes) {
+                            Ok(s) => {
+                                fetched_file = Some(s);
+                                let cache_dir = state.cache.base_dir();
+                                let _ = std::fs::create_dir_all(cache_dir);
+                                let cache_file = cache_dir.join(format!("{}.srt", clean_hash));
+                                let _ = std::fs::write(&cache_file, &bytes);
+                            }
+                            Err(e) => {
+                                state.push_log(
+                                    "REMOTE_CAS",
+                                    "ERROR",
+                                    format!("Failed to parse remote subtitle content: {:#}", e),
+                                );
+                            }
+                        }
+                    }
                 }
             }
         }
+    }
+
+    if fetched_file.is_none() {
+        let path = PathBuf::from(candidate_id);
+        match SubtitleFile::open(&path) {
+            Ok(s) => fetched_file = Some(s),
+            Err(e) => {
+                return Err(format!(
+                    "Failed to resolve subtitle (CAS hash '{}'): {:#}",
+                    clean_hash, e
+                ));
+            }
+        }
+    }
+
+    fetched_file.ok_or_else(|| format!("Subtitle not found for '{}'", clean_hash))
+}
+
+/// Fetches a subtitle from OpenSubtitles provider with local caching.
+///
+/// # Arguments
+/// * `state` - Application state with cache and OpenSubtitles client.
+/// * `media_path` - Path to media video file.
+/// * `candidate_id` - Remote subtitle identifier.
+/// * `language` - Target ISO language code.
+///
+/// # Returns
+/// * `Result<SubtitleFile, String>` - Downloaded subtitle or error string.
+///
+/// # Errors
+/// * Returns `Err` if provider fails or file parsing fails.
+///
+/// # Panics
+/// * Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// 1. Extracts video metadata from `media_path`.
+/// 2. Assembles `RemoteSubtitleCandidate`.
+/// 3. Invokes `fetch_or_cache_remote_subtitle`.
+pub async fn fetch_opensubtitles_subtitle(
+    state: &AppState,
+    media_path: &Path,
+    candidate_id: Option<&str>,
+    language: &str,
+) -> Result<SubtitleFile, String> {
+    let sub_id = candidate_id.unwrap_or_default();
+    let meta = MediaMetadata::parse_from_path(media_path);
+    let cand = dbsrt_core::RemoteSubtitleCandidate {
+        provider: SubtitleSource::OpenSubtitles.as_str().to_string(),
+        subtitle_id: sub_id.to_string(),
+        release_name: None,
+        language: language.to_string(),
+        download_url: String::new(),
+        hearing_impaired: false,
+        fps: None,
+        match_score: 1.0,
     };
 
-    let mut shift_frames = 0i64;
-    let mut shift_ms = 0.0f64;
-    let mut confidence_percent = 0.0f64;
+    fetch_or_cache_remote_subtitle(state, &meta, language, &cand)
+        .await
+        .map_err(|e| format!("Failed to download/parse subtitle ID '{}': {:#}", sub_id, e))
+}
 
+/// Dispatches subtitle resolution according to declared subtitle source.
+///
+/// # Arguments
+/// * `state` - Application state.
+/// * `source` - Declared subtitle source enum.
+/// * `media_path` - Path to source video.
+/// * `candidate_id` - Optional candidate identifier or path.
+/// * `language` - Target language code.
+/// * `subtitles_dir` - Subtitle storage directory.
+///
+/// # Returns
+/// * `Result<(SubtitleFile, String), String>` - Pair of resolved subtitle file and source name string.
+///
+/// # Errors
+/// * Returns `Err` if underlying fetcher fails.
+///
+/// # Panics
+/// * Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// 1. Directs to `extract_container_subtitle` for container tracks.
+/// 2. Directs to `fetch_cas_or_catalog_subtitle` for certified/catalog files.
+/// 3. Directs to `fetch_opensubtitles_subtitle` for OpenSubtitles downloads.
+pub async fn resolve_subtitle_content(
+    state: &AppState,
+    source: SubtitleSource,
+    media_path: &Path,
+    candidate_id: Option<&str>,
+    language: &str,
+    subtitles_dir: &Path,
+) -> Result<(SubtitleFile, String), String> {
+    match source {
+        SubtitleSource::Container => {
+            let s = extract_container_subtitle(media_path, candidate_id)?;
+            Ok((s, SubtitleSource::Container.as_str().to_string()))
+        }
+        SubtitleSource::Certified | SubtitleSource::Catalog => {
+            let s = fetch_cas_or_catalog_subtitle(
+                state,
+                candidate_id.unwrap_or_default(),
+                subtitles_dir,
+            )
+            .await?;
+            Ok((s, source.as_str().to_string()))
+        }
+        SubtitleSource::OpenSubtitles => {
+            let s = fetch_opensubtitles_subtitle(state, media_path, candidate_id, language).await?;
+            Ok((s, SubtitleSource::OpenSubtitles.as_str().to_string()))
+        }
+    }
+}
+
+/// Calculates synchronization shift either from explicit offset or visual pHash recognition.
+///
+/// # Arguments
+/// * `state` - Application state containing DB reader and configs.
+/// * `payload` - Download request options (shift_ms, resync).
+/// * `media_path` - Path to video file.
+/// * `phash_dirs` - Directories storing reference .phash files.
+///
+/// # Returns
+/// * `(i64, f64, f64)` - Tuple of `(shift_frames, shift_ms, confidence_percent)`.
+///
+/// # Errors
+/// * Guarantee: Never returns Err; defaults to 0 on failure.
+///
+/// # Panics
+/// * Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// 1. If explicit `shift_ms` is supplied and exceeds `MIN_SIGNIFICANT_SHIFT_MS`: computes frames via `probe_video` fps.
+/// 2. Otherwise if `resync` flag is set and video exists: performs visual fingerprint matching and calculates shift consensus.
+/// 3. In all other cases: returns zero shift.
+pub fn compute_subtitle_shift(
+    state: &AppState,
+    payload: &DownloadSubtitleRequest,
+    media_path: &Path,
+    phash_dirs: &[PathBuf],
+) -> (i64, f64, f64) {
     if let Some(explicit_shift) = payload.shift_ms {
         if explicit_shift.abs() > MIN_SIGNIFICANT_SHIFT_MS {
-            shift_ms = explicit_shift;
-            let fps = probe_video(&media_path)
+            let fps = probe_video(media_path)
                 .map(|m| m.fps)
                 .unwrap_or(DEFAULT_FALLBACK_FPS);
-            shift_frames = (shift_ms / MILLIS_PER_SEC * fps).round() as i64;
-            confidence_percent = 100.0;
+            let frames = (explicit_shift / MILLIS_PER_SEC * fps).round() as i64;
+            return (frames, explicit_shift, 100.0);
         }
-    } else if payload.resync && media_path.exists() {
+    }
+
+    if payload.resync && media_path.exists() {
         let reader_guard = state.dbphash_reader.load();
         let (matched, target_fps, existing_phash) = identify_media_by_phash_multi_with_reader(
-            &media_path,
-            &phash_dirs,
+            media_path,
+            phash_dirs,
             reader_guard.as_deref(),
             state.db_config.as_ref(),
             1.0,
@@ -269,24 +340,51 @@ pub async fn download_handler(
         );
         if let Some((matched_stem, match_conf)) = matched {
             let (sf, sms, conf) = compute_media_phash_shift_multi(
-                &media_path,
-                &phash_dirs,
+                media_path,
+                phash_dirs,
                 &matched_stem,
                 match_conf,
                 target_fps,
                 &existing_phash,
                 12,
             );
-            shift_frames = sf;
-            shift_ms = sms;
-            confidence_percent = conf;
+            return (sf, sms, conf);
         }
     }
 
-    if shift_ms.abs() > 0.001 {
-        srt_file.shift(shift_ms);
-    }
+    (0, 0.0, 0.0)
+}
 
+/// Saves subtitle to target destination with automatic fallback to cache directory.
+///
+/// # Arguments
+/// * `state` - Application state for logging and cache directory resolution.
+/// * `srt_file` - Subtitle file to persist.
+/// * `media_path` - Source video path (determines primary output directory and stem).
+/// * `language` - Subtitle ISO language code.
+/// * `shift_ms` - Applied synchronization shift in milliseconds.
+///
+/// # Returns
+/// * `Result<(PathBuf, bool), String>` - Pair of persisted output path and whether fallback cache was used.
+///
+/// # Errors
+/// * Returns `Err` if both primary write and fallback cache write fail.
+///
+/// # Panics
+/// * Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// 1. Constructs standard filename (`.synced.<lang>.srt` if shifted, else `.<lang>.srt`).
+/// 2. Attempts write to video's parent directory.
+/// 3. If primary write fails (read-only filesystem, permissions), writes to `state.cache.base_dir()`.
+/// 4. Logs warnings and errors to state log ring-buffer.
+pub fn persist_retargeted_subtitle(
+    state: &AppState,
+    srt_file: &SubtitleFile,
+    media_path: &Path,
+    language: &str,
+    shift_ms: f64,
+) -> Result<(PathBuf, bool), String> {
     let out_dir = media_path
         .parent()
         .filter(|p| p.is_dir() && !p.to_string_lossy().is_empty())
@@ -297,14 +395,14 @@ pub async fn download_handler(
         .unwrap_or_else(|| "subtitles".to_string());
 
     let out_name = if shift_ms.abs() > 0.001 {
-        format!("{}.synced.{}.srt", media_stem, payload.language)
+        format!("{}.synced.{}.srt", media_stem, language)
     } else {
-        format!("{}.{}.srt", media_stem, payload.language)
+        format!("{}.{}.srt", media_stem, language)
     };
     let out_path = out_dir.join(&out_name);
 
-    let (final_path, was_fallback) = match srt_file.save(&out_path) {
-        Ok(()) => (out_path, false),
+    match srt_file.save(&out_path) {
+        Ok(()) => Ok((out_path, false)),
         Err(e) => {
             let fallback_dir = state.cache.base_dir();
             if let Err(mkdir_err) = std::fs::create_dir_all(fallback_dir) {
@@ -316,19 +414,10 @@ pub async fn download_handler(
                         out_path, e, fallback_dir, mkdir_err
                     ),
                 );
-                return Json(DownloadSubtitleResponse {
-                    success: false,
-                    output_srt_path: String::new(),
-                    shift_frames: 0,
-                    shift_ms: 0.0,
-                    confidence_percent: 0.0,
-                    source: source_name,
-                    language: payload.language,
-                    error: Some(format!(
-                        "Failed to write subtitle file to {:?} ({:#}) and cache fallback failed ({:#})",
-                        out_path, e, mkdir_err
-                    )),
-                });
+                return Err(format!(
+                    "Failed to write subtitle file to {:?} ({:#}) and cache fallback failed ({:#})",
+                    out_path, e, mkdir_err
+                ));
             }
             let fallback_path = fallback_dir.join(&out_name);
             match srt_file.save(&fallback_path) {
@@ -341,7 +430,7 @@ pub async fn download_handler(
                             out_path, e, fallback_path
                         ),
                     );
-                    (fallback_path, true)
+                    Ok((fallback_path, true))
                 }
                 Err(fallback_err) => {
                     state.push_log(
@@ -352,21 +441,98 @@ pub async fn download_handler(
                             out_path, e, fallback_path, fallback_err
                         ),
                     );
-                    return Json(DownloadSubtitleResponse {
-                        success: false,
-                        output_srt_path: String::new(),
-                        shift_frames: 0,
-                        shift_ms: 0.0,
-                        confidence_percent: 0.0,
-                        source: source_name,
-                        language: payload.language,
-                        error: Some(format!(
-                            "Failed to write subtitle to {:?} ({:#}) and fallback to {:?} failed ({:#})",
-                            out_path, e, fallback_path, fallback_err
-                        )),
-                    });
+                    Err(format!(
+                        "Failed to write subtitle to {:?} ({:#}) and fallback to {:?} failed ({:#})",
+                        out_path, e, fallback_path, fallback_err
+                    ))
                 }
             }
+        }
+    }
+}
+
+/// Axum HTTP handler for `POST /v1/download`: resolves, retargets, and caches subtitles.
+///
+/// # Arguments
+/// * `State(state)` - Shared server state.
+/// * `Json(payload)` - Download and synchronization parameters.
+///
+/// # Returns
+/// * `Json<DownloadSubtitleResponse>` - Structured response with file path, applied shift, and status.
+///
+/// # Errors
+/// * Guarantee: Never returns HTTP 500; returns JSON payload with `success: false` and error message.
+///
+/// # Panics
+/// * Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// 1. Increments request metrics and parses `SubtitleSource`.
+/// 2. Resolves subtitle content via `resolve_subtitle_content`.
+/// 3. Computes time shift via `compute_subtitle_shift` and mutates cue timestamps if needed.
+/// 4. Persists retargeted subtitle via `persist_retargeted_subtitle`.
+/// 5. Logs outcome and returns structured response.
+pub async fn download_handler(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<DownloadSubtitleRequest>,
+) -> Json<DownloadSubtitleResponse> {
+    state
+        .metrics
+        .total_requests
+        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let media_path = PathBuf::from(&payload.media_path);
+    let subtitles_dir = payload
+        .subtitles_dir
+        .as_deref()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| state.subtitles_dir.clone());
+    let override_phash_dir = payload.phash_dir.as_deref().map(PathBuf::from);
+    let phash_dirs = state.effective_phash_dirs(override_phash_dir.as_deref());
+
+    let parsed_source = match payload.source.parse::<SubtitleSource>() {
+        Ok(s) => s,
+        Err(other) => {
+            return error_download_response(
+                other.clone(),
+                payload.language,
+                format!("Unknown subtitle source: {}", other),
+            );
+        }
+    };
+
+    let (mut srt_file, source_name) = match resolve_subtitle_content(
+        &state,
+        parsed_source,
+        &media_path,
+        payload.candidate_id.as_deref(),
+        &payload.language,
+        &subtitles_dir,
+    )
+    .await
+    {
+        Ok(res) => res,
+        Err(err_msg) => {
+            return error_download_response(payload.source, payload.language, err_msg);
+        }
+    };
+
+    let (shift_frames, shift_ms, confidence_percent) =
+        compute_subtitle_shift(&state, &payload, &media_path, &phash_dirs);
+
+    if shift_ms.abs() > 0.001 {
+        srt_file.shift(shift_ms);
+    }
+
+    let (final_path, was_fallback) = match persist_retargeted_subtitle(
+        &state,
+        &srt_file,
+        &media_path,
+        &payload.language,
+        shift_ms,
+    ) {
+        Ok(res) => res,
+        Err(err_msg) => {
+            return error_download_response(source_name, payload.language, err_msg);
         }
     };
 
