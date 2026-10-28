@@ -29,7 +29,15 @@ from pathlib import Path
 
 
 def is_blank_phash(h: int) -> bool:
-    if h in (0, 0xFFFFFFFFFFFFFFFF, 0x8000000000000000):
+    if h in (
+        0,
+        0xFFFFFFFFFFFFFFFF,
+        0x8000000000000000,
+        0x866939003986C639,
+        0x8F4C7233588E457E,
+        0x8FCC7233588E453E,
+        0x86C6969686C6D6C6,
+    ):
         return True
     ones = (h & 0x7FFFFFFFFFFFFFFF).bit_count()
     return ones <= 2 or ones >= 61
