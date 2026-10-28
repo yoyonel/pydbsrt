@@ -2,7 +2,8 @@
 
 use crate::constants::{
     DEFAULT_BASELINE_FPS, DEFAULT_SEARCH_DISTANCE, MILLIS_PER_SEC,
-    MIN_PHASH_RECOGNITION_CONFIDENCE_PERCENT, SIGNIFICANT_SHIFT_THRESHOLD_MS,
+    MIN_PHASH_RECOGNITION_CONFIDENCE_PERCENT, MIN_SEQUENCE_LEN_FOR_DYNAMICS_CHECK,
+    SIGNIFICANT_SHIFT_THRESHOLD_MS,
 };
 use crate::dtos::{RecognizeRequest, RecognizeResponse, SubtitleCandidate};
 use crate::services::catalog::lookup_certified_couplings;
@@ -47,7 +48,11 @@ pub fn match_fingerprint_multitier(
     search_distance: u32,
     phash_dirs: &[PathBuf],
 ) -> Option<(String, f64, String)> {
-    if hashes.is_empty() || hashes.iter().all(|&h| dbsrt_core::is_blank_phash(h)) {
+    if hashes.is_empty()
+        || hashes.iter().all(|&h| dbsrt_core::is_blank_phash(h))
+        || (hashes.len() >= MIN_SEQUENCE_LEN_FOR_DYNAMICS_CHECK
+            && dbsrt_core::is_static_sequence(hashes))
+    {
         return None;
     }
 

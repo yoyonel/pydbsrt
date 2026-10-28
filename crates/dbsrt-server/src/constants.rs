@@ -33,6 +33,18 @@ pub const DEFAULT_CACHE_SUBTITLES_SUBDIR: &str = "dbsrt/subtitles";
 /// Number of perceptual hash samples included in JSON search response preview.
 pub const FINGERPRINT_PREVIEW_SAMPLE_COUNT: usize = 5;
 
+/// Minimum sequence length required to enforce temporal dynamics validation during multi-tier recognition.
+pub const MIN_SEQUENCE_LEN_FOR_DYNAMICS_CHECK: usize = 5;
+
+/// Ordered candidate timeline ratios for narrative fingerprint sampling, prioritizing dynamic mid-acts.
+pub const NARRATIVE_SAMPLE_RATIOS: [f64; 6] = [0.35, 0.65, 0.40, 0.60, 0.25, 0.75];
+
+/// Target count of distinct non-blank visual hashes within a sample window certifying rich narrative entropy.
+pub const MIN_NARRATIVE_ENTROPY_DISTINCT_FRAMES: usize = 8;
+
+/// Minimum safe timestamp offset in seconds from media start to avoid introductory distributor logos and static title cards.
+pub const MIN_NARRATIVE_SAFE_OFFSET_SECONDS: f64 = 60.0;
+
 /// Number of seconds in a standard 24-hour day.
 pub const SECONDS_PER_DAY: u64 = 86_400;
 

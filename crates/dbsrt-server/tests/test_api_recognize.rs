@@ -95,6 +95,39 @@ async fn test_api_recognize_fingerprint_and_metrics() {
     assert_eq!(id_data.confidence, 0.0);
     assert!(id_data.media_match.is_none());
 
+    // 2b. Test POST /v1/recognize with 5 identical intro hashes 0x86c6969686c6d6c6 (must be rejected)
+    let intro_payload = RecognizeRequest {
+        media_path: "".to_string(),
+        query_fingerprint: Some(vec![
+            "0x86c6969686c6d6c6".to_string(),
+            "0x86c6969686c6d6c6".to_string(),
+            "0x86c6969686c6d6c6".to_string(),
+            "0x86c6969686c6d6c6".to_string(),
+            "0x86c6969686c6d6c6".to_string(),
+        ]),
+        fps: Some(25.0),
+        language: Some("fr".to_string()),
+        client_version: Some("2.1.0".to_string()),
+        search_distance: 6,
+        nb_seconds: 1.0,
+        phash_dir: None,
+    };
+
+    let intro_res = client
+        .post(format!("{}/v1/recognize", base_url))
+        .json(&intro_payload)
+        .send()
+        .await
+        .expect("Failed to send intro recognize");
+    assert!(intro_res.status().is_success());
+    let intro_data: RecognizeResponse = intro_res.json().await.expect("Failed to parse json");
+    assert!(
+        !intro_data.found,
+        "Static intro hashes 0x86c6969686c6d6c6 must be rejected with found=false"
+    );
+    assert_eq!(intro_data.confidence, 0.0);
+    assert!(intro_data.media_match.is_none());
+
     // 3. Test POST /v1/recognize with 25 real hashes from versioned Big Buck Bunny .phash
     assert!(
         bbb_phash.exists(),

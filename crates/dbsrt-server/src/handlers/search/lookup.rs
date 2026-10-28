@@ -107,20 +107,6 @@ pub async fn search_handler(
     let effective_season = payload.season.or(meta.season);
     let effective_episode = payload.episode.or(meta.episode);
 
-    if mode == "phash" && matched_media.is_none() {
-        return finalize_search_response(
-            payload,
-            matched_media,
-            moviehash,
-            fingerprint_preview,
-            candidates,
-            timing,
-            start_overall,
-            &state,
-            phash_conf,
-        );
-    }
-
     let mut seen_catalog_paths = std::collections::HashSet::new();
     let mut seen_filenames = std::collections::HashSet::new();
 
@@ -199,6 +185,118 @@ pub async fn search_handler(
     )
 }
 
+struct RemoteRelayProcessingContext<'a> {
+    state: &'a AppState,
+    remote_url: &'a str,
+    media_path: &'a Path,
+    candidates: &'a mut Vec<SubtitleCandidate>,
+    timing: &'a mut SearchTimingStats,
+}
+
+/// Processes upstream remote recognition response, verifying candidate presence and title consistency.
+///
+/// # Arguments
+/// - `ctx`: Mutable relay processing context containing state, URL, media path, candidates, and timing stats.
+/// - `rec_resp`: Upstream recognition response payload.
+/// - `net_rtt_ms`: Network round-trip latency in milliseconds.
+///
+/// # Returns
+/// Tuple containing `(matched_media, phash_confidence)`.
+///
+/// # Errors
+/// None.
+///
+/// # Panics
+/// Guaranteed panic-free.
+///
+/// # Data Flow & Invariants
+/// 1. Checks `rec_resp.found`; logs non-match and returns `(None, 0.0)` if not found.
+/// 2. If remote returned 0 candidates and matched title is disparate from target media stem,
+///    discards spurious cross-media collision to prevent false relabeling.
+/// 3. Updates search timing metrics, logs recognition success, and decorates candidate details with relay latency.
+fn process_remote_recognition_result(
+    ctx: &mut RemoteRelayProcessingContext<'_>,
+    rec_resp: RecognizeResponse,
+    net_rtt_ms: f64,
+) -> (Option<String>, f64) {
+    if !rec_resp.found {
+        ctx.state.push_log(
+            "RELAY",
+            "INFO",
+            format!(
+                "Remote server replied in {:.2}ms: not recognized",
+                net_rtt_ms
+            ),
+        );
+        return (None, 0.0);
+    }
+
+    let file_stem = ctx
+        .media_path
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let has_cands = rec_resp
+        .candidates
+        .as_ref()
+        .map(|c| !c.is_empty())
+        .unwrap_or(false);
+    let match_title = rec_resp.media_match.as_deref().unwrap_or("");
+    let stem_matches = !file_stem.is_empty()
+        && (match_title
+            .to_lowercase()
+            .contains(&file_stem.to_lowercase())
+            || file_stem
+                .to_lowercase()
+                .contains(&match_title.to_lowercase()));
+
+    if !has_cands && !stem_matches {
+        ctx.state.push_log(
+            "RELAY",
+            "WARN",
+            format!(
+                "Discarded unverified remote match '{}' (0 candidates, disparate stem '{}')",
+                match_title, file_stem
+            ),
+        );
+        return (None, 0.0);
+    }
+
+    let matched_media = rec_resp.media_match;
+    let phash_conf = rec_resp.confidence;
+    ctx.timing.confidence_percent = phash_conf;
+    ctx.timing.matching_tier = format!(
+        "Remote Relay ({} via {})",
+        rec_resp.tier.unwrap_or_else(|| "Tier 1 MIH".to_string()),
+        ctx.remote_url
+    );
+    ctx.timing.phash_match_ms = net_rtt_ms;
+
+    ctx.state.push_log(
+        "RELAY",
+        "INFO",
+        format!(
+            "✓ Remote match: '{}' (conf={:.1}%, RTT={:.2}ms)",
+            matched_media.as_deref().unwrap_or(""),
+            phash_conf,
+            net_rtt_ms
+        ),
+    );
+
+    if let Some(remote_cands) = rec_resp.candidates {
+        for mut c in remote_cands {
+            c.details = Some(format!(
+                "{} (Relayed from Remote Server in {:.1}ms)",
+                c.details.as_deref().unwrap_or(""),
+                net_rtt_ms
+            ));
+            ctx.candidates.push(c);
+        }
+    }
+
+    (matched_media, phash_conf)
+}
+
 /// Dispatches visual recognition request to an upstream remote DBS-RT server.
 ///
 /// # Arguments
@@ -262,7 +360,7 @@ async fn execute_remote_relay_recognition(
     let mut phash_conf = 0.0;
     let query_sample_opt = Some(query_sample.clone());
 
-    if !query_sample.is_empty() {
+    if !dbsrt_core::is_static_sequence(&query_sample) {
         let fp_strings: Vec<String> = query_sample
             .iter()
             .map(|h| format!("{:#018x}", h))
@@ -287,48 +385,16 @@ async fn execute_remote_relay_recognition(
         if let Some((rec_resp, net_rtt_ms)) =
             dispatch_remote_relay_call(state, &endpoint, &remote_req, relay_timeout_ms).await
         {
-            if rec_resp.found {
-                matched_media = rec_resp.media_match.clone();
-                phash_conf = rec_resp.confidence;
-                timing.confidence_percent = phash_conf;
-                timing.matching_tier = format!(
-                    "Remote Relay ({} via {})",
-                    rec_resp.tier.unwrap_or_else(|| "Tier 1 MIH".to_string()),
-                    remote_url
-                );
-                timing.phash_match_ms = net_rtt_ms;
-
-                state.push_log(
-                    "RELAY",
-                    "INFO",
-                    format!(
-                        "✓ Remote match: '{}' (conf={:.1}%, RTT={:.2}ms)",
-                        matched_media.as_deref().unwrap_or(""),
-                        phash_conf,
-                        net_rtt_ms
-                    ),
-                );
-
-                if let Some(remote_cands) = rec_resp.candidates {
-                    for mut c in remote_cands {
-                        c.details = Some(format!(
-                            "{} (Relayed from Remote Server in {:.1}ms)",
-                            c.details.as_deref().unwrap_or(""),
-                            net_rtt_ms
-                        ));
-                        candidates.push(c);
-                    }
-                }
-            } else {
-                state.push_log(
-                    "RELAY",
-                    "INFO",
-                    format!(
-                        "Remote server replied in {:.2}ms: not recognized",
-                        net_rtt_ms
-                    ),
-                );
-            }
+            let mut ctx = RemoteRelayProcessingContext {
+                state,
+                remote_url,
+                media_path,
+                candidates,
+                timing,
+            };
+            let (m_opt, conf) = process_remote_recognition_result(&mut ctx, rec_resp, net_rtt_ms);
+            matched_media = m_opt;
+            phash_conf = conf;
         }
     }
 
@@ -869,6 +935,89 @@ fn extract_embedded_container_subtitles(
 /// Iterates over candidate directories, applies fuzzy title matching and episodic token parsing,
 /// assigns heuristic bonuses for exact stem matches (+1000) or directory proximity (+500),
 /// deduplicates across paths and filenames, and sorts candidates by descending score.
+struct CatalogCandidateContext<'a> {
+    file_stem: &'a str,
+    matched_media: Option<&'a str>,
+    phash_conf: f64,
+    media_parent: Option<&'a Path>,
+}
+
+/// Evaluates a disk catalog subtitle candidate, assigning heuristic ranking bonuses and release metadata.
+///
+/// # Arguments
+/// - `ctx`: Shared context containing target file stem, matched media name, confidence, and media directory.
+/// - `path`: Candidate subtitle file path.
+/// - `resolved_lang`: Detected or metadata-parsed language code.
+/// - `score`: Base text search matching score.
+///
+/// # Returns
+/// Tuple containing `(final_score, candidate)`.
+///
+/// # Errors
+/// None.
+///
+/// # Panics
+/// Guaranteed panic-free.
+///
+/// # Data Flow & Invariants
+/// 1. Awards +1000 score bonus if subtitle stem directly matches target media file stem.
+/// 2. Awards +500 score bonus if subtitle resides in the same directory as the media file.
+/// 3. Retains target media file stem as release for direct matches, avoiding erroneous third-party relabels.
+fn build_disk_catalog_candidate(
+    ctx: &CatalogCandidateContext<'_>,
+    path: &Path,
+    resolved_lang: String,
+    score: i32,
+) -> (i32, SubtitleCandidate) {
+    let cand_fname = path
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+    let mut final_score = score;
+    let cand_stem = cand_fname.strip_suffix(".srt").unwrap_or(&cand_fname);
+    let direct_match = !ctx.file_stem.is_empty()
+        && (cand_stem == ctx.file_stem
+            || cand_stem.starts_with(ctx.file_stem)
+            || ctx.file_stem.starts_with(cand_stem));
+    if direct_match {
+        final_score += 1000;
+    } else if ctx.media_parent.is_some() && path.parent() == ctx.media_parent {
+        final_score += 500;
+    }
+
+    let path_str = path.to_string_lossy().to_string();
+    let release_val = if direct_match {
+        Some(ctx.file_stem.to_string())
+    } else {
+        ctx.matched_media
+            .map(String::from)
+            .or_else(|| Some(ctx.file_stem.to_string()))
+    };
+    let details = if !direct_match && ctx.matched_media.is_some() {
+        format!(
+            "pHash matched '{}' ({:.0}% conf) — {}",
+            ctx.matched_media.unwrap_or_default(),
+            ctx.phash_conf,
+            path.display()
+        )
+    } else {
+        path_str.clone()
+    };
+    (
+        final_score,
+        SubtitleCandidate {
+            source: SubtitleSource::Catalog.as_str().to_string(),
+            language: resolved_lang,
+            title: cand_fname,
+            release: release_val,
+            details: Some(details),
+            candidate_id: Some(path_str),
+            shift_ms: None,
+        },
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 fn search_disk_catalog_subtitles(
     media_path: &Path,
@@ -902,6 +1051,12 @@ fn search_disk_catalog_subtitles(
 
     let search_dirs = collect_subtitle_search_dirs(subtitles_dir, media_path, include_sidecars);
     let mut catalog_results = Vec::new();
+    let ctx = CatalogCandidateContext {
+        file_stem: &file_stem,
+        matched_media,
+        phash_conf,
+        media_parent: media_path.parent(),
+    };
 
     for dir in &search_dirs {
         for (score, path, resolved_lang) in search_subtitles_in_catalog(
@@ -929,43 +1084,11 @@ fn search_disk_catalog_subtitles(
                 continue;
             }
 
-            let mut final_score = score;
-            let cand_stem = cand_fname.strip_suffix(".srt").unwrap_or(&cand_fname);
-            if !file_stem.is_empty()
-                && (cand_stem == file_stem
-                    || cand_stem.starts_with(&file_stem)
-                    || file_stem.starts_with(cand_stem))
-            {
-                final_score += 1000;
-            } else if let Some(parent) = media_path.parent() {
-                if path.parent() == Some(parent) {
-                    final_score += 500;
-                }
-            }
-
-            let details = if let Some(m) = matched_media {
-                format!(
-                    "pHash matched '{}' ({:.0}% conf) — {}",
-                    m,
-                    phash_conf,
-                    path.display()
-                )
-            } else {
-                path_str.clone()
-            };
-            catalog_results.push((
-                final_score,
-                SubtitleCandidate {
-                    source: SubtitleSource::Catalog.as_str().to_string(),
-                    language: resolved_lang,
-                    title: cand_fname,
-                    release: matched_media
-                        .map(String::from)
-                        .or_else(|| Some(file_stem.clone())),
-                    details: Some(details),
-                    candidate_id: Some(path_str),
-                    shift_ms: None,
-                },
+            catalog_results.push(build_disk_catalog_candidate(
+                &ctx,
+                &path,
+                resolved_lang,
+                score,
             ));
         }
     }

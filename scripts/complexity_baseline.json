@@ -914,10 +914,10 @@
     "scope": "mod",
     "function_name": "execute_remote_relay_recognition",
     "start_line": 226,
-    "max_loc": 117,
-    "max_ccn": 8,
+    "max_loc": 86,
+    "max_ccn": 4,
     "max_parameters": 7,
-    "max_nesting": 6
+    "max_nesting": 4
   },
   "crates/dbsrt-server/src/handlers/search/lookup.rs::mod::extract_embedded_container_subtitles": {
     "file_path": "crates/dbsrt-server/src/handlers/search/lookup.rs",
@@ -964,20 +964,10 @@
     "scope": "mod",
     "function_name": "search_disk_catalog_subtitles",
     "start_line": 868,
-    "max_loc": 106,
-    "max_ccn": 17,
+    "max_loc": 80,
+    "max_ccn": 9,
     "max_parameters": 13,
-    "max_nesting": 5
-  },
-  "crates/dbsrt-server/src/handlers/search/lookup.rs::mod::search_handler": {
-    "file_path": "crates/dbsrt-server/src/handlers/search/lookup.rs",
-    "scope": "mod",
-    "function_name": "search_handler",
-    "start_line": 44,
-    "max_loc": 157,
-    "max_ccn": 10,
-    "max_parameters": 1,
-    "max_nesting": 2
+    "max_nesting": 4
   },
   "crates/dbsrt-server/src/handlers/search/recognize.rs::mod::calculate_best_sequence_shift": {
     "file_path": "crates/dbsrt-server/src/handlers/search/recognize.rs",
@@ -1088,16 +1078,6 @@
     "max_ccn": 10,
     "max_parameters": 7,
     "max_nesting": 5
-  },
-  "crates/dbsrt-server/src/services/phash.rs::mod::extract_media_query_sample": {
-    "file_path": "crates/dbsrt-server/src/services/phash.rs",
-    "scope": "mod",
-    "function_name": "extract_media_query_sample",
-    "start_line": 203,
-    "max_loc": 98,
-    "max_ccn": 15,
-    "max_parameters": 3,
-    "max_nesting": 7
   },
   "crates/dbsrt-server/src/services/phash.rs::mod::find_existing_phash": {
     "file_path": "crates/dbsrt-server/src/services/phash.rs",

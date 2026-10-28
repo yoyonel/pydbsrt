@@ -3,14 +3,16 @@
 use crate::constants::{
     DEFAULT_BASELINE_FPS, DEFAULT_CUT_THRESHOLD, DEFAULT_FALLBACK_FPS,
     MAX_CORRELATION_SAMPLE_FRAMES, MILLIS_PER_SEC, MIN_CUTS_FOR_CONSENSUS,
-    MIN_CUT_CONSENSUS_CONFIDENCE, PERCENT_SCALE, PHASH_BIT_DEPTH, REFINEMENT_STEP_RADIUS,
+    MIN_CUT_CONSENSUS_CONFIDENCE, MIN_NARRATIVE_ENTROPY_DISTINCT_FRAMES,
+    MIN_NARRATIVE_SAFE_OFFSET_SECONDS, NARRATIVE_SAMPLE_RATIOS, PERCENT_SCALE, PHASH_BIT_DEPTH,
+    REFINEMENT_STEP_RADIUS,
 };
 use anyhow::Result;
 use dbsrt_core::{
     detect_cuts, extract_frames_phash, probe_video, read_phash_file, write_phash_file, CutItem,
 };
 use dbsrt_index::{parse_fps_from_phash_stem, BkItem, BkTree};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 pub type ExistingPhashData = (PathBuf, Vec<u64>, f64);
@@ -200,6 +202,101 @@ pub fn read_ref_phash_for_media(phash_dir: &Path, media_name: &str) -> Result<Ve
     ))
 }
 
+/// Selects the best narrative sample offset with maximal temporal entropy from pre-computed hashes.
+///
+/// # Arguments
+/// * `hashes` - Full slice of 64-bit perceptual hashes for the media file.
+/// * `sample_len` - Number of consecutive frames required for the fingerprint window.
+/// * `min_safe_frame` - Minimum frame index to avoid opening title sequences and distributor logos.
+///
+/// # Returns
+/// * `Option<usize>` - Frame offset index of selected dynamic narrative window, or None if none found.
+///
+/// # Errors
+/// * Guarantee: Never returns Err.
+///
+/// # Panics
+/// * Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// 1. Iterates candidate ratios defined in [`NARRATIVE_SAMPLE_RATIOS`].
+/// 2. Skips offsets preceding `min_safe_frame` or exceeding sequence bounds.
+/// 3. Rejects windows identified as static by [`dbsrt_core::is_static_sequence`].
+/// 4. Scores candidate windows by unique non-blank frame cardinality.
+/// 5. Early exits when distinct count meets or exceeds [`MIN_NARRATIVE_ENTROPY_DISTINCT_FRAMES`].
+fn select_best_narrative_offset(
+    hashes: &[u64],
+    sample_len: usize,
+    min_safe_frame: usize,
+) -> Option<usize> {
+    let mut best_start = None;
+    let mut best_entropy = 0usize;
+    for &ratio in &NARRATIVE_SAMPLE_RATIOS {
+        let candidate_start =
+            ((hashes.len() as f64 * ratio).round() as usize).saturating_sub(sample_len / 2);
+        if candidate_start < min_safe_frame || candidate_start + sample_len > hashes.len() {
+            continue;
+        }
+        let win = &hashes[candidate_start..candidate_start + sample_len];
+        if dbsrt_core::is_static_sequence(win) {
+            continue;
+        }
+        let mut d = win.to_vec();
+        d.sort_unstable();
+        d.dedup();
+        if d.len() > best_entropy {
+            best_entropy = d.len();
+            best_start = Some(candidate_start);
+            if d.len() >= MIN_NARRATIVE_ENTROPY_DISTINCT_FRAMES {
+                break;
+            }
+        }
+    }
+    best_start
+}
+
+/// Fallback visual probing across narrative ratios directly from container via FFmpeg.
+///
+/// # Arguments
+/// * `media_path` - Path to media container file on disk.
+/// * `duration` - Probed duration of media in seconds.
+/// * `nb_seconds` - Extraction window duration in seconds.
+/// * `nb_frames` - Frame count to extract.
+///
+/// # Returns
+/// * `Option<Vec<u64>>` - Extracted perceptual hashes from dynamic narrative segment, or None.
+///
+/// # Errors
+/// * Guarantee: Never returns Err.
+///
+/// # Panics
+/// * Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// 1. Scans candidate narrative ratios avoiding opening intro cards.
+/// 2. Invokes [`extract_frames_phash`] per ratio until non-static sample is discovered.
+fn probe_best_narrative_sample(
+    media_path: &Path,
+    duration: f64,
+    nb_seconds: f64,
+    nb_frames: usize,
+) -> Option<Vec<u64>> {
+    for &offset_ratio in &NARRATIVE_SAMPLE_RATIOS {
+        let alt_sec = (duration * offset_ratio).floor().max(0.0);
+        if (alt_sec < MIN_NARRATIVE_SAFE_OFFSET_SECONDS && duration >= 120.0)
+            || alt_sec + nb_seconds > duration
+        {
+            continue;
+        }
+        if let Ok(alt_sample) = extract_frames_phash(media_path, alt_sec, nb_frames) {
+            if !dbsrt_core::is_static_sequence(&alt_sample) {
+                return Some(alt_sample);
+            }
+        }
+    }
+    None
+}
+
 pub fn extract_media_query_sample(
     media_path: &Path,
     phash_dirs: &[PathBuf],
@@ -210,6 +307,8 @@ pub fn extract_media_query_sample(
         .find_map(|dir| find_existing_phash(media_path, dir));
 
     let (target_fps, query_sample) = if let Some((_, ref hashes, fps)) = existing_phash {
+        let min_safe_frame =
+            ((MIN_NARRATIVE_SAFE_OFFSET_SECONDS * fps).round() as usize).min(hashes.len() / 10);
         let sample_len = ((nb_seconds * fps).round() as usize).min(hashes.len());
         let center_start = if hashes.len() > sample_len {
             (hashes.len() / 2).saturating_sub(sample_len / 2)
@@ -218,39 +317,12 @@ pub fn extract_media_query_sample(
         };
 
         let nominal_sample = &hashes[center_start..center_start + sample_len];
-        let nominal_unique = nominal_sample
-            .iter()
-            .copied()
-            .filter(|&h| !dbsrt_core::is_blank_phash(h))
-            .collect::<HashSet<_>>()
-            .len();
-
-        let chosen_start = if nominal_unique >= 2 || hashes.len() <= sample_len {
+        let chosen_start = if !dbsrt_core::is_static_sequence(nominal_sample)
+            || hashes.len() <= sample_len
+        {
             center_start
         } else {
-            let step = (fps.round() as usize / 2).max(1);
-            let mut best_start = center_start;
-            let mut best_unique = nominal_unique;
-
-            let mut cur = 0;
-            while cur + sample_len <= hashes.len() {
-                let win = &hashes[cur..cur + sample_len];
-                let uniq = win
-                    .iter()
-                    .copied()
-                    .filter(|&h| !dbsrt_core::is_blank_phash(h))
-                    .collect::<HashSet<_>>()
-                    .len();
-                if uniq > best_unique {
-                    best_unique = uniq;
-                    best_start = cur;
-                    if best_unique >= 6 {
-                        break;
-                    }
-                }
-                cur += step;
-            }
-            best_start
+            select_best_narrative_offset(hashes, sample_len, min_safe_frame).unwrap_or(center_start)
         };
 
         (
@@ -265,30 +337,12 @@ pub fn extract_media_query_sample(
         let nb_frames = ((nb_seconds * meta.fps).round() as usize).max(1);
         let start_sec = (meta.duration / 2.0).floor().max(0.0);
         let mut sample = extract_frames_phash(media_path, start_sec, nb_frames).unwrap_or_default();
-        let non_blank_unique = sample
-            .iter()
-            .copied()
-            .filter(|&h| !dbsrt_core::is_blank_phash(h))
-            .collect::<HashSet<_>>()
-            .len();
 
-        if non_blank_unique < 2 && meta.duration > 6.0 {
-            for offset_ratio in [0.25, 0.75, 0.1, 0.9] {
-                let alt_sec = (meta.duration * offset_ratio).floor().max(0.0);
-                if let Ok(alt_sample) = extract_frames_phash(media_path, alt_sec, nb_frames) {
-                    let alt_unique = alt_sample
-                        .iter()
-                        .copied()
-                        .filter(|&h| !dbsrt_core::is_blank_phash(h))
-                        .collect::<HashSet<_>>()
-                        .len();
-                    if alt_unique > non_blank_unique {
-                        sample = alt_sample;
-                        if alt_unique >= 2 {
-                            break;
-                        }
-                    }
-                }
+        if dbsrt_core::is_static_sequence(&sample) && meta.duration > 6.0 {
+            if let Some(alt_sample) =
+                probe_best_narrative_sample(media_path, meta.duration, nb_seconds, nb_frames)
+            {
+                sample = alt_sample;
             }
         }
         (meta.fps, sample)
