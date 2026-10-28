@@ -420,6 +420,37 @@ local function test_remote_relay_source_display()
     print("  [12/12] test_remote_relay_source_display: PASSED")
 end
 
+local function test_fallback_reference_label_from_title_query()
+    activate()
+
+    S.input_table["title"]:set_text("Maniac")
+    local sample_json = [[{
+        "matched_media": null,
+        "total_candidates": 1,
+        "matching_tier": null,
+        "candidates": [
+            {
+                "source": "catalog",
+                "language": "fr",
+                "title": "Maniac.S01E01.fr.srt",
+                "candidate_id": "data/SRT/Maniac.S01E01.fr.srt",
+                "shift_ms": 0.0,
+                "score": 1.0
+            }
+        ]
+    }]]
+
+    local full_http = string.format("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s", string.len(sample_json), sample_json)
+    mock_tcp_responses = { full_http }
+
+    S.search_by_phash()
+
+    local msg = S.input_table["message"]
+    assert_true(msg ~= nil, "Message widget exists")
+    assert_true(msg._text:find("ref: Maniac") ~= nil, "Status message falls back to title_query 'Maniac' when matched_media is null")
+    print("  [13/13] test_fallback_reference_label_from_title_query: PASSED")
+end
+
 -- Run all unit tests
 test_descriptor()
 test_parse_url()
@@ -433,5 +464,6 @@ test_json_escape_special_characters_and_unicode_nfd()
 test_search_with_quotes_and_special_paths()
 test_download_selection_with_special_characters()
 test_remote_relay_source_display()
+test_fallback_reference_label_from_title_query()
 
 print(string.format("=== All %d VLC Lua Plugin Unit Tests PASSED (100%%) ===", tests_passed))

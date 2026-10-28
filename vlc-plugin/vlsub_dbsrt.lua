@@ -758,9 +758,10 @@ function run_search(mode)
         log_info("[Search] Complete %s in %.2fms: 0 subtitles found", origin_short, total_elapsed_ms)
         setMessage(string.format("<b>%s Complete:</b> No subtitles found.", origin_short))
     else
-        log_info("[Search] Complete %s in %.2fms: %d candidate(s) loaded into UI listbox", origin_short, total_elapsed_ms, #candidates_store)
+        local ref_label = matched_media or (title_query ~= "" and title_query) or "ok"
+        log_info("[Search] Complete %s in %.2fms: %d candidate(s) loaded into UI listbox (ref: %s)", origin_short, total_elapsed_ms, #candidates_store, ref_label)
         setMessage(string.format("<b>%s MATCH:</b> %d subtitle(s) found (ref: %s, %.0fms).",
-            origin_short, #candidates_store, matched_media or "ok", req_elapsed_ms))
+            origin_short, #candidates_store, ref_label, req_elapsed_ms))
     end
 end
 
