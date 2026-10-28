@@ -72,3 +72,47 @@ Sur le corpus de référence de 125 vidéos (séries et animés) :
 | **Hybride (Cuts + 1 fps)** | **\( 264\,000 \)** | **\( 18\text{ Mo} \)** | **\( 100.0\% \)** |
 
 L'échantillonnage hybride offre ainsi **une réduction de 95% de la mémoire requise** par rapport au plein débit, tout en éliminant 100% des angles morts d'identification.
+
+---
+
+## 4. Échantillonnage Narratif Dynamique & Filtrage d'Entropie Temporelle
+
+Lorsqu'une requête d'identification visuelle est initiée par un client (VLC ou API REST), extraire un échantillon aveugle au tout début de la vidéo (\( t < 60\text{ s} \)) ou au strict milieu (\( t = 50\% \)) expose le système à deux types d'erreurs critiques :
+
+1. **La zone de danger des intros (\( t < 60\text{ s} \))** :
+   Les premières secondes d'une œuvre contiennent quasi-systématiquement des cartons noirs, logos de distributeurs (Netflix, Warner, Universal, BBC), ou avertissements légaux. Ces motifs visuels sont partagés par des centaines de titres distincts, provoquant des faux positifs massifs de reconnaissance croisée si une empreinte d'intro est transmise à l'index.
+
+2. **Les fondus au noir intermédiaires (\( t = 50\% \))** :
+   Dans de nombreuses séries (comme *Maniac* S01E01), la transition de mi-épisode correspond exactement à un fondu au noir ou une séquence sombre avec bruit de quantification MPEG (\( \Delta \le 2 \text{ bits} \)).
+
+```mermaid
+flowchart TD
+    Req["Requête Client : extract_media_query_sample"] --> Center["Évaluation Échantillon Médian (t = 50%)"]
+    Center --> StaticCheck{"is_static_sequence ?<br/>(Carton noir, fondu, ou gigue <= 2 bits)"}
+    StaticCheck -- "Non (Haute Dynamique)" --> UseCenter["✅ Sélection de la séquence médiane"]
+    StaticCheck -- "Oui (Statique / Basse Entropie)" --> ScanNarrative["Exploration Ratios Narratifs Candidats :<br/>[35%, 65%, 40%, 60%, 25%, 75%]"]
+    ScanNarrative --> SafeGuard{"Offset >= 60.0s ?<br/>(Évitement logos intro)"}
+    SafeGuard -- "Non" --> SkipCandidate["Ignorer candidat"]
+    SafeGuard -- "Oui" --> EntropyCheck{"Entropie Temporelle :<br/>distinct_frames >= 8 ?"}
+    EntropyCheck -- "Oui (Coupure nette / action)" --> PickNarrative["✅ Sélection immédiate du segment narratif"]
+    EntropyCheck -- "Non (Faible mouvement)" --> NextCandidate["Tester ratio suivant"]
+    NextCandidate --> ScanNarrative
+```
+
+### Critères Mathématiques de l'Entropie Temporelle (`is_static_sequence`)
+
+Pour éviter de surcharger le code métier par une énumération exhaustive de constantes déclaratives par encodeur, l'algorithme `is_static_sequence` dans `crates/dbsrt-core/src/cuts.rs` applique une cascade générique de tests statistiques :
+
+1. **Filtrage des trames d'amorce et uniformes** :
+   Rejet des trames dont la population binaire \( \text{popcount}(h) \notin [10, 54] \) ou correspondant aux motifs canoniques de noir/blanc dithérisé (`FLAT_BLACK_DITHERED_*`).
+2. **Gigue locale inter-trames** :
+   Si pour toutes les paires adjacentes \( (h_i, h_{i+1}) \), la distance de Hamming \( \mathcal{H}(h_i, h_{i+1}) \le \text{STATIC\_FRAME\_MAX\_DISTANCE} = 1 \), la séquence est qualifiée d'image fixe.
+3. **Cardinalité de variété visuelle** :
+   Pour une fenêtre \( W \ge 10 \) trames, si la cardinalité de trames distinctes non-vides \( |\{h \in W\}| \le 2 \) et que leur écart maximal \( \mathcal{H}(d_0, d_1) \le \text{STATIC\_SEQUENCE\_MAX\_JITTER_DISTANCE} = 2 \), la séquence est classifiée comme bruit de compression sur écran fixe.
+
+### Barrière de Validation des Résultats Relais Distants
+
+Lorsqu'un nœud client relaie une empreinte vers un serveur cloud (`o2switch`), la réponse de reconnaissance est soumise à un contrôle de cohérence strict :
+
+- Si le serveur distant répond `found: true`, mais retourne **0 sous-titre couplé** pour la langue demandée, ET que le titre reconnu est disjoint du nom de fichier local, la concordance est identifiée comme une collision de basse entropie et **écartée** (`matched_media = None`).
+- Les sous-titres locaux découverts sur disque pour le fichier en cours de lecture sont alors retournés avec un décalage de **0 ms**, garantissant l'affichage immédiat du sous-titre sans relabellisation erronée.
