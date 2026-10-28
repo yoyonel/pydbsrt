@@ -23,6 +23,7 @@ from pydbsrt.services.database import (
     error_console,
     psqlDbIpAddr,
     psqlDbName,
+    psqlPort,
     psqlUserName,
     psqlUserPass,
     search_subframe_records_from_media,
@@ -60,6 +61,7 @@ async def import_subtitles_into_db(
         password=psqlUserPass,
         database=psqlDbName,
         host=psqlDbIpAddr,
+        port=psqlPort,
         command_timeout=60,
     ) as pool:
         with spinner or contextlib.nullcontext() as spinner_subtitles:

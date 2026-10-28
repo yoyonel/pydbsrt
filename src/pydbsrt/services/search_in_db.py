@@ -8,7 +8,14 @@ from fuzzywuzzy import fuzz
 
 from pydbsrt.models.matching import ResultSearch, ResultSearchRecord
 from pydbsrt.models.searching import BuildSearchResult, PairedMatchedFrame
-from pydbsrt.services.database import psqlDbIpAddr, psqlDbName, psqlUserName, psqlUserPass, search_media_name
+from pydbsrt.services.database import (
+    psqlDbIpAddr,
+    psqlDbName,
+    psqlPort,
+    psqlUserName,
+    psqlUserPass,
+    search_media_name,
+)
 from pydbsrt.services.matching import search_phash_stream_in_db
 from pydbsrt.services.reader_frames import build_reader_frames
 from pydbsrt.tools.ffmpeg_tools.ffmeg_extract_frame import rawframe_to_imghash
@@ -122,6 +129,7 @@ async def build_search_media_results(media: Path, imghash_matched: ResultSearch)
         password=psqlUserPass,
         database=psqlDbName,
         host=psqlDbIpAddr,
+        port=psqlPort,
         command_timeout=60,
     ) as pool:
         async with pool.acquire() as conn:

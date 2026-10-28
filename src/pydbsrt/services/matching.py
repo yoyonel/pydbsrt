@@ -6,7 +6,7 @@ import asyncpg
 from asyncstdlib.functools import lru_cache
 
 from pydbsrt.models.matching import MatchedFrame, ResultSearch, ResultSearchRecord
-from pydbsrt.services.database import psqlDbIpAddr, psqlDbName, psqlUserName, psqlUserPass
+from pydbsrt.services.database import psqlDbIpAddr, psqlDbName, psqlPort, psqlUserName, psqlUserPass
 from pydbsrt.tools.timer_profiling import _Timer
 
 
@@ -33,6 +33,7 @@ async def search_phash_stream_in_db(phash_stream: Iterable[str], search_distance
         password=psqlUserPass,
         database=psqlDbName,
         host=psqlDbIpAddr,
+        port=psqlPort,
         command_timeout=60,
     ) as pool:
         async with pool.acquire() as conn:

@@ -19,6 +19,7 @@ psqlDbIpAddr = settings.PSQL_IP
 psqlDbName = settings.PSQL_DB_NAME
 psqlUserName = settings.PSQL_USER
 psqlUserPass = settings.PSQL_PASS
+psqlPort = settings.PSQL_PORT
 
 console = Console()
 error_console = Console(stderr=True, style="bold red")

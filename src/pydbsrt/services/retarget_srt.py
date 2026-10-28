@@ -15,7 +15,7 @@ from rich.console import Console
 
 from pydbsrt.models.matching import ResultSearch
 from pydbsrt.services.cuts import SearchTreeFromCuts, gen_items_from_cuts
-from pydbsrt.services.database import psqlDbIpAddr, psqlDbName, psqlUserName, psqlUserPass
+from pydbsrt.services.database import psqlDbIpAddr, psqlDbName, psqlPort, psqlUserName, psqlUserPass
 from pydbsrt.services.matching import search_phash_stream_in_db
 from pydbsrt.services.reader_frames import gen_read_binary_img_hash_file
 from pydbsrt.tools.aio_filehash import hashfile
@@ -47,7 +47,12 @@ async def retarget_subtitles_in_db_async(
 
     """
     async with asyncpg.create_pool(
-        user=psqlUserName, password=psqlUserPass, database=psqlDbName, host=psqlDbIpAddr, command_timeout=60
+        user=psqlUserName,
+        password=psqlUserPass,
+        database=psqlDbName,
+        host=psqlDbIpAddr,
+        port=psqlPort,
+        command_timeout=60,
     ) as pool:
         async with pool.acquire() as conn:
             found_ref_media_id = await search_media_hash_in_db(conn, str(ref_phash_file_hash))

@@ -11,6 +11,7 @@ from pydbsrt.services.database import (
     error_console,
     psqlDbIpAddr,
     psqlDbName,
+    psqlPort,
     psqlUserName,
     psqlUserPass,
 )
@@ -26,7 +27,12 @@ async def import_binary_img_hash_to_db_async(
     console.print(f"media_hash='{media_hash}'")
 
     async with asyncpg.create_pool(
-        user=psqlUserName, password=psqlUserPass, database=psqlDbName, host=psqlDbIpAddr, command_timeout=60
+        user=psqlUserName,
+        password=psqlUserPass,
+        database=psqlDbName,
+        host=psqlDbIpAddr,
+        port=psqlPort,
+        command_timeout=60,
     ) as pool:
         async with pool.acquire() as conn:
             await create_tables(conn)
