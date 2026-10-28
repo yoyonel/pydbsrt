@@ -1,0 +1,102 @@
+version: '3'
+
+tasks:
+  o2switch:build:
+    desc: Cross-compile static standalone x86_64-musl binaries for o2switch shared hosting
+    cmds:
+      - ./scripts/o2switch_ctl.sh build
+
+  o2switch:test-local:
+    desc: Empirically test static musl dbsrt-server in Zero-DB mode locally
+    cmds:
+      - ./scripts/o2switch_ctl.sh test-local
+
+  o2switch:sync:
+    desc: Synchronize static binaries, Zero-DB catalog, and .htaccess reverse-proxy to o2switch
+    cmds:
+      - ./scripts/o2switch_ctl.sh sync
+
+  o2switch:start:
+    desc: Start standalone unprivileged dbsrt-server daemon on o2switch
+    cmds:
+      - ./scripts/o2switch_ctl.sh start
+
+  o2switch:stop:
+    desc: Stop standalone dbsrt-server daemon on o2switch
+    cmds:
+      - ./scripts/o2switch_ctl.sh stop
+
+  o2switch:restart:
+    desc: Restart standalone dbsrt-server daemon on o2switch
+    cmds:
+      - ./scripts/o2switch_ctl.sh restart
+
+  o2switch:status:
+    desc: Check standalone dbsrt-server process and API telemetry on o2switch
+    cmds:
+      - ./scripts/o2switch_ctl.sh status
+
+  o2switch:logs:
+    desc: Tail dbsrt-server execution logs on o2switch
+    cmds:
+      - ./scripts/o2switch_ctl.sh logs
+
+  o2switch:demo:
+    desc: Test recognition and CAS subtitle retrieval on o2switch API
+    cmds:
+      - ./scripts/o2switch_ctl.sh demo
+
+  o2switch:setup-cron:
+    desc: Install unprivileged user cron watchdog on o2switch for zero-downtime persistence
+    cmds:
+      - ./scripts/o2switch_ctl.sh setup-cron
+
+  o2switch:remove-cron:
+    desc: Remove dbsrt-server cron watchdog on o2switch
+    cmds:
+      - ./scripts/o2switch_ctl.sh remove-cron
+
+  o2switch:rotate-key:
+    desc: Generate, rotate, and synchronize a new 256-bit API secret key on o2switch and pass
+    cmds:
+      - ./scripts/o2switch_ctl.sh rotate-key
+
+  o2switch:sync-nas:
+    desc: Synchronize Synology NAS .phash fingerprints, binary catalog, and SRT store to Cloud o2switch
+    cmds:
+      - ./scripts/nas_o2switch_sync.sh
+
+  o2switch:sync-nas:dry-run:
+    desc: Dry-run simulation of Synology NAS synchronization to Cloud o2switch
+    cmds:
+      - ./scripts/nas_o2switch_sync.sh --dry-run
+
+  o2switch:agent:start:
+    desc: Start local dbsrt client relay agent connected to Cloud o2switch
+    cmds:
+      - ./scripts/agent_relay.sh start
+
+  o2switch:agent:stop:
+    desc: Stop local dbsrt client relay agent
+    cmds:
+      - ./scripts/agent_relay.sh stop
+
+  o2switch:agent:restart:
+    desc: Restart local dbsrt client relay agent
+    cmds:
+      - ./scripts/agent_relay.sh restart
+
+  o2switch:agent:status:
+    desc: Check local dbsrt client relay agent status and telemetry
+    cmds:
+      - ./scripts/agent_relay.sh status
+
+  o2switch:agent:logs:
+    desc: Tail local dbsrt client relay agent logs
+    cmds:
+      - ./scripts/agent_relay.sh logs
+
+  o2switch:agent:demo:
+    desc: Test end-to-end recognition from local/Synology video through Cloud o2switch relay
+    cmds:
+      - ./scripts/agent_relay.sh demo

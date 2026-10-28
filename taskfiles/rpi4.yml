@@ -77,6 +77,62 @@ tasks:
     cmds:
       - ./scripts/rpi4_deploy.sh db-migrate {{.CLI_ARGS}}
 
+  rpi4:cli:build:
+    desc: Cross-compile ARM64 dbsrt CLI binary with Debian Bullseye GLIBC 2.31 parity
+    cmds:
+      - ./scripts/rpi4_cli.sh build
+
+  rpi4:cli:test:
+    desc: Validate ARM64 dbsrt CLI locally on host inside Debian Bullseye container via QEMU
+    cmds:
+      - ./scripts/rpi4_cli.sh test
+
+  rpi4:cli:deploy:
+    desc: Deploy ARM64 dbsrt CLI binary to Raspberry Pi 4 via SSH/SCP
+    cmds:
+      - ./scripts/rpi4_cli.sh deploy
+
+  rpi4:top:
+    desc: Launch interactive dbsrt top TUI session on Raspberry Pi 4 via SSH
+    cmds:
+      - ./scripts/rpi4_cli.sh top {{.CLI_ARGS}}
+
+  rpi4:server:deploy:
+    desc: Deploy standalone ARM64 dbsrt-server binary to Raspberry Pi 4 and configure systemd user service
+    cmds:
+      - ./scripts/rpi4_standalone.sh deploy
+
+  rpi4:server:start:
+    desc: Start standalone dbsrt-server systemd user service on Raspberry Pi 4
+    cmds:
+      - ./scripts/rpi4_standalone.sh start
+
+  rpi4:server:stop:
+    desc: Stop standalone dbsrt-server systemd user service on Raspberry Pi 4
+    cmds:
+      - ./scripts/rpi4_standalone.sh stop
+
+  rpi4:server:restart:
+    desc: Restart standalone dbsrt-server systemd user service on Raspberry Pi 4
+    cmds:
+      - ./scripts/rpi4_standalone.sh restart
+
+  rpi4:server:status:
+    desc: Check standalone dbsrt-server systemd user service and API telemetry on Raspberry Pi 4
+    cmds:
+      - ./scripts/rpi4_standalone.sh status
+
+  rpi4:server:logs:
+    desc: Tail live journal logs for standalone dbsrt-server systemd user service on Raspberry Pi 4
+    cmds:
+      - ./scripts/rpi4_standalone.sh logs
+
+  rpi4:server:demo:
+    desc: Test recognition and CAS subtitle retrieval on standalone Raspberry Pi 4 server
+    cmds:
+      - ./scripts/rpi4_standalone.sh demo
+
+
   sim:up:
     desc: Start local ARM64 simulation container via QEMU binfmt on :8766
     aliases:

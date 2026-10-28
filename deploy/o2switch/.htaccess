@@ -1,0 +1,14 @@
+# Apache / LiteSpeed .htaccess for pydbsrt reverse proxy gateway
+# Routes all public HTTPS requests to index.php which forwards to dbsrt-server (127.0.0.1:8765)
+# Compatible with cPanel mutualise without mod_proxy [P] restrictions.
+
+Options -Indexes
+RewriteEngine On
+
+# Force HTTPS redirect
+RewriteCond %{HTTPS} off
+RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^(.*)$ index.php [QSA,L]
