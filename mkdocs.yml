@@ -132,6 +132,8 @@ nav:
       - Recette E2E du Moniteur TUI Rust (dbsrt top): how-to/2026-10-26-recette-e2e-tui-rust.md
       - Guide Tests Scénarios TUI Headless: how-to/2026-10-27-guide-tests-scenarios-tui.md
       - Audit d'Intégrité Catalogue & Stockage: how-to/2026-10-26-audit-integrite-catalogue-et-stockage.md
+      - Déployer sur Hébergement Cloud o2switch: how-to/deployer-o2switch-cloud-cpanel.md
+      - Interconnecter NAS Synology & o2switch SFTP: how-to/interconnecter-nas-synology-et-o2switch-sftp.md
       - Exécuter les Recettes de Chaos Testing: how-to/executer-recettes-chaos-testing.md
       - Contribuer à la Documentation Diátaxis: how-to/contribuer-documentation-diataxis.md
   - 📖 Référence Technique:
