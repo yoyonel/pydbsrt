@@ -375,8 +375,13 @@ async fn dispatch_remote_relay_call(
         .build()
         .unwrap_or_default();
 
+    let mut req_builder = client.post(endpoint).json(remote_req);
+    if let Some(ref api_key) = state.remote_api_key {
+        req_builder = req_builder.header("X-API-Key", api_key);
+    }
+
     let t_net = Instant::now();
-    match client.post(endpoint).json(remote_req).send().await {
+    match req_builder.send().await {
         Ok(resp) if resp.status().is_success() => {
             let net_rtt_ms = t_net.elapsed().as_secs_f64() * 1000.0;
             resp.json::<RecognizeResponse>()

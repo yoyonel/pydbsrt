@@ -62,21 +62,111 @@ pub fn extract_container_subtitle(
     SubtitleFile::parse(&raw).map_err(|e| format!("Failed to parse container subtitle: {:#}", e))
 }
 
+/// Request parameters for fetching a subtitle from an upstream remote relay endpoint.
+struct RemoteFetchRequest<'a> {
+    pub remote_url: &'a str,
+    pub candidate_id: &'a str,
+    pub clean_hash: &'a str,
+    pub is_cas_hash: bool,
+}
+
+/// Fetches and caches a subtitle from an upstream remote relay server.
+///
+/// # Arguments
+/// * `state` - Application state containing client configuration and cache.
+/// * `req` - Request parameters targeting the remote subtitle.
+///
+/// # Returns
+/// `Option<SubtitleFile>` containing parsed subtitle on success, or `None` on network/parsing error.
+///
+/// # Errors
+/// Non-blocking, returns `None` and records structured logs on connection or parsing failure.
+///
+/// # Panics
+/// Never panics under any execution condition.
+///
+/// # Data Flow & Invariants
+/// Dispatches authenticated HTTP GET to `/v1/subtitles/{id}` on the upstream relay.
+/// On successful HTTP 200 response, caches the raw `.srt` bytes locally under `clean_hash.srt`.
+async fn fetch_remote_cas_subtitle(
+    state: &AppState,
+    req: RemoteFetchRequest<'_>,
+) -> Option<SubtitleFile> {
+    let fetch_target = if req.is_cas_hash {
+        req.clean_hash.to_string()
+    } else {
+        Path::new(req.candidate_id)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(req.candidate_id)
+            .to_string()
+    };
+
+    let url = format!(
+        "{}/v1/subtitles/{}",
+        req.remote_url.trim_end_matches('/'),
+        fetch_target
+    );
+    state.push_log(
+        "REMOTE_CAS",
+        "INFO",
+        format!("Fetching subtitle from remote Subtitle Service: {}", url),
+    );
+
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_millis(
+            crate::constants::DEFAULT_RELAY_CONNECT_TIMEOUT_MS,
+        ))
+        .timeout(std::time::Duration::from_millis(
+            crate::constants::DEFAULT_DOWNLOAD_RELAY_TIMEOUT_MS,
+        ))
+        .build()
+        .unwrap_or_default();
+
+    let mut req_builder = client.get(&url);
+    if let Some(ref api_key) = state.remote_api_key {
+        req_builder = req_builder.header("X-API-Key", api_key);
+    }
+
+    let resp = req_builder.send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let bytes = resp.bytes().await.ok()?;
+    match SubtitleFile::from_bytes(&bytes) {
+        Ok(s) => {
+            let cache_dir = state.cache.base_dir();
+            let _ = std::fs::create_dir_all(cache_dir);
+            let cache_file = cache_dir.join(format!("{}.srt", req.clean_hash));
+            let _ = std::fs::write(&cache_file, &bytes);
+            Some(s)
+        }
+        Err(e) => {
+            state.push_log(
+                "REMOTE_CAS",
+                "ERROR",
+                format!("Failed to parse remote subtitle content: {:#}", e),
+            );
+            None
+        }
+    }
+}
+
 /// Resolves a subtitle by CAS SHA256 digest or filesystem path across local registry and remote relay.
 ///
 /// # Arguments
 /// * `state` - Application state with registry, cache, and optional remote relay configuration.
-/// * `candidate_id` - CAS hash or filesystem path of candidate.
-/// * `subtitles_dir` - Directory containing reference subtitles.
+/// * `candidate_id` - Identifier which may be a CAS SHA256 digest or local filesystem path.
+/// * `subtitles_dir` - Fallback directory for resolving relative subtitle paths.
 ///
 /// # Returns
-/// * `Result<SubtitleFile, String>` - Resolved subtitle file or descriptive error.
+/// `Ok(SubtitleFile)` containing verified subtitle cues, or `Err(String)` describing lookup failure.
 ///
 /// # Errors
-/// * Returns `Err` if subtitle file cannot be located or downloaded.
+/// Returns error if file cannot be found in local registry, remote relay, or local filesystem.
 ///
 /// # Panics
-/// * Guarantee: Never panics.
+/// Never panics under any execution condition.
 ///
 /// # Data Flow & Invariants
 /// 1. Detects whether `candidate_id` is a CAS SHA256 identifier (`sub:sha256:` / `sha256:`).
@@ -120,61 +210,18 @@ pub async fn fetch_cas_or_catalog_subtitle(
         }
     }
 
-    if fetched_file.is_none() && state.remote_api.is_some() {
+    if fetched_file.is_none() {
         if let Some(ref remote_url) = state.remote_api {
-            let fetch_target = if is_cas_hash {
-                clean_hash.to_string()
-            } else {
-                Path::new(candidate_id)
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or(candidate_id)
-                    .to_string()
-            };
-
-            let url = format!(
-                "{}/v1/subtitles/{}",
-                remote_url.trim_end_matches('/'),
-                fetch_target
-            );
-            state.push_log(
-                "REMOTE_CAS",
-                "INFO",
-                format!("Fetching subtitle from remote Subtitle Service: {}", url),
-            );
-
-            let client = reqwest::Client::builder()
-                .connect_timeout(std::time::Duration::from_millis(
-                    crate::constants::DEFAULT_RELAY_CONNECT_TIMEOUT_MS,
-                ))
-                .timeout(std::time::Duration::from_millis(
-                    crate::constants::DEFAULT_DOWNLOAD_RELAY_TIMEOUT_MS,
-                ))
-                .build()
-                .unwrap_or_default();
-
-            if let Ok(resp) = client.get(&url).send().await {
-                if resp.status().is_success() {
-                    if let Ok(bytes) = resp.bytes().await {
-                        match SubtitleFile::from_bytes(&bytes) {
-                            Ok(s) => {
-                                fetched_file = Some(s);
-                                let cache_dir = state.cache.base_dir();
-                                let _ = std::fs::create_dir_all(cache_dir);
-                                let cache_file = cache_dir.join(format!("{}.srt", clean_hash));
-                                let _ = std::fs::write(&cache_file, &bytes);
-                            }
-                            Err(e) => {
-                                state.push_log(
-                                    "REMOTE_CAS",
-                                    "ERROR",
-                                    format!("Failed to parse remote subtitle content: {:#}", e),
-                                );
-                            }
-                        }
-                    }
-                }
-            }
+            fetched_file = fetch_remote_cas_subtitle(
+                state,
+                RemoteFetchRequest {
+                    remote_url,
+                    candidate_id,
+                    clean_hash,
+                    is_cas_hash,
+                },
+            )
+            .await;
         }
     }
 

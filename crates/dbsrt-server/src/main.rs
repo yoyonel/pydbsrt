@@ -70,6 +70,10 @@ pub struct ServerCli {
     #[arg(long, env = "DBSRT_REMOTE_API")]
     pub remote_api: Option<String>,
 
+    /// Optional API key for remote dbsrt-server relay authentication (env: DBSRT_REMOTE_API_KEY)
+    #[arg(long, env = "DBSRT_REMOTE_API_KEY")]
+    pub remote_api_key: Option<String>,
+
     /// Run as lightweight client agent (env: DBSRT_AGENT)
     #[arg(long, env = "DBSRT_AGENT", default_value_t = false)]
     pub agent: bool,
@@ -95,6 +99,7 @@ impl ServerCli {
         state.set_dbphash(self.dbphash);
         state.db_config = db_config;
         state.remote_api = self.remote_api;
+        state.remote_api_key = self.remote_api_key;
         state.is_agent = self.agent;
         state
     }

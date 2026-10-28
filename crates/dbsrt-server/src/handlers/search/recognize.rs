@@ -47,6 +47,10 @@ pub fn match_fingerprint_multitier(
     search_distance: u32,
     phash_dirs: &[PathBuf],
 ) -> Option<(String, f64, String)> {
+    if hashes.is_empty() || hashes.iter().all(|&h| dbsrt_core::is_blank_phash(h)) {
+        return None;
+    }
+
     let mut candidates: Vec<(String, f64, String, usize)> = Vec::new();
 
     let reader_guard = state.dbphash_reader.load();
@@ -563,5 +567,32 @@ mod tests {
         let res = recognize_handler(State(state), Json(req)).await.unwrap();
         assert!(!res.0.found);
         assert_eq!(res.0.confidence, 0.0);
+    }
+
+    #[tokio::test]
+    async fn test_recognize_zero_entropy_identical_frames() {
+        let state = test_app_state();
+        // 5 consecutive identical hashes with 32 ones (exact real-world black/intro studio hash)
+        let identical_black_hashes = vec![
+            "0x8f4c7233588e457e".to_string(),
+            "0x8f4c7233588e457e".to_string(),
+            "0x8f4c7233588e457e".to_string(),
+            "0x8f4c7233588e457e".to_string(),
+            "0x8f4c7233588e457e".to_string(),
+        ];
+        let req = RecognizeRequest {
+            media_path: String::new(),
+            query_fingerprint: Some(identical_black_hashes),
+            fps: Some(25.0),
+            language: Some("fr".to_string()),
+            client_version: None,
+            search_distance: 6,
+            nb_seconds: 1.0,
+            phash_dir: None,
+        };
+        let res = recognize_handler(State(state), Json(req)).await.unwrap();
+        assert!(!res.0.found, "Zero-entropy identical frames must not match");
+        assert_eq!(res.0.confidence, 0.0);
+        assert_eq!(res.0.media_match, None);
     }
 }

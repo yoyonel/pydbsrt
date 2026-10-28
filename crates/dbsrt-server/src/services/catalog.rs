@@ -45,6 +45,48 @@ pub fn normalize_lang_code(lang: &str) -> String {
 /// # Data Flow & Invariants
 /// Tokenizes the filename from right to left across separators (`.`, `_`, `-`, ` `)
 /// ignoring noise tokens (`"forced"`, `"sdh"`, `"synced"`) and maps common language abbreviations.
+const SUBTITLE_LANG_MAP: &[(&[&str], &str)] = &[
+    (&["fr", "fre", "fra", "french", "vf", "vostfr"], "fr"),
+    (&["en", "eng", "english", "vo"], "en"),
+    (&["es", "spa", "spanish"], "es"),
+    (&["de", "ger", "deu", "german"], "de"),
+    (&["it", "ita", "italian"], "it"),
+    (&["pt", "por", "pob", "portuguese"], "pt"),
+    (&["ru", "rus", "russian"], "ru"),
+    (&["ja", "jpn", "japanese"], "ja"),
+    (&["zh", "chi", "zho", "chinese"], "zh"),
+    (&["nl", "dut", "nld", "dutch"], "nl"),
+    (&["pl", "pol", "polish"], "pl"),
+    (&["tr", "tur", "turkish"], "tr"),
+    (&["ar", "ara", "arabic"], "ar"),
+    (&["he", "heb", "hebrew"], "he"),
+    (&["sv", "swe", "swedish"], "sv"),
+    (&["da", "dan", "danish"], "da"),
+    (&["fi", "fin", "finnish"], "fi"),
+    (&["no", "nor", "nob", "nno", "norwegian"], "no"),
+    (&["cs", "cze", "ces", "czech"], "cs"),
+    (&["hu", "hun", "hungarian"], "hu"),
+    (&["ro", "rum", "ron", "romanian"], "ro"),
+    (&["el", "ell", "gre", "greek"], "el"),
+    (&["uk", "ukr", "ukrainian"], "uk"),
+    (&["ko", "kor", "korean"], "ko"),
+    (&["hi", "hin", "hindi"], "hi"),
+    (&["id", "ind", "indonesian"], "id"),
+    (&["th", "tha", "thai"], "th"),
+    (&["vi", "vie", "vietnamese"], "vi"),
+    (&["ms", "msa", "may", "malay"], "ms"),
+    (&["tl", "tgl", "fil", "tagalog"], "tl"),
+];
+
+fn map_subtitle_lang_token(lower: &str) -> Option<&'static str> {
+    for &(aliases, code) in SUBTITLE_LANG_MAP {
+        if aliases.contains(&lower) {
+            return Some(code);
+        }
+    }
+    None
+}
+
 pub fn detect_subtitle_file_language(filename: &str) -> Option<String> {
     let base = filename.strip_suffix(".srt").unwrap_or(filename);
     for token in base
@@ -62,35 +104,7 @@ pub fn detect_subtitle_file_language(filename: &str) -> Option<String> {
         ) {
             continue;
         }
-        let mapped = match lower.as_str() {
-            "fr" | "fre" | "fra" | "french" | "vf" | "vostfr" => Some("fr"),
-            "en" | "eng" | "english" | "vo" => Some("en"),
-            "es" | "spa" | "spanish" => Some("es"),
-            "de" | "ger" | "deu" | "german" => Some("de"),
-            "it" | "ita" | "italian" => Some("it"),
-            "pt" | "por" | "pob" | "portuguese" => Some("pt"),
-            "ru" | "rus" | "russian" => Some("ru"),
-            "ja" | "jpn" | "japanese" => Some("ja"),
-            "zh" | "chi" | "zho" | "chinese" => Some("zh"),
-            "nl" | "dut" | "nld" | "dutch" => Some("nl"),
-            "pl" | "pol" | "polish" => Some("pl"),
-            "tr" | "tur" | "turkish" => Some("tr"),
-            "ar" | "ara" | "arabic" => Some("ar"),
-            "he" | "heb" | "hebrew" => Some("he"),
-            "sv" | "swe" | "swedish" => Some("sv"),
-            "da" | "dan" | "danish" => Some("da"),
-            "fi" | "fin" | "finnish" => Some("fi"),
-            "no" | "nor" | "nob" | "nno" | "norwegian" => Some("no"),
-            "cs" | "cze" | "ces" | "czech" => Some("cs"),
-            "hu" | "hun" | "hungarian" => Some("hu"),
-            "ro" | "rum" | "ron" | "romanian" => Some("ro"),
-            "el" | "ell" | "gre" | "greek" => Some("el"),
-            "uk" | "ukr" | "ukrainian" => Some("uk"),
-            "ko" | "kor" | "korean" => Some("ko"),
-            "hin" | "hindi" => Some("hi"),
-            _ => None,
-        };
-        if let Some(code) = mapped {
+        if let Some(code) = map_subtitle_lang_token(&lower) {
             return Some(code.to_string());
         }
     }
@@ -136,6 +150,104 @@ pub fn collect_subtitle_search_dirs(
     dirs
 }
 
+struct CatalogFilterCriteria<'a> {
+    clean_stems: &'a [String],
+    query_norm: Option<&'a str>,
+    eff_season: Option<u32>,
+    eff_episode: Option<u32>,
+    req_lang: &'a str,
+    any_lang: bool,
+}
+
+fn matches_season_and_stem(
+    fname: &str,
+    cand_meta: &MediaMetadata,
+    crit: &CatalogFilterCriteria<'_>,
+) -> Option<(bool, bool)> {
+    if let (Some(req_s), Some(req_e)) = (crit.eff_season, crit.eff_episode) {
+        if let (Some(cs), Some(ce)) = (cand_meta.season, cand_meta.episode) {
+            if cs != req_s || ce != req_e {
+                return None;
+            }
+        }
+    }
+
+    let cand_stem = fname.strip_suffix(".srt").unwrap_or(fname);
+    let is_exact_sidecar = crit.clean_stems.iter().any(|s| cand_stem == s);
+    let has_exact_stem = crit
+        .clean_stems
+        .iter()
+        .any(|stem_lower| fname.contains(stem_lower) || stem_lower.contains(cand_stem));
+
+    let norm_alnum = |s: &str| -> String {
+        s.chars()
+            .filter(|c| c.is_alphanumeric())
+            .collect::<String>()
+            .to_lowercase()
+    };
+    let fname_alnum = norm_alnum(fname);
+    let cand_title_norm = norm_alnum(&cand_meta.clean_title);
+
+    let has_query = crit.query_norm.as_ref().is_some_and(|&qn| {
+        if !cand_title_norm.is_empty() && cand_title_norm.len() >= 3 {
+            cand_title_norm == qn || (qn.len() >= 5 && fname_alnum.starts_with(qn))
+        } else {
+            fname_alnum.contains(qn)
+        }
+    });
+
+    if !has_exact_stem && !has_query {
+        return None;
+    }
+
+    if !has_exact_stem {
+        if let (Some(s), Some(e)) = (crit.eff_season, crit.eff_episode) {
+            let se_match = cand_meta.season == Some(s) && cand_meta.episode == Some(e);
+            let se_tag = format!("s{:02}e{:02}", s, e);
+            let x_tag = format!("{}x{:02}", s, e);
+            if !se_match && !fname.contains(&se_tag) && !fname.contains(&x_tag) {
+                return None;
+            }
+        }
+    }
+
+    Some((has_exact_stem, is_exact_sidecar))
+}
+
+fn evaluate_catalog_subtitle(
+    fname: &str,
+    file_size: u64,
+    crit: &CatalogFilterCriteria<'_>,
+) -> Option<(i32, String)> {
+    let cand_meta = MediaMetadata::parse(fname);
+    let (has_exact_stem, is_exact_sidecar) = matches_season_and_stem(fname, &cand_meta, crit)?;
+
+    let detected_lang = detect_subtitle_file_language(fname);
+    let (mut score, resolved_lang) = match detected_lang {
+        Some(ref d_lang) if *d_lang == crit.req_lang => (100, d_lang.clone()),
+        Some(ref d_lang) if crit.any_lang => (50, d_lang.clone()),
+        Some(_) => return None,
+        None => {
+            if is_exact_sidecar {
+                (50, crit.req_lang.to_string())
+            } else if crit.any_lang {
+                (10, "und".to_string())
+            } else {
+                return None;
+            }
+        }
+    };
+
+    if has_exact_stem {
+        score += 50;
+    }
+    if file_size >= 4096 {
+        score += 15;
+    }
+
+    Some((score, resolved_lang))
+}
+
 /// Unified catalog search returning ranked candidates matching release identity and requested language.
 ///
 /// # Arguments
@@ -173,14 +285,10 @@ pub fn search_subtitles_in_catalog(
     let clean_stems: Vec<String> = media_stems
         .iter()
         .map(|s| {
-            s.strip_suffix(".phash")
-                .unwrap_or(s)
-                .strip_suffix(".mp4")
-                .unwrap_or(s)
-                .strip_suffix(".webm")
-                .unwrap_or(s)
-                .strip_suffix(".mkv")
-                .unwrap_or(s)
+            s.trim_end_matches(".phash")
+                .trim_end_matches(".mp4")
+                .trim_end_matches(".webm")
+                .trim_end_matches(".mkv")
                 .to_lowercase()
         })
         .filter(|s| !s.is_empty())
@@ -207,6 +315,15 @@ pub fn search_subtitles_in_catalog(
                 .filter(|q| q.len() >= 3)
         });
 
+    let criteria = CatalogFilterCriteria {
+        clean_stems: &clean_stems,
+        query_norm: query_norm.as_deref(),
+        eff_season,
+        eff_episode,
+        req_lang: &req_lang,
+        any_lang,
+    };
+
     let mut results: Vec<(i32, PathBuf, String)> = Vec::new();
 
     for entry in entries.flatten() {
@@ -223,68 +340,12 @@ pub fn search_subtitles_in_catalog(
             continue;
         };
         let fname = fname_os.to_string_lossy().to_lowercase();
-        let fname_alnum = norm_alnum(&fname);
-        let cand_meta = MediaMetadata::parse(&fname);
-        let cand_title_norm = norm_alnum(&cand_meta.clean_title);
 
-        if let (Some(req_s), Some(req_e)) = (eff_season, eff_episode) {
-            if let (Some(cs), Some(ce)) = (cand_meta.season, cand_meta.episode) {
-                if cs != req_s || ce != req_e {
-                    continue;
-                }
-            }
+        if let Some((score, resolved_lang)) =
+            evaluate_catalog_subtitle(&fname, file_size, &criteria)
+        {
+            results.push((score, path, resolved_lang));
         }
-
-        let has_exact_stem = clean_stems.iter().any(|stem_lower| {
-            fname.contains(stem_lower) || stem_lower.contains(fname.trim_end_matches(".srt"))
-        });
-
-        let has_query = query_norm.as_ref().is_some_and(|qn| {
-            if !cand_title_norm.is_empty() && cand_title_norm.len() >= 3 {
-                cand_title_norm == *qn || (qn.len() >= 5 && fname_alnum.starts_with(qn))
-            } else {
-                fname_alnum.contains(qn)
-            }
-        });
-
-        if !has_exact_stem && !has_query {
-            continue;
-        }
-
-        if !has_exact_stem {
-            if let (Some(s), Some(e)) = (eff_season, eff_episode) {
-                let se_match = cand_meta.season == Some(s) && cand_meta.episode == Some(e);
-                let se_tag = format!("s{:02}e{:02}", s, e);
-                let x_tag = format!("{}x{:02}", s, e);
-                if !se_match && !fname.contains(&se_tag) && !fname.contains(&x_tag) {
-                    continue;
-                }
-            }
-        }
-
-        let detected_lang = detect_subtitle_file_language(&fname);
-        let (mut score, resolved_lang) = match detected_lang {
-            Some(ref d_lang) if *d_lang == req_lang => (100, d_lang.clone()),
-            Some(ref d_lang) if any_lang => (50, d_lang.clone()),
-            Some(_) => continue,
-            None => {
-                let fallback_lang = if any_lang {
-                    "und".to_string()
-                } else {
-                    req_lang.clone()
-                };
-                (10, fallback_lang)
-            }
-        };
-
-        if has_exact_stem {
-            score += 50;
-        }
-        if file_size >= 4096 {
-            score += 15;
-        }
-
-        results.push((score, path, resolved_lang));
     }
 
     results.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
@@ -519,4 +580,89 @@ pub fn lookup_certified_couplings(
         json_lookup_ms,
         pg_cached,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_detect_subtitle_file_language_multilingual() {
+        assert_eq!(
+            detect_subtitle_file_language(
+                "Kingdom.(2019).S01E01.Episode.1.1080p.NF.WEB-DL.DD5.1.x264-MZABI.mkv_fre_5.srt"
+            ),
+            Some("fr".to_string())
+        );
+        assert_eq!(
+            detect_subtitle_file_language(
+                "Kingdom.(2019).S01E01.Episode.1.1080p.NF.WEB-DL.DD5.1.x264-MZABI.mkv_ind_22.srt"
+            ),
+            Some("id".to_string())
+        );
+        assert_eq!(
+            detect_subtitle_file_language(
+                "Kingdom.(2019).S01E01.Episode.1.1080p.NF.WEB-DL.DD5.1.x264-MZABI.mkv_tha_24.srt"
+            ),
+            Some("th".to_string())
+        );
+        assert_eq!(
+            detect_subtitle_file_language(
+                "Kingdom.(2019).S01E01.Episode.1.1080p.NF.WEB-DL.DD5.1.x264-MZABI.mkv_vie_23.srt"
+            ),
+            Some("vi".to_string())
+        );
+        assert_eq!(
+            detect_subtitle_file_language(
+                "Maniac.2018.S01E01.MULTi.720p.NF.WEB-DL.DD5.1.x264-ARK01.mkv_fre_4.srt"
+            ),
+            Some("fr".to_string())
+        );
+        assert_eq!(
+            detect_subtitle_file_language("Beacon.23.S01E01.fr.srt"),
+            Some("fr".to_string())
+        );
+        assert_eq!(
+            detect_subtitle_file_language("Unknown.Release.mkv_xyz_99.srt"),
+            None
+        );
+    }
+
+    #[test]
+    fn test_search_subtitles_in_catalog_strict_language_filter() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("dbsrt_test_catalog_lang_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let files = [
+            "Kingdom.(2019).S01E01.Episode.1.1080p.NF.WEB-DL.DD5.1.x264-MZABI.mkv_fre_5.srt",
+            "Kingdom.(2019).S01E01.Episode.1.1080p.NF.WEB-DL.DD5.1.x264-MZABI.mkv_ind_22.srt",
+            "Kingdom.(2019).S01E01.Episode.1.1080p.NF.WEB-DL.DD5.1.x264-MZABI.mkv_tha_24.srt",
+            "Kingdom.(2019).S01E01.Episode.1.1080p.NF.WEB-DL.DD5.1.x264-MZABI.mkv_vie_23.srt",
+            "Kingdom.(2019).S01E01.Episode.1.1080p.NF.WEB-DL.DD5.1.x264-MZABI.mkv_xyz_99.srt",
+        ];
+
+        for f in &files {
+            let p = temp_dir.join(f);
+            std::fs::write(&p, "1\n00:00:01,000 --> 00:00:02,000\nHello\n\n").unwrap();
+        }
+
+        let stems =
+            vec!["Kingdom.(2019).S01E01.Episode.1.1080p.NF.WEB-DL.DD5.1.x264-MZABI".to_string()];
+
+        // Request French: strictly fre_5 must be returned, all others skipped!
+        let fr_results =
+            search_subtitles_in_catalog(&temp_dir, &stems, None, Some(1), Some(1), "fr");
+        assert_eq!(fr_results.len(), 1, "Only 1 French subtitle returned");
+        assert!(fr_results[0].1.to_string_lossy().contains("fre_5.srt"));
+        assert_eq!(fr_results[0].2, "fr");
+
+        // Request All: all 5 are returned
+        let all_results =
+            search_subtitles_in_catalog(&temp_dir, &stems, None, Some(1), Some(1), "all");
+        assert_eq!(all_results.len(), 5, "All 5 subtitles returned under 'all'");
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
 }

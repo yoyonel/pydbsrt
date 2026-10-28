@@ -995,3 +995,135 @@ async fn test_sidecar_catalog_deduplication_lookup() {
 
     let _ = std::fs::remove_dir_all(&tmp_base);
 }
+
+#[tokio::test]
+async fn test_search_multilingual_track_filtering_integration() {
+    let tmp_base = std::env::temp_dir().join(format!("dbsrt_multilang_{}", std::process::id()));
+    let phash_dir = tmp_base.join("phash");
+    let srt_dir = tmp_base.join("srt");
+    let video_dir = tmp_base.join("tvshows");
+    let _ = std::fs::create_dir_all(&phash_dir);
+    let _ = std::fs::create_dir_all(&srt_dir);
+    let _ = std::fs::create_dir_all(&video_dir);
+
+    // 1. Create a video and multiple extracted audio/subtitle tracks with language markers
+    let video_path =
+        video_dir.join("Kingdom.2019.S01E01.Episode.1.1080p.NF.WEB-DL.DD5.1.x264-MZABI.mkv");
+    let srt_fre = video_dir
+        .join("Kingdom.2019.S01E01.Episode.1.1080p.NF.WEB-DL.DD5.1.x264-MZABI.mkv_fre_5.srt");
+    let srt_fr_sidecar =
+        video_dir.join("Kingdom.2019.S01E01.Episode.1.1080p.NF.WEB-DL.DD5.1.x264-MZABI.fr.srt");
+    let srt_ind = video_dir
+        .join("Kingdom.2019.S01E01.Episode.1.1080p.NF.WEB-DL.DD5.1.x264-MZABI.mkv_ind_22.srt");
+    let srt_tha = video_dir
+        .join("Kingdom.2019.S01E01.Episode.1.1080p.NF.WEB-DL.DD5.1.x264-MZABI.mkv_tha_24.srt");
+    let srt_vie = video_dir
+        .join("Kingdom.2019.S01E01.Episode.1.1080p.NF.WEB-DL.DD5.1.x264-MZABI.mkv_vie_23.srt");
+
+    let dummy_srt = b"1\r\n00:00:01,000 --> 00:00:04,000\r\nDialogue\r\n\r\n";
+    std::fs::write(&video_path, b"fake video").unwrap();
+    std::fs::write(&srt_fre, dummy_srt).unwrap();
+    std::fs::write(&srt_fr_sidecar, dummy_srt).unwrap();
+    std::fs::write(&srt_ind, dummy_srt).unwrap();
+    std::fs::write(&srt_tha, dummy_srt).unwrap();
+    std::fs::write(&srt_vie, dummy_srt).unwrap();
+
+    let (listener, addr) = dbsrt_server::bind_listener("127.0.0.1", 0).await.unwrap();
+    let app = dbsrt_server::create_router(phash_dir.clone(), srt_dir.clone());
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    let base_url = format!("http://{}", addr);
+    let client = reqwest::Client::new();
+
+    // Query for French: must strictly return only French files (fre_5 and .fr), zero Asian tracks
+    let req_fr = dbsrt_server::SearchSubtitlesRequest {
+        media_path: video_path.to_string_lossy().to_string(),
+        language: "fr".to_string(),
+        subtitles_dir: None,
+        phash_dir: None,
+        search_mode: Some("all".to_string()),
+        index_engine: None,
+        query_title: None,
+        season: None,
+        episode: None,
+    };
+    let res_fr: dbsrt_server::SearchSubtitlesResponse = client
+        .post(format!("{}/v1/search", base_url))
+        .json(&req_fr)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        res_fr.candidates.len(),
+        2,
+        "Expected exactly 2 French candidates, found: {:?}",
+        res_fr
+            .candidates
+            .iter()
+            .map(|c| &c.title)
+            .collect::<Vec<_>>()
+    );
+    for cand in &res_fr.candidates {
+        assert_eq!(cand.language, "fr");
+        assert!(
+            cand.title.contains("fre_5") || cand.title.contains(".fr.srt"),
+            "Unexpected candidate title: {}",
+            cand.title
+        );
+    }
+
+    // Query for Thai: must strictly return 1 candidate (tha_24)
+    let req_th = dbsrt_server::SearchSubtitlesRequest {
+        media_path: video_path.to_string_lossy().to_string(),
+        language: "th".to_string(),
+        subtitles_dir: None,
+        phash_dir: None,
+        search_mode: Some("all".to_string()),
+        index_engine: None,
+        query_title: None,
+        season: None,
+        episode: None,
+    };
+    let res_th: dbsrt_server::SearchSubtitlesResponse = client
+        .post(format!("{}/v1/search", base_url))
+        .json(&req_th)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(res_th.candidates.len(), 1);
+    assert!(res_th.candidates[0].title.contains("tha_24"));
+
+    // Query for "all": must return all 5 subtitle tracks
+    let req_all = dbsrt_server::SearchSubtitlesRequest {
+        media_path: video_path.to_string_lossy().to_string(),
+        language: "all".to_string(),
+        subtitles_dir: None,
+        phash_dir: None,
+        search_mode: Some("all".to_string()),
+        index_engine: None,
+        query_title: None,
+        season: None,
+        episode: None,
+    };
+    let res_all: dbsrt_server::SearchSubtitlesResponse = client
+        .post(format!("{}/v1/search", base_url))
+        .json(&req_all)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(res_all.candidates.len(), 5);
+
+    let _ = std::fs::remove_dir_all(&tmp_base);
+}

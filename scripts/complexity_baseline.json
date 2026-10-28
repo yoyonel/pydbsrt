@@ -819,16 +819,6 @@
     "max_parameters": 2,
     "max_nesting": 5
   },
-  "crates/dbsrt-server/src/handlers/autosync.rs::mod::autosync_handler": {
-    "file_path": "crates/dbsrt-server/src/handlers/autosync.rs",
-    "scope": "mod",
-    "function_name": "autosync_handler",
-    "start_line": 28,
-    "max_loc": 274,
-    "max_ccn": 39,
-    "max_parameters": 1,
-    "max_nesting": 9
-  },
   "crates/dbsrt-server/src/handlers/autosync.rs::mod::certify_handler": {
     "file_path": "crates/dbsrt-server/src/handlers/autosync.rs",
     "scope": "mod",
@@ -874,10 +864,10 @@
     "scope": "mod",
     "function_name": "fetch_cas_or_catalog_subtitle",
     "start_line": 87,
-    "max_loc": 109,
-    "max_ccn": 25,
+    "max_loc": 66,
+    "max_ccn": 18,
     "max_parameters": 3,
-    "max_nesting": 8
+    "max_nesting": 5
   },
   "crates/dbsrt-server/src/handlers/search/download.rs::mod::persist_retargeted_subtitle": {
     "file_path": "crates/dbsrt-server/src/handlers/search/download.rs",
@@ -1059,16 +1049,6 @@
     "max_parameters": 3,
     "max_nesting": 5
   },
-  "crates/dbsrt-server/src/services/catalog.rs::mod::detect_subtitle_file_language": {
-    "file_path": "crates/dbsrt-server/src/services/catalog.rs",
-    "scope": "mod",
-    "function_name": "detect_subtitle_file_language",
-    "start_line": 48,
-    "max_loc": 51,
-    "max_ccn": 31,
-    "max_parameters": 1,
-    "max_nesting": 3
-  },
   "crates/dbsrt-server/src/services/catalog.rs::mod::lookup_certified_couplings": {
     "file_path": "crates/dbsrt-server/src/services/catalog.rs",
     "scope": "mod",
@@ -1084,10 +1064,10 @@
     "scope": "mod",
     "function_name": "search_subtitles_in_catalog",
     "start_line": 155,
-    "max_loc": 138,
-    "max_ccn": 39,
+    "max_loc": 87,
+    "max_ccn": 14,
     "max_parameters": 6,
-    "max_nesting": 5
+    "max_nesting": 3
   },
   "crates/dbsrt-server/src/services/phash.rs::mod::compute_media_phash_shift": {
     "file_path": "crates/dbsrt-server/src/services/phash.rs",
