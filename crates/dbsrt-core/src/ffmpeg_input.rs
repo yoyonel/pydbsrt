@@ -11,9 +11,9 @@
 use std::path::Path;
 use std::process::Command;
 
-/// Default decoding threads allocated per FFmpeg process to enforce resource predictability
-/// and prevent host process/thread starvation on shared cloud runtimes.
-pub const DEFAULT_FFMPEG_DECODE_THREADS: &str = "2";
+/// Default decoding threads per FFmpeg process: `0` lets FFmpeg use every core, as before the
+/// env existed. Shared cloud runtimes (o2switch) cap it through `DBSRT_FFMPEG_THREADS`.
+pub const DEFAULT_FFMPEG_DECODE_THREADS: &str = "0";
 
 /// Env var overriding the FFmpeg/FFprobe decode thread count (`0` lets FFmpeg decide).
 pub const FFMPEG_THREADS_ENV: &str = "DBSRT_FFMPEG_THREADS";

@@ -121,7 +121,7 @@ Les hébergements mutualisés disposent d'un espace disque limité et de quotas 
 
 ### Fonctionnement garanti
 1. Le worker distant lance `dbsrt media:add` sur une URL FTP directe `ftp://<NAS_HOST>:21/<chemin>`, sans identifiants dans l'URL. Il positionne `DBSRT_FTP_USER` / `DBSRT_FTP_PASSWORD` dans l'environnement de chaque processus enfant.
-2. `dbsrt` délègue la lecture à `ffmpeg` / `ffprobe` (options `-ftp-user` / `-ftp-password`, jamais journalisées ; les URLs journalisées sont expurgées), qui démultiplexe et décode le conteneur directement en mémoire RAM (`DBSRT_FFMPEG_THREADS`, défaut `2`).
+2. `dbsrt` délègue la lecture à `ffmpeg` / `ffprobe` (options `-ftp-user` / `-ftp-password`, jamais journalisées ; les URLs journalisées sont expurgées), qui démultiplexe et décode le conteneur directement en mémoire RAM (`DBSRT_FFMPEG_THREADS`, `2` posé par le worker).
 3. Seuls les artefacts finaux à haute valeur ajoutée sont écrits sur le disque o2switch :
    - Fichier binaire `.phash` : $\approx 3\text{ Ko}$ par épisode (51 frames clés $\times$ 64 bits).
    - Sous-titres extraits `.srt` : $\approx 50\text{ Ko}$ par piste de langue.

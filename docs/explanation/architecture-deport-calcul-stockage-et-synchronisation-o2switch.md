@@ -145,7 +145,7 @@ sequenceDiagram
 - **Traitement** :
   1. Le worker positionne `DBSRT_FTP_USER` / `DBSRT_FTP_PASSWORD` dans l'environnement de chaque processus `dbsrt` enfant (identifiants lus depuis `etc/.nas_config` et `etc/.nas_pass`, mode 600).
   2. `dbsrt` transmet ces identifiants à `ffmpeg` / `ffprobe` via `-ftp-user` / `-ftp-password`. Ils ne sont jamais journalisés, et la partie userinfo des URLs journalisées est expurgée. Le `ffmpeg` statique d'o2switch ne supporte pas SFTP : FTP est le seul transport direct disponible.
-  3. `ffmpeg` lit le flux FTP au fil de l'eau (`DBSRT_FFMPEG_THREADS`, défaut `2`) sans chercher à stocker le fichier complet sur le disque.
+  3. `ffmpeg` lit le flux FTP au fil de l'eau (`DBSRT_FFMPEG_THREADS`, `2` posé par le worker) sans chercher à stocker le fichier complet sur le disque.
   4. Les trames vidéo sont converties à la volée en niveaux de gris $32 \times 32$ pixels bruts (`rawvideo Y800`), injectées directement via pipe mémoire dans le moteur Rust de DCT (Discrete Cosine Transform).
   5. Simultanément, les flux de sous-titres intégrés au conteneur Matroska (pistes `ass` ou `srt`) sont extraits en mémoire texte.
 - **Sortie (OUT)** :

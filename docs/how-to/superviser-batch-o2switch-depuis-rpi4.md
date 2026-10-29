@@ -194,7 +194,7 @@ Toutes ces valeurs se définissent dans l'environnement ou dans le fichier `.env
 | `NAS_HOST`, `NAS_USER` | `o2switch_ctl.sh`, worker | Hôte et compte FTP du NAS. Écrits dans `etc/.nas_config` (mode 600) sur o2switch s'ils sont définis localement. |
 | `NAS_PASS` | `o2switch_ctl.sh`, worker | Mot de passe FTP. Transmis par stdin et écrit dans `etc/.nas_pass` (mode 600) ; jamais en argument ni dans une URL. |
 | `DBSRT_FTP_USER`, `DBSRT_FTP_PASSWORD` | `dbsrt` (ffmpeg/ffprobe) | Positionnés par le worker pour chaque processus enfant, puis passés à ffmpeg via `-ftp-user` / `-ftp-password`. Jamais journalisés. |
-| `DBSRT_FFMPEG_THREADS` | `dbsrt` (ffmpeg) | Threads de décodage par worker (défaut `2`). |
+| `DBSRT_FFMPEG_THREADS` | `dbsrt` (ffmpeg) | Threads de décodage par worker (`2` posé par le worker o2switch ; `0` = auto hors worker). |
 | `O2SWITCH_URL` | `o2switch_ctl.sh rotate-key` | URL publique de la passerelle ; la vérification post-rotation est sautée si absente. |
 
 > [!WARNING]

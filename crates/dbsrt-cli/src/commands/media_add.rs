@@ -172,7 +172,7 @@ fn select_and_validate_subtitle_pairs(
 /// Guarantee: Never panics.
 ///
 /// # Data Flow & Invariants
-/// 1. Tries single-pass multi-stream extraction via FFmpeg (`DBSRT_FFMPEG_THREADS`, default 2).
+/// 1. Tries single-pass multi-stream extraction via FFmpeg (`DBSRT_FFMPEG_THREADS`, default 0 = auto).
 /// 2. If single-pass fails, falls back sequentially to `extract_embedded_subtitle`.
 /// 3. Registers verified output files in `cleanup.srts` and `discovered`.
 fn extract_subtitle_tracks_batch(
