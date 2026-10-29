@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import atexit
+import contextlib
 import json
 import mmap
 import os
@@ -24,7 +25,16 @@ import traceback
 import unicodedata
 import urllib.parse
 from pathlib import Path
-from typing import Dict, List, Set, Tuple
+from typing import Any, Callable, Dict, Iterator, List, NamedTuple, Set, TextIO, Tuple
+
+
+class VideoTarget(NamedTuple):
+    """One NAS video: raw FTP path, NFC file name and size in bytes."""
+
+    rel_path: str
+    filename: str
+    size_bytes: int
+
 
 # Process groups of in-flight dbsrt children: they run in their own session, so they must be
 # killed explicitly on shutdown or they keep running as orphans.
@@ -116,10 +126,9 @@ def read_desired_workers(default_workers: int, max_workers: int = MAX_CONCURRENT
     """Reads desired concurrency dynamically from run/desired_workers, capped at max_workers."""
     val = default_workers
     if DEFAULT_DESIRED_WORKERS_PATH.is_file():
-        try:
+        # A half-written or garbage file keeps the default until the next poll
+        with contextlib.suppress(OSError, ValueError):
             val = int(DEFAULT_DESIRED_WORKERS_PATH.read_text(encoding="utf-8").strip())
-        except Exception:
-            pass
     return max(MIN_CONCURRENT_WORKERS, min(val, max_workers))
 
 
@@ -171,6 +180,9 @@ MAX_FAST_FAILURE_STREAK: int = 50
 # Videos failing this many times in a row (corrupt, unreadable on the NAS) are no longer queued
 MAX_FAILED_ATTEMPTS: int = 3
 VIDEO_EXTENSIONS: Tuple[str, ...] = (".mkv", ".mp4", ".webm", ".avi")
+# MLSD entries that never hold library videos (Synology metadata, subtitle and placeholder folders)
+FTP_SKIPPED_NAMES: Tuple[str, ...] = (".", "..", "EMPTY_DIRS", "SRT", "@eaDir")
+PHASH_FPS_SUFFIX_RE = re.compile(r"\.\d+(\.\d+)?fps$")
 
 
 def resolve_nas_password() -> str:
@@ -205,26 +217,29 @@ def load_certified_stems(couplings_file: Path) -> Set[str]:
     return stems
 
 
+def phash_media_stem(phash_name: str) -> str:
+    """Media stem of a .phash file name: URL-decoded, without the .phash, fps and video extension suffixes."""
+    raw_name = PHASH_FPS_SUFFIX_RE.sub("", urllib.parse.unquote(phash_name).removesuffix(".phash"))
+    for ext in VIDEO_EXTENSIONS:
+        if raw_name.lower().endswith(ext):
+            return raw_name[: -len(ext)]
+    return raw_name
+
+
+def _file_size(path: Path) -> int:
+    try:
+        return path.stat().st_size
+    except OSError:
+        return 0
+
+
 def load_existing_phash_stems(phash_dir: Path) -> Set[str]:
-    """Loads all media stems with existing .phash files on disk."""
+    """Loads all media stems with existing non-empty .phash files on disk."""
     stems: Set[str] = set()
     if phash_dir.is_dir():
         for p in phash_dir.glob("*.phash"):
-            try:
-                if p.stat().st_size == 0:
-                    continue
-            except OSError:
-                continue
-            raw_name = urllib.parse.unquote(p.name)
-            if raw_name.endswith(".phash"):
-                raw_name = raw_name[:-6]
-            raw_name = re.sub(r"\.\d+(\.\d+)?fps$", "", raw_name)
-            for ext in VIDEO_EXTENSIONS:
-                if raw_name.lower().endswith(ext):
-                    raw_name = raw_name[: -len(ext)]
-                    break
-            stems.add(raw_name)
-            stems.add(p.stem)
+            if _file_size(p) > 0:
+                stems.update((phash_media_stem(p.name), p.stem))
     return stems
 
 
@@ -235,13 +250,10 @@ def list_nas_videos_ftp(
     base_dir: str = DEFAULT_NAS_BASE,
     ftp_port: int = DEFAULT_FTP_PORT,
     max_depth: int = 8,
-) -> List[Tuple[str, str, int]]:
+) -> List[VideoTarget]:
     """Discovers video files on Synology NAS using standard FTP MLSD protocol.
 
     Transient FTP errors restart the whole walk, so a dropped connection never yields a partial list.
-
-    Returns:
-        List of tuples: (relative_path, filename, size_bytes).
     """
     import ftplib
 
@@ -258,19 +270,17 @@ def list_nas_videos_ftp(
 
 def _walk_nas_videos_ftp(
     nas_host: str, nas_user: str, nas_pass: str, base_dir: str, ftp_port: int, max_depth: int
-) -> List[Tuple[str, str, int]]:
+) -> List[VideoTarget]:
     import ftplib
     import posixpath
 
-    clean_base = base_dir.lstrip("/")
     ftp = ftplib.FTP()
     ftp.connect(nas_host, ftp_port, timeout=15)
     ftp.login(nas_user, nas_pass)
     ftp.encoding = "utf-8"
 
-    results: List[Tuple[str, str, int]] = []
-    stack: List[str] = [clean_base]
-
+    results: List[VideoTarget] = []
+    stack: List[str] = [base_dir.lstrip("/")]
     while stack:
         curr = stack.pop()
         try:
@@ -279,34 +289,30 @@ def _walk_nas_videos_ftp(
             # 550 on a folder the account cannot read: skip it, the rest of the library stays usable
             continue
         for name, facts in entries:
-            if name in (".", "..", "EMPTY_DIRS", "SRT", "@eaDir") or name.startswith("."):
+            if name in FTP_SKIPPED_NAMES or name.startswith("."):
                 continue
             full_path = posixpath.join(curr, name)
             ftype = facts.get("type", "")
-            if ftype == "dir":
-                if full_path.count("/") <= max_depth:
-                    stack.append(full_path)
-            elif ftype == "file":
-                if any(name.lower().endswith(ext) for ext in VIDEO_EXTENSIONS):
-                    size = int(facts.get("size", 0))
-                    rel = "/" + full_path if not full_path.startswith("/") else full_path
-                    # The NAS mixes NFC and NFD names: the path keeps the raw name the FTP server
-                    # expects, the media name is NFC like the rest of the catalog
-                    results.append((rel, unicodedata.normalize("NFC", name), size))
+            if ftype == "dir" and full_path.count("/") <= max_depth:
+                stack.append(full_path)
+            elif ftype == "file" and name.lower().endswith(VIDEO_EXTENSIONS):
+                rel = full_path if full_path.startswith("/") else "/" + full_path
+                # The NAS mixes NFC and NFD names: the path keeps the raw name the FTP server
+                # expects, the media name is NFC like the rest of the catalog
+                results.append(VideoTarget(rel, unicodedata.normalize("NFC", name), int(facts.get("size", 0))))
 
-    try:
+    # The listing is complete: a connection already dropped by the server must not discard it
+    with contextlib.suppress(Exception):
         ftp.quit()
-    except Exception:
-        pass
     return results
 
 
-def load_targets_file(targets_path: Path, nas_base: str, skip_stems: Set[str]) -> List[Tuple[str, str, int]]:
+def load_targets_file(targets_path: Path, nas_base: str, skip_stems: Set[str]) -> List[VideoTarget]:
     """Loads explicit targets (list of paths or {path, filename, stem, size_bytes} dicts).
 
     Paths are rebased on `nas_base`; stems in `skip_stems` are dropped. Raises on unreadable JSON.
     """
-    targets: List[Tuple[str, str, int]] = []
+    targets: List[VideoTarget] = []
     for item in json.loads(targets_path.read_text(encoding="utf-8")):
         if isinstance(item, dict):
             p_str = item.get("path", "")
@@ -322,41 +328,40 @@ def load_targets_file(targets_path: Path, nas_base: str, skip_stems: Set[str]) -
             continue
         idx = p_str.find(nas_base)
         rel_path = p_str[idx:] if idx != -1 else p_str
-        targets.append((rel_path, filename, size_bytes))
+        targets.append(VideoTarget(rel_path, filename, size_bytes))
     return targets
 
 
-def resolve_retry_targets(events_log: Path, skip_stems: Set[str]) -> List[Tuple[str, str, int]]:
+def iter_events(events_log: Path) -> Iterator[Tuple[str, Dict[str, Any]]]:
+    """Yields (NFC video stem, record) for each parseable event of the log, oldest first."""
+    if not events_log.is_file():
+        return
+    for line in events_log.read_text(encoding="utf-8").splitlines():
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        stem = unicodedata.normalize("NFC", rec.get("video_stem", ""))
+        if stem:
+            yield stem, rec
+
+
+def resolve_retry_targets(events_log: Path, skip_stems: Set[str]) -> List[VideoTarget]:
     """Returns videos whose last outcome in the events log is a failure, minus `skip_stems`."""
-    last_outcome: Dict[str, Tuple[bool, Tuple[str, str, int]]] = {}
-    if events_log.is_file():
-        for line in events_log.read_text(encoding="utf-8").splitlines():
-            if not line.strip():
-                continue
-            try:
-                rec = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            stem = unicodedata.normalize("NFC", rec.get("video_stem", ""))
-            rel_path = rec.get("video_rel_path", "")
-            if stem and rel_path:
-                item = (rel_path, Path(rel_path).name, rec.get("file_size_bytes", 0))
-                last_outcome[stem] = (bool(rec.get("success", False)), item)
+    last_outcome: Dict[str, Tuple[bool, VideoTarget]] = {}
+    for stem, rec in iter_events(events_log):
+        rel_path = rec.get("video_rel_path", "")
+        if rel_path:
+            item = VideoTarget(rel_path, Path(rel_path).name, rec.get("file_size_bytes", 0))
+            last_outcome[stem] = (bool(rec.get("success", False)), item)
     return [item for stem, (ok, item) in last_outcome.items() if not ok and stem not in skip_stems]
 
 
 def load_blacklisted_stems(events_log: Path, max_attempts: int = MAX_FAILED_ATTEMPTS) -> Set[str]:
     """Returns NFC stems whose last `max_attempts` outcomes in the events log are all failures."""
     streaks: Dict[str, int] = {}
-    if events_log.is_file():
-        for line in events_log.read_text(encoding="utf-8").splitlines():
-            try:
-                rec = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            stem = unicodedata.normalize("NFC", rec.get("video_stem", ""))
-            if stem:
-                streaks[stem] = 0 if rec.get("success") else streaks.get(stem, 0) + 1
+    for stem, rec in iter_events(events_log):
+        streaks[stem] = 0 if rec.get("success") else streaks.get(stem, 0) + 1
     return {stem for stem, count in streaks.items() if count >= max_attempts}
 
 
@@ -373,16 +378,14 @@ def is_excluded(rel_path: str, prefixes: List[str]) -> bool:
     return unicodedata.normalize("NFC", rel_path).startswith(tuple(prefixes))
 
 
-def match_nas_paths(
-    targets: List[Tuple[str, str, int]], nas_videos: List[Tuple[str, str, int]]
-) -> List[Tuple[str, str, int]]:
+def match_nas_paths(targets: List[VideoTarget], nas_videos: List[VideoTarget]) -> List[VideoTarget]:
     """Replaces each target with the NAS entry of the same NFC stem; unknown targets are dropped.
 
     Targets selected on a CIFS mount or replayed from the events log can carry NFC-normalized or
     8.3-mangled names that the FTP server rejects: only the FTP listing holds the real paths.
     """
-    by_stem = {Path(video[1]).stem: video for video in nas_videos}
-    matched = (by_stem.get(unicodedata.normalize("NFC", Path(target[1]).stem)) for target in targets)
+    by_stem = {Path(video.filename).stem: video for video in nas_videos}
+    matched = (by_stem.get(unicodedata.normalize("NFC", Path(target.filename).stem)) for target in targets)
     return list(dict.fromkeys(video for video in matched if video))
 
 
@@ -406,8 +409,9 @@ def write_batch_queue_state(total: int, completed: int, failed: int, active_work
         tmp_path = q_path.with_suffix(".tmp")
         tmp_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
         tmp_path.replace(q_path)
-    except Exception:
-        pass
+    except OSError as err:
+        # Telemetry only: a full disk must not stop the batch
+        print(f"⚠️ Failed writing {DEFAULT_BATCH_QUEUE_PATH}: {err}", file=sys.stderr)
 
 
 def get_process_group_cpu_ticks(pgid: int, proc_root: Path = Path("/proc")) -> int:
@@ -450,8 +454,65 @@ def build_stream_url(stream_base: str, rel_path: str) -> str:
     return f"{stream_base}{rel_path if rel_path.startswith('/') else '/' + rel_path}"
 
 
+def _kill_child(proc: subprocess.Popen, out_f: TextIO, reason: str) -> None:
+    out_f.write(f"\n❌ [WATCHDOG] Killed process: {reason}.\n")
+    out_f.flush()
+    with contextlib.suppress(ProcessLookupError):
+        os.killpg(proc.pid, signal.SIGKILL)
+    proc.wait()
+
+
+def _watch_child(proc: subprocess.Popen, out_f: TextIO, start_time: float, max_extraction_secs: int) -> str:
+    """Polls a dbsrt child until it exits or a watchdog kills it, and returns the final status."""
+    last_cpu_ticks = 0
+    stall_duration = 0
+    while (returncode := proc.poll()) is None:
+        time.sleep(1.0)
+        cur_cpu_ticks = get_process_group_cpu_ticks(proc.pid)
+        stall_duration = 0 if cur_cpu_ticks != last_cpu_ticks else stall_duration + 1
+        last_cpu_ticks = cur_cpu_ticks
+        # Stall detector: zero CPU activity in the whole group for >= DEFAULT_STALL_TIMEOUT_SECS
+        if stall_duration >= DEFAULT_STALL_TIMEOUT_SECS:
+            _kill_child(proc, out_f, f"zero progress / activity for {stall_duration}s (Stall Detector)")
+            return "STALLED"
+        if time.time() - start_time >= max_extraction_secs:
+            _kill_child(proc, out_f, f"exceeded max duration of {max_extraction_secs}s")
+            return "TIMEOUT"
+    if returncode == -signal.SIGTERM and RELOAD_REQUESTED.is_set():
+        return "RELOAD"
+    return "COMPLETED" if returncode == 0 else "ERROR"
+
+
+def _event_record(target: VideoTarget, start_time: float, status: str, log_path: Path) -> Dict[str, object]:
+    end_time = time.time()
+    end_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(end_time))
+    wall_duration = end_time - start_time
+    success = status == "COMPLETED"
+
+    # A completed extraction decodes the whole file, so the average NAS read rate is size / duration.
+    actual_bytes = target.size_bytes if success else 0
+    rate_mib_s = (actual_bytes / (1024 * 1024)) / wall_duration if wall_duration > 0 else 0.0
+
+    record: Dict[str, object] = {
+        "video_stem": Path(target.filename).stem,
+        "video_rel_path": target.rel_path,
+        "file_size_bytes": target.size_bytes,
+        "wall_duration_secs": round(wall_duration, 2),
+        "io_read_rate_mib_s": round(rate_mib_s, 2),
+        "cifs_read_rate_mib_s": round(rate_mib_s, 2),
+        "start_iso": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(start_time)),
+        "end_iso": end_iso,
+        "timestamp_iso": end_iso,
+        "success": success,
+        "status": status,
+    }
+    if not success and log_path.exists():
+        record["error_summary"] = log_path.read_text(encoding="utf-8", errors="ignore")[-300:]
+    return record
+
+
 def process_single_video(
-    video_info: Tuple[str, str, int],
+    target: VideoTarget,
     stream_base: str,
     dbsrt_bin: str,
     child_env: Dict[str, str],
@@ -460,17 +521,12 @@ def process_single_video(
     max_extraction_secs: int = DEFAULT_MAX_EXTRACTION_SECS,
 ) -> Dict[str, object]:
     """Processes a single video by invoking dbsrt media:add directly over FTP."""
-    rel_path, filename, file_size = video_info
-    stem = Path(filename).stem
-
-    stream_url = build_stream_url(stream_base, rel_path)
-
     base_cmd = [
         dbsrt_bin,
         "media:add",
-        stream_url,
+        build_stream_url(stream_base, target.rel_path),
         "--media-name",
-        filename,
+        target.filename,
         "--hwaccel",
         "disabled",
         "--phash-dir",
@@ -481,10 +537,9 @@ def process_single_video(
     ]
 
     start_time = time.time()
-    start_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(start_time))
-    print(f"--> [DEBUG] Launching dbsrt for {filename}...", flush=True)
+    print(f"--> [DEBUG] Launching dbsrt for {target.filename}...", flush=True)
 
-    log_path = Path("logs") / "workers" / f"{stem}.log"
+    log_path = Path("logs") / "workers" / f"{Path(target.filename).stem}.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     status = "ERROR"
     returncode: int | None = None
@@ -500,45 +555,8 @@ def process_single_video(
             with ACTIVE_CHILD_LOCK:
                 ACTIVE_CHILD_PGIDS.add(proc.pid)
             try:
-                last_cpu_ticks = 0
-                stall_duration = 0
-                while True:
-                    returncode = proc.poll()
-                    if returncode is not None:
-                        status = "COMPLETED" if returncode == 0 else "ERROR"
-                        if returncode == -signal.SIGTERM and RELOAD_REQUESTED.is_set():
-                            status = "RELOAD"
-                        break
-
-                    time.sleep(1.0)
-
-                    cur_cpu_ticks = get_process_group_cpu_ticks(proc.pid)
-                    if cur_cpu_ticks != last_cpu_ticks:
-                        stall_duration = 0
-                        last_cpu_ticks = cur_cpu_ticks
-                    else:
-                        stall_duration += 1
-
-                    # Stall detector: zero CPU activity in the whole group for >= DEFAULT_STALL_TIMEOUT_SECS
-                    if stall_duration >= DEFAULT_STALL_TIMEOUT_SECS:
-                        status = "STALLED"
-                        out_f.write(
-                            f"\n❌ [WATCHDOG] Killed process: zero progress / activity for {stall_duration}s (Stall Detector).\n"
-                        )
-                    elif time.time() - start_time >= max_extraction_secs:
-                        status = "TIMEOUT"
-                        out_f.write(
-                            f"\n❌ [WATCHDOG] Killed process: exceeded max duration of {max_extraction_secs}s.\n"
-                        )
-                    else:
-                        continue
-                    out_f.flush()
-                    try:
-                        os.killpg(proc.pid, signal.SIGKILL)
-                    except ProcessLookupError:
-                        pass
-                    proc.wait()
-                    break
+                status = _watch_child(proc, out_f, start_time, max_extraction_secs)
+                returncode = proc.returncode
             finally:
                 with ACTIVE_CHILD_LOCK:
                     ACTIVE_CHILD_PGIDS.discard(proc.pid)
@@ -546,32 +564,8 @@ def process_single_video(
         with open(log_path, "a", encoding="utf-8") as out_f:
             out_f.write(f"\n❌ Execution exception: {exc}\n")
 
-    print(f"--> [DEBUG] dbsrt {status} (returncode {returncode}) for {filename}", flush=True)
-
-    end_time = time.time()
-    end_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(end_time))
-    wall_duration = end_time - start_time
-    success = status == "COMPLETED"
-
-    # A completed extraction decodes the whole file, so the average NAS read rate is size / duration.
-    actual_bytes = file_size if success else 0
-    rate_mib_s = (actual_bytes / (1024 * 1024)) / wall_duration if wall_duration > 0 else 0.0
-
-    record: Dict[str, object] = {
-        "video_stem": stem,
-        "video_rel_path": rel_path,
-        "file_size_bytes": file_size,
-        "wall_duration_secs": round(wall_duration, 2),
-        "io_read_rate_mib_s": round(rate_mib_s, 2),
-        "cifs_read_rate_mib_s": round(rate_mib_s, 2),
-        "start_iso": start_iso,
-        "end_iso": end_iso,
-        "timestamp_iso": end_iso,
-        "success": success,
-        "status": status,
-    }
-    if not success and log_path.exists():
-        record["error_summary"] = log_path.read_text(encoding="utf-8", errors="ignore")[-300:]
+    print(f"--> [DEBUG] dbsrt {status} (returncode {returncode}) for {target.filename}", flush=True)
+    record = _event_record(target, start_time, status, log_path)
 
     if status == "RELOAD":
         # Not a failure: no event, so the re-exec requeues it and the blacklist ignores it
@@ -592,7 +586,7 @@ def next_fast_failure_streak(streak: int, rec: Dict[str, object]) -> int:
     return streak + 1 if fast_failure else 0
 
 
-def abort_batch(remaining_targets: List[Tuple[str, str, int]], reason: str) -> None:
+def abort_batch(remaining_targets: List[VideoTarget], reason: str) -> None:
     """Drops the queued targets and leaves run/batch_aborted so the supervisor does not relaunch."""
     remaining_targets.clear()
     print(f"🛑 [ABORT] {reason}", flush=True)
@@ -604,8 +598,105 @@ def abort_batch(remaining_targets: List[Tuple[str, str, int]], reason: str) -> N
         print(f"⚠️ Failed writing {DEFAULT_BATCH_ABORTED_PATH}: {err}", file=sys.stderr)
 
 
+class _BatchRun:
+    """Queue, counters and worker threads of one batch; mutated only under `state_lock`."""
+
+    def __init__(
+        self,
+        targets: List[VideoTarget],
+        run_video: Callable[[VideoTarget], Dict[str, object]],
+        initial_workers: int,
+        max_workers: int,
+    ) -> None:
+        self.total = len(targets)
+        self.remaining = list(targets)
+        self.run_video = run_video
+        self.initial_workers = initial_workers
+        self.max_workers = max_workers
+        self.state_lock = threading.Lock()
+        self.threads: List[threading.Thread] = []
+        self.success_count = 0
+        self.fail_count = 0
+        self.fast_failure_streak = 0
+        self.reload_since = 0.0
+
+    def desired_workers(self) -> int:
+        return read_desired_workers(self.initial_workers, self.max_workers)
+
+    def publish(self, active_workers: int | None = None) -> None:
+        active = len(self.threads) if active_workers is None else active_workers
+        write_batch_queue_state(self.total, self.success_count, self.fail_count, active)
+
+    def worker_loop(self) -> None:
+        while True:
+            with self.state_lock:
+                if len(self.threads) > self.desired_workers() or not self.remaining:
+                    return
+                item = self.remaining.pop(0)
+            try:
+                rec = self.run_video(item)
+            except Exception as exc:
+                with self.state_lock:
+                    self.fail_count += 1
+                    print(f"  ❌ Exception processing {item.filename}: {exc}", flush=True)
+                    self.publish()
+                continue
+            if rec.get("status") == "RELOAD":
+                return
+            with self.state_lock:
+                self.record(rec)
+                self.publish()
+
+    def record(self, rec: Dict[str, object]) -> None:
+        if rec.get("success"):
+            self.success_count += 1
+            print(
+                f"  ✓ [{self.success_count}/{self.total}] {rec['video_stem']} ({rec['wall_duration_secs']}s, {rec['io_read_rate_mib_s']} MB/s)",
+                flush=True,
+            )
+        else:
+            self.fail_count += 1
+            print(
+                f"  ❌ [{self.fail_count} FAILED] {rec['video_stem']}: {rec.get('error_summary', 'Unknown error')}",
+                flush=True,
+            )
+        self.fast_failure_streak = next_fast_failure_streak(self.fast_failure_streak, rec)
+        if self.fast_failure_streak == MAX_FAST_FAILURE_STREAK:
+            abort_batch(
+                self.remaining,
+                f"{self.fast_failure_streak} consecutive failures under {FAST_FAILURE_SECS:.0f}s: "
+                "systemic error, check logs/workers/ before relaunching",
+            )
+
+    def check_reload(self) -> None:
+        if self.remaining and script_updated():
+            print("🔄 [RELOAD] Worker script updated: finishing in-flight videos before re-exec", flush=True)
+            self.remaining.clear()
+            RELOAD_REQUESTED.set()
+            self.reload_since = time.time()
+        if self.reload_since and time.time() - self.reload_since >= RELOAD_DRAIN_SECS:
+            print("🔄 [RELOAD] Drain timeout: stopping in-flight videos, the re-exec requeues them", flush=True)
+            _kill_active_children()
+            self.reload_since = 0.0
+
+    def schedule(self) -> bool:
+        """One scheduler tick: reload checks, then spawns workers up to the target. False once drained."""
+        with self.state_lock:
+            self.check_reload()
+            self.threads = [t for t in self.threads if t.is_alive()]
+            if not self.remaining and not self.threads:
+                return False
+            desired = self.desired_workers()
+            while len(self.threads) < desired and self.remaining:
+                t = threading.Thread(target=self.worker_loop, daemon=True)
+                self.threads.append(t)
+                t.start()
+                self.publish()
+        return True
+
+
 def execute_dynamic_batch_ingestion(
-    targets: List[Tuple[str, str, int]],
+    targets: List[VideoTarget],
     stream_base: str,
     dbsrt_bin: str,
     child_env: Dict[str, str],
@@ -631,109 +722,33 @@ def execute_dynamic_batch_ingestion(
     * Tuple of (success_count, fail_count, total_duration_secs).
     """
     log_lock = threading.Lock()
-    state_lock = threading.Lock()
-    success_count = 0
-    fail_count = 0
-    fast_failure_streak = 0
-    remaining_targets = list(targets)
-    active_threads: List[threading.Thread] = []
-
     DEFAULT_DESIRED_WORKERS_PATH.parent.mkdir(parents=True, exist_ok=True)
     if not DEFAULT_DESIRED_WORKERS_PATH.exists():
         try:
             DEFAULT_DESIRED_WORKERS_PATH.write_text(str(initial_workers), encoding="utf-8")
-        except Exception:
-            pass
+        except OSError as err:
+            print(f"⚠️ Failed writing {DEFAULT_DESIRED_WORKERS_PATH}: {err}", file=sys.stderr)
 
     max_workers = max_workers_for_budget(child_env.get("DBSRT_FFMPEG_THREADS", DEFAULT_FFMPEG_THREADS))
     print(f"CPU budget: {CPU_BUDGET_VCPUS} vCPU, at most {max_workers} concurrent videos", flush=True)
-    write_batch_queue_state(len(targets), success_count, fail_count, initial_workers)
 
-    def worker_loop() -> None:
-        nonlocal success_count, fail_count, fast_failure_streak
-        while True:
-            with state_lock:
-                desired = read_desired_workers(initial_workers, max_workers)
-                if len(active_threads) > desired or not remaining_targets:
-                    return
-                item = remaining_targets.pop(0)
+    def run_video(target: VideoTarget) -> Dict[str, object]:
+        return process_single_video(
+            target, stream_base, dbsrt_bin, child_env, log_lock, events_log, max_extraction_secs
+        )
 
-            try:
-                rec = process_single_video(
-                    item,
-                    stream_base,
-                    dbsrt_bin,
-                    child_env,
-                    log_lock,
-                    events_log,
-                    max_extraction_secs,
-                )
-                if rec.get("status") == "RELOAD":
-                    return
-                with state_lock:
-                    if rec.get("success"):
-                        success_count += 1
-                        print(
-                            f"  ✓ [{success_count}/{len(targets)}] {rec['video_stem']} ({rec['wall_duration_secs']}s, {rec['io_read_rate_mib_s']} MB/s)",
-                            flush=True,
-                        )
-                    else:
-                        fail_count += 1
-                        print(
-                            f"  ❌ [{fail_count} FAILED] {rec['video_stem']}: {rec.get('error_summary', 'Unknown error')}",
-                            flush=True,
-                        )
-                    fast_failure_streak = next_fast_failure_streak(fast_failure_streak, rec)
-                    if fast_failure_streak == MAX_FAST_FAILURE_STREAK:
-                        abort_batch(
-                            remaining_targets,
-                            f"{fast_failure_streak} consecutive failures under {FAST_FAILURE_SECS:.0f}s: "
-                            "systemic error, check logs/workers/ before relaunching",
-                        )
-                    write_batch_queue_state(len(targets), success_count, fail_count, len(active_threads))
-            except Exception as exc:
-                with state_lock:
-                    fail_count += 1
-                    print(f"  ❌ Exception processing {item[1]}: {exc}", flush=True)
-                    write_batch_queue_state(len(targets), success_count, fail_count, len(active_threads))
-
+    batch = _BatchRun(targets, run_video, initial_workers, max_workers)
+    batch.publish(initial_workers)
     start_batch = time.time()
-    reload_since = 0.0
     try:
-        while True:
-            with state_lock:
-                if remaining_targets and script_updated():
-                    print("🔄 [RELOAD] Worker script updated: finishing in-flight videos before re-exec", flush=True)
-                    remaining_targets.clear()
-                    RELOAD_REQUESTED.set()
-                    reload_since = time.time()
-                if reload_since and time.time() - reload_since >= RELOAD_DRAIN_SECS:
-                    print("🔄 [RELOAD] Drain timeout: stopping in-flight videos, the re-exec requeues them", flush=True)
-                    _kill_active_children()
-                    reload_since = 0.0
-                active_threads = [t for t in active_threads if t.is_alive()]
-                desired = read_desired_workers(initial_workers, max_workers)
-                if not remaining_targets and not active_threads:
-                    break
-                while len(active_threads) < desired and remaining_targets:
-                    t = threading.Thread(target=worker_loop, daemon=True)
-                    active_threads.append(t)
-                    t.start()
-                    write_batch_queue_state(len(targets), success_count, fail_count, len(active_threads))
-
+        while batch.schedule():
             time.sleep(TARGET_QUEUE_POLL_INTERVAL_SECS)
-
-        for t in active_threads:
-            t.join(timeout=30)
     finally:
-        write_batch_queue_state(len(targets), success_count, fail_count, 0)
-
-    total_duration = time.time() - start_batch
-    return success_count, fail_count, total_duration
+        batch.publish(0)
+    return batch.success_count, batch.fail_count, time.time() - start_batch
 
 
-def main() -> int:
-    """CLI Entry point for o2switch batch processing."""
+def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="o2switch Remote Batch Processing Worker")
     parser.add_argument("--workers", type=int, default=DEFAULT_WORKERS, help="Parallel workers")
     parser.add_argument("--ftp-port", type=int, default=DEFAULT_FTP_PORT, help="NAS FTP port")
@@ -758,24 +773,35 @@ def main() -> int:
         default=DEFAULT_TARGETS_PATH,
         help="JSON file listing target video paths; the NAS is scanned when it does not exist",
     )
-    args = parser.parse_args()
+    return parser
 
-    nas_pass = resolve_nas_password()
-    missing = [
-        name
-        for name, value in (("NAS_HOST", args.nas_host), ("NAS_USER", args.nas_user), ("NAS_PASS", nas_pass))
-        if not value
-    ]
-    if missing:
-        print(
-            f"❌ Error: missing NAS config {', '.join(missing)} (env, etc/.nas_config or etc/.nas_pass).",
-            file=sys.stderr,
-        )
-        return 1
 
-    dbsrt_bin = "./bin/dbsrt" if Path("./bin/dbsrt").exists() else "dbsrt"
-    events_log = Path(DEFAULT_EVENTS_LOG_PATH)
+def _initial_targets(
+    args: argparse.Namespace,
+    all_videos: List[VideoTarget],
+    events_log: Path,
+    done_stems: Set[str],
+    skip_stems: Set[str],
+) -> List[VideoTarget]:
+    """Failed videos with --retry-failed, else the targets file, else the whole NAS listing."""
+    if args.retry_failed:
+        # An explicit retry ignores the blacklist
+        targets = match_nas_paths(resolve_retry_targets(events_log, done_stems), all_videos)
+        print(f"✓ Found {len(targets)} failed videos to retry under {args.nas_base}.")
+        return targets
+    targets_path = Path(args.targets_file)
+    if targets_path.is_file():
+        try:
+            targets = match_nas_paths(load_targets_file(targets_path, args.nas_base, skip_stems), all_videos)
+            print(f"✓ Loaded {len(targets)} targets from {targets_path} found on the NAS.")
+            return targets
+        except Exception as err:
+            print(f"⚠️ Failed reading {targets_path}: {err}. Falling back to remote scan.", file=sys.stderr)
+    return [video for video in all_videos if Path(video.filename).stem not in skip_stems]
 
+
+def select_targets(args: argparse.Namespace, nas_pass: str, events_log: Path) -> List[VideoTarget]:
+    """Steps 1-2: loads what is already done or blacklisted, lists the NAS and picks this run's videos."""
     print("=== [1/4] Scanning local catalogs and couplings ===")
     certified_stems = load_certified_stems(Path(DEFAULT_COUPLINGS_PATH))
     existing_phash = load_existing_phash_stems(Path(DEFAULT_PHASH_DIR))
@@ -795,34 +821,35 @@ def main() -> int:
     )
     print(f"✓ Discovered {len(all_videos)} video files on NAS.")
 
-    targets: List[Tuple[str, str, int]] = []
-    targets_path = Path(args.targets_file)
-    targets_loaded = False
-    if args.retry_failed:
-        # An explicit retry ignores the blacklist
-        targets = match_nas_paths(resolve_retry_targets(events_log, done_stems), all_videos)
-        targets_loaded = True
-        print(f"✓ Found {len(targets)} failed videos to retry under {args.nas_base}.")
-    elif targets_path.is_file():
-        try:
-            targets = match_nas_paths(load_targets_file(targets_path, args.nas_base, skip_stems), all_videos)
-            targets_loaded = True
-            print(f"✓ Loaded {len(targets)} targets from {targets_path} found on the NAS.")
-        except Exception as err:
-            print(f"⚠️ Failed reading {targets_path}: {err}. Falling back to remote scan.", file=sys.stderr)
-
-    if not targets_loaded:
-        targets = [video for video in all_videos if Path(video[1]).stem not in skip_stems]
-
+    targets = _initial_targets(args, all_videos, events_log, done_stems, skip_stems)
     excluded = load_excluded_prefixes(Path(DEFAULT_EXCLUDE_PATH))
     if excluded:
-        kept = [video for video in targets if not is_excluded(video[0], excluded)]
+        kept = [video for video in targets if not is_excluded(video.rel_path, excluded)]
         print(f"✓ Excluded {len(targets) - len(kept)} videos listed in {DEFAULT_EXCLUDE_PATH}.")
         targets = kept
+    return targets[: args.limit] if args.limit else targets
 
-    if args.limit and len(targets) > args.limit:
-        targets = targets[: args.limit]
 
+def main() -> int:
+    """CLI Entry point for o2switch batch processing."""
+    args = build_arg_parser().parse_args()
+
+    nas_pass = resolve_nas_password()
+    missing = [
+        name
+        for name, value in (("NAS_HOST", args.nas_host), ("NAS_USER", args.nas_user), ("NAS_PASS", nas_pass))
+        if not value
+    ]
+    if missing:
+        print(
+            f"❌ Error: missing NAS config {', '.join(missing)} (env, etc/.nas_config or etc/.nas_pass).",
+            file=sys.stderr,
+        )
+        return 1
+
+    dbsrt_bin = "./bin/dbsrt" if Path("./bin/dbsrt").exists() else "dbsrt"
+    events_log = Path(DEFAULT_EVENTS_LOG_PATH)
+    targets = select_targets(args, nas_pass, events_log)
     print(f"✓ Selected {len(targets)} target videos to process (fresh_only={args.fresh_only}, limit={args.limit}).")
     if not targets:
         print("🎉 No target videos to process. Library is up-to-date!")

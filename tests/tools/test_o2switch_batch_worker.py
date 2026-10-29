@@ -15,6 +15,7 @@ import pytest
 import scripts.o2switch_batch_worker as worker
 from scripts.o2switch_batch_worker import (
     ACTIVE_CHILD_PGIDS,
+    VideoTarget,
     _kill_active_children,
     abort_batch,
     build_child_env,
@@ -95,7 +96,7 @@ def test_resolve_retry_targets_keeps_only_last_failures(tmp_path: Path):
     ]
     events.write_text("\n".join(json.dumps(r) for r in lines) + "\nnot-json\n", encoding="utf-8")
 
-    assert resolve_retry_targets(events, skip_stems={"c"}) == [("/tvshow/b.mkv", "b.mkv", 20)]
+    assert resolve_retry_targets(events, skip_stems={"c"}) == [VideoTarget("/tvshow/b.mkv", "b.mkv", 20)]
     assert resolve_retry_targets(tmp_path / "missing.jsonl", set()) == []
 
 
@@ -114,8 +115,8 @@ def test_load_targets_file_rebases_and_skips(tmp_path: Path):
     )
 
     assert load_targets_file(targets, "/tvshow", skip_stems={"done"}) == [
-        ("/tvshow/S/e1.mkv", "e1.mkv", 5),
-        ("/tvshow/S/e2.mkv", "e2.mkv", 0),
+        VideoTarget("/tvshow/S/e1.mkv", "e1.mkv", 5),
+        VideoTarget("/tvshow/S/e2.mkv", "e2.mkv", 0),
     ]
 
 
@@ -184,7 +185,7 @@ def test_next_fast_failure_streak_counts_only_fast_failures():
 def test_abort_batch_drains_queue_and_leaves_marker(tmp_path: Path, monkeypatch):
     """Abort empties the shared queue and writes the marker read by batch-status."""
     monkeypatch.chdir(tmp_path)
-    queue = [("/video/a.mkv", "a.mkv", 1), ("/video/b.mkv", "b.mkv", 2)]
+    queue = [VideoTarget("/video/a.mkv", "a.mkv", 1), VideoTarget("/video/b.mkv", "b.mkv", 2)]
 
     abort_batch(queue, "50 consecutive failures")
 
@@ -208,13 +209,13 @@ def test_load_blacklisted_stems_needs_consecutive_failures(tmp_path: Path):
 def test_match_nas_paths_uses_real_nas_names():
     """NFC or 8.3-mangled target names are replaced by the raw NAS path, unknown ones dropped."""
     nas = [
-        ("/tvshow/S01/01 Cruaute\u0301.mp4", "01 Cruaut\u00e9.mp4", 7),
-        ("/tvshow/S04/E01 A: B.mkv", "E01 A: B.mkv", 9),
+        VideoTarget("/tvshow/S01/01 Cruaute\u0301.mp4", "01 Cruaut\u00e9.mp4", 7),
+        VideoTarget("/tvshow/S04/E01 A: B.mkv", "E01 A: B.mkv", 9),
     ]
     targets = [
-        ("/tvshow/S01/01 Cruaut\u00e9.mp4", "01 Cruaut\u00e9.mp4", 0),
-        ("/tvshow/S01/01 Cruaute\u0301.mp4", "01 Cruaute\u0301.mp4", 0),
-        ("/tvshow/S04/SY9QH1~F.MKV", "SY9QH1~F.MKV", 0),
+        VideoTarget("/tvshow/S01/01 Cruaut\u00e9.mp4", "01 Cruaut\u00e9.mp4", 0),
+        VideoTarget("/tvshow/S01/01 Cruaute\u0301.mp4", "01 Cruaute\u0301.mp4", 0),
+        VideoTarget("/tvshow/S04/SY9QH1~F.MKV", "SY9QH1~F.MKV", 0),
     ]
 
     assert match_nas_paths(targets, nas) == [nas[0]]
@@ -241,11 +242,11 @@ def test_list_nas_videos_ftp_retries_transient_errors(monkeypatch):
         calls.append(1)
         if len(calls) < 2:
             raise ConnectionResetError("reset")
-        return [("/video/a.mkv", "a.mkv", 1)]
+        return [VideoTarget("/video/a.mkv", "a.mkv", 1)]
 
     monkeypatch.setattr(worker, "_walk_nas_videos_ftp", flaky_walk)
     monkeypatch.setattr(worker.time, "sleep", lambda _s: None)
-    assert worker.list_nas_videos_ftp("nas", "u", "p") == [("/video/a.mkv", "a.mkv", 1)]
+    assert worker.list_nas_videos_ftp("nas", "u", "p") == [VideoTarget("/video/a.mkv", "a.mkv", 1)]
 
     monkeypatch.setattr(worker, "_walk_nas_videos_ftp", lambda *_a: (_ for _ in ()).throw(TimeoutError()))
     with pytest.raises(TimeoutError):
@@ -282,7 +283,11 @@ def test_reload_drops_queue_but_finishes_in_flight_video(tmp_path: Path, monkeyp
     monkeypatch.setattr(worker, "process_single_video", slow_video)
     monkeypatch.setattr(worker, "script_updated", started.is_set)
     threading.Timer(0.2, release.set).start()
-    targets = [("/video/a.mkv", "a.mkv", 1), ("/video/b.mkv", "b.mkv", 1), ("/video/c.mkv", "c.mkv", 1)]
+    targets = [
+        VideoTarget("/video/a.mkv", "a.mkv", 1),
+        VideoTarget("/video/b.mkv", "b.mkv", 1),
+        VideoTarget("/video/c.mkv", "c.mkv", 1),
+    ]
 
     ok, failed, _ = worker.execute_dynamic_batch_ingestion(targets, "ftp://nas:21", "dbsrt", {}, tmp_path / "e", 60, 1)
 
@@ -318,7 +323,7 @@ def test_cpu_budget_caps_concurrency_above_desired_workers(tmp_path: Path, monke
         return {"success": True, "video_stem": item[1], "wall_duration_secs": 1.0, "io_read_rate_mib_s": 1.0}
 
     monkeypatch.setattr(worker, "process_single_video", video)
-    targets = [(f"/video/{i}.mkv", f"{i}.mkv", 1) for i in range(8)]
+    targets = [VideoTarget(f"/video/{i}.mkv", f"{i}.mkv", 1) for i in range(8)]
     env = {"DBSRT_FFMPEG_THREADS": "2"}
 
     ok, failed, _ = worker.execute_dynamic_batch_ingestion(targets, "ftp://nas:21", "dbsrt", env, tmp_path / "e", 60, 8)
@@ -331,7 +336,7 @@ def test_main_reexecs_same_argv_after_reload(tmp_path: Path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(worker.sys, "argv", ["worker", "--nas-host", "nas", "--nas-user", "u", "--nas-base", "/video"])
     monkeypatch.setattr(worker, "resolve_nas_password", lambda: "p")
-    monkeypatch.setattr(worker, "list_nas_videos_ftp", lambda **_k: [("/video/a.mkv", "a.mkv", 1)])
+    monkeypatch.setattr(worker, "list_nas_videos_ftp", lambda **_k: [VideoTarget("/video/a.mkv", "a.mkv", 1)])
 
     def ingest(**_kwargs):
         worker.RELOAD_REQUESTED.set()
@@ -360,7 +365,7 @@ def test_reload_drain_timeout_kills_slow_video_without_failure_event(tmp_path: P
     monkeypatch.setattr(worker, "script_updated", lambda: bool(ACTIVE_CHILD_PGIDS))
     worker.RELOAD_REQUESTED.clear()
     events = tmp_path / "events.jsonl"
-    targets = [("/video/a.mkv", "a.mkv", 1), ("/video/b.mkv", "b.mkv", 1)]
+    targets = [VideoTarget("/video/a.mkv", "a.mkv", 1), VideoTarget("/video/b.mkv", "b.mkv", 1)]
 
     start = time.time()
     try:

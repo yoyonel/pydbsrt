@@ -5,7 +5,7 @@ Runs as a 24/7 systemd user service on Raspberry Pi 4 (or local host) to:
 1. Probe the remote batch worker lifecycle on o2switch (via o2switch_ctl.sh batch-status).
 2. Restart the batch worker only when it crashed or never started (never after a manual
    stop or a drained queue), resuming the same batch type.
-3. Autoscale worker concurrency (2-6) from the measured CloudLinux LVE CPU load.
+3. Autoscale worker concurrency (2-4) from the measured CloudLinux LVE CPU load.
 4. Periodically pull finished .phash files, subtitles and reports into the local data/ tree.
 """
 
@@ -19,6 +19,7 @@ import signal
 import subprocess
 import sys
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -268,6 +269,56 @@ def decide_workers(
     return cur_workers
 
 
+@dataclass
+class _LoopState:
+    last_scale_time: float = 0.0
+    last_launch_time: float = 0.0
+    cpu_history: List[float] = field(default_factory=list)
+    prev_sample: CpuSample | None = None
+
+
+def _autoscale_step(remote_host: str, remote_base: str, status: Dict[str, object], loop: _LoopState) -> None:
+    """Running batch: compares two CPU samples and moves desired_workers toward the LVE target band."""
+    cur_workers = get_remote_desired_workers(remote_host, remote_base)
+    sample = sample_remote_cpu(remote_host)
+    prev_sample, loop.prev_sample = loop.prev_sample, sample
+    if sample is None or prev_sample is None:
+        log(f"● Remote batch healthy (PID {status['pid']}, workers: {cur_workers}, CPU baseline pending).")
+        return
+    cpu = compute_lve_cpu_pct(prev_sample, sample)
+    loop.cpu_history = (loop.cpu_history + [cpu])[-AUTOSCALE_SAMPLE_WINDOW:]
+    now = time.time()
+    running_jobs = get_remote_running_jobs(remote_host)
+    new_workers = decide_workers(
+        cpu, loop.cpu_history, cur_workers, now - loop.last_scale_time >= AUTOSCALE_COOLDOWN_SECS, running_jobs
+    )
+    avg_cpu = sum(loop.cpu_history) / len(loop.cpu_history)
+    if new_workers != cur_workers and set_remote_desired_workers(remote_host, remote_base, new_workers):
+        direction = "📈 [AUTOSCALE UP]" if new_workers > cur_workers else "📉 [AUTOSCALE DOWN]"
+        log(f"{direction} CPU {cpu:.1f}% (avg {avg_cpu:.1f}%): {cur_workers} -> {new_workers} workers.")
+        loop.last_scale_time = now
+        loop.cpu_history.clear()
+    else:
+        log(
+            f"● Remote batch healthy (PID {status['pid']}, CPU: {cpu:.1f}% [avg {avg_cpu:.1f}%, "
+            f"{len(loop.cpu_history)}/{AUTOSCALE_SAMPLE_WINDOW} samples], workers: {cur_workers}, running: {running_jobs})."
+        )
+
+
+def _relaunch_step(remote_host: str, remote_base: str, state: str, status: Dict[str, object], loop: _LoopState) -> None:
+    """Stopped batch: relaunches it (or the other library) when decide_next_batch allows it."""
+    next_type = decide_next_batch(state, str(status["type"]), time.time() - loop.last_launch_time)
+    if next_type is None:
+        log(f"○ Remote batch is {state} ({status['type']}); no launch this cycle.")
+        return
+    cur_workers = get_remote_desired_workers(remote_host, remote_base)
+    log(f"⚠️ Remote batch is {state} ({status['type']}). Launching {next_type} with {cur_workers} workers...")
+    restart_remote_batch(remote_host, remote_base, cur_workers, next_type)
+    loop.cpu_history.clear()
+    loop.prev_sample = None
+    loop.last_scale_time = loop.last_launch_time = time.time()
+
+
 def supervisor_loop(remote_host: str, remote_base: str, check_interval: int, pull_interval: int) -> None:
     """Main continuous watchdog and adaptive autoscaling loop."""
     log(
@@ -275,55 +326,17 @@ def supervisor_loop(remote_host: str, remote_base: str, check_interval: int, pul
         f"autoscaling: {AUTOSCALE_MIN_WORKERS}-{AUTOSCALE_MAX_WORKERS} workers, target: {AUTOSCALE_TARGET_LOW_PCT:.0f}-{AUTOSCALE_TARGET_HIGH_PCT:.0f}% LVE CPU)."
     )
     last_pull_time = time.time()
-    last_scale_time = 0.0
-    last_launch_time = 0.0
-    cpu_history: List[float] = []
-    prev_sample: CpuSample | None = None
+    loop = _LoopState()
 
     while True:
         status = check_remote_batch_status(remote_host, remote_base)
         state = str(status["state"])
-
         if state == "running":
-            cur_workers = get_remote_desired_workers(remote_host, remote_base)
-            sample = sample_remote_cpu(remote_host)
-            if sample is not None and prev_sample is not None:
-                cpu = compute_lve_cpu_pct(prev_sample, sample)
-                cpu_history = (cpu_history + [cpu])[-AUTOSCALE_SAMPLE_WINDOW:]
-                now = time.time()
-                running_jobs = get_remote_running_jobs(remote_host)
-                new_workers = decide_workers(
-                    cpu, cpu_history, cur_workers, now - last_scale_time >= AUTOSCALE_COOLDOWN_SECS, running_jobs
-                )
-                avg_cpu = sum(cpu_history) / len(cpu_history)
-                if new_workers != cur_workers and set_remote_desired_workers(remote_host, remote_base, new_workers):
-                    direction = "📈 [AUTOSCALE UP]" if new_workers > cur_workers else "📉 [AUTOSCALE DOWN]"
-                    log(f"{direction} CPU {cpu:.1f}% (avg {avg_cpu:.1f}%): {cur_workers} -> {new_workers} workers.")
-                    last_scale_time = now
-                    cpu_history.clear()
-                else:
-                    log(
-                        f"● Remote batch healthy (PID {status['pid']}, CPU: {cpu:.1f}% [avg {avg_cpu:.1f}%, "
-                        f"{len(cpu_history)}/{AUTOSCALE_SAMPLE_WINDOW} samples], workers: {cur_workers}, running: {running_jobs})."
-                    )
-            else:
-                log(f"● Remote batch healthy (PID {status['pid']}, workers: {cur_workers}, CPU baseline pending).")
-            prev_sample = sample
+            _autoscale_step(remote_host, remote_base, status, loop)
         elif state == "unknown":
             log("⚠️ Remote batch status probe failed; no action this cycle.")
         else:
-            next_type = decide_next_batch(state, str(status["type"]), time.time() - last_launch_time)
-            if next_type is None:
-                log(f"○ Remote batch is {state} ({status['type']}); no launch this cycle.")
-            else:
-                cur_workers = get_remote_desired_workers(remote_host, remote_base)
-                log(
-                    f"⚠️ Remote batch is {state} ({status['type']}). Launching {next_type} with {cur_workers} workers..."
-                )
-                restart_remote_batch(remote_host, remote_base, cur_workers, next_type)
-                cpu_history.clear()
-                prev_sample = None
-                last_scale_time = last_launch_time = time.time()
+            _relaunch_step(remote_host, remote_base, state, status, loop)
 
         # Periodic catalog pull
         now = time.time()
