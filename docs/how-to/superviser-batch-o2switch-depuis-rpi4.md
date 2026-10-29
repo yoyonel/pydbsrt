@@ -8,7 +8,7 @@ Ce guide pratique détaille la mise en œuvre d'un agent de supervision autonome
 
 1. **Surveillance permanente (24/7)** : Vérifier régulièrement l'intégrité de la session et des workers sur o2switch sans intervention humaine.
 2. **Auto-guérison (Auto-Healing)** : Relancer automatiquement le batch en tâche de fond (`screen -dmS`) si le serveur distant subit un redémarrage, une déconnexion ou une coupure de session.
-3. **Régulation horaire intelligente** : Allouer 4 workers la nuit (23h00 - 07h00) pour saturer les 12 vCPUs o2switch, et réduire à 2 workers le jour pour ménager la bande passante montante du NAS Synology.
+3. **Autoscaling adaptatif en boucle fermée** : Sonde en temps réel la charge CPU CloudLinux LVE sur o2switch (quota de 12 vCPUs) et adapte dynamiquement la concurrence (2 à 6 workers) pour exploiter la marge résiduelle (cible 78% à 92%), avec repli d'urgence immédiat si pic > 96% et ajustement fluide via `run/desired_workers` sans interruption des flux en cours.
 4. **Rapatriement continu (Continuous Pull)** : Synchroniser périodiquement les nouveaux fichiers `.phash` et sous-titres vers la base PostgreSQL 17 locale et le stockage Zero-DB.
 
 ---

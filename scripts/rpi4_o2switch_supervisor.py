@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import fcntl
 import os
 import signal
 import subprocess
@@ -19,45 +20,76 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Dict
+from typing import Dict, List
 
 # Named Operational Constants
 DEFAULT_CHECK_INTERVAL_SECS: int = 60
 DEFAULT_PULL_INTERVAL_SECS: int = 600
 DEFAULT_SSH_TIMEOUT_SECS: int = 15
-DEFAULT_DAY_WORKERS: int = 4
-DEFAULT_NIGHT_WORKERS: int = 4
-NIGHT_START_HOUR: int = 23
-NIGHT_END_HOUR: int = 7
 DEFAULT_REMOTE_HOST: str = "o2switch"
 DEFAULT_REMOTE_BASE: str = "dbsrt"
 PID_FILE_PATH: str = "run/rpi4_supervisor.pid"
 LOG_FILE_PATH: str = "logs/rpi4_supervisor.log"
 
+# Autoscaling Engine Constants (CloudLinux LVE on o2switch has 12 vCPUs allocated = 1200% max)
+DEFAULT_LVE_TOTAL_VCPUS: float = 12.0
+AUTOSCALE_MIN_WORKERS: int = 2
+AUTOSCALE_MAX_WORKERS: int = 6
+AUTOSCALE_DEFAULT_WORKERS: int = 4
+AUTOSCALE_TARGET_LOW_PCT: float = 78.0  # Scale up concurrency if rolling average LVE CPU < 78%
+AUTOSCALE_TARGET_HIGH_PCT: float = 92.0  # Scale down concurrency if rolling average LVE CPU > 92%
+AUTOSCALE_EMERGENCY_SPIKE_PCT: float = 96.0  # Instant emergency throttle if single tick exceeds 96%
+AUTOSCALE_COOLDOWN_SECS: int = 180  # Cooldown between scale adjustments (3 min to observe steady state)
+AUTOSCALE_SAMPLE_WINDOW: int = 3  # Number of 60s probe ticks in rolling average window
+
 
 def log(msg: str) -> None:
-    """Logs timestamped message to stdout and append-only log file."""
+    """Logs timestamped message to stdout."""
     ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     formatted = f"[{ts}] {msg}"
     print(formatted, flush=True)
+
+
+def get_remote_lve_cpu_pct(remote_host: str) -> float | None:
+    """Measures current remote CloudLinux LVE CPU usage percentage (12 vCPUs allocation)."""
+    cmd = ["ssh", remote_host, "ps -u $(whoami) -o %cpu | awk '{s+=$1} END {print s}'"]
     try:
-        Path(LOG_FILE_PATH).parent.mkdir(parents=True, exist_ok=True)
-        with open(LOG_FILE_PATH, "a", encoding="utf-8") as f:
-            f.write(formatted + "\n")
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=DEFAULT_SSH_TIMEOUT_SECS)
+        if res.returncode == 0 and res.stdout.strip():
+            total_cpu = float(res.stdout.strip())
+            return total_cpu / DEFAULT_LVE_TOTAL_VCPUS
+    except Exception as err:
+        log(f"⚠️ Failed probing CPU on {remote_host}: {err}")
+    return None
+
+
+def get_remote_desired_workers(
+    remote_host: str, remote_base: str, default_workers: int = AUTOSCALE_DEFAULT_WORKERS
+) -> int:
+    """Reads active desired concurrency from remote run/desired_workers control file."""
+    cmd = ["ssh", remote_host, f"cat {remote_base}/run/desired_workers 2>/dev/null || true"]
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=DEFAULT_SSH_TIMEOUT_SECS)
+        if res.returncode == 0 and res.stdout.strip().isdigit():
+            return int(res.stdout.strip())
     except Exception:
         pass
+    return default_workers
 
 
-def compute_desired_workers() -> int:
-    """Determines optimal concurrency based on wall-clock time window.
-
-    Returns:
-        4 workers during night window (23:00 - 07:00), 2 workers during daytime.
-    """
-    now_hour = datetime.datetime.now().hour
-    if now_hour >= NIGHT_START_HOUR or now_hour < NIGHT_END_HOUR:
-        return DEFAULT_NIGHT_WORKERS
-    return DEFAULT_DAY_WORKERS
+def set_remote_desired_workers(remote_host: str, remote_base: str, count: int) -> bool:
+    """Updates remote desired concurrency control file."""
+    cmd = [
+        "ssh",
+        remote_host,
+        f"mkdir -p {remote_base}/run && echo {count} > {remote_base}/run/desired_workers",
+    ]
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=DEFAULT_SSH_TIMEOUT_SECS)
+        return res.returncode == 0
+    except Exception as err:
+        log(f"❌ Failed setting remote workers: {err}")
+        return False
 
 
 def check_remote_batch_status(remote_host: str, remote_base: str) -> Dict[str, object]:
@@ -141,19 +173,82 @@ def supervisor_loop(
     pull_interval: int,
     stop_event: threading.Event | None = None,
 ) -> None:
-    """Main continuous watchdog loop."""
-    log(f"🚀 RPi4 Supervisor Agent active (polling: {check_interval}s, pull: {pull_interval}s).")
+    """Main continuous watchdog and adaptive autoscaling loop."""
+    log(
+        f"🚀 RPi4 Supervisor Agent active (polling: {check_interval}s, pull: {pull_interval}s, "
+        f"autoscaling: {AUTOSCALE_MIN_WORKERS}-{AUTOSCALE_MAX_WORKERS} workers, target: {AUTOSCALE_TARGET_LOW_PCT:.0f}-{AUTOSCALE_TARGET_HIGH_PCT:.0f}% LVE CPU)."
+    )
     last_pull_time = time.time()
+    last_scale_time = 0.0
+    cpu_history: List[float] = []
 
     while True:
-        desired_workers = compute_desired_workers()
         status = check_remote_batch_status(remote_host, remote_base)
+        cur_workers = get_remote_desired_workers(remote_host, remote_base)
 
         if not status.get("running"):
-            log("⚠️ Remote batch worker is NOT running. Triggering auto-healing restart...")
-            restart_remote_batch(remote_host, remote_base, desired_workers)
+            log(f"⚠️ Remote batch worker is NOT running. Triggering auto-healing restart with {cur_workers} workers...")
+            restart_remote_batch(remote_host, remote_base, cur_workers)
+            cpu_history.clear()
+            last_scale_time = time.time()
         else:
-            log(f"● Remote batch healthy (PID {status.get('pid')}, target workers: {desired_workers}).")
+            cpu = get_remote_lve_cpu_pct(remote_host)
+            if cpu is not None:
+                # Emergency instant spike throttle (safety guard)
+                if cpu >= AUTOSCALE_EMERGENCY_SPIKE_PCT and cur_workers > AUTOSCALE_MIN_WORKERS:
+                    new_workers = cur_workers - 1
+                    set_remote_desired_workers(remote_host, remote_base, new_workers)
+                    log(
+                        f"🚨 [EMERGENCY THROTTLE] Instant CPU spike {cpu:.1f}% >= {AUTOSCALE_EMERGENCY_SPIKE_PCT}%. "
+                        f"Throttled {cur_workers} -> {new_workers} workers immediately."
+                    )
+                    last_scale_time = time.time()
+                    cpu_history.clear()
+                else:
+                    cpu_history.append(cpu)
+                    if len(cpu_history) > AUTOSCALE_SAMPLE_WINDOW:
+                        cpu_history.pop(0)
+
+                    avg_cpu = sum(cpu_history) / len(cpu_history)
+                    now = time.time()
+
+                    if len(cpu_history) >= AUTOSCALE_SAMPLE_WINDOW and (
+                        now - last_scale_time >= AUTOSCALE_COOLDOWN_SECS
+                    ):
+                        if avg_cpu < AUTOSCALE_TARGET_LOW_PCT and cur_workers < AUTOSCALE_MAX_WORKERS:
+                            new_workers = cur_workers + 1
+                            set_remote_desired_workers(remote_host, remote_base, new_workers)
+                            log(
+                                f"📈 [AUTOSCALE UP] Remote CPU average is {avg_cpu:.1f}% (< {AUTOSCALE_TARGET_LOW_PCT}%). "
+                                f"Scaling concurrency: {cur_workers} -> {new_workers} workers."
+                            )
+                            last_scale_time = now
+                            cpu_history.clear()
+                        elif avg_cpu > AUTOSCALE_TARGET_HIGH_PCT and cur_workers > AUTOSCALE_MIN_WORKERS:
+                            new_workers = cur_workers - 1
+                            set_remote_desired_workers(remote_host, remote_base, new_workers)
+                            log(
+                                f"📉 [AUTOSCALE DOWN] Remote CPU average is {avg_cpu:.1f}% (> {AUTOSCALE_TARGET_HIGH_PCT}%). "
+                                f"Throttling concurrency: {cur_workers} -> {new_workers} workers."
+                            )
+                            last_scale_time = now
+                            cpu_history.clear()
+                        else:
+                            log(
+                                f"● Remote batch healthy (PID {status.get('pid')}, CPU: {cpu:.1f}% [avg {avg_cpu:.1f}%], "
+                                f"workers: {cur_workers}, in target zone {AUTOSCALE_TARGET_LOW_PCT:.0f}-{AUTOSCALE_TARGET_HIGH_PCT:.0f}%)."
+                            )
+                    else:
+                        samples_str = (
+                            f" ({len(cpu_history)}/{AUTOSCALE_SAMPLE_WINDOW} samples)"
+                            if len(cpu_history) < AUTOSCALE_SAMPLE_WINDOW
+                            else ""
+                        )
+                        log(
+                            f"● Remote batch healthy (PID {status.get('pid')}, CPU: {cpu:.1f}%, workers: {cur_workers}){samples_str}."
+                        )
+            else:
+                log(f"● Remote batch healthy (PID {status.get('pid')}, target workers: {cur_workers}).")
 
         # Periodic catalog pull
         now = time.time()
@@ -177,10 +272,20 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    # Write supervisor PID
-    Path(PID_FILE_PATH).parent.mkdir(parents=True, exist_ok=True)
-    with open(PID_FILE_PATH, "w", encoding="utf-8") as f:
-        f.write(str(os.getpid()))
+    # Exclusive single-instance process lock
+    pid_path = Path(PID_FILE_PATH)
+    pid_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_file = open(pid_path, "a+", encoding="utf-8")
+    try:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except (BlockingIOError, OSError):
+        log(f"⚠️ Another instance of supervisor is already running ({PID_FILE_PATH} locked). Exiting.")
+        return 0
+
+    lock_file.seek(0)
+    lock_file.truncate()
+    lock_file.write(str(os.getpid()))
+    lock_file.flush()
 
     def _sig_handler(sig: int, _frame: object) -> None:
         log(f"🛑 Received signal {sig}. Stopping supervisor.")

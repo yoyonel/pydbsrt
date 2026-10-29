@@ -5,34 +5,51 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 from scripts.rpi4_o2switch_supervisor import (
-    DEFAULT_DAY_WORKERS,
-    DEFAULT_NIGHT_WORKERS,
     check_remote_batch_status,
-    compute_desired_workers,
+    get_remote_desired_workers,
+    get_remote_lve_cpu_pct,
     pull_remote_catalog,
     restart_remote_batch,
+    set_remote_desired_workers,
     supervisor_loop,
 )
 
 
-def test_compute_desired_workers():
-    """Verifies that workers are scaled up during night and scaled down during day."""
-    with patch("scripts.rpi4_o2switch_supervisor.datetime") as mock_dt:
-        # 02:00 -> Night (4 workers)
-        mock_dt.datetime.now.return_value.hour = 2
-        assert compute_desired_workers() == DEFAULT_NIGHT_WORKERS
+def test_get_remote_lve_cpu_pct():
+    """Verifies parsing of remote LVE CPU percentage across 12 vCPUs allocation."""
+    mock_res = MagicMock()
+    mock_res.stdout = "853.2\n"
+    mock_res.returncode = 0
 
-        # 23:30 -> Night (4 workers)
-        mock_dt.datetime.now.return_value.hour = 23
-        assert compute_desired_workers() == DEFAULT_NIGHT_WORKERS
+    with patch("subprocess.run", return_value=mock_res):
+        cpu = get_remote_lve_cpu_pct("o2switch")
+        assert cpu is not None
+        # 853.2 / 12 = 71.1%
+        assert round(cpu, 1) == 71.1
 
-        # 14:00 -> Day (2 workers)
-        mock_dt.datetime.now.return_value.hour = 14
-        assert compute_desired_workers() == DEFAULT_DAY_WORKERS
 
-        # 07:00 -> Day (2 workers)
-        mock_dt.datetime.now.return_value.hour = 7
-        assert compute_desired_workers() == DEFAULT_DAY_WORKERS
+def test_get_remote_desired_workers():
+    """Verifies reading desired workers count from remote file."""
+    mock_res = MagicMock()
+    mock_res.stdout = "5\n"
+    mock_res.returncode = 0
+
+    with patch("subprocess.run", return_value=mock_res):
+        workers = get_remote_desired_workers("o2switch", "dbsrt", default_workers=4)
+        assert workers == 5
+
+
+def test_set_remote_desired_workers():
+    """Verifies setting remote desired workers count via SSH."""
+    mock_res = MagicMock()
+    mock_res.returncode = 0
+
+    with patch("subprocess.run", return_value=mock_res) as mock_run:
+        success = set_remote_desired_workers("o2switch", "dbsrt", count=5)
+        assert success is True
+        mock_run.assert_called_once()
+        cmd = mock_run.call_args[0][0]
+        assert "desired_workers" in cmd[2]
 
 
 def test_check_remote_batch_status_running():
