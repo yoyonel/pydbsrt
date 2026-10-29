@@ -56,6 +56,8 @@ jobs:
       - name: Setup FFmpeg
         uses: AnimMouse/setup-ffmpeg@v1
         with:
+          # Same branch as production (o2switch runs 8.1.2); the default "release" floats to new majors
+          version: "8.1"
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install uv
@@ -93,6 +95,8 @@ jobs:
       - name: Setup FFmpeg
         uses: AnimMouse/setup-ffmpeg@v1
         with:
+          # Same branch as production (o2switch runs 8.1.2); the default "release" floats to new majors
+          version: "8.1"
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Start PostgreSQL 17 BK-Tree container for DB coverage
@@ -157,6 +161,8 @@ jobs:
       - name: Setup FFmpeg
         uses: AnimMouse/setup-ffmpeg@v1
         with:
+          # Same branch as production (o2switch runs 8.1.2); the default "release" floats to new majors
+          version: "8.1"
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Start PostgreSQL 17 BK-Tree container
