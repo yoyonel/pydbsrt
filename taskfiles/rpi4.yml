@@ -132,6 +132,11 @@ tasks:
     cmds:
       - ./scripts/rpi4_standalone.sh demo
 
+  rpi4:supervisor:install:
+    desc: Sync supervisor scripts and install/enable dbsrt-supervisor systemd user unit on Raspberry Pi 4
+    cmds:
+      - ./scripts/rpi4_supervisor_ctl.sh install
+
   rpi4:supervisor:start:
     desc: Start autonomous 24/7 background supervisor monitoring o2switch batch on Raspberry Pi 4
     cmds:
