@@ -829,6 +829,31 @@ impl HelpTab {
     }
 }
 
+/// Volatile batch processing queue progress metrics.
+///
+/// # Data Flow & Invariants
+/// Reflects the state of the active batch queue from `run/batch_queue.json` or fallback
+/// target manifest. Invariant: `remaining_targets == total_targets.saturating_sub(completed_targets + failed_targets)`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct BatchQueueTelemetry {
+    /// Total number of target media items discovered for this batch.
+    pub total_targets: usize,
+    /// Number of media items successfully processed.
+    pub completed_targets: usize,
+    /// Number of media items that failed processing.
+    pub failed_targets: usize,
+    /// Number of media items still pending in the queue.
+    pub remaining_targets: usize,
+    /// Overall batch progress percentage (0.0% to 100.0%).
+    pub progress_pct: f64,
+    /// Number of parallel worker processes actively decoding.
+    pub active_workers: usize,
+    /// Flag indicating whether the batch queue is actively running.
+    pub is_active: bool,
+    /// ISO 8601 UTC timestamp of last status update.
+    pub updated_at: String,
+}
+
 /// System-wide combined telemetry snapshot.
 ///
 /// # Invariants
@@ -864,6 +889,8 @@ pub struct SystemTelemetry {
     pub media_sources: Vec<MediaSourceConfig>,
     /// Flag indicating whether a background directory scan is actively running.
     pub is_scanning: bool,
+    /// Active batch processing queue telemetry.
+    pub batch_queue: BatchQueueTelemetry,
 }
 
 /// Active input field focus within the source configuration modal.

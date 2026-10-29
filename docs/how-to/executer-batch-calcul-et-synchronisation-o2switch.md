@@ -39,13 +39,30 @@ task o2switch:batch:tvshow -- --workers 8 --fresh-only
 Pour lancer un traitement de masse en tâche de fond permanente (démon persistant même si vous fermez votre session SSH ou éteignez votre PC portable) :
 
 ```bash
+# Ingestion des séries TV (/tvshow)
 task o2switch:batch:tvshow -- --workers 4 --fresh-only --daemon
+
+# Ingestion des films (/video)
+task o2switch:batch:movies -- --workers 4 --fresh-only --daemon
 ```
 
-Pour inspecter l'état du travailleur de fond (processus actif, PID, CPU, RAM, et dernières vidéos traitées) :
+Pour inspecter l'état du travailleur de fond (processus actif, PID, CPU, RAM, et progression détaillée de la file) :
 
 ```bash
 task o2switch:batch:status
+```
+
+Exemple de retour télémétrique en direct :
+
+```text
+● Batch worker is RUNNING (PID: 3182128)
+  PID USER     %CPU %MEM     ELAPSED COMMAND
+3182128 atli6249  0.3  0.1       30:54 python3
+
+--- File de Traitement Batch (Progression) ---
+  • Progression file : 434 / 674 traités (64.4%)
+  • En attente       : 240 cibles restantes (Échecs: 0)
+  • Concurrence      : 4 workers parallèles
 ```
 
 Pour suivre le journal d'exécution en streaming ou interrompre le traitement :
@@ -220,7 +237,8 @@ task o2switch:batch:tvshow -- --retry-failed --max-extraction-secs 2700 --daemon
 | Tâche | Description opérationnelle | Contexte d'exécution |
 | :--- | :--- | :--- |
 | `task o2switch:sync` | Déploie les binaires statiques, catalogues et passerelle vers o2switch | Local $\rightarrow$ o2switch |
-| `task o2switch:batch:tvshow` | Lance le batch parallèle sur les vidéos vierges (8-9 workers, palier 80%) | Exécution distante o2switch |
+| `task o2switch:batch:tvshow` | Lance le batch parallèle sur les séries vierges (/tvshow, 4-8 workers) | Exécution distante o2switch |
+| `task o2switch:batch:movies` | Lance le batch parallèle sur les films vierges (/video, 4-8 workers) | Exécution distante o2switch |
 | `task o2switch:top` | Ouvre le moniteur TUI plein écran en direct sur o2switch via SSH | Terminal interactif SSH |
 | `task o2switch:pull-catalog` | Rapatrie les `.phash`, `.srt` et journaux télémétriques vers le local | o2switch $\rightarrow$ Local |
 | `task coupling:certify` | Certifie et référence les nouveaux couplages dans `couplings.json` | Local |

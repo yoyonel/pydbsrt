@@ -27,8 +27,8 @@ use crate::commands::top::constants::{
 };
 use crate::commands::top::model::{
     calculate_overall_stats, format_unix_to_iso, parse_iso_to_unix_secs, ActiveJobTelemetry,
-    DiscoveredMediaItem, GpuTelemetry, HistoricalRecord, IngestionStatus, MediaSourceConfig,
-    MediaSubtrackInfo, PhashFingerprintInfo, SessionThroughput, SystemTelemetry,
+    BatchQueueTelemetry, DiscoveredMediaItem, GpuTelemetry, HistoricalRecord, IngestionStatus,
+    MediaSourceConfig, MediaSubtrackInfo, PhashFingerprintInfo, SessionThroughput, SystemTelemetry,
 };
 
 /// Shared handle for background GPU monitoring process.
@@ -1736,6 +1736,8 @@ pub fn run_telemetry_sampler_loop(
         let session =
             compute_session_throughput(&history_cache.records, &active_jobs, now_unix_secs);
 
+        let batch_queue = sample_batch_queue(active_jobs.len());
+
         {
             let mut state = shared_state.write().unwrap();
             state.host_cpu_pct = host_cpu;
@@ -1748,12 +1750,92 @@ pub fn run_telemetry_sampler_loop(
             state.history_records = history_cache.records.clone();
             state.stats = history_cache.stats.clone();
             state.is_scanning = IS_MEDIA_SCANNING.load(Ordering::Relaxed);
+            state.batch_queue = batch_queue;
             update_discovered_media_status(&mut state.discovered_media, &active_jobs);
             state.active_jobs = active_jobs;
         }
 
         std::thread::sleep(std::time::Duration::from_millis(refresh_interval_ms));
     }
+}
+
+/// Deserializes volatile batch queue state from a JSON file.
+fn load_batch_queue_from_json(path: &Path) -> Option<BatchQueueTelemetry> {
+    let content = fs::read_to_string(path).ok()?;
+    serde_json::from_str::<BatchQueueTelemetry>(&content).ok()
+}
+
+/// Fallback reconstruction of batch queue metrics from target manifest and events log.
+fn load_batch_queue_from_manifest(targets_path: &Path) -> Option<BatchQueueTelemetry> {
+    let content = fs::read_to_string(targets_path).ok()?;
+    let arr = serde_json::from_str::<Vec<serde_json::Value>>(&content).ok()?;
+    let total = arr.len();
+    let events_path = resolve_events_log_path();
+    let completed = count_completed_events_fast(&events_path);
+    let rem = total.saturating_sub(completed);
+    let pct = if total > 0 {
+        ((completed as f64 / total as f64) * 100.0 * 10.0).round() / 10.0
+    } else {
+        0.0
+    };
+    Some(BatchQueueTelemetry {
+        total_targets: total,
+        completed_targets: completed,
+        failed_targets: 0,
+        remaining_targets: rem,
+        progress_pct: pct,
+        active_workers: 0,
+        is_active: false,
+        updated_at: String::new(),
+    })
+}
+
+/// Reads volatile batch queue state from `run/batch_queue.json`, or falls back to target manifest calculation.
+///
+/// # Arguments
+/// * `active_workers` - Count of parallel decoding workers actively running.
+///
+/// # Returns
+/// Instantiated [`BatchQueueTelemetry`] structure.
+///
+/// # Panics
+/// Panic-free.
+///
+/// # Data Flow & Invariants
+/// 1. Reads `run/batch_queue.json` written by batch worker daemon.
+/// 2. If missing, attempts fallback count from `data/reports/selected_batch_targets.json`.
+/// 3. Returns default empty struct if no active queue manifest is detected.
+pub fn sample_batch_queue(active_workers: usize) -> BatchQueueTelemetry {
+    let queue_path = Path::new("run/batch_queue.json");
+    if let Some(mut data) = load_batch_queue_from_json(queue_path) {
+        if active_workers > 0 {
+            data.active_workers = active_workers;
+            data.is_active = true;
+        }
+        return data;
+    }
+
+    let targets_path = Path::new("data/reports/selected_batch_targets.json");
+    if let Some(mut data) = load_batch_queue_from_manifest(targets_path) {
+        data.active_workers = active_workers;
+        data.is_active = active_workers > 0 && data.remaining_targets > 0;
+        return data;
+    }
+
+    BatchQueueTelemetry::default()
+}
+
+fn count_completed_events_fast(events_path: &Path) -> usize {
+    if !events_path.is_file() {
+        return 0;
+    }
+    let Ok(content) = fs::read_to_string(events_path) else {
+        return 0;
+    };
+    content
+        .lines()
+        .filter(|l| l.contains("\"success\": true") || l.contains("\"success\":true"))
+        .count()
 }
 
 /// Sanitizes floating point transfer rates to eliminate negative zero representations.

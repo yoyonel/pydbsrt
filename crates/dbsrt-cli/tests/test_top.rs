@@ -354,6 +354,7 @@ fn test_ui_rendering_all_pages() {
             last_scan_iso: Some("2026-10-26T21:00:00Z".to_string()),
         }],
         is_scanning: false,
+        batch_queue: Default::default(),
     };
 
     let empty_set = HashSet::new();
@@ -3367,4 +3368,53 @@ fn test_system_page_render_and_shortcuts() {
     assert!(buffer.contains("M\u{c9}MOIRE & STOCKAGE"));
     assert!(buffer.contains("D\u{c9}BITS & T\u{c9}L\u{c9}M\u{c9}TRIE EN DIRECT"));
     assert!(buffer.contains("[6/y] Syst\u{e8}me"));
+}
+
+#[test]
+fn test_batch_queue_telemetry_rendered_in_header_and_table() {
+    use dbsrt_cli::commands::top::model::BatchQueueTelemetry;
+    let backend = ratatui::backend::TestBackend::new(140, 40);
+    let mut terminal = ratatui::Terminal::new(backend).unwrap();
+
+    let tel = SystemTelemetry {
+        batch_queue: BatchQueueTelemetry {
+            total_targets: 399,
+            completed_targets: 11,
+            failed_targets: 0,
+            remaining_targets: 388,
+            progress_pct: 2.8,
+            active_workers: 4,
+            is_active: true,
+            updated_at: "2026-10-29T07:45:00Z".to_string(),
+        },
+        ..Default::default()
+    };
+
+    let app = AppState::default();
+    let ctx = UiContext {
+        telemetry: &tel,
+        view: ViewPage::ActiveJobs,
+        selected_index: app.selected_index,
+        completed_scroll_index: app.completed_scroll_index,
+        media_scroll_index: app.media_scroll_index,
+        source_scroll_index: app.source_scroll_index,
+        source_modal: None,
+        selected_media_paths: &app.selected_media_paths,
+        media_filter: app.media_filter,
+        media_sort: app.media_sort,
+        source_filter: &app.source_filter,
+        completed_filter: app.completed_filter,
+        completed_sort: app.completed_sort,
+        search_query: "",
+        search_active: false,
+        help_tab: app.help_tab,
+        help_scroll_index: app.help_scroll_index,
+        feedback_msg: None,
+    };
+    terminal.draw(|f| render_ui(f, &ctx)).unwrap();
+    let buffer = format!("{:?}", terminal.backend());
+
+    assert!(buffer.contains("Batch: 11/399 (3%)"));
+    assert!(buffer.contains("File: 11/399"));
+    assert!(buffer.contains("388 en attente"));
 }

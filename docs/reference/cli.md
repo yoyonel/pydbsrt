@@ -184,12 +184,13 @@ dbsrt top [OPTIONS]
 #### Structure de l'Interface Full-Frame
 
 1. **Bannière d'En-Tête Système Multi-Lignes (Style Fastfetch Dynamique)** :
-   - Ligne 1 : Horloge temps réel (`HH:MM:SS`), nom d'hôte de la machine ou du nœud distant (`🖥️ hostname`), distribution OS et architecture (`Debian 13 x86_64`, `CloudLinux 8`, etc.), nombre de workers actifs, pourcentage CPU global hôte, mémoire vive consommée / totale (`RAM: X.X/Y.Y GiB`).
+   - Ligne 1 : Horloge temps réel (`HH:MM:SS`), nom d'hôte (`🖥️ hostname`), distribution OS et architecture (`Debian 13 x86_64`, `CloudLinux 8`, etc.), nombre de workers actifs, progression de la file batch active (`Batch: X/Y (Z%)` si un batch est en cours), pourcentage CPU global hôte, mémoire vive consommée / totale (`RAM: X.X/Y.Y GiB`).
    - Ligne 2 : Modèle et nombre de cœurs processeur (`🧠 CPU: <modèle> (N cœurs)`), modèle de carte graphique ou accélérateur détecté (`🎮 GPU: <modèle>`) avec télémesures de décodage matériel en direct (`intel_gpu_top` : `Décodage: X.X% [bar]`, Render/3D, fréquence `MHz`, puissance `W`) ou mention transparente du mode actif (`Mode CPU Multithread` ou `Non détecté`).
    - Ligne 3 : Débits réseau et pipe : Instantané réseau ingress physique (`Net RX`), débit de traitement du pipe de hachage (`Pipe pHash`), ainsi que le débit cumulé global de la session courante (`X.X MB/s` sur `Y.Y GiB` en `XhYYm` sur `N` flux).
 
 2. **Onglet 1 : Tâches en Cours (`[1]`)** :
    - Table interactive des processus actifs (`dbsrt` et `ffmpeg`), moteurs d'exécution (`GPU VA-API`, `CPU Software`, `Sub Extraction`), débits instantanés, barres de progression textuelles, ETA et consommation mémoire/CPU.
+   - En-tête dynamique contextuel : affiche le décompte des tâches actives et la progression globale de la file de traitement (`[X/Y actifs │ File: C/T traités, R en attente]`).
 
 3. **Onglet 2 : Historique & Statistiques Réelles (`[2]` ou `[h]`)** :
    - Tableau de distribution statistique descriptive (Min, Médiane, Moyenne, 90e percentile P90, Max, Écart-type $\sigma$) sur les décodages intégraux pHash (durée > 60s) : débits effectifs (`MB/s`), durées de traitement (`minutes`), tailles des fichiers (`GiB`) et couplings de sous-titres certifiés.
@@ -216,6 +217,15 @@ dbsrt top [OPTIONS]
    - `[d]` : Suppression de la source sélectionnée avec dialogue modal de confirmation (protection de la dernière source restante).
    - `[r]` : Déclenchement d'un rescan asynchrone immédiat de l'ensemble des sources actives (préservation du cache des métadonnées pour éviter tout recomputing superflu).
 
+7. **Onglet 6 : Télémétrie Système & Matériel (Vue Fastfetch `[6]` ou `[y]`)** :
+   - Tableau de bord exhaustif en double colonne structuré par domaines thématiques :
+     - **Applicatif (`dbsrt`)** : version sémantique, hash git de provenance, date de compilation, chemin d'exécutable, PID et thread pool Rayon.
+     - **Nœud & OS** : hostname FQDN, distribution Linux, version du noyau (`uname -r`), architecture CPU, et temps de fonctionnement (`uptime`).
+     - **Processeur (CPU)** : modèle CPU commercial complet, topologie (cœurs physiques + logiques), fréquence d'horloge et jauge de charge.
+     - **Accélération Matérielle (GPU)** : périphérique détecté, pilote/moteur actif (`Intel Iris Xe Graphics`, `VA-API iHD`), statut et barres d'activité matérielle.
+     - **Mémoire & Stockage** : RAM vive (utilisée, totale, pourcentage), swap actif, et espace disque libre sur la partition de travail.
+     - **Débits & Flux Réseau** : bande passante ingress (`Net RX`), débit d'ingestion pHash et volume global cumulé sur la session.
+
 #### Raccourcis Clavier
 
 - `[1]` : Afficher l'onglet des tâches en cours
@@ -223,7 +233,8 @@ dbsrt top [OPTIONS]
 - `[3]` / `[r]` : Afficher l'onglet des traitements complétés et certifiés
 - `[4]` / `[m]` : Afficher l'onglet de l'explorateur de médias multi-sources
 - `[5]` / `[s]` : Afficher l'onglet de gestion des sources de médias (ou `[s]` pour arrêter une tâche dans l'onglet 1)
-- `[Tab]` / `[Shift+Tab]` : Navigation circulaire bidirectionnelle entre les 5 onglets
+- `[6]` / `[y]` : Afficher la vue diagnostics système Fastfetch
+- `[Tab]` / `[Shift+Tab]` : Navigation circulaire bidirectionnelle entre les 6 onglets
 - `[↑]` / `[k]` : Déplacer le curseur vers le haut / élément précédent
 - `[↓]` / `[j]` : Déplacer le curseur vers le bas / élément suivant
 - `[PgUp]` / `[PgDn]` : Défilement rapide par page (onglets 1, 3, 4 et 5)

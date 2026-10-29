@@ -123,6 +123,24 @@ fn build_host_telemetry_line(tel: &SystemTelemetry) -> Line<'static> {
         Span::raw("│ "),
         Span::styled(format!("Workers: {workers_count} actifs "), worker_style),
         Span::raw("│ "),
+    ];
+
+    if tel.batch_queue.total_targets > 0 {
+        spans.push(Span::styled(
+            format!(
+                "Batch: {}/{} ({:.0}%) ",
+                tel.batch_queue.completed_targets,
+                tel.batch_queue.total_targets,
+                tel.batch_queue.progress_pct
+            ),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::raw("│ "));
+    }
+
+    spans.extend([
         Span::styled(
             format!("Host CPU: {:>2.0}% ", tel.host_cpu_pct),
             Style::default().fg(Color::White),
@@ -135,7 +153,7 @@ fn build_host_telemetry_line(tel: &SystemTelemetry) -> Line<'static> {
             ),
             Style::default().fg(Color::White),
         ),
-    ];
+    ]);
 
     if tel.is_scanning {
         spans.push(Span::raw(" │ "));
