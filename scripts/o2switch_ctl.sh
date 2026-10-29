@@ -463,7 +463,7 @@ REMOTE_SCRIPT
     shift || true
     echo "=== Connecting to live dbsrt top TUI on ${O2SWITCH_HOST} ==="
     # shellcheck disable=SC2029
-    ssh -tt "${O2SWITCH_HOST}" "cd ${REMOTE_BASE} && PATH=\"\$HOME/${REMOTE_BASE}/bin:\$PATH\" RAYON_NUM_THREADS=2 ./bin/dbsrt top $(printf '%q ' "$@")"
+    ssh -tt "${O2SWITCH_HOST}" "cd ${REMOTE_BASE} && PATH=\"\$HOME/${REMOTE_BASE}/bin:\$PATH\" RAYON_NUM_THREADS=2 ./bin/dbsrt top ${*:+$(printf '%q ' "$@")}"
     ;;
 
   pull-catalog)
