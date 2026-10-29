@@ -21,15 +21,21 @@ COPY crates/dbsrt-cli crates/dbsrt-cli
 COPY crates/dbsrt-server crates/dbsrt-server
 
 ENV CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
-RUN cargo build --release --target aarch64-unknown-linux-gnu --bin dbsrt --bin dbsrt-server
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/src/target \
+    cargo build --release --target aarch64-unknown-linux-gnu --bin dbsrt --bin dbsrt-server \
+    && mkdir -p /out \
+    && cp /src/target/aarch64-unknown-linux-gnu/release/dbsrt /out/dbsrt \
+    && cp /src/target/aarch64-unknown-linux-gnu/release/dbsrt-server /out/dbsrt-server
 
 # Stage 2: Minimal ARM64 runtime image for validation on Raspberry Pi 4 environment
 FROM --platform=linux/arm64 debian:bullseye-slim AS tester
 
 WORKDIR /app
 
-COPY --from=builder /src/target/aarch64-unknown-linux-gnu/release/dbsrt /usr/local/bin/dbsrt
-COPY --from=builder /src/target/aarch64-unknown-linux-gnu/release/dbsrt-server /usr/local/bin/dbsrt-server
+COPY --from=builder /out/dbsrt /usr/local/bin/dbsrt
+COPY --from=builder /out/dbsrt-server /usr/local/bin/dbsrt-server
 
 # Validate binaries run on ARM64 Bullseye with GLIBC 2.31
 RUN chmod +x /usr/local/bin/dbsrt /usr/local/bin/dbsrt-server \

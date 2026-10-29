@@ -73,7 +73,7 @@ task rpi4:cli:build && task rpi4:cli:deploy && task rpi4:top
 
 ### Étapes détaillées pas à pas
 
-#### Étape 1 : Cross-compiler le binaire ARM64
+#### Étape 1 : Cross-compiler le binaire ARM64 (avec cache BuildKit persistant)
 
 Exécutez la compilation sous conteneur Docker ARM64 Debian Bullseye pour garantir la parité stricte avec la GLIBC 2.31 du système d'exploitation du Raspberry Pi :
 
@@ -81,6 +81,7 @@ Exécutez la compilation sous conteneur Docker ARM64 Debian Bullseye pour garant
 task rpi4:cli:build
 ```
 
+*Le pipeline exploite les montages de cache persistants Docker BuildKit (`--mount=type=cache,target=/src/target`, `/usr/local/cargo/registry`, `/usr/local/cargo/git`). La compilation incrémentale ne reconstruit que les modules modifiés en quelques secondes sans retélécharger ni recompiler les 200+ dépendances du workspace.*
 *Le script extrait les binaires `dbsrt` et `dbsrt-server` vers `target/aarch64-unknown-linux-gnu/release/`.*
 
 #### Étape 2 (Optionnelle) : Valider le binaire localement sous QEMU
