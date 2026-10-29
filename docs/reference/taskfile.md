@@ -160,7 +160,7 @@ Cette page dresse le dictionnaire exhaustif de toutes les cibles d'orchestration
 | `task o2switch:status` | Affiche l'état du processus (PID, mémoire RSS, CPU) et la télémétrie de l'API `/v1/status`. |
 | `task o2switch:logs` | Suit en temps réel le fichier journal `dbsrt-server.log` sur o2switch via SSH. |
 | `task o2switch:demo` | Teste la reconnaissance d'empreintes et la récupération CAS de sous-titres sur o2switch. |
-| `task o2switch:setup-cron` | Installe le watchdog utilisateur non-root dans la crontab (`*/5 * * * *`). |
+| `task o2switch:setup-cron` | Installe le watchdog utilisateur non-root (`*/5 * * * *`) et le recompactage du catalogue (`*/15 * * * *`) dans la crontab. |
 | `task o2switch:remove-cron` | Supprime le watchdog utilisateur de la crontab. |
 | `task o2switch:rotate-key` | Génère, déploie et valide une nouvelle clé API 256 bits avec synchronisation dans `pass`. |
 | `task o2switch:sync-nas` | Compile le catalogue binaire depuis le NAS Synology et synchronise l'index et les sous-titres sur o2switch. |

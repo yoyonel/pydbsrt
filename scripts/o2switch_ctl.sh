@@ -383,15 +383,21 @@ REMOTE_SCRIPT
 PORT="$1"
 BASE="$2"
 CRON_MARKER="# dbsrt-server watchdog"
+PACK_MARKER="# dbsrt-server catalog pack"
 CMD="pgrep -u \$(whoami) -f dbsrt-server >/dev/null 2>&1 || (setsid \$HOME/${BASE}/bin/dbsrt-server --host 127.0.0.1 --port ${PORT} --dbphash \$HOME/${BASE}/data/catalog.dbphash --subtitles-dir \$HOME/${BASE}/data/SRT --phash-dir \$HOME/${BASE}/run/empty_phash </dev/null >> \$HOME/${BASE}/logs/dbsrt-server.log 2>&1 &)"
 CRON_LINE="*/5 * * * * ${CMD} ${CRON_MARKER}"
+# The on-demand spawn never repacks: fold new batch .phash files into the catalog (atomic mv,
+# picked up by the server file watcher and by the next spawn)
+D="\$HOME/${BASE}"
+PACK_CMD="[ -n \"\$(find ${D}/data/__PHASH__ -name '*.phash' -newer ${D}/data/catalog.dbphash -print -quit)\" ] && nice ${D}/bin/dbsrt pack -p ${D}/data/__PHASH__ -o ${D}/run/catalog.pack.tmp >/dev/null 2>&1 && mv -f ${D}/run/catalog.pack.tmp ${D}/data/catalog.dbphash"
+PACK_LINE="*/15 * * * * ${PACK_CMD} ${PACK_MARKER}"
 
-crontab -l 2>/dev/null | grep -v "${CRON_MARKER}" > /tmp/crontab.tmp || true
-echo "${CRON_LINE}" >> /tmp/crontab.tmp
+crontab -l 2>/dev/null | grep -v -e "${CRON_MARKER}" -e "${PACK_MARKER}" > /tmp/crontab.tmp || true
+printf '%s\n' "${CRON_LINE}" "${PACK_LINE}" >> /tmp/crontab.tmp
 crontab /tmp/crontab.tmp
 rm -f /tmp/crontab.tmp
-echo "✓ Watchdog cron installed (runs every 5 minutes):"
-crontab -l | grep "${CRON_MARKER}"
+echo "✓ Watchdog (every 5 minutes) and catalog pack (every 15 minutes) cron installed:"
+crontab -l | grep -e "${CRON_MARKER}" -e "${PACK_MARKER}"
 REMOTE_SCRIPT
     ;;
 
@@ -400,11 +406,10 @@ REMOTE_SCRIPT
     echo "=== Removing watchdog cron job on ${O2SWITCH_HOST} ==="
     # shellcheck disable=SC2029
     ssh "${O2SWITCH_HOST}" "bash -s" <<'REMOTE_SCRIPT'
-CRON_MARKER="# dbsrt-server watchdog"
-crontab -l 2>/dev/null | grep -v "${CRON_MARKER}" > /tmp/crontab.tmp || true
+crontab -l 2>/dev/null | grep -v -e "# dbsrt-server watchdog" -e "# dbsrt-server catalog pack" > /tmp/crontab.tmp || true
 crontab /tmp/crontab.tmp
 rm -f /tmp/crontab.tmp
-echo "✓ Watchdog cron removed."
+echo "✓ Watchdog and catalog pack cron removed."
 REMOTE_SCRIPT
     ;;
 

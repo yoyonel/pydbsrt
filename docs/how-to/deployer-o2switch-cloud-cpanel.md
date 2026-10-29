@@ -110,7 +110,7 @@ task o2switch:start
 Le script compacte d'abord les `.phash` du batch (`data/__PHASH__`) dans `data/catalog.dbphash` via `dbsrt pack` (~1,5 s). Il démarre ensuite `dbsrt-server` via `setsid` avec un dossier `.phash` vide (`run/empty_phash`), enregistre le PID et attend la sonde de santé via SSH.
 
 > [!WARNING]
-> **o2switch tue (SIGKILL) tout processus utilisateur en écoute sur un port après ~10 s**, même `python3 -m http.server`. Le daemon ne reste donc pas résident : la passerelle `index.php` le relance à la demande (~1,3 s à froid, ~80 ms à chaud), et le cron watchdog fait de même toutes les 5 min.
+> **o2switch tue (SIGKILL) tout processus utilisateur en écoute sur un port après ~10 s**, même `python3 -m http.server`. Le daemon ne reste donc pas résident : la passerelle `index.php` le relance à la demande (~1,3 s à froid, ~80 ms à chaud), et le cron watchdog fait de même toutes les 5 min. Le spawn à la demande ne recompacte pas : un second cron (toutes les 15 min) intègre les nouveaux `.phash` du batch au catalogue, rechargé à chaud.
 >
 > Ne pas pointer `--phash-dir` sur `data/__PHASH__` : chaque `.phash` isolé est mappé avec un index MIH en RAM (~6x sa taille disque). Avec ~1 200 fichiers, le serveur dépasse 2,7 Go et se fait tuer. Le catalogue compacté tient en ~340 Mo.
 
@@ -319,7 +319,7 @@ Pour synchroniser directement depuis le NAS Synology sans station de travail :
 | `task o2switch:restart` | Redémarre le démon à distance. |
 | `task o2switch:stop` | Arrête proprement le démon via signal `SIGTERM` (puis `SIGKILL` si nécessaire). |
 | `task o2switch:demo` | Exécute un test de reconnaissance et de téléchargement de sous-titres. |
-| `task o2switch:setup-cron` | Installe le watchdog utilisateur dans la crontab (`*/5 * * * *`). |
+| `task o2switch:setup-cron` | Installe le watchdog utilisateur (`*/5 * * * *`) et le recompactage du catalogue (`*/15 * * * *`, seulement si un `.phash` est plus récent que `catalog.dbphash`). |
 | `task o2switch:remove-cron` | Supprime le watchdog utilisateur de la crontab. |
 | `task o2switch:rotate-key` | Génère, déploie et valide une nouvelle clé API 256 bits avec mise à jour dans `pass`. |
 | `task o2switch:agent:start` | Démarre l'agent relais local connecté à o2switch pour VLC et le NAS Synology. |
