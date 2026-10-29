@@ -16,9 +16,11 @@ from scripts.o2switch_batch_worker import (
     build_child_env,
     build_stream_url,
     get_process_group_cpu_ticks,
+    load_blacklisted_stems,
     load_certified_stems,
     load_existing_phash_stems,
     load_targets_file,
+    match_nas_paths,
     next_fast_failure_streak,
     resolve_retry_targets,
 )
@@ -171,3 +173,31 @@ def test_abort_batch_drains_queue_and_leaves_marker(tmp_path: Path, monkeypatch)
 
     assert queue == []
     assert "50 consecutive failures" in (tmp_path / "run" / "batch_aborted").read_text(encoding="utf-8")
+
+
+def test_load_blacklisted_stems_needs_consecutive_failures(tmp_path: Path):
+    """Only stems whose last 3 outcomes are failures are blacklisted, NFD and NFC stems merge."""
+    events = tmp_path / "events.jsonl"
+    rows = [("bad", False)] * 3 + [("flaky", False)] * 2 + [("flaky", True), ("flaky", False)]
+    rows += [("Cruaute\u0301", False), ("Cruaut\u00e9", False), ("Cruaut\u00e9", False)]
+    events.write_text(
+        "\n".join(json.dumps({"video_stem": s, "success": ok}) for s, ok in rows) + "\n\n", encoding="utf-8"
+    )
+
+    assert load_blacklisted_stems(events) == {"bad", "Cruaut\u00e9"}
+    assert load_blacklisted_stems(tmp_path / "missing.jsonl") == set()
+
+
+def test_match_nas_paths_uses_real_nas_names():
+    """NFC or 8.3-mangled target names are replaced by the raw NAS path, unknown ones dropped."""
+    nas = [
+        ("/tvshow/S01/01 Cruaute\u0301.mp4", "01 Cruaut\u00e9.mp4", 7),
+        ("/tvshow/S04/E01 A: B.mkv", "E01 A: B.mkv", 9),
+    ]
+    targets = [
+        ("/tvshow/S01/01 Cruaut\u00e9.mp4", "01 Cruaut\u00e9.mp4", 0),
+        ("/tvshow/S01/01 Cruaute\u0301.mp4", "01 Cruaute\u0301.mp4", 0),
+        ("/tvshow/S04/SY9QH1~F.MKV", "SY9QH1~F.MKV", 0),
+    ]
+
+    assert match_nas_paths(targets, nas) == [nas[0]]

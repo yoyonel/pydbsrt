@@ -20,6 +20,7 @@ import sys
 import threading
 import time
 import traceback
+import unicodedata
 import urllib.parse
 from pathlib import Path
 from typing import Dict, List, Set, Tuple
@@ -138,6 +139,8 @@ DEFAULT_BATCH_ABORTED_PATH: str = "run/batch_aborted"
 # A systemic failure (bad ffmpeg flag, NAS down) fails every target within seconds
 FAST_FAILURE_SECS: float = 10.0
 MAX_FAST_FAILURE_STREAK: int = 50
+# Videos failing this many times in a row (corrupt, unreadable on the NAS) are no longer queued
+MAX_FAILED_ATTEMPTS: int = 3
 VIDEO_EXTENSIONS: Tuple[str, ...] = (".mkv", ".mp4", ".webm", ".avi")
 
 
@@ -204,7 +207,6 @@ def list_nas_videos_ftp(
     """
     import ftplib
     import posixpath
-    import unicodedata
 
     clean_base = base_dir.lstrip("/")
     ftp = ftplib.FTP()
@@ -222,7 +224,6 @@ def list_nas_videos_ftp(
         except Exception:
             continue
         for name, facts in entries:
-            name = unicodedata.normalize("NFC", name)
             if name in (".", "..", "EMPTY_DIRS", "SRT", "@eaDir") or name.startswith("."):
                 continue
             full_path = posixpath.join(curr, name)
@@ -234,7 +235,9 @@ def list_nas_videos_ftp(
                 if any(name.lower().endswith(ext) for ext in VIDEO_EXTENSIONS):
                     size = int(facts.get("size", 0))
                     rel = "/" + full_path if not full_path.startswith("/") else full_path
-                    results.append((rel, name, size))
+                    # The NAS mixes NFC and NFD names: the path keeps the raw name the FTP server
+                    # expects, the media name is NFC like the rest of the catalog
+                    results.append((rel, unicodedata.normalize("NFC", name), size))
 
     try:
         ftp.quit()
@@ -279,12 +282,40 @@ def resolve_retry_targets(events_log: Path, skip_stems: Set[str]) -> List[Tuple[
                 rec = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            stem = rec.get("video_stem", "")
+            stem = unicodedata.normalize("NFC", rec.get("video_stem", ""))
             rel_path = rec.get("video_rel_path", "")
             if stem and rel_path:
                 item = (rel_path, Path(rel_path).name, rec.get("file_size_bytes", 0))
                 last_outcome[stem] = (bool(rec.get("success", False)), item)
     return [item for stem, (ok, item) in last_outcome.items() if not ok and stem not in skip_stems]
+
+
+def load_blacklisted_stems(events_log: Path, max_attempts: int = MAX_FAILED_ATTEMPTS) -> Set[str]:
+    """Returns NFC stems whose last `max_attempts` outcomes in the events log are all failures."""
+    streaks: Dict[str, int] = {}
+    if events_log.is_file():
+        for line in events_log.read_text(encoding="utf-8").splitlines():
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            stem = unicodedata.normalize("NFC", rec.get("video_stem", ""))
+            if stem:
+                streaks[stem] = 0 if rec.get("success") else streaks.get(stem, 0) + 1
+    return {stem for stem, count in streaks.items() if count >= max_attempts}
+
+
+def match_nas_paths(
+    targets: List[Tuple[str, str, int]], nas_videos: List[Tuple[str, str, int]]
+) -> List[Tuple[str, str, int]]:
+    """Replaces each target with the NAS entry of the same NFC stem; unknown targets are dropped.
+
+    Targets selected on a CIFS mount or replayed from the events log can carry NFC-normalized or
+    8.3-mangled names that the FTP server rejects: only the FTP listing holds the real paths.
+    """
+    by_stem = {Path(video[1]).stem: video for video in nas_videos}
+    matched = (by_stem.get(unicodedata.normalize("NFC", Path(target[1]).stem)) for target in targets)
+    return list(dict.fromkeys(video for video in matched if video))
 
 
 def write_batch_queue_state(total: int, completed: int, failed: int, active_workers: int) -> None:
@@ -334,8 +365,8 @@ def build_child_env(nas_user: str, nas_pass: str, bin_dir: Path) -> Dict[str, st
     env = os.environ.copy()
     env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
     env["DBSRT_FTP_USER"] = nas_user
-    # shortcut: password lands in the ffmpeg argv (CageFS hides it from other accounts); the
-    # static ffmpeg 7.0.2 lacks `-/ftp-password`, switch to DBSRT_FTP_PASSWORD_FILE on >= 7.1
+    # Password lands in the ffmpeg argv: FFmpeg (checked up to 8.1) cannot read protocol options
+    # from a file, and o2switch mounts /proc with hidepid=2 so other accounts cannot see it.
     env["DBSRT_FTP_PASSWORD"] = nas_pass
     env.setdefault("DBSRT_FFMPEG_THREADS", DEFAULT_FFMPEG_THREADS)
     env.pop("NAS_PASS", None)
@@ -661,36 +692,38 @@ def main() -> int:
     certified_stems = load_certified_stems(Path(DEFAULT_COUPLINGS_PATH))
     existing_phash = load_existing_phash_stems(Path(DEFAULT_PHASH_DIR))
     print(f"✓ Found {len(certified_stems)} certified stems and {len(existing_phash)} .phash files locally.")
-    done_stems = certified_stems | existing_phash
-    skip_stems = done_stems if args.fresh_only else set()
+    done_stems = {unicodedata.normalize("NFC", stem) for stem in certified_stems | existing_phash}
+    blacklisted = load_blacklisted_stems(events_log)
+    print(f"✓ Skipping {len(blacklisted)} videos that failed {MAX_FAILED_ATTEMPTS} times in a row.")
+    skip_stems = (done_stems if args.fresh_only else set()) | blacklisted
+
+    print(f"=== [2/4] Discovering remote NAS video library ({args.nas_host}:{args.nas_base}) ===")
+    all_videos = list_nas_videos_ftp(
+        nas_host=args.nas_host,
+        nas_user=args.nas_user,
+        nas_pass=nas_pass,
+        base_dir=args.nas_base,
+        ftp_port=args.ftp_port,
+    )
+    print(f"✓ Discovered {len(all_videos)} video files on NAS.")
 
     targets: List[Tuple[str, str, int]] = []
     targets_path = Path(args.targets_file)
     targets_loaded = False
     if args.retry_failed:
-        print(f"=== [2/4] Resolving failed episodes from {events_log} ===")
-        targets = resolve_retry_targets(events_log, done_stems)
+        # An explicit retry ignores the blacklist
+        targets = match_nas_paths(resolve_retry_targets(events_log, done_stems), all_videos)
         targets_loaded = True
-        print(f"✓ Found {len(targets)} failed videos to retry.")
+        print(f"✓ Found {len(targets)} failed videos to retry under {args.nas_base}.")
     elif targets_path.is_file():
-        print(f"=== [2/4] Loading explicit targets from {targets_path} ===")
         try:
-            targets = load_targets_file(targets_path, args.nas_base, skip_stems)
+            targets = match_nas_paths(load_targets_file(targets_path, args.nas_base, skip_stems), all_videos)
             targets_loaded = True
-            print(f"✓ Loaded {len(targets)} targets from {targets_path}.")
+            print(f"✓ Loaded {len(targets)} targets from {targets_path} found on the NAS.")
         except Exception as err:
             print(f"⚠️ Failed reading {targets_path}: {err}. Falling back to remote scan.", file=sys.stderr)
 
     if not targets_loaded:
-        print(f"=== [2/4] Discovering remote NAS video library ({args.nas_host}:{args.nas_base}) ===")
-        all_videos = list_nas_videos_ftp(
-            nas_host=args.nas_host,
-            nas_user=args.nas_user,
-            nas_pass=nas_pass,
-            base_dir=args.nas_base,
-            ftp_port=args.ftp_port,
-        )
-        print(f"✓ Discovered {len(all_videos)} video files on NAS.")
         targets = [video for video in all_videos if Path(video[1]).stem not in skip_stems]
 
     if args.limit and len(targets) > args.limit:

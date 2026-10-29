@@ -20,7 +20,24 @@ Avant de lancer les opérations, assurez-vous d'avoir validé les points suivant
 - **Accès SSH configuré** : L'hôte `o2switch` doit être défini dans `~/.ssh/config` avec votre clé Ed25519 (`ssh o2switch "echo OK"`).
 - **Accès NAS Synology** : Le service FTP (port 21) du NAS Synology doit être accessible depuis o2switch, avec une redirection NAT Freebox filtrée sur l'IP sortante d'o2switch et un compte NAS en lecture seule (voir le guide [Interconnecter le NAS Synology et o2switch](interconnecter-nas-synology-et-o2switch-ftp.md)).
 - **Identifiants NAS** : `NAS_HOST`, `NAS_USER` et `NAS_PASS` proviennent de l'environnement ou du fichier `.env` local non versionné (aucune valeur par défaut versionnée). `o2switch_ctl.sh` les transmet par stdin vers `etc/.nas_config` et `etc/.nas_pass` (mode 600) sur o2switch.
-- **Binaires et outils déployés** : Les binaires statiques musl (`dbsrt`, `dbsrt-server`), `ffmpeg` statique et Python 3.11 doivent être déployés sur o2switch (`task o2switch:sync`).
+- **Binaires et outils déployés** : Les binaires statiques musl (`dbsrt`, `dbsrt-server`) et Python 3.11 sont déployés sur o2switch par `task o2switch:sync`. `ffmpeg` / `ffprobe` ne le sont pas : voir ci-dessous.
+
+### Installer ou mettre à jour FFmpeg sur o2switch
+
+o2switch (CloudLinux 8, glibc 2.28) exige un FFmpeg entièrement statique. Les builds BtbN demandent glibc 2.31 et ne démarrent pas. On utilise les builds statiques musl de l'image `mwader/static-ffmpeg`, en restant sur la dernière branche `x.1` (les branches FFmpeg maintenues le plus longtemps). Version installée : **8.1.2**.
+
+```bash
+V=8.1.2
+c=$(docker create mwader/static-ffmpeg:$V-amd64)
+docker cp "$c:/ffmpeg" ./ffmpeg && docker cp "$c:/ffprobe" ./ffprobe && docker rm "$c"
+rsync -az ffmpeg o2switch:dbsrt/bin/ffmpeg-$V && rsync -az ffprobe o2switch:dbsrt/bin/ffprobe-$V
+# Bascule atomique, l'ancienne version reste en .bak. Les processus en cours gardent l'ancien binaire.
+ssh o2switch "cd dbsrt/bin && for b in ffmpeg ffprobe; do cp -p \$b \$b.bak && mv \$b-$V \$b; done && ./ffmpeg -hide_banner -version | head -1"
+```
+
+Avant la bascule, vérifier que la nouvelle version produit des `.phash` identiques à l'ancienne sur une vidéo du NAS (`dbsrt media:add ... --skip-certify` lancé deux fois, avec chaque version en tête du `PATH`). Retour arrière : `mv ffmpeg.bak ffmpeg` (idem `ffprobe`).
+
+Le mot de passe NAS est passé à `ffmpeg` par `-ftp-password` et apparaît donc dans son argv. FFmpeg (vérifié jusqu'à 8.1) refuse `-/ftp-password <fichier>` pour les options de protocole. Sur o2switch, `/proc` est monté avec `hidepid=2` : les autres comptes ne voient pas nos processus.
 
 ---
 
@@ -230,8 +247,14 @@ task db:import:all-phash
 Dans l'onglet `[3/r] Récents` de `dbsrt top` (avec le filtre `[x FAIL (ERREURS SEULES)]`), certaines vidéos apparaissent avec le statut `x FAIL` (statuts worker `ERROR`, `STALLED` ou `TIMEOUT`, par opposition à `COMPLETED`). Vous souhaitez relancer le traitement uniquement sur ces vidéos en échec sans rescanner l'intégralité des milliers de fichiers du NAS Synology.
 
 ### Diagnostics et Causes Fréquentes d'Échec
-1. **Espaces et crochets dans les dossiers FTP** : Les répertoires contenant des espaces (ex: `/tvshow/What IF/`, `/tvshow/Mr Robot/`) provoquaient une erreur de parsing d'URL dans FFmpeg (`No video frames could be extracted`). Le script applique désormais un percent-encoding systématique via `urllib.parse.quote(..., safe="/")`.
-2. **Dépassement du temps limite (Watchdog 900s)** : Les vidéos 4K UHD 2160p volumineuses (5 à 7 Go en HEVC) requièrent plus de 15 minutes en décodage logiciel CPU multithread et étaient prématurément tuées par le watchdog. Le plafond par défaut est désormais relevé à **1800s (30 minutes)** via `--max-extraction-secs 1800`.
+1. **Lecture refusée par le NAS** (`550 Permission denied` sur `RETR`, alors que le listing et `SIZE` répondent) : le compte FTP n'a pas le droit de lecture sur le fichier. Côté `dbsrt`, l'erreur apparaît comme `No video frames could be extracted`. Corriger les permissions du dossier partagé sur le Synology, puis relancer avec `--retry-failed`.
+2. **Noms Unicode** : le NAS mélange des noms NFC (dossiers) et NFD (fichiers copiés depuis macOS, ex. `Cruauté`). Le worker garde le nom brut renvoyé par le serveur FTP pour l'URL, et n'utilise la forme NFC que pour le nom du média.
+3. **Noms 8.3 du montage CIFS** : un montage CIFS local remplace les noms contenant `:` par des noms courts (`SY9QH1~F.MKV`) que le serveur FTP ne connaît pas. Le worker liste toujours le NAS en FTP et rattache chaque cible (fichier de cibles local ou `--retry-failed`) au vrai chemin de même nom ; les cibles introuvables sont écartées.
+4. **Dépassement du temps limite (Watchdog)** : les vidéos 4K UHD 2160p volumineuses (5 à 7 Go en HEVC) dépassent parfois le plafond par défaut de **1800s (30 minutes)**, ajustable via `--max-extraction-secs`.
+
+### Liste noire automatique
+
+Une vidéo dont les **3 dernières tentatives** du journal d'événements sont des échecs n'est plus mise en file par les lancements normaux (`--fresh-only`, superviseur RPi4). Un succès remet le compteur à zéro. `--retry-failed` ignore cette liste noire : c'est le moyen de retenter ces vidéos après correction (permissions NAS, fichier remplacé).
 
 ### Procédure de Relance Ciblée
 
@@ -245,7 +268,7 @@ task o2switch:batch:stop
 task o2switch:batch:tvshow -- --retry-failed --daemon
 ```
 
-Le script lit le journal d'événements `data/reports/batch_tvshow_nightly.jsonl`, isole les vidéos en échec qui ne possèdent toujours pas d'artefact `.phash` sur disque, et lance leur calcul immédiat.
+Le script lit le journal d'événements `data/reports/batch_tvshow_nightly.jsonl`, isole les vidéos en échec qui ne possèdent toujours pas d'artefact `.phash` sur disque, et lance leur calcul immédiat. Seules les vidéos de la bibliothèque lancée (`/tvshow` ou `/video`) sont retentées.
 
 Pour ajuster le timeout maximal par vidéo (ex: 45 minutes pour de très gros fichiers 4K) :
 
