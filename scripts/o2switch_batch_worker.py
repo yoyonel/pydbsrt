@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import atexit
 import json
+import mmap
 import os
 import re
 import signal
@@ -172,16 +173,23 @@ def resolve_nas_password() -> str:
     return _CONFIG_ENV.get("NAS_PASS", "")
 
 
+MEDIA_NAME_RE = re.compile(rb'"media_name"\s*:\s*"((?:[^"\\]|\\.)*)"')
+
+
 def load_certified_stems(couplings_file: Path) -> Set[str]:
-    """Loads all media stems already certified in couplings.json."""
+    """Loads all media stems already certified in couplings.json.
+
+    The registry embeds every subtitle's sub-frame anchors (hundreds of MB) and json.loads on it
+    peaked at 1.7 GB, so only the media_name values are scanned from a read-only mmap.
+    """
     stems: Set[str] = set()
-    if couplings_file.is_file():
+    if couplings_file.is_file() and couplings_file.stat().st_size > 0:
         try:
-            data = json.loads(couplings_file.read_text(encoding="utf-8"))
-            for item in data.get("couplings", []):
-                media_name = item.get("media_name", "")
-                if media_name:
-                    stems.add(media_name)
+            with open(couplings_file, "rb") as f, mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as data:
+                for match in MEDIA_NAME_RE.finditer(data):
+                    media_name = json.loads(b'"' + match.group(1) + b'"')
+                    if media_name:
+                        stems.add(media_name)
         except Exception as err:
             print(f"⚠️ Warning loading {couplings_file}: {err}", file=sys.stderr)
     return stems

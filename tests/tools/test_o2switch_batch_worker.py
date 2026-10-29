@@ -71,6 +71,19 @@ def test_load_certified_stems_from_couplings():
         assert len(stems) == 2
 
 
+def test_load_certified_stems_decodes_escapes_and_ignores_empty(tmp_path: Path):
+    """Pretty-printed registries, JSON escapes and non-ASCII names round-trip like json.loads."""
+    couplings = {
+        "couplings": [{"media_name": 'Caf\u00e9 "x" \\ y', "subtitles": [{"sub_frames": [1, 2]}]}, {"media_name": ""}]
+    }
+    path = tmp_path / "couplings.json"
+    path.write_text(json.dumps(couplings, indent=2), encoding="utf-8")
+
+    assert load_certified_stems(path) == {'Caf\u00e9 "x" \\ y'}
+    (tmp_path / "empty.json").touch()
+    assert load_certified_stems(tmp_path / "empty.json") == set()
+
+
 def test_resolve_retry_targets_keeps_only_last_failures(tmp_path: Path):
     """A video retried successfully, or already done locally, must not be retried again."""
     events = tmp_path / "events.jsonl"
