@@ -123,4 +123,16 @@ tags:
       <a href="stockage-decentralise-cas-et-distribution/">→ Comprendre le stockage CAS</a>
     </div>
   </div>
+
+  <div class="dbsrt-bento-card bento-indigo">
+    <div class="bento-header">
+      <span class="bento-icon">🔄</span>
+      <span class="bento-badge">DÉPORT &amp; SYNCHRO</span>
+    </div>
+    <h3>Déport de Calcul, Stockage Multi-Niveaux &amp; Synchronisation</h3>
+    <p>Architecture streaming direct FFmpeg (Zéro NVMe), flux IN-OUT, déport 12 vCPUs o2switch et réconciliation sans conflit avec le NAS Synology.</p>
+    <div class="bento-links">
+      <a href="architecture-deport-calcul-stockage-et-synchronisation-o2switch/">→ Explorer l'architecture de synchronisation</a>
+    </div>
+  </div>
 </div>

@@ -134,6 +134,8 @@ nav:
       - Audit d'Intégrité Catalogue & Stockage: how-to/2026-10-26-audit-integrite-catalogue-et-stockage.md
       - Déployer sur Hébergement Cloud o2switch: how-to/deployer-o2switch-cloud-cpanel.md
       - Interconnecter NAS Synology & o2switch SFTP: how-to/interconnecter-nas-synology-et-o2switch-sftp.md
+      - Batch de Calcul & Synchronisation o2switch: how-to/executer-batch-calcul-et-synchronisation-o2switch.md
+      - Superviser les Batchs o2switch depuis un RPi4: how-to/superviser-batch-o2switch-depuis-rpi4.md
       - Exécuter les Recettes de Chaos Testing: how-to/executer-recettes-chaos-testing.md
       - Contribuer à la Documentation Diátaxis: how-to/contribuer-documentation-diataxis.md
   - 📖 Référence Technique:
@@ -156,6 +158,7 @@ nav:
       - Indexation Métrique (MIH vs BK-Tree): explanation/indexation-metrique-mih-vs-bktree.md
       - Modèle Relationnel & Couplages Certifiés: explanation/modele-relationnel-couplages-certifies.md
       - Architecture Cache Hybride Local & Cloud o2switch: explanation/architecture-cache-hybride-local-cloud.md
+      - Déport de Calcul & Synchronisation o2switch: explanation/architecture-deport-calcul-stockage-et-synchronisation-o2switch.md
       - Architecture Démon Axum & VLC OSD: explanation/architecture-daemon-axum-et-vlc-osd.md
       - Stockage Décentralisé CAS & Distribution: explanation/stockage-decentralise-cas-et-distribution.md
       - Moteur Zero-DB mmap SIMD: 2026-10-15-scaling-architecture-rust-mmap.md
@@ -173,6 +176,7 @@ nav:
   - 📊 Benchmarks & Preuves:
       - Campagnes Empiriques:
           - Rapport Batch TVShow Synology: 2026-10-25-rapport-batch-import-tvshow-synology.md
+          - Analyse Performance Décodage CPU vs Réseau (o2switch): 2026-10-28-analyse-performance-decodage-cpu-vs-reseau-o2switch.md
           - Dashboard Interactif E2E VLC (1 336 Tests): 2026-10-20-dashboard-interactif-e2e-vlc-corpus-nas.md
           - Validation E2E VLC Corpus Exhaustif (1 336 Extraits): 2026-10-19-validation-e2e-vlc-vlsub-corpus-nas-exhaustif.md
           - Validation E2E VLC & Corpus Réel NAS: 2026-10-19-validation-e2e-vlc-et-benchmarks-corpus-nas.md

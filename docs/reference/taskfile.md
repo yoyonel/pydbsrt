@@ -139,6 +139,12 @@ Cette page dresse le dictionnaire exhaustif de toutes les cibles d'orchestration
 | `task o2switch:build` | Cross-compile les exécutables statiques autonomes `x86_64-unknown-linux-musl` (`dbsrt`, `dbsrt-server`) et applique `strip`. |
 | `task o2switch:test-local` | Valide empiriquement le binaire musl en mode Zero-DB localement sur le port `8769`. |
 | `task o2switch:sync` | Synchronise les binaires statiques, le catalogue `catalog.dbphash`, les sous-titres et `.htaccess` par rsync. |
+| `task o2switch:batch:tvshow` | Exécute l'ingestion par batch distante sur les vidéos vierges (supporte `--daemon`, `--fresh-only`, `--retry-failed`, `--max-extraction-secs`). |
+| `task o2switch:batch:status` | Vérifie l'état d'exécution du démon batch (PID, CPU, mémoire, progression). |
+| `task o2switch:batch:stop` | Arrête proprement le travailleur batch en arrière-plan sur o2switch. |
+| `task o2switch:batch:logs` | Suit en direct (`tail -f`) les journaux d'exécution du batch distant sur o2switch. |
+| `task o2switch:top` | Ouvre le moniteur TUI plein écran en direct sur o2switch via SSH (`ssh -t`). |
+| `task o2switch:pull-catalog` | Rapatrie les `.phash`, `.srt` et journaux télémétriques depuis o2switch vers le stockage local. |
 | `task o2switch:start` | Démarre le démon en arrière-plan sans root sur o2switch et attend la validation de la sonde `/v1/health`. |
 | `task o2switch:stop` | Arrête proprement le démon à distance via signal `SIGTERM` (avec bascule `SIGKILL` de sécurité). |
 | `task o2switch:restart` | Redémarre le démon `dbsrt-server` sur o2switch. |

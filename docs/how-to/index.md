@@ -47,6 +47,8 @@ tags:
 ### 🌐 Déploiement Multi-Cibles & Hébergement
 * [Comment déployer sur un hébergement mutualisé o2switch](deployer-o2switch-cloud-cpanel.md) : Orchestrer le démon statique musl en mode Zero-DB avec reverse-proxy LiteSpeed sans root.
 * [Comment interconnecter un NAS Synology et le Cloud o2switch en SFTP](interconnecter-nas-synology-et-o2switch-sftp.md) : Ouvrir un accès distant sécurisé par liste blanche IP, configurer DSM, router les ports Freebox et tester la liaison SFTP/SMB.
+* [Comment orchestrer les batchs de calcul pHash distants, monitorer et synchroniser les catalogues avec o2switch](executer-batch-calcul-et-synchronisation-o2switch.md) : Déporter l'ingestion sur 8-9 workers (80% CPU), streamer en Zéro-NVMe, surveiller dans `dbsrt top` et rapatrier les catalogues.
+* [Comment superviser et auto-guérir les batchs o2switch en continu depuis un Raspberry Pi 4 (24/7)](superviser-batch-o2switch-depuis-rpi4.md) : Surveiller l'intégrité distante H24, auto-guérir les arrêts de daemon, adapter les workers selon l'horaire et synchroniser en continu les `.phash`.
 
 ### ✍️ Gouvernance & Standards Documentaires
 * [Comment contribuer à la documentation selon Diátaxis](contribuer-documentation-diataxis.md) : Consignes méthodologiques, gabarits et checklists pour enrichir incrémentalement les 4 quadrants.
