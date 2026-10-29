@@ -8,6 +8,19 @@ use dbsrt_index::DbSubtitleCoupling;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+/// Longest language token accepted in output subtitle file names (e.g. `pt-BR`, `zh_Hant`).
+const MAX_LANGUAGE_TOKEN_LEN: usize = 16;
+
+/// True when a client-supplied language is safe to embed in a file name:
+/// non-empty, at most `MAX_LANGUAGE_TOKEN_LEN`, ASCII alphanumerics plus `-`/`_` only.
+pub fn is_safe_language_token(lang: &str) -> bool {
+    !lang.is_empty()
+        && lang.len() <= MAX_LANGUAGE_TOKEN_LEN
+        && lang
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
 /// Normalizes a language code (ISO 639-1 / 639-2 or common name) to canonical 2-letter lowercase.
 ///
 /// # Arguments
@@ -585,6 +598,16 @@ pub fn lookup_certified_couplings(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_is_safe_language_token() {
+        for ok in ["en", "fre", "pt-BR", "zh_Hant"] {
+            assert!(is_safe_language_token(ok), "{ok}");
+        }
+        for bad in ["", "../x", "en/fr", "a.b", "en fr", "abcdefghijklmnopq"] {
+            assert!(!is_safe_language_token(bad), "{bad}");
+        }
+    }
 
     #[test]
     fn test_detect_subtitle_file_language_multilingual() {

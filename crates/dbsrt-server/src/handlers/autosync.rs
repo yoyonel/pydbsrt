@@ -7,7 +7,7 @@ use crate::dtos::{
 };
 use crate::services::catalog::{
     collect_subtitle_search_dirs, detect_subtitle_file_language, fetch_or_cache_remote_subtitle,
-    find_subtitle_in_catalog, normalize_lang_code,
+    find_subtitle_in_catalog, is_safe_language_token, normalize_lang_code,
 };
 use crate::services::phash::{
     calculate_shift_consensus, compute_media_phash_shift_multi, resolve_or_extract_phash,
@@ -231,13 +231,22 @@ fn save_synced_subtitle(
         })
 }
 
+/// Validates client inputs before any work: the media must exist and the language must be
+/// safe to embed in the output file name.
+fn autosync_precheck_error(media_path: &Path, language: &str) -> Option<String> {
+    if !media_path.exists() {
+        return Some(format!("Target media file not found: {:?}", media_path));
+    }
+    (!is_safe_language_token(language)).then(|| format!("Invalid language code: {:?}", language))
+}
+
 pub async fn autosync_handler(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<AutoSyncRequest>,
 ) -> Json<AutoSyncResponse> {
     let start = Instant::now();
     let media_path = PathBuf::from(&payload.media_path);
-    if !media_path.exists() {
+    if let Some(error) = autosync_precheck_error(&media_path, &payload.language) {
         return Json(AutoSyncResponse {
             success: false,
             matched_media: None,
@@ -248,7 +257,7 @@ pub async fn autosync_handler(
             confidence_percent: 0.0,
             elapsed_seconds: start.elapsed().as_secs_f64(),
             source: None,
-            error: Some(format!("Target media file not found: {:?}", media_path)),
+            error: Some(error),
         });
     }
 
