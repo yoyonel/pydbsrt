@@ -139,16 +139,6 @@
     "max_parameters": 1,
     "max_nesting": 5
   },
-  "crates/dbsrt-cli/src/commands/top/app.rs::mod::handle_global_navigation_key_event": {
-    "file_path": "crates/dbsrt-cli/src/commands/top/app.rs",
-    "scope": "mod",
-    "function_name": "handle_global_navigation_key_event",
-    "start_line": 746,
-    "max_loc": 81,
-    "max_ccn": 23,
-    "max_parameters": 2,
-    "max_nesting": 6
-  },
   "crates/dbsrt-cli/src/commands/top/app.rs::mod::handle_media_browser_batch_keys": {
     "file_path": "crates/dbsrt-cli/src/commands/top/app.rs",
     "scope": "mod",
@@ -206,16 +196,6 @@
     "start_line": 684,
     "max_loc": 43,
     "max_ccn": 12,
-    "max_parameters": 2,
-    "max_nesting": 5
-  },
-  "crates/dbsrt-cli/src/commands/top/app.rs::mod::handle_tab_cycling": {
-    "file_path": "crates/dbsrt-cli/src/commands/top/app.rs",
-    "scope": "mod",
-    "function_name": "handle_tab_cycling",
-    "start_line": 845,
-    "max_loc": 43,
-    "max_ccn": 17,
     "max_parameters": 2,
     "max_nesting": 5
   },
@@ -388,16 +368,6 @@
     "max_ccn": 4,
     "max_parameters": 5,
     "max_nesting": 3
-  },
-  "crates/dbsrt-cli/src/commands/top/views/footer.rs::mod::build_shortcuts_text": {
-    "file_path": "crates/dbsrt-cli/src/commands/top/views/footer.rs",
-    "scope": "mod",
-    "function_name": "build_shortcuts_text",
-    "start_line": 130,
-    "max_loc": 57,
-    "max_ccn": 31,
-    "max_parameters": 1,
-    "max_nesting": 5
   },
   "crates/dbsrt-cli/src/main.rs::mod::main": {
     "file_path": "crates/dbsrt-cli/src/main.rs",

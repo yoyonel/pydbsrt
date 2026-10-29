@@ -1,0 +1,34 @@
+---
+source: crates/dbsrt-cli/tests/scenarios/visual_snapshots.rs
+expression: grid
+---
+┌ pydbsrt top v0.1.0 (e79795f 2026-10-29) ── Moniteur de Décodage pHash & Ingestion Temps Réel ────────────────────────────── ⏱️   HH:MM:SS ┐
+│ 🖥️   HÔTE      │ thinkpad-x1 (Debian 13 (trixie) x86_64) │ Workers: 2 actifs │ Host CPU: 18% │ RAM:  8.4/31.0 GiB (27%)                   │
+│ ⚙️   MOTEURS   │ CPU: 13th Gen Intel(R) Core(TM) i7-1355U (12 c.) │ GPU: Iris Xe Graphics (Mode CPU Multithread)                          │
+│ ⚡  FLUX REEL  │ Réseau Net RX:   0.0 MB/s (  0.0 Mbps)  ──►  Pipe pHash:   0.0 MB/s                                                      │
+│ 📈  CUMUL SESS │ 0.0 MB traités en 0s (En attente de flux...)                                                                             │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌ 💻  INFORMATIONS SYSTÈME & MATÉRIEL (VUE FASTFETCH) ──────────────────────────────────────────────────────────────────────────────────────┐
+│  📦  APPLICATIF (dbsrt)                                                🎮  ACCÉLÉRATION MATÉRIELLE (GPU)                                   │
+│  │ ├─ Version binaire   : v0.1.0 (e79795f 2026-10-29)                 │ ├─ Contrôleur GPU    : Iris Xe Graphics                          │
+│  │ ├─ Provenance Git    : e79795f                                     │ ├─ Moteur décodage   : Iris Xe Graphics (Pilote non chargé / CPU)│
+│  │ ├─ Date de build     : 2026-10-29                                  │ ├─ Mode d'ingestion  : Multi-threads CPU logiciel                │
+│  │ └─ Couplages cert.   : data/SRT/couplings.json                     │ └─ Conso & Fréq.     : Inactif (Mode CPU)                        │
+│                                                                                                                                          │
+│  🌐  NŒUD & SYSTÈME D'EXPLOITATION                                     💾  MÉMOIRE & STOCKAGE                                              │
+│  │ ├─ Hôte (Hostname)   : thinkpad-x1                                 │ ├─ RAM système       :  8.4 / 31.0 GiB (27%)                     │
+│  │ ├─ Distribution      : Debian 13 (trixie)                          │ ├─ Cache pHash       : data/__PHASH__                            │
+│  │ ├─ Noyau (Kernel)    : 6.12.73                                     │ ├─ Catalogue média   : data/reports/media_browser_cache.json     │
+│  │ └─ Architecture      : x86_64                                      │ └─ Sources déclarées : 2 active(s)                               │
+│                                                                                                                                          │
+│  🧠  PROCESSEUR (CPU)                                                  ⚡  DÉBITS & TÉLÉMÉTRIE EN DIRECT                                   │
+│  │ ├─ Modèle            : 13th Gen Intel(R) Core(TM) i7-1355U         │ ├─ Réseau Net RX     :   0.0 MB/s (  0.0 Mbps)                   │
+│  │ ├─ Cœurs logiques    : 12 threads                                  │ ├─ Débit Pipe pHash  :   0.0 MB/s                                │
+│  │ ├─ Cœurs physiques   : 10 cœurs physiques                          │ ├─ Workers en cours  : 2 actifs                                  │
+│  │ └─ Charge globale    : 18.5%                                       │ └─ Session globale   : 0 flux (Session idle)                     │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+  [1] Tâches   [2/h] Stats   [3/r] Récents   [4/m] Médias   [5/s] Sources   [6/y] Système  │ [↑/k] Défiler  [?] Aide  [q] Quitter

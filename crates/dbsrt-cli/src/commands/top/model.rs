@@ -32,6 +32,7 @@ use crate::commands::top::constants::{
     P90_PERCENTILE_FACTOR, PROGRESS_BAR_CHAR_WIDTH, SECONDS_PER_DAY, SECONDS_PER_HOUR,
     SECONDS_PER_MINUTE,
 };
+pub use crate::commands::top::host_info::HostSystemInfo;
 
 /// Hardware GPU telemetry metrics sampled from `intel_gpu_top` or sysfs engines.
 ///
@@ -732,6 +733,8 @@ pub enum ViewPage {
     MediaBrowser,
     /// Full-frame manager for configured media library sources (`[5/s]`).
     MediaSources,
+    /// Full-frame Fastfetch-like system and hardware host diagnostics view (`[6/y]`).
+    System,
     /// Full-frame inspection view of selected task (cmdline, I/O, threads, memory, logs).
     JobInspection,
     /// Full-frame inspection and diagnostic view of candidate media release.
@@ -752,17 +755,19 @@ pub enum HelpTab {
     Completed,
     MediaBrowser,
     MediaSources,
+    System,
 }
 
 impl HelpTab {
     /// All help tabs in display order.
-    pub const ALL: [HelpTab; 6] = [
+    pub const ALL: [HelpTab; 7] = [
         HelpTab::General,
         HelpTab::ActiveJobs,
         HelpTab::StatsHistory,
         HelpTab::Completed,
         HelpTab::MediaBrowser,
         HelpTab::MediaSources,
+        HelpTab::System,
     ];
 
     /// Returns the tab title badge string.
@@ -774,6 +779,7 @@ impl HelpTab {
             HelpTab::Completed => "[3/r] Récents",
             HelpTab::MediaBrowser => "[4/m] Médias",
             HelpTab::MediaSources => "[5/s] Sources",
+            HelpTab::System => "[6/y] Système",
         }
     }
 
@@ -785,19 +791,21 @@ impl HelpTab {
             HelpTab::StatsHistory => HelpTab::Completed,
             HelpTab::Completed => HelpTab::MediaBrowser,
             HelpTab::MediaBrowser => HelpTab::MediaSources,
-            HelpTab::MediaSources => HelpTab::General,
+            HelpTab::MediaSources => HelpTab::System,
+            HelpTab::System => HelpTab::General,
         }
     }
 
     /// Cycles to the previous contextual help tab.
     pub fn prev(&self) -> Self {
         match self {
-            HelpTab::General => HelpTab::MediaSources,
+            HelpTab::General => HelpTab::System,
             HelpTab::ActiveJobs => HelpTab::General,
             HelpTab::StatsHistory => HelpTab::ActiveJobs,
             HelpTab::Completed => HelpTab::StatsHistory,
             HelpTab::MediaBrowser => HelpTab::Completed,
             HelpTab::MediaSources => HelpTab::MediaBrowser,
+            HelpTab::System => HelpTab::MediaSources,
         }
     }
 
@@ -815,6 +823,7 @@ impl HelpTab {
             ViewPage::CompletedMedia | ViewPage::CompletedInspection => HelpTab::Completed,
             ViewPage::MediaBrowser | ViewPage::MediaInspection => HelpTab::MediaBrowser,
             ViewPage::MediaSources => HelpTab::MediaSources,
+            ViewPage::System => HelpTab::System,
             ViewPage::Help => HelpTab::General,
         }
     }
@@ -827,6 +836,8 @@ impl HelpTab {
 /// batch history records, and media catalog state into a single cohesive snapshot.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct SystemTelemetry {
+    /// Static host and hardware identification.
+    pub host_info: HostSystemInfo,
     /// Total host CPU load percentage across all logical cores.
     pub host_cpu_pct: f32,
     /// Physical RAM consumed in Gibibytes (GiB).

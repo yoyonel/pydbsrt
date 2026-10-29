@@ -107,6 +107,9 @@ fn test_scenario_help_tab_cycling_and_scrolling() {
     assert_eq!(harness.app.help_tab, HelpTab::MediaSources);
 
     harness.send_key(KeyCode::Tab);
+    assert_eq!(harness.app.help_tab, HelpTab::System);
+
+    harness.send_key(KeyCode::Tab);
     assert_eq!(harness.app.help_tab, HelpTab::General);
 
     harness.send_key(KeyCode::Tab);
@@ -116,7 +119,10 @@ fn test_scenario_help_tab_cycling_and_scrolling() {
     harness.send_key(KeyCode::BackTab);
     assert_eq!(harness.app.help_tab, HelpTab::General);
 
-    // Direct jump keys: '0', '1', '2', '3', '4', '5'
+    // Direct jump keys: '0', '1', '2', '3', '4', '5', '6'
+    harness.send_key(KeyCode::Char('6'));
+    assert_eq!(harness.app.help_tab, HelpTab::System);
+
     harness.send_key(KeyCode::Char('3'));
     assert_eq!(harness.app.help_tab, HelpTab::Completed);
 

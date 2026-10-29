@@ -2,6 +2,7 @@
 
 pub mod app;
 pub mod constants;
+pub mod host_info;
 pub mod model;
 pub mod process_ctl;
 pub mod sampler;
@@ -13,6 +14,7 @@ use clap::Args;
 
 pub use app::run_top_app;
 pub use constants::DEFAULT_REFRESH_INTERVAL_MS;
+pub use host_info::HostSystemInfo;
 pub use model::{ActiveJobTelemetry, GpuTelemetry, MediaSourceConfig, SystemTelemetry, ViewPage};
 
 /// Command line arguments for `dbsrt top`.
@@ -35,7 +37,9 @@ pub fn probe_telemetry_snapshot(refresh_ms: u64) -> Result<SystemTelemetry> {
     let interval = refresh_ms.clamp(200, 1000);
     let mut initial_tel = SystemTelemetry::default();
     let mut sys = sysinfo::System::new();
+    sys.refresh_cpu_specifics(sysinfo::CpuRefreshKind::everything());
     sys.refresh_memory_specifics(sysinfo::MemoryRefreshKind::everything());
+    initial_tel.host_info = host_info::detect_host_system_info_with_sys(&sys);
     initial_tel.ram_total_gib = sys.total_memory() as f64 / constants::BYTES_PER_GIB_F64;
     initial_tel.ram_used_gib = sys.used_memory() as f64 / constants::BYTES_PER_GIB_F64;
 

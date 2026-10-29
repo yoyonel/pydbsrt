@@ -85,3 +85,11 @@ fn test_snapshot_help_view() {
     let grid = harness.render_to_text();
     insta::assert_snapshot!("view_help_media_browser", grid);
 }
+
+#[test]
+fn test_snapshot_system_view() {
+    let mut harness = TestHarness::new(SNAPSHOT_WIDTH, SNAPSHOT_HEIGHT, mock_complete_telemetry());
+    harness.app.view = ViewPage::System;
+    let grid = harness.render_to_text();
+    insta::assert_snapshot!("view_system", grid);
+}

@@ -10,4 +10,5 @@ pub mod media_browser;
 pub mod media_inspection;
 pub mod media_sources;
 pub mod stats;
+pub mod system;
 pub mod widgets;

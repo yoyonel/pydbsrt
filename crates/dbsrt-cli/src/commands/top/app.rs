@@ -81,6 +81,8 @@ pub struct AppState {
     pub source_scroll_index: usize,
     /// Modal state when adding or editing a media storage source.
     pub source_modal: Option<SourceInputModalState>,
+    /// Scroll line offset in System diagnostics view (`[6/y]`).
+    pub system_scroll_index: usize,
     /// Set of multi-selected candidate media paths tagged with Spacebar (`[Space]`).
     pub selected_media_paths: HashSet<PathBuf>,
     /// Active filter criterion in Media Browser (`[f]`).
@@ -167,6 +169,7 @@ impl AppState {
             ViewPage::ActiveJobs => self.selected_index = 0,
             ViewPage::CompletedMedia => self.completed_scroll_index = 0,
             ViewPage::MediaBrowser => self.media_scroll_index = 0,
+            ViewPage::System => self.system_scroll_index = 0,
             _ => {}
         }
     }
@@ -323,8 +326,10 @@ pub fn run_top_app(refresh_interval_ms: u64) -> Result<()> {
 
     let media_sources_path = PathBuf::from(DEFAULT_MEDIA_SOURCES_PATH);
     let initial_sources = load_media_sources(&media_sources_path);
+    let host_info = crate::commands::top::host_info::detect_host_system_info_with_sys(&initial_sys);
 
     let initial_telemetry = SystemTelemetry {
+        host_info,
         host_cpu_pct: host_cpu,
         ram_used_gib: ram_used,
         ram_total_gib: ram_total,
@@ -949,59 +954,10 @@ fn handle_global_navigation_key_event(code: KeyCode, app: &mut AppState) -> bool
             app.should_quit = true;
             true
         }
-        KeyCode::Char('?') => {
-            if app.view == ViewPage::Help {
-                app.view = app.help_caller_view;
-            } else {
-                app.help_caller_view = app.view;
-                app.help_tab = HelpTab::from_view(app.view);
-                app.help_scroll_index = 0;
-                app.view = ViewPage::Help;
-            }
-            true
-        }
-        KeyCode::Esc => {
-            if !app.current_search_query().is_empty() {
-                if let Some(query) = app.current_search_query_mut() {
-                    query.clear();
-                }
-                app.reset_current_view_scroll();
-                app.set_feedback("Recherche effacée.".to_string());
-            } else {
-                match app.view {
-                    ViewPage::ActiveJobs => {
-                        app.should_quit = true;
-                    }
-                    ViewPage::MediaInspection => {
-                        app.view = ViewPage::MediaBrowser;
-                    }
-                    ViewPage::CompletedInspection => {
-                        app.view = ViewPage::CompletedMedia;
-                    }
-                    ViewPage::Help => {
-                        app.view = app.help_caller_view;
-                    }
-                    ViewPage::JobInspection
-                    | ViewPage::StatsHistory
-                    | ViewPage::CompletedMedia
-                    | ViewPage::MediaBrowser
-                    | ViewPage::MediaSources => {
-                        app.view = ViewPage::ActiveJobs;
-                    }
-                }
-            }
-            true
-        }
+        KeyCode::Char('?') => handle_help_key_toggle(app),
+        KeyCode::Esc => handle_esc_key_navigation(app),
         KeyCode::Backspace if app.view != ViewPage::ActiveJobs => {
-            if app.view == ViewPage::MediaInspection {
-                app.view = ViewPage::MediaBrowser;
-            } else if app.view == ViewPage::CompletedInspection {
-                app.view = ViewPage::CompletedMedia;
-            } else if app.view == ViewPage::Help {
-                app.view = app.help_caller_view;
-            } else {
-                app.view = ViewPage::ActiveJobs;
-            }
+            handle_backspace_navigation(app);
             true
         }
         KeyCode::Char('/')
@@ -1018,6 +974,67 @@ fn handle_global_navigation_key_event(code: KeyCode, app: &mut AppState) -> bool
             true
         }
         _ => false,
+    }
+}
+
+/// Toggles between the Help screen and previous caller view.
+fn handle_help_key_toggle(app: &mut AppState) -> bool {
+    if app.view == ViewPage::Help {
+        app.view = app.help_caller_view;
+    } else {
+        app.help_caller_view = app.view;
+        app.help_tab = HelpTab::from_view(app.view);
+        app.help_scroll_index = 0;
+        app.view = ViewPage::Help;
+    }
+    true
+}
+
+/// Handles Escape key behavior: clearing search query or retreating through view hierarchy.
+fn handle_esc_key_navigation(app: &mut AppState) -> bool {
+    if !app.current_search_query().is_empty() {
+        if let Some(query) = app.current_search_query_mut() {
+            query.clear();
+        }
+        app.reset_current_view_scroll();
+        app.set_feedback("Recherche effacée.".to_string());
+    } else {
+        match app.view {
+            ViewPage::ActiveJobs => {
+                app.should_quit = true;
+            }
+            ViewPage::MediaInspection => {
+                app.view = ViewPage::MediaBrowser;
+            }
+            ViewPage::CompletedInspection => {
+                app.view = ViewPage::CompletedMedia;
+            }
+            ViewPage::Help => {
+                app.view = app.help_caller_view;
+            }
+            ViewPage::JobInspection
+            | ViewPage::StatsHistory
+            | ViewPage::CompletedMedia
+            | ViewPage::MediaBrowser
+            | ViewPage::MediaSources
+            | ViewPage::System => {
+                app.view = ViewPage::ActiveJobs;
+            }
+        }
+    }
+    true
+}
+
+/// Handles Backspace key retreat navigation from sub-views and modal screens.
+fn handle_backspace_navigation(app: &mut AppState) {
+    if app.view == ViewPage::MediaInspection {
+        app.view = ViewPage::MediaBrowser;
+    } else if app.view == ViewPage::CompletedInspection {
+        app.view = ViewPage::CompletedMedia;
+    } else if app.view == ViewPage::Help {
+        app.view = app.help_caller_view;
+    } else {
+        app.view = ViewPage::ActiveJobs;
     }
 }
 
@@ -1041,44 +1058,56 @@ fn handle_global_navigation_key_event(code: KeyCode, app: &mut AppState) -> bool
 fn handle_tab_cycling(code: KeyCode, app: &mut AppState) -> bool {
     match code {
         KeyCode::Tab | KeyCode::Right => {
-            if app.view == ViewPage::Help {
-                app.help_tab = app.help_tab.next();
-                app.help_scroll_index = 0;
-            } else {
-                app.view = match app.view {
-                    ViewPage::ActiveJobs => ViewPage::StatsHistory,
-                    ViewPage::StatsHistory => ViewPage::CompletedMedia,
-                    ViewPage::CompletedMedia => ViewPage::MediaBrowser,
-                    ViewPage::MediaBrowser => ViewPage::MediaSources,
-                    ViewPage::MediaSources
-                    | ViewPage::JobInspection
-                    | ViewPage::MediaInspection
-                    | ViewPage::CompletedInspection
-                    | ViewPage::Help => ViewPage::ActiveJobs,
-                };
-            }
+            cycle_view_forward(app);
             true
         }
         KeyCode::BackTab | KeyCode::Left => {
-            if app.view == ViewPage::Help {
-                app.help_tab = app.help_tab.prev();
-                app.help_scroll_index = 0;
-            } else {
-                app.view = match app.view {
-                    ViewPage::ActiveJobs => ViewPage::MediaSources,
-                    ViewPage::MediaSources => ViewPage::MediaBrowser,
-                    ViewPage::MediaBrowser => ViewPage::CompletedMedia,
-                    ViewPage::CompletedMedia => ViewPage::StatsHistory,
-                    ViewPage::StatsHistory => ViewPage::ActiveJobs,
-                    ViewPage::JobInspection
-                    | ViewPage::MediaInspection
-                    | ViewPage::CompletedInspection
-                    | ViewPage::Help => ViewPage::ActiveJobs,
-                };
-            }
+            cycle_view_backward(app);
             true
         }
         _ => false,
+    }
+}
+
+/// Advances to the next view or help tab.
+fn cycle_view_forward(app: &mut AppState) {
+    if app.view == ViewPage::Help {
+        app.help_tab = app.help_tab.next();
+        app.help_scroll_index = 0;
+    } else {
+        app.view = match app.view {
+            ViewPage::ActiveJobs => ViewPage::StatsHistory,
+            ViewPage::StatsHistory => ViewPage::CompletedMedia,
+            ViewPage::CompletedMedia => ViewPage::MediaBrowser,
+            ViewPage::MediaBrowser => ViewPage::MediaSources,
+            ViewPage::MediaSources => ViewPage::System,
+            ViewPage::System
+            | ViewPage::JobInspection
+            | ViewPage::MediaInspection
+            | ViewPage::CompletedInspection
+            | ViewPage::Help => ViewPage::ActiveJobs,
+        };
+    }
+}
+
+/// Retreats to the previous view or help tab.
+fn cycle_view_backward(app: &mut AppState) {
+    if app.view == ViewPage::Help {
+        app.help_tab = app.help_tab.prev();
+        app.help_scroll_index = 0;
+    } else {
+        app.view = match app.view {
+            ViewPage::ActiveJobs => ViewPage::System,
+            ViewPage::System => ViewPage::MediaSources,
+            ViewPage::MediaSources => ViewPage::MediaBrowser,
+            ViewPage::MediaBrowser => ViewPage::CompletedMedia,
+            ViewPage::CompletedMedia => ViewPage::StatsHistory,
+            ViewPage::StatsHistory => ViewPage::ActiveJobs,
+            ViewPage::JobInspection
+            | ViewPage::MediaInspection
+            | ViewPage::CompletedInspection
+            | ViewPage::Help => ViewPage::ActiveJobs,
+        };
     }
 }
 
@@ -1120,6 +1149,9 @@ fn resolve_shortcut_target(code: KeyCode, current_view: ViewPage) -> Option<(Vie
             if current_view != ViewPage::MediaBrowser || code != KeyCode::Char('S') =>
         {
             Some((ViewPage::MediaSources, HelpTab::MediaSources))
+        }
+        KeyCode::Char('6') | KeyCode::Char('y') | KeyCode::Char('Y') => {
+            Some((ViewPage::System, HelpTab::System))
         }
         _ => None,
     }
@@ -1216,6 +1248,9 @@ fn scroll_up(app: &mut AppState) {
         ViewPage::MediaSources if app.source_scroll_index > 0 => {
             app.source_scroll_index -= 1;
         }
+        ViewPage::System if app.system_scroll_index > 0 => {
+            app.system_scroll_index -= 1;
+        }
         ViewPage::Help if app.help_scroll_index > 0 => {
             app.help_scroll_index -= 1;
         }
@@ -1288,6 +1323,9 @@ fn scroll_down(app: &mut AppState, telemetry: &SystemTelemetry) {
                 app.source_scroll_index += 1;
             }
         }
+        ViewPage::System => {
+            app.system_scroll_index += 1;
+        }
         ViewPage::Help => {
             app.help_scroll_index += 1;
         }
@@ -1310,6 +1348,9 @@ fn scroll_page_up(app: &mut AppState) {
         }
         ViewPage::MediaSources => {
             app.source_scroll_index = app.source_scroll_index.saturating_sub(PAGE_SCROLL_STEP);
+        }
+        ViewPage::System => {
+            app.system_scroll_index = app.system_scroll_index.saturating_sub(PAGE_SCROLL_STEP);
         }
         ViewPage::Help => {
             app.help_scroll_index = app.help_scroll_index.saturating_sub(PAGE_SCROLL_STEP);
@@ -1340,6 +1381,9 @@ fn scroll_page_down(app: &mut AppState, telemetry: &SystemTelemetry) {
             let max_idx = telemetry.media_sources.len().saturating_sub(1);
             app.source_scroll_index = (app.source_scroll_index + PAGE_SCROLL_STEP).min(max_idx);
         }
+        ViewPage::System => {
+            app.system_scroll_index += PAGE_SCROLL_STEP;
+        }
         ViewPage::Help => {
             app.help_scroll_index += PAGE_SCROLL_STEP;
         }
@@ -1361,6 +1405,9 @@ fn scroll_home(app: &mut AppState) {
         }
         ViewPage::MediaSources => {
             app.source_scroll_index = 0;
+        }
+        ViewPage::System => {
+            app.system_scroll_index = 0;
         }
         ViewPage::Help => {
             app.help_scroll_index = 0;
@@ -1385,6 +1432,9 @@ fn scroll_end(app: &mut AppState, telemetry: &SystemTelemetry) {
         }
         ViewPage::MediaSources => {
             app.source_scroll_index = telemetry.media_sources.len().saturating_sub(1);
+        }
+        ViewPage::System => {
+            app.system_scroll_index = 20;
         }
         ViewPage::Help => {
             app.help_scroll_index = 100;
@@ -1435,6 +1485,7 @@ fn handle_view_specific_key_event(
         ViewPage::StatsHistory => {
             handle_stats_history_view_keys(code, app);
         }
+        ViewPage::System => {}
     }
 }
 

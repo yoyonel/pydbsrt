@@ -10,8 +10,9 @@ use dbsrt_cli::commands::top::model::{
     calculate_dimension_stats, calculate_overall_stats, default_progress_bar,
     filter_and_sort_media, format_duration, format_progress_bar, matches_fuzzy_search,
     parse_iso_to_unix_secs, ActiveJobTelemetry, CompletedFilter, CompletedSort,
-    DiscoveredMediaItem, GpuTelemetry, HelpTab, HistoricalRecord, IngestionStatus, MediaFilter,
-    MediaSort, MediaSourceFilter, MediaSubtrackInfo, SessionThroughput, SystemTelemetry, ViewPage,
+    DiscoveredMediaItem, GpuTelemetry, HelpTab, HistoricalRecord, HostSystemInfo, IngestionStatus,
+    MediaFilter, MediaSort, MediaSourceFilter, MediaSubtrackInfo, SessionThroughput,
+    SystemTelemetry, ViewPage,
 };
 use dbsrt_cli::commands::top::process_ctl::{
     check_if_stopped, inspect_job_details, kill_job, stop_job, toggle_pause_job,
@@ -249,6 +250,7 @@ fn test_ui_rendering_all_pages() {
     let stats = dbsrt_cli::commands::top::model::calculate_overall_stats(&history);
 
     let tel = SystemTelemetry {
+        host_info: HostSystemInfo::default(),
         host_cpu_pct: 25.0,
         ram_used_gib: 8.5,
         ram_total_gib: 32.0,
@@ -1414,9 +1416,15 @@ fn test_app_state_new_tabs_and_scrolling() {
     assert_eq!(app.view, ViewPage::MediaSources);
 
     handle_key_event(KeyCode::Tab, &mut app, &tel);
+    assert_eq!(app.view, ViewPage::System);
+
+    handle_key_event(KeyCode::Tab, &mut app, &tel);
     assert_eq!(app.view, ViewPage::ActiveJobs);
 
-    // BackTab cycling: ActiveJobs -> MediaSources -> MediaBrowser -> CompletedMedia -> StatsHistory -> ActiveJobs
+    // BackTab cycling: ActiveJobs -> System -> MediaSources -> MediaBrowser -> CompletedMedia -> StatsHistory -> ActiveJobs
+    handle_key_event(KeyCode::BackTab, &mut app, &tel);
+    assert_eq!(app.view, ViewPage::System);
+
     handle_key_event(KeyCode::BackTab, &mut app, &tel);
     assert_eq!(app.view, ViewPage::MediaSources);
 
@@ -3306,4 +3314,57 @@ fn test_active_jobs_and_media_browser_search() {
 
     handle_key_event(KeyCode::Esc, &mut app, &tel);
     assert_eq!(app.visible_media(&media, &[]).len(), 2);
+}
+
+#[test]
+fn test_system_page_render_and_shortcuts() {
+    let mut app = AppState::new();
+    let tel = SystemTelemetry::default();
+
+    // 1. Direct jump via '6'
+    handle_key_event(KeyCode::Char('6'), &mut app, &tel);
+    assert_eq!(app.view, ViewPage::System);
+
+    // 2. Double-tap '6' toggles back to ActiveJobs
+    handle_key_event(KeyCode::Char('6'), &mut app, &tel);
+    assert_eq!(app.view, ViewPage::ActiveJobs);
+
+    // 3. Direct jump via 'y'
+    handle_key_event(KeyCode::Char('y'), &mut app, &tel);
+    assert_eq!(app.view, ViewPage::System);
+
+    // 4. Render system page to terminal buffer
+    let backend = TestBackend::new(140, 35);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let ctx = UiContext {
+        telemetry: &tel,
+        view: app.view,
+        selected_index: app.selected_index,
+        completed_scroll_index: app.completed_scroll_index,
+        media_scroll_index: app.media_scroll_index,
+        source_scroll_index: app.source_scroll_index,
+        source_modal: None,
+        selected_media_paths: &app.selected_media_paths,
+        media_filter: app.media_filter,
+        media_sort: app.media_sort,
+        source_filter: &app.source_filter,
+        completed_filter: app.completed_filter,
+        completed_sort: app.completed_sort,
+        search_query: "",
+        search_active: false,
+        help_tab: app.help_tab,
+        help_scroll_index: app.help_scroll_index,
+        feedback_msg: None,
+    };
+    terminal.draw(|f| render_ui(f, &ctx)).unwrap();
+    let buffer = format!("{:?}", terminal.backend());
+
+    assert!(buffer.contains("INFORMATIONS SYST\u{c8}ME & MAT\u{c9}RIEL (VUE FASTFETCH)"));
+    assert!(buffer.contains("APPLICATIF (dbsrt)"));
+    assert!(buffer.contains("N\u{152}UD & SYST\u{c8}ME D\'EXPLOITATION"));
+    assert!(buffer.contains("PROCESSEUR (CPU)"));
+    assert!(buffer.contains("ACC\u{c9}L\u{c9}RATION MAT\u{c9}RIELLE (GPU)"));
+    assert!(buffer.contains("M\u{c9}MOIRE & STOCKAGE"));
+    assert!(buffer.contains("D\u{c9}BITS & T\u{c9}L\u{c9}M\u{c9}TRIE EN DIRECT"));
+    assert!(buffer.contains("[6/y] Syst\u{e8}me"));
 }

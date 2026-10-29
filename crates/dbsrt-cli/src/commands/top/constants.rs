@@ -88,7 +88,7 @@ pub const DEFAULT_HISTORY_SEED_PATH: &str = "data/seed/history_seed.jsonl";
 pub const DEFAULT_COUPLINGS_PATH: &str = "data/SRT/couplings.json";
 
 /// Height in lines of the top multi-line telemetry header block.
-pub const HEADER_BLOCK_HEIGHT: u16 = 5;
+pub const HEADER_BLOCK_HEIGHT: u16 = 6;
 
 /// Height in lines of the bottom keybinding and status footer block.
 pub const FOOTER_BLOCK_HEIGHT: u16 = 2;

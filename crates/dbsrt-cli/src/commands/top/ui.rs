@@ -25,6 +25,7 @@ use crate::commands::top::{
         media_inspection::render_media_inspection_page,
         media_sources::{render_media_sources_page, render_source_modal},
         stats::render_stats_page,
+        system::render_system_page,
     },
 };
 
@@ -80,6 +81,7 @@ pub fn render_ui(frame: &mut Frame, ctx: &UiContext) {
         ViewPage::CompletedMedia => render_completed_page(frame, chunks[1], ctx),
         ViewPage::MediaBrowser => render_media_browser_page(frame, chunks[1], ctx),
         ViewPage::MediaSources => render_media_sources_page(frame, chunks[1], ctx),
+        ViewPage::System => render_system_page(frame, chunks[1], ctx),
         ViewPage::JobInspection => render_inspection_page(frame, chunks[1], ctx),
         ViewPage::MediaInspection => render_media_inspection_page(frame, chunks[1], ctx),
         ViewPage::CompletedInspection => render_completed_inspection_page(frame, chunks[1], ctx),

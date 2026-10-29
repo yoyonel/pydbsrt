@@ -50,6 +50,7 @@ pub fn render_help_page(frame: &mut Frame, area: Rect, ctx: &UiContext) {
         HelpTab::Completed => build_help_completed(),
         HelpTab::MediaBrowser => build_help_media_browser(),
         HelpTab::MediaSources => build_help_media_sources(),
+        HelpTab::System => build_help_system(),
     };
 
     let p = Paragraph::new(lines)
@@ -116,6 +117,7 @@ pub fn build_help_general() -> Vec<Line<'static>> {
         Line::from("    • Couplings certifiés : stockés dans PostgreSQL 17 et dans data/SRT/couplings.json pour établir la vérité terrain."),
         Line::from("    • Mesure CIFS intègre : lecture rchar via /proc/[pid]/io évitant les biais de buffer Linux/SMB."),
         Line::from("    • Télémétrie GPU VA-API : surveillance matérielle sur /dev/dri/renderD128 avec bascule CPU automatique."),
+        Line::from("    • Détection Matérielle Dynamique (Fastfetch-style) : résolution automatique du hostname, OS, CPU (cœurs) et GPU actif (Intel, AMD, NVIDIA, Broadcom ou repli CPU)."),
     ]
 }
 
@@ -291,5 +293,36 @@ pub fn build_help_media_sources() -> Vec<Line<'static>> {
         Line::from("    [Space]        : Activer / Désactiver la source sélectionnée pour les scans disque (catalogue persistant préservé)."),
         Line::from("    [d]            : Supprimer la source sélectionnée avec dialogue modal de confirmation (sécurité : dernière source protégée)."),
         Line::from("    [r]            : Déclencher un rescan complet immédiat de l'ensemble des sources actives en tâche de fond."),
+    ]
+}
+
+/// Builds System Diagnostics help content lines.
+pub fn build_help_system() -> Vec<Line<'static>> {
+    vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            "  💻 ONGLET [6/y] INFORMATIONS SYSTÈME & MATÉRIEL (VUE FASTFETCH)",
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        )),
+        Line::from("  Panneau de diagnostic matériel et applicatif inspiré de Fastfetch, regroupé par thématiques techniques."),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  Sections et Paramètres Surveillés :",
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        )),
+        Line::from("    • APPLICATIF (dbsrt)     : Version binaire, empreinte commit Git (SHA court), date de compilation, couplages."),
+        Line::from("    • NŒUD & DISTRIBUTION    : Nom d'hôte réseau, distribution Linux (/etc/os-release), version du noyau et architecture."),
+        Line::from("    • PROCESSEUR (CPU)       : Modèle commercial CPU, nombre de cœurs logiques/physiques et charge instantanée."),
+        Line::from("    • ACCÉLÉRATION GPU       : Contrôleur graphique actif, moteur de décodage (VA-API/Intel Iris Xe, Broadcom VideoCore VI, ou CPU)."),
+        Line::from("    • MÉMOIRE & STOCKAGE     : Consommation RAM hôte en GiB/pourcentage, sources actives déclarées."),
+        Line::from("    • DÉBITS & FLUX EN DIRECT: Bande passante réseau Net RX, débit pipe pHash et statut cumulé de session."),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  Raccourcis Dédiés :",
+            Style::default().fg(Color::LightGreen).add_modifier(Modifier::BOLD),
+        )),
+        Line::from("    [6] ou [y]     : Basculer vers l'onglet Système / Revenir aux Tâches actives."),
+        Line::from("    [↑/k] / [↓/j]  : Défilement vertical du panneau si la hauteur de console est restreinte."),
+        Line::from("    [?]            : Afficher / Masquer cette aide contextuelle."),
     ]
 }
