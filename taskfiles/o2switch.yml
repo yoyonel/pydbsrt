@@ -103,6 +103,7 @@ tasks:
 
   o2switch:top:
     desc: Launch interactive dbsrt top TUI process monitor on o2switch via SSH
+    interactive: true
     cmds:
       - ./scripts/o2switch_ctl.sh top {{.CLI_ARGS}}
 
