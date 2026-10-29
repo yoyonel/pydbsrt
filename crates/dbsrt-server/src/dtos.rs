@@ -75,7 +75,7 @@ pub struct CatalogCompactResponse {
     pub message: String,
 }
 
-#[derive(Deserialize, Serialize, Debug)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct AutoSyncRequest {
     pub media_path: String,
     #[serde(default = "default_lang")]

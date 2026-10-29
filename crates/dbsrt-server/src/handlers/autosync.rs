@@ -25,7 +25,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
-/// Relays autosync requests to the configured remote endpoint when operating in agent mode.
+/// Relays autosync requests to the configured remote endpoint when operating in agent mode;
+/// the downloaded subtitle is re-synchronized against the local media.
 async fn handle_remote_agent_autosync(
     state: Arc<AppState>,
     payload: AutoSyncRequest,
@@ -53,7 +54,7 @@ async fn handle_remote_agent_autosync(
             candidate_id: cand.candidate_id,
             source: cand.source,
             language: cand.language,
-            resync: false,
+            resync: true,
             shift_ms: cand.shift_ms,
             subtitles_dir: payload.subtitles_dir.clone(),
             phash_dir: payload.phash_dir.clone(),
@@ -67,7 +68,7 @@ async fn handle_remote_agent_autosync(
             success: download_res.success,
             matched_media: search_res.matched_media,
             language: payload.language,
-            shift_frames: 0,
+            shift_frames: download_res.shift_frames,
             shift_ms: download_res.shift_ms,
             output_srt_path: download_res.output_srt_path,
             confidence_percent: search_res.timing.confidence_percent,
@@ -261,10 +262,23 @@ pub async fn autosync_handler(
         });
     }
 
-    if state.remote_api.is_some() || state.is_agent {
-        return Json(handle_remote_agent_autosync(state, payload, start).await);
+    // Local identification and resolution first; the remote relay is only a fallback.
+    let local = run_local_autosync(&state, payload.clone(), &media_path, start).await;
+    if local.success || (state.remote_api.is_none() && !state.is_agent) {
+        return Json(local);
     }
+    Json(handle_remote_agent_autosync(state, payload, start).await)
+}
 
+/// Identifies the media against local indexes, resolves a subtitle from the local catalog,
+/// container tracks or providers, shifts it, and saves it next to the media.
+async fn run_local_autosync(
+    state: &Arc<AppState>,
+    payload: AutoSyncRequest,
+    media_path: &Path,
+    start: Instant,
+) -> AutoSyncResponse {
+    let media_path = media_path.to_path_buf();
     let override_phash_dir = payload.phash_dir.map(PathBuf::from);
     let phash_dirs = state.effective_phash_dirs(override_phash_dir.as_deref());
     let include_sidecars = payload.subtitles_dir.is_none();
@@ -301,8 +315,7 @@ pub async fn autosync_handler(
         language: &payload.language,
         include_sidecars,
     };
-    let (mut srt, subtitle_source) = match resolve_autosync_subtitle(&state, &resolve_criteria)
-        .await
+    let (mut srt, subtitle_source) = match resolve_autosync_subtitle(state, &resolve_criteria).await
     {
         Ok(res) => res,
         Err(err_msg) => {
@@ -318,7 +331,7 @@ pub async fn autosync_handler(
                         phash_dirs, err_msg
                     )
             };
-            return Json(AutoSyncResponse {
+            return AutoSyncResponse {
                 success: false,
                 matched_media: matched_stem_opt,
                 language: payload.language,
@@ -329,7 +342,7 @@ pub async fn autosync_handler(
                 elapsed_seconds: start.elapsed().as_secs_f64(),
                 source: None,
                 error: Some(formatted_err),
-            });
+            };
         }
     };
 
@@ -356,7 +369,7 @@ pub async fn autosync_handler(
         match save_synced_subtitle(&srt, &media_path, &payload.language, state.cache.base_dir()) {
             Ok(p) => p,
             Err(err_msg) => {
-                return Json(AutoSyncResponse {
+                return AutoSyncResponse {
                     success: false,
                     matched_media: matched_stem_opt,
                     language: payload.language,
@@ -367,11 +380,11 @@ pub async fn autosync_handler(
                     elapsed_seconds: start.elapsed().as_secs_f64(),
                     source: Some(subtitle_source),
                     error: Some(err_msg),
-                });
+                };
             }
         };
 
-    Json(AutoSyncResponse {
+    AutoSyncResponse {
         success: true,
         matched_media: matched_stem_opt,
         language: payload.language,
@@ -382,7 +395,7 @@ pub async fn autosync_handler(
         elapsed_seconds: start.elapsed().as_secs_f64(),
         source: Some(subtitle_source),
         error: None,
-    })
+    }
 }
 
 pub async fn retarget_handler(
@@ -699,4 +712,49 @@ pub async fn certify_handler(
         registry_path: reg_path.to_string_lossy().to_string(),
         error: None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dbsrt_core::{OpenSubtitlesProvider, SubtitleCache};
+
+    #[tokio::test]
+    async fn test_agent_autosync_resolves_local_sidecar_before_relay() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let srt_fixture = repo_root.join("tests/data/big_buck_bunny_trailer_480p.en.srt");
+        let work_dir =
+            std::env::temp_dir().join(format!("test_agent_autosync_{}", std::process::id()));
+        std::fs::create_dir_all(&work_dir).unwrap();
+        let media = work_dir.join("clip.mkv");
+        std::fs::write(&media, b"not a real video").unwrap();
+        std::fs::copy(&srt_fixture, work_dir.join("clip.en.srt")).unwrap();
+
+        let mut state = AppState::new(
+            work_dir.clone(),
+            work_dir.clone(),
+            Arc::new(OpenSubtitlesProvider::new(None)),
+            SubtitleCache::default(),
+        );
+        state.is_agent = true;
+        let payload = AutoSyncRequest {
+            media_path: media.to_string_lossy().to_string(),
+            language: "en".to_string(),
+            phash_dir: None,
+            subtitles_dir: None,
+            search_distance: 0,
+            nb_seconds: 1.0,
+        };
+        let res = autosync_handler(State(Arc::new(state)), Json(payload))
+            .await
+            .0;
+        let _ = std::fs::remove_dir_all(&work_dir);
+
+        // Agent mode must not bypass the local sidecar in favour of the remote relay.
+        assert!(res.success, "local autosync failed: {:?}", res.error);
+        assert_eq!(
+            res.source.as_deref(),
+            Some(SubtitleSource::Catalog.as_str())
+        );
+    }
 }
