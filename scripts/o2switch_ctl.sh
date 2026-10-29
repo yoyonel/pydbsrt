@@ -133,12 +133,19 @@ case "${ACTION}" in
     fi
     echo "=== Synchronizing standalone stack to ${O2SWITCH_HOST} ==="
     # shellcheck disable=SC2029
-    ssh "${O2SWITCH_HOST}" "mkdir -p ${REMOTE_BASE}/bin ${REMOTE_BASE}/data ${REMOTE_BASE}/run ${REMOTE_BASE}/logs ${REMOTE_PUBLIC_HTML}"
+    ssh "${O2SWITCH_HOST}" "mkdir -p ${REMOTE_BASE}/bin ${REMOTE_BASE}/data ${REMOTE_BASE}/run ${REMOTE_BASE}/logs ${REMOTE_PUBLIC_HTML} ${REMOTE_BASE}/scripts"
 
     echo "-> Transferring static binaries..."
     rsync -avz --progress --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${CLI_BIN}" "${SERVER_BIN}" "${O2SWITCH_HOST}:${REMOTE_BASE}/bin/"
     # shellcheck disable=SC2029
     ssh "${O2SWITCH_HOST}" "chmod +x ${REMOTE_BASE}/bin/dbsrt ${REMOTE_BASE}/bin/dbsrt-server"
+
+    echo "-> Transferring batch worker scripts..."
+    if [[ -f "scripts/o2switch_batch_worker.py" ]]; then
+      rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "scripts/o2switch_batch_worker.py" "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/"
+      # shellcheck disable=SC2029
+      ssh "${O2SWITCH_HOST}" "chmod +x ${REMOTE_BASE}/scripts/o2switch_batch_worker.py"
+    fi
 
     echo "-> Transferring Zero-DB catalog and SRT store (bwlimit ${DEFAULT_RSYNC_BWLIMIT_KBPS} KB/s)..."
     if [[ -f "data/catalog.dbphash" ]]; then
@@ -400,8 +407,177 @@ REMOTE_SCRIPT
     echo "=== API Key rotation completed successfully! ==="
     ;;
 
+  top)
+    check_ssh
+    shift || true
+    echo "=== Connecting to live dbsrt top TUI on ${O2SWITCH_HOST} ==="
+    # shellcheck disable=SC2029
+    ssh -t "${O2SWITCH_HOST}" "cd ${REMOTE_BASE} && PATH=\"\$HOME/${REMOTE_BASE}/bin:\$PATH\" RAYON_NUM_THREADS=2 ./bin/dbsrt top $*"
+    ;;
+
+  pull-catalog)
+    check_ssh
+    echo "=== Pulling processed catalogs and fingerprints from ${O2SWITCH_HOST} ==="
+    mkdir -p data/__PHASH__ data/SRT data/reports
+    echo "-> Pulling .phash fingerprints..."
+    rsync -avz --progress --ignore-existing --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/__PHASH__/" "data/__PHASH__/" || true
+    echo "-> Pulling CAS SRT subtitles..."
+    rsync -avz --progress --ignore-existing --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/SRT/" "data/SRT/" || true
+    echo "-> Pulling telemetry reports..."
+    rsync -avz --progress --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/reports/" "data/reports/" || true
+    echo "✓ Pull completed from ${O2SWITCH_HOST}."
+    ;;
+
+  batch-tvshow)
+    check_ssh
+    shift || true
+    NAS_PASS="${NAS_PASS:-$(pass show 192.168.1.58:5000/qzsl2686 2>/dev/null || true)}"
+    DAEMON_MODE=false
+    WORKER_ARGS=()
+    for arg in "$@"; do
+      if [[ "${arg}" == "--daemon" || "${arg}" == "-d" ]]; then
+        DAEMON_MODE=true
+      else
+        WORKER_ARGS+=("${arg}")
+      fi
+    done
+
+    # Ensure remote scripts directory and worker script are present
+    # shellcheck disable=SC2029
+    ssh "${O2SWITCH_HOST}" "mkdir -p ${REMOTE_BASE}/scripts ${REMOTE_BASE}/data/reports ${REMOTE_BASE}/data/SRT ${REMOTE_BASE}/data/__PHASH__ ${REMOTE_BASE}/run ${REMOTE_BASE}/logs"
+    if [[ -f "scripts/o2switch_batch_worker.py" ]]; then
+      rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "scripts/o2switch_batch_worker.py" "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/"
+    fi
+    # shellcheck disable=SC2029
+    ssh "${O2SWITCH_HOST}" "chmod +x ${REMOTE_BASE}/scripts/o2switch_batch_worker.py"
+
+    # If local CIFS mount is available, resolve targets quickly locally
+    if [[ -d "/media/latty/Synology/tvshow" || -n "${NAS_TVSHOW_DIR:-}" ]]; then
+      echo "-> Resolving virgin target episodes locally..."
+      uv run python scripts/batch_media_add_tvshow.py --save-targets-only "${WORKER_ARGS[@]}" >/dev/null 2>&1 || true
+    fi
+    if [[ -f "data/reports/selected_batch_targets.json" ]]; then
+      echo "-> Transferring selected batch targets..."
+      rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "data/reports/selected_batch_targets.json" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/reports/"
+    fi
+
+    # Ensure remote credentials file exists securely
+    if [[ -n "${NAS_PASS}" ]]; then
+      # shellcheck disable=SC2029
+      ssh "${O2SWITCH_HOST}" "mkdir -p ${REMOTE_BASE}/etc && cat > ${REMOTE_BASE}/etc/.nas_pass && chmod 600 ${REMOTE_BASE}/etc/.nas_pass" <<<"${NAS_PASS}"
+    fi
+
+    if [[ "${DAEMON_MODE}" == "true" ]]; then
+      echo "=== Launching TVShow batch ingestion in background daemon on ${O2SWITCH_HOST} ==="
+      # shellcheck disable=SC2029
+      ssh "${O2SWITCH_HOST}" "bash -s -- '${REMOTE_BASE}' ${WORKER_ARGS[*]}" <<'REMOTE_DAEMON'
+BASE="$1"
+shift || true
+cd "${BASE}"
+mkdir -p run logs
+PID_FILE="run/batch_worker.pid"
+LOG_FILE="logs/batch_worker.log"
+
+if [[ -f "${PID_FILE}" ]]; then
+  PID=$(cat "${PID_FILE}")
+  if kill -0 "${PID}" 2>/dev/null; then
+    echo "⚠️ Batch worker is already running with PID ${PID}."
+    exit 0
+  fi
+fi
+
+# Clean up any leftover screen session
+screen -X -S dbsrt_batch quit 2>/dev/null || true
+
+export PATH="$HOME/${BASE}/bin:$PATH"
+export RAYON_NUM_THREADS=2
+
+# Launch in persistent detached screen session immune to SSH session termination
+screen -dmS dbsrt_batch bash -c "echo \$\$ > '${PID_FILE}'; exec ./bin/python3 -u scripts/o2switch_batch_worker.py $* >> '${LOG_FILE}' 2>&1"
+sleep 1
+PID=$(cat "${PID_FILE}" 2>/dev/null || true)
+echo "✓ Started persistent background batch worker (screen: dbsrt_batch, PID: ${PID})."
+REMOTE_DAEMON
+      echo "✓ Background batch ingestion worker started on ${O2SWITCH_HOST}."
+      echo "  • Monitor status : task o2switch:batch:status"
+      echo "  • Stream logs    : task o2switch:batch:logs"
+      echo "  • Live dashboard : task o2switch:top"
+      echo "  • Stop worker    : task o2switch:batch:stop"
+    else
+      echo "=== Executing TVShow batch ingestion on ${O2SWITCH_HOST} ==="
+      # shellcheck disable=SC2029
+      ssh -o ServerAliveInterval=15 -o ServerAliveCountMax=3 "${O2SWITCH_HOST}" "cd ${REMOTE_BASE} && PATH=\"\$HOME/${REMOTE_BASE}/bin:\$PATH\" RAYON_NUM_THREADS=2 ./bin/python3 -u scripts/o2switch_batch_worker.py ${WORKER_ARGS[*]}"
+    fi
+    ;;
+
+  batch-status)
+    check_ssh
+    echo "=== Remote TVShow Batch Worker Status (${O2SWITCH_HOST}) ==="
+    # shellcheck disable=SC2029
+    ssh "${O2SWITCH_HOST}" "bash -s -- '${REMOTE_BASE}'" <<'REMOTE_SCRIPT'
+BASE="$1"
+PID_FILE="${BASE}/run/batch_worker.pid"
+LOG_FILE="${BASE}/logs/batch_worker.log"
+if [[ -f "${PID_FILE}" ]]; then
+  PID=$(cat "${PID_FILE}")
+  if kill -0 "${PID}" 2>/dev/null; then
+    echo "● Batch worker is RUNNING (PID: ${PID})"
+    ps -o pid,user,%cpu,%mem,etime,comm -p "${PID}" || true
+  else
+    echo "○ Batch worker is STOPPED / FINISHED (PID ${PID} inactive)"
+  fi
+else
+  echo "○ No active batch worker PID file found at ${PID_FILE}."
+fi
+if [[ -f "${LOG_FILE}" ]]; then
+  echo ""
+  echo "--- Recent Worker Activity (last 10 lines of ${LOG_FILE}) ---"
+  tail -n 10 "${LOG_FILE}"
+fi
+REMOTE_SCRIPT
+    ;;
+
+  batch-stop)
+    check_ssh
+    echo "=== Stopping TVShow Batch Worker Daemon on ${O2SWITCH_HOST} ==="
+    # shellcheck disable=SC2029
+    ssh "${O2SWITCH_HOST}" "bash -s -- '${REMOTE_BASE}' '${DEFAULT_SHUTDOWN_TIMEOUT_SEC}'" <<'REMOTE_SCRIPT'
+BASE="$1"
+TIMEOUT="$2"
+PID_FILE="${BASE}/run/batch_worker.pid"
+if [[ ! -f "${PID_FILE}" ]]; then
+  echo "No batch worker PID file found at ${PID_FILE}."
+  exit 0
+fi
+PID=$(cat "${PID_FILE}")
+if kill -0 "${PID}" 2>/dev/null; then
+  echo "Sending SIGTERM to PID ${PID}..."
+  kill -TERM "${PID}"
+  for _ in $(seq 1 "${TIMEOUT}"); do
+    if ! kill -0 "${PID}" 2>/dev/null; then
+      break
+    fi
+    sleep 1
+  done
+  if kill -0 "${PID}" 2>/dev/null; then
+    echo "Process did not terminate gracefully, sending SIGKILL..."
+    kill -KILL "${PID}" || true
+  fi
+  echo "✓ Stopped batch worker process ${PID}."
+fi
+rm -f "${PID_FILE}"
+screen -X -S dbsrt_batch quit 2>/dev/null || true
+REMOTE_SCRIPT
+    ;;
+
+  batch-logs)
+    check_ssh
+    # shellcheck disable=SC2029
+    ssh -t "${O2SWITCH_HOST}" "tail -f ${REMOTE_BASE}/logs/batch_worker.log"
+    ;;
+
   *)
-    echo "Usage: $0 {build|test-local|sync|start|stop|restart|status|logs|demo|setup-cron|remove-cron|rotate-key}"
+    echo "Usage: $0 {build|test-local|sync|start|stop|restart|status|logs|demo|setup-cron|remove-cron|rotate-key|top|pull-catalog|batch-tvshow|batch-status|batch-stop|batch-logs}"
     exit 1
     ;;
 esac

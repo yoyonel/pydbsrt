@@ -875,6 +875,11 @@ def main() -> int:
         help="Process exclusively virgin episodes with zero pre-computed .phash (maximizes GPU decoding utilization)",
     )
     parser.add_argument("--dry-run", action="store_true", help="Probe and profile without writing to coupling registry")
+    parser.add_argument(
+        "--save-targets-only",
+        action="store_true",
+        help="Discovers and saves target manifests to JSON without executing batch processing",
+    )
     args = parser.parse_args()
 
     args.phash_dir.mkdir(parents=True, exist_ok=True)
@@ -913,6 +918,29 @@ def main() -> int:
     print(f"📋 Discovered {len(queue)} candidate video(s) for direct processing.")
     if not queue:
         print("ℹ️ No unindexed videos found. Exiting.")
+        return 0
+
+    # Save selected batch targets for monitoring and remote worker orchestration
+    targets_out = Path("data/reports/selected_batch_targets.json")
+    targets_out.parent.mkdir(parents=True, exist_ok=True)
+    targets_out.write_text(
+        json.dumps(
+            [
+                {
+                    "path": str(p),
+                    "stem": p.stem,
+                    "filename": p.name,
+                    "size_bytes": p.stat().st_size if p.is_file() else 0,
+                }
+                for p, _ in queue
+            ],
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    if args.save_targets_only:
+        print(f"✓ Saved {len(queue)} selected targets to {targets_out}.")
         return 0
 
     profiles: List[MediaProcessingProfile] = []

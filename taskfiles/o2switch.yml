@@ -100,3 +100,33 @@ tasks:
     desc: Test end-to-end recognition from local/Synology video through Cloud o2switch relay
     cmds:
       - ./scripts/agent_relay.sh demo
+
+  o2switch:top:
+    desc: Launch interactive dbsrt top TUI process monitor on o2switch via SSH
+    cmds:
+      - ./scripts/o2switch_ctl.sh top {{.CLI_ARGS}}
+
+  o2switch:pull-catalog:
+    desc: Pull processed .phash, SRT subtitles, and batch telemetry from o2switch to local storage
+    cmds:
+      - ./scripts/o2switch_ctl.sh pull-catalog
+
+  o2switch:batch:tvshow:
+    desc: Execute remote batch pHash extraction for virgin NAS episodes on o2switch (supports --daemon)
+    cmds:
+      - ./scripts/o2switch_ctl.sh batch-tvshow {{.CLI_ARGS}}
+
+  o2switch:batch:status:
+    desc: Check whether remote batch pHash worker is running on o2switch
+    cmds:
+      - ./scripts/o2switch_ctl.sh batch-status
+
+  o2switch:batch:stop:
+    desc: Stop running background batch pHash worker on o2switch
+    cmds:
+      - ./scripts/o2switch_ctl.sh batch-stop
+
+  o2switch:batch:logs:
+    desc: Tail execution logs of remote batch pHash worker on o2switch
+    cmds:
+      - ./scripts/o2switch_ctl.sh batch-logs
