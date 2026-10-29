@@ -7,6 +7,7 @@ pub mod container;
 pub mod coupling;
 pub mod cuts;
 pub mod ffmpeg_input;
+pub mod job_progress;
 pub mod lang_status;
 pub mod media_pairing;
 pub mod metadata;

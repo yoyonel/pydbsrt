@@ -2,7 +2,6 @@
 
 use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
-use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -32,6 +31,7 @@ pub use crate::ffmpeg_input::DEFAULT_FFMPEG_DECODE_THREADS;
 use crate::ffmpeg_input::{
     apply_ftp_credentials, display_input, ffmpeg_decode_threads, redact_url_userinfo,
 };
+use crate::job_progress::{create_job_guard, maybe_update_progress};
 
 /// Default probe size limit in bytes for ffprobe to avoid unbounded memory buffer on remote streams.
 pub const DEFAULT_FFPROBE_PROBESIZE: &str = "10000000";
@@ -861,58 +861,6 @@ fn resolve_extraction_meta_fps(path: &Path, sampling: SamplingMode) -> f64 {
         probe_video(path)
             .map(|m| m.fps)
             .unwrap_or(DEFAULT_BASELINE_FPS)
-    }
-}
-
-/// Number of decoded frames between volatile progress status writes.
-pub const PROGRESS_UPDATE_INTERVAL_FRAMES: usize = 120;
-
-/// Volatile runtime progress file guard for an active video extraction process.
-struct ExtractionJobGuard {
-    file_path: PathBuf,
-}
-
-impl Drop for ExtractionJobGuard {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.file_path);
-    }
-}
-
-fn create_job_guard(pid: u32) -> Option<ExtractionJobGuard> {
-    let dir = Path::new("run/jobs");
-    if fs::create_dir_all(dir).is_ok() {
-        let file_path = dir.join(format!("{pid}.json"));
-        Some(ExtractionJobGuard { file_path })
-    } else {
-        None
-    }
-}
-
-fn write_job_progress(
-    guard: &ExtractionJobGuard,
-    frames: usize,
-    total_frames: Option<usize>,
-    fps: f64,
-) {
-    let total_str = match total_frames {
-        Some(t) => format!("{t}"),
-        None => "null".to_string(),
-    };
-    let payload =
-        format!("{{\"frames\":{frames},\"total_frames\":{total_str},\"fps\":{fps:.3}}}\n");
-    let _ = fs::write(&guard.file_path, payload);
-}
-
-fn maybe_update_progress(
-    guard: Option<&ExtractionJobGuard>,
-    frame_idx: usize,
-    expected_total: Option<usize>,
-    meta_fps: f64,
-) {
-    if let Some(g) = guard {
-        if frame_idx.is_multiple_of(PROGRESS_UPDATE_INTERVAL_FRAMES) {
-            write_job_progress(g, frame_idx, expected_total, meta_fps);
-        }
     }
 }
 

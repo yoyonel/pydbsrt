@@ -216,6 +216,3 @@ pub const RAW_FRAME_BYTES: f64 = 1024.0;
 
 /// Default baseline duration in seconds for streaming TV show episodes (45 minutes).
 pub const DEFAULT_STREAM_EPISODE_DURATION_SECS: f64 = 2700.0;
-
-/// Directory path storing volatile active job progress tracking JSON files.
-pub const ACTIVE_JOBS_RUN_DIR: &str = "run/jobs";

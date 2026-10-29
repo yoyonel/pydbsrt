@@ -3589,6 +3589,39 @@ fn test_format_unix_to_iso_roundtrip() {
 }
 
 #[test]
+fn test_read_job_progress_rejects_dead_or_reused_pid() {
+    use dbsrt_cli::commands::top::sampler::read_job_progress_in;
+    let dir = std::env::temp_dir().join(format!("dbsrt_top_jobs_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let write =
+        |pid: u32, body: &str| std::fs::write(dir.join(format!("{pid}.json")), body).unwrap();
+    write(
+        1,
+        "{\"frames\":10,\"total_frames\":100,\"fps\":25.0,\"start_ticks\":500}",
+    );
+    write(2, "{\"frames\":20,\"total_frames\":null,\"fps\":25.0}");
+
+    assert_eq!(
+        read_job_progress_in(&dir, 1, Some(500)).map(|p| p.frames),
+        Some(10)
+    );
+    assert!(
+        read_job_progress_in(&dir, 1, Some(501)).is_none(),
+        "PID reused"
+    );
+    assert!(
+        read_job_progress_in(&dir, 1, None).is_none(),
+        "process dead"
+    );
+    assert_eq!(
+        read_job_progress_in(&dir, 2, Some(7)).map(|p| p.frames),
+        Some(20)
+    );
+    assert!(read_job_progress_in(&dir, 3, Some(7)).is_none(), "no file");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn test_cmdline_has_remote_stream() {
     use dbsrt_cli::commands::top::sampler::cmdline_has_remote_stream;
     let args = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();

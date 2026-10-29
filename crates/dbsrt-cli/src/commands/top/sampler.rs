@@ -15,15 +15,14 @@ use sysinfo::{
 };
 
 use crate::commands::top::constants::{
-    ACTIVE_JOBS_RUN_DIR, BYTES_PER_GIB_F64, BYTES_PER_MIB_F64, DEFAULT_BATCH_EVENTS_PATH,
-    DEFAULT_COUPLINGS_PATH, DEFAULT_COUPLING_BASELINE_FPS, DEFAULT_HISTORY_SEED_PATH,
-    DEFAULT_MEDIA_CACHE_PATH, DEFAULT_MEDIA_SCAN_INTERVAL_SECS, DEFAULT_MEDIA_SOURCES_PATH,
-    DEFAULT_NAS_TVSHOW_PATH, DEFAULT_PHASH_DIR, DEFAULT_SELECTED_BATCH_REPORT_PATH,
-    DEFAULT_SELECTED_BATCH_TARGETS_PATH, DEFAULT_SOURCE_ID_TVSHOW, DEFAULT_SOURCE_NAME_TVSHOW,
-    DEFAULT_STREAM_EPISODE_DURATION_SECS, MAX_MEDIA_SCAN_LIMIT, MAX_SELECTED_BATCH_WORKERS,
-    MIN_DELTA_TIME_FLOOR_SECS, MIN_PROGRESS_THRESHOLD, NAS_TVSHOW_DIR_ENV,
-    PROC_NET_DEV_HEADER_LINES, PROC_NET_DEV_PATH, RAW_FRAME_BYTES, SCAN_STREAMING_CHUNK_SIZE,
-    SESSION_WINDOW_SECS,
+    BYTES_PER_GIB_F64, BYTES_PER_MIB_F64, DEFAULT_BATCH_EVENTS_PATH, DEFAULT_COUPLINGS_PATH,
+    DEFAULT_COUPLING_BASELINE_FPS, DEFAULT_HISTORY_SEED_PATH, DEFAULT_MEDIA_CACHE_PATH,
+    DEFAULT_MEDIA_SCAN_INTERVAL_SECS, DEFAULT_MEDIA_SOURCES_PATH, DEFAULT_NAS_TVSHOW_PATH,
+    DEFAULT_PHASH_DIR, DEFAULT_SELECTED_BATCH_REPORT_PATH, DEFAULT_SELECTED_BATCH_TARGETS_PATH,
+    DEFAULT_SOURCE_ID_TVSHOW, DEFAULT_SOURCE_NAME_TVSHOW, DEFAULT_STREAM_EPISODE_DURATION_SECS,
+    MAX_MEDIA_SCAN_LIMIT, MAX_SELECTED_BATCH_WORKERS, MIN_DELTA_TIME_FLOOR_SECS,
+    MIN_PROGRESS_THRESHOLD, NAS_TVSHOW_DIR_ENV, PROC_NET_DEV_HEADER_LINES, PROC_NET_DEV_PATH,
+    RAW_FRAME_BYTES, SCAN_STREAMING_CHUNK_SIZE, SESSION_WINDOW_SECS,
 };
 use crate::commands::top::model::{
     calculate_overall_stats, format_unix_to_iso, parse_iso_to_unix_secs, ActiveJobTelemetry,
@@ -344,17 +343,33 @@ pub struct JobProgressPayload {
     pub frames: usize,
     pub total_frames: Option<usize>,
     pub fps: Option<f64>,
+    /// Writer process start time; absent in files from older writers.
+    #[serde(default)]
+    pub start_ticks: Option<u64>,
 }
 
-/// Reads the volatile IPC job progress file for an active decoding PID.
+/// Reads the volatile IPC job progress file for an active decoding PID, ignoring files left by
+/// a dead process or by an earlier process that had the same PID.
 pub fn read_job_progress_file(pid: u32) -> Option<JobProgressPayload> {
-    let p = PathBuf::from(ACTIVE_JOBS_RUN_DIR).join(format!("{pid}.json"));
-    if let Ok(content) = fs::read_to_string(&p) {
-        if let Ok(payload) = serde_json::from_str::<JobProgressPayload>(&content) {
-            return Some(payload);
-        }
-    }
-    None
+    let dir = dbsrt_core::job_progress::jobs_run_dir();
+    read_job_progress_in(
+        &dir,
+        pid,
+        dbsrt_core::job_progress::process_start_ticks(pid),
+    )
+}
+
+/// Reads `<dir>/<pid>.json` and keeps it only if it belongs to the process started at
+/// `live_start_ticks`.
+pub fn read_job_progress_in(
+    dir: &Path,
+    pid: u32,
+    live_start_ticks: Option<u64>,
+) -> Option<JobProgressPayload> {
+    let path = dbsrt_core::job_progress::job_progress_path(dir, pid);
+    let payload: JobProgressPayload = serde_json::from_str(&fs::read_to_string(path).ok()?).ok()?;
+    dbsrt_core::job_progress::progress_belongs_to_process(payload.start_ticks, live_start_ticks)
+        .then_some(payload)
 }
 
 fn parse_proc_io_val(line: &str) -> Option<u64> {
