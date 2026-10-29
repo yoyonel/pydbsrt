@@ -146,7 +146,7 @@ Le mot de passe peut aussi être conservé dans le gestionnaire GPG `pass` (entr
 pass insert services/synology/nas_pass
 ```
 
-Au lancement d'un batch, `o2switch_ctl.sh` transmet ces valeurs **par stdin** vers `etc/.nas_config` et `etc/.nas_pass` (mode 600) sur o2switch. Le worker écrit le mot de passe dans `etc/.ftp_password` (mode 600, sans retour à la ligne) et passe à chaque processus `dbsrt` `DBSRT_FTP_USER` / `DBSRT_FTP_PASSWORD_FILE`. `dbsrt` transmet à `ffmpeg` / `ffprobe` `-ftp-user` et `-/ftp-password <fichier>` (FFmpeg >= 7.0) : ffmpeg lit le fichier lui-même. Le mot de passe n'apparaît ni dans l'URL, ni dans les journaux, ni dans l'argv (`ps`).
+Au lancement d'un batch, `o2switch_ctl.sh` transmet ces valeurs **par stdin** vers `etc/.nas_config` et `etc/.nas_pass` (mode 600) sur o2switch. Le worker les passe à chaque processus `dbsrt` via `DBSRT_FTP_USER` / `DBSRT_FTP_PASSWORD`, puis `dbsrt` à `ffmpeg` / `ffprobe` via `-ftp-user` / `-ftp-password`. Les identifiants n'apparaissent jamais dans l'URL ni dans les journaux.
 
 ---
 

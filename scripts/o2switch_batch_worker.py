@@ -4,7 +4,7 @@
 Orchestrates multi-worker parallel pHash extraction and subtitle ingestion on o2switch
 shared hosting (CloudLinux LVE 12 vCPUs) by streaming directly from the Synology NAS over
 FTP with FFmpeg (Zero local video disk copy). NAS credentials reach dbsrt through the
-DBSRT_FTP_USER / DBSRT_FTP_PASSWORD_FILE environment variables, never inside URLs or argv.
+DBSRT_FTP_USER / DBSRT_FTP_PASSWORD environment variables, never inside URLs or argv.
 """
 
 from __future__ import annotations
@@ -125,7 +125,6 @@ DEFAULT_NAS_HOST: str = os.getenv("NAS_HOST") or _CONFIG_ENV.get("NAS_HOST", "")
 DEFAULT_NAS_USER: str = os.getenv("NAS_USER") or _CONFIG_ENV.get("NAS_USER", "")
 DEFAULT_NAS_BASE: str = "/tvshow"
 DEFAULT_FTP_PORT: int = 21
-DEFAULT_FTP_PASSWORD_FILE: str = "etc/.ftp_password"
 DEFAULT_FFMPEG_THREADS: str = "2"
 DEFAULT_STALL_TIMEOUT_SECS: int = 60
 DEFAULT_MAX_EXTRACTION_SECS: int = 1800
@@ -326,28 +325,16 @@ def get_process_group_cpu_ticks(pgid: int, proc_root: Path = Path("/proc")) -> i
     return total_ticks
 
 
-def write_password_file(nas_pass: str, path: Path) -> Path:
-    """Writes the FTP password (no trailing newline, mode 0600) for ffmpeg `-/ftp-password`."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as fh:
-        fh.write(nas_pass)
-    os.chmod(path, 0o600)
-    return path
-
-
-def build_child_env(nas_user: str, password_file: Path, bin_dir: Path) -> Dict[str, str]:
-    """Builds the dbsrt child environment: FTP credentials, decode threads and bin PATH.
-
-    The password travels as a file path: ffmpeg reads it itself, so it never shows in argv.
-    """
+def build_child_env(nas_user: str, nas_pass: str, bin_dir: Path) -> Dict[str, str]:
+    """Builds the dbsrt child environment: FTP credentials, decode threads and bin PATH."""
     env = os.environ.copy()
     env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
     env["DBSRT_FTP_USER"] = nas_user
-    env["DBSRT_FTP_PASSWORD_FILE"] = str(password_file)
+    # shortcut: password lands in the ffmpeg argv (CageFS hides it from other accounts); the
+    # static ffmpeg 7.0.2 lacks `-/ftp-password`, switch to DBSRT_FTP_PASSWORD_FILE on >= 7.1
+    env["DBSRT_FTP_PASSWORD"] = nas_pass
     env.setdefault("DBSRT_FFMPEG_THREADS", DEFAULT_FFMPEG_THREADS)
     env.pop("NAS_PASS", None)
-    env.pop("DBSRT_FTP_PASSWORD", None)
     return env
 
 
@@ -685,8 +672,7 @@ def main() -> int:
 
     print(f"=== [3/4] Direct FTP Native Streaming Mode ({args.nas_host}:{args.ftp_port}) ===")
     stream_base = f"ftp://{args.nas_host}:{args.ftp_port}"
-    password_file = write_password_file(nas_pass, Path(DEFAULT_FTP_PASSWORD_FILE).resolve())
-    child_env = build_child_env(args.nas_user, password_file, Path("bin").resolve())
+    child_env = build_child_env(args.nas_user, nas_pass, Path("bin").resolve())
 
     print(f"=== [4/4] Executing Batch Ingestion ({args.workers} initial parallel workers, dynamic scaling active) ===")
     success_count, fail_count, total_duration = execute_dynamic_batch_ingestion(

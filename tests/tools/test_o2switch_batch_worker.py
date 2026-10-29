@@ -19,7 +19,6 @@ from scripts.o2switch_batch_worker import (
     load_existing_phash_stems,
     load_targets_file,
     resolve_retry_targets,
-    write_password_file,
 )
 
 
@@ -104,17 +103,10 @@ def test_build_child_env_passes_credentials_out_of_band(tmp_path: Path, monkeypa
     monkeypatch.setenv("NAS_PASS", "secret")
     monkeypatch.delenv("DBSRT_FFMPEG_THREADS", raising=False)
 
-    monkeypatch.setenv("DBSRT_FTP_PASSWORD", "stale")
-    pw_file = write_password_file("p@ss#%", tmp_path / "etc" / ".ftp_password")
+    env = build_child_env("svc", "p@ss#%", tmp_path)
 
-    env = build_child_env("svc", pw_file, tmp_path)
-
-    assert pw_file.read_text() == "p@ss#%"
-    assert pw_file.stat().st_mode & 0o777 == 0o600
     assert env["DBSRT_FTP_USER"] == "svc"
-    assert env["DBSRT_FTP_PASSWORD_FILE"] == str(pw_file)
-    assert "DBSRT_FTP_PASSWORD" not in env
-    assert "p@ss#%" not in env.values()
+    assert env["DBSRT_FTP_PASSWORD"] == "p@ss#%"
     assert env["DBSRT_FFMPEG_THREADS"] == "2"
     assert env["PATH"].startswith(f"{tmp_path}:")
     assert "NAS_PASS" not in env

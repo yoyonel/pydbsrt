@@ -103,7 +103,7 @@ task o2switch:batch:tvshow -- --workers 2 --fresh-only --limit 5
 Les hébergements mutualisés disposent d'un espace disque limité et de quotas d'inodes stricts. Copier des fichiers vidéo MKV/MP4 de 1 à 4 Go sur le disque NVMe o2switch saturerait l'espace de stockage et déclencherait des pénalités d'I/O disque.
 
 ### Fonctionnement garanti
-1. Le worker distant lance `dbsrt media:add` sur une URL FTP directe `ftp://<NAS_HOST>:21/<chemin>`, sans identifiants dans l'URL. Il positionne `DBSRT_FTP_USER` / `DBSRT_FTP_PASSWORD_FILE` dans l'environnement de chaque processus enfant ; ffmpeg lit le mot de passe depuis le fichier (`-/ftp-password`).
+1. Le worker distant lance `dbsrt media:add` sur une URL FTP directe `ftp://<NAS_HOST>:21/<chemin>`, sans identifiants dans l'URL. Il positionne `DBSRT_FTP_USER` / `DBSRT_FTP_PASSWORD` dans l'environnement de chaque processus enfant.
 2. `dbsrt` délègue la lecture à `ffmpeg` / `ffprobe` (options `-ftp-user` / `-ftp-password`, jamais journalisées ; les URLs journalisées sont expurgées), qui démultiplexe et décode le conteneur directement en mémoire RAM (`DBSRT_FFMPEG_THREADS`, défaut `2`).
 3. Seuls les artefacts finaux à haute valeur ajoutée sont écrits sur le disque o2switch :
    - Fichier binaire `.phash` : $\approx 3\text{ Ko}$ par épisode (51 frames clés $\times$ 64 bits).

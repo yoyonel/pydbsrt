@@ -6,7 +6,7 @@
 //! - `DBSRT_FTP_USER` / `DBSRT_FTP_PASSWORD`: credentials for `ftp://` inputs without userinfo,
 //!   passed as `-ftp-user` / `-ftp-password` input options. Their values are never logged.
 //! - `DBSRT_FTP_PASSWORD_FILE`: file holding the password (no trailing newline), passed as
-//!   `-/ftp-password <file>` (FFmpeg >= 7.0) so the secret never reaches the ffmpeg argv.
+//!   `-/ftp-password <file>` (FFmpeg >= 7.1) so the secret never reaches the ffmpeg argv.
 //!   Wins over `DBSRT_FTP_PASSWORD`.
 
 use std::path::Path;
