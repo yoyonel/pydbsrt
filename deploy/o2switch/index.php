@@ -6,7 +6,7 @@
  * Relays public HTTPS requests from Apache/LiteSpeed to the local Rust dbsrt-server daemon
  * listening on 127.0.0.1:8765 without requiring Apache mod_proxy privileges.
  * Automatically spawns the daemon if inactive or harvested by CloudLinux.
- * Enforces strict API Key authentication (X-API-Key, Bearer token, or api_key query param).
+ * Enforces strict API Key authentication (X-API-Key or Bearer token); fails closed without a key file.
  */
 
 declare(strict_types=1);
@@ -19,6 +19,7 @@ const EXEC_TIMEOUT_SECONDS = 30;
 const SPAWN_MAX_RETRIES = 6;
 const SPAWN_RETRY_INTERVAL_MICROSECONDS = 250000; // 250 ms
 const SECRET_KEY_REL_PATH = '/dbsrt/etc/api_key.secret';
+const SPAWN_LOCK_REL_PATH = '/dbsrt/run/gateway_spawn.lock';
 
 // Derive user home directory relative to public_html/dbsrt
 $homeDir = dirname(__DIR__, 2);
@@ -28,27 +29,25 @@ $secretKeyFile = $homeDir . SECRET_KEY_REL_PATH;
  * Validates request authentication against configured API secret keys.
  * Supports multi-key pools (one key per line) for zero-downtime key rotation.
  */
-function is_authenticated(string $secretKeyFile): bool
+function load_valid_keys(string $secretKeyFile): array
 {
     if (!is_file($secretKeyFile) || !is_readable($secretKeyFile)) {
-        // If no secret key is provisioned, allow open access (fallback)
-        return true;
+        return [];
     }
 
-    $rawContent = (string) file_get_contents($secretKeyFile);
     $validKeys = [];
-    foreach (explode("\n", $rawContent) as $line) {
+    foreach (explode("\n", (string) file_get_contents($secretKeyFile)) as $line) {
         $key = trim($line);
         if ($key !== '' && !str_starts_with($key, '#')) {
             $validKeys[] = $key;
         }
     }
+    return $validKeys;
+}
 
-    if (empty($validKeys)) {
-        return true;
-    }
-
-    // Extract provided client token from headers or query params
+function is_authenticated(array $validKeys): bool
+{
+    // Extract provided client token from headers
     $clientToken = null;
     $headers = getallheaders();
 
@@ -68,11 +67,6 @@ function is_authenticated(string $secretKeyFile): bool
         }
     }
 
-    // 3. Check query parameter ?api_key=<token> (convenient for browser verification)
-    if ($clientToken === null && isset($_GET['api_key'])) {
-        $clientToken = (string) $_GET['api_key'];
-    }
-
     if ($clientToken === null || $clientToken === '') {
         return false;
     }
@@ -87,86 +81,87 @@ function is_authenticated(string $secretKeyFile): bool
     return false;
 }
 
-/**
- * Ensures the dbsrt-server daemon is alive, auto-spawning it if offline.
- */
-function ensure_daemon_alive(string $homeDir): bool
+function is_daemon_healthy(int $connectTimeoutMs, int $timeoutMs): bool
 {
-    $healthUrl = sprintf('%s:%d/v1/health', UPSTREAM_HOST, UPSTREAM_PORT);
-
-    // Quick test if already alive
-    $ch = curl_init($healthUrl);
-    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT_MS, 1500);
-    curl_setopt($ch, CURLOPT_TIMEOUT_MS, 2000);
+    $ch = curl_init(sprintf('%s:%d/v1/health', UPSTREAM_HOST, UPSTREAM_PORT));
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT_MS, $connectTimeoutMs);
+    curl_setopt($ch, CURLOPT_TIMEOUT_MS, $timeoutMs);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
     $res = curl_exec($ch);
     $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
+    return $res !== false && $code === 200;
+}
 
-    if ($res !== false && $code === 200) {
-        return true;
+/**
+ * Spawns the dbsrt-server daemon (called only when the upstream refused the connection).
+ * An exclusive lock serializes concurrent requests so only one of them spawns the daemon.
+ */
+function spawn_daemon(string $homeDir): bool
+{
+    $lock = fopen($homeDir . SPAWN_LOCK_REL_PATH, 'c');
+    if ($lock === false || !flock($lock, LOCK_EX)) {
+        return false;
     }
 
-    // Spawn server in background detached session
-    $bin = escapeshellarg($homeDir . '/dbsrt/bin/dbsrt-server');
-    $catalog = escapeshellarg($homeDir . '/dbsrt/data/catalog.dbphash');
-    $srtDir = escapeshellarg($homeDir . '/dbsrt/data/SRT');
-    $phashDir = escapeshellarg($homeDir . '/dbsrt/data/__PHASH__');
-    $log = escapeshellarg($homeDir . '/dbsrt/logs/dbsrt-server.log');
-
-    $cmd = sprintf(
-        'setsid %s --host 127.0.0.1 --port %d --dbphash %s --subtitles-dir %s --phash-dir %s </dev/null >> %s 2>&1 &',
-        $bin,
-        UPSTREAM_PORT,
-        $catalog,
-        $srtDir,
-        $phashDir,
-        $log
-    );
-
-    exec($cmd);
-
-    // Poll until healthy or retries exhausted
-    for ($i = 0; $i < SPAWN_MAX_RETRIES; $i++) {
-        usleep(SPAWN_RETRY_INTERVAL_MICROSECONDS);
-        $ch = curl_init($healthUrl);
-        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT_MS, 1000);
-        curl_setopt($ch, CURLOPT_TIMEOUT_MS, 1500);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        $res = curl_exec($ch);
-        $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
-
-        if ($res !== false && $code === 200) {
+    try {
+        // Another request may have spawned it while we waited for the lock
+        if (is_daemon_healthy(1500, 2000)) {
             return true;
         }
+
+        $bin = escapeshellarg($homeDir . '/dbsrt/bin/dbsrt-server');
+        $catalog = escapeshellarg($homeDir . '/dbsrt/data/catalog.dbphash');
+        $srtDir = escapeshellarg($homeDir . '/dbsrt/data/SRT');
+        // Loose .phash are packed into the catalog by o2switch_ctl.sh start (LVE memory cap)
+        $phashDir = escapeshellarg($homeDir . '/dbsrt/run/empty_phash');
+        $log = escapeshellarg($homeDir . '/dbsrt/logs/dbsrt-server.log');
+
+        exec(sprintf(
+            'setsid %s --host 127.0.0.1 --port %d --dbphash %s --subtitles-dir %s --phash-dir %s </dev/null >> %s 2>&1 &',
+            $bin,
+            UPSTREAM_PORT,
+            $catalog,
+            $srtDir,
+            $phashDir,
+            $log
+        ));
+
+        // Poll until healthy or retries exhausted
+        for ($i = 0; $i < SPAWN_MAX_RETRIES; $i++) {
+            usleep(SPAWN_RETRY_INTERVAL_MICROSECONDS);
+            if (is_daemon_healthy(1000, 1500)) {
+                return true;
+            }
+        }
+        return false;
+    } finally {
+        flock($lock, LOCK_UN);
+        fclose($lock);
     }
-
-    return false;
 }
 
-// 1. Strict Authentication Check
-if (!is_authenticated($secretKeyFile)) {
-    http_response_code(401);
+function send_json_error(int $code, array $payload): void
+{
+    http_response_code($code);
     header('Content-Type: application/json; charset=utf-8');
-    echo json_encode([
+    echo json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+    exit;
+}
+
+// 1. Strict Authentication Check (fail closed when no key is provisioned)
+$validKeys = load_valid_keys($secretKeyFile);
+if ($validKeys === []) {
+    send_json_error(503, ['error' => 'Service Unavailable: gateway API key not provisioned']);
+}
+if (!is_authenticated($validKeys)) {
+    send_json_error(401, [
         'error' => 'Unauthorized',
-        'message' => 'Valid API key required via X-API-Key header, Bearer token, or ?api_key= query parameter.',
-    ], JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
-    exit;
+        'message' => 'Valid API key required via X-API-Key header or Bearer token.',
+    ]);
 }
 
-// 2. Ensure backend is ready (lazy on-demand activation)
-if (!ensure_daemon_alive($homeDir)) {
-    http_response_code(502);
-    header('Content-Type: application/json; charset=utf-8');
-    echo json_encode([
-        'error' => 'Bad Gateway: Unable to reach or spawn dbsrt-server on 127.0.0.1:' . UPSTREAM_PORT,
-    ], JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
-    exit;
-}
-
-// 3. Determine requested sub-path
+// 2. Determine requested sub-path
 $requestUri = $_SERVER['REQUEST_URI'] ?? '/';
 $scriptName = $_SERVER['SCRIPT_NAME'] ?? '';
 $scriptDir = dirname($scriptName);
@@ -179,55 +174,50 @@ if (!str_starts_with($path, '/')) {
     $path = '/' . $path;
 }
 
-// Strip internal ?api_key parameter before forwarding upstream
-$queryParams = $_GET;
-unset($queryParams['api_key']);
-$upstreamQuery = http_build_query($queryParams);
+$upstreamQuery = $_SERVER['QUERY_STRING'] ?? '';
 $upstreamUrl = sprintf('%s:%d%s%s', UPSTREAM_HOST, UPSTREAM_PORT, $path, $upstreamQuery !== '' ? '?' . $upstreamQuery : '');
-
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
-$ch = curl_init($upstreamUrl);
 
-// Forward request headers
+// Forward request headers, minus hop-by-hop, credentials and client-supplied forwarding headers
+$droppedHeaders = ['host', 'content-length', 'connection', 'x-api-key', 'authorization', 'x-forwarded-for', 'x-forwarded-proto'];
 $forwardHeaders = [];
 foreach (getallheaders() as $name => $value) {
-    $lower = strtolower($name);
-    if ($lower === 'host' || $lower === 'content-length' || $lower === 'connection' || $lower === 'x-api-key') {
-        continue;
+    if (!in_array(strtolower($name), $droppedHeaders, true)) {
+        $forwardHeaders[] = sprintf('%s: %s', $name, $value);
     }
-    $forwardHeaders[] = sprintf('%s: %s', $name, $value);
 }
-
-$remoteAddr = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
-$forwardHeaders[] = sprintf('X-Forwarded-For: %s', $remoteAddr);
+$forwardHeaders[] = sprintf('X-Forwarded-For: %s', $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1');
 $forwardHeaders[] = 'X-Forwarded-Proto: https';
 
+$requestBody = in_array($method, ['POST', 'PUT', 'PATCH'], true) ? file_get_contents('php://input') : false;
+
+$ch = curl_init($upstreamUrl);
 curl_setopt($ch, CURLOPT_CUSTOMREQUEST, $method);
+curl_setopt($ch, CURLOPT_NOBODY, $method === 'HEAD');
 curl_setopt($ch, CURLOPT_HTTPHEADER, $forwardHeaders);
 curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, CONNECT_TIMEOUT_SECONDS);
 curl_setopt($ch, CURLOPT_TIMEOUT, EXEC_TIMEOUT_SECONDS);
 curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
 curl_setopt($ch, CURLOPT_HEADER, true);
-
-// Forward request body for POST/PUT
-if ($method === 'POST' || $method === 'PUT' || $method === 'PATCH') {
-    $body = file_get_contents('php://input');
-    if ($body !== false && $body !== '') {
-        curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
-    }
+if ($requestBody !== false && $requestBody !== '') {
+    curl_setopt($ch, CURLOPT_POSTFIELDS, $requestBody);
 }
 
 $rawResponse = curl_exec($ch);
 
+// 3. Lazy on-demand activation: spawn only when the daemon refused the connection (nothing sent yet)
+if ($rawResponse === false && curl_errno($ch) === CURLE_COULDNT_CONNECT) {
+    if (!spawn_daemon($homeDir)) {
+        curl_close($ch);
+        send_json_error(502, ['error' => 'Bad Gateway: Unable to reach or spawn dbsrt-server']);
+    }
+    $rawResponse = curl_exec($ch);
+}
+
 if ($rawResponse === false) {
-    http_response_code(502);
-    header('Content-Type: application/json; charset=utf-8');
-    echo json_encode([
-        'error' => 'Bad Gateway: Upstream request failed',
-        'details' => curl_error($ch),
-    ], JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+    error_log('dbsrt gateway upstream error: ' . curl_error($ch));
     curl_close($ch);
-    exit;
+    send_json_error(502, ['error' => 'Bad Gateway: Upstream request failed']);
 }
 
 $headerSize = curl_getinfo($ch, CURLINFO_HEADER_SIZE);
