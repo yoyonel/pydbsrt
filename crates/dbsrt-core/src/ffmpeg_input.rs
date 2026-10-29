@@ -5,9 +5,8 @@
 //! - `DBSRT_FFMPEG_THREADS`: decode threads per process (default `DEFAULT_FFMPEG_DECODE_THREADS`).
 //! - `DBSRT_FTP_USER` / `DBSRT_FTP_PASSWORD`: credentials for `ftp://` inputs without userinfo,
 //!   passed as `-ftp-user` / `-ftp-password` input options. Their values are never logged.
-//! - `DBSRT_FTP_PASSWORD_FILE`: file holding the password (no trailing newline), passed as
-//!   `-/ftp-password <file>` (FFmpeg >= 7.1) so the secret never reaches the ffmpeg argv.
-//!   Wins over `DBSRT_FTP_PASSWORD`.
+//!   FFmpeg (checked up to 8.1) rejects `-/ftp-password <file>`: protocol options cannot be
+//!   read from a file, so the password stays in the ffmpeg argv.
 
 use std::path::Path;
 use std::process::Command;
@@ -22,8 +21,6 @@ pub const FFMPEG_THREADS_ENV: &str = "DBSRT_FFMPEG_THREADS";
 pub const FTP_USER_ENV: &str = "DBSRT_FTP_USER";
 /// Env var holding the FTP password for `ftp://` inputs without userinfo.
 pub const FTP_PASSWORD_ENV: &str = "DBSRT_FTP_PASSWORD";
-/// Env var holding the path of a file whose content is the FTP password.
-pub const FTP_PASSWORD_FILE_ENV: &str = "DBSRT_FTP_PASSWORD_FILE";
 
 const FTP_SCHEME_PREFIX: &str = "ftp://";
 const SCHEME_SEPARATOR: &str = "://";
@@ -43,13 +40,7 @@ pub fn ffmpeg_decode_threads() -> String {
 
 /// Builds `-ftp-user` / `-ftp-password` input options for an `ftp://` input that carries no
 /// userinfo. Returns no options for other inputs, URLs with userinfo, or an empty user.
-/// A non-empty `password_file` wins over `password` and is read by FFmpeg itself.
-pub fn ftp_credential_args(
-    input: &str,
-    user: Option<&str>,
-    password: Option<&str>,
-    password_file: Option<&str>,
-) -> Vec<String> {
+pub fn ftp_credential_args(input: &str, user: Option<&str>, password: Option<&str>) -> Vec<String> {
     let Some(rest) = input
         .get(..FTP_SCHEME_PREFIX.len())
         .filter(|scheme| scheme.eq_ignore_ascii_case(FTP_SCHEME_PREFIX))
@@ -63,27 +54,21 @@ pub fn ftp_credential_args(
         return Vec::new();
     };
     let mut args = vec!["-ftp-user".to_string(), user.to_string()];
-    match (password_file.filter(|f| !f.is_empty()), password) {
-        (Some(file), _) => args.extend(["-/ftp-password".to_string(), file.to_string()]),
-        (None, Some(password)) => {
-            args.extend(["-ftp-password".to_string(), password.to_string()]);
-        }
-        (None, None) => {}
+    if let Some(password) = password {
+        args.extend(["-ftp-password".to_string(), password.to_string()]);
     }
     args
 }
 
-/// Appends FTP credential input options from `DBSRT_FTP_USER` / `DBSRT_FTP_PASSWORD[_FILE]`
+/// Appends FTP credential input options from `DBSRT_FTP_USER` / `DBSRT_FTP_PASSWORD`
 /// when `input` is an `ftp://` URL without userinfo. Must be called before the input argument.
 pub fn apply_ftp_credentials(cmd: &mut Command, input: &Path) {
     let user = std::env::var(FTP_USER_ENV).ok();
     let password = std::env::var(FTP_PASSWORD_ENV).ok();
-    let password_file = std::env::var(FTP_PASSWORD_FILE_ENV).ok();
     cmd.args(ftp_credential_args(
         &input.to_string_lossy(),
         user.as_deref(),
         password.as_deref(),
-        password_file.as_deref(),
     ));
 }
 
@@ -194,31 +179,22 @@ mod tests {
     fn test_ftp_credential_args() {
         let url = "ftp://nas.example:21/media/movie.mkv";
         assert_eq!(
-            ftp_credential_args(url, Some("u"), Some("p"), None),
+            ftp_credential_args(url, Some("u"), Some("p")),
             ["-ftp-user", "u", "-ftp-password", "p"]
         );
         assert_eq!(
-            ftp_credential_args(url, Some("u"), None, None),
+            ftp_credential_args(url, Some("u"), None),
             ["-ftp-user", "u"]
         );
-        assert!(ftp_credential_args(url, None, Some("p"), None).is_empty());
-        assert!(ftp_credential_args(url, Some(""), Some("p"), None).is_empty());
+        assert!(ftp_credential_args(url, None, Some("p")).is_empty());
+        assert!(ftp_credential_args(url, Some(""), Some("p")).is_empty());
         // Userinfo in the URL wins; other schemes and local paths get nothing.
-        assert!(ftp_credential_args("ftp://a:b@nas/x.mkv", Some("u"), Some("p"), None).is_empty());
-        assert!(ftp_credential_args("http://nas/x.mkv", Some("u"), Some("p"), None).is_empty());
-        assert!(ftp_credential_args("/data/x.mkv", Some("u"), Some("p"), None).is_empty());
-        // A password file wins and keeps the secret out of the ffmpeg argv.
-        assert_eq!(
-            ftp_credential_args(url, Some("u"), Some("p"), Some("/run/pw")),
-            ["-ftp-user", "u", "-/ftp-password", "/run/pw"]
-        );
-        assert_eq!(
-            ftp_credential_args(url, Some("u"), Some("p"), Some("")),
-            ["-ftp-user", "u", "-ftp-password", "p"]
-        );
+        assert!(ftp_credential_args("ftp://a:b@nas/x.mkv", Some("u"), Some("p")).is_empty());
+        assert!(ftp_credential_args("http://nas/x.mkv", Some("u"), Some("p")).is_empty());
+        assert!(ftp_credential_args("/data/x.mkv", Some("u"), Some("p")).is_empty());
         // An '@' in the path is not userinfo.
         assert_eq!(
-            ftp_credential_args("FTP://nas/dir@2024/x.mkv", Some("u"), None, None),
+            ftp_credential_args("FTP://nas/dir@2024/x.mkv", Some("u"), None),
             ["-ftp-user", "u"]
         );
     }
