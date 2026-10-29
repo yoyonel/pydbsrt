@@ -28,7 +28,7 @@ flowchart TD
 
     subgraph CI ["main.yml (Pipeline CI Principal)"]
         direction TB
-        QG["Multi-Language Quality Gate<br/>(Ruff, Pyright, ShellCheck, Lua, YAML, Hadolint)"]
+        QG["Multi-Language Quality Gate<br/>(Ruff, complexipy, Pyright, ShellCheck, Lua, YAML, Hadolint)"]
         PY["Python Unit Tests<br/>(Pytest + Coverage)"]
         RS["Rust Quality & Test Suite<br/>(cargo fmt, clippy, cargo-llvm-cov)"]
         DB["PostgreSQL 17 BK-Tree Integration<br/>(bktreedb:17 + certify-coupling)"]
@@ -81,7 +81,7 @@ flowchart TD
   - Linters système : `shellcheck` (préinstallé), `shfmt`, `lua5.2`, `yamllint`, `hadolint` (binaire v2.12.0)
 - **Commande exécutée** : `bash scripts/code_quality.sh lint-fast`
 - **Vérifications** :
-  1. Python : Formatage et règles de linting Ruff.
+  1. Python : Formatage et règles de linting Ruff, dont la complexité cyclomatique C901 ($\le$ 10) sur tout `scripts/` (seuls les scripts legacy listés dans `pyproject.toml` en sont exemptés), et complexité cognitive complexipy ($\le$ 15) sur `scripts/` avec cliquet `complexipy-snapshot.json` : une fonction nouvelle ou dégradée au-dessus du seuil échoue, une fonction corrigée sort du snapshot (`task complexity:py`, aussi en hook pre-commit).
   2. Python : Typage statique strict via Pyright (0 erreur tolérée).
   3. Shell : Conformité POSIX / Bash via `shellcheck` et formatage via `shfmt`.
   4. Lua : Compilation bytecode `luac` et exécution des 42 tests unitaires mockant LibVLC (`vlsub_dbsrt.lua`).

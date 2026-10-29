@@ -12,9 +12,11 @@ from __future__ import annotations
 import argparse
 import atexit
 import contextlib
+import ftplib
 import json
 import mmap
 import os
+import posixpath
 import re
 import signal
 import subprocess
@@ -255,8 +257,6 @@ def list_nas_videos_ftp(
 
     Transient FTP errors restart the whole walk, so a dropped connection never yields a partial list.
     """
-    import ftplib
-
     for attempt in range(1, FTP_LIST_ATTEMPTS + 1):
         try:
             return _walk_nas_videos_ftp(nas_host, nas_user, nas_pass, base_dir, ftp_port, max_depth)
@@ -268,12 +268,19 @@ def list_nas_videos_ftp(
     return []
 
 
+def _list_ftp_dir(ftp: ftplib.FTP, path: str) -> List[Tuple[str, Dict[str, str]]]:
+    """MLSD entries of `path` without hidden and NAS system entries."""
+    try:
+        entries = list(ftp.mlsd(path))
+    except ftplib.error_perm:
+        # 550 on a folder the account cannot read: skip it, the rest of the library stays usable
+        return []
+    return [(name, facts) for name, facts in entries if name not in FTP_SKIPPED_NAMES and not name.startswith(".")]
+
+
 def _walk_nas_videos_ftp(
     nas_host: str, nas_user: str, nas_pass: str, base_dir: str, ftp_port: int, max_depth: int
 ) -> List[VideoTarget]:
-    import ftplib
-    import posixpath
-
     ftp = ftplib.FTP()
     ftp.connect(nas_host, ftp_port, timeout=15)
     ftp.login(nas_user, nas_pass)
@@ -283,14 +290,7 @@ def _walk_nas_videos_ftp(
     stack: List[str] = [base_dir.lstrip("/")]
     while stack:
         curr = stack.pop()
-        try:
-            entries = list(ftp.mlsd(curr))
-        except ftplib.error_perm:
-            # 550 on a folder the account cannot read: skip it, the rest of the library stays usable
-            continue
-        for name, facts in entries:
-            if name in FTP_SKIPPED_NAMES or name.startswith("."):
-                continue
+        for name, facts in _list_ftp_dir(ftp, curr):
             full_path = posixpath.join(curr, name)
             ftype = facts.get("type", "")
             if ftype == "dir" and full_path.count("/") <= max_depth:

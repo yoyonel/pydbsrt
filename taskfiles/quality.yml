@@ -12,6 +12,12 @@ tasks:
     cmds:
       - uv run python scripts/lint_complexity.py {{.CLI_ARGS}}
 
+  complexity:py:
+    desc: Run Python cognitive complexity gate on scripts/ (complexipy <= 15, legacy frozen in complexipy-snapshot.json)
+    aliases: [lint:complexity:py]
+    cmds:
+      - uv run complexipy {{.CLI_ARGS}}
+
   complexity:report:
     desc: Display comprehensive ASCII table of Rust architectural metrics (LOC, CCN, Arity, Nesting) grouped by crate, module, and file
     aliases: [complexity:table]
