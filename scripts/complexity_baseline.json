@@ -354,8 +354,8 @@
     "scope": "mod",
     "function_name": "start_media_sources_scanner",
     "start_line": 1213,
-    "max_loc": 93,
-    "max_ccn": 10,
+    "max_loc": 52,
+    "max_ccn": 8,
     "max_parameters": 2,
     "max_nesting": 5
   },

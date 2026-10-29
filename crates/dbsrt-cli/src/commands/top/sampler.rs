@@ -1118,11 +1118,11 @@ pub fn toggle_media_source(
 }
 
 /// Parameters for discovering metadata of an individual candidate media file.
-struct MediaDiscoveryCriteria<'a> {
-    phash_dir: &'a Path,
-    active_jobs: &'a [ActiveJobTelemetry],
-    certified_stems: &'a std::collections::HashSet<String>,
-    source_id: &'a str,
+pub struct MediaDiscoveryCriteria<'a> {
+    pub phash_dir: &'a Path,
+    pub active_jobs: &'a [ActiveJobTelemetry],
+    pub certified_stems: &'a std::collections::HashSet<String>,
+    pub source_id: &'a str,
 }
 
 /// Discovers metadata, codec, duration, and fingerprint status for a single candidate video file.
@@ -1197,6 +1197,115 @@ fn discover_single_media_file(
         source_id: Some(criteria.source_id.to_string()),
         status,
     })
+}
+
+/// Extracts a [`DiscoveredMediaItem`] from a single JSON element in `selected_batch_targets.json`.
+///
+/// # Arguments
+/// * `val` - JSON value containing either a string path or a target object dictionary.
+/// * `criteria` - Static discovery criteria holding paths, active jobs, and source identity.
+///
+/// # Returns
+/// `Some(DiscoveredMediaItem)` if a valid stem could be resolved, `None` otherwise.
+///
+/// # Data Flow & Invariants
+/// 1. Extracts path string, filename stem, and optional size from string or object dictionary.
+/// 2. Probes existence of `.phash` fingerprint in `criteria.phash_dir`.
+/// 3. Resolves ingestion status: InProgress if in `active_jobs`, Completed if in `certified_stems`,
+///    PartialFail if `.phash` exists on disk, otherwise Virgin.
+fn parse_batch_target_value(
+    val: &serde_json::Value,
+    criteria: &MediaDiscoveryCriteria,
+) -> Option<DiscoveredMediaItem> {
+    let (path_str, stem, size_bytes) = if let Some(s) = val.as_str() {
+        let p = Path::new(s);
+        let stem = p.file_stem()?.to_string_lossy().to_string();
+        (s.to_string(), stem, 0)
+    } else {
+        let obj = val.as_object()?;
+        let path = obj.get("path").and_then(|p| p.as_str())?;
+        let stem = obj
+            .get("stem")
+            .and_then(|s| s.as_str())
+            .map(|s| s.to_string())
+            .or_else(|| {
+                Path::new(path)
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().to_string())
+            })?;
+        let size = obj.get("size_bytes").and_then(|s| s.as_u64()).unwrap_or(0);
+        (path.to_string(), stem, size)
+    };
+
+    let phash_path = criteria.phash_dir.join(format!("{stem}.phash"));
+    let phash_info = if let Ok(meta) = fs::metadata(&phash_path) {
+        let bytes = meta.len();
+        let frame_count = (bytes / 8) as usize;
+        Some(PhashFingerprintInfo {
+            exists: true,
+            frame_count,
+            size_bytes: bytes,
+        })
+    } else {
+        None
+    };
+
+    let status = if criteria.active_jobs.iter().any(|j| j.media_name == stem) {
+        IngestionStatus::InProgress
+    } else if criteria.certified_stems.contains(&stem) {
+        IngestionStatus::Completed
+    } else if phash_info.is_some() {
+        IngestionStatus::PartialFail
+    } else {
+        IngestionStatus::Virgin
+    };
+
+    Some(DiscoveredMediaItem {
+        path: PathBuf::from(path_str),
+        stem,
+        size_bytes,
+        duration_secs: None,
+        video_codec: None,
+        subtitles: Vec::new(),
+        phash: phash_info,
+        source_id: Some(criteria.source_id.to_string()),
+        status,
+    })
+}
+
+/// Loads candidate media files from the remote batch streaming targets manifest (`selected_batch_targets.json`).
+///
+/// # Arguments
+/// * `targets_path` - Path to the JSON targets file.
+/// * `criteria` - Static discovery criteria holding paths, active jobs, and source identity.
+///
+/// # Returns
+/// A sorted [`Vec<DiscoveredMediaItem>`] containing all remote streaming batch entries.
+///
+/// # Panics
+/// Guarantee: Never panics. Returns empty vector on missing file or parse failure.
+///
+/// # Data Flow & Invariants
+/// Deserializes array of targets, maps each entry via [`parse_batch_target_value`],
+/// and sorts items deterministically by stem (case-insensitive).
+pub fn load_remote_batch_media_items(
+    targets_path: &Path,
+    criteria: &MediaDiscoveryCriteria,
+) -> Vec<DiscoveredMediaItem> {
+    let Ok(content) = fs::read_to_string(targets_path) else {
+        return Vec::new();
+    };
+    let Ok(arr) = serde_json::from_str::<Vec<serde_json::Value>>(&content) else {
+        return Vec::new();
+    };
+
+    let mut items: Vec<DiscoveredMediaItem> = arr
+        .iter()
+        .filter_map(|val| parse_batch_target_value(val, criteria))
+        .collect();
+
+    items.sort_by_key(|a| a.stem.to_lowercase());
+    items
 }
 
 /// Session configuration and callbacks for scanning media sources.
@@ -1461,6 +1570,130 @@ pub fn launch_selected_batch_with_target_file(
     }
 }
 
+/// Context bundling file paths for remote batch streaming synchronization.
+struct RemoteBatchScanContext<'a> {
+    batch_targets_path: &'a Path,
+    phash_dir: &'a Path,
+    events_path: &'a Path,
+    couplings_path: &'a Path,
+    sources_path: &'a Path,
+}
+
+/// Synchronizes remote batch streaming targets into shared telemetry without triggering disk scans.
+///
+/// # Arguments
+/// * `ctx` - File path context for targets, phashes, events, couplings, and sources.
+/// * `sources` - Configured media sources slice.
+/// * `shared_state` - Target shared telemetry state lock.
+///
+/// # Data Flow & Invariants
+/// When no local storage directories exist on disk (e.g. cloud streaming nodes), loads candidate
+/// media from `selected_batch_targets.json`, sets `is_scanning = false`, and updates source metrics.
+fn load_and_publish_remote_batch_state(
+    ctx: &RemoteBatchScanContext,
+    sources: &[MediaSourceConfig],
+    shared_state: &Arc<RwLock<SystemTelemetry>>,
+) {
+    if !ctx.batch_targets_path.exists() {
+        if let Ok(mut state) = shared_state.write() {
+            state.is_scanning = false;
+        }
+        return;
+    }
+
+    let active_jobs = shared_state
+        .read()
+        .map(|s| s.active_jobs.clone())
+        .unwrap_or_default();
+
+    let certified_stems = get_certified_stems(ctx.events_path, ctx.couplings_path);
+    let default_source_id = sources
+        .first()
+        .map(|s| s.id.as_str())
+        .unwrap_or(DEFAULT_SOURCE_ID_TVSHOW);
+
+    let criteria = MediaDiscoveryCriteria {
+        phash_dir: ctx.phash_dir,
+        active_jobs: &active_jobs,
+        certified_stems: &certified_stems,
+        source_id: default_source_id,
+    };
+
+    let remote_items = load_remote_batch_media_items(ctx.batch_targets_path, &criteria);
+
+    let mut updated_sources = sources.to_vec();
+    if let Some(src) = updated_sources
+        .iter_mut()
+        .find(|s| s.id == default_source_id)
+    {
+        src.media_count = remote_items.len();
+        src.last_scan_iso = Some(format_unix_to_iso(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0),
+        ));
+    }
+
+    if let Ok(mut state) = shared_state.write() {
+        state.discovered_media = remote_items;
+        state.is_scanning = false;
+        state.is_remote_streaming = true;
+        merge_scanned_source_metrics(&mut state.media_sources, &updated_sources);
+        let _ = save_media_sources(ctx.sources_path, &state.media_sources);
+    }
+}
+
+/// Executes a full progressive local disk scan across all configured sources.
+fn run_local_sources_scan(
+    sources: &[MediaSourceConfig],
+    ctx: &RemoteBatchScanContext,
+    shared_state: &Arc<RwLock<SystemTelemetry>>,
+    publish: &mut impl FnMut(&[DiscoveredMediaItem], &[MediaSourceConfig], bool),
+) {
+    IS_MEDIA_SCANNING.store(true, Ordering::SeqCst);
+    if let Ok(mut state) = shared_state.write() {
+        state.is_scanning = true;
+    }
+
+    let active_jobs = shared_state
+        .read()
+        .map(|s| s.active_jobs.clone())
+        .unwrap_or_default();
+
+    let (items, updated_sources) = scan_all_media_sources_with_progress(
+        sources,
+        ctx.couplings_path,
+        ctx.events_path,
+        ctx.phash_dir,
+        &active_jobs,
+        Path::new(DEFAULT_MEDIA_CACHE_PATH),
+        |partial_items, partial_sources| {
+            publish(partial_items, partial_sources, true);
+        },
+    );
+
+    IS_MEDIA_SCANNING.store(false, Ordering::SeqCst);
+    publish(&items, &updated_sources, false);
+}
+
+/// Executes a single scan cycle, branching cleanly between local disk traversal and remote batch sync.
+fn execute_sources_scan_cycle(
+    ctx: &RemoteBatchScanContext,
+    shared_state: &Arc<RwLock<SystemTelemetry>>,
+    publish: &mut impl FnMut(&[DiscoveredMediaItem], &[MediaSourceConfig], bool),
+) {
+    let sources = load_media_sources(ctx.sources_path);
+    let has_local = sources.iter().any(|s| s.enabled && s.path.exists());
+
+    if has_local {
+        run_local_sources_scan(&sources, ctx, shared_state, publish);
+    } else {
+        IS_MEDIA_SCANNING.store(false, Ordering::SeqCst);
+        load_and_publish_remote_batch_state(ctx, &sources, shared_state);
+    }
+}
+
 /// Spawns a background worker thread periodically refreshing candidate media across all configured sources.
 pub fn start_media_sources_scanner(
     shared_state: Arc<RwLock<SystemTelemetry>>,
@@ -1471,11 +1704,19 @@ pub fn start_media_sources_scanner(
         let couplings_path = PathBuf::from(DEFAULT_COUPLINGS_PATH);
         let sources_path = PathBuf::from(DEFAULT_MEDIA_SOURCES_PATH);
         let phash_dir = PathBuf::from(DEFAULT_PHASH_DIR);
-        let media_cache_path = PathBuf::from(DEFAULT_MEDIA_CACHE_PATH);
+        let batch_targets_path = PathBuf::from(DEFAULT_SELECTED_BATCH_TARGETS_PATH);
 
-        let publish_scan_update = |catalog_items: &[DiscoveredMediaItem],
-                                   scanned_sources: &[MediaSourceConfig],
-                                   is_scanning: bool| {
+        let remote_ctx = RemoteBatchScanContext {
+            batch_targets_path: &batch_targets_path,
+            phash_dir: &phash_dir,
+            events_path: &events_path,
+            couplings_path: &couplings_path,
+            sources_path: &sources_path,
+        };
+
+        let mut publish_scan_update = |catalog_items: &[DiscoveredMediaItem],
+                                       scanned_sources: &[MediaSourceConfig],
+                                       is_scanning: bool| {
             if let Ok(mut state) = shared_state.write() {
                 if state.media_sources.is_empty() {
                     state.media_sources = scanned_sources.to_vec();
@@ -1488,32 +1729,7 @@ pub fn start_media_sources_scanner(
             }
         };
 
-        // Run initial scan once at startup
-        IS_MEDIA_SCANNING.store(true, Ordering::SeqCst);
-        if let Ok(mut state) = shared_state.write() {
-            state.is_scanning = true;
-        }
-
-        let initial_sources = load_media_sources(&sources_path);
-        let active_jobs = {
-            shared_state
-                .read()
-                .map(|s| s.active_jobs.clone())
-                .unwrap_or_default()
-        };
-        let (items, updated_sources) = scan_all_media_sources_with_progress(
-            &initial_sources,
-            &couplings_path,
-            &events_path,
-            &phash_dir,
-            &active_jobs,
-            &media_cache_path,
-            |partial_items, partial_sources| {
-                publish_scan_update(partial_items, partial_sources, true);
-            },
-        );
-        IS_MEDIA_SCANNING.store(false, Ordering::SeqCst);
-        publish_scan_update(&items, &updated_sources, false);
+        execute_sources_scan_cycle(&remote_ctx, &shared_state, &mut publish_scan_update);
 
         while !stop_flag.load(Ordering::Relaxed) {
             let sleep_ticks = DEFAULT_MEDIA_SCAN_INTERVAL_SECS * 10;
@@ -1527,31 +1743,7 @@ pub fn start_media_sources_scanner(
                 std::thread::sleep(std::time::Duration::from_millis(100));
             }
 
-            IS_MEDIA_SCANNING.store(true, Ordering::SeqCst);
-            if let Ok(mut state) = shared_state.write() {
-                state.is_scanning = true;
-            }
-
-            let sources = load_media_sources(&sources_path);
-            let active_jobs = shared_state
-                .read()
-                .map(|s| s.active_jobs.clone())
-                .unwrap_or_default();
-
-            let (items, updated_sources) = scan_all_media_sources_with_progress(
-                &sources,
-                &couplings_path,
-                &events_path,
-                &phash_dir,
-                &active_jobs,
-                &media_cache_path,
-                |partial_items, partial_sources| {
-                    publish_scan_update(partial_items, partial_sources, true);
-                },
-            );
-
-            IS_MEDIA_SCANNING.store(false, Ordering::SeqCst);
-            publish_scan_update(&items, &updated_sources, false);
+            execute_sources_scan_cycle(&remote_ctx, &shared_state, &mut publish_scan_update);
         }
     });
 }
@@ -1600,12 +1792,75 @@ fn maybe_reload_history(
 fn update_discovered_media_status(
     media: &mut [DiscoveredMediaItem],
     active_jobs: &[ActiveJobTelemetry],
+    history_records: &[HistoricalRecord],
 ) {
     for item in media {
         if active_jobs.iter().any(|j| j.media_name == item.stem) {
             item.status = IngestionStatus::InProgress;
+        } else if history_records
+            .iter()
+            .any(|r| r.success && r.video_stem == item.stem)
+        {
+            item.status = IngestionStatus::Completed;
         }
     }
+}
+
+/// Discovers and filters active dbsrt and ffmpeg candidate processes from sysinfo.
+fn collect_candidate_processes(system: &System) -> (Vec<RawCandidateProcess>, Vec<u32>) {
+    let mut ffmpeg_ppids = Vec::new();
+    let mut raw_candidates = Vec::new();
+
+    for (pid_obj, proc) in system.processes() {
+        let cmdline: Vec<String> = proc
+            .cmd()
+            .iter()
+            .map(|s| s.to_string_lossy().to_string())
+            .collect();
+        if cmdline.is_empty() {
+            continue;
+        }
+
+        let cmd_str = cmdline.join(" ");
+        let is_dbsrt = cmd_str.contains("dbsrt") && cmd_str.contains("media:add");
+        let is_ffmpeg =
+            cmd_str.contains("ffmpeg") && (cmd_str.contains("-i") || cmd_str.contains("-f"));
+
+        if !is_dbsrt && !is_ffmpeg {
+            continue;
+        }
+
+        let pid = pid_obj.as_u32();
+
+        // Strict liveness check: exclude dead, zombie or already terminated processes
+        if unsafe { libc::kill(pid as libc::pid_t, 0) } != 0 {
+            continue;
+        }
+
+        // Strict process filter: exclude individual thread tasks to prevent thread duplication
+        if proc.thread_kind().is_some() || is_thread_task(pid) {
+            continue;
+        }
+
+        let ppid = proc.parent().map(|p| p.as_u32()).unwrap_or(0);
+        if is_ffmpeg {
+            ffmpeg_ppids.push(ppid);
+        }
+
+        raw_candidates.push(RawCandidateProcess {
+            pid,
+            ppid,
+            cmdline,
+            cmd_str,
+            is_dbsrt,
+            is_ffmpeg,
+            cpu_pct: proc.cpu_usage(),
+            mem_bytes: proc.memory(),
+            run_time_secs: proc.run_time(),
+        });
+    }
+
+    (raw_candidates, ffmpeg_ppids)
 }
 
 /// Background sampler worker updating the shared telemetry state at regular intervals.
@@ -1663,62 +1918,7 @@ pub fn run_telemetry_sampler_loop(
         last_net_instant = new_last_net;
 
         // 2. Discover active candidate processes
-        let mut dbsrt_pids = Vec::new();
-        let mut ffmpeg_ppids = Vec::new();
-        let mut raw_candidates = Vec::new();
-
-        for (pid_obj, proc) in system.processes() {
-            let cmdline: Vec<String> = proc
-                .cmd()
-                .iter()
-                .map(|s| s.to_string_lossy().to_string())
-                .collect();
-            if cmdline.is_empty() {
-                continue;
-            }
-
-            let cmd_str = cmdline.join(" ");
-            let is_dbsrt = cmd_str.contains("dbsrt") && cmd_str.contains("media:add");
-            let is_ffmpeg =
-                cmd_str.contains("ffmpeg") && (cmd_str.contains("-i") || cmd_str.contains("-f"));
-
-            if !is_dbsrt && !is_ffmpeg {
-                continue;
-            }
-
-            let pid = pid_obj.as_u32();
-
-            // Strict liveness check: exclude dead, zombie or already terminated processes
-            if unsafe { libc::kill(pid as libc::pid_t, 0) } != 0 {
-                continue;
-            }
-
-            // Strict process filter: exclude individual thread tasks to prevent thread duplication
-            if proc.thread_kind().is_some() || is_thread_task(pid) {
-                continue;
-            }
-
-            let ppid = proc.parent().map(|p| p.as_u32()).unwrap_or(0);
-
-            if is_dbsrt {
-                dbsrt_pids.push(pid);
-            }
-            if is_ffmpeg {
-                ffmpeg_ppids.push(ppid);
-            }
-
-            raw_candidates.push(RawCandidateProcess {
-                pid,
-                ppid,
-                cmdline,
-                cmd_str,
-                is_dbsrt,
-                is_ffmpeg,
-                cpu_pct: proc.cpu_usage(),
-                mem_bytes: proc.memory(),
-                run_time_secs: proc.run_time(),
-            });
-        }
+        let (raw_candidates, ffmpeg_ppids) = collect_candidate_processes(&system);
 
         let (active_jobs, new_previous_io) =
             process_candidate_jobs(raw_candidates, &ffmpeg_ppids, previous_io_samples, now);
@@ -1751,7 +1951,11 @@ pub fn run_telemetry_sampler_loop(
             state.stats = history_cache.stats.clone();
             state.is_scanning = IS_MEDIA_SCANNING.load(Ordering::Relaxed);
             state.batch_queue = batch_queue;
-            update_discovered_media_status(&mut state.discovered_media, &active_jobs);
+            update_discovered_media_status(
+                &mut state.discovered_media,
+                &active_jobs,
+                &history_cache.records,
+            );
             state.active_jobs = active_jobs;
         }
 

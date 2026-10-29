@@ -293,6 +293,19 @@ pub fn build_help_media_sources() -> Vec<Line<'static>> {
         Line::from("    [Space]        : Activer / Désactiver la source sélectionnée pour les scans disque (catalogue persistant préservé)."),
         Line::from("    [d]            : Supprimer la source sélectionnée avec dialogue modal de confirmation (sécurité : dernière source protégée)."),
         Line::from("    [r]            : Déclencher un rescan complet immédiat de l'ensemble des sources actives en tâche de fond."),
+        Line::from(""),
+        Line::from(Span::styled("  Mode Déporté & Streaming SFTP (Zéro-NVMe / Cloud / RPi4) :", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))),
+        Line::from("    Sur les nœuds distants sans stockage vidéo monté localement, cette vue se transforme automatiquement en moniteur de flux streaming."),
+        Line::from("    • STATUT                 : [✓] ACTIF lorsque le canal de streaming réseau vers le NAS Synology est opérationnel."),
+        Line::from("    • SOURCE DE DIFFUSION    : Serveur SFTP source distant hébergeant les médias originaux."),
+        Line::from("    • CIBLES RÉSEAU          : Nombre total de vidéos répertoriées dans le batch streaming actif (data/reports/selected_batch_targets.json)."),
+        Line::from("    • FLUX STREAMING         : Statut de transit des données (Opérationnel avec débit MiB/s ou En attente)."),
+        Line::from("    • LIAISON SFTP / BRIDGE  : Tunnel SFTP NAS (port 22) routé vers le pont HTTP local éphémère (port 8769)."),
+        Line::from("    • MODE DÉCODAGE          : Zéro-NVMe (RAM Direct) : démultiplexage et décodage direct en mémoire vive sans écriture de vidéo sur disque."),
+        Line::from("    Raccourcis en Mode Zéro-NVMe :"),
+        Line::from("      [4/m]          : Basculer vers l'explorateur pour inspecter l'état individuel des cibles du batch."),
+        Line::from("      [r]            : Actualiser le registre des cibles streaming réseau sans déclencher de scan disque."),
+        Line::from("      [a/e/d/Space]  : Verrouillés avec message contextuel (la gestion des dossiers physiques s'effectue sur la station locale)."),
     ]
 }
 

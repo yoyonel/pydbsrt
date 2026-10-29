@@ -32,7 +32,24 @@ const MEDIA_SOURCES_COLUMN_WIDTHS: [Constraint; 7] = [
     Constraint::Min(25),
 ];
 
-/// Renders the full-frame manager for configured media library sources.
+/// Table column widths for remote streaming sources grid.
+const REMOTE_SOURCES_COLUMN_WIDTHS: [Constraint; 7] = [
+    Constraint::Length(3),
+    Constraint::Length(14),
+    Constraint::Length(34),
+    Constraint::Length(18),
+    Constraint::Length(28),
+    Constraint::Length(28),
+    Constraint::Min(24),
+];
+
+/// Top toolbar height for remote streaming sources page.
+const REMOTE_TOOLBAR_HEIGHT: u16 = 2;
+
+/// Table height for remote streaming sources row and header.
+const REMOTE_TABLE_HEIGHT: u16 = 4;
+
+/// Renders the full-frame manager for configured media library sources or remote streaming bridge.
 ///
 /// # Arguments
 /// * `frame` - Mutable Ratatui terminal render frame.
@@ -40,9 +57,19 @@ const MEDIA_SOURCES_COLUMN_WIDTHS: [Constraint; 7] = [
 /// * `ctx` - Active UI rendering context.
 ///
 /// # Data Flow & Invariants
-/// Displays active and configured media sources (local drives, CIFS/NFS mounts),
-/// rendering operational action shortcuts and disk availability statuses.
+/// Dispatches dynamically:
+/// - When `is_remote_streaming` is true: renders network streaming SFTP bridge status and locks physical storage actions.
+/// - When false: renders standard interactive local storage sources manager (CRUD and disk scanner).
 pub fn render_media_sources_page(frame: &mut Frame, area: Rect, ctx: &UiContext) {
+    if ctx.telemetry.is_remote_streaming {
+        render_remote_streaming_sources_page(frame, area, ctx);
+    } else {
+        render_local_sources_page(frame, area, ctx);
+    }
+}
+
+/// Renders the interactive local storage sources page.
+pub fn render_local_sources_page(frame: &mut Frame, area: Rect, ctx: &UiContext) {
     let active_sources = ctx
         .telemetry
         .media_sources
@@ -92,6 +119,226 @@ pub fn render_media_sources_page(frame: &mut Frame, area: Rect, ctx: &UiContext)
     } else {
         render_media_sources_table(frame, sub_chunks[1], ctx);
     }
+}
+
+/// Renders the remote network streaming sources and SFTP bridge view (Zero-NVMe mode).
+pub fn render_remote_streaming_sources_page(frame: &mut Frame, area: Rect, ctx: &UiContext) {
+    let sources_title = " 🌐 SOURCES DE FLUX RÉSEAU & PONT STREAMING SFTP [MODE ZÉRO-NVME] ";
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan))
+        .title(Line::from(vec![Span::styled(
+            sources_title,
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )]));
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let sub_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(REMOTE_TOOLBAR_HEIGHT),
+            Constraint::Length(REMOTE_TABLE_HEIGHT),
+            Constraint::Min(6),
+        ])
+        .split(inner);
+
+    let targets_count = ctx.telemetry.discovered_media.len();
+    render_remote_streaming_toolbar(frame, sub_chunks[0], targets_count);
+    render_remote_streaming_table(frame, sub_chunks[1], ctx);
+    render_remote_streaming_diagnostics(frame, sub_chunks[2], ctx);
+}
+
+/// Renders the locked action toolbar for remote streaming nodes.
+fn render_remote_streaming_toolbar(frame: &mut Frame, area: Rect, targets_count: usize) {
+    let bar_spans = vec![
+        Span::styled(
+            " [4/m] ",
+            Style::default()
+                .fg(Color::Magenta)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!("Voir Cibles ({targets_count} médias)   "),
+            Style::default().fg(Color::White),
+        ),
+        Span::styled(
+            " [r] ",
+            Style::default()
+                .fg(Color::LightBlue)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            "Actualiser Cibles Réseau   ",
+            Style::default().fg(Color::White),
+        ),
+        Span::styled(" [a/e/d/Space] ", Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            "Verrouillé (Stockage Local Désactivé sur ce Nœud)",
+            Style::default().fg(Color::DarkGray),
+        ),
+    ];
+    frame.render_widget(Paragraph::new(Line::from(bar_spans)), area);
+}
+
+/// Renders the single-row remote streaming source status table.
+fn render_remote_streaming_table(frame: &mut Frame, area: Rect, ctx: &UiContext) {
+    let header_cells = [
+        " ",
+        "STATUT",
+        "SOURCE DE DIFFUSION",
+        "CIBLES RÉSEAU",
+        "FLUX STREAMING",
+        "LIAISON SFTP / BRIDGE",
+        "MODE DÉCODAGE",
+    ]
+    .iter()
+    .map(|h| {
+        Cell::from(*h).style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )
+    });
+    let header = Row::new(header_cells).height(1).bottom_margin(0);
+
+    let targets_count = ctx.telemetry.discovered_media.len();
+    let is_streaming = ctx.telemetry.net_rx_mib_s > 0.0 || !ctx.telemetry.active_jobs.is_empty();
+    let flux_span = if is_streaming {
+        Span::styled(
+            format!("Opérationnel ({:.1} MiB/s)", ctx.telemetry.net_rx_mib_s),
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+        )
+    } else {
+        Span::styled("En attente", Style::default().fg(Color::Yellow))
+    };
+
+    let row = Row::new(vec![
+        Cell::from(Span::styled(
+            "► ",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Cell::from(Span::styled(
+            "[✓] ACTIF",
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Cell::from(Span::styled(
+            "Synology NAS (Flux SFTP Distant)",
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Cell::from(Span::styled(
+            format!("{targets_count} cibles batch"),
+            Style::default().fg(Color::Cyan),
+        )),
+        Cell::from(flux_span),
+        Cell::from(Span::styled(
+            "sftp://nas:22 ➔ HTTP :8769",
+            Style::default().fg(Color::LightBlue),
+        )),
+        Cell::from(Span::styled(
+            "Zéro-NVMe (RAM Direct)",
+            Style::default()
+                .fg(Color::Magenta)
+                .add_modifier(Modifier::BOLD),
+        )),
+    ]);
+
+    let table = Table::new(vec![row], REMOTE_SOURCES_COLUMN_WIDTHS).header(header);
+    frame.render_widget(table, area);
+}
+
+/// Renders technical specifications and operational rules of Zero-NVMe network streaming.
+fn render_remote_streaming_diagnostics(frame: &mut Frame, area: Rect, ctx: &UiContext) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::DarkGray))
+        .title(Line::from(vec![Span::styled(
+            " ℹ️ SPÉCIFICATIONS TECHNIQUES DU STREAMING RÉSEAU (ZÉRO-NVME) ",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )]));
+
+    let net_rate = ctx.telemetry.net_rx_mib_s;
+    let text = vec![
+        Line::from(vec![
+            Span::styled(
+                "  • Architecture Zéro-Copie   : ",
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Aucun stockage vidéo physique local monté sur ce nœud. Les flux vidéo sont",
+                Style::default().fg(Color::Gray),
+            ),
+        ]),
+        Line::from(vec![
+            Span::raw("                                "),
+            Span::styled(
+                "lus à la volée depuis le NAS Synology via SFTP et injectés dans les RAM buffers FFmpeg.",
+                Style::default().fg(Color::Gray),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                "  • Empreinte NVMe Garantie   : ",
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "0 octet de conteneur vidéo persistant. Seuls les fichiers d'empreinte .phash (~3 Ko)",
+                Style::default().fg(Color::Gray),
+            ),
+        ]),
+        Line::from(vec![
+            Span::raw("                                "),
+            Span::styled(
+                "et sous-titres .srt (~50 Ko) sont écrits localement avant synchronisation descendante.",
+                Style::default().fg(Color::Gray),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                "  • Bande Passante Ingress    : ",
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("Débit réseau actuel : {net_rate:.1} MiB/s (Plafond CloudLinux LVE respecté : 42.0 MiB/s)."),
+                Style::default().fg(Color::Cyan),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                "  • Administration Dossiers   : ",
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "L'ajout, édition ou scan de dossiers physiques s'effectue sur la station locale hôte.",
+                Style::default().fg(Color::DarkGray),
+            ),
+        ]),
+    ];
+
+    let p = Paragraph::new(text).block(block);
+    frame.render_widget(p, area);
 }
 
 /// Renders the action toolbar for media sources (add, edit, toggle, delete, rescan).

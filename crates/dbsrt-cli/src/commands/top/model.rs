@@ -891,6 +891,9 @@ pub struct SystemTelemetry {
     pub is_scanning: bool,
     /// Active batch processing queue telemetry.
     pub batch_queue: BatchQueueTelemetry,
+    /// Flag indicating whether the node operates in remote streaming mode (Zero-NVMe SFTP).
+    #[serde(default)]
+    pub is_remote_streaming: bool,
 }
 
 /// Active input field focus within the source configuration modal.
@@ -1150,22 +1153,30 @@ pub fn parse_iso_to_unix_secs(iso_str: &str) -> Option<f64> {
 /// Formatted UTC ISO-8601 string.
 ///
 /// # Data Flow & Invariants
-/// Utilizes POSIX `gmtime_r` for reentrant, thread-safe date calculation.
+/// Utilizes pure, safe Howard Hinnant algorithm to compute civil Gregorian date
+/// without C FFI or architecture-dependent `time_t` assumptions.
 pub fn format_unix_to_iso(unix_secs: u64) -> String {
-    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
-    let time = unix_secs as libc::time_t;
-    unsafe {
-        libc::gmtime_r(&time, &mut tm);
-    }
-    format!(
-        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
-        tm.tm_year + 1900,
-        tm.tm_mon + 1,
-        tm.tm_mday,
-        tm.tm_hour,
-        tm.tm_min,
-        tm.tm_sec
-    )
+    let secs_of_day = unix_secs % SECONDS_PER_DAY;
+    let hour = secs_of_day / SECONDS_PER_HOUR;
+    let min = (secs_of_day % SECONDS_PER_HOUR) / SECONDS_PER_MINUTE;
+    let sec = secs_of_day % SECONDS_PER_MINUTE;
+
+    let z = (unix_secs / SECONDS_PER_DAY) as i64 + CIVIL_EPOCH_DAYS_OFFSET;
+    let era = if z >= 0 {
+        z
+    } else {
+        z - (CIVIL_DAYS_PER_400_YEARS - 1)
+    } / CIVIL_DAYS_PER_400_YEARS;
+    let doe = (z - era * CIVIL_DAYS_PER_400_YEARS) as u32;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = if month <= 2 { y + 1 } else { y };
+
+    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{min:02}:{sec:02}Z")
 }
 
 /// Formats duration in seconds into a human-readable string (e.g. `"12m34s"` or `"1h05m"`).

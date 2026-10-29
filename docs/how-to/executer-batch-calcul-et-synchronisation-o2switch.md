@@ -124,14 +124,25 @@ Le script alloue un pseudo-terminal PTY (`ssh -t`) et active l'interface Ratatui
   - Affiche le nom de l'épisode, son PID, sa consommation CPU % et RAM RSS.
   - Indique le débit streaming instantané (MiB/s) mesuré via `/proc/<pid>/io`.
   - Fournit la jauge de progression et l'ETA calculé dynamiquement.
+- **Onglet 4 : Explorateur de Médias & Cibles Batch Distantes (`4` ou `m`)** :
+  - Sur nœud distant sans stockage local monté (ex: o2switch avec flux SFTP Zéro-NVMe), alimenté directement par le registre des cibles batch (`data/reports/selected_batch_targets.json`).
+  - Affiche l'ensemble des médias du batch avec leur statut en direct (`[EN COURS]` si un worker décode, `[COMPLÉTÉ]` dès certification `.phash`, `[VIERGE]` si en attente).
+  - Suppression automatique des scans disque en arrière-plan (aucun clignotement ni message intempestif *"Scan en cours..."* en l'absence de montages physiques locaux).
+- **Onglet 5 : Sources de Flux Réseau & Pont Streaming SFTP (`5` ou `s`)** :
+  - Commute automatiquement en moniteur de flux réseau en mode Zéro-NVMe : affiche la source NAS SFTP, le tunnel réseau actif (`sftp://nas:22 ➔ HTTP Bridge :8769`), le débit de transit et le total des cibles batch.
+  - Verrouille les actions d'ajout de répertoires physiques locaux (qui n'existent pas sur le nœud distant) et dédie `[r]` au rafraîchissement rapide du registre JSON.
 - **En-tête de télémétrie** :
   - Jauge globale CPU (permet de vérifier visuellement l'atteinte du palier cible $\approx 80\%$).
   - Jauge globale RAM et débit réseau entrant (`net_rx_mib_s`).
+  - Progression globale de la file active (`Batch: X/Y (Z%)`).
 - **Raccourcis de navigation** :
   - `1` : Tâches Actives
-  - `2` : Médiathèque découverte & Statuts d'ingestion
-  - `3` : Historique des sessions et débits consolidés
-  - `4` : Aide contextuelle et glossaire des statuts
+  - `2` / `h` : Statistiques & Distribution descriptive
+  - `3` / `r` : Historique des médias complétés & diagnostics d'erreurs
+  - `4` / `m` : Explorateur de Médias & Cibles batch distantes
+  - `5` / `s` : Sources de flux réseau & Pont SFTP
+  - `6` / `y` : Télémétrie système hôte (Fastfetch)
+  - `?` : Aide contextuelle et glossaire des statuts
   - `q` : Quitter le moniteur (les calculs en arrière-plan continuent normalement).
 
 > [!TIP]

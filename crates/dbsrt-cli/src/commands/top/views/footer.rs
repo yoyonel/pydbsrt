@@ -148,7 +148,11 @@ fn build_shortcuts_text(ctx: &UiContext) -> &'static str {
         }
         ViewPage::MediaBrowser => build_media_browser_shortcuts(ctx),
         ViewPage::MediaSources => {
-            "[↑/k] Défiler  [a] Ajouter  [e] Éditer  [Space] On/Off  [d] Suppr  [r] Rescan  [?] Aide  [q] Quitter"
+            if ctx.telemetry.is_remote_streaming {
+                "[4/m] Cibles Batch  [r] Actualiser  [?] Aide  [q] Quitter  (Stockage Local Verrouillé)"
+            } else {
+                "[↑/k] Défiler  [a] Ajouter  [e] Éditer  [Space] On/Off  [d] Suppr  [r] Rescan  [?] Aide  [q] Quitter"
+            }
         }
         ViewPage::System => "[↑/k] Défiler  [?] Aide  [q] Quitter",
         ViewPage::MediaInspection => {

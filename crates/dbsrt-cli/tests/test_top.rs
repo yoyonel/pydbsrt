@@ -8,11 +8,11 @@ use dbsrt_cli::commands::top::app::{handle_key_event, handle_key_event_with_stat
 use dbsrt_cli::commands::top::constants::*;
 use dbsrt_cli::commands::top::model::{
     calculate_dimension_stats, calculate_overall_stats, default_progress_bar,
-    filter_and_sort_media, format_duration, format_progress_bar, matches_fuzzy_search,
-    parse_iso_to_unix_secs, ActiveJobTelemetry, CompletedFilter, CompletedSort,
-    DiscoveredMediaItem, GpuTelemetry, HelpTab, HistoricalRecord, HostSystemInfo, IngestionStatus,
-    MediaFilter, MediaSort, MediaSourceFilter, MediaSubtrackInfo, SessionThroughput,
-    SystemTelemetry, ViewPage,
+    filter_and_sort_media, format_duration, format_progress_bar, format_unix_to_iso,
+    matches_fuzzy_search, parse_iso_to_unix_secs, ActiveJobTelemetry, CompletedFilter,
+    CompletedSort, DiscoveredMediaItem, GpuTelemetry, HelpTab, HistoricalRecord, HostSystemInfo,
+    IngestionStatus, MediaFilter, MediaSort, MediaSourceConfig, MediaSourceFilter,
+    MediaSubtrackInfo, SessionThroughput, SystemTelemetry, ViewPage,
 };
 use dbsrt_cli::commands::top::process_ctl::{
     check_if_stopped, inspect_job_details, kill_job, stop_job, toggle_pause_job,
@@ -20,7 +20,8 @@ use dbsrt_cli::commands::top::process_ctl::{
 use dbsrt_cli::commands::top::sampler::{
     compute_session_throughput, is_thread_task, launch_selected_batch,
     launch_selected_batch_with_target_file, load_historical_records, load_media_cache,
-    preload_stem_size_cache, read_proc_io_bytes, save_media_cache,
+    load_remote_batch_media_items, preload_stem_size_cache, read_proc_io_bytes, save_media_cache,
+    MediaDiscoveryCriteria,
 };
 use dbsrt_cli::commands::top::ui::{render_ui, UiContext};
 use dbsrt_cli::commands::top::{probe_telemetry_snapshot, run_top, TopArgs};
@@ -355,6 +356,7 @@ fn test_ui_rendering_all_pages() {
         }],
         is_scanning: false,
         batch_queue: Default::default(),
+        is_remote_streaming: false,
     };
 
     let empty_set = HashSet::new();
@@ -3417,4 +3419,269 @@ fn test_batch_queue_telemetry_rendered_in_header_and_table() {
     assert!(buffer.contains("Batch: 11/399 (3%)"));
     assert!(buffer.contains("File: 11/399"));
     assert!(buffer.contains("388 en attente"));
+}
+
+#[test]
+fn test_load_remote_batch_media_items_and_status_assignment() {
+    let tmp_dir = std::env::temp_dir().join(format!("pydbsrt_remote_batch_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+    let targets_file = tmp_dir.join("selected_batch_targets.json");
+    let phash_dir = tmp_dir.join("__PHASH__");
+    std::fs::create_dir_all(&phash_dir).unwrap();
+
+    // Create 1 dummy .phash file for episode 2
+    let dummy_phash = phash_dir.join("Episode.2.phash");
+    std::fs::write(&dummy_phash, vec![0u8; 16]).unwrap();
+
+    let json_content = r#"[
+        {
+            "path": "/tvshow/Show/Episode.1.mkv",
+            "stem": "Episode.1",
+            "size_bytes": 104857600
+        },
+        {
+            "path": "/tvshow/Show/Episode.2.mkv",
+            "stem": "Episode.2",
+            "size_bytes": 209715200
+        },
+        {
+            "path": "/tvshow/Show/Episode.3.mkv",
+            "stem": "Episode.3",
+            "size_bytes": 314572800
+        },
+        "/tvshow/Show/Episode.4.mkv"
+    ]"#;
+    std::fs::write(&targets_file, json_content).unwrap();
+
+    let active_job = ActiveJobTelemetry {
+        pid: 1234,
+        media_name: "Episode.1".to_string(),
+        engine: "CPU (Software)".to_string(),
+        engine_reason: None,
+        elapsed_secs: 12.0,
+        read_bytes: 1000,
+        total_bytes: 2000,
+        progress_ratio: 0.5,
+        current_rate_mib_s: 10.0,
+        hashing_fps: 24.0,
+        eta_secs: Some(12.0),
+        cpu_percent: 100.0,
+        ram_rss_mib: 10.0,
+        status: "RUNNING".to_string(),
+        cmdline: vec!["dbsrt".to_string()],
+    };
+    let active_jobs = vec![active_job];
+
+    let mut certified_stems = HashSet::new();
+    certified_stems.insert("Episode.3".to_string());
+
+    let criteria = MediaDiscoveryCriteria {
+        phash_dir: &phash_dir,
+        active_jobs: &active_jobs,
+        certified_stems: &certified_stems,
+        source_id: "remote-tvshow",
+    };
+
+    let items = load_remote_batch_media_items(&targets_file, &criteria);
+    assert_eq!(items.len(), 4);
+
+    // Episode.1 is in active_jobs -> InProgress
+    let ep1 = items.iter().find(|i| i.stem == "Episode.1").unwrap();
+    assert_eq!(ep1.status, IngestionStatus::InProgress);
+    assert_eq!(ep1.size_bytes, 104857600);
+    assert_eq!(ep1.source_id.as_deref(), Some("remote-tvshow"));
+
+    // Episode.2 has a .phash file -> PartialFail
+    let ep2 = items.iter().find(|i| i.stem == "Episode.2").unwrap();
+    assert_eq!(ep2.status, IngestionStatus::PartialFail);
+    assert!(ep2.phash.as_ref().unwrap().exists);
+
+    // Episode.3 is in certified_stems -> Completed
+    let ep3 = items.iter().find(|i| i.stem == "Episode.3").unwrap();
+    assert_eq!(ep3.status, IngestionStatus::Completed);
+
+    // Episode.4 was given as raw string path -> Virgin, size 0
+    let ep4 = items.iter().find(|i| i.stem == "Episode.4").unwrap();
+    assert_eq!(ep4.status, IngestionStatus::Virgin);
+    assert_eq!(ep4.size_bytes, 0);
+}
+
+#[test]
+fn test_remote_streaming_media_browser_rendered_with_targets() {
+    let backend = TestBackend::new(120, 30);
+    let mut terminal = Terminal::new(backend).unwrap();
+
+    let remote_item = DiscoveredMediaItem {
+        path: PathBuf::from("/tvshow/Demon Slayer/S04E05.mkv"),
+        stem: "Demon.Slayer.S04E05.1080p".to_string(),
+        size_bytes: 544 * 1024 * 1024,
+        duration_secs: None,
+        video_codec: None,
+        subtitles: Vec::new(),
+        phash: None,
+        source_id: Some("synology-tvshow".to_string()),
+        status: IngestionStatus::InProgress,
+    };
+
+    let tel = SystemTelemetry {
+        media_sources: vec![MediaSourceConfig {
+            id: "synology-tvshow".to_string(),
+            name: "Synology NAS (tvshow)".to_string(),
+            path: PathBuf::from("/media/storage/tvshow"),
+            enabled: true,
+            media_count: 1,
+            last_scan_added: 0,
+            last_scan_iso: Some("2026-10-29T09:00:00Z".to_string()),
+        }],
+        discovered_media: vec![remote_item],
+        is_scanning: false,
+        ..Default::default()
+    };
+
+    let app = AppState::default();
+    let ctx = UiContext {
+        telemetry: &tel,
+        view: ViewPage::MediaBrowser,
+        selected_index: app.selected_index,
+        completed_scroll_index: app.completed_scroll_index,
+        media_scroll_index: app.media_scroll_index,
+        source_scroll_index: app.source_scroll_index,
+        source_modal: None,
+        selected_media_paths: &app.selected_media_paths,
+        media_filter: app.media_filter,
+        media_sort: app.media_sort,
+        source_filter: &app.source_filter,
+        completed_filter: app.completed_filter,
+        completed_sort: app.completed_sort,
+        search_query: "",
+        search_active: false,
+        help_tab: app.help_tab,
+        help_scroll_index: app.help_scroll_index,
+        feedback_msg: None,
+    };
+
+    terminal.draw(|f| render_ui(f, &ctx)).unwrap();
+    let buffer = format!("{:?}", terminal.backend());
+
+    assert!(buffer.contains("EXPLORATEUR DE MÉDIAS"));
+    assert!(buffer.contains("Demon.Slayer.S"));
+    assert!(buffer.contains("EN COURS"));
+    assert!(buffer.contains("544 MiB"));
+    // Guarantee: zero "SCAN DISQUE EN COURS..." in header when is_scanning is false
+    assert!(!buffer.contains("SCAN DISQUE EN COURS"));
+}
+
+#[test]
+fn test_format_unix_to_iso_roundtrip() {
+    // 1970-01-01T00:00:00Z
+    assert_eq!(format_unix_to_iso(0), "1970-01-01T00:00:00Z");
+    assert_eq!(parse_iso_to_unix_secs("1970-01-01T00:00:00Z"), Some(0.0));
+
+    // Arbitrary reference timestamp
+    let sample_iso = "2026-10-29T08:57:47Z";
+    let secs = parse_iso_to_unix_secs(sample_iso).expect("valid ISO timestamp");
+    assert_eq!(format_unix_to_iso(secs as u64), sample_iso);
+
+    // Leap year date (2024-02-29T12:30:45Z)
+    let leap_iso = "2024-02-29T12:30:45Z";
+    let leap_secs = parse_iso_to_unix_secs(leap_iso).expect("valid leap year ISO");
+    assert_eq!(format_unix_to_iso(leap_secs as u64), leap_iso);
+}
+
+#[test]
+fn test_remote_streaming_sources_view_and_locked_keys() {
+    let mut terminal = Terminal::new(TestBackend::new(180, 40)).unwrap();
+
+    let tel = SystemTelemetry {
+        is_remote_streaming: true,
+        net_rx_mib_s: 31.7,
+        discovered_media: vec![DiscoveredMediaItem {
+            path: PathBuf::from("The.Wire.S01E01.1080p.mkv"),
+            stem: "The.Wire.S01E01.1080p".to_string(),
+            size_bytes: 500 * 1024 * 1024,
+            duration_secs: Some(3600.0),
+            video_codec: Some("h264".to_string()),
+            subtitles: vec![],
+            phash: None,
+            source_id: Some("remote-stream".to_string()),
+            status: IngestionStatus::InProgress,
+        }],
+        ..Default::default()
+    };
+
+    let mut app = AppState {
+        view: ViewPage::MediaSources,
+        ..Default::default()
+    };
+
+    let empty_set = HashSet::new();
+    let ctx = UiContext {
+        telemetry: &tel,
+        view: ViewPage::MediaSources,
+        selected_index: 0,
+        completed_scroll_index: 0,
+        media_scroll_index: 0,
+        source_scroll_index: 0,
+        source_modal: None,
+        selected_media_paths: &empty_set,
+        media_filter: MediaFilter::All,
+        media_sort: MediaSort::Name,
+        source_filter: &MediaSourceFilter::ActiveOnly,
+        completed_filter: CompletedFilter::All,
+        completed_sort: CompletedSort::DateDesc,
+        search_query: "",
+        search_active: false,
+        help_tab: HelpTab::General,
+        help_scroll_index: 0,
+        feedback_msg: None,
+    };
+
+    terminal.draw(|f| render_ui(f, &ctx)).unwrap();
+    let buffer = format!("{:?}", terminal.backend());
+
+    // 1. Verify remote streaming headers and labels
+    assert!(buffer.contains("SOURCES DE FLUX RÉSEAU & PONT STREAMING SFTP"));
+    assert!(buffer.contains("MODE ZÉRO-NVME"));
+    assert!(buffer.contains("Synology NAS (Flux SFTP Distant)"));
+    assert!(buffer.contains("1 cibles batch"));
+    assert!(buffer.contains("Opérationnel (31.7 MiB/s)"));
+    assert!(buffer.contains("sftp://nas:22 ➔ HTTP :8769"));
+    assert!(buffer.contains("Zéro-NVMe (RAM Direct)"));
+    assert!(buffer.contains("Architecture Zéro-Copie"));
+    assert!(buffer.contains("Verrouillé (Stockage Local Désactivé"));
+
+    // 2. Test locked actions ('a', 'e', 'd', Space)
+    handle_key_event(KeyCode::Char('a'), &mut app, &tel);
+    assert_eq!(app.source_modal, None);
+    assert!(app
+        .feedback_message
+        .as_ref()
+        .unwrap()
+        .0
+        .contains("Mode Zéro-NVMe actif"));
+
+    handle_key_event(KeyCode::Char(' '), &mut app, &tel);
+    assert!(app
+        .feedback_message
+        .as_ref()
+        .unwrap()
+        .0
+        .contains("Mode Zéro-NVMe actif"));
+
+    handle_key_event(KeyCode::Char('d'), &mut app, &tel);
+    assert!(app
+        .feedback_message
+        .as_ref()
+        .unwrap()
+        .0
+        .contains("Mode Zéro-NVMe actif"));
+
+    // 3. Test 'r' in remote mode
+    handle_key_event(KeyCode::Char('r'), &mut app, &tel);
+    assert!(app
+        .feedback_message
+        .as_ref()
+        .unwrap()
+        .0
+        .contains("Cibles streaming réseau actualisées"));
 }

@@ -203,19 +203,24 @@ dbsrt top [OPTIONS]
 
 5. **Onglet 4 : Explorateur de Médias Multi-Sources (`[4]` ou `[m]`)** :
    - Catalogue unifié de tous les répertoires sources configurés et actifs, présentant l'inventaire des fichiers vidéo, source d'origine, tailles, durées estimées, codecs vidéo détectés (`hevc`, `h264`, `h264 Hi10P`, etc.), présence et langues des pistes de sous-titres intégrées, ainsi que le cycle de vie d'ingestion (`VIERGE`, `EN COURS`, `COMPLÉTÉ`, `HACHÉ SEUL`).
+   - **Mode Nœud Distant Streaming (Zéro-NVMe / Cloud)** : Sur un nœud sans répertoire local monté (ex: worker o2switch opérant en streaming réseau pur), l'explorateur est alimenté automatiquement par le registre des cibles du batch en cours (`data/reports/selected_batch_targets.json`). Les scans disques locaux périodiques sont automatiquement neutralisés pour éliminer tout clignotement ou latence I/O inutile.
    - Filtrage dynamique cyclique (`[f]`) : `TOUS`, `VIERGES SEULS`, `EN COURS`, `COMPLÉTÉS`, `HACHÉS SEULS`, `AVEC SOUS-TITRES`, `SANS SOUS-TITRES`.
    - Tri multicritère cyclique (`[o]`) : `NOM (A-Z)`, `TAILLE`, `DURÉE`, `STATUT`, `SOUS-TITRES`.
    - Sélection multiple par case à cocher : touche `[Espace]` pour cocher/décocher le média pointé, touche `[a]` pour tout cocher/décocher.
    - Déclenchement de lot ciblé (`[b]`) : exécute le batch d'ingestion en tâche de fond exclusivement sur les médias sélectionnés et rebascule automatiquement sur l'onglet des Tâches avec notification.
 
-6. **Onglet 5 : Gestion des Sources de Médias (`[5]` ou `[s]`)** :
-   - Gestionnaire interactif CRUD complet des répertoires de stockage vidéo scannés en parallèle (stocké dans `data/reports/media_sources.json`).
-   - Initialisation automatique par défaut avec la source NAS (`$NAS_TVSHOW_DIR` ou bibliothèque TVShow par défaut).
-   - `[a]` : Ajout interactif d'une nouvelle source via modal (validation stricte : chemin absolu obligatoire et répertoire existant).
-   - `[e]` : Édition du chemin et du nom de la source sélectionnée (validation du répertoire).
-   - `[Espace]` : Activation / désactivation dynamique de la source (statut `[✓] ACTIF` vs `[ ] DÉSACTIVÉ`).
-   - `[d]` : Suppression de la source sélectionnée avec dialogue modal de confirmation (protection de la dernière source restante).
-   - `[r]` : Déclenchement d'un rescan asynchrone immédiat de l'ensemble des sources actives (préservation du cache des métadonnées pour éviter tout recomputing superflu).
+6. **Onglet 5 : Gestion des Sources de Médias / Pont Streaming Réseau (`[5]` ou `[s]`)** :
+   - **Mode Local (Station de Dev / Hôte)** : Gestionnaire interactif CRUD complet des répertoires de stockage vidéo scannés en parallèle (stocké dans `data/reports/media_sources.json`).
+     - Initialisation automatique par défaut avec la source NAS (`$NAS_TVSHOW_DIR` ou bibliothèque TVShow par défaut).
+     - `[a]` : Ajout interactif d'une nouvelle source via modal (validation stricte : chemin absolu obligatoire et répertoire existant).
+     - `[e]` : Édition du chemin et du nom de la source sélectionnée (validation du répertoire).
+     - `[Espace]` : Activation / désactivation dynamique de la source (statut `[✓] ACTIF` vs `[ ] DÉSACTIVÉ`).
+     - `[d]` : Suppression de la source sélectionnée avec dialogue modal de confirmation (protection de la dernière source restante).
+     - `[r]` : Déclenchement d'un rescan asynchrone immédiat de l'ensemble des sources actives.
+   - **Mode Déporté Réseau (Zéro-NVMe / o2switch / RPi4)** : En l'absence de montages de stockage physiques locaux, la vue commute automatiquement en moniteur de flux streaming réseau SFTP (`sftp://nas:22 ➔ HTTP Bridge :8769`).
+     - Affiche l'état en direct du canal de transit, le nombre de cibles batch cataloguées et le respect du plafond de bande passante CloudLinux LVE ($42\text{ MiB/s}$).
+     - Actions d'ajout/édition de répertoires physiques verrouillées avec notification (l'administration physique étant dévolue à la station hôte).
+     - `[r]` : Actualisation immédiate du registre des cibles streaming réseau sans déclenchement de scan disque superflu.
 
 7. **Onglet 6 : Télémétrie Système & Matériel (Vue Fastfetch `[6]` ou `[y]`)** :
    - Tableau de bord exhaustif en double colonne structuré par domaines thématiques :

@@ -43,8 +43,9 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 
 use crate::commands::top::constants::{
     BYTES_PER_GIB_F64, DEFAULT_COUPLINGS_PATH, DEFAULT_MEDIA_CACHE_PATH,
-    DEFAULT_MEDIA_SOURCES_PATH, DEFAULT_REFRESH_INTERVAL_MS, FEEDBACK_DISPLAY_DURATION_SECS,
-    KEY_EVENT_POLL_TIMEOUT_MS, PAGE_SCROLL_STEP,
+    DEFAULT_MEDIA_SOURCES_PATH, DEFAULT_REFRESH_INTERVAL_MS, DEFAULT_SELECTED_BATCH_TARGETS_PATH,
+    DEFAULT_SOURCE_ID_TVSHOW, FEEDBACK_DISPLAY_DURATION_SECS, KEY_EVENT_POLL_TIMEOUT_MS,
+    PAGE_SCROLL_STEP,
 };
 use crate::commands::top::model::{
     calculate_overall_stats, filter_active_jobs_with_search, filter_and_sort_completed_with_search,
@@ -328,6 +329,10 @@ pub fn run_top_app(refresh_interval_ms: u64) -> Result<()> {
     let initial_sources = load_media_sources(&media_sources_path);
     let host_info = crate::commands::top::host_info::detect_host_system_info_with_sys(&initial_sys);
 
+    let has_local_sources = initial_sources.iter().any(|s| s.enabled && s.path.exists());
+    let initial_is_scanning = has_local_sources;
+    let is_remote_streaming =
+        !has_local_sources && std::path::Path::new(DEFAULT_SELECTED_BATCH_TARGETS_PATH).exists();
     let initial_telemetry = SystemTelemetry {
         host_info,
         host_cpu_pct: host_cpu,
@@ -338,7 +343,8 @@ pub fn run_top_app(refresh_interval_ms: u64) -> Result<()> {
         session: initial_session,
         discovered_media: Vec::new(),
         media_sources: initial_sources,
-        is_scanning: true,
+        is_scanning: initial_is_scanning,
+        is_remote_streaming,
         ..Default::default()
     };
 
@@ -1480,7 +1486,11 @@ fn handle_view_specific_key_event(
             handle_media_browser_view_keys(code, app, telemetry, shared_state);
         }
         ViewPage::MediaSources => {
-            handle_media_sources_view_keys(code, app, telemetry, shared_state);
+            if telemetry.is_remote_streaming {
+                handle_remote_streaming_view_keys(code, app, telemetry, shared_state);
+            } else {
+                handle_media_sources_view_keys(code, app, telemetry, shared_state);
+            }
         }
         ViewPage::StatsHistory => {
             handle_stats_history_view_keys(code, app);
@@ -2093,6 +2103,92 @@ fn handle_media_sources_view_keys(
         }
         _ => {}
     }
+}
+
+/// Handles keypresses specific to the Remote Streaming / Zero-NVMe sources view.
+///
+/// # Arguments
+/// - `code`: Crossterm [`KeyCode`] received from the terminal event loop.
+/// - `app`: Mutable reference to application state.
+/// - `telemetry`: Active system telemetry snapshot.
+/// - `shared_state`: Optional thread-safe shared telemetry container.
+///
+/// # Returns
+/// None. Mutates feedback message or reloads remote batch targets.
+///
+/// # Errors
+/// None.
+///
+/// # Panics
+/// Guaranteed panic-free.
+///
+/// # Data Flow & Invariants
+/// Locks out physical disk actions (' ', 'a', 'e', 'd') on Zero-NVMe nodes,
+/// routing 'r' to reload the remote targets registry (`selected_batch_targets.json`).
+fn handle_remote_streaming_view_keys(
+    code: KeyCode,
+    app: &mut AppState,
+    telemetry: &SystemTelemetry,
+    shared_state: Option<&Arc<RwLock<SystemTelemetry>>>,
+) {
+    match code {
+        KeyCode::Char(' ')
+        | KeyCode::Char('a')
+        | KeyCode::Char('A')
+        | KeyCode::Char('e')
+        | KeyCode::Char('E')
+        | KeyCode::Char('d')
+        | KeyCode::Char('D') => {
+            app.set_feedback(
+                "Mode Zéro-NVMe actif : la gestion des répertoires physiques s'effectue sur la station hôte locale.".to_string(),
+            );
+        }
+        KeyCode::Char('r') | KeyCode::Char('R') => {
+            let count = reload_remote_streaming_targets(telemetry, shared_state);
+            app.set_feedback(format!(
+                "⟳ Cibles streaming réseau actualisées ({count} médias)."
+            ));
+        }
+        _ => {}
+    }
+}
+
+/// Reloads remote streaming batch targets from disk and updates shared telemetry state.
+///
+/// # Arguments
+/// - `telemetry`: Active system telemetry snapshot.
+/// - `shared_state`: Optional thread-safe shared telemetry container.
+///
+/// # Returns
+/// Total count of discovered remote streaming media targets.
+fn reload_remote_streaming_targets(
+    telemetry: &SystemTelemetry,
+    shared_state: Option<&Arc<RwLock<SystemTelemetry>>>,
+) -> usize {
+    let batch_path = std::path::Path::new(DEFAULT_SELECTED_BATCH_TARGETS_PATH);
+    let default_source_id = telemetry
+        .media_sources
+        .first()
+        .map(|s| s.id.as_str())
+        .unwrap_or(DEFAULT_SOURCE_ID_TVSHOW);
+    let active_jobs = telemetry.active_jobs.clone();
+    let certified_stems = std::collections::HashSet::new();
+    let criteria = crate::commands::top::sampler::MediaDiscoveryCriteria {
+        phash_dir: std::path::Path::new("data/__PHASH__"),
+        active_jobs: &active_jobs,
+        certified_stems: &certified_stems,
+        source_id: default_source_id,
+    };
+    let remote_items =
+        crate::commands::top::sampler::load_remote_batch_media_items(batch_path, &criteria);
+    let count = remote_items.len();
+    if let Some(shared) = shared_state {
+        if let Ok(mut state) = shared.write() {
+            state.discovered_media = remote_items;
+            state.is_remote_streaming = true;
+        }
+    }
+    count
 }
 
 /// Handles keypresses specific to the StatsHistory view.
