@@ -279,7 +279,7 @@ pub fn inspect_job_details(job: &ActiveJobTelemetry) -> Vec<String> {
         lines.push("  • Comportement       : dbsrt bascule automatiquement en décodage logiciel CPU multi-cœurs (consommation normale ~800%).".to_string());
     } else if job.engine.contains("GPU") {
         lines.push("  • Moteur sélectionné : GPU (VA-API)".to_string());
-        lines.push("  • Accélération active: Décodage matériel ASIC GPU actif via Intel QuickSync / VA-API (/dev/dri/renderD128).".to_string());
+        lines.push("  • Accélération active: Décodage matériel ASIC GPU actif via VA-API (/dev/dri/renderD128).".to_string());
         lines.push("  • Efficacité         : Déchargement CPU quasi-total (< 20% CPU hôte) et débit de décodage maximal.".to_string());
     } else if job.engine.contains("Sub") {
         lines.push("  • Moteur sélectionné : Sub Extraction".to_string());

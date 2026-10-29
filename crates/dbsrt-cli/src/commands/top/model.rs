@@ -891,7 +891,7 @@ pub struct SystemTelemetry {
     pub is_scanning: bool,
     /// Active batch processing queue telemetry.
     pub batch_queue: BatchQueueTelemetry,
-    /// Flag indicating whether the node operates in remote streaming mode (Zero-NVMe SFTP).
+    /// Flag indicating whether the node operates in remote streaming mode (Zero-NVMe FTP).
     #[serde(default)]
     pub is_remote_streaming: bool,
 }

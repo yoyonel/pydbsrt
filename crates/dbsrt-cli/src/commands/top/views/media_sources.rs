@@ -72,7 +72,7 @@ const REMOTE_TABLE_HEIGHT: u16 = 4;
 ///
 /// # Data Flow & Invariants
 /// Dispatches dynamically:
-/// - When `is_remote_streaming` is true: renders network streaming SFTP bridge status and locks physical storage actions.
+/// - When `is_remote_streaming` is true: renders network FTP streaming status and locks physical storage actions.
 /// - When false: renders standard interactive local storage sources manager (CRUD and disk scanner).
 pub fn render_media_sources_page(frame: &mut Frame, area: Rect, ctx: &UiContext) {
     if ctx.telemetry.is_remote_streaming {
@@ -135,9 +135,9 @@ pub fn render_local_sources_page(frame: &mut Frame, area: Rect, ctx: &UiContext)
     }
 }
 
-/// Renders the remote network streaming sources and SFTP bridge view (Zero-NVMe mode).
+/// Renders the remote network FTP streaming sources view (Zero-NVMe mode).
 pub fn render_remote_streaming_sources_page(frame: &mut Frame, area: Rect, ctx: &UiContext) {
-    let sources_title = " 🌐 SOURCES DE FLUX RÉSEAU & PONT STREAMING SFTP [MODE ZÉRO-NVME] ";
+    let sources_title = " 🌐 SOURCES DE FLUX RÉSEAU & STREAMING FTP [MODE ZÉRO-NVME] ";
 
     let block = Block::default()
         .borders(Borders::ALL)
@@ -207,7 +207,7 @@ fn render_remote_streaming_table(frame: &mut Frame, area: Rect, ctx: &UiContext)
         "SOURCE DE DIFFUSION",
         "CIBLES RÉSEAU",
         "FLUX STREAMING",
-        "LIAISON SFTP / BRIDGE",
+        "LIAISON FTP",
         "MODE DÉCODAGE",
     ]
     .iter()
@@ -320,7 +320,7 @@ fn render_remote_streaming_diagnostics(frame: &mut Frame, area: Rect, ctx: &UiCo
         Line::from(vec![
             Span::raw("                                "),
             Span::styled(
-                "lus à la volée depuis le NAS Synology via SFTP et injectés dans les RAM buffers FFmpeg.",
+                "lus à la volée depuis le NAS Synology via FTP et injectés dans les RAM buffers FFmpeg.",
                 Style::default().fg(Color::Gray),
             ),
         ]),

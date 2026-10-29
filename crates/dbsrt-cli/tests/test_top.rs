@@ -823,7 +823,7 @@ fn test_process_ctl_and_inspection() {
         .any(|l| l.contains("Diagnostic Moteur & Accélération Matérielle")));
     assert!(details
         .iter()
-        .any(|l| l.contains("Intel QuickSync / VA-API")));
+        .any(|l| l.contains("actif via VA-API (/dev/dri/renderD128)")));
 
     let hi10p_job = ActiveJobTelemetry {
         pid: 8888,
@@ -3729,7 +3729,7 @@ fn test_remote_streaming_sources_view_and_locked_keys() {
     let buffer = format!("{:?}", terminal.backend());
 
     // 1. Verify remote streaming headers and labels
-    assert!(buffer.contains("SOURCES DE FLUX RÉSEAU & PONT STREAMING SFTP"));
+    assert!(buffer.contains("SOURCES DE FLUX RÉSEAU & STREAMING FTP"));
     assert!(buffer.contains("MODE ZÉRO-NVME"));
     assert!(buffer.contains("Cibles batch distantes"));
     assert!(buffer.contains("1 cibles batch"));

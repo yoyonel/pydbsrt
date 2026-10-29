@@ -399,7 +399,8 @@ fn parse_lspci_gpu_line(line: &str) -> Option<String> {
         return Some(bracket_text);
     }
 
-    let (_, desc) = line.split_once(':')?;
+    // ": " skips the colons of the PCI address (e.g. `0000:00:02.0`).
+    let (_, desc) = line.split_once(": ")?;
     let clean = desc.trim();
     if let Some((clean_no_rev, _)) = clean.split_once("(rev") {
         Some(clean_no_rev.trim().to_string())
@@ -465,6 +466,16 @@ pub fn probe_gpu_via_drm_sysfs() -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_parse_lspci_gpu_line_without_brackets() {
+        let sample = "0000:00:02.0 VGA compatible controller: Matrox G200eR2 (rev 01)";
+        assert_eq!(
+            parse_lspci_gpu_line(sample),
+            Some("Matrox G200eR2".to_string())
+        );
+        assert_eq!(parse_lspci_gpu_line("00:1f.3 Audio device: Intel"), None);
+    }
 
     #[test]
     fn test_extract_last_bracket() {

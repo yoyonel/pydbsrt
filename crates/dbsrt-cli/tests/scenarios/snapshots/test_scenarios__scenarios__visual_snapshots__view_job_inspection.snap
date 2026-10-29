@@ -16,7 +16,7 @@ expression: grid
 │                                                                                                                                          │
 │--- Diagnostic Moteur & Accélération Matérielle ---                                                                                       │
 │  • Moteur sélectionné : GPU (VA-API)                                                                                                     │
-│  • Accélération active: Décodage matériel ASIC GPU actif via Intel QuickSync / VA-API (/dev/dri/renderD128).                             │
+│  • Accélération active: Décodage matériel ASIC GPU actif via VA-API (/dev/dri/renderD128).                                               │
 │  • Efficacité         : Déchargement CPU quasi-total (< 20% CPU hôte) et débit de décodage maximal.                                      │
 │                                                                                                                                          │
 │--- Ligne de Commande Exécutée ---                                                                                                        │
