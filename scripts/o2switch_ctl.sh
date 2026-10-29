@@ -26,28 +26,28 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # Load optional unversioned local environment file
-if [[ -f "${REPO_ROOT}/.env" ]]; then
-  # shellcheck source=/dev/null
-  source "${REPO_ROOT}/.env"
-elif [[ -f "${HOME}/.config/pydbsrt/env" ]]; then
-  # shellcheck source=/dev/null
-  source "${HOME}/.config/pydbsrt/env"
-fi
+# shellcheck source=scripts/load_env.sh
+source "${SCRIPT_DIR}/load_env.sh"
+load_local_env "${REPO_ROOT}"
 
-DEFAULT_NAS_HOST="nas.synology.me"
-DEFAULT_NAS_USER="dbsrt-svc"
 DEFAULT_NAS_PASS_ENTRY="services/synology/nas_pass"
+DEFAULT_API_KEY_PASS_ENTRY="services/pydbsrt/o2switch_api_key"
+# Worker concurrency bounds, kept in sync with MIN/MAX_CONCURRENT_WORKERS in o2switch_batch_worker.py
+MIN_BATCH_WORKERS=1
+MAX_BATCH_WORKERS=8
 
-NAS_HOST="${NAS_HOST:-${DEFAULT_NAS_HOST}}"
-NAS_USER="${NAS_USER:-${DEFAULT_NAS_USER}}"
+# NAS endpoint comes from .env / environment only (no versioned default)
+NAS_HOST="${NAS_HOST:-}"
+NAS_USER="${NAS_USER:-}"
 NAS_PASS_ENTRY="${NAS_PASS_ENTRY:-${DEFAULT_NAS_PASS_ENTRY}}"
+API_KEY_PASS_ENTRY="${API_KEY_PASS_ENTRY:-${DEFAULT_API_KEY_PASS_ENTRY}}"
 
 O2SWITCH_HOST="${O2SWITCH_HOST:-${DEFAULT_O2SWITCH_HOST}}"
 SERVER_PORT="${SERVER_PORT:-${DEFAULT_SERVER_PORT}}"
 REMOTE_BASE="${REMOTE_BASE:-${DEFAULT_REMOTE_BASE}}"
 REMOTE_PUBLIC_HTML="${REMOTE_PUBLIC_HTML:-${DEFAULT_REMOTE_PUBLIC_HTML}}"
 O2SWITCH_URL="${O2SWITCH_URL:-}"
-O2SWITCH_API_KEY="${O2SWITCH_API_KEY:-$(pass show services/pydbsrt/o2switch_api_key 2>/dev/null || true)}"
+O2SWITCH_API_KEY="${O2SWITCH_API_KEY:-}"
 
 check_ssh() {
   if ! ssh -o BatchMode=yes -o ConnectTimeout="${DEFAULT_CURL_TIMEOUT_SEC}" "${O2SWITCH_HOST}" "true" 2>/dev/null; then
@@ -55,6 +55,44 @@ check_ssh() {
     echo "   Ensure ~/.ssh/config contains a Host block for '${O2SWITCH_HOST}', or set O2SWITCH_HOST=user@yourdomain.com."
     exit 1
   fi
+}
+
+# Reads a secret from the pass store only when an action needs it
+pass_secret() {
+  if command -v pass >/dev/null 2>&1; then
+    pass show "$1" 2>/dev/null || true
+  fi
+}
+
+# Stops the remote process recorded in a PID file (SIGTERM, then SIGKILL after a timeout)
+remote_stop_pidfile() {
+  local pid_file="$1"
+  # shellcheck disable=SC2029
+  ssh "${O2SWITCH_HOST}" "bash -s -- $(printf '%q ' "${REMOTE_BASE}/${pid_file}" "${DEFAULT_SHUTDOWN_TIMEOUT_SEC}")" <<'REMOTE_SCRIPT'
+PID_FILE="$1"
+TIMEOUT="$2"
+if [[ ! -f "${PID_FILE}" ]]; then
+  echo "No PID file found at ${PID_FILE}."
+  exit 0
+fi
+PID=$(cat "${PID_FILE}")
+if kill -0 "${PID}" 2>/dev/null; then
+  echo "Sending SIGTERM to PID ${PID}..."
+  kill -TERM "${PID}"
+  for _ in $(seq 1 "${TIMEOUT}"); do
+    if ! kill -0 "${PID}" 2>/dev/null; then
+      break
+    fi
+    sleep 1
+  done
+  if kill -0 "${PID}" 2>/dev/null; then
+    echo "Process did not terminate gracefully, sending SIGKILL..."
+    kill -KILL "${PID}" || true
+  fi
+  echo "✓ Stopped process ${PID}."
+fi
+rm -f "${PID_FILE}"
+REMOTE_SCRIPT
 }
 
 case "${ACTION}" in
@@ -205,12 +243,21 @@ if [[ -f "${PID_FILE}" ]]; then
   fi
 fi
 
+# Loose .phash files are mmapped with an in-RAM MIH each (~6x disk size), which blows the
+# LVE memory cap; pack them into the catalog and serve it with an empty loose directory.
+mkdir -p "${BASE}/run/empty_phash"
+if "${BASE}/bin/dbsrt" pack -p "${DATA_DIR}/__PHASH__" -o "${BASE}/run/catalog.pack.tmp" >/dev/null 2>&1; then
+  mv -f "${BASE}/run/catalog.pack.tmp" "${DATA_DIR}/catalog.dbphash"
+else
+  echo "⚠️ Catalog pack failed; serving the previous catalog."
+fi
+
 setsid "${BIN}" \
   --host 127.0.0.1 \
   --port "${PORT}" \
   --dbphash "${DATA_DIR}/catalog.dbphash" \
   --subtitles-dir "${DATA_DIR}/SRT" \
-  --phash-dir "${DATA_DIR}/__PHASH__" </dev/null >> "${LOG_FILE}" 2>&1 &
+  --phash-dir "${BASE}/run/empty_phash" </dev/null >> "${LOG_FILE}" 2>&1 &
 echo $! > "${PID_FILE}"
 echo "✓ Started dbsrt-server with PID $(cat "${PID_FILE}")."
 REMOTE_SCRIPT
@@ -238,33 +285,7 @@ REMOTE_SCRIPT
   stop)
     check_ssh
     echo "=== Stopping dbsrt-server daemon on ${O2SWITCH_HOST} ==="
-    # shellcheck disable=SC2029
-    ssh "${O2SWITCH_HOST}" "bash -s -- '${REMOTE_BASE}' '${DEFAULT_SHUTDOWN_TIMEOUT_SEC}'" <<'REMOTE_SCRIPT'
-BASE="$1"
-TIMEOUT="$2"
-PID_FILE="${BASE}/run/dbsrt-server.pid"
-if [[ ! -f "${PID_FILE}" ]]; then
-  echo "No PID file found at ${PID_FILE}."
-  exit 0
-fi
-PID=$(cat "${PID_FILE}")
-if kill -0 "${PID}" 2>/dev/null; then
-  echo "Sending SIGTERM to PID ${PID}..."
-  kill -TERM "${PID}"
-  for _ in $(seq 1 "${TIMEOUT}"); do
-    if ! kill -0 "${PID}" 2>/dev/null; then
-      break
-    fi
-    sleep 1
-  done
-  if kill -0 "${PID}" 2>/dev/null; then
-    echo "Process did not terminate gracefully, sending SIGKILL..."
-    kill -KILL "${PID}" || true
-  fi
-  echo "✓ Stopped dbsrt-server process ${PID}."
-fi
-rm -f "${PID_FILE}"
-REMOTE_SCRIPT
+    remote_stop_pidfile "run/dbsrt-server.pid"
     echo "✓ dbsrt-server stopped."
     ;;
 
@@ -307,6 +328,7 @@ REMOTE_SCRIPT
   demo)
     echo "=== Running Recognition Demo against o2switch ==="
     if [[ -n "${O2SWITCH_URL}" ]]; then
+      O2SWITCH_API_KEY="${O2SWITCH_API_KEY:-$(pass_secret "${API_KEY_PASS_ENTRY}")}"
       TARGET_ENDPOINT="${O2SWITCH_URL}/v1/recognize"
       echo "Querying public HTTPS URL: ${TARGET_ENDPOINT}"
       AUTH_HEADER=()
@@ -360,7 +382,7 @@ REMOTE_SCRIPT
 PORT="$1"
 BASE="$2"
 CRON_MARKER="# dbsrt-server watchdog"
-CMD="pgrep -u \$(whoami) -f dbsrt-server >/dev/null 2>&1 || (setsid \$HOME/${BASE}/bin/dbsrt-server --host 127.0.0.1 --port ${PORT} --dbphash \$HOME/${BASE}/data/catalog.dbphash --subtitles-dir \$HOME/${BASE}/data/SRT --phash-dir \$HOME/${BASE}/data/__PHASH__ </dev/null >> \$HOME/${BASE}/logs/dbsrt-server.log 2>&1 &)"
+CMD="pgrep -u \$(whoami) -f dbsrt-server >/dev/null 2>&1 || (setsid \$HOME/${BASE}/bin/dbsrt-server --host 127.0.0.1 --port ${PORT} --dbphash \$HOME/${BASE}/data/catalog.dbphash --subtitles-dir \$HOME/${BASE}/data/SRT --phash-dir \$HOME/${BASE}/run/empty_phash </dev/null >> \$HOME/${BASE}/logs/dbsrt-server.log 2>&1 &)"
 CRON_LINE="*/5 * * * * ${CMD} ${CRON_MARKER}"
 
 crontab -l 2>/dev/null | grep -v "${CRON_MARKER}" > /tmp/crontab.tmp || true
@@ -387,44 +409,47 @@ REMOTE_SCRIPT
 
   rotate-key)
     check_ssh
+    if ! command -v pass >/dev/null 2>&1; then
+      echo "❌ 'pass' CLI is required to store the new key (${API_KEY_PASS_ENTRY}). Aborting before any change."
+      exit 1
+    fi
     echo "=== Rotating dbsrt-server API Secret Key on ${O2SWITCH_HOST} ==="
     NEW_KEY=$(openssl rand -hex 32)
     KEY_FINGERPRINT=$(printf "%s" "${NEW_KEY}" | sha256sum | cut -d' ' -f1 | head -c 16)
+    echo "-> Generated new 256-bit key (fingerprint: ${KEY_FINGERPRINT})."
 
-    echo "-> Generating new 256-bit cryptographically secure key (fingerprint: ${KEY_FINGERPRINT})..."
+    # Store locally first: a key installed remotely but lost locally would lock us out
+    if ! printf "%s\n" "${NEW_KEY}" | pass insert -m -f "${API_KEY_PASS_ENTRY}" >/dev/null; then
+      echo "❌ Failed to store the new key in pass (${API_KEY_PASS_ENTRY}). Remote key left unchanged."
+      exit 1
+    fi
+    echo "✓ Stored new key in local password store (${API_KEY_PASS_ENTRY})."
 
-    # Update remote secret file
+    # Key travels over stdin, never in the remote command line (visible in ps)
     # shellcheck disable=SC2029
-    ssh "${O2SWITCH_HOST}" "mkdir -p ${REMOTE_BASE}/etc && chmod 700 ${REMOTE_BASE}/etc && echo '${NEW_KEY}' > ${REMOTE_BASE}/etc/api_key.secret && chmod 600 ${REMOTE_BASE}/etc/api_key.secret"
+    ssh "${O2SWITCH_HOST}" "umask 077 && mkdir -p $(printf '%q' "${REMOTE_BASE}/etc") && cat > $(printf '%q' "${REMOTE_BASE}/etc/api_key.secret")" <<<"${NEW_KEY}"
     echo "✓ Installed new key on remote host (${REMOTE_BASE}/etc/api_key.secret, mode 0600)."
 
-    # Update local pass store if available
-    PASS_ENTRY="services/pydbsrt/o2switch_api_key"
-    if command -v pass >/dev/null 2>&1; then
-      printf "%s\n" "${NEW_KEY}" | pass insert -m -f "${PASS_ENTRY}" >/dev/null 2>&1 || true
-      echo "✓ Updated local password store (${PASS_ENTRY})."
-    else
-      echo "⚠️ 'pass' CLI not found. Remember to store your new key securely:"
-      echo "   ${NEW_KEY}"
+    if [[ -z "${O2SWITCH_URL}" ]]; then
+      echo "⚠️ O2SWITCH_URL not set: skipping live HTTPS verification."
+      exit 0
     fi
-
-    # Verify live HTTPS healthcheck with the new key
-    VERIFY_URL="${O2SWITCH_URL:-https://2026-pydbsrt.fr/dbsrt}/v1/health"
+    VERIFY_URL="${O2SWITCH_URL}/v1/health"
     echo "-> Verifying live HTTPS healthcheck using new key against ${VERIFY_URL}..."
-    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -H "X-API-Key: ${NEW_KEY}" "${VERIFY_URL}" 2>/dev/null || true)
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -H @- "${VERIFY_URL}" <<<"X-API-Key: ${NEW_KEY}" 2>/dev/null || true)
     if [[ "${HTTP_CODE}" == "200" ]]; then
       echo "✓ New key successfully validated over HTTPS (HTTP 200 OK)."
     else
       echo "⚠️ Healthcheck returned HTTP ${HTTP_CODE} (check domain propagation or logs)."
     fi
 
-    # Verify that unauthenticated requests are strictly rejected
     UNAUTH_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${VERIFY_URL}" 2>/dev/null || true)
     if [[ "${UNAUTH_CODE}" == "401" ]]; then
       echo "✓ Rejection of unauthenticated requests strictly confirmed (HTTP 401 Unauthorized)."
+    else
+      echo "⚠️ Unauthenticated request returned HTTP ${UNAUTH_CODE} (expected 401)."
     fi
-
-    echo "=== API Key rotation completed successfully! ==="
+    echo "=== API Key rotation completed ==="
     ;;
 
   top)
@@ -432,7 +457,7 @@ REMOTE_SCRIPT
     shift || true
     echo "=== Connecting to live dbsrt top TUI on ${O2SWITCH_HOST} ==="
     # shellcheck disable=SC2029
-    ssh -tt "${O2SWITCH_HOST}" "cd ${REMOTE_BASE} && PATH=\"\$HOME/${REMOTE_BASE}/bin:\$PATH\" RAYON_NUM_THREADS=2 ./bin/dbsrt top $*"
+    ssh -tt "${O2SWITCH_HOST}" "cd ${REMOTE_BASE} && PATH=\"\$HOME/${REMOTE_BASE}/bin:\$PATH\" RAYON_NUM_THREADS=2 ./bin/dbsrt top $(printf '%q ' "$@")"
     ;;
 
   pull-catalog)
@@ -460,60 +485,71 @@ REMOTE_SCRIPT
       LOCAL_SCAN_DIR="${NAS_VIDEO_DIR:-/media/${LOCAL_USER}/Synology/video}"
       REMOTE_NAS_BASE="/video"
     fi
-    NAS_PASS_ENTRY="${NAS_PASS_ENTRY:-services/synology/nas_pass}"
-    NAS_PASS="${NAS_PASS:-$(pass show "${NAS_PASS_ENTRY}" 2>/dev/null || pass show nas-synology/service_pass 2>/dev/null || true)}"
+    TARGETS_FILE="data/reports/selected_batch_targets.json"
     DAEMON_MODE=false
     WORKER_ARGS=(--nas-base "${REMOTE_NAS_BASE}")
-    if [[ -n "${NAS_HOST:-}" ]]; then
-      WORKER_ARGS+=(--nas-host "${NAS_HOST}")
-    fi
-    if [[ -n "${NAS_USER:-}" ]]; then
-      WORKER_ARGS+=(--nas-user "${NAS_USER}")
-    fi
-    for arg in "$@"; do
-      if [[ "${arg}" == "--daemon" || "${arg}" == "-d" ]]; then
-        DAEMON_MODE=true
-      else
-        WORKER_ARGS+=("${arg}")
-      fi
+    # Only the selection flags understood by batch_media_add_tvshow.py go to the local scan
+    SCAN_ARGS=()
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --daemon | -d) DAEMON_MODE=true ;;
+        --fresh-only)
+          WORKER_ARGS+=("$1")
+          SCAN_ARGS+=("$1")
+          ;;
+        --limit)
+          WORKER_ARGS+=("$1" "${2:?--limit needs a value}")
+          SCAN_ARGS+=("$1" "$2")
+          shift
+          ;;
+        *) WORKER_ARGS+=("$1") ;;
+      esac
+      shift
     done
 
-    # Ensure remote scripts directory and worker script are present
     # shellcheck disable=SC2029
-    ssh "${O2SWITCH_HOST}" "mkdir -p ${REMOTE_BASE}/scripts ${REMOTE_BASE}/data/reports ${REMOTE_BASE}/data/SRT ${REMOTE_BASE}/data/__PHASH__ ${REMOTE_BASE}/run ${REMOTE_BASE}/logs"
-    if [[ -f "scripts/o2switch_batch_worker.py" ]]; then
-      rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "scripts/o2switch_batch_worker.py" "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/"
-    fi
-    # shellcheck disable=SC2029
-    ssh "${O2SWITCH_HOST}" "chmod +x ${REMOTE_BASE}/scripts/o2switch_batch_worker.py"
+    ssh "${O2SWITCH_HOST}" "cd $(printf '%q' "${REMOTE_BASE}") && mkdir -p scripts data/reports data/SRT data/__PHASH__ run logs etc"
+    rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" --chmod=F755 "scripts/o2switch_batch_worker.py" "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/"
 
-    # If local CIFS mount is available, resolve targets quickly locally
+    # With a local NAS mount, select targets locally; otherwise the worker scans the NAS over FTP
     if [[ -d "${LOCAL_SCAN_DIR}" ]]; then
-      echo "-> Resolving virgin ${TARGET_TYPE} targets locally (${LOCAL_SCAN_DIR})..."
-      uv run python scripts/batch_media_add_tvshow.py --nas-root "${LOCAL_SCAN_DIR}" --save-targets-only --max-episodes-per-series 1000 "${WORKER_ARGS[@]}" >/dev/null 2>&1 || true
-    fi
-    if [[ -f "data/reports/selected_batch_targets.json" ]]; then
+      echo "-> Resolving ${TARGET_TYPE} targets locally (${LOCAL_SCAN_DIR})..."
+      rm -f "${TARGETS_FILE}"
+      if ! uv run python scripts/batch_media_add_tvshow.py --nas-root "${LOCAL_SCAN_DIR}" --save-targets-only \
+        --max-episodes-per-series 1000 "${SCAN_ARGS[@]}" >/dev/null; then
+        echo "❌ Local target scan failed (see error above)."
+        exit 1
+      fi
+      # The scanner writes nothing when there is nothing to do: send an explicit empty list
+      [[ -f "${TARGETS_FILE}" ]] || echo "[]" >"${TARGETS_FILE}"
       echo "-> Transferring selected batch targets..."
-      rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "data/reports/selected_batch_targets.json" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/reports/"
-      WORKER_ARGS+=(--targets-file "data/reports/selected_batch_targets.json")
+      rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${TARGETS_FILE}" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/reports/"
+    else
+      # shellcheck disable=SC2029
+      ssh "${O2SWITCH_HOST}" "rm -f $(printf '%q' "${REMOTE_BASE}/${TARGETS_FILE}")"
     fi
 
-    # Ensure remote credentials file exists securely
+    # NAS secrets travel over stdin into mode 600 files; hosts without them (RPi4) keep the remote copies
+    NAS_PASS="${NAS_PASS:-$(pass_secret "${NAS_PASS_ENTRY}")}"
     if [[ -n "${NAS_PASS}" ]]; then
       # shellcheck disable=SC2029
-      ssh "${O2SWITCH_HOST}" "mkdir -p ${REMOTE_BASE}/etc && cat > ${REMOTE_BASE}/etc/.nas_pass && chmod 600 ${REMOTE_BASE}/etc/.nas_pass" <<<"${NAS_PASS}"
+      ssh "${O2SWITCH_HOST}" "umask 077 && cat > $(printf '%q' "${REMOTE_BASE}/etc/.nas_pass")" <<<"${NAS_PASS}"
     fi
-    # shellcheck disable=SC2029
-    ssh "${O2SWITCH_HOST}" "mkdir -p ${REMOTE_BASE}/etc && printf 'NAS_HOST=%s\nNAS_USER=%s\n' '${NAS_HOST}' '${NAS_USER}' > ${REMOTE_BASE}/etc/.nas_config && chmod 600 ${REMOTE_BASE}/etc/.nas_config"
-
-    if [[ "${DAEMON_MODE}" == "true" ]]; then
-      echo "=== Launching TVShow batch ingestion in background daemon on ${O2SWITCH_HOST} ==="
+    if [[ -n "${NAS_HOST}" && -n "${NAS_USER}" ]]; then
       # shellcheck disable=SC2029
-      ssh "${O2SWITCH_HOST}" "bash -s -- '${REMOTE_BASE}' ${WORKER_ARGS[*]}" <<'REMOTE_DAEMON'
+      printf 'NAS_HOST=%s\nNAS_USER=%s\n' "${NAS_HOST}" "${NAS_USER}" |
+        ssh "${O2SWITCH_HOST}" "umask 077 && cat > $(printf '%q' "${REMOTE_BASE}/etc/.nas_config")"
+    fi
+
+    REMOTE_ARGS=$(printf '%q ' "${REMOTE_BASE}" "${TARGET_TYPE}" "${WORKER_ARGS[@]}")
+    if [[ "${DAEMON_MODE}" == "true" ]]; then
+      echo "=== Launching ${TARGET_TYPE} batch ingestion in background daemon on ${O2SWITCH_HOST} ==="
+      # shellcheck disable=SC2029
+      ssh "${O2SWITCH_HOST}" "bash -s -- ${REMOTE_ARGS}" <<'REMOTE_DAEMON'
 BASE="$1"
-shift || true
+TYPE="$2"
+shift 2
 cd "${BASE}"
-mkdir -p run logs
 PID_FILE="run/batch_worker.pid"
 LOG_FILE="logs/batch_worker.log"
 
@@ -528,11 +564,16 @@ fi
 # Clean up any leftover screen session
 screen -X -S dbsrt_batch quit 2>/dev/null || true
 
+# Lifecycle markers read by batch-status: batch type to resume, no manual stop pending
+echo "${TYPE}" > run/batch_type
+rm -f run/batch_stopped run/batch_queue.json
+
 export PATH="$HOME/${BASE}/bin:$PATH"
 export RAYON_NUM_THREADS=2
+ARGS=$(printf '%q ' "$@")
 
 # Launch in persistent detached screen session immune to SSH session termination
-screen -dmS dbsrt_batch bash -c "echo \$\$ > '${PID_FILE}'; exec ./bin/python3 -u scripts/o2switch_batch_worker.py $* >> '${LOG_FILE}' 2>&1"
+screen -dmS dbsrt_batch bash -c "echo \$\$ > '${PID_FILE}'; exec ./bin/python3 -u scripts/o2switch_batch_worker.py ${ARGS} >> '${LOG_FILE}' 2>&1"
 sleep 1
 PID=$(cat "${PID_FILE}" 2>/dev/null || true)
 echo "✓ Started persistent background batch worker (screen: dbsrt_batch, PID: ${PID})."
@@ -543,9 +584,16 @@ REMOTE_DAEMON
       echo "  • Live dashboard : task o2switch:top"
       echo "  • Stop worker    : task o2switch:batch:stop"
     else
-      echo "=== Executing TVShow batch ingestion on ${O2SWITCH_HOST} ==="
+      echo "=== Executing ${TARGET_TYPE} batch ingestion on ${O2SWITCH_HOST} ==="
       # shellcheck disable=SC2029
-      ssh -o ServerAliveInterval=15 -o ServerAliveCountMax=3 "${O2SWITCH_HOST}" "cd ${REMOTE_BASE} && PATH=\"\$HOME/${REMOTE_BASE}/bin:\$PATH\" RAYON_NUM_THREADS=2 ./bin/python3 -u scripts/o2switch_batch_worker.py ${WORKER_ARGS[*]}"
+      ssh -o ServerAliveInterval=15 -o ServerAliveCountMax=3 "${O2SWITCH_HOST}" "bash -s -- ${REMOTE_ARGS}" <<'REMOTE_FOREGROUND'
+BASE="$1"
+shift 2
+cd "${BASE}"
+export PATH="$HOME/${BASE}/bin:$PATH"
+export RAYON_NUM_THREADS=2
+exec ./bin/python3 -u scripts/o2switch_batch_worker.py "$@"
+REMOTE_FOREGROUND
     fi
     ;;
 
@@ -557,18 +605,30 @@ REMOTE_DAEMON
 BASE="$1"
 PID_FILE="${BASE}/run/batch_worker.pid"
 LOG_FILE="${BASE}/logs/batch_worker.log"
+QUEUE_FILE="${BASE}/run/batch_queue.json"
+# Machine-readable lifecycle line parsed by rpi4_o2switch_supervisor.py:
+#   running | stopped (manual batch-stop) | finished (queue drained) | crashed | absent (never started)
+PID=""
+STATE="absent"
 if [[ -f "${PID_FILE}" ]]; then
   PID=$(cat "${PID_FILE}")
-  if kill -0 "${PID}" 2>/dev/null; then
-    echo "● Batch worker is RUNNING (PID: ${PID})"
-    ps -o pid,user,%cpu,%mem,etime,comm -p "${PID}" || true
-  else
-    echo "○ Batch worker is STOPPED / FINISHED (PID ${PID} inactive)"
-  fi
-else
-  echo "○ No active batch worker PID file found at ${PID_FILE}."
 fi
-QUEUE_FILE="${BASE}/run/batch_queue.json"
+if [[ -n "${PID}" ]] && kill -0 "${PID}" 2>/dev/null; then
+  STATE="running"
+elif [[ -f "${BASE}/run/batch_stopped" ]]; then
+  STATE="stopped"
+elif [[ -f "${QUEUE_FILE}" ]] && grep -q '"remaining_targets": 0,' "${QUEUE_FILE}"; then
+  STATE="finished"
+elif [[ -n "${PID}" || -f "${QUEUE_FILE}" ]]; then
+  STATE="crashed"
+fi
+echo "BATCH_STATE=${STATE} PID=${PID:-none} TYPE=$(cat "${BASE}/run/batch_type" 2>/dev/null || echo tvshow)"
+if [[ "${STATE}" == "running" ]]; then
+  echo "● Batch worker is RUNNING (PID: ${PID})"
+  ps -o pid,user,%cpu,%mem,etime,comm -p "${PID}" || true
+else
+  echo "○ Batch worker is not running (${STATE})."
+fi
 if [[ -f "${QUEUE_FILE}" ]]; then
   echo ""
   echo "--- File de Traitement Batch (Progression) ---"
@@ -594,35 +654,14 @@ REMOTE_SCRIPT
 
   batch-stop)
     check_ssh
-    echo "=== Stopping TVShow Batch Worker Daemon on ${O2SWITCH_HOST} ==="
+    echo "=== Stopping Batch Worker Daemon on ${O2SWITCH_HOST} ==="
+    # Marker first, so the RPi4 supervisor does not heal a deliberate stop
     # shellcheck disable=SC2029
-    ssh "${O2SWITCH_HOST}" "bash -s -- '${REMOTE_BASE}' '${DEFAULT_SHUTDOWN_TIMEOUT_SEC}'" <<'REMOTE_SCRIPT'
-BASE="$1"
-TIMEOUT="$2"
-PID_FILE="${BASE}/run/batch_worker.pid"
-if [[ ! -f "${PID_FILE}" ]]; then
-  echo "No batch worker PID file found at ${PID_FILE}."
-  exit 0
-fi
-PID=$(cat "${PID_FILE}")
-if kill -0 "${PID}" 2>/dev/null; then
-  echo "Sending SIGTERM to PID ${PID}..."
-  kill -TERM "${PID}"
-  for _ in $(seq 1 "${TIMEOUT}"); do
-    if ! kill -0 "${PID}" 2>/dev/null; then
-      break
-    fi
-    sleep 1
-  done
-  if kill -0 "${PID}" 2>/dev/null; then
-    echo "Process did not terminate gracefully, sending SIGKILL..."
-    kill -KILL "${PID}" || true
-  fi
-  echo "✓ Stopped batch worker process ${PID}."
-fi
-rm -f "${PID_FILE}"
-screen -X -S dbsrt_batch quit 2>/dev/null || true
-REMOTE_SCRIPT
+    ssh "${O2SWITCH_HOST}" "touch $(printf '%q' "${REMOTE_BASE}/run/batch_stopped")"
+    remote_stop_pidfile "run/batch_worker.pid"
+    # The worker kills its dbsrt process groups on SIGTERM; this catches leftovers after a SIGKILL
+    # shellcheck disable=SC2029
+    ssh "${O2SWITCH_HOST}" "pkill -KILL -u \$(id -u) -f '[b]in/dbsrt media:add' || true; screen -X -S dbsrt_batch quit 2>/dev/null || true"
     ;;
 
   batch-workers)
@@ -630,14 +669,18 @@ REMOTE_SCRIPT
     shift || true
     NEW_COUNT="${1:-}"
     if [[ -n "${NEW_COUNT}" ]]; then
+      if ! [[ "${NEW_COUNT}" =~ ^[0-9]+$ ]] || ((NEW_COUNT < MIN_BATCH_WORKERS || NEW_COUNT > MAX_BATCH_WORKERS)); then
+        echo "❌ Worker count must be an integer in ${MIN_BATCH_WORKERS}-${MAX_BATCH_WORKERS} (got '${NEW_COUNT}')."
+        exit 1
+      fi
       echo "=== Setting remote batch concurrency to ${NEW_COUNT} workers on ${O2SWITCH_HOST} ==="
       # shellcheck disable=SC2029
-      ssh "${O2SWITCH_HOST}" "mkdir -p ${REMOTE_BASE}/run && echo '${NEW_COUNT}' > ${REMOTE_BASE}/run/desired_workers"
+      ssh "${O2SWITCH_HOST}" "mkdir -p $(printf '%q' "${REMOTE_BASE}/run") && echo ${NEW_COUNT} > $(printf '%q' "${REMOTE_BASE}/run/desired_workers")"
       echo "✓ Set desired workers to ${NEW_COUNT}."
     else
       echo "=== Querying remote batch concurrency on ${O2SWITCH_HOST} ==="
       # shellcheck disable=SC2029
-      ssh "${O2SWITCH_HOST}" "cat ${REMOTE_BASE}/run/desired_workers 2>/dev/null || echo '4 (default)'"
+      ssh "${O2SWITCH_HOST}" "cat ${REMOTE_BASE}/run/desired_workers 2>/dev/null || echo 'unset (worker uses its --workers value)'"
     fi
     ;;
 

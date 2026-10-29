@@ -1,18 +1,23 @@
-"""Unit tests for o2switch_batch_worker script and HTTP streaming bridge."""
+"""Unit tests for o2switch_batch_worker script."""
 
-import io
+import json
+import os
+import signal
+import subprocess
 import tempfile
+import time
 import urllib.parse
-from http.server import HTTPServer
 from pathlib import Path
-from typing import Any, cast
-from unittest.mock import MagicMock, patch
 
 from scripts.o2switch_batch_worker import (
-    FILE_SIZES_MAP,
-    StreamingBridgeHandler,
+    ACTIVE_CHILD_PGIDS,
+    _kill_active_children,
+    build_child_env,
+    get_process_group_cpu_ticks,
     load_certified_stems,
     load_existing_phash_stems,
+    load_targets_file,
+    resolve_retry_targets,
 )
 
 
@@ -57,127 +62,84 @@ def test_load_certified_stems_from_couplings():
         assert len(stems) == 2
 
 
-class MockSocket:
-    """Mock socket for testing BaseHTTPRequestHandler in memory."""
+def test_resolve_retry_targets_keeps_only_last_failures(tmp_path: Path):
+    """A video retried successfully, or already done locally, must not be retried again."""
+    events = tmp_path / "events.jsonl"
+    lines = [
+        {"video_stem": "a", "video_rel_path": "/tvshow/a.mkv", "file_size_bytes": 10, "success": False},
+        {"video_stem": "a", "video_rel_path": "/tvshow/a.mkv", "file_size_bytes": 10, "success": True},
+        {"video_stem": "b", "video_rel_path": "/tvshow/b.mkv", "file_size_bytes": 20, "success": False},
+        {"video_stem": "c", "video_rel_path": "/tvshow/c.mkv", "file_size_bytes": 30, "success": False},
+    ]
+    events.write_text("\n".join(json.dumps(r) for r in lines) + "\nnot-json\n", encoding="utf-8")
 
-    def __init__(self, request_bytes: bytes):
-        self.rfile = io.BytesIO(request_bytes)
-        self.wfile = io.BytesIO()
-
-    def makefile(self, mode: str, bufsize: int = -1):
-        if "b" in mode:
-            if "r" in mode:
-                return self.rfile
-            elif "w" in mode:
-                return self.wfile
-        raise ValueError(f"Unsupported mode: {mode}")
-
-    def sendall(self, data: bytes):
-        self.wfile.write(data)
-
-    def close(self):
-        pass
+    assert resolve_retry_targets(events, skip_stems={"c"}) == [("/tvshow/b.mkv", "b.mkv", 20)]
+    assert resolve_retry_targets(tmp_path / "missing.jsonl", set()) == []
 
 
-def test_streaming_bridge_do_head():
-    """Verifies that HEAD request returns 200 OK with Content-Length and Accept-Ranges."""
-    test_path = "/tvshow/test_show/episode1.mp4"
-    FILE_SIZES_MAP[test_path] = 1048576
+def test_load_targets_file_rebases_and_skips(tmp_path: Path):
+    """Targets are rebased on the NAS base dir and done stems are dropped."""
+    targets = tmp_path / "targets.json"
+    targets.write_text(
+        json.dumps(
+            [
+                {"path": "/media/nas/tvshow/S/e1.mkv", "size_bytes": 5},
+                "/media/nas/tvshow/S/e2.mkv",
+                "/media/nas/tvshow/S/done.mkv",
+            ]
+        ),
+        encoding="utf-8",
+    )
 
-    raw_req = f"HEAD /stream{test_path} HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".encode()
-    sock = MockSocket(raw_req)
-
-    server = HTTPServer(("127.0.0.1", 0), StreamingBridgeHandler)
-    StreamingBridgeHandler(cast(Any, sock), ("127.0.0.1", 12345), server)
-
-    sock.wfile.seek(0)
-    response_data = sock.wfile.read().decode("utf-8", errors="ignore")
-
-    assert "HTTP/1.0 200 OK" in response_data or "HTTP/1.1 200 OK" in response_data
-    assert "Accept-Ranges: bytes" in response_data
-    assert "Content-Length: 1048576" in response_data
-    assert "Content-Type: video/mp4" in response_data
-
-
-@patch("subprocess.Popen")
-def test_streaming_bridge_do_get_with_range(mock_popen):
-    """Verifies that GET request with Range header invokes curl -r and returns 206 Partial Content."""
-    mock_proc = MagicMock()
-    mock_proc.stdout.read.side_effect = [b"PARTIAL_VIDEO_BYTES", b""]
-    mock_proc.poll.return_value = 0
-    mock_proc.stderr = None
-    mock_popen.return_value = mock_proc
-
-    test_path = "/tvshow/test_show/episode1.mkv"
-    FILE_SIZES_MAP[test_path] = 5000000
-
-    raw_req = (f"GET /stream{test_path} HTTP/1.1\r\nHost: 127.0.0.1\r\nRange: bytes=100-200\r\n\r\n").encode()
-    sock = MockSocket(raw_req)
-
-    server = HTTPServer(("127.0.0.1", 0), StreamingBridgeHandler)
-    StreamingBridgeHandler(cast(Any, sock), ("127.0.0.1", 12345), server)
-
-    # Check curl arguments
-    mock_popen.assert_called_once()
-    cmd = mock_popen.call_args[0][0]
-    assert "-r" in cmd
-    range_idx = cmd.index("-r")
-    assert cmd[range_idx + 1] == "100-200"
-
-    sock.wfile.seek(0)
-    response_data = sock.wfile.read()
-
-    assert b"206 Partial Content" in response_data
-    assert b"Content-Range: bytes 100-200/5000000" in response_data
-    assert b"Content-Length: 101" in response_data
-    assert b"PARTIAL_VIDEO_BYTES" in response_data
+    assert load_targets_file(targets, "/tvshow", skip_stems={"done"}) == [
+        ("/tvshow/S/e1.mkv", "e1.mkv", 5),
+        ("/tvshow/S/e2.mkv", "e2.mkv", 0),
+    ]
 
 
-def test_streaming_bridge_invalid_route():
-    """Verifies that non-stream routes return 404."""
-    raw_req = b"GET /invalid/path HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"
-    sock = MockSocket(raw_req)
+def test_build_child_env_passes_credentials_out_of_band(tmp_path: Path, monkeypatch):
+    """Credentials go to dbsrt via env only; NAS_PASS itself is not leaked to children."""
+    monkeypatch.setenv("NAS_PASS", "secret")
+    monkeypatch.delenv("DBSRT_FFMPEG_THREADS", raising=False)
 
-    server = HTTPServer(("127.0.0.1", 0), StreamingBridgeHandler)
-    StreamingBridgeHandler(cast(Any, sock), ("127.0.0.1", 12345), server)
+    env = build_child_env("svc", "p@ss#%", tmp_path)
 
-    sock.wfile.seek(0)
-    response_data = sock.wfile.read().decode("utf-8", errors="ignore")
-    assert "404" in response_data
-
-
-@patch("subprocess.Popen")
-def test_streaming_bridge_sftp_failure_returns_502(mock_popen):
-    """Verifies that if curl produces zero bytes, bridge returns HTTP 502 Bad Gateway."""
-    mock_proc = MagicMock()
-    mock_proc.stdout.read.side_effect = [b""]
-    mock_proc.poll.return_value = 1
-    mock_proc.stderr.read.return_value = b"Authentication failed"
-    mock_popen.return_value = mock_proc
-
-    test_path = "/tvshow/test_show/episode1.mkv"
-    raw_req = f"GET /stream{test_path} HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".encode()
-    sock = MockSocket(raw_req)
-
-    server = HTTPServer(("127.0.0.1", 0), StreamingBridgeHandler)
-    StreamingBridgeHandler(cast(Any, sock), ("127.0.0.1", 12345), server)
-
-    sock.wfile.seek(0)
-    response_data = sock.wfile.read().decode("utf-8", errors="ignore")
-    assert "502" in response_data
+    assert env["DBSRT_FTP_USER"] == "svc"
+    assert env["DBSRT_FTP_PASSWORD"] == "p@ss#%"
+    assert env["DBSRT_FFMPEG_THREADS"] == "2"
+    assert env["PATH"].startswith(f"{tmp_path}:")
+    assert "NAS_PASS" not in env
 
 
-def test_batch_worker_retry_failed_flag_parsing():
-    """Verifies that --retry-failed argument is accepted and defaults are sound."""
-    import argparse
+def test_get_process_group_cpu_ticks_sums_matching_group(tmp_path: Path):
+    """Only processes of the requested group are summed, comm with spaces/parens is handled."""
+    stats = {
+        "100": "100 (dbsrt) S 1 100 100 0 0 0 0 0 0 0 7 3 0 0",
+        "101": "101 (ff mpeg (x)) R 100 100 100 0 0 0 0 0 0 0 20 5 0 0",
+        "200": "200 (other) S 1 200 200 0 0 0 0 0 0 0 99 99 0 0",
+    }
+    for pid, content in stats.items():
+        (tmp_path / pid).mkdir()
+        (tmp_path / pid / "stat").write_text(content, encoding="utf-8")
 
-    from scripts.o2switch_batch_worker import DEFAULT_MAX_EXTRACTION_SECS
+    assert get_process_group_cpu_ticks(100, proc_root=tmp_path) == 35
+    assert get_process_group_cpu_ticks(999, proc_root=tmp_path) == 0
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--retry-failed", action="store_true")
-    parser.add_argument("--max-extraction-secs", type=int, default=DEFAULT_MAX_EXTRACTION_SECS)
 
-    args = parser.parse_args(["--retry-failed", "--max-extraction-secs", "1200"])
-    assert args.retry_failed is True
-    assert args.max_extraction_secs == 1200
-    assert DEFAULT_MAX_EXTRACTION_SECS == 1800
+def test_kill_active_children_kills_whole_group():
+    """Shutdown kills tracked child sessions including grandchildren."""
+    proc = subprocess.Popen(["sh", "-c", "sleep 30 & wait"], start_new_session=True)
+    ACTIVE_CHILD_PGIDS.add(proc.pid)
+    try:
+        time.sleep(0.2)
+        _kill_active_children()
+        assert proc.wait(timeout=5) == -signal.SIGTERM
+        time.sleep(0.2)
+        try:
+            os.killpg(proc.pid, 0)
+            group_alive = True
+        except ProcessLookupError:
+            group_alive = False
+        assert not group_alive
+    finally:
+        ACTIVE_CHILD_PGIDS.discard(proc.pid)
