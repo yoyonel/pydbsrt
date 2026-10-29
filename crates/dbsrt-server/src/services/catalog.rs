@@ -29,21 +29,8 @@ pub fn is_safe_language_token(lang: &str) -> bool {
 /// # Returns
 /// Canonical 2-letter ISO code (`"fr"`, `"en"`, `"es"`, etc.) or unchanged lowercase string.
 pub fn normalize_lang_code(lang: &str) -> String {
-    match lang.trim().to_lowercase().as_str() {
-        "fr" | "fre" | "fra" | "french" => "fr".to_string(),
-        "en" | "eng" | "english" => "en".to_string(),
-        "es" | "spa" | "spanish" => "es".to_string(),
-        "de" | "ger" | "deu" | "german" => "de".to_string(),
-        "it" | "ita" | "italian" => "it".to_string(),
-        "pt" | "por" | "pob" | "portuguese" => "pt".to_string(),
-        "ru" | "rus" | "russian" => "ru".to_string(),
-        "ja" | "jpn" | "japanese" => "ja".to_string(),
-        "zh" | "chi" | "zho" | "chinese" => "zh".to_string(),
-        "nl" | "dut" | "nld" | "dutch" => "nl".to_string(),
-        "pl" | "pol" | "polish" => "pl".to_string(),
-        "tr" | "tur" | "turkish" => "tr".to_string(),
-        other => other.to_string(),
-    }
+    let trimmed = lang.trim();
+    dbsrt_core::parse_extended_language_token(trimmed).unwrap_or_else(|| trimmed.to_lowercase())
 }
 
 /// Extracts explicit language tag from a subtitle filename.
@@ -57,58 +44,18 @@ pub fn normalize_lang_code(lang: &str) -> String {
 ///
 /// # Data Flow & Invariants
 /// Tokenizes the filename from right to left across separators (`.`, `_`, `-`, ` `)
-/// ignoring noise tokens (`"forced"`, `"sdh"`, `"synced"`) and maps common language abbreviations.
-const SUBTITLE_LANG_MAP: &[(&[&str], &str)] = &[
-    (&["fr", "fre", "fra", "french", "vf", "vostfr"], "fr"),
-    (&["en", "eng", "english", "vo"], "en"),
-    (&["es", "spa", "spanish"], "es"),
-    (&["de", "ger", "deu", "german"], "de"),
-    (&["it", "ita", "italian"], "it"),
-    (&["pt", "por", "pob", "portuguese"], "pt"),
-    (&["ru", "rus", "russian"], "ru"),
-    (&["ja", "jpn", "japanese"], "ja"),
-    (&["zh", "chi", "zho", "chinese"], "zh"),
-    (&["nl", "dut", "nld", "dutch"], "nl"),
-    (&["pl", "pol", "polish"], "pl"),
-    (&["tr", "tur", "turkish"], "tr"),
-    (&["ar", "ara", "arabic"], "ar"),
-    (&["he", "heb", "hebrew"], "he"),
-    (&["sv", "swe", "swedish"], "sv"),
-    (&["da", "dan", "danish"], "da"),
-    (&["fi", "fin", "finnish"], "fi"),
-    (&["no", "nor", "nob", "nno", "norwegian"], "no"),
-    (&["cs", "cze", "ces", "czech"], "cs"),
-    (&["hu", "hun", "hungarian"], "hu"),
-    (&["ro", "rum", "ron", "romanian"], "ro"),
-    (&["el", "ell", "gre", "greek"], "el"),
-    (&["uk", "ukr", "ukrainian"], "uk"),
-    (&["ko", "kor", "korean"], "ko"),
-    (&["hi", "hin", "hindi"], "hi"),
-    (&["id", "ind", "indonesian"], "id"),
-    (&["th", "tha", "thai"], "th"),
-    (&["vi", "vie", "vietnamese"], "vi"),
-    (&["ms", "msa", "may", "malay"], "ms"),
-    (&["tl", "tgl", "fil", "tagalog"], "tl"),
-];
-
-fn map_subtitle_lang_token(lower: &str) -> Option<&'static str> {
-    for &(aliases, code) in SUBTITLE_LANG_MAP {
-        if aliases.contains(&lower) {
-            return Some(code);
-        }
-    }
-    None
-}
-
+/// ignoring noise tokens (`"forced"`, `"sdh"`, `"synced"`) and scene release groups
+/// (`x264-ID`), and maps tokens via [`dbsrt_core::parse_extended_language_token`].
 pub fn detect_subtitle_file_language(filename: &str) -> Option<String> {
     let base = filename.strip_suffix(".srt").unwrap_or(filename);
-    for token in base
-        .rsplit(['.', '_', '-', ' ', '(', ')', '[', ']'])
-        .filter(|t| !t.is_empty())
+    for (prev_sep, token) in split_name_tokens(base)
+        .into_iter()
+        .rev()
+        .filter(|(_, t)| !t.is_empty())
         .take(4)
     {
         let lower = token.to_lowercase();
-        if lower.chars().all(|c| c.is_ascii_digit()) {
+        if lower.chars().all(|c| c.is_ascii_digit()) || is_release_group_token(prev_sep, token) {
             continue;
         }
         if matches!(
@@ -117,11 +64,35 @@ pub fn detect_subtitle_file_language(filename: &str) -> Option<String> {
         ) {
             continue;
         }
-        if let Some(code) = map_subtitle_lang_token(&lower) {
-            return Some(code.to_string());
+        if let Some(code) = dbsrt_core::parse_extended_language_token(&lower) {
+            return Some(code);
         }
     }
     None
+}
+
+/// Separators between subtitle file name tokens.
+const SUBTITLE_NAME_SEPARATORS: [char; 8] = ['.', '_', '-', ' ', '(', ')', '[', ']'];
+
+/// Splits a file name into tokens, each paired with the separator that precedes it.
+fn split_name_tokens(base: &str) -> Vec<(Option<char>, &str)> {
+    let mut tokens = Vec::new();
+    let (mut prev_sep, mut start) = (None, 0);
+    for (i, c) in base.char_indices() {
+        if SUBTITLE_NAME_SEPARATORS.contains(&c) {
+            tokens.push((prev_sep, &base[start..i]));
+            prev_sep = Some(c);
+            start = i + c.len_utf8();
+        }
+    }
+    tokens.push((prev_sep, &base[start..]));
+    tokens
+}
+
+/// Scene release groups follow a `-` and are upper/mixed case (`x264-ID`, `-MS`, `-VO`);
+/// a lowercase `-fr` suffix is still read as a language tag.
+fn is_release_group_token(prev_sep: Option<char>, token: &str) -> bool {
+    prev_sep == Some('-') && token.chars().any(|c| c.is_ascii_uppercase())
 }
 
 /// Collects candidate subtitle directories: `primary_dir` plus optional sidecar folders.
@@ -649,6 +620,39 @@ mod tests {
             detect_subtitle_file_language("Unknown.Release.mkv_xyz_99.srt"),
             None
         );
+    }
+
+    #[test]
+    fn test_detect_subtitle_file_language_skips_release_group() {
+        for name in [
+            "Movie.2020.1080p.WEB-DL.x264-ID.srt",
+            "Movie.2020.1080p.WEB.x264-MS.srt",
+            "Movie.2020.720p.HDTV-VO.srt",
+        ] {
+            assert_eq!(detect_subtitle_file_language(name), None, "{name}");
+        }
+        assert_eq!(
+            detect_subtitle_file_language("Movie.2020.1080p.WEB-DL.x264-ID.fr.srt"),
+            Some("fr".to_string())
+        );
+        assert_eq!(
+            detect_subtitle_file_language("Movie.2020-fr.srt"),
+            Some("fr".to_string())
+        );
+    }
+
+    #[test]
+    fn test_normalize_lang_code_shares_core_table() {
+        assert_eq!(normalize_lang_code(" French "), "fr");
+        assert_eq!(normalize_lang_code("HEB"), "he");
+        assert_eq!(normalize_lang_code("nno"), "no");
+        assert_eq!(normalize_lang_code("pt-BR"), "pt-br");
+        for code in ["hebrew", "hindi", "tagalog", "ukrainian"] {
+            assert_eq!(
+                dbsrt_core::parse_extended_language_token(code).as_deref(),
+                Some(normalize_lang_code(code).as_str())
+            );
+        }
     }
 
     #[test]
