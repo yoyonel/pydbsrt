@@ -13,6 +13,7 @@ from scripts.o2switch_batch_worker import (
     ACTIVE_CHILD_PGIDS,
     _kill_active_children,
     build_child_env,
+    build_stream_url,
     get_process_group_cpu_ticks,
     load_certified_stems,
     load_existing_phash_stems,
@@ -151,3 +152,10 @@ def test_kill_active_children_kills_whole_group():
         assert not group_alive
     finally:
         ACTIVE_CHILD_PGIDS.discard(proc.pid)
+
+
+def test_build_stream_url_keeps_raw_paths_verbatim():
+    """Percent signs, '#' and spaces in NAS names are never URL-decoded."""
+    base = "ftp://nas:21"
+    assert build_stream_url(base, "/video/100%41 Live #10.mkv") == "ftp://nas:21/video/100%41 Live #10.mkv"
+    assert build_stream_url(base, "tvshow/a b.mkv") == "ftp://nas:21/tvshow/a b.mkv"

@@ -351,6 +351,15 @@ def build_child_env(nas_user: str, password_file: Path, bin_dir: Path) -> Dict[s
     return env
 
 
+def build_stream_url(stream_base: str, rel_path: str) -> str:
+    """Joins the FTP base and a raw NAS path.
+
+    Paths come raw from MLSD, the targets file and the events log, and FFmpeg
+    libavformat/ftp.c expects them verbatim: never URL-decode them (a literal `%41` must stay).
+    """
+    return f"{stream_base}{rel_path if rel_path.startswith('/') else '/' + rel_path}"
+
+
 def process_single_video(
     video_info: Tuple[str, str, int],
     stream_base: str,
@@ -364,18 +373,14 @@ def process_single_video(
     rel_path, filename, file_size = video_info
     stem = Path(filename).stem
 
-    unquoted = urllib.parse.unquote(rel_path)
-    if not unquoted.startswith("/"):
-        unquoted = "/" + unquoted
-    # FFmpeg libavformat/ftp.c expects verbatim raw paths without URL encoding
-    stream_url = f"{stream_base}{unquoted}"
+    stream_url = build_stream_url(stream_base, rel_path)
 
     base_cmd = [
         dbsrt_bin,
         "media:add",
         stream_url,
         "--media-name",
-        urllib.parse.unquote(filename),
+        filename,
         "--hwaccel",
         "disabled",
         "--phash-dir",
