@@ -304,7 +304,7 @@
     "scope": "mod",
     "function_name": "probe_media_file",
     "start_line": 614,
-    "max_loc": 78,
+    "max_loc": 65,
     "max_ccn": 16,
     "max_parameters": 1,
     "max_nesting": 8
@@ -449,26 +449,6 @@
     "max_parameters": 1,
     "max_nesting": 5
   },
-  "crates/dbsrt-core/src/media_pairing.rs::mod::parse_extended_language_token": {
-    "file_path": "crates/dbsrt-core/src/media_pairing.rs",
-    "scope": "mod",
-    "function_name": "parse_extended_language_token",
-    "start_line": 78,
-    "max_loc": 31,
-    "max_ccn": 25,
-    "max_parameters": 1,
-    "max_nesting": 2
-  },
-  "crates/dbsrt-core/src/media_pairing.rs::mod::parse_language_code": {
-    "file_path": "crates/dbsrt-core/src/media_pairing.rs",
-    "scope": "mod",
-    "function_name": "parse_language_code",
-    "start_line": 23,
-    "max_loc": 49,
-    "max_ccn": 40,
-    "max_parameters": 1,
-    "max_nesting": 2
-  },
   "crates/dbsrt-core/src/metadata.rs::mod::parse_resolution_token": {
     "file_path": "crates/dbsrt-core/src/metadata.rs",
     "scope": "mod",
@@ -529,16 +509,6 @@
     "max_parameters": 1,
     "max_nesting": 5
   },
-  "crates/dbsrt-core/src/video.rs::mod::extract_frames_advanced": {
-    "file_path": "crates/dbsrt-core/src/video.rs",
-    "scope": "mod",
-    "function_name": "extract_frames_advanced",
-    "start_line": 498,
-    "max_loc": 35,
-    "max_ccn": 13,
-    "max_parameters": 2,
-    "max_nesting": 5
-  },
   "crates/dbsrt-core/src/video.rs::mod::find_ffmpeg_supporting": {
     "file_path": "crates/dbsrt-core/src/video.rs",
     "scope": "mod",
@@ -564,8 +534,8 @@
     "scope": "mod",
     "function_name": "probe_video_with_cmd",
     "start_line": 189,
-    "max_loc": 36,
-    "max_ccn": 11,
+    "max_loc": 31,
+    "max_ccn": 10,
     "max_parameters": 3,
     "max_nesting": 5
   },
@@ -749,16 +719,6 @@
     "max_parameters": 1,
     "max_nesting": 8
   },
-  "crates/dbsrt-server/src/handlers/search/download.rs::mod::fetch_cas_or_catalog_subtitle": {
-    "file_path": "crates/dbsrt-server/src/handlers/search/download.rs",
-    "scope": "mod",
-    "function_name": "fetch_cas_or_catalog_subtitle",
-    "start_line": 87,
-    "max_loc": 66,
-    "max_ccn": 18,
-    "max_parameters": 3,
-    "max_nesting": 5
-  },
   "crates/dbsrt-server/src/handlers/search/download.rs::mod::persist_retargeted_subtitle": {
     "file_path": "crates/dbsrt-server/src/handlers/search/download.rs",
     "scope": "mod",
@@ -804,7 +764,7 @@
     "scope": "mod",
     "function_name": "execute_remote_relay_recognition",
     "start_line": 226,
-    "max_loc": 85,
+    "max_loc": 82,
     "max_ccn": 4,
     "max_parameters": 7,
     "max_nesting": 4
@@ -1014,8 +974,8 @@
     "scope": "mod",
     "function_name": "identify_media_by_phash_multi_routed",
     "start_line": 79,
-    "max_loc": 152,
-    "max_ccn": 27,
+    "max_loc": 146,
+    "max_ccn": 25,
     "max_parameters": 7,
     "max_nesting": 5
   },
