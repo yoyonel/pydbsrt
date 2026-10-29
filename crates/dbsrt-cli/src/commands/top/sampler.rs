@@ -721,20 +721,7 @@ pub fn save_media_cache(cache_path: &Path, items: &[DiscoveredMediaItem]) {
 
 /// Inspects container metadata, duration, video codec, and subtitle tracks via ffprobe.
 pub fn probe_media_file(path: &Path) -> (Option<f64>, Option<String>, Vec<MediaSubtrackInfo>) {
-    let output = Command::new("ffprobe")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .args([
-            "-v",
-            "error",
-            "-show_entries",
-            "format=duration:stream=index,codec_type,codec_name,profile,pix_fmt:stream_tags=language,title",
-            "-of",
-            "json",
-        ])
-        .arg(path)
-        .output();
+    let output = build_probe_media_command(path).output();
 
     if let Ok(out) = output {
         if out.status.success() {
@@ -2155,6 +2142,25 @@ fn compute_net_rx_rate(
     }
 
     (0.0, now)
+}
+
+/// Builds the ffprobe command listing duration and stream codecs/tags for `probe_media_file`.
+fn build_probe_media_command(path: &Path) -> Command {
+    let mut cmd = Command::new(dbsrt_core::video::resolve_ffprobe());
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .args([
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration:stream=index,codec_type,codec_name,profile,pix_fmt:stream_tags=language,title",
+            "-of",
+            "json",
+        ]);
+    dbsrt_core::apply_ftp_credentials(&mut cmd, path);
+    cmd.arg(path);
+    cmd
 }
 
 /// Decodes simple percent-encoded ASCII/UTF-8 substrings in media filenames (e.g. `%20` -> ` `, `%5B` -> `[`).

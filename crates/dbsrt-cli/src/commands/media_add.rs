@@ -172,7 +172,7 @@ fn select_and_validate_subtitle_pairs(
 /// Guarantee: Never panics.
 ///
 /// # Data Flow & Invariants
-/// 1. Tries single-pass multi-stream extraction via FFmpeg `-threads 2`.
+/// 1. Tries single-pass multi-stream extraction via FFmpeg (`DBSRT_FFMPEG_THREADS`, default 2).
 /// 2. If single-pass fails, falls back sequentially to `extract_embedded_subtitle`.
 /// 3. Registers verified output files in `cleanup.srts` and `discovered`.
 fn extract_subtitle_tracks_batch(
@@ -182,8 +182,10 @@ fn extract_subtitle_tracks_batch(
     discovered: &mut Vec<(PathBuf, Option<String>)>,
 ) {
     let mut cmd = std::process::Command::new(dbsrt_core::video::resolve_ffmpeg_cpu());
-    cmd.args(["-v", "error", "-y", "-threads", "2", "-i"])
-        .arg(video_path);
+    cmd.args(["-v", "error", "-y", "-threads"])
+        .arg(dbsrt_core::ffmpeg_decode_threads());
+    dbsrt_core::apply_ftp_credentials(&mut cmd, video_path);
+    cmd.arg("-i").arg(video_path);
     for (idx, _lang, dest) in candidates {
         let map_arg = format!("0:s:{}", idx);
         cmd.args(["-map", &map_arg, "-f", "srt"]).arg(dest);

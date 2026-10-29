@@ -6,6 +6,7 @@
 pub mod container;
 pub mod coupling;
 pub mod cuts;
+pub mod ffmpeg_input;
 pub mod lang_status;
 pub mod media_pairing;
 pub mod metadata;
@@ -29,6 +30,11 @@ pub use cuts::{
     FLAT_BLACK_DITHERED_3, FLAT_BLACK_PHASH, FLAT_WHITE_PHASH, MIN_DYNAMIC_SEQUENCE_DISTINCT_COUNT,
     MIN_DYNAMIC_SEQUENCE_WINDOW_LEN, STATIC_FRAME_MAX_DISTANCE,
     STATIC_SEQUENCE_MAX_JITTER_DISTANCE,
+};
+pub use ffmpeg_input::{
+    apply_ftp_credentials, display_input, ffmpeg_decode_threads, redact_command_line,
+    redact_url_userinfo, DEFAULT_FFMPEG_DECODE_THREADS, FFMPEG_THREADS_ENV, FTP_PASSWORD_ENV,
+    FTP_USER_ENV,
 };
 pub use lang_status::LangStatus;
 pub use media_pairing::{

@@ -9,6 +9,9 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use crate::ffmpeg_input::{
+    apply_ftp_credentials, display_input, ffmpeg_decode_threads, redact_url_userinfo,
+};
 use crate::media_pairing::parse_language_code;
 
 /// Metadata describing an embedded subtitle track within a container.
@@ -107,14 +110,15 @@ pub fn is_remote_stream_or_pipe<P: AsRef<Path>>(path: P) -> bool {
 pub fn inspect_container<P: AsRef<Path>>(path: P) -> Result<ContainerInspection> {
     let p = path.as_ref();
     if !is_remote_stream_or_pipe(p) && !p.exists() {
-        return Err(anyhow!("Media container not found: {:?}", p));
+        return Err(anyhow!("Media container not found: {:?}", display_input(p)));
     }
 
     let ffprobe_bin = crate::video::resolve_ffprobe();
-    let output = Command::new(ffprobe_bin)
+    let mut cmd = Command::new(ffprobe_bin);
+    cmd.args(["-threads", &ffmpeg_decode_threads()]);
+    apply_ftp_credentials(&mut cmd, p);
+    let output = cmd
         .args([
-            "-threads",
-            crate::video::DEFAULT_FFMPEG_DECODE_THREADS,
             "-v",
             "error",
             "-select_streams",
@@ -126,12 +130,12 @@ pub fn inspect_container<P: AsRef<Path>>(path: P) -> Result<ContainerInspection>
         ])
         .arg(p)
         .output()
-        .with_context(|| format!("Failed to execute ffprobe on {:?}", p))?;
+        .with_context(|| format!("Failed to execute ffprobe on {:?}", display_input(p)))?;
 
     if !output.status.success() {
         return Err(anyhow!(
             "ffprobe inspection failed: {}",
-            String::from_utf8_lossy(&output.stderr)
+            redact_url_userinfo(&String::from_utf8_lossy(&output.stderr))
         ));
     }
 
@@ -190,24 +194,32 @@ pub fn extract_embedded_subtitle<P: AsRef<Path>>(
 ) -> Result<String> {
     let p = media_path.as_ref();
     if !is_remote_stream_or_pipe(p) && !p.exists() {
-        return Err(anyhow!("Media container not found: {:?}", p));
+        return Err(anyhow!("Media container not found: {:?}", display_input(p)));
     }
 
     let map_arg = format!("0:s:{}", subtitle_index);
 
     let ffmpeg_bin = crate::video::resolve_ffmpeg_cpu();
-    let output = Command::new(ffmpeg_bin)
-        .args(["-v", "error", "-y", "-i"])
+    let mut cmd = Command::new(ffmpeg_bin);
+    cmd.args(["-v", "error", "-y", "-threads", &ffmpeg_decode_threads()]);
+    apply_ftp_credentials(&mut cmd, p);
+    let output = cmd
+        .arg("-i")
         .arg(p)
         .args(["-map", &map_arg, "-f", "srt", "-"])
         .output()
-        .with_context(|| format!("Failed to execute ffmpeg subtitle extraction on {:?}", p))?;
+        .with_context(|| {
+            format!(
+                "Failed to execute ffmpeg subtitle extraction on {:?}",
+                display_input(p)
+            )
+        })?;
 
     if !output.status.success() {
         return Err(anyhow!(
             "ffmpeg extraction failed for stream {}: {}",
             subtitle_index,
-            String::from_utf8_lossy(&output.stderr)
+            redact_url_userinfo(&String::from_utf8_lossy(&output.stderr))
         ));
     }
 

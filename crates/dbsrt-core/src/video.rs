@@ -28,9 +28,10 @@ pub const PAL_FPS: f64 = 25.0;
 /// Standard NTSC film frame rate.
 pub const NTSC_FILM_FPS: f64 = 23.976;
 
-/// Default decoding threads allocated per FFmpeg process to enforce resource predictability
-/// and prevent host process/thread starvation on shared cloud runtimes.
-pub const DEFAULT_FFMPEG_DECODE_THREADS: &str = "2";
+pub use crate::ffmpeg_input::DEFAULT_FFMPEG_DECODE_THREADS;
+use crate::ffmpeg_input::{
+    apply_ftp_credentials, display_input, ffmpeg_decode_threads, redact_url_userinfo,
+};
 
 /// Default probe size limit in bytes for ffprobe to avoid unbounded memory buffer on remote streams.
 pub const DEFAULT_FFPROBE_PROBESIZE: &str = "10000000";
@@ -207,21 +208,26 @@ pub fn parse_fps_from_stem(stem: &str) -> f64 {
 /// 3. If parent directory contains `ffprobe`, returns that sibling candidate.
 /// 4. Falls back to default system command string `"ffprobe"`.
 pub fn resolve_ffprobe() -> PathBuf {
-    if let Ok(env_bin) = std::env::var("DBSRT_FFPROBE").or_else(|_| std::env::var("FFPROBE_PATH")) {
-        let p = PathBuf::from(env_bin);
-        if p.exists() {
-            return p;
-        }
-    }
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let candidate = dir.join("ffprobe");
-            if candidate.is_file() {
-                return candidate;
-            }
-        }
-    }
-    PathBuf::from("ffprobe")
+    resolve_tool(["DBSRT_FFPROBE", "FFPROBE_PATH"], "ffprobe")
+}
+
+/// Shared resolution order for bundled tools: existing env path, sibling of the current
+/// executable, then bare `name` looked up on `PATH`.
+fn resolve_tool(env_vars: [&str; 2], name: &str) -> PathBuf {
+    let env_path = env_vars
+        .iter()
+        .find_map(|var| std::env::var(var).ok())
+        .map(PathBuf::from)
+        .filter(|p| p.exists());
+    let sibling = || {
+        std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.parent().map(|dir| dir.join(name)))
+            .filter(|candidate| candidate.is_file())
+    };
+    env_path
+        .or_else(sibling)
+        .unwrap_or_else(|| PathBuf::from(name))
 }
 
 /// Resolves the absolute or system path to the fallback CPU `ffmpeg` executable.
@@ -242,21 +248,7 @@ pub fn resolve_ffprobe() -> PathBuf {
 /// 3. If parent directory contains `ffmpeg`, returns that sibling candidate.
 /// 4. Falls back to default system command string `"ffmpeg"`.
 pub fn resolve_ffmpeg_cpu() -> PathBuf {
-    if let Ok(env_bin) = std::env::var("DBSRT_FFMPEG").or_else(|_| std::env::var("FFMPEG_PATH")) {
-        let p = PathBuf::from(env_bin);
-        if p.exists() {
-            return p;
-        }
-    }
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let candidate = dir.join("ffmpeg");
-            if candidate.is_file() {
-                return candidate;
-            }
-        }
-    }
-    PathBuf::from("ffmpeg")
+    resolve_tool(["DBSRT_FFMPEG", "FFMPEG_PATH"], "ffmpeg")
 }
 
 /// Probes a video file using ffprobe with a bounded execution timeout.
@@ -276,23 +268,24 @@ pub fn probe_video_with_timeout(path: &Path, timeout_secs: u64) -> Result<VideoM
 }
 
 /// Drains stdout and stderr buffers from a completed child process.
-fn read_child_output(child: &mut Child) -> (Vec<u8>, String) {
+/// Read errors propagate (a truncated stdout would otherwise parse as bogus JSON);
+/// stderr is decoded lossily so non-UTF-8 diagnostics never fail the read.
+fn read_child_output(child: &mut Child) -> std::io::Result<(Vec<u8>, String)> {
     let mut stdout = Vec::new();
     if let Some(mut out) = child.stdout.take() {
-        let _ = out.read_to_end(&mut stdout);
+        out.read_to_end(&mut stdout)?;
     }
-    let mut stderr = String::new();
+    let mut stderr = Vec::new();
     if let Some(mut err) = child.stderr.take() {
-        let _ = err.read_to_string(&mut stderr);
+        err.read_to_end(&mut stderr)?;
     }
-    (stdout, stderr)
+    Ok((stdout, String::from_utf8_lossy(&stderr).into_owned()))
 }
 
 fn build_ffprobe_command(path: &Path, ffprobe_bin: &str) -> Command {
     let mut cmd = Command::new(ffprobe_bin);
+    cmd.args(["-threads", &ffmpeg_decode_threads()]);
     cmd.args([
-        "-threads",
-        DEFAULT_FFMPEG_DECODE_THREADS,
         "-probesize",
         DEFAULT_FFPROBE_PROBESIZE,
         "-analyzeduration",
@@ -306,6 +299,7 @@ fn build_ffprobe_command(path: &Path, ffprobe_bin: &str) -> Command {
         "-of",
         "json",
     ]);
+    apply_ftp_credentials(&mut cmd, path);
     cmd.arg(path);
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
     cmd
@@ -317,29 +311,24 @@ pub fn probe_video_with_cmd(
     ffprobe_bin: &str,
     timeout_secs: u64,
 ) -> Result<VideoMetadata> {
+    let shown = display_input(path);
     let mut child = build_ffprobe_command(path, ffprobe_bin)
         .spawn()
-        .with_context(|| format!("Failed to execute '{}' on {:?}", ffprobe_bin, path))?;
+        .with_context(|| format!("Failed to execute '{}' on {:?}", ffprobe_bin, shown))?;
 
     let start = Instant::now();
     let timeout = Duration::from_secs(timeout_secs);
 
     loop {
         match child.try_wait()? {
-            Some(status) => {
-                let (stdout, stderr) = read_child_output(&mut child);
-                if !status.success() {
-                    anyhow::bail!("{} failed: {}", ffprobe_bin, stderr);
-                }
-                return parse_ffprobe_json_output(&stdout);
-            }
+            Some(status) => return finish_ffprobe_child(&mut child, status, ffprobe_bin),
             None => {
                 if start.elapsed() > timeout {
                     let _ = child.kill();
                     anyhow::bail!(
                         "Execution of '{}' on {:?} timed out after {} seconds",
                         ffprobe_bin,
-                        path,
+                        shown,
                         timeout_secs
                     );
                 }
@@ -347,6 +336,20 @@ pub fn probe_video_with_cmd(
             }
         }
     }
+}
+
+/// Reads an exited ffprobe child's output and parses it, failing with redacted stderr.
+fn finish_ffprobe_child(
+    child: &mut Child,
+    status: std::process::ExitStatus,
+    ffprobe_bin: &str,
+) -> Result<VideoMetadata> {
+    let (stdout, stderr) = read_child_output(child)
+        .with_context(|| format!("Failed to read '{}' output", ffprobe_bin))?;
+    if !status.success() {
+        anyhow::bail!("{} failed: {}", ffprobe_bin, redact_url_userinfo(&stderr));
+    }
+    parse_ffprobe_json_output(&stdout)
 }
 
 /// Parses raw JSON output from ffprobe into VideoMetadata.
@@ -552,9 +555,8 @@ pub fn probe_keyframe_timestamps(
 ) -> Result<Vec<u64>> {
     let ffprobe_bin = resolve_ffprobe();
     let mut cmd = Command::new(ffprobe_bin);
+    cmd.args(["-threads", &ffmpeg_decode_threads()]);
     cmd.args([
-        "-threads",
-        DEFAULT_FFMPEG_DECODE_THREADS,
         "-v",
         "error",
         "-skip_frame",
@@ -577,11 +579,15 @@ pub fn probe_keyframe_timestamps(
         cmd.args(["-read_intervals", &interval]);
     }
 
+    apply_ftp_credentials(&mut cmd, path);
     cmd.arg(path);
 
-    let output = cmd
-        .output()
-        .with_context(|| format!("Failed to run ffprobe for keyframes on {:?}", path))?;
+    let output = cmd.output().with_context(|| {
+        format!(
+            "Failed to run ffprobe for keyframes on {:?}",
+            display_input(path)
+        )
+    })?;
 
     if !output.status.success() {
         return Ok(Vec::new());
@@ -613,30 +619,46 @@ pub fn extract_frames_advanced(
     let res = run_extraction_process(path, options, &resolved);
     match res {
         Ok(samples) if !samples.is_empty() => Ok(samples),
-        other => {
-            if resolved.hwaccel != HwAccel::Disabled {
-                let err_detail = match &other {
-                    Ok(empty) => format!("produced {} frames", empty.len()),
-                    Err(e) => format!("failed: {:#}", e),
-                };
-                eprintln!(
-                    "⚠️  HWAccel {:?} decoding {} on {:?}, falling back to CPU software decoding.",
-                    resolved.hwaccel, err_detail, path
-                );
-                let fallback = ResolvedFfmpeg {
-                    binary: PathBuf::from("ffmpeg"),
-                    hwaccel: HwAccel::Disabled,
-                };
-                let fallback_res = run_extraction_process(path, options, &fallback);
-                if fallback_res.is_ok() {
-                    eprintln!("✓ CPU software decoding fallback succeeded on {:?}", path);
-                    return fallback_res;
-                }
-                eprintln!("✗ CPU software decoding fallback also failed on {:?}", path);
-            }
-            other
+        other if resolved.hwaccel != HwAccel::Disabled => {
+            extract_with_cpu_fallback(path, options, resolved.hwaccel, other)
         }
+        other => other,
     }
+}
+
+/// Retries a failed or empty hardware-accelerated extraction with CPU software decoding;
+/// returns the original hardware result when the CPU attempt also fails.
+fn extract_with_cpu_fallback(
+    path: &Path,
+    options: &VideoExtractionOptions,
+    hwaccel: HwAccel,
+    hw_result: Result<Vec<FrameSample>>,
+) -> Result<Vec<FrameSample>> {
+    let shown = display_input(path);
+    let err_detail = match &hw_result {
+        Ok(empty) => format!("produced {} frames", empty.len()),
+        Err(e) => format!("failed: {:#}", e),
+    };
+    eprintln!(
+        "⚠️  HWAccel {:?} decoding {} on {:?}, falling back to CPU software decoding.",
+        hwaccel,
+        redact_url_userinfo(&err_detail),
+        shown
+    );
+    let fallback = ResolvedFfmpeg {
+        binary: resolve_ffmpeg_cpu(),
+        hwaccel: HwAccel::Disabled,
+    };
+    let fallback_res = run_extraction_process(path, options, &fallback);
+    if fallback_res.is_ok() {
+        eprintln!("✓ CPU software decoding fallback succeeded on {:?}", shown);
+        return fallback_res;
+    }
+    eprintln!(
+        "✗ CPU software decoding fallback also failed on {:?}",
+        shown
+    );
+    hw_result
 }
 
 /// Builds the FFmpeg Command configured with video sampling, hwaccel, and filters.
@@ -698,7 +720,9 @@ fn build_ffmpeg_extraction_command(
         cmd.args(["-skip_frame", "nokey"]);
     }
 
-    cmd.args(["-threads", DEFAULT_FFMPEG_DECODE_THREADS]);
+    let threads = ffmpeg_decode_threads();
+    cmd.args(["-threads", &threads]);
+    apply_ftp_credentials(&mut cmd, path);
     cmd.arg("-i").arg(path);
 
     if let Some(dur) = options.duration_sec {
@@ -740,9 +764,9 @@ fn build_ffmpeg_extraction_command(
 
     cmd.args([
         "-threads",
-        DEFAULT_FFMPEG_DECODE_THREADS,
+        &threads,
         "-filter_threads",
-        DEFAULT_FFMPEG_DECODE_THREADS,
+        &threads,
         "-f",
         "rawvideo",
         "-",
@@ -902,7 +926,8 @@ fn spawn_ffmpeg_child(
         .with_context(|| {
             format!(
                 "Failed to spawn ffmpeg ({:?}) on {:?}",
-                resolved.binary, path
+                resolved.binary,
+                display_input(path)
             )
         })?;
 
@@ -1022,6 +1047,29 @@ pub fn extract_frames_phash(path: &Path, start_sec: f64, nb_frames: usize) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_extraction_command_threads_precede_input() {
+        let resolved = ResolvedFfmpeg {
+            binary: PathBuf::from("ffmpeg"),
+            hwaccel: HwAccel::Disabled,
+        };
+        let cmd = build_ffmpeg_extraction_command(
+            Path::new("/data/movie.mkv"),
+            &VideoExtractionOptions::default(),
+            &resolved,
+        );
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        let input_pos = args.iter().position(|a| a == "-i").unwrap();
+        let threads_pos = args.iter().position(|a| a == "-threads").unwrap();
+        assert!(threads_pos < input_pos);
+        assert_eq!(args[threads_pos + 1], ffmpeg_decode_threads());
+        assert_eq!(args[input_pos + 1], "/data/movie.mkv");
+        assert!(!args.iter().any(|a| a.starts_with("-ftp-")));
+    }
 
     #[test]
     fn test_detect_media_fps_explicit_priority() {

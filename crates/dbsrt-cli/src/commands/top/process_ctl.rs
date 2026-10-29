@@ -291,7 +291,7 @@ pub fn inspect_job_details(job: &ActiveJobTelemetry) -> Vec<String> {
     if !job.cmdline.is_empty() {
         lines.push(String::new());
         lines.push("--- Ligne de Commande Exécutée ---".to_string());
-        lines.push(job.cmdline.join(" "));
+        lines.push(dbsrt_core::redact_command_line(&job.cmdline));
     }
 
     // Inspect open file descriptors from /proc/{pid}/fd
