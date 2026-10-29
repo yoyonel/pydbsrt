@@ -3685,3 +3685,17 @@ fn test_remote_streaming_sources_view_and_locked_keys() {
         .0
         .contains("Cibles streaming réseau actualisées"));
 }
+
+#[test]
+fn test_url_decode_simple_multibyte_utf8() {
+    use dbsrt_cli::commands::top::sampler::url_decode_simple;
+    assert_eq!(
+        url_decode_simple("Am%C3%A9lie%20%5B2001%5D"),
+        "Am\u{e9}lie [2001]"
+    );
+    assert_eq!(url_decode_simple("plain_name"), "plain_name");
+    // Malformed escapes are copied verbatim.
+    assert_eq!(url_decode_simple("50%zz%"), "50%zz%");
+    assert_eq!(url_decode_simple("a%4"), "a%4");
+    assert_eq!(url_decode_simple("%+4"), "%+4");
+}

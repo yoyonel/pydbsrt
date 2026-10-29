@@ -2157,33 +2157,6 @@ fn compute_net_rx_rate(
     (0.0, now)
 }
 
-/// Decodes a 2-digit hex pair into an ASCII/UTF-8 character if valid.
-fn decode_hex_char(c1: char, c2: char) -> Option<char> {
-    let hex_str: String = [c1, c2].iter().collect();
-    u8::from_str_radix(&hex_str, 16).ok().map(|b| b as char)
-}
-
-/// Appends decoded hex pair or original percent triplet characters to destination string.
-fn append_decoded_triplet(c1: Option<char>, c2: Option<char>, result: &mut String) {
-    match (c1, c2) {
-        (Some(h1), Some(h2)) => match decode_hex_char(h1, h2) {
-            Some(decoded) => result.push(decoded),
-            None => {
-                result.push('%');
-                result.push(h1);
-                result.push(h2);
-            }
-        },
-        (Some(h1), None) => {
-            result.push('%');
-            result.push(h1);
-        }
-        _ => {
-            result.push('%');
-        }
-    }
-}
-
 /// Decodes simple percent-encoded ASCII/UTF-8 substrings in media filenames (e.g. `%20` -> ` `, `%5B` -> `[`).
 ///
 /// # Arguments
@@ -2199,24 +2172,34 @@ fn append_decoded_triplet(c1: Option<char>, c2: Option<char>, result: &mut Strin
 /// Never panics.
 ///
 /// # Data Flow & Invariants
-/// Scans characters sequentially. Triplet sequences beginning with `%` followed by two valid hex digits
-/// are converted into their corresponding byte/character representation.
+/// Scans bytes sequentially. Triplets `%XY` with two valid hex digits become raw bytes; the byte
+/// buffer is then decoded as UTF-8 (invalid sequences become U+FFFD).
 pub fn url_decode_simple(input: &str) -> String {
     if !input.contains('%') {
         return input.to_string();
     }
-    let mut result = String::with_capacity(input.len());
-    let mut chars = input.chars();
-    while let Some(ch) = chars.next() {
-        if ch != '%' {
-            result.push(ch);
-            continue;
+    // Decode into bytes first: multi-byte UTF-8 escapes (e.g. `%C3%A9`) span several triplets.
+    let bytes = input.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut idx = 0;
+    while idx < bytes.len() {
+        let hex_pair = bytes
+            .get(idx + 1..idx + 3)
+            .filter(|pair| pair.iter().all(u8::is_ascii_hexdigit))
+            .and_then(|pair| std::str::from_utf8(pair).ok())
+            .and_then(|pair| u8::from_str_radix(pair, 16).ok());
+        match (bytes[idx], hex_pair) {
+            (b'%', Some(byte)) => {
+                decoded.push(byte);
+                idx += 3;
+            }
+            (other, _) => {
+                decoded.push(other);
+                idx += 1;
+            }
         }
-        let c1 = chars.next();
-        let c2 = chars.next();
-        append_decoded_triplet(c1, c2, &mut result);
     }
-    result
+    String::from_utf8_lossy(&decoded).into_owned()
 }
 
 /// Processes raw detected candidate processes into typed telemetry jobs and updates delta IO samples.
