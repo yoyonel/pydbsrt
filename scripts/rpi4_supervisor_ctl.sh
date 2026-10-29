@@ -49,7 +49,7 @@ case "${ACTION}" in
       exit 0
     fi
 
-    run_ssh "cd ${REMOTE_DIR} && mkdir -p run logs && nohup /usr/bin/python3 -u scripts/rpi4_o2switch_supervisor.py >> ${LOG_FILE} 2>&1 &"
+    run_ssh "cd ${REMOTE_DIR} && mkdir -p run logs && nohup /usr/bin/python3 -u scripts/rpi4_o2switch_supervisor.py </dev/null >> ${LOG_FILE} 2>&1 &"
     sleep 1
 
     if run_ssh "test -f ${PID_FILE} && kill -0 \$(cat ${PID_FILE}) 2>/dev/null"; then

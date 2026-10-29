@@ -428,12 +428,20 @@ REMOTE_SCRIPT
     echo "✓ Pull completed from ${O2SWITCH_HOST}."
     ;;
 
-  batch-tvshow)
+  batch-tvshow | batch-movies)
     check_ssh
     shift || true
+    TARGET_TYPE="tvshow"
+    LOCAL_SCAN_DIR="${NAS_TVSHOW_DIR:-/media/latty/Synology/tvshow}"
+    REMOTE_NAS_BASE="/tvshow"
+    if [[ "${ACTION}" == "batch-movies" ]]; then
+      TARGET_TYPE="movies"
+      LOCAL_SCAN_DIR="${NAS_VIDEO_DIR:-/media/latty/Synology/video}"
+      REMOTE_NAS_BASE="/video"
+    fi
     NAS_PASS="${NAS_PASS:-$(pass show 192.168.1.58:5000/qzsl2686 2>/dev/null || true)}"
     DAEMON_MODE=false
-    WORKER_ARGS=()
+    WORKER_ARGS=(--nas-base "${REMOTE_NAS_BASE}")
     for arg in "$@"; do
       if [[ "${arg}" == "--daemon" || "${arg}" == "-d" ]]; then
         DAEMON_MODE=true
@@ -452,13 +460,14 @@ REMOTE_SCRIPT
     ssh "${O2SWITCH_HOST}" "chmod +x ${REMOTE_BASE}/scripts/o2switch_batch_worker.py"
 
     # If local CIFS mount is available, resolve targets quickly locally
-    if [[ -d "/media/latty/Synology/tvshow" || -n "${NAS_TVSHOW_DIR:-}" ]]; then
-      echo "-> Resolving virgin target episodes locally..."
-      uv run python scripts/batch_media_add_tvshow.py --save-targets-only "${WORKER_ARGS[@]}" >/dev/null 2>&1 || true
+    if [[ -d "${LOCAL_SCAN_DIR}" ]]; then
+      echo "-> Resolving virgin ${TARGET_TYPE} targets locally (${LOCAL_SCAN_DIR})..."
+      uv run python scripts/batch_media_add_tvshow.py --nas-root "${LOCAL_SCAN_DIR}" --save-targets-only --max-episodes-per-series 1000 "${WORKER_ARGS[@]}" >/dev/null 2>&1 || true
     fi
     if [[ -f "data/reports/selected_batch_targets.json" ]]; then
       echo "-> Transferring selected batch targets..."
       rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "data/reports/selected_batch_targets.json" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/reports/"
+      WORKER_ARGS+=(--targets-file "data/reports/selected_batch_targets.json")
     fi
 
     # Ensure remote credentials file exists securely
@@ -529,6 +538,22 @@ if [[ -f "${PID_FILE}" ]]; then
 else
   echo "○ No active batch worker PID file found at ${PID_FILE}."
 fi
+QUEUE_FILE="${BASE}/run/batch_queue.json"
+if [[ -f "${QUEUE_FILE}" ]]; then
+  echo ""
+  echo "--- File de Traitement Batch (Progression) ---"
+  python3 -c "
+import json
+try:
+    with open('${QUEUE_FILE}') as f:
+        d = json.load(f)
+    print(f\"  • Progression file : {d.get('completed_targets', 0)} / {d.get('total_targets', 0)} traités ({d.get('progress_pct', 0.0):.1f}%)\")
+    print(f\"  • En attente       : {d.get('remaining_targets', 0)} cibles restantes (Échecs: {d.get('failed_targets', 0)})\")
+    print(f\"  • Concurrence      : {d.get('active_workers', 0)} workers parallèles\")
+except Exception:
+    pass
+" 2>/dev/null || true
+fi
 if [[ -f "${LOG_FILE}" ]]; then
   echo ""
   echo "--- Recent Worker Activity (last 10 lines of ${LOG_FILE}) ---"
@@ -577,7 +602,7 @@ REMOTE_SCRIPT
     ;;
 
   *)
-    echo "Usage: $0 {build|test-local|sync|start|stop|restart|status|logs|demo|setup-cron|remove-cron|rotate-key|top|pull-catalog|batch-tvshow|batch-status|batch-stop|batch-logs}"
+    echo "Usage: $0 {build|test-local|sync|start|stop|restart|status|logs|demo|setup-cron|remove-cron|rotate-key|top|pull-catalog|batch-tvshow|batch-movies|batch-status|batch-stop|batch-logs}"
     exit 1
     ;;
 esac

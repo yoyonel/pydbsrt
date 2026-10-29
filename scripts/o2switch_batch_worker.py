@@ -64,7 +64,7 @@ for _sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT, signal.SIGQUIT, signa
         pass
 
 # Operational & System Constants
-DEFAULT_WORKERS: int = 2
+DEFAULT_WORKERS: int = 4
 DEFAULT_BRIDGE_PORT: int = 8769
 DEFAULT_NAS_HOST: str = "yoyonel.synology.me"
 DEFAULT_NAS_USER: str = "qzsl2686"
@@ -74,12 +74,13 @@ DEFAULT_CURL_TIMEOUT_SECS: int = 3600
 DEFAULT_SPEED_LIMIT_BYTES_SEC: int = 1024
 DEFAULT_SPEED_TIME_SECS: int = 60
 DEFAULT_WORKER_TIMEOUT_SECS: int = 1200
-DEFAULT_STALL_TIMEOUT_SECS: int = 30
+DEFAULT_STALL_TIMEOUT_SECS: int = 60
 DEFAULT_MAX_EXTRACTION_SECS: int = 1800
 DEFAULT_COUPLINGS_PATH: str = "data/SRT/couplings.json"
 DEFAULT_PHASH_DIR: str = "data/__PHASH__"
 DEFAULT_SUBTITLES_DIR: str = "data/SRT"
 DEFAULT_EVENTS_LOG_PATH: str = "data/reports/batch_tvshow_nightly.jsonl"
+DEFAULT_BATCH_QUEUE_PATH: str = "run/batch_queue.json"
 STREAM_ROUTE_PREFIX: str = "/stream/"
 VIDEO_EXTENSIONS: Tuple[str, ...] = (".mkv", ".mp4", ".webm", ".avi")
 
@@ -327,7 +328,7 @@ def list_nas_videos_ftp(
     nas_pass: str,
     base_dir: str = "/tvshow",
     ftp_port: int = 21,
-    max_depth: int = 4,
+    max_depth: int = 8,
 ) -> List[Tuple[str, str, int]]:
     """Discovers video files on Synology NAS using standard FTP MLSD protocol (Zero curl/SFTP).
 
@@ -336,11 +337,13 @@ def list_nas_videos_ftp(
     """
     import ftplib
     import posixpath
+    import unicodedata
 
     clean_base = base_dir.lstrip("/")
     ftp = ftplib.FTP()
     ftp.connect(nas_host, ftp_port, timeout=15)
     ftp.login(nas_user, nas_pass)
+    ftp.encoding = "utf-8"
 
     results: List[Tuple[str, str, int]] = []
     stack: List[str] = [clean_base]
@@ -352,6 +355,7 @@ def list_nas_videos_ftp(
         except Exception:
             continue
         for name, facts in entries:
+            name = unicodedata.normalize("NFC", name)
             if name in (".", "..", "EMPTY_DIRS", "SRT", "@eaDir") or name.startswith("."):
                 continue
             full_path = posixpath.join(curr, name)
@@ -420,6 +424,57 @@ def list_nas_videos_recursive(
     return results
 
 
+def write_batch_queue_state(total: int, completed: int, failed: int, active_workers: int) -> None:
+    """Persists volatile batch queue telemetry to disk for dbsrt top and monitoring."""
+    try:
+        q_path = Path(DEFAULT_BATCH_QUEUE_PATH)
+        q_path.parent.mkdir(parents=True, exist_ok=True)
+        rem = max(0, total - (completed + failed))
+        pct = round(((completed + failed) / total * 100.0), 1) if total > 0 else 0.0
+        state = {
+            "total_targets": total,
+            "completed_targets": completed,
+            "failed_targets": failed,
+            "remaining_targets": rem,
+            "progress_pct": pct,
+            "active_workers": active_workers,
+            "is_active": rem > 0 and active_workers > 0,
+            "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
+        tmp_path = q_path.with_suffix(".tmp")
+        tmp_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+        tmp_path.replace(q_path)
+    except Exception:
+        pass
+
+
+def _get_process_tree_cpu_ticks(pid: int) -> int:
+    """Computes total cumulative CPU user+system ticks for process and all direct children."""
+    total_ticks = 0
+    try:
+        pids = [pid]
+        children_path = f"/proc/{pid}/task/{pid}/children"
+        if os.path.exists(children_path):
+            with open(children_path, encoding="utf-8") as cf:
+                for child in cf.read().split():
+                    try:
+                        pids.append(int(child))
+                    except ValueError:
+                        pass
+        for p in pids:
+            stat_path = f"/proc/{p}/stat"
+            if os.path.exists(stat_path):
+                with open(stat_path, encoding="utf-8") as sf:
+                    content = sf.read()
+                    r_idx = content.rfind(")")
+                    if r_idx != -1:
+                        fields = content[r_idx + 2 :].split()
+                        total_ticks += int(fields[11]) + int(fields[12])
+    except Exception:
+        pass
+    return total_ticks
+
+
 def process_single_video(
     video_info: Tuple[str, str, int],
     stream_base: str,
@@ -437,9 +492,13 @@ def process_single_video(
     if not unquoted.startswith("/"):
         unquoted = "/" + unquoted
 
-    # Percent-encode URL path to safely handle spaces and special brackets in directory names
-    stream_path_enc = urllib.parse.quote(unquoted, safe="/")
-    stream_url = f"{stream_base}{stream_path_enc}"
+    if protocol == "ftp":
+        # Direct FTP: FFmpeg libavformat/ftp.c expects verbatim raw paths without URL encoding
+        stream_url = f"{stream_base}{unquoted}"
+    else:
+        # HTTP bridge: Percent-encode URL path for standard HTTP routing
+        stream_path_enc = urllib.parse.quote(unquoted, safe="/")
+        stream_url = f"{stream_base}{stream_path_enc}"
 
     env = os.environ.copy()
     bin_dir = str(Path.home() / "dbsrt" / "bin")
@@ -481,6 +540,7 @@ def process_single_video(
                 start_new_session=True,
             )
             last_bytes = start_stream_bytes
+            last_cpu_ticks = 0
             stall_duration = 0
             while True:
                 ret = proc.poll()
@@ -492,24 +552,33 @@ def process_single_video(
                 time.sleep(1.0)
                 now_elapsed = time.time() - start_time
 
-                with STREAM_BYTES_LOCK:
-                    cur_bytes = STREAM_BYTES_MAP.get(rel_path, 0)
-
-                if cur_bytes == last_bytes:
-                    stall_duration += 1
+                has_progress = False
+                if protocol != "ftp":
+                    with STREAM_BYTES_LOCK:
+                        cur_bytes = STREAM_BYTES_MAP.get(rel_path, 0)
+                    if cur_bytes != last_bytes:
+                        has_progress = True
+                        last_bytes = cur_bytes
                 else:
-                    stall_duration = 0
-                    last_bytes = cur_bytes
+                    cur_cpu_ticks = _get_process_tree_cpu_ticks(proc.pid)
+                    if cur_cpu_ticks != last_cpu_ticks:
+                        has_progress = True
+                        last_cpu_ticks = cur_cpu_ticks
 
-                # Stall detector: zero throughput for >= DEFAULT_STALL_TIMEOUT_SECS (HTTP bridge only)
-                if protocol != "ftp" and stall_duration >= DEFAULT_STALL_TIMEOUT_SECS:
+                if has_progress:
+                    stall_duration = 0
+                else:
+                    stall_duration += 1
+
+                # Stall detector: zero throughput / zero CPU activity for >= DEFAULT_STALL_TIMEOUT_SECS
+                if stall_duration >= DEFAULT_STALL_TIMEOUT_SECS:
                     try:
                         os.killpg(proc.pid, signal.SIGKILL)
                     except ProcessLookupError:
                         pass
                     returncode = -15
                     out_f.write(
-                        f"\n❌ [WATCHDOG] Killed process: zero network throughput for {stall_duration}s (Stall Detector).\n"
+                        f"\n❌ [WATCHDOG] Killed process: zero progress / activity for {stall_duration}s (Stall Detector).\n"
                     )
                     out_f.flush()
                     break
@@ -623,7 +692,7 @@ def main() -> int:
     print(f"✓ Found {len(certified_stems)} certified stems and {len(existing_phash)} .phash files locally.")
 
     targets: List[Tuple[str, str, int]] = []
-    targets_path = Path(args.targets_file)
+    targets_path = Path(args.targets_file) if args.targets_file else Path("data/reports/selected_batch_targets.json")
     if targets_path.is_file():
         print(f"=== [2/4] Loading explicit targets from {targets_path} ===")
         try:
@@ -736,6 +805,7 @@ def main() -> int:
     log_lock = threading.Lock()
     success_count = 0
     fail_count = 0
+    write_batch_queue_state(len(targets), success_count, fail_count, args.workers)
 
     start_batch = time.time()
     try:
@@ -770,7 +840,9 @@ def main() -> int:
                 except Exception as exc:
                     fail_count += 1
                     print(f"  ❌ Exception processing {target[1]}: {exc}")
+                write_batch_queue_state(len(targets), success_count, fail_count, args.workers)
     finally:
+        write_batch_queue_state(len(targets), success_count, fail_count, 0)
         if server is not None:
             try:
                 server.shutdown()
