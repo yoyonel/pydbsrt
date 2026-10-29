@@ -1,5 +1,5 @@
 o2switch:
   hosts:
-    yoyonel.com:
+    sapin.o2switch.net:
       # https://docs.ansible.com/ansible/latest/reference_appendices/faq.html#how-do-i-handle-different-machines-needing-different-user-accounts-or-ports-to-log-in-with
-      ansible_user: qzsl2686
+      ansible_user: "{{ lookup('env', 'O2SWITCH_USER') | default('dbsrt-svc', true) }}"

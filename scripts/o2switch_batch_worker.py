@@ -63,11 +63,36 @@ for _sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT, signal.SIGQUIT, signa
     except Exception:
         pass
 
+
+def _load_env_config(path: Path) -> Dict[str, str]:
+    """Loads key-value pairs from an optional local unversioned environment file."""
+    if not path.is_file():
+        return {}
+    config: Dict[str, str] = {}
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            if "=" in stripped:
+                k, v = stripped.split("=", 1)
+                config[k.strip()] = v.strip().strip("'\"")
+    except Exception:
+        pass
+    return config
+
+
+_CONFIG_ENV: Dict[str, str] = _load_env_config(Path("etc/.nas_config"))
+if not _CONFIG_ENV:
+    _CONFIG_ENV = _load_env_config(Path("etc/.env"))
+if not _CONFIG_ENV:
+    _CONFIG_ENV = _load_env_config(Path(".env"))
+
 # Operational & System Constants
 DEFAULT_WORKERS: int = 4
 DEFAULT_BRIDGE_PORT: int = 8769
-DEFAULT_NAS_HOST: str = "yoyonel.synology.me"
-DEFAULT_NAS_USER: str = "qzsl2686"
+DEFAULT_NAS_HOST: str = os.getenv("NAS_HOST") or _CONFIG_ENV.get("NAS_HOST") or "nas.synology.me"
+DEFAULT_NAS_USER: str = os.getenv("NAS_USER") or _CONFIG_ENV.get("NAS_USER") or "dbsrt-svc"
 DEFAULT_NAS_BASE: str = "/tvshow"
 DEFAULT_CHUNK_SIZE_BYTES: int = 128 * 1024
 DEFAULT_CURL_TIMEOUT_SECS: int = 3600
@@ -674,6 +699,8 @@ def main() -> int:
         pass_file = Path("etc/.nas_pass")
         if pass_file.is_file():
             args.nas_pass = pass_file.read_text(encoding="utf-8").strip()
+        elif "NAS_PASS" in _CONFIG_ENV:
+            args.nas_pass = _CONFIG_ENV["NAS_PASS"]
 
     if not args.nas_pass:
         print(

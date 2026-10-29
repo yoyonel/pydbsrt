@@ -33,16 +33,16 @@ Dans le cadre du déploiement multi-cibles de `pydbsrt` :
 ```mermaid
 flowchart LR
     subgraph Cloud["☁️ Cloud o2switch (Distant)"]
-        O2["Serveur o2switch<br/><code>sapin.o2switch.net</code><br/>IP : <code>109.xxx.xxx.225</code><br/>User : <code>qzsl2686</code>"]
+        O2["Serveur o2switch<br/><code>sapin.o2switch.net</code><br/>IP : <code>109.xxx.xxx.225</code><br/>User : <code>dbsrt-svc</code>"]
     end
 
     subgraph Internet["🌐 Réseau Internet"]
-        DDNS["Nom de Domaine DDNS<br/><code>yoyonel.synology.me</code>"]
+        DDNS["Nom de Domaine DDNS<br/><code>nas.synology.me</code>"]
     end
 
     subgraph Home["🏠 Réseau Local (LAN)"]
         FBX["Freebox OS<br/>Routeur NAT / PAT<br/>Port externe : <code>22 (TCP)</code>"]
-        NAS["NAS Synology DS418<br/>Hôte LAN : <code>ds418</code> (ou IP locale statique)<br/>User dédié : <code>qzsl2686</code><br/>Service : SFTP port <code>22</code>"]
+        NAS["NAS Synology DS418<br/>Hôte LAN : <code>ds418</code> (ou IP locale statique)<br/>User dédié : <code>dbsrt-svc</code><br/>Service : SFTP port <code>22</code>"]
     end
 
     O2 -->|SFTP Chiffré :22| DDNS
@@ -56,7 +56,7 @@ flowchart LR
 | :--- | :--- | :--- | :--- | :--- |
 | **Serveur Cloud o2switch** | `sapin.o2switch.net` | `109.xxx.xxx.225` | SSH `2022` / Sortant `22` | Client SFTP distant |
 | **Routeur Passerelle** | `mafreebox.freebox.fr` | IP Publique WAN Free | Entrant TCP `22` | Redirection NAT vers le NAS |
-| **NAS Synology** | `yoyonel.synology.me` | `ds418` (LAN statique) | Démon SFTP TCP `22` | Serveur de stockage médias |
+| **NAS Synology** | `nas.synology.me` | `ds418` (LAN statique) | Démon SFTP TCP `22` | Serveur de stockage médias |
 | **Sous-réseau Local LAN** | Réseau local | Masque `255.255.255.0` | Tous flux internes | Postes de travail locaux |
 
 ---
@@ -65,11 +65,11 @@ flowchart LR
 
 ### Étape 1 : Configurer le Compte Dédié sur Synology DSM
 
-Pour isoler les accès du serveur distant, n'utilisez **jamais** de compte administrateur. Créez un compte de service dédié nommé `qzsl2686` :
+Pour isoler les accès du serveur distant, n'utilisez **jamais** de compte administrateur. Créez un compte de service dédié nommé `dbsrt-svc` :
 
 1. Connectez-vous à l'interface Synology DSM (`http://ds418:5000` ou IP locale de votre NAS).
 2. Ouvrez **Panneau de configuration** > **Utilisateur et groupe** > Onglet **Utilisateur**.
-3. Sélectionnez ou créez l'utilisateur `qzsl2686` (Description : `o2switch serveur`).
+3. Sélectionnez ou créez l'utilisateur `dbsrt-svc` (Description : `o2switch serveur`).
 4. Dans l'onglet **Permissions** (Dossiers partagés) :
    - Cochez **Lecture seule** pour le dossier `tvshow`.
    - Cochez **Lecture/Écriture** pour le dossier `video` (si nécessaire pour l'injection des SRT).
@@ -77,7 +77,7 @@ Pour isoler les accès du serveur distant, n'utilisez **jamais** de compte admin
 
 <figure markdown="1">
   <img src="../../assets/screenshots/synology-sftp/01_synology_folder_permissions.png" alt="Permissions des dossiers partagés Synology DSM" width="100%">
-  <figcaption>Figure 1 : Permissions d'accès aux dossiers partagés pour l'utilisateur qzsl2686.</figcaption>
+  <figcaption>Figure 1 : Permissions d'accès aux dossiers partagés pour l'utilisateur dbsrt-svc.</figcaption>
 </figure>
 
 ---
@@ -88,7 +88,7 @@ Pour isoler les accès du serveur distant, n'utilisez **jamais** de compte admin
 > **Piège de Priorité Synology DSM : `Deny > Allow`**
 > Dans l'onglet **Applications** de DSM, si la case **Refuser** (*Deny*) est cochée sur une application, elle prévaut systématiquement sur toute liste d'autorisation par IP (*By IP*). Veillez à ne cocher **Refuser** QUE pour les services totalement interdits (DSM, Drive, File Station), et sélectionnez **Par IP** (*By IP*) pour SFTP, FTP et SMB.
 
-1. Dans les propriétés de l'utilisateur `qzsl2686`, basculez sur l'onglet **Applications**.
+1. Dans les propriétés de l'utilisateur `dbsrt-svc`, basculez sur l'onglet **Applications**.
 2. Affectez les droits applicatifs :
    - **DSM Web UI** : Cocher `Refuser` (le serveur distant ne doit pas accéder à l'interface d'administration).
    - **SFTP** : Cocher `Par IP` (*By IP*).
@@ -169,7 +169,7 @@ Conformément aux règles de sécurité du projet, aucun mot de passe ne doit ê
 
 ```bash
 # Stockage de l'accès NAS
-pass insert nas-synology/qzsl2686
+pass insert services/synology/nas_pass
 # Saisir le mot de passe généré lors de l'invite masquée
 ```
 
@@ -177,7 +177,7 @@ Pour récupérer le mot de passe dans un script ou dans le presse-papier sans l'
 
 ```bash
 # Copie directe dans le presse-papier (sans affichage terminal)
-pass -c nas-synology/qzsl2686
+pass -c services/synology/nas_pass
 ```
 
 ---
@@ -189,7 +189,7 @@ Connectez-vous au serveur o2switch via SSH pour vérifier la chaîne complète (
 #### 1. Connexion SSH au serveur o2switch
 
 ```bash
-ssh qzsl2686@sapin.o2switch.net -p 2022
+ssh dbsrt-svc@sapin.o2switch.net -p 2022
 ```
 
 #### 2. Vérification de la connectivité TCP & Bannière SSH
@@ -197,8 +197,8 @@ ssh qzsl2686@sapin.o2switch.net -p 2022
 Vérifiez que le port 22 du NAS répond et que la bannière OpenSSH de Synology est renvoyée :
 
 ```bash
-nc -zv yoyonel.synology.me 22
-# Résultat attendu : Connection to yoyonel.synology.me 22 port [tcp/ssh] succeeded!
+nc -zv nas.synology.me 22
+# Résultat attendu : Connection to nas.synology.me 22 port [tcp/ssh] succeeded!
 ```
 
 #### 3. Test de listing distant via cURL SFTP
@@ -206,8 +206,8 @@ nc -zv yoyonel.synology.me 22
 Exécutez un listing non interactif du dossier partagé `tvshow` :
 
 ```bash
-curl -s -k -u "qzsl2686:$(pass show nas-synology/qzsl2686)" \
-  "sftp://yoyonel.synology.me/tvshow/"
+curl -s -k -u "dbsrt-svc:$(pass show services/synology/nas_pass)" \
+  "sftp://nas.synology.me/tvshow/"
 ```
 
 **Sortie empiriquement constatée** :
@@ -226,9 +226,9 @@ drwxrwxrwx   1 root     root         4096 Oct 20 18:42 ⭐️The Acolyte
 Pour parcourir ou transférer des fichiers interactivement :
 
 ```bash
-sftp -P 22 qzsl2686@yoyonel.synology.me
-# qzsl2686@yoyonel.synology.me's password:
-# Connected to yoyonel.synology.me.
+sftp -P 22 dbsrt-svc@nas.synology.me
+# dbsrt-svc@nas.synology.me's password:
+# Connected to nas.synology.me.
 # sftp> cd tvshow
 # sftp> ls
 # sftp> bye
@@ -242,7 +242,7 @@ sftp -P 22 qzsl2686@yoyonel.synology.me
 | :--- | :--- | :--- |
 | `Connection refused` sur le port 22 | Le service SFTP n'est pas activé dans DSM ou la règle Freebox est inactive. | 1. Vérifier **Services de fichiers > FTP > Activer le service SFTP**.<br/>2. Vérifier que la règle Freebox est cochée **Active** (voir Fig. 5). |
 | `Permission denied (password)` | Le compte utilisateur a l'option **Refuser** cochée sur SFTP dans l'onglet Applications. | Dans DSM, vérifier que **SFTP** n'est PAS coché sous la colonne *Refuser* (la colonne *Refuser* a priorité absolue sur *Par IP*). |
-| `Connection timed out` | L'IP source n'est pas dans la liste blanche de l'application ou l'IP dynamique de la Freebox a changé. | 1. Vérifier que l'IP d'o2switch `109.xxx.xxx.225` est bien présente dans la liste blanche (Fig. 3).<br/>2. Vérifier la résolution DDNS avec `dig yoyonel.synology.me`. |
+| `Connection timed out` | L'IP source n'est pas dans la liste blanche de l'application ou l'IP dynamique de la Freebox a changé. | 1. Vérifier que l'IP d'o2switch `109.xxx.xxx.225` est bien présente dans la liste blanche (Fig. 3).<br/>2. Vérifier la résolution DDNS avec `dig nas.synology.me`. |
 | Échec d'authentification par clé SSH | Synology DSM bloque l'accès SSH complet pour les utilisateurs standards non-administrateurs. | Le service SFTP fonctionne en émulation d'accès fichiers sans shell interactif. Utilisez l'authentification par mot de passe robuste géré via `pass`. |
 
 ---

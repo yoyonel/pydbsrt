@@ -22,6 +22,26 @@ SERVER_BIN="${TARGET_DIR}/dbsrt-server"
 CLI_BIN="${TARGET_DIR}/dbsrt"
 
 ACTION="${1:-status}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+# Load optional unversioned local environment file
+if [[ -f "${REPO_ROOT}/.env" ]]; then
+  # shellcheck source=/dev/null
+  source "${REPO_ROOT}/.env"
+elif [[ -f "${HOME}/.config/pydbsrt/env" ]]; then
+  # shellcheck source=/dev/null
+  source "${HOME}/.config/pydbsrt/env"
+fi
+
+DEFAULT_NAS_HOST="nas.synology.me"
+DEFAULT_NAS_USER="dbsrt-svc"
+DEFAULT_NAS_PASS_ENTRY="services/synology/nas_pass"
+
+NAS_HOST="${NAS_HOST:-${DEFAULT_NAS_HOST}}"
+NAS_USER="${NAS_USER:-${DEFAULT_NAS_USER}}"
+NAS_PASS_ENTRY="${NAS_PASS_ENTRY:-${DEFAULT_NAS_PASS_ENTRY}}"
+
 O2SWITCH_HOST="${O2SWITCH_HOST:-${DEFAULT_O2SWITCH_HOST}}"
 SERVER_PORT="${SERVER_PORT:-${DEFAULT_SERVER_PORT}}"
 REMOTE_BASE="${REMOTE_BASE:-${DEFAULT_REMOTE_BASE}}"
@@ -432,16 +452,24 @@ REMOTE_SCRIPT
     check_ssh
     shift || true
     TARGET_TYPE="tvshow"
-    LOCAL_SCAN_DIR="${NAS_TVSHOW_DIR:-/media/latty/Synology/tvshow}"
+    LOCAL_USER="${USER:-$(whoami)}"
+    LOCAL_SCAN_DIR="${NAS_TVSHOW_DIR:-/media/${LOCAL_USER}/Synology/tvshow}"
     REMOTE_NAS_BASE="/tvshow"
     if [[ "${ACTION}" == "batch-movies" ]]; then
       TARGET_TYPE="movies"
-      LOCAL_SCAN_DIR="${NAS_VIDEO_DIR:-/media/latty/Synology/video}"
+      LOCAL_SCAN_DIR="${NAS_VIDEO_DIR:-/media/${LOCAL_USER}/Synology/video}"
       REMOTE_NAS_BASE="/video"
     fi
-    NAS_PASS="${NAS_PASS:-$(pass show 192.168.1.58:5000/qzsl2686 2>/dev/null || true)}"
+    NAS_PASS_ENTRY="${NAS_PASS_ENTRY:-services/synology/nas_pass}"
+    NAS_PASS="${NAS_PASS:-$(pass show "${NAS_PASS_ENTRY}" 2>/dev/null || pass show nas-synology/service_pass 2>/dev/null || true)}"
     DAEMON_MODE=false
     WORKER_ARGS=(--nas-base "${REMOTE_NAS_BASE}")
+    if [[ -n "${NAS_HOST:-}" ]]; then
+      WORKER_ARGS+=(--nas-host "${NAS_HOST}")
+    fi
+    if [[ -n "${NAS_USER:-}" ]]; then
+      WORKER_ARGS+=(--nas-user "${NAS_USER}")
+    fi
     for arg in "$@"; do
       if [[ "${arg}" == "--daemon" || "${arg}" == "-d" ]]; then
         DAEMON_MODE=true
@@ -475,6 +503,8 @@ REMOTE_SCRIPT
       # shellcheck disable=SC2029
       ssh "${O2SWITCH_HOST}" "mkdir -p ${REMOTE_BASE}/etc && cat > ${REMOTE_BASE}/etc/.nas_pass && chmod 600 ${REMOTE_BASE}/etc/.nas_pass" <<<"${NAS_PASS}"
     fi
+    # shellcheck disable=SC2029
+    ssh "${O2SWITCH_HOST}" "mkdir -p ${REMOTE_BASE}/etc && printf 'NAS_HOST=%s\nNAS_USER=%s\n' '${NAS_HOST}' '${NAS_USER}' > ${REMOTE_BASE}/etc/.nas_config && chmod 600 ${REMOTE_BASE}/etc/.nas_config"
 
     if [[ "${DAEMON_MODE}" == "true" ]]; then
       echo "=== Launching TVShow batch ingestion in background daemon on ${O2SWITCH_HOST} ==="

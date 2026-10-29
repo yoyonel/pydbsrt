@@ -4,7 +4,7 @@
 **Plateforme d'exécution** : Serveur mutualisé o2switch (`sapin.o2switch.net`)
 **Environnement système** : CloudLinux 9.5 x86_64, conteneur LVE 1200% CPU (12 vCPUs), 48 Go RAM, I/O cap 42 Mo/s
 **Architecture matérielle hôte** : Bi-socket AMD EPYC / Intel Xeon (104 cœurs physiques)
-**Flux source** : Streaming direct FTP Synology NAS (`ftp://yoyonel.synology.me:21/tvshow`)
+**Flux source** : Streaming direct FTP Synology NAS (`ftp://nas.synology.me:21/tvshow`)
 **Statut de validation** : `Empiriquement Prouvé` (mesures réelles terminal en production)
 
 ---

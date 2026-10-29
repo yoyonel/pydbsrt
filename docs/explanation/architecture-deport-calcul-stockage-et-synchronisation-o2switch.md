@@ -131,7 +131,7 @@ sequenceDiagram
 ---
 
 ### Flux 1 : Découverte & Filtrage des Médias "Vierges"
-- **Entrée (IN)** : Listing distant du dossier partagé NAS via commande cURL SFTP (`sftp://yoyonel.synology.me/tvshow/`).
+- **Entrée (IN)** : Listing distant du dossier partagé NAS via commande cURL SFTP (`sftp://nas.synology.me/tvshow/`).
 - **Traitement** :
   1. Extraction du nom de fichier canonique (`stem`).
   2. Vérification d'existence locale sur o2switch : le fichier `~/dbsrt/data/__PHASH__/<stem>.*.phash` existe-t-il ?

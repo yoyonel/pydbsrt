@@ -27,7 +27,7 @@ pub const DEFAULT_MIN_CORES: usize = 1;
 /// Emits clean, deterministic defaults in test environments.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HostSystemInfo {
-    /// Hostname of the current node (e.g. "sapin.o2switch.net", "raspberrypi", "latty-thinkpad").
+    /// Hostname of the current node (e.g. "sapin.o2switch.net", "raspberrypi", "workstation").
     pub hostname: String,
     /// Operating system distribution description (e.g. "Debian 13 (trixie)", "CloudLinux 8.10").
     pub os_name: String,
