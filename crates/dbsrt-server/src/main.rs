@@ -272,8 +272,15 @@ where
 /// Constrained to 4 threads to prevent hitting NPROC/thread-limits on shared hosting (CloudLinux LVE).
 pub const DEFAULT_SERVER_WORKER_THREADS: usize = 4;
 
-#[tokio::main(flavor = "multi_thread", worker_threads = 4)]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(DEFAULT_SERVER_WORKER_THREADS)
+        .enable_all()
+        .build()?
+        .block_on(run_main())
+}
+
+async fn run_main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()

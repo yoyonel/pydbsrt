@@ -299,6 +299,24 @@ fn process_remote_recognition_result(
     (matched_media, phash_conf)
 }
 
+/// Runs the ffmpeg-backed query sample extraction on the blocking pool so it does not stall
+/// async runtime workers; a panicked extraction yields an empty sample.
+async fn extract_query_sample_off_runtime(
+    media_path: &Path,
+    phash_dirs: &[PathBuf],
+) -> (f64, Vec<u64>, Option<ExistingPhashData>) {
+    let (media_path, phash_dirs) = (media_path.to_path_buf(), phash_dirs.to_vec());
+    tokio::task::spawn_blocking(move || {
+        extract_media_query_sample(
+            &media_path,
+            &phash_dirs,
+            crate::constants::DEFAULT_EXTRACT_SAMPLE_SECONDS,
+        )
+    })
+    .await
+    .unwrap_or_else(|_| (DEFAULT_BASELINE_FPS, Vec::new(), None))
+}
+
 /// Dispatches visual recognition request to an upstream remote DBS-RT server.
 ///
 /// # Arguments
@@ -339,11 +357,8 @@ async fn execute_remote_relay_recognition(
     Option<Vec<u64>>,
 ) {
     let t0 = Instant::now();
-    let (target_fps, query_sample, existing_phash) = extract_media_query_sample(
-        media_path,
-        phash_dirs,
-        crate::constants::DEFAULT_EXTRACT_SAMPLE_SECONDS,
-    );
+    let (target_fps, query_sample, existing_phash) =
+        extract_query_sample_off_runtime(media_path, phash_dirs).await;
 
     let extract_ms = t0.elapsed().as_secs_f64() * 1000.0;
     state.push_log(
@@ -1283,6 +1298,15 @@ fn finalize_search_response(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_extract_query_sample_off_runtime_missing_media() {
+        // Runs on the blocking pool even from a single-threaded runtime.
+        let missing = std::env::temp_dir().join("dbsrt_missing_relay_media.mkv");
+        let (_, sample, existing) = extract_query_sample_off_runtime(&missing, &[]).await;
+        assert!(sample.is_empty());
+        assert!(existing.is_none());
+    }
     use dbsrt_core::{
         CertifiedMediaCoupling, CertifiedSubtitleRecord, LangStatus, MockSubtitleProvider,
         SubtitleCache,
