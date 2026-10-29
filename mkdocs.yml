@@ -155,6 +155,7 @@ nav:
       - Principe Fondamental du pHash & Retargeting: explanation/principe-fondamental-phash-et-retargeting.md
       - Performances Décodage pHash & Contentions: explanation/performances-decodage-phash-et-contentions.md
       - Plafond Théorique Pipe pHash (o2switch): 2026-10-29-etude-theorique-plafond-pipe-phash-o2switch.md
+      - Bottlenecks Batch o2switch & Plan de Benchs: 2026-10-29-analyse-bottlenecks-batch-o2switch-et-plan-benchs.md
       - Échantillonnage Hybride (Cuts + 1fps): explanation/echantillonnage-hybride-cuts-et-1fps.md
       - Étude Cuts, Keyframes & Hybride: 2026-10-17-etude-comparative-identification-frames-cuts-keyframes-hybride.md
       - Indexation Métrique (MIH vs BK-Tree): explanation/indexation-metrique-mih-vs-bktree.md
