@@ -21,6 +21,20 @@ use crate::commands::top::{
 /// Truncation ellipsis character length.
 const TRUNCATION_SUFFIX_LEN: usize = 3;
 
+/// Remote source label used when no enabled media source is configured.
+const REMOTE_SOURCE_FALLBACK_NAME: &str = "Cibles batch distantes";
+/// Remote link label used when no discovered target carries a URL.
+const REMOTE_ENDPOINT_UNKNOWN: &str = "-";
+
+/// Returns `scheme://host[:port]` of a remote media URL, without userinfo or path.
+pub fn remote_stream_endpoint(path: &std::path::Path) -> Option<String> {
+    let raw = path.to_string_lossy();
+    let (scheme, rest) = raw.split_once("://")?;
+    let authority = rest.split('/').next().unwrap_or_default();
+    let host = authority.rsplit('@').next().unwrap_or_default();
+    (!scheme.is_empty() && !host.is_empty()).then(|| format!("{scheme}://{host}"))
+}
+
 /// Table column widths for media sources grid.
 const MEDIA_SOURCES_COLUMN_WIDTHS: [Constraint; 7] = [
     Constraint::Length(3),
@@ -219,6 +233,29 @@ fn render_remote_streaming_table(frame: &mut Frame, area: Rect, ctx: &UiContext)
         Span::styled("En attente", Style::default().fg(Color::Yellow))
     };
 
+    let status_span = if is_streaming {
+        Span::styled(
+            "[\u{2713}] ACTIF",
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+        )
+    } else {
+        Span::styled("[ ] EN ATTENTE", Style::default().fg(Color::Yellow))
+    };
+    let source_name = ctx
+        .telemetry
+        .media_sources
+        .iter()
+        .find(|s| s.enabled)
+        .map_or(REMOTE_SOURCE_FALLBACK_NAME, |s| s.name.as_str());
+    let endpoint = ctx
+        .telemetry
+        .discovered_media
+        .iter()
+        .find_map(|m| remote_stream_endpoint(&m.path))
+        .unwrap_or_else(|| REMOTE_ENDPOINT_UNKNOWN.to_string());
+
     let row = Row::new(vec![
         Cell::from(Span::styled(
             "► ",
@@ -226,14 +263,9 @@ fn render_remote_streaming_table(frame: &mut Frame, area: Rect, ctx: &UiContext)
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         )),
+        Cell::from(status_span),
         Cell::from(Span::styled(
-            "[✓] ACTIF",
-            Style::default()
-                .fg(Color::Green)
-                .add_modifier(Modifier::BOLD),
-        )),
-        Cell::from(Span::styled(
-            "Synology NAS (Flux SFTP Distant)",
+            source_name.to_string(),
             Style::default()
                 .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
@@ -244,7 +276,7 @@ fn render_remote_streaming_table(frame: &mut Frame, area: Rect, ctx: &UiContext)
         )),
         Cell::from(flux_span),
         Cell::from(Span::styled(
-            "sftp://nas:22 ➔ HTTP :8769",
+            endpoint,
             Style::default().fg(Color::LightBlue),
         )),
         Cell::from(Span::styled(

@@ -3589,6 +3589,22 @@ fn test_format_unix_to_iso_roundtrip() {
 }
 
 #[test]
+fn test_remote_stream_endpoint_strips_userinfo_and_path() {
+    use dbsrt_cli::commands::top::views::media_sources::remote_stream_endpoint;
+    use std::path::Path;
+    assert_eq!(
+        remote_stream_endpoint(Path::new("ftp://user:secret@nas.example:21/tv/a.mkv")),
+        Some("ftp://nas.example:21".to_string())
+    );
+    assert_eq!(
+        remote_stream_endpoint(Path::new("http://relay.example/a.mkv")),
+        Some("http://relay.example".to_string())
+    );
+    assert_eq!(remote_stream_endpoint(Path::new("/mnt/media/a.mkv")), None);
+    assert_eq!(remote_stream_endpoint(Path::new("ftp:///a.mkv")), None);
+}
+
+#[test]
 fn test_remote_streaming_sources_view_and_locked_keys() {
     let mut terminal = Terminal::new(TestBackend::new(180, 40)).unwrap();
 
@@ -3642,10 +3658,10 @@ fn test_remote_streaming_sources_view_and_locked_keys() {
     // 1. Verify remote streaming headers and labels
     assert!(buffer.contains("SOURCES DE FLUX RÉSEAU & PONT STREAMING SFTP"));
     assert!(buffer.contains("MODE ZÉRO-NVME"));
-    assert!(buffer.contains("Synology NAS (Flux SFTP Distant)"));
+    assert!(buffer.contains("Cibles batch distantes"));
     assert!(buffer.contains("1 cibles batch"));
     assert!(buffer.contains("Opérationnel (31.7 MiB/s)"));
-    assert!(buffer.contains("sftp://nas:22 ➔ HTTP :8769"));
+    assert!(!buffer.contains("sftp://nas:22"));
     assert!(buffer.contains("Zéro-NVMe (RAM Direct)"));
     assert!(buffer.contains("Architecture Zéro-Copie"));
     assert!(buffer.contains("Verrouillé (Stockage Local Désactivé"));
