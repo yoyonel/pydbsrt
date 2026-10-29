@@ -148,13 +148,14 @@ flowchart TD
 `task o2switch:batch:status` affiche une ligne machine lue par le superviseur :
 
 ```text
-BATCH_STATE=<running|stopped|finished|crashed|absent> PID=<pid|none> TYPE=<tvshow|movies>
+BATCH_STATE=<running|stopped|aborted|finished|crashed|absent> PID=<pid|none> TYPE=<tvshow|movies>
 ```
 
 | État | Signification | Action du superviseur |
 | :--- | :--- | :--- |
 | `running` | Le PID du pidfile est vivant. | Autoscaling uniquement. |
 | `stopped` | Marqueur `run/batch_stopped` posé par `batch:stop`. | Aucune relance. |
+| `aborted` | Marqueur `run/batch_aborted` posé par le worker après 50 échecs consécutifs de moins de 10 s (erreur systémique : ffmpeg, NAS, identifiants). | Aucune relance, ni changement de bibliothèque. Corriger la cause, puis relancer à la main. |
 | `finished` | `run/batch_queue.json` indique `remaining_targets: 0`. | Lance l'autre type (`tvshow` ↔ `movies`) `--fresh-only --daemon`. |
 | `crashed` | Pidfile présent, processus mort, sans marqueur d'arrêt. | Relance le même type `--fresh-only --daemon`. |
 | `absent` | Aucun pidfile ni marqueur. | Relance `--fresh-only --daemon`. |

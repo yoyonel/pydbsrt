@@ -221,7 +221,7 @@ def decide_next_batch(state: str, batch_type: str, secs_since_last_launch: float
     """Returns the batch type to launch now, or None.
 
     Crashed/absent batches resume their type; a finished batch switches to the other library.
-    Manual stops and failed probes never trigger a launch.
+    Manual stops, aborted batches and failed probes never trigger a launch.
     """
     if state in RESTARTABLE_STATES:
         next_type = batch_type

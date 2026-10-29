@@ -74,6 +74,7 @@ def test_decide_workers(cpu, history, workers, cooldown_elapsed, expected):
         ("finished", "tvshow", RELAUNCH_BACKOFF_SECS - 1, None),  # backoff blocks tight loops
         ("crashed", "tvshow", 60, None),
         ("stopped", "tvshow", RELAUNCH_BACKOFF_SECS, None),  # manual stop is final
+        ("aborted", "tvshow", RELAUNCH_BACKOFF_SECS, None),  # systemic failure waits for a human
         ("running", "tvshow", RELAUNCH_BACKOFF_SECS, None),
     ],
 )

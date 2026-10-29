@@ -12,12 +12,14 @@ from pathlib import Path
 from scripts.o2switch_batch_worker import (
     ACTIVE_CHILD_PGIDS,
     _kill_active_children,
+    abort_batch,
     build_child_env,
     build_stream_url,
     get_process_group_cpu_ticks,
     load_certified_stems,
     load_existing_phash_stems,
     load_targets_file,
+    next_fast_failure_streak,
     resolve_retry_targets,
 )
 
@@ -151,3 +153,21 @@ def test_build_stream_url_keeps_raw_paths_verbatim():
     base = "ftp://nas:21"
     assert build_stream_url(base, "/video/100%41 Live #10.mkv") == "ftp://nas:21/video/100%41 Live #10.mkv"
     assert build_stream_url(base, "tvshow/a b.mkv") == "ftp://nas:21/tvshow/a b.mkv"
+
+
+def test_next_fast_failure_streak_counts_only_fast_failures():
+    """Fast failures accumulate; a success or a slow failure resets the streak."""
+    assert next_fast_failure_streak(3, {"success": False, "wall_duration_secs": 1.0}) == 4
+    assert next_fast_failure_streak(3, {"success": False, "wall_duration_secs": 600.0}) == 0
+    assert next_fast_failure_streak(3, {"success": True, "wall_duration_secs": 1.0}) == 0
+
+
+def test_abort_batch_drains_queue_and_leaves_marker(tmp_path: Path, monkeypatch):
+    """Abort empties the shared queue and writes the marker read by batch-status."""
+    monkeypatch.chdir(tmp_path)
+    queue = [("/video/a.mkv", "a.mkv", 1), ("/video/b.mkv", "b.mkv", 2)]
+
+    abort_batch(queue, "50 consecutive failures")
+
+    assert queue == []
+    assert "50 consecutive failures" in (tmp_path / "run" / "batch_aborted").read_text(encoding="utf-8")

@@ -134,6 +134,10 @@ DEFAULT_SUBTITLES_DIR: str = "data/SRT"
 DEFAULT_EVENTS_LOG_PATH: str = "data/reports/batch_tvshow_nightly.jsonl"
 DEFAULT_TARGETS_PATH: str = "data/reports/selected_batch_targets.json"
 DEFAULT_BATCH_QUEUE_PATH: str = "run/batch_queue.json"
+DEFAULT_BATCH_ABORTED_PATH: str = "run/batch_aborted"
+# A systemic failure (bad ffmpeg flag, NAS down) fails every target within seconds
+FAST_FAILURE_SECS: float = 10.0
+MAX_FAST_FAILURE_STREAK: int = 50
 VIDEO_EXTENSIONS: Tuple[str, ...] = (".mkv", ".mp4", ".webm", ".avi")
 
 
@@ -476,6 +480,25 @@ def process_single_video(
     return record
 
 
+def next_fast_failure_streak(streak: int, rec: Dict[str, object]) -> int:
+    """Counts consecutive failures shorter than FAST_FAILURE_SECS; any other outcome resets it."""
+    wall = rec.get("wall_duration_secs", 0.0)
+    fast_failure = not rec.get("success") and isinstance(wall, int | float) and wall < FAST_FAILURE_SECS
+    return streak + 1 if fast_failure else 0
+
+
+def abort_batch(remaining_targets: List[Tuple[str, str, int]], reason: str) -> None:
+    """Drops the queued targets and leaves run/batch_aborted so the supervisor does not relaunch."""
+    remaining_targets.clear()
+    print(f"🛑 [ABORT] {reason}", flush=True)
+    try:
+        aborted_path = Path(DEFAULT_BATCH_ABORTED_PATH)
+        aborted_path.parent.mkdir(parents=True, exist_ok=True)
+        aborted_path.write_text(f"{time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} {reason}\n", encoding="utf-8")
+    except OSError as err:
+        print(f"⚠️ Failed writing {DEFAULT_BATCH_ABORTED_PATH}: {err}", file=sys.stderr)
+
+
 def execute_dynamic_batch_ingestion(
     targets: List[Tuple[str, str, int]],
     stream_base: str,
@@ -506,6 +529,7 @@ def execute_dynamic_batch_ingestion(
     state_lock = threading.Lock()
     success_count = 0
     fail_count = 0
+    fast_failure_streak = 0
     remaining_targets = list(targets)
     active_threads: List[threading.Thread] = []
 
@@ -519,7 +543,7 @@ def execute_dynamic_batch_ingestion(
     write_batch_queue_state(len(targets), success_count, fail_count, initial_workers)
 
     def worker_loop() -> None:
-        nonlocal success_count, fail_count
+        nonlocal success_count, fail_count, fast_failure_streak
         while True:
             with state_lock:
                 desired = read_desired_workers(initial_workers)
@@ -549,6 +573,13 @@ def execute_dynamic_batch_ingestion(
                         print(
                             f"  ❌ [{fail_count} FAILED] {rec['video_stem']}: {rec.get('error_summary', 'Unknown error')}",
                             flush=True,
+                        )
+                    fast_failure_streak = next_fast_failure_streak(fast_failure_streak, rec)
+                    if fast_failure_streak == MAX_FAST_FAILURE_STREAK:
+                        abort_batch(
+                            remaining_targets,
+                            f"{fast_failure_streak} consecutive failures under {FAST_FAILURE_SECS:.0f}s: "
+                            "systemic error, check logs/workers/ before relaunching",
                         )
                     write_batch_queue_state(len(targets), success_count, fail_count, len(active_threads))
             except Exception as exc:

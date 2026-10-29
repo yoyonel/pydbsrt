@@ -572,7 +572,7 @@ screen -X -S dbsrt_batch quit 2>/dev/null || true
 
 # Lifecycle markers read by batch-status: batch type to resume, no manual stop pending
 echo "${TYPE}" > run/batch_type
-rm -f run/batch_stopped run/batch_queue.json
+rm -f run/batch_stopped run/batch_aborted run/batch_queue.json
 
 export PATH="$HOME/${BASE}/bin:$PATH"
 export RAYON_NUM_THREADS=2
@@ -613,7 +613,8 @@ PID_FILE="${BASE}/run/batch_worker.pid"
 LOG_FILE="${BASE}/logs/batch_worker.log"
 QUEUE_FILE="${BASE}/run/batch_queue.json"
 # Machine-readable lifecycle line parsed by rpi4_o2switch_supervisor.py:
-#   running | stopped (manual batch-stop) | finished (queue drained) | crashed | absent (never started)
+#   running | stopped (manual batch-stop) | aborted (fast-failure streak, see run/batch_aborted)
+#   | finished (queue drained) | crashed | absent (never started)
 PID=""
 STATE="absent"
 if [[ -f "${PID_FILE}" ]]; then
@@ -623,6 +624,9 @@ if [[ -n "${PID}" ]] && kill -0 "${PID}" 2>/dev/null; then
   STATE="running"
 elif [[ -f "${BASE}/run/batch_stopped" ]]; then
   STATE="stopped"
+elif [[ -f "${BASE}/run/batch_aborted" ]]; then
+  STATE="aborted"
+  cat "${BASE}/run/batch_aborted"
 elif [[ -f "${QUEUE_FILE}" ]] && grep -q '"remaining_targets": 0,' "${QUEUE_FILE}"; then
   STATE="finished"
 elif [[ -n "${PID}" || -f "${QUEUE_FILE}" ]]; then

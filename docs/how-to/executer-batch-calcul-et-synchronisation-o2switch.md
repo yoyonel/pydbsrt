@@ -69,7 +69,7 @@ BATCH_STATE=running PID=<pid> TYPE=tvshow
   • Concurrence      : 4 workers parallèles
 ```
 
-La première ligne `BATCH_STATE=<running|stopped|finished|crashed|absent> PID=<pid|none> TYPE=<tvshow|movies>` est lue par le superviseur RPi4.
+La première ligne `BATCH_STATE=<running|stopped|aborted|finished|crashed|absent> PID=<pid|none> TYPE=<tvshow|movies>` est lue par le superviseur RPi4.
 
 Pour suivre le journal d'exécution en streaming ou interrompre le traitement (`batch:stop` pose le marqueur `run/batch_stopped` : le superviseur RPi4 ne relance jamais un batch arrêté ou terminé) :
 
