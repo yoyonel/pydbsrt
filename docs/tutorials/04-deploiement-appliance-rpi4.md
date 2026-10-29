@@ -117,18 +117,26 @@ Le serveur distant répond avec le titre du média appairé et le code de statut
 
 Pour superviser les métriques matérielles (CPU, RAM, débits réseau) et les tâches de traitement en direct sur l'appliance Raspberry Pi 4 :
 
-1. Validez d'abord le binaire ARM64 localement sur votre poste de développement via l'émulateur QEMU :
+1. Compilez le binaire CLI ARM64 avec parité Debian Bullseye GLIBC 2.31 :
+   ```bash
+   task rpi4:cli:build
+   ```
+2. (Optionnel) Validez le binaire ARM64 localement sur votre poste de développement via l'émulateur QEMU :
    ```bash
    task rpi4:cli:test
    ```
-2. Déployez le binaire compilé `dbsrt` vers `~/.local/bin/dbsrt` sur le Raspberry Pi :
+3. Déployez le binaire compilé `dbsrt` vers `~/.local/bin/dbsrt` sur le Raspberry Pi :
    ```bash
    task rpi4:cli:deploy
    ```
-3. Lancez le moniteur plein écran interactif à distance via SSH :
+4. Lancez le moniteur plein écran interactif à distance via SSH :
    ```bash
    task rpi4:top
    ```
+
+> [!NOTE]
+> Pour compiler, déployer et lancer en une seule commande : `task rpi4:cli:build && task rpi4:cli:deploy && task rpi4:top`.
+> Attention à ne pas confondre avec `task rpi4:build` (qui prépare l'image Docker du backend serveur `dbsrt-server`) ou `task rpi4:sync` (qui synchronise les bases de données et les fichiers SRT). Pour le guide complet, consultez [Comment compiler, tester, déployer et lancer le CLI dbsrt sur RPi4](../how-to/compiler-deployer-cli-top-sur-rpi4.md).
 
 ---
 

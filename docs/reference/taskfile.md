@@ -104,6 +104,13 @@ Cette page dresse le dictionnaire exhaustif de toutes les cibles d'orchestration
 
 ## 7. Appliance Domestique Raspberry Pi 4 (`rpi4:*`)
 
+> [!IMPORTANT]
+> **Distinction des familles de cibles RPi4** :
+>
+> * **Serveur Backend (Docker)** : `task rpi4:build` (build image `dbsrt-server`), `task rpi4:push` (stream SSH de l'image), `task rpi4:up` (stack Docker).
+> * **Synchronisation des Données** : `task rpi4:sync` (transfère `catalog.dbphash`, `data/SRT` et docker-compose par `rsync`, **aucun** binaire).
+> * **CLI Standalone & TUI (`top`)** : `task rpi4:cli:build` (compilation Debian Bullseye GLIBC 2.31), `task rpi4:cli:deploy` (copie SCP de `dbsrt` vers `~/.local/bin/`), `task rpi4:top` (session interactive SSH).
+
 | Commande | Description |
 | :--- | :--- |
 | `task rpi4:build` | Cross-compile le binaire aarch64 et génère l'image Docker ARM64 de `dbsrt-server`. |
