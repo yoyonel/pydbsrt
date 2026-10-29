@@ -1981,7 +1981,9 @@ fn detect_candidate_engine(
 ) -> (String, Option<String>) {
     let has_vaapi = Path::new("/dev/dri/renderD128").exists();
     if is_dbsrt {
-        if cmd_str.contains("--hwaccel disabled") || cmd_str.contains("--hwaccel cpu") || !has_vaapi
+        if cmd_str.contains("--hwaccel disabled")
+            || cmd_str.contains("--hwaccel cpu")
+            || (!cmd_str.contains("--hwaccel vaapi") && !has_vaapi)
         {
             (
                 "CPU (Software)".to_string(),
@@ -2005,7 +2007,7 @@ fn detect_candidate_engine(
             "Sub Extraction".to_string(),
             Some("Extraction de flux sous-titre texte/SRT (démultiplexage rapide, aucun décodage vidéo).".to_string()),
         )
-    } else if cmd_str.contains("-hwaccel vaapi") && has_vaapi {
+    } else if cmd_str.contains("-hwaccel vaapi") {
         (
             "GPU (VA-API)".to_string(),
             Some(
