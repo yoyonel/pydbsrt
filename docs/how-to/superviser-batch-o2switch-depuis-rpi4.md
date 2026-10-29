@@ -79,7 +79,29 @@ Exemple d'activité consignée :
 [2026-10-28 22:30:48] ✓ Catalog synchronization complete.
 ```
 
-### Étape 4 : Arrêter l'agent superviseur
+### Étape 4 : Inspecter ou régler manuellement la concurrence (Workers)
+
+Pour inspecter la concurrence active sur o2switch :
+
+```bash
+task o2switch:batch:workers
+# === Querying remote batch concurrency on o2switch ===
+# 5
+```
+
+Pour forcer un palier de concurrence sans interrompre le worker en vol :
+
+```bash
+task o2switch:batch:workers -- 5
+# === Setting remote batch concurrency to 5 workers on o2switch ===
+# ✓ Set desired workers to 5.
+```
+
+Le worker lit dynamiquement `run/desired_workers` et fait monter ou descendre le nombre de threads d'ingestion à la fin de chaque tâche vidéo.
+
+---
+
+### Étape 5 : Arrêter l'agent superviseur
 
 Pour interrompre proprement l'agent :
 

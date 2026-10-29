@@ -21,7 +21,6 @@ import threading
 import time
 import traceback
 import urllib.parse
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Dict, List, Set, Tuple
@@ -57,9 +56,51 @@ def _on_exit() -> None:
 
 
 sys.excepthook = _handle_uncaught_exception
-for _sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT, signal.SIGQUIT, signal.SIGUSR1, signal.SIGUSR2):
+for _sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT, signal.SIGQUIT):
     try:
         signal.signal(_sig, _handle_signal)
+    except Exception:
+        pass
+
+
+DEFAULT_DESIRED_WORKERS_PATH: Path = Path("run/desired_workers")
+MIN_CONCURRENT_WORKERS: int = 1
+MAX_CONCURRENT_WORKERS: int = 8
+TARGET_QUEUE_POLL_INTERVAL_SECS: float = 0.5
+
+
+def read_desired_workers(default_workers: int) -> int:
+    """Reads desired concurrency dynamically from run/desired_workers."""
+    if DEFAULT_DESIRED_WORKERS_PATH.is_file():
+        try:
+            val = int(DEFAULT_DESIRED_WORKERS_PATH.read_text(encoding="utf-8").strip())
+            return max(MIN_CONCURRENT_WORKERS, min(val, MAX_CONCURRENT_WORKERS))
+        except Exception:
+            pass
+    return default_workers
+
+
+def _handle_scale_signals(sig: int, _frame: object) -> None:
+    current = read_desired_workers(DEFAULT_WORKERS)
+    if sig == signal.SIGUSR1:
+        new_val = min(current + 1, MAX_CONCURRENT_WORKERS)
+        log_msg = f"\n📈 [SIGNAL] SIGUSR1 received: Scaling concurrency {current} -> {new_val}\n"
+    elif sig == signal.SIGUSR2:
+        new_val = max(current - 1, MIN_CONCURRENT_WORKERS)
+        log_msg = f"\n📉 [SIGNAL] SIGUSR2 received: Throttling concurrency {current} -> {new_val}\n"
+    else:
+        return
+    print(log_msg, flush=True)
+    try:
+        DEFAULT_DESIRED_WORKERS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        DEFAULT_DESIRED_WORKERS_PATH.write_text(str(new_val), encoding="utf-8")
+    except Exception:
+        pass
+
+
+for _scale_sig in (signal.SIGUSR1, signal.SIGUSR2):
+    try:
+        signal.signal(_scale_sig, _handle_scale_signals)
     except Exception:
         pass
 
@@ -666,6 +707,112 @@ def process_single_video(
     return record
 
 
+def execute_dynamic_batch_ingestion(
+    targets: List[Tuple[str, str, int]],
+    stream_base: str,
+    protocol: str,
+    dbsrt_bin: str,
+    events_log: Path,
+    max_extraction_secs: int,
+    initial_workers: int,
+) -> Tuple[int, int, float]:
+    """Executes batch processing with dynamic concurrency scaling.
+
+    Spawns and retires worker threads dynamically based on run/desired_workers,
+    allowing real-time scale-up and scale-down without killing active extraction jobs.
+
+    # Arguments
+    * `targets`: Ordered list of video targets (relative path, filename, size bytes).
+    * `stream_base`: HTTP or FTP streaming endpoint base URL.
+    * `protocol`: 'ftp' or 'sftp-bridge'.
+    * `dbsrt_bin`: Path to dbsrt binary executable.
+    * `events_log`: Path to events log file.
+    * `max_extraction_secs`: Max wall duration per video.
+    * `initial_workers`: Baseline concurrency count.
+
+    # Returns
+    * Tuple of (success_count, fail_count, total_duration_secs).
+    """
+    log_lock = threading.Lock()
+    state_lock = threading.Lock()
+    success_count = 0
+    fail_count = 0
+    remaining_targets = list(targets)
+    active_threads: List[threading.Thread] = []
+
+    DEFAULT_DESIRED_WORKERS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    if not DEFAULT_DESIRED_WORKERS_PATH.exists():
+        try:
+            DEFAULT_DESIRED_WORKERS_PATH.write_text(str(initial_workers), encoding="utf-8")
+        except Exception:
+            pass
+
+    write_batch_queue_state(len(targets), success_count, fail_count, initial_workers)
+
+    def worker_loop() -> None:
+        nonlocal success_count, fail_count
+        while True:
+            with state_lock:
+                desired = read_desired_workers(initial_workers)
+                if len(active_threads) > desired or not remaining_targets:
+                    return
+                item = remaining_targets.pop(0)
+
+            try:
+                rec = process_single_video(
+                    item,
+                    stream_base,
+                    protocol,
+                    dbsrt_bin,
+                    log_lock,
+                    events_log,
+                    max_extraction_secs,
+                )
+                with state_lock:
+                    if rec.get("success"):
+                        success_count += 1
+                        print(
+                            f"  ✓ [{success_count}/{len(targets)}] {rec['video_stem']} ({rec['wall_duration_secs']}s, {rec['io_read_rate_mib_s']} MB/s)",
+                            flush=True,
+                        )
+                    else:
+                        fail_count += 1
+                        print(
+                            f"  ❌ [{fail_count} FAILED] {rec['video_stem']}: {rec.get('error_summary', 'Unknown error')}",
+                            flush=True,
+                        )
+                    write_batch_queue_state(len(targets), success_count, fail_count, len(active_threads))
+            except Exception as exc:
+                with state_lock:
+                    fail_count += 1
+                    print(f"  ❌ Exception processing {item[1]}: {exc}", flush=True)
+                    write_batch_queue_state(len(targets), success_count, fail_count, len(active_threads))
+
+    start_batch = time.time()
+    try:
+        while True:
+            with state_lock:
+                active_threads = [t for t in active_threads if t.is_alive()]
+                desired = read_desired_workers(initial_workers)
+                if not remaining_targets and not active_threads:
+                    break
+                while len(active_threads) < desired and remaining_targets:
+                    t = threading.Thread(target=worker_loop, daemon=True)
+                    active_threads.append(t)
+                    t.start()
+                    write_batch_queue_state(len(targets), success_count, fail_count, len(active_threads))
+
+            time.sleep(TARGET_QUEUE_POLL_INTERVAL_SECS)
+
+        for t in active_threads:
+            t.join(timeout=30)
+    finally:
+        write_batch_queue_state(len(targets), success_count, fail_count, 0)
+
+    total_duration = time.time() - start_batch
+    return success_count, fail_count, total_duration
+
+
 def main() -> int:
     """CLI Entry point for o2switch batch processing."""
     parser = argparse.ArgumentParser(description="o2switch Remote Batch Processing Worker")
@@ -828,48 +975,18 @@ def main() -> int:
         stream_base = f"http://127.0.0.1:{args.port}/stream"
         print("✓ Bridge running in background (Zero-NVMe direct streaming active).")
 
-    print(f"=== [4/4] Executing Batch Ingestion ({args.workers} parallel workers) ===")
-    log_lock = threading.Lock()
-    success_count = 0
-    fail_count = 0
-    write_batch_queue_state(len(targets), success_count, fail_count, args.workers)
-
-    start_batch = time.time()
+    print(f"=== [4/4] Executing Batch Ingestion ({args.workers} initial parallel workers, dynamic scaling active) ===")
     try:
-        with ThreadPoolExecutor(max_workers=args.workers) as executor:
-            future_map = {
-                executor.submit(
-                    process_single_video,
-                    target,
-                    stream_base,
-                    args.protocol,
-                    dbsrt_bin,
-                    log_lock,
-                    events_log,
-                    args.max_extraction_secs,
-                ): target
-                for target in targets
-            }
-            for future in as_completed(future_map):
-                target = future_map[future]
-                try:
-                    rec = future.result()
-                    if rec.get("success"):
-                        success_count += 1
-                        print(
-                            f"  ✓ [{success_count}/{len(targets)}] {rec['video_stem']} ({rec['wall_duration_secs']}s, {rec['io_read_rate_mib_s']} MB/s)"
-                        )
-                    else:
-                        fail_count += 1
-                        print(
-                            f"  ❌ [{fail_count} FAILED] {rec['video_stem']}: {rec.get('error_summary', 'Unknown error')}"
-                        )
-                except Exception as exc:
-                    fail_count += 1
-                    print(f"  ❌ Exception processing {target[1]}: {exc}")
-                write_batch_queue_state(len(targets), success_count, fail_count, args.workers)
+        success_count, fail_count, total_duration = execute_dynamic_batch_ingestion(
+            targets=targets,
+            stream_base=stream_base,
+            protocol=args.protocol,
+            dbsrt_bin=dbsrt_bin,
+            events_log=events_log,
+            max_extraction_secs=args.max_extraction_secs,
+            initial_workers=args.workers,
+        )
     finally:
-        write_batch_queue_state(len(targets), success_count, fail_count, 0)
         if server is not None:
             try:
                 server.shutdown()
@@ -880,7 +997,6 @@ def main() -> int:
             except Exception:
                 pass
 
-    total_duration = time.time() - start_batch
     print("=" * 60)
     print(f"🏁 Batch completed in {total_duration:.1f}s: {success_count} succeeded, {fail_count} failed.")
     return 0 if fail_count == 0 else 1

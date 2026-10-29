@@ -625,6 +625,22 @@ screen -X -S dbsrt_batch quit 2>/dev/null || true
 REMOTE_SCRIPT
     ;;
 
+  batch-workers)
+    check_ssh
+    shift || true
+    NEW_COUNT="${1:-}"
+    if [[ -n "${NEW_COUNT}" ]]; then
+      echo "=== Setting remote batch concurrency to ${NEW_COUNT} workers on ${O2SWITCH_HOST} ==="
+      # shellcheck disable=SC2029
+      ssh "${O2SWITCH_HOST}" "mkdir -p ${REMOTE_BASE}/run && echo '${NEW_COUNT}' > ${REMOTE_BASE}/run/desired_workers"
+      echo "✓ Set desired workers to ${NEW_COUNT}."
+    else
+      echo "=== Querying remote batch concurrency on ${O2SWITCH_HOST} ==="
+      # shellcheck disable=SC2029
+      ssh "${O2SWITCH_HOST}" "cat ${REMOTE_BASE}/run/desired_workers 2>/dev/null || echo '4 (default)'"
+    fi
+    ;;
+
   batch-logs)
     check_ssh
     # shellcheck disable=SC2029
@@ -632,7 +648,7 @@ REMOTE_SCRIPT
     ;;
 
   *)
-    echo "Usage: $0 {build|test-local|sync|start|stop|restart|status|logs|demo|setup-cron|remove-cron|rotate-key|top|pull-catalog|batch-tvshow|batch-movies|batch-status|batch-stop|batch-logs}"
+    echo "Usage: $0 {build|test-local|sync|start|stop|restart|status|logs|demo|setup-cron|remove-cron|rotate-key|top|pull-catalog|batch-tvshow|batch-movies|batch-status|batch-workers|batch-stop|batch-logs}"
     exit 1
     ;;
 esac

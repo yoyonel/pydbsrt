@@ -127,6 +127,11 @@ tasks:
     cmds:
       - ./scripts/o2switch_ctl.sh batch-status
 
+  o2switch:batch:workers:
+    desc: Query or set dynamic batch worker concurrency on o2switch
+    cmds:
+      - ./scripts/o2switch_ctl.sh batch-workers {{.CLI_ARGS}}
+
   o2switch:batch:stop:
     desc: Stop running background batch pHash worker on o2switch
     cmds:
