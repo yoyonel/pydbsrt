@@ -20,7 +20,15 @@ COPY crates/dbsrt-index crates/dbsrt-index
 COPY crates/dbsrt-cli crates/dbsrt-cli
 COPY crates/dbsrt-server crates/dbsrt-server
 
-ENV CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+# .git is excluded from the build context: version metadata comes from build args
+# (DBSRT_GIT_HASH, DBSRT_BUILD_DATE or SOURCE_DATE_EPOCH); empty values render as "unknown".
+ARG DBSRT_GIT_HASH=""
+ARG DBSRT_BUILD_DATE=""
+ARG SOURCE_DATE_EPOCH=""
+ENV CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \
+    DBSRT_GIT_HASH=${DBSRT_GIT_HASH} \
+    DBSRT_BUILD_DATE=${DBSRT_BUILD_DATE} \
+    SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/src/target \
