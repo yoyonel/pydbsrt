@@ -9,6 +9,9 @@ import time
 import urllib.parse
 from pathlib import Path
 
+import pytest
+
+import scripts.o2switch_batch_worker as worker
 from scripts.o2switch_batch_worker import (
     ACTIVE_CHILD_PGIDS,
     _kill_active_children,
@@ -201,3 +204,48 @@ def test_match_nas_paths_uses_real_nas_names():
     ]
 
     assert match_nas_paths(targets, nas) == [nas[0]]
+
+
+def test_script_updated_detects_redeploy(tmp_path: Path, monkeypatch):
+    """A newer mtime on the worker script requests a reload, a vanished file does not."""
+    script = tmp_path / "worker.py"
+    script.write_text("x", encoding="utf-8")
+    monkeypatch.setattr(worker, "SCRIPT_PATH", script)
+    monkeypatch.setattr(worker, "SCRIPT_MTIME", script.stat().st_mtime)
+    assert not worker.script_updated()
+    os.utime(script, (0, worker.SCRIPT_MTIME + 5))
+    assert worker.script_updated()
+    script.unlink()
+    assert not worker.script_updated()
+
+
+def test_list_nas_videos_ftp_retries_transient_errors(monkeypatch):
+    """A dropped FTP connection restarts the walk; persistent failures still raise."""
+    calls = []
+
+    def flaky_walk(*_args):
+        calls.append(1)
+        if len(calls) < 2:
+            raise ConnectionResetError("reset")
+        return [("/video/a.mkv", "a.mkv", 1)]
+
+    monkeypatch.setattr(worker, "_walk_nas_videos_ftp", flaky_walk)
+    monkeypatch.setattr(worker.time, "sleep", lambda _s: None)
+    assert worker.list_nas_videos_ftp("nas", "u", "p") == [("/video/a.mkv", "a.mkv", 1)]
+
+    monkeypatch.setattr(worker, "_walk_nas_videos_ftp", lambda *_a: (_ for _ in ()).throw(TimeoutError()))
+    with pytest.raises(TimeoutError):
+        worker.list_nas_videos_ftp("nas", "u", "p")
+
+
+def test_excluded_prefixes_match_nfc_and_nfd_paths(tmp_path: Path):
+    """Exclusion prefixes skip comments and match whatever normalization the NAS uses."""
+    exclude = tmp_path / "batch_exclude.txt"
+    exclude.write_text("# unreadable\n\n/tvshow/Cruaut\u00e9\n", encoding="utf-8")
+    prefixes = worker.load_excluded_prefixes(exclude)
+
+    assert prefixes == ["/tvshow/Cruaut\u00e9"]
+    assert worker.is_excluded("/tvshow/Cruaute\u0301/S01/e1.mkv", prefixes)
+    assert not worker.is_excluded("/tvshow/Other/e1.mkv", prefixes)
+    assert not worker.is_excluded("/tvshow/x.mkv", [])
+    assert worker.load_excluded_prefixes(tmp_path / "missing.txt") == []

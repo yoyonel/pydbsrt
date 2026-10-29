@@ -256,6 +256,10 @@ Dans l'onglet `[3/r] Récents` de `dbsrt top` (avec le filtre `[x FAIL (ERREURS 
 
 Une vidéo dont les **3 dernières tentatives** du journal d'événements sont des échecs n'est plus mise en file par les lancements normaux (`--fresh-only`, superviseur RPi4). Un succès remet le compteur à zéro. `--retry-failed` ignore cette liste noire : c'est le moyen de retenter ces vidéos après correction (permissions NAS, fichier remplacé).
 
+### Exclusion manuelle
+
+`etc/batch_exclude.txt` (sur o2switch uniquement, jamais synchronisé) liste des préfixes de chemins NAS, un par ligne, `#` pour commenter. Les vidéos concernées sont écartées de **tous** les lancements, `--retry-failed` compris. Usage type : dossiers que le compte FTP ne peut pas lire (`550` sur `RETR`) en attendant la correction des ACL dans DSM. Retirez la ligne une fois le dossier lisible.
+
 ### Procédure de Relance Ciblée
 
 Arrêtez le travailleur distant en cours, puis relancez-le avec l'argument `--retry-failed` :

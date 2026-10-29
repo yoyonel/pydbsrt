@@ -83,6 +83,20 @@ DEFAULT_DESIRED_WORKERS_PATH: Path = Path("run/desired_workers")
 MIN_CONCURRENT_WORKERS: int = 1
 MAX_CONCURRENT_WORKERS: int = 8
 TARGET_QUEUE_POLL_INTERVAL_SECS: float = 0.5
+# A redeployed worker script is picked up between videos: the queue drains, then the process re-execs.
+SCRIPT_PATH: Path = Path(__file__).resolve()
+SCRIPT_MTIME: float = SCRIPT_PATH.stat().st_mtime
+RELOAD_REQUESTED = threading.Event()
+FTP_LIST_ATTEMPTS: int = 3
+FTP_LIST_RETRY_DELAY_SECS: float = 30.0
+
+
+def script_updated() -> bool:
+    """True when the worker script on disk differs from the one this process runs."""
+    try:
+        return SCRIPT_PATH.stat().st_mtime != SCRIPT_MTIME
+    except OSError:
+        return False
 
 
 def read_desired_workers(default_workers: int) -> int:
@@ -136,6 +150,8 @@ DEFAULT_EVENTS_LOG_PATH: str = "data/reports/batch_tvshow_nightly.jsonl"
 DEFAULT_TARGETS_PATH: str = "data/reports/selected_batch_targets.json"
 DEFAULT_BATCH_QUEUE_PATH: str = "run/batch_queue.json"
 DEFAULT_BATCH_ABORTED_PATH: str = "run/batch_aborted"
+# Remote-only list of NAS path prefixes never processed, even by --retry-failed (e.g. unreadable folders)
+DEFAULT_EXCLUDE_PATH: str = "etc/batch_exclude.txt"
 # A systemic failure (bad ffmpeg flag, NAS down) fails every target within seconds
 FAST_FAILURE_SECS: float = 10.0
 MAX_FAST_FAILURE_STREAK: int = 50
@@ -202,9 +218,27 @@ def list_nas_videos_ftp(
 ) -> List[Tuple[str, str, int]]:
     """Discovers video files on Synology NAS using standard FTP MLSD protocol.
 
+    Transient FTP errors restart the whole walk, so a dropped connection never yields a partial list.
+
     Returns:
         List of tuples: (relative_path, filename, size_bytes).
     """
+    import ftplib
+
+    for attempt in range(1, FTP_LIST_ATTEMPTS + 1):
+        try:
+            return _walk_nas_videos_ftp(nas_host, nas_user, nas_pass, base_dir, ftp_port, max_depth)
+        except (OSError, EOFError, ftplib.error_temp, ftplib.error_reply, ftplib.error_proto) as err:
+            if attempt == FTP_LIST_ATTEMPTS:
+                raise
+            print(f"⚠️ NAS FTP listing failed ({err}), retry {attempt}/{FTP_LIST_ATTEMPTS - 1}", file=sys.stderr)
+            time.sleep(FTP_LIST_RETRY_DELAY_SECS * attempt)
+    return []
+
+
+def _walk_nas_videos_ftp(
+    nas_host: str, nas_user: str, nas_pass: str, base_dir: str, ftp_port: int, max_depth: int
+) -> List[Tuple[str, str, int]]:
     import ftplib
     import posixpath
 
@@ -221,7 +255,8 @@ def list_nas_videos_ftp(
         curr = stack.pop()
         try:
             entries = list(ftp.mlsd(curr))
-        except Exception:
+        except ftplib.error_perm:
+            # 550 on a folder the account cannot read: skip it, the rest of the library stays usable
             continue
         for name, facts in entries:
             if name in (".", "..", "EMPTY_DIRS", "SRT", "@eaDir") or name.startswith("."):
@@ -303,6 +338,19 @@ def load_blacklisted_stems(events_log: Path, max_attempts: int = MAX_FAILED_ATTE
             if stem:
                 streaks[stem] = 0 if rec.get("success") else streaks.get(stem, 0) + 1
     return {stem for stem, count in streaks.items() if count >= max_attempts}
+
+
+def load_excluded_prefixes(exclude_file: Path) -> List[str]:
+    """Reads NFC NAS path prefixes, one per line; blank lines and '#' comments are ignored."""
+    if not exclude_file.is_file():
+        return []
+    lines = (line.strip() for line in exclude_file.read_text(encoding="utf-8").splitlines())
+    return [unicodedata.normalize("NFC", line) for line in lines if line and not line.startswith("#")]
+
+
+def is_excluded(rel_path: str, prefixes: List[str]) -> bool:
+    """True when the NFC form of a NAS path starts with one of the excluded prefixes."""
+    return unicodedata.normalize("NFC", rel_path).startswith(tuple(prefixes))
 
 
 def match_nas_paths(
@@ -623,6 +671,10 @@ def execute_dynamic_batch_ingestion(
     try:
         while True:
             with state_lock:
+                if remaining_targets and script_updated():
+                    print("🔄 [RELOAD] Worker script updated: finishing in-flight videos before re-exec", flush=True)
+                    remaining_targets.clear()
+                    RELOAD_REQUESTED.set()
                 active_threads = [t for t in active_threads if t.is_alive()]
                 desired = read_desired_workers(initial_workers)
                 if not remaining_targets and not active_threads:
@@ -726,6 +778,12 @@ def main() -> int:
     if not targets_loaded:
         targets = [video for video in all_videos if Path(video[1]).stem not in skip_stems]
 
+    excluded = load_excluded_prefixes(Path(DEFAULT_EXCLUDE_PATH))
+    if excluded:
+        kept = [video for video in targets if not is_excluded(video[0], excluded)]
+        print(f"✓ Excluded {len(targets) - len(kept)} videos listed in {DEFAULT_EXCLUDE_PATH}.")
+        targets = kept
+
     if args.limit and len(targets) > args.limit:
         targets = targets[: args.limit]
 
@@ -748,6 +806,11 @@ def main() -> int:
         max_extraction_secs=args.max_extraction_secs,
         initial_workers=args.workers,
     )
+
+    if RELOAD_REQUESTED.is_set():
+        # Same PID, argv and interpreter flags: pid file and supervisor stay valid; done videos are skipped
+        print(f"🔄 [RELOAD] Re-exec after {success_count} ok / {fail_count} failed", flush=True)
+        os.execv(sys.executable, sys.orig_argv)
 
     print("=" * 60)
     print(f"🏁 Batch completed in {total_duration:.1f}s: {success_count} succeeded, {fail_count} failed.")
