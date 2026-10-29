@@ -107,7 +107,7 @@ sequenceDiagram
     Note over Worker: Sélection stricte des médias sans .phash
 
     Note over NAS,Core: FLUX 2 & 3 : Streaming & Hachage en RAM
-    Worker->>Core: media:add ftp://<NAS_HOST>:21/<chemin> (DBSRT_FTP_USER / DBSRT_FTP_PASSWORD en env)
+    Worker->>Core: media:add ftp://<NAS_HOST>:21/<chemin> (DBSRT_FTP_USER / DBSRT_FTP_PASSWORD_FILE en env)
     Core->>NAS: ffmpeg RETR FTP direct (-ftp-user / -ftp-password)
     NAS-->>Core: Flux vidéo sans écriture disque
     Core->>Core: FFmpeg downscale 32x32 rawvideo (RAM)
@@ -143,7 +143,7 @@ sequenceDiagram
 ### Flux 2 & 3 : Streaming Réseau Mémoire & Décodage à la Volée
 - **Entrée (IN)** : URL FTP directe `ftp://<NAS_HOST>:21/<chemin>` passée par le worker à `dbsrt media:add`, sans identifiants dans l'URL.
 - **Traitement** :
-  1. Le worker positionne `DBSRT_FTP_USER` / `DBSRT_FTP_PASSWORD` dans l'environnement de chaque processus `dbsrt` enfant (identifiants lus depuis `etc/.nas_config` et `etc/.nas_pass`, mode 600).
+  1. Le worker positionne `DBSRT_FTP_USER` / `DBSRT_FTP_PASSWORD_FILE` dans l'environnement de chaque processus `dbsrt` enfant (identifiants lus depuis `etc/.nas_config` et `etc/.nas_pass`, mot de passe recopié dans `etc/.ftp_password`, mode 600).
   2. `dbsrt` transmet ces identifiants à `ffmpeg` / `ffprobe` via `-ftp-user` / `-ftp-password`. Ils ne sont jamais journalisés, et la partie userinfo des URLs journalisées est expurgée. Le `ffmpeg` statique d'o2switch ne supporte pas SFTP : FTP est le seul transport direct disponible.
   3. `ffmpeg` lit le flux FTP au fil de l'eau (`DBSRT_FFMPEG_THREADS`, défaut `2`) sans chercher à stocker le fichier complet sur le disque.
   4. Les trames vidéo sont converties à la volée en niveaux de gris $32 \times 32$ pixels bruts (`rawvideo Y800`), injectées directement via pipe mémoire dans le moteur Rust de DCT (Discrete Cosine Transform).
