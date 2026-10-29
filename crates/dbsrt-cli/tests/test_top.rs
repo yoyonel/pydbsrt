@@ -3589,6 +3589,19 @@ fn test_format_unix_to_iso_roundtrip() {
 }
 
 #[test]
+fn test_is_physical_interface_excludes_virtual_links() {
+    use dbsrt_cli::commands::top::sampler::is_physical_interface;
+    for name in ["eth0", "enp3s0", "wlan0", "ens18"] {
+        assert!(is_physical_interface(name), "{name}");
+    }
+    for name in [
+        "lo", "docker0", "veth1a2b", "br-1234", "virbr0", "tun0", "wg0", "cni0", "podman0",
+    ] {
+        assert!(!is_physical_interface(name), "{name}");
+    }
+}
+
+#[test]
 fn test_remote_stream_endpoint_strips_userinfo_and_path() {
     use dbsrt_cli::commands::top::views::media_sources::remote_stream_endpoint;
     use std::path::Path;

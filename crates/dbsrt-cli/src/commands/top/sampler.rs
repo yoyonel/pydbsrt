@@ -2038,16 +2038,23 @@ fn sanitize_non_negative_rate(val: f64) -> f64 {
     }
 }
 
+/// Name prefixes of loopback, bridge, container, VPN and tunnel interfaces whose traffic is
+/// not host network ingress.
+const VIRTUAL_INTERFACE_PREFIXES: &[&str] = &[
+    "lo", "virbr", "docker", "veth", "br-", "tun", "tap", "wg", "cni", "flannel", "podman",
+];
+
+/// True for interfaces counted in host RX throughput (both sysinfo and `/proc/net/dev`).
+pub fn is_physical_interface(name: &str) -> bool {
+    !VIRTUAL_INTERFACE_PREFIXES
+        .iter()
+        .any(|prefix| name.starts_with(prefix))
+}
+
 /// Parses a single `/proc/net/dev` interface line and extracts received bytes if non-virtual.
 fn parse_proc_net_line(line: &str) -> Option<u64> {
     let (iface, rest) = line.split_once(':')?;
-    let iface_clean = iface.trim();
-    if iface_clean.starts_with("lo")
-        || iface_clean.starts_with("virbr")
-        || iface_clean.starts_with("docker")
-        || iface_clean.starts_with("veth")
-        || iface_clean.starts_with("br-")
-    {
+    if !is_physical_interface(iface.trim()) {
         return None;
     }
     rest.split_whitespace().next()?.parse::<u64>().ok()
@@ -2098,8 +2105,9 @@ pub fn read_proc_net_dev_rx_bytes() -> Option<u64> {
 /// Panic-free.
 ///
 /// # Data Flow & Invariants
-/// First attempts reading via `sysinfo::Networks`. If sysinfo yields zero bytes (e.g. missing `/sys/class/net`),
-/// falls back to delta computation from `/proc/net/dev`.
+/// Uses the per-refresh deltas of `sysinfo::Networks` whenever it lists a physical interface
+/// (an idle link reports 0). Only when sysinfo sees none (e.g. missing `/sys/class/net`) does it
+/// fall back to delta computation from `/proc/net/dev`.
 fn compute_net_rx_rate(
     networks: &mut Networks,
     now: Instant,
@@ -2111,13 +2119,14 @@ fn compute_net_rx_rate(
         .duration_since(last_instant)
         .as_secs_f64()
         .max(MIN_DELTA_TIME_FLOOR_SECS);
-    let total_rx_bytes: u64 = networks
+    let physical_rx: Vec<u64> = networks
         .iter()
-        .filter(|(name, _)| !name.starts_with("lo") && !name.starts_with("virbr"))
+        .filter(|(name, _)| is_physical_interface(name))
         .map(|(_, data)| data.received())
-        .sum();
+        .collect();
 
-    if total_rx_bytes > 0 {
+    if !physical_rx.is_empty() {
+        let total_rx_bytes: u64 = physical_rx.iter().sum();
         return (
             sanitize_non_negative_rate((total_rx_bytes as f64 / BYTES_PER_MIB_F64) / dt),
             now,
