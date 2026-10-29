@@ -2,9 +2,13 @@
 # Controls the local dbsrt client relay agent connected to Cloud o2switch
 set -euo pipefail
 
+# Load optional unversioned local environment file (O2SWITCH_URL)
+# shellcheck source=scripts/load_env.sh
+source "$(dirname "${BASH_SOURCE[0]}")/load_env.sh"
+load_local_env "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
 # Named operational constants
 DEFAULT_AGENT_PORT=8765
-DEFAULT_REMOTE_API="https://2026-pydbsrt.fr/dbsrt"
 DEFAULT_PASS_ENTRY="services/pydbsrt/o2switch_api_key"
 DEFAULT_HEALTHCHECK_MAX_RETRIES=15
 DEFAULT_HEALTHCHECK_SLEEP_SEC=0.5
@@ -16,7 +20,7 @@ SERVER_BIN="target/release/dbsrt-server"
 
 ACTION="${1:-status}"
 PORT="${AGENT_PORT:-${DEFAULT_AGENT_PORT}}"
-REMOTE_API="${O2SWITCH_URL:-${DEFAULT_REMOTE_API}}"
+REMOTE_API="${O2SWITCH_URL:-}"
 
 resolve_sample_video() {
   local candidates=(
@@ -65,6 +69,11 @@ case "${ACTION}" in
     if [[ ! -f "${SERVER_BIN}" ]]; then
       echo "=== Building release binary: dbsrt-server ==="
       cargo build --release --bin dbsrt-server
+    fi
+
+    if [[ -z "${REMOTE_API}" ]]; then
+      echo "❌ O2SWITCH_URL is not set (env or .env), e.g. https://<your-domain>/dbsrt"
+      exit 1
     fi
 
     API_KEY=$(resolve_api_key)

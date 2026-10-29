@@ -684,7 +684,7 @@ function run_search(mode)
     last_matching_tier = matching_tier
     last_matched_ref = matched_media
 
-    local origin_banner = is_relay and "CLOUD o2switch (https://2026-pydbsrt.fr/dbsrt)" or "LOCAL DAEMON"
+    local origin_banner = is_relay and "CLOUD o2switch relay" or "LOCAL DAEMON"
     log_info("================================================================================")
     log_info("[MATCH IDENTIFIER] SOURCE: %s | ENGINE: %s", origin_banner, matching_tier or "Local MIH")
     log_info("[MATCH IDENTIFIER] Reference: '%s' | Confidence: %s%% | Network RTT: %.2fms",

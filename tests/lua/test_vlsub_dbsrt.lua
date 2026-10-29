@@ -378,7 +378,7 @@ local function test_remote_relay_source_display()
     local sample_json = [[{
         "matched_media": "Beacon 23",
         "total_candidates": 1,
-        "matching_tier": "Remote Relay (Tier 1 (RAM .dbphash MIH under 10ms) via https://2026-pydbsrt.fr/dbsrt)",
+        "matching_tier": "Remote Relay (Tier 1 (RAM .dbphash MIH under 10ms) via https://relay.example.invalid/dbsrt)",
         "candidates": [
             {
                 "source": "catalog",

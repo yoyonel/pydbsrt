@@ -68,7 +68,7 @@ tasks:
       - ./scripts/switch_target.sh local
 
   target:o2switch:
-    desc: Switch VLC backend to Cloud o2switch relay (https://2026-pydbsrt.fr/dbsrt)
+    desc: Switch VLC backend to Cloud o2switch relay (O2SWITCH_URL)
     cmds:
       - ./scripts/switch_target.sh o2switch
 

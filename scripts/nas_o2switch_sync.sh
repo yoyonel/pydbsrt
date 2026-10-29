@@ -3,12 +3,16 @@
 # and SRT subtitles directly to Cloud o2switch hosting.
 set -euo pipefail
 
+# Load optional unversioned local environment file (O2SWITCH_URL)
+# shellcheck source=scripts/load_env.sh
+source "$(dirname "${BASH_SOURCE[0]}")/load_env.sh"
+load_local_env "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
 # Named operational constants
 DEFAULT_O2SWITCH_HOST="o2switch"
 DEFAULT_REMOTE_BASE="dbsrt"
 DEFAULT_RSYNC_BWLIMIT_KBPS=20000
 DEFAULT_SCENE_CUT_THRESHOLD=16
-DEFAULT_REMOTE_STATUS_URL="https://2026-pydbsrt.fr/dbsrt/v1/status"
 DEFAULT_PASS_ENTRY="services/pydbsrt/o2switch_api_key"
 
 O2SWITCH_HOST="${O2SWITCH_HOST:-${DEFAULT_O2SWITCH_HOST}}"
@@ -162,8 +166,11 @@ echo "--- 5. Hot-restarting dbsrt-server on o2switch ---"
 
 echo "--- 6. Verifying Remote Status & Ingested Catalog ---"
 API_KEY=$(resolve_api_key)
-if [[ -n "${API_KEY}" ]]; then
-  STATUS_RESP=$(curl -s -f -m 5 "${DEFAULT_REMOTE_STATUS_URL}?api_key=${API_KEY}" 2>/dev/null || echo "")
+if [[ -z "${O2SWITCH_URL:-}" ]]; then
+  echo "⚠️ O2SWITCH_URL not set: skipping remote status verification."
+elif [[ -n "${API_KEY}" ]]; then
+  # Key goes through a stdin header, never the URL or argv
+  STATUS_RESP=$(printf 'X-API-Key: %s\n' "${API_KEY}" | curl -s -f -m 5 -H @- "${O2SWITCH_URL}/v1/status" 2>/dev/null || echo "")
   if [[ -n "${STATUS_RESP}" ]]; then
     echo "✓ Remote Cloud status: ${STATUS_RESP}"
   else

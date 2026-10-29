@@ -3,10 +3,14 @@
 # between: 1) Local Zero-DB server, 2) Cloud o2switch relay, 3) Raspberry Pi 4 appliance.
 set -euo pipefail
 
+# Load optional unversioned local environment file (O2SWITCH_URL, cloud relay base URL)
+# shellcheck source=scripts/load_env.sh
+source "$(dirname "${BASH_SOURCE[0]}")/load_env.sh"
+load_local_env "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
 # Named operational constants
 DEFAULT_TARGET_PORT=8765
 DEFAULT_RPI4_HOST="rpi4"
-DEFAULT_O2SWITCH_API="https://2026-pydbsrt.fr/dbsrt"
 DISCOVERY_FILE="/tmp/dbsrt-server.json"
 PID_RELAY="target/dbsrt-relay-agent.pid"
 PID_LOCAL="/tmp/dbsrt-server.pid"
@@ -52,10 +56,7 @@ check_active_mode() {
     if echo "${cmd}" | grep -q -- "--remote-api"; then
       local remote_url
       remote_url=$(echo "${cmd}" | sed -n 's/.*--remote-api \([^ ]*\).*/\1/p')
-      if [[ -z "${remote_url}" ]]; then
-        remote_url="${DEFAULT_O2SWITCH_API}"
-      fi
-      if echo "${remote_url}" | grep -q "2026-pydbsrt.fr"; then
+      if [[ -n "${O2SWITCH_URL:-}" && "${remote_url}" == "${O2SWITCH_URL}"* ]]; then
         echo "CLOUD_O2SWITCH (Relay -> ${remote_url})"
       elif echo "${remote_url}" | grep -q "${RPI_HOST}"; then
         echo "RPI4_RELAY (Relay -> ${remote_url})"
@@ -102,7 +103,7 @@ case "${MODE}" in
     ./scripts/agent_relay.sh start
     echo "✓ Active mode: CLOUD_O2SWITCH"
     echo "  VLC communicates with local agent on http://127.0.0.1:${PORT}"
-    echo "  Visual pHash fingerprints forwarded via HTTPS to ${DEFAULT_O2SWITCH_API}"
+    echo "  Visual pHash fingerprints forwarded via HTTPS to ${O2SWITCH_URL:-<O2SWITCH_URL unset>}"
     ;;
 
   rpi4)
