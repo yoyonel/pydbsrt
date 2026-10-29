@@ -87,6 +87,8 @@ TARGET_QUEUE_POLL_INTERVAL_SECS: float = 0.5
 SCRIPT_PATH: Path = Path(__file__).resolve()
 SCRIPT_MTIME: float = SCRIPT_PATH.stat().st_mtime
 RELOAD_REQUESTED = threading.Event()
+# Longest wait for in-flight videos after a redeploy; slower ones are killed and requeued by the re-exec
+RELOAD_DRAIN_SECS: float = 600.0
 FTP_LIST_ATTEMPTS: int = 3
 FTP_LIST_RETRY_DELAY_SECS: float = 30.0
 
@@ -486,6 +488,8 @@ def process_single_video(
                     returncode = proc.poll()
                     if returncode is not None:
                         status = "COMPLETED" if returncode == 0 else "ERROR"
+                        if returncode == -signal.SIGTERM and RELOAD_REQUESTED.is_set():
+                            status = "RELOAD"
                         break
 
                     time.sleep(1.0)
@@ -550,6 +554,10 @@ def process_single_video(
     }
     if not success and log_path.exists():
         record["error_summary"] = log_path.read_text(encoding="utf-8", errors="ignore")[-300:]
+
+    if status == "RELOAD":
+        # Not a failure: no event, so the re-exec requeues it and the blacklist ignores it
+        return record
 
     with log_lock:
         events_log.parent.mkdir(parents=True, exist_ok=True)
@@ -640,6 +648,8 @@ def execute_dynamic_batch_ingestion(
                     events_log,
                     max_extraction_secs,
                 )
+                if rec.get("status") == "RELOAD":
+                    return
                 with state_lock:
                     if rec.get("success"):
                         success_count += 1
@@ -668,6 +678,7 @@ def execute_dynamic_batch_ingestion(
                     write_batch_queue_state(len(targets), success_count, fail_count, len(active_threads))
 
     start_batch = time.time()
+    reload_since = 0.0
     try:
         while True:
             with state_lock:
@@ -675,6 +686,11 @@ def execute_dynamic_batch_ingestion(
                     print("🔄 [RELOAD] Worker script updated: finishing in-flight videos before re-exec", flush=True)
                     remaining_targets.clear()
                     RELOAD_REQUESTED.set()
+                    reload_since = time.time()
+                if reload_since and time.time() - reload_since >= RELOAD_DRAIN_SECS:
+                    print("🔄 [RELOAD] Drain timeout: stopping in-flight videos, the re-exec requeues them", flush=True)
+                    _kill_active_children()
+                    reload_since = 0.0
                 active_threads = [t for t in active_threads if t.is_alive()]
                 desired = read_desired_workers(initial_workers)
                 if not remaining_targets and not active_threads:

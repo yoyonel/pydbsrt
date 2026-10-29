@@ -260,6 +260,10 @@ Une vidéo dont les **3 dernières tentatives** du journal d'événements sont d
 
 `etc/batch_exclude.txt` (sur o2switch uniquement, jamais synchronisé) liste des préfixes de chemins NAS, un par ligne, `#` pour commenter. Les vidéos concernées sont écartées de **tous** les lancements, `--retry-failed` compris. Usage type : dossiers que le compte FTP ne peut pas lire (`550` sur `RETR`) en attendant la correction des ACL dans DSM. Retirez la ligne une fois le dossier lisible.
 
+### Redéploiement du worker en cours de batch
+
+Le worker surveille la date de modification de son propre script. Après un `task o2switch:sync` qui le modifie, il cesse de lancer de nouvelles vidéos, laisse finir celles en cours, puis se relance (`execv`) avec le même PID et les mêmes arguments : le superviseur RPi4 et le fichier PID restent valides. Une vidéo encore en cours au bout de 10 minutes est arrêtée ; elle n'est pas comptée en échec et repart après la relance. Un `sync` qui ne change pas le script ne déclenche rien.
+
 ### Procédure de Relance Ciblée
 
 Arrêtez le travailleur distant en cours, puis relancez-le avec l'argument `--retry-failed` :

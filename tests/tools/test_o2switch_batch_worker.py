@@ -5,6 +5,7 @@ import os
 import signal
 import subprocess
 import tempfile
+import threading
 import time
 import urllib.parse
 from pathlib import Path
@@ -249,3 +250,79 @@ def test_excluded_prefixes_match_nfc_and_nfd_paths(tmp_path: Path):
     assert not worker.is_excluded("/tvshow/Other/e1.mkv", prefixes)
     assert not worker.is_excluded("/tvshow/x.mkv", [])
     assert worker.load_excluded_prefixes(tmp_path / "missing.txt") == []
+
+
+def test_reload_drops_queue_but_finishes_in_flight_video(tmp_path: Path, monkeypatch):
+    """A redeploy stops new launches, lets the running video finish and requests a re-exec."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(worker, "TARGET_QUEUE_POLL_INTERVAL_SECS", 0.01)
+    monkeypatch.setattr(worker, "write_batch_queue_state", lambda *_a: None)
+    worker.RELOAD_REQUESTED.clear()
+    started, release, processed = threading.Event(), threading.Event(), []
+
+    def slow_video(item, *_args):
+        started.set()
+        release.wait(5)
+        processed.append(item[1])
+        return {"success": True, "video_stem": item[1], "wall_duration_secs": 1.0, "io_read_rate_mib_s": 1.0}
+
+    monkeypatch.setattr(worker, "process_single_video", slow_video)
+    monkeypatch.setattr(worker, "script_updated", started.is_set)
+    threading.Timer(0.2, release.set).start()
+    targets = [("/video/a.mkv", "a.mkv", 1), ("/video/b.mkv", "b.mkv", 1), ("/video/c.mkv", "c.mkv", 1)]
+
+    ok, failed, _ = worker.execute_dynamic_batch_ingestion(targets, "ftp://nas:21", "dbsrt", {}, tmp_path / "e", 60, 1)
+
+    assert (ok, failed, processed) == (1, 0, ["a.mkv"])
+    assert worker.RELOAD_REQUESTED.is_set()
+    worker.RELOAD_REQUESTED.clear()
+
+
+def test_main_reexecs_same_argv_after_reload(tmp_path: Path, monkeypatch):
+    """After a reload request main replaces the process with the exact same interpreter and argv."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(worker.sys, "argv", ["worker", "--nas-host", "nas", "--nas-user", "u", "--nas-base", "/video"])
+    monkeypatch.setattr(worker, "resolve_nas_password", lambda: "p")
+    monkeypatch.setattr(worker, "list_nas_videos_ftp", lambda **_k: [("/video/a.mkv", "a.mkv", 1)])
+
+    def ingest(**_kwargs):
+        worker.RELOAD_REQUESTED.set()
+        return 0, 0, 0.0
+
+    monkeypatch.setattr(worker, "execute_dynamic_batch_ingestion", ingest)
+    execs = []
+    monkeypatch.setattr(worker.os, "execv", lambda exe, argv: execs.append((exe, argv)))
+    try:
+        worker.main()
+    finally:
+        worker.RELOAD_REQUESTED.clear()
+
+    assert execs == [(worker.sys.executable, worker.sys.orig_argv)]
+
+
+def test_reload_drain_timeout_kills_slow_video_without_failure_event(tmp_path: Path, monkeypatch):
+    """A video still running after the drain window is killed and requeued, not recorded as failed."""
+    monkeypatch.chdir(tmp_path)
+    fake_dbsrt = tmp_path / "dbsrt"
+    fake_dbsrt.write_text("#!/bin/sh\nexec sleep 30\n", encoding="utf-8")
+    fake_dbsrt.chmod(0o755)
+    monkeypatch.setattr(worker, "TARGET_QUEUE_POLL_INTERVAL_SECS", 0.01)
+    monkeypatch.setattr(worker, "RELOAD_DRAIN_SECS", 0.2)
+    monkeypatch.setattr(worker, "write_batch_queue_state", lambda *_a: None)
+    monkeypatch.setattr(worker, "script_updated", lambda: bool(ACTIVE_CHILD_PGIDS))
+    worker.RELOAD_REQUESTED.clear()
+    events = tmp_path / "events.jsonl"
+    targets = [("/video/a.mkv", "a.mkv", 1), ("/video/b.mkv", "b.mkv", 1)]
+
+    start = time.time()
+    try:
+        ok, failed, _ = worker.execute_dynamic_batch_ingestion(
+            targets, "ftp://nas:21", str(fake_dbsrt), {}, events, 60, 1
+        )
+        assert worker.RELOAD_REQUESTED.is_set()
+    finally:
+        worker.RELOAD_REQUESTED.clear()
+
+    assert (ok, failed) == (0, 0)
+    assert not events.exists()
+    assert time.time() - start < 10
