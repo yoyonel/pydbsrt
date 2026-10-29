@@ -54,7 +54,7 @@ flowchart TD
     end
 
     subgraph Tier1["Tier 1 : Moteur de Calcul Déporté & Serveur Cloud (o2switch)"]
-        O2_CPU["⚙️ 12 vCPUs (1-8 workers dynamiques, 2-6 en autoscaling RPi4)"]
+        O2_CPU["⚙️ 12 vCPUs (1-8 workers dynamiques, 2-4 en autoscaling RPi4)"]
         O2_RAM["⚡ Mémoire RAM (Index MIH catalog.dbphash & Décodage FFmpeg)"]
         O2_DATA["💾 Stockage Léger NVMe (~/dbsrt/data/)<br/>• __PHASH__/*.phash (~150 Ko)<br/>• SRT/*.srt (~50 Ko CAS)<br/>• SRT/couplings.json"]
     end
@@ -271,7 +271,7 @@ flowchart TD
 1. **Cycle de Polling (60 secondes)** : L'agent lit la ligne `BATCH_STATE=<running|stopped|finished|crashed|absent> PID=<pid|none> TYPE=<tvshow|movies>` renvoyée par `batch-status`. Il relance le batch en arrière-plan (`screen -dmS`) uniquement s'il est `crashed` ou `absent` ; un batch `stopped` (marqueur `run/batch_stopped`) ou `finished` n'est jamais relancé.
 2. **Synchronisation du Code** : Lors d'une relance, le superviseur s'assure que la version locale de `scripts/o2switch_batch_worker.py` présente sur le RPi4 est projetée sur o2switch.
 3. **Persistance en Mémoire RAM** : Le processus Python actif sur o2switch conserve son code chargé en mémoire vive. Pour charger un nouveau code, arrêtez le batch (`task o2switch:batch:stop`) puis relancez-le explicitement (`batch-tvshow` / `batch-movies`), ce qui efface le marqueur d'arrêt.
-4. **Autoscaling en boucle fermée** : L'agent ajuste la concurrence entre 2 et 6 workers via `run/desired_workers` selon la charge CPU LVE (cible 78% à 92%).
+4. **Autoscaling en boucle fermée** : L'agent ajuste la concurrence entre 2 et 4 workers via `run/desired_workers` selon la charge CPU LVE (cible 78% à 92%).
 5. **Reprise Idempotente Ciblée** : Grâce à l'argument `--fresh-only` (ou `--retry-failed`), le worker redémarré ignore instantanément tous les médias dont les empreintes `.phash` ont déjà été validées sur disque, évitant tout recalcul inutile.
 
 ---

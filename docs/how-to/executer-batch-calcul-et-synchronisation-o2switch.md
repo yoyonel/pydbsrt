@@ -6,7 +6,7 @@ Ce guide pratique détaille pas-à-pas comment déporter le calcul intensif d'em
 
 ## 🎯 Objectifs opérationnels
 
-1. **Calcul distant intensif** : Exécuter l'ingestion par batch des épisodes non traités (**"Vierges"**) sur les 12 vCPUs d'o2switch avec une concurrence dynamique (1 à 8 workers, ajustable à chaud via `run/desired_workers`) sans saturation ni blocage CloudLinux LVE. Le superviseur RPi4 l'auto-régule entre 2 et 6 workers (cible 78% à 92% de CPU LVE).
+1. **Calcul distant intensif** : Exécuter l'ingestion par batch des épisodes non traités (**"Vierges"**) sur les 12 vCPUs d'o2switch avec une concurrence dynamique (1 à 8 workers, ajustable à chaud via `run/desired_workers`) sans saturation ni blocage CloudLinux LVE. Le superviseur RPi4 l'auto-régule entre 2 et 4 workers (cible 78% à 92% de CPU LVE). Budget CPU : le worker n'admet jamais plus de `DBSRT_CPU_BUDGET_VCPUS // DBSRT_FFMPEG_THREADS` vidéos simultanées (9 // 2 = 4), quel que soit `run/desired_workers` ; le superviseur ne baisse la cible que lorsque les jobs en cours ne la dépassent plus (un job lancé n'est jamais interrompu).
 2. **Zéro-Copie NVMe** : Traiter les flux vidéo directement en mémoire RAM via FFmpeg, lu directement en FTP (port 21) depuis le NAS Synology, sans jamais copier de fichiers vidéo volumineux sur l'hébergement mutualisé.
 3. **Supervision temps réel TUI** : Suivre l'exécution, les PIDs, le décodage, les débits réseau I/O et les prédictions d'ETA directement dans le terminal via `dbsrt top` en session SSH.
 4. **Synchronisation idempotente** : Rapatrier les empreintes binaires `.phash`, les sous-titres adressés par le contenu (CAS SHA-256) et consolider le registre `couplings.json` et le catalogue haute densité `.dbphash`.

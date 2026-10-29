@@ -90,6 +90,9 @@ SCRIPT_MTIME: float = SCRIPT_PATH.stat().st_mtime
 RELOAD_REQUESTED = threading.Event()
 # Longest wait for in-flight videos after a redeploy; slower ones are killed and requeued by the re-exec
 RELOAD_DRAIN_SECS: float = 600.0
+# Jobs run ~1 vCPU per FFmpeg thread and lowering desired_workers cannot stop in-flight ones,
+# so admission keeps workers x threads under this share of the 12 vCPU o2switch LVE limit.
+CPU_BUDGET_VCPUS: int = int(os.getenv("DBSRT_CPU_BUDGET_VCPUS", "9"))
 FTP_LIST_ATTEMPTS: int = 3
 FTP_LIST_RETRY_DELAY_SECS: float = 30.0
 
@@ -102,15 +105,22 @@ def script_updated() -> bool:
         return False
 
 
-def read_desired_workers(default_workers: int) -> int:
-    """Reads desired concurrency dynamically from run/desired_workers."""
+def max_workers_for_budget(ffmpeg_threads: str) -> int:
+    """Highest concurrency whose decode threads fit in CPU_BUDGET_VCPUS ("0" lets FFmpeg take every core)."""
+    threads = int(ffmpeg_threads) if ffmpeg_threads.isdigit() else 0
+    per_job = threads if threads > 0 else CPU_BUDGET_VCPUS
+    return max(MIN_CONCURRENT_WORKERS, min(MAX_CONCURRENT_WORKERS, CPU_BUDGET_VCPUS // per_job))
+
+
+def read_desired_workers(default_workers: int, max_workers: int = MAX_CONCURRENT_WORKERS) -> int:
+    """Reads desired concurrency dynamically from run/desired_workers, capped at max_workers."""
+    val = default_workers
     if DEFAULT_DESIRED_WORKERS_PATH.is_file():
         try:
             val = int(DEFAULT_DESIRED_WORKERS_PATH.read_text(encoding="utf-8").strip())
-            return max(MIN_CONCURRENT_WORKERS, min(val, MAX_CONCURRENT_WORKERS))
         except Exception:
             pass
-    return default_workers
+    return max(MIN_CONCURRENT_WORKERS, min(val, max_workers))
 
 
 def _load_env_config(path: Path) -> Dict[str, str]:
@@ -635,13 +645,15 @@ def execute_dynamic_batch_ingestion(
         except Exception:
             pass
 
+    max_workers = max_workers_for_budget(child_env.get("DBSRT_FFMPEG_THREADS", DEFAULT_FFMPEG_THREADS))
+    print(f"CPU budget: {CPU_BUDGET_VCPUS} vCPU, at most {max_workers} concurrent videos", flush=True)
     write_batch_queue_state(len(targets), success_count, fail_count, initial_workers)
 
     def worker_loop() -> None:
         nonlocal success_count, fail_count, fast_failure_streak
         while True:
             with state_lock:
-                desired = read_desired_workers(initial_workers)
+                desired = read_desired_workers(initial_workers, max_workers)
                 if len(active_threads) > desired or not remaining_targets:
                     return
                 item = remaining_targets.pop(0)
@@ -700,7 +712,7 @@ def execute_dynamic_batch_ingestion(
                     _kill_active_children()
                     reload_since = 0.0
                 active_threads = [t for t in active_threads if t.is_alive()]
-                desired = read_desired_workers(initial_workers)
+                desired = read_desired_workers(initial_workers, max_workers)
                 if not remaining_targets and not active_threads:
                     break
                 while len(active_threads) < desired and remaining_targets:

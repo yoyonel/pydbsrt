@@ -8,7 +8,7 @@ Ce guide pratique détaille la mise en œuvre d'un agent de supervision autonome
 
 1. **Surveillance permanente (24/7)** : Vérifier régulièrement l'intégrité de la session et des workers sur o2switch sans intervention humaine.
 2. **Auto-guérison (Auto-Healing)** : Relancer automatiquement le batch en tâche de fond (`screen -dmS`) s'il a planté (`crashed`) ou disparu (`absent`). Quand une file est vidée (`finished`), le superviseur bascule sur l'autre bibliothèque (`tvshow` ↔ `movies`) pour occuper les CPU en continu. Deux lancements sont espacés d'au moins 30 min, pour qu'une file de fichiers toujours en échec ne boucle pas. Un arrêt manuel (`stopped`) ou une sonde en échec (`unknown`) ne déclenchent jamais de lancement.
-3. **Autoscaling adaptatif en boucle fermée** : Sonde en temps réel la charge CPU CloudLinux LVE sur o2switch (quota de 12 vCPUs) et adapte dynamiquement la concurrence (2 à 6 workers) pour exploiter la marge résiduelle (cible 78% à 92%), avec repli d'urgence immédiat si pic > 96% et ajustement fluide via `run/desired_workers` sans interruption des flux en cours.
+3. **Autoscaling adaptatif en boucle fermée** : Sonde en temps réel la charge CPU CloudLinux LVE sur o2switch (quota de 12 vCPUs) et adapte dynamiquement la concurrence (2 à 4 workers) pour exploiter la marge résiduelle (cible 78% à 92%), avec repli d'urgence immédiat si pic > 96% et ajustement fluide via `run/desired_workers` sans interruption des flux en cours. Budget CPU : le worker n'admet jamais plus de `DBSRT_CPU_BUDGET_VCPUS // DBSRT_FFMPEG_THREADS` vidéos simultanées (9 // 2 = 4), quel que soit `run/desired_workers` ; le superviseur ne baisse la cible que lorsque les jobs en cours ne la dépassent plus (un job lancé n'est jamais interrompu).
 4. **Rapatriement continu (Continuous Pull)** : Synchroniser périodiquement les nouveaux fichiers `.phash` et sous-titres vers le catalogue local (`data/__PHASH__`, stockage Zero-DB).
 
 ---
@@ -24,7 +24,7 @@ flowchart LR
 
     subgraph O2["Hébergement CloudLinux o2switch"]
         SCREEN["Session screen (dbsrt_batch)"]
-        WORKERS["2 à 6 Workers (dbsrt + ffmpeg)"]
+        WORKERS["2 à 4 Workers (dbsrt + ffmpeg)"]
     end
 
     subgraph NAS["Synology NAS"]
@@ -195,6 +195,7 @@ Toutes ces valeurs se définissent dans l'environnement ou dans le fichier `.env
 | `NAS_PASS` | `o2switch_ctl.sh`, worker | Mot de passe FTP. Transmis par stdin et écrit dans `etc/.nas_pass` (mode 600) ; jamais en argument ni dans une URL. |
 | `DBSRT_FTP_USER`, `DBSRT_FTP_PASSWORD` | `dbsrt` (ffmpeg/ffprobe) | Positionnés par le worker pour chaque processus enfant, puis passés à ffmpeg via `-ftp-user` / `-ftp-password`. Jamais journalisés. |
 | `DBSRT_FFMPEG_THREADS` | `dbsrt` (ffmpeg) | Threads de décodage par worker (`2` posé par le worker o2switch ; `0` = auto hors worker). |
+| `DBSRT_CPU_BUDGET_VCPUS` | worker o2switch | vCPU maximum engagés par les décodages simultanés (`9`, soit 75 % du quota LVE de 12). |
 | `O2SWITCH_URL` | `o2switch_ctl.sh rotate-key` | URL publique de la passerelle ; la vérification post-rotation est sautée si absente. |
 
 > [!WARNING]

@@ -15,6 +15,7 @@ from scripts.rpi4_o2switch_supervisor import (
     decide_next_batch,
     decide_workers,
     get_remote_desired_workers,
+    get_remote_running_jobs,
     parse_proc_cpu_seconds,
     pull_remote_catalog,
     restart_remote_batch,
@@ -54,7 +55,7 @@ def test_compute_lve_cpu_pct_uses_deltas_and_counts_new_pids():
         (97.0, [97.0], AUTOSCALE_MIN_WORKERS, False, AUTOSCALE_MIN_WORKERS),  # floor
         (50.0, [50.0, 50.0], 4, True, 4),  # window not full
         (50.0, [50.0, 50.0, 50.0], 4, False, 4),  # cooldown running
-        (50.0, [50.0, 50.0, 50.0], 4, True, 5),  # scale up
+        (50.0, [50.0, 50.0, 50.0], 3, True, 4),  # scale up
         (50.0, [50.0, 50.0, 50.0], AUTOSCALE_MAX_WORKERS, True, AUTOSCALE_MAX_WORKERS),  # ceiling
         (94.0, [94.0, 94.0, 94.0], 4, True, 3),  # scale down
         (85.0, [85.0, 85.0, 85.0], 4, True, 4),  # target zone
@@ -62,6 +63,29 @@ def test_compute_lve_cpu_pct_uses_deltas_and_counts_new_pids():
 )
 def test_decide_workers(cpu, history, workers, cooldown_elapsed, expected):
     assert decide_workers(cpu, history, workers, cooldown_elapsed) == expected
+
+
+@pytest.mark.parametrize(
+    ("cpu", "history", "running", "expected"),
+    [
+        (99.0, [99.0], 4, 3),  # in-flight jobs exceed target: wait, a lower target changes nothing yet
+        (95.0, [95.0, 95.0, 95.0], 4, 3),  # same for the rolling-average step
+        (99.0, [99.0], 3, 2),  # target already bites: emergency step allowed
+        (95.0, [95.0, 95.0, 95.0], 2, 2),
+        (99.0, [99.0], None, 2),  # probe failed: previous behaviour
+    ],
+)
+def test_decide_workers_waits_for_in_flight_jobs_before_scaling_down(cpu, history, running, expected):
+    assert decide_workers(cpu, history, 3, True, running) == expected
+
+
+def test_get_remote_running_jobs():
+    """Counts in-flight jobs, None when the probe output is unusable."""
+    with patch("subprocess.run", return_value=_completed("3\n")) as mock_run:
+        assert get_remote_running_jobs("o2switch") == 3
+        assert "[d]bsrt media:add" in mock_run.call_args[0][0][-1]
+    with patch("subprocess.run", return_value=_completed("", returncode=255)):
+        assert get_remote_running_jobs("o2switch") is None
 
 
 @pytest.mark.parametrize(
@@ -149,6 +173,7 @@ def _run_one_iteration(state: str, batch_type: str = "tvshow") -> MagicMock:
         ),
         patch("scripts.rpi4_o2switch_supervisor.get_remote_desired_workers", return_value=4),
         patch("scripts.rpi4_o2switch_supervisor.sample_remote_cpu", return_value=None),
+        patch("scripts.rpi4_o2switch_supervisor.get_remote_running_jobs", return_value=None),
         patch("scripts.rpi4_o2switch_supervisor.restart_remote_batch") as mock_restart,
         patch("scripts.rpi4_o2switch_supervisor.pull_remote_catalog") as mock_pull,
         patch("scripts.rpi4_o2switch_supervisor.time.sleep", side_effect=KeyboardInterrupt),

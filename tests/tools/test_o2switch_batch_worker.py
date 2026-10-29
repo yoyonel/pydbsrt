@@ -291,6 +291,41 @@ def test_reload_drops_queue_but_finishes_in_flight_video(tmp_path: Path, monkeyp
     worker.RELOAD_REQUESTED.clear()
 
 
+@pytest.mark.parametrize(("threads", "expected"), [("2", 4), ("1", 8), ("3", 3), ("0", 1), ("auto", 1), ("16", 1)])
+def test_max_workers_for_budget(threads, expected, monkeypatch):
+    """Concurrency is the 9 vCPU budget divided by FFmpeg threads, within 1..8."""
+    monkeypatch.setattr(worker, "CPU_BUDGET_VCPUS", 9)
+    assert worker.max_workers_for_budget(threads) == expected
+
+
+def test_cpu_budget_caps_concurrency_above_desired_workers(tmp_path: Path, monkeypatch):
+    """A desired_workers above the CPU budget never runs more videos at once than the budget allows."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(worker, "TARGET_QUEUE_POLL_INTERVAL_SECS", 0.01)
+    monkeypatch.setattr(worker, "write_batch_queue_state", lambda *_a: None)
+    monkeypatch.setattr(worker, "CPU_BUDGET_VCPUS", 4)
+    (tmp_path / "run").mkdir()
+    (tmp_path / "run" / "desired_workers").write_text("8", encoding="utf-8")
+    lock, running, peak = threading.Lock(), [0], [0]
+
+    def video(item, *_args):
+        with lock:
+            running[0] += 1
+            peak[0] = max(peak[0], running[0])
+        time.sleep(0.05)
+        with lock:
+            running[0] -= 1
+        return {"success": True, "video_stem": item[1], "wall_duration_secs": 1.0, "io_read_rate_mib_s": 1.0}
+
+    monkeypatch.setattr(worker, "process_single_video", video)
+    targets = [(f"/video/{i}.mkv", f"{i}.mkv", 1) for i in range(8)]
+    env = {"DBSRT_FFMPEG_THREADS": "2"}
+
+    ok, failed, _ = worker.execute_dynamic_batch_ingestion(targets, "ftp://nas:21", "dbsrt", env, tmp_path / "e", 60, 8)
+
+    assert (ok, failed, peak[0]) == (8, 0, 2)
+
+
 def test_main_reexecs_same_argv_after_reload(tmp_path: Path, monkeypatch):
     """After a reload request main replaces the process with the exact same interpreter and argv."""
     monkeypatch.chdir(tmp_path)

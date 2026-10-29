@@ -40,7 +40,8 @@ RELAUNCH_BACKOFF_SECS: int = 1800
 # Autoscaling Engine Constants (CloudLinux LVE on o2switch has 12 vCPUs allocated = 1200% max)
 DEFAULT_LVE_TOTAL_VCPUS: float = 12.0
 AUTOSCALE_MIN_WORKERS: int = 2
-AUTOSCALE_MAX_WORKERS: int = 6
+# Matches the worker CPU budget: 9 vCPU // 2 FFmpeg threads per video
+AUTOSCALE_MAX_WORKERS: int = 4
 AUTOSCALE_DEFAULT_WORKERS: int = 4
 AUTOSCALE_TARGET_LOW_PCT: float = 78.0  # Scale up concurrency if rolling average LVE CPU < 78%
 AUTOSCALE_TARGET_HIGH_PCT: float = 92.0  # Scale down concurrency if rolling average LVE CPU > 92%
@@ -125,6 +126,19 @@ def get_remote_desired_workers(
     except Exception:
         pass
     return default_workers
+
+
+def get_remote_running_jobs(remote_host: str) -> int | None:
+    """Counts in-flight dbsrt media:add jobs on the remote host (None when the probe fails)."""
+    # The bracket keeps pgrep from matching the ssh shell whose command line holds the pattern
+    cmd = ["ssh", "-o", "BatchMode=yes", remote_host, "pgrep -cf '[d]bsrt media:add' || true"]
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=DEFAULT_SSH_TIMEOUT_SECS)
+        if res.returncode == 0 and res.stdout.strip().isdigit():
+            return int(res.stdout.strip())
+    except Exception as err:
+        log(f"⚠️ Failed counting running jobs on {remote_host}: {err}")
+    return None
 
 
 def set_remote_desired_workers(remote_host: str, remote_base: str, count: int) -> bool:
@@ -232,19 +246,24 @@ def decide_next_batch(state: str, batch_type: str, secs_since_last_launch: float
     return next_type if secs_since_last_launch >= RELAUNCH_BACKOFF_SECS else None
 
 
-def decide_workers(cpu: float, cpu_history: List[float], cur_workers: int, cooldown_elapsed: bool) -> int:
+def decide_workers(
+    cpu: float, cpu_history: List[float], cur_workers: int, cooldown_elapsed: bool, running_jobs: int | None = None
+) -> int:
     """Returns the new worker count for one CPU sample (cur_workers when unchanged).
 
-    `cpu_history` is the rolling window, already including `cpu`.
+    `cpu_history` is the rolling window, already including `cpu`. Scale-downs wait while
+    `running_jobs` still exceeds `cur_workers`: in-flight videos are never stopped, so a lower
+    target only bites when they finish and lowering it again would starve the next wave.
     """
-    if cpu >= AUTOSCALE_EMERGENCY_SPIKE_PCT and cur_workers > AUTOSCALE_MIN_WORKERS:
+    can_scale_down = cur_workers > AUTOSCALE_MIN_WORKERS and (running_jobs is None or running_jobs <= cur_workers)
+    if cpu >= AUTOSCALE_EMERGENCY_SPIKE_PCT and can_scale_down:
         return cur_workers - 1
     if len(cpu_history) < AUTOSCALE_SAMPLE_WINDOW or not cooldown_elapsed:
         return cur_workers
     avg_cpu = sum(cpu_history) / len(cpu_history)
     if avg_cpu < AUTOSCALE_TARGET_LOW_PCT and cur_workers < AUTOSCALE_MAX_WORKERS:
         return cur_workers + 1
-    if avg_cpu > AUTOSCALE_TARGET_HIGH_PCT and cur_workers > AUTOSCALE_MIN_WORKERS:
+    if avg_cpu > AUTOSCALE_TARGET_HIGH_PCT and can_scale_down:
         return cur_workers - 1
     return cur_workers
 
@@ -272,8 +291,9 @@ def supervisor_loop(remote_host: str, remote_base: str, check_interval: int, pul
                 cpu = compute_lve_cpu_pct(prev_sample, sample)
                 cpu_history = (cpu_history + [cpu])[-AUTOSCALE_SAMPLE_WINDOW:]
                 now = time.time()
+                running_jobs = get_remote_running_jobs(remote_host)
                 new_workers = decide_workers(
-                    cpu, cpu_history, cur_workers, now - last_scale_time >= AUTOSCALE_COOLDOWN_SECS
+                    cpu, cpu_history, cur_workers, now - last_scale_time >= AUTOSCALE_COOLDOWN_SECS, running_jobs
                 )
                 avg_cpu = sum(cpu_history) / len(cpu_history)
                 if new_workers != cur_workers and set_remote_desired_workers(remote_host, remote_base, new_workers):
@@ -284,7 +304,7 @@ def supervisor_loop(remote_host: str, remote_base: str, check_interval: int, pul
                 else:
                     log(
                         f"● Remote batch healthy (PID {status['pid']}, CPU: {cpu:.1f}% [avg {avg_cpu:.1f}%, "
-                        f"{len(cpu_history)}/{AUTOSCALE_SAMPLE_WINDOW} samples], workers: {cur_workers})."
+                        f"{len(cpu_history)}/{AUTOSCALE_SAMPLE_WINDOW} samples], workers: {cur_workers}, running: {running_jobs})."
                     )
             else:
                 log(f"● Remote batch healthy (PID {status['pid']}, workers: {cur_workers}, CPU baseline pending).")
