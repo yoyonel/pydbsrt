@@ -87,6 +87,7 @@ fn test_active_job_telemetry_instantiation() {
         total_bytes: 1000 * BYTES_PER_MIB,
         progress_ratio: 0.5,
         current_rate_mib_s: 25.4,
+        hashing_fps: 0.0,
         eta_secs: Some(19.6),
         cpu_percent: 18.5,
         ram_rss_mib: 64.0,
@@ -133,6 +134,7 @@ fn test_system_telemetry_aggregation() {
         total_bytes: 200,
         progress_ratio: 0.5,
         current_rate_mib_s: 15.0,
+        hashing_fps: 0.0,
         eta_secs: None,
         cpu_percent: 10.0,
         ram_rss_mib: 30.0,
@@ -150,6 +152,7 @@ fn test_system_telemetry_aggregation() {
         total_bytes: 200,
         progress_ratio: 0.25,
         current_rate_mib_s: 20.0,
+        hashing_fps: 0.0,
         eta_secs: None,
         cpu_percent: 45.0,
         ram_rss_mib: 40.0,
@@ -160,6 +163,47 @@ fn test_system_telemetry_aggregation() {
     sys.total_rate_mib_s = sys.active_jobs.iter().map(|j| j.current_rate_mib_s).sum();
     assert_eq!(sys.active_jobs.len(), 2);
     assert_eq!(sys.total_rate_mib_s, 35.0);
+}
+
+#[test]
+fn test_negative_zero_rate_sanitization() {
+    let sys = SystemTelemetry {
+        total_rate_mib_s: -0.0,
+        net_rx_mib_s: -0.0,
+        ..Default::default()
+    };
+
+    let backend = TestBackend::new(140, 45);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let empty_set = HashSet::new();
+
+    let ctx = UiContext {
+        telemetry: &sys,
+        view: ViewPage::ActiveJobs,
+        selected_index: 0,
+        completed_scroll_index: 0,
+        media_scroll_index: 0,
+        source_scroll_index: 0,
+        source_modal: None,
+        selected_media_paths: &empty_set,
+        media_filter: MediaFilter::All,
+        media_sort: MediaSort::Name,
+        source_filter: &MediaSourceFilter::ActiveOnly,
+        completed_filter: CompletedFilter::All,
+        completed_sort: CompletedSort::DateDesc,
+        search_query: "",
+        search_active: false,
+        help_tab: HelpTab::General,
+        help_scroll_index: 0,
+        feedback_msg: None,
+    };
+
+    terminal.draw(|f| render_ui(f, &ctx)).unwrap();
+
+    let buffer = terminal.backend().buffer();
+    let content: String = buffer.content().iter().map(|c| c.symbol()).collect();
+    assert!(!content.contains("-0.0 MB/s"));
+    assert!(content.contains("0.0 MB/s"));
 }
 
 #[test]
@@ -226,6 +270,7 @@ fn test_ui_rendering_all_pages() {
                 total_bytes: 500 * BYTES_PER_MIB,
                 progress_ratio: 0.01,
                 current_rate_mib_s: 18.5,
+                hashing_fps: 0.0,
                 eta_secs: Some(45.0),
                 cpu_percent: 15.0,
                 ram_rss_mib: 120.0,
@@ -246,6 +291,7 @@ fn test_ui_rendering_all_pages() {
                 total_bytes: 100 * BYTES_PER_MIB,
                 progress_ratio: 0.5,
                 current_rate_mib_s: 25.0,
+                hashing_fps: 0.0,
                 eta_secs: Some(5.0),
                 cpu_percent: 4.0,
                 ram_rss_mib: 25.0,
@@ -667,6 +713,7 @@ fn test_app_state_and_key_handling() {
                 total_bytes: 100,
                 progress_ratio: 0.1,
                 current_rate_mib_s: 1.0,
+                hashing_fps: 0.0,
                 eta_secs: None,
                 cpu_percent: 1.0,
                 ram_rss_mib: 10.0,
@@ -683,6 +730,7 @@ fn test_app_state_and_key_handling() {
                 total_bytes: 100,
                 progress_ratio: 0.1,
                 current_rate_mib_s: 1.0,
+                hashing_fps: 0.0,
                 eta_secs: None,
                 cpu_percent: 1.0,
                 ram_rss_mib: 10.0,
@@ -754,6 +802,7 @@ fn test_process_ctl_and_inspection() {
         total_bytes: 100 * BYTES_PER_MIB,
         progress_ratio: 0.5,
         current_rate_mib_s: 12.0,
+        hashing_fps: 0.0,
         eta_secs: Some(4.0),
         cpu_percent: 5.0,
         ram_rss_mib: 30.0,
@@ -781,6 +830,7 @@ fn test_process_ctl_and_inspection() {
         total_bytes: 100,
         progress_ratio: 0.1,
         current_rate_mib_s: 1.0,
+        hashing_fps: 0.0,
         eta_secs: None,
         cpu_percent: 800.0,
         ram_rss_mib: 150.0,
@@ -841,6 +891,7 @@ fn test_event_loop_step_execution() {
             total_bytes: 200,
             progress_ratio: 0.5,
             current_rate_mib_s: 10.0,
+            hashing_fps: 0.0,
             eta_secs: Some(10.0),
             cpu_percent: 5.0,
             ram_rss_mib: 50.0,
@@ -877,42 +928,43 @@ fn test_process_candidate_jobs_pipeline() {
         ),
     );
 
+    use dbsrt_cli::commands::top::sampler::RawCandidateProcess;
     let raw = vec![
         // 1. dbsrt coordinator with active child -> skipped
-        (
-            1000,
-            0,
-            vec!["dbsrt".to_string(), "media:add".to_string()],
-            "dbsrt media:add".to_string(),
-            true,
-            false,
-            5.0,
-            10_000_000,
-            10,
-        ),
+        RawCandidateProcess {
+            pid: 1000,
+            ppid: 0,
+            cmdline: vec!["dbsrt".to_string(), "media:add".to_string()],
+            cmd_str: "dbsrt media:add".to_string(),
+            is_dbsrt: true,
+            is_ffmpeg: false,
+            cpu_pct: 5.0,
+            mem_bytes: 10_000_000,
+            run_time_secs: 10,
+        },
         // 2. ffmpeg vaapi decoding (seen before -> delta rate calculated)
-        (
-            1001,
-            1000,
-            vec![
+        RawCandidateProcess {
+            pid: 1001,
+            ppid: 1000,
+            cmdline: vec![
                 "ffmpeg".to_string(),
                 "-hwaccel".to_string(),
                 "vaapi".to_string(),
                 "-i".to_string(),
                 "test.mkv".to_string(),
             ],
-            "ffmpeg -hwaccel vaapi -i test.mkv".to_string(),
-            false,
-            true,
-            45.0,
-            150_000_000,
-            10,
-        ),
+            cmd_str: "ffmpeg -hwaccel vaapi -i test.mkv".to_string(),
+            is_dbsrt: false,
+            is_ffmpeg: true,
+            cpu_pct: 45.0,
+            mem_bytes: 150_000_000,
+            run_time_secs: 10,
+        },
         // 3. ffmpeg subtitle extraction (first tick -> rate 0.0)
-        (
-            1002,
-            1000,
-            vec![
+        RawCandidateProcess {
+            pid: 1002,
+            ppid: 1000,
+            cmdline: vec![
                 "ffmpeg".to_string(),
                 "-i".to_string(),
                 "test.mkv".to_string(),
@@ -921,31 +973,31 @@ fn test_process_candidate_jobs_pipeline() {
                 "-f".to_string(),
                 "srt".to_string(),
             ],
-            "ffmpeg -i test.mkv -map 0:s:0 -f srt".to_string(),
-            false,
-            true,
-            2.0,
-            20_000_000,
-            2,
-        ),
+            cmd_str: "ffmpeg -i test.mkv -map 0:s:0 -f srt".to_string(),
+            is_dbsrt: false,
+            is_ffmpeg: true,
+            cpu_pct: 2.0,
+            mem_bytes: 20_000_000,
+            run_time_secs: 2,
+        },
         // 4. dbsrt standalone with cpu hwaccel
-        (
-            1003,
-            0,
-            vec![
+        RawCandidateProcess {
+            pid: 1003,
+            ppid: 0,
+            cmdline: vec![
                 "dbsrt".to_string(),
                 "media:add".to_string(),
                 "--hwaccel".to_string(),
                 "cpu".to_string(),
                 "clip.mp4".to_string(),
             ],
-            "dbsrt media:add --hwaccel cpu clip.mp4".to_string(),
-            true,
-            false,
-            80.0,
-            50_000_000,
-            5,
-        ),
+            cmd_str: "dbsrt media:add --hwaccel cpu clip.mp4".to_string(),
+            is_dbsrt: true,
+            is_ffmpeg: false,
+            cpu_pct: 80.0,
+            mem_bytes: 50_000_000,
+            run_time_secs: 5,
+        },
     ];
 
     let ffmpeg_ppids = vec![1000];
@@ -1083,7 +1135,7 @@ fn test_calculate_overall_stats() {
         HistoricalRecord {
             video_stem: "CachedOrSkipped".to_string(),
             success: true,
-            wall_duration_secs: 5.0, // < 60.0s
+            wall_duration_secs: 0.5, // < 1.0s
             cifs_read_rate_mib_s: 50.0,
             file_size_bytes: 100 * BYTES_PER_MIB,
             certified_couplings_count: 1,
@@ -1165,6 +1217,7 @@ fn test_compute_session_throughput() {
         total_bytes: 100 * BYTES_PER_MIB,
         progress_ratio: 0.25,
         current_rate_mib_s: 15.0,
+        hashing_fps: 0.0,
         eta_secs: Some(30.0),
         cpu_percent: 10.0,
         ram_rss_mib: 45.0,
@@ -1255,6 +1308,7 @@ fn test_app_state_new_tabs_and_scrolling() {
                 total_bytes: 100,
                 progress_ratio: 0.1,
                 current_rate_mib_s: 1.0,
+                hashing_fps: 0.0,
                 eta_secs: None,
                 cpu_percent: 1.0,
                 ram_rss_mib: 10.0,
@@ -1271,6 +1325,7 @@ fn test_app_state_new_tabs_and_scrolling() {
                 total_bytes: 100,
                 progress_ratio: 0.2,
                 current_rate_mib_s: 2.0,
+                hashing_fps: 0.0,
                 eta_secs: None,
                 cpu_percent: 2.0,
                 ram_rss_mib: 12.0,
@@ -3155,6 +3210,7 @@ fn test_active_jobs_and_media_browser_search() {
             total_bytes: 10000,
             progress_ratio: 0.1,
             current_rate_mib_s: 25.0,
+            hashing_fps: 0.0,
             eta_secs: Some(90.0),
             cpu_percent: 15.0,
             ram_rss_mib: 120.0,
@@ -3175,6 +3231,7 @@ fn test_active_jobs_and_media_browser_search() {
             total_bytes: 5000,
             progress_ratio: 0.1,
             current_rate_mib_s: 10.0,
+            hashing_fps: 0.0,
             eta_secs: Some(45.0),
             cpu_percent: 85.0,
             ram_rss_mib: 250.0,

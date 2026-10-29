@@ -11,11 +11,12 @@ use ratatui::{
 };
 
 use crate::commands::top::constants::{
-    BYTES_PER_GIB_F64, GPU_HIGH_LOAD_THRESHOLD_PCT, GPU_MODERATE_LOAD_THRESHOLD_PCT,
-    GPU_PROGRESS_BAR_CHAR_WIDTH, MIN_SESSION_DURATION_DISPLAY_SECS,
+    BITS_PER_BYTE_F64, BYTES_PER_GIB_F64, GPU_HIGH_LOAD_THRESHOLD_PCT,
+    GPU_MODERATE_LOAD_THRESHOLD_PCT, GPU_PROGRESS_BAR_CHAR_WIDTH,
+    MIN_SESSION_DURATION_DISPLAY_SECS,
 };
 use crate::commands::top::model::{
-    format_duration, format_progress_bar, GpuTelemetry, SystemTelemetry,
+    format_duration, format_progress_bar, ActiveJobTelemetry, GpuTelemetry, SystemTelemetry,
 };
 use crate::commands::top::views::widgets::get_current_time_str;
 
@@ -159,30 +160,88 @@ fn build_gpu_telemetry_line(gpu: &GpuTelemetry) -> Line<'static> {
     }
 }
 
+/// Checks whether any active job is streaming video over remote network protocols (FTP/HTTP/SFTP).
+fn is_streaming_active(jobs: &[ActiveJobTelemetry]) -> bool {
+    !jobs.is_empty()
+        && jobs.iter().any(|j| {
+            j.cmdline.iter().any(|arg| {
+                arg.starts_with("ftp://")
+                    || arg.starts_with("http://")
+                    || arg.starts_with("sftp://")
+            })
+        })
+}
+
 /// Builds Line 3: CIFS network throughput, instant RX rate, and cumulative session stats.
 fn build_cifs_network_line(tel: &SystemTelemetry) -> Line<'static> {
-    let mut line3_spans = vec![
-        Span::styled(
-            " ⚡ DÉBITS RÉSEAU CIFS : ",
-            Style::default()
-                .fg(Color::LightBlue)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("Instantané: ", Style::default().fg(Color::White)),
-        Span::styled(
-            format!("{:>5.1} MB/s ", tel.total_rate_mib_s),
-            Style::default()
-                .fg(Color::Magenta)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            format!(
-                "(Net RX: {:>5.1} MB/s, VFS: {:>5.1} MB/s)",
-                tel.net_rx_mib_s, tel.total_rate_mib_s
+    let safe_total_rate = if tel.total_rate_mib_s <= 0.0 {
+        0.0
+    } else {
+        tel.total_rate_mib_s
+    };
+    let safe_net_rx = if tel.net_rx_mib_s <= 0.0 {
+        0.0
+    } else {
+        tel.net_rx_mib_s
+    };
+
+    let mut line3_spans = if is_streaming_active(&tel.active_jobs) {
+        let total_fps: f64 = tel.active_jobs.iter().map(|j| j.hashing_fps).sum();
+        vec![
+            Span::styled(
+                " ⚡ DÉBITS RÉSEAU & PIPE : ",
+                Style::default()
+                    .fg(Color::LightBlue)
+                    .add_modifier(Modifier::BOLD),
             ),
-            Style::default().fg(Color::DarkGray),
-        ),
-    ];
+            Span::styled("Net RX: ", Style::default().fg(Color::White)),
+            Span::styled(
+                format!("{:>5.1} MB/s ", safe_net_rx),
+                Style::default()
+                    .fg(Color::LightCyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("({:>5.1} Mbps)", safe_net_rx * BITS_PER_BYTE_F64),
+                Style::default().fg(Color::DarkGray),
+            ),
+            Span::raw(" │ "),
+            Span::styled("Pipe pHash: ", Style::default().fg(Color::White)),
+            Span::styled(
+                format!("{:>5.1} MB/s ", safe_total_rate),
+                Style::default()
+                    .fg(Color::Magenta)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("({:.0} fps)", total_fps),
+                Style::default().fg(Color::Yellow),
+            ),
+        ]
+    } else {
+        vec![
+            Span::styled(
+                " ⚡ DÉBITS RÉSEAU CIFS : ",
+                Style::default()
+                    .fg(Color::LightBlue)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("Instantané: ", Style::default().fg(Color::White)),
+            Span::styled(
+                format!("{:>5.1} MB/s ", safe_total_rate),
+                Style::default()
+                    .fg(Color::Magenta)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!(
+                    "(Net RX: {:>5.1} MB/s, VFS: {:>5.1} MB/s)",
+                    safe_net_rx, safe_total_rate
+                ),
+                Style::default().fg(Color::DarkGray),
+            ),
+        ]
+    };
 
     if tel.session.stream_count > 0
         && tel.session.session_duration_secs > MIN_SESSION_DURATION_DISPLAY_SECS

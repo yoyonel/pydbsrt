@@ -35,7 +35,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use crossterm::{
-    event::{self, Event, KeyCode, KeyEventKind},
+    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -43,8 +43,8 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 
 use crate::commands::top::constants::{
     BYTES_PER_GIB_F64, DEFAULT_COUPLINGS_PATH, DEFAULT_MEDIA_CACHE_PATH,
-    DEFAULT_MEDIA_SOURCES_PATH, FEEDBACK_DISPLAY_DURATION_SECS, KEY_EVENT_POLL_TIMEOUT_MS,
-    PAGE_SCROLL_STEP,
+    DEFAULT_MEDIA_SOURCES_PATH, DEFAULT_REFRESH_INTERVAL_MS, FEEDBACK_DISPLAY_DURATION_SECS,
+    KEY_EVENT_POLL_TIMEOUT_MS, PAGE_SCROLL_STEP,
 };
 use crate::commands::top::model::{
     calculate_overall_stats, filter_active_jobs_with_search, filter_and_sort_completed_with_search,
@@ -467,24 +467,78 @@ pub fn event_loop_step<B: ratatui::backend::Backend>(
 /// - `Ok(())` when `app.should_quit` becomes true.
 /// - `Err(anyhow::Error)` on IO or drawing error.
 ///
+/// Determines whether a key event represents a terminal redraw request (Ctrl+L or Ctrl+R).
+fn is_redraw_key(key: &crossterm::event::KeyEvent) -> bool {
+    key.modifiers.contains(KeyModifiers::CONTROL)
+        && matches!(
+            key.code,
+            KeyCode::Char('l') | KeyCode::Char('L') | KeyCode::Char('r')
+        )
+}
+
+/// Dispatches keyboard or window resize events to terminal and application state.
+///
+/// # Arguments
+/// * `timeout` - Duration to wait for pending key events.
+/// * `app` - Mutable reference to application state.
+/// * `telemetry` - Reference to active system telemetry snapshot.
+/// * `shared_state` - Thread-safe shared telemetry handle.
+///
+/// # Returns
+/// `Ok(true)` if screen redraw is required, `Ok(false)` otherwise.
+///
+/// # Panics
+/// Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// 1. Polls crossterm event reader with bounded `timeout`.
+/// 2. If a key press event is received, forwards to `handle_key_event_with_state`.
+fn poll_and_dispatch_key(
+    timeout: Duration,
+    app: &mut AppState,
+    telemetry: &SystemTelemetry,
+    shared_state: &Arc<RwLock<SystemTelemetry>>,
+) -> Result<bool> {
+    if !event::poll(timeout)? {
+        return Ok(false);
+    }
+    match event::read()? {
+        Event::Key(key) if key.kind == KeyEventKind::Press => {
+            if is_redraw_key(&key) {
+                return Ok(true);
+            }
+            handle_key_event_with_state(key.code, app, telemetry, Some(shared_state));
+        }
+        Event::Resize(_, _) => return Ok(true),
+        _ => {}
+    }
+    Ok(false)
+}
+
 /// # Data Flow & Invariants
 /// Loops until `app.should_quit` is set. In each iteration, executes [`event_loop_step`],
-/// then polls for keyboard events with timeout [`KEY_EVENT_POLL_TIMEOUT_MS`] (20ms).
+/// then polls for keyboard events with bounded timeout up to [`DEFAULT_REFRESH_INTERVAL_MS`].
+/// Clears the terminal screen buffer if resize or Ctrl+L redraw request is triggered.
 fn event_loop<B: ratatui::backend::Backend>(
     terminal: &mut Terminal<B>,
     app: &mut AppState,
     shared_state: &Arc<RwLock<SystemTelemetry>>,
 ) -> Result<()> {
+    let tick_rate = Duration::from_millis(DEFAULT_REFRESH_INTERVAL_MS);
+    let mut last_tick = Instant::now();
+
     while !app.should_quit {
         let telemetry = event_loop_step(terminal, app, shared_state)?;
+        let timeout = tick_rate
+            .checked_sub(last_tick.elapsed())
+            .unwrap_or(Duration::from_millis(KEY_EVENT_POLL_TIMEOUT_MS));
 
-        // Non-blocking poll for keyboard events (< 20ms response time)
-        if event::poll(Duration::from_millis(KEY_EVENT_POLL_TIMEOUT_MS))? {
-            if let Event::Key(key) = event::read()? {
-                if key.kind == KeyEventKind::Press {
-                    handle_key_event_with_state(key.code, app, &telemetry, Some(shared_state));
-                }
-            }
+        if poll_and_dispatch_key(timeout, app, &telemetry, shared_state)? {
+            terminal.clear()?;
+        }
+
+        if last_tick.elapsed() >= tick_rate {
+            last_tick = Instant::now();
         }
     }
 

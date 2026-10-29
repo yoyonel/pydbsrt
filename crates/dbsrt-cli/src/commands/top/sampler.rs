@@ -15,13 +15,15 @@ use sysinfo::{
 };
 
 use crate::commands::top::constants::{
-    BYTES_PER_GIB_F64, BYTES_PER_MIB_F64, DEFAULT_BATCH_EVENTS_PATH, DEFAULT_COUPLINGS_PATH,
-    DEFAULT_COUPLING_BASELINE_FPS, DEFAULT_HISTORY_SEED_PATH, DEFAULT_MEDIA_CACHE_PATH,
-    DEFAULT_MEDIA_SCAN_INTERVAL_SECS, DEFAULT_MEDIA_SOURCES_PATH, DEFAULT_NAS_TVSHOW_PATH,
-    DEFAULT_PHASH_DIR, DEFAULT_SELECTED_BATCH_REPORT_PATH, DEFAULT_SELECTED_BATCH_TARGETS_PATH,
-    DEFAULT_SOURCE_ID_TVSHOW, DEFAULT_SOURCE_NAME_TVSHOW, MAX_MEDIA_SCAN_LIMIT,
-    MAX_SELECTED_BATCH_WORKERS, MIN_DELTA_TIME_FLOOR_SECS, MIN_PROGRESS_THRESHOLD,
-    NAS_TVSHOW_DIR_ENV, SCAN_STREAMING_CHUNK_SIZE, SESSION_WINDOW_SECS,
+    ACTIVE_JOBS_RUN_DIR, BYTES_PER_GIB_F64, BYTES_PER_MIB_F64, DEFAULT_BATCH_EVENTS_PATH,
+    DEFAULT_COUPLINGS_PATH, DEFAULT_COUPLING_BASELINE_FPS, DEFAULT_HISTORY_SEED_PATH,
+    DEFAULT_MEDIA_CACHE_PATH, DEFAULT_MEDIA_SCAN_INTERVAL_SECS, DEFAULT_MEDIA_SOURCES_PATH,
+    DEFAULT_NAS_TVSHOW_PATH, DEFAULT_PHASH_DIR, DEFAULT_SELECTED_BATCH_REPORT_PATH,
+    DEFAULT_SELECTED_BATCH_TARGETS_PATH, DEFAULT_SOURCE_ID_TVSHOW, DEFAULT_SOURCE_NAME_TVSHOW,
+    DEFAULT_STREAM_EPISODE_DURATION_SECS, MAX_MEDIA_SCAN_LIMIT, MAX_SELECTED_BATCH_WORKERS,
+    MIN_DELTA_TIME_FLOOR_SECS, MIN_PROGRESS_THRESHOLD, NAS_TVSHOW_DIR_ENV,
+    PROC_NET_DEV_HEADER_LINES, PROC_NET_DEV_PATH, RAW_FRAME_BYTES, SCAN_STREAMING_CHUNK_SIZE,
+    SESSION_WINDOW_SECS,
 };
 use crate::commands::top::model::{
     calculate_overall_stats, format_unix_to_iso, parse_iso_to_unix_secs, ActiveJobTelemetry,
@@ -73,24 +75,88 @@ pub fn resolve_events_log_path() -> PathBuf {
 /// Pre-populates [`STEM_SIZE_CACHE`] and [`STEM_CODEC_CACHE`] by scanning
 /// batch events log and `data/cache/discovered_media.json`.
 /// Eliminates network latency spikes by avoiding blocking metadata lookups across remote CIFS shares.
+/// Populates the media size lookup map from previous batch execution event logs.
+///
+/// # Arguments
+/// * `path` - Path to the NDJSON batch events log.
+/// * `map` - Mutable reference to the target stem -> size map.
+///
+/// # Returns
+/// Nothing. Mutates `map` in place.
+///
+/// # Panics
+/// Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// 1. Reads line by line from `path`.
+/// 2. Extracts `video_stem` and `file_size_bytes` from valid JSON payloads.
+/// 3. Populates `map` with discovered values.
+fn load_events_log_sizes(path: &Path, map: &mut HashMap<String, u64>) {
+    let Ok(file) = fs::File::open(path) else {
+        return;
+    };
+    let reader = BufReader::new(file);
+    for line in reader.lines().map_while(Result::ok) {
+        let trimmed = line.trim();
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(trimmed) else {
+            continue;
+        };
+        let (Some(stem), Some(size)) = (
+            v.get("video_stem").and_then(|s| s.as_str()),
+            v.get("file_size_bytes").and_then(|s| s.as_u64()),
+        ) else {
+            continue;
+        };
+        map.insert(stem.to_string(), size);
+    }
+}
+
+/// Populates the media size lookup map from selected batch target manifests.
+///
+/// # Arguments
+/// * `path` - Path to `selected_batch_targets.json`.
+/// * `map` - Mutable reference to the target stem -> size map.
+///
+/// # Returns
+/// Nothing. Mutates `map` in place.
+///
+/// # Panics
+/// Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// 1. Deserializes array of target dictionaries from `path`.
+/// 2. Extracts `stem` and non-zero `size_bytes`.
+/// 3. Registers stem sizes into `map`.
+fn load_batch_target_sizes(path: &Path, map: &mut HashMap<String, u64>) {
+    let Ok(content) = fs::read_to_string(path) else {
+        return;
+    };
+    let Ok(arr) = serde_json::from_str::<Vec<serde_json::Value>>(&content) else {
+        return;
+    };
+    for item in arr {
+        let (Some(stem), Some(size)) = (
+            item.get("stem").and_then(|s| s.as_str()),
+            item.get("size_bytes").and_then(|s| s.as_u64()),
+        ) else {
+            continue;
+        };
+        if size > 0 {
+            map.insert(stem.to_string(), size);
+        }
+    }
+}
+
 pub fn preload_stem_size_cache() {
     let mut map = HashMap::new();
     let events_file = resolve_events_log_path();
     if events_file.exists() {
-        if let Ok(file) = fs::File::open(&events_file) {
-            let reader = BufReader::new(file);
-            for line in reader.lines().map_while(Result::ok) {
-                let trimmed = line.trim();
-                if let Ok(v) = serde_json::from_str::<serde_json::Value>(trimmed) {
-                    if let (Some(stem), Some(size)) = (
-                        v.get("video_stem").and_then(|s| s.as_str()),
-                        v.get("file_size_bytes").and_then(|s| s.as_u64()),
-                    ) {
-                        map.insert(stem.to_string(), size);
-                    }
-                }
-            }
-        }
+        load_events_log_sizes(&events_file, &mut map);
+    }
+
+    let batch_targets_file = Path::new("data/reports/selected_batch_targets.json");
+    if batch_targets_file.exists() {
+        load_batch_target_sizes(batch_targets_file, &mut map);
     }
 
     let mut codec_map = HashMap::new();
@@ -272,31 +338,51 @@ pub fn start_gpu_sampler(gpu_state: Arc<RwLock<GpuTelemetry>>, stop_flag: Arc<At
 /// - `pid`: Linux process identifier to inspect.
 ///
 /// # Returns
+/// Volatile job progress snapshot deserialized from IPC state file.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct JobProgressPayload {
+    pub frames: usize,
+    pub total_frames: Option<usize>,
+    pub fps: Option<f64>,
+}
+
+/// Reads the volatile IPC job progress file for an active decoding PID.
+pub fn read_job_progress_file(pid: u32) -> Option<JobProgressPayload> {
+    let p = PathBuf::from(ACTIVE_JOBS_RUN_DIR).join(format!("{pid}.json"));
+    if let Ok(content) = fs::read_to_string(&p) {
+        if let Ok(payload) = serde_json::from_str::<JobProgressPayload>(&content) {
+            return Some(payload);
+        }
+    }
+    None
+}
+
+fn parse_proc_io_val(line: &str) -> Option<u64> {
+    if line.starts_with("rchar:") || line.starts_with("read_bytes:") || line.starts_with("wchar:") {
+        line.split_whitespace().nth(1)?.parse::<u64>().ok()
+    } else {
+        None
+    }
+}
+
 /// Cumulative read bytes. Returns `0` if `/proc/[pid]/io` is missing or access is denied.
 ///
 /// # Data Flow & Invariants
 /// Network filesystem mounts (CIFS/SMB) increment virtual `rchar` rather than physical block `read_bytes`.
-/// Computes `rchar.max(read_bytes)` to guarantee accurate throughput across both local and network storage.
+/// Direct socket streams (FTP/HTTP) decode uncompressed frames directly to stdout (`wchar`).
+/// Computes `rchar.max(read_bytes).max(wchar)` to guarantee accurate throughput across local, CIFS, and streaming.
 pub fn read_proc_io_bytes(pid: u32) -> u64 {
     let io_path = format!("/proc/{pid}/io");
-    let mut rchar = 0u64;
-    let mut read_bytes = 0u64;
+    let mut max_bytes = 0u64;
 
     if let Ok(file) = fs::File::open(io_path) {
-        let reader = BufReader::new(file);
-        for line in reader.lines().map_while(Result::ok) {
-            if line.starts_with("rchar:") {
-                if let Some(val) = line.split_whitespace().nth(1) {
-                    rchar = val.parse::<u64>().unwrap_or(0);
-                }
-            } else if line.starts_with("read_bytes:") {
-                if let Some(val) = line.split_whitespace().nth(1) {
-                    read_bytes = val.parse::<u64>().unwrap_or(0);
-                }
+        for line in BufReader::new(file).lines().map_while(Result::ok) {
+            if let Some(val) = parse_proc_io_val(&line) {
+                max_bytes = max_bytes.max(val);
             }
         }
     }
-    rchar.max(read_bytes)
+    max_bytes
 }
 
 /// Checks if the given PID is a child thread task rather than a main process thread group leader.
@@ -388,10 +474,12 @@ pub fn load_historical_records(events_path: &Path, couplings_path: &Path) -> Vec
                                 .unwrap_or(0) as usize;
                         let start_iso = v
                             .get("start_iso")
+                            .or_else(|| v.get("timestamp_iso"))
                             .and_then(|s| s.as_str())
                             .map(|s| s.to_string());
                         let end_iso = v
                             .get("end_iso")
+                            .or_else(|| v.get("timestamp_iso"))
                             .and_then(|s| s.as_str())
                             .map(|s| s.to_string());
 
@@ -413,15 +501,10 @@ pub fn load_historical_records(events_path: &Path, couplings_path: &Path) -> Vec
         }
     }
 
-    // Deduplicate keeping max wall_duration_secs per video_stem
+    // Deduplicate retaining latest record per video_stem
     let mut by_stem: HashMap<String, HistoricalRecord> = HashMap::new();
     for r in raw_records {
-        match by_stem.get(&r.video_stem) {
-            Some(existing) if existing.wall_duration_secs >= r.wall_duration_secs => {}
-            _ => {
-                by_stem.insert(r.video_stem.clone(), r);
-            }
-        }
+        by_stem.insert(r.video_stem.clone(), r);
     }
 
     // Fallback to couplings.json if no batch records exist
@@ -1491,6 +1574,40 @@ pub fn launch_selected_batch(media_paths: &[PathBuf]) -> (bool, String) {
     )
 }
 
+/// Cached historical records and statistical aggregates for top telemetry.
+struct HistoryTelemetryCache {
+    records: Vec<HistoricalRecord>,
+    stats: crate::commands::top::model::OverallStats,
+    last_mtime: Option<std::time::SystemTime>,
+}
+
+/// Conditionally reloads historical batch events if the events log has been touched.
+fn maybe_reload_history(
+    events_path: &Path,
+    couplings_path: &Path,
+    cache: &mut HistoryTelemetryCache,
+) {
+    if let Ok(mtime) = fs::metadata(events_path).and_then(|m| m.modified()) {
+        if cache.last_mtime != Some(mtime) {
+            cache.records = load_historical_records(events_path, couplings_path);
+            cache.stats = calculate_overall_stats(&cache.records);
+            cache.last_mtime = Some(mtime);
+        }
+    }
+}
+
+/// Marks discovered media items as InProgress if currently being processed by an active worker.
+fn update_discovered_media_status(
+    media: &mut [DiscoveredMediaItem],
+    active_jobs: &[ActiveJobTelemetry],
+) {
+    for item in media {
+        if active_jobs.iter().any(|j| j.media_name == item.stem) {
+            item.status = IngestionStatus::InProgress;
+        }
+    }
+}
+
 /// Background sampler worker updating the shared telemetry state at regular intervals.
 pub fn run_telemetry_sampler_loop(
     shared_state: Arc<RwLock<SystemTelemetry>>,
@@ -1501,16 +1618,21 @@ pub fn run_telemetry_sampler_loop(
     let mut system = System::new();
     let mut networks = Networks::new_with_refreshed_list();
     let mut last_net_instant = Instant::now();
+    let mut last_proc_rx: Option<(Instant, u64)> = None;
     let mut previous_io_samples: HashMap<u32, (Instant, u64)> = HashMap::new();
 
     let events_path = resolve_events_log_path();
     let couplings_path = PathBuf::from(DEFAULT_COUPLINGS_PATH);
 
-    let mut last_events_mtime = fs::metadata(&events_path)
-        .ok()
-        .and_then(|m| m.modified().ok());
-    let mut cached_history_records = load_historical_records(&events_path, &couplings_path);
-    let mut cached_stats = calculate_overall_stats(&cached_history_records);
+    let initial_records = load_historical_records(&events_path, &couplings_path);
+    let initial_stats = calculate_overall_stats(&initial_records);
+    let mut history_cache = HistoryTelemetryCache {
+        last_mtime: fs::metadata(&events_path)
+            .ok()
+            .and_then(|m| m.modified().ok()),
+        records: initial_records,
+        stats: initial_stats,
+    };
 
     preload_stem_size_cache();
 
@@ -1518,15 +1640,7 @@ pub fn run_telemetry_sampler_loop(
         let now = Instant::now();
 
         // 0. Check for historical record log updates
-        if let Ok(meta) = fs::metadata(&events_path) {
-            if let Ok(mtime) = meta.modified() {
-                if last_events_mtime != Some(mtime) {
-                    cached_history_records = load_historical_records(&events_path, &couplings_path);
-                    cached_stats = calculate_overall_stats(&cached_history_records);
-                    last_events_mtime = Some(mtime);
-                }
-            }
-        }
+        maybe_reload_history(&events_path, &couplings_path, &mut history_cache);
 
         // 1. Refresh system-wide CPU and memory
         system.refresh_cpu_specifics(CpuRefreshKind::everything());
@@ -1544,18 +1658,9 @@ pub fn run_telemetry_sampler_loop(
         let ram_total = system.total_memory() as f64 / BYTES_PER_GIB_F64;
 
         // Refresh physical network interface RX throughput
-        networks.refresh(true);
-        let net_dt = now
-            .duration_since(last_net_instant)
-            .as_secs_f64()
-            .max(MIN_DELTA_TIME_FLOOR_SECS);
-        last_net_instant = now;
-        let total_rx_bytes: u64 = networks
-            .iter()
-            .filter(|(name, _)| !name.starts_with("lo") && !name.starts_with("virbr"))
-            .map(|(_, data)| data.received())
-            .sum();
-        let net_rx_mib_s = (total_rx_bytes as f64 / BYTES_PER_MIB_F64) / net_dt;
+        let (net_rx_mib_s, new_last_net) =
+            compute_net_rx_rate(&mut networks, now, last_net_instant, &mut last_proc_rx);
+        last_net_instant = new_last_net;
 
         // 2. Discover active candidate processes
         let mut dbsrt_pids = Vec::new();
@@ -1602,17 +1707,17 @@ pub fn run_telemetry_sampler_loop(
                 ffmpeg_ppids.push(ppid);
             }
 
-            raw_candidates.push((
+            raw_candidates.push(RawCandidateProcess {
                 pid,
                 ppid,
                 cmdline,
                 cmd_str,
                 is_dbsrt,
                 is_ffmpeg,
-                proc.cpu_usage(),
-                proc.memory(),
-                proc.run_time(),
-            ));
+                cpu_pct: proc.cpu_usage(),
+                mem_bytes: proc.memory(),
+                run_time_secs: proc.run_time(),
+            });
         }
 
         let (active_jobs, new_previous_io) =
@@ -1620,7 +1725,8 @@ pub fn run_telemetry_sampler_loop(
         previous_io_samples = new_previous_io;
 
         // Compute total active VFS throughput
-        let total_rate_mib_s: f64 = active_jobs.iter().map(|j| j.current_rate_mib_s).sum();
+        let total_rate_mib_s: f64 =
+            sanitize_non_negative_rate(active_jobs.iter().map(|j| j.current_rate_mib_s).sum());
         let gpu_snap = gpu_state.read().unwrap().clone();
 
         let now_unix_secs = std::time::SystemTime::now()
@@ -1628,7 +1734,7 @@ pub fn run_telemetry_sampler_loop(
             .map(|d| d.as_secs_f64())
             .unwrap_or(0.0);
         let session =
-            compute_session_throughput(&cached_history_records, &active_jobs, now_unix_secs);
+            compute_session_throughput(&history_cache.records, &active_jobs, now_unix_secs);
 
         {
             let mut state = shared_state.write().unwrap();
@@ -1639,16 +1745,10 @@ pub fn run_telemetry_sampler_loop(
             state.total_rate_mib_s = total_rate_mib_s;
             state.net_rx_mib_s = net_rx_mib_s;
             state.session = session;
-            state.history_records = cached_history_records.clone();
-            state.stats = cached_stats.clone();
+            state.history_records = history_cache.records.clone();
+            state.stats = history_cache.stats.clone();
             state.is_scanning = IS_MEDIA_SCANNING.load(Ordering::Relaxed);
-
-            for item in &mut state.discovered_media {
-                if active_jobs.iter().any(|j| j.media_name == item.stem) {
-                    item.status = IngestionStatus::InProgress;
-                }
-            }
-
+            update_discovered_media_status(&mut state.discovered_media, &active_jobs);
             state.active_jobs = active_jobs;
         }
 
@@ -1656,84 +1756,238 @@ pub fn run_telemetry_sampler_loop(
     }
 }
 
-/// Processes raw detected candidate processes into typed telemetry jobs and updates delta IO samples.
-#[allow(clippy::type_complexity)]
-pub fn process_candidate_jobs(
-    raw_candidates: Vec<(u32, u32, Vec<String>, String, bool, bool, f32, u64, u64)>,
-    ffmpeg_ppids: &[u32],
-    previous_io_samples: HashMap<u32, (Instant, u64)>,
-    now: Instant,
-) -> (Vec<ActiveJobTelemetry>, HashMap<u32, (Instant, u64)>) {
-    let mut active_jobs = Vec::new();
-    let mut active_pids = HashMap::new();
+/// Sanitizes floating point transfer rates to eliminate negative zero representations.
+fn sanitize_non_negative_rate(val: f64) -> f64 {
+    if val <= 0.0 {
+        0.0
+    } else {
+        val
+    }
+}
 
-    for (pid, _ppid, cmdline, cmd_str, is_dbsrt, _is_ffmpeg, cpu_pct, mem_bytes, run_time_secs) in
-        raw_candidates
+/// Parses a single `/proc/net/dev` interface line and extracts received bytes if non-virtual.
+fn parse_proc_net_line(line: &str) -> Option<u64> {
+    let (iface, rest) = line.split_once(':')?;
+    let iface_clean = iface.trim();
+    if iface_clean.starts_with("lo")
+        || iface_clean.starts_with("virbr")
+        || iface_clean.starts_with("docker")
+        || iface_clean.starts_with("veth")
+        || iface_clean.starts_with("br-")
     {
-        // If dbsrt spawned a child ffmpeg doing the decoding work, skip the parent coordinator
-        if is_dbsrt && ffmpeg_ppids.contains(&pid) {
+        return None;
+    }
+    rest.split_whitespace().next()?.parse::<u64>().ok()
+}
+
+/// Reads aggregate network interface receive bytes directly from `/proc/net/dev`.
+///
+/// # Arguments
+/// None.
+///
+/// # Returns
+/// `Some(u64)` representing cumulative RX bytes across non-loopback interfaces, or `None` if inaccessible.
+///
+/// # Errors
+/// Silently falls back to `None` if `/proc/net/dev` cannot be opened or parsed.
+///
+/// # Panics
+/// Panic-free.
+///
+/// # Data Flow & Invariants
+/// Bypasses `/sys/class/net/` to guarantee network ingress visibility inside containerized
+/// environments (e.g. CloudLinux LVE on shared web hosting). Ignores virtual bridge and loopback devices.
+pub fn read_proc_net_dev_rx_bytes() -> Option<u64> {
+    let content = fs::read_to_string(PROC_NET_DEV_PATH).ok()?;
+    let total_rx = content
+        .lines()
+        .skip(PROC_NET_DEV_HEADER_LINES)
+        .filter_map(parse_proc_net_line)
+        .fold(0u64, |acc, bytes| acc.saturating_add(bytes));
+    Some(total_rx)
+}
+
+/// Computes physical network interface RX throughput in MiB/s.
+///
+/// # Arguments
+/// - `networks`: Mutable reference to `sysinfo::Networks` catalog.
+/// - `now`: Current sampling timestamp instant.
+/// - `last_instant`: Previous sampling timestamp instant.
+/// - `last_proc_rx`: Persistent state holding previous `(Instant, u64)` sample for `/proc/net/dev`.
+///
+/// # Returns
+/// A tuple `(f64, Instant)` containing the computed ingress rate in MiB/s and the updated timestamp.
+///
+/// # Errors
+/// Never returns an error; sanitized to non-negative floats.
+///
+/// # Panics
+/// Panic-free.
+///
+/// # Data Flow & Invariants
+/// First attempts reading via `sysinfo::Networks`. If sysinfo yields zero bytes (e.g. missing `/sys/class/net`),
+/// falls back to delta computation from `/proc/net/dev`.
+fn compute_net_rx_rate(
+    networks: &mut Networks,
+    now: Instant,
+    last_instant: Instant,
+    last_proc_rx: &mut Option<(Instant, u64)>,
+) -> (f64, Instant) {
+    networks.refresh(true);
+    let dt = now
+        .duration_since(last_instant)
+        .as_secs_f64()
+        .max(MIN_DELTA_TIME_FLOOR_SECS);
+    let total_rx_bytes: u64 = networks
+        .iter()
+        .filter(|(name, _)| !name.starts_with("lo") && !name.starts_with("virbr"))
+        .map(|(_, data)| data.received())
+        .sum();
+
+    if total_rx_bytes > 0 {
+        return (
+            sanitize_non_negative_rate((total_rx_bytes as f64 / BYTES_PER_MIB_F64) / dt),
+            now,
+        );
+    }
+
+    if let Some(curr_rx) = read_proc_net_dev_rx_bytes() {
+        if let Some((prev_t, prev_rx)) = *last_proc_rx {
+            let proc_dt = now
+                .duration_since(prev_t)
+                .as_secs_f64()
+                .max(MIN_DELTA_TIME_FLOOR_SECS);
+            let delta_bytes = curr_rx.saturating_sub(prev_rx) as f64;
+            *last_proc_rx = Some((now, curr_rx));
+            return (
+                sanitize_non_negative_rate((delta_bytes / BYTES_PER_MIB_F64) / proc_dt),
+                now,
+            );
+        } else {
+            *last_proc_rx = Some((now, curr_rx));
+        }
+    }
+
+    (0.0, now)
+}
+
+/// Decodes a 2-digit hex pair into an ASCII/UTF-8 character if valid.
+fn decode_hex_char(c1: char, c2: char) -> Option<char> {
+    let hex_str: String = [c1, c2].iter().collect();
+    u8::from_str_radix(&hex_str, 16).ok().map(|b| b as char)
+}
+
+/// Appends decoded hex pair or original percent triplet characters to destination string.
+fn append_decoded_triplet(c1: Option<char>, c2: Option<char>, result: &mut String) {
+    match (c1, c2) {
+        (Some(h1), Some(h2)) => match decode_hex_char(h1, h2) {
+            Some(decoded) => result.push(decoded),
+            None => {
+                result.push('%');
+                result.push(h1);
+                result.push(h2);
+            }
+        },
+        (Some(h1), None) => {
+            result.push('%');
+            result.push(h1);
+        }
+        _ => {
+            result.push('%');
+        }
+    }
+}
+
+/// Decodes simple percent-encoded ASCII/UTF-8 substrings in media filenames (e.g. `%20` -> ` `, `%5B` -> `[`).
+///
+/// # Arguments
+/// * `input` - Raw percent-encoded string slice.
+///
+/// # Returns
+/// Fully decoded string or original string if no percent markers exist.
+///
+/// # Errors
+/// Never returns an error (malformed escape sequences fall back to verbatim copy).
+///
+/// # Panics
+/// Never panics.
+///
+/// # Data Flow & Invariants
+/// Scans characters sequentially. Triplet sequences beginning with `%` followed by two valid hex digits
+/// are converted into their corresponding byte/character representation.
+pub fn url_decode_simple(input: &str) -> String {
+    if !input.contains('%') {
+        return input.to_string();
+    }
+    let mut result = String::with_capacity(input.len());
+    let mut chars = input.chars();
+    while let Some(ch) = chars.next() {
+        if ch != '%' {
+            result.push(ch);
             continue;
         }
+        let c1 = chars.next();
+        let c2 = chars.next();
+        append_decoded_triplet(c1, c2, &mut result);
+    }
+    result
+}
 
-        // Identify media path and name
-        let mut target_path: Option<PathBuf> = None;
-        for (idx, arg) in cmdline.iter().enumerate() {
-            if arg.ends_with(".mkv")
-                || arg.ends_with(".mp4")
-                || arg.ends_with(".webm")
-                || arg.ends_with(".avi")
-            {
-                target_path = Some(PathBuf::from(arg));
-                break;
-            }
-            if arg == "-i" && idx + 1 < cmdline.len() {
-                target_path = Some(PathBuf::from(&cmdline[idx + 1]));
+/// Processes raw detected candidate processes into typed telemetry jobs and updates delta IO samples.
+#[allow(clippy::type_complexity)]
+/// Extracts target video path and media name from process command-line arguments.
+fn extract_media_info(cmdline: &[String]) -> (Option<PathBuf>, String) {
+    let mut target_path: Option<PathBuf> = None;
+    let mut explicit_name: Option<String> = None;
+    for (idx, arg) in cmdline.iter().enumerate() {
+        if arg == "--media-name" && idx + 1 < cmdline.len() {
+            explicit_name = Some(cmdline[idx + 1].clone());
+        }
+        if arg.ends_with(".mkv")
+            || arg.ends_with(".mp4")
+            || arg.ends_with(".webm")
+            || arg.ends_with(".avi")
+        {
+            target_path = Some(PathBuf::from(arg));
+            if explicit_name.is_some() {
                 break;
             }
         }
+        if arg == "-i" && idx + 1 < cmdline.len() {
+            target_path = Some(PathBuf::from(&cmdline[idx + 1]));
+            if explicit_name.is_some() {
+                break;
+            }
+        }
+    }
 
-        let media_name = target_path
+    let raw_name = explicit_name.unwrap_or_else(|| {
+        target_path
             .as_ref()
             .and_then(|p| p.file_stem())
             .map(|s| s.to_string_lossy().to_string())
-            .unwrap_or_else(|| "Tâche Active".to_string());
+            .unwrap_or_else(|| "Tâche Active".to_string())
+    });
 
-        let is_hi10p = cmd_str.contains("Hi10P")
-            || target_path.as_ref().is_some_and(|p| {
-                p.to_string_lossy().contains("Hi10P")
-                    || get_file_codec(&media_name).is_some_and(|c| c.contains("Hi10P"))
-            })
-            || get_file_codec(&media_name).is_some_and(|c| c.contains("Hi10P"));
+    let media_name = url_decode_simple(&raw_name);
+    (target_path, media_name)
+}
 
-        let (engine, engine_reason) = if is_dbsrt {
-            if cmd_str.contains("--hwaccel disabled") || cmd_str.contains("--hwaccel cpu") {
-                (
-                    "CPU (Software)".to_string(),
-                    Some(
-                        "Décodage logiciel CPU forcé par option CLI (--hwaccel disabled/cpu)."
-                            .to_string(),
-                    ),
-                )
-            } else if is_hi10p {
-                (
-                    "CPU (Hi10P)".to_string(),
-                    Some("H.264 Hi10P (10-bit) non supporté par l'ASIC matériel GPU (Intel/Nvidia/AMD). Repli automatique en décodage logiciel CPU multi-thread.".to_string()),
-                )
-            } else {
-                (
-                    "GPU (VA-API)".to_string(),
-                    Some("Accélération matérielle Intel QuickSync / VA-API active (/dev/dri/renderD128).".to_string()),
-                )
-            }
-        } else if cmd_str.contains("-f srt") || cmd_str.contains("0:s:") {
+/// Detects the decoding engine and diagnostic reason for an active process candidate.
+fn detect_candidate_engine(
+    cmd_str: &str,
+    is_dbsrt: bool,
+    is_hi10p: bool,
+) -> (String, Option<String>) {
+    let has_vaapi = Path::new("/dev/dri/renderD128").exists();
+    if is_dbsrt {
+        if cmd_str.contains("--hwaccel disabled") || cmd_str.contains("--hwaccel cpu") || !has_vaapi
+        {
             (
-                "Sub Extraction".to_string(),
-                Some("Extraction de flux sous-titre texte/SRT (démultiplexage rapide, aucun décodage vidéo).".to_string()),
-            )
-        } else if cmd_str.contains("-hwaccel vaapi") {
-            (
-                "GPU (VA-API)".to_string(),
-                Some("Accélération matérielle Intel QuickSync / VA-API active (/dev/dri/renderD128).".to_string()),
+                "CPU (Software)".to_string(),
+                Some(
+                    "Décodage logiciel CPU (sans accélération matérielle GPU active).".to_string(),
+                ),
             )
         } else if is_hi10p {
             (
@@ -1742,28 +1996,119 @@ pub fn process_candidate_jobs(
             )
         } else {
             (
-                "CPU (Software)".to_string(),
-                Some("Décodage logiciel CPU multi-cœurs (sans accélération matérielle GPU détectée).".to_string()),
+                "GPU (VA-API)".to_string(),
+                Some("Accélération matérielle Intel QuickSync / VA-API active (/dev/dri/renderD128).".to_string()),
             )
-        };
+        }
+    } else if cmd_str.contains("-f srt") || cmd_str.contains("0:s:") {
+        (
+            "Sub Extraction".to_string(),
+            Some("Extraction de flux sous-titre texte/SRT (démultiplexage rapide, aucun décodage vidéo).".to_string()),
+        )
+    } else if cmd_str.contains("-hwaccel vaapi") && has_vaapi {
+        (
+            "GPU (VA-API)".to_string(),
+            Some(
+                "Accélération matérielle Intel QuickSync / VA-API active (/dev/dri/renderD128)."
+                    .to_string(),
+            ),
+        )
+    } else if is_hi10p {
+        (
+            "CPU (Hi10P)".to_string(),
+            Some("H.264 Hi10P (10-bit) non supporté par l'ASIC matériel GPU (Intel/Nvidia/AMD). Repli automatique en décodage logiciel CPU multi-thread.".to_string()),
+        )
+    } else {
+        (
+            "CPU (Software)".to_string(),
+            Some(
+                "Décodage logiciel CPU multi-cœurs (sans accélération matérielle GPU détectée)."
+                    .to_string(),
+            ),
+        )
+    }
+}
 
-        let elapsed = (run_time_secs as f64).max(1.0);
-        let total_bytes = get_file_size(&media_name, target_path.as_deref());
-        let read_bytes = read_proc_io_bytes(pid);
+/// Raw telemetry attributes collected for an active candidate process.
+#[derive(Debug, Clone)]
+pub struct RawCandidateProcess {
+    pub pid: u32,
+    pub ppid: u32,
+    pub cmdline: Vec<String>,
+    pub cmd_str: String,
+    pub is_dbsrt: bool,
+    pub is_ffmpeg: bool,
+    pub cpu_pct: f32,
+    pub mem_bytes: u64,
+    pub run_time_secs: u64,
+}
+
+pub fn process_candidate_jobs(
+    raw_candidates: Vec<RawCandidateProcess>,
+    ffmpeg_ppids: &[u32],
+    previous_io_samples: HashMap<u32, (Instant, u64)>,
+    now: Instant,
+) -> (Vec<ActiveJobTelemetry>, HashMap<u32, (Instant, u64)>) {
+    let mut active_jobs = Vec::new();
+    let mut active_pids = HashMap::new();
+
+    for candidate in raw_candidates {
+        // If dbsrt spawned a child ffmpeg doing the decoding work, skip the parent coordinator
+        if candidate.is_dbsrt && ffmpeg_ppids.contains(&candidate.pid) {
+            continue;
+        }
+
+        // Identify media path and name
+        let (target_path, media_name) = extract_media_info(&candidate.cmdline);
+
+        let is_hi10p = candidate.cmd_str.contains("Hi10P")
+            || target_path.as_ref().is_some_and(|p| {
+                p.to_string_lossy().contains("Hi10P")
+                    || get_file_codec(&media_name).is_some_and(|c| c.contains("Hi10P"))
+            })
+            || get_file_codec(&media_name).is_some_and(|c| c.contains("Hi10P"));
+
+        let (engine, engine_reason) =
+            detect_candidate_engine(&candidate.cmd_str, candidate.is_dbsrt, is_hi10p);
+
+        let elapsed = (candidate.run_time_secs as f64).max(1.0);
+        let mut total_bytes = get_file_size(&media_name, target_path.as_deref());
+        let mut read_bytes = read_proc_io_bytes(candidate.pid);
+        let mut hashing_fps = 0.0;
+
+        let is_streaming = candidate.cmd_str.contains("ftp://")
+            || candidate.cmd_str.contains("http://")
+            || candidate.cmd_str.contains("sftp://");
+
+        if let Some(progress) = read_job_progress_file(candidate.pid) {
+            read_bytes = (progress.frames as f64 * RAW_FRAME_BYTES) as u64;
+            if let Some(total_f) = progress.total_frames {
+                total_bytes = (total_f as f64 * RAW_FRAME_BYTES) as u64;
+            } else if is_streaming && total_bytes == 0 {
+                let fps = progress.fps.unwrap_or(DEFAULT_COUPLING_BASELINE_FPS);
+                total_bytes = (DEFAULT_STREAM_EPISODE_DURATION_SECS * fps * RAW_FRAME_BYTES) as u64;
+            }
+        } else if is_streaming && total_bytes == 0 {
+            total_bytes = (DEFAULT_STREAM_EPISODE_DURATION_SECS
+                * DEFAULT_COUPLING_BASELINE_FPS
+                * RAW_FRAME_BYTES) as u64;
+        }
 
         // Compute rate strictly via delta; first tick is 0.0 to prevent artificial spikes
-        let current_rate_mib_s = if let Some(&(prev_t, prev_b)) = previous_io_samples.get(&pid) {
-            let dt = now
-                .duration_since(prev_t)
-                .as_secs_f64()
-                .max(MIN_DELTA_TIME_FLOOR_SECS);
-            let db = read_bytes.saturating_sub(prev_b) as f64;
-            (db / BYTES_PER_MIB_F64) / dt
-        } else {
-            0.0
-        };
+        let current_rate_mib_s =
+            if let Some(&(prev_t, prev_b)) = previous_io_samples.get(&candidate.pid) {
+                let dt = now
+                    .duration_since(prev_t)
+                    .as_secs_f64()
+                    .max(MIN_DELTA_TIME_FLOOR_SECS);
+                let db = read_bytes.saturating_sub(prev_b) as f64;
+                hashing_fps = (db / RAW_FRAME_BYTES) / dt;
+                (db / BYTES_PER_MIB_F64) / dt
+            } else {
+                0.0
+            };
 
-        active_pids.insert(pid, (now, read_bytes));
+        active_pids.insert(candidate.pid, (now, read_bytes));
 
         // Compute progression ratio and ETA
         let mut ratio = 0.0;
@@ -1777,15 +2122,15 @@ pub fn process_candidate_jobs(
             }
         }
 
-        let ram_rss_mib = mem_bytes as f64 / BYTES_PER_MIB_F64;
-        let status = if crate::commands::top::process_ctl::check_if_stopped(pid) {
+        let ram_rss_mib = candidate.mem_bytes as f64 / BYTES_PER_MIB_F64;
+        let status = if crate::commands::top::process_ctl::check_if_stopped(candidate.pid) {
             "PAUSED".to_string()
         } else {
             "RUNNING".to_string()
         };
 
         active_jobs.push(ActiveJobTelemetry {
-            pid,
+            pid: candidate.pid,
             media_name,
             engine,
             engine_reason,
@@ -1794,11 +2139,12 @@ pub fn process_candidate_jobs(
             total_bytes,
             progress_ratio: ratio,
             current_rate_mib_s,
+            hashing_fps,
             eta_secs,
-            cpu_percent: cpu_pct,
+            cpu_percent: candidate.cpu_pct,
             ram_rss_mib,
             status,
-            cmdline,
+            cmdline: candidate.cmdline,
         });
     }
 

@@ -8,6 +8,7 @@ use ratatui::{
     Frame,
 };
 
+use crate::commands::top::constants::MIN_FULL_DECODE_DURATION_SECS;
 use crate::commands::top::model::SystemTelemetry;
 use crate::commands::top::ui::UiContext;
 
@@ -167,8 +168,8 @@ fn build_stats_info_lines(sample_count: usize) -> Vec<Line<'static>> {
                     .add_modifier(Modifier::BOLD),
             ),
             Span::raw(format!(
-                "{} médias décodés intégralement (durée > 60s)",
-                sample_count
+                "{} médias décodés intégralement (durée > {:.0}s)",
+                sample_count, MIN_FULL_DECODE_DURATION_SECS
             )),
         ]),
         Line::from(vec![

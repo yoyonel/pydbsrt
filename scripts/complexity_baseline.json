@@ -49,23 +49,13 @@
     "max_parameters": 2,
     "max_nesting": 5
   },
-  "crates/dbsrt-cli/src/commands/media_add.rs::mod::extract_embedded_subtitles_and_select": {
-    "file_path": "crates/dbsrt-cli/src/commands/media_add.rs",
-    "scope": "mod",
-    "function_name": "extract_embedded_subtitles_and_select",
-    "start_line": 160,
-    "max_loc": 59,
-    "max_ccn": 15,
-    "max_parameters": 2,
-    "max_nesting": 6
-  },
   "crates/dbsrt-cli/src/commands/media_add.rs::mod::extract_phash_and_subtitles": {
     "file_path": "crates/dbsrt-cli/src/commands/media_add.rs",
     "scope": "mod",
     "function_name": "extract_phash_and_subtitles",
     "start_line": 720,
-    "max_loc": 83,
-    "max_ccn": 18,
+    "max_loc": 46,
+    "max_ccn": 14,
     "max_parameters": 5,
     "max_nesting": 4
   },
@@ -74,20 +64,10 @@
     "scope": "mod",
     "function_name": "plan_subtitle_job",
     "start_line": 630,
-    "max_loc": 66,
+    "max_loc": 63,
     "max_ccn": 19,
     "max_parameters": 2,
     "max_nesting": 6
-  },
-  "crates/dbsrt-cli/src/commands/media_add.rs::mod::resolve_container_embedded_subtitles": {
-    "file_path": "crates/dbsrt-cli/src/commands/media_add.rs",
-    "scope": "mod",
-    "function_name": "resolve_container_embedded_subtitles",
-    "start_line": 473,
-    "max_loc": 136,
-    "max_ccn": 34,
-    "max_parameters": 4,
-    "max_nesting": 7
   },
   "crates/dbsrt-cli/src/commands/media_add.rs::mod::resolve_explicit_subtitle_pair": {
     "file_path": "crates/dbsrt-cli/src/commands/media_add.rs",
@@ -157,26 +137,6 @@
     "max_loc": 123,
     "max_ccn": 25,
     "max_parameters": 1,
-    "max_nesting": 5
-  },
-  "crates/dbsrt-cli/src/commands/shared.rs::mod::find_or_build_phash_with_hwaccel": {
-    "file_path": "crates/dbsrt-cli/src/commands/shared.rs",
-    "scope": "mod",
-    "function_name": "find_or_build_phash_with_hwaccel",
-    "start_line": 46,
-    "max_loc": 77,
-    "max_ccn": 28,
-    "max_parameters": 3,
-    "max_nesting": 8
-  },
-  "crates/dbsrt-cli/src/commands/top/app.rs::mod::event_loop": {
-    "file_path": "crates/dbsrt-cli/src/commands/top/app.rs",
-    "scope": "mod",
-    "function_name": "event_loop",
-    "start_line": 478,
-    "max_loc": 20,
-    "max_ccn": 9,
-    "max_parameters": 3,
     "max_nesting": 5
   },
   "crates/dbsrt-cli/src/commands/top/app.rs::mod::handle_global_navigation_key_event": {
@@ -334,8 +294,8 @@
     "scope": "mod",
     "function_name": "load_historical_records",
     "start_line": 325,
-    "max_loc": 134,
-    "max_ccn": 21,
+    "max_loc": 131,
+    "max_ccn": 20,
     "max_parameters": 2,
     "max_nesting": 8
   },
@@ -359,16 +319,6 @@
     "max_parameters": 1,
     "max_nesting": 5
   },
-  "crates/dbsrt-cli/src/commands/top/sampler.rs::mod::preload_stem_size_cache": {
-    "file_path": "crates/dbsrt-cli/src/commands/top/sampler.rs",
-    "scope": "mod",
-    "function_name": "preload_stem_size_cache",
-    "start_line": 50,
-    "max_loc": 40,
-    "max_ccn": 10,
-    "max_parameters": 0,
-    "max_nesting": 6
-  },
   "crates/dbsrt-cli/src/commands/top/sampler.rs::mod::probe_media_file": {
     "file_path": "crates/dbsrt-cli/src/commands/top/sampler.rs",
     "scope": "mod",
@@ -378,36 +328,6 @@
     "max_ccn": 16,
     "max_parameters": 1,
     "max_nesting": 8
-  },
-  "crates/dbsrt-cli/src/commands/top/sampler.rs::mod::process_candidate_jobs": {
-    "file_path": "crates/dbsrt-cli/src/commands/top/sampler.rs",
-    "scope": "mod",
-    "function_name": "process_candidate_jobs",
-    "start_line": 1500,
-    "max_loc": 146,
-    "max_ccn": 28,
-    "max_parameters": 1,
-    "max_nesting": 4
-  },
-  "crates/dbsrt-cli/src/commands/top/sampler.rs::mod::read_proc_io_bytes": {
-    "file_path": "crates/dbsrt-cli/src/commands/top/sampler.rs",
-    "scope": "mod",
-    "function_name": "read_proc_io_bytes",
-    "start_line": 254,
-    "max_loc": 21,
-    "max_ccn": 7,
-    "max_parameters": 1,
-    "max_nesting": 5
-  },
-  "crates/dbsrt-cli/src/commands/top/sampler.rs::mod::run_telemetry_sampler_loop": {
-    "file_path": "crates/dbsrt-cli/src/commands/top/sampler.rs",
-    "scope": "mod",
-    "function_name": "run_telemetry_sampler_loop",
-    "start_line": 1326,
-    "max_loc": 163,
-    "max_ccn": 21,
-    "max_parameters": 4,
-    "max_nesting": 5
   },
   "crates/dbsrt-cli/src/commands/top/sampler.rs::mod::scan_all_media_sources": {
     "file_path": "crates/dbsrt-cli/src/commands/top/sampler.rs",
@@ -484,8 +404,8 @@
     "scope": "mod",
     "function_name": "main",
     "start_line": 10,
-    "max_loc": 56,
-    "max_ccn": 35,
+    "max_loc": 27,
+    "max_ccn": 33,
     "max_parameters": 0,
     "max_nesting": 3
   },
@@ -674,8 +594,8 @@
     "scope": "mod",
     "function_name": "probe_video_with_cmd",
     "start_line": 189,
-    "max_loc": 57,
-    "max_ccn": 15,
+    "max_loc": 36,
+    "max_ccn": 11,
     "max_parameters": 3,
     "max_nesting": 5
   },
@@ -684,10 +604,10 @@
     "scope": "mod",
     "function_name": "run_extraction_process",
     "start_line": 534,
-    "max_loc": 160,
-    "max_ccn": 39,
+    "max_loc": 48,
+    "max_ccn": 7,
     "max_parameters": 3,
-    "max_nesting": 7
+    "max_nesting": 5
   },
   "crates/dbsrt-index/src/db.rs::DbClient::connect": {
     "file_path": "crates/dbsrt-index/src/db.rs",
@@ -914,7 +834,7 @@
     "scope": "mod",
     "function_name": "execute_remote_relay_recognition",
     "start_line": 226,
-    "max_loc": 86,
+    "max_loc": 85,
     "max_ccn": 4,
     "max_parameters": 7,
     "max_nesting": 4

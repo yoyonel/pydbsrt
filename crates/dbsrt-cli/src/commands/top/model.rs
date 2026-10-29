@@ -80,6 +80,9 @@ pub struct ActiveJobTelemetry {
     pub progress_ratio: f64,
     /// Instantaneous read throughput in Mebibytes per second (MiB/s).
     pub current_rate_mib_s: f64,
+    /// Instantaneous frame decoding / hashing throughput in Frames Per Second (FPS).
+    #[serde(default)]
+    pub hashing_fps: f64,
     /// Estimated time to completion (ETA) in seconds, if throughput is non-zero.
     pub eta_secs: Option<f64>,
     /// Percentage CPU usage for this process (can exceed 100% across multiple cores).

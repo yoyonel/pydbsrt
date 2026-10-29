@@ -268,7 +268,11 @@ where
     Ok(())
 }
 
-#[tokio::main]
+/// Maximum worker threads allocated for the asynchronous HTTP runtime.
+/// Constrained to 4 threads to prevent hitting NPROC/thread-limits on shared hosting (CloudLinux LVE).
+pub const DEFAULT_SERVER_WORKER_THREADS: usize = 4;
+
+#[tokio::main(flavor = "multi_thread", worker_threads = 4)]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(

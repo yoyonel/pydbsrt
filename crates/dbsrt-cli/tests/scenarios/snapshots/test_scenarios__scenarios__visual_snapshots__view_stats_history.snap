@@ -17,7 +17,7 @@ expression: grid
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ┌ Paramètres de Métrologie & Échantillonnage ──────────────────────────────────────────────────────────────────────────────────────────────┐
 │                                                                                                                                          │
-│  • Population Échantillonnée : 0 médias décodés intégralement (durée > 60s)                                                              │
+│  • Population Échantillonnée : 0 médias décodés intégralement (durée > 1s)                                                               │
 │  • Sources Données           : data/reports/batch_tvshow_nightly.jsonl & data/SRT/couplings.json                                         │
 │  • Raccourcis Disponibles    : [1] Tâches en cours  [2/h] Statistiques  [3/r] Récents certifiés  [Esc] Retour aux Tâches                 │
 │                                                                                                                                          │

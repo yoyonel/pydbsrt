@@ -2,15 +2,19 @@
 
 use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
+use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 /// Execution timeout in seconds for invoking ffprobe.
 /// Accommodates network CIFS/NFS SMB filesystem latency under heavy concurrent worker loads.
 pub const FFPROBE_TIMEOUT_SECS: u64 = 60;
+
+/// Default probe timeout in seconds for remote network streams to prevent unbounded memory starvation.
+pub const REMOTE_STREAM_PROBE_TIMEOUT_SECS: u64 = 6;
 
 /// Polling interval for checking child process completion.
 pub const CHILD_POLL_INTERVAL: Duration = Duration::from_millis(50);
@@ -23,6 +27,16 @@ pub const PAL_FPS: f64 = 25.0;
 
 /// Standard NTSC film frame rate.
 pub const NTSC_FILM_FPS: f64 = 23.976;
+
+/// Default decoding threads allocated per FFmpeg process to enforce resource predictability
+/// and prevent host process/thread starvation on shared cloud runtimes.
+pub const DEFAULT_FFMPEG_DECODE_THREADS: &str = "2";
+
+/// Default probe size limit in bytes for ffprobe to avoid unbounded memory buffer on remote streams.
+pub const DEFAULT_FFPROBE_PROBESIZE: &str = "10000000";
+
+/// Default analyze duration limit in microseconds for ffprobe.
+pub const DEFAULT_FFPROBE_ANALYZEDURATION: &str = "10000000";
 
 #[derive(Debug, Clone)]
 pub struct VideoMetadata {
@@ -175,14 +189,126 @@ pub fn parse_fps_from_stem(stem: &str) -> f64 {
     DEFAULT_BASELINE_FPS
 }
 
+/// Resolves the absolute or system path to the `ffprobe` executable.
+///
+/// # Arguments
+/// None.
+///
+/// # Returns
+/// A `PathBuf` pointing to `DBSRT_FFPROBE` / `FFPROBE_PATH`, a sibling binary next
+/// to the current executable, or falling back to `"ffprobe"` on `PATH`.
+///
+/// # Panics
+/// Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// 1. Reads `DBSRT_FFPROBE` or `FFPROBE_PATH` from environment; returns if file exists.
+/// 2. Queries current process executable path via `std::env::current_exe()`.
+/// 3. If parent directory contains `ffprobe`, returns that sibling candidate.
+/// 4. Falls back to default system command string `"ffprobe"`.
+pub fn resolve_ffprobe() -> PathBuf {
+    if let Ok(env_bin) = std::env::var("DBSRT_FFPROBE").or_else(|_| std::env::var("FFPROBE_PATH")) {
+        let p = PathBuf::from(env_bin);
+        if p.exists() {
+            return p;
+        }
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let candidate = dir.join("ffprobe");
+            if candidate.is_file() {
+                return candidate;
+            }
+        }
+    }
+    PathBuf::from("ffprobe")
+}
+
+/// Resolves the absolute or system path to the fallback CPU `ffmpeg` executable.
+///
+/// # Arguments
+/// None.
+///
+/// # Returns
+/// A `PathBuf` pointing to `DBSRT_FFMPEG` / `FFMPEG_PATH`, a sibling binary next
+/// to the current executable, or falling back to `"ffmpeg"` on `PATH`.
+///
+/// # Panics
+/// Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// 1. Reads `DBSRT_FFMPEG` or `FFMPEG_PATH` from environment; returns if file exists.
+/// 2. Queries current process executable path via `std::env::current_exe()`.
+/// 3. If parent directory contains `ffmpeg`, returns that sibling candidate.
+/// 4. Falls back to default system command string `"ffmpeg"`.
+pub fn resolve_ffmpeg_cpu() -> PathBuf {
+    if let Ok(env_bin) = std::env::var("DBSRT_FFMPEG").or_else(|_| std::env::var("FFMPEG_PATH")) {
+        let p = PathBuf::from(env_bin);
+        if p.exists() {
+            return p;
+        }
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let candidate = dir.join("ffmpeg");
+            if candidate.is_file() {
+                return candidate;
+            }
+        }
+    }
+    PathBuf::from("ffmpeg")
+}
+
 /// Probes a video file using ffprobe with a bounded execution timeout.
 pub fn probe_video(path: &Path) -> Result<VideoMetadata> {
-    probe_video_with_timeout(path, FFPROBE_TIMEOUT_SECS)
+    let timeout = if crate::container::is_remote_stream_or_pipe(path) {
+        REMOTE_STREAM_PROBE_TIMEOUT_SECS
+    } else {
+        FFPROBE_TIMEOUT_SECS
+    };
+    probe_video_with_timeout(path, timeout)
 }
 
 /// Probes a video file using ffprobe with a custom timeout.
 pub fn probe_video_with_timeout(path: &Path, timeout_secs: u64) -> Result<VideoMetadata> {
-    probe_video_with_cmd(path, "ffprobe", timeout_secs)
+    let bin = resolve_ffprobe();
+    probe_video_with_cmd(path, bin.to_string_lossy().as_ref(), timeout_secs)
+}
+
+/// Drains stdout and stderr buffers from a completed child process.
+fn read_child_output(child: &mut Child) -> (Vec<u8>, String) {
+    let mut stdout = Vec::new();
+    if let Some(mut out) = child.stdout.take() {
+        let _ = out.read_to_end(&mut stdout);
+    }
+    let mut stderr = String::new();
+    if let Some(mut err) = child.stderr.take() {
+        let _ = err.read_to_string(&mut stderr);
+    }
+    (stdout, stderr)
+}
+
+fn build_ffprobe_command(path: &Path, ffprobe_bin: &str) -> Command {
+    let mut cmd = Command::new(ffprobe_bin);
+    cmd.args([
+        "-threads",
+        DEFAULT_FFMPEG_DECODE_THREADS,
+        "-probesize",
+        DEFAULT_FFPROBE_PROBESIZE,
+        "-analyzeduration",
+        DEFAULT_FFPROBE_ANALYZEDURATION,
+        "-v",
+        "error",
+        "-select_streams",
+        "v:0",
+        "-show_entries",
+        "stream=r_frame_rate,duration:format=duration",
+        "-of",
+        "json",
+    ]);
+    cmd.arg(path);
+    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+    cmd
 }
 
 /// Probes a video file with a specific command/binary and timeout.
@@ -191,20 +317,7 @@ pub fn probe_video_with_cmd(
     ffprobe_bin: &str,
     timeout_secs: u64,
 ) -> Result<VideoMetadata> {
-    let mut child = Command::new(ffprobe_bin)
-        .args([
-            "-v",
-            "error",
-            "-select_streams",
-            "v:0",
-            "-show_entries",
-            "stream=r_frame_rate,duration:format=duration",
-            "-of",
-            "json",
-        ])
-        .arg(path)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+    let mut child = build_ffprobe_command(path, ffprobe_bin)
         .spawn()
         .with_context(|| format!("Failed to execute '{}' on {:?}", ffprobe_bin, path))?;
 
@@ -214,15 +327,7 @@ pub fn probe_video_with_cmd(
     loop {
         match child.try_wait()? {
             Some(status) => {
-                let mut stdout = Vec::new();
-                if let Some(mut out) = child.stdout.take() {
-                    out.read_to_end(&mut stdout)?;
-                }
-                let mut stderr = String::new();
-                if let Some(mut err) = child.stderr.take() {
-                    err.read_to_string(&mut stderr)?;
-                }
-
+                let (stdout, stderr) = read_child_output(&mut child);
                 if !status.success() {
                     anyhow::bail!("{} failed: {}", ffprobe_bin, stderr);
                 }
@@ -346,7 +451,7 @@ pub fn resolve_ffmpeg(requested: HwAccel, custom_bin: Option<&Path>) -> Resolved
 
     if requested == HwAccel::Disabled {
         return ResolvedFfmpeg {
-            binary: PathBuf::from("ffmpeg"),
+            binary: resolve_ffmpeg_cpu(),
             hwaccel: HwAccel::Disabled,
         };
     }
@@ -408,7 +513,7 @@ fn detect_best_hw_ffmpeg() -> ResolvedFfmpeg {
 
     // 3. Fallback: standard CPU ffmpeg
     ResolvedFfmpeg {
-        binary: PathBuf::from("ffmpeg"),
+        binary: resolve_ffmpeg_cpu(),
         hwaccel: HwAccel::Disabled,
     }
 }
@@ -445,8 +550,11 @@ pub fn probe_keyframe_timestamps(
     start_sec: f64,
     duration_sec: Option<f64>,
 ) -> Result<Vec<u64>> {
-    let mut cmd = Command::new("ffprobe");
+    let ffprobe_bin = resolve_ffprobe();
+    let mut cmd = Command::new(ffprobe_bin);
     cmd.args([
+        "-threads",
+        DEFAULT_FFMPEG_DECODE_THREADS,
         "-v",
         "error",
         "-skip_frame",
@@ -531,22 +639,32 @@ pub fn extract_frames_advanced(
     }
 }
 
-fn run_extraction_process(
+/// Builds the FFmpeg Command configured with video sampling, hwaccel, and filters.
+///
+/// # Arguments
+/// * `path` - Input video file or stream URL path.
+/// * `options` - Extraction options (duration, sampling mode, start time).
+/// * `resolved` - Selected FFmpeg binary and hardware acceleration backend.
+///
+/// # Returns
+/// Configured `Command` ready to spawn.
+///
+/// # Panics
+/// Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// 1. Configures standard quiet non-interactive banner arguments.
+/// 2. Injects hardware acceleration input parameters (VA-API, CUDA, QSV).
+/// 3. Sets decoding thread ceiling to prevent CloudLinux LVE starvation.
+/// 4. Assembles 32x32 grayscale video filter chain and configures rawvideo stdout pipe.
+fn build_ffmpeg_extraction_command(
     path: &Path,
     options: &VideoExtractionOptions,
     resolved: &ResolvedFfmpeg,
-) -> Result<Vec<FrameSample>> {
-    // Collect keyframe timestamps if KeyFrames mode is requested
-    let keyframe_ts = if options.sampling == SamplingMode::KeyFrames {
-        probe_keyframe_timestamps(path, options.start_sec, options.duration_sec).unwrap_or_default()
-    } else {
-        Vec::new()
-    };
-
+) -> Command {
     let mut cmd = Command::new(&resolved.binary);
     cmd.args(["-hide_banner", "-nostats", "-nostdin"]);
 
-    // HWAccel input arguments
     match resolved.hwaccel {
         HwAccel::Vaapi => {
             let device = if Path::new("/dev/dri/renderD128").exists() {
@@ -580,6 +698,7 @@ fn run_extraction_process(
         cmd.args(["-skip_frame", "nokey"]);
     }
 
+    cmd.args(["-threads", DEFAULT_FFMPEG_DECODE_THREADS]);
     cmd.arg("-i").arg(path);
 
     if let Some(dur) = options.duration_sec {
@@ -596,7 +715,6 @@ fn run_extraction_process(
         cmd.args(["-fps_mode", "passthrough"]);
     }
 
-    // Build filter chain
     let filter_chain = match (resolved.hwaccel, options.sampling) {
         (HwAccel::Vaapi, SamplingMode::Fps(fps)) => {
             format!("fps={fps},scale_vaapi=w=32:h=32,hwdownload,format=nv12,format=gray")
@@ -620,66 +738,228 @@ fn run_extraction_process(
         cmd.args(["-pix_fmt", "gray"]);
     }
 
-    cmd.args(["-f", "rawvideo", "-"]);
-
+    cmd.args([
+        "-threads",
+        DEFAULT_FFMPEG_DECODE_THREADS,
+        "-filter_threads",
+        DEFAULT_FFMPEG_DECODE_THREADS,
+        "-f",
+        "rawvideo",
+        "-",
+    ]);
     cmd.stdout(Stdio::piped()).stderr(Stdio::null());
+    cmd
+}
 
-    let mut child = cmd.spawn().with_context(|| {
-        format!(
-            "Failed to spawn ffmpeg ({:?}) on {:?}",
-            resolved.binary, path
-        )
-    })?;
+/// Context holding frame timing configuration and keyframe cache.
+struct FrameTimingContext<'a> {
+    sampling: SamplingMode,
+    start_ms: u64,
+    meta_fps: f64,
+    keyframe_ts: &'a [u64],
+}
+
+/// Computes the presentation timestamp (in ms) for an extracted frame index.
+///
+/// # Arguments
+/// * `ctx` - Frame timing configuration context.
+/// * `frame_idx` - Monotonic index of the current extracted frame.
+///
+/// # Returns
+/// Computed timestamp in milliseconds.
+///
+/// # Errors
+/// Never returns an error.
+///
+/// # Panics
+/// Never panics.
+///
+/// # Data Flow & Invariants
+/// Maps sequential frame index to millisecond timeline depending on sampling strategy.
+fn compute_frame_timestamp(ctx: &FrameTimingContext<'_>, frame_idx: usize) -> u64 {
+    match ctx.sampling {
+        SamplingMode::Full => {
+            let offset_ms = ((frame_idx as f64 / ctx.meta_fps) * 1000.0).round() as u64;
+            ctx.start_ms + offset_ms
+        }
+        SamplingMode::Fps(target_fps) => {
+            let offset_ms = ((frame_idx as f64 / target_fps) * 1000.0).round() as u64;
+            ctx.start_ms + offset_ms
+        }
+        SamplingMode::KeyFrames => {
+            if frame_idx < ctx.keyframe_ts.len() {
+                ctx.keyframe_ts[frame_idx]
+            } else {
+                ctx.start_ms + ((frame_idx as f64) * 1000.0).round() as u64
+            }
+        }
+    }
+}
+
+fn resolve_keyframe_timestamps(path: &Path, options: &VideoExtractionOptions) -> Vec<u64> {
+    if options.sampling == SamplingMode::KeyFrames
+        && !crate::container::is_remote_stream_or_pipe(path)
+    {
+        probe_keyframe_timestamps(path, options.start_sec, options.duration_sec).unwrap_or_default()
+    } else {
+        Vec::new()
+    }
+}
+
+/// Resolves the effective framerate for frame sample timestamp generation.
+///
+/// # Arguments
+/// * `path` - Target video file or remote stream locator.
+/// * `sampling` - Configured video extraction sampling strategy.
+///
+/// # Returns
+/// Effective framerate in Hz (`f64`).
+///
+/// # Errors
+/// Never returns an error (falls back to heuristic stem or `DEFAULT_BASELINE_FPS`).
+///
+/// # Panics
+/// Never panics.
+///
+/// # Data Flow & Invariants
+/// Bypasses ffprobe on remote network streams to prevent connection leaks, otherwise queries
+/// container metadata via probe or stem heuristics.
+fn resolve_extraction_meta_fps(path: &Path, sampling: SamplingMode) -> f64 {
+    if sampling != SamplingMode::Full {
+        return DEFAULT_BASELINE_FPS;
+    }
+    if crate::container::is_remote_stream_or_pipe(path) {
+        path.file_stem()
+            .and_then(|s| s.to_str())
+            .map(parse_fps_from_stem)
+            .unwrap_or(DEFAULT_BASELINE_FPS)
+    } else {
+        probe_video(path)
+            .map(|m| m.fps)
+            .unwrap_or(DEFAULT_BASELINE_FPS)
+    }
+}
+
+/// Number of decoded frames between volatile progress status writes.
+pub const PROGRESS_UPDATE_INTERVAL_FRAMES: usize = 120;
+
+/// Volatile runtime progress file guard for an active video extraction process.
+struct ExtractionJobGuard {
+    file_path: PathBuf,
+}
+
+impl Drop for ExtractionJobGuard {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.file_path);
+    }
+}
+
+fn create_job_guard(pid: u32) -> Option<ExtractionJobGuard> {
+    let dir = Path::new("run/jobs");
+    if fs::create_dir_all(dir).is_ok() {
+        let file_path = dir.join(format!("{pid}.json"));
+        Some(ExtractionJobGuard { file_path })
+    } else {
+        None
+    }
+}
+
+fn write_job_progress(
+    guard: &ExtractionJobGuard,
+    frames: usize,
+    total_frames: Option<usize>,
+    fps: f64,
+) {
+    let total_str = match total_frames {
+        Some(t) => format!("{t}"),
+        None => "null".to_string(),
+    };
+    let payload =
+        format!("{{\"frames\":{frames},\"total_frames\":{total_str},\"fps\":{fps:.3}}}\n");
+    let _ = fs::write(&guard.file_path, payload);
+}
+
+fn maybe_update_progress(
+    guard: Option<&ExtractionJobGuard>,
+    frame_idx: usize,
+    expected_total: Option<usize>,
+    meta_fps: f64,
+) {
+    if let Some(g) = guard {
+        if frame_idx.is_multiple_of(PROGRESS_UPDATE_INTERVAL_FRAMES) {
+            write_job_progress(g, frame_idx, expected_total, meta_fps);
+        }
+    }
+}
+
+fn spawn_ffmpeg_child(
+    path: &Path,
+    options: &VideoExtractionOptions,
+    resolved: &ResolvedFfmpeg,
+) -> Result<(Child, std::io::BufReader<std::process::ChildStdout>)> {
+    let mut child = build_ffmpeg_extraction_command(path, options, resolved)
+        .spawn()
+        .with_context(|| {
+            format!(
+                "Failed to spawn ffmpeg ({:?}) on {:?}",
+                resolved.binary, path
+            )
+        })?;
 
     let stdout = child
         .stdout
         .take()
         .ok_or_else(|| anyhow!("Cannot capture ffmpeg stdout"))?;
-    let mut reader = std::io::BufReader::with_capacity(1024 * 1024, stdout);
+    Ok((
+        child,
+        std::io::BufReader::with_capacity(1024 * 1024, stdout),
+    ))
+}
+
+fn resolve_expected_total_frames(options: &VideoExtractionOptions, meta_fps: f64) -> Option<usize> {
+    options.max_frames.or_else(|| {
+        options
+            .duration_sec
+            .map(|d| (d * meta_fps).round() as usize)
+    })
+}
+
+fn run_extraction_process(
+    path: &Path,
+    options: &VideoExtractionOptions,
+    resolved: &ResolvedFfmpeg,
+) -> Result<Vec<FrameSample>> {
+    let keyframe_ts = resolve_keyframe_timestamps(path, options);
+    let (mut child, mut reader) = spawn_ffmpeg_child(path, options, resolved)?;
 
     let mut buf = [0u8; 1024];
     let capacity = options.max_frames.unwrap_or(256);
     let mut samples = Vec::with_capacity(capacity);
 
-    // Frame timing parameters
-    let meta_fps = if options.sampling == SamplingMode::Full {
-        probe_video(path).map(|m| m.fps).unwrap_or(25.0)
-    } else {
-        25.0
-    };
+    let meta_fps = resolve_extraction_meta_fps(path, options.sampling);
+    let guard = create_job_guard(child.id());
+    let expected_total = resolve_expected_total_frames(options, meta_fps);
 
-    let start_ms = (options.start_sec * 1000.0).round() as u64;
+    let timing_ctx = FrameTimingContext {
+        sampling: options.sampling,
+        start_ms: (options.start_sec * 1000.0).round() as u64,
+        meta_fps,
+        keyframe_ts: &keyframe_ts,
+    };
 
     while options.max_frames.is_none_or(|m| samples.len() < m) {
         match reader.read_exact(&mut buf) {
             Ok(()) => {
                 let frame_idx = samples.len();
                 let phash = crate::phash::phash_32x32(&buf);
-
-                let timestamp_ms = match options.sampling {
-                    SamplingMode::Full => {
-                        let offset_ms = ((frame_idx as f64 / meta_fps) * 1000.0).round() as u64;
-                        start_ms + offset_ms
-                    }
-                    SamplingMode::Fps(target_fps) => {
-                        let offset_ms = ((frame_idx as f64 / target_fps) * 1000.0).round() as u64;
-                        start_ms + offset_ms
-                    }
-                    SamplingMode::KeyFrames => {
-                        if frame_idx < keyframe_ts.len() {
-                            keyframe_ts[frame_idx]
-                        } else {
-                            // Fallback approximation if probe returned fewer items
-                            start_ms + ((frame_idx as f64) * 1000.0).round() as u64
-                        }
-                    }
-                };
+                let timestamp_ms = compute_frame_timestamp(&timing_ctx, frame_idx);
 
                 samples.push(FrameSample {
                     phash,
                     timestamp_ms,
                     frame_idx,
                 });
+                maybe_update_progress(guard.as_ref(), frame_idx, expected_total, meta_fps);
             }
             Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
                 break;
@@ -688,6 +968,7 @@ fn run_extraction_process(
         }
     }
 
+    let _ = child.kill();
     let _ = child.wait();
     Ok(samples)
 }
@@ -723,7 +1004,7 @@ pub fn extract_frames_phash_with_hwaccel(
 ) -> Result<Vec<u64>> {
     let opts = VideoExtractionOptions {
         start_sec,
-        max_frames: Some(nb_frames),
+        max_frames: if nb_frames > 0 { Some(nb_frames) } else { None },
         sampling: SamplingMode::Full,
         hwaccel,
         ..Default::default()

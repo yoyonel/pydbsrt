@@ -21,6 +21,15 @@ pub const BYTES_PER_MIB_F64: f64 = (1024 * 1024) as f64;
 /// Floating-point number of bytes per GiB for memory conversions.
 pub const BYTES_PER_GIB_F64: f64 = (1024 * 1024 * 1024) as f64;
 
+/// Bits per byte factor for network throughput conversion to Mbps.
+pub const BITS_PER_BYTE_F64: f64 = 8.0;
+
+/// Procfs path to network interface statistics.
+pub const PROC_NET_DEV_PATH: &str = "/proc/net/dev";
+
+/// Number of header lines in `/proc/net/dev`.
+pub const PROC_NET_DEV_HEADER_LINES: usize = 2;
+
 /// Milliseconds in a second as float for duration calculations.
 pub const MILLIS_PER_SEC: f64 = 1000.0;
 
@@ -93,11 +102,14 @@ pub const GPU_PROGRESS_BAR_CHAR_WIDTH: usize = 12;
 /// Rolling time window in seconds (2 hours) for session throughput aggregation.
 pub const SESSION_WINDOW_SECS: f64 = 7200.0;
 
+/// Maximum worker threads allocated for Rayon global thread pool to prevent NPROC exhaustion on shared hosting.
+pub const DEFAULT_MAX_RAYON_WORKER_THREADS: usize = 2;
+
 /// Minimum session duration in seconds required before displaying session throughput.
 pub const MIN_SESSION_DURATION_DISPLAY_SECS: f64 = 5.0;
 
 /// Minimum decode duration in seconds to qualify as full pHash processing for statistics.
-pub const MIN_FULL_DECODE_DURATION_SECS: f64 = 60.0;
+pub const MIN_FULL_DECODE_DURATION_SECS: f64 = 1.0;
 
 /// Percentile factor for p90 statistical calculations.
 pub const P90_PERCENTILE_FACTOR: f64 = 0.90;
@@ -198,3 +210,12 @@ pub const BATCH_WORKER_CMD_PATTERN_2: &str = "dbsrt media add";
 
 /// Brief pause in milliseconds allowing coordinators to terminate child process groups gracefully.
 pub const BATCH_GRACEFUL_SHUTDOWN_PAUSE_MS: u64 = 50;
+
+/// Number of bytes in a single 32x32 8-bit grayscale raw video frame (1 KiB).
+pub const RAW_FRAME_BYTES: f64 = 1024.0;
+
+/// Default baseline duration in seconds for streaming TV show episodes (45 minutes).
+pub const DEFAULT_STREAM_EPISODE_DURATION_SECS: f64 = 2700.0;
+
+/// Directory path storing volatile active job progress tracking JSON files.
+pub const ACTIVE_JOBS_RUN_DIR: &str = "run/jobs";

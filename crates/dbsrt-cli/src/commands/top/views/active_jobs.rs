@@ -263,13 +263,19 @@ fn build_job_row(job: &ActiveJobTelemetry, idx: usize, selected_index: usize) ->
         .map(format_duration)
         .unwrap_or_else(|| "N/A".to_string());
 
+    let rate_display = if job.hashing_fps > 0.5 {
+        format!("{:>4.0} fps", job.hashing_fps)
+    } else {
+        format!("{:>5.1} MB/s", job.current_rate_mib_s)
+    };
+
     let row_cells = vec![
         Cell::from(Line::from(vec![cursor_span, status_icon])),
         Cell::from(job.pid.to_string()),
         Cell::from(media_display),
         Cell::from(Span::styled(job.engine.clone(), engine_style)),
         Cell::from(prog_text),
-        Cell::from(format!("{:>5.1} MB/s", job.current_rate_mib_s)),
+        Cell::from(rate_display),
         Cell::from(format!("{eta_text:>7}")),
         Cell::from(format!("{:>4.1}%", job.cpu_percent)),
         Cell::from(format!("{:>5.1} MB", job.ram_rss_mib)),
