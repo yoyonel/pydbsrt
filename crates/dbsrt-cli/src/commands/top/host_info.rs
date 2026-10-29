@@ -51,20 +51,25 @@ pub struct HostSystemInfo {
     pub build_date: String,
 }
 
+/// Neutral placeholder for identification fields that have not been probed yet.
+pub const UNKNOWN_FIELD: &str = "unknown";
+
+/// Neutral, machine-independent placeholder used before the first probe (and in tests).
 impl Default for HostSystemInfo {
     fn default() -> Self {
+        let unknown = || UNKNOWN_FIELD.to_string();
         Self {
-            hostname: "thinkpad-x1".to_string(),
-            os_name: "Debian 13 (trixie)".to_string(),
-            kernel: "6.12.73".to_string(),
-            arch: "x86_64".to_string(),
-            cpu_brand: "13th Gen Intel(R) Core(TM) i7-1355U".to_string(),
-            cpu_cores_logical: 12,
-            cpu_cores_physical: Some(10),
-            gpu_name: "Iris Xe Graphics".to_string(),
-            app_version: "v0.1.0 (e79795f 2026-10-29)".to_string(),
-            git_hash: "e79795f".to_string(),
-            build_date: "2026-10-29".to_string(),
+            hostname: unknown(),
+            os_name: unknown(),
+            kernel: unknown(),
+            arch: unknown(),
+            cpu_brand: unknown(),
+            cpu_cores_logical: 0,
+            cpu_cores_physical: None,
+            gpu_name: unknown(),
+            app_version: unknown(),
+            git_hash: unknown(),
+            build_date: unknown(),
         }
     }
 }
@@ -483,9 +488,11 @@ mod tests {
     #[test]
     fn test_host_system_info_default() {
         let def = HostSystemInfo::default();
-        assert_eq!(def.hostname, "thinkpad-x1");
-        assert_eq!(def.gpu_name, "Iris Xe Graphics");
-        assert_eq!(def.cpu_cores_logical, 12);
+        assert_eq!(def.hostname, UNKNOWN_FIELD);
+        assert_eq!(def.gpu_name, UNKNOWN_FIELD);
+        assert_eq!(def.git_hash, UNKNOWN_FIELD);
+        assert_eq!(def.cpu_cores_logical, 0);
+        assert_eq!(def.cpu_cores_physical, None);
     }
 
     #[test]
