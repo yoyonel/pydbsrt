@@ -253,7 +253,12 @@ fn parse_os_release_content(content: &str) -> Option<String> {
 /// Provides crucial fallback for jailed environments (like o2switch) where `/etc/os-release`
 /// is inaccessible, identifying CloudLinux, Red Hat, Debian, or Ubuntu markers.
 pub fn detect_os_from_proc_version() -> Option<String> {
-    let version_str = fs::read_to_string("/proc/version").ok()?.to_lowercase();
+    classify_proc_version(&fs::read_to_string("/proc/version").ok()?)
+}
+
+/// Maps `/proc/version` text to a distribution family label.
+fn classify_proc_version(content: &str) -> Option<String> {
+    let version_str = content.to_lowercase();
     if version_str.contains("cloudlinux") {
         Some("CloudLinux".to_string())
     } else if version_str.contains("red hat")
@@ -450,9 +455,12 @@ pub fn extract_last_bracket(s: &str) -> Option<String> {
 pub fn probe_gpu_via_drm_sysfs() -> Option<String> {
     let card0_driver = Path::new("/sys/class/drm/card0/device/driver");
     let target = fs::read_link(card0_driver).ok()?;
-    let driver_name = target.file_name()?.to_string_lossy().to_string();
+    drm_driver_label(&target.file_name()?.to_string_lossy())
+}
 
-    match driver_name.as_str() {
+/// Maps a kernel DRM driver name to a human-readable GPU label.
+fn drm_driver_label(driver_name: &str) -> Option<String> {
+    match driver_name {
         "v3d" | "vc4" => Some("Broadcom VideoCore VI (v3d)".to_string()),
         "i915" => Some("Iris Xe Graphics (i915)".to_string()),
         "xe" => Some("Intel Xe Graphics (xe)".to_string()),
@@ -507,13 +515,62 @@ mod tests {
     }
 
     #[test]
-    fn test_detect_host_system_info_live() {
-        let info = detect_host_system_info();
-        assert!(!info.hostname.is_empty());
-        assert!(!info.os_name.is_empty());
-        assert!(!info.kernel.is_empty());
-        assert!(!info.cpu_brand.is_empty());
-        assert!(info.cpu_cores_logical >= 1);
-        assert!(!info.gpu_name.is_empty());
+    fn test_parse_os_release_content_prefers_pretty_name() {
+        let both = "NAME=\"Debian\"\nPRETTY_NAME=\"Debian 13\"\n";
+        assert_eq!(parse_os_release_content(both), Some("Debian 13".into()));
+        assert_eq!(
+            parse_os_release_content("NAME='Alpine'\n"),
+            Some("Alpine".into())
+        );
+        assert_eq!(parse_os_release_content("PRETTY_NAME=\"\"\nID=x\n"), None);
+    }
+
+    #[test]
+    fn test_classify_proc_version() {
+        let el = "Linux version 4.18.0-513.el8.x86_64 (gcc)";
+        assert_eq!(
+            classify_proc_version(el),
+            Some("Enterprise Linux (RHEL)".into())
+        );
+        let cl = "Linux version 4.18.0 (CloudLinux build)";
+        assert_eq!(classify_proc_version(cl), Some("CloudLinux".into()));
+        assert_eq!(classify_proc_version("Linux version 6.12.0 (gcc)"), None);
+    }
+
+    #[test]
+    fn test_parse_cpuinfo_fallback_prefers_model_over_hardware() {
+        let rpi = "processor\t: 0\nHardware\t: BCM2835\nModel\t\t: Raspberry Pi 4 Model B\n";
+        assert_eq!(
+            parse_cpuinfo_fallback(rpi),
+            Some("Raspberry Pi 4 Model B".into())
+        );
+        assert_eq!(
+            parse_cpuinfo_fallback("Hardware\t: BCM2835\n"),
+            Some("BCM2835".into())
+        );
+        assert_eq!(parse_cpuinfo_fallback("processor\t: 0\n"), None);
+    }
+
+    #[test]
+    fn test_parse_lspci_gpu_line() {
+        let nv = "01:00.0 3D controller: NVIDIA Corporation GA107M (rev a1)";
+        assert_eq!(
+            parse_lspci_gpu_line(nv),
+            Some("NVIDIA Corporation GA107M".into())
+        );
+        let net = "02:00.0 Ethernet controller: Intel Corporation I219-V";
+        assert_eq!(parse_lspci_gpu_line(net), None);
+    }
+
+    #[test]
+    fn test_drm_driver_label() {
+        assert_eq!(
+            drm_driver_label("v3d"),
+            Some("Broadcom VideoCore VI (v3d)".into())
+        );
+        assert_eq!(
+            drm_driver_label("virtio_gpu"),
+            Some("GPU (virtio_gpu)".into())
+        );
     }
 }
