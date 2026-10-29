@@ -33,9 +33,6 @@ pub const DEFAULT_CACHE_SUBTITLES_SUBDIR: &str = "dbsrt/subtitles";
 /// Number of perceptual hash samples included in JSON search response preview.
 pub const FINGERPRINT_PREVIEW_SAMPLE_COUNT: usize = 5;
 
-/// Minimum sequence length required to enforce temporal dynamics validation during multi-tier recognition.
-pub const MIN_SEQUENCE_LEN_FOR_DYNAMICS_CHECK: usize = 5;
-
 /// Ordered candidate timeline ratios for narrative fingerprint sampling, prioritizing dynamic mid-acts.
 pub const NARRATIVE_SAMPLE_RATIOS: [f64; 6] = [0.35, 0.65, 0.40, 0.60, 0.25, 0.75];
 

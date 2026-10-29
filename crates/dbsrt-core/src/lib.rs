@@ -25,11 +25,11 @@ pub use coupling::{
     RegistryLock, RelabelResult, SubFrameAnchor,
 };
 pub use cuts::{
-    detect_cuts, detect_cuts_timestamped, is_blank_phash, is_static_sequence, read_phash_file,
-    write_phash_file, CutItem, TimestampedCutItem, FLAT_BLACK_DITHERED_1, FLAT_BLACK_DITHERED_2,
-    FLAT_BLACK_DITHERED_3, FLAT_BLACK_PHASH, FLAT_WHITE_PHASH, MIN_DYNAMIC_SEQUENCE_DISTINCT_COUNT,
-    MIN_DYNAMIC_SEQUENCE_WINDOW_LEN, STATIC_FRAME_MAX_DISTANCE,
-    STATIC_SEQUENCE_MAX_JITTER_DISTANCE,
+    detect_cuts, detect_cuts_timestamped, is_blank_phash, is_blank_sequence, is_static_sequence,
+    read_phash_file, write_phash_file, CutItem, TimestampedCutItem, FLAT_BLACK_DITHERED_1,
+    FLAT_BLACK_DITHERED_2, FLAT_BLACK_DITHERED_3, FLAT_BLACK_PHASH, FLAT_WHITE_PHASH,
+    MIN_DYNAMIC_SEQUENCE_DISTINCT_COUNT, MIN_DYNAMIC_SEQUENCE_WINDOW_LEN,
+    STATIC_FRAME_MAX_DISTANCE, STATIC_SEQUENCE_MAX_JITTER_DISTANCE,
 };
 pub use ffmpeg_input::{
     apply_ftp_credentials, display_input, ffmpeg_decode_threads, redact_command_line,

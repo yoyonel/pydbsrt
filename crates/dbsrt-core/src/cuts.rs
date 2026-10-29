@@ -73,6 +73,14 @@ pub fn is_blank_phash(hash: u64) -> bool {
         || hash == FLAT_BLACK_DITHERED_3
 }
 
+/// Returns `true` when a query carries no visual information: empty or every frame blank.
+///
+/// Recognition gates use this instead of [`is_static_sequence`]: a static but textured
+/// scene (dialogue shot, title card) is a legitimate query and must reach the index.
+pub fn is_blank_sequence(hashes: &[u64]) -> bool {
+    hashes.iter().all(|&h| is_blank_phash(h))
+}
+
 /// Evaluates whether a sequence of perceptual hashes represents a static or invariant scene
 /// (e.g. frozen frame, black screen, title card, or encoder dither without visual motion).
 ///
@@ -246,6 +254,23 @@ mod tests {
         assert!(is_blank_phash(FLAT_BLACK_DITHERED_3));
         assert!(!is_blank_phash(0xAAAA_AAAA_5555_5555)); // 32 bits set (natural image)
         assert!(!is_blank_phash(0xF72C_F0EA_5EC4_130A)); // 32 bits set
+    }
+
+    #[test]
+    fn test_is_blank_sequence() {
+        assert!(is_blank_sequence(&[]));
+        assert!(is_blank_sequence(&[
+            FLAT_BLACK_PHASH,
+            FLAT_BLACK_DITHERED_3
+        ]));
+        // A static textured scene is static but not blank: it stays queryable.
+        let freeze_5 = vec![0xAAAA_AAAA_5555_5555; 5];
+        assert!(is_static_sequence(&freeze_5));
+        assert!(!is_blank_sequence(&freeze_5));
+        assert!(!is_blank_sequence(&[
+            FLAT_BLACK_PHASH,
+            0xAAAA_AAAA_5555_5555
+        ]));
     }
 
     #[test]

@@ -2,8 +2,7 @@
 
 use crate::constants::{
     DEFAULT_BASELINE_FPS, DEFAULT_SEARCH_DISTANCE, MILLIS_PER_SEC,
-    MIN_PHASH_RECOGNITION_CONFIDENCE_PERCENT, MIN_SEQUENCE_LEN_FOR_DYNAMICS_CHECK,
-    SIGNIFICANT_SHIFT_THRESHOLD_MS,
+    MIN_PHASH_RECOGNITION_CONFIDENCE_PERCENT, SIGNIFICANT_SHIFT_THRESHOLD_MS,
 };
 use crate::dtos::{RecognizeRequest, RecognizeResponse, SubtitleCandidate};
 use crate::services::catalog::lookup_certified_couplings;
@@ -48,11 +47,7 @@ pub fn match_fingerprint_multitier(
     search_distance: u32,
     phash_dirs: &[PathBuf],
 ) -> Option<(String, f64, String)> {
-    if hashes.is_empty()
-        || hashes.iter().all(|&h| dbsrt_core::is_blank_phash(h))
-        || (hashes.len() >= MIN_SEQUENCE_LEN_FOR_DYNAMICS_CHECK
-            && dbsrt_core::is_static_sequence(hashes))
-    {
+    if dbsrt_core::is_blank_sequence(hashes) {
         return None;
     }
 
@@ -572,6 +567,26 @@ mod tests {
         let res = recognize_handler(State(state), Json(req)).await.unwrap();
         assert!(!res.0.found);
         assert_eq!(res.0.confidence, 0.0);
+    }
+
+    #[test]
+    fn test_match_static_textured_scene_reaches_index() {
+        const STATIC_SCENE_PHASH: u64 = 0xAAAA_AAAA_5555_5555;
+        const STATIC_SCENE_FRAMES: usize = 250;
+        const QUERY_FRAMES: usize = 25;
+        const FPS: f64 = 25.0;
+        let state = test_app_state();
+        let indexed = vec![STATIC_SCENE_PHASH; STATIC_SCENE_FRAMES];
+        state.delta_index.write().unwrap().ingest_raw_frames(
+            "Static.Scene.2020.1080p.mkv",
+            &indexed,
+            FPS,
+        );
+        // A static but textured query must not be rejected before the index lookup.
+        let query = vec![STATIC_SCENE_PHASH; QUERY_FRAMES];
+        assert!(dbsrt_core::is_static_sequence(&query));
+        let hit = match_fingerprint_multitier(&state, &query, DEFAULT_SEARCH_DISTANCE, &[]);
+        assert!(hit.is_some(), "static textured scene must reach the index");
     }
 
     #[tokio::test]

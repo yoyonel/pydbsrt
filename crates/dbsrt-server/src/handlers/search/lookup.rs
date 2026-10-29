@@ -362,7 +362,7 @@ async fn execute_remote_relay_recognition(
     let mut phash_conf = 0.0;
     let query_sample_opt = Some(query_sample.clone());
 
-    if !dbsrt_core::is_static_sequence(&query_sample) {
+    if !dbsrt_core::is_blank_sequence(&query_sample) {
         let fp_strings: Vec<String> = query_sample
             .iter()
             .map(|h| format!("{:#018x}", h))
