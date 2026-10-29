@@ -12,7 +12,7 @@ tasks:
       - ./scripts/o2switch_ctl.sh test-local
 
   o2switch:sync:
-    desc: Synchronize static binaries, Zero-DB catalog, and .htaccess reverse-proxy to o2switch
+    desc: Synchronize static binaries, gateway, and SRT store to o2switch (catalog seeded only if missing)
     cmds:
       - ./scripts/o2switch_ctl.sh sync
 

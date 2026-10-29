@@ -145,7 +145,7 @@ Cette page dresse le dictionnaire exhaustif de toutes les cibles d'orchestration
 | :--- | :--- |
 | `task o2switch:build` | Cross-compile les exécutables statiques autonomes `x86_64-unknown-linux-musl` (`dbsrt`, `dbsrt-server`) et applique `strip`. |
 | `task o2switch:test-local` | Valide empiriquement le binaire musl en mode Zero-DB localement sur le port `8769`. |
-| `task o2switch:sync` | Synchronise les binaires statiques, le catalogue `catalog.dbphash`, les sous-titres et `.htaccess` par rsync. |
+| `task o2switch:sync` | Synchronise les binaires statiques, la passerelle `index.php` + `.htaccess` et les sous-titres (`--update`) par rsync. Le catalogue `catalog.dbphash` local n'est envoyé que s'il manque sur o2switch : le catalogue distant est recompacté sur place. |
 | `task o2switch:batch:tvshow` | Exécute l'ingestion par batch distante sur les séries vierges (/tvshow, supporte `--daemon`, `--fresh-only`, `--retry-failed`, `--max-extraction-secs`). |
 | `task o2switch:batch:movies` | Exécute l'ingestion par batch distante sur les films vierges (/video, supporte `--daemon`, `--fresh-only`, `--retry-failed`, `--max-extraction-secs`). |
 | `task o2switch:batch:status` | Vérifie l'état d'exécution du démon batch (PID, CPU, mémoire, progression détaillée de la file). |

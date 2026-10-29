@@ -206,11 +206,12 @@ case "${ACTION}" in
     fi
 
     echo "-> Transferring Zero-DB catalog and SRT store (bwlimit ${DEFAULT_RSYNC_BWLIMIT_KBPS} KB/s)..."
+    # The remote catalog is packed on o2switch at start: the local one only seeds a fresh host
     if [[ -f "data/catalog.dbphash" ]]; then
-      rsync -avz --progress --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "data/catalog.dbphash" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/"
+      rsync -avz --progress --ignore-existing --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "data/catalog.dbphash" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/"
     fi
     if [[ -d "data/SRT" ]]; then
-      rsync -avz --progress --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "data/SRT/" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/SRT/"
+      rsync -avz --progress --update --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "data/SRT/" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/SRT/"
     fi
 
     echo "-> Deploying reverse-proxy gateway (index.php + .htaccess)..."
