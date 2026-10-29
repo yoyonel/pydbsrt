@@ -19,7 +19,7 @@ tags:
 
 En tant qu'utilisateur du lecteur multimédia VLC :
 
-- Vous souhaitez utiliser le **Cloud o2switch** (`https://2026-pydbsrt.fr/dbsrt`) pour profiter d'un catalogue distant sans consommer de mémoire RAM locale.
+- Vous souhaitez utiliser le **Cloud o2switch** (URL définie dans `O2SWITCH_URL`, ex: `https://<your-domain>/dbsrt`) pour profiter d'un catalogue distant sans consommer de mémoire RAM locale.
 - Vous souhaitez basculer en mode **100% Local (Zero-DB)** lorsque vous êtes hors-ligne ou sur un réseau isolé (Air-Gapped).
 - Vous souhaitez déporter les calculs sur une appliance **Raspberry Pi 4** connectée à votre réseau local.
 - Vous vous demandez quel endpoint configurer dans le plugin VLC et pourquoi l'extension continue d'afficher `http://127.0.0.1:8765`.
@@ -39,7 +39,7 @@ flowchart TD
     Agent -->|2c. Mode RPi4| RPi4["🍓 Appliance RPi4 (LAN)"]
 ```
 
-1. **Absence de moteur TLS dans VLC Lua** : L'API réseau interne de VLC (`vlc.net.connect_tcp`) ne supporte que les sockets TCP brutes non chiffrées. Elle est incapable d'établir une liaison chiffrée HTTPS vers `https://2026-pydbsrt.fr/dbsrt`.
+1. **Absence de moteur TLS dans VLC Lua** : L'API réseau interne de VLC (`vlc.net.connect_tcp`) ne supporte que les sockets TCP brutes non chiffrées. Elle est incapable d'établir une liaison chiffrée HTTPS vers `https://<your-domain>/dbsrt`.
 2. **Accès aux fichiers disques locaux** : Un serveur distant (o2switch ou RPi4 distant) n'a pas accès à vos montages disques ou NAS locaux pour y faire tourner `ffmpeg`. C'est l'agent local qui extrait les 5 trames clés pHash en 50 ms avant d'envoyer la signature compacte (200 octets).
 3. **Découverte automatique zéro-configuration** : À chaque bascule, l'agent écrit le fichier `/tmp/dbsrt-server.json`. Le plugin VLC le relit automatiquement lors de chaque recherche sans intervention manuelle.
 
@@ -60,7 +60,7 @@ task target:o2switch
 *Effet* :
 
 - Arrête tout serveur local autonome en cours.
-- Démarre l'agent relais local sur `127.0.0.1:8765` connecté à `https://2026-pydbsrt.fr/dbsrt`.
+- Démarre l'agent relais local sur `127.0.0.1:8765` connecté à `${O2SWITCH_URL}` (ex: `https://<your-domain>/dbsrt`, variable obligatoire, sans valeur par défaut versionnée).
 - Dans VLC : Chaque résultat et message OSD portera le badge `[CLOUD o2switch]`.
 
 ### Option 2 : Basculer en 100% Local (Zero-DB / Air-Gapped)
@@ -107,7 +107,7 @@ Exemple de sortie :
 
 ```text
 === Active VLC Backend Endpoint Status ===
-• Current Mode     : CLOUD_O2SWITCH (Relay -> https://2026-pydbsrt.fr/dbsrt)
+• Current Mode     : CLOUD_O2SWITCH (Relay -> https://<your-domain>/dbsrt)
 • VLC Discovery    : /tmp/dbsrt-server.json
   {"host":"127.0.0.1","pid":2112861,"port":8765,"url":"http://127.0.0.1:8765","version":"0.1.0"}
 • VLC Config Target: http://127.0.0.1:8765

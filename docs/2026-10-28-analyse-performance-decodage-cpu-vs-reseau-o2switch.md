@@ -1,7 +1,7 @@
 # Analyse Théorique & Empirique : Décodage Logiciel HEVC vs Débit Réseau (o2switch)
 
 **Date d'analyse** : 2026-10-28 23:25:00
-**Plateforme d'exécution** : Serveur mutualisé o2switch (`sapin.o2switch.net`)
+**Plateforme d'exécution** : Serveur mutualisé o2switch (`<o2switch_server>`)
 **Environnement système** : CloudLinux 9.5 x86_64, conteneur LVE 1200% CPU (12 vCPUs), 48 Go RAM, I/O cap 42 Mo/s
 **Architecture matérielle hôte** : Bi-socket AMD EPYC / Intel Xeon (104 cœurs physiques)
 **Flux source** : Streaming direct FTP Synology NAS (`ftp://nas.synology.me:21/tvshow`)

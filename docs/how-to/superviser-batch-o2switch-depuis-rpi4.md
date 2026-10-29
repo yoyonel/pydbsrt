@@ -7,9 +7,9 @@ Ce guide pratique détaille la mise en œuvre d'un agent de supervision autonome
 ## 🎯 Objectifs opérationnels
 
 1. **Surveillance permanente (24/7)** : Vérifier régulièrement l'intégrité de la session et des workers sur o2switch sans intervention humaine.
-2. **Auto-guérison (Auto-Healing)** : Relancer automatiquement le batch en tâche de fond (`screen -dmS`) si le serveur distant subit un redémarrage, une déconnexion ou une coupure de session.
+2. **Auto-guérison (Auto-Healing)** : Relancer automatiquement le batch en tâche de fond (`screen -dmS`) s'il a planté (`crashed`) ou disparu (`absent`). Quand une file est vidée (`finished`), le superviseur bascule sur l'autre bibliothèque (`tvshow` ↔ `movies`) pour occuper les CPU en continu. Deux lancements sont espacés d'au moins 30 min, pour qu'une file de fichiers toujours en échec ne boucle pas. Un arrêt manuel (`stopped`) ou une sonde en échec (`unknown`) ne déclenchent jamais de lancement.
 3. **Autoscaling adaptatif en boucle fermée** : Sonde en temps réel la charge CPU CloudLinux LVE sur o2switch (quota de 12 vCPUs) et adapte dynamiquement la concurrence (2 à 6 workers) pour exploiter la marge résiduelle (cible 78% à 92%), avec repli d'urgence immédiat si pic > 96% et ajustement fluide via `run/desired_workers` sans interruption des flux en cours.
-4. **Rapatriement continu (Continuous Pull)** : Synchroniser périodiquement les nouveaux fichiers `.phash` et sous-titres vers la base PostgreSQL 17 locale et le stockage Zero-DB.
+4. **Rapatriement continu (Continuous Pull)** : Synchroniser périodiquement les nouveaux fichiers `.phash` et sous-titres vers le catalogue local (`data/__PHASH__`, stockage Zero-DB).
 
 ---
 
@@ -19,12 +19,12 @@ Ce guide pratique détaille la mise en œuvre d'un agent de supervision autonome
 flowchart LR
     subgraph RPi4["Raspberry Pi 4 (Superviseur 24/7)"]
         WATCH["scripts/rpi4_o2switch_supervisor.py"]
-        LOCAL_CAT[("data/__PHASH__ / PostgreSQL")]
+        LOCAL_CAT[("data/__PHASH__ (Zero-DB)")]
     end
 
     subgraph O2["Hébergement CloudLinux o2switch"]
         SCREEN["Session screen (dbsrt_batch)"]
-        WORKERS["4 Workers (dbsrt + ffmpeg)"]
+        WORKERS["2 à 6 Workers (dbsrt + ffmpeg)"]
     end
 
     subgraph NAS["Synology NAS"]
@@ -32,7 +32,7 @@ flowchart LR
     end
 
     WATCH -->|"1. Probe état batch (toutes les 60s)"| SCREEN
-    WATCH -->|"2. Relance automatique si arrêté"| SCREEN
+    WATCH -->|"2. Relance si crashed/absent"| SCREEN
     SCREEN --> WORKERS
     WORKERS -->|"3. Décodage streaming direct"| FTP
     WATCH -->|"4. Rapatriement régulier (.phash)"| LOCAL_CAT
@@ -41,6 +41,17 @@ flowchart LR
 ---
 
 ## 🛠️ Déploiement et exploitation
+
+### Étape 0 : Installer le service sur le RPi4
+
+L'unité systemd est versionnée dans `deploy/rpi4/dbsrt-supervisor.service`. L'installation synchronise les scripts (`rpi4_o2switch_supervisor.py`, `o2switch_ctl.sh`, `o2switch_batch_worker.py`) vers `~/dbsrt/scripts/`, copie l'unité dans `~/.config/systemd/user/`, puis exécute `daemon-reload` et `enable` :
+
+```bash
+task rpi4:supervisor:install
+task rpi4:supervisor:restart   # charge le nouveau code
+```
+
+Relancez cette installation après toute modification de ces scripts.
 
 ### Étape 1 : Démarrer l'agent superviseur
 
@@ -77,7 +88,7 @@ task rpi4:supervisor:logs
 Exemple d'activité consignée :
 ```text
 [2026-10-28 22:20:44] 🚀 RPi4 Supervisor Agent active (polling: 60s, pull: 600s).
-[2026-10-28 22:20:45] ● Remote batch healthy (PID 1815957, target workers: 4).
+[2026-10-28 22:20:45] ● Remote batch healthy (PID 1815957, workers: 4, CPU baseline pending).
 [2026-10-28 22:30:45] 📥 Synchronizing catalog and .phash artifacts from o2switch...
 [2026-10-28 22:30:48] ✓ Catalog synchronization complete.
 ```
@@ -129,36 +140,65 @@ flowchart TD
 ```
 
 1. **Poste de développement** : Contient le code source sous contrôle Git.
-2. **Raspberry Pi 4 (`~/dbsrt/scripts/`)** : Le démon superviseur exécute `rpi4_o2switch_supervisor.py` qui appelle `o2switch_ctl.sh batch-tvshow`. Lors d'une relance, `o2switch_ctl.sh` synchronise sa copie locale de `o2switch_batch_worker.py` vers o2switch.
+2. **Raspberry Pi 4 (`~/dbsrt/scripts/`)** : Le démon superviseur exécute `rpi4_o2switch_supervisor.py`, qui appelle `o2switch_ctl.sh batch-status`, `batch-workers` et, en cas de crash, `batch-<type>` (type mémorisé dans `run/batch_type` sur o2switch). Lors d'une relance, `o2switch_ctl.sh` synchronise sa copie locale de `o2switch_batch_worker.py` vers o2switch.
 3. **Serveur distant o2switch (`~/dbsrt/scripts/`)** : Le script `o2switch_batch_worker.py` y est exécuté en tâche de fond dans une session `screen` détachée (`dbsrt_batch`).
+
+### États du batch (`batch-status`)
+
+`task o2switch:batch:status` affiche une ligne machine lue par le superviseur :
+
+```text
+BATCH_STATE=<running|stopped|finished|crashed|absent> PID=<pid|none> TYPE=<tvshow|movies>
+```
+
+| État | Signification | Action du superviseur |
+| :--- | :--- | :--- |
+| `running` | Le PID du pidfile est vivant. | Autoscaling uniquement. |
+| `stopped` | Marqueur `run/batch_stopped` posé par `batch:stop`. | Aucune relance. |
+| `finished` | `run/batch_queue.json` indique `remaining_targets: 0`. | Lance l'autre type (`tvshow` ↔ `movies`) `--fresh-only --daemon`. |
+| `crashed` | Pidfile présent, processus mort, sans marqueur d'arrêt. | Relance le même type `--fresh-only --daemon`. |
+| `absent` | Aucun pidfile ni marqueur. | Relance `--fresh-only --daemon`. |
 
 ### Conséquences Opérationnelles d'une Modification
 
 > [!IMPORTANT]
 >
-> - **Règle de double déploiement :** Si vous modifiez `o2switch_batch_worker.py` uniquement sur votre poste de travail, le Raspberry Pi 4 continuera d'injecter **sa propre copie locale** lors de ses cycles d'auto-guérison. Toute modification de script doit être copiée à la fois sur le **RPi4 et o2switch**.
-> - **Persistance en mémoire RAM :** Modifier un script Python sur le disque o2switch ne modifie **PAS** le processus en vol : l'interpréteur Python a déjà compilé et chargé le bytecode en mémoire au démarrage.
-> - **Auto-Healing consécutif à un arrêt :** Lorsque vous stoppez un batch (`task o2switch:batch:stop`), le superviseur RPi4 détecte l'absence de processus actif lors de sa prochaine vérification ($\le 60\text{ s}$) et relance automatiquement le batch avec le nouveau code synchronisé et l'option `--fresh-only`.
+> - **Règle de double déploiement :** Le RPi4 injecte **sa propre copie** de `o2switch_batch_worker.py` lors de chaque relance. Après modification, exécutez `task rpi4:supervisor:install` en plus de `task o2switch:sync`.
+> - **Persistance en mémoire RAM :** Modifier un script Python sur le disque o2switch ne modifie **PAS** le processus en vol : l'interpréteur a déjà chargé le code au démarrage.
+> - **Un arrêt manuel est définitif :** `task o2switch:batch:stop` pose le marqueur `run/batch_stopped` ; le superviseur ne relance plus le batch. Seul un nouveau `batch-tvshow` / `batch-movies` efface ce marqueur.
 
 ### Procédure de Déploiement et Prise en Compte Immédiate
 
-Pour déployer un correctif de worker et l'activer immédiatement en production :
+Pour déployer un correctif de worker et l'activer immédiatement :
 
 ```bash
-# Étape 1 : Pousser le script à jour vers o2switch ET le superviseur RPi4
-scp scripts/o2switch_batch_worker.py o2switch:~/dbsrt/scripts/
-scp scripts/o2switch_batch_worker.py rpi4:~/dbsrt/scripts/
+# Étape 1 : Pousser les scripts à jour vers o2switch ET le superviseur RPi4
+task o2switch:sync
+task rpi4:supervisor:install
+task rpi4:supervisor:restart
 
-# Étape 2 : Stopper le worker en cours pour déclencher la relance à chaud
+# Étape 2 : Arrêter le batch en cours puis le relancer explicitement
 task o2switch:batch:stop
+task o2switch:batch:tvshow -- --fresh-only --daemon   # ou o2switch:batch:movies
 ```
 
-Dès l'arrêt, le superviseur RPi4 consigne l'événement dans `logs/rpi4_supervisor.log` et relance le batch avec les nouveaux paramètres :
-```text
-[2026-10-29 05:04:11] ⚠️ Remote batch worker is NOT running. Triggering auto-healing restart...
-[2026-10-29 05:04:11] 🔄 Launching remote batch on o2switch (concurrency: 4 workers)...
-[2026-10-29 05:04:13] ✓ Remote batch successfully started with 4 workers.
-```
+---
+
+## 🔐 Variables d'environnement
+
+Toutes ces valeurs se définissent dans l'environnement ou dans le fichier `.env` local non versionné. Aucune valeur par défaut n'est versionnée.
+
+| Variable | Lu par | Rôle |
+| :--- | :--- | :--- |
+| `NAS_HOST`, `NAS_USER` | `o2switch_ctl.sh`, worker | Hôte et compte FTP du NAS. Écrits dans `etc/.nas_config` (mode 600) sur o2switch s'ils sont définis localement. |
+| `NAS_PASS` | `o2switch_ctl.sh`, worker | Mot de passe FTP. Transmis par stdin et écrit dans `etc/.nas_pass` (mode 600) ; jamais en argument ni dans une URL. |
+| `DBSRT_FTP_USER`, `DBSRT_FTP_PASSWORD` | `dbsrt` (ffmpeg/ffprobe) | Positionnés par le worker pour chaque processus enfant, puis passés à ffmpeg via `-ftp-user` / `-ftp-password`. Jamais journalisés. |
+| `DBSRT_FFMPEG_THREADS` | `dbsrt` (ffmpeg) | Threads de décodage par worker (défaut `2`). |
+| `O2SWITCH_URL` | `o2switch_ctl.sh rotate-key` | URL publique de la passerelle ; la vérification post-rotation est sautée si absente. |
+
+> [!WARNING]
+>
+> FTP transporte les identifiants en clair. Restreignez la règle NAT du port 21 à l'IP sortante d'o2switch et utilisez un compte NAS en lecture seule.
 
 ---
 

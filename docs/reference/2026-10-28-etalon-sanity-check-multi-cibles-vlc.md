@@ -40,7 +40,7 @@ Il sert **d'étalon de non-régression** pour valider que toute évolution futur
 | **Interface Démon** | REST Axum non-bloquant sur `127.0.0.1:8765` (découvert via `/tmp/dbsrt-server.json`) |
 | **Client Programmatique** | `cvlc --no-audio --avcodec-hw=none --extraintf luaintf --lua-intf dbsrt_intf` |
 | **Target 1 (Local)** | Démon local autonome `dbsrt-server` (Zero-DB, 3509 empreintes en RAM MIH) |
-| **Target 2 (Cloud)** | Hébergement mutualisé o2switch (`https://2026-pydbsrt.fr/dbsrt`, binaire statique musl) |
+| **Target 2 (Cloud)** | Hébergement mutualisé o2switch (`https://<your-domain>/dbsrt`, binaire statique musl) |
 | **Target 3 (RPi4)** | Appliance ARM64 Raspberry Pi 4 (`<rpi4-lan-ip>:8765`, 1801 empreintes, PG 17) |
 | **Garde-Fou Anti-Collision** | Rejet d'entropie nulle ($t=0$) sur signatures `0x8f4c_7233_588e_457e` / `0x8fcc_7233_588e_453e` |
 
@@ -94,7 +94,7 @@ VLC media player 3.0.24 Vetinari (revision 3.0.24-rc1-0-g6de05adcba)
 task target:o2switch
 # === Switching to CLOUD O2SWITCH Mode (Remote Relay) ===
 # === Starting local dbsrt relay agent on 127.0.0.1:8765 ===
-#     Remote Cloud Relay Target : https://2026-pydbsrt.fr/dbsrt
+#     Remote Cloud Relay Target : https://<your-domain>/dbsrt
 #     VLC Service Discovery     : /tmp/dbsrt-server.json
 # ✓ Local relay agent running with PID 2142011.
 ```

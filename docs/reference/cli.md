@@ -217,7 +217,7 @@ dbsrt top [OPTIONS]
      - `[Espace]` : Activation / désactivation dynamique de la source (statut `[✓] ACTIF` vs `[ ] DÉSACTIVÉ`).
      - `[d]` : Suppression de la source sélectionnée avec dialogue modal de confirmation (protection de la dernière source restante).
      - `[r]` : Déclenchement d'un rescan asynchrone immédiat de l'ensemble des sources actives.
-   - **Mode Déporté Réseau (Zéro-NVMe / o2switch / RPi4)** : En l'absence de montages de stockage physiques locaux, la vue commute automatiquement en moniteur de flux streaming réseau SFTP (`sftp://nas:22 ➔ HTTP Bridge :8769`).
+   - **Mode Déporté Réseau (Zéro-NVMe / o2switch / RPi4)** : En l'absence de montages de stockage physiques locaux, la vue commute automatiquement en moniteur de flux streaming réseau pour la source FTP du NAS (ex: `ftp://nas:21`).
      - Affiche l'état en direct du canal de transit, le nombre de cibles batch cataloguées et le respect du plafond de bande passante CloudLinux LVE ($42\text{ MiB/s}$).
      - Actions d'ajout/édition de répertoires physiques verrouillées avec notification (l'administration physique étant dévolue à la station hôte).
      - `[r]` : Actualisation immédiate du registre des cibles streaming réseau sans déclenchement de scan disque superflu.

@@ -133,7 +133,7 @@ nav:
       - Guide Tests Scénarios TUI Headless: how-to/2026-10-27-guide-tests-scenarios-tui.md
       - Audit d'Intégrité Catalogue & Stockage: how-to/2026-10-26-audit-integrite-catalogue-et-stockage.md
       - Déployer sur Hébergement Cloud o2switch: how-to/deployer-o2switch-cloud-cpanel.md
-      - Interconnecter NAS Synology & o2switch SFTP: how-to/interconnecter-nas-synology-et-o2switch-sftp.md
+      - Interconnecter NAS Synology & o2switch FTP: how-to/interconnecter-nas-synology-et-o2switch-ftp.md
       - Batch de Calcul & Synchronisation o2switch: how-to/executer-batch-calcul-et-synchronisation-o2switch.md
       - Superviser les Batchs o2switch depuis un RPi4: how-to/superviser-batch-o2switch-depuis-rpi4.md
       - Compiler, Déployer et Lancer le CLI dbsrt sur RPi4: how-to/compiler-deployer-cli-top-sur-rpi4.md

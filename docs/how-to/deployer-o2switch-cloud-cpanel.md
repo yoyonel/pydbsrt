@@ -35,7 +35,7 @@ Pour contourner ces contraintes sans dégrader les performances, `pydbsrt` explo
 * **Index MIH en mémoire RAM (`catalog.dbphash`)** : Chargement de l'index binaire unifié en RAM (< 30 Mo pour 5M trames, recherche en < 3 ms, 0 requête SQL).
 * **Stockage CAS (`data/SRT/`)** : Les pistes de sous-titres certifiées sont stockées sous leur empreinte SHA-256 et servies directement par le microservice.
 * **Passerelle Reverse-Proxy PHP & LiteSpeed (`public_html/dbsrt/`)** : Apache/LiteSpeed sur hébergement mutualisé interdit les directives `mod_proxy [P]`. Une passerelle ultra-légère (`index.php` + `.htaccess`) relaye les requêtes entrantes vers `127.0.0.1:8765` et réveille automatiquement le démon à la demande (auto-spawn en < 500 ms) en cas de récolte par CloudLinux.
-* **Sécurité & Authentification Clé API** : La passerelle PHP filtre les requêtes non autorisées (`401 Unauthorized`) et exige une clé secrète via l'en-tête `X-API-Key`, le Bearer token `Authorization`, ou le paramètre d'URL `?api_key=`. De plus, les chemins réels du système de fichiers hôte sont sanitisés sur la route `/v1/status` (zéro divulgation de structure interne).
+* **Sécurité & Authentification Clé API** : La passerelle PHP filtre les requêtes non autorisées (`401 Unauthorized`) et exige une clé secrète via l'en-tête `X-API-Key` ou le Bearer token `Authorization` (le paramètre d'URL `?api_key=` est refusé). Sans clé provisionnée, elle répond `503` (fail closed). De plus, les chemins réels du système de fichiers hôte sont sanitisés sur la route `/v1/status` (zéro divulgation de structure interne).
 * **Plafond de bande passante I/O LVE** : CloudLinux limite le débit disque à 42 MiB/s sur l'Offre Unique o2switch. Les transferts `rsync` sont bridés à 20 Mo/s (`--bwlimit=20000`) pour garantir zéro faute LVE I/O lors des synchronisations du catalogue.
 * **Watchdog Crontab non-root** : Orchestré via crontab utilisateur (`*/5 * * * *`) pour relancer automatiquement le démon en cas de redémarrage hôte.
 * **Gestionnaire de daemon non-root par PID** : Orchestré via `scripts/o2switch_ctl.sh` et les cibles Taskfile associées.
@@ -107,7 +107,12 @@ Démarrez le serveur en arrière-plan sans privilèges root :
 task o2switch:start
 ```
 
-Le script démarre `dbsrt-server` en arrière-plan via `nohup`, enregistre le PID et attend que la sonde de santé locale réponde positivement via SSH.
+Le script compacte d'abord les `.phash` du batch (`data/__PHASH__`) dans `data/catalog.dbphash` via `dbsrt pack` (~1,5 s). Il démarre ensuite `dbsrt-server` via `setsid` avec un dossier `.phash` vide (`run/empty_phash`), enregistre le PID et attend la sonde de santé via SSH.
+
+> [!WARNING]
+> **o2switch tue (SIGKILL) tout processus utilisateur en écoute sur un port après ~10 s**, même `python3 -m http.server`. Le daemon ne reste donc pas résident : la passerelle `index.php` le relance à la demande (~1,3 s à froid, ~80 ms à chaud), et le cron watchdog fait de même toutes les 5 min.
+>
+> Ne pas pointer `--phash-dir` sur `data/__PHASH__` : chaque `.phash` isolé est mappé avec un index MIH en RAM (~6x sa taille disque). Avec ~1 200 fichiers, le serveur dépasse 2,7 Go et se fait tuer. Le catalogue compacté tient en ~340 Mo.
 
 ### 5. Vérification du statut et de l'empreinte mémoire
 
@@ -117,7 +122,7 @@ Contrôlez l'état du processus et la télémétrie de l'API :
 task o2switch:status
 ```
 
-La sortie affiche l'état du PID, l'utilisation CPU/RAM (généralement < 40 Mo RSS, conforme aux quotas LVE CloudLinux), et la réponse JSON de `/v1/status`.
+La sortie affiche l'état du PID, l'utilisation CPU/RAM (~340 Mo RSS avec le catalogue compacté de ~1 200 médias), et la réponse JSON de `/v1/status`.
 
 ### 6. Test de reconnaissance de bout en bout
 
@@ -170,33 +175,39 @@ Le déploiement Cloud mutualisé applique un modèle de **sécurité en profonde
 
 ### 1. Formats d'authentification acceptés
 
-La passerelle `index.php` prend en charge trois méthodes d'authentification interchangeables :
+La passerelle `index.php` prend en charge deux méthodes d'authentification interchangeables. Le paramètre d'URL `?api_key=` n'est **plus accepté** (une clé dans l'URL fuiterait dans les journaux d'accès et l'historique navigateur). Les exemples ci-dessous utilisent l'URL de base de la passerelle, définie localement dans `O2SWITCH_URL` (environnement ou `.env` non versionné, ex: `https://<your-domain>/dbsrt`, sans valeur par défaut versionnée) :
 
 1. **En-tête standard (Recommandé en CLI / Scripting)** :
    ```http
    GET /dbsrt/v1/health HTTP/1.1
-   Host: 2026-pydbsrt.fr
+   Host: <your-domain>
    X-API-Key: <VOTRE_CLE_256_BITS>
    ```
 2. **Token Bearer (Recommandé pour les microservices / OAuth)** :
    ```http
    GET /dbsrt/v1/health HTTP/1.1
-   Host: 2026-pydbsrt.fr
+   Host: <your-domain>
    Authorization: Bearer <VOTRE_CLE_256_BITS>
    ```
-3. **Paramètre d'URL (Recommandé pour navigateurs et plugins légers comme VLC)** :
-   ```text
-   https://2026-pydbsrt.fr/dbsrt/v1/status?api_key=<VOTRE_CLE_256_BITS>
-   ```
+
+Exemple en ligne de commande :
+
+```bash
+curl -H "X-API-Key: <VOTRE_CLE_256_BITS>" https://<your-domain>/dbsrt/v1/status
+```
+
+VLC ne s'authentifie pas directement : il passe par l'agent relais local (`127.0.0.1:8765`), qui ajoute l'en-tête `X-API-Key` (voir section 5).
 
 Toute requête dépourvue d'une clé valide est immédiatement rejetée avec le statut `401 Unauthorized` :
 
 ```json
 {
     "error": "Unauthorized",
-    "message": "Valid API key required via X-API-Key header, Bearer token, or ?api_key= query parameter."
+    "message": "Valid API key required via X-API-Key header or Bearer token."
 }
 ```
+
+Si `~/dbsrt/etc/api_key.secret` est absent ou vide, la passerelle refuse **toutes** les requêtes avec `503 Service Unavailable` (comportement *fail closed*) au lieu de laisser passer les appels non authentifiés.
 
 ### 2. Stockage sécurisé et isolation du secret
 
@@ -217,7 +228,7 @@ Cette commande exécute une séquence 100% automatisée et vérifiée :
 1. Génération cryptographique d'une clé aléatoire de 256 bits (`openssl rand -hex 32`).
 2. Déploiement distant atomique dans `~/dbsrt/etc/api_key.secret` avec permissions `0600`.
 3. Synchronisation automatique dans le magasin local `pass` (`services/pydbsrt/o2switch_api_key`).
-4. Test direct de validation HTTPS sur l'endpoint `/v1/health` (assertion `HTTP 200 OK`).
+4. Test direct de validation HTTPS sur l'endpoint `/v1/health` (assertion `HTTP 200 OK`), sauté si `O2SWITCH_URL` n'est pas défini.
 5. Assertion de sécurité négative : vérification formelle que les requêtes non authentifiées retournent bien `HTTP 401 Unauthorized`.
 
 ### 4. Sanitisation anti-divulgation (`/v1/status`)
@@ -246,7 +257,7 @@ Pour interconnecter le lecteur VLC local avec les vidéos hébergées sur votre 
    ```
    * Écoute sur `127.0.0.1:8765` et publie le descripteur de découverte `/tmp/dbsrt-server.json` pour VLC.
    * Lit automatiquement la clé secrète depuis le magasin `pass` (`services/pydbsrt/o2switch_api_key`).
-   * Extrait les trames pHash de la vidéo locale ou CIFS en temps réel (décodage FFmpeg/GPU local) et relaye la signature visuelle vers `https://2026-pydbsrt.fr/dbsrt/v1/recognize` avec l'en-tête `X-API-Key`.
+   * Extrait les trames pHash de la vidéo locale ou CIFS en temps réel (décodage FFmpeg/GPU local) et relaye la signature visuelle vers `${O2SWITCH_URL}/v1/recognize` (ex: `https://<your-domain>/dbsrt/v1/recognize`) avec l'en-tête `X-API-Key`. L'agent refuse de démarrer si `O2SWITCH_URL` n'est pas défini.
 2. Testez la chaîne complète sur un média réel du Synology :
    ```bash
    task o2switch:agent:demo
@@ -279,7 +290,7 @@ Cette tâche orchestre automatiquement :
 
 Pour synchroniser directement depuis le NAS Synology sans station de travail :
 
-* **Serveur SFTP distant** : `sapin.o2switch.net` (Port 22, utilisateur `atli6249`).
+* **Serveur SSH distant (rsync)** : `<o2switch_server>` (Port 22, utilisateur `<cpanel_user>`).
 * **Authentification** : Clé SSH Ed25519 dédiée (`id_ed25519_o2switch`).
 * **Méthodes d'intégration Synology DSM** :
 
@@ -287,7 +298,7 @@ Pour synchroniser directement depuis le NAS Synology sans station de travail :
   2. **Tâche planifiée DSM (Planificateur de tâches)** :
      ```bash
      rsync -avz --bwlimit=20000 -e "ssh -p 22 -i /volume1/homes/admin/.ssh/id_ed25519_o2switch" \
-       /volume1/tvshow/__PHASH__/ atli6249@sapin.o2switch.net:dbsrt/data/__PHASH__/
+       /volume1/tvshow/__PHASH__/ <cpanel_user>@<o2switch_server>:dbsrt/data/__PHASH__/
      ```
      *Le paramètre `--bwlimit=20000` (20 Mo/s) est obligatoire pour respecter le plafond CloudLinux LVE de 42 MiB/s.*
 

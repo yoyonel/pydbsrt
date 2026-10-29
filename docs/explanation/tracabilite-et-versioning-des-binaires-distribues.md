@@ -146,7 +146,7 @@ Le script `build.rs` s'exécute automatiquement avant la compilation du binaire 
    ```json
    {
      "host_info": {
-       "hostname": "sapin.o2switch.net",
+       "hostname": "<o2switch_server>",
        "os_name": "CloudLinux",
        "kernel": "4.18.0-553.157.1.lve.el8.x86_64",
        "arch": "x86_64",

@@ -80,7 +80,7 @@ Cette page dresse le dictionnaire exhaustif de toutes les cibles d'orchestration
 | `task client:linux:logs` | Affiche les logs en direct du service client Linux via `journalctl`. |
 | `task target:status` | Inspecte le mode actif du démon pour VLC (Local Zero-DB, Cloud o2switch ou RPi4). |
 | `task target:local` | Bascule le backend VLC en mode 100% Local autonome (Zero-DB / RAM MIH). |
-| `task target:o2switch` | Bascule le backend VLC en mode relais Cloud o2switch (`https://2026-pydbsrt.fr/dbsrt`). |
+| `task target:o2switch` | Bascule le backend VLC en mode relais Cloud o2switch (`O2SWITCH_URL`, ex: `https://<your-domain>/dbsrt`). |
 | `task target:rpi4` | Bascule le backend VLC en mode relais sur l'appliance Raspberry Pi 4 locale. |
 
 ---

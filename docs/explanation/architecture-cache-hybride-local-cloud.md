@@ -37,7 +37,7 @@ flowchart TD
     end
 
     subgraph "Niveau 1 : Déport Cloud HTTPS (~70-90ms)"
-        LocalAgent -->|2. Fallback si absent localement| CloudRelay["☁️ Cloud o2switch (https://2026-pydbsrt.fr/dbsrt)"]
+        LocalAgent -->|2. Fallback si absent localement| CloudRelay["☁️ Cloud o2switch (O2SWITCH_URL, ex: https://&lt;your-domain&gt;/dbsrt)"]
         CloudRelay -->|Reconnaissance pHash| CloudRAM["⚡ Multi-Index Hashing Cloud (catalog.dbphash distant)"]
         CloudRelay -->|Sous-titres certifiés| CloudStore["🗄️ Dépôt SRT Cloud"]
     end

@@ -29,12 +29,12 @@ flowchart LR
         Reseau["💥 Volume Disque Prohibitif<br/>Copier 900 MKV (1 à 4 To) vers le Cloud<br/>saturerait le quota NVMe et la bande passante."]
     end
 
-    Defi --> Solution["✨ Solution Architecturale DBS-RT<br/><b>Déport de Calcul en Streaming Direct (Zéro NVMe)</b><br/>• o2switch décode en mémoire vive (12 vCPUs)<br/>• Le NAS sert les octets au fil de l'eau via SFTP<br/>• Seuls les résultats légers (~200 Ko) sont persistés"]
+    Defi --> Solution["✨ Solution Architecturale DBS-RT<br/><b>Déport de Calcul en Streaming Direct (Zéro NVMe)</b><br/>• o2switch décode en mémoire vive (12 vCPUs)<br/>• Le NAS sert les octets au fil de l'eau via FTP direct (port 21)<br/>• Seuls les résultats légers (~200 Ko) sont persistés"]
 ```
 
 1. **La saturation des ressources locales** : Décoder des centaines de fichiers HEVC/H.264 1080p et 4K sur une station de travail ou un PC portable monopolise le ventilateur, la batterie et le GPU pendant des dizaines d'heures. L'hébergement Cloud o2switch dispose d'une offre dotée de **12 vCPUs** capables d'absorber ces calculs en tâche de fond.
 2. **L'impossibilité de copier les vidéos sur le Cloud** : Un compte d'hébergement mutualisé n'est pas un data-lake de stockage brut. Y téléverser des téraoctets de conteneurs `.mkv` ferait exploser les quotas disques, violerait les conditions d'utilisation et prendrait des semaines de transfert montant.
-3. **Le paradigme retenu : Découplage Flux Vidéo vs Métadonnées** : La vidéo ne réside **jamais** sur le disque d'o2switch. Elle transite en flux mémoire continu (streaming direct via SFTP), est décodée en trames 32x32 rawvideo dans la RAM, puis immédiatement relâchée. Seuls les artefacts finaux ultra-légers (empreinte `.phash` de 150 Ko et sous-titres `.srt` de 50 Ko) sont enregistrés.
+3. **Le paradigme retenu : Découplage Flux Vidéo vs Métadonnées** : La vidéo ne réside **jamais** sur le disque d'o2switch. Elle transite en flux mémoire continu (streaming direct via FTP, lu par `ffmpeg` sans relais intermédiaire), est décodée en trames 32x32 rawvideo dans la RAM, puis immédiatement relâchée. Seuls les artefacts finaux ultra-légers (empreinte `.phash` de 150 Ko et sous-titres `.srt` de 50 Ko) sont enregistrés.
 
 ---
 
@@ -50,11 +50,11 @@ flowchart TD
     end
 
     subgraph WAN["🌐 Réseau Étendu & Sécurité Périmétrique"]
-        FBX["Freebox OS : Redirection NAT port 22 (SFTP)<br/>Filtrage IP strict : Seule l'IP publique o2switch est admise"]
+        FBX["Freebox OS : Redirection NAT port 21 (FTP)<br/>Filtrage IP strict : Seule l'IP sortante o2switch est admise"]
     end
 
     subgraph Tier1["Tier 1 : Moteur de Calcul Déporté & Serveur Cloud (o2switch)"]
-        O2_CPU["⚙️ 12 vCPUs (8-9 workers parallèles cibles)"]
+        O2_CPU["⚙️ 12 vCPUs (1-8 workers dynamiques, 2-6 en autoscaling RPi4)"]
         O2_RAM["⚡ Mémoire RAM (Index MIH catalog.dbphash & Décodage FFmpeg)"]
         O2_DATA["💾 Stockage Léger NVMe (~/dbsrt/data/)<br/>• __PHASH__/*.phash (~150 Ko)<br/>• SRT/*.srt (~50 Ko CAS)<br/>• SRT/couplings.json"]
     end
@@ -65,7 +65,7 @@ flowchart TD
         LOC_VLC["🎬 Lecteur Multimédia VLC (Plugin vlsub_dbsrt.lua)"]
     end
 
-    NAS_VID -->|1. Flux SFTP Chiffré| FBX
+    NAS_VID -->|1. Flux FTP en clair (compte lecture seule)| FBX
     FBX -->|2. Stream Réseau Mémoire| O2_CPU
     O2_CPU -->|3. Extraction à la volée| O2_DATA
     O2_DATA -->|4. Recompilation Zero-DB| O2_RAM
@@ -79,8 +79,8 @@ flowchart TD
 
 | Palier Physique | Équipement & Rôle | Données Hébergées | Protocole d'Échange | Garantie d'Intégrité |
 | :--- | :--- | :--- | :--- | :--- |
-| **Tier 3 (Maître Vidéo)** | **NAS Synology DS418**<br/>(Hôte `ds418` sur LAN) | Fichiers vidéos volumineux (`.mkv`, `.mp4`) et archive `.phash` miroir. | Serveur SFTP (port 22) restreint par liste blanche IP. | Immuabilité des fichiers sources (Lecture seule `RO`). |
-| **Tier 1 (Calcul & Cloud)** | **Cloud o2switch**<br/>(`sapin.o2switch.net`) | Moteur de calcul, index `catalog.dbphash` en RAM, magasin CAS `data/SRT/`. | HTTPS public (`/v1/search`), SSH interne (port 2022/22). | Zéro fichier vidéo stocké. Empreinte totale $\le 500$ Mo pour toute la bibliothèque. |
+| **Tier 3 (Maître Vidéo)** | **NAS Synology**<br/>(hôte LAN privé) | Fichiers vidéos volumineux (`.mkv`, `.mp4`) et archive `.phash` miroir. | Serveur FTP (port 21), compte en lecture seule, NAT restreint à l'IP sortante d'o2switch. | Immuabilité des fichiers sources (Lecture seule `RO`). |
+| **Tier 1 (Calcul & Cloud)** | **Cloud o2switch**<br/>(serveur mutualisé cPanel) | Moteur de calcul, index `catalog.dbphash` en RAM, magasin CAS `data/SRT/`. | HTTPS public (`/v1/search`), SSH interne (port 2022/22). | Zéro fichier vidéo stocké. Empreinte totale $\le 500$ Mo pour toute la bibliothèque. |
 | **Tier 0 / 2 (Local)** | **Station Développeur**<br/>(Machine locale) | Base PostgreSQL 17 SP-GiST, code source, orchestration `Taskfile`. | Sockets Unix, TCP interne `127.0.0.1:8765`, rsync SSH. | Source de vérité relationnelle et gouvernance Git. |
 
 ---
@@ -93,23 +93,23 @@ Le traitement déporté s'articule autour de **5 flux transactionnels stricts**.
 sequenceDiagram
     autonumber
     participant NAS as 🏠 Synology NAS (Tier 3)
-    participant Bridge as 🌉 Local Bridge o2switch (127.0.0.1:8769)
+    participant Worker as 🐍 o2switch_batch_worker.py
     participant Core as ⚡ dbsrt media:add (Rust / FFmpeg)
     participant Store as 💾 Registre o2switch (data/)
     participant Workstation as 💻 Poste Local (Tier 0)
     participant PG as 🐘 PostgreSQL 17
 
-    Note over Core,Bridge: FLUX 1 : Découverte & Filtrage "Vierge"
-    Core->>NAS: SFTP LIST /tvshow/
-    NAS-->>Core: Inventaire des noms de fichiers
-    Core->>Store: Comparaison avec data/__PHASH__/ et couplings.json
-    Note over Core: Sélection stricte des médias sans .phash
+    Note over NAS,Worker: FLUX 1 : Découverte & Filtrage "Vierge"
+    Worker->>Store: Lecture de data/reports/selected_batch_targets.json
+    Worker->>NAS: FTP LIST /tvshow/ (repli si aucun fichier de cibles)
+    NAS-->>Worker: Inventaire des noms de fichiers
+    Worker->>Store: Comparaison avec data/__PHASH__/ et couplings.json
+    Note over Worker: Sélection stricte des médias sans .phash
 
     Note over NAS,Core: FLUX 2 & 3 : Streaming & Hachage en RAM
-    Core->>Bridge: GET http://127.0.0.1:8769/stream.mkv
-    Bridge->>NAS: cURL SFTP Range Stream (chiffré)
-    NAS-->>Bridge: Paquets vidéo bruts
-    Bridge-->>Core: Flux vidéo sans écriture disque
+    Worker->>Core: media:add ftp://<NAS_HOST>:21/<chemin> (DBSRT_FTP_USER / DBSRT_FTP_PASSWORD en env)
+    Core->>NAS: ffmpeg RETR FTP direct (-ftp-user / -ftp-password)
+    NAS-->>Core: Flux vidéo sans écriture disque
     Core->>Core: FFmpeg downscale 32x32 rawvideo (RAM)
     Core->>Core: Calcul DCT pHash (64 bits par trame)
     Core->>Core: Détection des cuts & extraction SRT embedded
@@ -131,7 +131,7 @@ sequenceDiagram
 ---
 
 ### Flux 1 : Découverte & Filtrage des Médias "Vierges"
-- **Entrée (IN)** : Listing distant du dossier partagé NAS via commande cURL SFTP (`sftp://nas.synology.me/tvshow/`).
+- **Entrée (IN)** : Fichier de cibles `data/reports/selected_batch_targets.json` (`--targets-file`), résolu localement par `o2switch_ctl.sh` depuis le montage NAS quand il est disponible. À défaut, le worker liste le dossier partagé NAS en FTP. `--retry-failed` restreint la file aux derniers échecs du journal d'événements.
 - **Traitement** :
   1. Extraction du nom de fichier canonique (`stem`).
   2. Vérification d'existence locale sur o2switch : le fichier `~/dbsrt/data/__PHASH__/<stem>.*.phash` existe-t-il ?
@@ -141,11 +141,11 @@ sequenceDiagram
 ---
 
 ### Flux 2 & 3 : Streaming Réseau Mémoire & Décodage à la Volée
-- **Entrée (IN)** : Requête HTTP locale émise par `dbsrt media:add` vers le pont de streaming `http://127.0.0.1:8769/stream.mkv`.
+- **Entrée (IN)** : URL FTP directe `ftp://<NAS_HOST>:21/<chemin>` passée par le worker à `dbsrt media:add`, sans identifiants dans l'URL.
 - **Traitement** :
-  1. Le micro-bridge Python capture la requête et ouvre un sous-processus `curl` vers le NAS en SFTP.
-  2. `curl` négocie la session SSH/SFTP chiffrée avec le NAS et transfère les segments de données à la vitesse réseau disponible (testé empiriquement à **2.86x temps réel**).
-  3. `ffmpeg` lit le flux sur la socket HTTP sans chercher à stocker le fichier complet sur le disque.
+  1. Le worker positionne `DBSRT_FTP_USER` / `DBSRT_FTP_PASSWORD` dans l'environnement de chaque processus `dbsrt` enfant (identifiants lus depuis `etc/.nas_config` et `etc/.nas_pass`, mode 600).
+  2. `dbsrt` transmet ces identifiants à `ffmpeg` / `ffprobe` via `-ftp-user` / `-ftp-password`. Ils ne sont jamais journalisés, et la partie userinfo des URLs journalisées est expurgée. Le `ffmpeg` statique d'o2switch ne supporte pas SFTP : FTP est le seul transport direct disponible.
+  3. `ffmpeg` lit le flux FTP au fil de l'eau (`DBSRT_FFMPEG_THREADS`, défaut `2`) sans chercher à stocker le fichier complet sur le disque.
   4. Les trames vidéo sont converties à la volée en niveaux de gris $32 \times 32$ pixels bruts (`rawvideo Y800`), injectées directement via pipe mémoire dans le moteur Rust de DCT (Discrete Cosine Transform).
   5. Simultanément, les flux de sous-titres intégrés au conteneur Matroska (pistes `ass` ou `srt`) sont extraits en mémoire texte.
 - **Sortie (OUT)** :
@@ -237,7 +237,7 @@ flowchart TD
 | Scénario de Conflit | Cause Racine | Comportement DBS-RT | Résolution |
 | :--- | :--- | :--- | :--- |
 | **Double traitement d'un même épisode** | Relance accidentelle du batch sur un média déjà haché. | `media_add` inspecte les signatures existantes : `reg.is_already_certified(...)` renvoie `true`. | **Saut idempotent (`skipped_idempotent`)**. Aucun calcul redondant, message d'information dans les logs. |
-| **Coupure réseau SFTP en plein milieu du flux** | Micro-coupure WiFi ou liaison Freebox pendant le streaming. | FFmpeg renvoie une erreur I/O ou EOF prématuré. `CleanupState` intercepte le signal d'échec. | **Nettoyage automatique**. Le fichier partiel `.phash.tmp` est immédiatement purgé. Le média conserve son statut `Vierge` et sera repris au prochain run. |
+| **Coupure réseau FTP en plein milieu du flux** | Micro-coupure WiFi ou liaison Freebox pendant le streaming. | FFmpeg renvoie une erreur I/O ou se bloque. Le worker classe la vidéo en `ERROR`, `STALLED` (aucune activité CPU prolongée) ou `TIMEOUT` (`--max-extraction-secs` dépassé) et tue le groupe de processus. | **Nettoyage automatique**. Le fichier partiel `.phash.tmp` est purgé, le média reste `Vierge`. Relance ciblée avec `--retry-failed`. |
 | **Fichier vidéo réencodé ou modifié sur le NAS** | Remplacement d'une version 720p par une version 1080p remasterisée. | Les trames changent, le digest `media_hash` résultant est distinct. | Un nouveau couplage est créé sous le nouveau `media_hash`. L'ancien couplage reste valide pour les utilisateurs possédant l'ancienne release. |
 | **Conflit de synchronisation bidirectionnelle** | Exécution simultanée d'un hachage local et d'un hachage Cloud. | Les deux environnements ont généré des couplages disjoints dans leur `couplings.json` respectif. | L'outil `task catalog:verify` fusionne les clés de couplage par union ensembliste CAS ($\text{Registry}_A \cup \text{Registry}_B$) sans perte d'information. |
 
@@ -268,10 +268,11 @@ flowchart TD
 
 ### Mécanique de l'Auto-Healing et Déploiement Multi-Niveaux
 
-1. **Cycle de Polling (60 secondes)** : L'agent interroge l'état du processus distant (`kill -0 <PID>`). Si le travailleur s'est arrêté (fin de lot, crash réseau, ou arrêt volontaire), il déclenche automatiquement la relance en arrière-plan (`screen -dmS`).
+1. **Cycle de Polling (60 secondes)** : L'agent lit la ligne `BATCH_STATE=<running|stopped|finished|crashed|absent> PID=<pid|none> TYPE=<tvshow|movies>` renvoyée par `batch-status`. Il relance le batch en arrière-plan (`screen -dmS`) uniquement s'il est `crashed` ou `absent` ; un batch `stopped` (marqueur `run/batch_stopped`) ou `finished` n'est jamais relancé.
 2. **Synchronisation du Code** : Lors d'une relance, le superviseur s'assure que la version locale de `scripts/o2switch_batch_worker.py` présente sur le RPi4 est projetée sur o2switch.
-3. **Persistance en Mémoire RAM** : Le processus Python actif sur o2switch conserve son code chargé en mémoire vive. Un arrêt provoqué (`task o2switch:batch:stop`) est capté par la boucle de 60s du superviseur pour recharger le worker à chaud avec le code synchronisé.
-4. **Reprise Idempotente Ciblée** : Grâce à l'argument `--fresh-only` (ou `--retry-failed`), le worker redémarré ignore instantanément tous les médias dont les empreintes `.phash` ont déjà été validées sur disque, évitant tout recalcul inutile.
+3. **Persistance en Mémoire RAM** : Le processus Python actif sur o2switch conserve son code chargé en mémoire vive. Pour charger un nouveau code, arrêtez le batch (`task o2switch:batch:stop`) puis relancez-le explicitement (`batch-tvshow` / `batch-movies`), ce qui efface le marqueur d'arrêt.
+4. **Autoscaling en boucle fermée** : L'agent ajuste la concurrence entre 2 et 6 workers via `run/desired_workers` selon la charge CPU LVE (cible 78% à 92%).
+5. **Reprise Idempotente Ciblée** : Grâce à l'argument `--fresh-only` (ou `--retry-failed`), le worker redémarré ignore instantanément tous les médias dont les empreintes `.phash` ont déjà été validées sur disque, évitant tout recalcul inutile.
 
 ---
 
@@ -279,8 +280,8 @@ flowchart TD
 
 | Étape de Pipeline | Entrée (IN) | Sortie (OUT) | Volume Moyen | Protocole Réseau | Mécanisme d'Idempotence |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **1. Découverte** | Chemin racine NAS (`/tvshow/`) | Liste d'objets `MediaCandidate` | Quelques Ko JSON | SFTP `ls` via cURL | Filtre d'exclusion sur présence `.phash` |
-| **2. Streaming Décodeur** | Flux distant continu (URL HTTP interne) | Trames brutes $32 \times 32$ en RAM (`rawvideo`) | En mémoire vive (zéro disque) | HTTP 1.1 / TCP interne (`127.0.0.1:8769`) | Flux jetable non persistant |
+| **1. Découverte** | Chemin racine NAS (`/tvshow/`) | Liste d'objets `MediaCandidate` | Quelques Ko JSON | Fichier de cibles local ou `LIST` FTP | Filtre d'exclusion sur présence `.phash` |
+| **2. Streaming Décodeur** | Flux distant continu (URL `ftp://`) | Trames brutes $32 \times 32$ en RAM (`rawvideo`) | En mémoire vive (zéro disque) | FTP direct (port 21) lu par `ffmpeg` | Flux jetable non persistant |
 | **3. Hachage DCT** | Trames $32 \times 32$ | Empreintes pHash 64 bits (`Vec<u64>`) | En mémoire vive | CPU interne (SIMD / Rayon) | Algorithme DCT déterministe bit-à-bit |
 | **4. Export Fichier** | Empreintes 64 bits | Fichier binaire `*.phash` | **~150 Ko** par vidéo | Système de fichiers o2switch | Écriture atomique via `.tmp` puis `rename` |
 | **5. Extraction SRT** | Flux sous-titres conteneur | Piste texte `*.srt` normalisée UTF-8 | **~50 Ko** par langue | Mémoire $\rightarrow$ Disque NVMe | Dépôt CAS basé sur SHA-256 du texte |
@@ -295,4 +296,4 @@ flowchart TD
 - [Architecture du Cache Hybride Local & Cloud o2switch](architecture-cache-hybride-local-cloud.md)
 - [Stockage Décentralisé CAS & Distribution](stockage-decentralise-cas-et-distribution.md)
 - [Guide Pratique : Déployer sur Hébergement Mutualisé o2switch](../how-to/deployer-o2switch-cloud-cpanel.md)
-- [Guide Pratique : Interconnecter NAS Synology et o2switch en SFTP](../how-to/interconnecter-nas-synology-et-o2switch-sftp.md)
+- [Guide Pratique : Interconnecter NAS Synology et o2switch en FTP](../how-to/interconnecter-nas-synology-et-o2switch-ftp.md)
