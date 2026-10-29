@@ -13,71 +13,43 @@ RPI_HOST="${RPI_HOST:-${DEFAULT_RPI_HOST}}"
 REMOTE_BASE="${REMOTE_BASE:-${DEFAULT_REMOTE_BASE}}"
 
 REMOTE_DIR="\$HOME/${REMOTE_BASE}"
-PID_FILE="${REMOTE_DIR}/run/rpi4_supervisor.pid"
 LOG_FILE="${REMOTE_DIR}/logs/rpi4_supervisor.log"
+# Lifecycle is owned by the systemd user unit (Restart=always): never spawn the script directly
+SERVICE_NAME="${SERVICE_NAME:-dbsrt-supervisor.service}"
 
 run_ssh() {
   ssh -o BatchMode=yes -o ConnectTimeout="${DEFAULT_CONNECT_TIMEOUT}" "${RPI_HOST}" "$@"
 }
 
+run_systemctl() {
+  run_ssh "systemctl --user $*"
+}
+
 case "${ACTION}" in
   status)
-    # Check if PID file exists and process is alive
-    if run_ssh "test -f ${PID_FILE} && kill -0 \$(cat ${PID_FILE}) 2>/dev/null"; then
-      PID=$(run_ssh "cat ${PID_FILE}")
-      echo "● RPi4 Supervisor Agent is RUNNING on ${RPI_HOST} (PID ${PID})"
-      echo "--- Last activity logs ---"
-      run_ssh "tail -n 5 ${LOG_FILE} 2>/dev/null || true"
-    else
-      # Fallback check if python supervisor script is running without PID file
-      REMOTE_PID=$(run_ssh "pgrep -f 'rpi4_o2switch_supervisor.py' 2>/dev/null | head -n 1" || true)
-      if [[ -n "${REMOTE_PID}" ]]; then
-        echo "● RPi4 Supervisor Agent is RUNNING on ${RPI_HOST} (PID ${REMOTE_PID}, PID file missing)"
-        echo "--- Last activity logs ---"
-        run_ssh "tail -n 5 ${LOG_FILE} 2>/dev/null || true"
-      else
-        echo "○ RPi4 Supervisor Agent is STOPPED on ${RPI_HOST}"
-      fi
-    fi
+    run_systemctl "status --no-pager --lines=0 ${SERVICE_NAME}" || true
+    echo "--- Last activity logs ---"
+    run_ssh "tail -n 5 ${LOG_FILE} 2>/dev/null || true"
     ;;
 
-  start)
-    echo "=== Starting autonomous supervisor on ${RPI_HOST} ==="
-    if run_ssh "test -f ${PID_FILE} && kill -0 \$(cat ${PID_FILE}) 2>/dev/null"; then
-      PID=$(run_ssh "cat ${PID_FILE}")
-      echo "⚠️ RPi4 Supervisor is already running on ${RPI_HOST} (PID ${PID})."
-      exit 0
-    fi
-
-    run_ssh "cd ${REMOTE_DIR} && mkdir -p run logs && nohup /usr/bin/python3 -u scripts/rpi4_o2switch_supervisor.py </dev/null >> ${LOG_FILE} 2>&1 &"
+  start | restart)
+    echo "=== ${ACTION^} supervisor (${SERVICE_NAME}) on ${RPI_HOST} ==="
+    run_systemctl "daemon-reload"
+    run_systemctl "${ACTION} ${SERVICE_NAME}"
     sleep 1
-
-    if run_ssh "test -f ${PID_FILE} && kill -0 \$(cat ${PID_FILE}) 2>/dev/null"; then
-      PID=$(run_ssh "cat ${PID_FILE}")
-      echo "✓ RPi4 Supervisor Agent successfully started on ${RPI_HOST} (PID ${PID})."
+    if run_systemctl "is-active --quiet ${SERVICE_NAME}"; then
+      echo "✓ RPi4 Supervisor Agent active on ${RPI_HOST} (PID $(run_systemctl "show -p MainPID --value ${SERVICE_NAME}"))."
     else
-      echo "⚠️ Failed verifying supervisor startup. Inspecting logs:"
+      echo "⚠️ ${SERVICE_NAME} not active. Inspecting logs:"
       run_ssh "tail -n ${DEFAULT_TAIL_LINES} ${LOG_FILE} 2>/dev/null || true"
       exit 1
     fi
     ;;
 
   stop)
-    echo "=== Stopping autonomous supervisor on ${RPI_HOST} ==="
-    run_ssh "
-      if [[ -f ${PID_FILE} ]]; then
-        kill \$(cat ${PID_FILE}) 2>/dev/null || true
-        rm -f ${PID_FILE}
-      fi
-      pkill -f 'rpi4_o2switch_supervisor.py' 2>/dev/null || true
-    "
+    echo "=== Stopping supervisor (${SERVICE_NAME}) on ${RPI_HOST} ==="
+    run_systemctl "stop ${SERVICE_NAME}"
     echo "✓ RPi4 Supervisor stopped on ${RPI_HOST}."
-    ;;
-
-  restart)
-    "$0" stop
-    sleep 1
-    "$0" start
     ;;
 
   logs)

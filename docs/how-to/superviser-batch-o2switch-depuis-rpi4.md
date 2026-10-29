@@ -44,7 +44,9 @@ flowchart LR
 
 ### Étape 1 : Démarrer l'agent superviseur
 
-Pour lancer l'agent superviseur en tâche de fond :
+Le cycle de vie de l'agent est piloté par le service systemd utilisateur `dbsrt-supervisor.service` (`Restart=always`) installé sur le Raspberry Pi 4. Les cibles `task rpi4:supervisor:*` appellent `systemctl --user` : ne lancez jamais le script à la main, le verrou `run/rpi4_supervisor.pid` refuserait le doublon et systemd le relancerait en boucle.
+
+Pour démarrer le service :
 
 ```bash
 task rpi4:supervisor:start
@@ -60,7 +62,8 @@ task rpi4:supervisor:status
 
 Sortie attendue :
 ```text
-● RPi4 Supervisor Agent is RUNNING (PID 1849938)
+● dbsrt-supervisor.service - dbsrt o2switch 24/7 Watchdog Supervisor
+     Active: active (running) since ...
 ```
 
 ### Étape 3 : Suivre le journal d'activité en direct
