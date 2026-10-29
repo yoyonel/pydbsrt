@@ -5,7 +5,7 @@ Runs as a 24/7 systemd user service on Raspberry Pi 4 (or local host) to:
 1. Probe the remote batch worker lifecycle on o2switch (via o2switch_ctl.sh batch-status).
 2. Restart the batch worker only when it crashed or never started (never after a manual
    stop or a drained queue), resuming the same batch type.
-3. Autoscale worker concurrency (2-4) from the measured CloudLinux LVE CPU load.
+3. Autoscale worker concurrency (2-5) from the measured CloudLinux LVE CPU load.
 4. Periodically pull finished .phash files, subtitles and reports into the local data/ tree.
 """
 
@@ -41,8 +41,8 @@ RELAUNCH_BACKOFF_SECS: int = 1800
 # Autoscaling Engine Constants (CloudLinux LVE on o2switch has 12 vCPUs allocated = 1200% max)
 DEFAULT_LVE_TOTAL_VCPUS: float = 12.0
 AUTOSCALE_MIN_WORKERS: int = 2
-# Matches the worker CPU budget: 9 vCPU // 2 FFmpeg threads per video
-AUTOSCALE_MAX_WORKERS: int = 4
+# Matches the worker CPU budget: 10 vCPU // 2 FFmpeg threads per video (~85 % LVE measured)
+AUTOSCALE_MAX_WORKERS: int = 5
 AUTOSCALE_DEFAULT_WORKERS: int = 4
 AUTOSCALE_TARGET_LOW_PCT: float = 78.0  # Scale up concurrency if rolling average LVE CPU < 78%
 AUTOSCALE_TARGET_HIGH_PCT: float = 92.0  # Scale down concurrency if rolling average LVE CPU > 92%

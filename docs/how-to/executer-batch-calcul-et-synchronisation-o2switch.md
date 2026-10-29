@@ -108,7 +108,7 @@ task o2switch:batch:tvshow -- --workers 2 --fresh-only --limit 5
 ```
 
 ### Mécanisme de ciblage des ressources (Palier 80%)
-- **Allocation CPU** : L'environnement o2switch dispose d'un quota CloudLinux LVE de 12 vCPUs. Le réglage `--workers 8` (maximum autorisé) mobilise $\approx 80\%$ de la capacité CPU totale, laissant une marge de sécurité de 2 à 4 cœurs pour le reverse-proxy Apache, SSH et les démons système.
+- **Allocation CPU** : L'environnement o2switch dispose d'un quota CloudLinux LVE de 12 vCPUs. Quel que soit `--workers`, le worker n'exécute jamais plus de `DBSRT_CPU_BUDGET_VCPUS` (10) ÷ threads FFmpeg (2) = 5 vidéos simultanées, soit environ 85 % du quota mesuré, ce qui laisse environ 2 cœurs au démon `dbsrt`, à Apache, SSH et aux crons.
 - **Empreinte RAM** : Chaque worker consomme $\approx 150\text{ à }200\text{ MiB}$ de mémoire vive (buffer FFmpeg et décompression de trame 32x32). Le total de 8 workers ($\approx 1.5\text{ GiB}$) reste largement sous le quota LVE de $12\text{ GiB}$.
 - **Débit réseau I/O** : Le débit cumulé de 8 flux streaming ($\approx 8 \times 2.5\text{ MiB/s} = 20\text{ MiB/s}$) respecte scrupuleusement le plafond CloudLinux LVE fixé à $42\text{ MiB/s}$.
 

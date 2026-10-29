@@ -54,7 +54,7 @@ flowchart TD
     end
 
     subgraph Tier1["Tier 1 : Moteur de Calcul Déporté & Serveur Cloud (o2switch)"]
-        O2_CPU["⚙️ 12 vCPUs (1-8 workers dynamiques, 2-4 en autoscaling RPi4)"]
+        O2_CPU["⚙️ 12 vCPUs (1-8 workers dynamiques, 2-5 en autoscaling RPi4)"]
         O2_RAM["⚡ Mémoire RAM (Index MIH catalog.dbphash & Décodage FFmpeg)"]
         O2_DATA["💾 Stockage Léger NVMe (~/dbsrt/data/)<br/>• __PHASH__/*.phash (~150 Ko)<br/>• SRT/*.srt (~50 Ko CAS)<br/>• SRT/couplings.json"]
     end

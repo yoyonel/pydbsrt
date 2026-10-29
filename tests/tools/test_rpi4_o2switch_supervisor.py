@@ -56,6 +56,7 @@ def test_compute_lve_cpu_pct_uses_deltas_and_counts_new_pids():
         (50.0, [50.0, 50.0], 4, True, 4),  # window not full
         (50.0, [50.0, 50.0, 50.0], 4, False, 4),  # cooldown running
         (50.0, [50.0, 50.0, 50.0], 3, True, 4),  # scale up
+        (68.0, [68.0, 68.0, 68.0], 4, True, 5),  # 4 videos at ~68 % LVE: room for a fifth
         (50.0, [50.0, 50.0, 50.0], AUTOSCALE_MAX_WORKERS, True, AUTOSCALE_MAX_WORKERS),  # ceiling
         (94.0, [94.0, 94.0, 94.0], 4, True, 3),  # scale down
         (85.0, [85.0, 85.0, 85.0], 4, True, 4),  # target zone

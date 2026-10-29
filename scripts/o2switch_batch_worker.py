@@ -104,7 +104,7 @@ RELOAD_REQUESTED = threading.Event()
 RELOAD_DRAIN_SECS: float = 600.0
 # Jobs run ~1 vCPU per FFmpeg thread and lowering desired_workers cannot stop in-flight ones,
 # so admission keeps workers x threads under this share of the 12 vCPU o2switch LVE limit.
-CPU_BUDGET_VCPUS: int = int(os.getenv("DBSRT_CPU_BUDGET_VCPUS", "9"))
+CPU_BUDGET_VCPUS: int = int(os.getenv("DBSRT_CPU_BUDGET_VCPUS", "10"))
 FTP_LIST_ATTEMPTS: int = 3
 FTP_LIST_RETRY_DELAY_SECS: float = 30.0
 
