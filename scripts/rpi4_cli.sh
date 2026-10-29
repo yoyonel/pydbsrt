@@ -16,8 +16,16 @@ SERVER_BINARY_PATH="${TARGET_DIR}/dbsrt-server"
 case "${ACTION}" in
   build)
     echo "=== Building dbsrt CLI & Server Docker image for ARM64 with Bullseye GLIBC 2.31 parity ==="
+    # .git is outside the build context: pass the version metadata build.rs would read from git
+    GIT_HASH="$(git rev-parse --short HEAD 2>/dev/null || true)"
+    if [[ -n "${GIT_HASH}" ]] && ! git diff --quiet 2>/dev/null; then
+      GIT_HASH="${GIT_HASH}-dirty"
+    fi
+    COMMIT_EPOCH="$(git log -1 --format=%ct 2>/dev/null || true)"
     docker build \
       -f docker/Dockerfile.cli.rpi4 \
+      --build-arg "DBSRT_GIT_HASH=${GIT_HASH}" \
+      --build-arg "SOURCE_DATE_EPOCH=${COMMIT_EPOCH}" \
       -t "${IMAGE_NAME}" .
     echo "✓ Built Docker image ${IMAGE_NAME}."
 
