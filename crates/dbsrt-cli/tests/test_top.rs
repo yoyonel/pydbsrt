@@ -2663,6 +2663,7 @@ fn test_e2e_sources_toggle_purges_inactive_media_immediately() {
 }
 
 #[test]
+#[ignore = "signals real host processes (ffmpeg, dbsrt media:add); run manually"]
 fn test_e2e_stop_entire_batch_cleans_targets_and_returns_status() {
     let targets_file = std::path::Path::new("data/reports/selected_batch_targets.json");
     if let Some(parent) = targets_file.parent() {
@@ -2797,6 +2798,7 @@ fn test_e2e_media_browser_source_filter_cycle() {
 }
 
 #[test]
+#[ignore = "signals real host processes (ffmpeg, dbsrt media:add); run manually"]
 fn test_e2e_stop_entire_batch_via_key_events() {
     use std::sync::{Arc, RwLock};
 
