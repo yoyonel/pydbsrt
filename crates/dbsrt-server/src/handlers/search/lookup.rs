@@ -193,6 +193,14 @@ struct RemoteRelayProcessingContext<'a> {
     timing: &'a mut SearchTimingStats,
 }
 
+/// True when the local file stem and the remote match title contain one another
+/// (case-insensitive). Both must be non-empty: `contains("")` is always true.
+fn stem_and_title_overlap(file_stem: &str, match_title: &str) -> bool {
+    let stem = file_stem.trim().to_lowercase();
+    let title = match_title.trim().to_lowercase();
+    !stem.is_empty() && !title.is_empty() && (title.contains(&stem) || stem.contains(&title))
+}
+
 /// Processes upstream remote recognition response, verifying candidate presence and title consistency.
 ///
 /// # Arguments
@@ -242,13 +250,7 @@ fn process_remote_recognition_result(
         .map(|c| !c.is_empty())
         .unwrap_or(false);
     let match_title = rec_resp.media_match.as_deref().unwrap_or("");
-    let stem_matches = !file_stem.is_empty()
-        && (match_title
-            .to_lowercase()
-            .contains(&file_stem.to_lowercase())
-            || file_stem
-                .to_lowercase()
-                .contains(&match_title.to_lowercase()));
+    let stem_matches = stem_and_title_overlap(&file_stem, match_title);
 
     if !has_cands && !stem_matches {
         ctx.state.push_log(
@@ -1286,6 +1288,18 @@ mod tests {
         SubtitleCache,
     };
     use std::path::PathBuf;
+
+    #[test]
+    fn test_stem_and_title_overlap_rejects_empty_title() {
+        assert!(!stem_and_title_overlap("Big.Buck.Bunny", ""));
+        assert!(!stem_and_title_overlap("Big.Buck.Bunny", "   "));
+        assert!(!stem_and_title_overlap("", "Big Buck Bunny"));
+        assert!(stem_and_title_overlap(
+            "big_buck_bunny_trailer",
+            "BIG_BUCK_BUNNY"
+        ));
+        assert!(!stem_and_title_overlap("sintel", "big_buck_bunny"));
+    }
 
     fn get_repo_root() -> PathBuf {
         let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
