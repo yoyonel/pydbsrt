@@ -194,6 +194,18 @@ task o2switch:batch:tvshow -- --workers 2 --fresh-only --limit 5
 | Connexion établie mais listing ou flux bloqué | La plage de ports passifs n'est pas redirigée, ou le NAS annonce son IP LAN en mode PASV. | Rediriger la plage passive (étape 4) et cocher **Signaler l'IP externe en mode PASV** (étape 3). |
 | `530 Login incorrect` | Mauvais identifiants ou option **Refuser** cochée sur FTP dans l'onglet Applications. | Vérifier `etc/.nas_pass` et que **FTP** n'est PAS coché sous *Refuser* (prioritaire sur *Par IP*). |
 | Vidéo en `STALLED` ou `TIMEOUT` dans le batch | Coupure réseau pendant le flux FTP. | Relancer les échecs avec `task o2switch:batch:tvshow -- --retry-failed --daemon`. |
+| `No video frames could be extracted` en 1 à 3 s, listing OK | `550 Permission denied` sur `RETR` : le compte FTP voit le fichier mais ne peut pas le lire (droits du dossier). | Donner la lecture au compte FTP sur le dossier dans DSM, puis relancer avec `--retry-failed`. |
+
+---
+
+## 🔐 Durcissement restant (à faire)
+
+L'installation actuelle fonctionne mais n'applique pas encore toutes les étapes ci-dessus. Actions à faire, dans l'ordre :
+
+1. **Changer le mot de passe du compte NAS** : l'ancien a circulé en clair (URL ffmpeg, journaux, transcriptions locales de session Claude sous `~/.claude/projects/`). Mettre le nouveau dans le `.env` local ; le prochain lancement de batch le repousse vers `etc/.nas_pass` sur o2switch.
+2. **Compte NAS dédié en lecture seule** (étape 1), si le compte actuel a plus de droits.
+3. **Filtrer la redirection Freebox** du port 21 et de la plage passive sur l'IP sortante d'o2switch (étape 4), et activer la liste blanche DSM (étape 2).
+4. **Droits de lecture** : plusieurs dossiers (`⭐️Shogun`, `⭐️Halo`, `What IF`, etc.) renvoient `550 Permission denied` en lecture au compte FTP.
 
 ---
 
