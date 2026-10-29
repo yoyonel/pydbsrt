@@ -173,6 +173,7 @@ nav:
       - Audit Legacy VLSub: 2026-10-18-vlsub-legacy-audit.md
       - Testabilité TUI & Stratégies de Couverture: explanation/2026-10-27-analyse-testabilite-et-couverture-tui-open-source.md
       - Audit Qualité & Complexité Fonctions Rust: explanation/2026-10-27-audit-qualite-et-complexite-fonctions-rust.md
+      - Traçabilité & Versioning des Binaires Distribués: explanation/tracabilite-et-versioning-des-binaires-distribues.md
   - 📊 Benchmarks & Preuves:
       - Campagnes Empiriques:
           - Rapport Batch TVShow Synology: 2026-10-25-rapport-batch-import-tvshow-synology.md

@@ -183,10 +183,10 @@ dbsrt top [OPTIONS]
 
 #### Structure de l'Interface Full-Frame
 
-1. **Bannière d'En-Tête Système Multi-Lignes** :
-   - Ligne 1 : Horloge locale temps réel (`HH:MM:SS`), nombre de workers actifs, pourcentage CPU global hôte, mémoire vive consommée / totale (`RAM: X.X/Y.Y GiB`).
-   - Ligne 2 : Télémesures GPU matériel Intel Iris Xe (`intel_gpu_top`) : Moteur de décodage vidéo (`Video Engine: X.X% [bar]`), Render/3D, fréquence d'horloge GPU (`MHz`) et puissance électrique consommée (`W`).
-   - Ligne 3 : Débits réseau CIFS/SMB : Instantané combiné (`Net RX` physique et lecture `VFS`), ainsi que le débit cumulé global de la session courante (`X.X MB/s` sur `Y.Y GiB` en `XhYYm` sur `N` flux).
+1. **Bannière d'En-Tête Système Multi-Lignes (Style Fastfetch Dynamique)** :
+   - Ligne 1 : Horloge temps réel (`HH:MM:SS`), nom d'hôte de la machine ou du nœud distant (`🖥️ hostname`), distribution OS et architecture (`Debian 13 x86_64`, `CloudLinux 8`, etc.), nombre de workers actifs, pourcentage CPU global hôte, mémoire vive consommée / totale (`RAM: X.X/Y.Y GiB`).
+   - Ligne 2 : Modèle et nombre de cœurs processeur (`🧠 CPU: <modèle> (N cœurs)`), modèle de carte graphique ou accélérateur détecté (`🎮 GPU: <modèle>`) avec télémesures de décodage matériel en direct (`intel_gpu_top` : `Décodage: X.X% [bar]`, Render/3D, fréquence `MHz`, puissance `W`) ou mention transparente du mode actif (`Mode CPU Multithread` ou `Non détecté`).
+   - Ligne 3 : Débits réseau et pipe : Instantané réseau ingress physique (`Net RX`), débit de traitement du pipe de hachage (`Pipe pHash`), ainsi que le débit cumulé global de la session courante (`X.X MB/s` sur `Y.Y GiB` en `XhYYm` sur `N` flux).
 
 2. **Onglet 1 : Tâches en Cours (`[1]`)** :
    - Table interactive des processus actifs (`dbsrt` et `ffmpeg`), moteurs d'exécution (`GPU VA-API`, `CPU Software`, `Sub Extraction`), débits instantanés, barres de progression textuelles, ETA et consommation mémoire/CPU.
