@@ -86,17 +86,16 @@ case "${ACTION}" in
     echo "    Remote Cloud Relay Target : ${REMOTE_API}"
     echo "    VLC Service Discovery     : /tmp/dbsrt-server.json"
 
-    KEY_ARGS=()
+    # Key goes through the environment: argv is readable by any local user via ps
     if [[ -n "${API_KEY}" ]]; then
-      KEY_ARGS=(--remote-api-key "${API_KEY}")
+      export DBSRT_REMOTE_API_KEY="${API_KEY}"
     fi
 
     setsid "${SERVER_BIN}" \
       --host 127.0.0.1 \
       --port "${PORT}" \
       --agent \
-      --remote-api "${REMOTE_API}" \
-      "${KEY_ARGS[@]}" </dev/null >>"${LOG_FILE}" 2>&1 &
+      --remote-api "${REMOTE_API}" </dev/null >>"${LOG_FILE}" 2>&1 &
     AGENT_PID=$!
     echo "${AGENT_PID}" >"${PID_FILE}"
 
