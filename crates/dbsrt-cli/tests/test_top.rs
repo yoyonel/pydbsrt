@@ -3589,6 +3589,31 @@ fn test_format_unix_to_iso_roundtrip() {
 }
 
 #[test]
+fn test_cmdline_has_remote_stream() {
+    use dbsrt_cli::commands::top::sampler::cmdline_has_remote_stream;
+    let args = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    assert!(cmdline_has_remote_stream(&args(&[
+        "ffmpeg",
+        "-i",
+        "ftps://nas/a.mkv"
+    ])));
+    assert!(cmdline_has_remote_stream(&args(&[
+        "dbsrt",
+        "add",
+        "https://h/a.mkv"
+    ])));
+    assert!(!cmdline_has_remote_stream(&args(&[
+        "ffmpeg", "-i", "/m/a.mkv", "-f", "rawvideo", "-"
+    ])));
+    // A scheme inside a local file name is not a stream.
+    assert!(!cmdline_has_remote_stream(&args(&[
+        "ffmpeg",
+        "-i",
+        "/m/notes-ftp://x.mkv"
+    ])));
+}
+
+#[test]
 fn test_is_physical_interface_excludes_virtual_links() {
     use dbsrt_cli::commands::top::sampler::is_physical_interface;
     for name in ["eth0", "enp3s0", "wlan0", "ens18"] {

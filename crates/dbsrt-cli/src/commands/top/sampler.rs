@@ -6,7 +6,7 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::Instant;
 
 use rayon::prelude::*;
@@ -2257,13 +2257,34 @@ fn extract_media_info(cmdline: &[String]) -> (Option<PathBuf>, String) {
     (target_path, media_name)
 }
 
+/// DRM render node probed for VA-API availability.
+const VAAPI_RENDER_NODE: &str = "/dev/dri/renderD128";
+
+/// Render-node presence, probed once per process instead of on every sampling tick.
+fn has_vaapi_render_node() -> bool {
+    static HAS_RENDER_NODE: OnceLock<bool> = OnceLock::new();
+    *HAS_RENDER_NODE.get_or_init(|| Path::new(VAAPI_RENDER_NODE).exists())
+}
+
+/// Vendor-neutral diagnostic for VA-API hardware decoding.
+fn vaapi_engine_reason() -> String {
+    format!("Acc\u{e9}l\u{e9}ration mat\u{e9}rielle VA-API active ({VAAPI_RENDER_NODE}).")
+}
+
+/// True when any command-line argument is a remote stream URL (`ftp://`, `https://`, ...).
+pub fn cmdline_has_remote_stream(cmdline: &[String]) -> bool {
+    cmdline
+        .iter()
+        .any(|arg| arg.contains("://") && dbsrt_core::container::is_remote_stream_or_pipe(arg))
+}
+
 /// Detects the decoding engine and diagnostic reason for an active process candidate.
 fn detect_candidate_engine(
     cmd_str: &str,
     is_dbsrt: bool,
     is_hi10p: bool,
 ) -> (String, Option<String>) {
-    let has_vaapi = Path::new("/dev/dri/renderD128").exists();
+    let has_vaapi = has_vaapi_render_node();
     if is_dbsrt {
         if cmd_str.contains("--hwaccel disabled")
             || cmd_str.contains("--hwaccel cpu")
@@ -2281,10 +2302,7 @@ fn detect_candidate_engine(
                 Some("H.264 Hi10P (10-bit) non supporté par l'ASIC matériel GPU (Intel/Nvidia/AMD). Repli automatique en décodage logiciel CPU multi-thread.".to_string()),
             )
         } else {
-            (
-                "GPU (VA-API)".to_string(),
-                Some("Accélération matérielle Intel QuickSync / VA-API active (/dev/dri/renderD128).".to_string()),
-            )
+            ("GPU (VA-API)".to_string(), Some(vaapi_engine_reason()))
         }
     } else if cmd_str.contains("-f srt") || cmd_str.contains("0:s:") {
         (
@@ -2292,13 +2310,7 @@ fn detect_candidate_engine(
             Some("Extraction de flux sous-titre texte/SRT (démultiplexage rapide, aucun décodage vidéo).".to_string()),
         )
     } else if cmd_str.contains("-hwaccel vaapi") {
-        (
-            "GPU (VA-API)".to_string(),
-            Some(
-                "Accélération matérielle Intel QuickSync / VA-API active (/dev/dri/renderD128)."
-                    .to_string(),
-            ),
-        )
+        ("GPU (VA-API)".to_string(), Some(vaapi_engine_reason()))
     } else if is_hi10p {
         (
             "CPU (Hi10P)".to_string(),
@@ -2362,9 +2374,7 @@ pub fn process_candidate_jobs(
         let mut read_bytes = read_proc_io_bytes(candidate.pid);
         let mut hashing_fps = 0.0;
 
-        let is_streaming = candidate.cmd_str.contains("ftp://")
-            || candidate.cmd_str.contains("http://")
-            || candidate.cmd_str.contains("sftp://");
+        let is_streaming = cmdline_has_remote_stream(&candidate.cmdline);
 
         if let Some(progress) = read_job_progress_file(candidate.pid) {
             read_bytes = (progress.frames as f64 * RAW_FRAME_BYTES) as u64;
