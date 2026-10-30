@@ -668,3 +668,80 @@ fn reload_remote_streaming_targets(
     }
     count
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::KeyEvent;
+    use dbsrt_tui::app::KeyCode as K;
+
+    #[test]
+    fn test_is_redraw_key_needs_control_with_l_or_r() {
+        let ctrl = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL);
+        assert!(is_redraw_key(&ctrl('l')));
+        assert!(is_redraw_key(&ctrl('L')));
+        assert!(is_redraw_key(&ctrl('r')));
+        assert!(!is_redraw_key(&ctrl('q')));
+        assert!(!is_redraw_key(&KeyEvent::new(
+            KeyCode::Char('l'),
+            KeyModifiers::NONE
+        )));
+    }
+
+    #[test]
+    fn test_to_tui_key_maps_every_navigation_key_and_drops_others() {
+        let cases = [
+            (KeyCode::Char('x'), K::Char('x')),
+            (KeyCode::Enter, K::Enter),
+            (KeyCode::Esc, K::Esc),
+            (KeyCode::Backspace, K::Backspace),
+            (KeyCode::Delete, K::Delete),
+            (KeyCode::Tab, K::Tab),
+            (KeyCode::BackTab, K::BackTab),
+            (KeyCode::Up, K::Up),
+            (KeyCode::Down, K::Down),
+            (KeyCode::Left, K::Left),
+            (KeyCode::Right, K::Right),
+            (KeyCode::PageUp, K::PageUp),
+            (KeyCode::PageDown, K::PageDown),
+            (KeyCode::Home, K::Home),
+            (KeyCode::End, K::End),
+            (KeyCode::F(1), K::Null),
+            (KeyCode::Insert, K::Null),
+        ];
+        for (native, tui) in cases {
+            assert_eq!(to_tui_key(native), tui);
+        }
+    }
+
+    #[test]
+    fn test_validate_source_modal_rejects_bad_paths_without_persisting() {
+        let telemetry = SystemTelemetry::default();
+        for (path, expected) in [
+            ("   ", "obligatoire"),
+            ("relative/dir", "absolu"),
+            ("/nonexistent/dbsrt-test-dir", "introuvable"),
+        ] {
+            let mut modal = SourceInputModalState::new_add();
+            modal.path_input = path.to_string();
+            assert_eq!(
+                validate_and_save_source_modal(&mut modal, &telemetry, None),
+                (false, None)
+            );
+            assert!(modal.error_msg.unwrap().contains(expected), "{path}");
+        }
+    }
+
+    #[test]
+    fn test_apply_source_modal_action_refuses_delete_mode() {
+        let mut sources = Vec::new();
+        let result = apply_source_modal_action(
+            &SourceModalMode::DeleteConfirm(0),
+            &mut sources,
+            "n".to_string(),
+            PathBuf::from("/tmp"),
+        );
+        assert_eq!(result, Err("Action invalide".to_string()));
+        assert!(sources.is_empty());
+    }
+}
