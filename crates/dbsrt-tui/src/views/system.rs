@@ -151,7 +151,18 @@ fn build_left_column_lines(tel: &SystemTelemetry) -> Vec<Line<'static>> {
         .unwrap_or_else(|| "N/A".to_string());
     lines.push(build_tree_line("Cœurs physiques", &phys_str, false));
     let cpu_load_str = format!("{:>4.1}%", tel.host_cpu_pct);
-    lines.push(build_tree_line("Charge globale", &cpu_load_str, true));
+    lines.push(build_tree_line(
+        "Charge globale",
+        &cpu_load_str,
+        tel.account_cpu_pct.is_none(),
+    ));
+    if let Some(pct) = tel.account_cpu_pct {
+        lines.push(build_tree_line(
+            "Charge compte",
+            &format!("{pct:>4.1}% de la limite LVE"),
+            true,
+        ));
+    }
 
     lines
 }
@@ -222,6 +233,9 @@ fn build_right_column_lines(tel: &SystemTelemetry) -> Vec<Line<'static>> {
         "{:>4.1} / {:>4.1} GiB ({:>2.0}%)",
         tel.ram_used_gib, tel.ram_total_gib, ram_pct
     );
+    if let Some(label) = tel.account_ram_label() {
+        lines.push(build_tree_line("RAM compte", &label, false));
+    }
     lines.push(build_tree_line("RAM système", &ram_str, false));
     lines.push(build_tree_line("Cache pHash", DEFAULT_PHASH_DIR, false));
     lines.push(build_tree_line(

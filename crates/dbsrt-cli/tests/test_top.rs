@@ -20,8 +20,8 @@ use dbsrt_cli::commands::top::process_ctl::{
 use dbsrt_cli::commands::top::sampler::{
     compute_session_throughput, is_thread_task, launch_selected_batch,
     launch_selected_batch_with_target_file, load_historical_records, load_media_cache,
-    load_remote_batch_media_items, preload_stem_size_cache, read_proc_io_bytes, save_media_cache,
-    MediaDiscoveryCriteria,
+    load_remote_batch_media_items, parse_lve_usage, parse_pss_kib, preload_stem_size_cache,
+    read_proc_io_bytes, save_media_cache, MediaDiscoveryCriteria,
 };
 use dbsrt_cli::commands::top::ui::{render_ui, UiContext};
 use dbsrt_cli::commands::top::{probe_telemetry_snapshot, run_top, TopArgs};
@@ -255,6 +255,9 @@ fn test_ui_rendering_all_pages() {
         host_cpu_pct: 25.0,
         ram_used_gib: 8.5,
         ram_total_gib: 32.0,
+        account_ram_gib: None,
+        account_ram_limit_gib: None,
+        account_cpu_pct: None,
         gpu: GpuTelemetry {
             video_busy_pct: 85.0,
             render_busy_pct: 12.0,
@@ -3816,4 +3819,79 @@ fn test_url_decode_simple_multibyte_utf8() {
     assert_eq!(url_decode_simple("50%zz%"), "50%zz%");
     assert_eq!(url_decode_simple("a%4"), "a%4");
     assert_eq!(url_decode_simple("%+4"), "%+4");
+}
+
+#[test]
+fn test_parse_pss_kib_reads_smaps_rollup() {
+    let cases: [(&str, Option<u64>); 5] = [
+        (
+            "55d0-7ffe ---p 00000000 00:00 0 [rollup]\nRss:  2048 kB\nPss:  1536 kB\nPss_Anon:  512 kB\n",
+            Some(1536),
+        ),
+        ("Pss: 0 kB\n", Some(0)),
+        ("Rss: 2048 kB\nPss_Anon: 512 kB\n", None),
+        ("Pss: garbage kB\n", None),
+        ("", None),
+    ];
+    for (body, expected) in cases {
+        assert_eq!(parse_pss_kib(body), expected, "body: {body:?}");
+    }
+}
+
+#[test]
+fn test_parse_lve_usage_reads_uapi_get_usages() {
+    type UsageLimit = (u64, Option<u64>);
+    let both = r#"{"result":{"data":[{"id":"lvecpu","usage":90,"maximum":100},
+        {"id":"lvememphy","usage":901730304,"maximum":51539607552}]}}"#;
+    let cases: [(&str, &str, Option<UsageLimit>); 8] = [
+        (both, "lvememphy", Some((901_730_304, Some(51_539_607_552)))),
+        (both, "lvecpu", Some((90, Some(100)))),
+        (both, "lvenproc", None),
+        (
+            r#"{"result":{"data":[{"id":"lvememphy","usage":5,"maximum":null}]}}"#,
+            "lvememphy",
+            Some((5, None)),
+        ),
+        (
+            r#"{"result":{"data":[{"id":"lvememphy","usage":null,"maximum":1}]}}"#,
+            "lvememphy",
+            None,
+        ),
+        (
+            r#"{"result":{"data":[{"id":"lvecpu","usage":-1,"maximum":100}]}}"#,
+            "lvecpu",
+            None,
+        ),
+        (
+            r#"{"result":{"data":null,"errors":["denied"]}}"#,
+            "lvecpu",
+            None,
+        ),
+        ("bash: uapi: command not found", "lvememphy", None),
+    ];
+    for (body, id, expected) in cases {
+        assert_eq!(parse_lve_usage(body, id), expected, "{id} in {body}");
+    }
+}
+
+#[test]
+fn test_account_ram_label_shows_ratio_to_limit() {
+    let tel = |used, limit| SystemTelemetry {
+        account_ram_gib: used,
+        account_ram_limit_gib: limit,
+        ..Default::default()
+    };
+    assert_eq!(tel(None, Some(48.0)).account_ram_label(), None);
+    assert_eq!(
+        tel(Some(0.96), Some(48.0)).account_ram_label().as_deref(),
+        Some("0.96/48 GiB (2.0%)")
+    );
+    assert_eq!(
+        tel(Some(0.7), None).account_ram_label().as_deref(),
+        Some("0.70 GiB")
+    );
+    assert_eq!(
+        tel(Some(0.7), Some(0.0)).account_ram_label().as_deref(),
+        Some("0.70 GiB")
+    );
 }

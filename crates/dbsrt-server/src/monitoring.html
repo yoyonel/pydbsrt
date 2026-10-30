@@ -715,6 +715,10 @@
     const MIB = 1024 * 1024;
     const GIB = 1024 * MIB;
     const fmt = (v, d) => (Number(v) || 0).toFixed(d);
+    // Port of SystemTelemetry::account_ram_label.
+    const accountRamLabel = (t) => t.account_ram_gib == null ? null
+      : t.account_ram_limit_gib > 0 ? `${fmt(t.account_ram_gib, 2)}/${fmt(t.account_ram_limit_gib, 0)} GiB (${fmt(t.account_ram_gib / t.account_ram_limit_gib * 100, 1)}%)`
+      : `${fmt(t.account_ram_gib, 2)} GiB`;
     const span = (cls, txt) => `<span class="${cls}">${escapeHtml(txt)}</span>`;
 
     function textBar(ratio, width) {
@@ -774,7 +778,11 @@
       let host = span('top-key', '🖥️ HÔTE      │ ') + span('', h.hostname + ' ') + span('top-dim', `(${h.os_name} ${h.arch}) `)
         + '│ ' + span(jobs.length > 0 ? 'eng-gpu' : 'eng-hi10p', `Workers: ${jobs.length} actifs `) + '│ ';
       if (q.total_targets > 0) host += span('top-key', `Batch: ${q.completed_targets}/${q.total_targets} (${fmt(q.progress_pct, 0)}%) `) + '│ ';
-      host += escapeHtml(`Host CPU: ${fmt(t.host_cpu_pct, 0)}% │ RAM: ${fmt(t.ram_used_gib, 1)}/${fmt(t.ram_total_gib, 1)} GiB (${fmt(ramPct, 0)}%)`);
+      // Host RAM stays in the Système tab: on shared hosting it counts every tenant.
+      const account = accountRamLabel(t);
+      const ram = account ? `RAM compte: ${account}` : `RAM: ${fmt(t.ram_used_gib, 1)}/${fmt(t.ram_total_gib, 1)} GiB (${fmt(ramPct, 0)}%)`;
+      const cpu = t.account_cpu_pct != null ? `CPU compte: ${fmt(t.account_cpu_pct, 0)}%` : `Host CPU: ${fmt(t.host_cpu_pct, 0)}%`;
+      host += escapeHtml(`${cpu} │ ${ram}`);
       if (t.is_scanning) host += ' │ ' + span('eng-hi10p', '⟳ SCAN DISQUE EN COURS...');
       document.getElementById('top-line-host').innerHTML = host;
 
@@ -874,6 +882,7 @@
           ['Modèle', h.cpu_brand], ['Cœurs logiques', `${h.cpu_cores_logical} threads`],
           ['Cœurs physiques', h.cpu_cores_physical != null ? `${h.cpu_cores_physical} cœurs physiques` : 'N/A'],
           ['Charge globale', `${fmt(t.host_cpu_pct, 1)}%`],
+          ...(t.account_cpu_pct != null ? [['Charge compte', `${fmt(t.account_cpu_pct, 1)}% de la limite LVE`]] : []),
         ]],
         ['🎮 ACCÉLÉRATION MATÉRIELLE (GPU)', [
           ['Contrôleur GPU', h.gpu_name], ['Moteur décodage', engineDesc],
@@ -882,6 +891,7 @@
             : [['Mode d\'ingestion', 'Multi-threads CPU logiciel'], ['Conso & Fréq.', 'Inactif (Mode CPU)']]),
         ]],
         ['💾 MÉMOIRE & STOCKAGE', [
+          ...(accountRamLabel(t) ? [['RAM compte', accountRamLabel(t)]] : []),
           ['RAM système', `${fmt(t.ram_used_gib, 1)} / ${fmt(t.ram_total_gib, 1)} GiB (${fmt(t.ram_total_gib > 0 ? t.ram_used_gib / t.ram_total_gib * 100 : 0, 0)}%)`],
           ['Cache pHash', 'data/__PHASH__'], ['Catalogue média', 'data/reports/media_browser_cache.json'],
           ['Sources déclarées', `${sources} active(s)`],

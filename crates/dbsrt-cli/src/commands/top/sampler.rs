@@ -1894,6 +1894,9 @@ pub fn run_telemetry_sampler_loop(
     let mut last_net_instant = Instant::now();
     let mut last_proc_rx: Option<(Instant, u64)> = None;
     let mut previous_io_samples: HashMap<u32, (Instant, u64)> = HashMap::new();
+    /// Account RAM `(used, limit)` in GiB, and account CPU in percent of its LVE limit.
+    type AccountUsage = (Option<(f64, Option<f64>)>, Option<f64>);
+    let mut account: Option<(Instant, AccountUsage)> = None;
 
     let events_path = resolve_events_log_path();
     let couplings_path = PathBuf::from(DEFAULT_COUPLINGS_PATH);
@@ -1930,6 +1933,20 @@ pub fn run_telemetry_sampler_loop(
         let host_cpu = system.global_cpu_usage();
         let ram_used = system.used_memory() as f64 / BYTES_PER_GIB_F64;
         let ram_total = system.total_memory() as f64 / BYTES_PER_GIB_F64;
+        // Summing PSS walks every page table (~250 ms for 300 desktop processes): every 5 s.
+        if account.is_none_or(|(at, _)| now.duration_since(at).as_secs() >= 5) {
+            let gib = |bytes: u64| bytes as f64 / BYTES_PER_GIB_F64;
+            let usages = cpanel_resource_usage();
+            let lve = |id| usages.as_deref().and_then(|body| parse_lve_usage(body, id));
+            let mem = lve("lvememphy")
+                .map(|(used, limit)| (gib(used), limit.map(gib)))
+                .or_else(|| account_pss_kib().map(|kib| (gib(kib * 1024), None)));
+            let cpu = lve("lvecpu").map(|(used, limit)| match limit {
+                Some(max) if max > 0 => used as f64 * 100.0 / max as f64,
+                _ => used as f64,
+            });
+            account = Some((now, (mem, cpu)));
+        }
 
         // Refresh physical network interface RX throughput
         let (net_rx_mib_s, new_last_net) =
@@ -1962,6 +1979,10 @@ pub fn run_telemetry_sampler_loop(
             state.host_cpu_pct = host_cpu;
             state.ram_used_gib = ram_used;
             state.ram_total_gib = ram_total;
+            let (mem, cpu) = account.map_or((None, None), |(_, usage)| usage);
+            state.account_ram_gib = mem.map(|(used, _)| used);
+            state.account_ram_limit_gib = mem.and_then(|(_, limit)| limit);
+            state.account_cpu_pct = cpu;
             state.gpu = gpu_snap;
             state.total_rate_mib_s = total_rate_mib_s;
             state.net_rx_mib_s = net_rx_mib_s;
@@ -1980,6 +2001,75 @@ pub fn run_telemetry_sampler_loop(
 
         std::thread::sleep(std::time::Duration::from_millis(refresh_interval_ms));
     }
+}
+
+/// Extracts the `Pss:` value in KiB from a `/proc/<pid>/smaps_rollup` body.
+pub fn parse_pss_kib(smaps_rollup: &str) -> Option<u64> {
+    smaps_rollup
+        .lines()
+        .find_map(|line| line.strip_prefix("Pss:"))
+        .and_then(|rest| rest.split_whitespace().next())
+        .and_then(|kib| kib.parse().ok())
+}
+
+/// Sums the PSS of every process whose `smaps_rollup` is readable, i.e. this user's own
+/// processes. `None` when `/proc` is missing (non-Linux).
+fn account_pss_kib() -> Option<u64> {
+    let total = fs::read_dir("/proc")
+        .ok()?
+        .flatten()
+        .filter(|e| {
+            e.file_name()
+                .to_str()
+                .is_some_and(|n| n.bytes().all(|b| b.is_ascii_digit()))
+        })
+        .filter_map(|e| fs::read_to_string(e.path().join("smaps_rollup")).ok())
+        .filter_map(|body| parse_pss_kib(&body))
+        .sum();
+    Some(total)
+}
+
+/// Raw `uapi ResourceUsage get_usages` output, shared by every `dbsrt top --json` probe.
+const CPANEL_USAGE_CACHE_PATH: &str = "run/cpanel_resource_usage.json";
+/// `uapi` takes ~600 ms of account CPU: refresh its cache at most this often.
+const CPANEL_USAGE_TTL_SECS: u64 = 30;
+
+/// Extracts the `(usage, limit)` of entry `id` (`lvememphy`: bytes, `lvecpu`: percent of the
+/// LVE CPU limit) from `uapi --output=json ResourceUsage get_usages`. The limit is `None`
+/// when unlimited.
+pub fn parse_lve_usage(uapi_json: &str, id: &str) -> Option<(u64, Option<u64>)> {
+    let v: serde_json::Value = serde_json::from_str(uapi_json).ok()?;
+    let entry = v["result"]["data"]
+        .as_array()?
+        .iter()
+        .find(|u| u["id"] == id)?;
+    Some((entry["usage"].as_u64()?, entry["maximum"].as_u64()))
+}
+
+/// `uapi ResourceUsage get_usages` JSON, through a short disk cache. `None` off cPanel.
+fn cpanel_resource_usage() -> Option<String> {
+    let cache = Path::new(CPANEL_USAGE_CACHE_PATH);
+    let fresh = fs::metadata(cache)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.elapsed().ok())
+        .is_some_and(|age| age.as_secs() < CPANEL_USAGE_TTL_SECS);
+    if fresh {
+        if let Ok(body) = fs::read_to_string(cache) {
+            return Some(body);
+        }
+    }
+    let out = Command::new("uapi")
+        .args(["--output=json", "ResourceUsage", "get_usages"])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    let body = String::from_utf8_lossy(&out.stdout).into_owned();
+    // Only cache a usable answer, so a failing `uapi` is retried on the next refresh.
+    parse_lve_usage(&body, "lvememphy")?;
+    let _ = fs::write(cache, &body);
+    Some(body)
 }
 
 /// Deserializes volatile batch queue state from a JSON file.
