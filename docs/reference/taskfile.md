@@ -173,6 +173,7 @@ Cette page dresse le dictionnaire exhaustif de toutes les cibles d'orchestration
 | `task o2switch:setup-cron` | Installe le watchdog utilisateur non-root (`*/5 * * * *`) et le recompactage du catalogue (`*/15 * * * *`) dans la crontab. |
 | `task o2switch:remove-cron` | Supprime le watchdog utilisateur de la crontab. |
 | `task o2switch:rotate-key` | Génère, déploie et valide une nouvelle clé API 256 bits avec synchronisation dans `pass`. |
+| `task o2switch:rotate-readonly-key` | Génère et déploie la clé lecture seule (GET monitoring uniquement, 403 ailleurs) utilisée par le web-top et son QR code, avec synchronisation dans `pass`. |
 | `task o2switch:sync-nas` | Compile le catalogue binaire depuis le NAS Synology et synchronise l'index et les sous-titres sur o2switch. |
 | `task o2switch:sync-nas:dry-run` | Simule à sec la synchronisation du catalogue NAS vers o2switch sans transfert effectif ni redémarrage. |
 | `task o2switch:agent:start` | Démarre l'agent relais local connecté au Cloud o2switch pour VLC et le NAS Synology. |
@@ -190,4 +191,5 @@ Cette page dresse le dictionnaire exhaustif de toutes les cibles d'orchestration
 | :--- | :--- | :--- |
 | `task web-top:build` | - | Compile le bundle WebAssembly client (`dbsrt-web-top` via Ratzilla et Trunk) sous `crates/dbsrt-web-top/dist`. |
 | `task web-top:serve` | - | Sert localement le moniteur TUI WebAssembly sur `http://127.0.0.1:8085` avec rechargement à chaud. |
-| `task web-top:iso` | - | Test ISO strict : rejoue la même séquence de touches sur `dbsrt top` natif (o2switch via SSH/tmux) et sur le web-top déployé (Chromium headless), compare les écrans normalisés. Captures et diffs dans `target/top_iso`. Codes retour : 0 identique, 1 écart ISO, 2 erreur harness, 3 écart dû au flux web coupé (infra). |
+| `task web-top:iso` | - | Test ISO strict : rejoue la même séquence de touches sur `dbsrt top` natif (o2switch via SSH/tmux) et sur le web-top déployé (Chromium headless), compare les écrans normalisés. Couvre navigation, recherche `/`, défilement (PageDown/End/Home) et deux viewports (`ISO_VIEWPORTS`, défaut `1400x900,412x915` mobile). Le web-top s'authentifie avec la clé lecture seule. Captures et diffs dans `target/top_iso`. Codes retour : 0 identique, 1 écart ISO, 2 erreur harness, 3 écart dû au flux web coupé (infra). |
+| `task web-top:qr` | - | Affiche dans le terminal le QR code ASCII du lien 4G/5G du web-top déployé (`${O2SWITCH_URL}/top/?token=...`). Embarque la clé **lecture seule** (`.env` `O2SWITCH_READONLY_KEY` ou `pass`), créée par `task o2switch:rotate-readonly-key`. Ne pas le partager publiquement. |

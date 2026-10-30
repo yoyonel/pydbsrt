@@ -15,3 +15,8 @@ tasks:
     desc: Strict ISO check of deployed web-top vs native dbsrt top on o2switch (captures in target/top_iso)
     cmds:
       - node scripts/top_iso_compare.mjs
+
+  web-top:qr:
+    desc: Print the ASCII QR code of the deployed web-top 4G/5G link (token included) on o2switch
+    cmds:
+      - ./scripts/o2switch_ctl.sh web-top-qr

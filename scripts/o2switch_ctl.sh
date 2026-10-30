@@ -32,6 +32,7 @@ load_local_env "${REPO_ROOT}"
 
 DEFAULT_NAS_PASS_ENTRY="services/synology/nas_pass"
 DEFAULT_API_KEY_PASS_ENTRY="services/pydbsrt/o2switch_api_key"
+DEFAULT_READONLY_KEY_PASS_ENTRY="services/pydbsrt/o2switch_readonly_key"
 # Worker concurrency bounds, kept in sync with MIN/MAX_CONCURRENT_WORKERS in o2switch_batch_worker.py
 MIN_BATCH_WORKERS=1
 MAX_BATCH_WORKERS=8
@@ -41,6 +42,7 @@ NAS_HOST="${NAS_HOST:-}"
 NAS_USER="${NAS_USER:-}"
 NAS_PASS_ENTRY="${NAS_PASS_ENTRY:-${DEFAULT_NAS_PASS_ENTRY}}"
 API_KEY_PASS_ENTRY="${API_KEY_PASS_ENTRY:-${DEFAULT_API_KEY_PASS_ENTRY}}"
+READONLY_KEY_PASS_ENTRY="${READONLY_KEY_PASS_ENTRY:-${DEFAULT_READONLY_KEY_PASS_ENTRY}}"
 
 O2SWITCH_HOST="${O2SWITCH_HOST:-${DEFAULT_O2SWITCH_HOST}}"
 SERVER_PORT="${SERVER_PORT:-${DEFAULT_SERVER_PORT}}"
@@ -48,6 +50,10 @@ REMOTE_BASE="${REMOTE_BASE:-${DEFAULT_REMOTE_BASE}}"
 REMOTE_PUBLIC_HTML="${REMOTE_PUBLIC_HTML:-${DEFAULT_REMOTE_PUBLIC_HTML}}"
 O2SWITCH_URL="${O2SWITCH_URL:-}"
 O2SWITCH_API_KEY="${O2SWITCH_API_KEY:-}"
+O2SWITCH_READONLY_KEY="${O2SWITCH_READONLY_KEY:-}"
+# Remote snippet emitting the loopback auth header from the master key file; piped into
+# `curl -H @-` so the key stays out of every argv (the server enforces --api-key-file)
+REMOTE_AUTH_HEADER="printf 'Authorization: Bearer %s\\n' \"\$(grep -m 1 -v -e '^#' -e '^[[:space:]]*\$' ${REMOTE_BASE}/etc/api_key.secret)\""
 
 check_ssh() {
   if ! ssh -o BatchMode=yes -o ConnectTimeout="${DEFAULT_CURL_TIMEOUT_SEC}" "${O2SWITCH_HOST}" "true" 2>/dev/null; then
@@ -62,6 +68,38 @@ pass_secret() {
   if command -v pass >/dev/null 2>&1; then
     pass show "$1" 2>/dev/null || true
   fi
+}
+
+# Generates a 256-bit key, stores it in pass first, then installs it remotely (mode 0600).
+# Sets NEW_KEY for the caller's live verification.
+install_new_key() {
+  local pass_entry="$1" remote_file="$2"
+  check_ssh
+  if ! command -v pass >/dev/null 2>&1; then
+    echo "❌ 'pass' CLI is required to store the new key (${pass_entry}). Aborting before any change."
+    exit 1
+  fi
+  NEW_KEY=$(openssl rand -hex 32)
+  KEY_FINGERPRINT=$(printf "%s" "${NEW_KEY}" | sha256sum | cut -d' ' -f1 | head -c 16)
+  echo "-> Generated new 256-bit key (fingerprint: ${KEY_FINGERPRINT})."
+
+  # Store locally first: a key installed remotely but lost locally would lock us out
+  if ! printf "%s\n" "${NEW_KEY}" | pass insert -m -f "${pass_entry}" >/dev/null; then
+    echo "❌ Failed to store the new key in pass (${pass_entry}). Remote key left unchanged."
+    exit 1
+  fi
+  echo "✓ Stored new key in local password store (${pass_entry})."
+
+  # Key travels over stdin, never in the remote command line (visible in ps)
+  # shellcheck disable=SC2029
+  ssh "${O2SWITCH_HOST}" "umask 077 && mkdir -p $(printf '%q' "${REMOTE_BASE}/etc") && cat > $(printf '%q' "${REMOTE_BASE}/${remote_file}")" <<<"${NEW_KEY}"
+  echo "✓ Installed new key on remote host (${REMOTE_BASE}/${remote_file}, mode 0600)."
+}
+
+# Prints the HTTP code of a public request authenticated with the key given on stdin
+public_http_code() {
+  local method="$1" url="$2"
+  curl -s -o /dev/null -w "%{http_code}" -X "${method}" -H @- "${url}" 2>/dev/null || true
 }
 
 # Stops the remote process recorded in a PID file (SIGTERM, then SIGKILL after a timeout)
@@ -268,7 +306,8 @@ screen -S dbsrt_server -d -m "${BIN}" \
   --port "${PORT}" \
   --dbphash "${DATA_DIR}/catalog.dbphash" \
   --subtitles-dir "${DATA_DIR}/SRT" \
-  --phash-dir "${BASE}/run/empty_phash"
+  --phash-dir "${BASE}/run/empty_phash" \
+  --api-key-file "${BASE}/etc/api_key.secret"
 sleep 1
 PID=$(pgrep -u "$(whoami)" -f '[b]in/dbsrt-server' | head -n 1 || true)
 if [[ -n "${PID}" ]]; then
@@ -333,7 +372,7 @@ REMOTE_SCRIPT
     echo ""
     echo "=== Remote API Status (internal 127.0.0.1:${SERVER_PORT}) ==="
     # shellcheck disable=SC2029
-    ssh "${O2SWITCH_HOST}" "curl -s -f http://127.0.0.1:${SERVER_PORT}/v1/status || echo 'API unreachable'" | jq . 2>/dev/null || true
+    ssh "${O2SWITCH_HOST}" "${REMOTE_AUTH_HEADER} | curl -s -f -H @- http://127.0.0.1:${SERVER_PORT}/v1/status || echo 'API unreachable'" | jq . 2>/dev/null || true
     ;;
 
   logs)
@@ -377,7 +416,7 @@ REMOTE_SCRIPT
       check_ssh
       echo "Querying internal endpoint via SSH..."
       # shellcheck disable=SC2029
-      RESP=$(ssh "${O2SWITCH_HOST}" "curl -s -f -X POST http://127.0.0.1:${SERVER_PORT}/v1/recognize \
+      RESP=$(ssh "${O2SWITCH_HOST}" "${REMOTE_AUTH_HEADER} | curl -s -f -H @- -X POST http://127.0.0.1:${SERVER_PORT}/v1/recognize \
         -H 'Content-Type: application/json' \
         -d '{\"query_fingerprint\":[\"0xe9fd17223e1c0c4b\",\"0xe9fd17223e1c0c4b\",\"0xe9fd17223e1c0c4b\",\"0xe9fd17223e1c0c4b\",\"0xe9fd17223e1c0c4b\"],\"fps\":25.0,\"language\":\"fr\"}'")
       echo "${RESP}" | jq .
@@ -385,7 +424,7 @@ REMOTE_SCRIPT
       if [[ "${CANDIDATE_ID}" =~ ^sub:sha256:(.+) ]]; then
         HASH="${BASH_REMATCH[1]}"
         # shellcheck disable=SC2029
-        (ssh "${O2SWITCH_HOST}" "curl -s -f http://127.0.0.1:${SERVER_PORT}/v1/subtitles/${HASH}" | head -n "${DEFAULT_DEMO_SAMPLE_LINES}") || true
+        (ssh "${O2SWITCH_HOST}" "${REMOTE_AUTH_HEADER} | curl -s -f -H @- http://127.0.0.1:${SERVER_PORT}/v1/subtitles/${HASH}" | head -n "${DEFAULT_DEMO_SAMPLE_LINES}") || true
       fi
     fi
     echo "✓ Demo completed successfully!"
@@ -400,7 +439,7 @@ PORT="$1"
 BASE="$2"
 CRON_MARKER="# dbsrt-server watchdog"
 PACK_MARKER="# dbsrt-server catalog pack"
-CMD="pgrep -u \$(whoami) -f dbsrt-server >/dev/null 2>&1 || (setsid \$HOME/${BASE}/bin/dbsrt-server --host 127.0.0.1 --port ${PORT} --dbphash \$HOME/${BASE}/data/catalog.dbphash --subtitles-dir \$HOME/${BASE}/data/SRT --phash-dir \$HOME/${BASE}/run/empty_phash </dev/null >> \$HOME/${BASE}/logs/dbsrt-server.log 2>&1 &)"
+CMD="pgrep -u \$(whoami) -f dbsrt-server >/dev/null 2>&1 || (setsid \$HOME/${BASE}/bin/dbsrt-server --host 127.0.0.1 --port ${PORT} --dbphash \$HOME/${BASE}/data/catalog.dbphash --subtitles-dir \$HOME/${BASE}/data/SRT --phash-dir \$HOME/${BASE}/run/empty_phash --api-key-file \$HOME/${BASE}/etc/api_key.secret </dev/null >> \$HOME/${BASE}/logs/dbsrt-server.log 2>&1 &)"
 CRON_LINE="*/5 * * * * ${CMD} ${CRON_MARKER}"
 # The on-demand spawn never repacks: fold new batch .phash files into the catalog (atomic mv,
 # picked up by the server file watcher and by the next spawn)
@@ -430,27 +469,8 @@ REMOTE_SCRIPT
     ;;
 
   rotate-key)
-    check_ssh
-    if ! command -v pass >/dev/null 2>&1; then
-      echo "❌ 'pass' CLI is required to store the new key (${API_KEY_PASS_ENTRY}). Aborting before any change."
-      exit 1
-    fi
     echo "=== Rotating dbsrt-server API Secret Key on ${O2SWITCH_HOST} ==="
-    NEW_KEY=$(openssl rand -hex 32)
-    KEY_FINGERPRINT=$(printf "%s" "${NEW_KEY}" | sha256sum | cut -d' ' -f1 | head -c 16)
-    echo "-> Generated new 256-bit key (fingerprint: ${KEY_FINGERPRINT})."
-
-    # Store locally first: a key installed remotely but lost locally would lock us out
-    if ! printf "%s\n" "${NEW_KEY}" | pass insert -m -f "${API_KEY_PASS_ENTRY}" >/dev/null; then
-      echo "❌ Failed to store the new key in pass (${API_KEY_PASS_ENTRY}). Remote key left unchanged."
-      exit 1
-    fi
-    echo "✓ Stored new key in local password store (${API_KEY_PASS_ENTRY})."
-
-    # Key travels over stdin, never in the remote command line (visible in ps)
-    # shellcheck disable=SC2029
-    ssh "${O2SWITCH_HOST}" "umask 077 && mkdir -p $(printf '%q' "${REMOTE_BASE}/etc") && cat > $(printf '%q' "${REMOTE_BASE}/etc/api_key.secret")" <<<"${NEW_KEY}"
-    echo "✓ Installed new key on remote host (${REMOTE_BASE}/etc/api_key.secret, mode 0600)."
+    install_new_key "${API_KEY_PASS_ENTRY}" "etc/api_key.secret"
 
     if [[ -z "${O2SWITCH_URL}" ]]; then
       echo "⚠️ O2SWITCH_URL not set: skipping live HTTPS verification."
@@ -474,8 +494,23 @@ REMOTE_SCRIPT
     echo "=== API Key rotation completed ==="
     ;;
 
+  rotate-readonly-key)
+    echo "=== Rotating read-only (monitoring GET) key on ${O2SWITCH_HOST} ==="
+    install_new_key "${READONLY_KEY_PASS_ENTRY}" "etc/api_key_readonly.secret"
+    if [[ -z "${O2SWITCH_URL}" ]]; then
+      echo "⚠️ O2SWITCH_URL not set: skipping live HTTPS verification."
+      exit 0
+    fi
+    GET_CODE=$(public_http_code GET "${O2SWITCH_URL}/v1/health" <<<"X-API-Key: ${NEW_KEY}")
+    POST_CODE=$(public_http_code POST "${O2SWITCH_URL}/v1/catalog/reload" <<<"X-API-Key: ${NEW_KEY}")
+    echo "-> Read-only key: GET /v1/health=${GET_CODE} (expect 200), POST /v1/catalog/reload=${POST_CODE} (expect 403)."
+    [[ "${GET_CODE}" == "200" && "${POST_CODE}" == "403" ]] || exit 1
+    echo "=== Read-only key rotation completed ==="
+    ;;
+
   monitoring)
-    O2SWITCH_API_KEY="${O2SWITCH_API_KEY:-$(pass_secret "${API_KEY_PASS_ENTRY}")}"
+    # Shared links only need monitoring GETs: hand out the read-only key
+    O2SWITCH_API_KEY="${O2SWITCH_READONLY_KEY:-$(pass_secret "${READONLY_KEY_PASS_ENTRY}")}"
     echo "=== dbsrt Web Monitoring Dashboard (o2switch & RPi4) ==="
     if [[ -n "${O2SWITCH_URL}" ]]; then
       echo "  • Dashboard URL : ${O2SWITCH_URL}/monitoring"
@@ -499,6 +534,22 @@ REMOTE_SCRIPT
       echo "  • URL locale    : http://127.0.0.1:${SERVER_PORT}/monitoring"
       echo "  (Configurez O2SWITCH_URL dans .env pour afficher le lien public)"
     fi
+    ;;
+
+  web-top-qr)
+    O2SWITCH_READONLY_KEY="${O2SWITCH_READONLY_KEY:-$(pass_secret "${READONLY_KEY_PASS_ENTRY}")}"
+    if [[ -z "${O2SWITCH_URL}" || -z "${O2SWITCH_READONLY_KEY}" ]]; then
+      echo "Error: O2SWITCH_URL (.env) and the read-only key (.env or pass ${READONLY_KEY_PASS_ENTRY}," >&2
+      echo "       created by '$0 rotate-readonly-key') are required." >&2
+      exit 1
+    fi
+    if ! command -v qrencode >/dev/null 2>&1; then
+      echo "Error: qrencode is required to render the QR code." >&2
+      exit 1
+    fi
+    echo "=== web-top 4G/5G : ${O2SWITCH_URL}/top/ (QR code embeds the read-only key) ==="
+    # printf is a builtin: the key never shows up in a process argv.
+    printf '%s' "${O2SWITCH_URL}/top/?token=${O2SWITCH_READONLY_KEY}" | qrencode -t UTF8
     ;;
 
   top)
@@ -789,7 +840,7 @@ REMOTE_SCRIPT
     ;;
 
   *)
-    echo "Usage: $0 {build|test-local|sync|start|stop|restart|status|logs|demo|setup-cron|remove-cron|rotate-key|top|pull-catalog|backup-nas|batch-tvshow|batch-movies|batch-status|batch-workers|batch-stop|batch-logs}"
+    echo "Usage: $0 {build|test-local|sync|start|stop|restart|status|logs|demo|setup-cron|remove-cron|rotate-key|rotate-readonly-key|monitoring|web-top-qr|top|pull-catalog|backup-nas|batch-tvshow|batch-movies|batch-status|batch-workers|batch-stop|batch-logs}"
     exit 1
     ;;
 esac

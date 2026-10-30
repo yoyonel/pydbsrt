@@ -21,6 +21,7 @@ const EXEC_TIMEOUT_SECONDS = 30;
 const SPAWN_MAX_RETRIES = 6;
 const SPAWN_RETRY_INTERVAL_MICROSECONDS = 250000; // 250 ms
 const SECRET_KEY_REL_PATH = '/dbsrt/etc/api_key.secret';
+const READONLY_KEY_REL_PATH = '/dbsrt/etc/api_key_readonly.secret';
 const SPAWN_LOCK_REL_PATH = '/dbsrt/run/gateway_spawn.lock';
 const RATE_LIMIT_REL_PATH = '/dbsrt/run/auth_rate_limit.json';
 const AUTH_COOKIE_NAME = 'dbsrt_session';
@@ -32,6 +33,7 @@ const RATE_LIMIT_WINDOW_SECONDS = 900; // 15 min lockout
 // Derive user home directory relative to public_html/dbsrt
 $homeDir = dirname(__DIR__, 2);
 $secretKeyFile = $homeDir . SECRET_KEY_REL_PATH;
+$readOnlyKeyFile = $homeDir . READONLY_KEY_REL_PATH;
 $rateLimitFile = $homeDir . RATE_LIMIT_REL_PATH;
 
 /**
@@ -171,7 +173,7 @@ function is_authenticated(array $validKeys, string &$matchedKey = ''): bool
     $basicUser = $_SERVER['PHP_AUTH_USER'] ?? '';
     $basicPw = $_SERVER['PHP_AUTH_PW'] ?? '';
     if (check_key_match($basicPw, $validKeys) || check_key_match($basicUser, $validKeys)) {
-        $matchedKey = $basicPw !== '' ? $basicPw : $basicUser;
+        $matchedKey = check_key_match($basicPw, $validKeys) ? $basicPw : $basicUser;
         return true;
     }
 
@@ -234,14 +236,17 @@ function spawn_daemon(string $homeDir): bool
         $phashDir = escapeshellarg($homeDir . '/dbsrt/run/empty_phash');
         $log = escapeshellarg($homeDir . '/dbsrt/logs/dbsrt-server.log');
 
+        $keyFile = escapeshellarg($homeDir . SECRET_KEY_REL_PATH);
+
         exec(sprintf(
-            'cd %s && setsid %s --host 127.0.0.1 --port %d --dbphash %s --subtitles-dir %s --phash-dir %s </dev/null >> %s 2>&1 &',
+            'cd %s && setsid %s --host 127.0.0.1 --port %d --dbphash %s --subtitles-dir %s --phash-dir %s --api-key-file %s </dev/null >> %s 2>&1 &',
             $baseDir,
             $bin,
             UPSTREAM_PORT,
             $catalog,
             $srtDir,
             $phashDir,
+            $keyFile,
             $log
         ));
 
@@ -378,11 +383,12 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'OPTIONS') {
     exit;
 }
 
-// 1. Load Secret Keys
-$validKeys = load_valid_keys($secretKeyFile);
-if ($validKeys === []) {
+// 1. Load Secret Keys: master pool (full access) + optional read-only pool (monitoring GETs)
+$masterKeys = load_valid_keys($secretKeyFile);
+if ($masterKeys === []) {
     send_json_error(503, ['error' => 'Service Unavailable: gateway API key not provisioned']);
 }
+$validKeys = array_merge($masterKeys, load_valid_keys($readOnlyKeyFile));
 
 $clientIp = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
 if (str_contains($clientIp, ',')) {
@@ -439,6 +445,7 @@ if (!is_authenticated($validKeys, $matchedKey)) {
 clear_auth_failures($rateLimitFile, $clientIp);
 
 // 3. Determine requested sub-path
+$method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 $scriptName = $_SERVER['SCRIPT_NAME'] ?? '';
 $scriptDir = dirname($scriptName);
 
@@ -455,12 +462,23 @@ if ($path === '/' || $path === '') {
     $path = '/monitoring';
 }
 
+// Read-only keys (web-top QR, shared dashboards) only reach monitoring GETs
+$isReadOnly = !check_key_match($matchedKey, $masterKeys);
+$readOnlyPathAllowed = in_array($path, ['/monitoring', '/top', '/health', '/v1/health'], true)
+    || str_starts_with($path, '/v1/monitoring/');
+if ($isReadOnly && (!in_array($method, ['GET', 'HEAD'], true) || !$readOnlyPathAllowed)) {
+    send_json_error(403, ['error' => 'Forbidden: read-only key']);
+}
+
 $upstreamQuery = $_SERVER['QUERY_STRING'] ?? '';
 $upstreamUrl = sprintf('%s:%d%s%s', UPSTREAM_HOST, UPSTREAM_PORT, $path, $upstreamQuery !== '' ? '?' . $upstreamQuery : '');
-$method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
-// Forward request headers, minus hop-by-hop and client forwarding headers
-$droppedHeaders = ['host', 'content-length', 'connection', 'x-forwarded-for', 'x-forwarded-proto'];
+// Forward request headers, minus hop-by-hop, client forwarding and client credential headers:
+// the upstream only ever sees the master key, so a read-only key cannot reach it directly
+$droppedHeaders = [
+    'host', 'content-length', 'connection', 'x-forwarded-for', 'x-forwarded-proto',
+    'authorization', 'x-api-key', 'cookie',
+];
 $forwardHeaders = [];
 foreach (getallheaders() as $name => $value) {
     if (!in_array(strtolower($name), $droppedHeaders, true)) {
@@ -469,6 +487,7 @@ foreach (getallheaders() as $name => $value) {
 }
 $forwardHeaders[] = sprintf('X-Forwarded-For: %s', $clientIp);
 $forwardHeaders[] = 'X-Forwarded-Proto: https';
+$forwardHeaders[] = sprintf('Authorization: Bearer %s', $masterKeys[0]);
 
 $requestBody = in_array($method, ['POST', 'PUT', 'PATCH'], true) ? file_get_contents('php://input') : false;
 
