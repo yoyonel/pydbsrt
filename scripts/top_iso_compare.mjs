@@ -46,7 +46,8 @@ const SETTLE_MS = 2500;
 // Live job/batch transitions land on each side at a different poll: re-capture before judging.
 const RETRIES = 4;
 // The web client shows "⚠️ <HTTP code|Erreur|Échec réseau>" while its feed is down: its frame is stale.
-const WEB_FEED_DOWN = /⚠️ (\d{3} |Erreur|Échec réseau)/;
+// The web grid pads a wide emoji with a blank cell, hence `\s+`.
+const WEB_FEED_DOWN = /⚠️\s+(\d{3} |Erreur|Échec réseau)/;
 const UA =
   'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36';
 
@@ -56,8 +57,8 @@ const VOLATILE = [
   [/\b\d{1,2}:\d{2}(:\d{2})?\b/g, '<clock>'],
   [/\d+(\.\d+)?\s?(%|[KMGT]i?B(\/s)?|B\/s|[kMG]bps|°C|[MG]Hz|fps|x)(?![\w])/g, '<qty>'],
   [/(<qty> )\(\d+\/\d+/g, '$1(<frames>'],
-  // The header may clip this field at the right border, dropping its unit.
-  [/Host CPU:\s*\d+(\.\d+)?(?=│)/g, 'Host CPU: <qty>'],
+  // The header may clip a labelled field at the right border, dropping its unit.
+  [/(:\s*)\d+(\.\d+)?\s?(?=│)/g, '$1<qty>'],
   [/\d+(\.\d+)?\s*\/\s*\d+\.?\d*(?=│)/g, '<qty>/<qty>'],
   // The web grid blanks the second cell of a wide emoji; native text packs adjacent ones.
   [/(\p{Extended_Pictographic}️?) (?=\p{Extended_Pictographic}|\.\.\.)/gu, '$1'],
@@ -104,8 +105,15 @@ function selfCheck() {
   if (clip('29.7 / 125.') !== normalize('│ RAM : 29.5 / 125.│ (🧠 👩 ...')) {
     throw new Error(`normalize clip/emoji self-check failed: ${clip('29.7 / 125.')}`);
   }
+  const field = (s) => normalize(`│ ⚡ FLUX REEL │ ${s}│`);
+  if (field('Net RX: 1.0 ') !== field('Net RX: 0.2 ') || field('Host CPU: 7') !== field('Host CPU: 12')) {
+    throw new Error(`normalize clipped-field self-check failed: ${field('Net RX: 1.0 ')}`);
+  }
+  if (field('Actifs: 3   ') === field('Actifs: 4   ')) {
+    throw new Error('normalize must keep padded (unclipped) values');
+  }
   if (diffLines('a\nb', 'a\nc').length !== 1) throw new Error('diffLines self-check failed');
-  if (!WEB_FEED_DOWN.test('📢 ⚠️ 421 SNI Mismatch') || WEB_FEED_DOWN.test('📢 Lecture seule')) {
+  if (!WEB_FEED_DOWN.test('📢 ⚠️ 421 SNI Mismatch') || !WEB_FEED_DOWN.test('📢  ⚠️  421 SNI') || WEB_FEED_DOWN.test('📢 Lecture seule')) {
     throw new Error('WEB_FEED_DOWN self-check failed');
   }
 }
