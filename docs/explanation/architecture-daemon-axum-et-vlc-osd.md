@@ -67,3 +67,18 @@ Si `dbsrt-server` n'est pas démarré sur la machine locale :
 - L'extension détecte immédiatement l'absence de socket active sur `/tmp/dbsrt-server.json`.
 - Le plugin bascule gracieusement en mode standard OpenSubtitles (téléchargement classique de sous-titres par hash de fichier).
 - Aucun message d'erreur bloquant n'interrompt la lecture de l'utilisateur.
+
+## 4. Authentification en Profondeur (Déploiement o2switch)
+
+Sur o2switch, le démon écoute sur `127.0.0.1`, derrière la passerelle PHP `index.php`. Historiquement, seule la passerelle vérifiait la clé API : tout processus local de l'hébergement mutualisé pouvait appeler le démon sans clé.
+
+Le démon applique donc lui-même la clé, via le middleware Axum `auth::require_api_key` (option `--api-key-file`) :
+
+- **Deux barrières indépendantes** : la passerelle filtre le trafic public (rate limiting, cookie de session, clé lecture seule) ; le démon refuse tout appel loopback sans clé maître.
+- **Sondes publiques** : `/health` et `/v1/health` restent ouverts, car le watchdog cron et la passerelle les interrogent sans clé.
+- **Rotation sans redémarrage** : le fichier de clés est relu à chaque requête. Un fichier illisible échoue en mode fermé (`503`), jamais en mode ouvert.
+- **Comparaison à temps constant** : la réponse ne révèle pas le préfixe correct d'une clé.
+
+La **clé lecture seule** sert aux accès exposés hors du poste opérateur (QR Code, web-top sur smartphone). Elle ne quitte jamais la passerelle : celle-ci limite cette clé aux lectures de supervision (`403` sinon), retire les en-têtes d'authentification du client et injecte la clé maître vers le démon. Une fuite du QR Code expose donc la supervision, pas le catalogue ni les actions d'écriture.
+
+Sans `--api-key-file` (usage local, VLC sur le poste), l'API reste ouverte : le socket n'écoute que sur la boucle locale de la machine de l'utilisateur.

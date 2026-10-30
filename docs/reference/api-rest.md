@@ -25,7 +25,14 @@ Cette page fournit les spécifications techniques de l'API HTTP exposée par le 
   - **Jeton URL direct** : `?token=<token>` ou `?key=<token>` (idéal pour liens magiques et scan QR Code mobile).
   - **Cookie de session** : `dbsrt_session` (`HttpOnly; Secure; SameSite=Lax`), durée de validité de **30 jours**.
   - **Durée de validité de la clé secrète** : Illimitée (persistée dans `etc/api_key.secret`), rotation via `task o2switch:rotate-key`.
+  - **Clé lecture seule** (`etc/api_key_readonly.secret`, rotation via `task o2switch:rotate-readonly-key`) : limitée à `GET`/`HEAD` sur `/monitoring`, `/top`, `/health`, `/v1/health` et `/v1/monitoring/*`. Toute autre requête renvoie `403 Forbidden`.
   - **Protection anti-bruteforce** : Verrouillage 15 minutes (HTTP 429) après 5 échecs consécutifs par IP.
+- **Authentification du démon** (`--api-key-file` ou `DBSRT_API_KEY_FILE`) :
+  - Sans fichier de clés, l'API reste ouverte (usage local).
+  - Avec fichier : toutes les routes exigent `Authorization: Bearer <clé>` ou `X-API-Key: <clé>`, sauf `/health` et `/v1/health`.
+  - Format du fichier : une clé par ligne, lignes vides et `#` ignorées. Relu à chaque requête : une rotation s'applique sans redémarrage.
+  - Codes : `401 Unauthorized` (clé absente ou invalide), `503 Service Unavailable` (fichier illisible ou absent).
+  - Sur o2switch, la passerelle PHP retire les en-têtes `Authorization`, `X-API-Key` et `Cookie` du client et injecte la clé maître. La clé lecture seule n'est donc jamais acceptée directement par le démon.
 
 ---
 
@@ -66,6 +73,13 @@ Tableau de bord web interactif monopage (HTML5/CSS/JS), responsive pour smartpho
 
 ### `GET /v1/monitoring/telemetry`
 Snapshot unifié en JSON de la télémétrie du serveur (statistiques système, file batch, workers d'extraction actifs, télémétrie et logs du superviseur RPi4, derniers événements terminés).
+
+### `GET /v1/monitoring/top`
+Snapshot JSON de `dbsrt top --json` (binaire `dbsrt` voisin de `dbsrt-server`), consommé par le web-top (`/top/`). Mis en cache 2 s ; les échecs ne sont pas mis en cache.
+
+- `200 OK` : snapshot JSON (environ 1 Mo, non compressé).
+- `502 Bad Gateway` : `dbsrt top` a terminé en erreur ; le corps contient son `stderr`.
+- `500 Internal Server Error` : binaire `dbsrt` introuvable ou non exécutable.
 
 ### `POST /v1/supervisor/heartbeat`
 Réceptionne et persiste de manière atomique la pulsation et les logs de l'agent superviseur RPi4 dans `run/supervisor_status.json`.

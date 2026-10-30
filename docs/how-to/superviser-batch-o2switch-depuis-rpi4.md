@@ -127,7 +127,7 @@ Sortie générée :
 ```text
 === dbsrt Web Monitoring Dashboard (o2switch & RPi4) ===
   • Dashboard URL : https://votre-domaine.fr/dbsrt/monitoring
-  • Mobile Link   : https://votre-domaine.fr/dbsrt/monitoring?token=<CLE_SECRETE_API>
+  • Mobile Link   : https://votre-domaine.fr/dbsrt/monitoring?token=<CLE_LECTURE_SEULE>
   (Ce lien configure automatiquement le cookie sécurisé et nettoie l'URL pour votre smartphone 4G/5G)
 
 === QR Code 4G/5G (Scan Smartphone) ===
@@ -135,6 +135,14 @@ Sortie générée :
 ```
 
 #### Sécurité et Authentification Publique
+
+Le lien mobile et le QR Code embarquent la **clé lecture seule**, jamais la clé maître. Créez-la une fois avant le premier `task o2switch:monitoring` :
+
+```bash
+task o2switch:rotate-readonly-key
+```
+
+Cette clé ne donne accès qu'en `GET` au tableau de bord, au web-top et aux endpoints `/v1/monitoring/*`. Toute autre requête renvoie `403`. En cas de fuite du QR Code, relancez la même commande : l'ancienne clé est invalidée.
 
 1. **Scan QR Code & Jeton d'authentification mobile (URL Token)** :
    Scannez le QR Code affiché dans le terminal avec l'appareil photo de votre smartphone ou ouvrez le `Mobile Link`. La passerelle valide la clé, crée un cookie de session chiffré (`HttpOnly; Secure; SameSite=Lax`) valide **30 jours**, sert la page directement en HTTP 200 OK (sans saut de redirection 302 afin de garantir la compatibilité avec tous les lecteurs QR et webviews mobiles), et nettoie silencieusement la barre d'adresse du navigateur via l'API HTML5 `window.history.replaceState`. Une copie de secours est également conservée dans le `localStorage` du client.
