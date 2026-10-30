@@ -1,5 +1,5 @@
 from scripts import rpi4_o2switch_supervisor as sup
-from scripts.rpi4_o2switch_supervisor import NEXT_BATCH_TYPE, decide_next_batch
+from scripts.rpi4_o2switch_supervisor import NEXT_BATCH_TYPE, RELAUNCH_BACKOFF_SECS, decide_next_batch
 
 
 def test_batch_rotation_cycle():
@@ -9,14 +9,13 @@ def test_batch_rotation_cycle():
 
 
 def test_finished_batch_transitions_to_next():
-    assert decide_next_batch("finished", "tvshow", 120.0) == "movies"
-    assert decide_next_batch("finished", "movies", 120.0) == "freebox"
-    assert decide_next_batch("finished", "freebox", 120.0) == "tvshow"
+    assert decide_next_batch("finished", "tvshow", RELAUNCH_BACKOFF_SECS) == "movies"
+    assert decide_next_batch("finished", "movies", RELAUNCH_BACKOFF_SECS) == "freebox"
+    assert decide_next_batch("finished", "freebox", RELAUNCH_BACKOFF_SECS) == "tvshow"
 
 
-def test_finished_batch_respects_short_cooldown():
-    assert decide_next_batch("finished", "freebox", 10.0) is None
-    assert decide_next_batch("finished", "freebox", 65.0) == "tvshow"
+def test_finished_batch_respects_backoff():
+    assert decide_next_batch("finished", "freebox", RELAUNCH_BACKOFF_SECS - 1) is None
 
 
 def test_crashed_batch_uses_relaunch_backoff():

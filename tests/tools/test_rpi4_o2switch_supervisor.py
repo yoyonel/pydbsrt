@@ -95,7 +95,8 @@ def test_get_remote_running_jobs():
         ("crashed", "movies", RELAUNCH_BACKOFF_SECS, "movies"),  # resume same library
         ("absent", "tvshow", RELAUNCH_BACKOFF_SECS, "tvshow"),
         ("finished", "tvshow", RELAUNCH_BACKOFF_SECS, "movies"),  # drained: switch library
-        ("finished", "movies", RELAUNCH_BACKOFF_SECS, "tvshow"),
+        ("finished", "movies", RELAUNCH_BACKOFF_SECS, "freebox"),
+        ("finished", "freebox", RELAUNCH_BACKOFF_SECS, "tvshow"),
         ("finished", "tvshow", RELAUNCH_BACKOFF_SECS - 1, None),  # backoff blocks tight loops
         ("crashed", "tvshow", 60, None),
         ("stopped", "tvshow", RELAUNCH_BACKOFF_SECS, None),  # manual stop is final

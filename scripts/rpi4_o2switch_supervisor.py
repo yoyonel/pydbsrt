@@ -276,21 +276,17 @@ def backup_remote_phash_to_nas(
 def decide_next_batch(state: str, batch_type: str, secs_since_last_launch: float) -> str | None:
     """Returns the batch type to launch now, or None.
 
-    Crashed/absent batches resume their type with backoff; a finished batch immediately switches
-    to the next library in rotation (tvshow -> movies -> freebox -> tvshow).
+    Crashed/absent batches resume their type; a finished batch switches to the next library in
+    rotation (tvshow -> movies -> freebox -> tvshow).
     Manual stops, aborted batches and failed probes never trigger a launch.
     """
     if state in RESTARTABLE_STATES:
-        if secs_since_last_launch < RELAUNCH_BACKOFF_SECS:
-            return None
-        return batch_type
-    if state == "finished":
+        next_type = batch_type
+    elif state == "finished":
         next_type = NEXT_BATCH_TYPE.get(batch_type, "tvshow")
-        # Short cooldown to allow catalog sync and avoid tight CPU loop if all queues are drained
-        if secs_since_last_launch < 60:
-            return None
-        return next_type
-    return None
+    else:
+        return None
+    return next_type if secs_since_last_launch >= RELAUNCH_BACKOFF_SECS else None
 
 
 def decide_workers(
