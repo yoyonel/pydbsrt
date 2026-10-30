@@ -25,6 +25,7 @@ pub const FTP_PASSWORD_ENV: &str = "DBSRT_FTP_PASSWORD";
 const FTP_SCHEME_PREFIX: &str = "ftp://";
 const SCHEME_SEPARATOR: &str = "://";
 const REDACTED_SECRET: &str = "***";
+const FTP_PASSWORD_FLAG: &str = "-ftp-password";
 
 /// Returns the thread count from a raw env value: a non-negative integer, else the default.
 pub fn parse_ffmpeg_threads(raw: Option<&str>) -> String {
@@ -113,23 +114,75 @@ pub fn display_input(input: &Path) -> String {
     redact_url_userinfo(&input.to_string_lossy())
 }
 
-/// Joins a process command line for display, masking the `-ftp-password` value and URL
-/// userinfo passwords (process command lines are shown in the TUI).
-pub fn redact_command_line(args: &[String]) -> String {
+/// Byte length of the shell word starting `text`: ends at the first whitespace outside quotes
+/// and not backslash-escaped. An unterminated quote runs to the end, so the rest gets masked.
+fn shell_word_len(text: &str) -> usize {
+    let mut quote: Option<char> = None;
+    let mut escaped = false;
+    for (i, c) in text.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match (quote, c) {
+            (Some('\''), '\'') => quote = None,
+            // Backslash is literal inside single quotes
+            (Some('\''), _) => {}
+            (_, '\\') => escaped = true,
+            (Some(q), c) if c == q => quote = None,
+            (None, '\'' | '"') => quote = Some(c),
+            (None, c) if c.is_whitespace() => return i,
+            _ => {}
+        }
+    }
+    text.len()
+}
+
+/// Masks URL userinfo passwords and the shell word following `-ftp-password` in free text
+/// (a shell wrapper carries a whole ffmpeg command line in one argument). Quoted or escaped
+/// passwords with spaces are masked whole.
+pub fn redact_secrets(text: &str) -> String {
+    let text = redact_url_userinfo(text);
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text.as_str();
+    while let Some(pos) = rest.find(FTP_PASSWORD_FLAG) {
+        let flag_end = pos + FTP_PASSWORD_FLAG.len();
+        let after = &rest[flag_end..];
+        let value_start = after.len() - after.trim_start().len();
+        out.push_str(&rest[..flag_end + value_start]);
+        rest = &after[value_start..];
+        // A flag glued to other text (`-ftp-passwordX`) or ending the text has no value here
+        if value_start == 0 || rest.is_empty() {
+            continue;
+        }
+        let value_end = shell_word_len(rest);
+        out.push_str(REDACTED_SECRET);
+        rest = &rest[value_end..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Masks a process command line argument by argument: the argument after `-ftp-password`,
+/// then [`redact_secrets`] on every other argument.
+pub fn redact_args(args: &[String]) -> Vec<String> {
     let mut previous_was_password_flag = false;
-    let masked: Vec<String> = args
-        .iter()
+    args.iter()
         .map(|arg| {
             let shown = if previous_was_password_flag {
                 REDACTED_SECRET.to_string()
             } else {
-                redact_url_userinfo(arg)
+                redact_secrets(arg)
             };
-            previous_was_password_flag = arg == "-ftp-password";
+            previous_was_password_flag = arg == FTP_PASSWORD_FLAG;
             shown
         })
-        .collect();
-    masked.join(" ")
+        .collect()
+}
+
+/// Joins a process command line for display with its secrets masked (see [`redact_args`]).
+pub fn redact_command_line(args: &[String]) -> String {
+    redact_args(args).join(" ")
 }
 
 #[cfg(test)]
@@ -154,6 +207,103 @@ mod tests {
             redact_command_line(&args),
             "ffmpeg -ftp-user u -ftp-password *** -i ftp://a:***@h/x"
         );
+    }
+
+    #[test]
+    fn test_redact_secrets_in_free_text() {
+        assert_eq!(
+            redact_secrets("sh -c ffmpeg -ftp-password  s3cret -i ftp://u:p2@h/x.mkv"),
+            "sh -c ffmpeg -ftp-password  *** -i ftp://u:***@h/x.mkv"
+        );
+        assert_eq!(
+            redact_secrets("a -ftp-password x b -ftp-password y"),
+            "a -ftp-password *** b -ftp-password ***"
+        );
+        assert_eq!(redact_secrets("ends -ftp-password"), "ends -ftp-password");
+        assert_eq!(redact_secrets("-ftp-passwordX keep"), "-ftp-passwordX keep");
+        assert_eq!(redact_secrets("/local/a.mkv"), "/local/a.mkv");
+        // Idempotent: masking an already masked line changes nothing
+        let once = redact_secrets("-ftp-password s -i ftp://u:p@h/x");
+        assert_eq!(redact_secrets(&once), once);
+    }
+
+    #[test]
+    fn test_redact_secrets_masks_quoted_and_escaped_passwords_whole() {
+        let cases = [
+            (
+                "ffmpeg -ftp-password 'p a s s' -i x",
+                "ffmpeg -ftp-password *** -i x",
+            ),
+            (
+                "ffmpeg -ftp-password \"p a s s\" -i x",
+                "ffmpeg -ftp-password *** -i x",
+            ),
+            (
+                "ffmpeg -ftp-password p\\ a\\ s\\ s -i x",
+                "ffmpeg -ftp-password *** -i x",
+            ),
+            (
+                "ffmpeg -ftp-password pre\"mid dle\"post -i x",
+                "ffmpeg -ftp-password *** -i x",
+            ),
+            // Escaped quote inside double quotes does not close them
+            (
+                "ffmpeg -ftp-password \"a \\\" b\" -i x",
+                "ffmpeg -ftp-password *** -i x",
+            ),
+            // Backslash is literal inside single quotes: the quote closes at the next '
+            (
+                "ffmpeg -ftp-password 'a\\' -i x",
+                "ffmpeg -ftp-password *** -i x",
+            ),
+            // Unterminated quote: fail safe, mask everything after the flag
+            (
+                "ffmpeg -ftp-password 'p a s s -i x",
+                "ffmpeg -ftp-password ***",
+            ),
+            (
+                "ffmpeg -ftp-password\t'p a'\t-i x",
+                "ffmpeg -ftp-password\t***\t-i x",
+            ),
+        ];
+        for (input, expected) in cases {
+            let masked = redact_secrets(input);
+            assert_eq!(masked, expected, "input: {input}");
+            assert_eq!(redact_secrets(&masked), masked, "idempotent: {input}");
+            for leaked in ["p a s s", "mid dle", "a \\\" b"] {
+                assert!(!masked.contains(leaked), "{leaked} leaked from {input}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_redact_args_masks_password_argument_with_spaces() {
+        let args: Vec<String> = ["ffmpeg", "-ftp-password", "p a s s", "-i", "x"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(
+            redact_args(&args),
+            ["ffmpeg", "-ftp-password", "***", "-i", "x"]
+        );
+    }
+
+    #[test]
+    fn test_redact_args_masks_split_and_embedded_secrets() {
+        let args: Vec<String> = [
+            "bash",
+            "-c",
+            "ffmpeg -ftp-password s1 -i x",
+            "-ftp-password",
+            "s2",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        let masked = redact_args(&args);
+        assert_eq!(masked[2], "ffmpeg -ftp-password *** -i x");
+        assert_eq!(masked[4], "***");
+        assert!(!masked.join(" ").contains("s1") && !masked.join(" ").contains("s2"));
     }
 
     #[test]

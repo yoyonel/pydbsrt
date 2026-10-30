@@ -41,6 +41,15 @@ async fn test_top_snapshot_success_cache_and_errors() {
         "second call within the TTL must reuse the cache"
     );
 
+    let leaky = fake_cli(
+        "leaky",
+        "#!/bin/sh\nprintf '{\"cmdline\":[\"ftp://u:top-secret@nas/x.mkv\"]}'\n",
+    );
+    let body = top_snapshot(&leaky, &TopSnapshotCache::const_new(None))
+        .await
+        .expect("fake top succeeds");
+    assert_eq!(&body[..], br#"{"cmdline":["ftp://u:***@nas/x.mkv"]}"#);
+
     let failing = fake_cli("fail", "#!/bin/sh\necho boom >&2\nexit 3\n");
     let cache = TopSnapshotCache::const_new(None);
     let (code, msg) = top_snapshot(&failing, &cache).await.unwrap_err();
@@ -56,7 +65,7 @@ async fn test_top_snapshot_success_cache_and_errors() {
         .unwrap_err();
     assert_eq!(code, StatusCode::INTERNAL_SERVER_ERROR);
 
-    for exe in [&ok, &failing] {
+    for exe in [&ok, &leaky, &failing] {
         let _ = std::fs::remove_dir_all(exe.parent().unwrap());
     }
 

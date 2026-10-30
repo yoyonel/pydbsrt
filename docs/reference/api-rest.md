@@ -82,7 +82,7 @@ Snapshot JSON de `dbsrt top --json` (binaire `dbsrt` voisin de `dbsrt-server`), 
 - `500 Internal Server Error` : binaire `dbsrt` introuvable ou non exécutable.
 
 ### `POST /v1/supervisor/heartbeat`
-Réceptionne et persiste de manière atomique la pulsation et les logs de l'agent superviseur RPi4 dans `run/supervisor_status.json`.
+Réceptionne et persiste de manière atomique la pulsation et les logs de l'agent superviseur RPi4 dans `run/supervisor_status.json`. Les secrets FTP des logs sont masqués à l'écriture et à la lecture.
 
 ---
 

@@ -2472,7 +2472,7 @@ pub fn process_candidate_jobs(
             cpu_percent: candidate.cpu_pct,
             ram_rss_mib,
             status,
-            cmdline: candidate.cmdline,
+            cmdline: dbsrt_core::redact_args(&candidate.cmdline),
         });
     }
 

@@ -416,7 +416,7 @@ pub fn load_supervisor_status() -> SupervisorTelemetry {
         .and_then(|v| v.as_array())
         .map(|arr| {
             arr.iter()
-                .filter_map(|l| l.as_str().map(|s| s.to_string()))
+                .filter_map(|l| l.as_str().map(dbsrt_core::redact_secrets))
                 .collect()
         })
         .unwrap_or_default();
@@ -619,11 +619,15 @@ pub async fn top_snapshot(
     if !output.status.success() {
         return Err((
             StatusCode::BAD_GATEWAY,
-            String::from_utf8_lossy(&output.stderr).into_owned(),
+            dbsrt_core::redact_url_userinfo(&String::from_utf8_lossy(&output.stderr)),
         ));
     }
 
-    let body = axum::body::Bytes::from(output.stdout);
+    // Defense in depth over every field (paths, error tails): no URL password leaves the server.
+    // JSON-safe: an authority ends at '"' and ':'/'@' never sit inside an escape sequence.
+    let body = axum::body::Bytes::from(dbsrt_core::redact_url_userinfo(&String::from_utf8_lossy(
+        &output.stdout,
+    )));
     *cache = Some((std::time::Instant::now(), body.clone()));
     Ok(body)
 }
@@ -694,7 +698,8 @@ pub async fn supervisor_heartbeat_handler(
             "desired_workers": payload.desired_workers,
             "running_jobs": payload.running_workers,
         },
-        "recent_logs": payload.recent_logs,
+        // Log lines embed remote command output; mask secrets before they reach the dashboard
+        "recent_logs": payload.recent_logs.iter().map(|l| dbsrt_core::redact_secrets(l)).collect::<Vec<_>>(),
     });
 
     let target_path = PathBuf::from(DEFAULT_SUPERVISOR_STATUS_PATH);
