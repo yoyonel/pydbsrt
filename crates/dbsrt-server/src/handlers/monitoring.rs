@@ -571,46 +571,36 @@ pub async fn monitoring_telemetry_handler(
 /// Reuse window for the `dbsrt top --json` snapshot shared by concurrent web clients.
 const TOP_SNAPSHOT_TTL: std::time::Duration = std::time::Duration::from_secs(2);
 
-/// Last native snapshot; the lock is held across the spawn so only one probe runs at a time.
-static TOP_SNAPSHOT_CACHE: tokio::sync::Mutex<Option<(std::time::Instant, axum::body::Bytes)>> =
-    tokio::sync::Mutex::const_new(None);
+/// Cached `dbsrt top --json` output and the instant it was captured.
+pub type TopSnapshotCache = tokio::sync::Mutex<Option<(std::time::Instant, axum::body::Bytes)>>;
 
-/// Serves the exact `SystemTelemetry` rendered by the native `dbsrt top` (web-top ISO source).
-///
-/// # Returns
-/// Raw JSON bytes from the sibling `dbsrt top --json` binary, cached for [`TOP_SNAPSHOT_TTL`].
+/// Last native snapshot; the lock is held across the spawn so only one probe runs at a time.
+static TOP_SNAPSHOT_CACHE: TopSnapshotCache = tokio::sync::Mutex::const_new(None);
+
+/// Runs `dbsrt top --json` next to `server_exe`, reusing `cache` for [`TOP_SNAPSHOT_TTL`].
 ///
 /// # Errors
 /// [`StatusCode::INTERNAL_SERVER_ERROR`] when the binary cannot be spawned,
 /// [`StatusCode::BAD_GATEWAY`] when it exits non-zero.
 ///
 /// # Data Flow & Invariants
-/// Runs the CLI next to the server executable with the server cwd, so relative state paths
+/// Runs the CLI with the server cwd and its directory first in `PATH`, so relative state paths
 /// (`~/dbsrt` on o2switch) resolve identically to an interactive `dbsrt top`.
-/// shortcut: ~1.1 MB pretty JSON, no compression layer; add tower-http compression if mobile hurts.
-pub async fn monitoring_top_handler(
-    State(_state): State<Arc<AppState>>,
-) -> Result<
-    (
-        [(axum::http::header::HeaderName, &'static str); 1],
-        axum::body::Bytes,
-    ),
-    (StatusCode, String),
-> {
-    let json = [(axum::http::header::CONTENT_TYPE, "application/json")];
-    let mut cache = TOP_SNAPSHOT_CACHE.lock().await;
+pub async fn top_snapshot(
+    server_exe: &std::path::Path,
+    cache: &TopSnapshotCache,
+) -> Result<axum::body::Bytes, (StatusCode, String)> {
+    let mut cache = cache.lock().await;
     if let Some((at, body)) = cache.as_ref() {
         if at.elapsed() < TOP_SNAPSHOT_TTL {
-            return Ok((json, body.clone()));
+            return Ok(body.clone());
         }
     }
 
-    let exe =
-        std::env::current_exe().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    let cli = exe.with_file_name("dbsrt");
+    let cli = server_exe.with_file_name("dbsrt");
     let mut command = tokio::process::Command::new(&cli);
     command.args(["top", "--json"]).kill_on_drop(true);
-    if let Some(dir) = exe.parent() {
+    if let Some(dir) = server_exe.parent() {
         let path = std::env::var_os("PATH").unwrap_or_default();
         let joined = std::env::join_paths(
             std::iter::once(dir.to_path_buf()).chain(std::env::split_paths(&path)),
@@ -633,7 +623,34 @@ pub async fn monitoring_top_handler(
 
     let body = axum::body::Bytes::from(output.stdout);
     *cache = Some((std::time::Instant::now(), body.clone()));
-    Ok((json, body))
+    Ok(body)
+}
+
+/// Serves the exact `SystemTelemetry` rendered by the native `dbsrt top` (web-top ISO source).
+///
+/// # Returns
+/// Raw JSON bytes from the sibling `dbsrt top --json` binary, see [`top_snapshot`].
+///
+/// # Errors
+/// Same as [`top_snapshot`], plus [`StatusCode::INTERNAL_SERVER_ERROR`] when the server
+/// executable path is unknown.
+/// shortcut: ~1.1 MB pretty JSON, no compression layer; add tower-http compression if mobile hurts.
+pub async fn monitoring_top_handler(
+    State(_state): State<Arc<AppState>>,
+) -> Result<
+    (
+        [(axum::http::header::HeaderName, &'static str); 1],
+        axum::body::Bytes,
+    ),
+    (StatusCode, String),
+> {
+    let exe =
+        std::env::current_exe().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let body = top_snapshot(&exe, &TOP_SNAPSHOT_CACHE).await?;
+    Ok((
+        [(axum::http::header::CONTENT_TYPE, "application/json")],
+        body,
+    ))
 }
 
 /// Receives and persists supervisor heartbeat payloads from RPi4 agent.
