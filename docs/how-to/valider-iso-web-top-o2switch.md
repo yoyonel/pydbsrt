@@ -24,7 +24,15 @@ Ce guide vérifie que le web-top déployé (`/dbsrt/top/`, Ratzilla WASM) affich
 task web-top:iso
 ```
 
-Le harness rejoue la même séquence de touches des deux côtés, sur deux viewports : bureau `1400x900` et mobile `412x915` (émulation smartphone). La séquence couvre la navigation entre onglets, la recherche (`/`) et le défilement (`PageDown`, `End`, `Home`).
+Le harness rejoue la même séquence de touches des deux côtés, sur deux viewports : bureau `1400x900` et mobile `412x915`. La séquence couvre la navigation entre onglets, la recherche (`/`), le défilement (`PageDown`, `End`, `Home`), le tap sur la barre d'onglets et le défilement au glissé (swipe).
+
+Le viewport mobile (largeur < 600) émule un smartphone Android : user agent Chrome Android, écran tactile, densité 2.625. Ratzilla dimensionne alors sa grille depuis l'écran, comme sur un vrai téléphone (40x47 en `412x915`).
+
+Une étape `tap:<texte>` touche la première cellule de `<texte>` trouvée en partant du bas de la grille web : vrai événement tactile (`Input.dispatchTouchEvent`) sur mobile, clic souris sur bureau. Le harness vérifie que la page a reçu un `pointerup` du bon type (`touch` ou `mouse`). Côté natif, `<texte>` est tapé au clavier : l'ISO prouve que le tap produit le même écran que la touche.
+
+Une étape `swipe:<n>` fait glisser le doigt (la souris sur bureau) de `n` lignes vers le haut, ou vers le bas si `n` est négatif. Comme sur un téléphone, la liste suit le doigt : le web-top défile d'une ligne par ligne de grille parcourue. Côté natif, le harness envoie `n` fois `Down` (ou `Up`). Le même contrôle de `pointerType` s'applique.
+
+Sur le viewport mobile, la ligne sélectionnée n'est marquée que par la couleur : un swipe qui ne fait que déplacer la sélection ne change pas le texte capturé. Les étapes par défaut glissent donc au-delà des lignes visibles, puis dans l'aide (`?`).
 
 Codes de sortie :
 
@@ -43,6 +51,12 @@ ISO_VIEWPORTS=412x915 task web-top:iso
 
 # Une séquence de touches ciblée (texte multi-caractères = saisie de recherche)
 ISO_STEPS="3,/,the,Enter,Esc" ISO_OUT_DIR=target/top_iso_rerun task web-top:iso
+
+# Uniquement les taps sur la barre d'onglets, sur le smartphone émulé
+ISO_VIEWPORTS=412x915 ISO_STEPS="start,tap:3,tap:5,tap:1" task web-top:iso
+
+# Défilement au swipe dans l'aide, sur le smartphone émulé
+ISO_VIEWPORTS=412x915 ISO_STEPS="start,?,swipe:5,swipe:-2,?" task web-top:iso
 ```
 
 ## 3. Lire un écart

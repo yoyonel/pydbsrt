@@ -3,12 +3,15 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 
+use std::rc::Rc;
+
 use ratatui::{
-    layout::{Constraint, Direction, Layout},
+    layout::{Constraint, Direction, Layout, Position, Rect},
     Frame,
 };
 
 use crate::{
+    app::KeyCode,
     constants::{FOOTER_BLOCK_HEIGHT, HEADER_BLOCK_HEIGHT, MIN_BODY_HEIGHT},
     model::{
         CompletedFilter, CompletedSort, HelpTab, MediaFilter, MediaSort, MediaSourceFilter,
@@ -18,7 +21,7 @@ use crate::{
         active_jobs::{render_active_jobs_page, render_inspection_page},
         completed::render_completed_page,
         completed_inspection::render_completed_inspection_page,
-        footer::render_footer,
+        footer::{footer_tab_hits, render_footer},
         header::render_header,
         help::render_help_page,
         media_browser::render_media_browser_page,
@@ -62,16 +65,7 @@ pub struct UiContext<'a> {
 /// and fixed footer bar (2 rows). Displays source modal overlay if present.
 pub fn render_ui(frame: &mut Frame, ctx: &UiContext) {
     let size = frame.area();
-
-    // Divide screen: 5 lines header block, dynamic full-frame body, 2 lines footer
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(HEADER_BLOCK_HEIGHT),
-            Constraint::Min(MIN_BODY_HEIGHT),
-            Constraint::Length(FOOTER_BLOCK_HEIGHT),
-        ])
-        .split(size);
+    let chunks = root_chunks(size);
 
     render_header(frame, chunks[0], ctx.telemetry);
 
@@ -92,5 +86,94 @@ pub fn render_ui(frame: &mut Frame, ctx: &UiContext) {
 
     if let Some(modal) = ctx.source_modal {
         render_source_modal(frame, size, modal);
+    }
+}
+
+/// Divides the screen: header block, dynamic full-frame body, footer.
+fn root_chunks(size: Rect) -> Rc<[Rect]> {
+    Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(HEADER_BLOCK_HEIGHT),
+            Constraint::Min(MIN_BODY_HEIGHT),
+            Constraint::Length(FOOTER_BLOCK_HEIGHT),
+        ])
+        .split(size)
+}
+
+/// Resolves a click or tap on cell (`column`, `row`) of a `size` screen into the key it stands for.
+///
+/// # Data Flow & Invariants
+/// Uses the same layout as [`render_ui`], so a tap feeds `handle_key_event` exactly like the
+/// key printed under the finger. Ignored while the source modal or search input owns the keys
+/// (a tab digit would be typed into the field).
+pub fn hit_test(size: Rect, ctx: &UiContext, column: u16, row: u16) -> Option<KeyCode> {
+    if ctx.source_modal.is_some() || ctx.search_active {
+        return None;
+    }
+    let position = Position::new(column, row);
+    footer_tab_hits(root_chunks(size)[2])
+        .into_iter()
+        .find(|(zone, _)| zone.contains(position))
+        .map(|(_, code)| code)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::{AppState, KeyCode};
+    use ratatui::{backend::TestBackend, Terminal};
+
+    /// Renders `app` on a `width` x `height` screen and returns the footer tab row text.
+    fn tab_row(app: &AppState, telemetry: &SystemTelemetry, width: u16, height: u16) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal
+            .draw(|f| render_ui(f, &app.ui_context(telemetry, None)))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        (0..width)
+            .map(|x| buffer[(x, height - 1)].symbol())
+            .collect()
+    }
+
+    #[test]
+    fn test_narrow_screen_gets_tappable_numbered_tabs() {
+        let telemetry = SystemTelemetry::default();
+        let app = AppState::default();
+        let size = Rect::new(0, 0, 40, 44);
+        let row = tab_row(&app, &telemetry, size.width, size.height);
+        assert_eq!(row.trim_end(), "  1     2     3     4     5     6");
+
+        let ctx = app.ui_context(&telemetry, None);
+        assert_eq!(hit_test(size, &ctx, 14, 43), Some(KeyCode::Char('3')));
+        assert_eq!(hit_test(size, &ctx, 0, 43), Some(KeyCode::Char('1')));
+        assert_eq!(hit_test(size, &ctx, 39, 43), None);
+        assert_eq!(hit_test(size, &ctx, 14, 42), None);
+    }
+
+    #[test]
+    fn test_wide_screen_tab_hits_cover_their_labels() {
+        let telemetry = SystemTelemetry::default();
+        let app = AppState::default();
+        let size = Rect::new(0, 0, 140, 30);
+        let row = tab_row(&app, &telemetry, size.width, size.height);
+        assert!(row.contains("[6/y] Système"));
+        assert!(row.contains("│ [↑/k] Défiler"));
+
+        let ctx = app.ui_context(&telemetry, None);
+        let column = row.chars().position(|c| c == '5').unwrap() as u16;
+        assert_eq!(hit_test(size, &ctx, column, 29), Some(KeyCode::Char('5')));
+        assert_eq!(hit_test(size, &ctx, 0, 29), None);
+    }
+
+    #[test]
+    fn test_hit_test_ignored_while_typing() {
+        let telemetry = SystemTelemetry::default();
+        let app = AppState {
+            search_active: true,
+            ..Default::default()
+        };
+        let ctx = app.ui_context(&telemetry, None);
+        assert_eq!(hit_test(Rect::new(0, 0, 40, 44), &ctx, 0, 43), None);
     }
 }

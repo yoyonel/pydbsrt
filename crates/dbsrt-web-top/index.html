@@ -36,6 +36,10 @@
         margin: 0;
         user-select: none;
       }
+      /* Taps are routed by the app (pointerup); stop pan/zoom gestures on the grid. */
+      #grid {
+        touch-action: none;
+      }
     </style>
   </head>
   <body>

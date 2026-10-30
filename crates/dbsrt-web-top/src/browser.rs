@@ -3,11 +3,10 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use dbsrt_tui::app::handle_key_event;
 use dbsrt_tui::model::SystemTelemetry;
 use dbsrt_tui::ui::render_ui;
 use dbsrt_web_top::{
-    http_error_message, next_poll_delay_ms, to_tui_key, ReadOnlyActions, WebAppState,
+    http_error_message, next_poll_delay_ms, pixel_to_cell, to_tui_key, WebAppState,
     TELEMETRY_ENDPOINT_PATH, TELEMETRY_POLL_INTERVAL_MS,
 };
 use gloo_net::http::Request;
@@ -91,17 +90,89 @@ fn register_key_listener(model: Rc<RefCell<WebAppState>>) {
             return;
         };
         event.prevent_default();
-        let mut guard = model.borrow_mut();
-        let state = &mut *guard;
-        handle_key_event(code, &mut state.app, &state.telemetry, &mut ReadOnlyActions);
-        // There is no process to quit in a browser tab.
-        state.app.should_quit = false;
+        model.borrow_mut().press(code);
     });
     if let Some(document) = web_sys::window().and_then(|w| w.document()) {
         let _ =
             document.add_event_listener_with_callback("keydown", closure.as_ref().unchecked_ref());
     }
     closure.forget();
+}
+
+/// Resolves a pointer position into the (column, row) cell of Ratzilla's `#grid`.
+///
+/// # Data Flow & Invariants
+/// The grid holds one `<pre>` per row and one `<span>` per cell. The column is measured on the
+/// tapped row itself. shortcut: a row holding a wide emoji is wider than its cell count, so taps
+/// right of the emoji drift by one cell; fine for the emoji-free footer, revisit for row taps.
+fn grid_cell_at(client_x: f64, client_y: f64) -> Option<(u16, u16)> {
+    let grid = web_sys::window()?.document()?.get_element_by_id("grid")?;
+    let rect = grid.get_bounding_client_rect();
+    let rows = u16::try_from(grid.child_element_count()).ok()?;
+    let row = pixel_to_cell(client_y - rect.top(), rect.height(), rows)?;
+    let line = grid.children().item(u32::from(row))?;
+    let line_rect = line.get_bounding_client_rect();
+    let cols = u16::try_from(line.child_element_count()).ok()?;
+    let column = pixel_to_cell(client_x - line_rect.left(), line_rect.width(), cols)?;
+    Some((column, row))
+}
+
+/// Height of one `#grid` row in CSS pixels.
+fn grid_row_px() -> Option<f64> {
+    let grid = web_sys::window()?.document()?.get_element_by_id("grid")?;
+    let rows = grid.child_element_count();
+    (rows > 0).then(|| grid.get_bounding_client_rect().height() / f64::from(rows))
+}
+
+/// Adds a document-level Pointer Events listener for the lifetime of the page.
+fn on_pointer(event: &str, handler: impl FnMut(web_sys::PointerEvent) + 'static) {
+    let closure = Closure::<dyn FnMut(_)>::new(handler);
+    if let Some(document) = web_sys::window().and_then(|w| w.document()) {
+        let _ = document.add_event_listener_with_callback(event, closure.as_ref().unchecked_ref());
+    }
+    closure.forget();
+}
+
+/// Registers Pointer Events listeners: a vertical swipe scrolls, a tap hits the tab bar.
+///
+/// # Data Flow & Invariants
+/// Ratzilla's `on_mouse_event` only sees mouse events. Pointer Events cover touch as well
+/// (`#grid` has `touch-action: none`, so the browser never steals the gesture). A swipe presses
+/// one arrow key per row travelled; a release that did not scroll is a tap, resolved through
+/// the shared `hit_test`, i.e. the key drawn under the finger.
+fn register_pointer_listener(model: Rc<RefCell<WebAppState>>) {
+    let down = model.clone();
+    on_pointer("pointerdown", move |event| {
+        if event.is_primary() && event.button() == 0 {
+            if let Some(row_px) = grid_row_px() {
+                down.borrow_mut()
+                    .drag_start(f64::from(event.client_y()), row_px);
+            }
+        }
+    });
+    let mv = model.clone();
+    on_pointer("pointermove", move |event| {
+        if event.is_primary() {
+            mv.borrow_mut().drag_move(f64::from(event.client_y()));
+        }
+    });
+    let cancel = model.clone();
+    on_pointer("pointercancel", move |_| {
+        cancel.borrow_mut().drag_end();
+    });
+    on_pointer("pointerup", move |event| {
+        if !event.is_primary() || event.button() != 0 || model.borrow_mut().drag_end() {
+            return;
+        }
+        let Some((column, row)) =
+            grid_cell_at(f64::from(event.client_x()), f64::from(event.client_y()))
+        else {
+            return;
+        };
+        if model.borrow_mut().tap(column, row) {
+            event.prevent_default();
+        }
+    });
 }
 
 /// Resolves the absolute API endpoint path based on browser URL context.
@@ -269,7 +340,7 @@ fn spawn_telemetry_poller(app_model: Rc<RefCell<WebAppState>>) {
 /// Does not panic under normal runtime execution.
 ///
 /// # Data Flow & Invariants
-/// Initializes DOM terminal backend, registers keyboard event listeners,
+/// Initializes DOM terminal backend, registers keyboard and pointer event listeners,
 /// spawns asynchronous HTTP polling worker, and attaches Ratatui draw loop to `requestAnimationFrame`.
 pub fn run() -> std::io::Result<()> {
     console_error_panic_hook::set_once();
@@ -279,6 +350,7 @@ pub fn run() -> std::io::Result<()> {
     let terminal = Terminal::new(WideGlyphDom(backend))?;
 
     register_key_listener(app_model.clone());
+    register_pointer_listener(app_model.clone());
 
     // Start background asynchronous telemetry polling
     spawn_telemetry_poller(app_model.clone());
@@ -290,6 +362,7 @@ pub fn run() -> std::io::Result<()> {
             let mut guard = model.borrow_mut();
             let state = &mut *guard;
             state.app.clamp_indices(&state.telemetry);
+            state.frame_area = frame.area();
             let feedback = state
                 .app
                 .current_feedback()

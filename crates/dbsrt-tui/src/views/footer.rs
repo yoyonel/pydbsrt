@@ -8,6 +8,7 @@ use ratatui::{
     Frame,
 };
 
+use crate::app::KeyCode;
 use crate::model::ViewPage;
 use crate::ui::UiContext;
 
@@ -24,7 +25,8 @@ use crate::ui::UiContext;
 /// # Data Flow & Invariants
 /// 1. Emits feedback banner if a user notification message is pending.
 /// 2. Assembles tab bar spans with colored background on active tab.
-/// 3. Appends contextual shortcut keybindings based on current view and search state.
+/// 3. Appends contextual shortcut keybindings based on current view and search state,
+///    except on narrow screens where numbered tab cells take the whole row.
 pub fn render_footer(frame: &mut Frame, area: Rect, ctx: &UiContext) {
     let mut lines = Vec::new();
 
@@ -47,16 +49,16 @@ pub fn render_footer(frame: &mut Frame, area: Rect, ctx: &UiContext) {
         lines.push(Line::from(""));
     }
 
-    let mut footer_spans = build_tab_bar_spans(ctx.view);
-    footer_spans.push(Span::raw(" │ "));
-
-    let shortcuts = build_shortcuts_text(ctx);
-    footer_spans.push(Span::styled(
-        shortcuts,
-        Style::default()
-            .fg(Color::DarkGray)
-            .add_modifier(Modifier::BOLD),
-    ));
+    let mut footer_spans = build_tab_bar_spans(ctx.view, area.width);
+    if !is_compact(area.width) {
+        footer_spans.push(Span::raw(" │ "));
+        footer_spans.push(Span::styled(
+            build_shortcuts_text(ctx),
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
 
     lines.push(Line::from(footer_spans));
 
@@ -64,77 +66,128 @@ pub fn render_footer(frame: &mut Frame, area: Rect, ctx: &UiContext) {
     frame.render_widget(p, area);
 }
 
+/// Navigation tab: full label, the key it stands for, and its background when active.
+struct Tab {
+    label: &'static str,
+    key: char,
+    color: Color,
+}
+
+const TABS: [Tab; 6] = [
+    Tab {
+        label: " [1] Tâches ",
+        key: '1',
+        color: Color::Cyan,
+    },
+    Tab {
+        label: " [2/h] Stats ",
+        key: '2',
+        color: Color::Green,
+    },
+    Tab {
+        label: " [3/r] Récents ",
+        key: '3',
+        color: Color::LightBlue,
+    },
+    Tab {
+        label: " [4/m] Médias ",
+        key: '4',
+        color: Color::Cyan,
+    },
+    Tab {
+        label: " [5/s] Sources ",
+        key: '5',
+        color: Color::Yellow,
+    },
+    Tab {
+        label: " [6/y] Système ",
+        key: '6',
+        color: Color::Magenta,
+    },
+];
+
+/// Returns the tab key highlighted for a view (`None` on inspection and help pages).
+fn active_tab_key(view: ViewPage) -> Option<char> {
+    match view {
+        ViewPage::ActiveJobs => Some('1'),
+        ViewPage::StatsHistory => Some('2'),
+        ViewPage::CompletedMedia => Some('3'),
+        ViewPage::MediaBrowser | ViewPage::MediaInspection => Some('4'),
+        ViewPage::MediaSources => Some('5'),
+        ViewPage::System => Some('6'),
+        ViewPage::JobInspection | ViewPage::CompletedInspection | ViewPage::Help => None,
+    }
+}
+
+/// Width of the full tab bar (each label preceded by one space).
+fn full_tab_bar_width() -> u16 {
+    TABS.iter()
+        .map(|tab| 1 + Span::raw(tab.label).width() as u16)
+        .sum()
+}
+
+/// Narrow screens (phones) get one equal-width numbered cell per tab and no shortcuts.
+fn is_compact(width: u16) -> bool {
+    width < full_tab_bar_width()
+}
+
 /// Builds navigation tab badge spans with distinct colors for the active view.
-fn build_tab_bar_spans(current_view: ViewPage) -> Vec<Span<'static>> {
-    let tab_jobs_style = if current_view == ViewPage::ActiveJobs {
-        Style::default()
-            .fg(Color::Black)
-            .bg(Color::Cyan)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
-
-    let tab_stats_style = if current_view == ViewPage::StatsHistory {
-        Style::default()
-            .fg(Color::Black)
-            .bg(Color::Green)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
-
-    let tab_recents_style = if current_view == ViewPage::CompletedMedia {
-        Style::default()
-            .fg(Color::Black)
-            .bg(Color::LightBlue)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
-
-    let tab_media_style =
-        if current_view == ViewPage::MediaBrowser || current_view == ViewPage::MediaInspection {
+fn build_tab_bar_spans(current_view: ViewPage, width: u16) -> Vec<Span<'static>> {
+    let active = active_tab_key(current_view);
+    let style = |tab: &Tab| {
+        if active == Some(tab.key) {
             Style::default()
                 .fg(Color::Black)
-                .bg(Color::Cyan)
+                .bg(tab.color)
                 .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::DarkGray)
-        };
-
-    let tab_sources_style = if current_view == ViewPage::MediaSources {
-        Style::default()
-            .fg(Color::Black)
-            .bg(Color::Yellow)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(Color::DarkGray)
+        }
     };
+    if is_compact(width) {
+        let slot = usize::from(width) / TABS.len();
+        return TABS
+            .iter()
+            .map(|tab| Span::styled(format!("{:^slot$}", tab.key), style(tab)))
+            .collect();
+    }
+    TABS.iter()
+        .flat_map(|tab| [Span::raw(" "), Span::styled(tab.label, style(tab))])
+        .collect()
+}
 
-    let tab_system_style = if current_view == ViewPage::System {
-        Style::default()
-            .fg(Color::Black)
-            .bg(Color::Magenta)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
-
-    vec![
-        Span::raw(" "),
-        Span::styled(" [1] Tâches ", tab_jobs_style),
-        Span::raw(" "),
-        Span::styled(" [2/h] Stats ", tab_stats_style),
-        Span::raw(" "),
-        Span::styled(" [3/r] Récents ", tab_recents_style),
-        Span::raw(" "),
-        Span::styled(" [4/m] Médias ", tab_media_style),
-        Span::raw(" "),
-        Span::styled(" [5/s] Sources ", tab_sources_style),
-        Span::raw(" "),
-        Span::styled(" [6/y] Système ", tab_system_style),
-    ]
+/// Tappable tab cells of the footer `area`, in the geometry [`render_footer`] draws them.
+///
+/// # Data Flow & Invariants
+/// Tabs sit on the footer's second row; each cell maps to the key that switches to its tab.
+pub fn footer_tab_hits(area: Rect) -> Vec<(Rect, KeyCode)> {
+    if area.height < 2 {
+        return Vec::new();
+    }
+    let row = area.y + 1;
+    if is_compact(area.width) {
+        let slot = area.width / TABS.len() as u16;
+        return TABS
+            .iter()
+            .zip(0..)
+            .map(|(tab, i)| {
+                (
+                    Rect::new(area.x + i * slot, row, slot, 1),
+                    KeyCode::Char(tab.key),
+                )
+            })
+            .collect();
+    }
+    let mut x = area.x;
+    TABS.iter()
+        .map(|tab| {
+            let width = Span::raw(tab.label).width() as u16;
+            x += 1;
+            let zone = Rect::new(x, row, width, 1);
+            x += width;
+            (zone, KeyCode::Char(tab.key))
+        })
+        .collect()
 }
 
 /// Returns contextual keyboard shortcuts string based on the active tab and search query state.

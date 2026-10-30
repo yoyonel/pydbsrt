@@ -8,7 +8,12 @@
 // 3 when the only mismatches happened while the web feed was down (infra, not ISO).
 //
 // Env: O2SWITCH_HOST (default o2switch), WEB_TOP_URL, CHROME_BIN, CDP_PORT, ISO_OUT_DIR, ISO_STEPS,
-// ISO_VIEWPORTS (CSS px "WxH" list; a width under 600 is emulated as a mobile device).
+// ISO_VIEWPORTS (CSS px "WxH" list; a width under 600 is emulated as an Android phone: Chrome
+// Android user agent, touch screen).
+// A `tap:<text>` step touches (mouse-clicks on desktop) the first cell of <text> found from the
+// bottom of the web grid; the native side gets <text> typed as keys, so ISO proves the tap.
+// A `swipe:<n>` step drags the finger (mouse on desktop) up n grid rows (down when n < 0): the
+// list follows the finger, so the native side gets n Down (or Up) keys.
 // The read-only API key is read over SSH and never written to disk or stdout.
 
 import { execFileSync, spawn } from 'node:child_process';
@@ -32,6 +37,11 @@ const DEFAULT_STEPS = [
   '3,/,the,Enter,PageDown,/,Esc',
   // scrolling on the history, media browser and help views
   'PageDown,PageDown,End,Home,4,End,PageUp,Home,?,PageDown,End,Home,?,1',
+  // tab bar taps (touch on the phone viewport)
+  'tap:3,tap:5,tap:2,tap:1',
+  // swipe scrolling: past the visible history rows (the phone layout marks the selected row by
+  // color only, so short swipes leave the text unchanged), then the help text
+  '3,swipe:20,swipe:20,swipe:-5,?,swipe:5,swipe:-2,?,1',
 ].join(',');
 const STEPS = (process.env.ISO_STEPS ?? DEFAULT_STEPS).split(',').filter(Boolean);
 const VIEWPORTS = (process.env.ISO_VIEWPORTS ?? '1400x900,412x915').split(',').filter(Boolean)
@@ -50,6 +60,11 @@ const RETRIES = 4;
 const WEB_FEED_DOWN = /⚠️\s+(\d{3} |Erreur|Échec réseau)/;
 const UA =
   'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36';
+// Ratzilla sizes its grid from the screen when the user agent says "Mobile", like on a real phone.
+const ANDROID_UA =
+  'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Mobile Safari/537.36';
+const TAP_PREFIX = 'tap:';
+const SWIPE_PREFIX = 'swipe:';
 
 // Volatile fields: values sampled at different instants by the two sides.
 const VOLATILE = [
@@ -113,6 +128,8 @@ function selfCheck() {
     throw new Error('normalize must keep padded (unclipped) values');
   }
   if (diffLines('a\nb', 'a\nc').length !== 1) throw new Error('diffLines self-check failed');
+  if (tapText('tap:3') !== '3' || tapText('3') !== null) throw new Error('tapText self-check failed');
+  if (swipeRows('swipe:-2') !== -2 || swipeRows('Down') !== null) throw new Error('swipeRows self-check failed');
   if (!WEB_FEED_DOWN.test('📢 ⚠️ 421 SNI Mismatch') || !WEB_FEED_DOWN.test('📢  ⚠️  421 SNI') || WEB_FEED_DOWN.test('📢 Lecture seule')) {
     throw new Error('WEB_FEED_DOWN self-check failed');
   }
@@ -135,7 +152,22 @@ function nativeStart(cols, rows) {
   tmux('set-option', '-t', TMUX_SESSION, 'window-size', 'manual');
   tmux('resize-window', '-t', TMUX_SESSION, '-x', String(cols), '-y', String(rows));
 }
+const tapText = (step) => (step.startsWith(TAP_PREFIX) ? step.slice(TAP_PREFIX.length) : null);
+
+const swipeRows = (step) => {
+  if (!step.startsWith(SWIPE_PREFIX)) return null;
+  const rows = Number(step.slice(SWIPE_PREFIX.length));
+  if (!Number.isInteger(rows) || rows === 0) throw new Error(`bad swipe step: ${step}`);
+  return rows;
+};
+
 function nativeKey(step) {
+  const rows = swipeRows(step);
+  if (rows) {
+    for (let i = 0; i < Math.abs(rows); i++) nativeKey(rows > 0 ? 'Down' : 'Up');
+    return;
+  }
+  step = tapText(step) ?? step;
   if (TMUX_KEYS[step]) tmux('send-keys', '-t', TMUX_SESSION, TMUX_KEYS[step]);
   else tmux('send-keys', '-t', TMUX_SESSION, '-l', step);
 }
@@ -203,6 +235,88 @@ async function webKey(cdp, step) {
   }
 }
 
+// Center of the first cell spelling `text`, searched from the bottom row (footer) upwards.
+const CELL_OF_JS = (text) => `(() => {
+  const want = ${JSON.stringify(text)};
+  const rows = [...(document.getElementById('grid')?.children ?? [])];
+  for (let r = rows.length - 1; r >= 0; r--) {
+    const cells = [...rows[r].children];
+    for (let i = 0; i < cells.length; i++) {
+      let got = '';
+      for (let j = i; j < cells.length && got.length < want.length; j++) got += cells[j].textContent;
+      if (got === want) {
+        const b = cells[i].getBoundingClientRect();
+        return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+      }
+    }
+  }
+  return null;
+})()`;
+// Records the pointer type the page really received, so a tap step proves the touch path.
+const POINTER_PROBE_JS = `window.__isoPointer = null;
+if (!window.__isoProbe) {
+  window.__isoProbe = true;
+  document.addEventListener('pointerup', (e) => { window.__isoPointer = e.pointerType; }, true);
+}`;
+
+async function webTap(cdp, text, mobile) {
+  const r = await cdp.send('Runtime.evaluate', { expression: CELL_OF_JS(text), returnByValue: true });
+  const at = r.result.value;
+  if (!at) throw new Error(`tap target "${text}" not found on the web grid`);
+  await cdp.send('Runtime.evaluate', { expression: POINTER_PROBE_JS });
+  await pointerPath(cdp, [at], mobile);
+  await expectPointer(cdp, `tap "${text}"`, mobile);
+}
+
+// Grid center and row height, to drag over a known number of rows.
+const GRID_GEOMETRY_JS = `(() => {
+  const g = document.getElementById('grid').getBoundingClientRect();
+  const rows = document.getElementById('grid').children.length;
+  return { x: g.left + g.width / 2, y: g.top + g.height / 2, rowPx: g.height / rows, top: g.top, bottom: g.bottom };
+})()`;
+
+async function webSwipe(cdp, rows, mobile) {
+  const g = (await cdp.send('Runtime.evaluate', { expression: GRID_GEOMETRY_JS, returnByValue: true })).result.value;
+  // Half a row more than needed: the page scrolls one line per whole row travelled.
+  const travel = (Math.abs(rows) + 0.5) * g.rowPx * Math.sign(rows);
+  const start = g.y + travel / 2;
+  const inGrid = (y) => y >= g.top && y <= g.bottom;
+  if (!inGrid(start) || !inGrid(start - travel)) throw new Error(`swipe:${rows} exceeds the grid height`);
+  const path = [];
+  for (let i = 0; i <= 2 * Math.abs(rows) + 1; i++) {
+    path.push({ x: g.x, y: start - (travel * i) / (2 * Math.abs(rows) + 1) });
+  }
+  await cdp.send('Runtime.evaluate', { expression: POINTER_PROBE_JS });
+  await pointerPath(cdp, path, mobile);
+  await expectPointer(cdp, `swipe:${rows}`, mobile);
+}
+
+// Presses at the first point, moves through the others and releases at the last one: a real
+// touch sequence on the phone viewport, a left-button mouse drag on desktop.
+async function pointerPath(cdp, path, mobile) {
+  const [first, ...rest] = path;
+  if (mobile) {
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [first] });
+    for (const p of rest) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [p] });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    return;
+  }
+  const last = path[path.length - 1];
+  await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...first, button: 'left', clickCount: 1 });
+  for (const p of rest) await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...p, button: 'left', buttons: 1 });
+  await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...last, button: 'left', clickCount: 1 });
+}
+
+async function expectPointer(cdp, label, mobile) {
+  const want = mobile ? 'touch' : 'mouse';
+  let seen = null;
+  for (let i = 0; i < 10 && seen !== want; i++) {
+    seen = (await cdp.send('Runtime.evaluate', { expression: 'window.__isoPointer', returnByValue: true })).result.value;
+    if (seen !== want) await sleep(100);
+  }
+  if (seen !== want) throw new Error(`${label}: page saw pointerType ${seen}, expected ${want}`);
+}
+
 // Ratzilla DomBackend::size() reports the DOM grid minus one column and one row, so the app
 // draws a (cols-1)x(rows-1) frame: only that frame is captured and mirrored in tmux.
 const GRID_JS = `(() => {
@@ -227,7 +341,12 @@ async function webGrid(cdp) {
 async function runViewport(cdp, vp) {
   await cdp.send('Emulation.setDeviceMetricsOverride', {
     width: vp.width, height: vp.height, deviceScaleFactor: vp.mobile ? 2.625 : 1, mobile: vp.mobile,
+    screenWidth: vp.width, screenHeight: vp.height,
   });
+  await cdp.send('Emulation.setUserAgentOverride', {
+    userAgent: vp.mobile ? ANDROID_UA : UA, platform: vp.mobile ? 'Linux armv8l' : 'Linux x86_64',
+  });
+  await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: vp.mobile, maxTouchPoints: vp.mobile ? 5 : 1 });
   await cdp.send('Page.navigate', { url: `${WEB_URL}?token=${encodeURIComponent(apiKey)}` });
 
   let grid = null;
@@ -255,7 +374,11 @@ async function runViewport(cdp, vp) {
   for (const [index, step] of STEPS.entries()) {
     if (step !== 'start') {
       nativeKey(step);
-      await webKey(cdp, step);
+      const text = tapText(step);
+      const rows = swipeRows(step);
+      if (text) await webTap(cdp, text, vp.mobile);
+      else if (rows) await webSwipe(cdp, rows, vp.mobile);
+      else await webKey(cdp, step);
     }
     let nativeRaw, webRaw, diffs;
     for (let attempt = 0; attempt <= RETRIES && (!diffs || diffs.length); attempt++) {
