@@ -1,5 +1,5 @@
 //! Environment-driven FFmpeg/FFprobe input options shared by every spawn site:
-//! decode thread budget, FTP credentials, and URL redaction for logs.
+//! decode thread budget, FTP credentials, HTTP reconnection, and URL redaction for logs.
 //!
 //! Env contract (set by the batch worker / deployment):
 //! - `DBSRT_FFMPEG_THREADS`: decode threads per process (default `DEFAULT_FFMPEG_DECODE_THREADS`).
@@ -23,6 +23,9 @@ pub const FTP_USER_ENV: &str = "DBSRT_FTP_USER";
 pub const FTP_PASSWORD_ENV: &str = "DBSRT_FTP_PASSWORD";
 
 const FTP_SCHEME_PREFIX: &str = "ftp://";
+/// Reconnect (resuming with a Range request) when an `http(s)://` input drops mid-read, e.g.
+/// during a gateway restart: up to this many seconds of backoff before giving up.
+pub const HTTP_RECONNECT_DELAY_MAX_SECS: &str = "60";
 const SCHEME_SEPARATOR: &str = "://";
 const REDACTED_SECRET: &str = "***";
 const FTP_PASSWORD_FLAG: &str = "-ftp-password";
@@ -71,6 +74,22 @@ pub fn apply_ftp_credentials(cmd: &mut Command, input: &Path) {
         user.as_deref(),
         password.as_deref(),
     ));
+}
+
+/// Builds the reconnect input options for an `http(s)://` input, none for other inputs.
+pub fn http_reconnect_args(input: &str) -> Vec<&'static str> {
+    let lower = input.get(..8).unwrap_or(input).to_ascii_lowercase();
+    if !(lower.starts_with("http://") || lower.starts_with("https://")) {
+        return Vec::new();
+    }
+    vec![
+        "-reconnect",
+        "1",
+        "-reconnect_on_network_error",
+        "1",
+        "-reconnect_delay_max",
+        HTTP_RECONNECT_DELAY_MAX_SECS,
+    ]
 }
 
 /// Masks the password of every `scheme://user:password@host` occurrence as `user:***@host`.
@@ -273,6 +292,23 @@ mod tests {
             for leaked in ["p a s s", "mid dle", "a \\\" b"] {
                 assert!(!masked.contains(leaked), "{leaked} leaked from {input}");
             }
+        }
+    }
+
+    #[test]
+    fn test_http_reconnect_args() {
+        let args = http_reconnect_args("http://host/Disque_1/movie.mkv");
+        assert_eq!(&args[..2], ["-reconnect", "1"]);
+        assert!(args.contains(&"-reconnect_on_network_error"));
+        assert_eq!(http_reconnect_args("HTTPS://host/movie.mkv"), args);
+        for input in [
+            "ftp://host/movie.mkv",
+            "/media/movie.mkv",
+            "pipe:0",
+            "-",
+            "http",
+        ] {
+            assert!(http_reconnect_args(input).is_empty(), "{input}");
         }
     }
 

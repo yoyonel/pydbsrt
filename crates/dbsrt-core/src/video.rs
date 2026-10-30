@@ -29,7 +29,8 @@ pub const NTSC_FILM_FPS: f64 = 23.976;
 
 pub use crate::ffmpeg_input::DEFAULT_FFMPEG_DECODE_THREADS;
 use crate::ffmpeg_input::{
-    apply_ftp_credentials, display_input, ffmpeg_decode_threads, redact_url_userinfo,
+    apply_ftp_credentials, display_input, ffmpeg_decode_threads, http_reconnect_args,
+    redact_url_userinfo,
 };
 use crate::job_progress::{create_job_guard, maybe_update_progress};
 
@@ -723,6 +724,7 @@ fn build_ffmpeg_extraction_command(
     let threads = ffmpeg_decode_threads();
     cmd.args(["-threads", &threads]);
     apply_ftp_credentials(&mut cmd, path);
+    cmd.args(http_reconnect_args(&path.to_string_lossy()));
     cmd.arg("-i").arg(path);
 
     if let Some(dur) = options.duration_sec {
@@ -835,6 +837,7 @@ fn resolve_keyframe_timestamps(path: &Path, options: &VideoExtractionOptions) ->
 /// # Arguments
 /// * `path` - Target video file or remote stream locator.
 /// * `sampling` - Configured video extraction sampling strategy.
+/// * `remote` - Metadata from [`probe_remote_stream`], `None` when not probed or failed.
 ///
 /// # Returns
 /// Effective framerate in Hz (`f64`).
@@ -846,17 +849,26 @@ fn resolve_keyframe_timestamps(path: &Path, options: &VideoExtractionOptions) ->
 /// Never panics.
 ///
 /// # Data Flow & Invariants
-/// Bypasses ffprobe on remote network streams to prevent connection leaks, otherwise queries
-/// container metadata via probe or stem heuristics.
-fn resolve_extraction_meta_fps(path: &Path, sampling: SamplingMode) -> f64 {
+/// Never probes a remote stream or pipe itself (its single probe happens in
+/// [`probe_remote_stream`]); falls back to stem heuristics when that probe is missing.
+fn resolve_extraction_meta_fps(
+    path: &Path,
+    sampling: SamplingMode,
+    remote: Option<&VideoMetadata>,
+) -> f64 {
     if sampling != SamplingMode::Full {
         return DEFAULT_BASELINE_FPS;
     }
     if crate::container::is_remote_stream_or_pipe(path) {
-        path.file_stem()
-            .and_then(|s| s.to_str())
-            .map(parse_fps_from_stem)
-            .unwrap_or(DEFAULT_BASELINE_FPS)
+        remote
+            .map(|m| m.fps)
+            .filter(|&fps| fps > 0.0)
+            .unwrap_or_else(|| {
+                path.file_stem()
+                    .and_then(|s| s.to_str())
+                    .map(parse_fps_from_stem)
+                    .unwrap_or(DEFAULT_BASELINE_FPS)
+            })
     } else {
         probe_video(path)
             .map(|m| m.fps)
@@ -889,12 +901,79 @@ fn spawn_ffmpeg_child(
     ))
 }
 
-fn resolve_expected_total_frames(options: &VideoExtractionOptions, meta_fps: f64) -> Option<usize> {
-    options.max_frames.or_else(|| {
-        options
-            .duration_sec
-            .map(|d| (d * meta_fps).round() as usize)
-    })
+/// Framerate and progress total for one extraction, probing a full remote stream once.
+fn resolve_extraction_meta(path: &Path, options: &VideoExtractionOptions) -> (f64, Option<usize>) {
+    let remote = probe_remote_stream(path, options.sampling, |p| probe_video(p).ok());
+    let meta_fps = resolve_extraction_meta_fps(path, options.sampling, remote.as_ref());
+    let remote_duration = remote.map(|m| m.duration);
+    (
+        meta_fps,
+        resolve_expected_total_frames(options, meta_fps, remote_duration),
+    )
+}
+
+/// Probes a full remote (non-pipe) stream, before ffmpeg opens its own connection so a remote
+/// server never sees both at once. It gives the real framerate (the stem guess defaults to
+/// 24 fps) and the duration for the progress total. Pipes are never probed, since ffprobe would
+/// consume their input; sparse sampling needs neither value.
+fn probe_remote_stream(
+    path: &Path,
+    sampling: SamplingMode,
+    probe: impl FnOnce(&Path) -> Option<VideoMetadata>,
+) -> Option<VideoMetadata> {
+    let is_probeable_stream =
+        crate::container::is_remote_stream_or_pipe(path) && !crate::container::is_pipe_input(path);
+    (sampling == SamplingMode::Full && is_probeable_stream)
+        .then(|| probe(path))
+        .flatten()
+}
+
+/// Total frames expected for the progress file, `None` when unknown.
+///
+/// A full remote stream has no frame cap, so its probed duration (`remote_duration`) is used as
+/// a progress hint only: without it `dbsrt top` assumes a 45 min episode.
+fn resolve_expected_total_frames(
+    options: &VideoExtractionOptions,
+    meta_fps: f64,
+    remote_duration: Option<f64>,
+) -> Option<usize> {
+    if let Some(max) = options.max_frames {
+        return Some(max);
+    }
+    let duration = options
+        .duration_sec
+        .or_else(|| remote_duration.map(|d| (d - options.start_sec).max(0.0)))?;
+    Some((duration * meta_fps).round() as usize)
+}
+
+/// Minimum share of the probed frame count a full remote stream must deliver.
+const REMOTE_MIN_FRAME_RATIO: f64 = 0.98;
+
+/// Rejects a full remote stream that ended well before its probed length. ffmpeg exits 0 when
+/// the server drops the connection mid-file, so a short read is the only sign of truncation.
+// shortcut: container duration can exceed the video stream (longer audio); a file whose video
+// ends more than 2% early fails here, loosen the ratio if real media trips it.
+fn check_remote_truncation(
+    path: &Path,
+    options: &VideoExtractionOptions,
+    extracted: usize,
+    expected_total: Option<usize>,
+) -> Result<()> {
+    let is_remote =
+        crate::container::is_remote_stream_or_pipe(path) && !crate::container::is_pipe_input(path);
+    match expected_total {
+        Some(total)
+            if is_remote
+                && options.max_frames.is_none()
+                && (extracted as f64) < total as f64 * REMOTE_MIN_FRAME_RATIO =>
+        {
+            anyhow::bail!(
+                "Remote stream truncated: {extracted}/{total} frames from {}",
+                redact_url_userinfo(&path.to_string_lossy())
+            )
+        }
+        _ => Ok(()),
+    }
 }
 
 fn run_extraction_process(
@@ -903,15 +982,14 @@ fn run_extraction_process(
     resolved: &ResolvedFfmpeg,
 ) -> Result<Vec<FrameSample>> {
     let keyframe_ts = resolve_keyframe_timestamps(path, options);
+    let (meta_fps, expected_total) = resolve_extraction_meta(path, options);
     let (mut child, mut reader) = spawn_ffmpeg_child(path, options, resolved)?;
 
     let mut buf = [0u8; 1024];
     let capacity = options.max_frames.unwrap_or(256);
     let mut samples = Vec::with_capacity(capacity);
 
-    let meta_fps = resolve_extraction_meta_fps(path, options.sampling);
     let guard = create_job_guard(child.id());
-    let expected_total = resolve_expected_total_frames(options, meta_fps);
 
     let timing_ctx = FrameTimingContext {
         sampling: options.sampling,
@@ -943,7 +1021,7 @@ fn run_extraction_process(
 
     let _ = child.kill();
     let _ = child.wait();
-    Ok(samples)
+    check_remote_truncation(path, options, samples.len(), expected_total).map(|()| samples)
 }
 
 /// Convenience function: extracts 1 FPS sparse perceptual hashes for ultra-fast media identification.
@@ -997,6 +1075,96 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_probe_remote_stream_only_probes_full_remote_streams() {
+        let http = Path::new("http://host/Disque_1/movie.mkv");
+        let meta = |_: &Path| {
+            Some(VideoMetadata {
+                duration: 3600.0,
+                fps: 25.0,
+            })
+        };
+        let no_probe = |_: &Path| -> Option<VideoMetadata> { panic!("must not probe") };
+
+        assert!(probe_remote_stream(http, SamplingMode::Full, meta).is_some());
+        assert!(probe_remote_stream(http, SamplingMode::Full, |_| None).is_none());
+        // Pipes, local files and sparse sampling are never probed.
+        for path in ["-", "pipe:0", "/media/movie.mkv"] {
+            assert!(probe_remote_stream(Path::new(path), SamplingMode::Full, no_probe).is_none());
+        }
+        assert!(probe_remote_stream(http, SamplingMode::Fps(1.0), no_probe).is_none());
+        assert!(probe_remote_stream(http, SamplingMode::KeyFrames, no_probe).is_none());
+    }
+
+    #[test]
+    fn test_resolve_extraction_meta_fps_prefers_remote_probe_over_stem() {
+        let http = Path::new("http://host/Disque_1/movie.mkv");
+        let probed = VideoMetadata {
+            duration: 3600.0,
+            fps: 25.0,
+        };
+        assert_eq!(
+            resolve_extraction_meta_fps(http, SamplingMode::Full, Some(&probed)),
+            25.0
+        );
+        // Failed or zero-fps probe falls back to the stem heuristic.
+        let zero = VideoMetadata { fps: 0.0, ..probed };
+        assert_eq!(
+            resolve_extraction_meta_fps(http, SamplingMode::Full, Some(&zero)),
+            DEFAULT_BASELINE_FPS
+        );
+        assert_eq!(
+            resolve_extraction_meta_fps(http, SamplingMode::Full, None),
+            DEFAULT_BASELINE_FPS
+        );
+        let marked = Path::new("http://host/Disque_1/show.2160p.mkv");
+        assert_eq!(
+            resolve_extraction_meta_fps(marked, SamplingMode::Full, None),
+            NTSC_FILM_FPS
+        );
+    }
+
+    #[test]
+    fn test_resolve_expected_total_frames_uses_probed_duration() {
+        let full = VideoExtractionOptions {
+            sampling: SamplingMode::Full,
+            ..Default::default()
+        };
+        // Remote full stream: probed duration (1 h at 24 fps).
+        assert_eq!(
+            resolve_expected_total_frames(&full, 24.0, Some(3600.0)),
+            Some(86_400)
+        );
+        // start_sec is subtracted from the probed duration.
+        let offset = VideoExtractionOptions {
+            start_sec: 600.0,
+            ..full.clone()
+        };
+        assert_eq!(
+            resolve_expected_total_frames(&offset, 24.0, Some(3600.0)),
+            Some(72_000)
+        );
+        // No probe stays unknown.
+        assert_eq!(resolve_expected_total_frames(&full, 24.0, None), None);
+        // Explicit caps win over the probed duration.
+        let capped = VideoExtractionOptions {
+            max_frames: Some(500),
+            ..full.clone()
+        };
+        assert_eq!(
+            resolve_expected_total_frames(&capped, 24.0, Some(3600.0)),
+            Some(500)
+        );
+        let bounded = VideoExtractionOptions {
+            duration_sec: Some(10.0),
+            ..full.clone()
+        };
+        assert_eq!(
+            resolve_expected_total_frames(&bounded, 24.0, Some(3600.0)),
+            Some(240)
+        );
+    }
+
+    #[test]
     fn test_extraction_command_threads_precede_input() {
         let resolved = ResolvedFfmpeg {
             binary: PathBuf::from("ffmpeg"),
@@ -1017,6 +1185,46 @@ mod tests {
         assert_eq!(args[threads_pos + 1], ffmpeg_decode_threads());
         assert_eq!(args[input_pos + 1], "/data/movie.mkv");
         assert!(!args.iter().any(|a| a.starts_with("-ftp-")));
+        assert!(!args.iter().any(|a| a == "-reconnect"));
+    }
+
+    #[test]
+    fn test_check_remote_truncation() {
+        let url = Path::new("http://nas.example/movie.mkv");
+        let opts = VideoExtractionOptions::default();
+        assert!(check_remote_truncation(url, &opts, 330, Some(812)).is_err());
+        assert!(check_remote_truncation(url, &opts, 800, Some(812)).is_ok());
+        assert!(check_remote_truncation(url, &opts, 330, None).is_ok());
+        assert!(
+            check_remote_truncation(Path::new("/data/movie.mkv"), &opts, 330, Some(812)).is_ok()
+        );
+        assert!(check_remote_truncation(Path::new("pipe:0"), &opts, 330, Some(812)).is_ok());
+        let capped = VideoExtractionOptions {
+            max_frames: Some(812),
+            ..Default::default()
+        };
+        assert!(check_remote_truncation(url, &capped, 330, Some(812)).is_ok());
+    }
+
+    #[test]
+    fn test_extraction_command_http_reconnect_precedes_input() {
+        let resolved = ResolvedFfmpeg {
+            binary: PathBuf::from("ffmpeg"),
+            hwaccel: HwAccel::Disabled,
+        };
+        let cmd = build_ffmpeg_extraction_command(
+            Path::new("http://nas.example/Disque_1/movie.mkv"),
+            &VideoExtractionOptions::default(),
+            &resolved,
+        );
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        let input_pos = args.iter().position(|a| a == "-i").unwrap();
+        let reconnect_pos = args.iter().position(|a| a == "-reconnect").unwrap();
+        assert!(reconnect_pos < input_pos);
+        assert!(args[..input_pos].contains(&"-reconnect_on_network_error".to_string()));
     }
 
     #[test]

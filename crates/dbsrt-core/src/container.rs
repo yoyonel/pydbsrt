@@ -106,6 +106,12 @@ pub fn is_remote_stream_or_pipe<P: AsRef<Path>>(path: P) -> bool {
         || s == "-"
 }
 
+/// Returns true for a pipe input (`pipe:N` or `-`): ffprobe would consume it, so never probe it.
+pub fn is_pipe_input<P: AsRef<Path>>(path: P) -> bool {
+    let s = path.as_ref().to_string_lossy();
+    s.starts_with("pipe:") || s == "-"
+}
+
 /// Inspects a video/media container file using ffprobe to detect embedded subtitle tracks.
 pub fn inspect_container<P: AsRef<Path>>(path: P) -> Result<ContainerInspection> {
     let p = path.as_ref();
@@ -302,5 +308,13 @@ mod tests {
         assert!(!is_remote_stream_or_pipe(Path::new("/var/media/video.mkv")));
         assert!(!is_remote_stream_or_pipe(Path::new("relative/video.mp4")));
         assert!(!is_remote_stream_or_pipe(Path::new("sample.mkv")));
+    }
+
+    #[test]
+    fn test_is_pipe_input() {
+        assert!(is_pipe_input(Path::new("pipe:0")));
+        assert!(is_pipe_input(Path::new("-")));
+        assert!(!is_pipe_input(Path::new("http://host/movie.mkv")));
+        assert!(!is_pipe_input(Path::new("/var/media/video.mkv")));
     }
 }
