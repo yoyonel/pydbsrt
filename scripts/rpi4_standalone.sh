@@ -48,6 +48,8 @@ case "${ACTION}" in
 
     echo "=== Configuring systemd user service on ${RPI_HOST} ==="
     # shellcheck disable=SC2029
+    ssh "${RPI_HOST}" "mkdir -p %h/dbsrt/run/empty_phash"
+    # shellcheck disable=SC2029
     ssh "${RPI_HOST}" "cat <<'EOF' > ${REMOTE_SYSTEMD_DIR}/${SERVICE_NAME}
 [Unit]
 Description=dbsrt Standalone Zero-DB Server
@@ -55,7 +57,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=%h/.local/bin/dbsrt-server --host 0.0.0.0 --port ${SERVER_PORT} --dbphash %h/dbsrt/data/catalog.dbphash --subtitles-dir %h/dbsrt/data/SRT --phash-dir %h/dbsrt/data/__PHASH__
+ExecStart=%h/.local/bin/dbsrt-server --host 0.0.0.0 --port ${SERVER_PORT} --dbphash %h/dbsrt/data/catalog.dbphash --subtitles-dir %h/dbsrt/data/SRT --phash-dir %h/dbsrt/run/empty_phash
 Restart=always
 RestartSec=3
 KillMode=process

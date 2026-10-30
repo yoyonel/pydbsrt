@@ -468,15 +468,60 @@ REMOTE_SCRIPT
 
   pull-catalog)
     check_ssh
-    echo "=== Pulling processed catalogs and fingerprints from ${O2SWITCH_HOST} ==="
-    mkdir -p data/__PHASH__ data/SRT data/reports
-    echo "-> Pulling .phash fingerprints..."
-    rsync -avz --progress --ignore-existing --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/__PHASH__/" "data/__PHASH__/" || true
+    shift || true
+    WITH_PHASH=false
+    for arg in "$@"; do
+      case "${arg}" in
+        --with-phash) WITH_PHASH=true ;;
+      esac
+    done
+    echo "=== Pulling processed catalog and artifacts from ${O2SWITCH_HOST} ==="
+    mkdir -p data/SRT data/reports
+    echo "-> Pulling unified binary catalog (catalog.dbphash)..."
+    rsync -avz --progress --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" \
+      "${O2SWITCH_HOST}:${REMOTE_BASE}/data/catalog.dbphash" "data/catalog.dbphash.tmp" || true
+    if [[ -f "data/catalog.dbphash.tmp" ]]; then
+      mv -f "data/catalog.dbphash.tmp" "data/catalog.dbphash"
+      echo "✓ catalog.dbphash updated."
+    fi
     echo "-> Pulling CAS SRT subtitles..."
     rsync -avz --progress --ignore-existing --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/SRT/" "data/SRT/" || true
     echo "-> Pulling telemetry reports..."
     rsync -avz --progress --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/reports/" "data/reports/" || true
+    if [[ "${WITH_PHASH}" == "true" ]]; then
+      mkdir -p data/__PHASH__
+      echo "-> Pulling loose .phash fingerprints (backup mode)..."
+      rsync -avz --progress --ignore-existing --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/__PHASH__/" "data/__PHASH__/" || true
+    fi
     echo "✓ Pull completed from ${O2SWITCH_HOST}."
+    ;;
+
+  backup-nas)
+    check_ssh
+    shift || true
+    echo "=== Backing up raw .phash fingerprints from ${O2SWITCH_HOST} to NAS/persistent storage ==="
+    TARGET_DIR="${1:-}"
+    if [[ -z "${TARGET_DIR}" ]]; then
+      user_name="${USER:-$(whoami)}"
+      candidates=(
+        "${NAS_BACKUP_DIR:-}"
+        "/media/${user_name}/Synology/phash_backup"
+        "/media/${user_name}/Synology/__PHASH__"
+        "${HOME}/__SYNOLOGY__/__PHASH__"
+        "data/__PHASH__"
+      )
+      for c in "${candidates[@]}"; do
+        if [[ -n "${c}" && -d "${c}" ]]; then
+          TARGET_DIR="${c}"
+          break
+        fi
+      done
+      TARGET_DIR="${TARGET_DIR:-data/__PHASH__}"
+    fi
+    mkdir -p "${TARGET_DIR}"
+    echo "-> Backing up to ${TARGET_DIR}..."
+    rsync -avz --progress --ignore-existing --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/__PHASH__/" "${TARGET_DIR}/" || true
+    echo "✓ Backup of raw .phash fingerprints completed to ${TARGET_DIR}."
     ;;
 
   batch-tvshow | batch-movies)
@@ -701,7 +746,7 @@ REMOTE_SCRIPT
     ;;
 
   *)
-    echo "Usage: $0 {build|test-local|sync|start|stop|restart|status|logs|demo|setup-cron|remove-cron|rotate-key|top|pull-catalog|batch-tvshow|batch-movies|batch-status|batch-workers|batch-stop|batch-logs}"
+    echo "Usage: $0 {build|test-local|sync|start|stop|restart|status|logs|demo|setup-cron|remove-cron|rotate-key|top|pull-catalog|backup-nas|batch-tvshow|batch-movies|batch-status|batch-workers|batch-stop|batch-logs}"
     exit 1
     ;;
 esac

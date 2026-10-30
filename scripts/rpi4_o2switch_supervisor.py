@@ -26,9 +26,11 @@ from typing import Dict, List, Tuple
 # Named Operational Constants
 DEFAULT_CHECK_INTERVAL_SECS: int = 60
 DEFAULT_PULL_INTERVAL_SECS: int = 600
+DEFAULT_BACKUP_INTERVAL_SECS: int = 3600
 DEFAULT_SSH_TIMEOUT_SECS: int = 15
 DEFAULT_REMOTE_HOST: str = "o2switch"
 DEFAULT_REMOTE_BASE: str = "dbsrt"
+DEFAULT_NAS_PHASH_BACKUP_DIR: str = "/mnt/synology/video/__PHASH__"
 PID_FILE_PATH: str = "run/rpi4_supervisor.pid"
 CTL_SCRIPT: str = "./scripts/o2switch_ctl.sh"
 # batch-status states that call for an automatic restart of the same batch type
@@ -232,6 +234,31 @@ def pull_remote_catalog(remote_host: str, remote_base: str) -> bool:
         return False
 
 
+def backup_remote_phash_to_nas(
+    remote_host: str, remote_base: str, target_dir: str = DEFAULT_NAS_PHASH_BACKUP_DIR
+) -> bool:
+    """Backs up raw .phash fingerprints directly to Synology NAS persistent storage."""
+    if not Path(target_dir).exists():
+        return False
+    log(f"💾 Backing up raw .phash fingerprints from {remote_host} to NAS ({target_dir})...")
+    try:
+        res = subprocess.run(
+            [CTL_SCRIPT, "backup-nas", target_dir],
+            capture_output=True,
+            text=True,
+            timeout=1200,
+            env=_ctl_env(remote_host, remote_base),
+        )
+        if res.returncode == 0:
+            log("✓ Raw .phash backup to NAS complete.")
+            return True
+        log(f"⚠️ NAS backup returned warning: {res.stderr or res.stdout}")
+        return False
+    except Exception as err:
+        log(f"⚠️ NAS backup failed: {err}")
+        return False
+
+
 def decide_next_batch(state: str, batch_type: str, secs_since_last_launch: float) -> str | None:
     """Returns the batch type to launch now, or None.
 
@@ -319,13 +346,21 @@ def _relaunch_step(remote_host: str, remote_base: str, state: str, status: Dict[
     loop.last_scale_time = loop.last_launch_time = time.time()
 
 
-def supervisor_loop(remote_host: str, remote_base: str, check_interval: int, pull_interval: int) -> None:
+def supervisor_loop(
+    remote_host: str,
+    remote_base: str,
+    check_interval: int,
+    pull_interval: int,
+    backup_interval: int = DEFAULT_BACKUP_INTERVAL_SECS,
+) -> None:
     """Main continuous watchdog and adaptive autoscaling loop."""
     log(
         f"🚀 RPi4 Supervisor Agent active (polling: {check_interval}s, pull: {pull_interval}s, "
+        f"nas_backup: {backup_interval}s, "
         f"autoscaling: {AUTOSCALE_MIN_WORKERS}-{AUTOSCALE_MAX_WORKERS} workers, target: {AUTOSCALE_TARGET_LOW_PCT:.0f}-{AUTOSCALE_TARGET_HIGH_PCT:.0f}% LVE CPU)."
     )
     last_pull_time = time.time()
+    last_backup_time = time.time()
     loop = _LoopState()
 
     while True:
@@ -338,11 +373,16 @@ def supervisor_loop(remote_host: str, remote_base: str, check_interval: int, pul
         else:
             _relaunch_step(remote_host, remote_base, state, status, loop)
 
-        # Periodic catalog pull
+        # Periodic catalog pull (lightweight dbphash + srt)
         now = time.time()
         if now - last_pull_time >= pull_interval:
             pull_remote_catalog(remote_host, remote_base)
             last_pull_time = now
+
+        # Periodic NAS persistent backup (raw phash files direct to Synology NFS)
+        if now - last_backup_time >= backup_interval:
+            backup_remote_phash_to_nas(remote_host, remote_base)
+            last_backup_time = now
 
         time.sleep(check_interval)
 
@@ -357,6 +397,12 @@ def main() -> int:
     )
     parser.add_argument(
         "--pull-interval", type=int, default=DEFAULT_PULL_INTERVAL_SECS, help="Catalog pull sync interval in secs"
+    )
+    parser.add_argument(
+        "--backup-interval",
+        type=int,
+        default=DEFAULT_BACKUP_INTERVAL_SECS,
+        help="NAS raw phash backup interval in secs",
     )
     args = parser.parse_args()
 

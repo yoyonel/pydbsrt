@@ -108,9 +108,14 @@ tasks:
       - ./scripts/o2switch_ctl.sh top {{.CLI_ARGS}}
 
   o2switch:pull-catalog:
-    desc: Pull processed .phash, SRT subtitles, and batch telemetry from o2switch to local storage
+    desc: Pull processed unified catalog.dbphash, SRT subtitles, and batch telemetry from o2switch
     cmds:
-      - ./scripts/o2switch_ctl.sh pull-catalog
+      - ./scripts/o2switch_ctl.sh pull-catalog {{.CLI_ARGS}}
+
+  o2switch:backup-nas:
+    desc: Backup raw .phash fingerprints from o2switch to Synology NAS persistent storage
+    cmds:
+      - ./scripts/o2switch_ctl.sh backup-nas {{.CLI_ARGS}}
 
   o2switch:batch:tvshow:
     desc: Execute remote batch pHash extraction for virgin NAS episodes on o2switch (supports --daemon)
