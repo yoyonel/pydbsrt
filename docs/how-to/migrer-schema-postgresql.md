@@ -27,15 +27,17 @@ Vous développez une nouvelle fonctionnalité nécessitant une évolution de sch
 Pour connaître les migrations déjà appliquées et celles en attente :
 
 ```bash
-task db:migrate:status
+task db:status
 ```
 
 Sortie typique :
 ```text
 Applied migrations:
-  V1__initial_schema (applied on 2026-10-15)
-  V2__add_spgist_hamming_index (applied on 2026-10-18)
-  V3__add_sub_frames_table (applied on 2026-10-22)
+  V1__initial_schema
+  V2__certified_couplings
+  V3__secure_lang_and_cascades
+  V4__rich_media_metadata
+  V5__production_view_and_stream_specs
 Pending migrations:
   None
 ```
@@ -68,10 +70,55 @@ Toutes les migrations sont stockées sous `crates/dbsrt-index/migrations/`.
 3. Testez la migration sur votre base locale :
    ```bash
    task db:migrate
-   task db:migrate:status
+   task db:status
    ```
 
-4. Exécutez la suite de tests d'intégration de base de données pour vérifier la non-régression :
+4. Exécutez la suite de vérification de sécurité DDL et de non-régression :
    ```bash
+   task db:lint:safety
    task test:rs
    ```
+
+---
+
+### 4. Hydratation et Rétro-propagation (`task db:backfill:medias`)
+
+Après une migration enrichissant les colonnes de la table `medias` (ex: V4), exécutez le script d'hydratation par lot pour peupler les métadonnées depuis les archives `.phash` et la télémétrie JSONL :
+
+```bash
+task db:backfill:medias
+```
+
+Ce script effectue un `UPSERT` par lots (`psycopg2.extras.execute_batch`) à plus de 10 000 lignes/seconde sans insérer de doublons.
+
+---
+
+### 5. Extraction de la Géométrie Réelle par Sonde Réseau (`task db:probe`)
+
+Pour remplacer les déductions textuelles fragiles par des sources de vérité physiques (résolution native, géométrie `width` x `height`, codec conteneur) :
+
+```bash
+# Sonde locale via ffprobe sur le NAS Synology (12 workers parallèles)
+task db:probe
+
+# Réplication instantanée des spécifications physiques vers le Raspberry Pi 4
+task rpi4:db:sync
+```
+
+---
+
+### 6. Audit des NULLs et Inspection TUI Plein Écran (`task db:audit`, `task db:tui`)
+
+Pour contrôler la complétude des colonnes physiques et la vue conceptuelle `v_productions` :
+
+```bash
+# Bilan exhaustif des valeurs NULL et distribution des productions
+task db:audit
+
+# Même bilan sur le Raspberry Pi 4 distant
+task rpi4:db:audit
+
+# Inspection visuelle interactive complète via Harlequin SQL TUI
+task db:tui
+task rpi4:db:tui
+```

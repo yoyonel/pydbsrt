@@ -52,6 +52,10 @@ Cette page dresse le dictionnaire exhaustif de toutes les cibles d'orchestration
 | `task db:psql` | Ouvre une session interactive `psql` dans le conteneur PostgreSQL actif. |
 | `task db:import:all-phash` | Importe en lot les fichiers `.phash` dans PostgreSQL via flux binaire `COPY`. |
 | `task db:lint:safety` | Vérifie la compatibilité et la non-régression des scripts de migration DDL. |
+| `task db:tui` | Lance l'explorateur interactif plein écran SQL TUI Harlequin sur PostgreSQL 17 local (`:5433`). |
+| `task db:backfill:medias` | Rétro-propage les métadonnées riches depuis les `.phash` et la télémétrie JSONL vers la table `medias`. |
+| `task db:audit` | Génère un bilan d'intégrité exhaustif des valeurs `NULL` de la table `medias` et inspecte la vue `v_productions`. |
+| `task db:probe` | Sonde les flux vidéo réels sur le NAS en multi-threading via `ffprobe` et met à jour géométrie (`width`, `height`), `video_codec` et `resolution`. |
 
 ---
 
@@ -136,6 +140,10 @@ Cette page dresse le dictionnaire exhaustif de toutes les cibles d'orchestration
 | `task rpi4:db:status` | Vérifie l'état des migrations Refinery sur l'instance PostgreSQL distante du Raspberry Pi 4. |
 | `task rpi4:db:migrate` | Applique les migrations Refinery sur l'instance PostgreSQL distante du Raspberry Pi 4. |
 | `task rpi4:db:down` | Arrête le conteneur PostgreSQL 17 sur le Raspberry Pi 4. |
+| `task rpi4:db:tui` | Lance l'explorateur interactif plein écran SQL TUI Harlequin sur le PostgreSQL 17 du RPi4 (port 5433). |
+| `task rpi4:db:audit` | Génère le bilan des valeurs `NULL` et de la vue `v_productions` sur le PostgreSQL 17 du RPi4. |
+| `task rpi4:db:sync` | Réplique instantanément les spécifications physiques sondées (`width`, `height`, `codec`, `resolution`) du local vers le RPi4. |
+| `task rpi4:db:probe` | Sonde les flux NAS et met à jour directement le PostgreSQL 17 du Raspberry Pi 4. |
 
 ---
 
