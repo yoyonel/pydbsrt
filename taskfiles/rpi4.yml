@@ -61,6 +61,27 @@ tasks:
     cmds:
       - ./scripts/rpi4_deploy.sh db-logs
 
+  rpi4:db:tui:
+    desc: Launch interactive full-screen Harlequin SQL TUI on remote RPi4 PostgreSQL 17 (:5433)
+    interactive: true
+    cmds:
+      - uvx --with harlequin-postgres harlequin --adapter postgres "postgres://docker:docker@192.168.1.24:5433/bktreedb" {{.CLI_ARGS}}
+
+  rpi4:db:audit:
+    desc: Audit NULL values and inspect v_productions view on remote RPi4 PostgreSQL 17
+    cmds:
+      - uv run python scripts/probe_medias_metadata.py --target rpi4 --audit {{.CLI_ARGS}}
+
+  rpi4:db:sync:
+    desc: Synchronize probed physical specs (width, height, codec, resolution) from local to RPi4 DB
+    cmds:
+      - uv run python scripts/probe_medias_metadata.py --sync-rpi4 {{.CLI_ARGS}}
+
+  rpi4:db:probe:
+    desc: Probe video streams over NAS LAN FTP and update remote RPi4 PostgreSQL 17
+    cmds:
+      - NAS_HOST="{{.NAS_HOST | default \"192.168.1.58\"}}" uv run python scripts/probe_medias_metadata.py --target rpi4 {{.CLI_ARGS}}
+
   rpi4:db:status:
     desc: Check remote PostgreSQL 17 migration status on Raspberry Pi 4 (:5433)
     deps: [rs:build]
@@ -198,3 +219,8 @@ tasks:
       - sim:rpi4:test
     cmds:
       - ./scripts/rpi4_sim.sh test
+
+  rpi4:db:backfill:medias:
+    desc: Backfill rich media metadata from .phash and telemetry into RPi4 PostgreSQL 17 (:5433)
+    cmds:
+      - uv run python scripts/backfill_medias_pg.py --host 192.168.1.24 --port 5433 {{.CLI_ARGS}}
