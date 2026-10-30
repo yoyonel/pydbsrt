@@ -1,0 +1,74 @@
+version: '3'
+
+tasks:
+  freebox:install:
+    desc: Install and enable the Freebox HTTP Range gateway systemd unit on RPi4
+    dir: '{{.USER_WORKING_DIR}}'
+    cmds:
+      - ./scripts/rpi4_freebox_ctl.sh install
+
+  freebox:start:
+    desc: Mount Freebox CIFS shares (fstab) and start the HTTP Range gateway on RPi4
+    dir: '{{.USER_WORKING_DIR}}'
+    cmds:
+      - ./scripts/rpi4_freebox_ctl.sh start
+
+  freebox:stop:
+    desc: Stop the Freebox HTTP Range gateway on RPi4
+    dir: '{{.USER_WORKING_DIR}}'
+    cmds:
+      - ./scripts/rpi4_freebox_ctl.sh stop
+
+  freebox:restart:
+    desc: Remount Freebox shares if needed and restart the HTTP Range gateway on RPi4
+    dir: '{{.USER_WORKING_DIR}}'
+    cmds:
+      - ./scripts/rpi4_freebox_ctl.sh restart
+
+  freebox:status:
+    desc: Show Freebox CIFS mounts and gateway state on RPi4
+    dir: '{{.USER_WORKING_DIR}}'
+    cmds:
+      - ./scripts/rpi4_freebox_ctl.sh status
+
+  freebox:mount:
+    desc: Mount Freebox CIFS volumes on RPi4 from /etc/fstab entries
+    dir: '{{.USER_WORKING_DIR}}'
+    cmds:
+      - ./scripts/rpi4_freebox_ctl.sh mount
+
+  freebox:unmount:
+    desc: Unmount Freebox CIFS volumes on RPi4
+    dir: '{{.USER_WORKING_DIR}}'
+    cmds:
+      - ./scripts/rpi4_freebox_ctl.sh unmount
+
+  freebox:test:
+    desc: Probe the RPi4 gateway from o2switch through the Freebox NAT rule
+    dir: '{{.USER_WORKING_DIR}}'
+    cmds:
+      - ./scripts/freebox_batch_ctl.sh test
+
+  freebox:scan:
+    desc: Scan eligible Freebox cinema & TV targets (run on RPi4) and transfer catalog to o2switch
+    dir: '{{.USER_WORKING_DIR}}'
+    cmds:
+      - ./scripts/freebox_batch_ctl.sh scan {{.CLI_ARGS}}
+
+  freebox:batch:start:
+    desc: Launch Freebox batch ingestion daemon on o2switch (probes the gateway first)
+    dir: '{{.USER_WORKING_DIR}}'
+    cmds:
+      - ./scripts/freebox_batch_ctl.sh start {{.CLI_ARGS}}
+
+  freebox:batch:status:
+    desc: Check live status of Freebox batch worker on o2switch
+    dir: '{{.USER_WORKING_DIR}}'
+    cmds:
+      - ./scripts/freebox_batch_ctl.sh status
+
+  freebox:batch:stop:
+    desc: Stop running Freebox batch worker on o2switch
+    dir: '{{.USER_WORKING_DIR}}'
+    cmds:
+      - ./scripts/freebox_batch_ctl.sh stop

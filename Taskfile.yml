@@ -39,6 +39,9 @@ includes:
   o2switch:
     taskfile: ./taskfiles/o2switch.yml
     flatten: true
+  freebox:
+    taskfile: ./taskfiles/freebox.yml
+    flatten: true
   web:
     taskfile: ./taskfiles/web_top.yml
     flatten: true
