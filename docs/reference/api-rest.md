@@ -84,7 +84,9 @@ Les listes lourdes `history_records` et `discovered_media` sont paginées :
 | `offset` | `0` | Éléments sautés au début de chaque liste. |
 | `limit` | `50` | Éléments gardés par liste ; `0` ne garde que les champs live et les totaux. |
 
-La réponse ajoute `history_total` et `discovered_media_total` (taille de chaque liste avant découpe).
+La réponse ajoute `history_total` et `discovered_media_total` (taille de chaque liste avant découpe), et `discovered_media_per_source` (nombre de médias par `source_id`).
+
+Ordre avant découpe, comme les onglets de `dbsrt top` : `history_records` du plus récent au plus ancien, `discovered_media` par nom (insensible à la casse).
 
 Secrets masqués : la valeur suivant `-ftp-password` et le mot de passe des URL `scheme://user:pass@host` deviennent `***` (lignes de commande des jobs, corps et `stderr`).
 

@@ -640,6 +640,10 @@ const TOP_PAGED_LISTS: [(&str, &str); 2] = [
 
 /// Keeps `limit` items from `offset` in each list of [`TOP_PAGED_LISTS`] and adds its total.
 ///
+/// Lists are first put in the default order of the `dbsrt top` tabs: newest history record
+/// first, media by case-insensitive name. `discovered_media_per_source` counts media per
+/// `source_id` over the whole list.
+///
 /// # Errors
 /// [`StatusCode::BAD_GATEWAY`] when `body` is not JSON.
 pub fn paginate_top_snapshot(
@@ -650,6 +654,21 @@ pub fn paginate_top_snapshot(
     let mut snapshot: serde_json::Value = serde_json::from_slice(body)
         .map_err(|e| (StatusCode::BAD_GATEWAY, format!("dbsrt top --json: {e}")))?;
     if let Some(fields) = snapshot.as_object_mut() {
+        if let Some(serde_json::Value::Array(records)) = fields.get_mut("history_records") {
+            records.reverse();
+        }
+        if let Some(serde_json::Value::Array(media)) = fields.get_mut("discovered_media") {
+            media.sort_by_cached_key(|m| m["stem"].as_str().unwrap_or_default().to_lowercase());
+            let mut per_source = serde_json::Map::new();
+            for id in media.iter().filter_map(|m| m["source_id"].as_str()) {
+                let count = per_source
+                    .get(id)
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0);
+                per_source.insert(id.to_string(), (count + 1).into());
+            }
+            fields.insert("discovered_media_per_source".to_string(), per_source.into());
+        }
         for (list, total) in TOP_PAGED_LISTS {
             if let Some(serde_json::Value::Array(items)) = fields.get_mut(list) {
                 let len = items.len();

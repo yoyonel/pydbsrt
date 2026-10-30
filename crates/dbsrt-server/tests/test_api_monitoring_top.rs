@@ -86,13 +86,27 @@ async fn test_top_snapshot_success_cache_and_errors() {
 
 #[test]
 fn test_paginate_top_snapshot_cuts_heavy_lists_and_reports_totals() {
-    let body = br#"{"host_cpu_pct":12.5,"history_records":[1,2,3,4,5],"discovered_media":[1,2]}"#;
+    let body = br#"{"host_cpu_pct":12.5,"history_records":[1,2,3,4,5],
+        "discovered_media":[{"stem":"b","source_id":"nas"},{"stem":"A","source_id":"nas"},
+        {"stem":"c"}]}"#;
     let page: serde_json::Value =
         serde_json::from_slice(&paginate_top_snapshot(body, 1, 2).unwrap()).unwrap();
-    assert_eq!(page["history_records"], serde_json::json!([2, 3]));
-    assert_eq!(page["discovered_media"], serde_json::json!([2]));
+    assert_eq!(
+        page["history_records"],
+        serde_json::json!([4, 3]),
+        "newest first"
+    );
+    assert_eq!(
+        page["discovered_media"],
+        serde_json::json!([{"stem":"b","source_id":"nas"},{"stem":"c"}]),
+        "media sorted by case-insensitive name"
+    );
     assert_eq!(page["history_total"], 5);
-    assert_eq!(page["discovered_media_total"], 2);
+    assert_eq!(page["discovered_media_total"], 3);
+    assert_eq!(
+        page["discovered_media_per_source"],
+        serde_json::json!({"nas": 2})
+    );
     assert_eq!(page["host_cpu_pct"], 12.5, "live fields are kept");
 
     let live: serde_json::Value =
