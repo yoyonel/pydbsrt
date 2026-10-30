@@ -115,6 +115,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
@@ -133,6 +134,10 @@ jobs:
 
       - name: Linting (cargo clippy)
         run: cargo clippy --workspace --all-targets -- -D warnings
+
+      # Browser glue is cfg-gated to wasm32, so host builds above never compile it.
+      - name: Check web-top WebAssembly build (cargo check wasm32)
+        run: cargo check -p dbsrt-web-top --target wasm32-unknown-unknown
 
       - name: Rust Architectural Complexity Gate (LOC <= 150, CCN <= 20)
         run: uv run python scripts/lint_complexity.py
