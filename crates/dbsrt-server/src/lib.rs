@@ -1,5 +1,6 @@
 //! dbsrt-server: REST API microservice daemon for visual subtitle synchronization.
 
+pub mod auth;
 pub mod constants;
 pub mod dtos;
 pub mod handlers;
@@ -127,6 +128,10 @@ pub fn create_router_with_state(state: AppState) -> Router {
         .route("/v1/reload", post(catalog_reload_handler))
         .route("/v1/catalog/ingest", post(catalog_ingest_handler))
         .route("/v1/catalog/compact", post(catalog_compact_handler))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            auth::require_api_key,
+        ))
         .layer(cors)
         .layer(TraceLayer::new_for_http())
         .with_state(state)

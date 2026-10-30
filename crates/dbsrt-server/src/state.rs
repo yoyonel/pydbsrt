@@ -162,6 +162,8 @@ pub struct AppState {
     pub metrics: Arc<ServerMetrics>,
     pub remote_api: Option<String>,
     pub remote_api_key: Option<String>,
+    /// Key pool file guarding every non-health route; `None` keeps the API open.
+    pub api_key_file: Option<PathBuf>,
     pub is_agent: bool,
     pub log_buffer: Arc<std::sync::RwLock<VecDeque<ServerLogEntry>>>,
     pub reload_in_progress: Arc<std::sync::atomic::AtomicBool>,
@@ -266,6 +268,7 @@ impl AppState {
             metrics: Arc::new(ServerMetrics::default()),
             remote_api: None,
             remote_api_key: None,
+            api_key_file: None,
             is_agent: false,
             log_buffer: Arc::new(std::sync::RwLock::new(VecDeque::with_capacity(
                 LOG_BUFFER_CAPACITY,
