@@ -114,6 +114,8 @@ Lancement manuel :
 task freebox:batch:start -- --workers 5
 ```
 
+Depuis le poste de travail, préférez `task freebox:batch:restart -- --workers 5` : il exécute l'arrêt puis le lancement sur le RPi4, où `/mnt/freebox` est monté.
+
 La commande sonde d'abord le gateway depuis o2switch, scanne les médias éligibles, envoie `data/reports/freebox_batch_targets.json` sur o2switch, puis démarre le worker en `--fresh-only`. Le scan s'exécute sur la machine qui lance la commande : il lit `/mnt/freebox` s'il existe, sinon `/media/$USER/Freebox`.
 
 ---
@@ -142,6 +144,7 @@ Mesure du 2026-10-30 : environ 2,1 à 2,7 Mo/s par vidéo, environ 600 s par ép
 | Superviseur : `Remote batch is aborted (freebox)` | Le worker a vu 50 échecs rapides consécutifs : transport cassé. | Corriger le transport (`task freebox:test`), puis `task freebox:batch:start` (efface le marqueur). |
 | Lancement freebox en échec dans le superviseur | Sonde du gateway en échec. | Le superviseur passe automatiquement à la bibliothèque suivante (`tvshow`). Corriger, puis attendre le prochain tour de rotation. |
 | Des vidéos Freebox ne sont jamais retentées | Elles ont échoué 3 fois de suite (`MAX_FAILED_ATTEMPTS`) dans `data/reports/batch_tvshow_nightly.jsonl` : le worker les ignore. | Après une panne de transport, retirer ces lignes d'échec du journal, avec le worker arrêté et une sauvegarde du fichier. Aucune cible Taskfile ne le fait encore. |
+| Vidéos 2160p en `FAIL` après exactement `30m00s`, débit `0.0 MB/s` | Watchdog du worker : plafond par vidéo trop court pour 10 à 25 Go à 2-6 Mo/s. | Le batch Freebox utilise `--max-extraction-secs 7200` par défaut. Relancer avec `task freebox:batch:restart -- --workers 5`. |
 | Partages absents après un reboot du RPi4 | Montages faits à la main, absents de `/etc/fstab`. | Étapes 2 et 3, puis `task freebox:mount`. |
 
 ---

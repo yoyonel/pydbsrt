@@ -200,7 +200,8 @@ Voir [Ingérer les médias de la Freebox sur o2switch via le RPi4](../how-to/ing
 | `task freebox:unmount` | Démonte les partages Freebox du RPi4. |
 | `task freebox:test` | Sonde le gateway depuis o2switch à travers la redirection NAT Freebox (toute réponse HTTP = OK, `000` = injoignable). |
 | `task freebox:scan` | Scanne les médias éligibles (`Téléchargements`, `Vidéos`) et envoie `data/reports/freebox_batch_targets.json` sur o2switch (supporte `--limit`). |
-| `task freebox:batch:start` | Sonde le gateway, scanne, puis lance le worker batch Freebox sur o2switch en `--fresh-only` (supporte `--workers`, `--limit`). |
+| `task freebox:batch:start` | Sonde le gateway, scanne, puis lance le worker batch Freebox sur o2switch en `--fresh-only` (supporte `--workers`, `--limit`, `--max-extraction-secs`, défaut `7200`). |
+| `task freebox:batch:restart` | Arrête puis relance le batch Freebox depuis le RPi4, où le scan lit `/mnt/freebox` (mêmes options que `freebox:batch:start`). |
 | `task freebox:batch:status` | Affiche l'état et la progression du worker batch Freebox sur o2switch. |
 | `task freebox:batch:stop` | Arrête le worker batch Freebox sur o2switch (pose `run/batch_stopped`). |
 
