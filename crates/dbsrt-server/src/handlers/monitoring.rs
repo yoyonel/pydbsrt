@@ -113,7 +113,9 @@ fn parse_meminfo() -> (u64, u64) {
 /// Reads volatile metrics from Linux `/proc` filesystem. Falls back gracefully when running in
 /// constrained environments or non-Linux hosts.
 pub fn sample_system_stats() -> SystemStats {
+    // /etc/hostname is missing in some jails (o2switch CageFS); the kernel value is always there
     let hostname = fs::read_to_string("/etc/hostname")
+        .or_else(|_| fs::read_to_string("/proc/sys/kernel/hostname"))
         .map(|s| s.trim().to_string())
         .unwrap_or_else(|_| {
             std::env::var("HOSTNAME").unwrap_or_else(|_| "unknown-host".to_string())
