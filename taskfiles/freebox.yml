@@ -61,6 +61,12 @@ tasks:
     cmds:
       - ./scripts/freebox_batch_ctl.sh start {{.CLI_ARGS}}
 
+  freebox:batch:restart:
+    desc: Stop then relaunch the Freebox batch from the RPi4 (scan reads /mnt/freebox there)
+    dir: '{{.USER_WORKING_DIR}}'
+    cmds:
+      - ./scripts/rpi4_freebox_ctl.sh batch-restart {{.CLI_ARGS}}
+
   freebox:batch:status:
     desc: Check live status of Freebox batch worker on o2switch
     dir: '{{.USER_WORKING_DIR}}'

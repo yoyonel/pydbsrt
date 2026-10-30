@@ -30,7 +30,7 @@ run_rpi() {
 
 usage() {
   cat <<'EOF'
-Usage: rpi4_freebox_ctl.sh {install|start|stop|restart|status|mount|unmount}
+Usage: rpi4_freebox_ctl.sh {install|start|stop|restart|status|mount|unmount|batch-restart [ARGS]}
 
 One-time RPi4 setup (as root), credentials never pass on a command line:
   printf 'username=freebox\npassword=<secret>\n' > /etc/freebox.cred && chmod 600 /etc/freebox.cred
@@ -99,6 +99,11 @@ case "${ACTION}" in
   status) status_services ;;
   mount) mount_shares ;;
   unmount) unmount_shares ;;
+  batch-restart)
+    # The target scan reads /mnt/freebox, so the batch must be relaunched from the RPi4
+    shift
+    run_rpi "cd \$HOME/${REMOTE_BASE} && ./scripts/freebox_batch_ctl.sh stop && ./scripts/freebox_batch_ctl.sh start $*"
+    ;;
   *)
     usage
     exit 1

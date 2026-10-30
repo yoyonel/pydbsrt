@@ -10,6 +10,8 @@ DEFAULT_REMOTE_BASE="dbsrt"
 DEFAULT_GATEWAY_WAN_PORT=80
 DEFAULT_PROBE_PATH="/Disque_1/"
 DEFAULT_WORKERS=5
+# 2160p files (10-25 GB) stream at 2-6 MB/s through the Freebox upload: 30 min is too short
+DEFAULT_MAX_EXTRACTION_SECS=7200
 DEFAULT_TARGETS_FILE="data/reports/freebox_batch_targets.json"
 
 ACTION="${1:-status}"
@@ -69,6 +71,7 @@ start_batch() {
 
   local workers="${DEFAULT_WORKERS}"
   local limit=""
+  local max_secs="${DEFAULT_MAX_EXTRACTION_SECS}"
   shift || true
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -80,6 +83,10 @@ start_batch() {
         limit="${2:?--limit requires count}"
         shift
         ;;
+      --max-extraction-secs)
+        max_secs="${2:?--max-extraction-secs requires seconds}"
+        shift
+        ;;
     esac
     shift
   done
@@ -88,12 +95,13 @@ start_batch() {
 
   echo "=== Launching Freebox batch worker daemon on ${O2SWITCH_HOST} ==="
   # shellcheck disable=SC2029
-  ssh "${O2SWITCH_HOST}" "bash -s -- '${REMOTE_BASE}' '${stream_base}' '${DEFAULT_TARGETS_FILE}' '${workers}' '${limit}'" <<'REMOTE_BATCH'
+  ssh "${O2SWITCH_HOST}" "bash -s -- '${REMOTE_BASE}' '${stream_base}' '${DEFAULT_TARGETS_FILE}' '${workers}' '${limit}' '${max_secs}'" <<'REMOTE_BATCH'
 BASE="$1"
 STREAM_BASE="$2"
 TARGETS_FILE="$3"
 WORKERS="$4"
 LIMIT="$5"
+MAX_SECS="$6"
 
 cd "${BASE}"
 PID_FILE="run/batch_worker.pid"
@@ -122,7 +130,7 @@ if [[ -n "${LIMIT}" ]]; then
   EXTRA_ARGS+=(--limit "${LIMIT}")
 fi
 
-screen -dmS dbsrt_batch bash -c "echo \$\$ > '${PID_FILE}'; exec ./bin/python3 -u scripts/o2switch_batch_worker.py --stream-base '${STREAM_BASE}' --targets-file '${TARGETS_FILE}' --workers '${WORKERS}' --fresh-only ${EXTRA_ARGS[*]} >> '${LOG_FILE}' 2>&1"
+screen -dmS dbsrt_batch bash -c "echo \$\$ > '${PID_FILE}'; exec ./bin/python3 -u scripts/o2switch_batch_worker.py --stream-base '${STREAM_BASE}' --targets-file '${TARGETS_FILE}' --workers '${WORKERS}' --max-extraction-secs '${MAX_SECS}' --fresh-only ${EXTRA_ARGS[*]} >> '${LOG_FILE}' 2>&1"
 sleep 1
 if [[ -f "${PID_FILE}" ]]; then
   echo "✓ Started persistent background Freebox batch worker (PID: $(cat "${PID_FILE}"), concurrency: ${WORKERS} workers)."
@@ -179,7 +187,7 @@ case "${ACTION}" in
   scan) scan_and_sync_targets "${@:2}" ;;
   test) check_gateway "$(resolve_stream_base)" ;;
   *)
-    echo "Usage: $0 {start [--workers N] [--limit N]|stop|status|scan [--limit N]|test}"
+    echo "Usage: $0 {start [--workers N] [--limit N] [--max-extraction-secs S]|stop|status|scan [--limit N]|test}"
     exit 1
     ;;
 esac
