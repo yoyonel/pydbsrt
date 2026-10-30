@@ -326,8 +326,11 @@ def load_targets_file(targets_path: Path, nas_base: str, skip_stems: Set[str]) -
             size_bytes = 0
         if stem in skip_stems:
             continue
-        idx = p_str.find(nas_base)
-        rel_path = p_str[idx:] if idx != -1 else p_str
+        if nas_base and nas_base != "/":
+            idx = p_str.find(nas_base)
+            rel_path = p_str[idx:] if idx != -1 else p_str
+        else:
+            rel_path = p_str
         targets.append(VideoTarget(rel_path, filename, size_bytes))
     return targets
 
@@ -446,12 +449,14 @@ def build_child_env(nas_user: str, nas_pass: str, bin_dir: Path) -> Dict[str, st
 
 
 def build_stream_url(stream_base: str, rel_path: str) -> str:
-    """Joins the FTP base and a raw NAS path.
+    """Joins the streaming base and a raw target path.
 
-    Paths come raw from MLSD, the targets file and the events log, and FFmpeg
-    libavformat/ftp.c expects them verbatim: never URL-decode them (a literal `%41` must stay).
+    FTP expects verbatim paths; HTTP requires standard URL path encoding (spaces, brackets).
     """
-    return f"{stream_base}{rel_path if rel_path.startswith('/') else '/' + rel_path}"
+    clean_path = rel_path if rel_path.startswith("/") else "/" + rel_path
+    if stream_base.lower().startswith(("http://", "https://")):
+        clean_path = urllib.parse.quote(clean_path, safe="/")
+    return f"{stream_base}{clean_path}"
 
 
 def _kill_child(proc: subprocess.Popen, out_f: TextIO, reason: str) -> None:
@@ -769,6 +774,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--nas-user", default=DEFAULT_NAS_USER, help="Synology NAS FTP username (env NAS_USER)")
     parser.add_argument("--nas-base", default=DEFAULT_NAS_BASE, help="NAS base directory")
     parser.add_argument(
+        "--stream-base",
+        default=None,
+        help="Explicit stream base URL (e.g. http://127.0.0.1:18089 or ftp://host:port)",
+    )
+    parser.add_argument(
         "--targets-file",
         default=DEFAULT_TARGETS_PATH,
         help="JSON file listing target video paths; the NAS is scanned when it does not exist",
@@ -784,6 +794,14 @@ def _initial_targets(
     skip_stems: Set[str],
 ) -> List[VideoTarget]:
     """Failed videos with --retry-failed, else the targets file, else the whole NAS listing."""
+    if args.stream_base:
+        targets_path = Path(args.targets_file)
+        if targets_path.is_file():
+            targets = load_targets_file(targets_path, "", skip_stems)
+            print(f"✓ Loaded {len(targets)} targets from {targets_path} (stream mode).")
+            return targets
+        print(f"❌ Error: --stream-base requires a valid targets file ({args.targets_file}).", file=sys.stderr)
+        return []
     if args.retry_failed:
         # An explicit retry ignores the blacklist
         targets = match_nas_paths(resolve_retry_targets(events_log, done_stems), all_videos)
@@ -811,15 +829,18 @@ def select_targets(args: argparse.Namespace, nas_pass: str, events_log: Path) ->
     print(f"✓ Skipping {len(blacklisted)} videos that failed {MAX_FAILED_ATTEMPTS} times in a row.")
     skip_stems = (done_stems if args.fresh_only else set()) | blacklisted
 
-    print(f"=== [2/4] Discovering remote NAS video library ({args.nas_host}:{args.nas_base}) ===")
-    all_videos = list_nas_videos_ftp(
-        nas_host=args.nas_host,
-        nas_user=args.nas_user,
-        nas_pass=nas_pass,
-        base_dir=args.nas_base,
-        ftp_port=args.ftp_port,
-    )
-    print(f"✓ Discovered {len(all_videos)} video files on NAS.")
+    if args.stream_base:
+        all_videos: List[VideoTarget] = []
+    else:
+        print(f"=== [2/4] Discovering remote NAS video library ({args.nas_host}:{args.nas_base}) ===")
+        all_videos = list_nas_videos_ftp(
+            nas_host=args.nas_host,
+            nas_user=args.nas_user,
+            nas_pass=nas_pass,
+            base_dir=args.nas_base,
+            ftp_port=args.ftp_port,
+        )
+        print(f"✓ Discovered {len(all_videos)} video files on NAS.")
 
     targets = _initial_targets(args, all_videos, events_log, done_stems, skip_stems)
     excluded = load_excluded_prefixes(Path(DEFAULT_EXCLUDE_PATH))
@@ -834,18 +855,19 @@ def main() -> int:
     """CLI Entry point for o2switch batch processing."""
     args = build_arg_parser().parse_args()
 
-    nas_pass = resolve_nas_password()
-    missing = [
-        name
-        for name, value in (("NAS_HOST", args.nas_host), ("NAS_USER", args.nas_user), ("NAS_PASS", nas_pass))
-        if not value
-    ]
-    if missing:
-        print(
-            f"❌ Error: missing NAS config {', '.join(missing)} (env, etc/.nas_config or etc/.nas_pass).",
-            file=sys.stderr,
-        )
-        return 1
+    nas_pass = resolve_nas_password() if not args.stream_base else ""
+    if not args.stream_base:
+        missing = [
+            name
+            for name, value in (("NAS_HOST", args.nas_host), ("NAS_USER", args.nas_user), ("NAS_PASS", nas_pass))
+            if not value
+        ]
+        if missing:
+            print(
+                f"❌ Error: missing NAS config {', '.join(missing)} (env, etc/.nas_config or etc/.nas_pass).",
+                file=sys.stderr,
+            )
+            return 1
 
     dbsrt_bin = "./bin/dbsrt" if Path("./bin/dbsrt").exists() else "dbsrt"
     events_log = Path(DEFAULT_EVENTS_LOG_PATH)
@@ -855,8 +877,12 @@ def main() -> int:
         print("🎉 No target videos to process. Library is up-to-date!")
         return 0
 
-    print(f"=== [3/4] Direct FTP Native Streaming Mode ({args.nas_host}:{args.ftp_port}) ===")
-    stream_base = f"ftp://{args.nas_host}:{args.ftp_port}"
+    if args.stream_base:
+        stream_base = args.stream_base.rstrip("/")
+        print(f"=== [3/4] Direct HTTP Native Streaming Mode ({stream_base}) ===")
+    else:
+        print(f"=== [3/4] Direct FTP Native Streaming Mode ({args.nas_host}:{args.ftp_port}) ===")
+        stream_base = f"ftp://{args.nas_host}:{args.ftp_port}"
     child_env = build_child_env(args.nas_user, nas_pass, Path("bin").resolve())
 
     print(f"=== [4/4] Executing Batch Ingestion ({args.workers} initial parallel workers, dynamic scaling active) ===")
