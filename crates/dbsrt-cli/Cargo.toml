@@ -16,6 +16,7 @@ path = "src/main.rs"
 [dependencies]
 dbsrt-core = { path = "../dbsrt-core" }
 dbsrt-index = { path = "../dbsrt-index" }
+dbsrt-tui = { path = "../dbsrt-tui" }
 clap = { workspace = true }
 anyhow = { workspace = true }
 rayon = { workspace = true }

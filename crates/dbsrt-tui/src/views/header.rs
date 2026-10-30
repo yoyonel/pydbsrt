@@ -10,16 +10,16 @@ use ratatui::{
     Frame,
 };
 
-use crate::commands::top::constants::{
+use crate::constants::{
     BITS_PER_BYTE_F64, BYTES_PER_GIB_F64, GPU_HIGH_LOAD_THRESHOLD_PCT,
     GPU_MODERATE_LOAD_THRESHOLD_PCT, GPU_PROGRESS_BAR_CHAR_WIDTH,
     MIN_SESSION_DURATION_DISPLAY_SECS,
 };
-use crate::commands::top::host_info::HostSystemInfo;
-use crate::commands::top::model::{
+use crate::host_info::HostSystemInfo;
+use crate::model::{
     format_duration, format_progress_bar, ActiveJobTelemetry, GpuTelemetry, SystemTelemetry,
 };
-use crate::commands::top::views::widgets::get_current_time_str;
+use crate::views::widgets::get_current_time_str;
 
 /// Renders the top real-time telemetry header banner with system, GPU, and network metrics.
 ///

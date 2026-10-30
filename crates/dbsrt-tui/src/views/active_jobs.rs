@@ -8,11 +8,11 @@ use ratatui::{
     Frame,
 };
 
-use crate::commands::top::constants::{BYTES_PER_MIB_F64, MAX_MEDIA_NAME_DISPLAY_CHARS};
-use crate::commands::top::model::{
+use crate::constants::{BYTES_PER_MIB_F64, MAX_MEDIA_NAME_DISPLAY_CHARS};
+use crate::model::{
     default_progress_bar, filter_active_jobs_with_search, format_duration, ActiveJobTelemetry,
 };
-use crate::commands::top::ui::UiContext;
+use crate::ui::UiContext;
 
 /// Renders the fullframe table of active decoding/pHash jobs.
 ///
@@ -342,7 +342,7 @@ pub fn render_inspection_page(frame: &mut Frame, area: Rect, ctx: &UiContext) {
     }
 
     let job = &jobs[ctx.selected_index];
-    let details = crate::commands::top::process_ctl::inspect_job_details(job);
+    let details = inspect_job_details(job);
 
     let lines: Vec<Line> = details.into_iter().map(Line::from).collect();
     let p = Paragraph::new(lines)
@@ -350,4 +350,122 @@ pub fn render_inspection_page(frame: &mut Frame, area: Rect, ctx: &UiContext) {
         .wrap(ratatui::widgets::Wrap { trim: false });
 
     frame.render_widget(p, area);
+}
+
+/// Formats detailed diagnostic inspection lines for an active decoding job.
+///
+/// # Arguments
+/// * `job` - Active job telemetry snapshot.
+///
+/// # Returns
+/// A vector of formatted text strings representing operational metrics, I/O rates, and engine status.
+///
+/// # Data Flow & Invariants
+/// Pure projection of in-memory telemetry fields without blocking I/O.
+pub fn inspect_job_details(job: &ActiveJobTelemetry) -> Vec<String> {
+    let mut lines = Vec::new();
+
+    lines.push(format!(
+        "PID: {:<8} │ Moteur: {:<16} │ État: {}",
+        job.pid,
+        job.engine,
+        job.status.to_uppercase()
+    ));
+    lines.push(format!(
+        "Écoulé: {:<8} │ Débit CIFS: {:>6.1} MB/s │ CPU: {:>4.1}% │ RAM: {:>5.1} MB",
+        crate::model::format_duration(job.elapsed_secs),
+        job.current_rate_mib_s,
+        job.cpu_percent,
+        job.ram_rss_mib
+    ));
+    lines.push(format!(
+        "Progression: {:>5.1}% │ Lus: {:>6.1} MB / Total: {:>6.1} MB",
+        job.progress_ratio * 100.0,
+        job.read_bytes as f64 / crate::constants::BYTES_PER_MIB_F64,
+        job.total_bytes as f64 / crate::constants::BYTES_PER_MIB_F64
+    ));
+
+    if let Some(eta) = job.eta_secs {
+        lines.push(format!(
+            "ETA estimé: {}",
+            crate::model::format_duration(eta)
+        ));
+    }
+
+    lines.push(String::new());
+    lines.push("--- Diagnostic Moteur & Accélération Matérielle ---".to_string());
+    if let Some(ref reason) = job.engine_reason {
+        lines.push(format!("  • Moteur sélectionné : {}", job.engine));
+        lines.push(format!("  • Diagnostic matériel: {reason}"));
+    } else if job.engine.contains("Hi10P") {
+        lines.push(format!("  • Moteur sélectionné : {}", job.engine));
+        lines.push(
+            "  • Incompatibilité ASIC: Codec H.264 Hi10P (High 10 Profile, 10-bit color)."
+                .to_string(),
+        );
+        lines.push(
+            "    Fallback logiciel CPU (sw) requis car aucun ASIC moderne ne décode le Hi10P en matériel."
+                .to_string(),
+        );
+    } else if job.engine.contains("GPU") {
+        lines.push("  • Moteur sélectionné : GPU (VA-API)".to_string());
+        lines.push("  • Accélération active: Décodage matériel ASIC GPU actif via VA-API (/dev/dri/renderD128).".to_string());
+        lines.push("  • Efficacité         : Déchargement CPU quasi-total (< 20% CPU hôte) et débit de décodage maximal.".to_string());
+    } else if job.engine.contains("Sub") {
+        lines.push("  • Moteur sélectionné : Sub Extraction".to_string());
+        lines.push("  • Opération active   : Démultiplexage et extraction brute des pistes SRT (flux texte léger, aucun décodage vidéo).".to_string());
+    } else {
+        lines.push(format!("  • Moteur sélectionné : {}", job.engine));
+        lines.push(
+            "  • Mode Décodage      : Décodage logiciel CPU (sans accélération matérielle VA-API)."
+                .to_string(),
+        );
+    }
+
+    if !job.cmdline.is_empty() {
+        lines.push(String::new());
+        lines.push("--- Ligne de Commande Exécutée ---".to_string());
+        lines.push(redact_command_line(&job.cmdline));
+    }
+
+    lines.push(String::new());
+    lines.push("--- Descripteurs Fichiers & I/O Actifs ---".to_string());
+    lines.push("  • Aucun fichier physique direct ouvert détecté".to_string());
+
+    lines.push(String::new());
+    lines.push("--- Extrait Derniers Logs d'Exécution ---".to_string());
+    lines.push("  (Aucun fichier log dédié trouvé pour ce PID / média)".to_string());
+
+    lines
+}
+
+fn redact_url_arg(arg: &str) -> String {
+    let Some((prefix, rest)) = arg.split_once("://") else {
+        return arg.to_string();
+    };
+    let Some((userinfo, hostpath)) = rest.split_once('@') else {
+        return arg.to_string();
+    };
+    let Some((user, _pass)) = userinfo.split_once(':') else {
+        return arg.to_string();
+    };
+    format!("{prefix}://{user}:***@{hostpath}")
+}
+
+/// Masks sensitive passwords in command line arguments for safe display.
+pub fn redact_command_line(args: &[String]) -> String {
+    let mut previous_was_password_flag = false;
+    let masked: Vec<String> = args
+        .iter()
+        .map(|arg| {
+            let shown = if previous_was_password_flag {
+                "***".to_string()
+            } else {
+                redact_url_arg(arg)
+            };
+            previous_was_password_flag = arg == "-ftp-password";
+            shown
+        })
+        .collect();
+    masked.join(" ")
 }

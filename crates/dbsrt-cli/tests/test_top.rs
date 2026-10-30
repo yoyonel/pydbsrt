@@ -1006,9 +1006,13 @@ fn test_process_candidate_jobs_pipeline() {
     ];
 
     let ffmpeg_ppids = vec![1000];
+    // sysinfo yields processes in HashMap order: feed them reversed to check the pid sort.
+    let raw: Vec<RawCandidateProcess> = raw.into_iter().rev().collect();
     let (jobs, new_prev) = process_candidate_jobs(raw, &ffmpeg_ppids, prev_io, now);
 
     assert_eq!(jobs.len(), 3); // 1000 skipped
+    let pids: Vec<u32> = jobs.iter().map(|j| j.pid).collect();
+    assert_eq!(pids, vec![1001, 1002, 1003]);
     assert!(new_prev.contains_key(&1001));
     assert!(new_prev.contains_key(&1002));
     assert!(new_prev.contains_key(&1003));
@@ -1238,6 +1242,31 @@ fn test_compute_session_throughput() {
     assert_eq!(throughput.session_bytes, 75 * BYTES_PER_MIB);
     assert!(throughput.session_duration_secs > 0.0);
     assert!(throughput.session_rate_mib_s > 0.0);
+}
+
+#[test]
+fn test_load_historical_records_orders_equal_end_times_by_stem() {
+    use std::io::Write;
+
+    let dir = std::env::temp_dir().join(format!("pydbsrt_test_ties_{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    let events_path = dir.join("events.jsonl");
+    {
+        let mut f = std::fs::File::create(&events_path).unwrap();
+        for stem in ["Echo", "Delta", "Charlie", "Bravo", "Alpha"] {
+            writeln!(
+                f,
+                r#"{{"video_stem": "{stem}", "success": true, "wall_duration_secs": 1.0, "file_size_bytes": 1, "certified_couplings_count": 0, "start_iso": "2026-10-25T10:00:00", "end_iso": "2026-10-25T10:00:10"}}"#
+            )
+            .unwrap();
+        }
+    }
+
+    // Records are grouped in a HashMap: equal end times must not keep its random order.
+    let loaded = load_historical_records(&events_path, &dir.join("missing_couplings.json"));
+    let stems: Vec<&str> = loaded.iter().map(|r| r.video_stem.as_str()).collect();
+    assert_eq!(stems, vec!["Alpha", "Bravo", "Charlie", "Delta", "Echo"]);
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]

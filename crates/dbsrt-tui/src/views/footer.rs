@@ -8,8 +8,8 @@ use ratatui::{
     Frame,
 };
 
-use crate::commands::top::model::ViewPage;
-use crate::commands::top::ui::UiContext;
+use crate::model::ViewPage;
+use crate::ui::UiContext;
 
 /// Renders the bottom status and keybinding bar.
 ///

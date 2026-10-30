@@ -221,6 +221,13 @@ case "${ACTION}" in
     if [[ -f "deploy/o2switch/.htaccess" ]]; then
       rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "deploy/o2switch/.htaccess" "${O2SWITCH_HOST}:${REMOTE_PUBLIC_HTML}/.htaccess"
     fi
+
+    echo "-> Deploying WebAssembly TUI monitor (crates/dbsrt-web-top/dist)..."
+    if [[ -d "crates/dbsrt-web-top/dist" ]]; then
+      # shellcheck disable=SC2029
+      ssh "${O2SWITCH_HOST}" "mkdir -p ${REMOTE_PUBLIC_HTML}/top"
+      rsync -avz --delete --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "crates/dbsrt-web-top/dist/" "${O2SWITCH_HOST}:${REMOTE_PUBLIC_HTML}/top/"
+    fi
     echo "✓ Stack synchronized to ${O2SWITCH_HOST}."
     ;;
 
@@ -253,14 +260,21 @@ else
   echo "⚠️ Catalog pack failed; serving the previous catalog."
 fi
 
-setsid "${BIN}" \
+# Clean up any leftover screen session
+screen -X -S dbsrt_server quit 2>/dev/null || true
+
+screen -S dbsrt_server -d -m "${BIN}" \
   --host 127.0.0.1 \
   --port "${PORT}" \
   --dbphash "${DATA_DIR}/catalog.dbphash" \
   --subtitles-dir "${DATA_DIR}/SRT" \
-  --phash-dir "${BASE}/run/empty_phash" </dev/null >> "${LOG_FILE}" 2>&1 &
-echo $! > "${PID_FILE}"
-echo "✓ Started dbsrt-server with PID $(cat "${PID_FILE}")."
+  --phash-dir "${BASE}/run/empty_phash"
+sleep 1
+PID=$(pgrep -u "$(whoami)" -f '[b]in/dbsrt-server' | head -n 1 || true)
+if [[ -n "${PID}" ]]; then
+  echo "${PID}" > "${PID_FILE}"
+fi
+echo "✓ Started dbsrt-server (screen: dbsrt_server, PID: ${PID:-unknown})."
 REMOTE_SCRIPT
 
     echo "Waiting for healthcheck on http://127.0.0.1:${SERVER_PORT}/v1/health via SSH..."
@@ -287,6 +301,8 @@ REMOTE_SCRIPT
     check_ssh
     echo "=== Stopping dbsrt-server daemon on ${O2SWITCH_HOST} ==="
     remote_stop_pidfile "run/dbsrt-server.pid"
+    # shellcheck disable=SC2029
+    ssh "${O2SWITCH_HOST}" "screen -X -S dbsrt_server quit 2>/dev/null || true"
     echo "✓ dbsrt-server stopped."
     ;;
 
@@ -465,7 +481,9 @@ REMOTE_SCRIPT
       echo "  • Dashboard URL : ${O2SWITCH_URL}/monitoring"
       if [[ -n "${O2SWITCH_API_KEY}" ]]; then
         MOBILE_URL="${O2SWITCH_URL}/monitoring?token=${O2SWITCH_API_KEY}"
+        WASM_URL="${O2SWITCH_URL}/top/?token=${O2SWITCH_API_KEY}"
         echo "  • Mobile Link   : ${MOBILE_URL}"
+        echo "  • WASM TUI Link : ${WASM_URL}"
         echo "  (Ce lien configure automatiquement le cookie sécurisé et nettoie l'URL pour votre smartphone 4G/5G)"
         echo ""
         echo "=== QR Code 4G/5G (Scan Smartphone) ==="

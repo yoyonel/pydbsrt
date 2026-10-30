@@ -5,6 +5,9 @@
 Options -Indexes
 RewriteEngine On
 
+# Ensure WebAssembly MIME type is recognized by LiteSpeed/Apache
+AddType application/wasm .wasm
+
 # Force HTTPS redirect
 RewriteCond %{HTTPS} off
 RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]

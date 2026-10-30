@@ -8,7 +8,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::commands::top::{
+use crate::{
     constants::{BYTES_PER_GIB_F64, BYTES_PER_MIB_F64},
     model::{
         filter_and_sort_media_with_source_and_search, format_duration, DiscoveredMediaItem,

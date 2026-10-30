@@ -8,7 +8,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::commands::top::{
+use crate::{
     constants::{
         BYTES_PER_GIB, BYTES_PER_GIB_F64, BYTES_PER_MIB_F64, MEDIA_BROWSER_NON_STEM_COLUMNS_WIDTH,
     },

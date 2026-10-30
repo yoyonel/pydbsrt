@@ -11,14 +11,12 @@ use ratatui::{
     Frame,
 };
 
-use crate::commands::top::constants::{
+use crate::constants::{
     BITS_PER_BYTE_F64, BYTES_PER_GIB_F64, DEFAULT_MEDIA_CACHE_PATH, DEFAULT_PHASH_DIR,
 };
-use crate::commands::top::host_info::HostSystemInfo;
-use crate::commands::top::model::{
-    format_duration, format_progress_bar, GpuTelemetry, SystemTelemetry,
-};
-use crate::commands::top::ui::UiContext;
+use crate::host_info::HostSystemInfo;
+use crate::model::{format_duration, format_progress_bar, GpuTelemetry, SystemTelemetry};
+use crate::ui::UiContext;
 
 /// Minimum terminal column width required to split system diagnostics into a dual-column layout.
 pub const MIN_SYSTEM_TWO_COLUMN_WIDTH: u16 = 90;

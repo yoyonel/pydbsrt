@@ -10,7 +10,7 @@ use ratatui::{
     widgets::{Block, Borders},
 };
 
-use crate::commands::top::model::{CompletedStatus, IngestionStatus};
+use crate::model::{CompletedStatus, IngestionStatus};
 
 /// Percentage factor for symmetric horizontal layout padding (50% each side).
 pub const LAYOUT_CENTER_PERCENTAGE_DIVISOR: u16 = 2;
@@ -18,37 +18,61 @@ pub const LAYOUT_CENTER_PERCENTAGE_DIVISOR: u16 = 2;
 /// Standard base 100 percentage allocation.
 pub const TOTAL_PERCENTAGE: u16 = 100;
 
-/// Formats the current local wall-clock time as `HH:MM:SS` using thread-safe POSIX `localtime_r`.
+/// Queries the current UTC timestamp in seconds since Unix epoch across platforms.
+///
+/// # Returns
+/// `Some(u64)` with seconds elapsed since 1970-01-01, or `None` if clock retrieval fails.
+///
+/// # Data Flow & Invariants
+/// Uses native `std::time::SystemTime` on non-wasm targets.
+#[cfg(not(target_arch = "wasm32"))]
+fn get_now_epoch_secs() -> Option<u64> {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|d| d.as_secs())
+}
+
+/// Queries the current UTC timestamp in seconds since Unix epoch across platforms.
+///
+/// # Returns
+/// `Some(u64)` with seconds elapsed since 1970-01-01, or `None` if clock retrieval fails.
+///
+/// # Data Flow & Invariants
+/// Uses JavaScript `Date.now()` on wasm32 targets to avoid unsupported OS syscall panics.
+#[cfg(target_arch = "wasm32")]
+fn get_now_epoch_secs() -> Option<u64> {
+    let millis = js_sys::Date::now();
+    if millis >= 0.0 {
+        Some((millis / crate::constants::MILLIS_PER_SEC) as u64)
+    } else {
+        None
+    }
+}
+
+/// Formats the current local wall-clock time as `HH:MM:SS` across native and WebAssembly platforms.
 ///
 /// # Returns
 /// A formatted string representing the current system time in 24-hour format.
 ///
 /// # Panics
-/// Guaranteed not to panic; falls back to `"00:00:00"` if clock retrieval fails.
+/// Guaranteed not to panic; falls back to `"--:--:--"` if clock retrieval fails.
 ///
 /// # Data Flow & Invariants
-/// 1. Queries `libc::time(null)`.
-/// 2. Converts timestamp to local time structure using thread-safe `localtime_r`.
+/// 1. Queries platform epoch seconds via [`get_now_epoch_secs`].
+/// 2. Converts timestamp to UTC time of day.
 /// 3. Formats buffer into fixed 2-digit zero-padded segments.
 pub fn get_current_time_str() -> String {
-    let mut tm = libc::tm {
-        tm_sec: 0,
-        tm_min: 0,
-        tm_hour: 0,
-        tm_mday: 0,
-        tm_mon: 0,
-        tm_year: 0,
-        tm_wday: 0,
-        tm_yday: 0,
-        tm_isdst: 0,
-        tm_gmtoff: 0,
-        tm_zone: std::ptr::null(),
-    };
-    unsafe {
-        let now = libc::time(std::ptr::null_mut());
-        libc::localtime_r(&now, &mut tm);
+    if let Some(secs) = get_now_epoch_secs() {
+        let secs_of_day = secs % crate::constants::SECONDS_PER_DAY;
+        let hour = secs_of_day / crate::constants::SECONDS_PER_HOUR;
+        let min = (secs_of_day % crate::constants::SECONDS_PER_HOUR)
+            / crate::constants::SECONDS_PER_MINUTE;
+        let sec = secs_of_day % crate::constants::SECONDS_PER_MINUTE;
+        format!("{hour:02}:{min:02}:{sec:02}")
+    } else {
+        "--:--:--".to_string()
     }
-    format!("{:02}:{:02}:{:02}", tm.tm_hour, tm.tm_min, tm.tm_sec)
 }
 
 /// Computes a centered sub-rectangle inside a bounding area with fixed height and relative width.

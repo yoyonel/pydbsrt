@@ -1,0 +1,17 @@
+version: '3'
+
+tasks:
+  web-top:build:
+    desc: Build WebAssembly TUI monitor dashboard (crates/dbsrt-web-top via Ratzilla)
+    cmds:
+      - ./scripts/web_top_ctl.sh build {{.CLI_ARGS}}
+
+  web-top:serve:
+    desc: Serve WebAssembly TUI monitor dashboard locally on port 8085
+    cmds:
+      - ./scripts/web_top_ctl.sh serve {{.CLI_ARGS}}
+
+  web-top:iso:
+    desc: Strict ISO check of deployed web-top vs native dbsrt top on o2switch (captures in target/top_iso)
+    cmds:
+      - node scripts/top_iso_compare.mjs

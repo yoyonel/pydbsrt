@@ -107,6 +107,7 @@ pub fn create_router_with_state(state: AppState) -> Router {
             "/v1/monitoring/telemetry",
             get(monitoring_telemetry_handler),
         )
+        .route("/v1/monitoring/top", get(monitoring_top_handler))
         .route(
             "/v1/supervisor/heartbeat",
             post(supervisor_heartbeat_handler),

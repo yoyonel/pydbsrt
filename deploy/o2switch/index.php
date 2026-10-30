@@ -140,17 +140,21 @@ function set_auth_session_cookie(string $key): void
 
 function is_authenticated(array $validKeys, string &$matchedKey = ''): bool
 {
-    $headers = getallheaders();
+    $headers = function_exists('getallheaders') ? (getallheaders() ?: []) : [];
 
-    // 1. Check X-API-Key header
-    foreach ($headers as $name => $value) {
-        if (strcasecmp($name, 'X-API-Key') === 0) {
-            $candidate = trim((string) $value);
-            if (check_key_match($candidate, $validKeys)) {
-                $matchedKey = $candidate;
-                return true;
+    // 1. Check X-API-Key header (via $_SERVER or getallheaders)
+    $candidate = $_SERVER['HTTP_X_API_KEY'] ?? '';
+    if ($candidate === '') {
+        foreach ($headers as $name => $value) {
+            if (strcasecmp($name, 'X-API-Key') === 0) {
+                $candidate = trim((string) $value);
+                break;
             }
         }
+    }
+    if ($candidate !== '' && check_key_match($candidate, $validKeys)) {
+        $matchedKey = $candidate;
+        return true;
     }
 
     // 2. Check Authorization: Bearer <token>
@@ -365,6 +369,15 @@ function render_login_page(?string $errorMessage = null): void
     exit;
 }
 
+// Handle CORS preflight for browser WebAssembly clients
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'OPTIONS') {
+    header('Access-Control-Allow-Origin: *');
+    header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
+    header('Access-Control-Allow-Headers: Content-Type, Authorization, X-API-Key');
+    http_response_code(204);
+    exit;
+}
+
 // 1. Load Secret Keys
 $validKeys = load_valid_keys($secretKeyFile);
 if ($validKeys === []) {
@@ -517,7 +530,7 @@ foreach (explode("\r\n", $rawHeaders) as $headerLine) {
         if ($headerName === 'transfer-encoding' || $headerName === 'connection' || $headerName === 'content-length') {
             continue;
         }
-        header($headerLine, false);
+        header($headerLine, true);
     }
 }
 

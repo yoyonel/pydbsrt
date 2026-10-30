@@ -8,7 +8,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::commands::top::{constants::HELP_TAB_HEADER_HEIGHT, model::HelpTab, ui::UiContext};
+use crate::{constants::HELP_TAB_HEADER_HEIGHT, model::HelpTab, ui::UiContext};
 
 /// Renders the fullframe contextual help, technical glossary, and keybinding cheat sheet.
 ///

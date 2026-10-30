@@ -8,9 +8,9 @@ use ratatui::{
     Frame,
 };
 
-use crate::commands::top::constants::MIN_FULL_DECODE_DURATION_SECS;
-use crate::commands::top::model::SystemTelemetry;
-use crate::commands::top::ui::UiContext;
+use crate::constants::MIN_FULL_DECODE_DURATION_SECS;
+use crate::model::SystemTelemetry;
+use crate::ui::UiContext;
 
 /// Renders the fullframe descriptive statistical analysis of historical decoding performance.
 ///

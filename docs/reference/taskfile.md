@@ -181,3 +181,13 @@ Cette page dresse le dictionnaire exhaustif de toutes les cibles d'orchestration
 | `task o2switch:agent:status` | Affiche l'état et les métriques des requêtes relayées de l'agent local. |
 | `task o2switch:agent:logs` | Suit en direct les logs d'exécution de l'agent relais local. |
 | `task o2switch:agent:demo` | Valide de bout en bout la reconnaissance d'un fichier réel du NAS via le Cloud. |
+
+---
+
+## 9. Dashboard WebAssembly TUI (`web-top:*`)
+
+| Commande | Raccourcis | Description |
+| :--- | :--- | :--- |
+| `task web-top:build` | - | Compile le bundle WebAssembly client (`dbsrt-web-top` via Ratzilla et Trunk) sous `crates/dbsrt-web-top/dist`. |
+| `task web-top:serve` | - | Sert localement le moniteur TUI WebAssembly sur `http://127.0.0.1:8085` avec rechargement à chaud. |
+| `task web-top:iso` | - | Test ISO strict : rejoue la même séquence de touches sur `dbsrt top` natif (o2switch via SSH/tmux) et sur le web-top déployé (Chromium headless), compare les écrans normalisés. Captures et diffs dans `target/top_iso`. Codes retour : 0 identique, 1 écart ISO, 2 erreur harness, 3 écart dû au flux web coupé (infra). |

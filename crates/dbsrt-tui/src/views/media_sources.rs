@@ -8,7 +8,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::commands::top::{
+use crate::{
     constants::{
         DELETE_CONFIRM_MODAL_HEIGHT_LINES, MAX_SOURCE_NAME_CHARS, MAX_SOURCE_PATH_CHARS,
         SOURCE_MODAL_HEIGHT_LINES, SOURCE_MODAL_WIDTH_PERCENT,

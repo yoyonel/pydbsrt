@@ -568,6 +568,74 @@ pub async fn monitoring_telemetry_handler(
     })
 }
 
+/// Reuse window for the `dbsrt top --json` snapshot shared by concurrent web clients.
+const TOP_SNAPSHOT_TTL: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Last native snapshot; the lock is held across the spawn so only one probe runs at a time.
+static TOP_SNAPSHOT_CACHE: tokio::sync::Mutex<Option<(std::time::Instant, axum::body::Bytes)>> =
+    tokio::sync::Mutex::const_new(None);
+
+/// Serves the exact `SystemTelemetry` rendered by the native `dbsrt top` (web-top ISO source).
+///
+/// # Returns
+/// Raw JSON bytes from the sibling `dbsrt top --json` binary, cached for [`TOP_SNAPSHOT_TTL`].
+///
+/// # Errors
+/// [`StatusCode::INTERNAL_SERVER_ERROR`] when the binary cannot be spawned,
+/// [`StatusCode::BAD_GATEWAY`] when it exits non-zero.
+///
+/// # Data Flow & Invariants
+/// Runs the CLI next to the server executable with the server cwd, so relative state paths
+/// (`~/dbsrt` on o2switch) resolve identically to an interactive `dbsrt top`.
+/// shortcut: ~1.1 MB pretty JSON, no compression layer; add tower-http compression if mobile hurts.
+pub async fn monitoring_top_handler(
+    State(_state): State<Arc<AppState>>,
+) -> Result<
+    (
+        [(axum::http::header::HeaderName, &'static str); 1],
+        axum::body::Bytes,
+    ),
+    (StatusCode, String),
+> {
+    let json = [(axum::http::header::CONTENT_TYPE, "application/json")];
+    let mut cache = TOP_SNAPSHOT_CACHE.lock().await;
+    if let Some((at, body)) = cache.as_ref() {
+        if at.elapsed() < TOP_SNAPSHOT_TTL {
+            return Ok((json, body.clone()));
+        }
+    }
+
+    let exe =
+        std::env::current_exe().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let cli = exe.with_file_name("dbsrt");
+    let mut command = tokio::process::Command::new(&cli);
+    command.args(["top", "--json"]).kill_on_drop(true);
+    if let Some(dir) = exe.parent() {
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        let joined = std::env::join_paths(
+            std::iter::once(dir.to_path_buf()).chain(std::env::split_paths(&path)),
+        )
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        command.env("PATH", joined);
+    }
+    let output = command.output().await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("spawn {}: {e}", cli.display()),
+        )
+    })?;
+    if !output.status.success() {
+        return Err((
+            StatusCode::BAD_GATEWAY,
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+        ));
+    }
+
+    let body = axum::body::Bytes::from(output.stdout);
+    *cache = Some((std::time::Instant::now(), body.clone()));
+    Ok((json, body))
+}
+
 /// Receives and persists supervisor heartbeat payloads from RPi4 agent.
 ///
 /// # Arguments

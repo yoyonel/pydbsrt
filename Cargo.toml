@@ -2,6 +2,8 @@
 members = [
     "crates/dbsrt-core",
     "crates/dbsrt-index",
+    "crates/dbsrt-tui",
+    "crates/dbsrt-web-top",
     "crates/dbsrt-cli",
     "crates/dbsrt-server",
 ]

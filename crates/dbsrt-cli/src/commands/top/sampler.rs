@@ -565,20 +565,37 @@ pub fn load_historical_records(events_path: &Path, couplings_path: &Path) -> Vec
     }
 
     let mut items: Vec<HistoricalRecord> = by_stem.into_values().collect();
+    // by_stem is a HashMap: tie-break so every process (native, --json) lists the same order.
     items.sort_by(|a, b| {
-        let key_a = a
-            .end_iso
-            .as_deref()
-            .or(a.start_iso.as_deref())
-            .unwrap_or(&a.video_stem);
-        let key_b = b
-            .end_iso
-            .as_deref()
-            .or(b.start_iso.as_deref())
-            .unwrap_or(&b.video_stem);
-        key_a.cmp(key_b)
+        record_time_key(a)
+            .cmp(record_time_key(b))
+            .then(a.video_stem.cmp(&b.video_stem))
     });
     items
+}
+
+/// Returns the chronological sort key of a history record.
+///
+/// # Arguments
+/// * `record` - History record to order.
+///
+/// # Returns
+/// Its end timestamp, else its start timestamp, else its video stem.
+///
+/// # Errors
+/// None.
+///
+/// # Panics
+/// None.
+///
+/// # Data Flow & Invariants
+/// ISO-8601 strings sort chronologically as plain strings.
+fn record_time_key(record: &HistoricalRecord) -> &str {
+    record
+        .end_iso
+        .as_deref()
+        .or(record.start_iso.as_deref())
+        .unwrap_or(&record.video_stem)
 }
 
 /// Computes global session throughput across recent batch records (within rolling 2 hours) and active jobs.
@@ -2459,5 +2476,8 @@ pub fn process_candidate_jobs(
         });
     }
 
+    // sysinfo iterates a HashMap: sort so rows (and the selection) do not jump between refreshes
+    // and every process (native, --json) lists jobs in the same order.
+    active_jobs.sort_by_key(|j| j.pid);
     (active_jobs, active_pids)
 }
