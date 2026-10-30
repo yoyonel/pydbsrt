@@ -919,9 +919,8 @@ fn probe_remote_stream(
     sampling: SamplingMode,
     probe: impl FnOnce(&Path) -> Option<VideoMetadata>,
 ) -> Option<VideoMetadata> {
-    let s = path.to_string_lossy();
     let is_probeable_stream =
-        crate::container::is_remote_stream_or_pipe(path) && !s.starts_with("pipe:") && s != "-";
+        crate::container::is_remote_stream_or_pipe(path) && !crate::container::is_pipe_input(path);
     (sampling == SamplingMode::Full && is_probeable_stream)
         .then(|| probe(path))
         .flatten()

@@ -165,23 +165,25 @@ pub fn find_or_build_phash_with_hwaccel(
     }
 
     // Otherwise probe and extract all frames
-    let (meta_fps, max_frames) = if dbsrt_core::container::is_remote_stream_or_pipe(media_file) {
-        let fps = media_file
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .map(dbsrt_core::parse_fps_from_stem)
-            .unwrap_or(dbsrt_core::DEFAULT_BASELINE_FPS);
-        (fps, 0)
-    } else if let Ok(meta) = probe_video(media_file) {
-        let frames = (meta.duration * meta.fps).floor() as usize;
-        (meta.fps, if frames > 0 { frames } else { 0 })
-    } else {
-        let fps = media_file
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .map(dbsrt_core::parse_fps_from_stem)
-            .unwrap_or(dbsrt_core::DEFAULT_BASELINE_FPS);
-        (fps, 0)
+    let is_remote = dbsrt_core::container::is_remote_stream_or_pipe(media_file);
+    let probed = (!dbsrt_core::container::is_pipe_input(media_file))
+        .then(|| probe_video(media_file).ok())
+        .flatten()
+        .filter(|meta| meta.fps > 0.0);
+    let meta_fps = probed.as_ref().map_or_else(
+        || {
+            media_file
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .map(dbsrt_core::parse_fps_from_stem)
+                .unwrap_or(dbsrt_core::DEFAULT_BASELINE_FPS)
+        },
+        |meta| meta.fps,
+    );
+    // Remote streams stay uncapped: their probed fps only names the .phash file.
+    let max_frames = match &probed {
+        Some(meta) if !is_remote => (meta.duration * meta.fps).floor() as usize,
+        _ => 0,
     };
     let hashes = extract_frames_phash_with_hwaccel(media_file, 0.0, max_frames, hwaccel)?;
     if hashes.is_empty() {
