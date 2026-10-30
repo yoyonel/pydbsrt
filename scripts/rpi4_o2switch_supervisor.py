@@ -39,10 +39,13 @@ DEFAULT_SUPERVISOR_LOG_FILE: str = "logs/rpi4_supervisor.log"
 DEFAULT_RECENT_LOG_LINES_COUNT: int = 40
 PID_FILE_PATH: str = "run/rpi4_supervisor.pid"
 CTL_SCRIPT: str = "./scripts/o2switch_ctl.sh"
+FREEBOX_CTL_SCRIPT: str = "./scripts/freebox_batch_ctl.sh"
 # batch-status states that call for an automatic restart of the same batch type
 RESTARTABLE_STATES: Tuple[str, ...] = ("crashed", "absent")
 # A drained queue hands the CPUs over to the other library, so o2switch never idles
-NEXT_BATCH_TYPE: Dict[str, str] = {"tvshow": "movies", "movies": "tvshow"}
+NEXT_BATCH_TYPE: Dict[str, str] = {"tvshow": "movies", "movies": "freebox", "freebox": "tvshow"}
+# Batch types whose launch may fail on missing infrastructure (Freebox gateway); rotation then skips them
+OPTIONAL_BATCH_TYPES: Tuple[str, ...] = ("freebox",)
 # Minimum delay between two launches, so a queue of always-failing files cannot relaunch in a tight loop
 RELAUNCH_BACKOFF_SECS: int = 1800
 
@@ -205,10 +208,15 @@ def check_remote_batch_status(remote_host: str, remote_base: str) -> Dict[str, o
 def restart_remote_batch(remote_host: str, remote_base: str, workers: int, batch_type: str = "tvshow") -> bool:
     """Restarts remote batch ingestion of the given type with specified concurrency."""
     log(f"🔄 Launching remote {batch_type} batch on {remote_host} (concurrency: {workers} workers)...")
-    cmd = [CTL_SCRIPT, f"batch-{batch_type}", "--workers", str(workers), "--fresh-only", "--daemon"]
+    if batch_type == "freebox":
+        cmd = [FREEBOX_CTL_SCRIPT, "start", "--workers", str(workers)]
+    else:
+        cmd = [CTL_SCRIPT, f"batch-{batch_type}", "--workers", str(workers), "--fresh-only", "--daemon"]
     try:
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=120, env=_ctl_env(remote_host, remote_base))
-        success = res.returncode == 0 and "Started persistent background batch worker" in res.stdout
+        success = res.returncode == 0 and (
+            "Started persistent background" in res.stdout or "already running" in res.stdout
+        )
         if success:
             log(f"✓ Remote batch successfully started with {workers} workers.")
         else:
@@ -268,16 +276,21 @@ def backup_remote_phash_to_nas(
 def decide_next_batch(state: str, batch_type: str, secs_since_last_launch: float) -> str | None:
     """Returns the batch type to launch now, or None.
 
-    Crashed/absent batches resume their type; a finished batch switches to the other library.
+    Crashed/absent batches resume their type with backoff; a finished batch immediately switches
+    to the next library in rotation (tvshow -> movies -> freebox -> tvshow).
     Manual stops, aborted batches and failed probes never trigger a launch.
     """
     if state in RESTARTABLE_STATES:
-        next_type = batch_type
-    elif state == "finished":
+        if secs_since_last_launch < RELAUNCH_BACKOFF_SECS:
+            return None
+        return batch_type
+    if state == "finished":
         next_type = NEXT_BATCH_TYPE.get(batch_type, "tvshow")
-    else:
-        return None
-    return next_type if secs_since_last_launch >= RELAUNCH_BACKOFF_SECS else None
+        # Short cooldown to allow catalog sync and avoid tight CPU loop if all queues are drained
+        if secs_since_last_launch < 60:
+            return None
+        return next_type
+    return None
 
 
 def decide_workers(
@@ -420,7 +433,9 @@ def _relaunch_step(remote_host: str, remote_base: str, state: str, status: Dict[
         return
     cur_workers = get_remote_desired_workers(remote_host, remote_base)
     log(f"⚠️ Remote batch is {state} ({status['type']}). Launching {next_type} with {cur_workers} workers...")
-    restart_remote_batch(remote_host, remote_base, cur_workers, next_type)
+    if not restart_remote_batch(remote_host, remote_base, cur_workers, next_type) and next_type in OPTIONAL_BATCH_TYPES:
+        # An unreachable home gateway must not leave o2switch idle: skip to the next library
+        restart_remote_batch(remote_host, remote_base, cur_workers, NEXT_BATCH_TYPE[next_type])
     loop.cpu_history.clear()
     loop.prev_sample = None
     loop.last_scale_time = loop.last_launch_time = time.time()

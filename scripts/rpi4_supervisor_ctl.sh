@@ -18,7 +18,14 @@ LOG_FILE="${REMOTE_DIR}/logs/rpi4_supervisor.log"
 SERVICE_NAME="${SERVICE_NAME:-dbsrt-supervisor.service}"
 UNIT_FILE="deploy/rpi4/dbsrt-supervisor.service"
 # Scripts the supervisor runs on the RPi4 (it drives o2switch through o2switch_ctl.sh)
-SUPERVISOR_SCRIPTS=(scripts/rpi4_o2switch_supervisor.py scripts/o2switch_ctl.sh scripts/load_env.sh scripts/o2switch_batch_worker.py)
+SUPERVISOR_SCRIPTS=(
+  scripts/rpi4_o2switch_supervisor.py
+  scripts/o2switch_ctl.sh
+  scripts/load_env.sh
+  scripts/o2switch_batch_worker.py
+  scripts/freebox_batch_ctl.sh
+  scripts/scan_freebox_targets.py
+)
 
 run_ssh() {
   ssh -o BatchMode=yes -o ConnectTimeout="${DEFAULT_CONNECT_TIMEOUT}" "${RPI_HOST}" "$@"
