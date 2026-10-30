@@ -29,7 +29,8 @@ pub const NTSC_FILM_FPS: f64 = 23.976;
 
 pub use crate::ffmpeg_input::DEFAULT_FFMPEG_DECODE_THREADS;
 use crate::ffmpeg_input::{
-    apply_ftp_credentials, display_input, ffmpeg_decode_threads, redact_url_userinfo,
+    apply_ftp_credentials, display_input, ffmpeg_decode_threads, http_reconnect_args,
+    redact_url_userinfo,
 };
 use crate::job_progress::{create_job_guard, maybe_update_progress};
 
@@ -723,6 +724,7 @@ fn build_ffmpeg_extraction_command(
     let threads = ffmpeg_decode_threads();
     cmd.args(["-threads", &threads]);
     apply_ftp_credentials(&mut cmd, path);
+    cmd.args(http_reconnect_args(&path.to_string_lossy()));
     cmd.arg("-i").arg(path);
 
     if let Some(dur) = options.duration_sec {
@@ -944,6 +946,36 @@ fn resolve_expected_total_frames(
     Some((duration * meta_fps).round() as usize)
 }
 
+/// Minimum share of the probed frame count a full remote stream must deliver.
+const REMOTE_MIN_FRAME_RATIO: f64 = 0.98;
+
+/// Rejects a full remote stream that ended well before its probed length. ffmpeg exits 0 when
+/// the server drops the connection mid-file, so a short read is the only sign of truncation.
+// shortcut: container duration can exceed the video stream (longer audio); a file whose video
+// ends more than 2% early fails here, loosen the ratio if real media trips it.
+fn check_remote_truncation(
+    path: &Path,
+    options: &VideoExtractionOptions,
+    extracted: usize,
+    expected_total: Option<usize>,
+) -> Result<()> {
+    let is_remote =
+        crate::container::is_remote_stream_or_pipe(path) && !crate::container::is_pipe_input(path);
+    match expected_total {
+        Some(total)
+            if is_remote
+                && options.max_frames.is_none()
+                && (extracted as f64) < total as f64 * REMOTE_MIN_FRAME_RATIO =>
+        {
+            anyhow::bail!(
+                "Remote stream truncated: {extracted}/{total} frames from {}",
+                redact_url_userinfo(&path.to_string_lossy())
+            )
+        }
+        _ => Ok(()),
+    }
+}
+
 fn run_extraction_process(
     path: &Path,
     options: &VideoExtractionOptions,
@@ -989,7 +1021,7 @@ fn run_extraction_process(
 
     let _ = child.kill();
     let _ = child.wait();
-    Ok(samples)
+    check_remote_truncation(path, options, samples.len(), expected_total).map(|()| samples)
 }
 
 /// Convenience function: extracts 1 FPS sparse perceptual hashes for ultra-fast media identification.
@@ -1153,6 +1185,46 @@ mod tests {
         assert_eq!(args[threads_pos + 1], ffmpeg_decode_threads());
         assert_eq!(args[input_pos + 1], "/data/movie.mkv");
         assert!(!args.iter().any(|a| a.starts_with("-ftp-")));
+        assert!(!args.iter().any(|a| a == "-reconnect"));
+    }
+
+    #[test]
+    fn test_check_remote_truncation() {
+        let url = Path::new("http://nas.example/movie.mkv");
+        let opts = VideoExtractionOptions::default();
+        assert!(check_remote_truncation(url, &opts, 330, Some(812)).is_err());
+        assert!(check_remote_truncation(url, &opts, 800, Some(812)).is_ok());
+        assert!(check_remote_truncation(url, &opts, 330, None).is_ok());
+        assert!(
+            check_remote_truncation(Path::new("/data/movie.mkv"), &opts, 330, Some(812)).is_ok()
+        );
+        assert!(check_remote_truncation(Path::new("pipe:0"), &opts, 330, Some(812)).is_ok());
+        let capped = VideoExtractionOptions {
+            max_frames: Some(812),
+            ..Default::default()
+        };
+        assert!(check_remote_truncation(url, &capped, 330, Some(812)).is_ok());
+    }
+
+    #[test]
+    fn test_extraction_command_http_reconnect_precedes_input() {
+        let resolved = ResolvedFfmpeg {
+            binary: PathBuf::from("ffmpeg"),
+            hwaccel: HwAccel::Disabled,
+        };
+        let cmd = build_ffmpeg_extraction_command(
+            Path::new("http://nas.example/Disque_1/movie.mkv"),
+            &VideoExtractionOptions::default(),
+            &resolved,
+        );
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        let input_pos = args.iter().position(|a| a == "-i").unwrap();
+        let reconnect_pos = args.iter().position(|a| a == "-reconnect").unwrap();
+        assert!(reconnect_pos < input_pos);
+        assert!(args[..input_pos].contains(&"-reconnect_on_network_error".to_string()));
     }
 
     #[test]
