@@ -1,6 +1,6 @@
 #![cfg(unix)]
 
-use dbsrt_server::{create_router, top_snapshot, TopSnapshotCache};
+use dbsrt_server::{create_router, paginate_top_snapshot, top_snapshot, TopSnapshotCache};
 use reqwest::StatusCode;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -82,4 +82,28 @@ async fn test_top_snapshot_success_cache_and_errors() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::INTERNAL_SERVER_ERROR);
     let _ = std::fs::remove_dir_all(&phash_dir);
+}
+
+#[test]
+fn test_paginate_top_snapshot_cuts_heavy_lists_and_reports_totals() {
+    let body = br#"{"host_cpu_pct":12.5,"history_records":[1,2,3,4,5],"discovered_media":[1,2]}"#;
+    let page: serde_json::Value =
+        serde_json::from_slice(&paginate_top_snapshot(body, 1, 2).unwrap()).unwrap();
+    assert_eq!(page["history_records"], serde_json::json!([2, 3]));
+    assert_eq!(page["discovered_media"], serde_json::json!([2]));
+    assert_eq!(page["history_total"], 5);
+    assert_eq!(page["discovered_media_total"], 2);
+    assert_eq!(page["host_cpu_pct"], 12.5, "live fields are kept");
+
+    let live: serde_json::Value =
+        serde_json::from_slice(&paginate_top_snapshot(body, 0, 0).unwrap()).unwrap();
+    assert_eq!(live["history_records"], serde_json::json!([]));
+    assert_eq!(live["history_total"], 5);
+
+    let past_end: serde_json::Value =
+        serde_json::from_slice(&paginate_top_snapshot(body, 10, 50).unwrap()).unwrap();
+    assert_eq!(past_end["discovered_media"], serde_json::json!([]));
+
+    let (code, _) = paginate_top_snapshot(b"not json", 0, 1).unwrap_err();
+    assert_eq!(code, StatusCode::BAD_GATEWAY);
 }

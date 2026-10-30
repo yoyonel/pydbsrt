@@ -3,16 +3,16 @@
 use crate::constants::{
     BYTES_PER_GIB_F64, CIVIL_DAYS_PER_400_YEARS, CIVIL_EPOCH_DAYS_OFFSET,
     DEFAULT_BATCH_EVENTS_PATH, DEFAULT_BATCH_QUEUE_PATH, DEFAULT_ESTIMATED_MEDIA_DURATION_SECS,
-    DEFAULT_JOBS_DIR, DEFAULT_SUPERVISOR_STATUS_PATH, FALLBACK_BATCH_EVENTS_PATH,
-    MAX_MONITORING_RECENT_EVENTS, SECONDS_PER_DAY, SECONDS_PER_HOUR, SECONDS_PER_MINUTE,
-    SUPERVISOR_STALE_THRESHOLD_SECS,
+    DEFAULT_JOBS_DIR, DEFAULT_SUPERVISOR_STATUS_PATH, DEFAULT_TOP_PAGE_LIMIT,
+    FALLBACK_BATCH_EVENTS_PATH, MAX_MONITORING_RECENT_EVENTS, SECONDS_PER_DAY, SECONDS_PER_HOUR,
+    SECONDS_PER_MINUTE, SUPERVISOR_STALE_THRESHOLD_SECS,
 };
 use crate::dtos::{
     ActiveJobStatus, BatchQueueStatus, MonitoringTelemetryResponse, RecentBatchEvent,
-    SupervisorHeartbeatPayload, SupervisorTelemetry, SystemStats,
+    SupervisorHeartbeatPayload, SupervisorTelemetry, SystemStats, TopPageQuery,
 };
 use crate::state::AppState;
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::Html;
 use axum::Json;
@@ -632,17 +632,49 @@ pub async fn top_snapshot(
     Ok(body)
 }
 
-/// Serves the exact `SystemTelemetry` rendered by the native `dbsrt top`.
+/// Lists of `dbsrt top --json` paginated by `/v1/monitoring/top`, each with its total field.
+const TOP_PAGED_LISTS: [(&str, &str); 2] = [
+    ("history_records", "history_total"),
+    ("discovered_media", "discovered_media_total"),
+];
+
+/// Keeps `limit` items from `offset` in each list of [`TOP_PAGED_LISTS`] and adds its total.
+///
+/// # Errors
+/// [`StatusCode::BAD_GATEWAY`] when `body` is not JSON.
+pub fn paginate_top_snapshot(
+    body: &[u8],
+    offset: usize,
+    limit: usize,
+) -> Result<axum::body::Bytes, (StatusCode, String)> {
+    let mut snapshot: serde_json::Value = serde_json::from_slice(body)
+        .map_err(|e| (StatusCode::BAD_GATEWAY, format!("dbsrt top --json: {e}")))?;
+    if let Some(fields) = snapshot.as_object_mut() {
+        for (list, total) in TOP_PAGED_LISTS {
+            if let Some(serde_json::Value::Array(items)) = fields.get_mut(list) {
+                let len = items.len();
+                *items = items.drain(..).skip(offset).take(limit).collect();
+                fields.insert(total.to_string(), len.into());
+            }
+        }
+    }
+    serde_json::to_vec(&snapshot)
+        .map(Into::into)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+}
+
+/// Serves the `SystemTelemetry` rendered by the native `dbsrt top`, heavy lists paginated.
 ///
 /// # Returns
-/// Raw JSON bytes from the sibling `dbsrt top --json` binary, see [`top_snapshot`].
+/// JSON from the sibling `dbsrt top --json` binary (see [`top_snapshot`]), with
+/// `history_records` and `discovered_media` cut by [`paginate_top_snapshot`].
 ///
 /// # Errors
 /// Same as [`top_snapshot`], plus [`StatusCode::INTERNAL_SERVER_ERROR`] when the server
 /// executable path is unknown.
-/// shortcut: ~1.1 MB pretty JSON, no compression layer; add tower-http compression if mobile hurts.
 pub async fn monitoring_top_handler(
     State(_state): State<Arc<AppState>>,
+    Query(page): Query<TopPageQuery>,
 ) -> Result<
     (
         [(axum::http::header::HeaderName, &'static str); 1],
@@ -653,6 +685,11 @@ pub async fn monitoring_top_handler(
     let exe =
         std::env::current_exe().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let body = top_snapshot(&exe, &TOP_SNAPSHOT_CACHE).await?;
+    let body = paginate_top_snapshot(
+        &body,
+        page.offset.unwrap_or(0),
+        page.limit.unwrap_or(DEFAULT_TOP_PAGE_LIMIT),
+    )?;
     Ok((
         [(axum::http::header::CONTENT_TYPE, "application/json")],
         body,

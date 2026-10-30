@@ -427,6 +427,15 @@ pub struct CouplingsQuery {
     pub summary: Option<bool>,
 }
 
+/// Pagination of the heavy lists (`history_records`, `discovered_media`) of `/v1/monitoring/top`.
+#[derive(Deserialize, Debug, Default, Clone)]
+pub struct TopPageQuery {
+    /// Items skipped at the start of each list.
+    pub offset: Option<usize>,
+    /// Max items kept per list; `0` keeps only the live fields and the totals.
+    pub limit: Option<usize>,
+}
+
 #[derive(Deserialize, Debug, Default, Clone)]
 pub struct SubFramesQuery {
     pub media_hash: String,

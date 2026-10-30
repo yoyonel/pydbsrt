@@ -134,3 +134,6 @@ pub const MILLIS_PER_SEC: f64 = 1000.0;
 
 /// Refinement window radius in step units (+/- 2 seconds).
 pub const REFINEMENT_STEP_RADIUS: usize = 2;
+
+/// Default page size of the `history_records` and `discovered_media` lists of `/v1/monitoring/top`.
+pub const DEFAULT_TOP_PAGE_LIMIT: usize = 50;
