@@ -136,8 +136,8 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
 
       # Browser glue is cfg-gated to wasm32, so host builds above never compile it.
-      - name: Check web-top WebAssembly build (cargo check wasm32)
-        run: cargo check -p dbsrt-web-top --target wasm32-unknown-unknown
+      - name: Lint web-top WebAssembly build (cargo clippy wasm32)
+        run: cargo clippy -p dbsrt-web-top --target wasm32-unknown-unknown -- -D warnings
 
       - name: Rust Architectural Complexity Gate (LOC <= 150, CCN <= 20)
         run: uv run python scripts/lint_complexity.py
