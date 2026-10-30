@@ -167,7 +167,34 @@ Si vous préférez exécuter `dbsrt-server` sans surcharge de conteneur Docker n
 
 ---
 
-## 9. Félicitations !
+## 9. Étape 7 : Activer le Superviseur Autonome 24/7 & Backup NAS Synology
+
+Pour que le Raspberry Pi 4 gère de manière totalement autonome la synchronisation du catalogue avec le Cloud o2switch et archive en continu les empreintes brutes vers le NAS Synology sans intervention manuelle :
+
+1. Vérifiez que les partages NFS du Synology sont configurés dans `/etc/fstab` sur le Pi :
+   ```text
+   ds418.home:/volume1/video   /mnt/synology/video   nfs   rw,soft,timeo=30,nofail,_netdev   0   0
+   ds418.home:/volume1/tvshow  /mnt/synology/tvshow  nfs   rw,soft,timeo=30,nofail,_netdev   0   0
+   ```
+2. Installez et activez le démon superviseur systemd utilisateur sur le Pi :
+   ```bash
+   task rpi4:supervisor:install
+   task rpi4:supervisor:start
+   ```
+3. Suivez l'activité du superviseur en temps réel :
+   ```bash
+   task rpi4:supervisor:logs
+   ```
+
+Le superviseur exécute trois rôles en parallèle :
+
+- **Toutes les 60 s** : Contrôle de vie et régulation adaptative CPU du batch o2switch (2 à 5 workers).
+- **Toutes les 10 min** : Rapatriement différentiel atomique de `catalog.dbphash` (150 Mo, `mmap` pur, 0 fichier unitaire sur la SD).
+- **Toutes les heures** : Sauvegarde des empreintes `*.phash` brutes vers le NAS Synology via montage NFS (relais en RAM, **0 écriture flash SD**).
+
+---
+
+## 10. Félicitations !
 
 Votre Raspberry Pi 4 est désormais une **appliance domestique autonome** de reconnaissance et d'alignement de sous-titres :
 

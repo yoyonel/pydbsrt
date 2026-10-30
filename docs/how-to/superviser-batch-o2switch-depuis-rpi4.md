@@ -211,9 +211,14 @@ L'agent accepte les options suivantes en ligne de commande :
 | Option | Défaut | Description |
 | :--- | :--- | :--- |
 | `--check-interval` | `60` | Intervalle de contrôle de l'état distant (en secondes). |
-| `--pull-interval` | `600` | Intervalle de synchronisation descendante des `.phash` (en secondes). |
+| `--pull-interval` | `600` | Intervalle de synchronisation descendante du catalogue compilé `catalog.dbphash` et sous-titres (en secondes). |
+| `--backup-interval` | `3600` | Intervalle d'archivage automatique des empreintes brutes `*.phash` vers le NAS Synology (en secondes). |
 | `--remote-host` | `o2switch` | Alias de l'hôte distant défini dans `~/.ssh/config`. |
 | `--remote-base` | `dbsrt` | Répertoire distant racine du projet sur o2switch. |
+
+> [!NOTE]
+> **Pipeline de sauvegarde autonome RPi4 $\rightarrow$ NAS** :
+> En plus du rapatriement léger du catalogue toutes les 10 min, le superviseur déclenche automatiquement toutes les heures (`nas_backup: 3600s`) un `rsync` différentiel des fichiers `.phash` bruts depuis o2switch vers le montage NFS du Synology (`/mnt/synology/video/__PHASH__`). Le RPi4 agit en pur relais réseau en mémoire RAM : **0 écriture sur la carte SD**, sauvegarde 100% pérenne et autonome 24/7.
 
 ---
 

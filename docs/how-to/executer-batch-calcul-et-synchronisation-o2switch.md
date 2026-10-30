@@ -189,17 +189,21 @@ Une fois le batch d'épisodes terminé sur o2switch, les fichiers `.phash` et `.
 
 ### Étape 1 : Rapatriement différentiel des artefacts
 
-Exécutez la tâche de synchronisation descendante :
+Le système sépare strictement le catalogue compilé léger pour les appliances de lecture (RPi4) et la sauvegarde pérenne des empreintes brutes pour le NAS Synology :
 
 ```bash
+# 1. Rapatrier le catalogue compilé catalog.dbphash, les sous-titres CAS et les rapports télémétriques
 task o2switch:pull-catalog
+
+# 2. Sauvegarder les empreintes brutes unitaires .phash vers le stockage pérenne NAS Synology
+task o2switch:backup-nas
+
+# Sauvegarde personnalisée vers un point de montage NAS spécifique :
+task o2switch:backup-nas -- /media/$USER/Synology/__PHASH__
 ```
 
-Cette commande exécute un `rsync` différentiel sécurisé (`--ignore-existing`) plafonné à $20\text{ MB/s}$ :
-
-- Rapatrie tous les nouveaux fichiers `*.phash` dans `data/__PHASH__/`.
-- Rapatrie toutes les nouvelles pistes de sous-titres dans `data/SRT/<hash>.srt`.
-- Télécharge le journal d'événements `batch_tvshow_nightly.jsonl` dans `data/reports/`.
+- `task o2switch:pull-catalog` : télécharge atomiquement le catalogue unifié `catalog.dbphash` (150 Mo, mappé en `mmap`), les sous-titres `.srt` et les journaux sans encombrer ni user le stockage flash (idéal pour Raspberry Pi et postes légers).
+- `task o2switch:backup-nas` : archive les milliers d'empreintes brutes `*.phash` (~1 Go) vers le NAS Synology persistant, garantissant la conservation contre la volatilité d'o2switch.
 
 ### Étape 2 : Consolider et certifier les couplages locaux
 
@@ -294,7 +298,8 @@ task o2switch:batch:tvshow -- --retry-failed --max-extraction-secs 2700 --daemon
 | `task o2switch:batch:tvshow` | Lance le batch parallèle sur les séries vierges (/tvshow, 4-8 workers) | Exécution distante o2switch |
 | `task o2switch:batch:movies` | Lance le batch parallèle sur les films vierges (/video, 4-8 workers) | Exécution distante o2switch |
 | `task o2switch:top` | Ouvre le moniteur TUI plein écran en direct sur o2switch via SSH | Terminal interactif SSH |
-| `task o2switch:pull-catalog` | Rapatrie les `.phash`, `.srt` et journaux télémétriques vers le local | o2switch $\rightarrow$ Local |
+| `task o2switch:pull-catalog` | Rapatrie le catalogue compilé `catalog.dbphash`, les SRT et journaux (mode léger par défaut) | o2switch $\rightarrow$ Local / RPi4 |
+| `task o2switch:backup-nas` | Rapatrie les empreintes brutes unitaires `.phash` vers le NAS Synology / stockage pérenne | o2switch $\rightarrow$ NAS / Backup |
 | `task coupling:certify` | Certifie et référence les nouveaux couplages dans `couplings.json` | Local |
 | `task catalog:compact` | Recompacte le catalogue binaire haute densité `catalog.dbphash` | Local |
 | `task o2switch:status` | Vérifie l'état du démon distant, sa consommation RAM et la santé API | Local $\rightarrow$ o2switch |

@@ -153,7 +153,8 @@ Cette page dresse le dictionnaire exhaustif de toutes les cibles d'orchestration
 | `task o2switch:batch:stop` | Arrête proprement le travailleur batch en arrière-plan sur o2switch. |
 | `task o2switch:batch:logs` | Suit en direct (`tail -f`) les journaux d'exécution du batch distant sur o2switch. |
 | `task o2switch:top` | Ouvre le moniteur TUI plein écran en direct sur o2switch via SSH (`ssh -t`). |
-| `task o2switch:pull-catalog` | Rapatrie les `.phash`, `.srt` et journaux télémétriques depuis o2switch vers le stockage local. |
+| `task o2switch:pull-catalog` | Rapatrie le catalogue compilé `catalog.dbphash`, les sous-titres SRT et journaux depuis o2switch vers le stockage local / appliance. |
+| `task o2switch:backup-nas` | Rapatrie les empreintes brutes unitaires `.phash` depuis o2switch vers le NAS Synology / stockage persistant de sauvegarde. |
 | `task o2switch:start` | Démarre le démon en arrière-plan sans root sur o2switch et attend la validation de la sonde `/v1/health`. |
 | `task o2switch:stop` | Arrête proprement le démon à distance via signal `SIGTERM` (avec bascule `SIGKILL` de sécurité). |
 | `task o2switch:restart` | Redémarre le démon `dbsrt-server` sur o2switch. |

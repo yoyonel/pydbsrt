@@ -69,9 +69,9 @@ flowchart TD
     FBX -->|2. Stream Réseau Mémoire| O2_CPU
     O2_CPU -->|3. Extraction à la volée| O2_DATA
     O2_DATA -->|4. Recompilation Zero-DB| O2_RAM
-    O2_DATA -.->|5. task o2switch:pull-results| LOC_SRT
-    LOC_SRT -->|6. Import SQL batch| LOC_PG
-    LOC_SRT -.->|7. Sauvegarde pérenne| NAS_PHASH
+    O2_DATA -->|5. task o2switch:pull-catalog (dbphash + SRT)| LOC_SRT
+    O2_DATA -.->|6. task o2switch:backup-nas (archive brute)| NAS_PHASH
+    LOC_SRT -->|7. Import SQL batch| LOC_PG
     LOC_VLC -->|8. Requête HTTP /v1/search| O2_RAM
 ```
 
