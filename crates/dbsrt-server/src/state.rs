@@ -169,6 +169,15 @@ pub struct AppState {
     pub delta_index: Arc<std::sync::RwLock<DeltaIndex>>,
 }
 
+/// Optional configuration parameters for initializing [`AppState`].
+#[derive(Debug, Clone, Default)]
+pub struct AppStateInitOptions {
+    /// Explicit target `.dbphash` catalog file path.
+    pub dbphash_path: Option<PathBuf>,
+    /// Additional search directories for loose `.phash` files.
+    pub extra_phash_dirs: Vec<PathBuf>,
+}
+
 impl AppState {
     pub fn new(
         phash_dir: PathBuf,
@@ -176,9 +185,53 @@ impl AppState {
         provider: Arc<dyn SubtitleProvider>,
         cache: SubtitleCache,
     ) -> Self {
-        let mut extra_phash_dirs = Vec::new();
+        let mut st = Self::with_options(
+            phash_dir,
+            subtitles_dir,
+            provider,
+            AppStateInitOptions::default(),
+        );
+        st.cache = cache;
+        st
+    }
+
+    /// Initializes `AppState` with custom catalog path and extra directory options.
+    ///
+    /// # Arguments
+    /// - `phash_dir`: Primary directory for loose `.phash` files.
+    /// - `subtitles_dir`: Root directory for reference `.srt` files and `couplings.json`.
+    /// - `provider`: Remote subtitle download provider facade.
+    /// - `options`: Extended initialization options including custom dbphash path and extra dirs.
+    ///
+    /// # Returns
+    /// An initialized [`AppState`] ready to serve HTTP requests.
+    ///
+    /// # Panics
+    /// Never panics.
+    ///
+    /// # Data Flow & Invariants
+    /// Prevents unbounded memory bloat: when a compiled `.dbphash` catalog is present,
+    /// loose fallback directories (`data/__PHASH__`) are NOT scanned into RAM.
+    pub fn with_options(
+        phash_dir: PathBuf,
+        subtitles_dir: PathBuf,
+        provider: Arc<dyn SubtitleProvider>,
+        options: AppStateInitOptions,
+    ) -> Self {
+        let default_catalog = PathBuf::from("data/catalog.dbphash");
+        let initial_catalog_path = match options.dbphash_path {
+            Some(p) => Some(p),
+            None if default_catalog.exists() => Some(default_catalog),
+            None => None,
+        };
+
+        let mut extra_phash_dirs = options.extra_phash_dirs;
         let default_repo_phash = PathBuf::from("data/__PHASH__");
-        if default_repo_phash != phash_dir && default_repo_phash.exists() {
+        if initial_catalog_path.is_none()
+            && default_repo_phash != phash_dir
+            && !extra_phash_dirs.contains(&default_repo_phash)
+            && default_repo_phash.exists()
+        {
             extra_phash_dirs.push(default_repo_phash);
         }
 
@@ -187,15 +240,10 @@ impl AppState {
             CouplingRegistry::load_or_default(&reg_path).unwrap_or_default(),
         ));
 
-        // Auto-detect default catalog if exists
-        let default_catalog = PathBuf::from("data/catalog.dbphash");
-        let initial_catalog_path = if default_catalog.exists() {
-            Some(default_catalog)
-        } else {
-            None
-        };
-
-        let mut all_dirs = vec![phash_dir.clone()];
+        let mut all_dirs = Vec::new();
+        if phash_dir.exists() && phash_dir != Path::new("/tmp") {
+            all_dirs.push(phash_dir.clone());
+        }
         all_dirs.extend_from_slice(&extra_phash_dirs);
 
         let initial_engine =
@@ -213,7 +261,7 @@ impl AppState {
             subtitles_dir,
             coupling_registry,
             provider,
-            cache,
+            cache: SubtitleCache::default(),
             start_time: Instant::now(),
             metrics: Arc::new(ServerMetrics::default()),
             remote_api: None,
@@ -328,8 +376,6 @@ impl AppState {
                     );
                 }
                 let reader = MmapDbphash::open(p)?;
-                let _ = reader.sparse_mih();
-                let _ = reader.cuts_mih();
                 media_count = reader.media_entries().len();
                 cuts_count = reader.cuts_entries().len();
                 sparse_count = reader.sparse_entries().len();
@@ -340,13 +386,17 @@ impl AppState {
 
         let dirs = self.effective_phash_dirs(None);
         let mut loose_file_count = 0;
-        let new_lib_opt = match dbsrt_index::MmapLibrary::from_directories(&dirs) {
-            Ok(lib) => {
-                lib.prewarm_mih();
-                loose_file_count = lib.file_count();
-                Some(Arc::new(lib))
+        let new_lib_opt = if !dirs.is_empty() {
+            match dbsrt_index::MmapLibrary::from_directories(&dirs) {
+                Ok(lib) => {
+                    lib.prewarm_mih();
+                    loose_file_count = lib.file_count();
+                    Some(Arc::new(lib))
+                }
+                Err(_) => None,
             }
-            Err(_) => None,
+        } else {
+            None
         };
 
         // --- Phase 2: Commit Atomically (cannot fail) ---
@@ -409,8 +459,6 @@ impl AppState {
     pub fn set_dbphash(&self, path: Option<PathBuf>) {
         if let Some(ref p) = path {
             if let Ok(reader) = MmapDbphash::open(p) {
-                let _ = reader.sparse_mih();
-                let _ = reader.cuts_mih();
                 let reader_arc = Arc::new(reader);
                 if let Ok(mut p_lock) = self.dbphash_path.write() {
                     *p_lock = Some(p.clone());
@@ -455,10 +503,12 @@ impl AppState {
     pub fn effective_phash_dirs(&self, override_dir: Option<&Path>) -> Vec<PathBuf> {
         let mut dirs = Vec::new();
         let primary = override_dir.unwrap_or(&self.phash_dir).to_path_buf();
-        dirs.push(primary);
+        if primary.exists() && primary != Path::new("/tmp") {
+            dirs.push(primary);
+        }
         if override_dir.is_none() {
             for d in &self.extra_phash_dirs {
-                if !dirs.contains(d) {
+                if d.exists() && !dirs.contains(d) {
                     dirs.push(d.clone());
                 }
             }

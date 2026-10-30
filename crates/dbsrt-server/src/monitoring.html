@@ -1,0 +1,682 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#0d1117">
+  <title>dbsrt Monitor ── o2switch & RPi4 Watchdog</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --card-bg: #161b22;
+      --card-border: #30363d;
+      --text-main: #c9d1d9;
+      --text-muted: #8b949e;
+      --accent: #58a6ff;
+      --accent-hover: #79c0ff;
+      --success: #3fb950;
+      --warning: #d29922;
+      --danger: #f85149;
+      --terminal-bg: #090d13;
+      --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    body {
+      background-color: var(--bg);
+      color: var(--text-main);
+      font-family: var(--font-sans);
+      font-size: 14px;
+      line-height: 1.5;
+      padding: 12px;
+      padding-bottom: 40px;
+    }
+
+    header {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding-bottom: 12px;
+      margin-bottom: 16px;
+      border-bottom: 1px solid var(--card-border);
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .brand h1 {
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .badge {
+      font-size: 0.72rem;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .badge-online { background: rgba(63, 185, 80, 0.15); color: var(--success); border: 1px solid var(--success); }
+    .badge-offline { background: rgba(248, 81, 73, 0.15); color: var(--danger); border: 1px solid var(--danger); }
+    .badge-warn { background: rgba(210, 153, 34, 0.15); color: var(--warning); border: 1px solid var(--warning); }
+    .badge-blue { background: rgba(88, 166, 255, 0.15); color: var(--accent); border: 1px solid var(--accent); }
+
+    .header-controls {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+    }
+    .btn {
+      background: var(--card-bg);
+      color: var(--text-main);
+      border: 1px solid var(--card-border);
+      padding: 6px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.8rem;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      transition: all 0.15s ease;
+    }
+    .btn:hover { border-color: var(--accent); color: #fff; }
+    .btn-accent { background: #1f6feb; border-color: #388bfd; color: #fff; }
+    .btn-accent:hover { background: #388bfd; }
+
+    /* Hero Progress Card */
+    .hero-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 16px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+    }
+    .hero-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      margin-bottom: 8px;
+    }
+    .hero-title {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+    .hero-pct {
+      font-size: 1.8rem;
+      font-weight: 800;
+      color: var(--accent);
+      font-family: var(--font-mono);
+    }
+    .progress-bar-wrap {
+      background: #21262d;
+      border-radius: 6px;
+      height: 14px;
+      overflow: hidden;
+      margin-bottom: 14px;
+      border: 1px solid var(--card-border);
+    }
+    .progress-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #1f6feb, #3fb950);
+      width: 0%;
+      transition: width 0.4s ease;
+    }
+
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+      gap: 10px;
+    }
+    .kpi-cell {
+      background: rgba(255,255,255,0.02);
+      border: 1px solid var(--card-border);
+      padding: 10px;
+      border-radius: 6px;
+      text-align: center;
+    }
+    .kpi-val {
+      font-size: 1.25rem;
+      font-weight: 700;
+      font-family: var(--font-mono);
+      color: #fff;
+    }
+    .kpi-lbl {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      margin-top: 2px;
+      text-transform: uppercase;
+    }
+
+    /* Section Cards */
+    .section-title {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 20px;
+      margin-bottom: 10px;
+    }
+
+    /* Active Jobs Cards */
+    .jobs-container {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    .job-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .job-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .job-title {
+      font-weight: 600;
+      color: #fff;
+      font-size: 0.88rem;
+      word-break: break-all;
+    }
+    .job-metrics {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      font-family: var(--font-mono);
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      margin-top: 8px;
+    }
+    .job-metric-val {
+      color: var(--accent);
+      font-weight: 600;
+    }
+
+    /* Supervisor Card & Terminal */
+    .sup-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 14px;
+      margin-bottom: 16px;
+    }
+    .sup-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .terminal-box {
+      background: var(--terminal-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 6px;
+      padding: 10px;
+      font-family: var(--font-mono);
+      font-size: 0.74rem;
+      color: #7ee787;
+      max-height: 220px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+      line-height: 1.45;
+    }
+
+    /* Recent Events */
+    .events-list {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      overflow: hidden;
+      margin-bottom: 16px;
+    }
+    .event-row {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      padding: 9px 12px;
+      border-bottom: 1px solid #21262d;
+      gap: 8px;
+      font-size: 0.82rem;
+    }
+    .event-row:last-child { border-bottom: none; }
+    .event-stem {
+      font-weight: 500;
+      color: #fff;
+      max-width: 65%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .event-meta {
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+
+    /* Footer info */
+    footer {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+      margin-top: 24px;
+      padding-top: 12px;
+      border-top: 1px solid var(--card-border);
+    }
+
+    /* Login Modal */
+    .modal-backdrop {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0, 0, 0, 0.85);
+      backdrop-filter: blur(4px);
+      z-index: 1000;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+    .modal-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 24px;
+      width: 100%;
+      max-width: 380px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    }
+    .modal-card h2 {
+      font-size: 1.15rem;
+      margin-bottom: 6px;
+      color: #fff;
+    }
+    .modal-card p {
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      margin-bottom: 16px;
+    }
+    .input-field {
+      width: 100%;
+      background: #0d1117;
+      border: 1px solid var(--card-border);
+      color: #fff;
+      padding: 10px 12px;
+      border-radius: 6px;
+      font-family: var(--font-mono);
+      font-size: 0.9rem;
+      margin-bottom: 14px;
+    }
+    .input-field:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Navigation Header -->
+  <header>
+    <div class="brand">
+      <h1>📡 dbsrt Monitor</h1>
+      <span id="node-badge" class="badge badge-blue">o2switch</span>
+      <span id="health-badge" class="badge badge-online">Actif</span>
+    </div>
+    <div class="header-controls">
+      <span id="countdown-label">3s</span>
+      <button class="btn" id="btn-refresh" title="Actualiser maintenant">↻</button>
+      <button class="btn" id="btn-pause" title="Mettre en pause">⏸</button>
+      <button class="btn" id="btn-auth" title="Changer de clé">🔑</button>
+    </div>
+  </header>
+
+  <!-- Hero Ingestion Progress Card -->
+  <section class="hero-card">
+    <div class="hero-header">
+      <div class="hero-title">Progression File Batch (pHash)</div>
+      <div class="hero-pct" id="queue-pct">0.0%</div>
+    </div>
+    <div class="progress-bar-wrap">
+      <div class="progress-bar-fill" id="queue-bar"></div>
+    </div>
+    <div class="kpi-grid">
+      <div class="kpi-cell">
+        <div class="kpi-val" id="kpi-completed">0</div>
+        <div class="kpi-lbl">Traités</div>
+      </div>
+      <div class="kpi-cell">
+        <div class="kpi-val" id="kpi-remaining">0</div>
+        <div class="kpi-lbl">En attente</div>
+      </div>
+      <div class="kpi-cell">
+        <div class="kpi-val" id="kpi-failed">0</div>
+        <div class="kpi-lbl">Échecs</div>
+      </div>
+      <div class="kpi-cell">
+        <div class="kpi-val" id="kpi-total">0</div>
+        <div class="kpi-lbl">Total</div>
+      </div>
+      <div class="kpi-cell">
+        <div class="kpi-val" id="kpi-workers" style="color: var(--accent);">0</div>
+        <div class="kpi-lbl">Workers</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Section: Active Jobs -->
+  <div class="section-title">
+    <span>⚡ Tâches en cours d'extraction</span>
+    <span id="active-jobs-count" class="badge badge-blue">0</span>
+  </div>
+  <div id="jobs-container" class="jobs-container">
+    <div class="job-card" style="text-align: center; color: var(--text-muted); padding: 16px;">
+      Aucune extraction active en cours
+    </div>
+  </div>
+
+  <!-- Section: RPi4 Autonomous Supervisor -->
+  <div class="section-title">
+    <span>🛡️ Superviseur Autonome RPi4</span>
+    <span id="sup-status-badge" class="badge badge-online">ONLINE</span>
+  </div>
+  <section class="sup-card">
+    <div class="sup-grid">
+      <div class="kpi-cell">
+        <div class="kpi-val" id="sup-cpu">-- %</div>
+        <div class="kpi-lbl">LVE vCPU (Inst / Avg)</div>
+      </div>
+      <div class="kpi-cell">
+        <div class="kpi-val" id="sup-concurrency">--</div>
+        <div class="kpi-lbl">Concurrence Cible</div>
+      </div>
+      <div class="kpi-cell">
+        <div class="kpi-val" id="sup-heartbeat">-- s</div>
+        <div class="kpi-lbl">Dernier Heartbeat</div>
+      </div>
+      <div class="kpi-cell">
+        <div class="kpi-val" id="sup-backup">--</div>
+        <div class="kpi-lbl">Backup NAS</div>
+      </div>
+    </div>
+    <div style="font-size: 0.76rem; font-weight: 600; color: var(--text-muted); margin-bottom: 6px; text-transform: uppercase;">
+      Journal d'activité superviseur (rpi4_supervisor.log)
+    </div>
+    <div id="sup-logs-box" class="terminal-box">En attente de télémétrie superviseur...</div>
+  </section>
+
+  <!-- Section: Recent Completed Batch Events -->
+  <div class="section-title">
+    <span>📜 Dernières Extractions Terminées</span>
+  </div>
+  <div id="events-list" class="events-list">
+    <div style="padding: 12px; text-align: center; color: var(--text-muted);">
+      Chargement de l'historique...
+    </div>
+  </div>
+
+  <!-- Footer Host Metrics -->
+  <footer>
+    <span id="sys-host">Hôte : sapin.o2switch.net</span>
+    <span id="sys-ram">RAM : -- / -- GiB</span>
+    <span id="sys-uptime">Uptime : --</span>
+  </footer>
+
+  <!-- Modal Authentification API Key -->
+  <div id="auth-modal" class="modal-backdrop">
+    <div class="modal-card">
+      <h2>🔐 Authentification Requise</h2>
+      <p>Entrez la clé secrète API pour déverrouiller la télémétrie en temps réel sur 4G/5G.</p>
+      <input type="password" id="api-key-input" class="input-field" placeholder="Clé secrète API (Bearer / X-API-Key)" autofocus>
+      <div style="display: flex; gap: 8px;">
+        <button id="btn-save-key" class="btn btn-accent" style="flex: 1; justify-content: center;">Valider</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Configuration & State
+    const REFRESH_INTERVAL_MS = 3000;
+    let refreshTimer = null;
+    let countdownTimer = null;
+    let secondsLeft = 3;
+    let isPaused = false;
+    let apiKey = localStorage.getItem('dbsrt_api_key') || '';
+
+    // Handle initial URL token query param (?token=... or ?key=...)
+    const urlParams = new URLSearchParams(window.location.search);
+    const tokenParam = urlParams.get('token') || urlParams.get('key');
+    if (tokenParam) {
+      apiKey = tokenParam;
+      localStorage.setItem('dbsrt_api_key', apiKey);
+      // Clean query params from URL address bar without reload
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+
+    function getAuthHeaders() {
+      const headers = { 'Accept': 'application/json' };
+      if (apiKey) {
+        headers['X-API-Key'] = apiKey;
+        headers['Authorization'] = 'Bearer ' + apiKey;
+      }
+      return headers;
+    }
+
+    function showAuthModal() {
+      document.getElementById('auth-modal').style.display = 'flex';
+      document.getElementById('api-key-input').focus();
+    }
+
+    function hideAuthModal() {
+      document.getElementById('auth-modal').style.display = 'none';
+    }
+
+    document.getElementById('btn-save-key').addEventListener('click', () => {
+      const val = document.getElementById('api-key-input').value.trim();
+      if (val) {
+        apiKey = val;
+        localStorage.setItem('dbsrt_api_key', apiKey);
+        hideAuthModal();
+        fetchTelemetry();
+      }
+    });
+
+    document.getElementById('btn-auth').addEventListener('click', showAuthModal);
+
+    document.getElementById('btn-refresh').addEventListener('click', () => {
+      secondsLeft = 3;
+      fetchTelemetry();
+    });
+
+    document.getElementById('btn-pause').addEventListener('click', () => {
+      isPaused = !isPaused;
+      document.getElementById('btn-pause').textContent = isPaused ? '▶' : '⏸';
+      document.getElementById('btn-pause').classList.toggle('btn-accent', isPaused);
+    });
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    function formatDuration(secs) {
+      if (!secs || secs < 0) return '0s';
+      const s = Math.floor(secs % 60);
+      const m = Math.floor((secs / 60) % 60);
+      const h = Math.floor(secs / 3600);
+      if (h > 0) return `${h}h${String(m).padStart(2, '0')}m`;
+      if (m > 0) return `${m}m${String(s).padStart(2, '0')}s`;
+      return `${s}s`;
+    }
+
+    async function fetchTelemetry() {
+      try {
+        const resp = await fetch('v1/monitoring/telemetry', { headers: getAuthHeaders() });
+        if (resp.status === 401 || resp.status === 403) {
+          showAuthModal();
+          return;
+        }
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const data = await resp.json();
+        renderTelemetry(data);
+      } catch (err) {
+        console.warn('Erreur télémétrie:', err);
+        document.getElementById('health-badge').className = 'badge badge-offline';
+        document.getElementById('health-badge').textContent = 'Erreur Réseau';
+      }
+    }
+
+    function renderTelemetry(data) {
+      // 1. Host identity & badge
+      document.getElementById('health-badge').className = 'badge badge-online';
+      document.getElementById('health-badge').textContent = 'Actif';
+      if (data.system && data.system.hostname) {
+        document.getElementById('node-badge').textContent = data.system.hostname.split('.')[0];
+        document.getElementById('sys-host').textContent = 'Hôte : ' + data.system.hostname;
+        document.getElementById('sys-ram').textContent = `RAM : ${data.system.ram_used_gib.toFixed(1)} / ${data.system.ram_total_gib.toFixed(1)} GiB`;
+        document.getElementById('sys-uptime').textContent = `Uptime : ${formatDuration(data.system.uptime_secs)}`;
+      }
+
+      // 2. Batch Queue Progress
+      const q = data.batch_queue || {};
+      const pct = (q.progress_pct || 0).toFixed(1) + '%';
+      document.getElementById('queue-pct').textContent = pct;
+      document.getElementById('queue-bar').style.width = pct;
+      document.getElementById('kpi-completed').textContent = q.completed_targets || 0;
+      document.getElementById('kpi-remaining').textContent = q.remaining_targets || 0;
+      document.getElementById('kpi-failed').textContent = q.failed_targets || 0;
+      document.getElementById('kpi-total').textContent = q.total_targets || 0;
+      document.getElementById('kpi-workers').textContent = q.active_workers || 0;
+
+      // 3. Active Ingestion Jobs
+      const jobs = data.active_jobs || [];
+      document.getElementById('active-jobs-count').textContent = jobs.length;
+      const jobsContainer = document.getElementById('jobs-container');
+      if (jobs.length === 0) {
+        jobsContainer.innerHTML = '<div class="job-card" style="text-align: center; color: var(--text-muted); padding: 16px;">Aucune extraction active en cours</div>';
+      } else {
+        jobsContainer.innerHTML = jobs.map(j => {
+          const jpct = (j.progress_ratio * 100).toFixed(1);
+          const fps = j.fps ? j.fps.toFixed(0) : '0';
+          const eta = j.eta_secs ? formatDuration(j.eta_secs) : '--';
+          return `
+            <div class="job-card">
+              <div class="job-top">
+                <div class="job-title">🎬 ${escapeHtml(j.media_name)}</div>
+                <span class="badge ${j.status === 'RUNNING' ? 'badge-online' : 'badge-warn'}">PID ${j.pid}</span>
+              </div>
+              <div class="progress-bar-wrap" style="height: 8px; margin-bottom: 6px;">
+                <div class="progress-bar-fill" style="width: ${jpct}%;"></div>
+              </div>
+              <div class="job-metrics">
+                <div>Progression : <span class="job-metric-val">${jpct}%</span> (${j.frames_decoded} frames)</div>
+                <div>Vitesse : <span class="job-metric-val">${fps} FPS</span></div>
+                <div>ETA : <span class="job-metric-val">${eta}</span></div>
+              </div>
+            </div>
+          `;
+        }).join('');
+      }
+
+      // 4. RPi4 Supervisor
+      const sup = data.supervisor || {};
+      const supBadge = document.getElementById('sup-status-badge');
+      if (sup.is_online) {
+        supBadge.className = 'badge badge-online';
+        supBadge.textContent = 'ONLINE (' + sup.supervisor_host + ')';
+      } else {
+        supBadge.className = 'badge badge-offline';
+        supBadge.textContent = 'OFFLINE';
+      }
+
+      const cpuInst = sup.lve_cpu_pct !== null && sup.lve_cpu_pct !== undefined ? sup.lve_cpu_pct.toFixed(1) : '--';
+      const cpuAvg = sup.lve_cpu_avg_pct !== null && sup.lve_cpu_avg_pct !== undefined ? sup.lve_cpu_avg_pct.toFixed(1) : '--';
+      document.getElementById('sup-cpu').textContent = `${cpuInst}% / ${cpuAvg}%`;
+      document.getElementById('sup-concurrency').textContent = (sup.desired_workers || '--') + ' workers';
+      document.getElementById('sup-heartbeat').textContent = (sup.heartbeat_age_secs !== undefined ? sup.heartbeat_age_secs : '--') + 's';
+      document.getElementById('sup-backup').textContent = sup.last_backup_iso ? 'OK' : 'N/A';
+
+      const logsBox = document.getElementById('sup-logs-box');
+      if (sup.recent_logs && sup.recent_logs.length > 0) {
+        logsBox.innerHTML = sup.recent_logs.map(line => {
+          let color = '#8b949e';
+          if (line.includes('✓') || line.includes('healthy')) color = '#7ee787';
+          else if (line.includes('⚠️') || line.includes('AUTOSCALE')) color = '#e3b341';
+          else if (line.includes('❌') || line.includes('Killed')) color = '#f85149';
+          else if (line.includes('💾') || line.includes('📥')) color = '#79c0ff';
+          return `<div style="color: ${color};">${escapeHtml(line)}</div>`;
+        }).join('');
+        logsBox.scrollTop = logsBox.scrollHeight;
+      } else {
+        logsBox.textContent = 'Aucun log superviseur disponible.';
+      }
+
+      // 5. Recent Completed Events
+      const events = data.recent_events || [];
+      const eventsList = document.getElementById('events-list');
+      if (events.length === 0) {
+        eventsList.innerHTML = '<div style="padding: 12px; text-align: center; color: var(--text-muted);">Aucun événement récent</div>';
+      } else {
+        eventsList.innerHTML = events.slice(0, 8).map(ev => {
+          const mb = (ev.file_size_bytes / (1024 * 1024)).toFixed(0);
+          const rate = ev.rate_mib_s ? ev.rate_mib_s.toFixed(1) + ' MB/s' : '--';
+          const dur = formatDuration(ev.wall_duration_secs);
+          const badgeClass = ev.success ? 'badge-online' : 'badge-offline';
+          return `
+            <div class="event-row">
+              <div class="event-stem" title="${escapeHtml(ev.video_stem)}">${escapeHtml(ev.video_stem)}</div>
+              <div class="event-meta">
+                <span style="color: var(--accent);">${dur}</span> · ${mb} MB · ${rate}
+                <span class="badge ${badgeClass}" style="margin-left: 6px;">${ev.status}</span>
+              </div>
+            </div>
+          `;
+        }).join('');
+      }
+    }
+
+    // Auto-refresh loop
+    countdownTimer = setInterval(() => {
+      if (!isPaused) {
+        secondsLeft--;
+        if (secondsLeft <= 0) {
+          secondsLeft = 3;
+          fetchTelemetry();
+        }
+        document.getElementById('countdown-label').textContent = secondsLeft + 's';
+      }
+    }, 1000);
+
+    // Initial load
+    fetchTelemetry();
+  </script>
+</body>
+</html>

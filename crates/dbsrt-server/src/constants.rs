@@ -60,6 +60,42 @@ pub const PERCENT_SCALE: f64 = 100.0;
 /// Default baseline FPS when target FPS is unspecified or invalid.
 pub const DEFAULT_BASELINE_FPS: f64 = 24.0;
 
+/// Path to volatile batch queue state written by batch worker daemon.
+pub const DEFAULT_BATCH_QUEUE_PATH: &str = "run/batch_queue.json";
+
+/// Path to volatile supervisor telemetry state written by RPi4 supervisor.
+pub const DEFAULT_SUPERVISOR_STATUS_PATH: &str = "run/supervisor_status.json";
+
+/// Default directory holding volatile per-process active job progress files.
+pub const DEFAULT_JOBS_DIR: &str = "run/jobs";
+
+/// Primary path to NDJSON batch events report log.
+pub const DEFAULT_BATCH_EVENTS_PATH: &str = "data/reports/batch_tvshow_nightly.jsonl";
+
+/// Secondary fallback path to batch events report log.
+pub const FALLBACK_BATCH_EVENTS_PATH: &str = "data/reports/selected_batch_events.ndjson";
+
+/// Maximum number of recent completed events to return in monitoring telemetry snapshot.
+pub const MAX_MONITORING_RECENT_EVENTS: usize = 20;
+
+/// Number of seconds after which a supervisor heartbeat is flagged as offline/stale.
+pub const SUPERVISOR_STALE_THRESHOLD_SECS: u64 = 180;
+
+/// Byte conversion factor for Gibibytes (GiB).
+pub const BYTES_PER_GIB_F64: f64 = 1024.0 * 1024.0 * 1024.0;
+
+/// Byte conversion factor for Mebibytes (MiB).
+pub const BYTES_PER_MIB_F64: f64 = 1024.0 * 1024.0;
+
+/// Default estimated duration in seconds for progress calculation when total frames are unspecified.
+pub const DEFAULT_ESTIMATED_MEDIA_DURATION_SECS: f64 = 5400.0;
+
+/// Number of days in a 400-year civil Gregorian cycle.
+pub const CIVIL_DAYS_PER_400_YEARS: i64 = 146_097;
+
+/// Offset in days between the Unix epoch (1970-01-01) and the civil epoch (0000-03-01).
+pub const CIVIL_EPOCH_DAYS_OFFSET: i64 = 719_468;
+
 /// Default Hamming threshold between consecutive frames to detect a scene cut.
 pub const DEFAULT_CUT_THRESHOLD: u32 = 16;
 

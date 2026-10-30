@@ -101,6 +101,11 @@ tasks:
     cmds:
       - ./scripts/agent_relay.sh demo
 
+  o2switch:monitoring:
+    desc: Display public monitoring dashboard URL and 4G/5G mobile direct link for o2switch & RPi4
+    cmds:
+      - ./scripts/o2switch_ctl.sh monitoring
+
   o2switch:top:
     desc: Launch interactive dbsrt top TUI process monitor on o2switch via SSH
     interactive: true

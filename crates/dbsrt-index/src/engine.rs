@@ -40,9 +40,6 @@ impl PhashEngine {
         if let Some(p) = dbphash_path {
             if p.exists() {
                 let reader = MmapDbphash::open(p)?;
-                // Prewarm MIH tables
-                let _ = reader.sparse_mih();
-                let _ = reader.cuts_mih();
                 engine.dbphash = Some(Arc::new(reader));
             }
         }

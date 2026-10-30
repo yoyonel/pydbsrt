@@ -115,7 +115,47 @@ Le worker lit dynamiquement `run/desired_workers` et fait monter ou descendre le
 
 ---
 
-### Étape 5 : Arrêter l'agent superviseur
+### Étape 5 : Suivi Web & Monitoring Mobile (4G/5G)
+
+Pour suivre en direct l'avancement du batch o2switch et l'état du superviseur RPi4 depuis un smartphone (hors du domicile, en 4G/5G Free mobile), un tableau de bord web responsive est exposé publiquement avec une couche d'authentification renforcée :
+
+```bash
+task o2switch:monitoring
+```
+
+Sortie générée :
+```text
+=== dbsrt Web Monitoring Dashboard (o2switch & RPi4) ===
+  • Dashboard URL : https://votre-domaine.fr/dbsrt/monitoring
+  • Mobile Link   : https://votre-domaine.fr/dbsrt/monitoring?token=<CLE_SECRETE_API>
+  (Ce lien configure automatiquement le cookie sécurisé et nettoie l'URL pour votre smartphone 4G/5G)
+
+=== QR Code 4G/5G (Scan Smartphone) ===
+[... QR Code UTF-8 affiché directement dans le terminal ...]
+```
+
+#### Sécurité et Authentification Publique
+
+1. **Scan QR Code & Jeton d'authentification mobile (URL Token)** :
+   Scannez le QR Code affiché dans le terminal avec l'appareil photo de votre smartphone ou ouvrez le `Mobile Link`. La passerelle valide la clé, crée un cookie de session chiffré (`HttpOnly; Secure; SameSite=Lax`) valide **30 jours**, sert la page directement en HTTP 200 OK (sans saut de redirection 302 afin de garantir la compatibilité avec tous les lecteurs QR et webviews mobiles), et nettoie silencieusement la barre d'adresse du navigateur via l'API HTML5 `window.history.replaceState`. Une copie de secours est également conservée dans le `localStorage` du client.
+2. **Durée de vie des identifiants & sessions** :
+   - **Clé Secrète API** : Validité illimitée (stockée de manière chiffrée/sécurisée dans `etc/api_key.secret` sur o2switch et dans votre coffre `pass`), renouvelable à la demande via `task o2switch:rotate-key`.
+   - **Session Smartphone (Cookie `dbsrt_session`)** : Valide 30 jours consécutifs, renouvelée à chaque reconnexion.
+   - **Stockage Local (`localStorage`)** : Persistance permanente sur le navigateur mobile jusqu'à déconnexion explicite.
+3. **Écran de connexion mobile dédié** :
+   En accédant directement à `https://votre-domaine.fr/dbsrt/monitoring` sans session active ni paramètre de token, un formulaire dark-mode épuré invite à saisir la clé secrète API.
+4. **Protection anti force-brute (Rate Limiting)** :
+   Toute adresse IP échouant à s'authentifier plus de 5 fois consécutives est temporairement verrouillée pendant 15 minutes (HTTP 429).
+5. **Télémétrie unifiée en temps réel** :
+   Le tableau de bord actualise toutes les 3 secondes :
+   - La jauge de progression globale de la file batch (traités, en attente, échecs, total).
+   - Les cartes individuelles de chaque worker en vol (PID, titre vidéo, %, FPS de décodage, ETA).
+   - L'état de santé du superviseur RPi4 (ONLINE/OFFLINE, charge LVE CPU instantanée et moyenne mobile).
+   - Les 40 dernières lignes du journal `rpi4_supervisor.log` avec coloration syntaxique.
+
+---
+
+### Étape 6 : Arrêter l'agent superviseur
 
 Pour interrompre proprement l'agent :
 

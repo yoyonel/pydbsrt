@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import datetime
 import fcntl
+import json
 import os
 import signal
 import subprocess
@@ -23,6 +24,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Tuple
 
+UTC = getattr(datetime, "UTC", datetime.timezone.utc)  # noqa: UP017
+
 # Named Operational Constants
 DEFAULT_CHECK_INTERVAL_SECS: int = 60
 DEFAULT_PULL_INTERVAL_SECS: int = 600
@@ -31,6 +34,9 @@ DEFAULT_SSH_TIMEOUT_SECS: int = 15
 DEFAULT_REMOTE_HOST: str = "o2switch"
 DEFAULT_REMOTE_BASE: str = "dbsrt"
 DEFAULT_NAS_PHASH_BACKUP_DIR: str = "/mnt/synology/video/__PHASH__"
+DEFAULT_SUPERVISOR_STATUS_FILE: str = "run/supervisor_status.json"
+DEFAULT_SUPERVISOR_LOG_FILE: str = "logs/rpi4_supervisor.log"
+DEFAULT_RECENT_LOG_LINES_COUNT: int = 40
 PID_FILE_PATH: str = "run/rpi4_supervisor.pid"
 CTL_SCRIPT: str = "./scripts/o2switch_ctl.sh"
 # batch-status states that call for an automatic restart of the same batch type
@@ -302,28 +308,102 @@ class _LoopState:
     last_launch_time: float = 0.0
     cpu_history: List[float] = field(default_factory=list)
     prev_sample: CpuSample | None = None
+    last_cpu: float = 0.0
+    last_avg_cpu: float = 0.0
+    last_workers: int = AUTOSCALE_DEFAULT_WORKERS
+    last_running: int = 0
+    last_backup_iso: str | None = None
+    last_sync_iso: str | None = None
+
+
+def read_recent_supervisor_logs(log_file: Path, max_lines: int = DEFAULT_RECENT_LOG_LINES_COUNT) -> List[str]:
+    """Reads the last N lines from the supervisor log file."""
+    if not log_file.is_file():
+        return []
+    try:
+        content = log_file.read_text(encoding="utf-8", errors="replace")
+        lines = [line.strip() for line in content.splitlines() if line.strip()]
+        return lines[-max_lines:]
+    except OSError:
+        return []
+
+
+def push_supervisor_telemetry_to_remote(
+    remote_host: str,
+    remote_base: str,
+    loop: _LoopState,
+    status: Dict[str, object],
+    log_file: Path,
+) -> bool:
+    """Pushes supervisor status snapshot and recent log tail to remote host for web monitoring."""
+    now_ts = int(time.time())
+    now_iso = datetime.datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    recent_logs = read_recent_supervisor_logs(log_file)
+
+    payload = {
+        "timestamp": now_iso,
+        "unix_ts": now_ts,
+        "supervisor_host": "rpi4",
+        "supervisor_pid": os.getpid(),
+        "state": "healthy" if status.get("state") in ("running", "finished") else "warning",
+        "remote_batch": {
+            "state": status.get("state"),
+            "pid": status.get("pid"),
+            "batch_type": status.get("type"),
+            "desired_workers": loop.last_workers,
+            "running_jobs": loop.last_running,
+            "lve_cpu_pct": round(loop.last_cpu, 1),
+            "avg_cpu_pct": round(loop.last_avg_cpu, 1),
+        },
+        "last_backup_time": loop.last_backup_iso,
+        "last_sync_time": loop.last_sync_iso,
+        "recent_logs": recent_logs,
+    }
+
+    raw_json = json.dumps(payload, indent=2)
+    remote_target = f"{remote_base}/{DEFAULT_SUPERVISOR_STATUS_FILE}"
+    cmd = [
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        f"ConnectTimeout={DEFAULT_SSH_TIMEOUT_SECS}",
+        remote_host,
+        f"cat > {remote_target}.tmp && mv {remote_target}.tmp {remote_target}",
+    ]
+    try:
+        res = subprocess.run(cmd, input=raw_json, text=True, timeout=DEFAULT_SSH_TIMEOUT_SECS, capture_output=True)
+        return res.returncode == 0
+    except Exception as err:
+        log(f"⚠️ Failed pushing supervisor telemetry: {err}")
+        return False
 
 
 def _autoscale_step(remote_host: str, remote_base: str, status: Dict[str, object], loop: _LoopState) -> None:
     """Running batch: compares two CPU samples and moves desired_workers toward the LVE target band."""
     cur_workers = get_remote_desired_workers(remote_host, remote_base)
+    loop.last_workers = cur_workers
     sample = sample_remote_cpu(remote_host)
     prev_sample, loop.prev_sample = loop.prev_sample, sample
     if sample is None or prev_sample is None:
         log(f"● Remote batch healthy (PID {status['pid']}, workers: {cur_workers}, CPU baseline pending).")
         return
     cpu = compute_lve_cpu_pct(prev_sample, sample)
+    loop.last_cpu = cpu
     loop.cpu_history = (loop.cpu_history + [cpu])[-AUTOSCALE_SAMPLE_WINDOW:]
     now = time.time()
     running_jobs = get_remote_running_jobs(remote_host)
+    loop.last_running = running_jobs or 0
     new_workers = decide_workers(
         cpu, loop.cpu_history, cur_workers, now - loop.last_scale_time >= AUTOSCALE_COOLDOWN_SECS, running_jobs
     )
     avg_cpu = sum(loop.cpu_history) / len(loop.cpu_history)
+    loop.last_avg_cpu = avg_cpu
     if new_workers != cur_workers and set_remote_desired_workers(remote_host, remote_base, new_workers):
         direction = "📈 [AUTOSCALE UP]" if new_workers > cur_workers else "📉 [AUTOSCALE DOWN]"
         log(f"{direction} CPU {cpu:.1f}% (avg {avg_cpu:.1f}%): {cur_workers} -> {new_workers} workers.")
         loop.last_scale_time = now
+        loop.last_workers = new_workers
         loop.cpu_history.clear()
     else:
         log(
@@ -376,13 +456,19 @@ def supervisor_loop(
         # Periodic catalog pull (lightweight dbphash + srt)
         now = time.time()
         if now - last_pull_time >= pull_interval:
-            pull_remote_catalog(remote_host, remote_base)
+            if pull_remote_catalog(remote_host, remote_base):
+                loop.last_sync_iso = datetime.datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
             last_pull_time = now
 
         # Periodic NAS persistent backup (raw phash files direct to Synology NFS)
         if now - last_backup_time >= backup_interval:
-            backup_remote_phash_to_nas(remote_host, remote_base)
+            if backup_remote_phash_to_nas(remote_host, remote_base):
+                loop.last_backup_iso = datetime.datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
             last_backup_time = now
+
+        # Push telemetry snapshot to remote host for web monitoring
+        log_file = Path(DEFAULT_SUPERVISOR_LOG_FILE)
+        push_supervisor_telemetry_to_remote(remote_host, remote_base, loop, status, log_file)
 
         time.sleep(check_interval)
 

@@ -96,11 +96,21 @@ pub fn create_router_with_state(state: AppState) -> Router {
     Router::new()
         .route("/studio", get(studio_ui_handler))
         .route("/ui", get(studio_ui_handler))
+        .route("/monitoring", get(monitoring_ui_handler))
+        .route("/top", get(monitoring_ui_handler))
         .route("/health", get(health_handler))
         .route("/v1/health", get(health_handler))
         .route("/v1/status", get(status_handler))
         .route("/v1/metrics", get(metrics_handler))
         .route("/v1/logs", get(logs_handler))
+        .route(
+            "/v1/monitoring/telemetry",
+            get(monitoring_telemetry_handler),
+        )
+        .route(
+            "/v1/supervisor/heartbeat",
+            post(supervisor_heartbeat_handler),
+        )
         .route("/v1/couplings", get(couplings_handler))
         .route("/v1/couplings/sub_frames", get(sub_frames_handler))
         .route("/v1/search", post(search_handler))

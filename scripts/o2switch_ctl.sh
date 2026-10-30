@@ -458,6 +458,31 @@ REMOTE_SCRIPT
     echo "=== API Key rotation completed ==="
     ;;
 
+  monitoring)
+    O2SWITCH_API_KEY="${O2SWITCH_API_KEY:-$(pass_secret "${API_KEY_PASS_ENTRY}")}"
+    echo "=== dbsrt Web Monitoring Dashboard (o2switch & RPi4) ==="
+    if [[ -n "${O2SWITCH_URL}" ]]; then
+      echo "  • Dashboard URL : ${O2SWITCH_URL}/monitoring"
+      if [[ -n "${O2SWITCH_API_KEY}" ]]; then
+        MOBILE_URL="${O2SWITCH_URL}/monitoring?token=${O2SWITCH_API_KEY}"
+        echo "  • Mobile Link   : ${MOBILE_URL}"
+        echo "  (Ce lien configure automatiquement le cookie sécurisé et nettoie l'URL pour votre smartphone 4G/5G)"
+        echo ""
+        echo "=== QR Code 4G/5G (Scan Smartphone) ==="
+        if command -v qrencode >/dev/null 2>&1; then
+          qrencode -t UTF8 "${MOBILE_URL}"
+        else
+          echo "  (Installez 'qrencode' pour afficher le QR code ASCII directement dans le terminal)"
+        fi
+      else
+        echo "  • Clé secrète   : Non détectée dans .env ou pass store."
+      fi
+    else
+      echo "  • URL locale    : http://127.0.0.1:${SERVER_PORT}/monitoring"
+      echo "  (Configurez O2SWITCH_URL dans .env pour afficher le lien public)"
+    fi
+    ;;
+
   top)
     check_ssh
     shift || true

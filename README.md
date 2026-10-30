@@ -182,6 +182,9 @@ task status
 # Ouvrir dbsrt Studio dans votre navigateur
 task studio
 
+# Consulter le tableau de bord web de monitoring & supervision (optimisé smartphone 4G/5G)
+task o2switch:monitoring
+
 # Arrêter proprement tous les services
 task down
 ```

@@ -20,6 +20,12 @@ Cette page fournit les spécifications techniques de l'API HTTP exposée par le 
 - **Encodage binaire** : Les séquences d'empreintes pHash sont transmises soit sous forme de tableau d'entiers 64-bit non-signés (`u64`), soit en chaîne hexadécimale, soit en base64 pour les gros volumes.
 - **Cross-Origin Resource Sharing (CORS)** : Toutes les origines sont admises en mode local.
 - **Port d'écoute** : Défini par l'option `--port` ou la variable `DBSRT_PORT` (défaut : `8765`).
+- **Authentification & Sécurité (Passerelle Cloud o2switch)** :
+  - **En-têtes acceptés** : `X-API-Key: <token>` ou `Authorization: Bearer <token>`.
+  - **Jeton URL direct** : `?token=<token>` ou `?key=<token>` (idéal pour liens magiques et scan QR Code mobile).
+  - **Cookie de session** : `dbsrt_session` (`HttpOnly; Secure; SameSite=Lax`), durée de validité de **30 jours**.
+  - **Durée de validité de la clé secrète** : Illimitée (persistée dans `etc/api_key.secret`), rotation via `task o2switch:rotate-key`.
+  - **Protection anti-bruteforce** : Verrouillage 15 minutes (HTTP 429) après 5 échecs consécutifs par IP.
 
 ---
 
@@ -54,6 +60,15 @@ Exposition des métriques au format Prometheus (`text/plain; version=0.0.4`).
 
 ### `GET /v1/logs`
 Retourne les dernières lignes du journal d'exécution en mémoire vive du serveur.
+
+### `GET /monitoring` & `GET /top`
+Tableau de bord web interactif monopage (HTML5/CSS/JS), responsive pour smartphones (4G/5G) et ordinateurs. Affiche la progression globale de la file batch, les workers actifs, la télémétrie du superviseur RPi4 et le journal en direct.
+
+### `GET /v1/monitoring/telemetry`
+Snapshot unifié en JSON de la télémétrie du serveur (statistiques système, file batch, workers d'extraction actifs, télémétrie et logs du superviseur RPi4, derniers événements terminés).
+
+### `POST /v1/supervisor/heartbeat`
+Réceptionne et persiste de manière atomique la pulsation et les logs de l'agent superviseur RPi4 dans `run/supervisor_status.json`.
 
 ---
 

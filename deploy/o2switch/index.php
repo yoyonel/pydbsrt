@@ -1,12 +1,14 @@
 <?php
 /**
  * Ultra-lightweight resilient reverse proxy gateway with on-demand auto-spawn
- * and API Key authentication for dbsrt-server on o2switch cPanel Cloud.
+ * and multi-channel authentication (Header, Bearer, Cookie, URL Token, Basic Auth)
+ * for dbsrt-server on o2switch cPanel Cloud.
  *
  * Relays public HTTPS requests from Apache/LiteSpeed to the local Rust dbsrt-server daemon
  * listening on 127.0.0.1:8765 without requiring Apache mod_proxy privileges.
  * Automatically spawns the daemon if inactive or harvested by CloudLinux.
- * Enforces strict API Key authentication (X-API-Key or Bearer token); fails closed without a key file.
+ * Provides mobile-friendly login interface, rate-limiting brute-force defense,
+ * and timing-safe authentication for remote monitoring over 4G/5G mobile.
  */
 
 declare(strict_types=1);
@@ -20,10 +22,17 @@ const SPAWN_MAX_RETRIES = 6;
 const SPAWN_RETRY_INTERVAL_MICROSECONDS = 250000; // 250 ms
 const SECRET_KEY_REL_PATH = '/dbsrt/etc/api_key.secret';
 const SPAWN_LOCK_REL_PATH = '/dbsrt/run/gateway_spawn.lock';
+const RATE_LIMIT_REL_PATH = '/dbsrt/run/auth_rate_limit.json';
+const AUTH_COOKIE_NAME = 'dbsrt_session';
+const AUTH_COOKIE_MAX_AGE = 2592000; // 30 days
+const SESSION_SALT = 'dbsrt_session_v1_';
+const MAX_FAILED_ATTEMPTS = 5;
+const RATE_LIMIT_WINDOW_SECONDS = 900; // 15 min lockout
 
 // Derive user home directory relative to public_html/dbsrt
 $homeDir = dirname(__DIR__, 2);
 $secretKeyFile = $homeDir . SECRET_KEY_REL_PATH;
+$rateLimitFile = $homeDir . RATE_LIMIT_REL_PATH;
 
 /**
  * Validates request authentication against configured API secret keys.
@@ -45,35 +54,140 @@ function load_valid_keys(string $secretKeyFile): array
     return $validKeys;
 }
 
-function is_authenticated(array $validKeys): bool
+function compute_session_hash(string $secretKey): string
 {
-    // Extract provided client token from headers
-    $clientToken = null;
+    return hash('sha256', SESSION_SALT . $secretKey);
+}
+
+function is_ip_rate_limited(string $rateLimitFile, string $clientIp): bool
+{
+    if (!is_file($rateLimitFile)) {
+        return false;
+    }
+    $data = json_decode((string) file_get_contents($rateLimitFile), true);
+    if (!is_array($data) || !isset($data[$clientIp])) {
+        return false;
+    }
+    $entry = $data[$clientIp];
+    $attempts = (int) ($entry['attempts'] ?? 0);
+    $lastAttempt = (int) ($entry['time'] ?? 0);
+
+    if (time() - $lastAttempt > RATE_LIMIT_WINDOW_SECONDS) {
+        return false;
+    }
+    return $attempts >= MAX_FAILED_ATTEMPTS;
+}
+
+function record_auth_failure(string $rateLimitFile, string $clientIp): void
+{
+    $data = is_file($rateLimitFile) ? (json_decode((string) file_get_contents($rateLimitFile), true) ?: []) : [];
+    $entry = $data[$clientIp] ?? ['attempts' => 0, 'time' => time()];
+    if (time() - (int)$entry['time'] > RATE_LIMIT_WINDOW_SECONDS) {
+        $entry['attempts'] = 0;
+    }
+    $entry['attempts'] = ((int)$entry['attempts']) + 1;
+    $entry['time'] = time();
+    $data[$clientIp] = $entry;
+
+    $tmp = $rateLimitFile . '.tmp';
+    @file_put_contents($tmp, json_encode($data));
+    @rename($tmp, $rateLimitFile);
+}
+
+function clear_auth_failures(string $rateLimitFile, string $clientIp): void
+{
+    if (!is_file($rateLimitFile)) {
+        return;
+    }
+    $data = json_decode((string) file_get_contents($rateLimitFile), true);
+    if (is_array($data) && isset($data[$clientIp])) {
+        unset($data[$clientIp]);
+        $tmp = $rateLimitFile . '.tmp';
+        @file_put_contents($tmp, json_encode($data));
+        @rename($tmp, $rateLimitFile);
+    }
+}
+
+function check_key_match(string $candidate, array $validKeys): bool
+{
+    if ($candidate === '') {
+        return false;
+    }
+    foreach ($validKeys as $expectedKey) {
+        if (hash_equals($expectedKey, $candidate)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function set_auth_session_cookie(string $key): void
+{
+    $hash = compute_session_hash($key);
+    $isHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ||
+               ($_SERVER['SERVER_PORT'] ?? 80) == 443 ||
+               (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https');
+
+    setcookie(AUTH_COOKIE_NAME, $hash, [
+        'expires' => time() + AUTH_COOKIE_MAX_AGE,
+        'path' => '/',
+        'domain' => '',
+        'secure' => $isHttps,
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ]);
+}
+
+function is_authenticated(array $validKeys, string &$matchedKey = ''): bool
+{
     $headers = getallheaders();
 
     // 1. Check X-API-Key header
     foreach ($headers as $name => $value) {
         if (strcasecmp($name, 'X-API-Key') === 0) {
-            $clientToken = trim((string) $value);
-            break;
+            $candidate = trim((string) $value);
+            if (check_key_match($candidate, $validKeys)) {
+                $matchedKey = $candidate;
+                return true;
+            }
         }
     }
 
     // 2. Check Authorization: Bearer <token>
-    if ($clientToken === null) {
-        $authHeader = $headers['Authorization'] ?? $headers['authorization'] ?? $_SERVER['HTTP_AUTHORIZATION'] ?? '';
-        if (preg_match('/^Bearer\s+(\S+)$/i', trim((string) $authHeader), $matches)) {
-            $clientToken = $matches[1];
+    $authHeader = $headers['Authorization'] ?? $headers['authorization'] ?? $_SERVER['HTTP_AUTHORIZATION'] ?? '';
+    if (preg_match('/^Bearer\s+(\S+)$/i', trim((string) $authHeader), $matches)) {
+        $candidate = $matches[1];
+        if (check_key_match($candidate, $validKeys)) {
+            $matchedKey = $candidate;
+            return true;
         }
     }
 
-    if ($clientToken === null || $clientToken === '') {
-        return false;
+    // 3. Check HTTP Basic Auth (user or password matching the key)
+    $basicUser = $_SERVER['PHP_AUTH_USER'] ?? '';
+    $basicPw = $_SERVER['PHP_AUTH_PW'] ?? '';
+    if (check_key_match($basicPw, $validKeys) || check_key_match($basicUser, $validKeys)) {
+        $matchedKey = $basicPw !== '' ? $basicPw : $basicUser;
+        return true;
     }
 
-    // Timing-safe comparison against all valid keys
-    foreach ($validKeys as $expectedKey) {
-        if (hash_equals($expectedKey, $clientToken)) {
+    // 4. Check session cookie
+    $cookieHash = $_COOKIE[AUTH_COOKIE_NAME] ?? '';
+    if ($cookieHash !== '') {
+        foreach ($validKeys as $expectedKey) {
+            if (hash_equals(compute_session_hash($expectedKey), $cookieHash)) {
+                $matchedKey = $expectedKey;
+                return true;
+            }
+        }
+    }
+
+    // 5. Check URL query token (?token=... or ?key=...)
+    $queryToken = $_GET['token'] ?? $_GET['key'] ?? '';
+    if ($queryToken !== '') {
+        if (check_key_match($queryToken, $validKeys)) {
+            $matchedKey = $queryToken;
+            set_auth_session_cookie($queryToken);
             return true;
         }
     }
@@ -105,20 +219,20 @@ function spawn_daemon(string $homeDir): bool
     }
 
     try {
-        // Another request may have spawned it while we waited for the lock
         if (is_daemon_healthy(1500, 2000)) {
             return true;
         }
 
+        $baseDir = escapeshellarg($homeDir . '/dbsrt');
         $bin = escapeshellarg($homeDir . '/dbsrt/bin/dbsrt-server');
         $catalog = escapeshellarg($homeDir . '/dbsrt/data/catalog.dbphash');
         $srtDir = escapeshellarg($homeDir . '/dbsrt/data/SRT');
-        // Loose .phash are packed into the catalog by o2switch_ctl.sh start (LVE memory cap)
         $phashDir = escapeshellarg($homeDir . '/dbsrt/run/empty_phash');
         $log = escapeshellarg($homeDir . '/dbsrt/logs/dbsrt-server.log');
 
         exec(sprintf(
-            'setsid %s --host 127.0.0.1 --port %d --dbphash %s --subtitles-dir %s --phash-dir %s </dev/null >> %s 2>&1 &',
+            'cd %s && setsid %s --host 127.0.0.1 --port %d --dbphash %s --subtitles-dir %s --phash-dir %s </dev/null >> %s 2>&1 &',
+            $baseDir,
             $bin,
             UPSTREAM_PORT,
             $catalog,
@@ -127,7 +241,6 @@ function spawn_daemon(string $homeDir): bool
             $log
         ));
 
-        // Poll until healthy or retries exhausted
         for ($i = 0; $i < SPAWN_MAX_RETRIES; $i++) {
             usleep(SPAWN_RETRY_INTERVAL_MICROSECONDS);
             if (is_daemon_healthy(1000, 1500)) {
@@ -149,20 +262,170 @@ function send_json_error(int $code, array $payload): void
     exit;
 }
 
-// 1. Strict Authentication Check (fail closed when no key is provisioned)
+function render_login_page(?string $errorMessage = null): void
+{
+    http_response_code(401);
+    header('Content-Type: text/html; charset=utf-8');
+?>
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#0d1117">
+  <title>Connexion ── dbsrt Monitor Cloud</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0d1117;
+      color: #c9d1d9;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 16px;
+    }
+    .card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 28px 24px;
+      width: 100%;
+      max-width: 380px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    }
+    h1 {
+      font-size: 1.25rem;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    p {
+      font-size: 0.85rem;
+      color: #8b949e;
+      margin-bottom: 20px;
+      line-height: 1.4;
+    }
+    .err-box {
+      background: rgba(248, 81, 73, 0.15);
+      border: 1px solid #f85149;
+      color: #f85149;
+      padding: 10px 12px;
+      border-radius: 6px;
+      font-size: 0.82rem;
+      margin-bottom: 16px;
+    }
+    .input-field {
+      width: 100%;
+      background: #090d13;
+      border: 1px solid #30363d;
+      color: #fff;
+      padding: 12px;
+      border-radius: 6px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.95rem;
+      margin-bottom: 16px;
+    }
+    .input-field:focus {
+      outline: none;
+      border-color: #58a6ff;
+    }
+    .btn-submit {
+      width: 100%;
+      background: #1f6feb;
+      border: 1px solid #388bfd;
+      color: #fff;
+      padding: 12px;
+      border-radius: 6px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .btn-submit:hover { background: #388bfd; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>📡 dbsrt Monitor</h1>
+    <p>Accès public sécurisé 4G/5G. Veuillez saisir la clé secrète API pour ouvrir la session de télémétrie.</p>
+    <?php if ($errorMessage): ?>
+      <div class="err-box"><?= htmlspecialchars($errorMessage, ENT_QUOTES, 'UTF-8') ?></div>
+    <?php endif; ?>
+    <form method="POST" action="">
+      <input type="password" name="api_key" class="input-field" placeholder="Clé Secrète API" required autofocus>
+      <button type="submit" class="btn-submit">Déverrouiller l'accès</button>
+    </form>
+  </div>
+</body>
+</html>
+<?php
+    exit;
+}
+
+// 1. Load Secret Keys
 $validKeys = load_valid_keys($secretKeyFile);
 if ($validKeys === []) {
     send_json_error(503, ['error' => 'Service Unavailable: gateway API key not provisioned']);
 }
-if (!is_authenticated($validKeys)) {
-    send_json_error(401, [
-        'error' => 'Unauthorized',
-        'message' => 'Valid API key required via X-API-Key header or Bearer token.',
+
+$clientIp = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
+if (str_contains($clientIp, ',')) {
+    $clientIp = trim(explode(',', $clientIp)[0]);
+}
+
+// Check Rate Limiting
+if (is_ip_rate_limited($rateLimitFile, $clientIp)) {
+    send_json_error(429, [
+        'error' => 'Too Many Requests',
+        'message' => 'Rate limit exceeded: 5 failed attempts. Locked for 15 minutes.',
     ]);
 }
 
-// 2. Determine requested sub-path
+// Handle Logout
 $requestUri = $_SERVER['REQUEST_URI'] ?? '/';
+if (str_contains($requestUri, '/logout')) {
+    setcookie(AUTH_COOKIE_NAME, '', ['expires' => time() - 3600, 'path' => '/']);
+    header('Location: monitoring');
+    exit;
+}
+
+// Handle Form POST Login
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['api_key'])) {
+    $submittedKey = trim((string) $_POST['api_key']);
+    if (check_key_match($submittedKey, $validKeys)) {
+        clear_auth_failures($rateLimitFile, $clientIp);
+        set_auth_session_cookie($submittedKey);
+        // Redirect to monitoring page
+        header('Location: ' . strtok($requestUri, '?'));
+        exit;
+    } else {
+        record_auth_failure($rateLimitFile, $clientIp);
+        render_login_page('Clé secrète invalide. Tentative enregistrée.');
+    }
+}
+
+// 2. Strict Authentication Check
+$matchedKey = '';
+if (!is_authenticated($validKeys, $matchedKey)) {
+    record_auth_failure($rateLimitFile, $clientIp);
+    $acceptHeader = $_SERVER['HTTP_ACCEPT'] ?? '';
+    if (str_contains($acceptHeader, 'text/html')) {
+        render_login_page();
+    } else {
+        send_json_error(401, [
+            'error' => 'Unauthorized',
+            'message' => 'Valid API key required via X-API-Key header, Bearer token, session cookie, or query token.',
+        ]);
+    }
+}
+
+// On successful authentication, clear any prior rate limit failures
+clear_auth_failures($rateLimitFile, $clientIp);
+
+// 3. Determine requested sub-path
 $scriptName = $_SERVER['SCRIPT_NAME'] ?? '';
 $scriptDir = dirname($scriptName);
 
@@ -174,19 +437,24 @@ if (!str_starts_with($path, '/')) {
     $path = '/' . $path;
 }
 
+// Default root or empty path to /monitoring
+if ($path === '/' || $path === '') {
+    $path = '/monitoring';
+}
+
 $upstreamQuery = $_SERVER['QUERY_STRING'] ?? '';
 $upstreamUrl = sprintf('%s:%d%s%s', UPSTREAM_HOST, UPSTREAM_PORT, $path, $upstreamQuery !== '' ? '?' . $upstreamQuery : '');
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
-// Forward request headers, minus hop-by-hop, credentials and client-supplied forwarding headers
-$droppedHeaders = ['host', 'content-length', 'connection', 'x-api-key', 'authorization', 'x-forwarded-for', 'x-forwarded-proto'];
+// Forward request headers, minus hop-by-hop and client forwarding headers
+$droppedHeaders = ['host', 'content-length', 'connection', 'x-forwarded-for', 'x-forwarded-proto'];
 $forwardHeaders = [];
 foreach (getallheaders() as $name => $value) {
     if (!in_array(strtolower($name), $droppedHeaders, true)) {
         $forwardHeaders[] = sprintf('%s: %s', $name, $value);
     }
 }
-$forwardHeaders[] = sprintf('X-Forwarded-For: %s', $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1');
+$forwardHeaders[] = sprintf('X-Forwarded-For: %s', $clientIp);
 $forwardHeaders[] = 'X-Forwarded-Proto: https';
 
 $requestBody = in_array($method, ['POST', 'PUT', 'PATCH'], true) ? file_get_contents('php://input') : false;
@@ -205,7 +473,7 @@ if ($requestBody !== false && $requestBody !== '') {
 
 $rawResponse = curl_exec($ch);
 
-// 3. Lazy on-demand activation: spawn only when the daemon refused the connection (nothing sent yet)
+// Lazy on-demand activation: spawn only when the daemon refused the connection
 if ($rawResponse === false && curl_errno($ch) === CURLE_COULDNT_CONNECT) {
     if (!spawn_daemon($homeDir)) {
         curl_close($ch);

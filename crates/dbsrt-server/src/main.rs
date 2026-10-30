@@ -2,14 +2,14 @@
 
 use anyhow::Result;
 use clap::Parser;
-use dbsrt_core::{OpenSubtitlesProvider, SubtitleCache};
+use dbsrt_core::OpenSubtitlesProvider;
 use dbsrt_server::constants::{
     DEFAULT_FILE_WATCH_DEBOUNCE_MS, DEFAULT_FILE_WATCH_INTERVAL_MS, DEFAULT_PG_ERROR_RETRY_SECS,
     DEFAULT_PG_RECONNECT_INTERVAL_SECS,
 };
 use dbsrt_server::{
     bind_listener, create_router_with_state, remove_discovery_file, write_discovery_file, AppState,
-    DbConnectionConfig, DISCOVERY_FILE,
+    AppStateInitOptions, DbConnectionConfig, DISCOVERY_FILE,
 };
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -85,18 +85,15 @@ impl ServerCli {
             DbConnectionConfig::new(host, self.db_port, self.db_user, self.db_pass, self.db_name)
         });
 
-        let mut state = AppState::new(
+        let mut state = AppState::with_options(
             self.phash_dir,
             self.subtitles_dir,
             Arc::new(OpenSubtitlesProvider::new(None)),
-            SubtitleCache::default(),
+            AppStateInitOptions {
+                dbphash_path: self.dbphash,
+                extra_phash_dirs: self.extra_phash_dirs,
+            },
         );
-        for dir in self.extra_phash_dirs {
-            if !state.extra_phash_dirs.contains(&dir) {
-                state.extra_phash_dirs.push(dir);
-            }
-        }
-        state.set_dbphash(self.dbphash);
         state.db_config = db_config;
         state.remote_api = self.remote_api;
         state.remote_api_key = self.remote_api_key;
