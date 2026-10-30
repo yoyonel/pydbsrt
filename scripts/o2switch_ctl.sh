@@ -362,6 +362,10 @@ if [[ -f "${PID_FILE}" ]]; then
 else
   echo "○ dbsrt-server is not running (no PID file)"
 fi
+# Same lookup as dbsrt: an ffmpeg next to the binary wins over PATH.
+FFMPEG="${BASE}/bin/ffmpeg"
+[[ -x "${FFMPEG}" ]] || FFMPEG="$(command -v ffmpeg || true)"
+echo "ffmpeg: ${FFMPEG:-not found} ($("${FFMPEG:-false}" -version 2>/dev/null | head -1 || true))"
 REMOTE_SCRIPT
     echo ""
     echo "=== Remote API Status (internal 127.0.0.1:${SERVER_PORT}) ==="
