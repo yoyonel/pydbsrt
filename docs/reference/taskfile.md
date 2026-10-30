@@ -185,7 +185,28 @@ Cette page dresse le dictionnaire exhaustif de toutes les cibles d'orchestration
 
 ---
 
-## 9. Dashboard WebAssembly TUI (`web-top:*`)
+## 9. Ingestion Freebox via RPi4 (`freebox:*`)
+
+Voir [Ingérer les médias de la Freebox sur o2switch via le RPi4](../how-to/ingerer-medias-freebox-via-rpi4-et-o2switch.md).
+
+| Commande | Description |
+| :--- | :--- |
+| `task freebox:install` | Copie le gateway HTTP Range et son unité systemd utilisateur sur le RPi4, puis l'active (à lancer depuis le poste de travail). |
+| `task freebox:start` | Monte les partages Freebox déclarés dans `/etc/fstab` du RPi4 et démarre le gateway. |
+| `task freebox:stop` | Arrête le gateway sur le RPi4. |
+| `task freebox:restart` | Remonte les partages manquants et redémarre le gateway (charge le nouveau code). |
+| `task freebox:status` | Affiche les montages CIFS Freebox et l'état du gateway sur le RPi4. |
+| `task freebox:mount` | Monte les partages Freebox depuis les entrées `/etc/fstab` du RPi4. |
+| `task freebox:unmount` | Démonte les partages Freebox du RPi4. |
+| `task freebox:test` | Sonde le gateway depuis o2switch à travers la redirection NAT Freebox (toute réponse HTTP = OK, `000` = injoignable). |
+| `task freebox:scan` | Scanne les médias éligibles (`Téléchargements`, `Vidéos`) et envoie `data/reports/freebox_batch_targets.json` sur o2switch (supporte `--limit`). |
+| `task freebox:batch:start` | Sonde le gateway, scanne, puis lance le worker batch Freebox sur o2switch en `--fresh-only` (supporte `--workers`, `--limit`). |
+| `task freebox:batch:status` | Affiche l'état et la progression du worker batch Freebox sur o2switch. |
+| `task freebox:batch:stop` | Arrête le worker batch Freebox sur o2switch (pose `run/batch_stopped`). |
+
+---
+
+## 10. Dashboard WebAssembly TUI (`web-top:*`)
 
 | Commande | Raccourcis | Description |
 | :--- | :--- | :--- |

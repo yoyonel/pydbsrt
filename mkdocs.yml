@@ -138,6 +138,7 @@ nav:
       - Audit d'Intégrité Catalogue & Stockage: how-to/2026-10-26-audit-integrite-catalogue-et-stockage.md
       - Déployer sur Hébergement Cloud o2switch: how-to/deployer-o2switch-cloud-cpanel.md
       - Interconnecter NAS Synology & o2switch FTP: how-to/interconnecter-nas-synology-et-o2switch-ftp.md
+      - Ingérer les Médias Freebox via RPi4 & o2switch: how-to/ingerer-medias-freebox-via-rpi4-et-o2switch.md
       - Batch de Calcul & Synchronisation o2switch: how-to/executer-batch-calcul-et-synchronisation-o2switch.md
       - Superviser les Batchs o2switch depuis un RPi4: how-to/superviser-batch-o2switch-depuis-rpi4.md
       - Compiler, Déployer et Lancer le CLI dbsrt sur RPi4: how-to/compiler-deployer-cli-top-sur-rpi4.md
@@ -208,6 +209,7 @@ nav:
           - Modernization Blueprint (UV/Taskfile): 2026-10-15-modernization-blueprint.md
           - ADR Détection Encodage Sous-Titres: decisions/2026-10-25-subtitle-encoding-detection.md
           - ADR Cas Limites Façade Ingestion: decisions/2026-10-25-media-add-edge-cases.md
+          - ADR Transport Freebox vers o2switch: decisions/2026-10-30-transport-freebox-nat-gateway-http.md
       - Archives & Rapports Techniques:
           - Intégration Daemon Axum & VLC: 2026-10-15-vlc-integration-daemon-and-plugins.md
           - Mécanique E2E Search by pHash: 2026-10-18-e2e-phash-search-mechanics-and-roadmap.md

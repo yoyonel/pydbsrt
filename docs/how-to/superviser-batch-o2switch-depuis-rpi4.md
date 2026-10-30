@@ -7,7 +7,7 @@ Ce guide pratique détaille la mise en œuvre d'un agent de supervision autonome
 ## 🎯 Objectifs opérationnels
 
 1. **Surveillance permanente (24/7)** : Vérifier régulièrement l'intégrité de la session et des workers sur o2switch sans intervention humaine.
-2. **Auto-guérison (Auto-Healing)** : Relancer automatiquement le batch en tâche de fond (`screen -dmS`) s'il a planté (`crashed`) ou disparu (`absent`). Quand une file est vidée (`finished`), le superviseur bascule sur l'autre bibliothèque (`tvshow` ↔ `movies`) pour occuper les CPU en continu. Deux lancements sont espacés d'au moins 30 min, pour qu'une file de fichiers toujours en échec ne boucle pas. Un arrêt manuel (`stopped`) ou une sonde en échec (`unknown`) ne déclenchent jamais de lancement.
+2. **Auto-guérison (Auto-Healing)** : Relancer automatiquement le batch en tâche de fond (`screen -dmS`) s'il a planté (`crashed`) ou disparu (`absent`). Quand une file est vidée (`finished`), le superviseur passe à la bibliothèque suivante (`tvshow` → `movies` → `freebox` → `tvshow`) pour occuper les CPU en continu. Si le lancement de `freebox` échoue (gateway injoignable), il lance directement `tvshow`. Deux lancements sont espacés d'au moins 30 min, pour qu'une file de fichiers toujours en échec ne boucle pas. Un arrêt manuel (`stopped`) ou une sonde en échec (`unknown`) ne déclenchent jamais de lancement.
 3. **Autoscaling adaptatif en boucle fermée** : Sonde en temps réel la charge CPU CloudLinux LVE sur o2switch (quota de 12 vCPUs) et adapte dynamiquement la concurrence (2 à 5 workers) pour exploiter la marge résiduelle (cible 78% à 92%), avec repli d'urgence immédiat si pic > 96% et ajustement fluide via `run/desired_workers` sans interruption des flux en cours. Budget CPU : le worker n'admet jamais plus de `DBSRT_CPU_BUDGET_VCPUS // DBSRT_FFMPEG_THREADS` vidéos simultanées (9 // 2 = 4), quel que soit `run/desired_workers` ; le superviseur ne baisse la cible que lorsque les jobs en cours ne la dépassent plus (un job lancé n'est jamais interrompu).
 4. **Rapatriement continu (Continuous Pull)** : Synchroniser périodiquement les nouveaux fichiers `.phash` et sous-titres vers le catalogue local (`data/__PHASH__`, stockage Zero-DB).
 
@@ -196,7 +196,7 @@ flowchart TD
 `task o2switch:batch:status` affiche une ligne machine lue par le superviseur :
 
 ```text
-BATCH_STATE=<running|stopped|aborted|finished|crashed|absent> PID=<pid|none> TYPE=<tvshow|movies>
+BATCH_STATE=<running|stopped|aborted|finished|crashed|absent> PID=<pid|none> TYPE=<tvshow|movies|freebox>
 ```
 
 | État | Signification | Action du superviseur |
@@ -204,7 +204,7 @@ BATCH_STATE=<running|stopped|aborted|finished|crashed|absent> PID=<pid|none> TYP
 | `running` | Le PID du pidfile est vivant. | Autoscaling uniquement. |
 | `stopped` | Marqueur `run/batch_stopped` posé par `batch:stop`. | Aucune relance. |
 | `aborted` | Marqueur `run/batch_aborted` posé par le worker après 50 échecs consécutifs de moins de 10 s (erreur systémique : ffmpeg, NAS, identifiants). | Aucune relance, ni changement de bibliothèque. Corriger la cause, puis relancer à la main. |
-| `finished` | `run/batch_queue.json` indique `remaining_targets: 0`. | Lance l'autre type (`tvshow` ↔ `movies`) `--fresh-only --daemon`. |
+| `finished` | `run/batch_queue.json` indique `remaining_targets: 0`. | Lance le type suivant (`tvshow` → `movies` → `freebox` → `tvshow`) `--fresh-only`. |
 | `crashed` | Pidfile présent, processus mort, sans marqueur d'arrêt. | Relance le même type `--fresh-only --daemon`. |
 | `absent` | Aucun pidfile ni marqueur. | Relance `--fresh-only --daemon`. |
 
@@ -214,7 +214,7 @@ BATCH_STATE=<running|stopped|aborted|finished|crashed|absent> PID=<pid|none> TYP
 >
 > - **Règle de double déploiement :** Le RPi4 injecte **sa propre copie** de `o2switch_batch_worker.py` lors de chaque relance. Après modification, exécutez `task rpi4:supervisor:install` en plus de `task o2switch:sync`.
 > - **Persistance en mémoire RAM :** Modifier un script Python sur le disque o2switch ne modifie **PAS** le processus en vol : l'interpréteur a déjà chargé le code au démarrage.
-> - **Un arrêt manuel est définitif :** `task o2switch:batch:stop` pose le marqueur `run/batch_stopped` ; le superviseur ne relance plus le batch. Seul un nouveau `batch-tvshow` / `batch-movies` efface ce marqueur.
+> - **Un arrêt manuel est définitif :** `task o2switch:batch:stop` pose le marqueur `run/batch_stopped` ; le superviseur ne relance plus le batch. Seul un nouveau `batch-tvshow` / `batch-movies` / `freebox:batch:start` efface ce marqueur.
 
 ### Procédure de Déploiement et Prise en Compte Immédiate
 
