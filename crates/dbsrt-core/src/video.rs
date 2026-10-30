@@ -889,12 +889,42 @@ fn spawn_ffmpeg_child(
     ))
 }
 
-fn resolve_expected_total_frames(options: &VideoExtractionOptions, meta_fps: f64) -> Option<usize> {
-    options.max_frames.or_else(|| {
-        options
-            .duration_sec
-            .map(|d| (d * meta_fps).round() as usize)
+/// [`resolve_expected_total_frames`] with a real ffprobe. Called before spawning ffmpeg, so a
+/// remote server never sees the probe and the extraction connections at once.
+fn expected_total_frames(
+    path: &Path,
+    options: &VideoExtractionOptions,
+    meta_fps: f64,
+) -> Option<usize> {
+    resolve_expected_total_frames(path, options, meta_fps, |p| {
+        probe_video(p).ok().map(|m| m.duration)
     })
+}
+
+/// Total frames expected for the progress file, `None` when unknown.
+///
+/// A full remote stream has no frame cap, so its container duration is probed (`probe_duration`)
+/// as a progress hint only: without it `dbsrt top` assumes a 45 min episode. Pipes are never
+/// probed, since ffprobe would consume their input.
+fn resolve_expected_total_frames(
+    path: &Path,
+    options: &VideoExtractionOptions,
+    meta_fps: f64,
+    probe_duration: impl FnOnce(&Path) -> Option<f64>,
+) -> Option<usize> {
+    if let Some(max) = options.max_frames {
+        return Some(max);
+    }
+    let s = path.to_string_lossy();
+    let is_probeable_stream =
+        crate::container::is_remote_stream_or_pipe(path) && !s.starts_with("pipe:") && s != "-";
+    let duration = options.duration_sec.or_else(|| {
+        (options.sampling == SamplingMode::Full && is_probeable_stream)
+            .then(|| probe_duration(path))
+            .flatten()
+            .map(|d| (d - options.start_sec).max(0.0))
+    })?;
+    Some((duration * meta_fps).round() as usize)
 }
 
 fn run_extraction_process(
@@ -903,15 +933,15 @@ fn run_extraction_process(
     resolved: &ResolvedFfmpeg,
 ) -> Result<Vec<FrameSample>> {
     let keyframe_ts = resolve_keyframe_timestamps(path, options);
+    let meta_fps = resolve_extraction_meta_fps(path, options.sampling);
+    let expected_total = expected_total_frames(path, options, meta_fps);
     let (mut child, mut reader) = spawn_ffmpeg_child(path, options, resolved)?;
 
     let mut buf = [0u8; 1024];
     let capacity = options.max_frames.unwrap_or(256);
     let mut samples = Vec::with_capacity(capacity);
 
-    let meta_fps = resolve_extraction_meta_fps(path, options.sampling);
     let guard = create_job_guard(child.id());
-    let expected_total = resolve_expected_total_frames(options, meta_fps);
 
     let timing_ctx = FrameTimingContext {
         sampling: options.sampling,
@@ -995,6 +1025,69 @@ pub fn extract_frames_phash(path: &Path, start_sec: f64, nb_frames: usize) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_resolve_expected_total_frames_probes_only_full_remote_streams() {
+        let full = VideoExtractionOptions {
+            sampling: SamplingMode::Full,
+            ..Default::default()
+        };
+        let http = Path::new("http://host/Disque_1/movie.mkv");
+        let probe = |_: &Path| Some(3600.0);
+        let no_probe = |_: &Path| -> Option<f64> { panic!("must not probe") };
+
+        // Remote full stream: probed duration (1 h at 24 fps).
+        assert_eq!(
+            resolve_expected_total_frames(http, &full, 24.0, probe),
+            Some(86_400)
+        );
+        // start_sec is subtracted from the probed duration.
+        let offset = VideoExtractionOptions {
+            start_sec: 600.0,
+            ..full.clone()
+        };
+        assert_eq!(
+            resolve_expected_total_frames(http, &offset, 24.0, probe),
+            Some(72_000)
+        );
+        // Failed probe stays unknown.
+        assert_eq!(
+            resolve_expected_total_frames(http, &full, 24.0, |_| None),
+            None
+        );
+        // Explicit caps win and never probe.
+        let capped = VideoExtractionOptions {
+            max_frames: Some(500),
+            ..full.clone()
+        };
+        assert_eq!(
+            resolve_expected_total_frames(http, &capped, 24.0, no_probe),
+            Some(500)
+        );
+        let bounded = VideoExtractionOptions {
+            duration_sec: Some(10.0),
+            ..full.clone()
+        };
+        assert_eq!(
+            resolve_expected_total_frames(http, &bounded, 24.0, no_probe),
+            Some(240)
+        );
+        // Pipes, local files and sparse sampling are never probed.
+        for path in ["-", "pipe:0", "/media/movie.mkv"] {
+            assert_eq!(
+                resolve_expected_total_frames(Path::new(path), &full, 24.0, no_probe),
+                None
+            );
+        }
+        let sparse = VideoExtractionOptions {
+            sampling: SamplingMode::Fps(1.0),
+            ..Default::default()
+        };
+        assert_eq!(
+            resolve_expected_total_frames(http, &sparse, 24.0, no_probe),
+            None
+        );
+    }
 
     #[test]
     fn test_extraction_command_threads_precede_input() {
