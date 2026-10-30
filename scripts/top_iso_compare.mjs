@@ -7,8 +7,9 @@
 // Exit code: 0 when every step matches, 1 on any ISO mismatch, 2 on harness failure,
 // 3 when the only mismatches happened while the web feed was down (infra, not ISO).
 //
-// Env: O2SWITCH_HOST (default o2switch), WEB_TOP_URL, CHROME_BIN, CDP_PORT, ISO_OUT_DIR, ISO_STEPS.
-// The API key is read over SSH and never written to disk or stdout.
+// Env: O2SWITCH_HOST (default o2switch), WEB_TOP_URL, CHROME_BIN, CDP_PORT, ISO_OUT_DIR, ISO_STEPS,
+// ISO_VIEWPORTS (CSS px "WxH" list; a width under 600 is emulated as a mobile device).
+// The read-only API key is read over SSH and never written to disk or stdout.
 
 import { execFileSync, spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -23,10 +24,24 @@ const OUT_DIR = process.env.ISO_OUT_DIR ?? 'target/top_iso';
 const TMUX_SESSION = 'dbsrt_top_iso';
 const NATIVE_CMD =
   'cd dbsrt && PATH=$HOME/dbsrt/bin:$PATH RAYON_NUM_THREADS=2 ./bin/dbsrt top';
-// Esc is only sent from a sub-view: on the active jobs view it quits the native app.
-const DEFAULT_STEPS =
-  'start,1,2,3,Down,Enter,Esc,f,o,4,Down,Enter,Esc,5,6,?,Tab,BackTab,?,Tab,1';
+// Esc is only sent from a sub-view or to cancel a search: on the active jobs view it quits the
+// native app. A multi-char step is typed as text (search query).
+const DEFAULT_STEPS = [
+  'start,1,2,3,Down,Enter,Esc,f,o,4,Down,Enter,Esc,5,6,?,Tab,BackTab,?,Tab,1',
+  // search: filter, scroll the filtered list, cancel
+  '3,/,the,Enter,PageDown,/,Esc',
+  // scrolling on the history, media browser and help views
+  'PageDown,PageDown,End,Home,4,End,PageUp,Home,?,PageDown,End,Home,?,1',
+].join(',');
 const STEPS = (process.env.ISO_STEPS ?? DEFAULT_STEPS).split(',').filter(Boolean);
+const VIEWPORTS = (process.env.ISO_VIEWPORTS ?? '1400x900,412x915').split(',').filter(Boolean)
+  .map((v) => {
+    const [width, height] = v.split('x').map(Number);
+    if (!(width > 0 && height > 0)) throw new Error(`bad ISO_VIEWPORTS entry: ${v}`);
+    return { label: v, width, height, mobile: width < 600 };
+  });
+const READONLY_KEY_CMD =
+  "grep -m 1 -v -e '^#' -e '^[[:space:]]*$' ~/dbsrt/etc/api_key_readonly.secret";
 const SETTLE_MS = 2500;
 // Live job/batch transitions land on each side at a different poll: re-capture before judging.
 const RETRIES = 4;
@@ -43,6 +58,9 @@ const VOLATILE = [
   [/(<qty> )\(\d+\/\d+/g, '$1(<frames>'],
   // The header may clip this field at the right border, dropping its unit.
   [/Host CPU:\s*\d+(\.\d+)?(?=│)/g, 'Host CPU: <qty>'],
+  [/\d+(\.\d+)?\s*\/\s*\d+\.?\d*(?=│)/g, '<qty>/<qty>'],
+  // The web grid blanks the second cell of a wide emoji; native text packs adjacent ones.
+  [/(\p{Extended_Pictographic}️?) (?=\p{Extended_Pictographic}|\.\.\.)/gu, '$1'],
   [/\b\d+(\.\d+)?\s?(d|h|min|ms|m|s)(\d+(h|min|ms|m|s))*\b(\s+ago)?/g, '<dur>'],
   [/\bload\s+[\d.]+\s+[\d.]+\s+[\d.]+/gi, 'load <loadavg>'],
   [/[▁▂▃▄▅▆▇█▏▎▍▌▋▊▉░▒▓⣀⣄⣤⣦⣶⣷⣿⡀⢀]+/g, '<bar>'],
@@ -82,6 +100,10 @@ function selfCheck() {
   const n = normalize('CPU 12.5%  RAM 28.8 / 3.2 GiB  12:01:02  ██▓░  up 1h20m  ( 62.2 Mbps)  0.6% (97/150');
   const w = normalize('CPU 9%     RAM 3/3.25 GiB 12:01:05  █░░░  up 1h19m  (538.8 Mbps)  0.6% (96/150');
   if (n !== w) throw new Error(`normalize self-check failed:\n${n}\n${w}`);
+  const clip = (s) => normalize(`│ RAM : ${s}│ (🧠👩...`);
+  if (clip('29.7 / 125.') !== normalize('│ RAM : 29.5 / 125.│ (🧠 👩 ...')) {
+    throw new Error(`normalize clip/emoji self-check failed: ${clip('29.7 / 125.')}`);
+  }
   if (diffLines('a\nb', 'a\nc').length !== 1) throw new Error('diffLines self-check failed');
   if (!WEB_FEED_DOWN.test('📢 ⚠️ 421 SNI Mismatch') || WEB_FEED_DOWN.test('📢 Lecture seule')) {
     throw new Error('WEB_FEED_DOWN self-check failed');
@@ -110,6 +132,14 @@ function nativeKey(step) {
   else tmux('send-keys', '-t', TMUX_SESSION, '-l', step);
 }
 const nativeCapture = () => tmux('capture-pane', '-p', '-t', TMUX_SESSION);
+// Quit the remote app with `q` first so no orphan `dbsrt top` keeps running on o2switch.
+async function nativeStop() {
+  try {
+    tmux('send-keys', '-t', TMUX_SESSION, 'Escape', 'q');
+    await sleep(1500);
+    tmux('kill-session', '-t', TMUX_SESSION);
+  } catch { /* already gone */ }
+}
 
 // ---------- web side (Chromium over CDP) ----------
 const CDP_KEYS = {
@@ -185,10 +215,67 @@ async function webGrid(cdp) {
 }
 
 // ---------- driver ----------
+// Replays every step on one viewport (fresh page load, fresh native session of the same grid).
+async function runViewport(cdp, vp) {
+  await cdp.send('Emulation.setDeviceMetricsOverride', {
+    width: vp.width, height: vp.height, deviceScaleFactor: vp.mobile ? 2.625 : 1, mobile: vp.mobile,
+  });
+  await cdp.send('Page.navigate', { url: `${WEB_URL}?token=${encodeURIComponent(apiKey)}` });
+
+  let grid = null;
+  for (let i = 0; i < 60 && !(grid && grid.rows > 0 && grid.cols > 0); i++) {
+    await sleep(500);
+    grid = await webGrid(cdp);
+  }
+  if (!grid?.rows) throw new Error(`web-top grid never rendered (${vp.label})`);
+  console.log(`viewport ${vp.label}${vp.mobile ? ' mobile' : ''}: grid ${grid.cols}x${grid.rows}`);
+
+  nativeStart(grid.cols, grid.rows);
+  // Both sides must show live data (same header) before the first step: the web side may still
+  // be backing off after an upstream failure.
+  let ready = false;
+  for (let i = 0; i < 90 && !ready; i++) {
+    await sleep(1000);
+    const head = (t) => normalize(t).split('\n')[0];
+    ready = head(nativeCapture()) === head((await webGrid(cdp)).text);
+  }
+  if (!ready) throw new Error('native and web headers never converged (web-top has no data?)');
+
+  const summary = [];
+  let failures = 0;
+  let infraFailures = 0;
+  for (const [index, step] of STEPS.entries()) {
+    if (step !== 'start') {
+      nativeKey(step);
+      await webKey(cdp, step);
+    }
+    let nativeRaw, webRaw, diffs;
+    for (let attempt = 0; attempt <= RETRIES && (!diffs || diffs.length); attempt++) {
+      await sleep(SETTLE_MS);
+      nativeRaw = nativeCapture();
+      webRaw = redact((await webGrid(cdp)).text);
+      diffs = diffLines(normalize(nativeRaw), normalize(webRaw));
+    }
+    const tag = `${vp.label}_${String(index).padStart(2, '0')}_${step.replace(/[^\w]/g, (c) => `x${c.charCodeAt(0)}`)}`;
+    writeFileSync(join(OUT_DIR, `${tag}.native.txt`), nativeRaw);
+    writeFileSync(join(OUT_DIR, `${tag}.web.txt`), webRaw);
+    writeFileSync(join(OUT_DIR, `${tag}.diff.txt`),
+      diffs.map((d) => `L${d.line}\n  native: ${d.native}\n  web:    ${d.web}`).join('\n'));
+    // A diff while the web feed is down says nothing about ISO: report it apart.
+    const status = !diffs.length ? 'OK  ' : WEB_FEED_DOWN.test(webRaw) ? 'INFRA' : 'FAIL';
+    summary.push(`${status} ${tag} (${diffs.length} lines differ)`);
+    if (status === 'FAIL') failures++;
+    if (status === 'INFRA') infraFailures++;
+  }
+  console.log(summary.join('\n'));
+  return { failures, infraFailures };
+}
+
 async function main() {
   selfCheck();
-  apiKey = execFileSync('ssh', [HOST, 'head -n1 ~/dbsrt/etc/api_key.secret'], { encoding: 'utf8' }).trim();
-  if (!apiKey) throw new Error('empty API key');
+  // The web side authenticates with the read-only key, exactly like the shared QR code.
+  apiKey = execFileSync('ssh', [HOST, READONLY_KEY_CMD], { encoding: 'utf8' }).trim();
+  if (!apiKey) throw new Error('empty read-only API key (run o2switch_ctl.sh rotate-readonly-key)');
   mkdirSync(OUT_DIR, { recursive: true });
 
   const profile = mkdtempSync(join(tmpdir(), 'dbsrt-iso-'));
@@ -199,57 +286,16 @@ async function main() {
   try {
     const cdp = await cdpSession(await cdpConnect());
     await cdp.send('Network.setUserAgentOverride', { userAgent: UA });
-    await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 900, deviceScaleFactor: 1, mobile: false });
-    await cdp.send('Page.navigate', { url: `${WEB_URL}?token=${encodeURIComponent(apiKey)}` });
-
-    let grid = null;
-    for (let i = 0; i < 60 && !(grid && grid.rows > 0 && grid.cols > 0); i++) {
-      await sleep(500);
-      grid = await webGrid(cdp);
+    for (const vp of VIEWPORTS) {
+      const r = await runViewport(cdp, vp);
+      failures += r.failures;
+      infraFailures += r.infraFailures;
+      await nativeStop();
     }
-    if (!grid?.rows) throw new Error('web-top grid never rendered');
-    console.log(`grid ${grid.cols}x${grid.rows}`);
-
-    nativeStart(grid.cols, grid.rows);
-    // Both sides must show live data (same header) before the first step: the web side may still
-    // be backing off after an upstream failure.
-    let ready = false;
-    for (let i = 0; i < 90 && !ready; i++) {
-      await sleep(1000);
-      const head = (t) => normalize(t).split('\n')[0];
-      ready = head(nativeCapture()) === head((await webGrid(cdp)).text);
-    }
-    if (!ready) throw new Error('native and web headers never converged (web-top has no data?)');
-
-    const summary = [];
-    for (const [index, step] of STEPS.entries()) {
-      if (step !== 'start') {
-        nativeKey(step);
-        await webKey(cdp, step);
-      }
-      let nativeRaw, webRaw, diffs;
-      for (let attempt = 0; attempt <= RETRIES && (!diffs || diffs.length); attempt++) {
-        await sleep(SETTLE_MS);
-        nativeRaw = nativeCapture();
-        webRaw = redact((await webGrid(cdp)).text);
-        diffs = diffLines(normalize(nativeRaw), normalize(webRaw));
-      }
-      const tag = `${String(index).padStart(2, '0')}_${step.replace(/[^\w]/g, (c) => `x${c.charCodeAt(0)}`)}`;
-      writeFileSync(join(OUT_DIR, `${tag}.native.txt`), nativeRaw);
-      writeFileSync(join(OUT_DIR, `${tag}.web.txt`), webRaw);
-      writeFileSync(join(OUT_DIR, `${tag}.diff.txt`),
-        diffs.map((d) => `L${d.line}\n  native: ${d.native}\n  web:    ${d.web}`).join('\n'));
-      // A diff while the web feed is down says nothing about ISO: report it apart.
-      const status = !diffs.length ? 'OK  ' : WEB_FEED_DOWN.test(webRaw) ? 'INFRA' : 'FAIL';
-      summary.push(`${status} ${tag} (${diffs.length} lines differ)`);
-      if (status === 'FAIL') failures++;
-      if (status === 'INFRA') infraFailures++;
-    }
-    console.log(summary.join('\n'));
     console.log(`captures: ${OUT_DIR}`);
     cdp.close();
   } finally {
-    try { tmux('kill-session', '-t', TMUX_SESSION); } catch { /* already gone */ }
+    await nativeStop();
     chrome.kill();
     rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   }
