@@ -15,6 +15,62 @@
     enhanceArticleMetadataBanner();
     probeLocalServicesIfLocalhost();
     initAsciinemaPlayers();
+    initSearchResultsEnhancer();
+  }
+
+  function getDocsDates() {
+    return window.__DOCS_DATES__ || {};
+  }
+
+  function normalizeDocPath(href) {
+    if (!href) return "";
+    let clean = href.split("?")[0].split("#")[0];
+    clean = clean.replace(/^(?:https?:\/\/[^\/]+)/, "");
+    clean = clean.replace(/^(?:\/?\.\.\/)+/, "").replace(/^\/+/, "");
+    clean = clean.replace(/^pydbsrt\//, "");
+    if (clean && !clean.endsWith("/")) clean += "/";
+    return clean;
+  }
+
+  function initSearchResultsEnhancer() {
+    const search = document.querySelector(".md-search");
+    if (!search || search.hasAttribute("data-date-observer")) return;
+    search.setAttribute("data-date-observer", "true");
+
+    const observer = new MutationObserver(() => {
+      const dates = getDocsDates();
+      const links = search.querySelectorAll(".md-search-result__link:not([data-date-enhanced])");
+      links.forEach((link) => {
+        link.setAttribute("data-date-enhanced", "true");
+        const href = link.getAttribute("href");
+        const docKey = normalizeDocPath(href);
+        const info = dates[docKey] || (docKey === "index/" ? dates[""] : null);
+        if (!info) return;
+
+        const articleEl = link.querySelector("article");
+        if (!articleEl || articleEl.querySelector(".dbsrt-search-timestamp")) return;
+
+        const heading = articleEl.querySelector("h1, h2");
+        if (!heading) return;
+
+        const timeRow = document.createElement("div");
+        timeRow.className = "dbsrt-search-timestamp";
+        let badgesHtml =
+          '<span class="dbsrt-time-badge created" title="Date de rédaction initiale">📅 Rédigé le ' +
+          info.created +
+          "</span>";
+        if (info.updated && info.updated !== info.created) {
+          badgesHtml +=
+            '<span class="dbsrt-time-badge updated" title="Dernière mise à jour">🔄 Mis à jour le ' +
+            info.updated +
+            "</span>";
+        }
+        timeRow.innerHTML = badgesHtml;
+        heading.insertAdjacentElement("afterend", timeRow);
+      });
+    });
+
+    observer.observe(search, { childList: true, subtree: true });
   }
 
   function initAsciinemaPlayers() {
@@ -105,6 +161,7 @@
   function enhanceArticleMetadataBanner() {
     const article = document.querySelector(".md-content__inner");
     if (!article || document.querySelector(".dbsrt-hero")) return;
+    if (article.querySelector(".dbsrt-reading-bar")) return;
 
     const h1 = article.querySelector("h1");
     if (!h1) return;
@@ -112,18 +169,33 @@
     const words = (article.textContent || "").trim().split(/\s+/).length;
     const readMin = Math.max(1, Math.round(words / 220));
 
+    const badgeBar = document.createElement("div");
+    badgeBar.className = "dbsrt-reading-bar";
+
+    const docKey = normalizeDocPath(window.location.pathname);
+    const info = getDocsDates()[docKey] || (docKey === "index/" ? getDocsDates()[""] : null);
+    let datesHtml = "";
+    if (info) {
+      datesHtml = '<span class="dbsrt-meta-chip">📅 Rédigé le ' + info.created + "</span>";
+      if (info.updated && info.updated !== info.created) {
+        datesHtml +=
+          '<span class="dbsrt-meta-chip dbsrt-meta-chip-updated">🔄 Mis à jour le ' + info.updated + "</span>";
+      }
+    }
+    badgeBar.innerHTML =
+      '<span class="dbsrt-meta-chip">⏱️ Lecture ~' +
+      readMin +
+      " min (" +
+      words +
+      ' mots)</span>' +
+      datesHtml +
+      '<span id="dbsrt-article-local-slot" style="display:inline-flex;gap:0.5rem;"></span>';
+
     const firstBq = h1.nextElementSibling;
-    if (firstBq && firstBq.tagName === "BLOCKQUOTE" && !firstBq.classList.contains("dbsrt-meta-enhanced")) {
-      firstBq.classList.add("dbsrt-meta-enhanced");
-      const badgeBar = document.createElement("div");
-      badgeBar.className = "dbsrt-reading-bar";
-      badgeBar.innerHTML =
-        '<span class="dbsrt-meta-chip">⏱️ Lecture ~' +
-        readMin +
-        " min (" +
-        words +
-        ' mots)</span><span id="dbsrt-article-local-slot" style="display:inline-flex;gap:0.5rem;"></span>';
+    if (firstBq && firstBq.tagName === "BLOCKQUOTE") {
       article.insertBefore(badgeBar, firstBq);
+    } else {
+      h1.insertAdjacentElement("afterend", badgeBar);
     }
   }
 

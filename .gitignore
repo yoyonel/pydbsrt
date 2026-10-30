@@ -151,3 +151,5 @@ scripts/*_report.json
 # Runtime volatile files & logs
 run/
 logs/
+docs/javascripts/docs-dates.js
+docs/assets/docs-dates.json

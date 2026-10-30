@@ -50,6 +50,9 @@ theme:
     - content.code.copy
     - content.code.annotate
 
+hooks:
+  - scripts/mkdocs_hooks.py
+
 plugins:
   - search:
       lang: fr
@@ -75,6 +78,7 @@ extra_javascript:
   - https://unpkg.com/mathjax@3/es5/tex-mml-svg.js
   - javascripts/panzoom.js
   - javascripts/asciinema-player.min.js
+  - javascripts/docs-dates.js
   - javascripts/doc-portal.js
 
 markdown_extensions:

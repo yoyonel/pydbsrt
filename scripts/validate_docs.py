@@ -181,6 +181,7 @@ def check_docs_filetypes() -> list[str]:
         ".mp4",
         ".webm",
         ".js",
+        ".json",
         ".css",
         ".pdf",
         ".svg",
