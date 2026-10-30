@@ -142,7 +142,6 @@ nav:
       - Batch de Calcul & Synchronisation o2switch: how-to/executer-batch-calcul-et-synchronisation-o2switch.md
       - Superviser les Batchs o2switch depuis un RPi4: how-to/superviser-batch-o2switch-depuis-rpi4.md
       - Compiler, Déployer et Lancer le CLI dbsrt sur RPi4: how-to/compiler-deployer-cli-top-sur-rpi4.md
-      - Valider l'ISO du Web-Top sur o2switch: how-to/valider-iso-web-top-o2switch.md
       - Exécuter les Recettes de Chaos Testing: how-to/executer-recettes-chaos-testing.md
       - Contribuer à la Documentation Diátaxis: how-to/contribuer-documentation-diataxis.md
   - 📖 Référence Technique:

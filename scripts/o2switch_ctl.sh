@@ -260,12 +260,6 @@ case "${ACTION}" in
       rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "deploy/o2switch/.htaccess" "${O2SWITCH_HOST}:${REMOTE_PUBLIC_HTML}/.htaccess"
     fi
 
-    echo "-> Deploying WebAssembly TUI monitor (crates/dbsrt-web-top/dist)..."
-    if [[ -d "crates/dbsrt-web-top/dist" ]]; then
-      # shellcheck disable=SC2029
-      ssh "${O2SWITCH_HOST}" "mkdir -p ${REMOTE_PUBLIC_HTML}/top"
-      rsync -avz --delete --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "crates/dbsrt-web-top/dist/" "${O2SWITCH_HOST}:${REMOTE_PUBLIC_HTML}/top/"
-    fi
     echo "✓ Stack synchronized to ${O2SWITCH_HOST}."
     ;;
 
@@ -516,9 +510,7 @@ REMOTE_SCRIPT
       echo "  • Dashboard URL : ${O2SWITCH_URL}/monitoring"
       if [[ -n "${O2SWITCH_API_KEY}" ]]; then
         MOBILE_URL="${O2SWITCH_URL}/monitoring?token=${O2SWITCH_API_KEY}"
-        WASM_URL="${O2SWITCH_URL}/top/?token=${O2SWITCH_API_KEY}"
         echo "  • Mobile Link   : ${MOBILE_URL}"
-        echo "  • WASM TUI Link : ${WASM_URL}"
         echo "  (Ce lien configure automatiquement le cookie sécurisé et nettoie l'URL pour votre smartphone 4G/5G)"
         echo ""
         echo "=== QR Code 4G/5G (Scan Smartphone) ==="
@@ -534,22 +526,6 @@ REMOTE_SCRIPT
       echo "  • URL locale    : http://127.0.0.1:${SERVER_PORT}/monitoring"
       echo "  (Configurez O2SWITCH_URL dans .env pour afficher le lien public)"
     fi
-    ;;
-
-  web-top-qr)
-    O2SWITCH_READONLY_KEY="${O2SWITCH_READONLY_KEY:-$(pass_secret "${READONLY_KEY_PASS_ENTRY}")}"
-    if [[ -z "${O2SWITCH_URL}" || -z "${O2SWITCH_READONLY_KEY}" ]]; then
-      echo "Error: O2SWITCH_URL (.env) and the read-only key (.env or pass ${READONLY_KEY_PASS_ENTRY}," >&2
-      echo "       created by '$0 rotate-readonly-key') are required." >&2
-      exit 1
-    fi
-    if ! command -v qrencode >/dev/null 2>&1; then
-      echo "Error: qrencode is required to render the QR code." >&2
-      exit 1
-    fi
-    echo "=== web-top 4G/5G : ${O2SWITCH_URL}/top/ (QR code embeds the read-only key) ==="
-    # printf is a builtin: the key never shows up in a process argv.
-    printf '%s' "${O2SWITCH_URL}/top/?token=${O2SWITCH_READONLY_KEY}" | qrencode -t UTF8
     ;;
 
   top)
@@ -840,7 +816,7 @@ REMOTE_SCRIPT
     ;;
 
   *)
-    echo "Usage: $0 {build|test-local|sync|start|stop|restart|status|logs|demo|setup-cron|remove-cron|rotate-key|rotate-readonly-key|monitoring|web-top-qr|top|pull-catalog|backup-nas|batch-tvshow|batch-movies|batch-status|batch-workers|batch-stop|batch-logs}"
+    echo "Usage: $0 {build|test-local|sync|start|stop|restart|status|logs|demo|setup-cron|remove-cron|rotate-key|rotate-readonly-key|monitoring|top|pull-catalog|backup-nas|batch-tvshow|batch-movies|batch-status|batch-workers|batch-stop|batch-logs}"
     exit 1
     ;;
 esac

@@ -214,7 +214,7 @@ Si `~/dbsrt/etc/api_key.secret` est absent ou vide, la passerelle refuse **toute
 * **Sur le serveur distant** : La clé est enregistrée dans `~/dbsrt/etc/api_key.secret`. Ce fichier est situé **hors de l'arborescence web** `public_html/`, empêchant tout téléchargement direct, avec des permissions strictes `chmod 600` (lecture/écriture réservée à l'utilisateur système).
 * **Sur le poste opérateur** : La clé est automatiquement sauvegardée dans le gestionnaire de mots de passe chiffré Unix `pass` sous l'entrée `services/pydbsrt/o2switch_api_key`.
 * **Support Multi-Clés (Zero-Downtime Rolling Update)** : Le fichier `api_key.secret` accepte plusieurs clés (une par ligne). La passerelle valide la requête dès qu'une des clés correspond, permettant des transitions progressives sans coupure de service.
-* **Clé lecture seule** : `~/dbsrt/etc/api_key_readonly.secret` (même format, entrée `pass` `services/pydbsrt/o2switch_readonly_key`) n'ouvre que les `GET`/`HEAD` sur `/monitoring`, `/top`, `/health`, `/v1/health` et `/v1/monitoring/*` ; tout le reste répond `403`. C'est elle qu'embarquent `task web-top:qr` et `task o2switch:monitoring`. Création ou rotation : `task o2switch:rotate-readonly-key`.
+* **Clé lecture seule** : `~/dbsrt/etc/api_key_readonly.secret` (même format, entrée `pass` `services/pydbsrt/o2switch_readonly_key`) n'ouvre que les `GET`/`HEAD` sur `/monitoring`, `/top`, `/health`, `/v1/health` et `/v1/monitoring/*` ; tout le reste répond `403`. C'est elle qu'embarque `task o2switch:monitoring`. Création ou rotation : `task o2switch:rotate-readonly-key`.
 * **Défense en profondeur côté démon** : `dbsrt-server` est lancé avec `--api-key-file ~/dbsrt/etc/api_key.secret` (spawn PHP, `start`, watchdog cron). Toute route hors `/health` et `/v1/health` exige alors `Authorization: Bearer <clé maître>` ou `X-API-Key`, y compris sur `127.0.0.1:8765` : un autre compte de l'hébergement mutualisé ne peut plus l'interroger. La passerelle retire les identifiants du client et injecte la clé maître. Le fichier est relu à chaque requête (rotation sans redémarrage) ; illisible, le démon répond `503`. Sans `--api-key-file` (dev, RPi4, tests) l'API reste ouverte.
 
 ### 3. Rotation automatisée des clés via Taskfile
@@ -324,7 +324,7 @@ Pour synchroniser directement depuis le NAS Synology sans station de travail :
 | `task o2switch:setup-cron` | Installe le watchdog utilisateur (`*/5 * * * *`) et le recompactage du catalogue (`*/15 * * * *`, seulement si un `.phash` est plus récent que `catalog.dbphash`). |
 | `task o2switch:remove-cron` | Supprime le watchdog utilisateur de la crontab. |
 | `task o2switch:rotate-key` | Génère, déploie et valide une nouvelle clé API 256 bits avec mise à jour dans `pass`. |
-| `task o2switch:rotate-readonly-key` | Génère et déploie la clé lecture seule (web-top, QR code), vérifie `GET /v1/health` = 200 et `POST /v1/catalog/reload` = 403. |
+| `task o2switch:rotate-readonly-key` | Génère et déploie la clé lecture seule (supervision partagée), vérifie `GET /v1/health` = 200 et `POST /v1/catalog/reload` = 403. |
 | `task o2switch:agent:start` | Démarre l'agent relais local connecté à o2switch pour VLC et le NAS Synology. |
 | `task o2switch:agent:stop` | Arrête l'agent relais local. |
 | `task o2switch:agent:restart` | Redémarre l'agent relais local. |

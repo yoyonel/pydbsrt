@@ -75,7 +75,7 @@ Tableau de bord web interactif monopage (HTML5/CSS/JS), responsive pour smartpho
 Snapshot unifié en JSON de la télémétrie du serveur (statistiques système, file batch, workers d'extraction actifs, télémétrie et logs du superviseur RPi4, derniers événements terminés).
 
 ### `GET /v1/monitoring/top`
-Snapshot JSON de `dbsrt top --json` (binaire `dbsrt` voisin de `dbsrt-server`), consommé par le web-top (`/top/`). Mis en cache 2 s ; les échecs ne sont pas mis en cache.
+Snapshot JSON de `dbsrt top --json` (binaire `dbsrt` voisin de `dbsrt-server`), destiné aux clients web de supervision (lecture seule). Mis en cache 2 s ; les échecs ne sont pas mis en cache.
 
 - `200 OK` : snapshot JSON (environ 1 Mo, non compressé).
 - `502 Bad Gateway` : `dbsrt top` a terminé en erreur ; le corps contient son `stderr`.

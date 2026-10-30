@@ -42,9 +42,6 @@ includes:
   freebox:
     taskfile: ./taskfiles/freebox.yml
     flatten: true
-  web:
-    taskfile: ./taskfiles/web_top.yml
-    flatten: true
   eval:
     taskfile: ./taskfiles/eval.yml
     flatten: true

@@ -13,6 +13,3 @@ path = "src/lib.rs"
 ratatui = { version = "0.29", default-features = false }
 serde = { workspace = true }
 serde_json = { workspace = true }
-
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-js-sys = "0.3"

@@ -79,7 +79,7 @@ Ces variables pilotent les scripts d'orchestration et cibles Taskfile pour les d
 - `REMOTE_PUBLIC_HTML` (défaut : `public_html/dbsrt`) : Répertoire web public recevant la règle de reverse-proxy `.htaccess`.
 - `O2SWITCH_URL` (défaut : *vide*) : URL publique HTTPS du reverse-proxy pour les tests de démonstration (ex. `https://votredomaine.fr/dbsrt`).
 - `O2SWITCH_API_KEY` (défaut : auto-résolu depuis `pass show services/pydbsrt/o2switch_api_key`) : Clé secrète d'API (256 bits) envoyée dans l'en-tête `X-API-Key` pour s'authentifier auprès de la passerelle.
-- `O2SWITCH_READONLY_KEY` (défaut : auto-résolu depuis `pass show services/pydbsrt/o2switch_readonly_key`) : Clé lecture seule utilisée par `monitoring`, `web-top-qr` et le harness ISO. Créée par `rotate-readonly-key`.
+- `O2SWITCH_READONLY_KEY` (défaut : auto-résolu depuis `pass show services/pydbsrt/o2switch_readonly_key`) : Clé lecture seule utilisée par `monitoring`. Créée par `rotate-readonly-key`.
 - `READONLY_KEY_PASS_ENTRY` (défaut : `services/pydbsrt/o2switch_readonly_key`) : Entrée `pass` de la clé lecture seule.
 - `DEFAULT_RSYNC_BWLIMIT_KBPS` (valeur : `20000`) : Plafond strict de bande passante rsync (20 Mo/s) pour respecter le quota CloudLinux LVE I/O de 42 MiB/s.
 

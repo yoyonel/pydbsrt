@@ -1,8 +1,7 @@
 //! Platform-agnostic `dbsrt top` interaction state machine and keyboard dispatch.
 //!
-//! Shared by the native crossterm monitor (`dbsrt-cli`) and the WebAssembly Ratzilla client
-//! (`dbsrt-web-top`) so both frontends react identically to every key. Host side effects
-//! (signals, persistence, rescans) are delegated to a [`TopActions`] implementation.
+//! Host side effects (signals, persistence, rescans) are delegated to a [`TopActions`]
+//! implementation.
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -17,7 +16,7 @@ use crate::model::{
 };
 use crate::ui::UiContext;
 
-/// Frontend-neutral key code (subset of crossterm / Ratzilla codes used by `dbsrt top`).
+/// Frontend-neutral key code (subset of crossterm codes used by `dbsrt top`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyCode {
     Char(char),
@@ -39,19 +38,12 @@ pub enum KeyCode {
     Null,
 }
 
-/// Seconds since Unix epoch as `f64` (wasm-safe: `std::time::Instant` panics on wasm32).
-#[cfg(not(target_arch = "wasm32"))]
+/// Seconds since Unix epoch as `f64`.
 pub fn now_secs_f64() -> f64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs_f64())
         .unwrap_or(0.0)
-}
-
-/// Seconds since Unix epoch as `f64` (wasm-safe: `std::time::Instant` panics on wasm32).
-#[cfg(target_arch = "wasm32")]
-pub fn now_secs_f64() -> f64 {
-    js_sys::Date::now() / crate::constants::MILLIS_PER_SEC
 }
 
 /// Host side effects triggered by keys. Each method returns the feedback toast to display.

@@ -62,7 +62,7 @@ tasks:
       - ./scripts/o2switch_ctl.sh rotate-key
 
   o2switch:rotate-readonly-key:
-    desc: Generate the read-only (monitoring GET) key used by the web-top QR code, on o2switch and pass
+    desc: Generate the read-only (monitoring GET) key used by shared monitoring links, on o2switch and pass
     cmds:
       - ./scripts/o2switch_ctl.sh rotate-readonly-key
 

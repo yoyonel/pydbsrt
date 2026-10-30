@@ -626,7 +626,7 @@ pub async fn top_snapshot(
     Ok(body)
 }
 
-/// Serves the exact `SystemTelemetry` rendered by the native `dbsrt top` (web-top ISO source).
+/// Serves the exact `SystemTelemetry` rendered by the native `dbsrt top`.
 ///
 /// # Returns
 /// Raw JSON bytes from the sibling `dbsrt top --json` binary, see [`top_snapshot`].

@@ -18,14 +18,10 @@ pub const LAYOUT_CENTER_PERCENTAGE_DIVISOR: u16 = 2;
 /// Standard base 100 percentage allocation.
 pub const TOTAL_PERCENTAGE: u16 = 100;
 
-/// Queries the current UTC timestamp in seconds since Unix epoch across platforms.
+/// Queries the current UTC timestamp in seconds since Unix epoch.
 ///
 /// # Returns
 /// `Some(u64)` with seconds elapsed since 1970-01-01, or `None` if clock retrieval fails.
-///
-/// # Data Flow & Invariants
-/// Uses native `std::time::SystemTime` on non-wasm targets.
-#[cfg(not(target_arch = "wasm32"))]
 fn get_now_epoch_secs() -> Option<u64> {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -33,24 +29,7 @@ fn get_now_epoch_secs() -> Option<u64> {
         .map(|d| d.as_secs())
 }
 
-/// Queries the current UTC timestamp in seconds since Unix epoch across platforms.
-///
-/// # Returns
-/// `Some(u64)` with seconds elapsed since 1970-01-01, or `None` if clock retrieval fails.
-///
-/// # Data Flow & Invariants
-/// Uses JavaScript `Date.now()` on wasm32 targets to avoid unsupported OS syscall panics.
-#[cfg(target_arch = "wasm32")]
-fn get_now_epoch_secs() -> Option<u64> {
-    let millis = js_sys::Date::now();
-    if millis >= 0.0 {
-        Some((millis / crate::constants::MILLIS_PER_SEC) as u64)
-    } else {
-        None
-    }
-}
-
-/// Formats the current local wall-clock time as `HH:MM:SS` across native and WebAssembly platforms.
+/// Formats the current local wall-clock time as `HH:MM:SS`.
 ///
 /// # Returns
 /// A formatted string representing the current system time in 24-hour format.
