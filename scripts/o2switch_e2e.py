@@ -15,6 +15,7 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Callable
 from pathlib import Path
@@ -24,6 +25,7 @@ CTL = REPO_ROOT / "scripts" / "o2switch_ctl.sh"
 HOST = os.environ.get("O2SWITCH_HOST", "o2switch")
 REMOTE_BASE = os.environ.get("REMOTE_BASE", "dbsrt")
 REMOTE_HELPER = f"{REMOTE_BASE}/bin/dbsrt_server_ctl.sh"
+RELEASE_HELPER = f"{REMOTE_BASE}/bin/dbsrt_release.sh"
 STOP_MARKER = f"{REMOTE_BASE}/run/dbsrt-server.stopped"
 API_KEY_PASS_ENTRY = os.environ.get("API_KEY_PASS_ENTRY", "services/pydbsrt/o2switch_api_key")
 WATCHDOG_TAG = "# dbsrt-server watchdog"
@@ -71,10 +73,18 @@ def right_media(media_match: str, stem: str) -> bool:
     its fps suffix): one word run must contain the other. Whole words, so "Le Film 2" does not match
     "Le.Film.2010".
 
+    The stem is percent-decoded like MediaMetadata::parse: catalog file names may carry `%20`.
+
     shortcut: a clean series title also passes for another episode, it does not name the episode.
     """
-    match_words, stem_words = words(media_match), words(stem)
+    match_words, stem_words = words(media_match), words(urllib.parse.unquote(stem))
     return contains_run(stem_words, match_words) or contains_run(match_words, stem_words)
+
+
+def parse_releases(listing: str) -> tuple[str | None, str | None]:
+    """(current, previous) release ids from `dbsrt_release.sh list` ("* id build", "- id build")."""
+    marked = {line[0]: line.split()[1] for line in listing.splitlines() if line[:2] in ("* ", "- ")}
+    return marked.get("*"), marked.get("-")
 
 
 class Recette:
@@ -113,6 +123,12 @@ class Recette:
         """Processes with an open fd on the spawn lock: only a spawner, while it spawns."""
         out = self.ssh(f"ls -l /proc/[0-9]*/fd 2>/dev/null | grep -c {REMOTE_BASE}/run/gateway_spawn.lock")
         return int(out.stdout.strip() or 0)
+
+    def releases(self) -> tuple[str | None, str | None]:
+        return parse_releases(self.ssh(f"bash {RELEASE_HELPER} list {REMOTE_BASE}").stdout)
+
+    def running(self) -> list[str]:
+        return self.ssh(f"bash {RELEASE_HELPER} running {REMOTE_BASE}").stdout.split()
 
     def marker(self) -> bool:
         return self.ssh(f"test -e {STOP_MARKER}").returncode == 0
@@ -178,6 +194,20 @@ class Recette:
         self.ssh(f"bash {REMOTE_HELPER} watchdog {REMOTE_BASE}")
         watched = self.wait_pids(1)
         self.check("watchdog respawn: 1 new daemon", len(watched) == 1 and watched != respawned)
+
+        print("== releases")
+        self.rollback_round_trip()
+
+    def rollback_round_trip(self) -> None:
+        current, previous = self.releases()
+        self.check("releases: daemon executes the current release", current is not None and self.running() == [current])
+        if not self.check("releases: a previous release exists", previous is not None):
+            return
+        for target, other in ((previous, current), (current, previous)):
+            self.check("rollback exits 0", self.ctl("rollback") == 0)
+            self.check("rollback: current and previous swapped", self.releases() == (target, other))
+            self.check("rollback: daemon executes the new current release", self.running() == [target])
+            self.check("health after rollback: 200", self.http("/v1/health")[0] == 200)
 
     def kill(self, pids: list[int]) -> None:
         # Live traffic or the cron can respawn a daemon right away: only the killed pids must go.

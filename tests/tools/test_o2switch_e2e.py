@@ -4,7 +4,7 @@ import subprocess
 import pytest
 
 from scripts import o2switch_e2e
-from scripts.o2switch_e2e import Recette, right_media
+from scripts.o2switch_e2e import Recette, parse_releases, right_media
 
 
 class FakeRecette(Recette):
@@ -53,6 +53,8 @@ def test_kill_checks_killed_pids_only(monkeypatch: pytest.MonkeyPatch, listings:
         ("", "Le.Film.2010", False),
         ("...", "Le.Film.2010", False),
         ("Le Film 2", "Le.Film.2010", False),
+        ("Show Name", "Show%20Name%20S01E02%201080p", True),
+        ("Autre Show", "Show%20Name%20S01E02", False),
     ],
     ids=[
         "dots",
@@ -65,7 +67,61 @@ def test_kill_checks_killed_pids_only(monkeypatch: pytest.MonkeyPatch, listings:
         "empty",
         "punctuation-only",
         "longer-title",
+        "percent-encoded-stem",
+        "percent-encoded-other",
     ],
 )
 def test_right_media(media_match: str, stem: str, expected: bool) -> None:
     assert right_media(media_match, stem) is expected
+
+
+@pytest.mark.parametrize(
+    ("listing", "expected"),
+    [
+        ("* b abc-dirty feat/x\n- a \n  c \n", ("b", "a")),
+        ("* b \n", ("b", None)),
+        ("  c \n", (None, None)),
+        ("", (None, None)),
+    ],
+    ids=["current-previous-other", "first-deploy", "no-link", "no-release"],
+)
+def test_parse_releases(listing: str, expected: tuple[str | None, str | None]) -> None:
+    assert parse_releases(listing) == expected
+
+
+class FakeReleases(Recette):
+    """Simulates dbsrt_release.sh rollback: swaps current/previous; the daemon follows unless stuck."""
+
+    def __init__(self, current: str, previous: str | None, stuck: bool = False) -> None:
+        super().__init__("http://gateway", "key")
+        self.state = (current, previous)
+        self.daemon = current
+        self.stuck = stuck
+
+    def releases(self) -> tuple[str | None, str | None]:
+        return self.state
+
+    def running(self) -> list[str]:
+        return [self.daemon] if self.daemon else []
+
+    def ctl(self, action: str) -> int:
+        assert action == "rollback"
+        self.state = (self.state[1], self.state[0])
+        if not self.stuck:
+            self.daemon = self.state[0]
+        return 0
+
+    def http(self, path: str, auth: bool = True, payload: dict | None = None) -> tuple[int, bytes]:
+        return 200, b""
+
+
+@pytest.mark.parametrize(
+    ("previous", "stuck", "failed"),
+    [("a", False, 0), (None, False, 1), ("a", True, 1)],
+    ids=["round-trip", "no-previous", "daemon-not-restarted"],
+)
+def test_rollback_round_trip(previous: str | None, stuck: bool, failed: int) -> None:
+    recette = FakeReleases("b", previous, stuck)
+    recette.rollback_round_trip()
+    assert recette.failed == failed
+    assert recette.state == ("b", previous)

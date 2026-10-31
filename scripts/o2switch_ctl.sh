@@ -16,6 +16,8 @@ DEFAULT_CURL_TIMEOUT_SEC=5
 # CloudLinux LVE I/O limit is 42 MiB/s on o2switch.
 # Cap rsync bandwidth to 20,000 KB/s (~20 MB/s) to guarantee zero I/O faults.
 DEFAULT_RSYNC_BWLIMIT_KBPS=20000
+# Releases kept on the host by deploy (current and previous included)
+DEFAULT_RELEASES_KEEP=5
 TARGET_TRIPLE="x86_64-unknown-linux-musl"
 TARGET_DIR="target/${TARGET_TRIPLE}/release"
 SERVER_BIN="${TARGET_DIR}/dbsrt-server"
@@ -109,6 +111,21 @@ remote_server_ctl() {
   rsync -a --chmod=F755 "${REPO_ROOT}/deploy/o2switch/dbsrt_server_ctl.sh" "${O2SWITCH_HOST}:${REMOTE_BASE}/bin/"
   # shellcheck disable=SC2029
   ssh "${O2SWITCH_HOST}" "bash $(printf '%q ' "${REMOTE_BASE}/bin/dbsrt_server_ctl.sh" "${action}" "${REMOTE_BASE}" "${SERVER_SOCKET}")"
+}
+
+# Deploys the remote releases helper, then runs one of its actions (dbsrt_release.sh <action> <base> [arg])
+remote_release() {
+  rsync -a --chmod=F755 "${REPO_ROOT}/deploy/o2switch/dbsrt_release.sh" "${REPO_ROOT}/deploy/o2switch/dbsrt_server_ctl.sh" "${O2SWITCH_HOST}:${REMOTE_BASE}/bin/"
+  # shellcheck disable=SC2029
+  ssh "${O2SWITCH_HOST}" "bash $(printf '%q ' "${REMOTE_BASE}/bin/dbsrt_release.sh" "$1" "${REMOTE_BASE}" "${@:2}")"
+}
+
+# Restarts the daemon, then checks it executes the active release
+restart_on_current_release() {
+  local expected
+  "$0" restart || return 1
+  expected="$(remote_release list | sed -n 's/^\* \([^ ]*\).*/\1/p')"
+  [[ -n "${expected}" && "$(remote_release running "${SERVER_SOCKET}")" == "${expected}" ]]
 }
 
 # Stops the remote process recorded in a PID file (SIGTERM, then SIGKILL after a timeout)
@@ -232,18 +249,11 @@ case "${ACTION}" in
 
   sync)
     check_ssh
-    if [[ ! -f "${SERVER_BIN}" || ! -f "${CLI_BIN}" ]]; then
-      echo "Binaries not found. Building first..."
-      "$0" build
-    fi
     echo "=== Synchronizing standalone stack to ${O2SWITCH_HOST} ==="
     # shellcheck disable=SC2029
     ssh "${O2SWITCH_HOST}" "mkdir -p ${REMOTE_BASE}/bin ${REMOTE_BASE}/data ${REMOTE_BASE}/run ${REMOTE_BASE}/logs ${REMOTE_PUBLIC_HTML} ${REMOTE_BASE}/scripts"
 
-    echo "-> Transferring static binaries..."
-    rsync -avz --progress --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${CLI_BIN}" "${SERVER_BIN}" "${O2SWITCH_HOST}:${REMOTE_BASE}/bin/"
-    # shellcheck disable=SC2029
-    ssh "${O2SWITCH_HOST}" "chmod +x ${REMOTE_BASE}/bin/dbsrt ${REMOTE_BASE}/bin/dbsrt-server"
+    # Binaries ship as releases (deploy): copying over bin/ would replace the release links
     rsync -a --chmod=F755 "deploy/o2switch/dbsrt_server_ctl.sh" "${O2SWITCH_HOST}:${REMOTE_BASE}/bin/"
 
     echo "-> Transferring batch worker scripts..."
@@ -270,7 +280,54 @@ case "${ACTION}" in
       rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "deploy/o2switch/.htaccess" "${O2SWITCH_HOST}:${REMOTE_PUBLIC_HTML}/.htaccess"
     fi
 
-    echo "✓ Stack synchronized to ${O2SWITCH_HOST}."
+    echo "✓ Stack synchronized to ${O2SWITCH_HOST}. Binaries: run 'task o2switch:deploy'."
+    ;;
+
+  deploy)
+    check_ssh
+    "$0" build
+    STAGE="$(mktemp -d)"
+    trap 'rm -rf "${STAGE}"' EXIT
+    cp "${SERVER_BIN}" "${CLI_BIN}" "${STAGE}/"
+    (cd "${STAGE}" && sha256sum dbsrt-server dbsrt >SHA256SUMS)
+    # Same id as dbsrt_release.sh: the hash of the binaries' listing
+    RELEASE_ID="$(sha256sum "${STAGE}/SHA256SUMS" | cut -c1-16)"
+    printf '%s %s\n' "$(git -C "${REPO_ROOT}" describe --always --dirty --abbrev=12)" "$(git -C "${REPO_ROOT}" rev-parse --abbrev-ref HEAD)" >"${STAGE}/BUILD"
+    echo "=== Deploying release ${RELEASE_ID} ($(cat "${STAGE}/BUILD")) to ${O2SWITCH_HOST} ==="
+    # shellcheck disable=SC2029
+    ssh "${O2SWITCH_HOST}" "mkdir -p ${REMOTE_BASE}/releases ${REMOTE_BASE}/bin"
+    rsync -a --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${STAGE}/" "${O2SWITCH_HOST}:${REMOTE_BASE}/releases/${RELEASE_ID}/"
+    remote_release activate "${RELEASE_ID}"
+    # restart repacks the catalog with the new dbsrt, then health-checks the new daemon
+    if ! restart_on_current_release; then
+      echo "❌ Release ${RELEASE_ID} is not serving: rolling back."
+      if remote_release rollback && restart_on_current_release; then
+        echo "✓ Previous release restored and serving."
+      else
+        echo "❌ Rollback failed too: check 'task o2switch:releases' and 'task o2switch:logs'."
+      fi
+      exit 1
+    fi
+    remote_release prune "${DEFAULT_RELEASES_KEEP}"
+    echo "✓ Release ${RELEASE_ID} deployed and serving."
+    ;;
+
+  rollback)
+    check_ssh
+    echo "=== Rolling back to the previous release on ${O2SWITCH_HOST} ==="
+    remote_release rollback
+    if ! restart_on_current_release; then
+      echo "❌ Previous release is not serving: check 'task o2switch:releases' and 'task o2switch:logs'."
+      exit 1
+    fi
+    echo "✓ Previous release serving."
+    ;;
+
+  releases)
+    check_ssh
+    echo "=== Releases on ${O2SWITCH_HOST} (* current, - previous) ==="
+    remote_release list
+    echo "Running daemon(s): $(remote_release running "${SERVER_SOCKET}" | paste -sd ' ')"
     ;;
 
   start)
@@ -815,7 +872,7 @@ REMOTE_SCRIPT
     ;;
 
   *)
-    echo "Usage: $0 {build|test-local|sync|start|stop|restart|status|logs|demo|setup-cron|remove-cron|rotate-key|rotate-readonly-key|monitoring|top|pull-catalog|backup-nas|batch-tvshow|batch-movies|batch-status|batch-workers|batch-stop|batch-logs|faultwatch}"
+    echo "Usage: $0 {build|test-local|sync|deploy|rollback|releases|start|stop|restart|status|logs|demo|setup-cron|remove-cron|rotate-key|rotate-readonly-key|monitoring|top|pull-catalog|backup-nas|batch-tvshow|batch-movies|batch-status|batch-workers|batch-stop|batch-logs|faultwatch}"
     exit 1
     ;;
 esac

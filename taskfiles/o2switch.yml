@@ -12,9 +12,24 @@ tasks:
       - ./scripts/o2switch_ctl.sh test-local
 
   o2switch:sync:
-    desc: Synchronize static binaries, gateway, and SRT store to o2switch (catalog seeded only if missing)
+    desc: Synchronize gateway, helpers, and SRT store to o2switch (catalog seeded only if missing; binaries ship via o2switch:deploy)
     cmds:
       - ./scripts/o2switch_ctl.sh sync
+
+  o2switch:deploy:
+    desc: Build and ship dbsrt-server + dbsrt as a checksummed release, switch atomically, restart, auto-rollback on failure
+    cmds:
+      - ./scripts/o2switch_ctl.sh deploy
+
+  o2switch:rollback:
+    desc: Switch back to the previous o2switch release and restart the daemon on it
+    cmds:
+      - ./scripts/o2switch_ctl.sh rollback
+
+  o2switch:releases:
+    desc: List o2switch releases (current, previous, build) and the release the daemon executes
+    cmds:
+      - ./scripts/o2switch_ctl.sh releases
 
   o2switch:start:
     desc: Start standalone unprivileged dbsrt-server daemon on o2switch
