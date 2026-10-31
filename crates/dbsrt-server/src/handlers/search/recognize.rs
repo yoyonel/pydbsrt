@@ -273,10 +273,9 @@ pub fn resolve_certified_candidates_with_shift(
 /// * `hashes` - Slice of query pHash hashes.
 /// * `payload` - Parsed recognize request parameters.
 /// * `phash_dirs` - Configured directories storing .phash files.
-/// * `elapsed` - Duration elapsed since request start.
 ///
 /// # Returns
-/// * `RecognizeResponse` - Structured recognition outcome.
+/// * `RecognizeResponse` - Structured recognition outcome (`timer_seconds` is filled by `recognize_handler`).
 ///
 /// # Errors
 /// * Guarantee: Never returns Err.
@@ -294,7 +293,6 @@ pub fn recognize_from_fingerprint(
     hashes: &[u64],
     payload: &RecognizeRequest,
     phash_dirs: &[PathBuf],
-    elapsed: f64,
 ) -> RecognizeResponse {
     let req_fps = payload.fps.unwrap_or(DEFAULT_BASELINE_FPS);
     let req_lang = payload.language.as_deref().unwrap_or("auto");
@@ -315,7 +313,7 @@ pub fn recognize_from_fingerprint(
             shift_frames: None,
             shift_ms: None,
             candidates: None,
-            timer_seconds: elapsed,
+            timer_seconds: 0.0,
         };
     }
 
@@ -347,7 +345,7 @@ pub fn recognize_from_fingerprint(
             shift_frames,
             shift_ms,
             candidates: Some(final_cands),
-            timer_seconds: elapsed,
+            timer_seconds: 0.0,
         }
     } else {
         RecognizeResponse {
@@ -360,7 +358,7 @@ pub fn recognize_from_fingerprint(
             shift_frames: None,
             shift_ms: None,
             candidates: None,
-            timer_seconds: elapsed,
+            timer_seconds: 0.0,
         }
     }
 }
@@ -371,10 +369,9 @@ pub fn recognize_from_fingerprint(
 /// * `media_path` - Path to target video file.
 /// * `payload` - Recognize request options (nb_seconds, search_distance).
 /// * `phash_dirs` - Configured directories storing .phash files.
-/// * `elapsed` - Duration elapsed since request start.
 ///
 /// # Returns
-/// * `Result<RecognizeResponse, (StatusCode, String)>` - Recognition result or HTTP error tuple.
+/// * `Result<RecognizeResponse, (StatusCode, String)>` - Recognition result (`timer_seconds` is filled by `recognize_handler`) or HTTP error tuple.
 ///
 /// # Errors
 /// * Returns `Err(StatusCode::BAD_REQUEST)` if media file does not exist.
@@ -391,7 +388,6 @@ pub fn recognize_from_media_file(
     media_path: &Path,
     payload: &RecognizeRequest,
     phash_dirs: &[PathBuf],
-    elapsed: f64,
 ) -> Result<RecognizeResponse, (StatusCode, String)> {
     if !media_path.exists() {
         return Err((
@@ -424,7 +420,7 @@ pub fn recognize_from_media_file(
             shift_frames: None,
             shift_ms: None,
             candidates: None,
-            timer_seconds: elapsed,
+            timer_seconds: 0.0,
         });
     }
 
@@ -444,7 +440,7 @@ pub fn recognize_from_media_file(
             shift_frames: None,
             shift_ms: None,
             candidates: None,
-            timer_seconds: elapsed,
+            timer_seconds: 0.0,
         })
     } else {
         Ok(RecognizeResponse {
@@ -457,7 +453,7 @@ pub fn recognize_from_media_file(
             shift_frames: None,
             shift_ms: None,
             candidates: None,
-            timer_seconds: elapsed,
+            timer_seconds: 0.0,
         })
     }
 }
@@ -494,15 +490,15 @@ pub async fn recognize_handler(
     let override_phash_dir = payload.phash_dir.as_deref().map(PathBuf::from);
     let phash_dirs = state.effective_phash_dirs(override_phash_dir.as_deref());
 
-    let response = if let Some(ref fp) = payload.query_fingerprint {
+    let mut response = if let Some(ref fp) = payload.query_fingerprint {
         let hashes = parse_fingerprint_hashes(fp);
-        let elapsed = t_start.elapsed().as_secs_f64();
-        recognize_from_fingerprint(&state, &hashes, &payload, &phash_dirs, elapsed)
+        recognize_from_fingerprint(&state, &hashes, &payload, &phash_dirs)
     } else {
         let media_path = PathBuf::from(&payload.media_path);
-        let elapsed = t_start.elapsed().as_secs_f64();
-        recognize_from_media_file(&media_path, &payload, &phash_dirs, elapsed)?
+        recognize_from_media_file(&media_path, &payload, &phash_dirs)?
     };
+    // Measured after matching/extraction so the reported latency covers the real work.
+    response.timer_seconds = t_start.elapsed().as_secs_f64();
 
     state.metrics.total_latency_us.fetch_add(
         t_start.elapsed().as_micros() as u64,
@@ -587,6 +583,61 @@ mod tests {
         assert!(dbsrt_core::is_static_sequence(&query));
         let hit = match_fingerprint_multitier(&state, &query, DEFAULT_SEARCH_DISTANCE, &[]);
         assert!(hit.is_some(), "static textured scene must reach the index");
+    }
+
+    #[tokio::test]
+    async fn test_recognize_timer_covers_matching() {
+        const MEDIA_COUNT: usize = 20;
+        const FRAMES_PER_MEDIA: usize = 5000;
+        const QUERY_FRAMES: usize = 1000;
+        const FPS: f64 = 25.0;
+        let state = test_app_state();
+        // Deterministic pseudo-random frames so the match is non-trivial work.
+        let mut seed: u64 = 0x9E37_79B9_7F4A_7C15;
+        let mut next = || {
+            seed = seed
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            seed
+        };
+        let mut first_media = Vec::new();
+        for i in 0..MEDIA_COUNT {
+            let frames: Vec<u64> = (0..FRAMES_PER_MEDIA).map(|_| next()).collect();
+            state.delta_index.write().unwrap().ingest_raw_frames(
+                &format!("Timer.Media.{i}.2020.1080p.mkv"),
+                &frames,
+                FPS,
+            );
+            if i == 0 {
+                first_media = frames;
+            }
+        }
+        let query: Vec<String> = first_media[..QUERY_FRAMES]
+            .iter()
+            .map(|h| format!("0x{h:016x}"))
+            .collect();
+        let req = RecognizeRequest {
+            media_path: String::new(),
+            query_fingerprint: Some(query),
+            fps: Some(FPS),
+            language: Some("fr".to_string()),
+            client_version: None,
+            search_distance: 6,
+            nb_seconds: 1.0,
+            phash_dir: None,
+        };
+
+        let t_outer = Instant::now();
+        let res = recognize_handler(State(state), Json(req)).await.unwrap();
+        let outer = t_outer.elapsed().as_secs_f64();
+
+        assert!(res.0.found);
+        // timer_seconds must include the matching, i.e. almost all of the handler time.
+        assert!(
+            res.0.timer_seconds >= outer * 0.5,
+            "timer_seconds={} but handler took {outer}s",
+            res.0.timer_seconds
+        );
     }
 
     #[tokio::test]
