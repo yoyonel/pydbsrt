@@ -17,7 +17,8 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -27,36 +28,69 @@ REMOTE_BASE = os.environ.get("REMOTE_BASE", "dbsrt")
 REMOTE_HELPER = f"{REMOTE_BASE}/bin/dbsrt_server_ctl.sh"
 RELEASE_HELPER = f"{REMOTE_BASE}/bin/dbsrt_release.sh"
 STOP_MARKER = f"{REMOTE_BASE}/run/dbsrt-server.stopped"
+# Serializes every spawn: PHP gateway, cron watchdog and ctl start/stop
+SPAWN_LOCK = f"{REMOTE_BASE}/run/gateway_spawn.lock"
+SPAWN_LOCK_WAIT_SEC = 30.0
+# The holder releases the lock on its own if this process dies before closing its stdin
+SPAWN_LOCK_HOLD_SEC = 60
 API_KEY_PASS_ENTRY = os.environ.get("API_KEY_PASS_ENTRY", "services/pydbsrt/o2switch_api_key")
 WATCHDOG_TAG = "# dbsrt-server watchdog"
 PACK_TAG = "# dbsrt-server catalog pack"
 # Never fires (31 February): only trips the legacy-watchdog guard of stop
 LEGACY_WATCHDOG_LINE = f"0 0 31 2 * true {WATCHDOG_TAG}"
-RECOGNIZE_SAMPLES = 5
+GOLDEN_FILE = f"{REMOTE_BASE}/etc/e2e_golden.json"
+GOLDEN_PLAIN = 10
+GOLDEN_COUPLED = 5
+GOLDEN_SIZE = GOLDEN_PLAIN + GOLDEN_COUPLED
+# Candidates cut per kept query when (re)building the fixed set: some known-hard queries fail
+GOLDEN_POOL_FACTOR = 4
 QUERY_SECONDS = 10
 HTTP_TIMEOUT_SEC = 60
 CTL_TIMEOUT_SEC = 600
 PID_POLL_TIMEOUT_SEC = 10.0
 PID_POLL_INTERVAL_SEC = 0.5
 
-# Runs remotely from REMOTE_BASE: one /v1/recognize payload per line, cut mid-media from a random
-# .phash already packed in the catalog. `_stem` is the file stem, kept local for right_media.
-PICK_QUERIES = r"""
-import json, os, random, re, sys
-count, seconds = int(sys.argv[1]), float(sys.argv[2])
+# Runs remotely from REMOTE_BASE (Python 3.6): one /v1/recognize payload per line, cut mid-media.
+# `golden SECONDS`: the fixed set of etc/e2e_golden.json, `{"_missing": true}` for a vanished file.
+# `pool SECONDS PLAIN COUPLED`: the first .phash already packed in the catalog, in sha256 order of
+# their name, split by French certified coupling. The fixed set stays on o2switch: no media name in git.
+# `_stem`, `_file` and `_coupled` stay local; media names are never printed.
+CUT_QUERIES = r"""
+import hashlib, json, os, re, sys
+mode, seconds = sys.argv[1], float(sys.argv[2])
 d = "data/__PHASH__"
-cat_mtime = os.path.getmtime("data/catalog.dbphash")
 pat = re.compile(r"^(.*)\.([0-9]+\.[0-9]+)fps\.phash$")
-files = [f for f in os.listdir(d) if pat.match(f) and os.path.getmtime(os.path.join(d, f)) < cat_mtime]
-for f in random.sample(files, min(count, len(files))):
+
+
+def cut(f, coupled):
     stem, fps = pat.match(f).groups()
     raw = open(os.path.join(d, f), "rb").read()
     hashes = [int.from_bytes(raw[i : i + 8], "big") for i in range(0, len(raw) - 7, 8)]
     n = int(float(fps) * seconds)
     start = max(0, len(hashes) // 2 - n // 2)
     query = ["0x%016x" % h for h in hashes[start : start + n]]
-    print(json.dumps({"query_fingerprint": query, "fps": float(fps), "language": "fr", "_stem": stem}))
+    print(json.dumps({"query_fingerprint": query, "fps": float(fps), "language": "fr", "_stem": stem,
+                      "_file": f, "_coupled": coupled}))
+
+
+if mode == "golden":
+    for entry in json.load(open("etc/e2e_golden.json")):
+        if pat.match(entry["file"]) and os.path.isfile(os.path.join(d, entry["file"])):
+            cut(entry["file"], entry["coupled"])
+        else:
+            print(json.dumps({"_missing": True}))
+else:
+    plain, coupled = int(sys.argv[3]), int(sys.argv[4])
+    cat_mtime = os.path.getmtime("data/catalog.dbphash")
+    couplings = json.load(open("data/SRT/couplings.json")).get("couplings", [])
+    french = {c.get("phash_filename") for c in couplings
+              if any(str(s.get("lang", "")).lower() in ("fr", "fre", "fra", "french") for s in c.get("subtitles", []))}
+    files = sorted((f for f in os.listdir(d) if pat.match(f) and os.path.getmtime(os.path.join(d, f)) < cat_mtime),
+                   key=lambda f: hashlib.sha256(f.encode()).hexdigest())
+    for f in [f for f in files if f not in french][:plain] + [f for f in files if f in french][:coupled]:
+        cut(f, f in french)
 """
+SXXEYY = re.compile(r"[sS](\d{1,2})[eE](\d{1,3})")
 
 
 def words(s: str) -> list[str]:
@@ -79,6 +113,34 @@ def right_media(media_match: str, stem: str) -> bool:
     """
     match_words, stem_words = words(media_match), words(urllib.parse.unquote(stem))
     return contains_run(stem_words, match_words) or contains_run(match_words, stem_words)
+
+
+def golden_ok(resp: dict, stem: str, coupled: bool) -> bool:
+    """A fixed query passes when it names its own media, its own SxxEyy (episode stems) and, when the
+    media has a French certified coupling, offers only certified subtitles of its own release."""
+    if not resp.get("found") or not right_media(resp.get("media_match") or "", stem):
+        return False
+    decoded = urllib.parse.unquote(stem)
+    sxe = SXXEYY.search(decoded)
+    if sxe and (resp.get("season"), resp.get("episode")) != (int(sxe[1]), int(sxe[2])):
+        return False
+    cands = resp.get("candidates") or []
+    return not coupled or (
+        bool(cands) and all(urllib.parse.unquote(str(c.get("release") or "")).startswith(decoded) for c in cands)
+    )
+
+
+def pick_golden(results: Iterator[tuple[dict, bool]], plain: int, coupled: int) -> list[dict]:
+    """First passing queries of each kind, in pool order; stops reading the pool once the set is full."""
+    wanted = {False: plain, True: coupled}
+    kept: list[dict] = []
+    for query, ok in results:
+        if ok and wanted[query["_coupled"]] > 0:
+            wanted[query["_coupled"]] -= 1
+            kept.append({"file": query["_file"], "coupled": query["_coupled"]})
+        if not any(wanted.values()):
+            break
+    return kept
 
 
 def parse_releases(listing: str) -> tuple[str | None, str | None]:
@@ -106,6 +168,27 @@ class Recette:
         return subprocess.run(
             ["ssh", "-o", "BatchMode=yes", HOST, cmd], input=stdin, capture_output=True, text=True, timeout=120
         )
+
+    def hold(self, cmd: str) -> subprocess.Popen[str]:
+        return subprocess.Popen(
+            ["ssh", "-o", "BatchMode=yes", HOST, cmd], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True
+        )
+
+    @contextmanager
+    def spawns_blocked(self) -> Iterator[bool]:
+        """Holds the spawn lock: live traffic (an open monitoring page) cannot respawn the daemon meanwhile.
+
+        Yields whether the lock was taken within SPAWN_LOCK_WAIT_SEC.
+        """
+        holder = self.hold(
+            f"flock -w {SPAWN_LOCK_WAIT_SEC} {SPAWN_LOCK} -c 'echo locked; read -t {SPAWN_LOCK_HOLD_SEC} _'"
+        )
+        assert holder.stdin is not None and holder.stdout is not None
+        try:
+            yield holder.stdout.readline().strip() == "locked"
+        finally:
+            holder.stdin.close()
+            holder.wait(timeout=SPAWN_LOCK_WAIT_SEC + 30)
 
     def pids(self) -> list[int]:
         return sorted(int(p) for p in self.ssh(f"bash {REMOTE_HELPER} pids {REMOTE_BASE}").stdout.split())
@@ -184,8 +267,10 @@ class Recette:
         self.check("helper spawn: no process inherits the spawn lock", self.lock_holders() == 0)
 
         print("== respawn after crash")
-        self.kill(after)
-        self.check("status exits 3 (crashed, no marker)", self.ctl("status") == 3 and not self.marker())
+        with self.spawns_blocked() as locked:
+            self.check("spawn lock held: no respawn between kill and status", locked)
+            self.kill(after)
+            self.check("status exits 3 (crashed, no marker)", self.ctl("status") == 3 and not self.marker())
         self.check("gateway respawns: health 200", self.http("/v1/health")[0] == 200)
         respawned = self.pids()
         self.check("gateway respawn: 1 new daemon", len(respawned) == 1 and respawned != after)
@@ -211,27 +296,51 @@ class Recette:
 
     def kill(self, pids: list[int]) -> None:
         # Live traffic or the cron can respawn a daemon right away: only the killed pids must go.
-        # shortcut: such a respawn also skews the next "status exits 3" check, rare on a 10 s window.
         self.ssh("kill -9 " + " ".join(map(str, pids)))
         left = self.wait_until(lambda now: not set(now) & set(pids))
         self.check("kill -9: killed daemon gone", not set(left) & set(pids))
 
+    def cut_queries(self, *args: object) -> list[dict]:
+        out = self.ssh(f"cd {REMOTE_BASE} && python3 -I - {' '.join(map(str, args))}", CUT_QUERIES)
+        return [json.loads(line) for line in out.stdout.splitlines()]
+
+    def ask(self, query: dict) -> dict:
+        code, body = self.http("/v1/recognize", payload={k: v for k, v in query.items() if not k.startswith("_")})
+        return json.loads(body) if code == 200 else {}
+
+    def build_golden(self) -> None:
+        pool = self.cut_queries(
+            "pool", QUERY_SECONDS, GOLDEN_PLAIN * GOLDEN_POOL_FACTOR, GOLDEN_COUPLED * GOLDEN_POOL_FACTOR
+        )
+        results = ((q, golden_ok(self.ask(q), q["_stem"], q["_coupled"])) for q in pool)
+        kept = pick_golden(results, GOLDEN_PLAIN, GOLDEN_COUPLED)
+        self.ssh(
+            f"mkdir -p {REMOTE_BASE}/etc && cat > {GOLDEN_FILE}.tmp && mv -f {GOLDEN_FILE}.tmp {GOLDEN_FILE}",
+            json.dumps(kept),
+        )
+        print(f"golden set built: {len(kept)}/{GOLDEN_SIZE} queries")
+
     def recognize(self) -> None:
-        lines = self.ssh(f"cd {REMOTE_BASE} && python3 -I - {RECOGNIZE_SAMPLES} {QUERY_SECONDS}", PICK_QUERIES)
-        payloads = [json.loads(line) for line in lines.stdout.splitlines()]
-        self.check(f"picked {RECOGNIZE_SAMPLES} catalog queries", len(payloads) == RECOGNIZE_SAMPLES)
-        found = right = timed = 0
-        for payload in payloads:
-            stem = payload.pop("_stem")
-            code, body = self.http("/v1/recognize", payload=payload)
-            resp = json.loads(body) if code == 200 else {}
-            found += bool(resp.get("found"))
-            right += right_media(resp.get("media_match") or "", stem)
+        if self.ssh(f"test -s {GOLDEN_FILE}").returncode != 0:
+            self.build_golden()
+        queries = self.cut_queries("golden", QUERY_SECONDS)
+        present = [q for q in queries if not q.get("_missing")]
+        self.check(
+            f"golden set: {len(present)}/{GOLDEN_SIZE} fixed queries", len(present) == GOLDEN_SIZE == len(queries)
+        )
+        passed = {False: 0, True: 0}
+        timed = 0
+        for query in present:
+            resp = self.ask(query)
+            passed[query["_coupled"]] += golden_ok(resp, query["_stem"], query["_coupled"])
             timed += (resp.get("timer_seconds") or 0) > 0
-        total = len(payloads)
-        self.check(f"recognize found: {found}/{total}", total > 0 and found == total)
-        self.check(f"recognize right_media: {right}/{total}", total > 0 and right == total)
-        self.check(f"recognize timer_seconds > 0: {timed}/{total}", total > 0 and timed == total)
+        plain = sum(not q["_coupled"] for q in present)
+        coupled = len(present) - plain
+        self.check(f"golden plain: {passed[False]}/{plain} own media and episode", plain > 0 and passed[False] == plain)
+        self.check(
+            f"golden coupled: {passed[True]}/{coupled} own certified subtitles", coupled > 0 and passed[True] == coupled
+        )
+        self.check(f"recognize timer_seconds > 0: {timed}/{len(present)}", present != [] and timed == len(present))
 
     def cron(self) -> None:
         def is_watchdog(line: str) -> bool:
@@ -272,6 +381,8 @@ def main() -> int:
         return 2
     key = subprocess.run(["pass", "show", API_KEY_PASS_ENTRY], capture_output=True, text=True, check=True)
     recette = Recette(url, key.stdout.splitlines()[0])
+    if "--reset-golden" in sys.argv[1:]:
+        recette.ssh(f"rm -f {GOLDEN_FILE}")
     try:
         recette.run()
     finally:

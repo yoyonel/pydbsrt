@@ -47,9 +47,14 @@ tasks:
       - ./scripts/o2switch_ctl.sh restart
 
   o2switch:e2e:
-    desc: Live E2E recette of dbsrt-server on o2switch (lifecycle, respawn, cron, gateway), PASS/FAIL only
+    desc: Live E2E recette of dbsrt-server on o2switch (lifecycle, respawn, cron, gateway, fixed recognize set), PASS/FAIL only
     cmds:
       - uv run python scripts/o2switch_e2e.py
+
+  o2switch:e2e:reset-golden:
+    desc: Rebuild the fixed recognize query set kept on o2switch (etc/e2e_golden.json), then run the E2E recette
+    cmds:
+      - uv run python scripts/o2switch_e2e.py --reset-golden
 
   o2switch:status:
     desc: Check standalone dbsrt-server process and API telemetry on o2switch
