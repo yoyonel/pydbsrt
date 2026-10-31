@@ -13,6 +13,8 @@ repos:
         args: [--unsafe]
       - id: check-executables-have-shebangs
       - id: end-of-file-fixer
+        # complexipy rewrites its snapshot without a final newline on every run
+        exclude: ^complexipy-snapshot\.json$
       - id: trailing-whitespace
 
   # Python: Ruff (Lint & Format across src/, tests/, scripts/)
@@ -33,9 +35,16 @@ repos:
         files: ^(src|tests|scripts)/.*\.py$
         pass_filenames: false
 
+      - id: complexipy
+        name: complexipy cognitive complexity gate (scripts/*.py)
+        entry: uv run complexipy --quiet
+        language: system
+        files: ^(scripts/.*\.py|complexipy-snapshot\.json)$
+        pass_filenames: false
+
       - id: shellcheck
         name: shellcheck (.sh)
-        entry: shellcheck
+        entry: shellcheck -x
         language: system
         types: [shell]
 

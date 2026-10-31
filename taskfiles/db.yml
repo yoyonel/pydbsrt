@@ -50,3 +50,24 @@ tasks:
     internal: true
     cmds:
       - docker build -t {{.DOCKER_DB_IMAGE}} docker/pg-spgist_hamming/17-develop/
+
+  db:tui:
+    desc: Launch interactive full-screen Harlequin SQL TUI on local PostgreSQL 17 (:5433)
+    interactive: true
+    cmds:
+      - uvx --with harlequin-postgres harlequin --adapter postgres "postgres://docker:docker@127.0.0.1:5433/bktreedb" {{.CLI_ARGS}}
+
+  db:backfill:medias:
+    desc: Backfill rich media metadata from .phash and telemetry into PostgreSQL 17 'medias' table
+    cmds:
+      - uv run python scripts/backfill_medias_pg.py {{.CLI_ARGS}}
+
+  db:audit:
+    desc: Audit NULL values and inspect v_productions view on local PostgreSQL 17
+    cmds:
+      - uv run python scripts/probe_medias_metadata.py --target local --audit {{.CLI_ARGS}}
+
+  db:probe:
+    desc: Probe video streams over NAS LAN FTP and populate real width, height, codec and resolution
+    cmds:
+      - NAS_HOST="{{.NAS_HOST | default \"192.168.1.58\"}}" uv run python scripts/probe_medias_metadata.py --target local {{.CLI_ARGS}}

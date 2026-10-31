@@ -80,3 +80,4 @@ Si le message OSD affiche `[dbsrt] Aucun couplage trouvé` :
 2. **Le port du serveur est personnalisé** : si votre serveur s'exécute sur un port non-standard (ex: `8766` ou distant sur RPi4), modifiez le paramètre d'hôte dans la configuration du plugin :
    - Fichier de configuration : `~/.config/vlc/dbsrt.conf`
    - Définir : `server_url=http://127.0.0.1:8765` ou `http://rpi4.local:8765`.
+   - Pour basculer facilement entre Local, Cloud o2switch et RPi4 sans rien modifier dans VLC, consultez le guide dédié : [Comment basculer les cibles de backend VLC](basculer-cibles-vlc-local-cloud-rpi4.md).

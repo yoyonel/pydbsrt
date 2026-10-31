@@ -75,6 +75,7 @@ dev = [
     "waiting>=1.4.1",
     "pytest-lazy-fixtures>=1.4.1",
     "pyright>=1.1.414",
+    "complexipy==8.3.0",
 ]
 docs = [
     "beautifulsoup4>=4.12.0",
@@ -94,7 +95,7 @@ exclude = [
 ]
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "UP", "B"]
+select = ["E", "F", "W", "I", "UP", "B", "C901"]
 ignore = [
     "E501",  # line length handled by formatter
     "B008",  # do not perform function calls in argument defaults (click options)
@@ -106,6 +107,37 @@ ignore = [
     "B020",  # loop control variable overrides iterable
     "B006",  # mutable default argument
 ]
+
+[tool.ruff.lint.per-file-ignores]
+# C901 gates every script, new ones included; src/, tests/ and these legacy scripts are exempt.
+# Never add a script to this list: refactor it instead, then remove it from here once it passes.
+"src/**" = ["C901"]
+"tests/**" = ["C901"]
+"notebook/**" = ["C901"]
+"scripts/audit_phash_catalog.py" = ["C901"]
+"scripts/batch_media_add_tvshow.py" = ["C901"]
+"scripts/benchmark_worker_scaling.py" = ["C901"]
+"scripts/convert_dashboard_webp.py" = ["C901"]
+"scripts/dbsrt_top.py" = ["C901"]
+"scripts/enrich_snippets_metadata.py" = ["C901"]
+"scripts/eval_nas_reliability.py" = ["C901"]
+"scripts/eval_vlc_vlsub_batch.py" = ["C901"]
+"scripts/extract_embedded_subs.py" = ["C901"]
+"scripts/extract_nas_snippets.py" = ["C901"]
+"scripts/generate_coverage_report.py" = ["C901"]
+"scripts/lint_complexity.py" = ["C901"]
+"scripts/lint_migrations.py" = ["C901"]
+"scripts/repair_corrupted_couplings.py" = ["C901"]
+"scripts/scale_up_nas_dataset.py" = ["C901"]
+"scripts/validate_docs.py" = ["C901"]
+"scripts/verify_catalog_integrity.py" = ["C901"]
+"scripts/verify_terminal_rendering.py" = ["C901"]
+
+[tool.complexipy]
+# Cognitive complexity gate on scripts/; legacy debt is frozen in complexipy-snapshot.json
+# (a new or worsened function fails, a fixed one shrinks the snapshot)
+paths = ["scripts"]
+max-complexity-allowed = 15
 
 [tool.ruff.lint.isort]
 known-first-party = ["pydbsrt"]

@@ -1,0 +1,15 @@
+[package]
+name = "dbsrt-tui"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lib]
+name = "dbsrt_tui"
+path = "src/lib.rs"
+
+[dependencies]
+ratatui = { version = "0.29", default-features = false }
+serde = { workspace = true }
+serde_json = { workspace = true }

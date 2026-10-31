@@ -36,6 +36,13 @@ Ce document recense les constantes opérationnelles, temporelles et algorithmiqu
 | `DEFAULT_SEARCH_DISTANCE_FOR_BKTREE` | `u32 = 0` | `crates/dbsrt-core/src/cuts.rs` | Rayon de recherche exact par défaut lors du parcours dans l'arbre métrique BK-Tree. |
 | `FLAT_WHITE_PHASH` | `u64 = 0x8669_3900_3986_c639` | `crates/dbsrt-core/src/cuts.rs` | Empreinte pHash normalisée d'une trame purement blanche (rejetée lors de l'indexation). |
 | `FLAT_BLACK_PHASH` | `u64 = 0x0000_0000_0000_0000` | `crates/dbsrt-core/src/cuts.rs` | Empreinte pHash normalisée d'une trame purement noire (trame d'amorce rejetée). |
+| `FLAT_BLACK_DITHERED_1` | `u64 = 0x8f4c_7233_588e_457e` | `crates/dbsrt-core/src/cuts.rs` | Empreinte pHash d'amorce noire dithérisée MPEG/H.264 (fondus d'intro rejetés). |
+| `FLAT_BLACK_DITHERED_2` | `u64 = 0x8fcc_7233_588e_453e` | `crates/dbsrt-core/src/cuts.rs` | Variante d'amorce noire dithérisée MPEG/H.264 (fondus d'intro rejetés). |
+| `FLAT_BLACK_DITHERED_3` | `u64 = 0x86c6_9696_86c6_d6c6` | `crates/dbsrt-core/src/cuts.rs` | Empreinte pHash d'amorce/carton statique invariant (intro Maniac / Alabama Monroe rejetée). |
+| `STATIC_FRAME_MAX_DISTANCE` | `u32 = 1` | `crates/dbsrt-core/src/cuts.rs` | Distance de Hamming maximale entre trames consécutives qualifiant un bruit de gigue statique (image fixe). |
+| `STATIC_SEQUENCE_MAX_JITTER_DISTANCE` | `u32 = 2` | `crates/dbsrt-core/src/cuts.rs` | Distance de Hamming maximale entre trames distinctes qualifiant un bruit de compression sur séquence fixe (fenêtre $\ge$ 10). |
+| `MIN_DYNAMIC_SEQUENCE_WINDOW_LEN` | `usize = 10` | `crates/dbsrt-core/src/cuts.rs` | Longueur minimale d'une fenêtre d'empreintes requise pour auditer le bruit de gigue statique multi-trames. |
+| `MIN_DYNAMIC_SEQUENCE_DISTINCT_COUNT` | `usize = 2` | `crates/dbsrt-core/src/cuts.rs` | Cardinalité minimale de trames distinctes non-vides requise pour certifier une dynamique temporelle. |
 
 ---
 
@@ -93,6 +100,10 @@ Ce document recense les constantes opérationnelles, temporelles et algorithmiqu
 | `DEFAULT_RELAY_CONNECT_TIMEOUT_MS` | `u64 = 2_000` | `crates/dbsrt-server/src/constants.rs` | Timeout d'établissement TCP vers les serveurs relais. |
 | `PHASH_BIT_DEPTH` | `f64 = 64.0` | `crates/dbsrt-server/src/constants.rs` | Longueur binaire de l'empreinte perceptuelle dbsrt (64 bits = \(8 \times 8\) DCT). |
 | `SIGNIFICANT_SHIFT_THRESHOLD_MS` | `f64 = 500.0` | `crates/dbsrt-server/src/constants.rs` | Décalage temporel minimum nécessitant la réécriture d'un sous-titre `.dbsrt.srt`. |
+| `MIN_SEQUENCE_LEN_FOR_DYNAMICS_CHECK` | `usize = 5` | `crates/dbsrt-server/src/constants.rs` | Longueur minimale d'une séquence pour appliquer le rejet de gigue statique lors de la reconnaissance multi-tier. |
+| `NARRATIVE_SAMPLE_RATIOS` | `[f64; 6] = [0.35, 0.65, 0.40, 0.60, 0.25, 0.75]` | `crates/dbsrt-server/src/constants.rs` | Ratios temporels candidats pour l'échantillonnage narratif (évitement des génériques). |
+| `MIN_NARRATIVE_ENTROPY_DISTINCT_FRAMES` | `usize = 8` | `crates/dbsrt-server/src/constants.rs` | Nombre cible d'empreintes distinctes dans une fenêtre qualifiant une haute entropie narrative. |
+| `MIN_NARRATIVE_SAFE_OFFSET_SECONDS` | `f64 = 60.0` | `crates/dbsrt-server/src/constants.rs` | Décalage minimal depuis le début du média pour éviter les cartons et logos d'intro. |
 
 ---
 

@@ -8,10 +8,11 @@ use dbsrt_cli::commands::top::app::{handle_key_event, handle_key_event_with_stat
 use dbsrt_cli::commands::top::constants::*;
 use dbsrt_cli::commands::top::model::{
     calculate_dimension_stats, calculate_overall_stats, default_progress_bar,
-    filter_and_sort_media, format_duration, format_progress_bar, matches_fuzzy_search,
-    parse_iso_to_unix_secs, ActiveJobTelemetry, CompletedFilter, CompletedSort,
-    DiscoveredMediaItem, GpuTelemetry, HelpTab, HistoricalRecord, IngestionStatus, MediaFilter,
-    MediaSort, MediaSourceFilter, MediaSubtrackInfo, SessionThroughput, SystemTelemetry, ViewPage,
+    filter_and_sort_media, format_duration, format_progress_bar, format_unix_to_iso,
+    matches_fuzzy_search, parse_iso_to_unix_secs, ActiveJobTelemetry, CompletedFilter,
+    CompletedSort, DiscoveredMediaItem, GpuTelemetry, HelpTab, HistoricalRecord, HostSystemInfo,
+    IngestionStatus, MediaFilter, MediaSort, MediaSourceConfig, MediaSourceFilter,
+    MediaSubtrackInfo, SessionThroughput, SystemTelemetry, ViewPage,
 };
 use dbsrt_cli::commands::top::process_ctl::{
     check_if_stopped, inspect_job_details, kill_job, stop_job, toggle_pause_job,
@@ -19,7 +20,8 @@ use dbsrt_cli::commands::top::process_ctl::{
 use dbsrt_cli::commands::top::sampler::{
     compute_session_throughput, is_thread_task, launch_selected_batch,
     launch_selected_batch_with_target_file, load_historical_records, load_media_cache,
-    preload_stem_size_cache, read_proc_io_bytes, save_media_cache,
+    load_remote_batch_media_items, parse_lve_usage, parse_pss_kib, preload_stem_size_cache,
+    read_proc_io_bytes, save_media_cache, MediaDiscoveryCriteria,
 };
 use dbsrt_cli::commands::top::ui::{render_ui, UiContext};
 use dbsrt_cli::commands::top::{probe_telemetry_snapshot, run_top, TopArgs};
@@ -87,6 +89,7 @@ fn test_active_job_telemetry_instantiation() {
         total_bytes: 1000 * BYTES_PER_MIB,
         progress_ratio: 0.5,
         current_rate_mib_s: 25.4,
+        hashing_fps: 0.0,
         eta_secs: Some(19.6),
         cpu_percent: 18.5,
         ram_rss_mib: 64.0,
@@ -133,6 +136,7 @@ fn test_system_telemetry_aggregation() {
         total_bytes: 200,
         progress_ratio: 0.5,
         current_rate_mib_s: 15.0,
+        hashing_fps: 0.0,
         eta_secs: None,
         cpu_percent: 10.0,
         ram_rss_mib: 30.0,
@@ -150,6 +154,7 @@ fn test_system_telemetry_aggregation() {
         total_bytes: 200,
         progress_ratio: 0.25,
         current_rate_mib_s: 20.0,
+        hashing_fps: 0.0,
         eta_secs: None,
         cpu_percent: 45.0,
         ram_rss_mib: 40.0,
@@ -160,6 +165,47 @@ fn test_system_telemetry_aggregation() {
     sys.total_rate_mib_s = sys.active_jobs.iter().map(|j| j.current_rate_mib_s).sum();
     assert_eq!(sys.active_jobs.len(), 2);
     assert_eq!(sys.total_rate_mib_s, 35.0);
+}
+
+#[test]
+fn test_negative_zero_rate_sanitization() {
+    let sys = SystemTelemetry {
+        total_rate_mib_s: -0.0,
+        net_rx_mib_s: -0.0,
+        ..Default::default()
+    };
+
+    let backend = TestBackend::new(140, 45);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let empty_set = HashSet::new();
+
+    let ctx = UiContext {
+        telemetry: &sys,
+        view: ViewPage::ActiveJobs,
+        selected_index: 0,
+        completed_scroll_index: 0,
+        media_scroll_index: 0,
+        source_scroll_index: 0,
+        source_modal: None,
+        selected_media_paths: &empty_set,
+        media_filter: MediaFilter::All,
+        media_sort: MediaSort::Name,
+        source_filter: &MediaSourceFilter::ActiveOnly,
+        completed_filter: CompletedFilter::All,
+        completed_sort: CompletedSort::DateDesc,
+        search_query: "",
+        search_active: false,
+        help_tab: HelpTab::General,
+        help_scroll_index: 0,
+        feedback_msg: None,
+    };
+
+    terminal.draw(|f| render_ui(f, &ctx)).unwrap();
+
+    let buffer = terminal.backend().buffer();
+    let content: String = buffer.content().iter().map(|c| c.symbol()).collect();
+    assert!(!content.contains("-0.0 MB/s"));
+    assert!(content.contains("0.0 MB/s"));
 }
 
 #[test]
@@ -205,9 +251,13 @@ fn test_ui_rendering_all_pages() {
     let stats = dbsrt_cli::commands::top::model::calculate_overall_stats(&history);
 
     let tel = SystemTelemetry {
+        host_info: HostSystemInfo::default(),
         host_cpu_pct: 25.0,
         ram_used_gib: 8.5,
         ram_total_gib: 32.0,
+        account_ram_gib: None,
+        account_ram_limit_gib: None,
+        account_cpu_pct: None,
         gpu: GpuTelemetry {
             video_busy_pct: 85.0,
             render_busy_pct: 12.0,
@@ -226,6 +276,7 @@ fn test_ui_rendering_all_pages() {
                 total_bytes: 500 * BYTES_PER_MIB,
                 progress_ratio: 0.01,
                 current_rate_mib_s: 18.5,
+                hashing_fps: 0.0,
                 eta_secs: Some(45.0),
                 cpu_percent: 15.0,
                 ram_rss_mib: 120.0,
@@ -246,6 +297,7 @@ fn test_ui_rendering_all_pages() {
                 total_bytes: 100 * BYTES_PER_MIB,
                 progress_ratio: 0.5,
                 current_rate_mib_s: 25.0,
+                hashing_fps: 0.0,
                 eta_secs: Some(5.0),
                 cpu_percent: 4.0,
                 ram_rss_mib: 25.0,
@@ -306,6 +358,8 @@ fn test_ui_rendering_all_pages() {
             last_scan_iso: Some("2026-10-26T21:00:00Z".to_string()),
         }],
         is_scanning: false,
+        batch_queue: Default::default(),
+        is_remote_streaming: false,
     };
 
     let empty_set = HashSet::new();
@@ -667,6 +721,7 @@ fn test_app_state_and_key_handling() {
                 total_bytes: 100,
                 progress_ratio: 0.1,
                 current_rate_mib_s: 1.0,
+                hashing_fps: 0.0,
                 eta_secs: None,
                 cpu_percent: 1.0,
                 ram_rss_mib: 10.0,
@@ -683,6 +738,7 @@ fn test_app_state_and_key_handling() {
                 total_bytes: 100,
                 progress_ratio: 0.1,
                 current_rate_mib_s: 1.0,
+                hashing_fps: 0.0,
                 eta_secs: None,
                 cpu_percent: 1.0,
                 ram_rss_mib: 10.0,
@@ -754,6 +810,7 @@ fn test_process_ctl_and_inspection() {
         total_bytes: 100 * BYTES_PER_MIB,
         progress_ratio: 0.5,
         current_rate_mib_s: 12.0,
+        hashing_fps: 0.0,
         eta_secs: Some(4.0),
         cpu_percent: 5.0,
         ram_rss_mib: 30.0,
@@ -769,7 +826,7 @@ fn test_process_ctl_and_inspection() {
         .any(|l| l.contains("Diagnostic Moteur & Accélération Matérielle")));
     assert!(details
         .iter()
-        .any(|l| l.contains("Intel QuickSync / VA-API")));
+        .any(|l| l.contains("actif via VA-API (/dev/dri/renderD128)")));
 
     let hi10p_job = ActiveJobTelemetry {
         pid: 8888,
@@ -781,6 +838,7 @@ fn test_process_ctl_and_inspection() {
         total_bytes: 100,
         progress_ratio: 0.1,
         current_rate_mib_s: 1.0,
+        hashing_fps: 0.0,
         eta_secs: None,
         cpu_percent: 800.0,
         ram_rss_mib: 150.0,
@@ -841,6 +899,7 @@ fn test_event_loop_step_execution() {
             total_bytes: 200,
             progress_ratio: 0.5,
             current_rate_mib_s: 10.0,
+            hashing_fps: 0.0,
             eta_secs: Some(10.0),
             cpu_percent: 5.0,
             ram_rss_mib: 50.0,
@@ -877,42 +936,43 @@ fn test_process_candidate_jobs_pipeline() {
         ),
     );
 
+    use dbsrt_cli::commands::top::sampler::RawCandidateProcess;
     let raw = vec![
         // 1. dbsrt coordinator with active child -> skipped
-        (
-            1000,
-            0,
-            vec!["dbsrt".to_string(), "media:add".to_string()],
-            "dbsrt media:add".to_string(),
-            true,
-            false,
-            5.0,
-            10_000_000,
-            10,
-        ),
+        RawCandidateProcess {
+            pid: 1000,
+            ppid: 0,
+            cmdline: vec!["dbsrt".to_string(), "media:add".to_string()],
+            cmd_str: "dbsrt media:add".to_string(),
+            is_dbsrt: true,
+            is_ffmpeg: false,
+            cpu_pct: 5.0,
+            mem_bytes: 10_000_000,
+            run_time_secs: 10,
+        },
         // 2. ffmpeg vaapi decoding (seen before -> delta rate calculated)
-        (
-            1001,
-            1000,
-            vec![
+        RawCandidateProcess {
+            pid: 1001,
+            ppid: 1000,
+            cmdline: vec![
                 "ffmpeg".to_string(),
                 "-hwaccel".to_string(),
                 "vaapi".to_string(),
                 "-i".to_string(),
                 "test.mkv".to_string(),
             ],
-            "ffmpeg -hwaccel vaapi -i test.mkv".to_string(),
-            false,
-            true,
-            45.0,
-            150_000_000,
-            10,
-        ),
+            cmd_str: "ffmpeg -hwaccel vaapi -i test.mkv".to_string(),
+            is_dbsrt: false,
+            is_ffmpeg: true,
+            cpu_pct: 45.0,
+            mem_bytes: 150_000_000,
+            run_time_secs: 10,
+        },
         // 3. ffmpeg subtitle extraction (first tick -> rate 0.0)
-        (
-            1002,
-            1000,
-            vec![
+        RawCandidateProcess {
+            pid: 1002,
+            ppid: 1000,
+            cmdline: vec![
                 "ffmpeg".to_string(),
                 "-i".to_string(),
                 "test.mkv".to_string(),
@@ -921,37 +981,41 @@ fn test_process_candidate_jobs_pipeline() {
                 "-f".to_string(),
                 "srt".to_string(),
             ],
-            "ffmpeg -i test.mkv -map 0:s:0 -f srt".to_string(),
-            false,
-            true,
-            2.0,
-            20_000_000,
-            2,
-        ),
+            cmd_str: "ffmpeg -i test.mkv -map 0:s:0 -f srt".to_string(),
+            is_dbsrt: false,
+            is_ffmpeg: true,
+            cpu_pct: 2.0,
+            mem_bytes: 20_000_000,
+            run_time_secs: 2,
+        },
         // 4. dbsrt standalone with cpu hwaccel
-        (
-            1003,
-            0,
-            vec![
+        RawCandidateProcess {
+            pid: 1003,
+            ppid: 0,
+            cmdline: vec![
                 "dbsrt".to_string(),
                 "media:add".to_string(),
                 "--hwaccel".to_string(),
                 "cpu".to_string(),
                 "clip.mp4".to_string(),
             ],
-            "dbsrt media:add --hwaccel cpu clip.mp4".to_string(),
-            true,
-            false,
-            80.0,
-            50_000_000,
-            5,
-        ),
+            cmd_str: "dbsrt media:add --hwaccel cpu clip.mp4".to_string(),
+            is_dbsrt: true,
+            is_ffmpeg: false,
+            cpu_pct: 80.0,
+            mem_bytes: 50_000_000,
+            run_time_secs: 5,
+        },
     ];
 
     let ffmpeg_ppids = vec![1000];
+    // sysinfo yields processes in HashMap order: feed them reversed to check the pid sort.
+    let raw: Vec<RawCandidateProcess> = raw.into_iter().rev().collect();
     let (jobs, new_prev) = process_candidate_jobs(raw, &ffmpeg_ppids, prev_io, now);
 
     assert_eq!(jobs.len(), 3); // 1000 skipped
+    let pids: Vec<u32> = jobs.iter().map(|j| j.pid).collect();
+    assert_eq!(pids, vec![1001, 1002, 1003]);
     assert!(new_prev.contains_key(&1001));
     assert!(new_prev.contains_key(&1002));
     assert!(new_prev.contains_key(&1003));
@@ -1083,7 +1147,7 @@ fn test_calculate_overall_stats() {
         HistoricalRecord {
             video_stem: "CachedOrSkipped".to_string(),
             success: true,
-            wall_duration_secs: 5.0, // < 60.0s
+            wall_duration_secs: 0.5, // < 1.0s
             cifs_read_rate_mib_s: 50.0,
             file_size_bytes: 100 * BYTES_PER_MIB,
             certified_couplings_count: 1,
@@ -1165,6 +1229,7 @@ fn test_compute_session_throughput() {
         total_bytes: 100 * BYTES_PER_MIB,
         progress_ratio: 0.25,
         current_rate_mib_s: 15.0,
+        hashing_fps: 0.0,
         eta_secs: Some(30.0),
         cpu_percent: 10.0,
         ram_rss_mib: 45.0,
@@ -1180,6 +1245,31 @@ fn test_compute_session_throughput() {
     assert_eq!(throughput.session_bytes, 75 * BYTES_PER_MIB);
     assert!(throughput.session_duration_secs > 0.0);
     assert!(throughput.session_rate_mib_s > 0.0);
+}
+
+#[test]
+fn test_load_historical_records_orders_equal_end_times_by_stem() {
+    use std::io::Write;
+
+    let dir = std::env::temp_dir().join(format!("pydbsrt_test_ties_{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    let events_path = dir.join("events.jsonl");
+    {
+        let mut f = std::fs::File::create(&events_path).unwrap();
+        for stem in ["Echo", "Delta", "Charlie", "Bravo", "Alpha"] {
+            writeln!(
+                f,
+                r#"{{"video_stem": "{stem}", "success": true, "wall_duration_secs": 1.0, "file_size_bytes": 1, "certified_couplings_count": 0, "start_iso": "2026-10-25T10:00:00", "end_iso": "2026-10-25T10:00:10"}}"#
+            )
+            .unwrap();
+        }
+    }
+
+    // Records are grouped in a HashMap: equal end times must not keep its random order.
+    let loaded = load_historical_records(&events_path, &dir.join("missing_couplings.json"));
+    let stems: Vec<&str> = loaded.iter().map(|r| r.video_stem.as_str()).collect();
+    assert_eq!(stems, vec!["Alpha", "Bravo", "Charlie", "Delta", "Echo"]);
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -1255,6 +1345,7 @@ fn test_app_state_new_tabs_and_scrolling() {
                 total_bytes: 100,
                 progress_ratio: 0.1,
                 current_rate_mib_s: 1.0,
+                hashing_fps: 0.0,
                 eta_secs: None,
                 cpu_percent: 1.0,
                 ram_rss_mib: 10.0,
@@ -1271,6 +1362,7 @@ fn test_app_state_new_tabs_and_scrolling() {
                 total_bytes: 100,
                 progress_ratio: 0.2,
                 current_rate_mib_s: 2.0,
+                hashing_fps: 0.0,
                 eta_secs: None,
                 cpu_percent: 2.0,
                 ram_rss_mib: 12.0,
@@ -1359,9 +1451,15 @@ fn test_app_state_new_tabs_and_scrolling() {
     assert_eq!(app.view, ViewPage::MediaSources);
 
     handle_key_event(KeyCode::Tab, &mut app, &tel);
+    assert_eq!(app.view, ViewPage::System);
+
+    handle_key_event(KeyCode::Tab, &mut app, &tel);
     assert_eq!(app.view, ViewPage::ActiveJobs);
 
-    // BackTab cycling: ActiveJobs -> MediaSources -> MediaBrowser -> CompletedMedia -> StatsHistory -> ActiveJobs
+    // BackTab cycling: ActiveJobs -> System -> MediaSources -> MediaBrowser -> CompletedMedia -> StatsHistory -> ActiveJobs
+    handle_key_event(KeyCode::BackTab, &mut app, &tel);
+    assert_eq!(app.view, ViewPage::System);
+
     handle_key_event(KeyCode::BackTab, &mut app, &tel);
     assert_eq!(app.view, ViewPage::MediaSources);
 
@@ -2597,6 +2695,7 @@ fn test_e2e_sources_toggle_purges_inactive_media_immediately() {
 }
 
 #[test]
+#[ignore = "signals real host processes (ffmpeg, dbsrt media:add); run manually"]
 fn test_e2e_stop_entire_batch_cleans_targets_and_returns_status() {
     let targets_file = std::path::Path::new("data/reports/selected_batch_targets.json");
     if let Some(parent) = targets_file.parent() {
@@ -2731,6 +2830,7 @@ fn test_e2e_media_browser_source_filter_cycle() {
 }
 
 #[test]
+#[ignore = "signals real host processes (ffmpeg, dbsrt media:add); run manually"]
 fn test_e2e_stop_entire_batch_via_key_events() {
     use std::sync::{Arc, RwLock};
 
@@ -3155,6 +3255,7 @@ fn test_active_jobs_and_media_browser_search() {
             total_bytes: 10000,
             progress_ratio: 0.1,
             current_rate_mib_s: 25.0,
+            hashing_fps: 0.0,
             eta_secs: Some(90.0),
             cpu_percent: 15.0,
             ram_rss_mib: 120.0,
@@ -3175,6 +3276,7 @@ fn test_active_jobs_and_media_browser_search() {
             total_bytes: 5000,
             progress_ratio: 0.1,
             current_rate_mib_s: 10.0,
+            hashing_fps: 0.0,
             eta_secs: Some(45.0),
             cpu_percent: 85.0,
             ram_rss_mib: 250.0,
@@ -3249,4 +3351,547 @@ fn test_active_jobs_and_media_browser_search() {
 
     handle_key_event(KeyCode::Esc, &mut app, &tel);
     assert_eq!(app.visible_media(&media, &[]).len(), 2);
+}
+
+#[test]
+fn test_system_page_render_and_shortcuts() {
+    let mut app = AppState::new();
+    let tel = SystemTelemetry::default();
+
+    // 1. Direct jump via '6'
+    handle_key_event(KeyCode::Char('6'), &mut app, &tel);
+    assert_eq!(app.view, ViewPage::System);
+
+    // 2. Double-tap '6' toggles back to ActiveJobs
+    handle_key_event(KeyCode::Char('6'), &mut app, &tel);
+    assert_eq!(app.view, ViewPage::ActiveJobs);
+
+    // 3. Direct jump via 'y'
+    handle_key_event(KeyCode::Char('y'), &mut app, &tel);
+    assert_eq!(app.view, ViewPage::System);
+
+    // 4. Render system page to terminal buffer
+    let backend = TestBackend::new(140, 35);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let ctx = UiContext {
+        telemetry: &tel,
+        view: app.view,
+        selected_index: app.selected_index,
+        completed_scroll_index: app.completed_scroll_index,
+        media_scroll_index: app.media_scroll_index,
+        source_scroll_index: app.source_scroll_index,
+        source_modal: None,
+        selected_media_paths: &app.selected_media_paths,
+        media_filter: app.media_filter,
+        media_sort: app.media_sort,
+        source_filter: &app.source_filter,
+        completed_filter: app.completed_filter,
+        completed_sort: app.completed_sort,
+        search_query: "",
+        search_active: false,
+        help_tab: app.help_tab,
+        help_scroll_index: app.help_scroll_index,
+        feedback_msg: None,
+    };
+    terminal.draw(|f| render_ui(f, &ctx)).unwrap();
+    let buffer = format!("{:?}", terminal.backend());
+
+    assert!(buffer.contains("INFORMATIONS SYST\u{c8}ME & MAT\u{c9}RIEL (VUE FASTFETCH)"));
+    assert!(buffer.contains("APPLICATIF (dbsrt)"));
+    assert!(buffer.contains("N\u{152}UD & SYST\u{c8}ME D\'EXPLOITATION"));
+    assert!(buffer.contains("PROCESSEUR (CPU)"));
+    assert!(buffer.contains("ACC\u{c9}L\u{c9}RATION MAT\u{c9}RIELLE (GPU)"));
+    assert!(buffer.contains("M\u{c9}MOIRE & STOCKAGE"));
+    assert!(buffer.contains("D\u{c9}BITS & T\u{c9}L\u{c9}M\u{c9}TRIE EN DIRECT"));
+    assert!(buffer.contains("[6/y] Syst\u{e8}me"));
+}
+
+#[test]
+fn test_batch_queue_telemetry_rendered_in_header_and_table() {
+    use dbsrt_cli::commands::top::model::BatchQueueTelemetry;
+    let backend = ratatui::backend::TestBackend::new(140, 40);
+    let mut terminal = ratatui::Terminal::new(backend).unwrap();
+
+    let tel = SystemTelemetry {
+        batch_queue: BatchQueueTelemetry {
+            total_targets: 399,
+            completed_targets: 11,
+            failed_targets: 0,
+            remaining_targets: 388,
+            progress_pct: 2.8,
+            active_workers: 4,
+            is_active: true,
+            updated_at: "2026-10-29T07:45:00Z".to_string(),
+        },
+        ..Default::default()
+    };
+
+    let app = AppState::default();
+    let ctx = UiContext {
+        telemetry: &tel,
+        view: ViewPage::ActiveJobs,
+        selected_index: app.selected_index,
+        completed_scroll_index: app.completed_scroll_index,
+        media_scroll_index: app.media_scroll_index,
+        source_scroll_index: app.source_scroll_index,
+        source_modal: None,
+        selected_media_paths: &app.selected_media_paths,
+        media_filter: app.media_filter,
+        media_sort: app.media_sort,
+        source_filter: &app.source_filter,
+        completed_filter: app.completed_filter,
+        completed_sort: app.completed_sort,
+        search_query: "",
+        search_active: false,
+        help_tab: app.help_tab,
+        help_scroll_index: app.help_scroll_index,
+        feedback_msg: None,
+    };
+    terminal.draw(|f| render_ui(f, &ctx)).unwrap();
+    let buffer = format!("{:?}", terminal.backend());
+
+    assert!(buffer.contains("Batch: 11/399 (3%)"));
+    assert!(buffer.contains("File: 11/399"));
+    assert!(buffer.contains("388 en attente"));
+}
+
+#[test]
+fn test_load_remote_batch_media_items_and_status_assignment() {
+    let tmp_dir = std::env::temp_dir().join(format!("pydbsrt_remote_batch_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+    let targets_file = tmp_dir.join("selected_batch_targets.json");
+    let phash_dir = tmp_dir.join("__PHASH__");
+    std::fs::create_dir_all(&phash_dir).unwrap();
+
+    // Create 1 dummy .phash file for episode 2
+    let dummy_phash = phash_dir.join("Episode.2.phash");
+    std::fs::write(&dummy_phash, vec![0u8; 16]).unwrap();
+
+    let json_content = r#"[
+        {
+            "path": "/tvshow/Show/Episode.1.mkv",
+            "stem": "Episode.1",
+            "size_bytes": 104857600
+        },
+        {
+            "path": "/tvshow/Show/Episode.2.mkv",
+            "stem": "Episode.2",
+            "size_bytes": 209715200
+        },
+        {
+            "path": "/tvshow/Show/Episode.3.mkv",
+            "stem": "Episode.3",
+            "size_bytes": 314572800
+        },
+        "/tvshow/Show/Episode.4.mkv"
+    ]"#;
+    std::fs::write(&targets_file, json_content).unwrap();
+
+    let active_job = ActiveJobTelemetry {
+        pid: 1234,
+        media_name: "Episode.1".to_string(),
+        engine: "CPU (Software)".to_string(),
+        engine_reason: None,
+        elapsed_secs: 12.0,
+        read_bytes: 1000,
+        total_bytes: 2000,
+        progress_ratio: 0.5,
+        current_rate_mib_s: 10.0,
+        hashing_fps: 24.0,
+        eta_secs: Some(12.0),
+        cpu_percent: 100.0,
+        ram_rss_mib: 10.0,
+        status: "RUNNING".to_string(),
+        cmdline: vec!["dbsrt".to_string()],
+    };
+    let active_jobs = vec![active_job];
+
+    let mut certified_stems = HashSet::new();
+    certified_stems.insert("Episode.3".to_string());
+
+    let criteria = MediaDiscoveryCriteria {
+        phash_dir: &phash_dir,
+        active_jobs: &active_jobs,
+        certified_stems: &certified_stems,
+        source_id: "remote-tvshow",
+    };
+
+    let items = load_remote_batch_media_items(&targets_file, &criteria);
+    assert_eq!(items.len(), 4);
+
+    // Episode.1 is in active_jobs -> InProgress
+    let ep1 = items.iter().find(|i| i.stem == "Episode.1").unwrap();
+    assert_eq!(ep1.status, IngestionStatus::InProgress);
+    assert_eq!(ep1.size_bytes, 104857600);
+    assert_eq!(ep1.source_id.as_deref(), Some("remote-tvshow"));
+
+    // Episode.2 has a .phash file -> PartialFail
+    let ep2 = items.iter().find(|i| i.stem == "Episode.2").unwrap();
+    assert_eq!(ep2.status, IngestionStatus::PartialFail);
+    assert!(ep2.phash.as_ref().unwrap().exists);
+
+    // Episode.3 is in certified_stems -> Completed
+    let ep3 = items.iter().find(|i| i.stem == "Episode.3").unwrap();
+    assert_eq!(ep3.status, IngestionStatus::Completed);
+
+    // Episode.4 was given as raw string path -> Virgin, size 0
+    let ep4 = items.iter().find(|i| i.stem == "Episode.4").unwrap();
+    assert_eq!(ep4.status, IngestionStatus::Virgin);
+    assert_eq!(ep4.size_bytes, 0);
+}
+
+#[test]
+fn test_remote_streaming_media_browser_rendered_with_targets() {
+    let backend = TestBackend::new(120, 30);
+    let mut terminal = Terminal::new(backend).unwrap();
+
+    let remote_item = DiscoveredMediaItem {
+        path: PathBuf::from("/tvshow/Demon Slayer/S04E05.mkv"),
+        stem: "Demon.Slayer.S04E05.1080p".to_string(),
+        size_bytes: 544 * 1024 * 1024,
+        duration_secs: None,
+        video_codec: None,
+        subtitles: Vec::new(),
+        phash: None,
+        source_id: Some("synology-tvshow".to_string()),
+        status: IngestionStatus::InProgress,
+    };
+
+    let tel = SystemTelemetry {
+        media_sources: vec![MediaSourceConfig {
+            id: "synology-tvshow".to_string(),
+            name: "Synology NAS (tvshow)".to_string(),
+            path: PathBuf::from("/media/storage/tvshow"),
+            enabled: true,
+            media_count: 1,
+            last_scan_added: 0,
+            last_scan_iso: Some("2026-10-29T09:00:00Z".to_string()),
+        }],
+        discovered_media: vec![remote_item],
+        is_scanning: false,
+        ..Default::default()
+    };
+
+    let app = AppState::default();
+    let ctx = UiContext {
+        telemetry: &tel,
+        view: ViewPage::MediaBrowser,
+        selected_index: app.selected_index,
+        completed_scroll_index: app.completed_scroll_index,
+        media_scroll_index: app.media_scroll_index,
+        source_scroll_index: app.source_scroll_index,
+        source_modal: None,
+        selected_media_paths: &app.selected_media_paths,
+        media_filter: app.media_filter,
+        media_sort: app.media_sort,
+        source_filter: &app.source_filter,
+        completed_filter: app.completed_filter,
+        completed_sort: app.completed_sort,
+        search_query: "",
+        search_active: false,
+        help_tab: app.help_tab,
+        help_scroll_index: app.help_scroll_index,
+        feedback_msg: None,
+    };
+
+    terminal.draw(|f| render_ui(f, &ctx)).unwrap();
+    let buffer = format!("{:?}", terminal.backend());
+
+    assert!(buffer.contains("EXPLORATEUR DE MÉDIAS"));
+    assert!(buffer.contains("Demon.Slayer.S"));
+    assert!(buffer.contains("EN COURS"));
+    assert!(buffer.contains("544 MiB"));
+    // Guarantee: zero "SCAN DISQUE EN COURS..." in header when is_scanning is false
+    assert!(!buffer.contains("SCAN DISQUE EN COURS"));
+}
+
+#[test]
+fn test_format_unix_to_iso_roundtrip() {
+    // 1970-01-01T00:00:00Z
+    assert_eq!(format_unix_to_iso(0), "1970-01-01T00:00:00Z");
+    assert_eq!(parse_iso_to_unix_secs("1970-01-01T00:00:00Z"), Some(0.0));
+
+    // Arbitrary reference timestamp
+    let sample_iso = "2026-10-29T08:57:47Z";
+    let secs = parse_iso_to_unix_secs(sample_iso).expect("valid ISO timestamp");
+    assert_eq!(format_unix_to_iso(secs as u64), sample_iso);
+
+    // Leap year date (2024-02-29T12:30:45Z)
+    let leap_iso = "2024-02-29T12:30:45Z";
+    let leap_secs = parse_iso_to_unix_secs(leap_iso).expect("valid leap year ISO");
+    assert_eq!(format_unix_to_iso(leap_secs as u64), leap_iso);
+}
+
+#[test]
+fn test_read_job_progress_rejects_dead_or_reused_pid() {
+    use dbsrt_cli::commands::top::sampler::read_job_progress_in;
+    let dir = std::env::temp_dir().join(format!("dbsrt_top_jobs_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let write =
+        |pid: u32, body: &str| std::fs::write(dir.join(format!("{pid}.json")), body).unwrap();
+    write(
+        1,
+        "{\"frames\":10,\"total_frames\":100,\"fps\":25.0,\"start_ticks\":500}",
+    );
+    write(2, "{\"frames\":20,\"total_frames\":null,\"fps\":25.0}");
+
+    assert_eq!(
+        read_job_progress_in(&dir, 1, Some(500)).map(|p| p.frames),
+        Some(10)
+    );
+    assert!(
+        read_job_progress_in(&dir, 1, Some(501)).is_none(),
+        "PID reused"
+    );
+    assert!(
+        read_job_progress_in(&dir, 1, None).is_none(),
+        "process dead"
+    );
+    assert_eq!(
+        read_job_progress_in(&dir, 2, Some(7)).map(|p| p.frames),
+        Some(20)
+    );
+    assert!(read_job_progress_in(&dir, 3, Some(7)).is_none(), "no file");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn test_cmdline_has_remote_stream() {
+    use dbsrt_cli::commands::top::sampler::cmdline_has_remote_stream;
+    let args = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    assert!(cmdline_has_remote_stream(&args(&[
+        "ffmpeg",
+        "-i",
+        "ftps://nas/a.mkv"
+    ])));
+    assert!(cmdline_has_remote_stream(&args(&[
+        "dbsrt",
+        "add",
+        "https://h/a.mkv"
+    ])));
+    assert!(!cmdline_has_remote_stream(&args(&[
+        "ffmpeg", "-i", "/m/a.mkv", "-f", "rawvideo", "-"
+    ])));
+    // A scheme inside a local file name is not a stream.
+    assert!(!cmdline_has_remote_stream(&args(&[
+        "ffmpeg",
+        "-i",
+        "/m/notes-ftp://x.mkv"
+    ])));
+}
+
+#[test]
+fn test_is_physical_interface_excludes_virtual_links() {
+    use dbsrt_cli::commands::top::sampler::is_physical_interface;
+    for name in ["eth0", "enp3s0", "wlan0", "ens18"] {
+        assert!(is_physical_interface(name), "{name}");
+    }
+    for name in [
+        "lo", "docker0", "veth1a2b", "br-1234", "virbr0", "tun0", "wg0", "cni0", "podman0",
+    ] {
+        assert!(!is_physical_interface(name), "{name}");
+    }
+}
+
+#[test]
+fn test_remote_stream_endpoint_strips_userinfo_and_path() {
+    use dbsrt_cli::commands::top::views::media_sources::remote_stream_endpoint;
+    use std::path::Path;
+    assert_eq!(
+        remote_stream_endpoint(Path::new("ftp://user:secret@nas.example:21/tv/a.mkv")),
+        Some("ftp://nas.example:21".to_string())
+    );
+    assert_eq!(
+        remote_stream_endpoint(Path::new("http://relay.example/a.mkv")),
+        Some("http://relay.example".to_string())
+    );
+    assert_eq!(remote_stream_endpoint(Path::new("/mnt/media/a.mkv")), None);
+    assert_eq!(remote_stream_endpoint(Path::new("ftp:///a.mkv")), None);
+}
+
+#[test]
+fn test_remote_streaming_sources_view_and_locked_keys() {
+    let mut terminal = Terminal::new(TestBackend::new(180, 40)).unwrap();
+
+    let tel = SystemTelemetry {
+        is_remote_streaming: true,
+        net_rx_mib_s: 31.7,
+        discovered_media: vec![DiscoveredMediaItem {
+            path: PathBuf::from("The.Wire.S01E01.1080p.mkv"),
+            stem: "The.Wire.S01E01.1080p".to_string(),
+            size_bytes: 500 * 1024 * 1024,
+            duration_secs: Some(3600.0),
+            video_codec: Some("h264".to_string()),
+            subtitles: vec![],
+            phash: None,
+            source_id: Some("remote-stream".to_string()),
+            status: IngestionStatus::InProgress,
+        }],
+        ..Default::default()
+    };
+
+    let mut app = AppState {
+        view: ViewPage::MediaSources,
+        ..Default::default()
+    };
+
+    let empty_set = HashSet::new();
+    let ctx = UiContext {
+        telemetry: &tel,
+        view: ViewPage::MediaSources,
+        selected_index: 0,
+        completed_scroll_index: 0,
+        media_scroll_index: 0,
+        source_scroll_index: 0,
+        source_modal: None,
+        selected_media_paths: &empty_set,
+        media_filter: MediaFilter::All,
+        media_sort: MediaSort::Name,
+        source_filter: &MediaSourceFilter::ActiveOnly,
+        completed_filter: CompletedFilter::All,
+        completed_sort: CompletedSort::DateDesc,
+        search_query: "",
+        search_active: false,
+        help_tab: HelpTab::General,
+        help_scroll_index: 0,
+        feedback_msg: None,
+    };
+
+    terminal.draw(|f| render_ui(f, &ctx)).unwrap();
+    let buffer = format!("{:?}", terminal.backend());
+
+    // 1. Verify remote streaming headers and labels
+    assert!(buffer.contains("SOURCES DE FLUX RÉSEAU & STREAMING FTP"));
+    assert!(buffer.contains("MODE ZÉRO-NVME"));
+    assert!(buffer.contains("Cibles batch distantes"));
+    assert!(buffer.contains("1 cibles batch"));
+    assert!(buffer.contains("Opérationnel (31.7 MiB/s)"));
+    assert!(!buffer.contains("sftp://nas:22"));
+    assert!(buffer.contains("Zéro-NVMe (RAM Direct)"));
+    assert!(buffer.contains("Architecture Zéro-Copie"));
+    assert!(buffer.contains("Verrouillé (Stockage Local Désactivé"));
+
+    // 2. Test locked actions ('a', 'e', 'd', Space)
+    handle_key_event(KeyCode::Char('a'), &mut app, &tel);
+    assert_eq!(app.source_modal, None);
+    assert!(app
+        .feedback_message
+        .as_ref()
+        .unwrap()
+        .0
+        .contains("Mode Zéro-NVMe actif"));
+
+    handle_key_event(KeyCode::Char(' '), &mut app, &tel);
+    assert!(app
+        .feedback_message
+        .as_ref()
+        .unwrap()
+        .0
+        .contains("Mode Zéro-NVMe actif"));
+
+    handle_key_event(KeyCode::Char('d'), &mut app, &tel);
+    assert!(app
+        .feedback_message
+        .as_ref()
+        .unwrap()
+        .0
+        .contains("Mode Zéro-NVMe actif"));
+
+    // 3. Test 'r' in remote mode
+    handle_key_event(KeyCode::Char('r'), &mut app, &tel);
+    assert!(app
+        .feedback_message
+        .as_ref()
+        .unwrap()
+        .0
+        .contains("Cibles streaming réseau actualisées"));
+}
+
+#[test]
+fn test_url_decode_simple_multibyte_utf8() {
+    use dbsrt_cli::commands::top::sampler::url_decode_simple;
+    assert_eq!(
+        url_decode_simple("Am%C3%A9lie%20%5B2001%5D"),
+        "Am\u{e9}lie [2001]"
+    );
+    assert_eq!(url_decode_simple("plain_name"), "plain_name");
+    // Malformed escapes are copied verbatim.
+    assert_eq!(url_decode_simple("50%zz%"), "50%zz%");
+    assert_eq!(url_decode_simple("a%4"), "a%4");
+    assert_eq!(url_decode_simple("%+4"), "%+4");
+}
+
+#[test]
+fn test_parse_pss_kib_reads_smaps_rollup() {
+    let cases: [(&str, Option<u64>); 5] = [
+        (
+            "55d0-7ffe ---p 00000000 00:00 0 [rollup]\nRss:  2048 kB\nPss:  1536 kB\nPss_Anon:  512 kB\n",
+            Some(1536),
+        ),
+        ("Pss: 0 kB\n", Some(0)),
+        ("Rss: 2048 kB\nPss_Anon: 512 kB\n", None),
+        ("Pss: garbage kB\n", None),
+        ("", None),
+    ];
+    for (body, expected) in cases {
+        assert_eq!(parse_pss_kib(body), expected, "body: {body:?}");
+    }
+}
+
+#[test]
+fn test_parse_lve_usage_reads_uapi_get_usages() {
+    type UsageLimit = (u64, Option<u64>);
+    let both = r#"{"result":{"data":[{"id":"lvecpu","usage":90,"maximum":100},
+        {"id":"lvememphy","usage":901730304,"maximum":51539607552}]}}"#;
+    let cases: [(&str, &str, Option<UsageLimit>); 8] = [
+        (both, "lvememphy", Some((901_730_304, Some(51_539_607_552)))),
+        (both, "lvecpu", Some((90, Some(100)))),
+        (both, "lvenproc", None),
+        (
+            r#"{"result":{"data":[{"id":"lvememphy","usage":5,"maximum":null}]}}"#,
+            "lvememphy",
+            Some((5, None)),
+        ),
+        (
+            r#"{"result":{"data":[{"id":"lvememphy","usage":null,"maximum":1}]}}"#,
+            "lvememphy",
+            None,
+        ),
+        (
+            r#"{"result":{"data":[{"id":"lvecpu","usage":-1,"maximum":100}]}}"#,
+            "lvecpu",
+            None,
+        ),
+        (
+            r#"{"result":{"data":null,"errors":["denied"]}}"#,
+            "lvecpu",
+            None,
+        ),
+        ("bash: uapi: command not found", "lvememphy", None),
+    ];
+    for (body, id, expected) in cases {
+        assert_eq!(parse_lve_usage(body, id), expected, "{id} in {body}");
+    }
+}
+
+#[test]
+fn test_account_ram_label_shows_ratio_to_limit() {
+    let tel = |used, limit| SystemTelemetry {
+        account_ram_gib: used,
+        account_ram_limit_gib: limit,
+        ..Default::default()
+    };
+    assert_eq!(tel(None, Some(48.0)).account_ram_label(), None);
+    assert_eq!(
+        tel(Some(0.96), Some(48.0)).account_ram_label().as_deref(),
+        Some("0.96/48 GiB (2.0%)")
+    );
+    assert_eq!(
+        tel(Some(0.7), None).account_ram_label().as_deref(),
+        Some("0.70 GiB")
+    );
+    assert_eq!(
+        tel(Some(0.7), Some(0.0)).account_ram_label().as_deref(),
+        Some("0.70 GiB")
+    );
 }

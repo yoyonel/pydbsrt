@@ -1,0 +1,208 @@
+version: '3'
+
+tasks:
+  o2switch:build:
+    desc: Cross-compile static standalone x86_64-musl binaries for o2switch shared hosting
+    cmds:
+      - ./scripts/o2switch_ctl.sh build
+
+  o2switch:test-local:
+    desc: Empirically test static musl dbsrt-server in Zero-DB mode locally
+    cmds:
+      - ./scripts/o2switch_ctl.sh test-local
+
+  o2switch:sync:
+    desc: Synchronize gateway, helpers, and SRT store to o2switch (catalog seeded only if missing; binaries ship via o2switch:deploy)
+    cmds:
+      - ./scripts/o2switch_ctl.sh sync
+
+  o2switch:deploy:
+    desc: Build and ship dbsrt-server + dbsrt as a checksummed release, switch atomically, restart, auto-rollback on failure
+    cmds:
+      - ./scripts/o2switch_ctl.sh deploy
+
+  o2switch:rollback:
+    desc: Switch back to the previous o2switch release and restart the daemon on it
+    cmds:
+      - ./scripts/o2switch_ctl.sh rollback
+
+  o2switch:releases:
+    desc: List o2switch releases (current, previous, build) and the release the daemon executes
+    cmds:
+      - ./scripts/o2switch_ctl.sh releases
+
+  o2switch:start:
+    desc: Start standalone unprivileged dbsrt-server daemon on o2switch
+    cmds:
+      - ./scripts/o2switch_ctl.sh start
+
+  o2switch:stop:
+    desc: Stop every dbsrt-server daemon on o2switch and block gateway/cron respawn until start
+    cmds:
+      - ./scripts/o2switch_ctl.sh stop
+
+  o2switch:restart:
+    desc: Restart standalone dbsrt-server daemon on o2switch
+    cmds:
+      - ./scripts/o2switch_ctl.sh restart
+
+  o2switch:e2e:
+    desc: Live E2E recette of dbsrt-server on o2switch (lifecycle, respawn, cron, gateway, fixed recognize set), PASS/FAIL only
+    cmds:
+      - uv run python scripts/o2switch_e2e.py
+
+  o2switch:e2e:reset-golden:
+    desc: Rebuild the fixed recognize query set kept on o2switch (etc/e2e_golden.json), then run the E2E recette
+    cmds:
+      - uv run python scripts/o2switch_e2e.py --reset-golden
+
+  o2switch:status:
+    desc: Check standalone dbsrt-server process and API telemetry on o2switch
+    cmds:
+      - ./scripts/o2switch_ctl.sh status
+
+  o2switch:logs:
+    desc: Tail dbsrt-server execution logs on o2switch
+    cmds:
+      - ./scripts/o2switch_ctl.sh logs
+
+  o2switch:demo:
+    desc: Test recognition and CAS subtitle retrieval on o2switch API
+    cmds:
+      - ./scripts/o2switch_ctl.sh demo
+
+  o2switch:setup-cron:
+    desc: Install unprivileged user cron watchdog on o2switch for zero-downtime persistence
+    cmds:
+      - ./scripts/o2switch_ctl.sh setup-cron
+
+  o2switch:remove-cron:
+    desc: Remove dbsrt-server cron watchdog on o2switch
+    cmds:
+      - ./scripts/o2switch_ctl.sh remove-cron
+
+  o2switch:rotate-key:
+    desc: Generate, rotate, and synchronize a new 256-bit API secret key on o2switch and pass
+    cmds:
+      - ./scripts/o2switch_ctl.sh rotate-key
+
+  o2switch:rotate-readonly-key:
+    desc: Generate the read-only (monitoring GET) key used by shared monitoring links, on o2switch and pass
+    cmds:
+      - ./scripts/o2switch_ctl.sh rotate-readonly-key
+
+  o2switch:sync-nas:
+    desc: Synchronize Synology NAS .phash fingerprints, binary catalog, and SRT store to Cloud o2switch
+    cmds:
+      - ./scripts/nas_o2switch_sync.sh
+
+  o2switch:sync-nas:dry-run:
+    desc: Dry-run simulation of Synology NAS synchronization to Cloud o2switch
+    cmds:
+      - ./scripts/nas_o2switch_sync.sh --dry-run
+
+  o2switch:agent:start:
+    desc: Start local dbsrt client relay agent connected to Cloud o2switch
+    cmds:
+      - ./scripts/agent_relay.sh start
+
+  o2switch:agent:stop:
+    desc: Stop local dbsrt client relay agent
+    cmds:
+      - ./scripts/agent_relay.sh stop
+
+  o2switch:agent:restart:
+    desc: Restart local dbsrt client relay agent
+    cmds:
+      - ./scripts/agent_relay.sh restart
+
+  o2switch:agent:status:
+    desc: Check local dbsrt client relay agent status and telemetry
+    cmds:
+      - ./scripts/agent_relay.sh status
+
+  o2switch:agent:logs:
+    desc: Tail local dbsrt client relay agent logs
+    cmds:
+      - ./scripts/agent_relay.sh logs
+
+  o2switch:agent:demo:
+    desc: Test end-to-end recognition from local/Synology video through Cloud o2switch relay
+    cmds:
+      - ./scripts/agent_relay.sh demo
+
+  o2switch:monitoring:
+    desc: Display public monitoring dashboard URL and 4G/5G mobile direct link for o2switch & RPi4
+    cmds:
+      - ./scripts/o2switch_ctl.sh monitoring
+
+  o2switch:top:
+    desc: Launch interactive dbsrt top TUI process monitor on o2switch via SSH
+    interactive: true
+    cmds:
+      - ./scripts/o2switch_ctl.sh top {{.CLI_ARGS}}
+
+  o2switch:pull-catalog:
+    desc: Pull processed unified catalog.dbphash, SRT subtitles, and batch telemetry from o2switch
+    cmds:
+      - ./scripts/o2switch_ctl.sh pull-catalog {{.CLI_ARGS}}
+
+  o2switch:backup-nas:
+    desc: Backup raw .phash fingerprints from o2switch to Synology NAS persistent storage
+    cmds:
+      - ./scripts/o2switch_ctl.sh backup-nas {{.CLI_ARGS}}
+
+  o2switch:batch:tvshow:
+    desc: Execute remote batch pHash extraction for virgin NAS episodes on o2switch (supports --daemon)
+    cmds:
+      - ./scripts/o2switch_ctl.sh batch-tvshow {{.CLI_ARGS}}
+
+  o2switch:batch:movies:
+    desc: Execute remote batch pHash extraction for virgin NAS movies (/video) on o2switch (supports --daemon)
+    cmds:
+      - ./scripts/o2switch_ctl.sh batch-movies {{.CLI_ARGS}}
+
+  o2switch:batch:status:
+    desc: Check whether remote batch pHash worker is running on o2switch
+    cmds:
+      - ./scripts/o2switch_ctl.sh batch-status
+
+  o2switch:batch:workers:
+    desc: Query or set dynamic batch worker concurrency on o2switch
+    cmds:
+      - ./scripts/o2switch_ctl.sh batch-workers {{.CLI_ARGS}}
+
+  o2switch:batch:stop:
+    desc: Stop running background batch pHash worker on o2switch
+    cmds:
+      - ./scripts/o2switch_ctl.sh batch-stop
+
+  o2switch:batch:logs:
+    desc: Tail execution logs of remote batch pHash worker on o2switch
+    cmds:
+      - ./scripts/o2switch_ctl.sh batch-logs
+
+  o2switch:faultwatch:start:
+    desc: Deploy and start the per-minute LVE fault proxy watcher on o2switch
+    cmds:
+      - ./scripts/o2switch_ctl.sh faultwatch start
+
+  o2switch:faultwatch:stop:
+    desc: Stop the LVE fault proxy watcher on o2switch
+    cmds:
+      - ./scripts/o2switch_ctl.sh faultwatch stop
+
+  o2switch:faultwatch:status:
+    desc: Show LVE fault watcher state and its latest minute records
+    cmds:
+      - ./scripts/o2switch_ctl.sh faultwatch status
+
+  o2switch:faultwatch:pull:
+    desc: Pull LVE fault watcher minute records into data/reports/faultwatch/
+    cmds:
+      - ./scripts/o2switch_ctl.sh faultwatch pull
+
+  o2switch:faultwatch:correlate:
+    desc: Join pulled fault watcher records with a pasted cPanel Resource Usage table (task ... -- <file>)
+    cmds:
+      - uv run --frozen python scripts/o2switch_fault_watch.py correlate {{.CLI_ARGS}}

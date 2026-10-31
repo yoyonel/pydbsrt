@@ -45,7 +45,7 @@ def main():
 
         raw_rel = x.get("screenshot_rel", "")
         clean_rel = raw_rel.replace("docs/", "").lstrip("/")
-        img_url = f"../{clean_rel}"
+        img_url = f"../../{clean_rel}"
 
         table_data.append(
             [
@@ -515,7 +515,7 @@ $(document).ready(function() {{
 </script>
 """
 
-    out_file = Path("docs/2026-10-20-dashboard-interactif-e2e-vlc-corpus-nas.md")
+    out_file = Path("docs/history/2026-10-20-dashboard-interactif-e2e-vlc-corpus-nas.md")
     out_file.write_text(html_content, encoding="utf-8")
     print(f"Generated clean dashboard with diagnostics at {out_file}")
 

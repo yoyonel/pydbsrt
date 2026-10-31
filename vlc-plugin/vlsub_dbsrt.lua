@@ -51,6 +51,8 @@ local file_info = {
 }
 
 local candidates_store = {}
+local last_matching_tier = nil
+local last_matched_ref = nil
 local input_table = {}
 local selected_lang_code = "fre"
 
@@ -678,6 +680,17 @@ function run_search(mode)
         log_dbg("[Search] Engine tier: %s", matching_tier)
     end
 
+    local is_relay = matching_tier and (string.find(matching_tier, "Remote Relay") ~= nil)
+    last_matching_tier = matching_tier
+    last_matched_ref = matched_media
+
+    local origin_banner = is_relay and "CLOUD o2switch relay" or "LOCAL DAEMON"
+    log_info("================================================================================")
+    log_info("[MATCH IDENTIFIER] SOURCE: %s | ENGINE: %s", origin_banner, matching_tier or "Local MIH")
+    log_info("[MATCH IDENTIFIER] Reference: '%s' | Confidence: %s%% | Network RTT: %.2fms",
+        matched_media or "none", confidence_str or "0.0", req_elapsed_ms)
+    log_info("================================================================================")
+
     log_info("[Search] Server response in %.2fms: matched_ref='%s', confidence=%s%%, visual shift=%sframes / %sms",
         req_elapsed_ms, matched_media or "none", confidence_str or "0.0", shift_frames or "0", shift_ms_str or "0.0")
 
@@ -740,13 +753,15 @@ function run_search(mode)
     display_subtitles()
 
     local total_elapsed_ms = (os.clock() - t_start) * 1000.0
-    local relay_tag = (matching_tier and string.find(matching_tier, "Remote Relay")) and " [Remote Relay]" or ""
+    local origin_short = is_relay and "[CLOUD o2switch]" or "[LOCAL]"
     if #candidates_store == 0 then
-        log_info("[Search] Complete%s in %.2fms: 0 subtitles found", relay_tag, total_elapsed_ms)
-        setMessage("<b>Complete:</b> No subtitles found.")
+        log_info("[Search] Complete %s in %.2fms: 0 subtitles found", origin_short, total_elapsed_ms)
+        setMessage(string.format("<b>%s Complete:</b> No subtitles found.", origin_short))
     else
-        log_info("[Search] Complete%s in %.2fms: %d candidate(s) loaded into UI listbox", relay_tag, total_elapsed_ms, #candidates_store)
-        setMessage(string.format("<b>Complete%s:</b> %d subtitle(s) found.", relay_tag, #candidates_store))
+        local ref_label = matched_media or (title_query ~= "" and title_query) or "ok"
+        log_info("[Search] Complete %s in %.2fms: %d candidate(s) loaded into UI listbox (ref: %s)", origin_short, total_elapsed_ms, #candidates_store, ref_label)
+        setMessage(string.format("<b>%s MATCH:</b> %d subtitle(s) found (ref: %s, %.0fms).",
+            origin_short, #candidates_store, ref_label, req_elapsed_ms))
     end
 end
 
@@ -771,14 +786,15 @@ function display_subtitles()
         return
     end
 
+    local is_relay = last_matching_tier and (string.find(last_matching_tier, "Remote Relay") ~= nil)
     for idx, c in ipairs(candidates_store) do
         local source_tag = c.source:upper()
         if c.source == "certified" or c.source == "certified_synced" then
-            source_tag = "pHash certified"
+            source_tag = is_relay and "[CLOUD o2switch] pHash certified" or "pHash certified"
         elseif c.source == "container" then
             source_tag = "container"
         elseif c.source == "catalog" then
-            source_tag = "catalog"
+            source_tag = is_relay and "[CLOUD o2switch] catalog" or "catalog"
         elseif c.source == "remote" then
             source_tag = "OpenSubtitles"
         end
@@ -864,16 +880,18 @@ function download_selection()
             log_err("[Download] vlc.input.add_subtitle failed: %s", tostring(sub_err))
         end
 
+        local is_relay = last_matching_tier and (string.find(last_matching_tier, "Remote Relay") ~= nil)
+        local origin_short = is_relay and "[CLOUD o2switch]" or "[LOCAL]"
         local out_basename = out_srt:match("([^/\\]+)$") or out_srt
         local shift_desc = ""
         if math.abs(shift_ms) > MIN_SIGNIFICANT_DISPLAY_SHIFT_MS then
             shift_desc = string.format(" (shift: %+.2fs)", shift_ms / MILLIS_PER_SEC)
         end
-        setMessage(string.format("<b>Subtitles loaded:</b> %s%s", out_basename, shift_desc))
-        notify_osd(string.format("✓ Subtitles loaded: %s", out_basename), DEFAULT_OSD_DURATION_SEC)
+        setMessage(string.format("<b>%s Subtitles loaded:</b> %s%s", origin_short, out_basename, shift_desc))
+        notify_osd(string.format("✓ %s Subtitles loaded: %s", origin_short, out_basename), DEFAULT_OSD_DURATION_SEC)
 
         local total_dl_ms = (os.clock() - t_start) * 1000.0
-        log_info("=== [Download] Complete in %.2fms: loaded '%s'%s ===", total_dl_ms, out_basename, shift_desc)
+        log_info("=== [Download] %s Complete in %.2fms: loaded '%s'%s ===", origin_short, total_dl_ms, out_basename, shift_desc)
     else
         local err_msg = string.match(body, '"error":%s*"([^"]+)"') or "Failed to download subtitle."
         log_err("[Download] Server download failed: %s", err_msg)

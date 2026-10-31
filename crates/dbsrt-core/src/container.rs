@@ -9,6 +9,9 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use crate::ffmpeg_input::{
+    apply_ftp_credentials, display_input, ffmpeg_decode_threads, redact_url_userinfo,
+};
 use crate::media_pairing::parse_language_code;
 
 /// Metadata describing an embedded subtitle track within a container.
@@ -82,14 +85,45 @@ struct FfprobeSubDisposition {
     forced: Option<u32>,
 }
 
+/// Returns true if the path represents a remote streaming URL or Unix pipe rather than a local file.
+///
+/// # Arguments
+/// * `path` - Input filesystem path or stream URL.
+///
+/// # Returns
+/// * `bool` - True if path starts with a recognized network protocol (`ftp://`, `http://`, etc.) or pipe syntax.
+///
+/// # Invariants
+/// * Never panics. Zero allocation on typical static strings.
+pub fn is_remote_stream_or_pipe<P: AsRef<Path>>(path: P) -> bool {
+    let s = path.as_ref().to_string_lossy();
+    s.starts_with("ftp://")
+        || s.starts_with("ftps://")
+        || s.starts_with("http://")
+        || s.starts_with("https://")
+        || s.starts_with("sftp://")
+        || s.starts_with("pipe:")
+        || s == "-"
+}
+
+/// Returns true for a pipe input (`pipe:N` or `-`): ffprobe would consume it, so never probe it.
+pub fn is_pipe_input<P: AsRef<Path>>(path: P) -> bool {
+    let s = path.as_ref().to_string_lossy();
+    s.starts_with("pipe:") || s == "-"
+}
+
 /// Inspects a video/media container file using ffprobe to detect embedded subtitle tracks.
 pub fn inspect_container<P: AsRef<Path>>(path: P) -> Result<ContainerInspection> {
     let p = path.as_ref();
-    if !p.exists() {
-        return Err(anyhow!("Media container not found: {:?}", p));
+    if !is_remote_stream_or_pipe(p) && !p.exists() {
+        return Err(anyhow!("Media container not found: {:?}", display_input(p)));
     }
 
-    let output = Command::new("ffprobe")
+    let ffprobe_bin = crate::video::resolve_ffprobe();
+    let mut cmd = Command::new(ffprobe_bin);
+    cmd.args(["-threads", &ffmpeg_decode_threads()]);
+    apply_ftp_credentials(&mut cmd, p);
+    let output = cmd
         .args([
             "-v",
             "error",
@@ -102,12 +136,12 @@ pub fn inspect_container<P: AsRef<Path>>(path: P) -> Result<ContainerInspection>
         ])
         .arg(p)
         .output()
-        .with_context(|| format!("Failed to execute ffprobe on {:?}", p))?;
+        .with_context(|| format!("Failed to execute ffprobe on {:?}", display_input(p)))?;
 
     if !output.status.success() {
         return Err(anyhow!(
             "ffprobe inspection failed: {}",
-            String::from_utf8_lossy(&output.stderr)
+            redact_url_userinfo(&String::from_utf8_lossy(&output.stderr))
         ));
     }
 
@@ -165,24 +199,33 @@ pub fn extract_embedded_subtitle<P: AsRef<Path>>(
     subtitle_index: usize,
 ) -> Result<String> {
     let p = media_path.as_ref();
-    if !p.exists() {
-        return Err(anyhow!("Media container not found: {:?}", p));
+    if !is_remote_stream_or_pipe(p) && !p.exists() {
+        return Err(anyhow!("Media container not found: {:?}", display_input(p)));
     }
 
     let map_arg = format!("0:s:{}", subtitle_index);
 
-    let output = Command::new("ffmpeg")
-        .args(["-v", "error", "-y", "-i"])
+    let ffmpeg_bin = crate::video::resolve_ffmpeg_cpu();
+    let mut cmd = Command::new(ffmpeg_bin);
+    cmd.args(["-v", "error", "-y", "-threads", &ffmpeg_decode_threads()]);
+    apply_ftp_credentials(&mut cmd, p);
+    let output = cmd
+        .arg("-i")
         .arg(p)
         .args(["-map", &map_arg, "-f", "srt", "-"])
         .output()
-        .with_context(|| format!("Failed to execute ffmpeg subtitle extraction on {:?}", p))?;
+        .with_context(|| {
+            format!(
+                "Failed to execute ffmpeg subtitle extraction on {:?}",
+                display_input(p)
+            )
+        })?;
 
     if !output.status.success() {
         return Err(anyhow!(
             "ffmpeg extraction failed for stream {}: {}",
             subtitle_index,
-            String::from_utf8_lossy(&output.stderr)
+            redact_url_userinfo(&String::from_utf8_lossy(&output.stderr))
         ));
     }
 
@@ -236,4 +279,42 @@ pub fn language_matches(stream_lang: Option<&str>, target_lang: &str) -> bool {
     }
 
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_remote_stream_or_pipe() {
+        assert!(is_remote_stream_or_pipe(Path::new(
+            "ftp://user:pass@example.com/video.mkv"
+        )));
+        assert!(is_remote_stream_or_pipe(Path::new(
+            "ftps://example.com/video.mp4"
+        )));
+        assert!(is_remote_stream_or_pipe(Path::new(
+            "http://127.0.0.1:8080/stream.webm"
+        )));
+        assert!(is_remote_stream_or_pipe(Path::new(
+            "https://example.com/file.mkv"
+        )));
+        assert!(is_remote_stream_or_pipe(Path::new(
+            "sftp://nas.local/share/media.mkv"
+        )));
+        assert!(is_remote_stream_or_pipe(Path::new("pipe:0")));
+        assert!(is_remote_stream_or_pipe(Path::new("-")));
+
+        assert!(!is_remote_stream_or_pipe(Path::new("/var/media/video.mkv")));
+        assert!(!is_remote_stream_or_pipe(Path::new("relative/video.mp4")));
+        assert!(!is_remote_stream_or_pipe(Path::new("sample.mkv")));
+    }
+
+    #[test]
+    fn test_is_pipe_input() {
+        assert!(is_pipe_input(Path::new("pipe:0")));
+        assert!(is_pipe_input(Path::new("-")));
+        assert!(!is_pipe_input(Path::new("http://host/movie.mkv")));
+        assert!(!is_pipe_input(Path::new("/var/media/video.mkv")));
+    }
 }

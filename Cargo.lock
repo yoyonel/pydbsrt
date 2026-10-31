@@ -626,6 +626,7 @@ dependencies = [
  "ctrlc",
  "dbsrt-core",
  "dbsrt-index",
+ "dbsrt-tui",
  "insta",
  "libc",
  "ratatui",
@@ -690,6 +691,15 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "dbsrt-tui"
+version = "0.1.0"
+dependencies = [
+ "ratatui",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

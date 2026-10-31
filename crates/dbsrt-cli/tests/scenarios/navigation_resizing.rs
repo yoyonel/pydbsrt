@@ -25,9 +25,15 @@ fn test_scenario_circular_tab_cycling_forward_and_backward() {
     assert_eq!(harness.app.view, ViewPage::MediaSources);
 
     harness.send_key(KeyCode::Tab);
+    assert_eq!(harness.app.view, ViewPage::System);
+
+    harness.send_key(KeyCode::Tab);
     assert_eq!(harness.app.view, ViewPage::ActiveJobs);
 
-    // Backward cycling via BackTab: 1 -> 5 -> 4 -> 3 -> 2 -> 1
+    // Backward cycling via BackTab: 1 -> 6 -> 5 -> 4 -> 3 -> 2 -> 1
+    harness.send_key(KeyCode::BackTab);
+    assert_eq!(harness.app.view, ViewPage::System);
+
     harness.send_key(KeyCode::BackTab);
     assert_eq!(harness.app.view, ViewPage::MediaSources);
 

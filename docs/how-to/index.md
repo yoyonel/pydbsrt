@@ -29,6 +29,7 @@ tags:
 
 ### 🎬 Lecteur Multimédia & Client VLC
 * [Comment synchroniser des sous-titres dans VLC](synchroniser-sous-titres-vlc.md) : Utiliser VLSub, gérer les décalages audio/vidéo et diagnostiquer les erreurs de reconnaissance.
+* [Comment basculer les cibles de backend VLC (Local, Cloud o2switch, RPi4)](basculer-cibles-vlc-local-cloud-rpi4.md) : Choisir facilement la cible de calcul et d'indexation sans modifier la configuration VLC.
 
 ### 🎛️ Ingestion, Indexation & Vérité Terrain
 * [Comment ajouter et indexer un média via la façade unifiée](ajouter-et-indexer-un-media.md) : Automatiser l'extraction pHash et l'appairage en 1 commande (`task media:add`).
@@ -42,6 +43,15 @@ tags:
 ### 📊 Observabilité, Surveillance & Fiabilité
 * [Comment surveiller la stack avec Prometheus & Grafana](surveiller-stack-telemetrie.md) : Accéder aux métriques temps réel, surveiller les latences d'interrogation et la mémoire vive.
 * [Comment exécuter les recettes de chaos testing et tests d'infra](executer-recettes-chaos-testing.md) : Valider la résilience du démon face aux coupures réseau, plantages de sockets et redémarrages inopinés.
+
+### 🌐 Déploiement Multi-Cibles & Hébergement
+* [Comment déployer sur un hébergement mutualisé o2switch](deployer-o2switch-cloud-cpanel.md) : Orchestrer le démon statique musl en mode Zero-DB avec reverse-proxy LiteSpeed sans root.
+* [Comment déployer et restaurer une release des binaires sur o2switch](deployer-et-restaurer-une-release-o2switch.md) : Mettre à jour `dbsrt-server` et `dbsrt` par bascule atomique d'une release vérifiée, avec retour arrière automatique (`task o2switch:deploy`, `task o2switch:rollback`).
+* [Comment interconnecter un NAS Synology et le Cloud o2switch en FTP](interconnecter-nas-synology-et-o2switch-ftp.md) : Ouvrir un accès distant sécurisé par liste blanche IP, configurer le service FTP de DSM avec un compte en lecture seule, router le port 21 Freebox filtré sur l'IP o2switch et tester la liaison.
+* [Comment ingérer les médias de la Freebox sur o2switch via le RPi4](ingerer-medias-freebox-via-rpi4-et-o2switch.md) : Monter les disques Freebox en lecture seule sur le RPi4, les servir par le gateway HTTP Range, router le port 80 Freebox filtré sur l'IP o2switch et lancer le batch `freebox`.
+* [Comment orchestrer les batchs de calcul pHash distants, monitorer et synchroniser les catalogues avec o2switch](executer-batch-calcul-et-synchronisation-o2switch.md) : Déporter l'ingestion sur 8-9 workers (80% CPU), streamer en Zéro-NVMe, surveiller dans `dbsrt top` et rapatrier les catalogues.
+* [Comment superviser et auto-guérir les batchs o2switch en continu depuis un Raspberry Pi 4 (24/7)](superviser-batch-o2switch-depuis-rpi4.md) : Surveiller l'intégrité distante H24, auto-guérir les arrêts de daemon, adapter les workers selon l'horaire et synchroniser en continu les `.phash`.
+* [Comment compiler, tester, déployer et lancer le CLI dbsrt top sur Raspberry Pi 4](compiler-deployer-cli-top-sur-rpi4.md) : Maîtriser le pipeline complet cross-compilation Docker Debian Bullseye (GLIBC 2.31), test QEMU local, déploiement SSH et session interactive TUI.
 
 ### ✍️ Gouvernance & Standards Documentaires
 * [Comment contribuer à la documentation selon Diátaxis](contribuer-documentation-diataxis.md) : Consignes méthodologiques, gabarits et checklists pour enrichir incrémentalement les 4 quadrants.

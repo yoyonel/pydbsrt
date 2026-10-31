@@ -100,6 +100,18 @@ tags:
     </div>
   </div>
 
+  <div class="dbsrt-bento-card bento-cyan">
+    <div class="bento-header">
+      <span class="bento-icon">⚡</span>
+      <span class="bento-badge">CACHE &amp; CLOUD</span>
+    </div>
+    <h3>Cache Hybride Local-First &amp; Cloud o2switch</h3>
+    <p>Hiérarchie des tiers de latence (Tier 0 RAM < 2ms vs Tier 1 Cloud ~70ms), anti-collision sur écrans noirs et filtrage linguistique strict.</p>
+    <div class="bento-links">
+      <a href="architecture-cache-hybride-local-cloud/">→ Comprendre le cache hybride</a>
+    </div>
+  </div>
+
   <div class="dbsrt-bento-card bento-purple">
     <div class="bento-header">
       <span class="bento-icon">☁️</span>
@@ -109,6 +121,18 @@ tags:
     <p>Principes du stockage adressable par le contenu (Content-Addressable Storage) pour la réplication et la distribution de sous-titres.</p>
     <div class="bento-links">
       <a href="stockage-decentralise-cas-et-distribution/">→ Comprendre le stockage CAS</a>
+    </div>
+  </div>
+
+  <div class="dbsrt-bento-card bento-indigo">
+    <div class="bento-header">
+      <span class="bento-icon">🔄</span>
+      <span class="bento-badge">DÉPORT &amp; SYNCHRO</span>
+    </div>
+    <h3>Déport de Calcul, Stockage Multi-Niveaux &amp; Synchronisation</h3>
+    <p>Architecture streaming direct FFmpeg (Zéro NVMe), flux IN-OUT, déport 12 vCPUs o2switch et réconciliation sans conflit avec le NAS Synology.</p>
+    <div class="bento-links">
+      <a href="architecture-deport-calcul-stockage-et-synchronisation-o2switch/">→ Explorer l'architecture de synchronisation</a>
     </div>
   </div>
 </div>

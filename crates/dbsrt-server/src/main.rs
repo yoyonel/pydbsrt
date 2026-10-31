@@ -2,14 +2,14 @@
 
 use anyhow::Result;
 use clap::Parser;
-use dbsrt_core::{OpenSubtitlesProvider, SubtitleCache};
+use dbsrt_core::OpenSubtitlesProvider;
 use dbsrt_server::constants::{
     DEFAULT_FILE_WATCH_DEBOUNCE_MS, DEFAULT_FILE_WATCH_INTERVAL_MS, DEFAULT_PG_ERROR_RETRY_SECS,
     DEFAULT_PG_RECONNECT_INTERVAL_SECS,
 };
 use dbsrt_server::{
     bind_listener, create_router_with_state, remove_discovery_file, write_discovery_file, AppState,
-    DbConnectionConfig, DISCOVERY_FILE,
+    AppStateInitOptions, DbConnectionConfig, DISCOVERY_FILE,
 };
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -29,6 +29,11 @@ pub struct ServerCli {
     /// Port to listen on (env: DBSRT_PORT, 0 for random free port)
     #[arg(short, long, env = "DBSRT_PORT", default_value_t = 8765)]
     pub port: u16,
+
+    /// Listen on this Unix socket instead of TCP host/port (env: DBSRT_UNIX_SOCKET).
+    /// Shared hosting (o2switch) kills TCP listeners within seconds but leaves Unix sockets alone.
+    #[arg(long, env = "DBSRT_UNIX_SOCKET")]
+    pub unix_socket: Option<PathBuf>,
 
     /// Default directory storing .phash files (env: DBSRT_PHASH_DIR)
     #[arg(long, env = "DBSRT_PHASH_DIR", default_value = "/tmp")]
@@ -70,6 +75,15 @@ pub struct ServerCli {
     #[arg(long, env = "DBSRT_REMOTE_API")]
     pub remote_api: Option<String>,
 
+    /// Optional API key for remote dbsrt-server relay authentication (env: DBSRT_REMOTE_API_KEY)
+    #[arg(long, env = "DBSRT_REMOTE_API_KEY")]
+    pub remote_api_key: Option<String>,
+
+    /// Optional key pool file (one key per line); every route but health then requires
+    /// `Authorization: Bearer <key>` or `X-API-Key` (env: DBSRT_API_KEY_FILE)
+    #[arg(long, env = "DBSRT_API_KEY_FILE")]
+    pub api_key_file: Option<PathBuf>,
+
     /// Run as lightweight client agent (env: DBSRT_AGENT)
     #[arg(long, env = "DBSRT_AGENT", default_value_t = false)]
     pub agent: bool,
@@ -81,22 +95,77 @@ impl ServerCli {
             DbConnectionConfig::new(host, self.db_port, self.db_user, self.db_pass, self.db_name)
         });
 
-        let mut state = AppState::new(
+        let mut state = AppState::with_options(
             self.phash_dir,
             self.subtitles_dir,
             Arc::new(OpenSubtitlesProvider::new(None)),
-            SubtitleCache::default(),
+            AppStateInitOptions {
+                dbphash_path: self.dbphash,
+                extra_phash_dirs: self.extra_phash_dirs,
+            },
         );
-        for dir in self.extra_phash_dirs {
-            if !state.extra_phash_dirs.contains(&dir) {
-                state.extra_phash_dirs.push(dir);
-            }
-        }
-        state.set_dbphash(self.dbphash);
         state.db_config = db_config;
         state.remote_api = self.remote_api;
+        state.remote_api_key = self.remote_api_key;
+        state.api_key_file = self.api_key_file;
         state.is_agent = self.agent;
         state
+    }
+}
+
+enum BoundListener {
+    Tcp(tokio::net::TcpListener),
+    #[cfg(unix)]
+    Unix(tokio::net::UnixListener, PathBuf),
+}
+
+impl BoundListener {
+    async fn bind(cli: &ServerCli) -> Result<Self> {
+        match cli.unix_socket.clone() {
+            #[cfg(unix)]
+            Some(path) => {
+                let listener = dbsrt_server::bind_unix_listener(&path)?;
+                info!("dbsrt-server daemon listening on unix:{}", path.display());
+                Ok(Self::Unix(listener, path))
+            }
+            #[cfg(not(unix))]
+            Some(_) => anyhow::bail!("--unix-socket requires a Unix platform"),
+            None => {
+                let (listener, addr) = bind_listener(&cli.host, cli.port).await?;
+                info!("dbsrt-server daemon listening on http://{}", addr);
+
+                write_discovery_file(addr)?;
+                info!(
+                    "Published service discovery descriptor to {}",
+                    DISCOVERY_FILE
+                );
+                Ok(Self::Tcp(listener))
+            }
+        }
+    }
+
+    /// Serves until `shutdown`, then removes the discovery file (TCP) or the socket file (Unix).
+    async fn serve<F>(self, app: axum::Router, shutdown: F) -> std::io::Result<()>
+    where
+        F: std::future::Future<Output = ()> + Send + 'static,
+    {
+        match self {
+            Self::Tcp(listener) => {
+                let res = axum::serve(listener, app)
+                    .with_graceful_shutdown(shutdown)
+                    .await;
+                remove_discovery_file();
+                res
+            }
+            #[cfg(unix)]
+            Self::Unix(listener, path) => {
+                let res = axum::serve(listener, app)
+                    .with_graceful_shutdown(shutdown)
+                    .await;
+                let _ = std::fs::remove_file(&path);
+                res
+            }
+        }
     }
 }
 
@@ -104,14 +173,7 @@ pub async fn run_server_until<F>(cli: ServerCli, shutdown: F) -> Result<()>
 where
     F: std::future::Future<Output = ()> + Send + 'static,
 {
-    let (listener, addr) = bind_listener(&cli.host, cli.port).await?;
-    info!("dbsrt-server daemon listening on http://{}", addr);
-
-    write_discovery_file(addr)?;
-    info!(
-        "Published service discovery descriptor to {}",
-        DISCOVERY_FILE
-    );
+    let bound = BoundListener::bind(&cli).await?;
 
     let state = cli.into_app_state();
     let state_arc = Arc::new(state);
@@ -256,15 +318,23 @@ where
 
     let app = create_router_with_state((*state_arc).clone());
 
-    let server = axum::serve(listener, app).with_graceful_shutdown(shutdown);
-    let res = server.await;
-    remove_discovery_file();
-    res?;
+    bound.serve(app, shutdown).await?;
     Ok(())
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+/// Maximum worker threads allocated for the asynchronous HTTP runtime.
+/// Constrained to 4 threads to prevent hitting NPROC/thread-limits on shared hosting (CloudLinux LVE).
+pub const DEFAULT_SERVER_WORKER_THREADS: usize = 4;
+
+fn main() -> Result<()> {
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(DEFAULT_SERVER_WORKER_THREADS)
+        .enable_all()
+        .build()?
+        .block_on(run_main())
+}
+
+async fn run_main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -331,5 +401,47 @@ mod tests {
         }
 
         assert!(res.is_ok());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_server_unix_socket_lifecycle() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let sock = std::env::temp_dir().join(format!("dbsrt_srv_{}.sock", std::process::id()));
+        let cli = ServerCli::try_parse_from([
+            "dbsrt-server",
+            "--unix-socket",
+            sock.to_str().unwrap(),
+            "--phash-dir",
+            "/tmp/phash_primary",
+        ])
+        .expect("CLI must parse cleanly");
+
+        let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+        let server = tokio::spawn(run_server_until(cli, async {
+            let _ = stop_rx.await;
+        }));
+
+        let mut stream = None;
+        for _ in 0..100 {
+            if let Ok(s) = tokio::net::UnixStream::connect(&sock).await {
+                stream = Some(s);
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        let mut stream = stream.expect("server must listen on the Unix socket");
+        stream
+            .write_all(b"GET /v1/health HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
+            .await
+            .unwrap();
+        let mut response = String::new();
+        stream.read_to_string(&mut response).await.unwrap();
+        assert!(response.starts_with("HTTP/1.1 200"), "got: {response}");
+
+        stop_tx.send(()).unwrap();
+        server.await.unwrap().expect("server must stop cleanly");
+        assert!(!sock.exists(), "socket file must be removed on shutdown");
     }
 }

@@ -183,13 +183,14 @@ dbsrt top [OPTIONS]
 
 #### Structure de l'Interface Full-Frame
 
-1. **Bannière d'En-Tête Système Multi-Lignes** :
-   - Ligne 1 : Horloge locale temps réel (`HH:MM:SS`), nombre de workers actifs, pourcentage CPU global hôte, mémoire vive consommée / totale (`RAM: X.X/Y.Y GiB`).
-   - Ligne 2 : Télémesures GPU matériel Intel Iris Xe (`intel_gpu_top`) : Moteur de décodage vidéo (`Video Engine: X.X% [bar]`), Render/3D, fréquence d'horloge GPU (`MHz`) et puissance électrique consommée (`W`).
-   - Ligne 3 : Débits réseau CIFS/SMB : Instantané combiné (`Net RX` physique et lecture `VFS`), ainsi que le débit cumulé global de la session courante (`X.X MB/s` sur `Y.Y GiB` en `XhYYm` sur `N` flux).
+1. **Bannière d'En-Tête Système Multi-Lignes (Style Fastfetch Dynamique)** :
+   - Ligne 1 : Horloge temps réel (`HH:MM:SS`), nom d'hôte (`🖥️ hostname`), distribution OS et architecture (`Debian 13 x86_64`, `CloudLinux 8`, etc.), nombre de workers actifs, progression de la file batch active (`Batch: X/Y (Z%)` si un batch est en cours), pourcentage CPU global hôte, mémoire vive consommée / totale (`RAM: X.X/Y.Y GiB`).
+   - Ligne 2 : Modèle et nombre de cœurs processeur (`🧠 CPU: <modèle> (N cœurs)`), modèle de carte graphique ou accélérateur détecté (`🎮 GPU: <modèle>`) avec télémesures de décodage matériel en direct (`intel_gpu_top` : `Décodage: X.X% [bar]`, Render/3D, fréquence `MHz`, puissance `W`) ou mention transparente du mode actif (`Mode CPU Multithread` ou `Non détecté`).
+   - Ligne 3 : Débits réseau et pipe : Instantané réseau ingress physique (`Net RX`), débit de traitement du pipe de hachage (`Pipe pHash`), ainsi que le débit cumulé global de la session courante (`X.X MB/s` sur `Y.Y GiB` en `XhYYm` sur `N` flux).
 
 2. **Onglet 1 : Tâches en Cours (`[1]`)** :
    - Table interactive des processus actifs (`dbsrt` et `ffmpeg`), moteurs d'exécution (`GPU VA-API`, `CPU Software`, `Sub Extraction`), débits instantanés, barres de progression textuelles, ETA et consommation mémoire/CPU.
+   - En-tête dynamique contextuel : affiche le décompte des tâches actives et la progression globale de la file de traitement (`[X/Y actifs │ File: C/T traités, R en attente]`).
 
 3. **Onglet 2 : Historique & Statistiques Réelles (`[2]` ou `[h]`)** :
    - Tableau de distribution statistique descriptive (Min, Médiane, Moyenne, 90e percentile P90, Max, Écart-type $\sigma$) sur les décodages intégraux pHash (durée > 60s) : débits effectifs (`MB/s`), durées de traitement (`minutes`), tailles des fichiers (`GiB`) et couplings de sous-titres certifiés.
@@ -202,19 +203,33 @@ dbsrt top [OPTIONS]
 
 5. **Onglet 4 : Explorateur de Médias Multi-Sources (`[4]` ou `[m]`)** :
    - Catalogue unifié de tous les répertoires sources configurés et actifs, présentant l'inventaire des fichiers vidéo, source d'origine, tailles, durées estimées, codecs vidéo détectés (`hevc`, `h264`, `h264 Hi10P`, etc.), présence et langues des pistes de sous-titres intégrées, ainsi que le cycle de vie d'ingestion (`VIERGE`, `EN COURS`, `COMPLÉTÉ`, `HACHÉ SEUL`).
+   - **Mode Nœud Distant Streaming (Zéro-NVMe / Cloud)** : Sur un nœud sans répertoire local monté (ex: worker o2switch opérant en streaming réseau pur), l'explorateur est alimenté automatiquement par le registre des cibles du batch en cours (`data/reports/selected_batch_targets.json`). Les scans disques locaux périodiques sont automatiquement neutralisés pour éliminer tout clignotement ou latence I/O inutile.
    - Filtrage dynamique cyclique (`[f]`) : `TOUS`, `VIERGES SEULS`, `EN COURS`, `COMPLÉTÉS`, `HACHÉS SEULS`, `AVEC SOUS-TITRES`, `SANS SOUS-TITRES`.
    - Tri multicritère cyclique (`[o]`) : `NOM (A-Z)`, `TAILLE`, `DURÉE`, `STATUT`, `SOUS-TITRES`.
    - Sélection multiple par case à cocher : touche `[Espace]` pour cocher/décocher le média pointé, touche `[a]` pour tout cocher/décocher.
    - Déclenchement de lot ciblé (`[b]`) : exécute le batch d'ingestion en tâche de fond exclusivement sur les médias sélectionnés et rebascule automatiquement sur l'onglet des Tâches avec notification.
 
-6. **Onglet 5 : Gestion des Sources de Médias (`[5]` ou `[s]`)** :
-   - Gestionnaire interactif CRUD complet des répertoires de stockage vidéo scannés en parallèle (stocké dans `data/reports/media_sources.json`).
-   - Initialisation automatique par défaut avec la source NAS (`$NAS_TVSHOW_DIR` ou bibliothèque TVShow par défaut).
-   - `[a]` : Ajout interactif d'une nouvelle source via modal (validation stricte : chemin absolu obligatoire et répertoire existant).
-   - `[e]` : Édition du chemin et du nom de la source sélectionnée (validation du répertoire).
-   - `[Espace]` : Activation / désactivation dynamique de la source (statut `[✓] ACTIF` vs `[ ] DÉSACTIVÉ`).
-   - `[d]` : Suppression de la source sélectionnée avec dialogue modal de confirmation (protection de la dernière source restante).
-   - `[r]` : Déclenchement d'un rescan asynchrone immédiat de l'ensemble des sources actives (préservation du cache des métadonnées pour éviter tout recomputing superflu).
+6. **Onglet 5 : Gestion des Sources de Médias / Pont Streaming Réseau (`[5]` ou `[s]`)** :
+   - **Mode Local (Station de Dev / Hôte)** : Gestionnaire interactif CRUD complet des répertoires de stockage vidéo scannés en parallèle (stocké dans `data/reports/media_sources.json`).
+     - Initialisation automatique par défaut avec la source NAS (`$NAS_TVSHOW_DIR` ou bibliothèque TVShow par défaut).
+     - `[a]` : Ajout interactif d'une nouvelle source via modal (validation stricte : chemin absolu obligatoire et répertoire existant).
+     - `[e]` : Édition du chemin et du nom de la source sélectionnée (validation du répertoire).
+     - `[Espace]` : Activation / désactivation dynamique de la source (statut `[✓] ACTIF` vs `[ ] DÉSACTIVÉ`).
+     - `[d]` : Suppression de la source sélectionnée avec dialogue modal de confirmation (protection de la dernière source restante).
+     - `[r]` : Déclenchement d'un rescan asynchrone immédiat de l'ensemble des sources actives.
+   - **Mode Déporté Réseau (Zéro-NVMe / o2switch / RPi4)** : En l'absence de montages de stockage physiques locaux, la vue commute automatiquement en moniteur de flux streaming réseau pour la source FTP du NAS (ex: `ftp://nas:21`).
+     - Affiche l'état en direct du canal de transit, le nombre de cibles batch cataloguées et le respect du plafond de bande passante CloudLinux LVE ($42\text{ MiB/s}$).
+     - Actions d'ajout/édition de répertoires physiques verrouillées avec notification (l'administration physique étant dévolue à la station hôte).
+     - `[r]` : Actualisation immédiate du registre des cibles streaming réseau sans déclenchement de scan disque superflu.
+
+7. **Onglet 6 : Télémétrie Système & Matériel (Vue Fastfetch `[6]` ou `[y]`)** :
+   - Tableau de bord exhaustif en double colonne structuré par domaines thématiques :
+     - **Applicatif (`dbsrt`)** : version sémantique, hash git de provenance, date de compilation, chemin d'exécutable, PID et thread pool Rayon.
+     - **Nœud & OS** : hostname FQDN, distribution Linux, version du noyau (`uname -r`), architecture CPU, et temps de fonctionnement (`uptime`).
+     - **Processeur (CPU)** : modèle CPU commercial complet, topologie (cœurs physiques + logiques), fréquence d'horloge et jauge de charge.
+     - **Accélération Matérielle (GPU)** : périphérique détecté, pilote/moteur actif (`Intel Iris Xe Graphics`, `VA-API iHD`), statut et barres d'activité matérielle.
+     - **Mémoire & Stockage** : RAM vive (utilisée, totale, pourcentage), swap actif, et espace disque libre sur la partition de travail.
+     - **Débits & Flux Réseau** : bande passante ingress (`Net RX`), débit d'ingestion pHash et volume global cumulé sur la session.
 
 #### Raccourcis Clavier
 
@@ -223,7 +238,8 @@ dbsrt top [OPTIONS]
 - `[3]` / `[r]` : Afficher l'onglet des traitements complétés et certifiés
 - `[4]` / `[m]` : Afficher l'onglet de l'explorateur de médias multi-sources
 - `[5]` / `[s]` : Afficher l'onglet de gestion des sources de médias (ou `[s]` pour arrêter une tâche dans l'onglet 1)
-- `[Tab]` / `[Shift+Tab]` : Navigation circulaire bidirectionnelle entre les 5 onglets
+- `[6]` / `[y]` : Afficher la vue diagnostics système Fastfetch
+- `[Tab]` / `[Shift+Tab]` : Navigation circulaire bidirectionnelle entre les 6 onglets
 - `[↑]` / `[k]` : Déplacer le curseur vers le haut / élément précédent
 - `[↓]` / `[j]` : Déplacer le curseur vers le bas / élément suivant
 - `[PgUp]` / `[PgDn]` : Défilement rapide par page (onglets 1, 3, 4 et 5)

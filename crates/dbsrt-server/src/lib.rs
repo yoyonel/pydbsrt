@@ -1,5 +1,6 @@
 //! dbsrt-server: REST API microservice daemon for visual subtitle synchronization.
 
+pub mod auth;
 pub mod constants;
 pub mod dtos;
 pub mod handlers;
@@ -75,6 +76,46 @@ pub async fn bind_listener(
     }
 }
 
+/// Binds a Unix socket listener (mode 0600), replacing a stale socket left by a killed daemon.
+///
+/// Refuses to steal a socket a live daemon still answers on, and never removes a path that is
+/// not a socket. Check, removal and bind run under an exclusive `flock` on `<path>.lock`, so
+/// concurrent starters (PHP gateway, cron watchdog, `o2switch_ctl.sh start`) cannot delete each
+/// other's fresh socket.
+#[cfg(unix)]
+pub fn bind_unix_listener(path: &std::path::Path) -> Result<tokio::net::UnixListener> {
+    use std::os::unix::fs::{FileTypeExt, OpenOptionsExt, PermissionsExt};
+
+    let mut lock_path = path.as_os_str().to_owned();
+    lock_path.push(".lock");
+    let lock_path = PathBuf::from(lock_path);
+    // The lock file is never removed: unlinking it would let two starters lock different inodes.
+    let lock = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .mode(0o600)
+        .open(&lock_path)
+        .with_context(|| format!("Failed to open spawn lock {}", lock_path.display()))?;
+    lock.lock()
+        .with_context(|| format!("Failed to lock {}", lock_path.display()))?;
+
+    if let Ok(meta) = std::fs::symlink_metadata(path) {
+        if !meta.file_type().is_socket() {
+            anyhow::bail!("Refusing to replace non-socket path {}", path.display());
+        }
+        if std::os::unix::net::UnixStream::connect(path).is_ok() {
+            anyhow::bail!("A dbsrt-server already listens on {}", path.display());
+        }
+        std::fs::remove_file(path)
+            .with_context(|| format!("Failed to remove stale socket {}", path.display()))?;
+    }
+    let listener = tokio::net::UnixListener::bind(path)
+        .with_context(|| format!("Failed to bind Unix socket {}", path.display()))?;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+    Ok(listener)
+}
+
 pub fn create_router(phash_dir: PathBuf, subtitles_dir: PathBuf) -> Router {
     create_router_with_state(AppState::new(
         phash_dir,
@@ -96,11 +137,22 @@ pub fn create_router_with_state(state: AppState) -> Router {
     Router::new()
         .route("/studio", get(studio_ui_handler))
         .route("/ui", get(studio_ui_handler))
+        .route("/monitoring", get(monitoring_ui_handler))
+        .route("/top", get(monitoring_ui_handler))
         .route("/health", get(health_handler))
         .route("/v1/health", get(health_handler))
         .route("/v1/status", get(status_handler))
         .route("/v1/metrics", get(metrics_handler))
         .route("/v1/logs", get(logs_handler))
+        .route(
+            "/v1/monitoring/telemetry",
+            get(monitoring_telemetry_handler),
+        )
+        .route("/v1/monitoring/top", get(monitoring_top_handler))
+        .route(
+            "/v1/supervisor/heartbeat",
+            post(supervisor_heartbeat_handler),
+        )
         .route("/v1/couplings", get(couplings_handler))
         .route("/v1/couplings/sub_frames", get(sub_frames_handler))
         .route("/v1/search", post(search_handler))
@@ -116,6 +168,10 @@ pub fn create_router_with_state(state: AppState) -> Router {
         .route("/v1/reload", post(catalog_reload_handler))
         .route("/v1/catalog/ingest", post(catalog_ingest_handler))
         .route("/v1/catalog/compact", post(catalog_compact_handler))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            auth::require_api_key,
+        ))
         .layer(cors)
         .layer(TraceLayer::new_for_http())
         .with_state(state)
@@ -239,6 +295,67 @@ mod tests {
         assert_eq!(addr.ip().to_string(), "127.0.0.1");
         assert!(addr.port() > 0);
         drop(listener);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_bind_unix_listener_cases() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = std::env::temp_dir().join(format!("dbsrt_uds_test_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // Fresh path: bound with owner-only permissions
+        let fresh = dir.join("fresh.sock");
+        let live = bind_unix_listener(&fresh).expect("bind fresh socket");
+        let mode = std::fs::metadata(&fresh).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+
+        // Live socket: refused, file kept
+        assert!(bind_unix_listener(&fresh).is_err());
+        assert!(fresh.exists());
+
+        // Stale socket (listener gone, file left behind): replaced
+        drop(live);
+        assert!(fresh.exists());
+        let rebound = bind_unix_listener(&fresh).expect("rebind stale socket");
+        drop(rebound);
+
+        // Regular file at the path: refused and left untouched
+        let regular = dir.join("not_a_socket");
+        std::fs::write(&regular, b"keep").unwrap();
+        assert!(bind_unix_listener(&regular).is_err());
+        assert_eq!(std::fs::read(&regular).unwrap(), b"keep");
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Two starters (PHP gateway, cron watchdog) racing on a stale socket: the second one must
+    /// wait for the first bind, otherwise it deletes the fresh socket and orphans the first daemon.
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_bind_unix_listener_waits_for_spawn_lock() {
+        const HOLD_MS: u64 = 300;
+        let dir = std::env::temp_dir().join(format!("dbsrt_uds_lock_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let sock = dir.join("d.sock");
+        drop(std::os::unix::net::UnixListener::bind(&sock).unwrap()); // stale socket file
+
+        let lock = std::fs::File::create(dir.join("d.sock.lock")).unwrap();
+        lock.lock().unwrap(); // another starter is mid check/remove/bind
+
+        let path = sock.clone();
+        let starter = tokio::task::spawn_blocking(move || bind_unix_listener(&path));
+        tokio::time::sleep(std::time::Duration::from_millis(HOLD_MS)).await;
+        assert!(
+            !starter.is_finished(),
+            "bind must wait while the spawn lock is held"
+        );
+
+        lock.unlock().unwrap();
+        let listener = starter.await.unwrap().expect("bind after lock release");
+        drop(listener);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

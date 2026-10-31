@@ -157,6 +157,64 @@ fn select_and_validate_subtitle_pairs(
     Ok(final_pairs)
 }
 
+/// Executes batch subtitle stream extraction with sequential fallback.
+///
+/// # Arguments
+/// * `video_path` - Path to the container file or stream.
+/// * `candidates` - List of (subtitle stream index, language tag, output path).
+/// * `cleanup` - Cleanup registry for temporary extracted files.
+/// * `discovered` - Output accumulator for successfully extracted subtitle tracks.
+///
+/// # Returns
+/// Nothing. Extracted files are pushed to `discovered`.
+///
+/// # Panics
+/// Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// 1. Tries single-pass multi-stream extraction via FFmpeg (`DBSRT_FFMPEG_THREADS`, default 0 = auto).
+/// 2. If single-pass fails, falls back sequentially to `extract_embedded_subtitle`.
+/// 3. Registers verified output files in `cleanup.srts` and `discovered`.
+fn extract_subtitle_tracks_batch(
+    video_path: &Path,
+    candidates: &[(usize, Option<String>, PathBuf)],
+    cleanup: &CleanupState,
+    discovered: &mut Vec<(PathBuf, Option<String>)>,
+) {
+    let mut cmd = std::process::Command::new(dbsrt_core::video::resolve_ffmpeg_cpu());
+    cmd.args(["-v", "error", "-y", "-threads"])
+        .arg(dbsrt_core::ffmpeg_decode_threads());
+    dbsrt_core::apply_ftp_credentials(&mut cmd, video_path);
+    cmd.arg("-i").arg(video_path);
+    for (idx, _lang, dest) in candidates {
+        let map_arg = format!("0:s:{}", idx);
+        cmd.args(["-map", &map_arg, "-f", "srt"]).arg(dest);
+    }
+
+    let batch_ok = cmd.status().map(|s| s.success()).unwrap_or(false);
+    if batch_ok {
+        for (_idx, lang_opt, srt_path) in candidates {
+            let is_valid =
+                srt_path.exists() && srt_path.metadata().map(|m| m.len() > 0).unwrap_or(false);
+            if is_valid {
+                cleanup.srts.lock().unwrap().push(srt_path.clone());
+                discovered.push((srt_path.clone(), lang_opt.clone()));
+            }
+        }
+        return;
+    }
+
+    for (idx, lang_opt, srt_path) in candidates {
+        let Ok(srt_content) = extract_embedded_subtitle(video_path, *idx) else {
+            continue;
+        };
+        if fs::write(srt_path, &srt_content).is_ok() {
+            cleanup.srts.lock().unwrap().push(srt_path.clone());
+            discovered.push((srt_path.clone(), lang_opt.clone()));
+        }
+    }
+}
+
 fn extract_embedded_subtitles_and_select(
     video_path: &Path,
     candidates: Vec<(usize, Option<String>, PathBuf)>,
@@ -179,32 +237,7 @@ fn extract_embedded_subtitles_and_select(
             );
         }
 
-        let mut cmd = std::process::Command::new("ffmpeg");
-        cmd.args(["-v", "error", "-y", "-i"]).arg(video_path);
-        for (idx, _lang, dest) in &candidates {
-            let map_arg = format!("0:s:{}", idx);
-            cmd.args(["-map", &map_arg, "-f", "srt"]).arg(dest);
-        }
-
-        let batch_ok = cmd.status().map(|s| s.success()).unwrap_or(false);
-        if batch_ok {
-            for (_idx, lang_opt, srt_path) in candidates {
-                if srt_path.exists() && srt_path.metadata().map(|m| m.len() > 0).unwrap_or(false) {
-                    cleanup.srts.lock().unwrap().push(srt_path.clone());
-                    discovered.push((srt_path, lang_opt));
-                }
-            }
-        } else {
-            // Fallback to sequential extraction
-            for (idx, lang_opt, srt_path) in candidates {
-                if let Ok(srt_content) = extract_embedded_subtitle(video_path, idx) {
-                    if fs::write(&srt_path, &srt_content).is_ok() {
-                        cleanup.srts.lock().unwrap().push(srt_path.clone());
-                        discovered.push((srt_path, lang_opt));
-                    }
-                }
-            }
-        }
+        extract_subtitle_tracks_batch(video_path, &candidates, &cleanup, &mut discovered);
     }
 
     if discovered.is_empty() {
@@ -281,6 +314,10 @@ pub struct MediaAddArgs {
     /// Positional video path if not passed with --video
     #[arg(value_name = "VIDEO_PATH")]
     pub video_pos: Option<PathBuf>,
+
+    /// Explicit media name stem override (useful for remote streaming URLs or pipes)
+    #[arg(long, value_name = "NAME")]
+    pub media_name: Option<String>,
 
     /// Reference subtitle file (.srt)
     #[arg(short, long, value_name = "SRT")]
@@ -371,10 +408,49 @@ pub(crate) fn resolve_media_video_path(args: &MediaAddArgs) -> Result<&PathBuf> 
             anyhow!("Error: No media video file specified. Usage: dbsrt media:add <video_file> [srt_file] [--lang <code>] [--fps <val>]")
         })?;
 
-    if !video_path.exists() {
+    if !dbsrt_core::container::is_remote_stream_or_pipe(video_path) && !video_path.exists() {
         bail!("Media video file not found: {:?}", video_path);
     }
     Ok(video_path)
+}
+
+/// Derives logical media stem name, respecting explicit `--media-name` overrides and remote stream URLs.
+pub(crate) fn resolve_media_stem(args: &MediaAddArgs, video_path: &Path) -> String {
+    if let Some(ref name) = args.media_name {
+        return name.clone();
+    }
+    let raw = video_path.to_string_lossy();
+    if dbsrt_core::container::is_remote_stream_or_pipe(video_path) {
+        let unquoted = raw.split('?').next().unwrap_or(&raw);
+        let last_segment = unquoted.rsplit('/').next().unwrap_or(unquoted);
+        if let Some((stem, _)) = last_segment.rsplit_once('.') {
+            return stem.to_string();
+        }
+        return last_segment.to_string();
+    }
+    video_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("unknown")
+        .to_string()
+}
+
+/// Derives logical media filename with extension, respecting explicit `--media-name` overrides and remote stream URLs.
+pub(crate) fn resolve_media_filename(args: &MediaAddArgs, video_path: &Path) -> String {
+    if let Some(ref name) = args.media_name {
+        return name.clone();
+    }
+    let raw = video_path.to_string_lossy();
+    if dbsrt_core::container::is_remote_stream_or_pipe(video_path) {
+        let unquoted = raw.split('?').next().unwrap_or(&raw);
+        let last_segment = unquoted.rsplit('/').next().unwrap_or(unquoted);
+        return last_segment.to_string();
+    }
+    video_path
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string()
 }
 
 /// Resolves and validates an explicitly provided subtitle file and its language status.
@@ -448,6 +524,112 @@ pub(crate) fn resolve_explicit_subtitle_pair(
     Ok(vec![(srt_file.to_path_buf(), lang_status)])
 }
 
+/// Checks if any container stream explicitly matches the requested target language.
+fn has_explicit_language_match(
+    streams: &[dbsrt_core::container::SubtitleStreamInfo],
+    target: &str,
+) -> bool {
+    for s in streams {
+        let parsed = s.language.as_deref().and_then(parse_language_code);
+        if language_matches(s.language.as_deref(), target) || parsed.as_deref() == Some(target) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Evaluates if an individual subtitle stream satisfies language filter criteria.
+fn stream_matches_target_lang(
+    raw_lang: Option<&str>,
+    target: &str,
+    parsed_lang: Option<&str>,
+    has_explicit_match: bool,
+) -> bool {
+    match raw_lang {
+        Some(tag) => language_matches(Some(tag), target) || parsed_lang == Some(target),
+        None => !has_explicit_match,
+    }
+}
+
+/// Filters and prepares embedded subtitle stream extraction candidates from container streams.
+fn collect_embedded_subtitle_candidates(
+    args: &MediaAddArgs,
+    streams: &[dbsrt_core::container::SubtitleStreamInfo],
+    video_stem: &str,
+) -> Vec<(usize, Option<String>, PathBuf)> {
+    let mut candidates = Vec::new();
+    let mut seen_extracted_langs = HashSet::new();
+    let mut seen_no_lang = false;
+
+    let has_explicit_match = args
+        .lang
+        .as_ref()
+        .map(|t| has_explicit_language_match(streams, t))
+        .unwrap_or(false);
+
+    for stream in streams {
+        if BITMAP_SUB_CODECS
+            .iter()
+            .any(|c| stream.codec_name.eq_ignore_ascii_case(c))
+        {
+            if !args.json {
+                eprintln!(
+                    "ℹ️  Skipping bitmap subtitle track #{} (codec: {})",
+                    stream.subtitle_index, stream.codec_name
+                );
+            }
+            continue;
+        }
+        let stream_lang_opt = stream.language.as_deref().and_then(parse_language_code);
+
+        if let Some(ref target) = args.lang {
+            if !stream_matches_target_lang(
+                stream.language.as_deref(),
+                target,
+                stream_lang_opt.as_deref(),
+                has_explicit_match,
+            ) {
+                continue;
+            }
+        }
+
+        let lang_opt = stream_lang_opt.or_else(|| {
+            if let Some(ref target) = args.lang {
+                Some(target.clone())
+            } else {
+                stream.language.clone()
+            }
+        });
+
+        let is_duplicate = match &lang_opt {
+            Some(lang) => !seen_extracted_langs.insert(lang.clone()),
+            None => {
+                let dup = seen_no_lang;
+                seen_no_lang = true;
+                dup
+            }
+        };
+        if is_duplicate {
+            if !args.json {
+                let label = lang_opt.as_deref().unwrap_or("untagged");
+                eprintln!(
+                    "ℹ️  Skipping duplicate {} track (stream #{})",
+                    label, stream.subtitle_index
+                );
+            }
+            continue;
+        }
+
+        let srt_fname = match &lang_opt {
+            Some(lang) => format!("{}.{}.srt", video_stem, lang),
+            None => format!("{}.srt", video_stem),
+        };
+        let srt_path = args.subtitles_dir.join(&srt_fname);
+        candidates.push((stream.subtitle_index, lang_opt, srt_path));
+    }
+    candidates
+}
+
 /// Inspects media container for embedded subtitle tracks and prepares extraction candidates.
 ///
 /// # Arguments
@@ -476,6 +658,19 @@ pub(crate) fn resolve_container_embedded_subtitles(
     video_stem: &str,
     discovered: &[(PathBuf, Option<String>)],
 ) -> Result<SubtitleJob> {
+    if args.skip_certify && !args.all_embedded {
+        if !discovered.is_empty() {
+            let pairs = select_and_validate_subtitle_pairs(
+                discovered,
+                video_path,
+                args.lang.as_deref(),
+                args.json,
+            )?;
+            return Ok(SubtitleJob::AlreadyResolved(pairs));
+        }
+        return Ok(SubtitleJob::AlreadyResolved(Vec::new()));
+    }
+
     if !args.json {
         if let Some(ref target) = args.lang {
             eprintln!(
@@ -486,100 +681,19 @@ pub(crate) fn resolve_container_embedded_subtitles(
         eprintln!("🔍 Inspecting video container for embedded subtitle tracks...");
     }
 
-    let mut candidates = Vec::new();
-    match inspect_container(video_path) {
+    let candidates = match inspect_container(video_path) {
         Ok(insp) if !insp.subtitle_streams.is_empty() => {
             fs::create_dir_all(&args.subtitles_dir)?;
-
-            let mut seen_extracted_langs = HashSet::new();
-            let mut seen_no_lang = false;
-
-            let has_explicit_lang_match = args.lang.as_ref().is_some_and(|target| {
-                insp.subtitle_streams.iter().any(|s| {
-                    language_matches(s.language.as_deref(), target)
-                        || s.language
-                            .as_deref()
-                            .and_then(parse_language_code)
-                            .as_deref()
-                            == Some(target.as_str())
-                })
-            });
-
-            for stream in &insp.subtitle_streams {
-                if BITMAP_SUB_CODECS
-                    .iter()
-                    .any(|c| stream.codec_name.eq_ignore_ascii_case(c))
-                {
-                    if !args.json {
-                        eprintln!(
-                            "ℹ️  Skipping bitmap subtitle track #{} (codec: {})",
-                            stream.subtitle_index, stream.codec_name
-                        );
-                    }
-                    continue;
-                }
-                let stream_lang_opt = stream.language.as_deref().and_then(parse_language_code);
-
-                if let Some(ref target) = args.lang {
-                    let matches = match &stream.language {
-                        Some(raw_tag) => {
-                            language_matches(Some(raw_tag), target)
-                                || stream_lang_opt.as_deref() == Some(target.as_str())
-                        }
-                        None => !has_explicit_lang_match,
-                    };
-                    if !matches {
-                        continue;
-                    }
-                }
-
-                let lang_opt = stream_lang_opt.or_else(|| {
-                    if let Some(ref target) = args.lang {
-                        Some(target.clone())
-                    } else {
-                        stream.language.clone()
-                    }
-                });
-
-                if let Some(ref lang) = lang_opt {
-                    if seen_extracted_langs.contains(lang) {
-                        if !args.json {
-                            eprintln!(
-                                "ℹ️  Skipping duplicate {} track (stream #{})",
-                                lang, stream.subtitle_index
-                            );
-                        }
-                        continue;
-                    }
-                    seen_extracted_langs.insert(lang.clone());
-                } else {
-                    if seen_no_lang {
-                        if !args.json {
-                            eprintln!(
-                                "ℹ️  Skipping duplicate untagged track (stream #{})",
-                                stream.subtitle_index
-                            );
-                        }
-                        continue;
-                    }
-                    seen_no_lang = true;
-                }
-
-                let srt_fname = match &lang_opt {
-                    Some(lang) => format!("{}.{}.srt", video_stem, lang),
-                    None => format!("{}.srt", video_stem),
-                };
-                let srt_path = args.subtitles_dir.join(&srt_fname);
-                candidates.push((stream.subtitle_index, lang_opt, srt_path));
-            }
+            collect_embedded_subtitle_candidates(args, &insp.subtitle_streams, video_stem)
         }
-        Ok(_) => {}
+        Ok(_) => Vec::new(),
         Err(e) => {
             if !args.json {
                 eprintln!("⚠️  Could not inspect video container: {}", e);
             }
+            Vec::new()
         }
-    }
+    };
 
     if candidates.is_empty() {
         if discovered.is_empty() {
@@ -634,10 +748,7 @@ pub(crate) fn plan_subtitle_job(args: &MediaAddArgs, video_path: &Path) -> Resul
         return Ok(SubtitleJob::AlreadyResolved(pairs));
     }
 
-    let video_stem = video_path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("unknown");
+    let video_stem = resolve_media_stem(args, video_path);
 
     if !args.json {
         eprintln!("🔍 Scanning for sidecar .srt files matching video stem...");
@@ -690,7 +801,7 @@ pub(crate) fn plan_subtitle_job(args: &MediaAddArgs, video_path: &Path) -> Resul
         )?;
         Ok(SubtitleJob::AlreadyResolved(pairs))
     } else {
-        resolve_container_embedded_subtitles(args, video_path, video_stem, &discovered)
+        resolve_container_embedded_subtitles(args, video_path, &video_stem, &discovered)
     }
 }
 
@@ -715,8 +826,53 @@ pub(crate) fn plan_subtitle_job(args: &MediaAddArgs, video_path: &Path) -> Resul
 /// # Data Flow & Invariants
 /// 1. Initializes estimated phash file path into cleanup guard.
 /// 2. If subtitles are already resolved, extracts pHash synchronously.
-/// 3. If embedded extraction is needed, spawns concurrent blocking tasks and awaits with `tokio::try_join!`.
+/// 3. Extracts embedded container subtitles sequentially followed by visual pHash frames.
 /// 4. Marks cleanup state `phash_done = true`.
+async fn extract_embedded_and_phash(
+    video_path: &Path,
+    candidates: Vec<(usize, Option<String>, PathBuf)>,
+    discovered: Vec<(PathBuf, Option<String>)>,
+    args: &MediaAddArgs,
+) -> Result<(Vec<(PathBuf, LangStatus)>, PathBuf, Vec<u64>, f64)> {
+    let video_path_sub = video_path.to_path_buf();
+    let video_path_phash = video_path.to_path_buf();
+    let phash_dir = args.phash_dir.clone();
+    let target_lang = args.lang.clone();
+    let is_json = args.json;
+
+    let hw_backend = match args.hwaccel.to_lowercase().as_str() {
+        "vaapi" => dbsrt_core::HwAccel::Vaapi,
+        "cuda" => dbsrt_core::HwAccel::Cuda,
+        "qsv" => dbsrt_core::HwAccel::Qsv,
+        "disabled" | "none" | "cpu" => dbsrt_core::HwAccel::Disabled,
+        _ => dbsrt_core::HwAccel::Auto,
+    };
+
+    let sub_task = tokio::task::spawn_blocking(move || -> Result<Vec<(PathBuf, LangStatus)>> {
+        extract_embedded_subtitles_and_select(
+            &video_path_sub,
+            candidates,
+            discovered,
+            target_lang.as_deref(),
+            is_json,
+        )
+    });
+
+    let pairs = sub_task
+        .await
+        .map_err(|e| anyhow!("Subtitle extraction task panicked: {}", e))??;
+
+    let phash_task = tokio::task::spawn_blocking(move || -> Result<(PathBuf, Vec<u64>, f64)> {
+        find_or_build_phash_with_hwaccel(&video_path_phash, &phash_dir, hw_backend)
+    });
+
+    let (phash_path, hashes, detected_fps) = phash_task
+        .await
+        .map_err(|e| anyhow!("pHash extraction task panicked: {}", e))??;
+
+    Ok((pairs, phash_path, hashes, detected_fps))
+}
+
 pub(crate) async fn extract_phash_and_subtitles(
     args: &MediaAddArgs,
     video_path: &Path,
@@ -726,7 +882,7 @@ pub(crate) async fn extract_phash_and_subtitles(
 ) -> Result<(Vec<(PathBuf, LangStatus)>, PathBuf, Vec<u64>, f64)> {
     fs::create_dir_all(&args.phash_dir)?;
 
-    let video_name = video_path.file_name().unwrap_or_default().to_string_lossy();
+    let video_name = resolve_media_filename(args, video_path);
     let estimated_phash = args
         .phash_dir
         .join(format!("{}.{:.1}fps.phash", video_name, fps));
@@ -740,16 +896,15 @@ pub(crate) async fn extract_phash_and_subtitles(
         eprintln!("   FPS detected: {:.3}", fps);
     }
 
-    let hw_backend = match args.hwaccel.to_lowercase().as_str() {
-        "vaapi" => dbsrt_core::HwAccel::Vaapi,
-        "cuda" => dbsrt_core::HwAccel::Cuda,
-        "qsv" => dbsrt_core::HwAccel::Qsv,
-        "disabled" | "none" | "cpu" => dbsrt_core::HwAccel::Disabled,
-        _ => dbsrt_core::HwAccel::Auto,
-    };
-
     let (pairs, phash_path, hashes, detected_fps) = match sub_job {
         SubtitleJob::AlreadyResolved(pairs) => {
+            let hw_backend = match args.hwaccel.to_lowercase().as_str() {
+                "vaapi" => dbsrt_core::HwAccel::Vaapi,
+                "cuda" => dbsrt_core::HwAccel::Cuda,
+                "qsv" => dbsrt_core::HwAccel::Qsv,
+                "disabled" | "none" | "cpu" => dbsrt_core::HwAccel::Disabled,
+                _ => dbsrt_core::HwAccel::Auto,
+            };
             let (phash_path, hashes, detected_fps) =
                 find_or_build_phash_with_hwaccel(video_path, &args.phash_dir, hw_backend)?;
             (pairs, phash_path, hashes, detected_fps)
@@ -757,43 +912,7 @@ pub(crate) async fn extract_phash_and_subtitles(
         SubtitleJob::NeedsExtraction {
             candidates,
             discovered,
-        } => {
-            let video_path_sub = video_path.to_path_buf();
-            let video_path_phash = video_path.to_path_buf();
-            let phash_dir = args.phash_dir.clone();
-            let target_lang = args.lang.clone();
-            let is_json = args.json;
-
-            let sub_task =
-                tokio::task::spawn_blocking(move || -> Result<Vec<(PathBuf, LangStatus)>> {
-                    extract_embedded_subtitles_and_select(
-                        &video_path_sub,
-                        candidates,
-                        discovered,
-                        target_lang.as_deref(),
-                        is_json,
-                    )
-                });
-
-            let phash_task =
-                tokio::task::spawn_blocking(move || -> Result<(PathBuf, Vec<u64>, f64)> {
-                    find_or_build_phash_with_hwaccel(&video_path_phash, &phash_dir, hw_backend)
-                });
-
-            let sub_future = async {
-                sub_task
-                    .await
-                    .map_err(|e| anyhow!("Subtitle extraction task panicked: {}", e))?
-            };
-            let phash_future = async {
-                phash_task
-                    .await
-                    .map_err(|e| anyhow!("pHash extraction task panicked: {}", e))?
-            };
-            let (pairs, (phash_path, hashes, detected_fps)) =
-                tokio::try_join!(sub_future, phash_future)?;
-            (pairs, phash_path, hashes, detected_fps)
-        }
+        } => extract_embedded_and_phash(video_path, candidates, discovered, args).await?,
     };
 
     cleanup.phash_done.store(true, Ordering::SeqCst);
@@ -1209,6 +1328,7 @@ mod tests {
         let args = MediaAddArgs {
             video: Some(PathBuf::from("non_existent_file.mkv")),
             video_pos: None,
+            media_name: None,
             srt: None,
             srt_pos: None,
             lang: None,
@@ -1236,6 +1356,7 @@ mod tests {
         let args = MediaAddArgs {
             video: Some(video),
             video_pos: None,
+            media_name: None,
             srt: None,
             srt_pos: None,
             lang: None,
@@ -1269,6 +1390,7 @@ mod tests {
         let args = MediaAddArgs {
             video: Some(video),
             video_pos: None,
+            media_name: None,
             srt: Some(srt),
             srt_pos: None,
             lang: Some("auto".to_string()),
@@ -1289,6 +1411,76 @@ mod tests {
                 .contains("Could not determine subtitle language"),
             "Expected error rejecting 'auto' language: {}",
             err
+        );
+    }
+
+    #[test]
+    fn test_resolve_media_stem_and_filename_remote_and_local() {
+        let default_args = MediaAddArgs {
+            video: None,
+            video_pos: None,
+            media_name: None,
+            srt: None,
+            srt_pos: None,
+            lang: None,
+            fps: None,
+            phash_dir: PathBuf::from("/tmp"),
+            subtitles_dir: PathBuf::from("/tmp"),
+            all_embedded: false,
+            skip_certify: false,
+            hwaccel: "auto".to_string(),
+            json: false,
+            server_url: DEFAULT_SERVER_URL.to_string(),
+            db: PostgresArgs::default(),
+        };
+
+        // 1. Local path
+        let local = Path::new("/media/storage/tvshow/The.Wire.S01E01.1080p.mkv");
+        assert_eq!(
+            resolve_media_stem(&default_args, local),
+            "The.Wire.S01E01.1080p"
+        );
+        assert_eq!(
+            resolve_media_filename(&default_args, local),
+            "The.Wire.S01E01.1080p.mkv"
+        );
+
+        // 2. Remote FTP URL
+        let remote_ftp =
+            Path::new("ftp://user:secret@nas.local:21/tvshow/WestWorld/WestWorld.S01E02.mkv");
+        assert_eq!(
+            resolve_media_stem(&default_args, remote_ftp),
+            "WestWorld.S01E02"
+        );
+        assert_eq!(
+            resolve_media_filename(&default_args, remote_ftp),
+            "WestWorld.S01E02.mkv"
+        );
+
+        // 3. Remote HTTP stream with query parameters
+        let remote_http = Path::new("http://127.0.0.1:8080/stream/Carnivale.S01E01.mkv?token=123");
+        assert_eq!(
+            resolve_media_stem(&default_args, remote_http),
+            "Carnivale.S01E01"
+        );
+        assert_eq!(
+            resolve_media_filename(&default_args, remote_http),
+            "Carnivale.S01E01.mkv"
+        );
+
+        // 4. Pipe with explicit --media-name
+        let pipe = Path::new("pipe:0");
+        let with_override = MediaAddArgs {
+            media_name: Some("Custom.Title.2024".to_string()),
+            ..default_args
+        };
+        assert_eq!(
+            resolve_media_stem(&with_override, pipe),
+            "Custom.Title.2024"
+        );
+        assert_eq!(
+            resolve_media_filename(&with_override, pipe),
+            "Custom.Title.2024"
         );
     }
 }

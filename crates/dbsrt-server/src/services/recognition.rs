@@ -4,7 +4,6 @@ use crate::constants::MIN_PHASH_RECOGNITION_CONFIDENCE_PERCENT;
 use crate::services::phash::{extract_media_query_sample, ExistingPhashData};
 use crate::state::DbConnectionConfig;
 use dbsrt_index::{MmapDbphash, MmapLibrary};
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 pub type PhashIdentificationResult = (Option<(String, f64)>, f64, Option<ExistingPhashData>);
@@ -88,13 +87,7 @@ pub fn identify_media_by_phash_multi_routed(
     let (target_fps, query_sample, existing_phash) =
         extract_media_query_sample(media_path, phash_dirs, nb_seconds);
 
-    let non_blank_unique: HashSet<u64> = query_sample
-        .iter()
-        .copied()
-        .filter(|&h| !dbsrt_core::is_blank_phash(h))
-        .collect();
-
-    if non_blank_unique.is_empty() || (query_sample.len() >= 10 && non_blank_unique.len() < 2) {
+    if dbsrt_core::is_blank_sequence(&query_sample) {
         return (None, target_fps, existing_phash);
     }
 
@@ -155,7 +148,7 @@ pub fn identify_media_by_phash_multi_routed(
                         Some((
                             m.clean_title,
                             m.confidence,
-                            "Tier 1 (RAM .dbphash MIH under 10ms)".to_string(),
+                            "Tier 1 (RAM .dbphash MIH)".to_string(),
                         )),
                         target_fps,
                         existing_phash,
@@ -175,7 +168,7 @@ pub fn identify_media_by_phash_multi_routed(
                     Some((
                         m.clean_title,
                         m.confidence,
-                        "Tier 1 (RAM .dbphash MIH under 10ms)".to_string(),
+                        "Tier 1 (RAM .dbphash MIH)".to_string(),
                     )),
                     target_fps,
                     existing_phash,

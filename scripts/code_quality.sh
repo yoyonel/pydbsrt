@@ -5,9 +5,11 @@ set -euo pipefail
 ACTION="${1:-lint}"
 
 run_lint_fast() {
-  echo "=== [1/6] Python (Ruff Check & Format Check) ==="
+  echo "=== [1/6] Python (Ruff Check & Format Check, Cognitive Complexity) ==="
   uv run ruff check src/ tests/ scripts/
   uv run ruff format --check src/ tests/ scripts/
+  # Ratchet against complexipy-snapshot.json: a new or worsened function over 15 fails
+  uv run complexipy --quiet
 
   echo "=== [2/6] Python Type Checking (Pyright) ==="
   run_typecheck

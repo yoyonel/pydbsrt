@@ -57,7 +57,7 @@ impl Default for PostgresArgs {
 #[derive(Parser, Debug)]
 #[command(
     name = "dbsrt",
-    version,
+    version = env!("DBSRT_VERSION_FULL"),
     about = "High-performance video perceptual hash & subtitle retargeting"
 )]
 pub struct Cli {

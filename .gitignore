@@ -147,3 +147,11 @@ repomix-*.md
 scripts/eval_*_report.json
 scripts/eval_*report.json
 scripts/*_report.json
+
+# Runtime volatile files & logs
+run/
+logs/
+etc/
+*.secret
+docs/javascripts/docs-dates.js
+docs/assets/docs-dates.json

@@ -124,4 +124,16 @@ tags:
       <a href="ci-cd/">→ Consulter l'architecture CI/CD</a>
     </div>
   </div>
+
+  <div class="dbsrt-bento-card bento-purple">
+    <div class="bento-header">
+      <span class="bento-icon">🎯</span>
+      <span class="bento-badge">RÉFÉRENCE QUALIFIÉE</span>
+    </div>
+    <h3>Étalon Sanity Check Multi-Cibles VLC</h3>
+    <p>Rapport d'essais réels horodaté servant d'étalon de non-régression pour la validation de bout en bout sur Local, Cloud o2switch et Raspberry Pi 4.</p>
+    <div class="bento-links">
+      <a href="2026-10-28-etalon-sanity-check-multi-cibles-vlc/">→ Consulter l'étalon multi-cibles</a>
+    </div>
+  </div>
 </div>

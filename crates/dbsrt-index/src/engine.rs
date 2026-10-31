@@ -40,9 +40,6 @@ impl PhashEngine {
         if let Some(p) = dbphash_path {
             if p.exists() {
                 let reader = MmapDbphash::open(p)?;
-                // Prewarm MIH tables
-                let _ = reader.sparse_mih();
-                let _ = reader.cuts_mih();
                 engine.dbphash = Some(Arc::new(reader));
             }
         }
@@ -120,7 +117,7 @@ impl PhashEngine {
                     return Some(PhashEngineMatch {
                         media_name: m.clean_title,
                         confidence_percent: m.confidence,
-                        engine_label: "Tier 1 (RAM .dbphash MIH under 10ms)",
+                        engine_label: "Tier 1 (RAM .dbphash MIH)",
                         offset_delta: m.estimated_shift_ms,
                     });
                 }

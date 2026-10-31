@@ -42,6 +42,103 @@ pub fn find_or_build_phash(
     find_or_build_phash_with_hwaccel(media_file, phash_dir, dbsrt_core::HwAccel::Auto)
 }
 
+fn resolve_media_path_filename(media_file: &Path) -> Result<String> {
+    if dbsrt_core::container::is_remote_stream_or_pipe(media_file) {
+        let raw = media_file.to_string_lossy();
+        let unquoted = raw.split('?').next().unwrap_or(&raw);
+        let last_segment = unquoted.rsplit('/').next().unwrap_or(unquoted);
+        return Ok(last_segment.to_string());
+    }
+    media_file
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .ok_or_else(|| anyhow::anyhow!("Cannot derive filename from media path {:?}", media_file))
+}
+
+fn match_prefix_phash(entries: &[PathBuf], full_name: &str) -> Option<(PathBuf, Vec<u64>, f64)> {
+    if full_name.is_empty() {
+        return None;
+    }
+    for p in entries {
+        let name = p.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+        if !name.starts_with(full_name) || !name.ends_with(PHASH_DOT_EXT) {
+            continue;
+        }
+        let Ok(hashes) = read_phash_file(p) else {
+            continue;
+        };
+        if hashes.is_empty() {
+            continue;
+        }
+        let fps = parse_fps_from_phash_stem(name);
+        return Some((p.clone(), hashes, fps));
+    }
+    None
+}
+
+fn match_stem_phash(
+    entries: &[PathBuf],
+    stem: &str,
+    my_ext: Option<&str>,
+) -> Option<(PathBuf, Vec<u64>, f64)> {
+    if stem.is_empty() {
+        return None;
+    }
+    for p in entries {
+        let name = p.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+        if !name.contains(stem) || !name.ends_with(PHASH_DOT_EXT) {
+            continue;
+        }
+        let name_lower = name.to_lowercase();
+        let has_conflicting = KNOWN_VIDEO_EXTS
+            .iter()
+            .any(|ext| name_lower.contains(ext) && my_ext != Some(*ext));
+        if has_conflicting {
+            continue;
+        }
+        let Ok(hashes) = read_phash_file(p) else {
+            continue;
+        };
+        if hashes.is_empty() {
+            continue;
+        }
+        let fps = parse_fps_from_phash_stem(name);
+        return Some((p.clone(), hashes, fps));
+    }
+    None
+}
+
+fn scan_existing_phash(
+    phash_dir: &Path,
+    full_name: &str,
+    stem: &str,
+    media_file: &Path,
+) -> Result<Option<(PathBuf, Vec<u64>, f64)>> {
+    if !phash_dir.exists() {
+        return Ok(None);
+    }
+    let dir_entries = match std::fs::read_dir(phash_dir) {
+        Ok(entries) => entries,
+        Err(_) => return Ok(None),
+    };
+    let entries: Vec<_> = dir_entries.flatten().map(|e| e.path()).collect();
+
+    if let Some(res) = match_prefix_phash(&entries, full_name) {
+        return Ok(Some(res));
+    }
+
+    let my_ext = media_file
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| format!(".{}.", e.to_lowercase()));
+
+    if let Some(res) = match_stem_phash(&entries, stem, my_ext.as_deref()) {
+        return Ok(Some(res));
+    }
+
+    Ok(None)
+}
+
 /// Discovers existing .phash file or extracts full perceptual hash fingerprint with hardware acceleration.
 pub fn find_or_build_phash_with_hwaccel(
     media_file: &Path,
@@ -63,62 +160,42 @@ pub fn find_or_build_phash_with_hwaccel(
         return Ok((media_file.to_path_buf(), hashes, fps));
     }
 
-    if phash_dir.exists() {
-        if let Ok(dir_entries) = std::fs::read_dir(phash_dir) {
-            let entries: Vec<_> = dir_entries.flatten().map(|e| e.path()).collect();
-
-            // Pass 1: Prefer exact full filename prefix (e.g. `foo.mp4.25.0fps.phash` over `foo.webm.25.0fps.phash`)
-            if !full_name.is_empty() {
-                for p in &entries {
-                    if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
-                        if name.starts_with(&full_name) && name.ends_with(PHASH_DOT_EXT) {
-                            let hashes = read_phash_file(p)?;
-                            let meta = probe_video(media_file)?;
-                            return Ok((p.clone(), hashes, meta.fps));
-                        }
-                    }
-                }
-            }
-
-            // Pass 2: Stem fallback without conflicting container extension
-            let my_ext = media_file
-                .extension()
-                .and_then(|e| e.to_str())
-                .map(|e| format!(".{}.", e.to_lowercase()));
-            if !stem.is_empty() {
-                for p in &entries {
-                    if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
-                        if name.contains(&stem) && name.ends_with(PHASH_DOT_EXT) {
-                            let name_lower = name.to_lowercase();
-                            let has_conflicting_ext = KNOWN_VIDEO_EXTS.iter().any(|ext| {
-                                name_lower.contains(ext) && my_ext.as_deref() != Some(*ext)
-                            });
-                            if has_conflicting_ext {
-                                continue;
-                            }
-                            let hashes = read_phash_file(p)?;
-                            let meta = probe_video(media_file)?;
-                            return Ok((p.clone(), hashes, meta.fps));
-                        }
-                    }
-                }
-            }
-        }
+    if let Some(res) = scan_existing_phash(phash_dir, &full_name, &stem, media_file)? {
+        return Ok(res);
     }
 
     // Otherwise probe and extract all frames
-    let meta = probe_video(media_file)?;
-    let total_frames = (meta.duration * meta.fps).floor() as usize;
-    let hashes = extract_frames_phash_with_hwaccel(media_file, 0.0, total_frames, hwaccel)?;
+    let is_remote = dbsrt_core::container::is_remote_stream_or_pipe(media_file);
+    let probed = (!dbsrt_core::container::is_pipe_input(media_file))
+        .then(|| probe_video(media_file).ok())
+        .flatten()
+        .filter(|meta| meta.fps > 0.0);
+    let meta_fps = probed.as_ref().map_or_else(
+        || {
+            media_file
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .map(dbsrt_core::parse_fps_from_stem)
+                .unwrap_or(dbsrt_core::DEFAULT_BASELINE_FPS)
+        },
+        |meta| meta.fps,
+    );
+    // Remote streams stay uncapped: their probed fps only names the .phash file.
+    let max_frames = match &probed {
+        Some(meta) if !is_remote => (meta.duration * meta.fps).floor() as usize,
+        _ => 0,
+    };
+    let hashes = extract_frames_phash_with_hwaccel(media_file, 0.0, max_frames, hwaccel)?;
+    if hashes.is_empty() {
+        anyhow::bail!("No video frames could be extracted from {:?}", media_file);
+    }
 
-    let file_name = media_file.file_name().ok_or_else(|| {
-        anyhow::anyhow!("Cannot derive filename from media path {:?}", media_file)
-    })?;
-    let out_name = format!("{}.{:.1}fps.phash", file_name.to_string_lossy(), meta.fps);
+    let file_name = resolve_media_path_filename(media_file)?;
+    let out_name = format!("{}.{:.1}fps.phash", file_name, meta_fps);
     let out_path = phash_dir.join(&out_name);
     write_phash_file(&out_path, &hashes)?;
 
-    Ok((out_path, hashes, meta.fps))
+    Ok((out_path, hashes, meta_fps))
 }
 
 #[cfg(test)]

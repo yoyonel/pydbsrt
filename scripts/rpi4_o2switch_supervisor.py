@@ -1,0 +1,541 @@
+#!/usr/bin/env python3
+"""RPi4 Autonomous Watchdog Supervisor for o2switch Remote Batch Ingestion.
+
+Runs as a 24/7 systemd user service on Raspberry Pi 4 (or local host) to:
+1. Probe the remote batch worker lifecycle on o2switch (via o2switch_ctl.sh batch-status).
+2. Restart the batch worker only when it crashed or never started (never after a manual
+   stop or a drained queue), resuming the same batch type.
+3. Autoscale worker concurrency (2-5) from the measured CloudLinux LVE CPU load.
+4. Periodically pull finished .phash files, subtitles and reports into the local data/ tree.
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime
+import fcntl
+import json
+import os
+import signal
+import subprocess
+import sys
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Dict, List, Tuple
+
+UTC = getattr(datetime, "UTC", datetime.timezone.utc)  # noqa: UP017
+
+# Named Operational Constants
+DEFAULT_CHECK_INTERVAL_SECS: int = 60
+DEFAULT_PULL_INTERVAL_SECS: int = 600
+DEFAULT_BACKUP_INTERVAL_SECS: int = 3600
+DEFAULT_SSH_TIMEOUT_SECS: int = 15
+DEFAULT_REMOTE_HOST: str = "o2switch"
+DEFAULT_REMOTE_BASE: str = "dbsrt"
+DEFAULT_NAS_PHASH_BACKUP_DIR: str = "/mnt/synology/video/__PHASH__"
+DEFAULT_SUPERVISOR_STATUS_FILE: str = "run/supervisor_status.json"
+DEFAULT_SUPERVISOR_LOG_FILE: str = "logs/rpi4_supervisor.log"
+DEFAULT_RECENT_LOG_LINES_COUNT: int = 40
+PID_FILE_PATH: str = "run/rpi4_supervisor.pid"
+CTL_SCRIPT: str = "./scripts/o2switch_ctl.sh"
+FREEBOX_CTL_SCRIPT: str = "./scripts/freebox_batch_ctl.sh"
+# batch-status states that call for an automatic restart of the same batch type
+RESTARTABLE_STATES: Tuple[str, ...] = ("crashed", "absent")
+# A drained queue hands the CPUs over to the other library, so o2switch never idles
+NEXT_BATCH_TYPE: Dict[str, str] = {"tvshow": "movies", "movies": "freebox", "freebox": "tvshow"}
+# Batch types whose launch may fail on missing infrastructure (Freebox gateway); rotation then skips them
+OPTIONAL_BATCH_TYPES: Tuple[str, ...] = ("freebox",)
+# Minimum delay between two launches, so a queue of always-failing files cannot relaunch in a tight loop
+RELAUNCH_BACKOFF_SECS: int = 1800
+
+# Autoscaling Engine Constants (CloudLinux LVE on o2switch has 12 vCPUs allocated = 1200% max)
+DEFAULT_LVE_TOTAL_VCPUS: float = 12.0
+AUTOSCALE_MIN_WORKERS: int = 2
+# Matches the worker CPU budget: 10 vCPU // 2 FFmpeg threads per video (~85 % LVE measured)
+AUTOSCALE_MAX_WORKERS: int = 5
+AUTOSCALE_DEFAULT_WORKERS: int = 4
+# CPU faults start near 79% LVE minute average (docs/explanation/2026-10-31-o2switch-lve-cpu-faults-analysis.md)
+# Band wider than one worker (~2 of 12 vCPUs = 17 points), otherwise it flaps 4 <-> 5
+AUTOSCALE_TARGET_LOW_PCT: float = 60.0  # Scale up concurrency if rolling average LVE CPU < 60%
+AUTOSCALE_TARGET_HIGH_PCT: float = 80.0  # Scale down concurrency if rolling average LVE CPU > 80%
+AUTOSCALE_EMERGENCY_SPIKE_PCT: float = 96.0  # Instant emergency throttle if single tick exceeds 96%
+AUTOSCALE_COOLDOWN_SECS: int = 180  # Cooldown between scale adjustments (3 min to observe steady state)
+AUTOSCALE_SAMPLE_WINDOW: int = 3  # Number of 60s probe ticks in rolling average window
+
+# Prints clock ticks per second, then /proc/<pid>/stat of every process owned by the ssh user
+CPU_TICKS_PROBE_CMD: str = (
+    'getconf CLK_TCK; for d in /proc/[0-9]*; do [ -O "$d" ] && cat "$d/stat" 2>/dev/null; done; true'
+)
+
+CpuSample = Tuple[float, Dict[int, float]]  # (monotonic time, cumulative CPU seconds per pid)
+
+
+def log(msg: str) -> None:
+    """Logs timestamped message to stdout."""
+    ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    formatted = f"[{ts}] {msg}"
+    print(formatted, flush=True)
+
+
+def _ctl_env(remote_host: str, remote_base: str) -> Dict[str, str]:
+    env = os.environ.copy()
+    env["O2SWITCH_HOST"] = remote_host
+    env["REMOTE_BASE"] = remote_base
+    return env
+
+
+def parse_proc_cpu_seconds(output: str) -> Dict[int, float]:
+    """Parses CPU_TICKS_PROBE_CMD output into cumulative user+system CPU seconds per pid."""
+    lines = output.splitlines()
+    clk_tck = float(lines[0])
+    cpu_secs: Dict[int, float] = {}
+    for line in lines[1:]:
+        r_idx = line.rfind(")")
+        if r_idx == -1:
+            continue
+        # After "comm)": fields[11]=utime, fields[12]=stime
+        fields = line[r_idx + 2 :].split()
+        try:
+            cpu_secs[int(line.split(" ", 1)[0])] = (int(fields[11]) + int(fields[12])) / clk_tck
+        except (ValueError, IndexError):
+            continue
+    return cpu_secs
+
+
+def compute_lve_cpu_pct(prev: CpuSample, cur: CpuSample, total_vcpus: float = DEFAULT_LVE_TOTAL_VCPUS) -> float:
+    """CPU usage over the interval between two samples, as a percentage of the LVE allocation.
+
+    A pid absent from `prev` started during the interval, so all its CPU time counts.
+    Processes that exited during the interval are missed (slight under-estimate).
+    """
+    elapsed = cur[0] - prev[0]
+    if elapsed <= 0:
+        return 0.0
+    used = sum(max(0.0, secs - prev[1].get(pid, 0.0)) for pid, secs in cur[1].items())
+    return used / elapsed / total_vcpus * 100.0
+
+
+def sample_remote_cpu(remote_host: str) -> CpuSample | None:
+    """Samples cumulative CPU seconds of all remote processes of the ssh user."""
+    cmd = ["ssh", "-o", "BatchMode=yes", remote_host, CPU_TICKS_PROBE_CMD]
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=DEFAULT_SSH_TIMEOUT_SECS)
+        if res.returncode == 0 and res.stdout.strip():
+            return time.monotonic(), parse_proc_cpu_seconds(res.stdout)
+    except Exception as err:
+        log(f"⚠️ Failed probing CPU on {remote_host}: {err}")
+    return None
+
+
+def get_remote_desired_workers(
+    remote_host: str, remote_base: str, default_workers: int = AUTOSCALE_DEFAULT_WORKERS
+) -> int:
+    """Reads active desired concurrency from remote run/desired_workers control file."""
+    cmd = ["ssh", "-o", "BatchMode=yes", remote_host, f"cat {remote_base}/run/desired_workers 2>/dev/null || true"]
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=DEFAULT_SSH_TIMEOUT_SECS)
+        if res.returncode == 0 and res.stdout.strip().isdigit():
+            return int(res.stdout.strip())
+    except Exception:
+        pass
+    return default_workers
+
+
+def get_remote_running_jobs(remote_host: str) -> int | None:
+    """Counts in-flight dbsrt media:add jobs on the remote host (None when the probe fails)."""
+    # The bracket keeps pgrep from matching the ssh shell whose command line holds the pattern
+    cmd = ["ssh", "-o", "BatchMode=yes", remote_host, "pgrep -cf '[d]bsrt media:add' || true"]
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=DEFAULT_SSH_TIMEOUT_SECS)
+        if res.returncode == 0 and res.stdout.strip().isdigit():
+            return int(res.stdout.strip())
+    except Exception as err:
+        log(f"⚠️ Failed counting running jobs on {remote_host}: {err}")
+    return None
+
+
+def set_remote_desired_workers(remote_host: str, remote_base: str, count: int) -> bool:
+    """Updates remote desired concurrency through o2switch_ctl.sh batch-workers (validated bounds)."""
+    cmd = [CTL_SCRIPT, "batch-workers", str(count)]
+    try:
+        res = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=DEFAULT_SSH_TIMEOUT_SECS,
+            env=_ctl_env(remote_host, remote_base),
+        )
+        if res.returncode != 0:
+            log(f"❌ Failed setting remote workers: {res.stderr or res.stdout}")
+        return res.returncode == 0
+    except Exception as err:
+        log(f"❌ Failed setting remote workers: {err}")
+        return False
+
+
+def check_remote_batch_status(remote_host: str, remote_base: str) -> Dict[str, object]:
+    """Queries remote batch lifecycle via o2switch_ctl.sh batch-status.
+
+    Returns:
+        Dict with keys 'state' (running|stopped|finished|crashed|absent|unknown), 'pid' (int | None)
+        and 'type' (tvshow|movies). 'unknown' means the probe itself failed.
+    """
+    unknown: Dict[str, object] = {"state": "unknown", "pid": None, "type": "tvshow"}
+    try:
+        res = subprocess.run(
+            [CTL_SCRIPT, "batch-status"],
+            capture_output=True,
+            text=True,
+            timeout=DEFAULT_SSH_TIMEOUT_SECS,
+            env=_ctl_env(remote_host, remote_base),
+        )
+    except Exception as err:
+        log(f"⚠️ Failed querying status on {remote_host}: {err}")
+        return unknown
+    if res.returncode != 0:
+        return unknown
+    for line in res.stdout.splitlines():
+        if line.startswith("BATCH_STATE="):
+            fields = dict(part.split("=", 1) for part in line.split() if "=" in part)
+            pid = fields.get("PID", "")
+            return {
+                "state": fields.get("BATCH_STATE", "unknown"),
+                "pid": int(pid) if pid.isdigit() else None,
+                "type": fields.get("TYPE", "tvshow"),
+            }
+    return unknown
+
+
+def restart_remote_batch(remote_host: str, remote_base: str, workers: int, batch_type: str = "tvshow") -> bool:
+    """Restarts remote batch ingestion of the given type with specified concurrency."""
+    log(f"🔄 Launching remote {batch_type} batch on {remote_host} (concurrency: {workers} workers)...")
+    if batch_type == "freebox":
+        cmd = [FREEBOX_CTL_SCRIPT, "start", "--workers", str(workers)]
+    else:
+        cmd = [CTL_SCRIPT, f"batch-{batch_type}", "--workers", str(workers), "--fresh-only", "--daemon"]
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=120, env=_ctl_env(remote_host, remote_base))
+        success = res.returncode == 0 and (
+            "Started persistent background" in res.stdout or "already running" in res.stdout
+        )
+        if success:
+            log(f"✓ Remote batch successfully started with {workers} workers.")
+        else:
+            log(f"❌ Failed starting batch: {res.stderr or res.stdout}")
+        return success
+    except Exception as err:
+        log(f"❌ Exception starting remote batch: {err}")
+        return False
+
+
+def pull_remote_catalog(remote_host: str, remote_base: str) -> bool:
+    """Pulls newly computed pHash and subtitle artifacts to local storage."""
+    log("📥 Synchronizing catalog and .phash artifacts from o2switch...")
+    try:
+        res = subprocess.run(
+            [CTL_SCRIPT, "pull-catalog"],
+            capture_output=True,
+            text=True,
+            timeout=600,
+            env=_ctl_env(remote_host, remote_base),
+        )
+        if res.returncode == 0:
+            log("✓ Catalog synchronization complete.")
+            return True
+        log(f"⚠️ Catalog pull returned warning: {res.stderr or res.stdout}")
+        return False
+    except Exception as err:
+        log(f"⚠️ Catalog pull failed: {err}")
+        return False
+
+
+def backup_remote_phash_to_nas(
+    remote_host: str, remote_base: str, target_dir: str = DEFAULT_NAS_PHASH_BACKUP_DIR
+) -> bool:
+    """Backs up raw .phash fingerprints directly to Synology NAS persistent storage."""
+    if not Path(target_dir).exists():
+        return False
+    log(f"💾 Backing up raw .phash fingerprints from {remote_host} to NAS ({target_dir})...")
+    try:
+        res = subprocess.run(
+            [CTL_SCRIPT, "backup-nas", target_dir],
+            capture_output=True,
+            text=True,
+            timeout=1200,
+            env=_ctl_env(remote_host, remote_base),
+        )
+        if res.returncode == 0:
+            log("✓ Raw .phash backup to NAS complete.")
+            return True
+        log(f"⚠️ NAS backup returned warning: {res.stderr or res.stdout}")
+        return False
+    except Exception as err:
+        log(f"⚠️ NAS backup failed: {err}")
+        return False
+
+
+def decide_next_batch(state: str, batch_type: str, secs_since_last_launch: float) -> str | None:
+    """Returns the batch type to launch now, or None.
+
+    Crashed/absent batches resume their type; a finished batch switches to the next library in
+    rotation (tvshow -> movies -> freebox -> tvshow).
+    Manual stops, aborted batches and failed probes never trigger a launch.
+    """
+    if state in RESTARTABLE_STATES:
+        next_type = batch_type
+    elif state == "finished":
+        next_type = NEXT_BATCH_TYPE.get(batch_type, "tvshow")
+    else:
+        return None
+    return next_type if secs_since_last_launch >= RELAUNCH_BACKOFF_SECS else None
+
+
+def decide_workers(
+    cpu: float, cpu_history: List[float], cur_workers: int, cooldown_elapsed: bool, running_jobs: int | None = None
+) -> int:
+    """Returns the new worker count for one CPU sample (cur_workers when unchanged).
+
+    `cpu_history` is the rolling window, already including `cpu`. Scale-downs wait while
+    `running_jobs` still exceeds `cur_workers`: in-flight videos are never stopped, so a lower
+    target only bites when they finish and lowering it again would starve the next wave.
+    """
+    can_scale_down = cur_workers > AUTOSCALE_MIN_WORKERS and (running_jobs is None or running_jobs <= cur_workers)
+    if cpu >= AUTOSCALE_EMERGENCY_SPIKE_PCT and can_scale_down:
+        return cur_workers - 1
+    if len(cpu_history) < AUTOSCALE_SAMPLE_WINDOW or not cooldown_elapsed:
+        return cur_workers
+    avg_cpu = sum(cpu_history) / len(cpu_history)
+    if avg_cpu < AUTOSCALE_TARGET_LOW_PCT and cur_workers < AUTOSCALE_MAX_WORKERS:
+        return cur_workers + 1
+    if avg_cpu > AUTOSCALE_TARGET_HIGH_PCT and can_scale_down:
+        return cur_workers - 1
+    return cur_workers
+
+
+@dataclass
+class _LoopState:
+    last_scale_time: float = 0.0
+    last_launch_time: float = 0.0
+    cpu_history: List[float] = field(default_factory=list)
+    prev_sample: CpuSample | None = None
+    last_cpu: float = 0.0
+    last_avg_cpu: float = 0.0
+    last_workers: int = AUTOSCALE_DEFAULT_WORKERS
+    last_running: int = 0
+    last_backup_iso: str | None = None
+    last_sync_iso: str | None = None
+
+
+def read_recent_supervisor_logs(log_file: Path, max_lines: int = DEFAULT_RECENT_LOG_LINES_COUNT) -> List[str]:
+    """Reads the last N lines from the supervisor log file."""
+    if not log_file.is_file():
+        return []
+    try:
+        content = log_file.read_text(encoding="utf-8", errors="replace")
+        lines = [line.strip() for line in content.splitlines() if line.strip()]
+        return lines[-max_lines:]
+    except OSError:
+        return []
+
+
+def push_supervisor_telemetry_to_remote(
+    remote_host: str,
+    remote_base: str,
+    loop: _LoopState,
+    status: Dict[str, object],
+    log_file: Path,
+) -> bool:
+    """Pushes supervisor status snapshot and recent log tail to remote host for web monitoring."""
+    now_ts = int(time.time())
+    now_iso = datetime.datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    recent_logs = read_recent_supervisor_logs(log_file)
+
+    payload = {
+        "timestamp": now_iso,
+        "unix_ts": now_ts,
+        "supervisor_host": "rpi4",
+        "supervisor_pid": os.getpid(),
+        "state": "healthy" if status.get("state") in ("running", "finished") else "warning",
+        "remote_batch": {
+            "state": status.get("state"),
+            "pid": status.get("pid"),
+            "batch_type": status.get("type"),
+            "desired_workers": loop.last_workers,
+            "running_jobs": loop.last_running,
+            "lve_cpu_pct": round(loop.last_cpu, 1),
+            "avg_cpu_pct": round(loop.last_avg_cpu, 1),
+        },
+        "last_backup_time": loop.last_backup_iso,
+        "last_sync_time": loop.last_sync_iso,
+        "recent_logs": recent_logs,
+    }
+
+    raw_json = json.dumps(payload, indent=2)
+    remote_target = f"{remote_base}/{DEFAULT_SUPERVISOR_STATUS_FILE}"
+    cmd = [
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        f"ConnectTimeout={DEFAULT_SSH_TIMEOUT_SECS}",
+        remote_host,
+        f"cat > {remote_target}.tmp && mv {remote_target}.tmp {remote_target}",
+    ]
+    try:
+        res = subprocess.run(cmd, input=raw_json, text=True, timeout=DEFAULT_SSH_TIMEOUT_SECS, capture_output=True)
+        return res.returncode == 0
+    except Exception as err:
+        log(f"⚠️ Failed pushing supervisor telemetry: {err}")
+        return False
+
+
+def _autoscale_step(remote_host: str, remote_base: str, status: Dict[str, object], loop: _LoopState) -> None:
+    """Running batch: compares two CPU samples and moves desired_workers toward the LVE target band."""
+    cur_workers = get_remote_desired_workers(remote_host, remote_base)
+    loop.last_workers = cur_workers
+    sample = sample_remote_cpu(remote_host)
+    prev_sample, loop.prev_sample = loop.prev_sample, sample
+    if sample is None or prev_sample is None:
+        log(f"● Remote batch healthy (PID {status['pid']}, workers: {cur_workers}, CPU baseline pending).")
+        return
+    cpu = compute_lve_cpu_pct(prev_sample, sample)
+    loop.last_cpu = cpu
+    loop.cpu_history = (loop.cpu_history + [cpu])[-AUTOSCALE_SAMPLE_WINDOW:]
+    now = time.time()
+    running_jobs = get_remote_running_jobs(remote_host)
+    loop.last_running = running_jobs or 0
+    new_workers = decide_workers(
+        cpu, loop.cpu_history, cur_workers, now - loop.last_scale_time >= AUTOSCALE_COOLDOWN_SECS, running_jobs
+    )
+    avg_cpu = sum(loop.cpu_history) / len(loop.cpu_history)
+    loop.last_avg_cpu = avg_cpu
+    if new_workers != cur_workers and set_remote_desired_workers(remote_host, remote_base, new_workers):
+        direction = "📈 [AUTOSCALE UP]" if new_workers > cur_workers else "📉 [AUTOSCALE DOWN]"
+        log(f"{direction} CPU {cpu:.1f}% (avg {avg_cpu:.1f}%): {cur_workers} -> {new_workers} workers.")
+        loop.last_scale_time = now
+        loop.last_workers = new_workers
+        loop.cpu_history.clear()
+    else:
+        log(
+            f"● Remote batch healthy (PID {status['pid']}, CPU: {cpu:.1f}% [avg {avg_cpu:.1f}%, "
+            f"{len(loop.cpu_history)}/{AUTOSCALE_SAMPLE_WINDOW} samples], workers: {cur_workers}, running: {running_jobs})."
+        )
+
+
+def _relaunch_step(remote_host: str, remote_base: str, state: str, status: Dict[str, object], loop: _LoopState) -> None:
+    """Stopped batch: relaunches it (or the other library) when decide_next_batch allows it."""
+    next_type = decide_next_batch(state, str(status["type"]), time.time() - loop.last_launch_time)
+    if next_type is None:
+        log(f"○ Remote batch is {state} ({status['type']}); no launch this cycle.")
+        return
+    cur_workers = get_remote_desired_workers(remote_host, remote_base)
+    log(f"⚠️ Remote batch is {state} ({status['type']}). Launching {next_type} with {cur_workers} workers...")
+    if not restart_remote_batch(remote_host, remote_base, cur_workers, next_type) and next_type in OPTIONAL_BATCH_TYPES:
+        # An unreachable home gateway must not leave o2switch idle: skip to the next library
+        restart_remote_batch(remote_host, remote_base, cur_workers, NEXT_BATCH_TYPE[next_type])
+    loop.cpu_history.clear()
+    loop.prev_sample = None
+    loop.last_scale_time = loop.last_launch_time = time.time()
+
+
+def supervisor_loop(
+    remote_host: str,
+    remote_base: str,
+    check_interval: int,
+    pull_interval: int,
+    backup_interval: int = DEFAULT_BACKUP_INTERVAL_SECS,
+) -> None:
+    """Main continuous watchdog and adaptive autoscaling loop."""
+    log(
+        f"🚀 RPi4 Supervisor Agent active (polling: {check_interval}s, pull: {pull_interval}s, "
+        f"nas_backup: {backup_interval}s, "
+        f"autoscaling: {AUTOSCALE_MIN_WORKERS}-{AUTOSCALE_MAX_WORKERS} workers, target: {AUTOSCALE_TARGET_LOW_PCT:.0f}-{AUTOSCALE_TARGET_HIGH_PCT:.0f}% LVE CPU)."
+    )
+    last_pull_time = time.time()
+    last_backup_time = time.time()
+    loop = _LoopState()
+
+    while True:
+        status = check_remote_batch_status(remote_host, remote_base)
+        state = str(status["state"])
+        if state == "running":
+            _autoscale_step(remote_host, remote_base, status, loop)
+        elif state == "unknown":
+            log("⚠️ Remote batch status probe failed; no action this cycle.")
+        else:
+            _relaunch_step(remote_host, remote_base, state, status, loop)
+
+        # Periodic catalog pull (lightweight dbphash + srt)
+        now = time.time()
+        if now - last_pull_time >= pull_interval:
+            if pull_remote_catalog(remote_host, remote_base):
+                loop.last_sync_iso = datetime.datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+            last_pull_time = now
+
+        # Periodic NAS persistent backup (raw phash files direct to Synology NFS)
+        if now - last_backup_time >= backup_interval:
+            if backup_remote_phash_to_nas(remote_host, remote_base):
+                loop.last_backup_iso = datetime.datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+            last_backup_time = now
+
+        # Push telemetry snapshot to remote host for web monitoring
+        log_file = Path(DEFAULT_SUPERVISOR_LOG_FILE)
+        push_supervisor_telemetry_to_remote(remote_host, remote_base, loop, status, log_file)
+
+        time.sleep(check_interval)
+
+
+def main() -> int:
+    """CLI Entry point for RPi4 supervisor."""
+    parser = argparse.ArgumentParser(description="RPi4 Autonomous Supervisor for o2switch Batch Ingestion")
+    parser.add_argument("--remote-host", default=DEFAULT_REMOTE_HOST, help="Remote SSH host alias")
+    parser.add_argument("--remote-base", default=DEFAULT_REMOTE_BASE, help="Remote project directory")
+    parser.add_argument(
+        "--check-interval", type=int, default=DEFAULT_CHECK_INTERVAL_SECS, help="Healthcheck polling interval in secs"
+    )
+    parser.add_argument(
+        "--pull-interval", type=int, default=DEFAULT_PULL_INTERVAL_SECS, help="Catalog pull sync interval in secs"
+    )
+    parser.add_argument(
+        "--backup-interval",
+        type=int,
+        default=DEFAULT_BACKUP_INTERVAL_SECS,
+        help="NAS raw phash backup interval in secs",
+    )
+    args = parser.parse_args()
+
+    # Exclusive single-instance process lock, released by the kernel when the process exits.
+    # The file is never unlinked: a new inode would let a second instance lock it concurrently.
+    pid_path = Path(PID_FILE_PATH)
+    pid_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_file = open(pid_path, "a+", encoding="utf-8")
+    try:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except (BlockingIOError, OSError):
+        log(f"⚠️ Another instance of supervisor is already running ({PID_FILE_PATH} locked). Exiting.")
+        return 0
+
+    lock_file.seek(0)
+    lock_file.truncate()
+    lock_file.write(str(os.getpid()))
+    lock_file.flush()
+
+    def _sig_handler(sig: int, _frame: object) -> None:
+        log(f"🛑 Received signal {sig}. Stopping supervisor.")
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, _sig_handler)
+    signal.signal(signal.SIGTERM, _sig_handler)
+
+    supervisor_loop(
+        remote_host=args.remote_host,
+        remote_base=args.remote_base,
+        check_interval=args.check_interval,
+        pull_interval=args.pull_interval,
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

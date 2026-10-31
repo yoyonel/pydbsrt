@@ -113,7 +113,88 @@ Le serveur distant répond avec le titre du média appairé et le code de statut
 
 ---
 
-## 7. Félicitations !
+## 7. Étape 6 : Déployer et Lancer le Moniteur Temps Réel TUI (`dbsrt top`)
+
+Pour superviser les métriques matérielles (CPU, RAM, débits réseau) et les tâches de traitement en direct sur l'appliance Raspberry Pi 4 :
+
+1. Compilez le binaire CLI ARM64 avec parité Debian Bullseye GLIBC 2.31 :
+   ```bash
+   task rpi4:cli:build
+   ```
+2. (Optionnel) Validez le binaire ARM64 localement sur votre poste de développement via l'émulateur QEMU :
+   ```bash
+   task rpi4:cli:test
+   ```
+3. Déployez le binaire compilé `dbsrt` vers `~/.local/bin/dbsrt` sur le Raspberry Pi :
+   ```bash
+   task rpi4:cli:deploy
+   ```
+4. Lancez le moniteur plein écran interactif à distance via SSH :
+   ```bash
+   task rpi4:top
+   ```
+
+> [!NOTE]
+> Pour compiler, déployer et lancer en une seule commande : `task rpi4:cli:build && task rpi4:cli:deploy && task rpi4:top`.
+> Attention à ne pas confondre avec `task rpi4:build` (qui prépare l'image Docker du backend serveur `dbsrt-server`) ou `task rpi4:sync` (qui synchronise les bases de données et les fichiers SRT). Pour le guide complet, consultez [Comment compiler, tester, déployer et lancer le CLI dbsrt sur RPi4](../how-to/compiler-deployer-cli-top-sur-rpi4.md).
+
+---
+
+## 8. Alternative Légère : Serveur Standalone sans Docker (`rpi4:server:*`)
+
+Si vous préférez exécuter `dbsrt-server` sans surcharge de conteneur Docker ni dépendance PostgreSQL (mode **Zero-DB pur** avec index `catalog.dbphash` en RAM) :
+
+1. Déployez le binaire autonome ARM64 et installez l'unité de service systemd en mode utilisateur :
+   ```bash
+   task rpi4:server:deploy
+   ```
+2. Démarrez le service systemd :
+   ```bash
+   task rpi4:server:start
+   ```
+3. Contrôlez le statut du service et la télémétrie de l'API :
+   ```bash
+   task rpi4:server:status
+   ```
+4. Suivez les journaux journald en direct :
+   ```bash
+   task rpi4:server:logs
+   ```
+5. Validez le fonctionnement avec la requête test :
+   ```bash
+   task rpi4:server:demo
+   ```
+
+---
+
+## 9. Étape 7 : Activer le Superviseur Autonome 24/7 & Backup NAS Synology
+
+Pour que le Raspberry Pi 4 gère de manière totalement autonome la synchronisation du catalogue avec le Cloud o2switch et archive en continu les empreintes brutes vers le NAS Synology sans intervention manuelle :
+
+1. Vérifiez que les partages NFS du Synology sont configurés dans `/etc/fstab` sur le Pi :
+   ```text
+   ds418.home:/volume1/video   /mnt/synology/video   nfs   rw,soft,timeo=30,nofail,_netdev   0   0
+   ds418.home:/volume1/tvshow  /mnt/synology/tvshow  nfs   rw,soft,timeo=30,nofail,_netdev   0   0
+   ```
+2. Installez et activez le démon superviseur systemd utilisateur sur le Pi :
+   ```bash
+   task rpi4:supervisor:install
+   task rpi4:supervisor:start
+   ```
+3. Suivez l'activité du superviseur en temps réel :
+   ```bash
+   task rpi4:supervisor:logs
+   ```
+
+Le superviseur exécute trois rôles en parallèle :
+
+- **Toutes les 60 s** : Contrôle de vie et régulation adaptative CPU du batch o2switch (2 à 5 workers).
+- **Toutes les 10 min** : Rapatriement différentiel atomique de `catalog.dbphash` (150 Mo, `mmap` pur, 0 fichier unitaire sur la SD).
+- **Toutes les heures** : Sauvegarde des empreintes `*.phash` brutes vers le NAS Synology via montage NFS (relais en RAM, **0 écriture flash SD**).
+
+---
+
+## 10. Félicitations !
 
 Votre Raspberry Pi 4 est désormais une **appliance domestique autonome** de reconnaissance et d'alignement de sous-titres :
 

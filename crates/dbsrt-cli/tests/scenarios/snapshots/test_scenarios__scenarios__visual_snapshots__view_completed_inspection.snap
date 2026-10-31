@@ -2,10 +2,11 @@
 source: crates/dbsrt-cli/tests/scenarios/visual_snapshots.rs
 expression: grid
 ---
-┌ pydbsrt top ── Moniteur de Décodage pHash & Ingestion Temps Réel ────────────────────────────────────────────────────────────────────────┐
-│ ⏱️   HH:MM:SS │ Workers Actifs: 2 │ Host CPU: 18% │ RAM:  8.4/31.0 GiB                                                                    │
-│ 🎮  GPU INTEL IRIS XE : Non disponible (Mode CPU Multithread)                                                                             │
-│ ⚡  DÉBITS RÉSEAU CIFS : Instantané:   0.0 MB/s (Net RX:   0.0 MB/s, VFS:   0.0 MB/s)                                                     │
+┌ pydbsrt top unknown ── Moniteur de Décodage pHash & Ingestion Temps Réel ────────────────────────────────────────────────── ⏱️   HH:MM:SS ┐
+│ 🖥️   HÔTE      │ unknown (unknown unknown) │ Workers: 2 actifs │ Host CPU: 18% │ RAM:  8.4/31.0 GiB (27%)                                 │
+│ ⚙️   MOTEURS   │ CPU: unknown (0 c.) │ GPU: unknown (Mode CPU Multithread)                                                                │
+│ ⚡  FLUX REEL  │ Réseau Net RX:   0.0 MB/s (  0.0 Mbps)  ──►  Pipe pHash:   0.0 MB/s                                                      │
+│ 📈  CUMUL SESS │ 0.0 MB traités en 0s (En attente de flux...)                                                                             │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ┌ 🔍  FICHE DÉTAILLÉE DU TRAITEMENT & DIAGNOSTIC D'EXÉCUTION (FULL-FRAME) ──────────────────────────────────────────────────────────────────┐
 │  Média / Release  : The Leftovers S01E01                                                                                                 │
@@ -28,7 +29,6 @@ expression: grid
 │                                                                                                                                          │
 │                                                                                                                                          │
 │                                                                                                                                          │
-│                                                                                                                                          │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 
-  [1] Tâches   [2/h] Stats   [3/r] Récents   [4/m] Médias   [5/s] Sources  │ [Esc/Backspace/Enter] Retour Liste  [?] Aide  [q] Quitter
+  [1] Tâches   [2/h] Stats   [3/r] Récents   [4/m] Médias   [5/s] Sources   [6/y] Système  │ [Esc/Backspace/Enter] Retour Liste  [?] Aide  [

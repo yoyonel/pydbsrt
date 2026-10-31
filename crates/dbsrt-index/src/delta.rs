@@ -5,7 +5,8 @@
 //! Searches are merged across Base (.dbphash) and Delta (RAM) using Multi-Index Hashing (MIH).
 
 use crate::dbphash::{
-    DbphashBuilder, DbphashCutEntry, DbphashCutMatch, DbphashMediaMatch, DbphashSparseEntry,
+    media_confidence, rank_media_matches, DbphashBuilder, DbphashCutEntry, DbphashCutMatch,
+    DbphashMediaMatch, DbphashSparseEntry,
 };
 use crate::mih::MultiIndexHash64;
 use dbsrt_core::cuts::detect_cuts;
@@ -408,81 +409,12 @@ impl DeltaIndex {
                 let matching_cuts = c_matches.map(|v| v.len()).unwrap_or(0);
 
                 let fps = media.fps.max(1.0);
-                let expected_sparse = ((query_hashes.len() as f64 / fps).round() as usize).max(1);
-
-                // Analyze coherent cut matches along timeline shift
-                let mut best_coherent_cuts = 0usize;
-                let mut best_cut_shift_ms = 0i64;
-                if let Some(cm) = c_matches {
-                    if !cm.is_empty() {
-                        let mut diffs: HashMap<i64, usize> = HashMap::new();
-                        for m in cm {
-                            let query_ts_ms = (m.query_idx as f64 / fps * 1000.0) as i64;
-                            let diff = m.cut_entry.timestamp_ms as i64 - query_ts_ms;
-                            let bucket = (diff / 50) * 50;
-                            *diffs.entry(bucket).or_default() += 1;
-                        }
-                        if let Some((&shift, &count)) =
-                            diffs.iter().max_by_key(|&(_, count)| *count)
-                        {
-                            best_cut_shift_ms = shift;
-                            best_coherent_cuts = count;
-                        }
-                    }
-                }
-
-                // Analyze coherent sparse matches along timeline shift
-                let mut best_coherent_sparse = 0usize;
-                let mut best_sparse_shift_ms = 0i64;
-                if let Some(sm) = s_matches {
-                    if !sm.is_empty() {
-                        let mut diffs: HashMap<i64, usize> = HashMap::new();
-                        for m in sm {
-                            let query_ts_ms = (m.query_idx as f64 / fps * 1000.0) as i64;
-                            let diff = m.cut_entry.timestamp_ms as i64 - query_ts_ms;
-                            let bucket = (diff / 500) * 500;
-                            *diffs.entry(bucket).or_default() += 1;
-                        }
-                        if let Some((&shift, &count)) =
-                            diffs.iter().max_by_key(|&(_, count)| *count)
-                        {
-                            best_sparse_shift_ms = shift;
-                            best_coherent_sparse = count;
-                        }
-                    }
-                }
-
-                let query_len = query_hashes.len().max(1);
-                let query_match_ratio =
-                    (matching_sparse.max(matching_cuts) as f64 / query_len as f64).min(1.0);
-
-                let (confidence, estimated_shift_ms) = if best_coherent_sparse >= 3 {
-                    let sparse_ratio =
-                        (best_coherent_sparse as f64 / expected_sparse as f64).min(1.0);
-                    let base_conf = sparse_ratio * 100.0;
-                    let conf = if best_coherent_cuts >= 2 {
-                        (base_conf * 0.7 + (best_coherent_cuts as f64 * 15.0).min(30.0)).min(100.0)
-                    } else {
-                        base_conf
-                    };
-                    let shift = if best_coherent_cuts >= 2 {
-                        best_cut_shift_ms
-                    } else {
-                        best_sparse_shift_ms
-                    };
-                    (conf, shift)
-                } else if best_coherent_cuts >= 3 {
-                    let conf = if expected_sparse <= 1 && query_len <= 30 {
-                        95.0
-                    } else {
-                        (best_coherent_cuts as f64 * 25.0).min(90.0)
-                    };
-                    (conf, best_cut_shift_ms)
-                } else if query_len <= 5 && query_match_ratio >= 0.9 {
-                    (query_match_ratio * 100.0, 0i64)
-                } else {
-                    ((query_match_ratio * 100.0).min(30.0), 0i64)
-                };
+                let (confidence, estimated_shift_ms, coherent_distance) = media_confidence(
+                    query_hashes.len(),
+                    fps,
+                    s_matches.map_or(&[][..], Vec::as_slice),
+                    c_matches.map_or(&[][..], Vec::as_slice),
+                );
 
                 ranked.push(DbphashMediaMatch {
                     media_id,
@@ -492,22 +424,14 @@ impl DeltaIndex {
                     episode: media.episode,
                     matching_cuts,
                     matching_sparse,
+                    coherent_distance,
                     confidence,
                     estimated_shift_ms,
                 });
             }
         }
 
-        // Consistent ranking criteria: confidence descending, then weighted score (cuts*2 + sparse)
-        ranked.sort_by(|a, b| {
-            b.confidence
-                .partial_cmp(&a.confidence)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| {
-                    (b.matching_cuts * 2 + b.matching_sparse)
-                        .cmp(&(a.matching_cuts * 2 + a.matching_sparse))
-                })
-        });
+        ranked.sort_by(rank_media_matches);
         ranked
     }
 }
@@ -539,6 +463,75 @@ mod tests {
         assert!(!matches.is_empty());
         assert_eq!(matches[0].clean_title, "Inception");
         assert_eq!(matches[0].year, Some(2010));
+    }
+
+    /// Same as the `.dbphash` case: a static decoy scene must not outrank the source media.
+    #[test]
+    fn test_delta_recognize_prefers_coherent_media_over_static_decoy() {
+        let frame = |k: u64| (k + 1).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+        let sparse_source: Vec<(u64, u32)> = (0..10).map(|k| (frame(k), k as u32 * 1000)).collect();
+        let sparse_decoy: Vec<(u64, u32)> = (0..60).map(|k| (frame(0), k * 1000)).collect();
+        let mut delta = DeltaIndex::new();
+        delta.add_media(
+            &MediaMetadata::parse("Decoy.2001.mkv"),
+            60_000,
+            24.0,
+            &[],
+            &sparse_decoy,
+        );
+        delta.add_media(
+            &MediaMetadata::parse("Source.2002.mkv"),
+            10_000,
+            24.0,
+            &[],
+            &sparse_source,
+        );
+
+        let query: Vec<u64> = (0..240).map(|i| frame(i / 24)).collect();
+        let ranked = delta.recognize(&query, 0);
+
+        assert_eq!(ranked[0].clean_title, "Source");
+        assert_eq!(ranked[0].confidence, 100.0);
+        let decoy = ranked.iter().find(|m| m.clean_title == "Decoy").unwrap();
+        assert!(
+            decoy.confidence <= 30.0,
+            "decoy confidence {}",
+            decoy.confidence
+        );
+    }
+
+    /// Same as the `.dbphash` case: at equal confidence the closest media ranks first.
+    #[test]
+    fn test_delta_recognize_tie_prefers_closest_media() {
+        let frame = |k: u64| (k + 1).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+        let mut sparse_source: Vec<(u64, u32)> =
+            (0..10).map(|k| (frame(k), k as u32 * 1000)).collect();
+        sparse_source.extend((20..26).map(|k| (frame(0), k * 1000)));
+        let sparse_rival: Vec<(u64, u32)> = (0..30)
+            .map(|j| (frame(j / 3) ^ 0b111, (j / 3) as u32 * 1000))
+            .collect();
+        let mut delta = DeltaIndex::new();
+        delta.add_media(
+            &MediaMetadata::parse("Rival.2001.mkv"),
+            10_000,
+            24.0,
+            &[],
+            &sparse_rival,
+        );
+        delta.add_media(
+            &MediaMetadata::parse("Source.2002.mkv"),
+            26_000,
+            24.0,
+            &[],
+            &sparse_source,
+        );
+
+        let query: Vec<u64> = (0..240).map(|i| frame(i / 24)).collect();
+        let ranked = delta.recognize(&query, 4);
+
+        assert_eq!(ranked[0].confidence, 100.0);
+        assert_eq!(ranked[1].confidence, 100.0);
+        assert_eq!(ranked[0].clean_title, "Source");
     }
 
     #[test]

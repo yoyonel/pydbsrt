@@ -16,6 +16,88 @@ pub const SUBTITLE_SUBDIRS: &[&str] = &["subs", "Subs", "subtitles", "Subtitles"
 /// Subtitle file extension (case-insensitive).
 pub const SUBTITLE_EXTENSION: &str = "srt";
 
+/// Canonical ISO 639-1 codes with their ISO 639-2 (B/T) aliases. Single language table
+/// shared by subtitle pairing and the server catalog.
+const LANGUAGE_CODE_ALIASES: &[(&str, &[&str])] = &[
+    ("fr", &["fre", "fra"]),
+    ("en", &["eng"]),
+    ("es", &["spa"]),
+    ("de", &["ger", "deu"]),
+    ("it", &["ita"]),
+    ("pt", &["por", "pob"]),
+    ("ja", &["jpn"]),
+    ("nl", &["dut", "nld"]),
+    ("ru", &["rus"]),
+    ("ar", &["ara"]),
+    ("pl", &["pol"]),
+    ("zh", &["zho", "chi"]),
+    ("ko", &["kor"]),
+    ("sv", &["swe"]),
+    ("da", &["dan"]),
+    ("fi", &["fin"]),
+    ("el", &["ell", "gre"]),
+    ("cs", &["ces", "cze"]),
+    ("tr", &["tur"]),
+    ("uk", &["ukr"]),
+    ("ro", &["ron", "rum"]),
+    ("hu", &["hun"]),
+    ("he", &["heb"]),
+    ("hr", &["hrv"]),
+    ("id", &["ind"]),
+    ("no", &["nob", "nor", "nno"]),
+    ("th", &["tha"]),
+    ("vi", &["vie"]),
+    ("tl", &["fil", "tgl"]),
+    ("ms", &["may", "msa"]),
+    ("bg", &["bul"]),
+    ("sl", &["slv"]),
+    ("sk", &["slk", "slo"]),
+    ("ca", &["cat"]),
+    ("hi", &["hin"]),
+];
+
+/// Natural language names and release tags accepted by [`parse_extended_language_token`].
+const LANGUAGE_NAME_ALIASES: &[(&str, &[&str])] = &[
+    ("en", &["english"]),
+    ("fr", &["french", "francais", "vff", "vf", "vostfr"]),
+    ("es", &["spanish", "espanol"]),
+    ("de", &["german", "deutsch"]),
+    ("it", &["italian", "italiano"]),
+    ("pt", &["portuguese", "portugues"]),
+    ("nl", &["dutch", "nederlands"]),
+    ("ru", &["russian"]),
+    ("ja", &["japanese"]),
+    ("zh", &["chinese"]),
+    ("ko", &["korean"]),
+    ("ar", &["arabic"]),
+    ("pl", &["polish"]),
+    ("sv", &["swedish"]),
+    ("no", &["norwegian"]),
+    ("da", &["danish"]),
+    ("fi", &["finnish"]),
+    ("el", &["greek"]),
+    ("cs", &["czech"]),
+    ("tr", &["turkish"]),
+    ("hu", &["hungarian"]),
+    ("ro", &["romanian"]),
+    ("he", &["hebrew"]),
+    ("uk", &["ukrainian"]),
+    ("hi", &["hindi"]),
+    ("id", &["indonesian"]),
+    ("th", &["thai"]),
+    ("vi", &["vietnamese"]),
+    ("ms", &["malay"]),
+    ("tl", &["tagalog"]),
+];
+
+/// Canonical code whose entry in `table` is `token` itself or lists it as an alias.
+fn lookup_language_alias(table: &[(&str, &[&str])], token: &str) -> Option<String> {
+    table
+        .iter()
+        .find(|(code, aliases)| *code == token || aliases.contains(&token))
+        .map(|(code, _)| (*code).to_string())
+}
+
 /// Extract normalized ISO-639-1 language code from a token.
 /// STRICT: only matches 2-letter ISO 639-1 or 3-letter ISO 639-2 codes.
 /// Words like "french", "english", "vff", "vf", "vostfr" are REJECTED
@@ -28,46 +110,7 @@ pub fn parse_language_code(token: &str) -> Option<String> {
     if !lower.chars().all(|c| c.is_ascii_alphabetic()) {
         return None;
     }
-    match lower.as_str() {
-        "fr" | "en" | "es" | "de" | "it" | "pt" | "ja" | "nl" | "ru" | "ar" | "pl" | "zh"
-        | "ko" | "sv" | "da" | "fi" | "el" | "cs" | "tr" | "uk" | "ro" | "hu" | "he" | "hr"
-        | "id" | "no" | "th" | "vi" | "tl" | "ms" | "bg" | "sl" | "sk" | "ca" => Some(lower),
-        "fre" | "fra" => Some("fr".to_string()),
-        "eng" => Some("en".to_string()),
-        "spa" => Some("es".to_string()),
-        "ger" | "deu" => Some("de".to_string()),
-        "ita" => Some("it".to_string()),
-        "por" | "pob" => Some("pt".to_string()),
-        "jpn" => Some("ja".to_string()),
-        "dut" | "nld" => Some("nl".to_string()),
-        "rus" => Some("ru".to_string()),
-        "ara" => Some("ar".to_string()),
-        "pol" => Some("pl".to_string()),
-        "zho" | "chi" => Some("zh".to_string()),
-        "kor" => Some("ko".to_string()),
-        "swe" => Some("sv".to_string()),
-        "dan" => Some("da".to_string()),
-        "fin" => Some("fi".to_string()),
-        "ell" | "gre" => Some("el".to_string()),
-        "ces" | "cze" => Some("cs".to_string()),
-        "tur" => Some("tr".to_string()),
-        "ukr" => Some("uk".to_string()),
-        "ron" | "rum" => Some("ro".to_string()),
-        "hun" => Some("hu".to_string()),
-        "heb" => Some("he".to_string()),
-        "hrv" => Some("hr".to_string()),
-        "ind" => Some("id".to_string()),
-        "nob" | "nor" => Some("no".to_string()),
-        "tha" => Some("th".to_string()),
-        "vie" => Some("vi".to_string()),
-        "fil" | "tgl" => Some("tl".to_string()),
-        "may" | "msa" => Some("ms".to_string()),
-        "bul" => Some("bg".to_string()),
-        "slv" => Some("sl".to_string()),
-        "slk" | "slo" => Some("sk".to_string()),
-        "cat" => Some("ca".to_string()),
-        _ => None,
-    }
+    lookup_language_alias(LANGUAGE_CODE_ALIASES, &lower)
 }
 
 /// Matches ISO 639-1 / 639-2 codes as well as common natural language names
@@ -76,35 +119,10 @@ pub fn parse_language_code(token: &str) -> Option<String> {
 /// Safe for subtitle track pairing where the video stem has already been stripped
 /// or where tracks are inside a dedicated subtitle directory (`Subs/<stem>/`).
 pub fn parse_extended_language_token(token: &str) -> Option<String> {
-    if let Some(code) = parse_language_code(token) {
-        return Some(code);
-    }
-    let lower = token.trim().to_lowercase();
-    match lower.as_str() {
-        "english" => Some("en".to_string()),
-        "french" | "francais" | "vff" | "vf" | "vostfr" => Some("fr".to_string()),
-        "spanish" | "espanol" => Some("es".to_string()),
-        "german" | "deutsch" => Some("de".to_string()),
-        "italian" | "italiano" => Some("it".to_string()),
-        "portuguese" | "portugues" => Some("pt".to_string()),
-        "dutch" | "nederlands" => Some("nl".to_string()),
-        "russian" => Some("ru".to_string()),
-        "japanese" => Some("ja".to_string()),
-        "chinese" => Some("zh".to_string()),
-        "korean" => Some("ko".to_string()),
-        "arabic" => Some("ar".to_string()),
-        "polish" => Some("pl".to_string()),
-        "swedish" => Some("sv".to_string()),
-        "norwegian" => Some("no".to_string()),
-        "danish" => Some("da".to_string()),
-        "finnish" => Some("fi".to_string()),
-        "greek" => Some("el".to_string()),
-        "czech" => Some("cs".to_string()),
-        "turkish" => Some("tr".to_string()),
-        "hungarian" => Some("hu".to_string()),
-        "romanian" => Some("ro".to_string()),
-        _ => None,
-    }
+    parse_language_code(token).or_else(|| {
+        let lower = token.trim().to_lowercase();
+        lookup_language_alias(LANGUAGE_NAME_ALIASES, &lower)
+    })
 }
 
 /// Discovers subtitle `.srt` files matching the video filename stem.

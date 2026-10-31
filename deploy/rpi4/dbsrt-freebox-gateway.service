@@ -1,0 +1,16 @@
+[Unit]
+Description=dbsrt Freebox Range HTTP Gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/dbsrt
+ExecStart=/usr/bin/python3 -u %h/dbsrt/scripts/rpi4_freebox_gateway.py --host 0.0.0.0 --port 18089
+Restart=always
+RestartSec=5
+StandardOutput=append:%h/dbsrt/logs/rpi4_freebox_gateway.log
+StandardError=append:%h/dbsrt/logs/rpi4_freebox_gateway.log
+
+[Install]
+WantedBy=default.target

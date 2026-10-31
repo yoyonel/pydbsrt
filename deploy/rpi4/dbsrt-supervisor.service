@@ -1,0 +1,16 @@
+[Unit]
+Description=dbsrt o2switch 24/7 Watchdog Supervisor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/dbsrt
+ExecStart=/usr/bin/python3 -u %h/dbsrt/scripts/rpi4_o2switch_supervisor.py
+Restart=always
+RestartSec=10
+StandardOutput=append:%h/dbsrt/logs/rpi4_supervisor.log
+StandardError=append:%h/dbsrt/logs/rpi4_supervisor.log
+
+[Install]
+WantedBy=default.target

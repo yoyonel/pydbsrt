@@ -1,0 +1,34 @@
+---
+source: crates/dbsrt-cli/tests/scenarios/visual_snapshots.rs
+expression: grid
+---
+┌ pydbsrt top unknown ── Moniteur de Décodage pHash & Ingestion Temps Réel ────────────────────────────────────────────────── ⏱️   HH:MM:SS ┐
+│ 🖥️   HÔTE      │ unknown (unknown unknown) │ Workers: 2 actifs │ Host CPU: 18% │ RAM:  8.4/31.0 GiB (27%)                                 │
+│ ⚙️   MOTEURS   │ CPU: unknown (0 c.) │ GPU: unknown (Mode CPU Multithread)                                                                │
+│ ⚡  FLUX REEL  │ Réseau Net RX:   0.0 MB/s (  0.0 Mbps)  ──►  Pipe pHash:   0.0 MB/s                                                      │
+│ 📈  CUMUL SESS │ 0.0 MB traités en 0s (En attente de flux...)                                                                             │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌ 💻  INFORMATIONS SYSTÈME & MATÉRIEL (VUE FASTFETCH) ──────────────────────────────────────────────────────────────────────────────────────┐
+│  📦  APPLICATIF (dbsrt)                                                🎮  ACCÉLÉRATION MATÉRIELLE (GPU)                                   │
+│  │ ├─ Version binaire   : unknown                                     │ ├─ Contrôleur GPU    : unknown                                   │
+│  │ ├─ Provenance Git    : unknown                                     │ ├─ Moteur décodage   : unknown (Pilote non chargé / CPU)         │
+│  │ ├─ Date de build     : unknown                                     │ ├─ Mode d'ingestion  : Multi-threads CPU logiciel                │
+│  │ └─ Couplages cert.   : data/SRT/couplings.json                     │ └─ Conso & Fréq.     : Inactif (Mode CPU)                        │
+│                                                                                                                                          │
+│  🌐  NŒUD & SYSTÈME D'EXPLOITATION                                     💾  MÉMOIRE & STOCKAGE                                              │
+│  │ ├─ Hôte (Hostname)   : unknown                                     │ ├─ RAM système       :  8.4 / 31.0 GiB (27%)                     │
+│  │ ├─ Distribution      : unknown                                     │ ├─ Cache pHash       : data/__PHASH__                            │
+│  │ ├─ Noyau (Kernel)    : unknown                                     │ ├─ Catalogue média   : data/reports/media_browser_cache.json     │
+│  │ └─ Architecture      : unknown                                     │ └─ Sources déclarées : 2 active(s)                               │
+│                                                                                                                                          │
+│  🧠  PROCESSEUR (CPU)                                                  ⚡  DÉBITS & TÉLÉMÉTRIE EN DIRECT                                   │
+│  │ ├─ Modèle            : unknown                                     │ ├─ Réseau Net RX     :   0.0 MB/s (  0.0 Mbps)                   │
+│  │ ├─ Cœurs logiques    : 0 threads                                   │ ├─ Débit Pipe pHash  :   0.0 MB/s                                │
+│  │ ├─ Cœurs physiques   : N/A                                         │ ├─ Workers en cours  : 2 actifs                                  │
+│  │ └─ Charge globale    : 18.5%                                       │ └─ Session globale   : 0 flux (Session idle)                     │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+  [1] Tâches   [2/h] Stats   [3/r] Récents   [4/m] Médias   [5/s] Sources   [6/y] Système  │ [↑/k] Défiler  [?] Aide  [q] Quitter

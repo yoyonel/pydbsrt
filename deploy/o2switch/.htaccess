@@ -1,0 +1,17 @@
+# Apache / LiteSpeed .htaccess for pydbsrt reverse proxy gateway
+# Routes all public HTTPS requests to index.php which forwards to dbsrt-server (Unix socket ~/dbsrt/run/dbsrt-server.sock)
+# Compatible with cPanel mutualise without mod_proxy [P] restrictions.
+
+Options -Indexes
+RewriteEngine On
+
+# Ensure WebAssembly MIME type is recognized by LiteSpeed/Apache
+AddType application/wasm .wasm
+
+# Force HTTPS redirect
+RewriteCond %{HTTPS} off
+RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^(.*)$ index.php [QSA,L]

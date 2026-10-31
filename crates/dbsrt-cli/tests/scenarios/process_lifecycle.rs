@@ -14,7 +14,7 @@ fn test_scenario_active_jobs_table_metrics_and_navigation() {
     assert_eq!(harness.app.view, ViewPage::ActiveJobs);
 
     // Verify 2 workers active
-    harness.assert_buffer_contains("Workers Actifs: 2");
+    harness.assert_buffer_contains("Workers: 2 actifs");
     harness.assert_buffer_contains("The.Wire.S01E01");
     harness.assert_buffer_contains("GPU (VA-API)");
     harness.assert_buffer_contains("The.Wire.S01E02");
@@ -108,7 +108,7 @@ fn test_scenario_active_jobs_empty_state() {
     assert_eq!(harness.app.view, ViewPage::ActiveJobs);
 
     // Header shows 0 active workers
-    harness.assert_buffer_contains("Workers Actifs: 0");
+    harness.assert_buffer_contains("Workers: 0 actifs");
 
     // Keys do not panic
     harness.send_key(KeyCode::Down);

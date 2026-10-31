@@ -23,13 +23,17 @@ use crate::commands::top::model::{format_duration, ActiveJobTelemetry};
 /// - `ppid`: Parent process ID.
 /// - `known_pids`: Known active worker process IDs from telemetry.
 pub fn is_batch_worker_candidate(cmd: &str, name: &str, ppid: u32, known_pids: &[u32]) -> bool {
-    if cmd.contains(BATCH_WORKER_CMD_PATTERN_1) || cmd.contains(BATCH_WORKER_CMD_PATTERN_2) {
+    // Match on the executable name: a shell whose command line merely mentions these
+    // patterns (ssh session, git commit message) must never be signaled.
+    if name == "dbsrt"
+        && (cmd.contains(BATCH_WORKER_CMD_PATTERN_1) || cmd.contains(BATCH_WORKER_CMD_PATTERN_2))
+    {
         return true;
     }
-    if cmd.contains("ffmpeg") && (cmd.contains("-i") || cmd.contains("-f")) {
-        return true;
+    if !name.contains("ffmpeg") {
+        return false;
     }
-    name.contains("ffmpeg") && (ppid != 0 && known_pids.contains(&ppid))
+    cmd.contains("-i") || cmd.contains("-f") || (ppid != 0 && known_pids.contains(&ppid))
 }
 
 /// Stops or hard-kills an entire batch execution tree (coordinators, workers, ffmpeg processes).
@@ -73,7 +77,7 @@ pub fn stop_entire_batch(force: bool, known_worker_pids: &[u32]) -> (bool, Strin
         let name = proc_.name().to_string_lossy();
         let ppid = proc_.parent().map(|p| p.as_u32()).unwrap_or(0);
 
-        if cmd.contains(BATCH_COORDINATOR_PATTERN) {
+        if cmd.contains(BATCH_COORDINATOR_PATTERN) && name.starts_with("python") {
             coordinator_pids.push(p_u32);
         } else if is_batch_worker_candidate(&cmd, &name, ppid, known_worker_pids)
             && !worker_pids.contains(&p_u32)
@@ -275,7 +279,7 @@ pub fn inspect_job_details(job: &ActiveJobTelemetry) -> Vec<String> {
         lines.push("  • Comportement       : dbsrt bascule automatiquement en décodage logiciel CPU multi-cœurs (consommation normale ~800%).".to_string());
     } else if job.engine.contains("GPU") {
         lines.push("  • Moteur sélectionné : GPU (VA-API)".to_string());
-        lines.push("  • Accélération active: Décodage matériel ASIC GPU actif via Intel QuickSync / VA-API (/dev/dri/renderD128).".to_string());
+        lines.push("  • Accélération active: Décodage matériel ASIC GPU actif via VA-API (/dev/dri/renderD128).".to_string());
         lines.push("  • Efficacité         : Déchargement CPU quasi-total (< 20% CPU hôte) et débit de décodage maximal.".to_string());
     } else if job.engine.contains("Sub") {
         lines.push("  • Moteur sélectionné : Sub Extraction".to_string());
@@ -291,7 +295,7 @@ pub fn inspect_job_details(job: &ActiveJobTelemetry) -> Vec<String> {
     if !job.cmdline.is_empty() {
         lines.push(String::new());
         lines.push("--- Ligne de Commande Exécutée ---".to_string());
-        lines.push(job.cmdline.join(" "));
+        lines.push(dbsrt_core::redact_command_line(&job.cmdline));
     }
 
     // Inspect open file descriptors from /proc/{pid}/fd
@@ -387,4 +391,34 @@ pub fn inspect_job_details(job: &ActiveJobTelemetry) -> Vec<String> {
     }
 
     lines
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_batch_worker_candidate_matches_executable_not_text() {
+        assert!(is_batch_worker_candidate(
+            "./bin/dbsrt media:add ftp://nas/a.mkv",
+            "dbsrt",
+            1,
+            &[]
+        ));
+        assert!(is_batch_worker_candidate(
+            "ffmpeg -i ftp://nas/a.mkv -f rawvideo -",
+            "ffmpeg",
+            1,
+            &[]
+        ));
+        assert!(is_batch_worker_candidate("ffmpeg", "ffmpeg", 42, &[42]));
+        // A shell mentioning the patterns (e.g. a commit message) is never a worker.
+        assert!(!is_batch_worker_candidate(
+            "bash -c git commit -m 'fix(ffmpeg): -f' && dbsrt media:add",
+            "bash",
+            1,
+            &[]
+        ));
+        assert!(!is_batch_worker_candidate("ffmpeg", "ffmpeg", 7, &[42]));
+    }
 }

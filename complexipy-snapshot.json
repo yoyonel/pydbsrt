@@ -1,0 +1,364 @@
+[
+  {
+    "path": "scripts/audit_phash_catalog.py",
+    "file_name": "audit_phash_catalog.py",
+    "functions": [
+      {
+        "name": "is_same_media",
+        "complexity": 20
+      },
+      {
+        "name": "run_full_catalog_audit",
+        "complexity": 29
+      }
+    ]
+  },
+  {
+    "path": "scripts/batch_media_add_tvshow.py",
+    "file_name": "batch_media_add_tvshow.py",
+    "functions": [
+      {
+        "name": "detect_alphabet_family",
+        "complexity": 16
+      },
+      {
+        "name": "load_targets_from_file",
+        "complexity": 17
+      },
+      {
+        "name": "probe_video_container",
+        "complexity": 17
+      },
+      {
+        "name": "execute_media_add",
+        "complexity": 18
+      },
+      {
+        "name": "generate_nightly_report",
+        "complexity": 25
+      },
+      {
+        "name": "analyze_extracted_subtitles",
+        "complexity": 28
+      },
+      {
+        "name": "main",
+        "complexity": 31
+      },
+      {
+        "name": "discover_stratified_tvshows",
+        "complexity": 68
+      }
+    ]
+  },
+  {
+    "path": "scripts/benchmark_worker_scaling.py",
+    "file_name": "benchmark_worker_scaling.py",
+    "functions": [
+      {
+        "name": "GpuSampler::stop",
+        "complexity": 20
+      },
+      {
+        "name": "find_distinct_synology_media",
+        "complexity": 35
+      }
+    ]
+  },
+  {
+    "path": "scripts/compare_top_telemetry.py",
+    "file_name": "compare_top_telemetry.py",
+    "functions": [
+      {
+        "name": "run_comparison",
+        "complexity": 26
+      }
+    ]
+  },
+  {
+    "path": "scripts/convert_dashboard_webp.py",
+    "file_name": "convert_dashboard_webp.py",
+    "functions": [
+      {
+        "name": "main",
+        "complexity": 29
+      }
+    ]
+  },
+  {
+    "path": "scripts/dbsrt_top.py",
+    "file_name": "dbsrt_top.py",
+    "functions": [
+      {
+        "name": "TerminalInput::poll_key",
+        "complexity": 24
+      },
+      {
+        "name": "get_job_logs",
+        "complexity": 31
+      },
+      {
+        "name": "load_historical_records",
+        "complexity": 39
+      },
+      {
+        "name": "main",
+        "complexity": 62
+      },
+      {
+        "name": "scan_active_jobs",
+        "complexity": 89
+      },
+      {
+        "name": "render_dashboard",
+        "complexity": 112
+      }
+    ]
+  },
+  {
+    "path": "scripts/download_and_audit_all_trailers.py",
+    "file_name": "download_and_audit_all_trailers.py",
+    "functions": [
+      {
+        "name": "audit_work",
+        "complexity": 17
+      }
+    ]
+  },
+  {
+    "path": "scripts/enrich_snippets_metadata.py",
+    "file_name": "enrich_snippets_metadata.py",
+    "functions": [
+      {
+        "name": "parse_video_metadata",
+        "complexity": 27
+      },
+      {
+        "name": "main",
+        "complexity": 41
+      }
+    ]
+  },
+  {
+    "path": "scripts/eval_exhaustive_nas_snippets.py",
+    "file_name": "eval_exhaustive_nas_snippets.py",
+    "functions": [
+      {
+        "name": "run_battery_2_all_series_isolation",
+        "complexity": 20
+      }
+    ]
+  },
+  {
+    "path": "scripts/eval_media_batch.py",
+    "file_name": "eval_media_batch.py",
+    "functions": [
+      {
+        "name": "discover_sidecar_subtitles",
+        "complexity": 16
+      },
+      {
+        "name": "evaluate_media_batch",
+        "complexity": 18
+      }
+    ]
+  },
+  {
+    "path": "scripts/eval_nas_reliability.py",
+    "file_name": "eval_nas_reliability.py",
+    "functions": [
+      {
+        "name": "is_same_media",
+        "complexity": 20
+      },
+      {
+        "name": "run_suite_2_real_video_recognition",
+        "complexity": 36
+      },
+      {
+        "name": "run_suite_3_true_negatives",
+        "complexity": 44
+      },
+      {
+        "name": "run_suite_4_catalog_and_download",
+        "complexity": 73
+      },
+      {
+        "name": "run_suite_1_phash_recall",
+        "complexity": 75
+      }
+    ]
+  },
+  {
+    "path": "scripts/eval_vlc_vlsub_batch.py",
+    "file_name": "eval_vlc_vlsub_batch.py",
+    "functions": [
+      {
+        "name": "main",
+        "complexity": 26
+      },
+      {
+        "name": "pick_sample_50",
+        "complexity": 26
+      }
+    ]
+  },
+  {
+    "path": "scripts/extract_embedded_subs.py",
+    "file_name": "extract_embedded_subs.py",
+    "functions": [
+      {
+        "name": "main",
+        "complexity": 39
+      }
+    ]
+  },
+  {
+    "path": "scripts/extract_nas_snippets.py",
+    "file_name": "extract_nas_snippets.py",
+    "functions": [
+      {
+        "name": "process_video_snippet",
+        "complexity": 19
+      },
+      {
+        "name": "discover_and_stratify_videos",
+        "complexity": 23
+      },
+      {
+        "name": "main",
+        "complexity": 38
+      }
+    ]
+  },
+  {
+    "path": "scripts/generate_coverage_report.py",
+    "file_name": "generate_coverage_report.py",
+    "functions": [
+      {
+        "name": "parse_python_coverage",
+        "complexity": 19
+      },
+      {
+        "name": "generate_markdown",
+        "complexity": 26
+      }
+    ]
+  },
+  {
+    "path": "scripts/generate_nightly_report_enhanced.py",
+    "file_name": "generate_nightly_report_enhanced.py",
+    "functions": [
+      {
+        "name": "main",
+        "complexity": 30
+      }
+    ]
+  },
+  {
+    "path": "scripts/lint_complexity.py",
+    "file_name": "lint_complexity.py",
+    "functions": [
+      {
+        "name": "run_check",
+        "complexity": 38
+      },
+      {
+        "name": "main",
+        "complexity": 41
+      },
+      {
+        "name": "print_complexity_table",
+        "complexity": 70
+      },
+      {
+        "name": "parse_function_metrics",
+        "complexity": 205
+      }
+    ]
+  },
+  {
+    "path": "scripts/lint_migrations.py",
+    "file_name": "lint_migrations.py",
+    "functions": [
+      {
+        "name": "lint_migration_file",
+        "complexity": 37
+      }
+    ]
+  },
+  {
+    "path": "scripts/repair_corrupted_couplings.py",
+    "file_name": "repair_corrupted_couplings.py",
+    "functions": [
+      {
+        "name": "repair_registry",
+        "complexity": 37
+      }
+    ]
+  },
+  {
+    "path": "scripts/scale_up_nas_dataset.py",
+    "file_name": "scale_up_nas_dataset.py",
+    "functions": [
+      {
+        "name": "process_one_video",
+        "complexity": 26
+      },
+      {
+        "name": "certify_existing_phash_couplings",
+        "complexity": 29
+      },
+      {
+        "name": "extract_embedded_srts_for_video",
+        "complexity": 33
+      },
+      {
+        "name": "select_stratified_videos",
+        "complexity": 45
+      },
+      {
+        "name": "build_nas_catalog",
+        "complexity": 74
+      }
+    ]
+  },
+  {
+    "path": "scripts/validate_docs.py",
+    "file_name": "validate_docs.py",
+    "functions": [
+      {
+        "name": "main",
+        "complexity": 17
+      },
+      {
+        "name": "check_asciinema_casts",
+        "complexity": 51
+      },
+      {
+        "name": "check_html_files",
+        "complexity": 68
+      }
+    ]
+  },
+  {
+    "path": "scripts/verify_catalog_integrity.py",
+    "file_name": "verify_catalog_integrity.py",
+    "functions": [
+      {
+        "name": "check_tier2_couplings",
+        "complexity": 24
+      }
+    ]
+  },
+  {
+    "path": "scripts/verify_terminal_rendering.py",
+    "file_name": "verify_terminal_rendering.py",
+    "functions": [
+      {
+        "name": "main",
+        "complexity": 19
+      }
+    ]
+  }
+]

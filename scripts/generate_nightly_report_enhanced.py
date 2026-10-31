@@ -14,7 +14,7 @@ import statistics
 from pathlib import Path
 from typing import Any, Dict, List
 
-REPORT_MD_PATH = Path("docs/2026-10-25-rapport-batch-import-tvshow-synology.md")
+REPORT_MD_PATH = Path("docs/history/2026-10-25-rapport-batch-import-tvshow-synology.md")
 EVENTS_JSONL_PATH = Path("data/reports/batch_tvshow_nightly.jsonl")
 
 

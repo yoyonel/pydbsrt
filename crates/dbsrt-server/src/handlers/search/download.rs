@@ -5,15 +5,46 @@ use crate::constants::{
     MIN_SIGNIFICANT_SHIFT_MS,
 };
 use crate::dtos::{DownloadSubtitleRequest, DownloadSubtitleResponse, SubtitleSource};
-use crate::services::catalog::fetch_or_cache_remote_subtitle;
+use crate::services::catalog::{
+    collect_subtitle_search_dirs, fetch_or_cache_remote_subtitle, is_safe_language_token,
+};
 use crate::services::phash::compute_media_phash_shift_multi;
 use crate::services::recognition::identify_media_by_phash_multi_with_reader;
 use crate::state::AppState;
 use axum::extract::State;
 use axum::Json;
-use dbsrt_core::{extract_embedded_subtitle, probe_video, MediaMetadata, SubtitleFile};
+use dbsrt_core::{
+    compute_bytes_digest_32, extract_embedded_subtitle, probe_video, MediaMetadata, SubtitleFile,
+};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+/// Longest accepted CAS identifier: a full SHA256 hex digest (registry also accepts prefixes).
+const MAX_CAS_HASH_HEX_LEN: usize = 64;
+/// File extensions a client-supplied catalog subtitle path may point to.
+const SUBTITLE_FILE_EXTENSIONS: &[&str] = &["srt", "ass", "ssa", "vtt", "sub"];
+
+/// True for a non-empty ASCII hex CAS digest (or digest prefix) of at most `MAX_CAS_HASH_HEX_LEN`.
+fn is_valid_cas_hash(hash: &str) -> bool {
+    !hash.is_empty()
+        && hash.len() <= MAX_CAS_HASH_HEX_LEN
+        && hash.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+/// Canonicalizes a client-supplied subtitle path and accepts it only when it is an existing
+/// subtitle file located under one of `roots`. Blocks `..`/absolute-path reads of arbitrary files.
+fn resolve_allowed_subtitle_path(candidate: &Path, roots: &[PathBuf]) -> Option<PathBuf> {
+    let canonical = candidate.canonicalize().ok()?;
+    let ext_ok = canonical
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| SUBTITLE_FILE_EXTENSIONS.contains(&e.to_ascii_lowercase().as_str()));
+    let inside_root = roots
+        .iter()
+        .filter_map(|r| r.canonicalize().ok())
+        .any(|root| canonical.starts_with(root));
+    (ext_ok && inside_root && canonical.is_file()).then_some(canonical)
+}
 
 /// Helper to construct uniform failure response payloads.
 fn error_download_response(
@@ -62,32 +93,130 @@ pub fn extract_container_subtitle(
     SubtitleFile::parse(&raw).map_err(|e| format!("Failed to parse container subtitle: {:#}", e))
 }
 
+/// Request parameters for fetching a subtitle from an upstream remote relay endpoint.
+struct RemoteFetchRequest<'a> {
+    pub remote_url: &'a str,
+    pub candidate_id: &'a str,
+    pub clean_hash: &'a str,
+    pub is_cas_hash: bool,
+}
+
+/// Fetches and caches a subtitle from an upstream remote relay server.
+///
+/// # Arguments
+/// * `state` - Application state containing client configuration and cache.
+/// * `req` - Request parameters targeting the remote subtitle.
+///
+/// # Returns
+/// `Option<SubtitleFile>` containing parsed subtitle on success, or `None` on network/parsing error.
+///
+/// # Errors
+/// Non-blocking, returns `None` and records structured logs on connection or parsing failure.
+///
+/// # Panics
+/// Never panics under any execution condition.
+///
+/// # Data Flow & Invariants
+/// Dispatches authenticated HTTP GET to `/v1/subtitles/{id}` on the upstream relay.
+/// On successful HTTP 200 response, caches the raw `.srt` bytes locally under `<cas hash>.srt`
+/// (or `<content digest>.srt` for non-CAS ids).
+async fn fetch_remote_cas_subtitle(
+    state: &AppState,
+    req: RemoteFetchRequest<'_>,
+) -> Option<SubtitleFile> {
+    let fetch_target = if req.is_cas_hash {
+        req.clean_hash.to_string()
+    } else {
+        Path::new(req.candidate_id)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(req.candidate_id)
+            .to_string()
+    };
+
+    let url = format!(
+        "{}/v1/subtitles/{}",
+        req.remote_url.trim_end_matches('/'),
+        fetch_target
+    );
+    state.push_log(
+        "REMOTE_CAS",
+        "INFO",
+        format!("Fetching subtitle from remote Subtitle Service: {}", url),
+    );
+
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_millis(
+            crate::constants::DEFAULT_RELAY_CONNECT_TIMEOUT_MS,
+        ))
+        .timeout(std::time::Duration::from_millis(
+            crate::constants::DEFAULT_DOWNLOAD_RELAY_TIMEOUT_MS,
+        ))
+        .build()
+        .unwrap_or_default();
+
+    let mut req_builder = client.get(&url);
+    if let Some(ref api_key) = state.remote_api_key {
+        req_builder = req_builder.header("X-API-Key", api_key);
+    }
+
+    let resp = req_builder.send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let bytes = resp.bytes().await.ok()?;
+    match SubtitleFile::from_bytes(&bytes) {
+        Ok(s) => {
+            let cache_dir = state.cache.base_dir();
+            let _ = std::fs::create_dir_all(cache_dir);
+            // Non-CAS ids are client paths: never use them as file names (path traversal).
+            let cache_name = if req.is_cas_hash {
+                req.clean_hash.to_string()
+            } else {
+                compute_bytes_digest_32(&bytes)
+            };
+            let cache_file = cache_dir.join(format!("{cache_name}.srt"));
+            let _ = std::fs::write(&cache_file, &bytes);
+            Some(s)
+        }
+        Err(e) => {
+            state.push_log(
+                "REMOTE_CAS",
+                "ERROR",
+                format!("Failed to parse remote subtitle content: {:#}", e),
+            );
+            None
+        }
+    }
+}
+
 /// Resolves a subtitle by CAS SHA256 digest or filesystem path across local registry and remote relay.
 ///
 /// # Arguments
 /// * `state` - Application state with registry, cache, and optional remote relay configuration.
-/// * `candidate_id` - CAS hash or filesystem path of candidate.
-/// * `subtitles_dir` - Directory containing reference subtitles.
+/// * `candidate_id` - Identifier which may be a CAS SHA256 digest or local filesystem path.
+/// * `search_dirs` - Allowed subtitle dirs; the first one resolves relative registry paths.
 ///
 /// # Returns
-/// * `Result<SubtitleFile, String>` - Resolved subtitle file or descriptive error.
+/// `Ok(SubtitleFile)` containing verified subtitle cues, or `Err(String)` describing lookup failure.
 ///
 /// # Errors
-/// * Returns `Err` if subtitle file cannot be located or downloaded.
+/// Returns error if file cannot be found in local registry, remote relay, or local filesystem.
 ///
 /// # Panics
-/// * Guarantee: Never panics.
+/// Never panics under any execution condition.
 ///
 /// # Data Flow & Invariants
 /// 1. Detects whether `candidate_id` is a CAS SHA256 identifier (`sub:sha256:` / `sha256:`).
-/// 2. If non-CAS, attempts direct local filesystem open.
+/// 2. If non-CAS, opens the path only after `resolve_allowed_subtitle_path` containment checks.
 /// 3. If CAS, queries in-memory `CouplingRegistry` for certified couplings and opens file.
 /// 4. If still unresolved and `remote_api` is configured, queries remote `/v1/subtitles/{hash}` and caches result.
-/// 5. As last fallback, tries opening `candidate_id` as direct filesystem path.
+/// 5. Non-CAS paths are only opened when they resolve to a subtitle file inside the search
+///    directories (`collect_subtitle_search_dirs`) or the cache dir; CAS ids must be hex.
 pub async fn fetch_cas_or_catalog_subtitle(
     state: &AppState,
     candidate_id: &str,
-    subtitles_dir: &Path,
+    search_dirs: &[PathBuf],
 ) -> Result<SubtitleFile, String> {
     let is_cas_hash =
         candidate_id.starts_with("sub:sha256:") || candidate_id.starts_with("sha256:");
@@ -95,103 +224,64 @@ pub async fn fetch_cas_or_catalog_subtitle(
         .trim_start_matches("sub:sha256:")
         .trim_start_matches("sha256:")
         .trim();
-
-    let mut fetched_file: Option<SubtitleFile> = None;
-
-    if !is_cas_hash {
-        let local_path = PathBuf::from(candidate_id);
-        if local_path.exists() {
-            if let Ok(s) = SubtitleFile::open(&local_path) {
-                fetched_file = Some(s);
-            }
-        }
-    } else if let Ok(reg) = state.coupling_registry.read() {
-        if let Some((_coupling, sub)) = reg.find_subtitle_by_hash(clean_hash) {
-            let p = if Path::new(&sub.srt_path).is_absolute() || Path::new(&sub.srt_path).exists() {
-                PathBuf::from(&sub.srt_path)
-            } else {
-                subtitles_dir.join(&sub.srt_path)
-            };
-            if p.exists() {
-                if let Ok(s) = SubtitleFile::open(&p) {
-                    fetched_file = Some(s);
-                }
-            }
-        }
+    if is_cas_hash && !is_valid_cas_hash(clean_hash) {
+        return Err(format!("Invalid CAS subtitle hash '{}'", clean_hash));
     }
 
-    if fetched_file.is_none() && state.remote_api.is_some() {
-        if let Some(ref remote_url) = state.remote_api {
-            let fetch_target = if is_cas_hash {
-                clean_hash.to_string()
-            } else {
-                Path::new(candidate_id)
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or(candidate_id)
-                    .to_string()
-            };
-
-            let url = format!(
-                "{}/v1/subtitles/{}",
-                remote_url.trim_end_matches('/'),
-                fetch_target
-            );
-            state.push_log(
-                "REMOTE_CAS",
-                "INFO",
-                format!("Fetching subtitle from remote Subtitle Service: {}", url),
-            );
-
-            let client = reqwest::Client::builder()
-                .connect_timeout(std::time::Duration::from_millis(
-                    crate::constants::DEFAULT_RELAY_CONNECT_TIMEOUT_MS,
-                ))
-                .timeout(std::time::Duration::from_millis(
-                    crate::constants::DEFAULT_DOWNLOAD_RELAY_TIMEOUT_MS,
-                ))
-                .build()
-                .unwrap_or_default();
-
-            if let Ok(resp) = client.get(&url).send().await {
-                if resp.status().is_success() {
-                    if let Ok(bytes) = resp.bytes().await {
-                        match SubtitleFile::from_bytes(&bytes) {
-                            Ok(s) => {
-                                fetched_file = Some(s);
-                                let cache_dir = state.cache.base_dir();
-                                let _ = std::fs::create_dir_all(cache_dir);
-                                let cache_file = cache_dir.join(format!("{}.srt", clean_hash));
-                                let _ = std::fs::write(&cache_file, &bytes);
-                            }
-                            Err(e) => {
-                                state.push_log(
-                                    "REMOTE_CAS",
-                                    "ERROR",
-                                    format!("Failed to parse remote subtitle content: {:#}", e),
-                                );
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
+    let mut local_error: Option<String> = None;
+    let mut fetched_file = if is_cas_hash {
+        let primary_dir = search_dirs.first().map_or(Path::new("."), PathBuf::as_path);
+        open_registry_subtitle(state, clean_hash, primary_dir)
+    } else {
+        let mut roots = search_dirs.to_vec();
+        roots.push(state.cache.base_dir().to_path_buf());
+        open_contained_subtitle(candidate_id, &roots)
+            .map_err(|e| local_error = Some(e))
+            .ok()
+    };
 
     if fetched_file.is_none() {
-        let path = PathBuf::from(candidate_id);
-        match SubtitleFile::open(&path) {
-            Ok(s) => fetched_file = Some(s),
-            Err(e) => {
-                return Err(format!(
-                    "Failed to resolve subtitle (CAS hash '{}'): {:#}",
-                    clean_hash, e
-                ));
-            }
+        if let Some(ref remote_url) = state.remote_api {
+            fetched_file = fetch_remote_cas_subtitle(
+                state,
+                RemoteFetchRequest {
+                    remote_url,
+                    candidate_id,
+                    clean_hash,
+                    is_cas_hash,
+                },
+            )
+            .await;
         }
     }
 
-    fetched_file.ok_or_else(|| format!("Subtitle not found for '{}'", clean_hash))
+    fetched_file.ok_or_else(|| match local_error {
+        Some(e) => format!("Failed to resolve subtitle '{}': {}", clean_hash, e),
+        None => format!("Subtitle not found for '{}'", clean_hash),
+    })
+}
+
+/// Opens a client-supplied catalog subtitle path after `resolve_allowed_subtitle_path` checks.
+fn open_contained_subtitle(candidate_id: &str, roots: &[PathBuf]) -> Result<SubtitleFile, String> {
+    let path = resolve_allowed_subtitle_path(Path::new(candidate_id), roots)
+        .ok_or("path is not a subtitle file inside an allowed directory")?;
+    SubtitleFile::open(&path).map_err(|e| format!("{:#}", e))
+}
+
+/// Opens the subtitle registered under a CAS hash in the in-memory coupling registry.
+fn open_registry_subtitle(
+    state: &AppState,
+    clean_hash: &str,
+    subtitles_dir: &Path,
+) -> Option<SubtitleFile> {
+    let reg = state.coupling_registry.read().ok()?;
+    let (_coupling, sub) = reg.find_subtitle_by_hash(clean_hash)?;
+    let p = if Path::new(&sub.srt_path).is_absolute() || Path::new(&sub.srt_path).exists() {
+        PathBuf::from(&sub.srt_path)
+    } else {
+        subtitles_dir.join(&sub.srt_path)
+    };
+    SubtitleFile::open(&p).ok()
 }
 
 /// Fetches a subtitle from OpenSubtitles provider with local caching.
@@ -279,7 +369,7 @@ pub async fn resolve_subtitle_content(
             let s = fetch_cas_or_catalog_subtitle(
                 state,
                 candidate_id.unwrap_or_default(),
-                subtitles_dir,
+                &collect_subtitle_search_dirs(subtitles_dir, media_path, true),
             )
             .await?;
             Ok((s, source.as_str().to_string()))
@@ -489,6 +579,14 @@ pub async fn download_handler(
     let override_phash_dir = payload.phash_dir.as_deref().map(PathBuf::from);
     let phash_dirs = state.effective_phash_dirs(override_phash_dir.as_deref());
 
+    if !is_safe_language_token(&payload.language) {
+        return error_download_response(
+            payload.source,
+            payload.language.clone(),
+            format!("Invalid language code: {:?}", payload.language),
+        );
+    }
+
     let parsed_source = match payload.source.parse::<SubtitleSource>() {
         Ok(s) => s,
         Err(other) => {
@@ -674,10 +772,13 @@ mod tests {
         let _ = std::fs::copy(&video_fixture, &tmp_media);
         let state = test_app_state();
         let tmp_out = std::env::temp_dir();
+        // Catalog paths must live inside the declared subtitle dirs.
+        let tmp_srt = tmp_out.join(format!("test_shift_sub_{}.srt", std::process::id()));
+        let _ = std::fs::copy(&srt_fixture, &tmp_srt);
         let req = DownloadSubtitleRequest {
             media_path: tmp_media.to_string_lossy().to_string(),
             source: "catalog".to_string(),
-            candidate_id: Some(srt_fixture.to_string_lossy().to_string()),
+            candidate_id: Some(tmp_srt.to_string_lossy().to_string()),
             language: "en".to_string(),
             resync: false,
             shift_ms: Some(1500.0),
@@ -692,6 +793,7 @@ mod tests {
             let _ = std::fs::remove_file(out_file);
         }
         let _ = std::fs::remove_file(tmp_media);
+        let _ = std::fs::remove_file(tmp_srt);
     }
 
     #[tokio::test]
@@ -709,10 +811,12 @@ mod tests {
         let _ = std::fs::copy(&video_fixture, &tmp_media);
         let state = test_app_state();
         let tmp_out = std::env::temp_dir();
+        let tmp_srt = tmp_out.join(format!("test_resync_sub_{}.srt", std::process::id()));
+        let _ = std::fs::copy(&srt_fixture, &tmp_srt);
         let req = DownloadSubtitleRequest {
             media_path: tmp_media.to_string_lossy().to_string(),
             source: "certified".to_string(),
-            candidate_id: Some(srt_fixture.to_string_lossy().to_string()),
+            candidate_id: Some(tmp_srt.to_string_lossy().to_string()),
             language: "en".to_string(),
             resync: true,
             shift_ms: None,
@@ -726,5 +830,106 @@ mod tests {
             let _ = std::fs::remove_file(out_file);
         }
         let _ = std::fs::remove_file(tmp_media);
+        let _ = std::fs::remove_file(tmp_srt);
+    }
+
+    #[tokio::test]
+    async fn test_download_rejects_path_like_language() {
+        let state = test_app_state();
+        let req = DownloadSubtitleRequest {
+            media_path: "video.mkv".to_string(),
+            source: "catalog".to_string(),
+            candidate_id: None,
+            language: "../../evil".to_string(),
+            resync: false,
+            shift_ms: None,
+            subtitles_dir: None,
+            phash_dir: None,
+        };
+        let res = download_handler(State(state), Json(req)).await;
+        assert!(!res.0.success);
+        assert!(res.0.error.unwrap().contains("Invalid language code"));
+    }
+
+    #[test]
+    fn test_is_valid_cas_hash() {
+        assert!(is_valid_cas_hash("0123abcdEF"));
+        assert!(is_valid_cas_hash(&"a".repeat(MAX_CAS_HASH_HEX_LEN)));
+        assert!(!is_valid_cas_hash(""));
+        assert!(!is_valid_cas_hash(&"a".repeat(MAX_CAS_HASH_HEX_LEN + 1)));
+        assert!(!is_valid_cas_hash("../../etc/passwd"));
+        assert!(!is_valid_cas_hash("/abs/path"));
+    }
+
+    #[test]
+    fn test_resolve_allowed_subtitle_path_blocks_escape() {
+        let root = std::env::temp_dir().join(format!("dbsrt_sub_root_{}", std::process::id()));
+        let nested = root.join("SRT");
+        std::fs::create_dir_all(&nested).unwrap();
+        let inside = nested.join("movie.en.srt");
+        let not_sub = nested.join("notes.txt");
+        let outside =
+            std::env::temp_dir().join(format!("dbsrt_outside_{}.srt", std::process::id()));
+        for p in [&inside, &not_sub, &outside] {
+            std::fs::write(p, "1\n00:00:01,000 --> 00:00:02,000\nhi\n").unwrap();
+        }
+        let roots = vec![root.clone()];
+
+        assert!(resolve_allowed_subtitle_path(&inside, &roots).is_some());
+        // Relative traversal and absolute paths outside the roots are refused.
+        let traversal = nested
+            .join("..")
+            .join("..")
+            .join(outside.file_name().unwrap());
+        assert!(resolve_allowed_subtitle_path(&traversal, &roots).is_none());
+        assert!(resolve_allowed_subtitle_path(&outside, &roots).is_none());
+        // Non-subtitle files inside a root are refused too.
+        assert!(resolve_allowed_subtitle_path(&not_sub, &roots).is_none());
+
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_file(&outside);
+    }
+
+    #[tokio::test]
+    async fn test_download_catalog_rejects_path_outside_roots() {
+        let state = test_app_state();
+        let outside = std::env::temp_dir().join(format!("dbsrt_escape_{}.srt", std::process::id()));
+        std::fs::write(&outside, "1\n00:00:01,000 --> 00:00:02,000\nhi\n").unwrap();
+        let empty_root =
+            std::env::temp_dir().join(format!("dbsrt_empty_root_{}", std::process::id()));
+        std::fs::create_dir_all(&empty_root).unwrap();
+        let req = DownloadSubtitleRequest {
+            media_path: "nonexistent_dir/video.mkv".to_string(),
+            source: "catalog".to_string(),
+            candidate_id: Some(outside.to_string_lossy().to_string()),
+            language: "en".to_string(),
+            resync: false,
+            shift_ms: None,
+            subtitles_dir: Some(empty_root.to_string_lossy().to_string()),
+            phash_dir: None,
+        };
+        let res = download_handler(State(state), Json(req)).await;
+        assert!(!res.0.success);
+        assert!(res.0.error.unwrap().contains("allowed directory"));
+        let _ = std::fs::remove_file(&outside);
+        let _ = std::fs::remove_dir_all(&empty_root);
+    }
+
+    #[tokio::test]
+    async fn test_download_certified_rejects_non_hex_cas_id() {
+        let state = test_app_state();
+        let req = DownloadSubtitleRequest {
+            media_path: "video.mkv".to_string(),
+            source: "certified".to_string(),
+            candidate_id: Some("sha256:../../etc/passwd".to_string()),
+            language: "en".to_string(),
+            resync: false,
+            shift_ms: None,
+            subtitles_dir: None,
+            phash_dir: None,
+        };
+        let res = download_handler(State(state), Json(req)).await;
+        assert!(!res.0.success);
+        assert!(res.0.error.unwrap().contains("Invalid CAS subtitle hash"));
     }
 }

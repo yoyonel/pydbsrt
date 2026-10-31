@@ -1,0 +1,56 @@
+# syntax=docker/dockerfile:1
+# Multi-stage Dockerfile for dbsrt CLI & Standalone Server ARM64 (Debian Bullseye GLIBC 2.31 parity)
+
+# Stage 1: Fast cross-compilation on host architecture using Debian Bullseye toolchain
+FROM --platform=$BUILDPLATFORM rust:slim-bullseye AS builder
+
+WORKDIR /src
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc-aarch64-linux-gnu \
+    libc6-dev-arm64-cross \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN rustup target add aarch64-unknown-linux-gnu
+
+# Copy workspace dependency declarations and source trees
+COPY Cargo.toml Cargo.lock ./
+COPY crates/dbsrt-core crates/dbsrt-core
+COPY crates/dbsrt-index crates/dbsrt-index
+COPY crates/dbsrt-cli crates/dbsrt-cli
+COPY crates/dbsrt-server crates/dbsrt-server
+
+# .git is excluded from the build context: version metadata comes from build args
+# (DBSRT_GIT_HASH, DBSRT_BUILD_DATE or SOURCE_DATE_EPOCH); empty values render as "unknown".
+ARG DBSRT_GIT_HASH=""
+ARG DBSRT_BUILD_DATE=""
+ARG SOURCE_DATE_EPOCH=""
+ENV CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \
+    DBSRT_GIT_HASH=${DBSRT_GIT_HASH} \
+    DBSRT_BUILD_DATE=${DBSRT_BUILD_DATE} \
+    SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/src/target \
+    cargo build --release --target aarch64-unknown-linux-gnu --bin dbsrt --bin dbsrt-server \
+    && mkdir -p /out \
+    && cp /src/target/aarch64-unknown-linux-gnu/release/dbsrt /out/dbsrt \
+    && cp /src/target/aarch64-unknown-linux-gnu/release/dbsrt-server /out/dbsrt-server
+
+# Stage 2: Minimal ARM64 runtime image for validation on Raspberry Pi 4 environment
+FROM --platform=linux/arm64 debian:bullseye-slim AS tester
+
+WORKDIR /app
+
+COPY --from=builder /out/dbsrt /usr/local/bin/dbsrt
+COPY --from=builder /out/dbsrt-server /usr/local/bin/dbsrt-server
+
+# Validate binaries run on ARM64 Bullseye with GLIBC 2.31
+RUN chmod +x /usr/local/bin/dbsrt /usr/local/bin/dbsrt-server \
+    && /usr/local/bin/dbsrt --version \
+    && /usr/local/bin/dbsrt --help \
+    && /usr/local/bin/dbsrt-server --version \
+    && /usr/local/bin/dbsrt-server --help
+
+ENTRYPOINT ["/usr/local/bin/dbsrt"]
+CMD ["--help"]

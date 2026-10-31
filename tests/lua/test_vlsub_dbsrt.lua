@@ -372,6 +372,85 @@ local function test_download_selection_with_special_characters()
     print("  [11/11] test_download_selection_with_special_characters: PASSED")
 end
 
+local function test_remote_relay_source_display()
+    activate()
+
+    local sample_json = [[{
+        "matched_media": "Beacon 23",
+        "total_candidates": 1,
+        "matching_tier": "Remote Relay (Tier 1 (RAM .dbphash MIH) via https://relay.example.invalid/dbsrt)",
+        "candidates": [
+            {
+                "source": "catalog",
+                "language": "fr",
+                "title": "Beacon.23.S01E01.fr.srt",
+                "candidate_id": "data/SRT/Beacon.23.S01E01.fr.srt",
+                "shift_ms": 0.0,
+                "score": 1.0
+            }
+        ]
+    }]]
+
+    local full_http = string.format("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s", string.len(sample_json), sample_json)
+    mock_tcp_responses = { full_http }
+
+    S.search_by_phash()
+
+    local mainlist = S.input_table["mainlist"]
+    assert_true(mainlist ~= nil, "Mainlist widget exists")
+    assert_eq(#mainlist._values, 1, "Mainlist populated with 1 item")
+    assert_true(mainlist._values[1]:find("%[CLOUD o2switch%]") ~= nil, "Mainlist displays '[CLOUD o2switch]' tag")
+
+    local msg = S.input_table["message"]
+    assert_true(msg ~= nil, "Message widget exists")
+    assert_true(msg._text:find("%[CLOUD o2switch%] MATCH") ~= nil, "Status message displays '[CLOUD o2switch] MATCH'")
+
+    -- Test download selection displays cloud source
+    mainlist._selection = { [1] = mainlist._values[1] }
+    local download_resp = [[{
+        "success": true,
+        "output_srt_path": "/media/Beacon.23.S01E01.fr.srt",
+        "shift_ms": 0.0
+    }]]
+    local dl_http = string.format("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s", string.len(download_resp), download_resp)
+    mock_tcp_responses = { dl_http }
+
+    S.download_selection()
+    assert_true(msg._text:find("%[CLOUD o2switch%] Subtitles loaded") ~= nil, "Loaded message contains '[CLOUD o2switch]'")
+    print("  [12/12] test_remote_relay_source_display: PASSED")
+end
+
+local function test_fallback_reference_label_from_title_query()
+    activate()
+
+    S.input_table["title"]:set_text("Maniac")
+    local sample_json = [[{
+        "matched_media": null,
+        "total_candidates": 1,
+        "matching_tier": null,
+        "candidates": [
+            {
+                "source": "catalog",
+                "language": "fr",
+                "title": "Maniac.S01E01.fr.srt",
+                "candidate_id": "data/SRT/Maniac.S01E01.fr.srt",
+                "shift_ms": 0.0,
+                "score": 1.0
+            }
+        ]
+    }]]
+
+    local full_http = string.format("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s", string.len(sample_json), sample_json)
+    mock_tcp_responses = { full_http }
+
+    S.search_by_phash()
+
+    local msg = S.input_table["message"]
+    assert_true(msg ~= nil, "Message widget exists")
+    assert_true(msg._text:find("ref: Maniac") ~= nil, "Status message falls back to title_query 'Maniac' when matched_media is null")
+    print("  [13/13] test_fallback_reference_label_from_title_query: PASSED")
+end
+
 -- Run all unit tests
 test_descriptor()
 test_parse_url()
@@ -384,5 +463,7 @@ test_offline_daemon_fails_gracefully()
 test_json_escape_special_characters_and_unicode_nfd()
 test_search_with_quotes_and_special_paths()
 test_download_selection_with_special_characters()
+test_remote_relay_source_display()
+test_fallback_reference_label_from_title_query()
 
 print(string.format("=== All %d VLC Lua Plugin Unit Tests PASSED (100%%) ===", tests_passed))

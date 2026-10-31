@@ -201,3 +201,97 @@ async fn test_dual_process_remote_relay_e2e() {
     assert_eq!(remote_m.total_requests, 3); // 1 recognize + 1 test CAS fetch + 1 agent CAS fetch during download
     assert_eq!(remote_m.recognize_requests, 1);
 }
+
+#[tokio::test]
+async fn test_remote_relay_api_key_header_forwarding() {
+    use axum::extract::Request;
+    use axum::response::IntoResponse;
+    use axum::routing::post;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let api_key_received = Arc::new(AtomicBool::new(false));
+    let flag_clone = api_key_received.clone();
+
+    // Mock remote server asserting presence of X-API-Key
+    let mock_remote = axum::Router::new().route(
+        "/v1/recognize",
+        post(move |req: Request| async move {
+            if let Some(val) = req.headers().get("X-API-Key") {
+                if val == "secret-test-key-256" {
+                    flag_clone.store(true, Ordering::SeqCst);
+                }
+            }
+            axum::Json(dbsrt_server::RecognizeResponse {
+                found: false,
+                media_name_search: "mock".to_string(),
+                media_match: None,
+                season: None,
+                episode: None,
+                nb_offsets_match: 0,
+                confidence: 0.0,
+                tier: Some("Mock Tier".to_string()),
+                shift_frames: Some(0),
+                shift_ms: Some(0.0),
+                candidates: Some(vec![]),
+                timer_seconds: 0.001,
+            })
+            .into_response()
+        }),
+    );
+
+    let remote_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let remote_addr = remote_listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(remote_listener, mock_remote).await.unwrap();
+    });
+
+    // Local agent configured with remote_api and remote_api_key
+    let mut local_state = AppState::new(
+        std::env::temp_dir(),
+        std::env::temp_dir(),
+        Arc::new(OpenSubtitlesProvider::new(None)),
+        SubtitleCache::default(),
+    );
+    local_state.remote_api = Some(format!("http://{}", remote_addr));
+    local_state.remote_api_key = Some("secret-test-key-256".to_string());
+    local_state.is_agent = true;
+
+    let local_app = create_router_with_state(local_state);
+    let local_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let local_addr = local_listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(local_listener, local_app).await.unwrap();
+    });
+
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let repo_root = manifest_dir.parent().unwrap().parent().unwrap();
+    let snippet_video = repo_root.join("data/snippets/Andor.S01E01.1080p.WEB.h264-KOGi_mid15s.mp4");
+    if !snippet_video.exists() {
+        return;
+    }
+
+    let client = reqwest::Client::new();
+    let req = SearchSubtitlesRequest {
+        media_path: snippet_video.to_string_lossy().to_string(),
+        language: "fr".to_string(),
+        search_mode: Some("phash".to_string()),
+        query_title: Some("Test".to_string()),
+        season: None,
+        episode: None,
+        subtitles_dir: None,
+        phash_dir: None,
+        index_engine: None,
+    };
+
+    let _ = client
+        .post(format!("http://{}/v1/search", local_addr))
+        .json(&req)
+        .send()
+        .await;
+
+    // Verify mock server received the header
+    assert!(
+        api_key_received.load(Ordering::SeqCst),
+        "Expected remote server to receive 'X-API-Key: secret-test-key-256'"
+    );
+}

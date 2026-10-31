@@ -1,6 +1,7 @@
 """Unit and integration tests for batch_media_add_tvshow script."""
 
 import json
+import sys
 import tempfile
 from pathlib import Path
 
@@ -100,11 +101,10 @@ def test_cli_targets_file_dry_run_execution():
         targets_json.write_text(json.dumps([str(v1), str(v2)]), encoding="utf-8")
         report_md = tmp_path / "report.md"
 
+        # Run from tmp_path: the script writes data/reports/selected_batch_targets.json relative to cwd
         cmd = [
-            "uv",
-            "run",
-            "python",
-            "scripts/batch_media_add_tvshow.py",
+            sys.executable,
+            str(Path(__file__).resolve().parents[2] / "scripts" / "batch_media_add_tvshow.py"),
             "--targets-file",
             str(targets_json),
             "--report-path",
@@ -113,7 +113,8 @@ def test_cli_targets_file_dry_run_execution():
             "--workers",
             "2",
         ]
-        res = subprocess.run(cmd, capture_output=True, text=True)
+        res = subprocess.run(cmd, capture_output=True, text=True, cwd=tmp_path)
         assert res.returncode == 0
+        assert (tmp_path / "data" / "reports" / "selected_batch_targets.json").exists()
         assert "Discovered 2 candidate video(s) for direct processing." in res.stdout
         assert report_md.exists()

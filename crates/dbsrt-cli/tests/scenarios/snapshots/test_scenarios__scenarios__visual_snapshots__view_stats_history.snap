@@ -2,10 +2,11 @@
 source: crates/dbsrt-cli/tests/scenarios/visual_snapshots.rs
 expression: grid
 ---
-┌ pydbsrt top ── Moniteur de Décodage pHash & Ingestion Temps Réel ────────────────────────────────────────────────────────────────────────┐
-│ ⏱️   HH:MM:SS │ Workers Actifs: 2 │ Host CPU: 18% │ RAM:  8.4/31.0 GiB                                                                    │
-│ 🎮  GPU INTEL IRIS XE : Non disponible (Mode CPU Multithread)                                                                             │
-│ ⚡  DÉBITS RÉSEAU CIFS : Instantané:   0.0 MB/s (Net RX:   0.0 MB/s, VFS:   0.0 MB/s)                                                     │
+┌ pydbsrt top unknown ── Moniteur de Décodage pHash & Ingestion Temps Réel ────────────────────────────────────────────────── ⏱️   HH:MM:SS ┐
+│ 🖥️   HÔTE      │ unknown (unknown unknown) │ Workers: 2 actifs │ Host CPU: 18% │ RAM:  8.4/31.0 GiB (27%)                                 │
+│ ⚙️   MOTEURS   │ CPU: unknown (0 c.) │ GPU: unknown (Mode CPU Multithread)                                                                │
+│ ⚡  FLUX REEL  │ Réseau Net RX:   0.0 MB/s (  0.0 Mbps)  ──►  Pipe pHash:   0.0 MB/s                                                      │
+│ 📈  CUMUL SESS │ 0.0 MB traités en 0s (En attente de flux...)                                                                             │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ┌ 📊  HISTORIQUE & STATISTIQUES RÉELLES (DÉCODAGE INTÉGRAL PHASH - 0 MÉDIAS) ───────────────────────────────────────────────────────────────┐
 │Dimension Analysée               Min          Médiane      Moyenne      P90 (90e pct)   Max          Écart-type (σ)                       │
@@ -17,7 +18,7 @@ expression: grid
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ┌ Paramètres de Métrologie & Échantillonnage ──────────────────────────────────────────────────────────────────────────────────────────────┐
 │                                                                                                                                          │
-│  • Population Échantillonnée : 0 médias décodés intégralement (durée > 60s)                                                              │
+│  • Population Échantillonnée : 0 médias décodés intégralement (durée > 1s)                                                               │
 │  • Sources Données           : data/reports/batch_tvshow_nightly.jsonl & data/SRT/couplings.json                                         │
 │  • Raccourcis Disponibles    : [1] Tâches en cours  [2/h] Statistiques  [3/r] Récents certifiés  [Esc] Retour aux Tâches                 │
 │                                                                                                                                          │
@@ -28,7 +29,6 @@ expression: grid
 │                                                                                                                                          │
 │                                                                                                                                          │
 │                                                                                                                                          │
-│                                                                                                                                          │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 
-  [1] Tâches   [2/h] Stats   [3/r] Récents   [4/m] Médias   [5/s] Sources  │ [↑/k] Défiler  [?] Aide  [q] Quitter
+  [1] Tâches   [2/h] Stats   [3/r] Récents   [4/m] Médias   [5/s] Sources   [6/y] Système  │ [↑/k] Défiler  [?] Aide  [q] Quitter
