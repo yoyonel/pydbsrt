@@ -76,6 +76,30 @@ pub async fn bind_listener(
     }
 }
 
+/// Binds a Unix socket listener (mode 0600), replacing a stale socket left by a killed daemon.
+///
+/// Refuses to steal a socket a live daemon still answers on, and never removes a path that is
+/// not a socket.
+#[cfg(unix)]
+pub fn bind_unix_listener(path: &std::path::Path) -> Result<tokio::net::UnixListener> {
+    use std::os::unix::fs::{FileTypeExt, PermissionsExt};
+
+    if let Ok(meta) = std::fs::symlink_metadata(path) {
+        if !meta.file_type().is_socket() {
+            anyhow::bail!("Refusing to replace non-socket path {}", path.display());
+        }
+        if std::os::unix::net::UnixStream::connect(path).is_ok() {
+            anyhow::bail!("A dbsrt-server already listens on {}", path.display());
+        }
+        std::fs::remove_file(path)
+            .with_context(|| format!("Failed to remove stale socket {}", path.display()))?;
+    }
+    let listener = tokio::net::UnixListener::bind(path)
+        .with_context(|| format!("Failed to bind Unix socket {}", path.display()))?;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+    Ok(listener)
+}
+
 pub fn create_router(phash_dir: PathBuf, subtitles_dir: PathBuf) -> Router {
     create_router_with_state(AppState::new(
         phash_dir,
@@ -255,6 +279,39 @@ mod tests {
         assert_eq!(addr.ip().to_string(), "127.0.0.1");
         assert!(addr.port() > 0);
         drop(listener);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_bind_unix_listener_cases() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = std::env::temp_dir().join(format!("dbsrt_uds_test_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // Fresh path: bound with owner-only permissions
+        let fresh = dir.join("fresh.sock");
+        let live = bind_unix_listener(&fresh).expect("bind fresh socket");
+        let mode = std::fs::metadata(&fresh).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+
+        // Live socket: refused, file kept
+        assert!(bind_unix_listener(&fresh).is_err());
+        assert!(fresh.exists());
+
+        // Stale socket (listener gone, file left behind): replaced
+        drop(live);
+        assert!(fresh.exists());
+        let rebound = bind_unix_listener(&fresh).expect("rebind stale socket");
+        drop(rebound);
+
+        // Regular file at the path: refused and left untouched
+        let regular = dir.join("not_a_socket");
+        std::fs::write(&regular, b"keep").unwrap();
+        assert!(bind_unix_listener(&regular).is_err());
+        assert_eq!(std::fs::read(&regular).unwrap(), b"keep");
+
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

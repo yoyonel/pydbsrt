@@ -5,7 +5,8 @@
  * for dbsrt-server on o2switch cPanel Cloud.
  *
  * Relays public HTTPS requests from Apache/LiteSpeed to the local Rust dbsrt-server daemon
- * listening on 127.0.0.1:8765 without requiring Apache mod_proxy privileges.
+ * listening on the Unix socket ~/dbsrt/run/dbsrt-server.sock without requiring Apache
+ * mod_proxy privileges (o2switch kills TCP listeners within seconds, not Unix sockets).
  * Automatically spawns the daemon if inactive or harvested by CloudLinux.
  * Provides mobile-friendly login interface, rate-limiting brute-force defense,
  * and timing-safe authentication for remote monitoring over 4G/5G mobile.
@@ -14,8 +15,8 @@
 declare(strict_types=1);
 
 // Operational configuration constants
-const UPSTREAM_HOST = 'http://127.0.0.1';
-const UPSTREAM_PORT = 8765;
+const UPSTREAM_BASE_URL = 'http://localhost';
+const UPSTREAM_SOCKET_REL_PATH = '/dbsrt/run/dbsrt-server.sock';
 const CONNECT_TIMEOUT_SECONDS = 2;
 const EXEC_TIMEOUT_SECONDS = 30;
 const SPAWN_MAX_RETRIES = 6;
@@ -201,9 +202,10 @@ function is_authenticated(array $validKeys, string &$matchedKey = ''): bool
     return false;
 }
 
-function is_daemon_healthy(int $connectTimeoutMs, int $timeoutMs): bool
+function is_daemon_healthy(string $homeDir, int $connectTimeoutMs, int $timeoutMs): bool
 {
-    $ch = curl_init(sprintf('%s:%d/v1/health', UPSTREAM_HOST, UPSTREAM_PORT));
+    $ch = curl_init(UPSTREAM_BASE_URL . '/v1/health');
+    curl_setopt($ch, CURLOPT_UNIX_SOCKET_PATH, $homeDir . UPSTREAM_SOCKET_REL_PATH);
     curl_setopt($ch, CURLOPT_CONNECTTIMEOUT_MS, $connectTimeoutMs);
     curl_setopt($ch, CURLOPT_TIMEOUT_MS, $timeoutMs);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
@@ -225,7 +227,7 @@ function spawn_daemon(string $homeDir): bool
     }
 
     try {
-        if (is_daemon_healthy(1500, 2000)) {
+        if (is_daemon_healthy($homeDir, 1500, 2000)) {
             return true;
         }
 
@@ -237,12 +239,13 @@ function spawn_daemon(string $homeDir): bool
         $log = escapeshellarg($homeDir . '/dbsrt/logs/dbsrt-server.log');
 
         $keyFile = escapeshellarg($homeDir . SECRET_KEY_REL_PATH);
+        $socket = escapeshellarg($homeDir . UPSTREAM_SOCKET_REL_PATH);
 
         exec(sprintf(
-            'cd %s && setsid %s --host 127.0.0.1 --port %d --dbphash %s --subtitles-dir %s --phash-dir %s --api-key-file %s </dev/null >> %s 2>&1 &',
+            'cd %s && setsid %s --unix-socket %s --dbphash %s --subtitles-dir %s --phash-dir %s --api-key-file %s </dev/null >> %s 2>&1 &',
             $baseDir,
             $bin,
-            UPSTREAM_PORT,
+            $socket,
             $catalog,
             $srtDir,
             $phashDir,
@@ -252,7 +255,7 @@ function spawn_daemon(string $homeDir): bool
 
         for ($i = 0; $i < SPAWN_MAX_RETRIES; $i++) {
             usleep(SPAWN_RETRY_INTERVAL_MICROSECONDS);
-            if (is_daemon_healthy(1000, 1500)) {
+            if (is_daemon_healthy($homeDir, 1000, 1500)) {
                 return true;
             }
         }
@@ -471,7 +474,7 @@ if ($isReadOnly && (!in_array($method, ['GET', 'HEAD'], true) || !$readOnlyPathA
 }
 
 $upstreamQuery = $_SERVER['QUERY_STRING'] ?? '';
-$upstreamUrl = sprintf('%s:%d%s%s', UPSTREAM_HOST, UPSTREAM_PORT, $path, $upstreamQuery !== '' ? '?' . $upstreamQuery : '');
+$upstreamUrl = sprintf('%s%s%s', UPSTREAM_BASE_URL, $path, $upstreamQuery !== '' ? '?' . $upstreamQuery : '');
 
 // Forward request headers, minus hop-by-hop, client forwarding and client credential headers:
 // the upstream only ever sees the master key, so a read-only key cannot reach it directly
@@ -492,6 +495,7 @@ $forwardHeaders[] = sprintf('Authorization: Bearer %s', $masterKeys[0]);
 $requestBody = in_array($method, ['POST', 'PUT', 'PATCH'], true) ? file_get_contents('php://input') : false;
 
 $ch = curl_init($upstreamUrl);
+curl_setopt($ch, CURLOPT_UNIX_SOCKET_PATH, $homeDir . UPSTREAM_SOCKET_REL_PATH);
 curl_setopt($ch, CURLOPT_CUSTOMREQUEST, $method);
 curl_setopt($ch, CURLOPT_NOBODY, $method === 'HEAD');
 curl_setopt($ch, CURLOPT_HTTPHEADER, $forwardHeaders);

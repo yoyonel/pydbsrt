@@ -30,6 +30,11 @@ pub struct ServerCli {
     #[arg(short, long, env = "DBSRT_PORT", default_value_t = 8765)]
     pub port: u16,
 
+    /// Listen on this Unix socket instead of TCP host/port (env: DBSRT_UNIX_SOCKET).
+    /// Shared hosting (o2switch) kills TCP listeners within seconds but leaves Unix sockets alone.
+    #[arg(long, env = "DBSRT_UNIX_SOCKET")]
+    pub unix_socket: Option<PathBuf>,
+
     /// Default directory storing .phash files (env: DBSRT_PHASH_DIR)
     #[arg(long, env = "DBSRT_PHASH_DIR", default_value = "/tmp")]
     pub phash_dir: PathBuf,
@@ -108,18 +113,67 @@ impl ServerCli {
     }
 }
 
+enum BoundListener {
+    Tcp(tokio::net::TcpListener),
+    #[cfg(unix)]
+    Unix(tokio::net::UnixListener, PathBuf),
+}
+
+impl BoundListener {
+    async fn bind(cli: &ServerCli) -> Result<Self> {
+        match cli.unix_socket.clone() {
+            #[cfg(unix)]
+            Some(path) => {
+                let listener = dbsrt_server::bind_unix_listener(&path)?;
+                info!("dbsrt-server daemon listening on unix:{}", path.display());
+                Ok(Self::Unix(listener, path))
+            }
+            #[cfg(not(unix))]
+            Some(_) => anyhow::bail!("--unix-socket requires a Unix platform"),
+            None => {
+                let (listener, addr) = bind_listener(&cli.host, cli.port).await?;
+                info!("dbsrt-server daemon listening on http://{}", addr);
+
+                write_discovery_file(addr)?;
+                info!(
+                    "Published service discovery descriptor to {}",
+                    DISCOVERY_FILE
+                );
+                Ok(Self::Tcp(listener))
+            }
+        }
+    }
+
+    /// Serves until `shutdown`, then removes the discovery file (TCP) or the socket file (Unix).
+    async fn serve<F>(self, app: axum::Router, shutdown: F) -> std::io::Result<()>
+    where
+        F: std::future::Future<Output = ()> + Send + 'static,
+    {
+        match self {
+            Self::Tcp(listener) => {
+                let res = axum::serve(listener, app)
+                    .with_graceful_shutdown(shutdown)
+                    .await;
+                remove_discovery_file();
+                res
+            }
+            #[cfg(unix)]
+            Self::Unix(listener, path) => {
+                let res = axum::serve(listener, app)
+                    .with_graceful_shutdown(shutdown)
+                    .await;
+                let _ = std::fs::remove_file(&path);
+                res
+            }
+        }
+    }
+}
+
 pub async fn run_server_until<F>(cli: ServerCli, shutdown: F) -> Result<()>
 where
     F: std::future::Future<Output = ()> + Send + 'static,
 {
-    let (listener, addr) = bind_listener(&cli.host, cli.port).await?;
-    info!("dbsrt-server daemon listening on http://{}", addr);
-
-    write_discovery_file(addr)?;
-    info!(
-        "Published service discovery descriptor to {}",
-        DISCOVERY_FILE
-    );
+    let bound = BoundListener::bind(&cli).await?;
 
     let state = cli.into_app_state();
     let state_arc = Arc::new(state);
@@ -264,10 +318,7 @@ where
 
     let app = create_router_with_state((*state_arc).clone());
 
-    let server = axum::serve(listener, app).with_graceful_shutdown(shutdown);
-    let res = server.await;
-    remove_discovery_file();
-    res?;
+    bound.serve(app, shutdown).await?;
     Ok(())
 }
 
@@ -350,5 +401,47 @@ mod tests {
         }
 
         assert!(res.is_ok());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_server_unix_socket_lifecycle() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let sock = std::env::temp_dir().join(format!("dbsrt_srv_{}.sock", std::process::id()));
+        let cli = ServerCli::try_parse_from([
+            "dbsrt-server",
+            "--unix-socket",
+            sock.to_str().unwrap(),
+            "--phash-dir",
+            "/tmp/phash_primary",
+        ])
+        .expect("CLI must parse cleanly");
+
+        let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+        let server = tokio::spawn(run_server_until(cli, async {
+            let _ = stop_rx.await;
+        }));
+
+        let mut stream = None;
+        for _ in 0..100 {
+            if let Ok(s) = tokio::net::UnixStream::connect(&sock).await {
+                stream = Some(s);
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        let mut stream = stream.expect("server must listen on the Unix socket");
+        stream
+            .write_all(b"GET /v1/health HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
+            .await
+            .unwrap();
+        let mut response = String::new();
+        stream.read_to_string(&mut response).await.unwrap();
+        assert!(response.starts_with("HTTP/1.1 200"), "got: {response}");
+
+        stop_tx.send(()).unwrap();
+        server.await.unwrap().expect("server must stop cleanly");
+        assert!(!sock.exists(), "socket file must be removed on shutdown");
     }
 }

@@ -6,7 +6,7 @@ set -euo pipefail
 DEFAULT_O2SWITCH_HOST="o2switch"
 DEFAULT_REMOTE_BASE="dbsrt"
 DEFAULT_REMOTE_PUBLIC_HTML="public_html/dbsrt"
-DEFAULT_SERVER_PORT=8765
+DEFAULT_SERVER_SOCKET_REL="run/dbsrt-server.sock"
 DEFAULT_LOCAL_TEST_PORT=8769
 DEFAULT_HEALTHCHECK_MAX_RETRIES=20
 DEFAULT_HEALTHCHECK_SLEEP_SEC=0.5
@@ -45,8 +45,9 @@ API_KEY_PASS_ENTRY="${API_KEY_PASS_ENTRY:-${DEFAULT_API_KEY_PASS_ENTRY}}"
 READONLY_KEY_PASS_ENTRY="${READONLY_KEY_PASS_ENTRY:-${DEFAULT_READONLY_KEY_PASS_ENTRY}}"
 
 O2SWITCH_HOST="${O2SWITCH_HOST:-${DEFAULT_O2SWITCH_HOST}}"
-SERVER_PORT="${SERVER_PORT:-${DEFAULT_SERVER_PORT}}"
 REMOTE_BASE="${REMOTE_BASE:-${DEFAULT_REMOTE_BASE}}"
+# o2switch kills TCP listeners within seconds, not Unix sockets (path relative to the remote $HOME)
+SERVER_SOCKET="${SERVER_SOCKET:-${REMOTE_BASE}/${DEFAULT_SERVER_SOCKET_REL}}"
 REMOTE_PUBLIC_HTML="${REMOTE_PUBLIC_HTML:-${DEFAULT_REMOTE_PUBLIC_HTML}}"
 O2SWITCH_URL="${O2SWITCH_URL:-}"
 O2SWITCH_API_KEY="${O2SWITCH_API_KEY:-}"
@@ -267,8 +268,8 @@ case "${ACTION}" in
     check_ssh
     echo "=== Starting dbsrt-server daemon on ${O2SWITCH_HOST} ==="
     # shellcheck disable=SC2029
-    ssh "${O2SWITCH_HOST}" "bash -s -- '${SERVER_PORT}' '${REMOTE_BASE}'" <<'REMOTE_SCRIPT'
-PORT="$1"
+    ssh "${O2SWITCH_HOST}" "bash -s -- '${SERVER_SOCKET}' '${REMOTE_BASE}'" <<'REMOTE_SCRIPT'
+SOCKET="$1"
 BASE="$2"
 PID_FILE="${BASE}/run/dbsrt-server.pid"
 LOG_FILE="${BASE}/logs/dbsrt-server.log"
@@ -296,8 +297,7 @@ fi
 screen -X -S dbsrt_server quit 2>/dev/null || true
 
 screen -S dbsrt_server -d -m "${BIN}" \
-  --host 127.0.0.1 \
-  --port "${PORT}" \
+  --unix-socket "${SOCKET}" \
   --dbphash "${DATA_DIR}/catalog.dbphash" \
   --subtitles-dir "${DATA_DIR}/SRT" \
   --phash-dir "${BASE}/run/empty_phash" \
@@ -310,11 +310,11 @@ fi
 echo "✓ Started dbsrt-server (screen: dbsrt_server, PID: ${PID:-unknown})."
 REMOTE_SCRIPT
 
-    echo "Waiting for healthcheck on http://127.0.0.1:${SERVER_PORT}/v1/health via SSH..."
+    echo "Waiting for healthcheck on unix:${SERVER_SOCKET} via SSH..."
     HEALTHY=false
     for _ in $(seq 1 "${DEFAULT_HEALTHCHECK_MAX_RETRIES}"); do
       # shellcheck disable=SC2029
-      if ssh "${O2SWITCH_HOST}" "curl -s -f http://127.0.0.1:${SERVER_PORT}/v1/health" >/dev/null 2>&1; then
+      if ssh "${O2SWITCH_HOST}" "curl -s -f --unix-socket ${SERVER_SOCKET} http://localhost/v1/health" >/dev/null 2>&1; then
         HEALTHY=true
         break
       fi
@@ -368,9 +368,9 @@ FFMPEG="${BASE}/bin/ffmpeg"
 echo "ffmpeg: ${FFMPEG:-not found} ($("${FFMPEG:-false}" -version 2>/dev/null | head -1 || true))"
 REMOTE_SCRIPT
     echo ""
-    echo "=== Remote API Status (internal 127.0.0.1:${SERVER_PORT}) ==="
+    echo "=== Remote API Status (internal unix:${SERVER_SOCKET}) ==="
     # shellcheck disable=SC2029
-    ssh "${O2SWITCH_HOST}" "${REMOTE_AUTH_HEADER} | curl -s -f -H @- http://127.0.0.1:${SERVER_PORT}/v1/status || echo 'API unreachable'" | jq . 2>/dev/null || true
+    ssh "${O2SWITCH_HOST}" "${REMOTE_AUTH_HEADER} | curl -s -f -H @- --unix-socket ${SERVER_SOCKET} http://localhost/v1/status || echo 'API unreachable'" | jq . 2>/dev/null || true
     ;;
 
   logs)
@@ -414,7 +414,7 @@ REMOTE_SCRIPT
       check_ssh
       echo "Querying internal endpoint via SSH..."
       # shellcheck disable=SC2029
-      RESP=$(ssh "${O2SWITCH_HOST}" "${REMOTE_AUTH_HEADER} | curl -s -f -H @- -X POST http://127.0.0.1:${SERVER_PORT}/v1/recognize \
+      RESP=$(ssh "${O2SWITCH_HOST}" "${REMOTE_AUTH_HEADER} | curl -s -f -H @- --unix-socket ${SERVER_SOCKET} -X POST http://localhost/v1/recognize \
         -H 'Content-Type: application/json' \
         -d '{\"query_fingerprint\":[\"0xe9fd17223e1c0c4b\",\"0xe9fd17223e1c0c4b\",\"0xe9fd17223e1c0c4b\",\"0xe9fd17223e1c0c4b\",\"0xe9fd17223e1c0c4b\"],\"fps\":25.0,\"language\":\"fr\"}'")
       echo "${RESP}" | jq .
@@ -422,7 +422,7 @@ REMOTE_SCRIPT
       if [[ "${CANDIDATE_ID}" =~ ^sub:sha256:(.+) ]]; then
         HASH="${BASH_REMATCH[1]}"
         # shellcheck disable=SC2029
-        (ssh "${O2SWITCH_HOST}" "${REMOTE_AUTH_HEADER} | curl -s -f -H @- http://127.0.0.1:${SERVER_PORT}/v1/subtitles/${HASH}" | head -n "${DEFAULT_DEMO_SAMPLE_LINES}") || true
+        (ssh "${O2SWITCH_HOST}" "${REMOTE_AUTH_HEADER} | curl -s -f -H @- --unix-socket ${SERVER_SOCKET} http://localhost/v1/subtitles/${HASH}" | head -n "${DEFAULT_DEMO_SAMPLE_LINES}") || true
       fi
     fi
     echo "✓ Demo completed successfully!"
@@ -432,12 +432,12 @@ REMOTE_SCRIPT
     check_ssh
     echo "=== Setting up watchdog cron job on ${O2SWITCH_HOST} ==="
     # shellcheck disable=SC2029
-    ssh "${O2SWITCH_HOST}" "bash -s -- '${SERVER_PORT}' '${REMOTE_BASE}'" <<'REMOTE_SCRIPT'
-PORT="$1"
+    ssh "${O2SWITCH_HOST}" "bash -s -- '${SERVER_SOCKET}' '${REMOTE_BASE}'" <<'REMOTE_SCRIPT'
+SOCKET="$1"
 BASE="$2"
 CRON_MARKER="# dbsrt-server watchdog"
 PACK_MARKER="# dbsrt-server catalog pack"
-CMD="pgrep -u \$(whoami) -f dbsrt-server >/dev/null 2>&1 || (setsid \$HOME/${BASE}/bin/dbsrt-server --host 127.0.0.1 --port ${PORT} --dbphash \$HOME/${BASE}/data/catalog.dbphash --subtitles-dir \$HOME/${BASE}/data/SRT --phash-dir \$HOME/${BASE}/run/empty_phash --api-key-file \$HOME/${BASE}/etc/api_key.secret </dev/null >> \$HOME/${BASE}/logs/dbsrt-server.log 2>&1 &)"
+CMD="pgrep -u \$(whoami) -f dbsrt-server >/dev/null 2>&1 || (setsid \$HOME/${BASE}/bin/dbsrt-server --unix-socket \$HOME/${SOCKET} --dbphash \$HOME/${BASE}/data/catalog.dbphash --subtitles-dir \$HOME/${BASE}/data/SRT --phash-dir \$HOME/${BASE}/run/empty_phash --api-key-file \$HOME/${BASE}/etc/api_key.secret </dev/null >> \$HOME/${BASE}/logs/dbsrt-server.log 2>&1 &)"
 CRON_LINE="*/5 * * * * ${CMD} ${CRON_MARKER}"
 # The on-demand spawn never repacks: fold new batch .phash files into the catalog (atomic mv,
 # picked up by the server file watcher and by the next spawn)
@@ -527,7 +527,7 @@ REMOTE_SCRIPT
         echo "  • Clé secrète   : Non détectée dans .env ou pass store."
       fi
     else
-      echo "  • URL locale    : http://127.0.0.1:${SERVER_PORT}/monitoring"
+      echo "  • Socket local  : ~/${SERVER_SOCKET} (o2switch)"
       echo "  (Configurez O2SWITCH_URL dans .env pour afficher le lien public)"
     fi
     ;;
