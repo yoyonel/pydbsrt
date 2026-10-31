@@ -14,7 +14,7 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::Json;
 use dbsrt_core::{extract_frames_phash, probe_video, read_phash_file};
-use dbsrt_index::MmapLibrary;
+use dbsrt_index::{rank_media_matches, DbphashMediaMatch, MmapLibrary};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
@@ -38,7 +38,7 @@ use std::time::Instant;
 ///
 /// # Data Flow & Invariants
 /// 1. Queries in-memory Tier 1 (`dbphash_reader`) and Tier 1-Delta (`delta_index`).
-/// 2. Sorts candidates by confidence and score.
+/// 2. Sorts candidates by confidence, then match precision.
 /// 3. Falls through to Tier 2 (`MmapLibrary`) across `phash_dirs`.
 /// 4. Falls through to Tier 3 (PostgreSQL 17 SP-GiST BK-Tree) if configured.
 pub fn match_fingerprint_multitier(
@@ -51,18 +51,12 @@ pub fn match_fingerprint_multitier(
         return None;
     }
 
-    let mut candidates: Vec<(String, f64, String, usize)> = Vec::new();
+    let mut candidates: Vec<(DbphashMediaMatch, &str)> = Vec::new();
 
     let reader_guard = state.dbphash_reader.load();
     if let Some(ref reader) = *reader_guard {
         for m in reader.recognize(hashes, search_distance) {
-            let score = m.matching_cuts * 2 + m.matching_sparse;
-            candidates.push((
-                m.clean_title,
-                m.confidence,
-                "Tier 1 (RAM .dbphash MIH under 10ms)".to_string(),
-                score,
-            ));
+            candidates.push((m, "Tier 1 (RAM .dbphash MIH under 10ms)"));
         }
     }
 
@@ -80,25 +74,15 @@ pub fn match_fingerprint_multitier(
 
     if let Some(delta) = delta_snap {
         for m in delta.recognize(hashes, search_distance) {
-            let score = m.matching_cuts * 2 + m.matching_sparse;
-            candidates.push((
-                m.clean_title,
-                m.confidence,
-                "Tier 1-Delta (RAM DeltaIndex MIH under 1ms)".to_string(),
-                score,
-            ));
+            candidates.push((m, "Tier 1-Delta (RAM DeltaIndex MIH under 1ms)"));
         }
     }
 
-    candidates.sort_by(|a, b| {
-        b.1.partial_cmp(&a.1)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| b.3.cmp(&a.3))
-    });
+    candidates.sort_by(|a, b| rank_media_matches(&a.0, &b.0));
 
-    if let Some((clean_title, conf, tier, _)) = candidates.into_iter().next() {
-        if conf >= MIN_PHASH_RECOGNITION_CONFIDENCE_PERCENT {
-            return Some((clean_title, conf, tier));
+    if let Some((m, tier)) = candidates.into_iter().next() {
+        if m.confidence >= MIN_PHASH_RECOGNITION_CONFIDENCE_PERCENT {
+            return Some((m.clean_title, m.confidence, tier.to_string()));
         }
     }
 

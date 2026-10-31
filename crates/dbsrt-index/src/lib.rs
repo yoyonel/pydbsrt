@@ -17,9 +17,9 @@ pub use db::{
     MIN_LANG_CODE_LEN, NTSC_FILM_FPS, PAL_FPS,
 };
 pub use dbphash::{
-    DbphashBuilder, DbphashCutEntry, DbphashCutMatch, DbphashHeader, DbphashMediaEntry,
-    DbphashMediaMatch, DbphashPackStats, DbphashSparseEntry, MmapDbphash, DBPHASH_MAGIC,
-    DBPHASH_VERSION,
+    rank_media_matches, DbphashBuilder, DbphashCutEntry, DbphashCutMatch, DbphashHeader,
+    DbphashMediaEntry, DbphashMediaMatch, DbphashPackStats, DbphashSparseEntry, MmapDbphash,
+    DBPHASH_MAGIC, DBPHASH_VERSION,
 };
 use dbsrt_core::{hamming_distance, FrameHashEntry};
 pub use delta::{DeltaIndex, DeltaMediaEntry};

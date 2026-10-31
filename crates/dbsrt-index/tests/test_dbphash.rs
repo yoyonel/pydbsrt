@@ -231,3 +231,43 @@ fn test_recognize_prefers_coherent_media_over_static_decoy() {
         decoy.confidence
     );
 }
+
+/// Two media both fully coherent with the query tie at 100: the closest one wins, even when the
+/// farther one has more raw matches and a cleaner coherent window (e.g. a near-duplicate scene
+/// stored several times).
+#[test]
+fn test_recognize_tie_prefers_closest_media() {
+    let dbphash_path = std::env::temp_dir().join(format!("tie_{}.dbphash", std::process::id()));
+    let frame = |k: u64| (k + 1).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    let mut sparse_source: Vec<(u64, u32)> = (0..10).map(|k| (frame(k), k as u32 * 1000)).collect();
+    sparse_source.extend((20..26).map(|k| (frame(0), k * 1000)));
+    let sparse_rival: Vec<(u64, u32)> = (0..30)
+        .map(|j| (frame(j / 3) ^ 0b111, (j / 3) as u32 * 1000))
+        .collect();
+
+    let mut builder = DbphashBuilder::new();
+    builder.add_media(
+        &MediaMetadata::parse("Rival.2001.mkv"),
+        10_000,
+        24.0,
+        &[],
+        &sparse_rival,
+    );
+    builder.add_media(
+        &MediaMetadata::parse("Source.2002.mkv"),
+        26_000,
+        24.0,
+        &[],
+        &sparse_source,
+    );
+    builder.write_to_file(&dbphash_path).unwrap();
+    let db = MmapDbphash::open(&dbphash_path).unwrap();
+
+    let query: Vec<u64> = (0..240).map(|i| frame(i / 24)).collect();
+    let ranked = db.recognize(&query, 4);
+    let _ = fs::remove_file(&dbphash_path);
+
+    assert_eq!(ranked[0].confidence, 100.0);
+    assert_eq!(ranked[1].confidence, 100.0);
+    assert_eq!(ranked[0].clean_title, "Source");
+}
