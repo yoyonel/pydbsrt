@@ -136,7 +136,8 @@ pub struct DbphashMediaMatch {
     pub estimated_shift_ms: i64,
 }
 
-/// Ranking order: confidence descending, then mean coherent Hamming distance ascending.
+/// Ranking order: confidence descending, then mean coherent Hamming distance ascending, then
+/// title, season and episode so that exact ties never fall back to hash-map order.
 ///
 /// At equal confidence the closest media wins: dark or static scenes of other media match the
 /// query frames too, but at a larger distance than the frames the query was taken from.
@@ -144,6 +145,8 @@ pub fn rank_media_matches(a: &DbphashMediaMatch, b: &DbphashMediaMatch) -> std::
     b.confidence
         .total_cmp(&a.confidence)
         .then_with(|| a.coherent_distance.total_cmp(&b.coherent_distance))
+        .then_with(|| a.clean_title.cmp(&b.clean_title))
+        .then_with(|| (a.season, a.episode).cmp(&(b.season, b.episode)))
 }
 
 /// Summary statistics for a packaging run.

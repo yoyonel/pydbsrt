@@ -33,4 +33,4 @@ tags:
 
 | # | Fichier Vidéo Testé | Média Apparié (pHash) | Score | Statut | Preuve Écran |
 |---|---|---|---|---|---|
-| 0001 | `pure_black.mp4` | `Non indexé` | **0.0%** | ❌ Échec | [Capture 0001](screenshots/test_negative_e2e_black.png) |
+| 0001 | `pure_black.mp4` | `Non indexé` | **0.0%** | ❌ Échec | [Capture 0001](../screenshots/test_negative_e2e_black.png) |

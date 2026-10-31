@@ -306,11 +306,16 @@ impl Default for RecognizeRequest {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct RecognizeResponse {
     pub found: bool,
     pub media_name_search: String,
     pub media_match: Option<String>,
+    /// Season and episode of the recognized media: `media_match` alone is shared by every episode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub season: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub episode: Option<u32>,
     pub nb_offsets_match: usize,
     pub confidence: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]

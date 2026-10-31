@@ -22,7 +22,7 @@ DISPLAY_NUM = "98"
 DEFAULT_OUT_DIR = Path("docs/screenshots/e2e_vlc_all")
 SNIPPETS_DIR = Path("data/snippets")
 SERVER_URL = "http://127.0.0.1:8765"
-REPORT_MD_PATH = Path("docs/2026-10-19-validation-e2e-vlc-vlsub-corpus-nas-exhaustif.md")
+REPORT_MD_PATH = Path("docs/history/2026-10-19-validation-e2e-vlc-vlsub-corpus-nas-exhaustif.md")
 
 
 def pick_sample_50() -> list[Path]:
@@ -283,7 +283,7 @@ def generate_markdown_report(results: list[dict], total_planned: int, out_report
         conf = r.get("confidence_percent", 0.0)
         status = "✅ Succès" if conf >= 90.0 else "❌ Échec"
         png_rel = r.get("screenshot_rel", "")
-        proof_link = f"[Capture {idx:04d}]({png_rel})" if png_rel else "N/A"
+        proof_link = f"[Capture {idx:04d}](../{png_rel})" if png_rel else "N/A"
         lines.append(
             f"| {idx:04d} | `{vid_name[:40]}` | `{matched[:35]}` | **{conf:.1f}%** | {status} | {proof_link} |"
         )
