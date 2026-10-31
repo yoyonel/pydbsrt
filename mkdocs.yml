@@ -183,6 +183,7 @@ nav:
       - Testabilité TUI & Stratégies de Couverture: explanation/2026-10-27-analyse-testabilite-et-couverture-tui-open-source.md
       - Audit Qualité & Complexité Fonctions Rust: explanation/2026-10-27-audit-qualite-et-complexite-fonctions-rust.md
       - Traçabilité & Versioning des Binaires Distribués: explanation/tracabilite-et-versioning-des-binaires-distribues.md
+      - Enquête Kill Périodique dbsrt-server (o2switch): explanation/2026-10-31-enquete-kill-periodique-dbsrt-server-o2switch.md
   - 📊 Benchmarks & Preuves:
       - Campagnes Empiriques:
           - Rapport Batch TVShow Synology: 2026-10-25-rapport-batch-import-tvshow-synology.md
@@ -210,6 +211,7 @@ nav:
           - ADR Détection Encodage Sous-Titres: decisions/2026-10-25-subtitle-encoding-detection.md
           - ADR Cas Limites Façade Ingestion: decisions/2026-10-25-media-add-edge-cases.md
           - ADR Transport Freebox vers o2switch: decisions/2026-10-30-transport-freebox-nat-gateway-http.md
+          - ADR dbsrt-server sur Socket Unix (o2switch): decisions/2026-10-31-dbsrt-server-unix-socket-o2switch.md
       - Archives & Rapports Techniques:
           - Intégration Daemon Axum & VLC: 2026-10-15-vlc-integration-daemon-and-plugins.md
           - Mécanique E2E Search by pHash: 2026-10-18-e2e-phash-search-mechanics-and-roadmap.md

@@ -84,7 +84,9 @@ Question posée : les fautes suivent-elles le nombre de processus actifs ?
 
 ### 2.6 Hors sujet mais lié : les kills de `dbsrt-server`
 
-`dbsrt-server` est tué toutes les ≈ 20,8 s et relancé par la passerelle PHP (`deploy/o2switch/index.php`, `spawn_daemon`), ce qui produit des 421 intermittents côté LiteSpeed. Une faute CPU bride sans tuer : **ces kills ne s'expliquent pas par les fautes LVE**. Cause encore inconnue (piste : LiteSpeed/lsphp ou o2switch qui tue les processus d'arrière-plan lancés depuis PHP).
+`dbsrt-server` est tué toutes les ≈ 20,8 s et relancé par la passerelle PHP (`deploy/o2switch/index.php`, `spawn_daemon`), ce qui produit des 421 intermittents sur la passerelle. Une faute CPU bride sans tuer : **ces kills ne s'expliquent pas par les fautes LVE**.
+
+**Cause trouvée (31/10)** : o2switch termine les process qui écoutent sur un port TCP, même en `127.0.0.1`. Un listener sur socket Unix n'est pas touché. Le démon écoute désormais sur une socket Unix. Voir l'[enquête](explanation/2026-10-31-enquete-kill-periodique-dbsrt-server-o2switch.md) et l'[ADR](decisions/2026-10-31-dbsrt-server-unix-socket-o2switch.md).
 
 ## 3. Action prise : bande d'autoscale 60–80 %
 
@@ -149,4 +151,4 @@ Bench local (12 cœurs logiques, vidéo synthétique 1080p H.264 bruitée de 60 
 1. 09:38–10:18 contre 00:00–01:30 : même moyenne, fautes très différentes. Le watcher (`secs_over_100`, `run_delay`) doit dire si ce sont des rafales du compte ou un hôte plus chargé.
 2. Les ≈ 93 fautes du 30/10 après 12:07 ne sont pas analysées (hors du tableau collé).
 3. Faut-il lisser les démarrages de jobs (espacement minimal entre deux lancements) plutôt que baisser encore la bande ?
-4. Les kills de `dbsrt-server` toutes les ≈ 20,8 s (section 2.6).
+4. ~~Les kills de `dbsrt-server` toutes les ≈ 20,8 s (section 2.6).~~ Résolu : listener TCP tué par o2switch, passage en socket Unix (section 2.6).
