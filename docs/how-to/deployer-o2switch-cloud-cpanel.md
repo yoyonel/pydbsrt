@@ -85,15 +85,17 @@ Cette cible lance un test hermétique automatisé :
 
 ### 3. Synchronisation de la pile vers o2switch
 
-Transférez les binaires statiques, le catalogue d'indexation Zero-DB, le dépôt de sous-titres et la configuration reverse-proxy :
+Transférez le catalogue d'indexation Zero-DB, le dépôt de sous-titres et la configuration reverse-proxy, puis les binaires sous forme de release (voir [Déployer et restaurer une release](deployer-et-restaurer-une-release-o2switch.md)) :
 
 ```bash
 task o2switch:sync
+task o2switch:deploy
 ```
 
 Les répertoires distants suivants sont initialisés sur l'hébergement :
 
-* `~/dbsrt/bin/` : Exécutables `dbsrt`, `dbsrt-server` et le script de cycle de vie `dbsrt_server_ctl.sh`.
+* `~/dbsrt/releases/<id>/` : Binaires `dbsrt` et `dbsrt-server` de chaque release, avec leurs sommes `SHA256SUMS`.
+* `~/dbsrt/bin/` : Liens `dbsrt` et `dbsrt-server` vers la release active (`current`), scripts `dbsrt_server_ctl.sh` et `dbsrt_release.sh`.
 * `~/dbsrt/data/` : Catalogue `catalog.dbphash` et sous-titres `SRT/`.
 * `~/dbsrt/run/` : Socket `dbsrt-server.sock`, verrou `gateway_spawn.lock` et marqueur d'arrêt `dbsrt-server.stopped`.
 * `~/dbsrt/logs/` : Fichier journal d'exécution (`dbsrt-server.log`).
@@ -312,7 +314,10 @@ Pour synchroniser directement depuis le NAS Synology sans station de travail :
 | :--- | :--- |
 | `task o2switch:build` | Cross-compile les binaires x86_64 musl statiques et applique le `strip`. |
 | `task o2switch:test-local` | Valide empiriquement le binaire musl en mode Zero-DB localement. |
-| `task o2switch:sync` | Synchronise les binaires, le catalogue et la passerelle sous quota I/O (20 Mo/s). |
+| `task o2switch:sync` | Synchronise le catalogue, les sous-titres et la passerelle sous quota I/O (20 Mo/s). N'envoie pas les binaires. |
+| `task o2switch:deploy` | Compile et envoie les binaires en release vérifiée (SHA-256), bascule atomiquement, redémarre ; retour arrière automatique en cas d'échec. |
+| `task o2switch:rollback` | Revient à la release précédente et redémarre le démon. |
+| `task o2switch:releases` | Liste les releases (courante, précédente, build) et celle qu'exécute le démon. |
 | `task o2switch:sync-nas` | Compile le catalogue NAS et synchronise l'index et les sous-titres vers o2switch. |
 | `task o2switch:sync-nas:dry-run` | Simule à sec la synchronisation NAS vers o2switch sans transfert ni redémarrage. |
 | `task o2switch:start` | Démarre le démon en arrière-plan sur o2switch. |

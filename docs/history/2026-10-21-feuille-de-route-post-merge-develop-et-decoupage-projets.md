@@ -61,7 +61,7 @@ flowchart TD
 * **Branche Git cible** : `feature/rpi4-physical-appliance`
 * **Objectif** : Valider le fonctionnement du serveur sur le matériel physique réel Raspberry Pi 4 (dépasser la simulation locale QEMU `sim:rpi4`). Éprouver le streaming pHash sur le réseau local 1 Gbps et synchroniser les catalogues `.dbphash` en continu.
 * **Documents de conception associés** :
-  * [Plan de déploiement et intégration remote RPi4](2026-10-20-plan-deploiement-et-integration-remote-rpi4.md)
+  * [Plan de déploiement et intégration remote RPi4](../explanation/2026-10-20-plan-deploiement-et-integration-remote-rpi4.md)
 * **Critères d'Acceptation (DoD)** :
   1. Déploiement réussi sur RPi4 via `task rpi4:push` et `task rpi4:up`.
   2. Télémétrie HTTP (`task rpi4:status`) confirmant la connexion à PostgreSQL 15.2 embarqué.
@@ -86,7 +86,7 @@ flowchart TD
 * **Branche Git cible** : `feature/packaging-client-deb`
 * **Objectif** : Fournir un installateur autonome prêt à l'emploi pour les utilisateurs finaux Linux (Debian, Ubuntu, Mint), ne nécessitant ni `cargo`, ni `uv`, ni compilation locale.
 * **Documents de conception associés** :
-  * [Tutoriel : Installation & Administration du Client VLC et Service systemd](2026-10-20-tutoriel-installation-client-linux-vlc-et-service-systemd.md)
+  * [Tutoriel : Installation & Administration du Client VLC et Service systemd](../tutorials/2026-10-20-tutoriel-installation-client-linux-vlc-et-service-systemd.md)
   * [Stratégie de Test d'Infrastructure & Recettes systemd Hermétiques](2026-10-21-strategie-tests-infrastructure-et-recettes-systemd-hermetiques.md)
 * **Critères d'Acceptation (DoD)** :
   1. Génération automatisée d'un paquet Debian `.deb` contenant `dbsrt-agent`, `vlsub_dbsrt.lua` et les scripts de post-installation systemd.

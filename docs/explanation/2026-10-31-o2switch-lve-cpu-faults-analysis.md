@@ -86,7 +86,7 @@ Question posée : les fautes suivent-elles le nombre de processus actifs ?
 
 `dbsrt-server` est tué toutes les ≈ 20,8 s et relancé par la passerelle PHP (`deploy/o2switch/index.php`, `spawn_daemon`), ce qui produit des 421 intermittents sur la passerelle. Une faute CPU bride sans tuer : **ces kills ne s'expliquent pas par les fautes LVE**.
 
-**Cause trouvée (31/10)** : o2switch termine les process qui écoutent sur un port TCP, même en `127.0.0.1`. Un listener sur socket Unix n'est pas touché. Le démon écoute désormais sur une socket Unix. Voir l'[enquête](explanation/2026-10-31-enquete-kill-periodique-dbsrt-server-o2switch.md) et l'[ADR](decisions/2026-10-31-dbsrt-server-unix-socket-o2switch.md).
+**Cause trouvée (31/10)** : o2switch termine les process qui écoutent sur un port TCP, même en `127.0.0.1`. Un listener sur socket Unix n'est pas touché. Le démon écoute désormais sur une socket Unix. Voir l'[enquête](2026-10-31-enquete-kill-periodique-dbsrt-server-o2switch.md) et l'[ADR](../decisions/2026-10-31-dbsrt-server-unix-socket-o2switch.md).
 
 ## 3. Action prise : bande d'autoscale 60–80 %
 

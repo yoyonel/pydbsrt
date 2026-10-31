@@ -13,7 +13,7 @@ tags:
 > **Date** : 29 Octobre 2026 à 22:17 CET (révisée le 30/10 : définitions des métriques corrigées d'après le code de `dbsrt top`, modèle mathématique formalisé)
 > **Nature** : analyse théorique (contraintes matérielles + coût algorithmique). Aucune mesure de débit/fps de la plateforme n'est utilisée, pour ne pas biaiser le modèle.
 > **Question** : quels sont le fps maximal et les débits maximaux théoriques atteignables sur o2switch, en flux FTP depuis le NAS Synology, avec un code « parfait » ?
-> **Complément empirique** : [Analyse Performance Décodage CPU vs Réseau (o2switch)](2026-10-28-analyse-performance-decodage-cpu-vs-reseau-o2switch.md).
+> **Complément empirique** : [Analyse Performance Décodage CPU vs Réseau (o2switch)](../history/2026-10-28-analyse-performance-decodage-cpu-vs-reseau-o2switch.md).
 
 ---
 

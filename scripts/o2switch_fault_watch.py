@@ -9,7 +9,7 @@ the account can see from inside, sampled every second over its own processes:
                process/thread counts, spawns (ffmpeg = job churn, dbsrt-server = respawns).
     correlate  runs locally: joins those lines with a cPanel table pasted into a text file.
 
-See docs/2026-10-31-o2switch-lve-cpu-faults-analysis.md.
+See docs/explanation/2026-10-31-o2switch-lve-cpu-faults-analysis.md.
 """
 
 from __future__ import annotations
