@@ -77,6 +77,9 @@ pub enum HwAccel {
 pub struct VideoExtractionOptions {
     /// Start position in seconds (corresponds to FFmpeg `-ss`).
     pub start_sec: f64,
+    /// Frame-exact output seek after `start_sec` (FFmpeg `-ss` after `-i`): the input seek lands
+    /// on a keyframe, the next one in an MPEG-TS, so a resume seeks early and drops up to here.
+    pub output_seek_sec: f64,
     /// Duration in seconds to extract (corresponds to FFmpeg `-t`).
     pub duration_sec: Option<f64>,
     /// Maximum number of frames to extract.
@@ -87,17 +90,21 @@ pub struct VideoExtractionOptions {
     pub hwaccel: HwAccel,
     /// Optional explicit path to FFmpeg binary.
     pub custom_ffmpeg: Option<PathBuf>,
+    /// Resumable `.phash` file that every extracted hash is appended to.
+    pub checkpoint: Option<crate::cuts::PhashCheckpoint>,
 }
 
 impl Default for VideoExtractionOptions {
     fn default() -> Self {
         Self {
             start_sec: 0.0,
+            output_seek_sec: 0.0,
             duration_sec: None,
             max_frames: None,
             sampling: SamplingMode::Full,
             hwaccel: HwAccel::Auto,
             custom_ffmpeg: None,
+            checkpoint: None,
         }
     }
 }
@@ -662,6 +669,26 @@ fn extract_with_cpu_fallback(
     hw_result
 }
 
+/// 32x32 grayscale scaling filter chain for the decode backend and sampling mode.
+fn scale_filter_chain(hwaccel: HwAccel, sampling: SamplingMode) -> String {
+    match (hwaccel, sampling) {
+        (HwAccel::Vaapi, SamplingMode::Fps(fps)) => {
+            format!("fps={fps},scale_vaapi=w=32:h=32,hwdownload,format=nv12,format=gray")
+        }
+        (HwAccel::Vaapi, _) => {
+            "scale_vaapi=w=32:h=32,hwdownload,format=nv12,format=gray".to_string()
+        }
+        (HwAccel::Cuda, SamplingMode::Fps(fps)) => {
+            format!("fps={fps},scale_cuda=w=32:h=32,hwdownload,format=nv12,format=gray")
+        }
+        (HwAccel::Cuda, _) => "scale_cuda=w=32:h=32,hwdownload,format=nv12,format=gray".to_string(),
+        (_, SamplingMode::Fps(fps)) => {
+            format!("fps={fps},scale=32:32")
+        }
+        (_, _) => "scale=32:32".to_string(),
+    }
+}
+
 /// Builds the FFmpeg Command configured with video sampling, hwaccel, and filters.
 ///
 /// # Arguments
@@ -727,6 +754,10 @@ fn build_ffmpeg_extraction_command(
     cmd.args(http_reconnect_args(&path.to_string_lossy()));
     cmd.arg("-i").arg(path);
 
+    if options.output_seek_sec > 0.0 {
+        cmd.args(["-ss", &format!("{:.6}", options.output_seek_sec)]);
+    }
+
     if let Some(dur) = options.duration_sec {
         cmd.args(["-t", &format!("{:.3}", dur)]);
     }
@@ -741,24 +772,10 @@ fn build_ffmpeg_extraction_command(
         cmd.args(["-fps_mode", "passthrough"]);
     }
 
-    let filter_chain = match (resolved.hwaccel, options.sampling) {
-        (HwAccel::Vaapi, SamplingMode::Fps(fps)) => {
-            format!("fps={fps},scale_vaapi=w=32:h=32,hwdownload,format=nv12,format=gray")
-        }
-        (HwAccel::Vaapi, _) => {
-            "scale_vaapi=w=32:h=32,hwdownload,format=nv12,format=gray".to_string()
-        }
-        (HwAccel::Cuda, SamplingMode::Fps(fps)) => {
-            format!("fps={fps},scale_cuda=w=32:h=32,hwdownload,format=nv12,format=gray")
-        }
-        (HwAccel::Cuda, _) => "scale_cuda=w=32:h=32,hwdownload,format=nv12,format=gray".to_string(),
-        (_, SamplingMode::Fps(fps)) => {
-            format!("fps={fps},scale=32:32")
-        }
-        (_, _) => "scale=32:32".to_string(),
-    };
-
-    cmd.args(["-vf", &filter_chain]);
+    cmd.args([
+        "-vf",
+        &scale_filter_chain(resolved.hwaccel, options.sampling),
+    ]);
 
     if resolved.hwaccel == HwAccel::Disabled || resolved.hwaccel == HwAccel::Auto {
         cmd.args(["-pix_fmt", "gray"]);
@@ -940,9 +957,9 @@ fn resolve_expected_total_frames(
     if let Some(max) = options.max_frames {
         return Some(max);
     }
-    let duration = options
-        .duration_sec
-        .or_else(|| remote_duration.map(|d| (d - options.start_sec).max(0.0)))?;
+    let duration = options.duration_sec.or_else(|| {
+        remote_duration.map(|d| (d - options.start_sec - options.output_seek_sec).max(0.0))
+    })?;
     Some((duration * meta_fps).round() as usize)
 }
 
@@ -976,6 +993,26 @@ fn check_remote_truncation(
     }
 }
 
+/// Opens the resume checkpoint, if any. A failure only disables checkpointing.
+fn open_checkpoint(options: &VideoExtractionOptions) -> Option<std::io::BufWriter<std::fs::File>> {
+    let checkpoint = options.checkpoint.as_ref()?;
+    checkpoint
+        .open_append()
+        .map_err(|e| eprintln!("⚠️  Extraction checkpoint disabled: {e:#}"))
+        .ok()
+}
+
+/// Appends one hash; the `BufWriter` flushes every 8 KiB, so a killed extraction loses at most
+/// 1024 frames. A write error disables checkpointing without failing the extraction.
+fn append_checkpoint(writer: &mut Option<std::io::BufWriter<std::fs::File>>, phash: u64) {
+    if let Some(w) = writer {
+        if let Err(e) = std::io::Write::write_all(w, &phash.to_be_bytes()) {
+            eprintln!("⚠️  Extraction checkpoint disabled: {e}");
+            *writer = None;
+        }
+    }
+}
+
 fn run_extraction_process(
     path: &Path,
     options: &VideoExtractionOptions,
@@ -986,8 +1023,8 @@ fn run_extraction_process(
     let (mut child, mut reader) = spawn_ffmpeg_child(path, options, resolved)?;
 
     let mut buf = [0u8; 1024];
-    let capacity = options.max_frames.unwrap_or(256);
-    let mut samples = Vec::with_capacity(capacity);
+    let mut samples = Vec::with_capacity(options.max_frames.unwrap_or(256));
+    let mut checkpoint = open_checkpoint(options);
 
     let guard = create_job_guard(child.id());
 
@@ -1003,6 +1040,7 @@ fn run_extraction_process(
             Ok(()) => {
                 let frame_idx = samples.len();
                 let phash = crate::phash::phash_32x32(&buf);
+                append_checkpoint(&mut checkpoint, phash);
                 let timestamp_ms = compute_frame_timestamp(&timing_ctx, frame_idx);
 
                 samples.push(FrameSample {
@@ -1143,6 +1181,15 @@ mod tests {
             resolve_expected_total_frames(&offset, 24.0, Some(3600.0)),
             Some(72_000)
         );
+        // A resume subtracts its output seek too.
+        let resumed = VideoExtractionOptions {
+            output_seek_sec: 10.0,
+            ..offset.clone()
+        };
+        assert_eq!(
+            resolve_expected_total_frames(&resumed, 24.0, Some(3600.0)),
+            Some(71_760)
+        );
         // No probe stays unknown.
         assert_eq!(resolve_expected_total_frames(&full, 24.0, None), None);
         // Explicit caps win over the probed duration.
@@ -1186,6 +1233,30 @@ mod tests {
         assert_eq!(args[input_pos + 1], "/data/movie.mkv");
         assert!(!args.iter().any(|a| a.starts_with("-ftp-")));
         assert!(!args.iter().any(|a| a == "-reconnect"));
+    }
+
+    #[test]
+    fn test_extraction_command_resume_seeks_input_then_output() {
+        let resolved = ResolvedFfmpeg {
+            binary: PathBuf::from("ffmpeg"),
+            hwaccel: HwAccel::Disabled,
+        };
+        let opts = VideoExtractionOptions {
+            start_sec: 31.0,
+            output_seek_sec: 10.708333,
+            ..Default::default()
+        };
+        let cmd = build_ffmpeg_extraction_command(Path::new("/data/movie.mkv"), &opts, &resolved);
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        let input_pos = args.iter().position(|a| a == "-i").unwrap();
+        let seeks: Vec<usize> = (0..args.len()).filter(|&i| args[i] == "-ss").collect();
+        assert_eq!(seeks.len(), 2);
+        assert!(seeks[0] < input_pos && seeks[1] > input_pos);
+        assert_eq!(args[seeks[0] + 1], "31.000");
+        assert_eq!(args[seeks[1] + 1], "10.708333");
     }
 
     #[test]

@@ -2,7 +2,8 @@
 
 use anyhow::{Context, Result};
 use dbsrt_core::{
-    extract_frames_phash_with_hwaccel, probe_video, read_phash_file, write_phash_file,
+    extract_frames_advanced, probe_video, read_phash_file, write_phash_file, PhashCheckpoint,
+    VideoExtractionOptions,
 };
 use dbsrt_index::{parse_fps_from_phash_stem, DbClient};
 use std::path::{Path, PathBuf};
@@ -185,22 +186,160 @@ pub fn find_or_build_phash_with_hwaccel(
         Some(meta) if !is_remote => (meta.duration * meta.fps).floor() as usize,
         _ => 0,
     };
-    let hashes = extract_frames_phash_with_hwaccel(media_file, 0.0, max_frames, hwaccel)?;
+    let file_name = resolve_media_path_filename(media_file)?;
+    let out_name = format!("{}.{:.1}fps.phash", file_name, meta_fps);
+    let out_path = phash_dir.join(&out_name);
+    let base = VideoExtractionOptions {
+        max_frames: (max_frames > 0).then_some(max_frames),
+        hwaccel,
+        ..Default::default()
+    };
+    let hashes = extract_resumable(media_file, &out_path, meta_fps, base)?;
     if hashes.is_empty() {
         anyhow::bail!("No video frames could be extracted from {:?}", media_file);
     }
 
-    let file_name = resolve_media_path_filename(media_file)?;
-    let out_name = format!("{}.{:.1}fps.phash", file_name, meta_fps);
-    let out_path = phash_dir.join(&out_name);
-    write_phash_file(&out_path, &hashes)?;
-
     Ok((out_path, hashes, meta_fps))
+}
+
+/// Input seek lead before a resume point: covers the keyframe distance, since an MPEG-TS input
+/// seek lands on the keyframe after its target.
+const RESUME_PREROLL_SEC: f64 = 10.0;
+
+/// `base` full-extraction options that continue after `done` frames, frame for frame. The input
+/// seek lands on whole seconds well before frame `done`; the output seek then drops exactly the
+/// frames before it. Seeking straight to frame `done` (or half a frame early) shifts the CFR output.
+fn resume_options(done: usize, fps: f64, base: VideoExtractionOptions) -> VideoExtractionOptions {
+    let target = done as f64 / fps;
+    let start_sec = (target - RESUME_PREROLL_SEC).max(0.0).floor();
+    VideoExtractionOptions {
+        start_sec,
+        output_seek_sec: target - start_sec,
+        ..base
+    }
+}
+
+/// Extracts a full fingerprint into `out_path`. A remote stream checkpoints into
+/// `<out_path>.partial` and resumes from it after a kill (watchdog timeout, worker reload).
+/// The final file is renamed into place, so a reader never sees it half written.
+// shortcut: resume seeks by frame count / fps, exact only for a constant framerate and an
+// unchanged source; delete the .partial to force a full extraction of a VFR or replaced file.
+fn extract_resumable(
+    media_file: &Path,
+    out_path: &Path,
+    meta_fps: f64,
+    base: VideoExtractionOptions,
+) -> Result<Vec<u64>> {
+    let resumable = dbsrt_core::container::is_remote_stream_or_pipe(media_file)
+        && !dbsrt_core::container::is_pipe_input(media_file);
+    let partial = out_path.with_extension("phash.partial");
+    let mut hashes = if resumable {
+        read_phash_file(&partial).unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    let checkpoint = resumable.then(|| PhashCheckpoint {
+        path: partial.clone(),
+        done: hashes.len(),
+    });
+    let opts = resume_options(
+        hashes.len(),
+        meta_fps,
+        VideoExtractionOptions { checkpoint, ..base },
+    );
+    hashes.extend(
+        extract_frames_advanced(media_file, &opts)?
+            .into_iter()
+            .map(|s| s.phash),
+    );
+    if !hashes.is_empty() {
+        let tmp = out_path.with_extension("phash.tmp");
+        write_phash_file(&tmp, &hashes)?;
+        std::fs::rename(&tmp, out_path)?;
+        let _ = std::fs::remove_file(&partial);
+    }
+    Ok(hashes)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn cpu() -> VideoExtractionOptions {
+        VideoExtractionOptions {
+            hwaccel: dbsrt_core::HwAccel::Disabled,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_resume_options_coarse_input_seek_then_exact_output_seek() {
+        let opts = resume_options(1000, 25.0, cpu());
+        assert_eq!((opts.start_sec, opts.output_seek_sec), (30.0, 10.0));
+        assert_eq!(opts.hwaccel, dbsrt_core::HwAccel::Disabled);
+        let opts = resume_options(100, 25.0, cpu());
+        assert_eq!((opts.start_sec, opts.output_seek_sec), (0.0, 4.0));
+        let opts = resume_options(0, 25.0, cpu());
+        assert_eq!((opts.start_sec, opts.output_seek_sec), (0.0, 0.0));
+    }
+
+    fn assert_resume_matches_full(video: &Path) {
+        let extract = |opts: &VideoExtractionOptions| -> Vec<u64> {
+            extract_frames_advanced(video, opts)
+                .unwrap()
+                .into_iter()
+                .map(|s| s.phash)
+                .collect()
+        };
+        let full = extract(&cpu());
+        let fps = probe_video(video).unwrap().fps;
+        // Keyframe, mid-GOP and late resume points.
+        for done in [1, 137, 500, full.len() - 3] {
+            let resumed = extract(&resume_options(done, fps, cpu()));
+            assert_eq!(resumed, full[done..], "resume after {done} frames");
+        }
+    }
+
+    #[test]
+    fn test_resume_seek_continues_the_full_extraction_exactly() {
+        assert_resume_matches_full(
+            &Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../tests/data/big_buck_bunny_trailer_480p.mp4"),
+        );
+    }
+
+    #[test]
+    fn test_resume_seek_is_exact_on_offset_mpegts() {
+        // MPEG-TS: a bare input seek lands on the next keyframe and drops frames.
+        let video =
+            std::env::temp_dir().join(format!("test_resume_offset_{}.ts", std::process::id()));
+        let status = std::process::Command::new("ffmpeg")
+            .args([
+                "-v",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc2=size=160x120:rate=25",
+            ])
+            .args([
+                "-t",
+                "40",
+                "-g",
+                "50",
+                "-bf",
+                "2",
+                "-output_ts_offset",
+                "1.4",
+            ])
+            .args(["-f", "mpegts"])
+            .arg(&video)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        assert_resume_matches_full(&video);
+        let _ = std::fs::remove_file(&video);
+    }
 
     #[test]
     fn test_resolve_db_host_explicit() {

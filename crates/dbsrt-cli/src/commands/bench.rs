@@ -103,6 +103,8 @@ pub fn run_bench_video(args: &BenchVideoArgs) -> Result<()> {
             sampling,
             hwaccel,
             custom_ffmpeg: None,
+            checkpoint: None,
+            output_seek_sec: 0.0,
         };
 
         let t0 = Instant::now();

@@ -74,6 +74,8 @@ pub fn run_export_phash(args: &ExportPhashArgs) -> Result<()> {
         sampling,
         hwaccel: args.hwaccel.into(),
         custom_ffmpeg: None,
+        checkpoint: None,
+        output_seek_sec: 0.0,
     };
 
     let out_path = args.output.clone().unwrap_or_else(|| {
