@@ -100,11 +100,14 @@ class Recette:
     def pids(self) -> list[int]:
         return sorted(int(p) for p in self.ssh(f"bash {REMOTE_HELPER} pids {REMOTE_BASE}").stdout.split())
 
-    def wait_pids(self, count: int) -> list[int]:
+    def wait_until(self, done: Callable[[list[int]], bool]) -> list[int]:
         deadline = time.monotonic() + PID_POLL_TIMEOUT_SEC
-        while len(pids := self.pids()) != count and time.monotonic() < deadline:
+        while not done(pids := self.pids()) and time.monotonic() < deadline:
             time.sleep(PID_POLL_INTERVAL_SEC)
         return pids
+
+    def wait_pids(self, count: int) -> list[int]:
+        return self.wait_until(lambda pids: len(pids) == count)
 
     def lock_holders(self) -> int:
         """Processes with an open fd on the spawn lock: only a spawner, while it spawns."""
@@ -177,8 +180,11 @@ class Recette:
         self.check("watchdog respawn: 1 new daemon", len(watched) == 1 and watched != respawned)
 
     def kill(self, pids: list[int]) -> None:
+        # Live traffic or the cron can respawn a daemon right away: only the killed pids must go.
+        # shortcut: such a respawn also skews the next "status exits 3" check, rare on a 10 s window.
         self.ssh("kill -9 " + " ".join(map(str, pids)))
-        self.check("kill -9: 0 daemon", self.wait_pids(0) == [])
+        left = self.wait_until(lambda now: not set(now) & set(pids))
+        self.check("kill -9: killed daemon gone", not set(left) & set(pids))
 
     def recognize(self) -> None:
         lines = self.ssh(f"cd {REMOTE_BASE} && python3 -I - {RECOGNIZE_SAMPLES} {QUERY_SECONDS}", PICK_QUERIES)

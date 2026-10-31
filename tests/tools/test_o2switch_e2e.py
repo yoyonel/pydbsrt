@@ -1,6 +1,43 @@
+import itertools
+import subprocess
+
 import pytest
 
-from scripts.o2switch_e2e import right_media
+from scripts import o2switch_e2e
+from scripts.o2switch_e2e import Recette, right_media
+
+
+class FakeRecette(Recette):
+    """Replays daemon pid listings; the last one repeats."""
+
+    def __init__(self, listings: list[list[int]]) -> None:
+        super().__init__("http://gateway", "key")
+        self.listings = itertools.chain(listings, itertools.repeat(listings[-1]))
+
+    def ssh(self, cmd: str, stdin: str | None = None) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess([], 0, "", "")
+
+    def pids(self) -> list[int]:
+        return next(self.listings)
+
+
+@pytest.mark.parametrize(
+    ("listings", "ok"),
+    [
+        ([[]], True),
+        ([[7]], True),
+        ([[1], [1, 7], [7]], True),
+        ([[1]], False),
+        ([[1, 7]], False),
+    ],
+    ids=["none-left", "respawned-by-other", "gone-after-polls", "still-alive", "alive-with-respawn"],
+)
+def test_kill_checks_killed_pids_only(monkeypatch: pytest.MonkeyPatch, listings: list[list[int]], ok: bool) -> None:
+    monkeypatch.setattr(o2switch_e2e, "PID_POLL_TIMEOUT_SEC", 0.2)
+    monkeypatch.setattr(o2switch_e2e, "PID_POLL_INTERVAL_SEC", 0.0)
+    recette = FakeRecette(listings)
+    recette.kill([1])
+    assert recette.failed == (0 if ok else 1)
 
 
 @pytest.mark.parametrize(
