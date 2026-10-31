@@ -217,16 +217,22 @@ def test_list_marks_current_and_previous_newest_first(remote: Remote) -> None:
 
 
 def test_running_reports_the_release_a_daemon_executes(remote: Remote) -> None:
-    sleep = Path(shutil.which("sleep") or "/bin/sleep").resolve()
-    if sleep.name != "sleep":
-        pytest.skip("sleep is a multi-call binary")
+    cc = shutil.which("cc")
+    if cc is None:
+        pytest.skip("needs a C compiler to build the daemon stand-in")
     a = remote.release("A")
     activate(remote, a)
-    shutil.copy(sleep, remote.base / "releases" / a / "dbsrt-server")
+    # A real binary that ignores argv[0]: a copied coreutils sleep can be multi-call (CI runners)
+    subprocess.run(
+        [cc, "-x", "c", "-o", str(remote.base / "releases" / a / "dbsrt-server"), "-"],
+        input="#include <unistd.h>\nint main(void) { sleep(60); return 0; }\n",
+        text=True,
+        check=True,
+    )
     socket = remote.base / "run" / "dbsrt-server.sock"
     # argv[0] carries the daemon command line that dbsrt_server_ctl.sh pids matches
     daemon = subprocess.Popen(
-        [f"{remote.base}/bin/dbsrt-server --unix-socket {socket}", "60"],
+        [f"{remote.base}/bin/dbsrt-server --unix-socket {socket}"],
         executable=remote.base / "bin" / "dbsrt-server",
     )
     try:
