@@ -336,7 +336,7 @@ Pour synchroniser directement depuis le NAS Synology sans station de travail :
 
 Le démon écoute sur la socket Unix `~/dbsrt/run/dbsrt-server.sock`, car o2switch tue les listeners TCP en 5 à 20 s (voir l'[ADR socket Unix](../decisions/2026-10-31-dbsrt-server-unix-socket-o2switch.md)). Le binaire garde le mode TCP : sans `--unix-socket`, il écoute sur `--host`/`--port`. Pour revenir au TCP, par exemple si o2switch se met à tuer aussi les sockets Unix :
 
-1. Déployer la version TCP de `deploy/o2switch/index.php` (révision antérieure à l'ADR) dans `~/dbsrt/run/index.php`, puis la valider sur le serveur avec `php -l`.
+1. Déployer la version TCP de `deploy/o2switch/index.php` (révision antérieure à l'ADR) dans `~/public_html/dbsrt/index.php`, après l'avoir validée sur le serveur avec `php -l`.
 2. Depuis la même révision, réinstaller le watchdog : `task o2switch:setup-cron`. Sinon, le cron relance le démon sur la socket.
 3. Arrêter le démon en cours. `task o2switch:stop` ne suffit pas : il ne lit que `run/dbsrt-server.pid`, que ni la passerelle PHP ni le cron n'écrivent. Sur le serveur : `pkill -u "$(id -u)" -f 'bin/dbsrt-server --unix-socket'`. La passerelle le relance en TCP à la requête suivante.
 4. Vérifier que les relances reprennent ou non : le compteur `dbsrt-server_spawns` du faultwatch reste le meilleur indicateur.
