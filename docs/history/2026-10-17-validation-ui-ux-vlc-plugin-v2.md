@@ -40,7 +40,7 @@ tags:
     Enregistrement haute définition H.264 (1080p) sur `Xvfb :99` : lecture du MKV depuis le Synology, ouverture du dialogue Qt v2.0, interaction avec l'interface et synchronisation automatique avec incrustation OSD :
 
     <video controls autoplay loop muted playsinline width="100%">
-      <source src="../assets/vlc-v2/theboys_vlc_subtitles_1080p.mp4" type="video/mp4">
+      <source src="../../assets/vlc-v2/theboys_vlc_subtitles_1080p.mp4" type="video/mp4">
     </video>
 
 === "Média de Référence CI (Big Buck Bunny)"
@@ -48,7 +48,7 @@ tags:
     Enregistrement HD montrant l'ouverture du dialogue, le clic sur `Search Candidates` et `Auto-Sync Subtitle`, le calage immédiat, le message OSD et l'incrustation des sous-titres français synchronisés (*"Un gros lapin"*) :
 
     <video controls autoplay loop muted playsinline width="100%">
-      <source src="../assets/vlc-v2/bbb_vlc_workflow_1080p.mp4" type="video/mp4">
+      <source src="../../assets/vlc-v2/bbb_vlc_workflow_1080p.mp4" type="video/mp4">
     </video>
 
 ---
@@ -59,7 +59,7 @@ tags:
 
 L'extension détecte automatiquement le fichier lourd en cours de lecture depuis le partage réseau Synology et se connecte au daemon local :
 
-![Panneau de Contrôle sur The Boys](assets/vlc-v2/01_theboys_dialog_init.png)
+![Panneau de Contrôle sur The Boys](../assets/vlc-v2/01_theboys_dialog_init.png)
 
 * **Fichier analysé** : `The.Boys.S02E03.1080p.AMZN.WEBRip.DDP5.1.x264-NTb.mkv` (3.5 Go)
 * **Daemon actif** : `✓ dbsrt-server v0.1.0` connecté sur `http://127.0.0.1:8765`
@@ -70,7 +70,7 @@ L'extension détecte automatiquement le fichier lourd en cours de lecture depuis
 
 Lors de la recherche de candidats (`🔍 Search Candidates`), le serveur explore les pistes encapsulées dans le MKV et interroge le catalogue :
 
-![Recherche Multi-Sources sur The Boys](assets/vlc-v2/02_theboys_candidates_osd.png)
+![Recherche Multi-Sources sur The Boys](../assets/vlc-v2/02_theboys_candidates_osd.png)
 
 * **Notification OSD incrustée** : Confirmation immédiate dans le coin supérieur droit du lecteur.
 * **Extraction des pistes** : Les 32 flux de sous-titres du conteneur MKV sont inspectés en temps réel sans latence de lecture.
@@ -81,7 +81,7 @@ Lors de la recherche de candidats (`🔍 Search Candidates`), le serveur explore
 
 Le déclenchement de l'auto-sync affiche la confirmation visuelle via l'OSD natif de VLC :
 
-![Synchronisation Réussie sur The Boys](assets/vlc-v2/03_theboys_synced_osd.png)
+![Synchronisation Réussie sur The Boys](../assets/vlc-v2/03_theboys_synced_osd.png)
 
 * **Notification OSD** : `dbsrt: Auto-Syncing (fr)...` puis confirmation du calage temporel appliqué à la lecture.
 
@@ -93,14 +93,14 @@ Le déclenchement de l'auto-sync affiche la confirmation visuelle via l'OSD nati
 <summary>Cliquez pour dérouler les captures sur Big Buck Bunny (Média de contrôle)</summary>
 
 ### Dialogue Initialisé (Big Buck Bunny)
-![Panneau Initialisé](assets/vlc-v2/01_dialog_initialized.png)
+![Panneau Initialisé](../assets/vlc-v2/01_dialog_initialized.png)
 
 ### Résultats de Recherche Détaillés
-![Recherche Candidats](assets/vlc-v2/02_search_candidates_result.png)
+![Recherche Candidats](../assets/vlc-v2/02_search_candidates_result.png)
 * `• [CATALOG] big_buck_bunny_trailer_480p.fr.srt (fr)`
 
 ### Rendu Final Synchronisé (*"Un gros lapin"*)
-![Rendu Sous-titres et OSD](assets/vlc-v2/03_autosync_completed.png)
+![Rendu Sous-titres et OSD](../assets/vlc-v2/03_autosync_completed.png)
 
 </details>
 

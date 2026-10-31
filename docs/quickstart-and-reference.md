@@ -82,7 +82,7 @@ task down
 | Interface / Service | URL Locale | Port | Rôle & Fonctionnalités |
 | :--- | :--- | :---: | :--- |
 | **🎛️ dbsrt Studio** | `http://127.0.0.1:8765/studio` | `8765` | Backoffice interactif : Timeline bi-piste (`Frames` ↔ `SRT Cues`), Loupe pHash 8×8, lecteur `<video>` synchronisé, pagination serveur et certification en 1 clic. |
-| **📊 Grafana Dashboards** | `http://127.0.0.1:3000` | `3000` | Suite de 3 dashboards out-of-the-box (Corpus Explorer, NAS Benchmarks, PostgreSQL 17 health - zero login). Guide complet : [`Observabilité & Grafana`](2026-10-20-observabilite-prometheus-grafana-et-telemetrie-pydbsrt.md). |
+| **📊 Grafana Dashboards** | `http://127.0.0.1:3000` | `3000` | Suite de 3 dashboards out-of-the-box (Corpus Explorer, NAS Benchmarks, PostgreSQL 17 health - zero login). Guide complet : [`Observabilité & Grafana`](history/2026-10-20-observabilite-prometheus-grafana-et-telemetrie-pydbsrt.md). |
 | **📚 Portail Documentation** | `http://127.0.0.1:8000` | `8000` | Serveur MkDocs Material avec recherche instantanée, diagrammes Mermaid Panzoom, équations MathJax vectorielles et Dashboard E2E VLC. |
 | **🐘 PgWeb (SQL Explorer)** | `http://127.0.0.1:8086` | `8086` (ou `$PGWEB_PORT`) | Explorateur web zero-conf branché sur PostgreSQL 17 (`bktreedb`) pour inspecter `medias`, `frames`, `subtitles` et `sub_frames`. |
 | **🔥 Prometheus Console** | `http://127.0.0.1:9090` | `9090` | Moteur TSDB Prometheus, exploration de requêtes PromQL et statut des cibles de scraping. |
@@ -105,7 +105,7 @@ task down
 Conformément à la règle **Taskfile-First**, toutes les opérations récurrentes passent par `task <cible>` (orchestrant les scripts dédiés sous `scripts/` et découpées sous `taskfiles/`) :
 
 > [!TIP] Guide Développeur & Architecture Modulaire
-> Consultez le **[Tutoriel Développeur & Guide d'Ordonnancement Taskfile](2026-10-21-tutoriel-orchestration-taskfile-et-guide-developpeur.md)** pour le détail de l'architecture modulaire `taskfiles/` et les 4 workflows clés.
+> Consultez le **[Tutoriel Développeur & Guide d'Ordonnancement Taskfile](tutorials/2026-10-21-tutoriel-orchestration-taskfile-et-guide-developpeur.md)** pour le détail de l'architecture modulaire `taskfiles/` et les 4 workflows clés.
 
 === "🎛️ Stack & Couplages"
 
@@ -115,7 +115,7 @@ Conformément à la règle **Taskfile-First**, toutes les opérations récurrent
     | `task down` | `scripts/stack_ctl.sh` | Arrête proprement le daemon `dbsrt-server`, MkDocs et les conteneurs Docker. |
     | `task status` | `scripts/stack_ctl.sh status` | Affiche l'état HTTP 200 des 4 services et les compteurs d'entités PostgreSQL. |
     | `task studio` | `Taskfile.yml` | Démarre le socle backend seul (Docker + seed couplages + daemon `dbsrt-server`). |
-    | `task media:add` | `scripts/media_add.sh` | Façade unifiée d'ingestion média (pHash, extraction MKV/MP4 embarqué, certification couplage et rechargement dynamique RAM). [Voir guide](2026-10-25-guide-media-add-facade.md). |
+    | `task media:add` | `scripts/media_add.sh` | Façade unifiée d'ingestion média (pHash, extraction MKV/MP4 embarqué, certification couplage et rechargement dynamique RAM). [Voir guide](how-to/2026-10-25-guide-media-add-facade.md). |
     | `task coupling:certify` | `scripts/seed_couplings.sh` | Découvre et certifie tous les couples de référence (`data/__PHASH__` $\leftrightarrow$ `data/SRT`). |
     | `task server:status` | `scripts/stack_ctl.sh server-status` | Interroge le statut du daemon via `GET /v1/status`. |
     | `task server:reload` | `scripts/stack_ctl.sh server-reload` | Déclenche le rechargement atomique à chaud du catalogue (`/v1/catalog/reload`). |
@@ -209,7 +209,7 @@ Conformément à la règle **Taskfile-First**, toutes les opérations récurrent
   4. Pour purger manuellement : `task clean:rs` (Rust seul) ou `task clean` (purge unifiée Rust + caches Python).
 
 ### 🎬 Dashboard E2E VLC GUI & Navigation Synchronisée
-* **Accès** : Disponible sur le portail documentaire via [`Dashboard Interactif E2E VLC`](2026-10-20-dashboard-interactif-e2e-vlc-corpus-nas.md).
+* **Accès** : Disponible sur le portail documentaire via [`Dashboard Interactif E2E VLC`](history/2026-10-20-dashboard-interactif-e2e-vlc-corpus-nas.md).
 * **Navigation Clavier** :
   * Flèche gauche $\leftarrow$ (`ArrowLeft`) et Flèche droite $\rightarrow$ (`ArrowRight`) : défilement instantané entre les captures avec bouclage circulaire.
   * Touche $\text{Échap}$ : fermeture immédiate du modal plein écran.

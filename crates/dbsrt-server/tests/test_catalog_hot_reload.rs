@@ -777,10 +777,13 @@ async fn test_true_unified_merge_picks_highest_confidence() {
     let client = reqwest::Client::new();
     let base_url = format!("http://{}", addr);
 
-    // 2. Ingest "DeltaWinner" into DeltaIndex with high coherence and dense matches
+    // 2. Ingest "DeltaWinner" into DeltaIndex: distinct frames, the first one shared with Base
+    let delta_hashes: Vec<u64> = std::iter::once(0xAAAA_BBBB_CCCC_DDDD_u64)
+        .chain((1..100u64).map(|k| k.wrapping_mul(0x9E37_79B9_7F4A_7C15)))
+        .collect();
     let ingest_req = serde_json::json!({
         "filename": "DeltaWinner.2024.mkv",
-        "hashes": vec![0xAAAA_BBBB_CCCC_DDDD_u64; 100],
+        "hashes": delta_hashes,
         "fps": 24.0
     });
     let _ = client
@@ -790,16 +793,16 @@ async fn test_true_unified_merge_picks_highest_confidence() {
         .await
         .unwrap();
 
-    // 3. Query with hashes that match both Base (1 cut) and Delta (dense matches).
+    // 3. Query with the first 4 Delta frames: Base matches 1 of them (1 cut), Delta all 4.
     // Unified merge must evaluate both tiers and pick DeltaWinner because of higher confidence.
     let rec_payload = RecognizeRequest {
         media_path: "query.mp4".to_string(),
-        query_fingerprint: Some(vec![
-            "0xaaaabbbbccccdddd".to_string(),
-            "0xaaaabbbbccccdddd".to_string(),
-            "0xaaaabbbbccccdddd".to_string(),
-            "0xaaaabbbbccccdddd".to_string(),
-        ]),
+        query_fingerprint: Some(
+            delta_hashes[..4]
+                .iter()
+                .map(|h| format!("{h:#018x}"))
+                .collect(),
+        ),
         fps: Some(24.0),
         language: Some("en".to_string()),
         client_version: Some("2.1.0".to_string()),

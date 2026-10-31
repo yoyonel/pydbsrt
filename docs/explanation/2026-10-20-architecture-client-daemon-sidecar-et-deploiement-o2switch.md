@@ -15,7 +15,7 @@ tags:
 # Architecture Client Daemon Sidecar & Déploiement o2switch
 
 > [!NOTE] Contexte Architectural
-> Cette documentation fait suite à l'[Étude de Déploiement Remote o2switch & Dimensionnement VLSub++](2026-10-19-etude-deploiement-remote-o2switch-et-dimensionnement-vlsub.md). Elle formalise la stratégie de répartition des calculs entre le poste client utilisateur (VLC + Daemon Sidecar local) et l'infrastructure serveur centrale (Hébergement Cloud o2switch).
+> Cette documentation fait suite à l'[Étude de Déploiement Remote o2switch & Dimensionnement VLSub++](../history/2026-10-19-etude-deploiement-remote-o2switch-et-dimensionnement-vlsub.md). Elle formalise la stratégie de répartition des calculs entre le poste client utilisateur (VLC + Daemon Sidecar local) et l'infrastructure serveur centrale (Hébergement Cloud o2switch).
 
 ---
 

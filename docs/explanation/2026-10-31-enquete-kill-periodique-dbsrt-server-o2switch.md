@@ -20,7 +20,7 @@ Ce document garde la trace des pistes suivies, y compris celles qui se sont rév
 
 ### 2.1 Fautes LVE CPU
 
-Une faute CPU LVE bride les process (*throttling*), elle ne les tue pas. Les kills ne suivent pas les pics de fautes. Détails dans l'[analyse des fautes LVE CPU](../2026-10-31-o2switch-lve-cpu-faults-analysis.md).
+Une faute CPU LVE bride les process (*throttling*), elle ne les tue pas. Les kills ne suivent pas les pics de fautes. Détails dans l'[analyse des fautes LVE CPU](2026-10-31-o2switch-lve-cpu-faults-analysis.md).
 
 ### 2.2 Limite mémoire, NPROC, EP, IO
 

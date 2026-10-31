@@ -1,0 +1,62 @@
+# ADR: Banc de mesure continu de la reconnaissance (`/v1/recognize`)
+
+- Date: 2026-10-31
+- Statut: Proposé
+- Contexte:
+  - Les audits de reconnaissance sont ponctuels et faits à la main : scripts jetables, une fenêtre de 10 s au milieu de chaque `.phash`, résultats non versionnés. Le dernier (2739 requêtes) a trouvé 93,7 % de titres justes et 735/970 épisodes justes. Voir [Identification de l'Épisode & Classement](../explanation/identification-episode-et-classement-des-correspondances.md).
+  - Chaque correctif (#38 frames distinctes, #39 départage par distance, épisode, noms percent-encodés) a été validé sur un échantillon différent. Aucun suivi ne détecte une régression entre deux versions du moteur ou du catalogue.
+  - La recette E2E (`scripts/o2switch_e2e.py`) tire 5 requêtes au hasard sans graine. Avec ~6 % d'erreur de titre, elle échoue par intermittence : elle ne mesure pas la qualité.
+  - Causes d'échec connues, non quantifiées par strate :
+    - fenêtres statiques (moins de 5 % de frames distinctes : 17,5 % d'erreur) ;
+    - quasi-doublons (récaps, épisodes frères, éditions multiples) ;
+    - trous de cuts épars.
+  - La confiance n'est pas calibrée : presque toutes les réponses fausses ont une confiance de 100.
+  - Les audits sur o2switch ont fait mourir le démon de production. Cause probable : coupure LVE pour CPU (faultwatch `cpu_p90` ≈ 100, `run_delay` jusqu'à 74 s, 4 ffmpeg d'ingestion en parallèle).
+- Options:
+  1. **Audits ponctuels (statu quo)** : rejeté. Non reproductibles, pas de suivi des régressions, et ils chargent la production.
+  2. **Banc dans la CI** : non retenu seul. Le catalogue réel (médias, `.phash`) ne doit pas quitter l'infrastructure privée, et une CI ne tient pas des heures de calcul. La CI garde un golden set synthétique minimal.
+  3. **Démon de banc dédié sur une machine à part** : retenu. Il tourne en continu sur un instantané figé du catalogue, hors du chemin de production.
+- Décision:
+  - **Plateforme.** Un nouveau serveur o2switch dédié au banc est fortement envisagé ; le RPi4 reste l'alternative.
+    - o2switch : même OS et même binaire musl que la production, catalogue déjà sur place. À évaluer avant achat : le plafond CPU LVE (kills constatés), la coupure des listeners TCP (~10 à 20 s), et `max_execution_time`. Le banc ne doit pas écouter : il s'exécute comme un batch borné, relancé par cron.
+    - RPi4 : pas de limite LVE, mais ARM (binaire différent) et calcul plus lent.
+  - **Harnais.** Nouvelle commande `dbsrt bench-recognize`, qui réutilise `BenchCutsArgs` (`crates/dbsrt-cli/src/commands/bench.rs`). Elle appelle en processus le même chemin que `/v1/recognize` (classement, épisode, couplages, décalage), sans HTTP.
+    - Entrée : un instantané figé du catalogue.
+    - Chaque exécution est identifiée par le sha du moteur et le sha du catalogue.
+  - **Axes des scénarios.**
+    - Fenêtre : durée et position dans le média.
+    - Cadence : écart de fps, accélération PAL (25/23,976).
+    - Frames perdues ou dupliquées.
+    - Bruit binaire sur les hashes.
+    - Strates d'entropie : part de frames distinctes dans la fenêtre (cause d'échec n°1).
+    - Qualité des cuts.
+    - Type de média : film, épisode.
+    - Épisodes frères, récaps, quasi-doublons.
+    - Réencodages réels par ffmpeg : CRF, résolution, recadrage, gamma, logo incrusté.
+    - Requêtes négatives (média absent du catalogue) pour mesurer les faux positifs.
+  - **Échantillonnage.**
+    - Stratifié par strate d'entropie et type de média, puis hypercube latin sur les axes continus.
+    - Adaptatif : on densifie autour de la frontière d'échec.
+    - Golden set à graine fixe pour la non-régression.
+    - Hard set collecté automatiquement à partir des échecs.
+  - **Sorties.**
+    - Une ligne par requête dans SQLite ou DuckDB : paramètres, réponse, tier, temps.
+    - Métriques : précision titre et épisode, taux de faux positifs, calibration de la confiance, fenêtre minimale pour 95 % de réussite, latence p50/p99.
+    - Restitution : Grafana (Prometheus déjà en place) ou rapport HTML.
+    - Les noms de médias restent sur la machine du banc. Rapports et métriques n'exposent que des compteurs et des identifiants opaques.
+  - **Phases.**
+    - P0 : `dbsrt bench-recognize` sur le golden set à graine fixe, sortie SQLite. La recette E2E passe sur des requêtes déterministes.
+    - P1 : axes synthétiques (fenêtre, cadence, frames, bruit, entropie, négatifs) et métriques agrégées.
+    - P2 : réencodages ffmpeg réels, échantillonnage adaptatif, hard set.
+    - P3 : démon continu sur la machine dédiée, comparaison automatique entre versions, tableau de bord.
+- Conséquences:
+  - Chaque correctif du moteur sera validé par un delta mesuré sur le golden set, pas par un audit ad hoc.
+  - Le banc ne charge plus la production. Le coût est un serveur supplémentaire et la maintenance d'un instantané du catalogue.
+  - Le calibrage de la confiance devient mesurable. C'est le préalable à une réponse « ambiguë » sur les égalités de titre et à un nouvel essai VLC sur une autre fenêtre.
+  - Risque : si les limites LVE s'appliquent aussi aux batchs longs, le serveur o2switch ne convient pas. Il faut alors un VPS ou le RPi4. Une mesure courte (batch de 30 min, faultwatch actif) précède l'achat.
+- Sites (à créer):
+  - `crates/dbsrt-cli/src/commands/bench.rs` (`bench-recognize`)
+  - `scripts/o2switch_e2e.py` (requêtes déterministes)
+- Tests (à créer):
+  - Tests unitaires du générateur de scénarios (graine fixe, mêmes requêtes à chaque exécution).
+  - Golden set synthétique dans la CI.
