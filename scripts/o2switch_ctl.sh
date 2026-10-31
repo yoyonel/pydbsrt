@@ -6,7 +6,7 @@ set -euo pipefail
 DEFAULT_O2SWITCH_HOST="o2switch"
 DEFAULT_REMOTE_BASE="dbsrt"
 DEFAULT_REMOTE_PUBLIC_HTML="public_html/dbsrt"
-DEFAULT_SERVER_PORT=8765
+DEFAULT_SERVER_SOCKET_REL="run/dbsrt-server.sock"
 DEFAULT_LOCAL_TEST_PORT=8769
 DEFAULT_HEALTHCHECK_MAX_RETRIES=20
 DEFAULT_HEALTHCHECK_SLEEP_SEC=0.5
@@ -16,6 +16,8 @@ DEFAULT_CURL_TIMEOUT_SEC=5
 # CloudLinux LVE I/O limit is 42 MiB/s on o2switch.
 # Cap rsync bandwidth to 20,000 KB/s (~20 MB/s) to guarantee zero I/O faults.
 DEFAULT_RSYNC_BWLIMIT_KBPS=20000
+# Releases kept on the host by deploy (current and previous included)
+DEFAULT_RELEASES_KEEP=5
 TARGET_TRIPLE="x86_64-unknown-linux-musl"
 TARGET_DIR="target/${TARGET_TRIPLE}/release"
 SERVER_BIN="${TARGET_DIR}/dbsrt-server"
@@ -45,8 +47,9 @@ API_KEY_PASS_ENTRY="${API_KEY_PASS_ENTRY:-${DEFAULT_API_KEY_PASS_ENTRY}}"
 READONLY_KEY_PASS_ENTRY="${READONLY_KEY_PASS_ENTRY:-${DEFAULT_READONLY_KEY_PASS_ENTRY}}"
 
 O2SWITCH_HOST="${O2SWITCH_HOST:-${DEFAULT_O2SWITCH_HOST}}"
-SERVER_PORT="${SERVER_PORT:-${DEFAULT_SERVER_PORT}}"
 REMOTE_BASE="${REMOTE_BASE:-${DEFAULT_REMOTE_BASE}}"
+# o2switch kills TCP listeners within seconds, not Unix sockets (path relative to the remote $HOME)
+SERVER_SOCKET="${SERVER_SOCKET:-${REMOTE_BASE}/${DEFAULT_SERVER_SOCKET_REL}}"
 REMOTE_PUBLIC_HTML="${REMOTE_PUBLIC_HTML:-${DEFAULT_REMOTE_PUBLIC_HTML}}"
 O2SWITCH_URL="${O2SWITCH_URL:-}"
 O2SWITCH_API_KEY="${O2SWITCH_API_KEY:-}"
@@ -100,6 +103,29 @@ install_new_key() {
 public_http_code() {
   local method="$1" url="$2"
   curl -s -o /dev/null -w "%{http_code}" -X "${method}" -H @- "${url}" 2>/dev/null || true
+}
+
+# Deploys the remote lifecycle helper (also run by the cron watchdog), then runs one of its actions
+remote_server_ctl() {
+  local action="$1"
+  rsync -a --chmod=F755 "${REPO_ROOT}/deploy/o2switch/dbsrt_server_ctl.sh" "${O2SWITCH_HOST}:${REMOTE_BASE}/bin/"
+  # shellcheck disable=SC2029
+  ssh "${O2SWITCH_HOST}" "bash $(printf '%q ' "${REMOTE_BASE}/bin/dbsrt_server_ctl.sh" "${action}" "${REMOTE_BASE}" "${SERVER_SOCKET}")"
+}
+
+# Deploys the remote releases helper, then runs one of its actions (dbsrt_release.sh <action> <base> [arg])
+remote_release() {
+  rsync -a --chmod=F755 "${REPO_ROOT}/deploy/o2switch/dbsrt_release.sh" "${REPO_ROOT}/deploy/o2switch/dbsrt_server_ctl.sh" "${O2SWITCH_HOST}:${REMOTE_BASE}/bin/"
+  # shellcheck disable=SC2029
+  ssh "${O2SWITCH_HOST}" "bash $(printf '%q ' "${REMOTE_BASE}/bin/dbsrt_release.sh" "$1" "${REMOTE_BASE}" "${@:2}")"
+}
+
+# Restarts the daemon, then checks it executes the active release
+restart_on_current_release() {
+  local expected
+  "$0" restart || return 1
+  expected="$(remote_release list | sed -n 's/^\* \([^ ]*\).*/\1/p')"
+  [[ -n "${expected}" && "$(remote_release running "${SERVER_SOCKET}")" == "${expected}" ]]
 }
 
 # Stops the remote process recorded in a PID file (SIGTERM, then SIGKILL after a timeout)
@@ -223,18 +249,12 @@ case "${ACTION}" in
 
   sync)
     check_ssh
-    if [[ ! -f "${SERVER_BIN}" || ! -f "${CLI_BIN}" ]]; then
-      echo "Binaries not found. Building first..."
-      "$0" build
-    fi
     echo "=== Synchronizing standalone stack to ${O2SWITCH_HOST} ==="
     # shellcheck disable=SC2029
     ssh "${O2SWITCH_HOST}" "mkdir -p ${REMOTE_BASE}/bin ${REMOTE_BASE}/data ${REMOTE_BASE}/run ${REMOTE_BASE}/logs ${REMOTE_PUBLIC_HTML} ${REMOTE_BASE}/scripts"
 
-    echo "-> Transferring static binaries..."
-    rsync -avz --progress --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${CLI_BIN}" "${SERVER_BIN}" "${O2SWITCH_HOST}:${REMOTE_BASE}/bin/"
-    # shellcheck disable=SC2029
-    ssh "${O2SWITCH_HOST}" "chmod +x ${REMOTE_BASE}/bin/dbsrt ${REMOTE_BASE}/bin/dbsrt-server"
+    # Binaries ship as releases (deploy): copying over bin/ would replace the release links
+    rsync -a --chmod=F755 "deploy/o2switch/dbsrt_server_ctl.sh" "${O2SWITCH_HOST}:${REMOTE_BASE}/bin/"
 
     echo "-> Transferring batch worker scripts..."
     if [[ -f "scripts/o2switch_batch_worker.py" ]]; then
@@ -260,61 +280,66 @@ case "${ACTION}" in
       rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "deploy/o2switch/.htaccess" "${O2SWITCH_HOST}:${REMOTE_PUBLIC_HTML}/.htaccess"
     fi
 
-    echo "✓ Stack synchronized to ${O2SWITCH_HOST}."
+    echo "✓ Stack synchronized to ${O2SWITCH_HOST}. Binaries: run 'task o2switch:deploy'."
+    ;;
+
+  deploy)
+    check_ssh
+    "$0" build
+    STAGE="$(mktemp -d)"
+    trap 'rm -rf "${STAGE}"' EXIT
+    cp "${SERVER_BIN}" "${CLI_BIN}" "${STAGE}/"
+    (cd "${STAGE}" && sha256sum dbsrt-server dbsrt >SHA256SUMS)
+    # Same id as dbsrt_release.sh: the hash of the binaries' listing
+    RELEASE_ID="$(sha256sum "${STAGE}/SHA256SUMS" | cut -c1-16)"
+    printf '%s %s\n' "$(git -C "${REPO_ROOT}" describe --always --dirty --abbrev=12)" "$(git -C "${REPO_ROOT}" rev-parse --abbrev-ref HEAD)" >"${STAGE}/BUILD"
+    echo "=== Deploying release ${RELEASE_ID} ($(cat "${STAGE}/BUILD")) to ${O2SWITCH_HOST} ==="
+    # shellcheck disable=SC2029
+    ssh "${O2SWITCH_HOST}" "mkdir -p ${REMOTE_BASE}/releases ${REMOTE_BASE}/bin"
+    rsync -a --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${STAGE}/" "${O2SWITCH_HOST}:${REMOTE_BASE}/releases/${RELEASE_ID}/"
+    remote_release activate "${RELEASE_ID}"
+    # restart repacks the catalog with the new dbsrt, then health-checks the new daemon
+    if ! restart_on_current_release; then
+      echo "❌ Release ${RELEASE_ID} is not serving: rolling back."
+      if remote_release rollback && restart_on_current_release; then
+        echo "✓ Previous release restored and serving."
+      else
+        echo "❌ Rollback failed too: check 'task o2switch:releases' and 'task o2switch:logs'."
+      fi
+      exit 1
+    fi
+    remote_release prune "${DEFAULT_RELEASES_KEEP}"
+    echo "✓ Release ${RELEASE_ID} deployed and serving."
+    ;;
+
+  rollback)
+    check_ssh
+    echo "=== Rolling back to the previous release on ${O2SWITCH_HOST} ==="
+    remote_release rollback
+    if ! restart_on_current_release; then
+      echo "❌ Previous release is not serving: check 'task o2switch:releases' and 'task o2switch:logs'."
+      exit 1
+    fi
+    echo "✓ Previous release serving."
+    ;;
+
+  releases)
+    check_ssh
+    echo "=== Releases on ${O2SWITCH_HOST} (* current, - previous) ==="
+    remote_release list
+    echo "Running daemon(s): $(remote_release running "${SERVER_SOCKET}" | paste -sd ' ')"
     ;;
 
   start)
     check_ssh
     echo "=== Starting dbsrt-server daemon on ${O2SWITCH_HOST} ==="
-    # shellcheck disable=SC2029
-    ssh "${O2SWITCH_HOST}" "bash -s -- '${SERVER_PORT}' '${REMOTE_BASE}'" <<'REMOTE_SCRIPT'
-PORT="$1"
-BASE="$2"
-PID_FILE="${BASE}/run/dbsrt-server.pid"
-LOG_FILE="${BASE}/logs/dbsrt-server.log"
-BIN="${BASE}/bin/dbsrt-server"
-DATA_DIR="${BASE}/data"
+    remote_server_ctl start
 
-if [[ -f "${PID_FILE}" ]]; then
-  PID=$(cat "${PID_FILE}")
-  if kill -0 "${PID}" 2>/dev/null; then
-    echo "⚠️ dbsrt-server is already running with PID ${PID}."
-    exit 0
-  fi
-fi
-
-# Loose .phash files are mmapped with an in-RAM MIH each (~6x disk size), which blows the
-# LVE memory cap; pack them into the catalog and serve it with an empty loose directory.
-mkdir -p "${BASE}/run/empty_phash"
-if "${BASE}/bin/dbsrt" pack -p "${DATA_DIR}/__PHASH__" -o "${BASE}/run/catalog.pack.tmp" >/dev/null 2>&1; then
-  mv -f "${BASE}/run/catalog.pack.tmp" "${DATA_DIR}/catalog.dbphash"
-else
-  echo "⚠️ Catalog pack failed; serving the previous catalog."
-fi
-
-# Clean up any leftover screen session
-screen -X -S dbsrt_server quit 2>/dev/null || true
-
-screen -S dbsrt_server -d -m "${BIN}" \
-  --host 127.0.0.1 \
-  --port "${PORT}" \
-  --dbphash "${DATA_DIR}/catalog.dbphash" \
-  --subtitles-dir "${DATA_DIR}/SRT" \
-  --phash-dir "${BASE}/run/empty_phash" \
-  --api-key-file "${BASE}/etc/api_key.secret"
-sleep 1
-PID=$(pgrep -u "$(whoami)" -f '[b]in/dbsrt-server' | head -n 1 || true)
-if [[ -n "${PID}" ]]; then
-  echo "${PID}" > "${PID_FILE}"
-fi
-echo "✓ Started dbsrt-server (screen: dbsrt_server, PID: ${PID:-unknown})."
-REMOTE_SCRIPT
-
-    echo "Waiting for healthcheck on http://127.0.0.1:${SERVER_PORT}/v1/health via SSH..."
+    echo "Waiting for healthcheck on unix:${SERVER_SOCKET} via SSH..."
     HEALTHY=false
     for _ in $(seq 1 "${DEFAULT_HEALTHCHECK_MAX_RETRIES}"); do
       # shellcheck disable=SC2029
-      if ssh "${O2SWITCH_HOST}" "curl -s -f http://127.0.0.1:${SERVER_PORT}/v1/health" >/dev/null 2>&1; then
+      if ssh "${O2SWITCH_HOST}" "curl -s -f --unix-socket ${SERVER_SOCKET} http://localhost/v1/health" >/dev/null 2>&1; then
         HEALTHY=true
         break
       fi
@@ -333,10 +358,13 @@ REMOTE_SCRIPT
   stop)
     check_ssh
     echo "=== Stopping dbsrt-server daemon on ${O2SWITCH_HOST} ==="
-    remote_stop_pidfile "run/dbsrt-server.pid"
+    # A watchdog line from before dbsrt_server_ctl.sh ignores the stop marker and would respawn
     # shellcheck disable=SC2029
-    ssh "${O2SWITCH_HOST}" "screen -X -S dbsrt_server quit 2>/dev/null || true"
-    echo "✓ dbsrt-server stopped."
+    if ssh "${O2SWITCH_HOST}" "crontab -l 2>/dev/null | grep -F '# dbsrt-server watchdog' | grep -qvF dbsrt_server_ctl.sh"; then
+      echo "❌ Legacy cron watchdog would respawn the daemon: run 'task o2switch:setup-cron' first."
+      exit 1
+    fi
+    remote_server_ctl stop
     ;;
 
   restart)
@@ -347,30 +375,22 @@ REMOTE_SCRIPT
   status)
     check_ssh
     echo "=== Remote Process Status (${O2SWITCH_HOST}) ==="
+    STATUS_RC=0
+    remote_server_ctl status || STATUS_RC=$?
     # shellcheck disable=SC2029
     ssh "${O2SWITCH_HOST}" "bash -s -- '${REMOTE_BASE}'" <<'REMOTE_SCRIPT'
 BASE="$1"
-PID_FILE="${BASE}/run/dbsrt-server.pid"
-if [[ -f "${PID_FILE}" ]]; then
-  PID=$(cat "${PID_FILE}")
-  if kill -0 "${PID}" 2>/dev/null; then
-    echo "● dbsrt-server is running (PID: ${PID})"
-    ps -o pid,user,%cpu,%mem,vsz,rss,comm -p "${PID}" || true
-  else
-    echo "○ dbsrt-server is dead but PID file exists (${PID})"
-  fi
-else
-  echo "○ dbsrt-server is not running (no PID file)"
-fi
 # Same lookup as dbsrt: an ffmpeg next to the binary wins over PATH.
 FFMPEG="${BASE}/bin/ffmpeg"
 [[ -x "${FFMPEG}" ]] || FFMPEG="$(command -v ffmpeg || true)"
 echo "ffmpeg: ${FFMPEG:-not found} ($("${FFMPEG:-false}" -version 2>/dev/null | head -1 || true))"
 REMOTE_SCRIPT
     echo ""
-    echo "=== Remote API Status (internal 127.0.0.1:${SERVER_PORT}) ==="
+    echo "=== Remote API Status (internal unix:${SERVER_SOCKET}) ==="
     # shellcheck disable=SC2029
-    ssh "${O2SWITCH_HOST}" "${REMOTE_AUTH_HEADER} | curl -s -f -H @- http://127.0.0.1:${SERVER_PORT}/v1/status || echo 'API unreachable'" | jq . 2>/dev/null || true
+    ssh "${O2SWITCH_HOST}" "${REMOTE_AUTH_HEADER} | curl -s -f -H @- --unix-socket ${SERVER_SOCKET} http://localhost/v1/status || echo 'API unreachable'" | jq . 2>/dev/null || true
+    # 0 = one daemon, 3 = not running (stopped or awaiting respawn), 1 = duplicate daemons
+    exit "${STATUS_RC}"
     ;;
 
   logs)
@@ -385,13 +405,14 @@ REMOTE_SCRIPT
       O2SWITCH_API_KEY="${O2SWITCH_API_KEY:-$(pass_secret "${API_KEY_PASS_ENTRY}")}"
       TARGET_ENDPOINT="${O2SWITCH_URL}/v1/recognize"
       echo "Querying public HTTPS URL: ${TARGET_ENDPOINT}"
-      AUTH_HEADER=()
+      # Key travels as a header on stdin (curl -H @-), never in argv (visible in ps)
+      AUTH_LINE=""
       if [[ -n "${O2SWITCH_API_KEY}" ]]; then
-        AUTH_HEADER=(-H "X-API-Key: ${O2SWITCH_API_KEY}")
+        AUTH_LINE="X-API-Key: ${O2SWITCH_API_KEY}"
       fi
-      RESP=$(curl -s -f -X POST "${TARGET_ENDPOINT}" \
+      RESP=$(printf '%s\n' "${AUTH_LINE}" | curl -s -f -X POST "${TARGET_ENDPOINT}" \
         -H "Content-Type: application/json" \
-        "${AUTH_HEADER[@]}" \
+        -H @- \
         -d '{
         "query_fingerprint": [
           "0xe9fd17223e1c0c4b",
@@ -408,13 +429,13 @@ REMOTE_SCRIPT
       if [[ "${CANDIDATE_ID}" =~ ^sub:sha256:(.+) ]]; then
         HASH="${BASH_REMATCH[1]}"
         echo "Fetching subtitle from: ${O2SWITCH_URL}/v1/subtitles/${HASH}"
-        (curl -s -f "${AUTH_HEADER[@]}" "${O2SWITCH_URL}/v1/subtitles/${HASH}" | head -n "${DEFAULT_DEMO_SAMPLE_LINES}") || true
+        (printf '%s\n' "${AUTH_LINE}" | curl -s -f -H @- "${O2SWITCH_URL}/v1/subtitles/${HASH}" | head -n "${DEFAULT_DEMO_SAMPLE_LINES}") || true
       fi
     else
       check_ssh
       echo "Querying internal endpoint via SSH..."
       # shellcheck disable=SC2029
-      RESP=$(ssh "${O2SWITCH_HOST}" "${REMOTE_AUTH_HEADER} | curl -s -f -H @- -X POST http://127.0.0.1:${SERVER_PORT}/v1/recognize \
+      RESP=$(ssh "${O2SWITCH_HOST}" "${REMOTE_AUTH_HEADER} | curl -s -f -H @- --unix-socket ${SERVER_SOCKET} -X POST http://localhost/v1/recognize \
         -H 'Content-Type: application/json' \
         -d '{\"query_fingerprint\":[\"0xe9fd17223e1c0c4b\",\"0xe9fd17223e1c0c4b\",\"0xe9fd17223e1c0c4b\",\"0xe9fd17223e1c0c4b\",\"0xe9fd17223e1c0c4b\"],\"fps\":25.0,\"language\":\"fr\"}'")
       echo "${RESP}" | jq .
@@ -422,7 +443,7 @@ REMOTE_SCRIPT
       if [[ "${CANDIDATE_ID}" =~ ^sub:sha256:(.+) ]]; then
         HASH="${BASH_REMATCH[1]}"
         # shellcheck disable=SC2029
-        (ssh "${O2SWITCH_HOST}" "${REMOTE_AUTH_HEADER} | curl -s -f -H @- http://127.0.0.1:${SERVER_PORT}/v1/subtitles/${HASH}" | head -n "${DEFAULT_DEMO_SAMPLE_LINES}") || true
+        (ssh "${O2SWITCH_HOST}" "${REMOTE_AUTH_HEADER} | curl -s -f -H @- --unix-socket ${SERVER_SOCKET} http://localhost/v1/subtitles/${HASH}" | head -n "${DEFAULT_DEMO_SAMPLE_LINES}") || true
       fi
     fi
     echo "✓ Demo completed successfully!"
@@ -431,13 +452,15 @@ REMOTE_SCRIPT
   setup-cron)
     check_ssh
     echo "=== Setting up watchdog cron job on ${O2SWITCH_HOST} ==="
+    rsync -a --chmod=F755 "${REPO_ROOT}/deploy/o2switch/dbsrt_server_ctl.sh" "${O2SWITCH_HOST}:${REMOTE_BASE}/bin/"
     # shellcheck disable=SC2029
-    ssh "${O2SWITCH_HOST}" "bash -s -- '${SERVER_PORT}' '${REMOTE_BASE}'" <<'REMOTE_SCRIPT'
-PORT="$1"
+    ssh "${O2SWITCH_HOST}" "bash -s -- '${SERVER_SOCKET}' '${REMOTE_BASE}'" <<'REMOTE_SCRIPT'
+SOCKET="$1"
 BASE="$2"
 CRON_MARKER="# dbsrt-server watchdog"
 PACK_MARKER="# dbsrt-server catalog pack"
-CMD="pgrep -u \$(whoami) -f dbsrt-server >/dev/null 2>&1 || (setsid \$HOME/${BASE}/bin/dbsrt-server --host 127.0.0.1 --port ${PORT} --dbphash \$HOME/${BASE}/data/catalog.dbphash --subtitles-dir \$HOME/${BASE}/data/SRT --phash-dir \$HOME/${BASE}/run/empty_phash --api-key-file \$HOME/${BASE}/etc/api_key.secret </dev/null >> \$HOME/${BASE}/logs/dbsrt-server.log 2>&1 &)"
+# Respawns only when no daemon runs and stop has not set the stop marker
+CMD="bash \$HOME/${BASE}/bin/dbsrt_server_ctl.sh watchdog ${BASE} ${SOCKET} >> \$HOME/${BASE}/logs/dbsrt-server.log 2>&1"
 CRON_LINE="*/5 * * * * ${CMD} ${CRON_MARKER}"
 # The on-demand spawn never repacks: fold new batch .phash files into the catalog (atomic mv,
 # picked up by the server file watcher and by the next spawn)
@@ -527,7 +550,7 @@ REMOTE_SCRIPT
         echo "  • Clé secrète   : Non détectée dans .env ou pass store."
       fi
     else
-      echo "  • URL locale    : http://127.0.0.1:${SERVER_PORT}/monitoring"
+      echo "  • Socket local  : ~/${SERVER_SOCKET} (o2switch)"
       echo "  (Configurez O2SWITCH_URL dans .env pour afficher le lien public)"
     fi
     ;;
@@ -820,7 +843,7 @@ REMOTE_SCRIPT
     ;;
 
   faultwatch)
-    # Per-minute LVE fault proxies, see docs/2026-10-31-o2switch-lve-cpu-faults-analysis.md
+    # Per-minute LVE fault proxies, see docs/explanation/2026-10-31-o2switch-lve-cpu-faults-analysis.md
     check_ssh
     SUB="${2:-status}"
     case "${SUB}" in
@@ -849,7 +872,7 @@ REMOTE_SCRIPT
     ;;
 
   *)
-    echo "Usage: $0 {build|test-local|sync|start|stop|restart|status|logs|demo|setup-cron|remove-cron|rotate-key|rotate-readonly-key|monitoring|top|pull-catalog|backup-nas|batch-tvshow|batch-movies|batch-status|batch-workers|batch-stop|batch-logs|faultwatch}"
+    echo "Usage: $0 {build|test-local|sync|deploy|rollback|releases|start|stop|restart|status|logs|demo|setup-cron|remove-cron|rotate-key|rotate-readonly-key|monitoring|top|pull-catalog|backup-nas|batch-tvshow|batch-movies|batch-status|batch-workers|batch-stop|batch-logs|faultwatch}"
     exit 1
     ;;
 esac

@@ -119,24 +119,25 @@ nav:
       - 2. Ingestion & Certification Média: tutorials/02-ingestion-et-certification-premier-media.md
       - 3. Environnement de Dév & Contribution: tutorials/03-environnement-developpement-et-contribution.md
       - 4. Déploiement Appliance RPi4: tutorials/04-deploiement-appliance-rpi4.md
-      - Tutoriel Orchestration Taskfile & Dev: 2026-10-21-tutoriel-orchestration-taskfile-et-guide-developpeur.md
-      - Tutoriel Client Linux & systemd: 2026-10-20-tutoriel-installation-client-linux-vlc-et-service-systemd.md
+      - Tutoriel Orchestration Taskfile & Dev: tutorials/2026-10-21-tutoriel-orchestration-taskfile-et-guide-developpeur.md
+      - Tutoriel Client Linux & systemd: tutorials/2026-10-20-tutoriel-installation-client-linux-vlc-et-service-systemd.md
   - 🛠️ Guides Pratiques (How-To):
       - Catalogue des Recettes: how-to/index.md
       - Synchroniser des Sous-Titres dans VLC: how-to/synchroniser-sous-titres-vlc.md
       - Basculer les Cibles de Backend VLC: how-to/basculer-cibles-vlc-local-cloud-rpi4.md
       - Ajouter et Indexer un Média (media:add): how-to/ajouter-et-indexer-un-media.md
-      - Guide Façade Unifiée media:add: 2026-10-25-guide-media-add-facade.md
+      - Guide Façade Unifiée media:add: how-to/2026-10-25-guide-media-add-facade.md
       - Certifier un Couplage Média-Sous-Titres: how-to/certifier-un-couplage.md
-      - Guide Pratique Ingestion & Certification: 2026-10-24-guide-pratique-ingestion-et-certification-media.md
+      - Guide Pratique Ingestion & Certification: how-to/2026-10-24-guide-pratique-ingestion-et-certification-media.md
       - Migrer le Schéma PostgreSQL avec Refinery: how-to/migrer-schema-postgresql.md
-      - Guide Migrations Refinery: 2026-10-23-guide-migrations-schema-postgresql-refinery.md
+      - Guide Migrations Refinery: how-to/2026-10-23-guide-migrations-schema-postgresql-refinery.md
       - Surveiller la Stack avec Prometheus & Grafana: how-to/surveiller-stack-telemetrie.md
       - Invalider et Purger des Données pHash: how-to/invalider-donnees-phash.md
       - Recette E2E du Moniteur TUI Rust (dbsrt top): how-to/2026-10-26-recette-e2e-tui-rust.md
       - Guide Tests Scénarios TUI Headless: how-to/2026-10-27-guide-tests-scenarios-tui.md
       - Audit d'Intégrité Catalogue & Stockage: how-to/2026-10-26-audit-integrite-catalogue-et-stockage.md
       - Déployer sur Hébergement Cloud o2switch: how-to/deployer-o2switch-cloud-cpanel.md
+      - Déployer & Restaurer une Release o2switch: how-to/deployer-et-restaurer-une-release-o2switch.md
       - Interconnecter NAS Synology & o2switch FTP: how-to/interconnecter-nas-synology-et-o2switch-ftp.md
       - Ingérer les Médias Freebox via RPi4 & o2switch: how-to/ingerer-medias-freebox-via-rpi4-et-o2switch.md
       - Batch de Calcul & Synchronisation o2switch: how-to/executer-batch-calcul-et-synchronisation-o2switch.md
@@ -159,66 +160,71 @@ nav:
       - Vue d'Ensemble Conceptuelle: explanation/index.md
       - Principe Fondamental du pHash & Retargeting: explanation/principe-fondamental-phash-et-retargeting.md
       - Performances Décodage pHash & Contentions: explanation/performances-decodage-phash-et-contentions.md
-      - Plafond Théorique Pipe pHash (o2switch): 2026-10-29-etude-theorique-plafond-pipe-phash-o2switch.md
-      - Bottlenecks Batch o2switch & Plan de Benchs: 2026-10-29-analyse-bottlenecks-batch-o2switch-et-plan-benchs.md
-      - Fautes LVE CPU o2switch (cPanel & logs): 2026-10-31-o2switch-lve-cpu-faults-analysis.md
+      - Plafond Théorique Pipe pHash (o2switch): explanation/2026-10-29-etude-theorique-plafond-pipe-phash-o2switch.md
+      - Bottlenecks Batch o2switch & Plan de Benchs: explanation/2026-10-29-analyse-bottlenecks-batch-o2switch-et-plan-benchs.md
+      - Fautes LVE CPU o2switch (cPanel & logs): explanation/2026-10-31-o2switch-lve-cpu-faults-analysis.md
       - Échantillonnage Hybride (Cuts + 1fps): explanation/echantillonnage-hybride-cuts-et-1fps.md
-      - Étude Cuts, Keyframes & Hybride: 2026-10-17-etude-comparative-identification-frames-cuts-keyframes-hybride.md
+      - Étude Cuts, Keyframes & Hybride: explanation/2026-10-17-etude-comparative-identification-frames-cuts-keyframes-hybride.md
       - Indexation Métrique (MIH vs BK-Tree): explanation/indexation-metrique-mih-vs-bktree.md
+      - Identification de l'Épisode & Classement: explanation/identification-episode-et-classement-des-correspondances.md
+      - État & Qualité de la Reconnaissance: explanation/etat-qualite-reconnaissance-recognize.md
       - Modèle Relationnel & Couplages Certifiés: explanation/modele-relationnel-couplages-certifies.md
       - Architecture Cache Hybride Local & Cloud o2switch: explanation/architecture-cache-hybride-local-cloud.md
       - Déport de Calcul & Synchronisation o2switch: explanation/architecture-deport-calcul-stockage-et-synchronisation-o2switch.md
       - Architecture Démon Axum & VLC OSD: explanation/architecture-daemon-axum-et-vlc-osd.md
       - Stockage Décentralisé CAS & Distribution: explanation/stockage-decentralise-cas-et-distribution.md
-      - Moteur Zero-DB mmap SIMD: 2026-10-15-scaling-architecture-rust-mmap.md
-      - PostgreSQL 17 SP-GiST BK-Tree: 2026-10-15-pg17-bktree-benchmark-migration.md
-      - Sécurité SQL & Atomicité COPY: 2026-10-22-securisation-sql-et-atomicite-transactionnelle-copy-postgresql.md
-      - Retrait & Invalidation Globale: 2026-10-20-architecture-retrait-invalidation-donnees-globales.md
-      - Cycle de Vie des Données & Hot-Reload: 2026-10-24-architecture-cycle-de-vie-donnees-io-et-rechargement-a-chaud.md
-      - Providers Distants (OpenSubtitles): 2026-10-16-axe5-remote-subtitles-providers.md
-      - Architecture Sidecar Client & Déploiement: 2026-10-20-architecture-client-daemon-sidecar-et-deploiement-o2switch.md
-      - Plan Déploiement & Intégration RPi4: 2026-10-20-plan-deploiement-et-integration-remote-rpi4.md
-      - Déploiement PostgreSQL 17 Dédié RPi4: 2026-10-24-deploiement-postgresql-17-isole-rpi4-et-orchestration-migrations.md
-      - Audit Legacy VLSub: 2026-10-18-vlsub-legacy-audit.md
+      - Moteur Zero-DB mmap SIMD: explanation/2026-10-15-scaling-architecture-rust-mmap.md
+      - PostgreSQL 17 SP-GiST BK-Tree: explanation/2026-10-15-pg17-bktree-benchmark-migration.md
+      - Sécurité SQL & Atomicité COPY: explanation/2026-10-22-securisation-sql-et-atomicite-transactionnelle-copy-postgresql.md
+      - Retrait & Invalidation Globale: explanation/2026-10-20-architecture-retrait-invalidation-donnees-globales.md
+      - Cycle de Vie des Données & Hot-Reload: explanation/2026-10-24-architecture-cycle-de-vie-donnees-io-et-rechargement-a-chaud.md
+      - Providers Distants (OpenSubtitles): explanation/2026-10-16-axe5-remote-subtitles-providers.md
+      - Architecture Sidecar Client & Déploiement: explanation/2026-10-20-architecture-client-daemon-sidecar-et-deploiement-o2switch.md
+      - Plan Déploiement & Intégration RPi4: explanation/2026-10-20-plan-deploiement-et-integration-remote-rpi4.md
+      - Déploiement PostgreSQL 17 Dédié RPi4: explanation/2026-10-24-deploiement-postgresql-17-isole-rpi4-et-orchestration-migrations.md
+      - Audit Legacy VLSub: explanation/2026-10-18-vlsub-legacy-audit.md
       - Testabilité TUI & Stratégies de Couverture: explanation/2026-10-27-analyse-testabilite-et-couverture-tui-open-source.md
       - Audit Qualité & Complexité Fonctions Rust: explanation/2026-10-27-audit-qualite-et-complexite-fonctions-rust.md
       - Traçabilité & Versioning des Binaires Distribués: explanation/tracabilite-et-versioning-des-binaires-distribues.md
+      - Enquête Kill Périodique dbsrt-server (o2switch): explanation/2026-10-31-enquete-kill-periodique-dbsrt-server-o2switch.md
   - 📊 Benchmarks & Preuves:
       - Campagnes Empiriques:
-          - Rapport Batch TVShow Synology: 2026-10-25-rapport-batch-import-tvshow-synology.md
-          - Analyse Performance Décodage CPU vs Réseau (o2switch): 2026-10-28-analyse-performance-decodage-cpu-vs-reseau-o2switch.md
-          - Dashboard Interactif E2E VLC (1 336 Tests): 2026-10-20-dashboard-interactif-e2e-vlc-corpus-nas.md
-          - Validation E2E VLC Corpus Exhaustif (1 336 Extraits): 2026-10-19-validation-e2e-vlc-vlsub-corpus-nas-exhaustif.md
-          - Validation E2E VLC & Corpus Réel NAS: 2026-10-19-validation-e2e-vlc-et-benchmarks-corpus-nas.md
-          - Évaluation 1s Random Corpus NAS: 2026-10-19-evaluation-1sec-random-corpus-nas.md
-          - Galerie 50 Captures VLC/VLSub: 2026-10-19-validation-e2e-vlc-vlsub-50-screenshots.md
-          - Stress-Test 100M Frames (MIH): 2026-10-19-mih-100m-scale-benchmark-report.md
-          - Audit Exhaustif Matching E2E (YouTube & DB): 2026-10-19-audit-exhaustif-matching-e2e-phash.md
-          - Profiling Latences Recherche pHash & E2E: 2026-10-19-profiling-latences-recherche-phash-et-e2e.md
-          - Tests d'Infra & Recettes systemd Hermétiques: 2026-10-21-strategie-tests-infrastructure-et-recettes-systemd-hermetiques.md
-          - Registre Incidents & Matrice de Chaos: 2026-10-20-registre-incidents-chaos-testing-et-post-mortem-vlc-hang.md
-          - Benchmarks E2E Rust vs Python: 2026-10-15-rust-e2e-benchmarks-and-tradeoffs.md
-          - Passage à l'Échelle (5M frames): 2026-10-16-phash-dataset-scale-and-benchmarks.md
-          - Validation Empirique Synology NAS: 2026-10-17-validation-empirique-e2e-synology.md
-          - Plugin VLC v2.0 & OSD: 2026-10-17-validation-ui-ux-vlc-plugin-v2.md
-          - Fork VLSub & Démo 1080p: 2026-10-18-vlsub-fork-and-restoration.md
+          - Rapport Batch TVShow Synology: history/2026-10-25-rapport-batch-import-tvshow-synology.md
+          - Analyse Performance Décodage CPU vs Réseau (o2switch): history/2026-10-28-analyse-performance-decodage-cpu-vs-reseau-o2switch.md
+          - Dashboard Interactif E2E VLC (1 336 Tests): history/2026-10-20-dashboard-interactif-e2e-vlc-corpus-nas.md
+          - Validation E2E VLC Corpus Exhaustif (1 336 Extraits): history/2026-10-19-validation-e2e-vlc-vlsub-corpus-nas-exhaustif.md
+          - Validation E2E VLC & Corpus Réel NAS: history/2026-10-19-validation-e2e-vlc-et-benchmarks-corpus-nas.md
+          - Évaluation 1s Random Corpus NAS: history/2026-10-19-evaluation-1sec-random-corpus-nas.md
+          - Galerie 50 Captures VLC/VLSub: history/2026-10-19-validation-e2e-vlc-vlsub-50-screenshots.md
+          - Stress-Test 100M Frames (MIH): history/2026-10-19-mih-100m-scale-benchmark-report.md
+          - Audit Exhaustif Matching E2E (YouTube & DB): history/2026-10-19-audit-exhaustif-matching-e2e-phash.md
+          - Profiling Latences Recherche pHash & E2E: history/2026-10-19-profiling-latences-recherche-phash-et-e2e.md
+          - Tests d'Infra & Recettes systemd Hermétiques: history/2026-10-21-strategie-tests-infrastructure-et-recettes-systemd-hermetiques.md
+          - Registre Incidents & Matrice de Chaos: history/2026-10-20-registre-incidents-chaos-testing-et-post-mortem-vlc-hang.md
+          - Benchmarks E2E Rust vs Python: history/2026-10-15-rust-e2e-benchmarks-and-tradeoffs.md
+          - Passage à l'Échelle (5M frames): history/2026-10-16-phash-dataset-scale-and-benchmarks.md
+          - Validation Empirique Synology NAS: history/2026-10-17-validation-empirique-e2e-synology.md
+          - Plugin VLC v2.0 & OSD: history/2026-10-17-validation-ui-ux-vlc-plugin-v2.md
+          - Fork VLSub & Démo 1080p: history/2026-10-18-vlsub-fork-and-restoration.md
   - 🗺️ Roadmap & Archives:
       - Feuilles de Route & Décisions (ADR):
-          - Feuille de Route Post-Merge develop (5 Projets v0.2+): 2026-10-21-feuille-de-route-post-merge-develop-et-decoupage-projets.md
-          - Feuille de Route & Échelle (1920-2026): 2026-10-15-deep-dive-modernization-and-scaling-roadmap.md
-          - Modernization Blueprint (UV/Taskfile): 2026-10-15-modernization-blueprint.md
+          - Feuille de Route Post-Merge develop (5 Projets v0.2+): history/2026-10-21-feuille-de-route-post-merge-develop-et-decoupage-projets.md
+          - Feuille de Route & Échelle (1920-2026): history/2026-10-15-deep-dive-modernization-and-scaling-roadmap.md
+          - Modernization Blueprint (UV/Taskfile): history/2026-10-15-modernization-blueprint.md
           - ADR Détection Encodage Sous-Titres: decisions/2026-10-25-subtitle-encoding-detection.md
           - ADR Cas Limites Façade Ingestion: decisions/2026-10-25-media-add-edge-cases.md
           - ADR Transport Freebox vers o2switch: decisions/2026-10-30-transport-freebox-nat-gateway-http.md
+          - ADR dbsrt-server sur Socket Unix (o2switch): decisions/2026-10-31-dbsrt-server-unix-socket-o2switch.md
+          - ADR Banc Continu de Reconnaissance: decisions/2026-10-31-banc-continu-reconnaissance.md
       - Archives & Rapports Techniques:
-          - Intégration Daemon Axum & VLC: 2026-10-15-vlc-integration-daemon-and-plugins.md
-          - Mécanique E2E Search by pHash: 2026-10-18-e2e-phash-search-mechanics-and-roadmap.md
-          - Studio Backoffice & Couplages: 2026-10-18-studio-backoffice-and-relational-couplings.md
-          - Déploiement Remote o2switch: 2026-10-19-etude-deploiement-remote-o2switch-et-dimensionnement-vlsub.md
-          - Indexation Métrique & MIH: 2026-10-19-indexing-metric-trees-and-multi-index-hashing.md
-          - Distribution Décentralisée o2switch: 2026-10-20-architecture-distribution-sous-titres-o2switch-et-stockage-decentralise.md
-          - Service CAS Subtitles (REST vs gRPC): 2026-10-20-architecture-subtitle-service-cas-et-comparatif-rest-grpc.md
-          - Observabilité Prometheus & Grafana: 2026-10-20-observabilite-prometheus-grafana-et-telemetrie-pydbsrt.md
-          - Audit Global Initial (2026): 2026-10-15-audit-global.md
+          - Intégration Daemon Axum & VLC: history/2026-10-15-vlc-integration-daemon-and-plugins.md
+          - Mécanique E2E Search by pHash: history/2026-10-18-e2e-phash-search-mechanics-and-roadmap.md
+          - Studio Backoffice & Couplages: history/2026-10-18-studio-backoffice-and-relational-couplings.md
+          - Déploiement Remote o2switch: history/2026-10-19-etude-deploiement-remote-o2switch-et-dimensionnement-vlsub.md
+          - Indexation Métrique & MIH: history/2026-10-19-indexing-metric-trees-and-multi-index-hashing.md
+          - Distribution Décentralisée o2switch: history/2026-10-20-architecture-distribution-sous-titres-o2switch-et-stockage-decentralise.md
+          - Service CAS Subtitles (REST vs gRPC): history/2026-10-20-architecture-subtitle-service-cas-et-comparatif-rest-grpc.md
+          - Observabilité Prometheus & Grafana: history/2026-10-20-observabilite-prometheus-grafana-et-telemetrie-pydbsrt.md
+          - Audit Global Initial (2026): history/2026-10-15-audit-global.md
           - Notes 2021 Fast Hamming Postgres: history/2021-04-13-fast-hamming-postgres.md
           - 🏷️ Index des Tags: tags.md

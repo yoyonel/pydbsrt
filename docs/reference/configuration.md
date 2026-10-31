@@ -37,6 +37,7 @@ Ces variables peuvent être définies dans votre environnement shell ou dans un 
 ### Paramètres Microservice (`dbsrt-server`)
 - `DBSRT_HOST` (défaut : `127.0.0.1`) : Adresse IP d'écoute de l'interface réseau.
 - `DBSRT_PORT` (défaut : `8765`) : Port d'écoute HTTP. Si défini à `0`, alloue un port libre aléatoire.
+- `DBSRT_UNIX_SOCKET` (défaut : *vide*) : Chemin d'une socket Unix d'écoute, à la place de `DBSRT_HOST`/`DBSRT_PORT`. Équivalent de `--unix-socket`. Socket créée en `0600` et supprimée à l'arrêt ; une socket morte est remplacée, une socket vivante ou un fichier ordinaire font échouer le démarrage. Pas de fichier de découverte `/tmp/dbsrt-server.json` dans ce mode. Utilisé sur o2switch, qui tue les listeners TCP (voir [ADR](../decisions/2026-10-31-dbsrt-server-unix-socket-o2switch.md)).
 - `DBSRT_PHASH_DIR` (défaut : `/tmp`) : Répertoire par défaut de lecture/écriture des fichiers d'empreintes unitaire `.phash`.
 - `DBSRT_SUBTITLES_DIR` (défaut : `data/SRT`) : Répertoire de stockage des fichiers de sous-titres `.srt`.
 - `DBSRT_DBPHASH` (défaut : *vide*) : Chemin optionnel vers le fichier d'archive haute densité `.dbphash` pré-compilé.
@@ -74,7 +75,7 @@ Ces variables pilotent les scripts d'orchestration et cibles Taskfile pour les d
 
 ### Cible Hébergement Mutualisé o2switch (`scripts/o2switch_ctl.sh`)
 - `O2SWITCH_HOST` (défaut : `o2switch`) : Hôte SSH ou alias configuré dans `~/.ssh/config`.
-- `SERVER_PORT` (défaut : `8765`) : Port d'écoute interne du démon sur l'hôte distant (`127.0.0.1`).
+- `SERVER_SOCKET` (défaut : `dbsrt/run/dbsrt-server.sock`, relatif au `$HOME` distant) : Socket Unix d'écoute du démon sur l'hôte distant.
 - `REMOTE_BASE` (défaut : `dbsrt`) : Répertoire racine du projet sur l'hébergement mutualisé.
 - `REMOTE_PUBLIC_HTML` (défaut : `public_html/dbsrt`) : Répertoire web public recevant la règle de reverse-proxy `.htaccess`.
 - `O2SWITCH_URL` (défaut : *vide*) : URL publique HTTPS du reverse-proxy pour les tests de démonstration (ex. `https://votredomaine.fr/dbsrt`).

@@ -126,7 +126,7 @@ graph TD
 > [!NOTE]
 > **Papier de Recherche Original** :
 > Norouzi, M., Punjani, A., & Fleet, D. J. (2014). *Fast Exact Search in Hamming Space with Multi-Index Hashing*. IEEE Transactions on Pattern Analysis and Machine Intelligence (TPAMI).
-> Copie locale archivée dans le dépôt : [`docs/papers/MIH-pami2014.pdf`](papers/MIH-pami2014.pdf) (Source originelle : [cs.toronto.edu](https://www.cs.toronto.edu/~fleet/research/Papers/MIH-pami2014.pdf)).
+> Copie locale archivée dans le dépôt : [`docs/papers/MIH-pami2014.pdf`](../papers/MIH-pami2014.pdf) (Source originelle : [cs.toronto.edu](https://www.cs.toronto.edu/~fleet/research/Papers/MIH-pami2014.pdf)).
 
 Le Multi-Index Hashing tire parti du **Principe des Tiroirs (Pigeonhole Principle)** sur des empreintes binaires de longueur fixe (64 bits).
 

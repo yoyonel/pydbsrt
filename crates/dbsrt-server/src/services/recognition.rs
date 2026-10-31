@@ -148,7 +148,7 @@ pub fn identify_media_by_phash_multi_routed(
                         Some((
                             m.clean_title,
                             m.confidence,
-                            "Tier 1 (RAM .dbphash MIH under 10ms)".to_string(),
+                            "Tier 1 (RAM .dbphash MIH)".to_string(),
                         )),
                         target_fps,
                         existing_phash,
@@ -168,7 +168,7 @@ pub fn identify_media_by_phash_multi_routed(
                     Some((
                         m.clean_title,
                         m.confidence,
-                        "Tier 1 (RAM .dbphash MIH under 10ms)".to_string(),
+                        "Tier 1 (RAM .dbphash MIH)".to_string(),
                     )),
                     target_fps,
                     existing_phash,

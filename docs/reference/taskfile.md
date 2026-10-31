@@ -165,9 +165,10 @@ Cette page dresse le dictionnaire exhaustif de toutes les cibles d'orchestration
 | `task o2switch:pull-catalog` | Rapatrie le catalogue compilé `catalog.dbphash`, les sous-titres SRT et journaux depuis o2switch vers le stockage local / appliance. |
 | `task o2switch:backup-nas` | Rapatrie les empreintes brutes unitaires `.phash` depuis o2switch vers le NAS Synology / stockage persistant de sauvegarde. |
 | `task o2switch:start` | Démarre le démon en arrière-plan sans root sur o2switch et attend la validation de la sonde `/v1/health`. |
-| `task o2switch:stop` | Arrête proprement le démon à distance via signal `SIGTERM` (avec bascule `SIGKILL` de sécurité). |
+| `task o2switch:stop` | Arrête tous les démons `dbsrt-server` de la socket, qu'ils viennent de `start`, de la passerelle PHP ou du cron (`SIGTERM`, puis `SIGKILL`). Bloque toute relance jusqu'au prochain `start`. |
 | `task o2switch:restart` | Redémarre le démon `dbsrt-server` sur o2switch. |
-| `task o2switch:status` | Affiche l'état du processus (PID, mémoire RSS, CPU) et la télémétrie de l'API `/v1/status`. |
+| `task o2switch:status` | Affiche l'état des démons (PID, mémoire RSS, CPU) et la télémétrie de l'API `/v1/status`. Sort en `0` (un démon), `3` (aucun) ou `1` (doublons). |
+| `task o2switch:e2e` | Recette live de `dbsrt-server` sur o2switch : cron, cycle start/stop/restart, relances après crash, passerelle et reconnaissance. Affiche une ligne PASS/FAIL par contrôle, sans nom de média ni clé. Laisse le cron installé et le démon démarré. |
 | `task o2switch:logs` | Suit en temps réel le fichier journal `dbsrt-server.log` sur o2switch via SSH. |
 | `task o2switch:demo` | Teste la reconnaissance d'empreintes et la récupération CAS de sous-titres sur o2switch. |
 | `task o2switch:setup-cron` | Installe le watchdog utilisateur non-root (`*/5 * * * *`) et le recompactage du catalogue (`*/15 * * * *`) dans la crontab. |

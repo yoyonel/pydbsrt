@@ -34,7 +34,7 @@ Pour contourner ces contraintes sans dégrader les performances, `pydbsrt` explo
 * **Binaire autonome 100% statique** : Compilé avec la cible `x86_64-unknown-linux-musl`, le binaire `dbsrt-server` n'a aucune dépendance dynamique vers la libc hôte.
 * **Index MIH en mémoire RAM (`catalog.dbphash`)** : Chargement de l'index binaire unifié en RAM (< 30 Mo pour 5M trames, recherche en < 3 ms, 0 requête SQL).
 * **Stockage CAS (`data/SRT/`)** : Les pistes de sous-titres certifiées sont stockées sous leur empreinte SHA-256 et servies directement par le microservice.
-* **Passerelle Reverse-Proxy PHP & LiteSpeed (`public_html/dbsrt/`)** : Apache/LiteSpeed sur hébergement mutualisé interdit les directives `mod_proxy [P]`. Une passerelle ultra-légère (`index.php` + `.htaccess`) relaye les requêtes entrantes vers `127.0.0.1:8765` et réveille automatiquement le démon à la demande (auto-spawn en < 500 ms) en cas de récolte par CloudLinux.
+* **Passerelle Reverse-Proxy PHP & LiteSpeed (`public_html/dbsrt/`)** : Apache/LiteSpeed sur hébergement mutualisé interdit les directives `mod_proxy [P]`. Une passerelle ultra-légère (`index.php` + `.htaccess`) relaye les requêtes entrantes vers le socket Unix `~/dbsrt/run/dbsrt-server.sock` (o2switch tue tout listener TCP en quelques secondes, pas les sockets Unix) et réveille automatiquement le démon à la demande (auto-spawn en < 500 ms) en cas de récolte par CloudLinux.
 * **Sécurité & Authentification Clé API** : La passerelle PHP filtre les requêtes non autorisées (`401 Unauthorized`) et exige une clé secrète via l'en-tête `X-API-Key` ou le Bearer token `Authorization` (le paramètre d'URL `?api_key=` est refusé). Sans clé provisionnée, elle répond `503` (fail closed). De plus, les chemins réels du système de fichiers hôte sont sanitisés sur la route `/v1/status` (zéro divulgation de structure interne).
 * **Plafond de bande passante I/O LVE** : CloudLinux limite le débit disque à 42 MiB/s sur l'Offre Unique o2switch. Les transferts `rsync` sont bridés à 20 Mo/s (`--bwlimit=20000`) pour garantir zéro faute LVE I/O lors des synchronisations du catalogue.
 * **Watchdog Crontab non-root** : Orchestré via crontab utilisateur (`*/5 * * * *`) pour relancer automatiquement le démon en cas de redémarrage hôte.
@@ -85,17 +85,19 @@ Cette cible lance un test hermétique automatisé :
 
 ### 3. Synchronisation de la pile vers o2switch
 
-Transférez les binaires statiques, le catalogue d'indexation Zero-DB, le dépôt de sous-titres et la configuration reverse-proxy :
+Transférez le catalogue d'indexation Zero-DB, le dépôt de sous-titres et la configuration reverse-proxy, puis les binaires sous forme de release (voir [Déployer et restaurer une release](deployer-et-restaurer-une-release-o2switch.md)) :
 
 ```bash
 task o2switch:sync
+task o2switch:deploy
 ```
 
 Les répertoires distants suivants sont initialisés sur l'hébergement :
 
-* `~/dbsrt/bin/` : Exécutables `dbsrt` et `dbsrt-server`.
+* `~/dbsrt/releases/<id>/` : Binaires `dbsrt` et `dbsrt-server` de chaque release, avec leurs sommes `SHA256SUMS`.
+* `~/dbsrt/bin/` : Liens `dbsrt` et `dbsrt-server` vers la release active (`current`), scripts `dbsrt_server_ctl.sh` et `dbsrt_release.sh`.
 * `~/dbsrt/data/` : Catalogue `catalog.dbphash` et sous-titres `SRT/`.
-* `~/dbsrt/run/` : Fichier de suivi de PID (`dbsrt-server.pid`).
+* `~/dbsrt/run/` : Socket `dbsrt-server.sock`, verrou `gateway_spawn.lock` et marqueur d'arrêt `dbsrt-server.stopped`.
 * `~/dbsrt/logs/` : Fichier journal d'exécution (`dbsrt-server.log`).
 * `~/public_html/dbsrt/.htaccess` : Règle de reverse-proxy Apache / LiteSpeed.
 
@@ -107,7 +109,7 @@ Démarrez le serveur en arrière-plan sans privilèges root :
 task o2switch:start
 ```
 
-Le script compacte d'abord les `.phash` du batch (`data/__PHASH__`) dans `data/catalog.dbphash` via `dbsrt pack` (~1,5 s). Il démarre ensuite `dbsrt-server` via `setsid` avec un dossier `.phash` vide (`run/empty_phash`), enregistre le PID et attend la sonde de santé via SSH.
+Le script compacte d'abord les `.phash` du batch (`data/__PHASH__`) dans `data/catalog.dbphash` via `dbsrt pack` (~1,5 s). Il démarre ensuite `dbsrt-server` via `setsid` avec un dossier `.phash` vide (`run/empty_phash`), puis attend la sonde de santé via SSH. Il supprime aussi le marqueur d'arrêt posé par `task o2switch:stop`.
 
 > [!WARNING]
 > **o2switch tue (SIGKILL) tout processus utilisateur en écoute sur un port après ~10 s**, même `python3 -m http.server`. Le daemon ne reste donc pas résident : la passerelle `index.php` le relance à la demande (~1,3 s à froid, ~80 ms à chaud), et le cron watchdog fait de même toutes les 5 min. Le spawn à la demande ne recompacte pas : un second cron (toutes les 15 min) intègre les nouveaux `.phash` du batch au catalogue, rechargé à chaud.
@@ -122,7 +124,7 @@ Contrôlez l'état du processus et la télémétrie de l'API :
 task o2switch:status
 ```
 
-La sortie affiche l'état du PID, l'utilisation CPU/RAM (~340 Mo RSS avec le catalogue compacté de ~1 200 médias), et la réponse JSON de `/v1/status`.
+Code de sortie : `0` = un seul démon, `3` = aucun démon (arrêté par l'opérateur ou en attente de relance), `1` = plusieurs démons sur la socket. La sortie affiche aussi l'utilisation CPU/RAM (~340 Mo RSS avec le catalogue compacté de ~1 200 médias), et la réponse JSON de `/v1/status`.
 
 ### 6. Test de reconnaissance de bout en bout
 
@@ -164,7 +166,7 @@ Le déploiement Cloud mutualisé applique un modèle de **sécurité en profonde
                           │
                           ▼
         ┌───────────────────────────────────┐
-        │  Niveau 4 : Démon dbsrt-server    │  (127.0.0.1:8765, Zero-DB, 0 accès SQL)
+        │  Niveau 4 : Démon dbsrt-server    │  (socket Unix run/dbsrt-server.sock, Zero-DB, 0 accès SQL)
         └─────────────────┬─────────────────┘
                           │
                           ▼
@@ -215,7 +217,7 @@ Si `~/dbsrt/etc/api_key.secret` est absent ou vide, la passerelle refuse **toute
 * **Sur le poste opérateur** : La clé est automatiquement sauvegardée dans le gestionnaire de mots de passe chiffré Unix `pass` sous l'entrée `services/pydbsrt/o2switch_api_key`.
 * **Support Multi-Clés (Zero-Downtime Rolling Update)** : Le fichier `api_key.secret` accepte plusieurs clés (une par ligne). La passerelle valide la requête dès qu'une des clés correspond, permettant des transitions progressives sans coupure de service.
 * **Clé lecture seule** : `~/dbsrt/etc/api_key_readonly.secret` (même format, entrée `pass` `services/pydbsrt/o2switch_readonly_key`) n'ouvre que les `GET`/`HEAD` sur `/monitoring`, `/top`, `/health`, `/v1/health` et `/v1/monitoring/*` ; tout le reste répond `403`. C'est elle qu'embarque `task o2switch:monitoring`. Création ou rotation : `task o2switch:rotate-readonly-key`.
-* **Défense en profondeur côté démon** : `dbsrt-server` est lancé avec `--api-key-file ~/dbsrt/etc/api_key.secret` (spawn PHP, `start`, watchdog cron). Toute route hors `/health` et `/v1/health` exige alors `Authorization: Bearer <clé maître>` ou `X-API-Key`, y compris sur `127.0.0.1:8765` : un autre compte de l'hébergement mutualisé ne peut plus l'interroger. La passerelle retire les identifiants du client et injecte la clé maître. Le fichier est relu à chaque requête (rotation sans redémarrage) ; illisible, le démon répond `503`. Sans `--api-key-file` (dev, RPi4, tests) l'API reste ouverte.
+* **Défense en profondeur côté démon** : `dbsrt-server` est lancé avec `--api-key-file ~/dbsrt/etc/api_key.secret` (spawn PHP, `start`, watchdog cron). Toute route hors `/health` et `/v1/health` exige alors `Authorization: Bearer <clé maître>` ou `X-API-Key`, y compris sur le socket Unix (déjà en mode `0600`) : un autre compte de l'hébergement mutualisé ne peut plus l'interroger. La passerelle retire les identifiants du client et injecte la clé maître. Le fichier est relu à chaque requête (rotation sans redémarrage) ; illisible, le démon répond `503`. Sans `--api-key-file` (dev, RPi4, tests) l'API reste ouverte.
 
 ### 3. Rotation automatisée des clés via Taskfile
 
@@ -312,15 +314,19 @@ Pour synchroniser directement depuis le NAS Synology sans station de travail :
 | :--- | :--- |
 | `task o2switch:build` | Cross-compile les binaires x86_64 musl statiques et applique le `strip`. |
 | `task o2switch:test-local` | Valide empiriquement le binaire musl en mode Zero-DB localement. |
-| `task o2switch:sync` | Synchronise les binaires, le catalogue et la passerelle sous quota I/O (20 Mo/s). |
+| `task o2switch:sync` | Synchronise le catalogue, les sous-titres et la passerelle sous quota I/O (20 Mo/s). N'envoie pas les binaires. |
+| `task o2switch:deploy` | Compile et envoie les binaires en release vérifiée (SHA-256), bascule atomiquement, redémarre ; retour arrière automatique en cas d'échec. |
+| `task o2switch:rollback` | Revient à la release précédente et redémarre le démon. |
+| `task o2switch:releases` | Liste les releases (courante, précédente, build) et celle qu'exécute le démon. |
 | `task o2switch:sync-nas` | Compile le catalogue NAS et synchronise l'index et les sous-titres vers o2switch. |
 | `task o2switch:sync-nas:dry-run` | Simule à sec la synchronisation NAS vers o2switch sans transfert ni redémarrage. |
 | `task o2switch:start` | Démarre le démon en arrière-plan sur o2switch. |
-| `task o2switch:status` | Affiche l'état du PID et la télémétrie API à distance. |
+| `task o2switch:status` | Affiche l'état des démons (code `0` = un, `3` = aucun, `1` = doublons) et la télémétrie API à distance. |
 | `task o2switch:logs` | Suit en direct les logs d'exécution sur le serveur distant. |
 | `task o2switch:restart` | Redémarre le démon à distance. |
-| `task o2switch:stop` | Arrête proprement le démon via signal `SIGTERM` (puis `SIGKILL` si nécessaire). |
+| `task o2switch:stop` | Arrête tous les démons de la socket, quel que soit le lanceur (`SIGTERM`, puis `SIGKILL` après 10 s). Pose le marqueur `run/dbsrt-server.stopped` : la passerelle répond `503` et le watchdog ne relance plus jusqu'au prochain `start`. |
 | `task o2switch:demo` | Exécute un test de reconnaissance et de téléchargement de sous-titres. |
+| `task o2switch:e2e` | Recette live complète (cron, start/stop/restart, relances, passerelle, reconnaissance), une ligne PASS/FAIL par contrôle. Coupe le service quelques secondes. |
 | `task o2switch:setup-cron` | Installe le watchdog utilisateur (`*/5 * * * *`) et le recompactage du catalogue (`*/15 * * * *`, seulement si un `.phash` est plus récent que `catalog.dbphash`). |
 | `task o2switch:remove-cron` | Supprime le watchdog utilisateur de la crontab. |
 | `task o2switch:rotate-key` | Génère, déploie et valide une nouvelle clé API 256 bits avec mise à jour dans `pass`. |
@@ -331,3 +337,12 @@ Pour synchroniser directement depuis le NAS Synology sans station de travail :
 | `task o2switch:agent:status` | Affiche l'état et les métriques de requêtes relayées de l'agent local. |
 | `task o2switch:agent:logs` | Suit en direct les journaux d'exécution de l'agent relais local. |
 | `task o2switch:agent:demo` | Valide de bout en bout la reconnaissance d'un fichier réel du NAS via le Cloud. |
+
+## ↩️ Revenir au démon TCP
+
+Le démon écoute sur la socket Unix `~/dbsrt/run/dbsrt-server.sock`, car o2switch tue les listeners TCP en 5 à 20 s (voir l'[ADR socket Unix](../decisions/2026-10-31-dbsrt-server-unix-socket-o2switch.md)). Le binaire garde le mode TCP : sans `--unix-socket`, il écoute sur `--host`/`--port`. Pour revenir au TCP, par exemple si o2switch se met à tuer aussi les sockets Unix :
+
+1. Déployer la version TCP de `deploy/o2switch/index.php` (révision antérieure à l'ADR) dans `~/public_html/dbsrt/index.php`, après l'avoir validée sur le serveur avec `php -l`.
+2. Depuis la même révision, réinstaller le watchdog : `task o2switch:setup-cron`. Sinon, le cron relance le démon sur la socket.
+3. Arrêter le démon en cours avec `task o2switch:stop`, puis supprimer le marqueur `~/dbsrt/run/dbsrt-server.stopped` sur le serveur. La passerelle le relance en TCP à la requête suivante.
+4. Vérifier que les relances reprennent ou non : le compteur `dbsrt-server_spawns` du faultwatch reste le meilleur indicateur.

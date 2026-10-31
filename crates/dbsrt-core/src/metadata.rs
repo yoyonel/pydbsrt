@@ -95,7 +95,8 @@ impl MediaMetadata {
     /// Parses a media filename or path string into structured [`MediaMetadata`].
     pub fn parse(input: &str) -> Self {
         let raw = input.trim().to_string();
-        let stripped_name = strip_known_extension(&raw);
+        let decoded = decode_percent_escapes(&raw);
+        let stripped_name = strip_known_extension(&decoded);
 
         // Check for anime pattern: [ReleaseGroup] Title - 01 (1080p)...
         if let Some(anime_meta) = parse_anime_convention(&raw, stripped_name) {
@@ -119,6 +120,35 @@ impl MediaMetadata {
         }
         meta
     }
+}
+
+/// Decodes `%XX` escapes left by URL-encoded listings (FTP/HTTP), e.g. `Show%20S01E02`.
+/// Escapes of path separators or control bytes stay encoded, as does invalid UTF-8 input.
+fn decode_percent_escapes(input: &str) -> std::borrow::Cow<'_, str> {
+    if !input.contains('%') {
+        return std::borrow::Cow::Borrowed(input);
+    }
+    let bytes = input.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let decoded = bytes
+            .get(i + 1..i + 3)
+            .filter(|hex| bytes[i] == b'%' && hex.iter().all(u8::is_ascii_hexdigit))
+            .and_then(|hex| u8::from_str_radix(std::str::from_utf8(hex).ok()?, 16).ok())
+            .filter(|b| !b.is_ascii_control() && *b != b'/' && *b != b'\\');
+        match decoded {
+            Some(b) => {
+                out.push(b);
+                i += 3;
+            }
+            None => {
+                out.push(bytes[i]);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8(out).map_or(std::borrow::Cow::Borrowed(input), std::borrow::Cow::Owned)
 }
 
 /// Strips file extension and path components if present.
