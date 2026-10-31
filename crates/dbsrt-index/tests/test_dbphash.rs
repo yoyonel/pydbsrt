@@ -271,3 +271,31 @@ fn test_recognize_tie_prefers_closest_media() {
     assert_eq!(ranked[1].confidence, 100.0);
     assert_eq!(ranked[0].clean_title, "Source");
 }
+
+/// Exact ties (same confidence and distance, e.g. the same release stored twice) must not fall
+/// back to hash-map order: the answer would change from one request to the next.
+#[test]
+fn test_rank_media_matches_breaks_exact_ties_deterministically() {
+    let make = |title: &str, episode: u32| dbsrt_index::DbphashMediaMatch {
+        media_id: 1,
+        clean_title: title.to_string(),
+        year: None,
+        season: Some(1),
+        episode: Some(episode),
+        matching_cuts: 4,
+        matching_sparse: 4,
+        confidence: 100.0,
+        estimated_shift_ms: 0,
+        coherent_distance: 0.0,
+    };
+    let mut ranked = [make("Beta", 1), make("Alpha", 2), make("Alpha", 1)];
+    ranked.sort_by(dbsrt_index::rank_media_matches);
+    let order: Vec<(&str, Option<u32>)> = ranked
+        .iter()
+        .map(|m| (m.clean_title.as_str(), m.episode))
+        .collect();
+    assert_eq!(
+        order,
+        vec![("Alpha", Some(1)), ("Alpha", Some(2)), ("Beta", Some(1))]
+    );
+}
