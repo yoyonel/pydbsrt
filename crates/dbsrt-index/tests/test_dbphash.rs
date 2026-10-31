@@ -189,3 +189,45 @@ fn test_dbphash_corrupted_header_handling() {
 
     let _ = fs::remove_file(&corrupt_path);
 }
+
+/// A static scene repeated across a decoy media must not outrank the media the query was cut
+/// from: one decoy frame matched by many query frames is one coherent frame, not many.
+#[test]
+fn test_recognize_prefers_coherent_media_over_static_decoy() {
+    let dbphash_path = std::env::temp_dir().join(format!("decoy_{}.dbphash", std::process::id()));
+    let frame = |k: u64| (k + 1).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    let sparse_source: Vec<(u64, u32)> = (0..10).map(|k| (frame(k), k as u32 * 1000)).collect();
+    let sparse_decoy: Vec<(u64, u32)> = (0..60).map(|k| (frame(0), k * 1000)).collect();
+
+    let mut builder = DbphashBuilder::new();
+    builder.add_media(
+        &MediaMetadata::parse("Decoy.2001.mkv"),
+        60_000,
+        24.0,
+        &[],
+        &sparse_decoy,
+    );
+    builder.add_media(
+        &MediaMetadata::parse("Source.2002.mkv"),
+        10_000,
+        24.0,
+        &[],
+        &sparse_source,
+    );
+    builder.write_to_file(&dbphash_path).unwrap();
+    let db = MmapDbphash::open(&dbphash_path).unwrap();
+
+    // 10 s at 24 fps: 24 copies of each 1 fps frame
+    let query: Vec<u64> = (0..240).map(|i| frame(i / 24)).collect();
+    let ranked = db.recognize(&query, 0);
+    let _ = fs::remove_file(&dbphash_path);
+
+    assert_eq!(ranked[0].clean_title, "Source");
+    assert_eq!(ranked[0].confidence, 100.0);
+    let decoy = ranked.iter().find(|m| m.clean_title == "Decoy").unwrap();
+    assert!(
+        decoy.confidence <= 30.0,
+        "decoy confidence {}",
+        decoy.confidence
+    );
+}
