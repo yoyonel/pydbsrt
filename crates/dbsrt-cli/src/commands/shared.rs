@@ -233,8 +233,13 @@ fn extract_resumable(
     let resumable = dbsrt_core::container::is_remote_stream_or_pipe(media_file)
         && !dbsrt_core::container::is_pipe_input(media_file);
     let partial = out_path.with_extension("phash.partial");
+    let tmp = out_path.with_extension("phash.tmp");
+    ensure_creatable(&tmp)?;
     let mut hashes = if resumable {
-        read_phash_file(&partial).unwrap_or_default()
+        ensure_creatable(&partial)?;
+        let (hashes, note) = load_checkpoint(&partial);
+        eprintln!("{note}");
+        hashes
     } else {
         Vec::new()
     };
@@ -253,7 +258,6 @@ fn extract_resumable(
             .map(|s| s.phash),
     );
     if !hashes.is_empty() {
-        let tmp = out_path.with_extension("phash.tmp");
         write_phash_file(&tmp, &hashes)?;
         std::fs::rename(&tmp, out_path)?;
         let _ = std::fs::remove_file(&partial);
@@ -261,9 +265,110 @@ fn extract_resumable(
     Ok(hashes)
 }
 
+/// Fails before the decode when an output file cannot be created (name over NAME_MAX, missing or
+/// read-only dir), instead of after minutes of extraction. An existing file is left untouched.
+fn ensure_creatable(path: &Path) -> Result<()> {
+    let existed = path.exists();
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .with_context(|| format!("Cannot create output file {:?}", path))?;
+    if !existed {
+        let _ = std::fs::remove_file(path);
+    }
+    Ok(())
+}
+
+/// Loads the `.phash.partial` checkpoint of a remote extraction, with a note for the worker log
+/// stating what the run starts from, so a resumed run is provable after the fact.
+fn load_checkpoint(partial: &Path) -> (Vec<u64>, String) {
+    if !partial.exists() {
+        return (
+            Vec::new(),
+            "Extraction: no checkpoint, full decode".to_string(),
+        );
+    }
+    match read_phash_file(partial) {
+        Ok(hashes) => {
+            let note = format!(
+                "Extraction: resumed {} frames from checkpoint",
+                hashes.len()
+            );
+            (hashes, note)
+        }
+        Err(e) => (
+            Vec::new(),
+            format!("Extraction: checkpoint unreadable ({e:#}), full decode"),
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn scratch_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("dbsrt_shared_{tag}_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn test_extract_resumable_fails_before_decode_when_output_name_too_long() {
+        let dir = scratch_dir("long_name");
+        // 252 bytes fits NAME_MAX (255); the `.phash.tmp` sibling (256) does not.
+        let out_path = dir.join(format!("{}.phash", "x".repeat(246)));
+        let missing_media = dir.join("missing.mkv");
+
+        let err = extract_resumable(&missing_media, &out_path, 25.0, cpu()).unwrap_err();
+
+        // The decode never starts: the error names the output, not the missing input.
+        assert!(
+            format!("{err:#}").contains("Cannot create output file"),
+            "{err:#}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_ensure_creatable_keeps_existing_and_leaves_no_new_file() {
+        let dir = scratch_dir("creatable");
+        let existing = dir.join("a.phash.partial");
+        std::fs::write(&existing, [1u8; 16]).unwrap();
+        let fresh = dir.join("b.phash.tmp");
+
+        ensure_creatable(&existing).unwrap();
+        ensure_creatable(&fresh).unwrap();
+
+        assert_eq!(std::fs::read(&existing).unwrap(), [1u8; 16]);
+        assert!(!fresh.exists());
+        assert!(ensure_creatable(&dir.join("no_such_dir").join("c.phash.tmp")).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_load_checkpoint_states_what_the_run_starts_from() {
+        let dir = scratch_dir("checkpoint");
+        let partial = dir.join("m.phash.partial");
+
+        let (hashes, note) = load_checkpoint(&partial);
+        assert!(hashes.is_empty());
+        assert!(note.contains("no checkpoint"), "{note}");
+
+        write_phash_file(&partial, &[7, 8, 9]).unwrap();
+        let (hashes, note) = load_checkpoint(&partial);
+        assert_eq!(hashes, vec![7, 8, 9]);
+        assert!(note.contains("resumed 3 frames from checkpoint"), "{note}");
+
+        let unreadable = dir.join("dir.phash.partial");
+        std::fs::create_dir_all(&unreadable).unwrap();
+        let (hashes, note) = load_checkpoint(&unreadable);
+        assert!(hashes.is_empty());
+        assert!(note.contains("unreadable"), "{note}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     fn cpu() -> VideoExtractionOptions {
         VideoExtractionOptions {

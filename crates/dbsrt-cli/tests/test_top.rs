@@ -3452,7 +3452,7 @@ fn test_batch_queue_telemetry_rendered_in_header_and_table() {
 
     assert!(buffer.contains("Batch: 11/399 (3%)"));
     assert!(buffer.contains("File: 11/399"));
-    assert!(buffer.contains("388 en attente"));
+    assert!(buffer.contains("388 restants (dont 0 en cours)"));
 }
 
 #[test]

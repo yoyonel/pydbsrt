@@ -42,7 +42,7 @@ pub fn render_active_jobs_page(frame: &mut Frame, area: Rect, ctx: &UiContext) {
     let visible_count = jobs.len();
     let title = if ctx.telemetry.batch_queue.total_targets > 0 {
         format!(
-            " TÂCHES EN COURS (DÉCODAGE & PHASH TEMPS RÉEL) [{visible_count}/{total_count} actifs │ File: {}/{} traités, {} en attente] ",
+            " TÂCHES EN COURS (DÉCODAGE & PHASH TEMPS RÉEL) [{visible_count}/{total_count} actifs │ File: {}/{} traités, {} restants (dont {total_count} en cours)] ",
             ctx.telemetry.batch_queue.completed_targets,
             ctx.telemetry.batch_queue.total_targets,
             ctx.telemetry.batch_queue.remaining_targets,

@@ -437,3 +437,61 @@ def test_failed_video_event_never_carries_nas_secrets(tmp_path: Path, monkeypatc
         assert secret not in summary
         assert secret not in stored
     assert summary.endswith("z" * 294 + "\n")
+
+
+@pytest.mark.parametrize(
+    ("log_text", "expected_rate", "expected_resumed"),
+    [
+        ("Extraction: no checkpoint, full decode\n", 10.0, 0),
+        ("Extraction: checkpoint unreadable (EISDIR), full decode\n", 10.0, 0),
+        ("Extraction: resumed 293197 frames from checkpoint\n", 0.0, 293197),
+        # No extraction note (existing .phash, older CLI): the file read is unknown, no rate.
+        ("Found existing pHash\n", 0.0, 0),
+    ],
+)
+def test_event_record_rate_only_for_a_full_decode(
+    tmp_path: Path, monkeypatch, log_text, expected_rate, expected_resumed
+):
+    """size / duration is a NAS read rate only when the CLI states it decoded the whole file."""
+    log = tmp_path / "a.log"
+    log.write_text(log_text, encoding="utf-8")
+    monkeypatch.setattr(worker.time, "time", lambda: 1002.0)
+
+    rec = worker._event_record(VideoTarget("/tv/a.mkv", "a.mkv", 20 * 1024 * 1024), 1000.0, "COMPLETED", log)
+
+    assert rec["io_read_rate_mib_s"] == expected_rate
+    assert rec["cifs_read_rate_mib_s"] == expected_rate
+    assert rec["resumed_frames"] == expected_resumed
+
+
+def test_queue_state_republishes_worker_count_when_a_worker_exits(tmp_path: Path, monkeypatch):
+    """A worker leaving an empty queue must not stay counted while the last video still runs."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(worker, "TARGET_QUEUE_POLL_INTERVAL_SECS", 0.01)
+    published: list[int] = []
+    monkeypatch.setattr(worker, "write_batch_queue_state", lambda _t, _c, _f, active: published.append(active))
+    release, seen_one_while_running = threading.Event(), threading.Event()
+
+    def video(item, *_args):
+        if item[1] == "slow.mkv":
+            release.wait(5)
+        return {"success": True, "video_stem": item[1], "wall_duration_secs": 1.0, "io_read_rate_mib_s": 1.0}
+
+    def release_once_one_worker_published():
+        deadline = time.time() + 3
+        while time.time() < deadline and (not published or published[-1] != 1):
+            time.sleep(0.01)
+        if published and published[-1] == 1:
+            seen_one_while_running.set()
+        release.set()
+
+    monkeypatch.setattr(worker, "process_single_video", video)
+    threading.Thread(target=release_once_one_worker_published, daemon=True).start()
+    targets = [VideoTarget("/video/slow.mkv", "slow.mkv", 1), VideoTarget("/video/fast.mkv", "fast.mkv", 1)]
+
+    ok, failed, _ = worker.execute_dynamic_batch_ingestion(targets, "ftp://nas:21", "dbsrt", {}, tmp_path / "e", 60, 2)
+
+    assert (ok, failed) == (2, 0)
+    # While only the slow video ran, the state said 1 worker, then 0 once drained.
+    assert seen_one_while_running.is_set(), published
+    assert published[-1] == 0, published
