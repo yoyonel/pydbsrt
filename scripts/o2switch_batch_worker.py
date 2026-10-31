@@ -488,7 +488,25 @@ def _watch_child(proc: subprocess.Popen, out_f: TextIO, start_time: float, max_e
     return "COMPLETED" if returncode == 0 else "ERROR"
 
 
-def _event_record(target: VideoTarget, start_time: float, status: str, log_path: Path) -> Dict[str, object]:
+def redact_nas(text: str, host: str, password: str) -> str:
+    """Masks NAS credentials and host in text bound for batch_worker.log, the events file and monitoring.
+
+    Fails safe: any token glued before '@<any host>' goes with that host, so userinfo fragments cut by
+    truncation go too, even for a NAS host that is no longer the configured one.
+    """
+    if password:
+        variants = {password, urllib.parse.quote(password), urllib.parse.quote(password, safe="")}
+        for secret in sorted(variants, key=len, reverse=True):
+            text = text.replace(secret, "<redacted>")
+    text = re.sub(r"[^\s\"'/]*@(?:\[[0-9A-Fa-f:.]+\]|[\w.-]+)", "<nas>", text)
+    if host:
+        text = re.sub(re.escape(host), "<nas>", text, flags=re.IGNORECASE)
+    return text
+
+
+def _event_record(
+    target: VideoTarget, start_time: float, status: str, log_path: Path, nas_host: str = "", nas_pass: str = ""
+) -> Dict[str, object]:
     end_time = time.time()
     end_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(end_time))
     wall_duration = end_time - start_time
@@ -512,7 +530,9 @@ def _event_record(target: VideoTarget, start_time: float, status: str, log_path:
         "status": status,
     }
     if not success and log_path.exists():
-        record["error_summary"] = log_path.read_text(encoding="utf-8", errors="ignore")[-300:]
+        # Redact before truncating: a cut inside a raw password would leave an unmatched fragment
+        log_text = log_path.read_text(encoding="utf-8", errors="ignore")
+        record["error_summary"] = redact_nas(log_text, nas_host, nas_pass)[-300:]
     return record
 
 
@@ -570,7 +590,8 @@ def process_single_video(
             out_f.write(f"\n❌ Execution exception: {exc}\n")
 
     print(f"--> [DEBUG] dbsrt {status} (returncode {returncode}) for {target.filename}", flush=True)
-    record = _event_record(target, start_time, status, log_path)
+    nas_host = urllib.parse.urlsplit(stream_base).hostname or ""
+    record = _event_record(target, start_time, status, log_path, nas_host, child_env.get("DBSRT_FTP_PASSWORD", ""))
 
     if status == "RELOAD":
         # Not a failure: no event, so the re-exec requeues it and the blacklist ignores it
@@ -832,7 +853,7 @@ def select_targets(args: argparse.Namespace, nas_pass: str, events_log: Path) ->
     if args.stream_base:
         all_videos: List[VideoTarget] = []
     else:
-        print(f"=== [2/4] Discovering remote NAS video library ({args.nas_host}:{args.nas_base}) ===")
+        print(f"=== [2/4] Discovering remote NAS video library (<nas>:{args.nas_base}) ===")
         all_videos = list_nas_videos_ftp(
             nas_host=args.nas_host,
             nas_user=args.nas_user,
@@ -879,9 +900,10 @@ def main() -> int:
 
     if args.stream_base:
         stream_base = args.stream_base.rstrip("/")
-        print(f"=== [3/4] Direct HTTP Native Streaming Mode ({stream_base}) ===")
+        nas_host = urllib.parse.urlsplit(stream_base).hostname or ""
+        print(f"=== [3/4] Direct HTTP Native Streaming Mode ({redact_nas(stream_base, nas_host, '')}) ===")
     else:
-        print(f"=== [3/4] Direct FTP Native Streaming Mode ({args.nas_host}:{args.ftp_port}) ===")
+        print(f"=== [3/4] Direct FTP Native Streaming Mode (<nas>:{args.ftp_port}) ===")
         stream_base = f"ftp://{args.nas_host}:{args.ftp_port}"
     child_env = build_child_env(args.nas_user, nas_pass, Path("bin").resolve())
 
