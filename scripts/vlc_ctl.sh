@@ -29,7 +29,7 @@ test_cvlc() {
 run_vlc() {
   install_plugin
   local media="${2:-tests/data/big_buck_bunny_trailer_480p.mp4}"
-  vlc --no-sub-autodetect-file "$media"
+  vlc --no-sub-autodetect-file --avcodec-hw=none "$media"
 }
 
 demo_vlc() {
@@ -37,7 +37,7 @@ demo_vlc() {
   local media="${2:-tests/data/big_buck_bunny_trailer_480p.mp4}"
   echo "Lancement VLC pour démonstration interactive dbsrt..."
   echo "Dans VLC : Menu Vue -> VLSub (dbsrt) -> Clic sur 'Recherche par pHash'"
-  vlc --no-sub-autodetect-file "$media"
+  vlc --no-sub-autodetect-file --avcodec-hw=none "$media"
 }
 
 case "$ACTION" in
