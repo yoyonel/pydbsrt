@@ -225,6 +225,8 @@ async fn test_remote_relay_api_key_header_forwarding() {
                 found: false,
                 media_name_search: "mock".to_string(),
                 media_match: None,
+                season: None,
+                episode: None,
                 nb_offsets_match: 0,
                 confidence: 0.0,
                 tier: Some("Mock Tier".to_string()),

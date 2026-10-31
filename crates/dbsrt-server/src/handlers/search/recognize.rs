@@ -19,6 +19,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
+/// Recognized media: title, confidence percentage, tier description, season, episode.
+pub type RecognizedMedia = (String, f64, String, Option<u32>, Option<u32>);
+
 /// Matches a sequence of pHash hashes against Tier 1 (.dbphash), Tier 1-Delta (RAM), Tier 2 (MmapLibrary), and Tier 3 (PostgreSQL).
 ///
 /// # Arguments
@@ -28,7 +31,8 @@ use std::time::Instant;
 /// * `phash_dirs` - Reference directories storing .phash files.
 ///
 /// # Returns
-/// * `Option<(String, f64, String)>` - Matched media stem, confidence percentage (0-100), and tier description.
+/// * `Option<RecognizedMedia>` - Matched media stem, confidence percentage (0-100), tier description,
+///   and season/episode (Tier 2/3 parse them from the matched release stem).
 ///
 /// # Errors
 /// * Guarantee: Never returns Err; unhandled errors fall through to subsequent tiers.
@@ -46,7 +50,7 @@ pub fn match_fingerprint_multitier(
     hashes: &[u64],
     search_distance: u32,
     phash_dirs: &[PathBuf],
-) -> Option<(String, f64, String)> {
+) -> Option<RecognizedMedia> {
     if dbsrt_core::is_blank_sequence(hashes) {
         return None;
     }
@@ -82,7 +86,13 @@ pub fn match_fingerprint_multitier(
 
     if let Some((m, tier)) = candidates.into_iter().next() {
         if m.confidence >= MIN_PHASH_RECOGNITION_CONFIDENCE_PERCENT {
-            return Some((m.clean_title, m.confidence, tier.to_string()));
+            return Some((
+                m.clean_title,
+                m.confidence,
+                tier.to_string(),
+                m.season,
+                m.episode,
+            ));
         }
     }
 
@@ -91,10 +101,13 @@ pub fn match_fingerprint_multitier(
         if let Some(top) = m.into_iter().next() {
             let conf_pct = top.confidence * 100.0;
             if conf_pct >= MIN_PHASH_RECOGNITION_CONFIDENCE_PERCENT {
+                let meta = dbsrt_core::MediaMetadata::parse(&top.media_name);
                 return Some((
                     top.media_name,
                     conf_pct,
                     "Tier 2 (MmapLibrary Zero-DB Files)".to_string(),
+                    meta.season,
+                    meta.episode,
                 ));
             }
         }
@@ -106,10 +119,13 @@ pub fn match_fingerprint_multitier(
         {
             let conf_pct = conf * 100.0;
             if conf_pct >= MIN_PHASH_RECOGNITION_CONFIDENCE_PERCENT {
+                let meta = dbsrt_core::MediaMetadata::parse(&rec.name);
                 return Some((
                     rec.name,
                     conf_pct,
                     "Tier 3 (PostgreSQL 17 SP-GiST BK-Tree)".to_string(),
+                    meta.season,
+                    meta.episode,
                 ));
             }
         }
@@ -122,7 +138,7 @@ pub fn match_fingerprint_multitier(
 ///
 /// # Arguments
 /// * `hashes` - Query visual fingerprint sequence.
-/// * `media_match` - Matched media title or stem.
+/// * `recognized` - Matched media title or stem, with its season and episode: files of other episodes are skipped.
 /// * `req_fps` - Query framerate.
 /// * `phash_dirs` - Directories storing reference .phash files.
 ///
@@ -141,7 +157,7 @@ pub fn match_fingerprint_multitier(
 /// 3. Retains reference with highest sequence alignment confidence.
 pub fn calculate_best_sequence_shift(
     hashes: &[u64],
-    media_match: &str,
+    recognized: &RecognizedMedia,
     req_fps: f64,
     phash_dirs: &[PathBuf],
 ) -> (i64, f64, f64) {
@@ -157,22 +173,16 @@ pub fn calculate_best_sequence_shift(
             for entry in entries.flatten() {
                 let p = entry.path();
                 if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
-                    if name.ends_with(".phash") && !name.contains("_mid15s") {
-                        let cand_stem = name.trim_end_matches(".phash");
-                        let norm_m = norm_alnum(media_match);
-                        let norm_c = norm_alnum(cand_stem);
-                        if norm_c.starts_with(&norm_m)
-                            || norm_m.starts_with(&norm_c)
-                            || name.contains(media_match)
-                            || media_match.contains(cand_stem)
-                        {
-                            if let Ok(ref_hashes) = read_phash_file(&p) {
-                                let (sf, match_conf) =
-                                    calculate_sequence_shift_argmin(hashes, &ref_hashes, fps);
-                                if match_conf > best_shift.2 {
-                                    let sms = (sf as f64 / fps) * 1000.0;
-                                    best_shift = (sf, sms, match_conf);
-                                }
+                    if name.ends_with(".phash")
+                        && !name.contains("_mid15s")
+                        && is_reference_of(recognized, name.trim_end_matches(".phash"))
+                    {
+                        if let Ok(ref_hashes) = read_phash_file(&p) {
+                            let (sf, match_conf) =
+                                calculate_sequence_shift_argmin(hashes, &ref_hashes, fps);
+                            if match_conf > best_shift.2 {
+                                let sms = (sf as f64 / fps) * 1000.0;
+                                best_shift = (sf, sms, match_conf);
                             }
                         }
                     }
@@ -184,13 +194,28 @@ pub fn calculate_best_sequence_shift(
     best_shift
 }
 
+/// Tells whether a reference `.phash` stem belongs to the recognized media and episode.
+fn is_reference_of(recognized: &RecognizedMedia, cand_stem: &str) -> bool {
+    let (media_match, _, _, season, episode) = recognized;
+    let norm_m = norm_alnum(media_match);
+    let norm_c = norm_alnum(cand_stem);
+    // Episodes share the title: another episode's file must not set the shift.
+    let cand_meta = dbsrt_core::MediaMetadata::parse(cand_stem);
+    let other_episode = season.zip(cand_meta.season).is_some_and(|(a, b)| a != b)
+        || episode.zip(cand_meta.episode).is_some_and(|(a, b)| a != b);
+    !other_episode
+        && (norm_c.starts_with(&norm_m)
+            || norm_m.starts_with(&norm_c)
+            || cand_stem.contains(media_match.as_str())
+            || media_match.contains(cand_stem))
+}
+
 /// Queries certified couplings and enriches candidates with visual shifts.
 ///
 /// # Arguments
 /// * `state` - Application state with coupling registry.
-/// * `media_match` - Matched media release name.
+/// * `recognized` - Matched media release name, confidence percentage, tier, season and episode.
 /// * `req_lang` - Requested ISO language code or "auto".
-/// * `confidence` - Recognition confidence percentage.
 /// * `shift_ms` - Computed visual shift in milliseconds.
 ///
 /// # Returns
@@ -208,19 +233,19 @@ pub fn calculate_best_sequence_shift(
 /// 3. If `shift_ms` is significant (> `SIGNIFICANT_SHIFT_THRESHOLD_MS`), generates a `certified_synced` candidate.
 pub fn resolve_certified_candidates_with_shift(
     state: &AppState,
-    media_match: &str,
+    recognized: &RecognizedMedia,
     req_lang: &str,
-    confidence: f64,
     shift_ms: Option<f64>,
 ) -> Vec<SubtitleCandidate> {
+    let (media_match, confidence, _, season, episode) = recognized;
     let (cert_cands, _, _, _) = lookup_certified_couplings(
         state,
         &state.subtitles_dir,
         media_match,
-        None,
-        None,
+        *season,
+        *episode,
         req_lang,
-        confidence,
+        *confidence,
     );
 
     let mut final_cands = Vec::new();
@@ -290,41 +315,32 @@ pub fn recognize_from_fingerprint(
 
     if hashes.is_empty() || hashes.iter().all(|&h| dbsrt_core::is_blank_phash(h)) {
         return RecognizeResponse {
-            found: false,
             media_name_search: "fingerprint_query".to_string(),
-            media_match: None,
-            nb_offsets_match: 0,
-            confidence: 0.0,
-            tier: None,
-            shift_frames: None,
-            shift_ms: None,
-            candidates: None,
             timer_seconds: elapsed,
+            ..Default::default()
         };
     }
 
     let matched = match_fingerprint_multitier(state, hashes, search_distance, phash_dirs);
 
-    if let Some((media_match, confidence, tier)) = matched {
-        let best_shift = calculate_best_sequence_shift(hashes, &media_match, req_fps, phash_dirs);
+    if let Some(recognized) = matched {
+        let best_shift = calculate_best_sequence_shift(hashes, &recognized, req_fps, phash_dirs);
         let (shift_frames, shift_ms) = if best_shift.2 >= MIN_PHASH_RECOGNITION_CONFIDENCE_PERCENT {
             (Some(best_shift.0), Some(best_shift.1))
         } else {
             (Some(0), Some(0.0))
         };
 
-        let final_cands = resolve_certified_candidates_with_shift(
-            state,
-            &media_match,
-            req_lang,
-            confidence,
-            shift_ms,
-        );
+        let final_cands =
+            resolve_certified_candidates_with_shift(state, &recognized, req_lang, shift_ms);
+        let (media_match, confidence, tier, season, episode) = recognized;
 
         RecognizeResponse {
             found: true,
             media_name_search: format!("fingerprint:{}frames", hashes.len()),
             media_match: Some(media_match),
+            season,
+            episode,
             nb_offsets_match: hashes.len(),
             confidence,
             tier: Some(tier),
@@ -335,16 +351,9 @@ pub fn recognize_from_fingerprint(
         }
     } else {
         RecognizeResponse {
-            found: false,
             media_name_search: format!("fingerprint:{}frames", hashes.len()),
-            media_match: None,
-            nb_offsets_match: 0,
-            confidence: 0.0,
-            tier: None,
-            shift_frames: None,
-            shift_ms: None,
-            candidates: None,
             timer_seconds: elapsed,
+            ..Default::default()
         }
     }
 }
@@ -402,6 +411,8 @@ pub fn recognize_from_media_file(
             found: false,
             media_name_search,
             media_match: None,
+            season: None,
+            episode: None,
             nb_offsets_match: 0,
             confidence: 0.0,
             tier: None,
@@ -422,6 +433,8 @@ pub fn recognize_from_media_file(
             found: true,
             media_name_search,
             media_match: Some(top.media_name.clone()),
+            season: None,
+            episode: None,
             nb_offsets_match: top.nb_offsets_match,
             confidence: top.confidence,
             tier: Some("Tier 2 (MmapLibrary Zero-DB Files)".to_string()),
@@ -435,6 +448,8 @@ pub fn recognize_from_media_file(
             found: false,
             media_name_search,
             media_match: None,
+            season: None,
+            episode: None,
             nb_offsets_match: 0,
             confidence: 0.0,
             tier: None,
@@ -598,5 +613,134 @@ mod tests {
         assert!(!res.0.found, "Zero-entropy identical frames must not match");
         assert_eq!(res.0.confidence, 0.0);
         assert_eq!(res.0.media_match, None);
+    }
+
+    /// Deterministic distinct (textured) frame hashes.
+    fn episode_frames(seed: u64, n: usize) -> Vec<u64> {
+        let mut x = seed;
+        (0..n)
+            .map(|_| {
+                x = x
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                x ^ (x >> 29)
+            })
+            .collect()
+    }
+
+    fn episode_coupling(stem: &str) -> dbsrt_core::CertifiedMediaCoupling {
+        dbsrt_core::CertifiedMediaCoupling {
+            media_hash: format!("media_{stem}"),
+            media_name: stem.to_string(),
+            phash_filename: format!("{stem}.phash"),
+            fps: 25.0,
+            frame_count: 250,
+            subtitles: vec![dbsrt_core::CertifiedSubtitleRecord {
+                subtitles_hash: format!("sub_{stem}"),
+                name: format!("{stem}.fr"),
+                lang: "fr".to_string(),
+                lang_status: dbsrt_core::LangStatus::Detected("fr".to_string()),
+                srt_path: format!("{stem}.fr.srt"),
+                certified: true,
+                cue_count: 5,
+                sub_frames: vec![],
+            }],
+        }
+    }
+
+    #[test]
+    fn test_recognize_reports_matched_episode_and_only_its_subtitles() {
+        const FPS: f64 = 25.0;
+        let state = test_app_state();
+        let ep1 = episode_frames(1, 250);
+        let ep2 = episode_frames(2, 250);
+        {
+            let mut delta = state.delta_index.write().unwrap();
+            delta.ingest_raw_frames("Show.S01E01.1080p.mkv", &ep1, FPS);
+            delta.ingest_raw_frames("Show.S01E02.1080p.mkv", &ep2, FPS);
+        }
+        {
+            let mut reg = state.coupling_registry.write().unwrap();
+            reg.couplings.push(episode_coupling("Show.S01E01.1080p"));
+            reg.couplings.push(episode_coupling("Show.S01E02.1080p"));
+        }
+        let req = RecognizeRequest {
+            media_path: String::new(),
+            query_fingerprint: None,
+            fps: Some(FPS),
+            language: Some("fr".to_string()),
+            client_version: None,
+            search_distance: 6,
+            nb_seconds: 1.0,
+            phash_dir: None,
+        };
+
+        let res = recognize_from_fingerprint(&state, &ep2[100..200], &req, &[], 0.0);
+
+        assert!(res.found);
+        assert_eq!((res.season, res.episode), (Some(1), Some(2)));
+        let titles: Vec<String> = res
+            .candidates
+            .unwrap_or_default()
+            .into_iter()
+            .map(|c| c.title)
+            .collect();
+        assert!(
+            !titles.is_empty(),
+            "the episode's certified subtitles must be offered"
+        );
+        assert!(
+            titles.iter().all(|t| t.contains("S01E02")),
+            "only the recognized episode's subtitles: {titles:?}"
+        );
+    }
+
+    #[test]
+    fn test_best_sequence_shift_uses_matched_episode_file() {
+        const FPS: f64 = 25.0;
+        let dir = std::env::temp_dir().join(format!("dbsrt_ep_shift_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // E01 holds the scene exactly; E02 (the recognized episode) replays it as a recap, 1 bit off.
+        let scene = episode_frames(7, 50);
+        let mut ep1 = episode_frames(1, 300);
+        ep1.splice(10..60, scene.iter().copied());
+        let mut ep2 = episode_frames(2, 300);
+        ep2.splice(200..250, scene.iter().map(|h| h ^ 1));
+        dbsrt_core::write_phash_file(&dir.join("Show.S01E01.1080p.25.000fps.phash"), &ep1).unwrap();
+        dbsrt_core::write_phash_file(&dir.join("Show.S01E02.1080p.25.000fps.phash"), &ep2).unwrap();
+        let e01_shift = calculate_sequence_shift_argmin(&scene, &ep1, FPS).0;
+        let e02_shift = calculate_sequence_shift_argmin(&scene, &ep2, FPS).0;
+
+        let recognized = ("Show".to_string(), 100.0, String::new(), Some(1), Some(2));
+        let best =
+            calculate_best_sequence_shift(&scene, &recognized, FPS, std::slice::from_ref(&dir));
+        std::fs::remove_dir_all(&dir).ok();
+
+        assert_ne!(e01_shift, e02_shift, "fixture: the episodes must disagree");
+        assert_eq!(best.0, e02_shift);
+    }
+
+    #[test]
+    fn test_tier2_match_reports_episode_parsed_from_stem() {
+        let state = test_app_state();
+        let dir = std::env::temp_dir().join(format!("dbsrt_ep_tier2_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let ep2 = episode_frames(2, 250);
+        dbsrt_core::write_phash_file(&dir.join("Show.S01E02.1080p.25.000fps.phash"), &ep2).unwrap();
+
+        let hit = match_fingerprint_multitier(
+            &state,
+            &ep2[100..200],
+            DEFAULT_SEARCH_DISTANCE,
+            std::slice::from_ref(&dir),
+        );
+        std::fs::remove_dir_all(&dir).ok();
+
+        let (_, _, tier, season, episode) = hit.expect("the episode file must match");
+        assert!(
+            tier.starts_with("Tier 2"),
+            "fixture: Tier 1 is empty, got {tier}"
+        );
+        assert_eq!((season, episode), (Some(1), Some(2)));
     }
 }
