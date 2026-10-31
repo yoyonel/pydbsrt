@@ -140,7 +140,7 @@ def run_chrome_smoke_test(site_dir: Path) -> list[str]:
         return []
 
     # Test file URL directly on site/ index
-    test_page = (site_dir / "2026-10-15-scaling-architecture-rust-mmap" / "index.html").resolve()
+    test_page = (site_dir / "explanation" / "2026-10-15-scaling-architecture-rust-mmap" / "index.html").resolve()
     if not test_page.exists():
         return [f"Target test page not found: {test_page}"]
 

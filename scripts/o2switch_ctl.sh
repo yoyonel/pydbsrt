@@ -843,7 +843,7 @@ REMOTE_SCRIPT
     ;;
 
   faultwatch)
-    # Per-minute LVE fault proxies, see docs/2026-10-31-o2switch-lve-cpu-faults-analysis.md
+    # Per-minute LVE fault proxies, see docs/explanation/2026-10-31-o2switch-lve-cpu-faults-analysis.md
     check_ssh
     SUB="${2:-status}"
     case "${SUB}" in
