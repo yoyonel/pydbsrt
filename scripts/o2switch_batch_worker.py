@@ -100,8 +100,9 @@ TARGET_QUEUE_POLL_INTERVAL_SECS: float = 0.5
 SCRIPT_PATH: Path = Path(__file__).resolve()
 SCRIPT_MTIME: float = SCRIPT_PATH.stat().st_mtime
 RELOAD_REQUESTED = threading.Event()
-# Longest wait for in-flight videos after a redeploy; slower ones are killed and requeued by the re-exec
-RELOAD_DRAIN_SECS: float = 600.0
+# Longest wait for in-flight videos after a redeploy; slower ones are killed and requeued by the re-exec,
+# which resumes their extraction from the .phash.partial checkpoint (at most ~1024 frames redone)
+RELOAD_DRAIN_SECS: float = 30.0
 # Jobs run ~1 vCPU per FFmpeg thread and lowering desired_workers cannot stop in-flight ones,
 # so admission keeps workers x threads under this share of the 12 vCPU o2switch LVE limit.
 CPU_BUDGET_VCPUS: int = int(os.getenv("DBSRT_CPU_BUDGET_VCPUS", "10"))

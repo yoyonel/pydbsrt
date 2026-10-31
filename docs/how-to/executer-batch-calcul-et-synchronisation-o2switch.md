@@ -266,7 +266,11 @@ Une vidéo dont les **3 dernières tentatives** du journal d'événements sont d
 
 ### Redéploiement du worker en cours de batch
 
-Le worker surveille la date de modification de son propre script. Après un `task o2switch:sync` qui le modifie, il cesse de lancer de nouvelles vidéos, laisse finir celles en cours, puis se relance (`execv`) avec le même PID et les mêmes arguments : le superviseur RPi4 et le fichier PID restent valides. Une vidéo encore en cours au bout de 10 minutes est arrêtée ; elle n'est pas comptée en échec et repart après la relance. Un `sync` qui ne change pas le script ne déclenche rien.
+Le worker surveille la date de modification de son propre script. Après un `task o2switch:sync` qui le modifie, il cesse de lancer de nouvelles vidéos, laisse finir celles en cours, puis se relance (`execv`) avec le même PID et les mêmes arguments : le superviseur RPi4 et le fichier PID restent valides. Une vidéo encore en cours au bout de 30 secondes est arrêtée ; elle n'est pas comptée en échec et repart après la relance. Son extraction pHash reprend depuis `<phash>.partial` : seules les ~1024 dernières frames sont recalculées. Un `sync` qui ne change pas le script ne déclenche rien.
+
+Un `task o2switch:deploy` ne relance pas le worker : chaque nouvelle vidéo utilise directement le nouveau binaire `dbsrt`, et les vidéos en cours finissent sur l'ancien.
+
+La reprise suppose une source à débit d'images constant et inchangée. Si une source a été remplacée ou est à débit variable, supprimez son `.partial` pour forcer une extraction complète.
 
 ### Procédure de Relance Ciblée
 
