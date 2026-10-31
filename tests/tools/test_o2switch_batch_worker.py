@@ -379,3 +379,61 @@ def test_reload_drain_timeout_kills_slow_video_without_failure_event(tmp_path: P
     assert (ok, failed) == (0, 0)
     assert not events.exists()
     assert time.time() - start < 10
+
+
+NAS_HOST = "nas.example.org"
+NAS_PASS = "p@ss w/rd:é"
+NAS_PASS_ENC = urllib.parse.quote(NAS_PASS, safe="")
+
+
+@pytest.mark.parametrize(
+    ("text", "host", "password", "expected"),
+    [
+        # legacy dbsrt: credentials inside the URL, percent-encoded
+        (f'from "ftp://u:{NAS_PASS_ENC}@{NAS_HOST}:21/tv/a.mkv"', NAS_HOST, NAS_PASS, 'from "ftp://<nas>:21/tv/a.mkv"'),
+        # same URL encoded with quote()'s default safe="/"
+        (f"ftp://u:{urllib.parse.quote(NAS_PASS)}@{NAS_HOST}/a", NAS_HOST, NAS_PASS, "ftp://<nas>/a"),
+        # 300-char truncation cut inside the userinfo: the fragment must go too
+        (f"Le Maitre: {NAS_PASS_ENC[-9:]}@{NAS_HOST}:21/a", NAS_HOST, "", "Le Maitre: <nas>:21/a"),
+        # current dbsrt: no userinfo, host only, any case
+        (f"ftp://{NAS_HOST.upper()}:21/a b.mkv", NAS_HOST, NAS_PASS, "ftp://<nas>:21/a b.mkv"),
+        # raw password in an ffmpeg argv
+        (f"-ftp-password {NAS_PASS} -i x", NAS_HOST, NAS_PASS, "-ftp-password <redacted> -i x"),
+        # userinfo for a host that is no longer the configured one is masked with that host
+        ("ftp://u:secret@old-nas.example.net/a", NAS_HOST, NAS_PASS, "ftp://<nas>/a"),
+        ("FTP://u:secret@old-nas.example.net/a", "", "", "FTP://<nas>/a"),
+        # truncated userinfo fragment before an unconfigured host, no password known
+        ("Le Maitre: d%28%2Aq@old-nas.example.net:21/a", NAS_HOST, "", "Le Maitre: <nas>:21/a"),
+        ("ftp://u:p%40ss@[2001:db8::1]:21/a", "", "", "ftp://<nas>:21/a"),
+        ("Error: unreadable stream", NAS_HOST, NAS_PASS, "Error: unreadable stream"),
+        ("", NAS_HOST, NAS_PASS, ""),
+    ],
+)
+def test_redact_nas(text, host, password, expected):
+    redacted = worker.redact_nas(text, host, password)
+    assert redacted == expected
+    assert worker.redact_nas(redacted, host, password) == redacted  # idempotent
+
+
+def test_failed_video_event_never_carries_nas_secrets(tmp_path: Path, monkeypatch):
+    """dbsrt output echoing the credentialed URL and the raw password is redacted before the 300-char cut."""
+    monkeypatch.chdir(tmp_path)
+    fake_dbsrt = tmp_path / "dbsrt"
+    leak = f"ftp://u:{NAS_PASS_ENC}@{NAS_HOST}:21/tv/a.mkv"
+    # Without redaction first, the 300-char cut would keep the raw password's last 4 chars, no '@' after them
+    output = f"x{'y' * 400} {leak} -ftp-password {NAS_PASS} {'z' * 294}"
+    fake_dbsrt.write_text(f"#!/bin/sh\necho '{output}'\nexit 1\n", encoding="utf-8")
+    fake_dbsrt.chmod(0o755)
+    events = tmp_path / "events.jsonl"
+    env = {"PATH": os.environ["PATH"], "DBSRT_FTP_PASSWORD": NAS_PASS}
+
+    rec = worker.process_single_video(
+        VideoTarget("/tv/a.mkv", "a.mkv", 1), f"ftp://{NAS_HOST}:21", str(fake_dbsrt), env, threading.Lock(), events
+    )
+
+    stored = events.read_text(encoding="utf-8")
+    summary = str(rec["error_summary"])
+    for secret in (NAS_HOST, NAS_PASS_ENC[-6:], NAS_PASS[-4:], "@"):
+        assert secret not in summary
+        assert secret not in stored
+    assert summary.endswith("z" * 294 + "\n")

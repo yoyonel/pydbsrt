@@ -64,7 +64,10 @@ async fn test_server_monitoring_endpoints() {
         lve_cpu_avg_pct: Some(72.1),
         desired_workers: Some(4),
         running_workers: Some(4),
-        recent_logs: vec!["[2026-10-30 10:00:00] ● Test log message".to_string()],
+        recent_logs: vec![
+            "[2026-10-30 10:00:00] ● Test log message".to_string(),
+            "❌ ffmpeg -ftp-password hb-secret -i ftp://u:hb-url-secret@nas/x.mkv".to_string(),
+        ],
     };
 
     let res_hb = client
@@ -89,7 +92,10 @@ async fn test_server_monitoring_endpoints() {
     assert_eq!(tel2.supervisor.supervisor_pid, Some(99999));
     assert!(tel2.supervisor.is_online);
     assert_eq!(tel2.supervisor.lve_cpu_pct, Some(65.4));
-    assert_eq!(tel2.supervisor.recent_logs.len(), 1);
+    assert_eq!(tel2.supervisor.recent_logs.len(), 2);
+    let logs = tel2.supervisor.recent_logs.join("\n");
+    assert!(!logs.contains("hb-secret") && !logs.contains("hb-url-secret"));
+    assert!(logs.contains("-ftp-password *** -i ftp://u:***@nas/x.mkv"));
 
     // Clean up temporary run file
     let _ = std::fs::remove_file("run/supervisor_status.json");

@@ -819,8 +819,37 @@ REMOTE_SCRIPT
     ssh -t "${O2SWITCH_HOST}" "tail -f ${REMOTE_BASE}/logs/batch_worker.log"
     ;;
 
+  faultwatch)
+    # Per-minute LVE fault proxies, see docs/2026-10-31-o2switch-lve-cpu-faults-analysis.md
+    check_ssh
+    SUB="${2:-status}"
+    case "${SUB}" in
+      start)
+        rsync -az "scripts/o2switch_fault_watch.py" "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/"
+        # shellcheck disable=SC2029
+        ssh "${O2SWITCH_HOST}" "cd $(printf '%q' "${REMOTE_BASE}") && mkdir -p run logs/faultwatch && if [ -f run/faultwatch.pid ] && kill -0 \$(cat run/faultwatch.pid) 2>/dev/null; then echo 'Fault watcher already running.'; else screen -X -S dbsrt_faultwatch quit 2>/dev/null; screen -dmS dbsrt_faultwatch bash -c 'echo \$\$ > run/faultwatch.pid; exec ./bin/python3 -u scripts/o2switch_fault_watch.py watch >> logs/faultwatch/watch.log 2>&1' && echo '✓ Fault watcher started (screen: dbsrt_faultwatch).'; fi"
+        ;;
+      stop)
+        remote_stop_pidfile "run/faultwatch.pid"
+        ;;
+      status)
+        # shellcheck disable=SC2029
+        ssh "${O2SWITCH_HOST}" "cd $(printf '%q' "${REMOTE_BASE}") && if [ -f run/faultwatch.pid ] && kill -0 \$(cat run/faultwatch.pid) 2>/dev/null; then echo \"● Fault watcher RUNNING (PID \$(cat run/faultwatch.pid))\"; else echo '○ Fault watcher not running.'; fi; tail -n 3 logs/faultwatch/*.jsonl 2>/dev/null | tail -n 3; tail -n 5 logs/faultwatch/watch.log 2>/dev/null"
+        ;;
+      pull)
+        mkdir -p data/reports/faultwatch
+        rsync -az "${O2SWITCH_HOST}:${REMOTE_BASE}/logs/faultwatch/" data/reports/faultwatch/ --include='*.jsonl' --exclude='*'
+        echo "✓ Pulled into data/reports/faultwatch/"
+        ;;
+      *)
+        echo "Usage: $0 faultwatch {start|stop|status|pull}"
+        exit 1
+        ;;
+    esac
+    ;;
+
   *)
-    echo "Usage: $0 {build|test-local|sync|start|stop|restart|status|logs|demo|setup-cron|remove-cron|rotate-key|rotate-readonly-key|monitoring|top|pull-catalog|backup-nas|batch-tvshow|batch-movies|batch-status|batch-workers|batch-stop|batch-logs}"
+    echo "Usage: $0 {build|test-local|sync|start|stop|restart|status|logs|demo|setup-cron|remove-cron|rotate-key|rotate-readonly-key|monitoring|top|pull-catalog|backup-nas|batch-tvshow|batch-movies|batch-status|batch-workers|batch-stop|batch-logs|faultwatch}"
     exit 1
     ;;
 esac

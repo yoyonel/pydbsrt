@@ -56,10 +56,14 @@ def test_compute_lve_cpu_pct_uses_deltas_and_counts_new_pids():
         (50.0, [50.0, 50.0], 4, True, 4),  # window not full
         (50.0, [50.0, 50.0, 50.0], 4, False, 4),  # cooldown running
         (50.0, [50.0, 50.0, 50.0], 3, True, 4),  # scale up
-        (68.0, [68.0, 68.0, 68.0], 4, True, 5),  # 4 videos at ~68 % LVE: room for a fifth
+        (55.0, [55.0, 55.0, 55.0], 4, True, 5),  # 4 videos at ~55 % LVE: room for a fifth
+        (67.0, [67.0, 67.0, 67.0], 4, True, 4),  # 4 workers at ~67 %: a fifth would cross 80 % (flapping)
         (50.0, [50.0, 50.0, 50.0], AUTOSCALE_MAX_WORKERS, True, AUTOSCALE_MAX_WORKERS),  # ceiling
         (94.0, [94.0, 94.0, 94.0], 4, True, 3),  # scale down
-        (85.0, [85.0, 85.0, 85.0], 4, True, 4),  # target zone
+        (85.0, [85.0, 85.0, 85.0], 4, True, 3),  # above 80 %: CPU fault zone, scale down
+        (80.0, [80.0, 80.0, 80.0], 4, True, 4),  # upper bound included in target zone
+        (60.0, [60.0, 60.0, 60.0], 4, True, 4),  # lower bound included in target zone
+        (75.0, [75.0, 75.0, 75.0], 4, True, 4),  # target zone
     ],
 )
 def test_decide_workers(cpu, history, workers, cooldown_elapsed, expected):

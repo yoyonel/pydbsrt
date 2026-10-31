@@ -55,8 +55,10 @@ AUTOSCALE_MIN_WORKERS: int = 2
 # Matches the worker CPU budget: 10 vCPU // 2 FFmpeg threads per video (~85 % LVE measured)
 AUTOSCALE_MAX_WORKERS: int = 5
 AUTOSCALE_DEFAULT_WORKERS: int = 4
-AUTOSCALE_TARGET_LOW_PCT: float = 78.0  # Scale up concurrency if rolling average LVE CPU < 78%
-AUTOSCALE_TARGET_HIGH_PCT: float = 92.0  # Scale down concurrency if rolling average LVE CPU > 92%
+# CPU faults start near 79% LVE minute average (docs/2026-10-31-o2switch-lve-cpu-faults-analysis.md)
+# Band wider than one worker (~2 of 12 vCPUs = 17 points), otherwise it flaps 4 <-> 5
+AUTOSCALE_TARGET_LOW_PCT: float = 60.0  # Scale up concurrency if rolling average LVE CPU < 60%
+AUTOSCALE_TARGET_HIGH_PCT: float = 80.0  # Scale down concurrency if rolling average LVE CPU > 80%
 AUTOSCALE_EMERGENCY_SPIKE_PCT: float = 96.0  # Instant emergency throttle if single tick exceeds 96%
 AUTOSCALE_COOLDOWN_SECS: int = 180  # Cooldown between scale adjustments (3 min to observe steady state)
 AUTOSCALE_SAMPLE_WINDOW: int = 3  # Number of 60s probe ticks in rolling average window

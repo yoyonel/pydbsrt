@@ -77,12 +77,25 @@ Snapshot unifié en JSON de la télémétrie du serveur (statistiques système, 
 ### `GET /v1/monitoring/top`
 Snapshot JSON de `dbsrt top --json` (binaire `dbsrt` voisin de `dbsrt-server`), destiné aux clients web de supervision (lecture seule). Mis en cache 2 s ; les échecs ne sont pas mis en cache.
 
-- `200 OK` : snapshot JSON (environ 1 Mo, non compressé).
+Les listes lourdes `history_records` et `discovered_media` sont paginées :
+
+| Paramètre | Défaut | Rôle |
+|---|---|---|
+| `offset` | `0` | Éléments sautés au début de chaque liste. |
+| `limit` | `50` | Éléments gardés par liste ; `0` ne garde que les champs live et les totaux. |
+
+La réponse ajoute `history_total` et `discovered_media_total` (taille de chaque liste avant découpe), et `discovered_media_per_source` (nombre de médias par `source_id`).
+
+Ordre avant découpe, comme les onglets de `dbsrt top` : `history_records` du plus récent au plus ancien, `discovered_media` par nom (insensible à la casse).
+
+Secrets masqués : la valeur suivant `-ftp-password` et le mot de passe des URL `scheme://user:pass@host` deviennent `***` (lignes de commande des jobs, corps et `stderr`).
+
+- `200 OK` : snapshot JSON compact (quelques Ko avec `limit=0`, environ 1 Mo non paginé).
 - `502 Bad Gateway` : `dbsrt top` a terminé en erreur ; le corps contient son `stderr`.
 - `500 Internal Server Error` : binaire `dbsrt` introuvable ou non exécutable.
 
 ### `POST /v1/supervisor/heartbeat`
-Réceptionne et persiste de manière atomique la pulsation et les logs de l'agent superviseur RPi4 dans `run/supervisor_status.json`.
+Réceptionne et persiste de manière atomique la pulsation et les logs de l'agent superviseur RPi4 dans `run/supervisor_status.json`. Les secrets FTP des logs sont masqués à l'écriture et à la lecture.
 
 ---
 

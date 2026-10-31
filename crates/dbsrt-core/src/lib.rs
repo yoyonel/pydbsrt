@@ -33,9 +33,9 @@ pub use cuts::{
     STATIC_FRAME_MAX_DISTANCE, STATIC_SEQUENCE_MAX_JITTER_DISTANCE,
 };
 pub use ffmpeg_input::{
-    apply_ftp_credentials, display_input, ffmpeg_decode_threads, redact_command_line,
-    redact_url_userinfo, DEFAULT_FFMPEG_DECODE_THREADS, FFMPEG_THREADS_ENV, FTP_PASSWORD_ENV,
-    FTP_USER_ENV,
+    apply_ftp_credentials, display_input, ffmpeg_decode_threads, redact_args, redact_command_line,
+    redact_secrets, redact_url_userinfo, DEFAULT_FFMPEG_DECODE_THREADS, FFMPEG_THREADS_ENV,
+    FTP_PASSWORD_ENV, FTP_USER_ENV,
 };
 pub use lang_status::LangStatus;
 pub use media_pairing::{

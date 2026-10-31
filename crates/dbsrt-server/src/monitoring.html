@@ -173,46 +173,6 @@
       margin-bottom: 10px;
     }
 
-    /* Active Jobs Cards */
-    .jobs-container {
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-      margin-bottom: 16px;
-    }
-    .job-card {
-      background: var(--card-bg);
-      border: 1px solid var(--card-border);
-      border-radius: 8px;
-      padding: 12px;
-    }
-    .job-top {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      gap: 8px;
-      margin-bottom: 8px;
-    }
-    .job-title {
-      font-weight: 600;
-      color: #fff;
-      font-size: 0.88rem;
-      word-break: break-all;
-    }
-    .job-metrics {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 12px;
-      font-family: var(--font-mono);
-      font-size: 0.78rem;
-      color: var(--text-muted);
-      margin-top: 8px;
-    }
-    .job-metric-val {
-      color: var(--accent);
-      font-weight: 600;
-    }
-
     /* Supervisor Card & Terminal */
     .sup-card {
       background: var(--card-bg);
@@ -335,6 +295,54 @@
       outline: none;
       border-color: var(--accent);
     }
+
+    /* dbsrt top parity: header banner, tabs, tables */
+    .top-banner {
+      background: var(--terminal-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-bottom: 16px;
+      font-family: var(--font-mono);
+      font-size: 0.76rem;
+      overflow-x: auto;
+    }
+    .top-title { color: var(--accent); font-weight: 700; margin-bottom: 6px; display: flex; justify-content: space-between; gap: 8px; }
+    .top-line { white-space: nowrap; }
+    .top-key { color: #39c5cf; font-weight: 700; }
+    .top-dim { color: var(--text-muted); }
+    .tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+    .tab-btn { font-family: var(--font-mono); font-size: 0.76rem; }
+    .tab-btn.active { background: #1f6feb; border-color: #388bfd; color: #fff; }
+    .tab-pane { display: none; margin-bottom: 20px; }
+    .tab-pane.active { display: block; }
+    .tab-caption { font-family: var(--font-mono); font-size: 0.74rem; color: var(--text-muted); margin-bottom: 6px; }
+    .table-wrap { overflow-x: auto; border: 1px solid var(--card-border); border-radius: 8px; background: var(--card-bg); }
+    .top-table { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 0.74rem; }
+    .top-table th { text-align: left; color: #e3b341; padding: 6px 8px; border-bottom: 1px solid var(--card-border); white-space: nowrap; }
+    .top-table td { padding: 5px 8px; border-bottom: 1px solid #21262d; white-space: nowrap; }
+    .top-table td.num, .top-table th.num { text-align: right; }
+    .top-table tr:last-child td { border-bottom: none; }
+    /* MÉDIA takes only the width the other columns leave (max-width: 0 + width: 100%), truncating
+       long release names instead of pushing PROGRESSION off-screen; full name stays in the title */
+    .top-table td.media { width: 100%; max-width: 0; min-width: 12ch; overflow: hidden; text-overflow: ellipsis; }
+    @media (max-width: 600px) { .top-table .hide-sm { display: none; } }
+    .eng-gpu { color: #7ee787; font-weight: 700; }
+    .eng-sub { color: #d2a8ff; }
+    .eng-hi10p { color: #e3b341; font-weight: 700; }
+    .sys-tree { font-family: var(--font-mono); font-size: 0.76rem; background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px; padding: 10px 12px; }
+    .sys-group { color: #39c5cf; font-weight: 700; margin-top: 8px; }
+    .sys-group:first-child { margin-top: 0; }
+    .sys-row { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .st-fail { color: #f85149; font-weight: 700; }
+    .st-info { color: var(--accent-hover); font-weight: 700; }
+    .top-table tr[data-key] { cursor: pointer; }
+    .top-table tr[data-key]:hover td { background: #161b22; }
+    /* Inspection sheet (TUI Enter/i): wraps long paths and error reports instead of truncating */
+    .top-table tr.detail td { white-space: pre-wrap; word-break: break-all; background: #0d1117; }
+    .top-table tr.detail .sys-row { white-space: pre-wrap; }
+    .pager { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 8px; font-family: var(--font-mono); font-size: 0.74rem; }
+    .pager .btn:disabled { opacity: 0.4; cursor: default; }
   </style>
 </head>
 <body>
@@ -347,12 +355,20 @@
       <span id="health-badge" class="badge badge-online">Actif</span>
     </div>
     <div class="header-controls">
-      <span id="countdown-label">3s</span>
       <button class="btn" id="btn-refresh" title="Actualiser maintenant">↻</button>
       <button class="btn" id="btn-pause" title="Mettre en pause">⏸</button>
       <button class="btn" id="btn-auth" title="Changer de clé">🔑</button>
     </div>
   </header>
+
+  <!-- dbsrt top header banner (same 4 lines as the TUI) -->
+  <section class="top-banner" id="top-banner">
+    <div class="top-title"><span id="top-title">pydbsrt top ── Moniteur de Décodage pHash &amp; Ingestion Temps Réel</span><span id="top-clock"></span></div>
+    <div class="top-line" id="top-line-host"><span class="top-dim">En attente de /v1/monitoring/top...</span></div>
+    <div class="top-line" id="top-line-engines"></div>
+    <div class="top-line" id="top-line-flow"></div>
+    <div class="top-line" id="top-line-session"></div>
+  </section>
 
   <!-- Hero Ingestion Progress Card -->
   <section class="hero-card">
@@ -387,16 +403,83 @@
     </div>
   </section>
 
-  <!-- Section: Active Jobs -->
-  <div class="section-title">
-    <span>⚡ Tâches en cours d'extraction</span>
-    <span id="active-jobs-count" class="badge badge-blue">0</span>
-  </div>
-  <div id="jobs-container" class="jobs-container">
-    <div class="job-card" style="text-align: center; color: var(--text-muted); padding: 16px;">
-      Aucune extraction active en cours
+  <!-- dbsrt top tabs, read-only (TUI actions such as select, rescan or source CRUD are left out) -->
+  <nav class="tabs">
+    <button class="btn tab-btn active" data-tab="jobs">[1] Tâches <span id="active-jobs-count" class="badge badge-blue">0</span></button>
+    <button class="btn tab-btn" data-tab="stats">[2] Stats</button>
+    <button class="btn tab-btn" data-tab="completed">[3] Récents</button>
+    <button class="btn tab-btn" data-tab="media">[4] Médias</button>
+    <button class="btn tab-btn" data-tab="sources">[5] Sources</button>
+    <button class="btn tab-btn" data-tab="system">[6] Système</button>
+  </nav>
+
+  <section class="tab-pane active" id="tab-jobs">
+    <div class="tab-caption" id="jobs-caption">TÂCHES EN COURS (DÉCODAGE &amp; PHASH TEMPS RÉEL)</div>
+    <div class="table-wrap">
+      <table class="top-table">
+        <thead>
+          <tr><th></th><th class="hide-sm">PID</th><th>MÉDIA</th><th class="hide-sm">MOTEUR</th><th>PROGRESSION</th><th class="num">DÉBIT VFS</th><th class="num">ETA</th><th class="num">CPU</th><th class="num">RAM</th></tr>
+        </thead>
+        <tbody id="jobs-tbody">
+          <tr><td colspan="9" class="top-dim" style="text-align: center;">Aucune extraction active en cours</td></tr>
+        </tbody>
+      </table>
     </div>
-  </div>
+  </section>
+
+  <section class="tab-pane" id="tab-stats">
+    <div class="tab-caption" id="stats-caption">HISTORIQUE &amp; STATISTIQUES RÉELLES (DÉCODAGE INTÉGRAL PHASH)</div>
+    <div class="table-wrap">
+      <table class="top-table">
+        <thead>
+          <tr><th>Dimension Analysée</th><th class="num">Min</th><th class="num">Médiane</th><th class="num">Moyenne</th><th class="num">P90 (90e pct)</th><th class="num">Max</th><th class="num">Écart-type (σ)</th></tr>
+        </thead>
+        <tbody id="stats-tbody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="tab-pane" id="tab-completed">
+    <div class="tab-caption" id="completed-caption">DERNIERS TRAITEMENTS COMPLÉTÉS &amp; CERTIFIÉS</div>
+    <div class="table-wrap">
+      <table class="top-table">
+        <thead>
+          <tr><th>MÉDIA / ÉPISODE TRAITÉ</th><th>STATUT</th><th class="num hide-sm">TAILLE</th><th class="num">DURÉE</th><th class="num hide-sm">COUPLINGS</th><th class="num hide-sm">DÉBIT CIFS</th><th class="hide-sm">DATE FIN</th></tr>
+        </thead>
+        <tbody id="completed-tbody"></tbody>
+      </table>
+    </div>
+    <div class="pager" data-list="completed"></div>
+  </section>
+
+  <section class="tab-pane" id="tab-media">
+    <div class="tab-caption" id="media-caption">EXPLORATEUR DE MÉDIAS MULTI-SOURCES</div>
+    <div class="table-wrap">
+      <table class="top-table">
+        <thead>
+          <tr><th>MÉDIA / RELEASE NAS</th><th class="num hide-sm">TAILLE</th><th class="num hide-sm">DURÉE</th><th class="hide-sm">EMPREINTE PHASH</th><th>SOUS-TITRES</th><th class="hide-sm">ENCODAGE</th><th>STATUT</th></tr>
+        </thead>
+        <tbody id="media-tbody"></tbody>
+      </table>
+    </div>
+    <div class="pager" data-list="media"></div>
+  </section>
+
+  <section class="tab-pane" id="tab-sources">
+    <div class="tab-caption" id="sources-caption">SOURCES DE MÉDIAS</div>
+    <div class="table-wrap">
+      <table class="top-table">
+        <thead id="sources-thead"></thead>
+        <tbody id="sources-tbody"></tbody>
+      </table>
+    </div>
+    <div class="sys-tree" id="sources-specs" style="margin-top: 10px; display: none;"></div>
+  </section>
+
+  <section class="tab-pane" id="tab-system">
+    <div class="tab-caption">INFORMATIONS SYSTÈME &amp; MATÉRIEL (VUE FASTFETCH)</div>
+    <div class="sys-tree" id="sys-tree"><span class="top-dim">En attente de télémétrie...</span></div>
+  </section>
 
   <!-- Section: RPi4 Autonomous Supervisor -->
   <div class="section-title">
@@ -460,9 +543,6 @@
   <script>
     // Configuration & State
     const REFRESH_INTERVAL_MS = 3000;
-    let refreshTimer = null;
-    let countdownTimer = null;
-    let secondsLeft = 3;
     let isPaused = false;
     let apiKey = localStorage.getItem('dbsrt_api_key') || '';
 
@@ -500,16 +580,13 @@
         apiKey = val;
         localStorage.setItem('dbsrt_api_key', apiKey);
         hideAuthModal();
-        fetchTelemetry();
+        refreshAll();
       }
     });
 
     document.getElementById('btn-auth').addEventListener('click', showAuthModal);
 
-    document.getElementById('btn-refresh').addEventListener('click', () => {
-      secondsLeft = 3;
-      fetchTelemetry();
-    });
+    document.getElementById('btn-refresh').addEventListener('click', refreshAll);
 
     document.getElementById('btn-pause').addEventListener('click', () => {
       isPaused = !isPaused;
@@ -559,7 +636,6 @@
       document.getElementById('health-badge').className = 'badge badge-online';
       document.getElementById('health-badge').textContent = 'Actif';
       if (data.system && data.system.hostname) {
-        document.getElementById('node-badge').textContent = data.system.hostname.split('.')[0];
         document.getElementById('sys-host').textContent = 'Hôte : ' + data.system.hostname;
         document.getElementById('sys-ram').textContent = `RAM : ${data.system.ram_used_gib.toFixed(1)} / ${data.system.ram_total_gib.toFixed(1)} GiB`;
         document.getElementById('sys-uptime').textContent = `Uptime : ${formatDuration(data.system.uptime_secs)}`;
@@ -576,35 +652,7 @@
       document.getElementById('kpi-total').textContent = q.total_targets || 0;
       document.getElementById('kpi-workers').textContent = q.active_workers || 0;
 
-      // 3. Active Ingestion Jobs
-      const jobs = data.active_jobs || [];
-      document.getElementById('active-jobs-count').textContent = jobs.length;
-      const jobsContainer = document.getElementById('jobs-container');
-      if (jobs.length === 0) {
-        jobsContainer.innerHTML = '<div class="job-card" style="text-align: center; color: var(--text-muted); padding: 16px;">Aucune extraction active en cours</div>';
-      } else {
-        jobsContainer.innerHTML = jobs.map(j => {
-          const jpct = (j.progress_ratio * 100).toFixed(1);
-          const fps = j.fps ? j.fps.toFixed(0) : '0';
-          const eta = j.eta_secs ? formatDuration(j.eta_secs) : '--';
-          return `
-            <div class="job-card">
-              <div class="job-top">
-                <div class="job-title">🎬 ${escapeHtml(j.media_name)}</div>
-                <span class="badge ${j.status === 'RUNNING' ? 'badge-online' : 'badge-warn'}">PID ${j.pid}</span>
-              </div>
-              <div class="progress-bar-wrap" style="height: 8px; margin-bottom: 6px;">
-                <div class="progress-bar-fill" style="width: ${jpct}%;"></div>
-              </div>
-              <div class="job-metrics">
-                <div>Progression : <span class="job-metric-val">${jpct}%</span> (${j.frames_decoded} frames)</div>
-                <div>Vitesse : <span class="job-metric-val">${fps} FPS</span></div>
-                <div>ETA : <span class="job-metric-val">${eta}</span></div>
-              </div>
-            </div>
-          `;
-        }).join('');
-      }
+      // 3. Active jobs are rendered from /v1/monitoring/top (renderTop), like `dbsrt top`
 
       // 4. RPi4 Supervisor
       const sup = data.supervisor || {};
@@ -663,20 +711,464 @@
       }
     }
 
-    // Auto-refresh loop
-    countdownTimer = setInterval(() => {
-      if (!isPaused) {
-        secondsLeft--;
-        if (secondsLeft <= 0) {
-          secondsLeft = 3;
-          fetchTelemetry();
-        }
-        document.getElementById('countdown-label').textContent = secondsLeft + 's';
+    // ── dbsrt top parity (/v1/monitoring/top?limit=0: live fields only, heavy lists cut) ──
+    const MIB = 1024 * 1024;
+    const GIB = 1024 * MIB;
+    const fmt = (v, d) => (Number(v) || 0).toFixed(d);
+    // Port of SystemTelemetry::account_ram_label.
+    const accountRamLabel = (t) => t.account_ram_gib == null ? null
+      : t.account_ram_limit_gib > 0 ? `${fmt(t.account_ram_gib, 2)}/${fmt(t.account_ram_limit_gib, 0)} GiB (${fmt(t.account_ram_gib / t.account_ram_limit_gib * 100, 1)}%)`
+      : `${fmt(t.account_ram_gib, 2)} GiB`;
+    const span = (cls, txt) => `<span class="${cls}">${escapeHtml(txt)}</span>`;
+
+    function textBar(ratio, width) {
+      const filled = Math.round(Math.min(Math.max(ratio || 0, 0), 1) * width);
+      return '█'.repeat(filled) + '░'.repeat(width - filled);
+    }
+
+    // Same rule as the TUI header: any job reading ftp/http/sftp means remote streaming
+    function isStreamingActive(jobs) {
+      return jobs.some(j => (j.cmdline || []).some(a => /^(ftp|https?|sftp):\/\//.test(a)));
+    }
+
+    // Heavy lists are fetched one page at a time, only while their tab is shown
+    const PAGE_SIZE = 50;
+    const pageIndex = { completed: 0, media: 0 };
+    let activeTab = 'jobs';
+    let topSeq = 0;
+    let lastTop = null;
+
+    function topQuery() {
+      if (activeTab in pageIndex) return `limit=${PAGE_SIZE}&offset=${pageIndex[activeTab] * PAGE_SIZE}`;
+      // The remote source row reads the NAS endpoint from one media path
+      return activeTab === 'sources' ? 'limit=1' : 'limit=0';
+    }
+
+    async function fetchTop() {
+      const seq = ++topSeq;
+      try {
+        const resp = await fetch('v1/monitoring/top?' + topQuery(), { headers: getAuthHeaders() });
+        if (resp.status === 401 || resp.status === 403) return;
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const t = await resp.json();
+        // A slower answer for a previous tab or page must not overwrite the current one
+        if (seq !== topSeq) return;
+        lastTop = t;
+        renderTop(t);
+      } catch (err) {
+        console.warn('Erreur top:', err);
+        document.getElementById('top-line-host').innerHTML = span('top-dim', 'Snapshot dbsrt top indisponible (' + err.message + ')');
       }
-    }, 1000);
+    }
+
+    function refreshAll() {
+      fetchTelemetry();
+      fetchTop();
+    }
+
+    function renderTopBanner(t) {
+      const h = t.host_info || {};
+      const q = t.batch_queue || {};
+      const jobs = t.active_jobs || [];
+      document.getElementById('top-title').textContent = `pydbsrt top ${h.app_version || ''} ── Moniteur de Décodage pHash & Ingestion Temps Réel`;
+      document.getElementById('top-clock').textContent = new Date().toLocaleTimeString('fr-FR');
+      if (h.hostname) document.getElementById('node-badge').textContent = h.hostname.split('.')[0];
+
+      const ramPct = t.ram_total_gib > 0 ? (t.ram_used_gib / t.ram_total_gib) * 100 : 0;
+      let host = span('top-key', '🖥️ HÔTE      │ ') + span('', h.hostname + ' ') + span('top-dim', `(${h.os_name} ${h.arch}) `)
+        + '│ ' + span(jobs.length > 0 ? 'eng-gpu' : 'eng-hi10p', `Workers: ${jobs.length} actifs `) + '│ ';
+      if (q.total_targets > 0) host += span('top-key', `Batch: ${q.completed_targets}/${q.total_targets} (${fmt(q.progress_pct, 0)}%) `) + '│ ';
+      // Host RAM stays in the Système tab: on shared hosting it counts every tenant.
+      const account = accountRamLabel(t);
+      const ram = account ? `RAM compte: ${account}` : `RAM: ${fmt(t.ram_used_gib, 1)}/${fmt(t.ram_total_gib, 1)} GiB (${fmt(ramPct, 0)}%)`;
+      const cpu = t.account_cpu_pct != null ? `CPU compte: ${fmt(t.account_cpu_pct, 0)}%` : `Host CPU: ${fmt(t.host_cpu_pct, 0)}%`;
+      host += escapeHtml(`${cpu} │ ${ram}`);
+      if (t.is_scanning) host += ' │ ' + span('eng-hi10p', '⟳ SCAN DISQUE EN COURS...');
+      document.getElementById('top-line-host').innerHTML = host;
+
+      const g = t.gpu || {};
+      const gpu = g.available
+        ? `${h.gpu_name} (Décodage: ${fmt(g.video_busy_pct, 0)}% ${textBar(g.video_busy_pct / 100, 10)} │ Conso: ${fmt(g.power_watts, 1)} W)`
+        : 'Non disponible (Mode CPU Multithread)';
+      document.getElementById('top-line-engines').innerHTML = span('top-key', '⚙️ MOTEURS   │ ')
+        + escapeHtml(`CPU: ${h.cpu_brand} (${h.cpu_cores_logical} c.) │ `) + span('top-key', 'GPU: ') + escapeHtml(gpu);
+
+      const netRx = Math.max(t.net_rx_mib_s || 0, 0);
+      let pipe = `Pipe pHash: ${fmt(Math.max(t.total_rate_mib_s || 0, 0), 1)} MB/s`;
+      if (isStreamingActive(jobs)) pipe += ` (${fmt(jobs.reduce((s, j) => s + (j.hashing_fps || 0), 0), 0)} fps)`;
+      document.getElementById('top-line-flow').innerHTML = span('top-key', '⚡ FLUX REEL  │ ')
+        + escapeHtml(`Réseau Net RX: ${fmt(netRx, 1)} MB/s (${fmt(netRx * 8, 1)} Mbps)`) + span('top-dim', '  ──►  ') + escapeHtml(pipe);
+
+      const s = t.session || {};
+      const cumul = s.session_bytes > 0
+        ? `${fmt(s.session_bytes / GIB, 1)} GiB traités en ${formatDuration(s.session_duration_secs)} (Moyenne: ${fmt(s.session_rate_mib_s, 1)} MB/s sur ${s.stream_count} flux)`
+        : '0.0 MB traités en 0s (En attente de flux...)';
+      document.getElementById('top-line-session').innerHTML = span('top-key', '📈 CUMUL SESS │ ') + escapeHtml(cumul);
+    }
+
+    function engineClass(engine) {
+      if (engine.includes('GPU')) return 'eng-gpu';
+      if (engine.includes('Sub')) return 'eng-sub';
+      if (engine.includes('Hi10P')) return 'eng-hi10p';
+      return '';
+    }
+
+    function renderTopJobs(t) {
+      const jobs = t.active_jobs || [];
+      const q = t.batch_queue || {};
+      document.getElementById('active-jobs-count').textContent = jobs.length;
+      document.getElementById('jobs-caption').textContent = q.total_targets > 0
+        ? `TÂCHES EN COURS (DÉCODAGE & PHASH TEMPS RÉEL) [${jobs.length} actifs │ File: ${q.completed_targets}/${q.total_targets} traités, ${q.remaining_targets} en attente]`
+        : `TÂCHES EN COURS (DÉCODAGE & PHASH TEMPS RÉEL) [${jobs.length}]`;
+      const tbody = document.getElementById('jobs-tbody');
+      if (jobs.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="9" class="top-dim" style="text-align: center;">Aucune extraction active en cours</td></tr>';
+        return;
+      }
+      tbody.innerHTML = jobs.map(j => {
+        const mbRead = j.read_bytes / MIB;
+        const mbTotal = j.total_bytes / MIB;
+        const prog = `${textBar(j.progress_ratio, 10)} ${fmt(j.progress_ratio * 100, 0)}% (${fmt(mbRead, mbRead > 0 && mbRead < 10 ? 1 : 0)}/${fmt(mbTotal, 0)} MB)`;
+        const rate = j.hashing_fps > 0.5 ? `${fmt(j.hashing_fps, 0)} fps` : `${fmt(j.current_rate_mib_s, 1)} MB/s`;
+        const eta = j.eta_secs != null ? formatDuration(j.eta_secs) : 'N/A';
+        return `<tr>
+          <td>${j.status === 'PAUSED' ? span('eng-hi10p', '⏸') : span('eng-gpu', '▶')}</td>
+          <td class="hide-sm">${j.pid}</td>
+          <td class="media" title="${escapeHtml(j.media_name)}">${escapeHtml(j.media_name)}</td>
+          <td class="hide-sm" title="${escapeHtml(j.engine_reason || '')}">${span(engineClass(j.engine), j.engine)}</td>
+          <td>${escapeHtml(prog)}</td>
+          <td class="num">${rate}</td>
+          <td class="num">${eta}</td>
+          <td class="num">${fmt(j.cpu_percent, 0)}%</td>
+          <td class="num">${fmt(j.ram_rss_mib, 0)} MB</td>
+        </tr>`;
+      }).join('');
+    }
+
+    function renderTopStats(t) {
+      const st = t.stats || {};
+      document.getElementById('stats-caption').textContent = `HISTORIQUE & STATISTIQUES RÉELLES (DÉCODAGE INTÉGRAL PHASH - ${st.sample_count || 0} MÉDIAS)`;
+      const dims = [
+        ['Débit Décodage pHash (MB/s)', st.rate, 2],
+        ['Durée Décodage (minutes)', st.duration_mins, 1],
+        ['Taille Vidéo Décodée (GiB)', st.size_gib, 2],
+        ['Couplings Certifiés', st.couplings, 0],
+      ];
+      document.getElementById('stats-tbody').innerHTML = dims.map(([label, d, digits]) => {
+        d = d || {};
+        const cells = ['min', 'median', 'mean', 'p90', 'max', 'stdev']
+          // the TUI shows mean and stdev of couplings with one decimal
+          .map(k => `<td class="num">${fmt(d[k], digits === 0 && (k === 'mean' || k === 'stdev') ? 1 : digits)}</td>`).join('');
+        return `<tr><td class="top-key">${label}</td>${cells}</tr>`;
+      }).join('');
+    }
+
+    function renderTopSystem(t) {
+      const h = t.host_info || {};
+      const g = t.gpu || {};
+      const sources = (t.media_sources || []).filter(s => s.enabled).length;
+      let engineDesc = `${h.gpu_name} (Pilote non chargé / CPU)`;
+      if (g.available) engineDesc = `VA-API Actif [${textBar(g.video_busy_pct / 100, 10)}]`;
+      else if (!h.gpu_name || h.gpu_name === 'Non détecté') engineDesc = 'Non disponible (CPU multithread)';
+      const groups = [
+        ['📦 APPLICATIF (dbsrt)', [
+          ['Version binaire', h.app_version], ['Provenance Git', h.git_hash], ['Date de build', h.build_date],
+          ['Couplages cert.', 'data/SRT/couplings.json'],
+        ]],
+        ['🌐 NŒUD & SYSTÈME D\'EXPLOITATION', [
+          ['Hôte (Hostname)', h.hostname], ['Distribution', h.os_name], ['Noyau (Kernel)', h.kernel], ['Architecture', h.arch],
+        ]],
+        ['🧠 PROCESSEUR (CPU)', [
+          ['Modèle', h.cpu_brand], ['Cœurs logiques', `${h.cpu_cores_logical} threads`],
+          ['Cœurs physiques', h.cpu_cores_physical != null ? `${h.cpu_cores_physical} cœurs physiques` : 'N/A'],
+          ['Charge globale', `${fmt(t.host_cpu_pct, 1)}%`],
+          ...(t.account_cpu_pct != null ? [['Charge compte', `${fmt(t.account_cpu_pct, 1)}% de la limite LVE`]] : []),
+        ]],
+        ['🎮 ACCÉLÉRATION MATÉRIELLE (GPU)', [
+          ['Contrôleur GPU', h.gpu_name], ['Moteur décodage', engineDesc],
+          ...(g.available
+            ? [['Charge vidéo', `${fmt(g.video_busy_pct, 1)}%`], ['Conso & Fréq.', `${fmt(g.power_watts, 1)} W @ ${fmt(g.freq_mhz, 0)} MHz`]]
+            : [['Mode d\'ingestion', 'Multi-threads CPU logiciel'], ['Conso & Fréq.', 'Inactif (Mode CPU)']]),
+        ]],
+        ['💾 MÉMOIRE & STOCKAGE', [
+          ...(accountRamLabel(t) ? [['RAM compte', accountRamLabel(t)]] : []),
+          ['RAM système', `${fmt(t.ram_used_gib, 1)} / ${fmt(t.ram_total_gib, 1)} GiB (${fmt(t.ram_total_gib > 0 ? t.ram_used_gib / t.ram_total_gib * 100 : 0, 0)}%)`],
+          ['Cache pHash', 'data/__PHASH__'], ['Catalogue média', 'data/reports/media_browser_cache.json'],
+          ['Sources déclarées', `${sources} active(s)`],
+        ]],
+      ];
+      document.getElementById('sys-tree').innerHTML = groups.map(([title, rows]) =>
+        `<div class="sys-group">${escapeHtml(title)}</div>` + rows.map(([k, v], i) =>
+          `<div class="sys-row"><span class="top-dim">${i === rows.length - 1 ? '└─' : '├─'} </span>${escapeHtml(k.padEnd(17, ' '))}: ${escapeHtml(v == null ? 'N/A' : String(v))}</div>`
+        ).join('')).join('');
+    }
+
+    // Rows clicked open their inspection sheet (TUI Enter/i); kept open across refreshes
+    const openDetails = new Set();
+
+    function detailRow(colspan, pairs) {
+      return `<tr class="detail"><td colspan="${colspan}">` + pairs.map(([k, v]) =>
+        `<div class="sys-row"><span class="top-dim">${escapeHtml(k.padEnd(18, ' '))}:</span> ${v}</div>`
+      ).join('') + '</td></tr>';
+    }
+
+    function sizeLabel(bytes) {
+      if (!(bytes > 0)) return '-';
+      return bytes >= GIB ? `${fmt(bytes / GIB, 1)} GiB` : `${fmt(bytes / MIB, 0)} MiB`;
+    }
+
+    function renderPager(list, total) {
+      const pages = Math.max(Math.ceil(total / PAGE_SIZE), 1);
+      const page = pageIndex[list] = Math.min(pageIndex[list], pages - 1);
+      document.querySelector(`.pager[data-list="${list}"]`).innerHTML =
+        `<button class="btn" data-step="-1" ${page === 0 ? 'disabled' : ''}>‹ Préc.</button>`
+        + span('top-dim', `Page ${page + 1}/${pages} (${total})`)
+        + `<button class="btn" data-step="1" ${page >= pages - 1 ? 'disabled' : ''}>Suiv. ›</button>`;
+    }
+
+    // Same rules, badges and labels as HistoricalRecord::status() in dbsrt-tui
+    const COMPLETED_STATUS = {
+      ok: ['✓ OK', 'eng-gpu', 'Succès certifié'],
+      cache: ['✓ CACHE', 'eng-hi10p', 'En Cache'],
+      nosrt: ['⚠ NO_SRT', 'eng-hi10p', 'Avertissement (Sous-titres manquants)'],
+      cancel: ['⏹ CANCEL', 'eng-sub', "Interrompu par l'utilisateur"],
+      fail: ['✗ FAIL', 'st-fail', 'Erreur critique décodeur'],
+    };
+    const NO_SRT_HINTS = ['no matching .srt', 'aucun fichier .srt', 'no .srt', 'missing .srt'];
+    const CANCEL_HINTS = ['sigterm', 'sigkill', 'exit code -15', 'exit code -9', 'exit code -2', 'interrupted', 'signal 15', 'signal 9'];
+
+    function completedStatus(r) {
+      if (r.success) return r.wall_duration_secs < 1 ? 'cache' : 'ok';
+      const err = (r.error_summary || '').toLowerCase();
+      if (NO_SRT_HINTS.some(h => err.includes(h))) return 'nosrt';
+      if (CANCEL_HINTS.some(h => err.includes(h))) return 'cancel';
+      return 'fail';
+    }
+
+    function renderTopCompleted(t) {
+      const records = t.history_records || [];
+      const total = t.history_total || 0;
+      document.getElementById('completed-caption').textContent = `DERNIERS TRAITEMENTS COMPLÉTÉS & CERTIFIÉS [${total} RÉFÉRENCÉS] - du plus récent au plus ancien, cliquer une ligne pour sa fiche`;
+      renderPager('completed', total);
+      const tbody = document.getElementById('completed-tbody');
+      if (records.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" class="top-dim" style="text-align: center;">Aucun enregistrement dans data/reports/batch_tvshow_nightly.jsonl</td></tr>';
+        return;
+      }
+      tbody.innerHTML = records.map(r => {
+        const status = completedStatus(r);
+        const [badge, cls, severity] = COMPLETED_STATUS[status];
+        const isCache = status === 'cache';
+        const dur = isCache ? '< 1s' : formatDuration(r.wall_duration_secs);
+        const rate = isCache ? 'N/A (Cache)' : `${fmt(r.cifs_read_rate_mib_s, 1)} MB/s`;
+        const size = r.file_size_bytes > 0 ? `${fmt(r.file_size_bytes / MIB, 0)} MB` : '-';
+        const key = `${r.video_stem}|${r.end_iso || r.start_iso || ''}`;
+        let html = `<tr data-key="${escapeHtml(key)}">
+          <td class="media" title="${escapeHtml(r.video_stem)}">${escapeHtml(r.video_stem)}</td>
+          <td>${span(cls, badge)}</td>
+          <td class="num hide-sm">${size}</td>
+          <td class="num">${dur}</td>
+          <td class="num hide-sm">+${r.certified_couplings_count}</td>
+          <td class="num hide-sm">${rate}</td>
+          <td class="hide-sm">${escapeHtml(r.end_iso || r.start_iso || '-')}</td>
+        </tr>`;
+        if (openDetails.has(key)) {
+          html += detailRow(7, [
+            ['Média / Release', escapeHtml(r.video_stem)],
+            ['Chemin Complet', escapeHtml(r.video_rel_path || '-')],
+            ['Statut Traitement', `${span(cls, badge)} ${escapeHtml(severity)}`],
+            ['Taille Fichier', escapeHtml(size)],
+            ['Horodatage Début', escapeHtml(r.start_iso || '-')],
+            ['Horodatage Fin', escapeHtml(r.end_iso || '-')],
+            ['Durée / Débit', escapeHtml(`${dur} @ ${rate}`)],
+            ['Couplings Sous-T.', escapeHtml(`+${r.certified_couplings_count} certifié(s)`)],
+            ['Rapport Worker', r.error_summary ? span(cls, r.error_summary) : span('eng-gpu', 'Aucune erreur remontée')],
+          ]);
+        }
+        return html;
+      }).join('');
+    }
+
+    // Same badges as ingestion_status_badge() in dbsrt-tui
+    const INGESTION_STATUS = {
+      Virgin: ['VIERGE', 'eng-hi10p'],
+      InProgress: ['EN COURS', 'top-key'],
+      Completed: ['COMPLÉTÉ', 'eng-gpu'],
+      PartialFail: ['HACHÉ SEUL', 'st-info'],
+    };
+
+    function sourceName(t, id) {
+      const src = (t.media_sources || []).find(s => s.id === id);
+      if (!src) return id;
+      return src.name.replace(/^Synology NAS \(/, '').replace(/\)$/, '').trim() || src.id;
+    }
+
+    function renderTopMedia(t) {
+      const items = t.discovered_media || [];
+      const total = t.discovered_media_total || 0;
+      document.getElementById('media-caption').textContent = `EXPLORATEUR DE MÉDIAS MULTI-SOURCES [${total} DISPONIBLES] - par nom, cliquer une ligne pour sa fiche`;
+      renderPager('media', total);
+      const tbody = document.getElementById('media-tbody');
+      if (items.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" class="top-dim" style="text-align: center;">Aucun média découvert (scan des sources en attente)</td></tr>';
+        return;
+      }
+      tbody.innerHTML = items.map(m => {
+        const [label, cls] = INGESTION_STATUS[m.status] || [m.status, ''];
+        const badge = m.source_id ? span('top-key', `[${sourceName(t, m.source_id)}] `) : '';
+        const ph = m.phash && m.phash.exists && m.phash.frame_count > 0
+          ? span('eng-gpu', `✓ ${fmt(m.phash.frame_count / 1000, 1)}kf (${fmt(m.phash.size_bytes / 1024, 0)}K)`)
+          : span('top-dim', '- Non calculé');
+        const subs = m.subtitles || [];
+        const subsLabel = subs.length === 0 ? '0 (Aucun)' : `${subs.length} (${subs.slice(0, 3).map(s => s.lang).join(',')})`;
+        const dur = m.duration_secs != null ? formatDuration(m.duration_secs) : '-';
+        let html = `<tr data-key="${escapeHtml(m.path)}">
+          <td class="media" title="${escapeHtml(m.stem)}">${badge}${escapeHtml(m.stem)}</td>
+          <td class="num hide-sm">${sizeLabel(m.size_bytes)}</td>
+          <td class="num hide-sm">${dur}</td>
+          <td class="hide-sm">${ph}</td>
+          <td>${escapeHtml(subsLabel)}</td>
+          <td class="hide-sm">${escapeHtml(m.video_codec || '-')}</td>
+          <td>${span(cls, label)}</td>
+        </tr>`;
+        if (openDetails.has(m.path)) {
+          html += detailRow(7, [
+            ['Release', escapeHtml(m.stem)],
+            ['Source', escapeHtml(m.source_id ? sourceName(t, m.source_id) : '-')],
+            ['Chemin', escapeHtml(m.path)],
+            ['Taille / Durée', escapeHtml(`${sizeLabel(m.size_bytes)} / ${dur}`)],
+            ['Codec vidéo', escapeHtml(m.video_codec || '-')],
+            ['Statut pHash', m.phash && m.phash.exists
+              ? escapeHtml(`${m.phash.frame_count} frames, ${fmt(m.phash.size_bytes / 1024, 0)} Ko`) : span('top-dim', 'Non calculé')],
+            ['Sous-titres', subs.length === 0 ? span('top-dim', 'Aucun') : escapeHtml(subs.map(s =>
+              `#${s.index} ${s.lang} ${s.codec}${s.title ? ` "${s.title}"` : ''}`).join(' │ '))],
+            ['Statut Actuel', span(cls, label)],
+          ]);
+        }
+        return html;
+      }).join('');
+    }
+
+    // Same as remote_stream_endpoint() in dbsrt-tui: scheme://host[:port], userinfo and path dropped
+    function streamEndpoint(path) {
+      const m = /^([^:/]+):\/\/([^/]*)/.exec(path || '');
+      const host = m ? m[2].split('@').pop() : '';
+      return host ? `${m[1]}://${host}` : null;
+    }
+
+    function renderTopSources(t) {
+      const sources = t.media_sources || [];
+      const jobs = t.active_jobs || [];
+      const thead = document.getElementById('sources-thead');
+      const tbody = document.getElementById('sources-tbody');
+      const specs = document.getElementById('sources-specs');
+      if (t.is_remote_streaming) {
+        const targets = t.discovered_media_total || 0;
+        const streaming = t.net_rx_mib_s > 0 || jobs.length > 0;
+        const enabled = sources.find(s => s.enabled);
+        const endpoint = (t.discovered_media || []).map(m => streamEndpoint(m.path)).find(Boolean) || '-';
+        document.getElementById('sources-caption').textContent = 'SOURCES DE FLUX RÉSEAU & STREAMING FTP [MODE ZÉRO-NVME]';
+        thead.innerHTML = '<tr><th>STATUT</th><th>SOURCE DE DIFFUSION</th><th class="hide-sm">CIBLES RÉSEAU</th><th>FLUX STREAMING</th><th class="hide-sm">LIAISON FTP</th><th class="hide-sm">MODE DÉCODAGE</th></tr>';
+        tbody.innerHTML = `<tr>
+          <td>${streaming ? span('eng-gpu', '[✓] ACTIF') : span('eng-hi10p', '[ ] EN ATTENTE')}</td>
+          <td>${escapeHtml(enabled ? enabled.name : 'Cibles batch distantes')}</td>
+          <td class="hide-sm">${span('top-key', `${targets} cibles batch`)}</td>
+          <td>${streaming ? span('eng-gpu', `Opérationnel (${fmt(t.net_rx_mib_s, 1)} MiB/s)`) : span('eng-hi10p', 'En attente')}</td>
+          <td class="hide-sm">${span('st-info', endpoint)}</td>
+          <td class="hide-sm">${span('eng-sub', 'Zéro-NVMe (RAM Direct)')}</td>
+        </tr>`;
+        const rows = [
+          ['Architecture Zéro-Copie', 'Aucun stockage vidéo physique local monté sur ce nœud. Les flux vidéo sont lus à la volée depuis le NAS Synology via FTP et injectés dans les RAM buffers FFmpeg.'],
+          ['Empreinte NVMe Garantie', "0 octet de conteneur vidéo persistant. Seuls les fichiers d'empreinte .phash (~3 Ko) et sous-titres .srt (~50 Ko) sont écrits localement avant synchronisation descendante."],
+          ['Bande Passante Ingress', `Débit réseau actuel : ${fmt(t.net_rx_mib_s, 1)} MiB/s (Plafond CloudLinux LVE respecté : 42.0 MiB/s).`],
+          ['Administration Dossiers', "L'ajout, édition ou scan de dossiers physiques s'effectue sur la station locale hôte."],
+        ];
+        specs.innerHTML = '<div class="sys-group">ℹ️ SPÉCIFICATIONS TECHNIQUES DU STREAMING RÉSEAU (ZÉRO-NVME)</div>'
+          + rows.map(([k, v]) => `<div class="sys-row" style="white-space: normal;">• ${span('', k.padEnd(24, ' '))}: ${span('top-dim', v)}</div>`).join('');
+        specs.style.display = '';
+        return;
+      }
+      const active = sources.filter(s => s.enabled).length;
+      const perSource = t.discovered_media_per_source || {};
+      document.getElementById('sources-caption').textContent = 'GESTION DES SOURCES DE MÉDIAS (RÉPERTOIRES VIDÉO) '
+        + (active === sources.length ? `[${sources.length}]` : `[${active}/${sources.length} ACTIVES]`)
+        + (t.is_scanning ? ' [⟳ SCAN DISQUE EN COURS...]' : '');
+      thead.innerHTML = '<tr><th>STATUT</th><th>NOM DE LA SOURCE</th><th class="hide-sm">SCAN DISQUE</th><th>DISPONIBLES</th><th class="hide-sm">DERNIER SCAN</th><th class="hide-sm">CHEMIN DU RÉPERTOIRE</th></tr>';
+      specs.style.display = 'none';
+      if (sources.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="top-dim" style="text-align: center;">Aucune source de médias configurée</td></tr>';
+        return;
+      }
+      tbody.innerHTML = sources.map(s => {
+        const scan = !s.last_scan_iso ? span('top-dim', '- (en attente)')
+          : s.last_scan_added > 0 ? span('top-key', `${s.media_count} (+${s.last_scan_added} nouv.)`)
+          : escapeHtml(`${s.media_count} fichier(s)`);
+        const count = perSource[s.id] || 0;
+        const dispo = !s.enabled ? span('top-dim', '0 (inactif)')
+          : count > 0 ? span('eng-gpu', `${count} dispo`) : span('eng-hi10p', '0 dispo');
+        return `<tr>
+          <td>${s.enabled ? span('eng-gpu', '[✓] ACTIF') : span('top-dim', '[ ] DÉSACTIVÉ')}</td>
+          <td>${escapeHtml(s.name)}</td>
+          <td class="hide-sm">${scan}</td>
+          <td>${dispo}</td>
+          <td class="hide-sm">${escapeHtml(s.last_scan_iso || 'En attente...')}</td>
+          <td class="media hide-sm" title="${escapeHtml(s.path)}">${escapeHtml(s.path)}</td>
+        </tr>`;
+      }).join('');
+    }
+
+    function renderTop(t) {
+      renderTopBanner(t);
+      renderTopJobs(t);
+      renderTopStats(t);
+      // List tabs only hold real rows while shown (other fetches use limit=0)
+      if (activeTab === 'completed') renderTopCompleted(t);
+      if (activeTab === 'media') renderTopMedia(t);
+      if (activeTab === 'sources') renderTopSources(t);
+      renderTopSystem(t);
+    }
+
+    ['completed-tbody', 'media-tbody'].forEach(id => document.getElementById(id).addEventListener('click', e => {
+      const row = e.target.closest('tr[data-key]');
+      if (!row) return;
+      const key = row.dataset.key;
+      if (openDetails.has(key)) openDetails.delete(key); else openDetails.add(key);
+      if (lastTop) renderTop(lastTop);
+    }));
+
+    document.querySelectorAll('.pager').forEach(p => p.addEventListener('click', e => {
+      const step = Number(e.target.dataset.step);
+      if (!step) return;
+      pageIndex[p.dataset.list] = Math.max(pageIndex[p.dataset.list] + step, 0);
+      fetchTop();
+    }));
+
+    document.querySelectorAll('.tab-btn').forEach(btn => btn.addEventListener('click', () => {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b === btn));
+      document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('active', p.id === 'tab-' + btn.dataset.tab));
+      activeTab = btn.dataset.tab;
+      fetchTop();
+    }));
+
+    // Keyboard shortcuts mirror `dbsrt top`: 1 / 2,h / 3,r / 4,m / 5,s / 6,y
+    const TAB_KEYS = {
+      '1': 'jobs', '2': 'stats', 'h': 'stats', '3': 'completed', 'r': 'completed',
+      '4': 'media', 'm': 'media', '5': 'sources', 's': 'sources', '6': 'system', 'y': 'system',
+    };
+    document.addEventListener('keydown', e => {
+      if (e.target.tagName === 'INPUT' || e.ctrlKey || e.metaKey || e.altKey) return;
+      const tab = TAB_KEYS[e.key];
+      if (tab) document.querySelector(`.tab-btn[data-tab="${tab}"]`).click();
+    });
+
+    // Auto-refresh loop
+    // Silent auto-refresh: the banner clock already shows the last update time
+    setInterval(() => {
+      if (!isPaused) refreshAll();
+    }, REFRESH_INTERVAL_MS);
 
     // Initial load
-    fetchTelemetry();
+    refreshAll();
   </script>
 </body>
 </html>

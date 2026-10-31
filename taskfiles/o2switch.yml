@@ -156,3 +156,28 @@ tasks:
     desc: Tail execution logs of remote batch pHash worker on o2switch
     cmds:
       - ./scripts/o2switch_ctl.sh batch-logs
+
+  o2switch:faultwatch:start:
+    desc: Deploy and start the per-minute LVE fault proxy watcher on o2switch
+    cmds:
+      - ./scripts/o2switch_ctl.sh faultwatch start
+
+  o2switch:faultwatch:stop:
+    desc: Stop the LVE fault proxy watcher on o2switch
+    cmds:
+      - ./scripts/o2switch_ctl.sh faultwatch stop
+
+  o2switch:faultwatch:status:
+    desc: Show LVE fault watcher state and its latest minute records
+    cmds:
+      - ./scripts/o2switch_ctl.sh faultwatch status
+
+  o2switch:faultwatch:pull:
+    desc: Pull LVE fault watcher minute records into data/reports/faultwatch/
+    cmds:
+      - ./scripts/o2switch_ctl.sh faultwatch pull
+
+  o2switch:faultwatch:correlate:
+    desc: Join pulled fault watcher records with a pasted cPanel Resource Usage table (task ... -- <file>)
+    cmds:
+      - uv run --frozen python scripts/o2switch_fault_watch.py correlate {{.CLI_ARGS}}

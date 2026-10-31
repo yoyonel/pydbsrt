@@ -869,6 +869,18 @@ pub struct SystemTelemetry {
     pub ram_used_gib: f64,
     /// Total installed system RAM in Gibibytes (GiB).
     pub ram_total_gib: f64,
+    /// RAM charged to this account in GiB: cPanel LVE physical memory when `uapi` is
+    /// available, else the sum of PSS of this user's processes. `/proc/meminfo` reports the
+    /// whole shared host under CloudLinux LVE.
+    #[serde(default)]
+    pub account_ram_gib: Option<f64>,
+    /// Account RAM limit in GiB (cPanel LVE contract), when known.
+    #[serde(default)]
+    pub account_ram_limit_gib: Option<f64>,
+    /// Account CPU load in percent of its cPanel LVE limit (`lvecpu`), when known.
+    /// `host_cpu_pct` covers the whole shared host.
+    #[serde(default)]
+    pub account_cpu_pct: Option<f64>,
     /// Hardware Intel GPU telemetry.
     pub gpu: GpuTelemetry,
     /// Active decoding and pHash job snapshots.
@@ -894,6 +906,19 @@ pub struct SystemTelemetry {
     /// Flag indicating whether the node operates in remote streaming mode (Zero-NVMe FTP).
     #[serde(default)]
     pub is_remote_streaming: bool,
+}
+
+impl SystemTelemetry {
+    /// Formats the account RAM as `used/limit GiB (pct%)`, or `used GiB` without a limit.
+    pub fn account_ram_label(&self) -> Option<String> {
+        let used = self.account_ram_gib?;
+        Some(match self.account_ram_limit_gib {
+            Some(limit) if limit > 0.0 => {
+                format!("{used:.2}/{limit:.0} GiB ({:.1}%)", used / limit * 100.0)
+            }
+            _ => format!("{used:.2} GiB"),
+        })
+    }
 }
 
 /// Active input field focus within the source configuration modal.

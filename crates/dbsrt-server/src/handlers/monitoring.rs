@@ -3,16 +3,16 @@
 use crate::constants::{
     BYTES_PER_GIB_F64, CIVIL_DAYS_PER_400_YEARS, CIVIL_EPOCH_DAYS_OFFSET,
     DEFAULT_BATCH_EVENTS_PATH, DEFAULT_BATCH_QUEUE_PATH, DEFAULT_ESTIMATED_MEDIA_DURATION_SECS,
-    DEFAULT_JOBS_DIR, DEFAULT_SUPERVISOR_STATUS_PATH, FALLBACK_BATCH_EVENTS_PATH,
-    MAX_MONITORING_RECENT_EVENTS, SECONDS_PER_DAY, SECONDS_PER_HOUR, SECONDS_PER_MINUTE,
-    SUPERVISOR_STALE_THRESHOLD_SECS,
+    DEFAULT_JOBS_DIR, DEFAULT_SUPERVISOR_STATUS_PATH, DEFAULT_TOP_PAGE_LIMIT,
+    FALLBACK_BATCH_EVENTS_PATH, MAX_MONITORING_RECENT_EVENTS, SECONDS_PER_DAY, SECONDS_PER_HOUR,
+    SECONDS_PER_MINUTE, SUPERVISOR_STALE_THRESHOLD_SECS,
 };
 use crate::dtos::{
     ActiveJobStatus, BatchQueueStatus, MonitoringTelemetryResponse, RecentBatchEvent,
-    SupervisorHeartbeatPayload, SupervisorTelemetry, SystemStats,
+    SupervisorHeartbeatPayload, SupervisorTelemetry, SystemStats, TopPageQuery,
 };
 use crate::state::AppState;
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::Html;
 use axum::Json;
@@ -113,7 +113,9 @@ fn parse_meminfo() -> (u64, u64) {
 /// Reads volatile metrics from Linux `/proc` filesystem. Falls back gracefully when running in
 /// constrained environments or non-Linux hosts.
 pub fn sample_system_stats() -> SystemStats {
+    // /etc/hostname is missing in some jails (o2switch CageFS); the kernel value is always there
     let hostname = fs::read_to_string("/etc/hostname")
+        .or_else(|_| fs::read_to_string("/proc/sys/kernel/hostname"))
         .map(|s| s.trim().to_string())
         .unwrap_or_else(|_| {
             std::env::var("HOSTNAME").unwrap_or_else(|_| "unknown-host".to_string())
@@ -414,7 +416,7 @@ pub fn load_supervisor_status() -> SupervisorTelemetry {
         .and_then(|v| v.as_array())
         .map(|arr| {
             arr.iter()
-                .filter_map(|l| l.as_str().map(|s| s.to_string()))
+                .filter_map(|l| l.as_str().map(dbsrt_core::redact_secrets))
                 .collect()
         })
         .unwrap_or_default();
@@ -617,26 +619,81 @@ pub async fn top_snapshot(
     if !output.status.success() {
         return Err((
             StatusCode::BAD_GATEWAY,
-            String::from_utf8_lossy(&output.stderr).into_owned(),
+            dbsrt_core::redact_url_userinfo(&String::from_utf8_lossy(&output.stderr)),
         ));
     }
 
-    let body = axum::body::Bytes::from(output.stdout);
+    // Defense in depth over every field (paths, error tails): no URL password leaves the server.
+    // JSON-safe: an authority ends at '"' and ':'/'@' never sit inside an escape sequence.
+    let body = axum::body::Bytes::from(dbsrt_core::redact_url_userinfo(&String::from_utf8_lossy(
+        &output.stdout,
+    )));
     *cache = Some((std::time::Instant::now(), body.clone()));
     Ok(body)
 }
 
-/// Serves the exact `SystemTelemetry` rendered by the native `dbsrt top`.
+/// Lists of `dbsrt top --json` paginated by `/v1/monitoring/top`, each with its total field.
+const TOP_PAGED_LISTS: [(&str, &str); 2] = [
+    ("history_records", "history_total"),
+    ("discovered_media", "discovered_media_total"),
+];
+
+/// Keeps `limit` items from `offset` in each list of [`TOP_PAGED_LISTS`] and adds its total.
+///
+/// Lists are first put in the default order of the `dbsrt top` tabs: newest history record
+/// first, media by case-insensitive name. `discovered_media_per_source` counts media per
+/// `source_id` over the whole list.
+///
+/// # Errors
+/// [`StatusCode::BAD_GATEWAY`] when `body` is not JSON.
+pub fn paginate_top_snapshot(
+    body: &[u8],
+    offset: usize,
+    limit: usize,
+) -> Result<axum::body::Bytes, (StatusCode, String)> {
+    let mut snapshot: serde_json::Value = serde_json::from_slice(body)
+        .map_err(|e| (StatusCode::BAD_GATEWAY, format!("dbsrt top --json: {e}")))?;
+    if let Some(fields) = snapshot.as_object_mut() {
+        if let Some(serde_json::Value::Array(records)) = fields.get_mut("history_records") {
+            records.reverse();
+        }
+        if let Some(serde_json::Value::Array(media)) = fields.get_mut("discovered_media") {
+            media.sort_by_cached_key(|m| m["stem"].as_str().unwrap_or_default().to_lowercase());
+            let mut per_source = serde_json::Map::new();
+            for id in media.iter().filter_map(|m| m["source_id"].as_str()) {
+                let count = per_source
+                    .get(id)
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0);
+                per_source.insert(id.to_string(), (count + 1).into());
+            }
+            fields.insert("discovered_media_per_source".to_string(), per_source.into());
+        }
+        for (list, total) in TOP_PAGED_LISTS {
+            if let Some(serde_json::Value::Array(items)) = fields.get_mut(list) {
+                let len = items.len();
+                *items = items.drain(..).skip(offset).take(limit).collect();
+                fields.insert(total.to_string(), len.into());
+            }
+        }
+    }
+    serde_json::to_vec(&snapshot)
+        .map(Into::into)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+}
+
+/// Serves the `SystemTelemetry` rendered by the native `dbsrt top`, heavy lists paginated.
 ///
 /// # Returns
-/// Raw JSON bytes from the sibling `dbsrt top --json` binary, see [`top_snapshot`].
+/// JSON from the sibling `dbsrt top --json` binary (see [`top_snapshot`]), with
+/// `history_records` and `discovered_media` cut by [`paginate_top_snapshot`].
 ///
 /// # Errors
 /// Same as [`top_snapshot`], plus [`StatusCode::INTERNAL_SERVER_ERROR`] when the server
 /// executable path is unknown.
-/// shortcut: ~1.1 MB pretty JSON, no compression layer; add tower-http compression if mobile hurts.
 pub async fn monitoring_top_handler(
     State(_state): State<Arc<AppState>>,
+    Query(page): Query<TopPageQuery>,
 ) -> Result<
     (
         [(axum::http::header::HeaderName, &'static str); 1],
@@ -647,6 +704,11 @@ pub async fn monitoring_top_handler(
     let exe =
         std::env::current_exe().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let body = top_snapshot(&exe, &TOP_SNAPSHOT_CACHE).await?;
+    let body = paginate_top_snapshot(
+        &body,
+        page.offset.unwrap_or(0),
+        page.limit.unwrap_or(DEFAULT_TOP_PAGE_LIMIT),
+    )?;
     Ok((
         [(axum::http::header::CONTENT_TYPE, "application/json")],
         body,
@@ -692,7 +754,8 @@ pub async fn supervisor_heartbeat_handler(
             "desired_workers": payload.desired_workers,
             "running_jobs": payload.running_workers,
         },
-        "recent_logs": payload.recent_logs,
+        // Log lines embed remote command output; mask secrets before they reach the dashboard
+        "recent_logs": payload.recent_logs.iter().map(|l| dbsrt_core::redact_secrets(l)).collect::<Vec<_>>(),
     });
 
     let target_path = PathBuf::from(DEFAULT_SUPERVISOR_STATUS_PATH);

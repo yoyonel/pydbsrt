@@ -141,19 +141,36 @@ fn build_host_telemetry_line(tel: &SystemTelemetry) -> Line<'static> {
     }
 
     spans.extend([
-        Span::styled(
-            format!("Host CPU: {:>2.0}% ", tel.host_cpu_pct),
-            Style::default().fg(Color::White),
-        ),
+        match tel.account_cpu_pct {
+            Some(pct) => Span::styled(
+                format!("CPU compte: {pct:>2.0}% "),
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            None => Span::styled(
+                format!("Host CPU: {:>2.0}% ", tel.host_cpu_pct),
+                Style::default().fg(Color::White),
+            ),
+        },
         Span::raw("│ "),
-        Span::styled(
+    ]);
+    // Host RAM stays in the Système tab: on shared hosting it counts every tenant.
+    spans.push(match tel.account_ram_label() {
+        Some(label) => Span::styled(
+            format!("RAM compte: {label}"),
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        ),
+        None => Span::styled(
             format!(
                 "RAM: {:>4.1}/{:>4.1} GiB ({:>2.0}%)",
                 tel.ram_used_gib, tel.ram_total_gib, ram_pct
             ),
             Style::default().fg(Color::White),
         ),
-    ]);
+    });
 
     if tel.is_scanning {
         spans.push(Span::raw(" │ "));

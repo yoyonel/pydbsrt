@@ -1,6 +1,6 @@
 #![cfg(unix)]
 
-use dbsrt_server::{create_router, top_snapshot, TopSnapshotCache};
+use dbsrt_server::{create_router, paginate_top_snapshot, top_snapshot, TopSnapshotCache};
 use reqwest::StatusCode;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -41,6 +41,15 @@ async fn test_top_snapshot_success_cache_and_errors() {
         "second call within the TTL must reuse the cache"
     );
 
+    let leaky = fake_cli(
+        "leaky",
+        "#!/bin/sh\nprintf '{\"cmdline\":[\"ftp://u:top-secret@nas/x.mkv\"]}'\n",
+    );
+    let body = top_snapshot(&leaky, &TopSnapshotCache::const_new(None))
+        .await
+        .expect("fake top succeeds");
+    assert_eq!(&body[..], br#"{"cmdline":["ftp://u:***@nas/x.mkv"]}"#);
+
     let failing = fake_cli("fail", "#!/bin/sh\necho boom >&2\nexit 3\n");
     let cache = TopSnapshotCache::const_new(None);
     let (code, msg) = top_snapshot(&failing, &cache).await.unwrap_err();
@@ -56,7 +65,7 @@ async fn test_top_snapshot_success_cache_and_errors() {
         .unwrap_err();
     assert_eq!(code, StatusCode::INTERNAL_SERVER_ERROR);
 
-    for exe in [&ok, &failing] {
+    for exe in [&ok, &leaky, &failing] {
         let _ = std::fs::remove_dir_all(exe.parent().unwrap());
     }
 
@@ -73,4 +82,42 @@ async fn test_top_snapshot_success_cache_and_errors() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::INTERNAL_SERVER_ERROR);
     let _ = std::fs::remove_dir_all(&phash_dir);
+}
+
+#[test]
+fn test_paginate_top_snapshot_cuts_heavy_lists_and_reports_totals() {
+    let body = br#"{"host_cpu_pct":12.5,"history_records":[1,2,3,4,5],
+        "discovered_media":[{"stem":"b","source_id":"nas"},{"stem":"A","source_id":"nas"},
+        {"stem":"c"}]}"#;
+    let page: serde_json::Value =
+        serde_json::from_slice(&paginate_top_snapshot(body, 1, 2).unwrap()).unwrap();
+    assert_eq!(
+        page["history_records"],
+        serde_json::json!([4, 3]),
+        "newest first"
+    );
+    assert_eq!(
+        page["discovered_media"],
+        serde_json::json!([{"stem":"b","source_id":"nas"},{"stem":"c"}]),
+        "media sorted by case-insensitive name"
+    );
+    assert_eq!(page["history_total"], 5);
+    assert_eq!(page["discovered_media_total"], 3);
+    assert_eq!(
+        page["discovered_media_per_source"],
+        serde_json::json!({"nas": 2})
+    );
+    assert_eq!(page["host_cpu_pct"], 12.5, "live fields are kept");
+
+    let live: serde_json::Value =
+        serde_json::from_slice(&paginate_top_snapshot(body, 0, 0).unwrap()).unwrap();
+    assert_eq!(live["history_records"], serde_json::json!([]));
+    assert_eq!(live["history_total"], 5);
+
+    let past_end: serde_json::Value =
+        serde_json::from_slice(&paginate_top_snapshot(body, 10, 50).unwrap()).unwrap();
+    assert_eq!(past_end["discovered_media"], serde_json::json!([]));
+
+    let (code, _) = paginate_top_snapshot(b"not json", 0, 1).unwrap_err();
+    assert_eq!(code, StatusCode::BAD_GATEWAY);
 }
