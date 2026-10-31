@@ -148,6 +148,38 @@ Endpoint combiné utilisé par les plugins VLC : analyse les empreintes extraite
   }
   ```
 
+### `POST /v1/recognize`
+Reconnaissance visuelle d'un média à partir d'empreintes pHash déjà extraites (`query_fingerprint`) ou d'un fichier local (`media_path`). Utilisé par l'agent local en mode relais vers le serveur distant. Protégé par `X-API-Key` quand le serveur est lancé avec `--api-key`.
+**Corps de la requête** :
+  ```json
+  {
+    "query_fingerprint": ["0x1234567890abcdef", "0xfedcba0987654321"],
+    "fps": 25.0,
+    "language": "fr",
+    "search_distance": 6
+  }
+  ```
+**Réponse** :
+  ```json
+  {
+    "found": true,
+    "media_name_search": "fingerprint_query",
+    "media_match": "Andor",
+    "season": 1,
+    "episode": 1,
+    "nb_offsets_match": 240,
+    "confidence": 100.0,
+    "tier": "Tier 1 (RAM .dbphash MIH)",
+    "shift_frames": -29175,
+    "shift_ms": -1167000.0,
+    "candidates": [],
+    "timer_seconds": 0.18
+  }
+  ```
+* `media_match` : titre nettoyé (Tier 1) ou nom de release complet (Tier 2/3). Seul, il est partagé par tous les épisodes d'une série.
+* `season` / `episode` : épisode reconnu, absents si inconnus (films, noms non parsables). Les `candidates` ne contiennent que les sous-titres certifiés de cet épisode, et le décalage est calculé sur son seul `.phash`.
+* À confiance égale, le média retenu est celui de plus faible distance de Hamming cohérente, puis par titre, saison et épisode (ordre déterministe).
+
 ### `GET /v1/subtitles/{hash}`
 Télécharge le contenu du fichier SRT correspondant au hash demandé.
 **Paramètre de requête** : `?shift_ms=<INT>` : applique à la volée le décalage temporel spécifié à toutes les balises de timing du fichier SRT retourné.

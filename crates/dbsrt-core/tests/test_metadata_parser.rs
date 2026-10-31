@@ -711,3 +711,41 @@ fn test_50_plus_release_naming_patterns() {
         }
     }
 }
+
+#[test]
+fn test_percent_encoded_names_parse_like_decoded_ones() {
+    // (input, clean_title, season, episode): URL-encoded names (FTP/HTTP listings) must not
+    // hide SxxEyy; sequences that would change the path or inject control chars stay encoded.
+    let cases = [
+        (
+            "Show%20Name%20S01E02%201080p.mkv",
+            "Show Name",
+            Some(1),
+            Some(2),
+        ),
+        (
+            "Show%20Name%20S01E02%20-%20Pilot.phash",
+            "Show Name",
+            Some(1),
+            Some(2),
+        ),
+        (
+            "Show.Name.S03E04.100%.Real.1080p.mkv",
+            "Show Name",
+            Some(3),
+            Some(4),
+        ),
+        ("Show%2FName%20S01E02.mkv", "Show%2FName", Some(1), Some(2)),
+        ("Show%00Name%20S01E02.mkv", "Show%00Name", Some(1), Some(2)),
+        ("Show%ZZName%20S01E02.mkv", "Show%ZZName", Some(1), Some(2)),
+    ];
+    for (raw, title, season, episode) in cases {
+        let meta = MediaMetadata::parse(raw);
+        assert_eq!(
+            (meta.clean_title.as_str(), meta.season, meta.episode),
+            (title, season, episode),
+            "{raw}"
+        );
+        assert_eq!(meta.raw_title, raw, "raw_title keeps the original input");
+    }
+}

@@ -14,7 +14,7 @@ tags:
 # Architecture Subtitle Service (CAS) & Étude Comparative REST vs gRPC
 
 > [!NOTE] Contexte
-> Ce document fait suite aux tests d'intégration du [Plan de Déploiement & Intégration Serveur Remote RPi4](2026-10-20-plan-deploiement-et-integration-remote-rpi4.md). Lors de l'exécution en conditions réelles distantes, un problème de couplage fort a été identifié : le retour de chemins de fichiers système (`/app/data/SRT/...`) par le serveur distant vers le client. Ce document formalise la refonte vers un **Content-Addressable Storage (CAS)** et tranche le choix du protocole réseau (**REST vs gRPC**).
+> Ce document fait suite aux tests d'intégration du [Plan de Déploiement & Intégration Serveur Remote RPi4](../explanation/2026-10-20-plan-deploiement-et-integration-remote-rpi4.md). Lors de l'exécution en conditions réelles distantes, un problème de couplage fort a été identifié : le retour de chemins de fichiers système (`/app/data/SRT/...`) par le serveur distant vers le client. Ce document formalise la refonte vers un **Content-Addressable Storage (CAS)** et tranche le choix du protocole réseau (**REST vs gRPC**).
 
 ---
 

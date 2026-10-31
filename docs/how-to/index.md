@@ -46,6 +46,7 @@ tags:
 
 ### 🌐 Déploiement Multi-Cibles & Hébergement
 * [Comment déployer sur un hébergement mutualisé o2switch](deployer-o2switch-cloud-cpanel.md) : Orchestrer le démon statique musl en mode Zero-DB avec reverse-proxy LiteSpeed sans root.
+* [Comment déployer et restaurer une release des binaires sur o2switch](deployer-et-restaurer-une-release-o2switch.md) : Mettre à jour `dbsrt-server` et `dbsrt` par bascule atomique d'une release vérifiée, avec retour arrière automatique (`task o2switch:deploy`, `task o2switch:rollback`).
 * [Comment interconnecter un NAS Synology et le Cloud o2switch en FTP](interconnecter-nas-synology-et-o2switch-ftp.md) : Ouvrir un accès distant sécurisé par liste blanche IP, configurer le service FTP de DSM avec un compte en lecture seule, router le port 21 Freebox filtré sur l'IP o2switch et tester la liaison.
 * [Comment ingérer les médias de la Freebox sur o2switch via le RPi4](ingerer-medias-freebox-via-rpi4-et-o2switch.md) : Monter les disques Freebox en lecture seule sur le RPi4, les servir par le gateway HTTP Range, router le port 80 Freebox filtré sur l'IP o2switch et lancer le batch `freebox`.
 * [Comment orchestrer les batchs de calcul pHash distants, monitorer et synchroniser les catalogues avec o2switch](executer-batch-calcul-et-synchronisation-o2switch.md) : Déporter l'ingestion sur 8-9 workers (80% CPU), streamer en Zéro-NVMe, surveiller dans `dbsrt top` et rapatrier les catalogues.

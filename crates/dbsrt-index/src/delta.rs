@@ -5,8 +5,8 @@
 //! Searches are merged across Base (.dbphash) and Delta (RAM) using Multi-Index Hashing (MIH).
 
 use crate::dbphash::{
-    media_confidence, DbphashBuilder, DbphashCutEntry, DbphashCutMatch, DbphashMediaMatch,
-    DbphashSparseEntry,
+    media_confidence, rank_media_matches, DbphashBuilder, DbphashCutEntry, DbphashCutMatch,
+    DbphashMediaMatch, DbphashSparseEntry,
 };
 use crate::mih::MultiIndexHash64;
 use dbsrt_core::cuts::detect_cuts;
@@ -409,7 +409,7 @@ impl DeltaIndex {
                 let matching_cuts = c_matches.map(|v| v.len()).unwrap_or(0);
 
                 let fps = media.fps.max(1.0);
-                let (confidence, estimated_shift_ms) = media_confidence(
+                let (confidence, estimated_shift_ms, coherent_distance) = media_confidence(
                     query_hashes.len(),
                     fps,
                     s_matches.map_or(&[][..], Vec::as_slice),
@@ -424,22 +424,14 @@ impl DeltaIndex {
                     episode: media.episode,
                     matching_cuts,
                     matching_sparse,
+                    coherent_distance,
                     confidence,
                     estimated_shift_ms,
                 });
             }
         }
 
-        // Consistent ranking criteria: confidence descending, then weighted score (cuts*2 + sparse)
-        ranked.sort_by(|a, b| {
-            b.confidence
-                .partial_cmp(&a.confidence)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| {
-                    (b.matching_cuts * 2 + b.matching_sparse)
-                        .cmp(&(a.matching_cuts * 2 + a.matching_sparse))
-                })
-        });
+        ranked.sort_by(rank_media_matches);
         ranked
     }
 }
@@ -506,6 +498,40 @@ mod tests {
             "decoy confidence {}",
             decoy.confidence
         );
+    }
+
+    /// Same as the `.dbphash` case: at equal confidence the closest media ranks first.
+    #[test]
+    fn test_delta_recognize_tie_prefers_closest_media() {
+        let frame = |k: u64| (k + 1).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+        let mut sparse_source: Vec<(u64, u32)> =
+            (0..10).map(|k| (frame(k), k as u32 * 1000)).collect();
+        sparse_source.extend((20..26).map(|k| (frame(0), k * 1000)));
+        let sparse_rival: Vec<(u64, u32)> = (0..30)
+            .map(|j| (frame(j / 3) ^ 0b111, (j / 3) as u32 * 1000))
+            .collect();
+        let mut delta = DeltaIndex::new();
+        delta.add_media(
+            &MediaMetadata::parse("Rival.2001.mkv"),
+            10_000,
+            24.0,
+            &[],
+            &sparse_rival,
+        );
+        delta.add_media(
+            &MediaMetadata::parse("Source.2002.mkv"),
+            26_000,
+            24.0,
+            &[],
+            &sparse_source,
+        );
+
+        let query: Vec<u64> = (0..240).map(|i| frame(i / 24)).collect();
+        let ranked = delta.recognize(&query, 4);
+
+        assert_eq!(ranked[0].confidence, 100.0);
+        assert_eq!(ranked[1].confidence, 100.0);
+        assert_eq!(ranked[0].clean_title, "Source");
     }
 
     #[test]

@@ -129,8 +129,24 @@ pub struct DbphashMediaMatch {
     pub episode: Option<u32>,
     pub matching_cuts: usize,
     pub matching_sparse: usize,
+    /// Mean Hamming distance of the matches in the best time-shift buckets (sparse + cuts);
+    /// infinite without any coherent match.
+    pub coherent_distance: f64,
     pub confidence: f64,
     pub estimated_shift_ms: i64,
+}
+
+/// Ranking order: confidence descending, then mean coherent Hamming distance ascending, then
+/// title, season and episode so that exact ties never fall back to hash-map order.
+///
+/// At equal confidence the closest media wins: dark or static scenes of other media match the
+/// query frames too, but at a larger distance than the frames the query was taken from.
+pub fn rank_media_matches(a: &DbphashMediaMatch, b: &DbphashMediaMatch) -> std::cmp::Ordering {
+    b.confidence
+        .total_cmp(&a.confidence)
+        .then_with(|| a.coherent_distance.total_cmp(&b.coherent_distance))
+        .then_with(|| a.clean_title.cmp(&b.clean_title))
+        .then_with(|| (a.season, a.episode).cmp(&(b.season, b.episode)))
 }
 
 /// Summary statistics for a packaging run.
@@ -299,24 +315,30 @@ impl DbphashBuilder {
 }
 
 /// Most populated time-shift bucket of one media's matches:
-/// `(shift_ms, matched pairs, distinct target frames)`.
-fn best_shift_bucket(matches: &[DbphashCutMatch], fps: f64, bucket_ms: i64) -> (i64, usize, usize) {
-    let mut buckets: HashMap<i64, (usize, HashSet<u32>)> = HashMap::new();
+/// `(shift_ms, matched pairs, distinct target frames, sum of Hamming distances)`.
+fn best_shift_bucket(
+    matches: &[DbphashCutMatch],
+    fps: f64,
+    bucket_ms: i64,
+) -> (i64, usize, usize, u64) {
+    let mut buckets: HashMap<i64, (usize, HashSet<u32>, u64)> = HashMap::new();
     for m in matches {
         let query_ts_ms = (m.query_idx as f64 / fps * 1000.0) as i64;
         let diff = m.cut_entry.timestamp_ms as i64 - query_ts_ms;
         let bucket = buckets.entry((diff / bucket_ms) * bucket_ms).or_default();
         bucket.0 += 1;
         bucket.1.insert(m.cut_entry.timestamp_ms);
+        bucket.2 += u64::from(m.distance);
     }
     buckets
         .into_iter()
-        .max_by_key(|(_, (pairs, _))| *pairs)
-        .map(|(shift, (pairs, targets))| (shift, pairs, targets.len()))
-        .unwrap_or((0, 0, 0))
+        .max_by_key(|(_, (pairs, _, _))| *pairs)
+        .map(|(shift, (pairs, targets, dist))| (shift, pairs, targets.len(), dist))
+        .unwrap_or((0, 0, 0, 0))
 }
 
-/// Confidence (0-100) and estimated shift of one media from its sparse and cut matches.
+/// Confidence (0-100), estimated shift and mean coherent Hamming distance of one media from its
+/// sparse and cut matches.
 ///
 /// Random cross-media collisions in large indices have scattered deltas (count <= 1 or 2)
 /// and a tiny match ratio (< 5% of query frames). The sparse ratio counts distinct target
@@ -326,17 +348,24 @@ pub(crate) fn media_confidence(
     fps: f64,
     s_matches: &[DbphashCutMatch],
     c_matches: &[DbphashCutMatch],
-) -> (f64, i64) {
+) -> (f64, i64, f64) {
     let expected_sparse = ((query_frames as f64 / fps).round() as usize).max(1);
-    let (best_cut_shift_ms, best_coherent_cuts, _) = best_shift_bucket(c_matches, fps, 50);
-    let (best_sparse_shift_ms, best_coherent_sparse, coherent_sparse_frames) =
+    let (best_cut_shift_ms, best_coherent_cuts, _, cut_distance) =
+        best_shift_bucket(c_matches, fps, 50);
+    let (best_sparse_shift_ms, best_coherent_sparse, coherent_sparse_frames, sparse_distance) =
         best_shift_bucket(s_matches, fps, 500);
 
     let query_len = query_frames.max(1);
     let query_match_ratio =
         (s_matches.len().max(c_matches.len()) as f64 / query_len as f64).min(1.0);
+    let coherent_matches = best_coherent_sparse + best_coherent_cuts;
+    let coherent_distance = if coherent_matches == 0 {
+        f64::INFINITY
+    } else {
+        (cut_distance + sparse_distance) as f64 / coherent_matches as f64
+    };
 
-    if best_coherent_sparse >= 3 {
+    let (confidence, shift_ms) = if best_coherent_sparse >= 3 {
         let sparse_ratio = (coherent_sparse_frames as f64 / expected_sparse as f64).min(1.0);
         let base_conf = sparse_ratio * 100.0;
         if best_coherent_cuts >= 2 {
@@ -359,7 +388,8 @@ pub(crate) fn media_confidence(
     } else {
         // Incoherent noise / random collision across large index: reject
         ((query_match_ratio * 100.0).min(30.0), 0i64)
-    }
+    };
+    (confidence, shift_ms, coherent_distance)
 }
 
 /// Zero-copy memory-mapped reader for `.dbphash` binary index files.
@@ -649,7 +679,7 @@ impl MmapDbphash {
                 let matching_cuts = c_matches.map(|v| v.len()).unwrap_or(0);
 
                 let fps = (media.fps_x1000 as f64 / 1000.0).max(1.0);
-                let (confidence, estimated_shift_ms) = media_confidence(
+                let (confidence, estimated_shift_ms, coherent_distance) = media_confidence(
                     query_hashes.len(),
                     fps,
                     s_matches.map_or(&[][..], Vec::as_slice),
@@ -681,22 +711,14 @@ impl MmapDbphash {
                     episode,
                     matching_cuts,
                     matching_sparse,
+                    coherent_distance,
                     confidence,
                     estimated_shift_ms,
                 });
             }
         }
 
-        // Consistent ranking criteria: confidence descending, then weighted score (cuts*2 + sparse)
-        ranked.sort_by(|a, b| {
-            b.confidence
-                .partial_cmp(&a.confidence)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| {
-                    (b.matching_cuts * 2 + b.matching_sparse)
-                        .cmp(&(a.matching_cuts * 2 + a.matching_sparse))
-                })
-        });
+        ranked.sort_by(rank_media_matches);
         ranked
     }
 

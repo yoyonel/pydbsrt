@@ -22,7 +22,7 @@ tags:
 La démonstration vidéo enregistrée via `task vlc:record-demo` (`scripts/record_vlsub_demo.sh`) s'exécute dans un serveur d'affichage X11 isolé (`Xvfb :98` en `1920x1080x24` sous gestionnaire de fenêtres `marco`). Le lecteur VLC est démarré sur le média `tests/data/big_buck_bunny_trailer_480p.mp4` avec les drapeaux `--start-time=18` et `--no-sub-autodetect-file` (garantissant qu'aucun fichier `.srt` adjacent n'est chargé automatiquement par VLC au démarrage).
 
 <video autoplay loop muted playsinline width="100%">
-  <source src="../assets/vlsub-dbsrt/vlsub_dbsrt_workflow_1080p.mp4" type="video/mp4">
+  <source src="../../assets/vlsub-dbsrt/vlsub_dbsrt_workflow_1080p.mp4" type="video/mp4">
 </video>
 
 Le scénario E2E automatise 4 étapes successives :
@@ -60,7 +60,7 @@ Le scénario E2E automatise 4 étapes successives :
 
 | Étape 1 : Initialisation & 3 Boutons | Étape 2 : Résultat `Search by pHash` | Étape 3 : Recalage & Injection Temps Réel |
 | :---: | :---: | :---: |
-| ![Init](assets/vlsub-dbsrt/01_vlsub_dialog_init.png) | ![Search](assets/vlsub-dbsrt/02_vlsub_search_results.png) | ![Synced](assets/vlsub-dbsrt/03_vlsub_subtitle_synced.png) |
+| ![Init](../assets/vlsub-dbsrt/01_vlsub_dialog_init.png) | ![Search](../assets/vlsub-dbsrt/02_vlsub_search_results.png) | ![Synced](../assets/vlsub-dbsrt/03_vlsub_subtitle_synced.png) |
 
 ---
 

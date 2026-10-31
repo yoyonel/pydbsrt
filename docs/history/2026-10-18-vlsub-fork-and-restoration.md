@@ -8,7 +8,7 @@
 
 ## 1. Contexte & Rapprochement avec la Vision VLSub
 
-Suite à l'audit technique objectif de **VLSub legacy** ([audit complet](2026-10-18-vlsub-legacy-audit.md)), nous avons constaté que l'implémentation initiale du plugin `pydbsrt` avait dérivé vers un paradigme purement passif/automatisé (`input-listener` sans boîte de dialogue de recherche par titre/saison/épisode), rompant avec l'expérience utilisateur historique de VLSub.
+Suite à l'audit technique objectif de **VLSub legacy** ([audit complet](../explanation/2026-10-18-vlsub-legacy-audit.md)), nous avons constaté que l'implémentation initiale du plugin `pydbsrt` avait dérivé vers un paradigme purement passif/automatisé (`input-listener` sans boîte de dialogue de recherche par titre/saison/épisode), rompant avec l'expérience utilisateur historique de VLSub.
 
 Le projet a donc opéré un retour rigoureux aux fondamentaux de VLSub sous la forme d'un **fork bonifié** :
 
@@ -42,7 +42,7 @@ graph TD
 Conformément à la règle d'intégrité factuelle, l'interaction complète avec le plugin a été enregistrée en direct sur un serveur X virtuel Xvfb (1920x1080x24) avec le gestionnaire de fenêtres Marco et encodée en **H.264/MP4 1080p**.
 
 <video controls autoplay loop muted playsinline width="100%">
-  <source src="../assets/vlsub-dbsrt/vlsub_dbsrt_workflow_1080p.mp4" type="video/mp4">
+  <source src="../../assets/vlsub-dbsrt/vlsub_dbsrt_workflow_1080p.mp4" type="video/mp4">
   Votre navigateur ne supporte pas la balise vidéo HTML5.
 </video>
 
@@ -57,33 +57,33 @@ Conformément à la règle d'intégrité factuelle, l'interaction complète avec
 
 === "Après — Studio Edition v2.0"
 
-    ![Étape 1 — Après (Studio v2)](assets/vlsub-dbsrt/vlsub_after_01_init.png)
+    ![Étape 1 — Après (Studio v2)](../assets/vlsub-dbsrt/vlsub_after_01_init.png)
 
 === "Avant — Legacy v1"
 
-    ![Étape 1 — Avant (Legacy v1)](assets/vlsub-dbsrt/vlsub_before_01.png)
+    ![Étape 1 — Avant (Legacy v1)](../assets/vlsub-dbsrt/vlsub_before_01.png)
 
 ### Étape 2 : Recherche Multi-Sources (`Smart Search (All)` / `Search by pHash` / `Search by Hash` / `Search by Name`)
 Un clic sur **Smart Search (All)** ou **Search by pHash** déclenche `POST /v1/search`. Les candidats sont formatés de manière tabulaire sans barre de défilement horizontale (`#01   [CERTIFIED pHash]   [FR]   ...  |  PostgreSQL #1`). L'OSD s'affiche en `top-left` pour éviter toute collision avec l'OSD natif VLC.
 
 === "Après — Studio Edition v2.0"
 
-    ![Étape 2 — Après (Studio v2)](assets/vlsub-dbsrt/vlsub_after_02_results.png)
+    ![Étape 2 — Après (Studio v2)](../assets/vlsub-dbsrt/vlsub_after_02_results.png)
 
 === "Avant — Legacy v1"
 
-    ![Étape 2 — Avant (Legacy v1)](assets/vlsub-dbsrt/vlsub_before_02.png)
+    ![Étape 2 — Avant (Legacy v1)](../assets/vlsub-dbsrt/vlsub_before_02.png)
 
 ### Étape 3 : Téléchargement, Recalage Temporel, Certification & Injection VLC
 Un clic sur **Download + Sync** (qui sélectionne automatiquement `#01` si aucune ligne n'a été cliquée) ou sur **1-Click Auto-Sync** applique le recalage pHash et injecte le sous-titre dans VLC. La console inférieure **Dark Slate (`#0f172a`)** affiche le décalage (`ms`/`s`) et la confiance (`96.2%`), tandis que le bouton **Certify Coupling** permet d'enregistrer le couplage certifié dans PostgreSQL 17 et `couplings.json`.
 
 === "Après — Studio Edition v2.0"
 
-    ![Étape 3 — Après (Studio v2)](assets/vlsub-dbsrt/vlsub_after_03_synced.png)
+    ![Étape 3 — Après (Studio v2)](../assets/vlsub-dbsrt/vlsub_after_03_synced.png)
 
 === "Avant — Legacy v1"
 
-    ![Étape 3 — Avant (Legacy v1)](assets/vlsub-dbsrt/vlsub_before_03.png)
+    ![Étape 3 — Avant (Legacy v1)](../assets/vlsub-dbsrt/vlsub_before_03.png)
 
 ---
 
