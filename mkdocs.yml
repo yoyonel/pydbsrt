@@ -167,6 +167,7 @@ nav:
       - Étude Cuts, Keyframes & Hybride: explanation/2026-10-17-etude-comparative-identification-frames-cuts-keyframes-hybride.md
       - Indexation Métrique (MIH vs BK-Tree): explanation/indexation-metrique-mih-vs-bktree.md
       - Identification de l'Épisode & Classement: explanation/identification-episode-et-classement-des-correspondances.md
+      - État & Qualité de la Reconnaissance: explanation/etat-qualite-reconnaissance-recognize.md
       - Modèle Relationnel & Couplages Certifiés: explanation/modele-relationnel-couplages-certifies.md
       - Architecture Cache Hybride Local & Cloud o2switch: explanation/architecture-cache-hybride-local-cloud.md
       - Déport de Calcul & Synchronisation o2switch: explanation/architecture-deport-calcul-stockage-et-synchronisation-o2switch.md
