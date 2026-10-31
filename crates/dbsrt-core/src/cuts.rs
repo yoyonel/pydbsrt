@@ -3,8 +3,8 @@
 use crate::hamming_distance;
 use anyhow::{Context, Result};
 use std::fs;
-use std::io::{Read, Write};
-use std::path::Path;
+use std::io::{BufWriter, Read, Write};
+use std::path::{Path, PathBuf};
 
 pub const DEFAULT_THRESHOLD_DISTANCE_FOR_CUT: u32 = 16;
 pub const DEFAULT_SEARCH_DISTANCE_FOR_BKTREE: u32 = 0;
@@ -228,6 +228,27 @@ pub fn read_phash_file(path: &Path) -> Result<Vec<u64>> {
     Ok(hashes)
 }
 
+/// A `.phash` file that already holds `done` hashes from an interrupted extraction.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PhashCheckpoint {
+    pub path: PathBuf,
+    pub done: usize,
+}
+
+impl PhashCheckpoint {
+    /// Opens the file for appending after its first `done` hashes, dropping anything past them:
+    /// a torn last write, or frames from a failed attempt that is now being retried.
+    pub fn open_append(&self) -> Result<BufWriter<fs::File>> {
+        let file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.path)
+            .with_context(|| format!("Failed to open checkpoint {:?}", self.path))?;
+        file.set_len(self.done as u64 * 8)?;
+        Ok(BufWriter::new(file))
+    }
+}
+
 /// Writes a binary .phash file (8-byte big-endian integers).
 pub fn write_phash_file(path: &Path, hashes: &[u64]) -> Result<()> {
     let mut file = fs::File::create(path)
@@ -354,5 +375,32 @@ mod tests {
         assert_eq!(sample, loaded);
 
         let _ = std::fs::remove_file(test_file);
+    }
+
+    #[test]
+    fn test_phash_checkpoint_truncates_then_appends() {
+        let path =
+            std::env::temp_dir().join(format!("test_checkpoint_{}.phash", std::process::id()));
+        // Two whole hashes plus a torn third write.
+        let mut raw = [1u64, 2, 3].map(u64::to_be_bytes).concat();
+        raw.truncate(20);
+        std::fs::write(&path, raw).unwrap();
+
+        let checkpoint = PhashCheckpoint {
+            path: path.clone(),
+            done: 2,
+        };
+        let mut writer = checkpoint.open_append().unwrap();
+        writer.write_all(&9u64.to_be_bytes()).unwrap();
+        drop(writer);
+        assert_eq!(read_phash_file(&path).unwrap(), vec![1, 2, 9]);
+
+        // A retry from the same checkpoint drops the previous attempt's frames.
+        let mut writer = checkpoint.open_append().unwrap();
+        writer.write_all(&7u64.to_be_bytes()).unwrap();
+        drop(writer);
+        assert_eq!(read_phash_file(&path).unwrap(), vec![1, 2, 7]);
+
+        let _ = std::fs::remove_file(path);
     }
 }
