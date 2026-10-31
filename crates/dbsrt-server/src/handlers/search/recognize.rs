@@ -56,7 +56,7 @@ pub fn match_fingerprint_multitier(
     let reader_guard = state.dbphash_reader.load();
     if let Some(ref reader) = *reader_guard {
         for m in reader.recognize(hashes, search_distance) {
-            candidates.push((m, "Tier 1 (RAM .dbphash MIH under 10ms)"));
+            candidates.push((m, "Tier 1 (RAM .dbphash MIH)"));
         }
     }
 
@@ -74,7 +74,7 @@ pub fn match_fingerprint_multitier(
 
     if let Some(delta) = delta_snap {
         for m in delta.recognize(hashes, search_distance) {
-            candidates.push((m, "Tier 1-Delta (RAM DeltaIndex MIH under 1ms)"));
+            candidates.push((m, "Tier 1-Delta (RAM DeltaIndex MIH)"));
         }
     }
 
