@@ -23,13 +23,18 @@
   - En mode socket Unix, le serveur n'écrit pas `/tmp/dbsrt-server.json` (fichier de découverte). Seul VLC en local le lit.
   - Socket en `0600` : les autres comptes du mutualisé ne peuvent pas s'y connecter. C'est plus strict que le TCP local, ouvert à tout l'hôte.
   - Trois lanceurs peuvent démarrer le démon : la passerelle PHP (sérialisée entre requêtes par `run/gateway_spawn.lock`), le watchdog cron et `o2switch_ctl.sh start`. Sur une socket morte, deux lanceurs simultanés pouvaient chacun la juger morte : le second supprimait la socket neuve du premier, laissant un démon orphelin qui gardait sa RAM. `bind_unix_listener` prend donc un `flock` exclusif sur `<socket>.lock` (mode `0600`, jamais supprimé) pendant la vérification, la suppression et le bind. Le second lanceur voit alors la socket vivante et s'arrête.
+  - Les trois lanceurs passent par `deploy/o2switch/dbsrt_server_ctl.sh` (cron, `start`) ou partagent son verrou (passerelle). `stop` tue tout processus `bin/dbsrt-server --unix-socket <socket>` de l'utilisateur et pose `run/dbsrt-server.stopped` sous le verrou : la passerelle répond alors `503` et le watchdog ne relance plus, jusqu'au prochain `start`.
+  - Le verrou ne doit pas fuir dans le démon. La passerelle ouvrait `gateway_spawn.lock` sans close-on-exec, et le `sh` de `exec()` gardait le pipe de sortie ouvert : la requête PHP bloquait, était tuée avant de libérer le verrou, et le démon héritait du fd verrouillé. Tout `stop` ou watchdog suivant attendait ce verrou indéfiniment (constaté en production). La passerelle ouvre donc le verrou en mode `'ce'`, détache le démon (`exec setsid`, sortie redirigée), et le helper borne l'attente du verrou (`DBSRT_LOCK_WAIT_SEC`, 30 s par défaut). Après ce délai, `stop` tue les démons de la socket puis réessaie ; les autres actions échouent au lieu de bloquer.
   - Le mécanisme exact du kill o2switch reste inconnu (sortie `exit=0`, aucun signal capturable). Si o2switch étend sa politique aux sockets Unix, il faudra reprendre l'option 2 ou 3.
 - Sites:
   - `crates/dbsrt-server/src/lib.rs` (`bind_unix_listener`)
   - `crates/dbsrt-server/src/main.rs` (`ServerCli::unix_socket`, `BoundListener`, `run_server_until`)
   - `deploy/o2switch/index.php` (`UPSTREAM_SOCKET_REL_PATH`, `is_daemon_healthy`, `spawn_daemon`)
-  - `scripts/o2switch_ctl.sh` (`SERVER_SOCKET`, `start`, `setup-cron`)
+  - `deploy/o2switch/dbsrt_server_ctl.sh` (`start`, `stop`, `status`, `pids`, `watchdog`)
+  - `scripts/o2switch_ctl.sh` (`SERVER_SOCKET`, `remote_server_ctl`, `setup-cron`)
 - Tests:
   - `crates/dbsrt-server/src/lib.rs::tests::test_bind_unix_listener_cases`
   - `crates/dbsrt-server/src/lib.rs::tests::test_bind_unix_listener_waits_for_spawn_lock`
   - `crates/dbsrt-server/src/main.rs::tests::test_server_unix_socket_lifecycle`
+  - `tests/tools/test_dbsrt_server_ctl.py` (stop, start, status, pids, watchdog sur faux démons ; verrou tenu par un démon ou par un autre processus)
+  - `scripts/o2switch_e2e.py` (`task o2switch:e2e`) : recette live sur o2switch (cron, start/stop/restart, `503` après stop, relance passerelle et watchdog après crash, aucun processus ne garde le verrou, reconnaissance du bon média)

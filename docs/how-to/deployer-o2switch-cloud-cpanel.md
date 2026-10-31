@@ -93,9 +93,9 @@ task o2switch:sync
 
 Les répertoires distants suivants sont initialisés sur l'hébergement :
 
-* `~/dbsrt/bin/` : Exécutables `dbsrt` et `dbsrt-server`.
+* `~/dbsrt/bin/` : Exécutables `dbsrt`, `dbsrt-server` et le script de cycle de vie `dbsrt_server_ctl.sh`.
 * `~/dbsrt/data/` : Catalogue `catalog.dbphash` et sous-titres `SRT/`.
-* `~/dbsrt/run/` : Fichier de suivi de PID (`dbsrt-server.pid`).
+* `~/dbsrt/run/` : Socket `dbsrt-server.sock`, verrou `gateway_spawn.lock` et marqueur d'arrêt `dbsrt-server.stopped`.
 * `~/dbsrt/logs/` : Fichier journal d'exécution (`dbsrt-server.log`).
 * `~/public_html/dbsrt/.htaccess` : Règle de reverse-proxy Apache / LiteSpeed.
 
@@ -107,7 +107,7 @@ Démarrez le serveur en arrière-plan sans privilèges root :
 task o2switch:start
 ```
 
-Le script compacte d'abord les `.phash` du batch (`data/__PHASH__`) dans `data/catalog.dbphash` via `dbsrt pack` (~1,5 s). Il démarre ensuite `dbsrt-server` via `setsid` avec un dossier `.phash` vide (`run/empty_phash`), enregistre le PID et attend la sonde de santé via SSH.
+Le script compacte d'abord les `.phash` du batch (`data/__PHASH__`) dans `data/catalog.dbphash` via `dbsrt pack` (~1,5 s). Il démarre ensuite `dbsrt-server` via `setsid` avec un dossier `.phash` vide (`run/empty_phash`), puis attend la sonde de santé via SSH. Il supprime aussi le marqueur d'arrêt posé par `task o2switch:stop`.
 
 > [!WARNING]
 > **o2switch tue (SIGKILL) tout processus utilisateur en écoute sur un port après ~10 s**, même `python3 -m http.server`. Le daemon ne reste donc pas résident : la passerelle `index.php` le relance à la demande (~1,3 s à froid, ~80 ms à chaud), et le cron watchdog fait de même toutes les 5 min. Le spawn à la demande ne recompacte pas : un second cron (toutes les 15 min) intègre les nouveaux `.phash` du batch au catalogue, rechargé à chaud.
@@ -122,7 +122,7 @@ Contrôlez l'état du processus et la télémétrie de l'API :
 task o2switch:status
 ```
 
-La sortie affiche l'état du PID, l'utilisation CPU/RAM (~340 Mo RSS avec le catalogue compacté de ~1 200 médias), et la réponse JSON de `/v1/status`.
+Code de sortie : `0` = un seul démon, `3` = aucun démon (arrêté par l'opérateur ou en attente de relance), `1` = plusieurs démons sur la socket. La sortie affiche aussi l'utilisation CPU/RAM (~340 Mo RSS avec le catalogue compacté de ~1 200 médias), et la réponse JSON de `/v1/status`.
 
 ### 6. Test de reconnaissance de bout en bout
 
@@ -316,11 +316,12 @@ Pour synchroniser directement depuis le NAS Synology sans station de travail :
 | `task o2switch:sync-nas` | Compile le catalogue NAS et synchronise l'index et les sous-titres vers o2switch. |
 | `task o2switch:sync-nas:dry-run` | Simule à sec la synchronisation NAS vers o2switch sans transfert ni redémarrage. |
 | `task o2switch:start` | Démarre le démon en arrière-plan sur o2switch. |
-| `task o2switch:status` | Affiche l'état du PID et la télémétrie API à distance. |
+| `task o2switch:status` | Affiche l'état des démons (code `0` = un, `3` = aucun, `1` = doublons) et la télémétrie API à distance. |
 | `task o2switch:logs` | Suit en direct les logs d'exécution sur le serveur distant. |
 | `task o2switch:restart` | Redémarre le démon à distance. |
-| `task o2switch:stop` | Arrête proprement le démon via signal `SIGTERM` (puis `SIGKILL` si nécessaire). |
+| `task o2switch:stop` | Arrête tous les démons de la socket, quel que soit le lanceur (`SIGTERM`, puis `SIGKILL` après 10 s). Pose le marqueur `run/dbsrt-server.stopped` : la passerelle répond `503` et le watchdog ne relance plus jusqu'au prochain `start`. |
 | `task o2switch:demo` | Exécute un test de reconnaissance et de téléchargement de sous-titres. |
+| `task o2switch:e2e` | Recette live complète (cron, start/stop/restart, relances, passerelle, reconnaissance), une ligne PASS/FAIL par contrôle. Coupe le service quelques secondes. |
 | `task o2switch:setup-cron` | Installe le watchdog utilisateur (`*/5 * * * *`) et le recompactage du catalogue (`*/15 * * * *`, seulement si un `.phash` est plus récent que `catalog.dbphash`). |
 | `task o2switch:remove-cron` | Supprime le watchdog utilisateur de la crontab. |
 | `task o2switch:rotate-key` | Génère, déploie et valide une nouvelle clé API 256 bits avec mise à jour dans `pass`. |
@@ -338,5 +339,5 @@ Le démon écoute sur la socket Unix `~/dbsrt/run/dbsrt-server.sock`, car o2swit
 
 1. Déployer la version TCP de `deploy/o2switch/index.php` (révision antérieure à l'ADR) dans `~/public_html/dbsrt/index.php`, après l'avoir validée sur le serveur avec `php -l`.
 2. Depuis la même révision, réinstaller le watchdog : `task o2switch:setup-cron`. Sinon, le cron relance le démon sur la socket.
-3. Arrêter le démon en cours. `task o2switch:stop` ne suffit pas : il ne lit que `run/dbsrt-server.pid`, que ni la passerelle PHP ni le cron n'écrivent. Sur le serveur : `pkill -u "$(id -u)" -f 'bin/dbsrt-server --unix-socket'`. La passerelle le relance en TCP à la requête suivante.
+3. Arrêter le démon en cours avec `task o2switch:stop`, puis supprimer le marqueur `~/dbsrt/run/dbsrt-server.stopped` sur le serveur. La passerelle le relance en TCP à la requête suivante.
 4. Vérifier que les relances reprennent ou non : le compteur `dbsrt-server_spawns` du faultwatch reste le meilleur indicateur.

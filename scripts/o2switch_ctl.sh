@@ -103,6 +103,14 @@ public_http_code() {
   curl -s -o /dev/null -w "%{http_code}" -X "${method}" -H @- "${url}" 2>/dev/null || true
 }
 
+# Deploys the remote lifecycle helper (also run by the cron watchdog), then runs one of its actions
+remote_server_ctl() {
+  local action="$1"
+  rsync -a --chmod=F755 "${REPO_ROOT}/deploy/o2switch/dbsrt_server_ctl.sh" "${O2SWITCH_HOST}:${REMOTE_BASE}/bin/"
+  # shellcheck disable=SC2029
+  ssh "${O2SWITCH_HOST}" "bash $(printf '%q ' "${REMOTE_BASE}/bin/dbsrt_server_ctl.sh" "${action}" "${REMOTE_BASE}" "${SERVER_SOCKET}")"
+}
+
 # Stops the remote process recorded in a PID file (SIGTERM, then SIGKILL after a timeout)
 remote_stop_pidfile() {
   local pid_file="$1"
@@ -236,6 +244,7 @@ case "${ACTION}" in
     rsync -avz --progress --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${CLI_BIN}" "${SERVER_BIN}" "${O2SWITCH_HOST}:${REMOTE_BASE}/bin/"
     # shellcheck disable=SC2029
     ssh "${O2SWITCH_HOST}" "chmod +x ${REMOTE_BASE}/bin/dbsrt ${REMOTE_BASE}/bin/dbsrt-server"
+    rsync -a --chmod=F755 "deploy/o2switch/dbsrt_server_ctl.sh" "${O2SWITCH_HOST}:${REMOTE_BASE}/bin/"
 
     echo "-> Transferring batch worker scripts..."
     if [[ -f "scripts/o2switch_batch_worker.py" ]]; then
@@ -267,48 +276,7 @@ case "${ACTION}" in
   start)
     check_ssh
     echo "=== Starting dbsrt-server daemon on ${O2SWITCH_HOST} ==="
-    # shellcheck disable=SC2029
-    ssh "${O2SWITCH_HOST}" "bash -s -- '${SERVER_SOCKET}' '${REMOTE_BASE}'" <<'REMOTE_SCRIPT'
-SOCKET="$1"
-BASE="$2"
-PID_FILE="${BASE}/run/dbsrt-server.pid"
-LOG_FILE="${BASE}/logs/dbsrt-server.log"
-BIN="${BASE}/bin/dbsrt-server"
-DATA_DIR="${BASE}/data"
-
-if [[ -f "${PID_FILE}" ]]; then
-  PID=$(cat "${PID_FILE}")
-  if kill -0 "${PID}" 2>/dev/null; then
-    echo "⚠️ dbsrt-server is already running with PID ${PID}."
-    exit 0
-  fi
-fi
-
-# Loose .phash files are mmapped with an in-RAM MIH each (~6x disk size), which blows the
-# LVE memory cap; pack them into the catalog and serve it with an empty loose directory.
-mkdir -p "${BASE}/run/empty_phash"
-if "${BASE}/bin/dbsrt" pack -p "${DATA_DIR}/__PHASH__" -o "${BASE}/run/catalog.pack.tmp" >/dev/null 2>&1; then
-  mv -f "${BASE}/run/catalog.pack.tmp" "${DATA_DIR}/catalog.dbphash"
-else
-  echo "⚠️ Catalog pack failed; serving the previous catalog."
-fi
-
-# Clean up any leftover screen session
-screen -X -S dbsrt_server quit 2>/dev/null || true
-
-screen -S dbsrt_server -d -m "${BIN}" \
-  --unix-socket "${SOCKET}" \
-  --dbphash "${DATA_DIR}/catalog.dbphash" \
-  --subtitles-dir "${DATA_DIR}/SRT" \
-  --phash-dir "${BASE}/run/empty_phash" \
-  --api-key-file "${BASE}/etc/api_key.secret"
-sleep 1
-PID=$(pgrep -u "$(whoami)" -f '[b]in/dbsrt-server' | head -n 1 || true)
-if [[ -n "${PID}" ]]; then
-  echo "${PID}" > "${PID_FILE}"
-fi
-echo "✓ Started dbsrt-server (screen: dbsrt_server, PID: ${PID:-unknown})."
-REMOTE_SCRIPT
+    remote_server_ctl start
 
     echo "Waiting for healthcheck on unix:${SERVER_SOCKET} via SSH..."
     HEALTHY=false
@@ -333,10 +301,13 @@ REMOTE_SCRIPT
   stop)
     check_ssh
     echo "=== Stopping dbsrt-server daemon on ${O2SWITCH_HOST} ==="
-    remote_stop_pidfile "run/dbsrt-server.pid"
+    # A watchdog line from before dbsrt_server_ctl.sh ignores the stop marker and would respawn
     # shellcheck disable=SC2029
-    ssh "${O2SWITCH_HOST}" "screen -X -S dbsrt_server quit 2>/dev/null || true"
-    echo "✓ dbsrt-server stopped."
+    if ssh "${O2SWITCH_HOST}" "crontab -l 2>/dev/null | grep -F '# dbsrt-server watchdog' | grep -qvF dbsrt_server_ctl.sh"; then
+      echo "❌ Legacy cron watchdog would respawn the daemon: run 'task o2switch:setup-cron' first."
+      exit 1
+    fi
+    remote_server_ctl stop
     ;;
 
   restart)
@@ -347,21 +318,11 @@ REMOTE_SCRIPT
   status)
     check_ssh
     echo "=== Remote Process Status (${O2SWITCH_HOST}) ==="
+    STATUS_RC=0
+    remote_server_ctl status || STATUS_RC=$?
     # shellcheck disable=SC2029
     ssh "${O2SWITCH_HOST}" "bash -s -- '${REMOTE_BASE}'" <<'REMOTE_SCRIPT'
 BASE="$1"
-PID_FILE="${BASE}/run/dbsrt-server.pid"
-if [[ -f "${PID_FILE}" ]]; then
-  PID=$(cat "${PID_FILE}")
-  if kill -0 "${PID}" 2>/dev/null; then
-    echo "● dbsrt-server is running (PID: ${PID})"
-    ps -o pid,user,%cpu,%mem,vsz,rss,comm -p "${PID}" || true
-  else
-    echo "○ dbsrt-server is dead but PID file exists (${PID})"
-  fi
-else
-  echo "○ dbsrt-server is not running (no PID file)"
-fi
 # Same lookup as dbsrt: an ffmpeg next to the binary wins over PATH.
 FFMPEG="${BASE}/bin/ffmpeg"
 [[ -x "${FFMPEG}" ]] || FFMPEG="$(command -v ffmpeg || true)"
@@ -371,6 +332,8 @@ REMOTE_SCRIPT
     echo "=== Remote API Status (internal unix:${SERVER_SOCKET}) ==="
     # shellcheck disable=SC2029
     ssh "${O2SWITCH_HOST}" "${REMOTE_AUTH_HEADER} | curl -s -f -H @- --unix-socket ${SERVER_SOCKET} http://localhost/v1/status || echo 'API unreachable'" | jq . 2>/dev/null || true
+    # 0 = one daemon, 3 = not running (stopped or awaiting respawn), 1 = duplicate daemons
+    exit "${STATUS_RC}"
     ;;
 
   logs)
@@ -385,13 +348,14 @@ REMOTE_SCRIPT
       O2SWITCH_API_KEY="${O2SWITCH_API_KEY:-$(pass_secret "${API_KEY_PASS_ENTRY}")}"
       TARGET_ENDPOINT="${O2SWITCH_URL}/v1/recognize"
       echo "Querying public HTTPS URL: ${TARGET_ENDPOINT}"
-      AUTH_HEADER=()
+      # Key travels as a header on stdin (curl -H @-), never in argv (visible in ps)
+      AUTH_LINE=""
       if [[ -n "${O2SWITCH_API_KEY}" ]]; then
-        AUTH_HEADER=(-H "X-API-Key: ${O2SWITCH_API_KEY}")
+        AUTH_LINE="X-API-Key: ${O2SWITCH_API_KEY}"
       fi
-      RESP=$(curl -s -f -X POST "${TARGET_ENDPOINT}" \
+      RESP=$(printf '%s\n' "${AUTH_LINE}" | curl -s -f -X POST "${TARGET_ENDPOINT}" \
         -H "Content-Type: application/json" \
-        "${AUTH_HEADER[@]}" \
+        -H @- \
         -d '{
         "query_fingerprint": [
           "0xe9fd17223e1c0c4b",
@@ -408,7 +372,7 @@ REMOTE_SCRIPT
       if [[ "${CANDIDATE_ID}" =~ ^sub:sha256:(.+) ]]; then
         HASH="${BASH_REMATCH[1]}"
         echo "Fetching subtitle from: ${O2SWITCH_URL}/v1/subtitles/${HASH}"
-        (curl -s -f "${AUTH_HEADER[@]}" "${O2SWITCH_URL}/v1/subtitles/${HASH}" | head -n "${DEFAULT_DEMO_SAMPLE_LINES}") || true
+        (printf '%s\n' "${AUTH_LINE}" | curl -s -f -H @- "${O2SWITCH_URL}/v1/subtitles/${HASH}" | head -n "${DEFAULT_DEMO_SAMPLE_LINES}") || true
       fi
     else
       check_ssh
@@ -431,13 +395,15 @@ REMOTE_SCRIPT
   setup-cron)
     check_ssh
     echo "=== Setting up watchdog cron job on ${O2SWITCH_HOST} ==="
+    rsync -a --chmod=F755 "${REPO_ROOT}/deploy/o2switch/dbsrt_server_ctl.sh" "${O2SWITCH_HOST}:${REMOTE_BASE}/bin/"
     # shellcheck disable=SC2029
     ssh "${O2SWITCH_HOST}" "bash -s -- '${SERVER_SOCKET}' '${REMOTE_BASE}'" <<'REMOTE_SCRIPT'
 SOCKET="$1"
 BASE="$2"
 CRON_MARKER="# dbsrt-server watchdog"
 PACK_MARKER="# dbsrt-server catalog pack"
-CMD="pgrep -u \$(whoami) -f dbsrt-server >/dev/null 2>&1 || (setsid \$HOME/${BASE}/bin/dbsrt-server --unix-socket \$HOME/${SOCKET} --dbphash \$HOME/${BASE}/data/catalog.dbphash --subtitles-dir \$HOME/${BASE}/data/SRT --phash-dir \$HOME/${BASE}/run/empty_phash --api-key-file \$HOME/${BASE}/etc/api_key.secret </dev/null >> \$HOME/${BASE}/logs/dbsrt-server.log 2>&1 &)"
+# Respawns only when no daemon runs and stop has not set the stop marker
+CMD="bash \$HOME/${BASE}/bin/dbsrt_server_ctl.sh watchdog ${BASE} ${SOCKET} >> \$HOME/${BASE}/logs/dbsrt-server.log 2>&1"
 CRON_LINE="*/5 * * * * ${CMD} ${CRON_MARKER}"
 # The on-demand spawn never repacks: fold new batch .phash files into the catalog (atomic mv,
 # picked up by the server file watcher and by the next spawn)

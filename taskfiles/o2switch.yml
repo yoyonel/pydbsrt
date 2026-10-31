@@ -22,7 +22,7 @@ tasks:
       - ./scripts/o2switch_ctl.sh start
 
   o2switch:stop:
-    desc: Stop standalone dbsrt-server daemon on o2switch
+    desc: Stop every dbsrt-server daemon on o2switch and block gateway/cron respawn until start
     cmds:
       - ./scripts/o2switch_ctl.sh stop
 
@@ -30,6 +30,11 @@ tasks:
     desc: Restart standalone dbsrt-server daemon on o2switch
     cmds:
       - ./scripts/o2switch_ctl.sh restart
+
+  o2switch:e2e:
+    desc: Live E2E recette of dbsrt-server on o2switch (lifecycle, respawn, cron, gateway), PASS/FAIL only
+    cmds:
+      - uv run python scripts/o2switch_e2e.py
 
   o2switch:status:
     desc: Check standalone dbsrt-server process and API telemetry on o2switch
