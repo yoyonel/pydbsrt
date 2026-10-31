@@ -22,7 +22,7 @@
   - Mesuré après déploiement : même PID pendant plus de 606 s, aucune relance au passage du cron. `/v1/health` en 0,08 s ; `/v1/monitoring/top` en 2,7 s à froid puis 0,1 s ; 8 appels `/v1/recognize` en `200` (0,19 à 0,77 s).
   - En mode socket Unix, le serveur n'écrit pas `/tmp/dbsrt-server.json` (fichier de découverte). Seul VLC en local le lit.
   - Socket en `0600` : les autres comptes du mutualisé ne peuvent pas s'y connecter. C'est plus strict que le TCP local, ouvert à tout l'hôte.
-  - Course connue : le watchdog cron ne prend pas le verrou de spawn de PHP (`run/gateway_spawn.lock`). Dans un cas rare, deux spawns simultanés peuvent laisser un démon orphelin qui garde sa RAM.
+  - Trois lanceurs peuvent démarrer le démon : la passerelle PHP (sérialisée entre requêtes par `run/gateway_spawn.lock`), le watchdog cron et `o2switch_ctl.sh start`. Sur une socket morte, deux lanceurs simultanés pouvaient chacun la juger morte : le second supprimait la socket neuve du premier, laissant un démon orphelin qui gardait sa RAM. `bind_unix_listener` prend donc un `flock` exclusif sur `<socket>.lock` (mode `0600`, jamais supprimé) pendant la vérification, la suppression et le bind. Le second lanceur voit alors la socket vivante et s'arrête.
   - Le mécanisme exact du kill o2switch reste inconnu (sortie `exit=0`, aucun signal capturable). Si o2switch étend sa politique aux sockets Unix, il faudra reprendre l'option 2 ou 3.
 - Sites:
   - `crates/dbsrt-server/src/lib.rs` (`bind_unix_listener`)
@@ -31,4 +31,5 @@
   - `scripts/o2switch_ctl.sh` (`SERVER_SOCKET`, `start`, `setup-cron`)
 - Tests:
   - `crates/dbsrt-server/src/lib.rs::tests::test_bind_unix_listener_cases`
+  - `crates/dbsrt-server/src/lib.rs::tests::test_bind_unix_listener_waits_for_spawn_lock`
   - `crates/dbsrt-server/src/main.rs::tests::test_server_unix_socket_lifecycle`

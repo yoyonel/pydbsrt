@@ -79,10 +79,26 @@ pub async fn bind_listener(
 /// Binds a Unix socket listener (mode 0600), replacing a stale socket left by a killed daemon.
 ///
 /// Refuses to steal a socket a live daemon still answers on, and never removes a path that is
-/// not a socket.
+/// not a socket. Check, removal and bind run under an exclusive `flock` on `<path>.lock`, so
+/// concurrent starters (PHP gateway, cron watchdog, `o2switch_ctl.sh start`) cannot delete each
+/// other's fresh socket.
 #[cfg(unix)]
 pub fn bind_unix_listener(path: &std::path::Path) -> Result<tokio::net::UnixListener> {
-    use std::os::unix::fs::{FileTypeExt, PermissionsExt};
+    use std::os::unix::fs::{FileTypeExt, OpenOptionsExt, PermissionsExt};
+
+    let mut lock_path = path.as_os_str().to_owned();
+    lock_path.push(".lock");
+    let lock_path = PathBuf::from(lock_path);
+    // The lock file is never removed: unlinking it would let two starters lock different inodes.
+    let lock = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .mode(0o600)
+        .open(&lock_path)
+        .with_context(|| format!("Failed to open spawn lock {}", lock_path.display()))?;
+    lock.lock()
+        .with_context(|| format!("Failed to lock {}", lock_path.display()))?;
 
     if let Ok(meta) = std::fs::symlink_metadata(path) {
         if !meta.file_type().is_socket() {
@@ -311,6 +327,34 @@ mod tests {
         assert!(bind_unix_listener(&regular).is_err());
         assert_eq!(std::fs::read(&regular).unwrap(), b"keep");
 
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Two starters (PHP gateway, cron watchdog) racing on a stale socket: the second one must
+    /// wait for the first bind, otherwise it deletes the fresh socket and orphans the first daemon.
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_bind_unix_listener_waits_for_spawn_lock() {
+        const HOLD_MS: u64 = 300;
+        let dir = std::env::temp_dir().join(format!("dbsrt_uds_lock_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let sock = dir.join("d.sock");
+        drop(std::os::unix::net::UnixListener::bind(&sock).unwrap()); // stale socket file
+
+        let lock = std::fs::File::create(dir.join("d.sock.lock")).unwrap();
+        lock.lock().unwrap(); // another starter is mid check/remove/bind
+
+        let path = sock.clone();
+        let starter = tokio::task::spawn_blocking(move || bind_unix_listener(&path));
+        tokio::time::sleep(std::time::Duration::from_millis(HOLD_MS)).await;
+        assert!(
+            !starter.is_finished(),
+            "bind must wait while the spawn lock is held"
+        );
+
+        lock.unlock().unwrap();
+        let listener = starter.await.unwrap().expect("bind after lock release");
+        drop(listener);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
