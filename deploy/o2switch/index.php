@@ -24,6 +24,8 @@ const SPAWN_RETRY_INTERVAL_MICROSECONDS = 250000; // 250 ms
 const SECRET_KEY_REL_PATH = '/dbsrt/etc/api_key.secret';
 const READONLY_KEY_REL_PATH = '/dbsrt/etc/api_key_readonly.secret';
 const SPAWN_LOCK_REL_PATH = '/dbsrt/run/gateway_spawn.lock';
+// Set by `o2switch_ctl.sh stop` (dbsrt_server_ctl.sh), under the spawn lock: no auto-spawn
+const STOP_MARKER_REL_PATH = '/dbsrt/run/dbsrt-server.stopped';
 const RATE_LIMIT_REL_PATH = '/dbsrt/run/auth_rate_limit.json';
 const AUTH_COOKIE_NAME = 'dbsrt_session';
 const AUTH_COOKIE_MAX_AGE = 2592000; // 30 days
@@ -221,7 +223,9 @@ function is_daemon_healthy(string $homeDir, int $connectTimeoutMs, int $timeoutM
  */
 function spawn_daemon(string $homeDir): bool
 {
-    $lock = fopen($homeDir . SPAWN_LOCK_REL_PATH, 'c');
+    // 'e' (close-on-exec): the spawned daemon must not inherit the lock, or it would hold it for
+    // its whole life if this request dies before the unlock below
+    $lock = fopen($homeDir . SPAWN_LOCK_REL_PATH, 'ce');
     if ($lock === false || !flock($lock, LOCK_EX)) {
         return false;
     }
@@ -229,6 +233,9 @@ function spawn_daemon(string $homeDir): bool
     try {
         if (is_daemon_healthy($homeDir, 1500, 2000)) {
             return true;
+        }
+        if (file_exists($homeDir . STOP_MARKER_REL_PATH)) {
+            return false;
         }
 
         $baseDir = escapeshellarg($homeDir . '/dbsrt');
@@ -241,8 +248,10 @@ function spawn_daemon(string $homeDir): bool
         $keyFile = escapeshellarg($homeDir . SECRET_KEY_REL_PATH);
         $socket = escapeshellarg($homeDir . UPSTREAM_SOCKET_REL_PATH);
 
+        // Redirect the whole backgrounded subshell, then exec: no shell is left holding exec()'s
+        // stdout pipe, which would block this request until PHP kills it
         exec(sprintf(
-            'cd %s && setsid %s --unix-socket %s --dbphash %s --subtitles-dir %s --phash-dir %s --api-key-file %s </dev/null >> %s 2>&1 &',
+            '(cd %s && exec setsid %s --unix-socket %s --dbphash %s --subtitles-dir %s --phash-dir %s --api-key-file %s) </dev/null >> %s 2>&1 &',
             $baseDir,
             $bin,
             $socket,
@@ -513,6 +522,9 @@ $rawResponse = curl_exec($ch);
 if ($rawResponse === false && curl_errno($ch) === CURLE_COULDNT_CONNECT) {
     if (!spawn_daemon($homeDir)) {
         curl_close($ch);
+        if (file_exists($homeDir . STOP_MARKER_REL_PATH)) {
+            send_json_error(503, ['error' => 'Service Unavailable: dbsrt-server stopped by operator']);
+        }
         send_json_error(502, ['error' => 'Bad Gateway: Unable to reach or spawn dbsrt-server']);
     }
     $rawResponse = curl_exec($ch);

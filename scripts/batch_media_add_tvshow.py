@@ -50,7 +50,7 @@ MAX_EPISODES_PER_SERIES: int = 4
 DEFAULT_DBSRT_CLI_BIN: Path = Path("target/release/dbsrt")
 DEFAULT_PHASH_DIR: Path = Path("data/__PHASH__")
 DEFAULT_SUBTITLES_DIR: Path = Path("data/SRT")
-DEFAULT_REPORT_PATH: Path = Path("docs/2026-10-25-rapport-batch-import-tvshow-synology.md")
+DEFAULT_REPORT_PATH: Path = Path("docs/history/2026-10-25-rapport-batch-import-tvshow-synology.md")
 DEFAULT_EVENTS_LOG_PATH: Path = Path("data/reports/batch_tvshow_nightly.jsonl")
 
 ISO_639_2_TO_1: Dict[str, str] = {

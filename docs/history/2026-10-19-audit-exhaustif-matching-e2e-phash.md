@@ -101,7 +101,7 @@ Sur les 57 œuvres testées, 26 flux n'ont pas matché avec la base. Cette non-r
 * **Source** : Vidéo officielle YouTube (`u41ujNodvnM`).
 * **Protocole** : Téléchargement d'un segment de 5 secondes (`00:02:00 - 00:02:05`) via `yt-dlp` en 720p AV1 (`kyan_snippet_5s.webm`). Le fichier est renommé pour supprimer tout mot-clé ou métadonnée textuelle.
 
-![Extrait vidéo réel YouTube Kyan Khojandi](assets/audit-matching/audit_kyan_pulsions_frame.png)
+![Extrait vidéo réel YouTube Kyan Khojandi](../assets/audit-matching/audit_kyan_pulsions_frame.png)
 
 * **Résultat dbsrt CLI** :
   ```text
@@ -120,7 +120,7 @@ Sur les 57 œuvres testées, 26 flux n'ont pas matché avec la base. Cette non-r
 * **Source** : Bande-annonce officielle MGM numérisée sur YouTube (`vJVXTKkjsxA`, 171 secondes, 720p).
 * **Protocole** : Extraction d'une sonde de 2 secondes à $t=20$s dans le trailer.
 
-![Bande-annonce officielle Freaks 1932 MGM](assets/audit-matching/audit_freaks_trailer_frame.png)
+![Bande-annonce officielle Freaks 1932 MGM](../assets/audit-matching/audit_freaks_trailer_frame.png)
 
 * **Résultat dbsrt CLI** :
   ```text
@@ -136,7 +136,7 @@ Sur les 57 œuvres testées, 26 flux n'ont pas matché avec la base. Cette non-r
 
 * **Source** : Bande-annonce officielle Prime Video de la Saison 2 (`MN8fFM1ZdWo`, 150 secondes).
 
-![Trailer officiel The Boys Saison 2](assets/audit-matching/audit_the_boys_s2_trailer_frame.png)
+![Trailer officiel The Boys Saison 2](../assets/audit-matching/audit_the_boys_s2_trailer_frame.png)
 
 * **Comportement vérifié** : L'algorithme refuse d'attribuer un score artificiel au-dessus du seuil de confiance strict (65%), évitant tout faux positif sur un épisode non concordant.
 
@@ -147,7 +147,7 @@ Sur les 57 œuvres testées, 26 flux n'ont pas matché avec la base. Cette non-r
 * **Source A (Indexée)** : `Stalker.1979.DVDRip.XviD.AC3.Mono.CD1-KG.phash` (Format 4:3 letterbox).
 * **Source B (Testée)** : Restauration Mosfilm officielle HD 720p sur YouTube (`Q3hBLv-HLEc`, format 16:9 anamorphique sans bandes noires).
 
-![Restauration HD Mosfilm Stalker 1979](assets/audit-matching/audit_stalker_mosfilm_frame.png)
+![Restauration HD Mosfilm Stalker 1979](../assets/audit-matching/audit_stalker_mosfilm_frame.png)
 
 * **Mesure de distance de Hamming** :
   * Distance de Hamming minimale observée sur une même scène : **$d \approx 15$ bits**.
@@ -164,7 +164,7 @@ Sur les 57 œuvres testées, 26 flux n'ont pas matché avec la base. Cette non-r
 * **Base Indexée** : `Blue.Bayou.2021.1080p.BluRay.x264.DTS-HD.MA.5.1-MT.phash` et version 2160p 4K UHD.
 * **Protocole** : Segment de 6s téléchargé en AV1 720p via `yt-dlp`.
 
-![Trailer officiel Blue Bayou](assets/audit-matching/audit_blue_bayou_frame.png)
+![Trailer officiel Blue Bayou](../assets/audit-matching/audit_blue_bayou_frame.png)
 
 * **Résultat dbsrt CLI** :
   ```text
@@ -183,7 +183,7 @@ Sur les 57 œuvres testées, 26 flux n'ont pas matché avec la base. Cette non-r
 * **Base Indexée** : `Cmon.Cmon.2021.1080p.WEBRip.x264.AAC5.1-[YTS.MX].phash` et version 2160p 4K.
 * **Protocole** : Segment de 6s téléchargé en AV1 720p via `yt-dlp`.
 
-![Trailer officiel Cmon Cmon N&B](assets/audit-matching/audit_cmon_cmon_frame.png)
+![Trailer officiel Cmon Cmon N&B](../assets/audit-matching/audit_cmon_cmon_frame.png)
 
 * **Résultat dbsrt CLI** :
   ```text
@@ -202,7 +202,7 @@ Sur les 57 œuvres testées, 26 flux n'ont pas matché avec la base. Cette non-r
 * **Base Indexée** : `Maniac.S01E05.1080p.NF.WEBRip.DDP5.1.x264-NTb.phash`.
 * **Protocole** : Segment de 6s extrait de la bande promotionnelle.
 
-![Extrait officiel Netflix Maniac](assets/audit-matching/audit_maniac_frame.png)
+![Extrait officiel Netflix Maniac](../assets/audit-matching/audit_maniac_frame.png)
 
 * **Résultat dbsrt CLI** :
   ```text
