@@ -38,6 +38,16 @@ Closes #
 ## 🧪 Validation Empirique & Preuves Terminales
 
 <!-- Rappel de la règle : Zéro Spéculation & Preuve Terminale Obligatoire. -->
+<!-- OBLIGATOIRE, vérifié par la CI : une preuve prod, ou « Non déployé » avec la raison.
+     Déployé (o2switch, RPi...) : enregistrer la vraie sortie, masquée (chemins /home, URL, IP, e-mails,
+     valeurs d'auth et du .env), par exemple :
+       task proof:record -- o2switch_status task o2switch:status
+     Committer .github/proofs/<nom>.cast et .svg sur la branche, pousser, puis afficher ici :
+       ![<nom>](https://github.com/yoyonel/pydbsrt/raw/<sha du commit>/.github/proofs/<nom>.svg)
+     La commande ne doit afficher que des compteurs : jamais de nom de média. -->
+
+**Non déployé :**
+
 <!-- Coller la sortie terminale vérifiée (logs réels, métriques de temps ou RAM, etc.). -->
 
 ```text
