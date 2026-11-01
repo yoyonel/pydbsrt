@@ -9,7 +9,6 @@ load_local_env "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # Named operational constants
 DEFAULT_AGENT_PORT=8765
-DEFAULT_PASS_ENTRY="services/pydbsrt/o2switch_api_key"
 DEFAULT_HEALTHCHECK_MAX_RETRIES=15
 DEFAULT_HEALTHCHECK_SLEEP_SEC=0.5
 DEFAULT_SHUTDOWN_TIMEOUT_SEC=10
@@ -37,22 +36,6 @@ resolve_sample_video() {
     fi
   done
   echo "${DEFAULT_LOCAL_SNIPPET}"
-}
-
-resolve_api_key() {
-  if [[ -n "${DBSRT_REMOTE_API_KEY:-}" ]]; then
-    echo "${DBSRT_REMOTE_API_KEY}"
-    return 0
-  fi
-  if command -v pass >/dev/null 2>&1; then
-    local pass_val
-    pass_val=$(pass show "${DEFAULT_PASS_ENTRY}" 2>/dev/null || true)
-    if [[ -n "${pass_val}" ]]; then
-      echo "${pass_val}"
-      return 0
-    fi
-  fi
-  echo ""
 }
 
 case "${ACTION}" in
