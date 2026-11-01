@@ -3541,6 +3541,44 @@ fn test_load_remote_batch_media_items_and_status_assignment() {
 }
 
 #[test]
+fn test_remote_batch_media_items_find_moviehash_and_fps_named_phash() {
+    let tmp_dir = std::env::temp_dir().join(format!("pydbsrt_remote_mh_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+    let targets_file = tmp_dir.join("selected_batch_targets.json");
+    let phash_dir = tmp_dir.join("__PHASH__");
+    std::fs::create_dir_all(&phash_dir).unwrap();
+    std::fs::write(phash_dir.join("e19d5212c9812cd6.25.0fps.phash"), [0u8; 16]).unwrap();
+    std::fs::write(
+        phash_dir.join("e19d5212c9812cd6.json"),
+        r#"{"media_name":"Episode.5.mkv"}"#,
+    )
+    .unwrap();
+    std::fs::write(phash_dir.join("Episode.6.mkv.23.976fps.phash"), [0u8; 24]).unwrap();
+    std::fs::write(
+        &targets_file,
+        r#"["/tvshow/Show/Episode.5.mkv", "/tvshow/Show/Episode.6.mkv"]"#,
+    )
+    .unwrap();
+    let criteria = MediaDiscoveryCriteria {
+        phash_dir: &phash_dir,
+        active_jobs: &[],
+        certified_stems: &HashSet::new(),
+        source_id: "remote-tvshow",
+    };
+
+    let items = load_remote_batch_media_items(&targets_file, &criteria);
+    std::fs::remove_dir_all(&tmp_dir).ok();
+
+    let frames = |stem: &str| {
+        let item = items.iter().find(|i| i.stem == stem).unwrap();
+        assert_eq!(item.status, IngestionStatus::PartialFail, "{stem}");
+        item.phash.as_ref().map(|p| p.frame_count)
+    };
+    assert_eq!(frames("Episode.5"), Some(2));
+    assert_eq!(frames("Episode.6"), Some(3));
+}
+
+#[test]
 fn test_remote_streaming_media_browser_rendered_with_targets() {
     let backend = TestBackend::new(120, 30);
     let mut terminal = Terminal::new(backend).unwrap();
