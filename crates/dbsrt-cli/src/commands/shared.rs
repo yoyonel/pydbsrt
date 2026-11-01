@@ -103,7 +103,8 @@ fn match_prefix_phash(entries: &[PathBuf], full_name: &str) -> Option<(PathBuf, 
         if hashes.is_empty() {
             continue;
         }
-        let fps = parse_fps_from_phash_stem(name);
+        // The parser reads the fps at the end of the stem: the .phash suffix would hide it
+        let fps = parse_fps_from_phash_stem(name.trim_end_matches(PHASH_DOT_EXT));
         return Some((p.clone(), hashes, fps));
     }
     None
@@ -135,7 +136,7 @@ fn match_stem_phash(
         if hashes.is_empty() {
             continue;
         }
-        let fps = parse_fps_from_phash_stem(name);
+        let fps = parse_fps_from_phash_stem(name.trim_end_matches(PHASH_DOT_EXT));
         return Some((p.clone(), hashes, fps));
     }
     None
@@ -143,9 +144,8 @@ fn match_stem_phash(
 
 fn scan_existing_phash(
     phash_dir: &Path,
-    full_name: &str,
-    stem: &str,
     media_file: &Path,
+    moviehash: Option<&str>,
 ) -> Result<Option<(PathBuf, Vec<u64>, f64)>> {
     if !phash_dir.exists() {
         return Ok(None);
@@ -156,7 +156,14 @@ fn scan_existing_phash(
     };
     let entries: Vec<_> = dir_entries.flatten().map(|e| e.path()).collect();
 
-    if let Some(res) = match_prefix_phash(&entries, full_name) {
+    // The moviehash names the content whatever the media name; files named before it fall through
+    if let Some(res) = moviehash.and_then(|h| match_prefix_phash(&entries, &format!("{h}."))) {
+        return Ok(Some(res));
+    }
+    let name_of = |s: Option<&std::ffi::OsStr>| s.map(|s| s.to_string_lossy().to_string());
+    let full_name = name_of(media_file.file_name()).unwrap_or_default();
+    let stem = name_of(media_file.file_stem()).unwrap_or_default();
+    if let Some(res) = match_prefix_phash(&entries, &full_name) {
         return Ok(Some(res));
     }
 
@@ -165,7 +172,7 @@ fn scan_existing_phash(
         .and_then(|e| e.to_str())
         .map(|e| format!(".{}.", e.to_lowercase()));
 
-    if let Some(res) = match_stem_phash(&entries, stem, my_ext.as_deref()) {
+    if let Some(res) = match_stem_phash(&entries, &stem, my_ext.as_deref()) {
         return Ok(Some(res));
     }
 
@@ -179,10 +186,6 @@ pub fn find_or_build_phash_with_hwaccel(
     hwaccel: dbsrt_core::HwAccel,
     moviehash: Option<&str>,
 ) -> Result<(PathBuf, Vec<u64>, f64)> {
-    let full_name = media_file
-        .file_name()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_default();
     let stem = media_file
         .file_stem()
         .map(|s| s.to_string_lossy().to_string())
@@ -194,7 +197,12 @@ pub fn find_or_build_phash_with_hwaccel(
         return Ok((media_file.to_path_buf(), hashes, fps));
     }
 
-    if let Some(res) = scan_existing_phash(phash_dir, &full_name, &stem, media_file)? {
+    if let Some(res) = scan_existing_phash(phash_dir, media_file, moviehash)? {
+        // The batch summary and the worker rate read this note: no decode, no NAS read rate
+        eprintln!(
+            "Extraction: reused existing .phash ({} frames), no decode",
+            res.1.len()
+        );
         return Ok(res);
     }
 
@@ -346,6 +354,44 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn test_find_or_build_reuses_the_phash_named_by_moviehash() {
+        let dir = scratch_dir("reuse");
+        write_phash_file(&dir.join("e19d5212c9812cd6.25.0fps.phash"), &[1, 2, 3]).unwrap();
+        // Media name unrelated to the file name: only the moviehash links them, no decode happens
+        let media = Path::new("/nonexistent/Renamed Media.mkv");
+        let (path, hashes, fps) = find_or_build_phash_with_hwaccel(
+            media,
+            &dir,
+            dbsrt_core::HwAccel::Disabled,
+            Some("e19d5212c9812cd6"),
+        )
+        .unwrap();
+        assert_eq!(path, dir.join("e19d5212c9812cd6.25.0fps.phash"));
+        assert_eq!(hashes, vec![1, 2, 3]);
+        assert_eq!(fps, 25.0);
+        // Another moviehash never picks this file
+        let other = find_or_build_phash_with_hwaccel(
+            media,
+            &dir,
+            dbsrt_core::HwAccel::Disabled,
+            Some("0000000000000001"),
+        );
+        assert!(other.is_err());
+    }
+
+    #[test]
+    fn test_find_or_build_reuse_by_media_name_reads_the_fps_of_the_file() {
+        let dir = scratch_dir("reuse_name");
+        write_phash_file(&dir.join("Old Name.mkv.23.976fps.phash"), &[7]).unwrap();
+        let media = Path::new("/nonexistent/Old Name.mkv");
+        let (_, hashes, fps) =
+            find_or_build_phash_with_hwaccel(media, &dir, dbsrt_core::HwAccel::Disabled, None)
+                .unwrap();
+        assert_eq!(hashes, vec![7]);
+        assert_eq!(fps, 23.976);
     }
 
     #[test]

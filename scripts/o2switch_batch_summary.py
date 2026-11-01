@@ -20,6 +20,7 @@ NOTES = {
     "no checkpoint, full decode": "Extraction: no checkpoint, full decode",
     "resumed from checkpoint": "Extraction: resumed ",
     "checkpoint unreadable": "Extraction: checkpoint unreadable",
+    "reused existing .phash": "Extraction: reused existing .phash",
 }
 
 
