@@ -1,6 +1,19 @@
-## 🎯 Contexte & Objectif
+## 🎯 Objectif métier (en 30 secondes)
 
-<!-- Décrire le problème résolu, l'objectif architectural ou la fonctionnalité ajoutée. -->
+<!-- OBLIGATOIRE, vérifié par la CI (scripts/check_pr_body.py). À remplir dès l'ouverture de la PR,
+     en brouillon (draft) dès la création de la branche.
+     Lisible par quelqu'un qui ne lit pas le code : ce que ça change pour le produit, sans jargon.
+     Une notion d'infra (WAF, worker, checkpoint...) : lien vers docs/explanation/glossaire-metier.md.
+     Exemple de puce :
+     - **Ne plus gaspiller le worker.** Un média au nom trop long échoue en ~1 s au lieu de 7 à 12 min
+       de décodage perdues. La file avance plus vite. -->
+
+-
+
+**Hors périmètre :**
+
+**KPI / preuve :**
+
 <!-- Lier l'issue ou le projet GitHub associé (ex: Closes #14, Réf #16, Projet 3). -->
 
 Closes #
