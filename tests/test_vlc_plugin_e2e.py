@@ -59,7 +59,7 @@ def test_cvlc_headless_integration():
     assert "SUCCESS! Media matched" in res.stdout
 
 
-def test_cvlc_chaos_special_characters_and_quotes():
+def test_cvlc_chaos_special_characters_and_quotes(tmp_path: Path):
     """Tier 2 Chaos: Real cvlc execution on video with quotes, accents, ampersands and brackets."""
     cvlc_bin = shutil.which("cvlc")
     if not cvlc_bin:
@@ -68,7 +68,8 @@ def test_cvlc_chaos_special_characters_and_quotes():
     src_video = Path("tests/data/big_buck_bunny_trailer_480p.mp4")
     assert src_video.exists(), "Test video fixture missing"
 
-    chaos_file = Path('tests/data/L\'été "Spécial" & [Chaos] 1080p.mp4')
+    # tmp_path, not tests/data: the server also writes <stem>.<lang>.srt next to the media
+    chaos_file = tmp_path / 'L\'été "Spécial" & [Chaos] 1080p.mp4'
     shutil.copy(src_video, chaos_file)
     expected_srt = Path(f"{chaos_file}.auto.synced.srt")
 
