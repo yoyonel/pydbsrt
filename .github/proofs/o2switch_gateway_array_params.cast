@@ -1,0 +1,8 @@
+{"version": 2, "width": 80, "height": 24, "timestamp": 1793571524, "env": {"SHELL": "/bin/bash", "TERM": "xterm-256color"}}
+[0.005874, "o", "== gateway tests under php:8.3-cli (display_errors=0, as on o2switch) ==\r\n"]
+[12.199968, "o", "6 passed\r\n"]
+[12.650246, "o", "== display_errors on o2switch (system php.ini, no override) ==\r\n"]
+[13.111667, "o", "display_errors_on_count=0\r\n"]
+[13.114859, "o", "== deployed gateway on o2switch (task o2switch:sync) ==\r\n"]
+[13.575444, "o", "deployed_equals_branch=true\r\nphp_lint_ok_on_o2switch=true string_guards=3\r\n== one relayed search through the deployed gateway (task o2switch:agent:demo) ==\r\n"]
+[13.577902, "o", "confidence=100.0\r\ncandidates_count=1\r\n"]

@@ -181,8 +181,9 @@ function is_authenticated(array $validKeys, string &$matchedKey = ''): bool
     }
 
     // 4. Check session cookie
+    // Client input can be an array (name[]=x): reject it instead of crashing on a string type.
     $cookieHash = $_COOKIE[AUTH_COOKIE_NAME] ?? '';
-    if ($cookieHash !== '') {
+    if (is_string($cookieHash) && $cookieHash !== '') {
         foreach ($validKeys as $expectedKey) {
             if (hash_equals(compute_session_hash($expectedKey), $cookieHash)) {
                 $matchedKey = $expectedKey;
@@ -193,7 +194,7 @@ function is_authenticated(array $validKeys, string &$matchedKey = ''): bool
 
     // 5. Check URL query token (?token=... or ?key=...)
     $queryToken = $_GET['token'] ?? $_GET['key'] ?? '';
-    if ($queryToken !== '') {
+    if (is_string($queryToken) && $queryToken !== '') {
         if (check_key_match($queryToken, $validKeys)) {
             $matchedKey = $queryToken;
             set_auth_session_cookie($queryToken);
@@ -424,7 +425,7 @@ if (str_contains($requestUri, '/logout')) {
 
 // Handle Form POST Login
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['api_key'])) {
-    $submittedKey = trim((string) $_POST['api_key']);
+    $submittedKey = is_string($_POST['api_key']) ? trim($_POST['api_key']) : '';
     if (check_key_match($submittedKey, $validKeys)) {
         clear_auth_failures($rateLimitFile, $clientIp);
         set_auth_session_cookie($submittedKey);
