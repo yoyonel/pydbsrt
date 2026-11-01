@@ -177,6 +177,11 @@ tasks:
     cmds:
       - ./scripts/o2switch_ctl.sh batch-sync
 
+  o2switch:phash:migrate:
+    desc: Rename legacy .phash files to their moviehash name on o2switch, dry run unless -- --apply (counts only)
+    cmds:
+      - ./scripts/o2switch_ctl.sh phash-migrate {{.CLI_ARGS}}
+
   o2switch:batch:workers:
     desc: Query or set dynamic batch worker concurrency on o2switch
     cmds:
