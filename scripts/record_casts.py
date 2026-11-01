@@ -29,13 +29,14 @@ def build_cast_events(
     output_lines: List[str],
     width: int = DEFAULT_TERMINAL_WIDTH,
     height: int = DEFAULT_TERMINAL_HEIGHT,
+    prompt: str = PROMPT_PREFIX,
 ) -> List[Tuple[float, str, str]]:
     """Build a list of asciicast v2 timed events for a shell command run."""
     events: List[Tuple[float, str, str]] = []
     current_time: float = 0.0
 
     # 1. Initial Prompt
-    events.append((round(current_time, 3), "o", PROMPT_PREFIX))
+    events.append((round(current_time, 3), "o", prompt))
     current_time += COMMAND_START_DELAY_SEC
 
     # 2. Simulated Keystrokes
@@ -55,7 +56,7 @@ def build_cast_events(
 
     # 5. Return to Prompt
     current_time += POST_EXECUTION_DELAY_SEC
-    events.append((round(current_time, 3), "o", PROMPT_PREFIX))
+    events.append((round(current_time, 3), "o", prompt))
 
     # 6. Idle pause so users can read comfortably
     current_time += FINAL_PAUSE_SEC
@@ -71,18 +72,20 @@ def write_cast_file(
     output_lines: List[str],
     width: int = DEFAULT_TERMINAL_WIDTH,
     height: int = DEFAULT_TERMINAL_HEIGHT,
+    timestamp: int = 1729900000,
+    prompt: str = PROMPT_PREFIX,
 ) -> None:
     """Serialize header and events into a valid Asciicast v2 JSON Lines file."""
     header: dict[str, Any] = {
         "version": 2,
         "width": width,
         "height": height,
-        "timestamp": 1729900000,
+        "timestamp": timestamp,
         "title": title,
         "env": {"SHELL": "/bin/bash", "TERM": "xterm-256color"},
     }
 
-    events = build_cast_events(command_text, output_lines, width=width, height=height)
+    events = build_cast_events(command_text, output_lines, width=width, height=height, prompt=prompt)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as f:
