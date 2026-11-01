@@ -62,8 +62,8 @@ d = "data/__PHASH__"
 pat = re.compile(r"^(.*)\.([0-9]+\.[0-9]+)fps\.phash$")
 
 
-def cut(f, coupled):
-    stem, fps = pat.match(f).groups()
+def cut(f, coupled, stem=None):
+    stem, fps = stem or pat.match(f).group(1), pat.match(f).group(2)
     raw = open(os.path.join(d, f), "rb").read()
     hashes = [int.from_bytes(raw[i : i + 8], "big") for i in range(0, len(raw) - 7, 8)]
     n = int(float(fps) * seconds)
@@ -73,9 +73,26 @@ def cut(f, coupled):
                       "_file": f, "_coupled": coupled}))
 
 
+def moviehash_twin(stem):
+    # The RPi4 dedupe deletes a legacy .phash identical to its `<moviehash>.<fps>fps.phash` twin,
+    # whose `<moviehash>.json` sidecar keeps the media name
+    for f in os.listdir(d):
+        m = pat.match(f)
+        side = os.path.join(d, f.split(".")[0] + ".json")
+        if m and re.match(r"^[0-9a-f]{16}$", m.group(1)) and os.path.isfile(side):
+            name = json.load(open(side)).get("media_name", "")
+            if stem in (name, os.path.splitext(name)[0]):
+                return f
+    return None
+
+
 if mode == "golden":
     for entry in json.load(open("etc/e2e_golden.json")):
-        if pat.match(entry["file"]) and os.path.isfile(os.path.join(d, entry["file"])):
+        m = pat.match(entry["file"])
+        twin = m and not os.path.isfile(os.path.join(d, entry["file"])) and moviehash_twin(m.group(1))
+        if twin:
+            cut(twin, entry["coupled"], m.group(1))
+        elif m and os.path.isfile(os.path.join(d, entry["file"])):
             cut(entry["file"], entry["coupled"])
         else:
             print(json.dumps({"_missing": True}))
