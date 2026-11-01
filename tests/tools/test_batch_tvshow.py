@@ -7,6 +7,7 @@ from pathlib import Path
 
 from scripts.batch_media_add_tvshow import (
     detect_alphabet_family,
+    discover_stratified_tvshows,
     load_targets_from_file,
     normalize_lang_code,
 )
@@ -118,3 +119,19 @@ def test_cli_targets_file_dry_run_execution():
         assert (tmp_path / "data" / "reports" / "selected_batch_targets.json").exists()
         assert "Discovered 2 candidate video(s) for direct processing." in res.stdout
         assert report_md.exists()
+
+
+def test_discover_resumes_an_episode_whose_phash_is_named_by_moviehash(tmp_path: Path) -> None:
+    show = tmp_path / "nas" / "Show"
+    show.mkdir(parents=True)
+    (show / "Episode.1.mkv").write_bytes(b"x")
+    (show / "Episode.2.mkv").write_bytes(b"x")
+    phash_dir = tmp_path / "phash"
+    phash_dir.mkdir()
+    (phash_dir / "e19d5212c9812cd6.25.0fps.phash").write_bytes(b"\x01" * 16)
+    (phash_dir / "e19d5212c9812cd6.json").write_text(json.dumps({"media_name": "Episode.1.mkv"}), encoding="utf-8")
+
+    fresh = discover_stratified_tvshows(tmp_path / "nas", phash_dir, tmp_path / "srt", fresh_only=True)
+
+    # Episode.1 already has its .phash: only Episode.2 is virgin
+    assert [path.name for path, _ in fresh] == ["Episode.2.mkv"]

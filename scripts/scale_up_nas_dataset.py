@@ -23,6 +23,10 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from scripts.phash_names import phash_media_name  # noqa: E402
+
 
 def default_nas_root() -> Path:
     env_root = os.environ.get("MEDIA_ROOT") or os.environ.get("NAS_ROOT")
@@ -291,7 +295,7 @@ def certify_existing_phash_couplings(
     phash_files = sorted(phash_dir.glob("*.phash"))
 
     for pf in phash_files:
-        stem = pf.stem
+        stem = phash_media_name(pf)
         candidate_srts: list[Path] = []
         if stem in srt_by_stem:
             candidate_srts.extend(srt_by_stem[stem])
@@ -470,7 +474,7 @@ def main() -> int:
 
     print(f"=== STEP 1: Scanning NAS catalog at {args.nas_root} ===", flush=True)
     srt_by_stem, all_videos = build_nas_catalog(args.nas_root)
-    existing_stems = {p.stem for p in args.phash_dir.glob("*.phash")}
+    existing_stems = {phash_media_name(p) for p in args.phash_dir.glob("*.phash")}
     print(
         f"Found {len(all_videos)} videos on NAS, {len(srt_by_stem)} SRT release stems in tvshow/SRT, {len(existing_stems)} existing .phash files.",
         flush=True,
@@ -491,7 +495,9 @@ def main() -> int:
     )
 
     # Use initial existing count (126) so any videos already extracted in interrupted runs are still included in the 108 batch
-    baseline_stems = {p.stem for p in args.phash_dir.glob("*.phash") if p.stat().st_mtime < (time.time() - 10800)}
+    baseline_stems = {
+        phash_media_name(p) for p in args.phash_dir.glob("*.phash") if p.stat().st_mtime < (time.time() - 10800)
+    }
     selected = select_stratified_videos(all_videos, baseline_stems, args.target_new_videos)
     categories_covered = sorted({cat for (_, _, cat) in selected})
     print(

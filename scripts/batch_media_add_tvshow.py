@@ -27,6 +27,10 @@ from typing import Any, Dict, List, Set, Tuple
 
 import psutil
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from scripts.phash_names import phash_logical_name  # noqa: E402
+
 # Operational & System Constants
 BYTES_PER_KIB: int = 1024
 BYTES_PER_MIB: int = 1024 * 1024
@@ -315,7 +319,7 @@ def discover_stratified_tvshows(
             pass
 
     # 2. Existing phash files on disk
-    existing_phash_names: List[str] = [p.name for p in phash_dir.glob("*.phash")]
+    existing_phash_names: List[str] = [phash_logical_name(p) for p in phash_dir.glob("*.phash")]
 
     unfinished_map: Dict[str, List[Path]] = {}
     fresh_map: Dict[str, List[Path]] = {}

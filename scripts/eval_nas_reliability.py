@@ -25,11 +25,16 @@ import random
 import re
 import struct
 import subprocess
+import sys
 import time
 import urllib.request
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from scripts.phash_names import phash_media_name  # noqa: E402
 
 
 def default_nas_root() -> Path:
@@ -190,7 +195,7 @@ def run_suite_1_phash_recall(
             continue
         n = (len(raw) - 4) // 8
         hashes = struct.unpack(f"<{n}Q", raw[4 : 4 + n * 8])
-        media_streams.append((pf.stem, hashes))
+        media_streams.append((phash_media_name(pf), hashes))
         total_frames += n
 
     print(
@@ -387,7 +392,7 @@ def run_suite_2_real_video_recognition(
     """Suite 2: Real video recognition via POST /v1/search (search_mode='phash') on NAS videos & cross-release pairs."""
     print("\n=== SUITE 2: Real Video Recognition & Cross-Release Retargeting (search_mode='phash') ===", flush=True)
     t0 = time.monotonic()
-    indexed_stems = {p.stem for p in phash_dir.glob("*.phash")}
+    indexed_stems = {phash_media_name(p) for p in phash_dir.glob("*.phash")}
 
     # Map all NAS videos
     nas_videos_by_stem: dict[str, Path] = {}
@@ -512,7 +517,7 @@ def run_suite_3_true_negatives(
         flush=True,
     )
     t0 = time.monotonic()
-    indexed_stems = {p.stem.lower() for p in phash_dir.glob("*.phash")}
+    indexed_stems = {phash_media_name(p).lower() for p in phash_dir.glob("*.phash")}
     # Also exclude any episode/movie that shares the same title+SxxExx as an indexed stem
     indexed_title_ep = set()
     for s in indexed_stems:

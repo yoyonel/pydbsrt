@@ -23,9 +23,14 @@ import json
 import re
 import struct
 import subprocess
+import sys
 import time
 import urllib.request
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from scripts.phash_names import phash_media_name  # noqa: E402
 
 
 def is_blank_phash(h: int) -> bool:
@@ -111,7 +116,7 @@ def run_full_catalog_audit(
             continue
         n = (len(raw) - 4) // 8
         hashes = struct.unpack(f"<{n}Q", raw[4 : 4 + n * 8])
-        stem = pf.stem
+        stem = phash_media_name(pf)
         total_frames += n
         streams.append((stem, hashes))
 
