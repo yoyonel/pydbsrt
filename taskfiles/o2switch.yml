@@ -167,6 +167,11 @@ tasks:
     cmds:
       - ./scripts/o2switch_ctl.sh batch-status
 
+  o2switch:batch:summary:
+    desc: Counts-only batch worker summary on o2switch, safe for PR proofs (task o2switch:batch:summary -- [SINCE_ISO])
+    cmds:
+      - ./scripts/o2switch_ctl.sh batch-summary {{.CLI_ARGS}}
+
   o2switch:batch:workers:
     desc: Query or set dynamic batch worker concurrency on o2switch
     cmds:

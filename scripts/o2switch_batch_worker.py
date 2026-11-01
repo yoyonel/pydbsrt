@@ -512,9 +512,13 @@ def _event_record(
     end_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(end_time))
     wall_duration = end_time - start_time
     success = status == "COMPLETED"
+    log_text = log_path.read_text(encoding="utf-8", errors="ignore") if log_path.exists() else ""
 
-    # A completed extraction decodes the whole file, so the average NAS read rate is size / duration.
-    actual_bytes = target.size_bytes if success else 0
+    # size / duration is a NAS read rate only when the CLI states it decoded the whole file: a run
+    # resumed from a checkpoint or served by an existing .phash reads a part of it, or nothing.
+    resumed = re.search(r"Extraction: resumed (\d+) frames from checkpoint", log_text)
+    full_decode = success and "full decode" in log_text and not resumed
+    actual_bytes = target.size_bytes if full_decode else 0
     rate_mib_s = (actual_bytes / (1024 * 1024)) / wall_duration if wall_duration > 0 else 0.0
 
     record: Dict[str, object] = {
@@ -524,6 +528,7 @@ def _event_record(
         "wall_duration_secs": round(wall_duration, 2),
         "io_read_rate_mib_s": round(rate_mib_s, 2),
         "cifs_read_rate_mib_s": round(rate_mib_s, 2),
+        "resumed_frames": int(resumed.group(1)) if resumed else 0,
         "start_iso": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(start_time)),
         "end_iso": end_iso,
         "timestamp_iso": end_iso,
@@ -532,7 +537,6 @@ def _event_record(
     }
     if not success and log_path.exists():
         # Redact before truncating: a cut inside a raw password would leave an unmatched fragment
-        log_text = log_path.read_text(encoding="utf-8", errors="ignore")
         record["error_summary"] = redact_nas(log_text, nas_host, nas_pass)[-300:]
     return record
 
@@ -710,7 +714,12 @@ class _BatchRun:
         """One scheduler tick: reload checks, then spawns workers up to the target. False once drained."""
         with self.state_lock:
             self.check_reload()
-            self.threads = [t for t in self.threads if t.is_alive()]
+            alive = [t for t in self.threads if t.is_alive()]
+            exited = len(alive) != len(self.threads)
+            self.threads = alive
+            if exited:
+                # A worker leaving an empty queue publishes nothing itself: refresh the count here.
+                self.publish()
             if not self.remaining and not self.threads:
                 return False
             desired = self.desired_workers()

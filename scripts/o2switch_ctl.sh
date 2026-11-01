@@ -808,6 +808,18 @@ fi
 REMOTE_SCRIPT
     ;;
 
+  batch-summary)
+    # Counts only (no media name): safe to record as a PR proof. Optional arg: events since ISO date.
+    SINCE="${2:-}"
+    if [[ ! "${SINCE}" =~ ^[0-9T:Z-]*$ ]]; then
+      echo "batch-summary: SINCE must be an ISO date (e.g. 2026-10-30T12:00:00Z)" >&2
+      exit 1
+    fi
+    check_ssh
+    # shellcheck disable=SC2029
+    ssh "${O2SWITCH_HOST}" "cd '${REMOTE_BASE}' && python3 - '${SINCE}'" <"${SCRIPT_DIR}/o2switch_batch_summary.py"
+    ;;
+
   batch-stop)
     check_ssh
     echo "=== Stopping Batch Worker Daemon on ${O2SWITCH_HOST} ==="
@@ -876,7 +888,7 @@ REMOTE_SCRIPT
     ;;
 
   *)
-    echo "Usage: $0 {build|test-local|sync|deploy|rollback|releases|start|stop|restart|status|logs|demo|setup-cron|remove-cron|rotate-key|rotate-readonly-key|monitoring|top|pull-catalog|backup-nas|batch-tvshow|batch-movies|batch-status|batch-workers|batch-stop|batch-logs|faultwatch}"
+    echo "Usage: $0 {build|test-local|sync|deploy|rollback|releases|start|stop|restart|status|logs|demo|setup-cron|remove-cron|rotate-key|rotate-readonly-key|monitoring|top|pull-catalog|backup-nas|batch-tvshow|batch-movies|batch-status|batch-summary|batch-workers|batch-stop|batch-logs|faultwatch}"
     exit 1
     ;;
 esac

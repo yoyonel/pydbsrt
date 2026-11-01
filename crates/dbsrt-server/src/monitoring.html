@@ -386,7 +386,7 @@
       </div>
       <div class="kpi-cell">
         <div class="kpi-val" id="kpi-remaining">0</div>
-        <div class="kpi-lbl">En attente</div>
+        <div class="kpi-lbl">Restants (dont en cours)</div>
       </div>
       <div class="kpi-cell">
         <div class="kpi-val" id="kpi-failed">0</div>
@@ -818,7 +818,7 @@
       const q = t.batch_queue || {};
       document.getElementById('active-jobs-count').textContent = jobs.length;
       document.getElementById('jobs-caption').textContent = q.total_targets > 0
-        ? `TÂCHES EN COURS (DÉCODAGE & PHASH TEMPS RÉEL) [${jobs.length} actifs │ File: ${q.completed_targets}/${q.total_targets} traités, ${q.remaining_targets} en attente]`
+        ? `TÂCHES EN COURS (DÉCODAGE & PHASH TEMPS RÉEL) [${jobs.length} actifs │ File: ${q.completed_targets}/${q.total_targets} traités, ${q.remaining_targets} restants (dont ${jobs.length} en cours)]`
         : `TÂCHES EN COURS (DÉCODAGE & PHASH TEMPS RÉEL) [${jobs.length}]`;
       const tbody = document.getElementById('jobs-tbody');
       if (jobs.length === 0) {
