@@ -490,7 +490,7 @@ async fn dispatch_remote_relay_call(
             );
             None
         }
-        _ => {
+        Ok(resp) => {
             state
                 .metrics
                 .remote_errors
@@ -498,7 +498,10 @@ async fn dispatch_remote_relay_call(
             state.push_log(
                 "RELAY",
                 "WARN",
-                "✗ Remote relay returned unexpected non-200 status code",
+                format!(
+                    "✗ Remote relay returned unexpected non-200 status: HTTP {}",
+                    resp.status()
+                ),
             );
             None
         }
@@ -1312,6 +1315,30 @@ mod tests {
         SubtitleCache,
     };
     use std::path::PathBuf;
+
+    #[tokio::test]
+    async fn test_remote_relay_non_success_logs_the_http_status() {
+        let mock_remote = axum::Router::new().route(
+            "/v1/recognize",
+            axum::routing::post(|| async { axum::http::StatusCode::TOO_MANY_REQUESTS }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, mock_remote).await.unwrap() });
+
+        let state = test_app_state();
+        let endpoint = format!("http://{}/v1/recognize", addr);
+        let res =
+            dispatch_remote_relay_call(&state, &endpoint, &RecognizeRequest::default(), 5000).await;
+
+        assert!(res.is_none());
+        let logs = state.log_buffer.read().unwrap();
+        assert!(
+            logs.iter()
+                .any(|l| l.tag == "RELAY" && l.message.contains("HTTP 429")),
+            "relay log must carry the remote HTTP status"
+        );
+    }
 
     #[test]
     fn test_stem_and_title_overlap_rejects_empty_title() {
