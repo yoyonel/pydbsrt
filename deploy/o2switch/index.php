@@ -402,10 +402,9 @@ if ($masterKeys === []) {
 }
 $validKeys = array_merge($masterKeys, load_valid_keys($readOnlyKeyFile));
 
-$clientIp = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
-if (str_contains($clientIp, ',')) {
-    $clientIp = trim(explode(',', $clientIp)[0]);
-}
+// Connection IP only: X-Forwarded-For is client-written and would let anyone dodge the lockout
+// or lock another client out. Measured on o2switch: Apache sees the real client IP (no shared proxy).
+$clientIp = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
 
 // Check Rate Limiting
 if (is_ip_rate_limited($rateLimitFile, $clientIp)) {
