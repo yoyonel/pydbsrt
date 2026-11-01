@@ -11,7 +11,8 @@ permissions:
 
 jobs:
   validate-body:
-    name: "Validate PR Body (Objectif métier)"
+    # ASCII on purpose: branch protection matches required checks by this exact name
+    name: "Validate PR Body (business goals)"
     runs-on: ubuntu-latest
     steps:
       - name: Checkout base branch
