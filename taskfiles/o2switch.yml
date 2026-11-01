@@ -172,6 +172,11 @@ tasks:
     cmds:
       - ./scripts/o2switch_ctl.sh batch-summary {{.CLI_ARGS}}
 
+  o2switch:batch:sync:
+    desc: Ship only the batch worker script to o2switch (no SRT, no gateway) and compare its local/remote sha256
+    cmds:
+      - ./scripts/o2switch_ctl.sh batch-sync
+
   o2switch:batch:workers:
     desc: Query or set dynamic batch worker concurrency on o2switch
     cmds:

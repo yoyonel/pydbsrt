@@ -820,6 +820,15 @@ REMOTE_SCRIPT
     ssh "${O2SWITCH_HOST}" "cd '${REMOTE_BASE}' && python3 - '${SINCE}'" <"${SCRIPT_DIR}/o2switch_batch_summary.py"
     ;;
 
+  batch-sync)
+    # Worker script only (sync also ships SRT and the public gateway); the next launch runs it
+    check_ssh
+    rsync -a --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" --chmod=F755 "scripts/o2switch_batch_worker.py" "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/"
+    echo "local  $(sha256sum scripts/o2switch_batch_worker.py | cut -c1-16)"
+    # shellcheck disable=SC2029
+    echo "remote $(ssh "${O2SWITCH_HOST}" "sha256sum '${REMOTE_BASE}/scripts/o2switch_batch_worker.py'" | cut -c1-16)"
+    ;;
+
   batch-stop)
     check_ssh
     echo "=== Stopping Batch Worker Daemon on ${O2SWITCH_HOST} ==="
@@ -888,7 +897,7 @@ REMOTE_SCRIPT
     ;;
 
   *)
-    echo "Usage: $0 {build|test-local|sync|deploy|rollback|releases|start|stop|restart|status|logs|demo|setup-cron|remove-cron|rotate-key|rotate-readonly-key|monitoring|top|pull-catalog|backup-nas|batch-tvshow|batch-movies|batch-status|batch-summary|batch-workers|batch-stop|batch-logs|faultwatch}"
+    echo "Usage: $0 {build|test-local|sync|deploy|rollback|releases|start|stop|restart|status|logs|demo|setup-cron|remove-cron|rotate-key|rotate-readonly-key|monitoring|top|pull-catalog|backup-nas|batch-tvshow|batch-movies|batch-status|batch-summary|batch-sync|batch-workers|batch-stop|batch-logs|faultwatch}"
     exit 1
     ;;
 esac
