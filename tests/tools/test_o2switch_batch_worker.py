@@ -1,5 +1,6 @@
 """Unit tests for o2switch_batch_worker script."""
 
+import argparse
 import json
 import os
 import signal
@@ -15,7 +16,9 @@ import pytest
 import scripts.o2switch_batch_worker as worker
 from scripts.o2switch_batch_worker import (
     ACTIVE_CHILD_PGIDS,
+    DEFAULT_TARGETS_PATH,
     VideoTarget,
+    _initial_targets,
     _kill_active_children,
     abort_batch,
     build_child_env,
@@ -113,6 +116,27 @@ def test_resolve_retry_targets_keeps_only_last_failures(tmp_path: Path):
 
     assert resolve_retry_targets(events, skip_stems={"c"}) == [VideoTarget("/tvshow/b.mkv", "b.mkv", 20)]
     assert resolve_retry_targets(tmp_path / "missing.jsonl", set()) == []
+
+
+def test_retry_failed_with_an_explicit_targets_file_retries_only_those(tmp_path: Path):
+    """A blacklisted video can be retried alone: an explicit targets file narrows --retry-failed."""
+    events = tmp_path / "events.jsonl"
+    lines = [
+        {"video_stem": s, "video_rel_path": f"/tvshow/{s}.mkv", "file_size_bytes": 1, "success": False}
+        for s in ("a", "long", "long", "long")
+    ]
+    events.write_text("\n".join(json.dumps(r) for r in lines), encoding="utf-8")
+    nas = [VideoTarget("/tvshow/a.mkv", "a.mkv", 1), VideoTarget("/tvshow/long.mkv", "long.mkv", 1)]
+    explicit = tmp_path / "one.json"
+    explicit.write_text(json.dumps([{"path": "/tvshow/long.mkv", "stem": "long"}]), encoding="utf-8")
+
+    def run(targets_file: str) -> list[VideoTarget]:
+        args = argparse.Namespace(stream_base=None, retry_failed=True, targets_file=targets_file, nas_base="/tvshow")
+        return _initial_targets(args, nas, events, set(), {"long"})
+
+    assert run(str(explicit)) == [VideoTarget("/tvshow/long.mkv", "long.mkv", 1)]
+    # The default targets file, rewritten by every scan, never narrows a retry
+    assert run(DEFAULT_TARGETS_PATH) == nas
 
 
 def test_load_targets_file_rebases_and_skips(tmp_path: Path):

@@ -883,7 +883,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--retry-failed",
         action="store_true",
-        help="Retry only videos whose last run failed in the events log (ignores --targets-file)",
+        help="Retry only videos whose last run failed in the events log (a non-default --targets-file narrows it)",
     )
     parser.add_argument(
         "--max-extraction-secs",
@@ -908,6 +908,17 @@ def build_arg_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _narrow_to_targets_file(
+    args: argparse.Namespace, targets: List[VideoTarget], all_videos: List[VideoTarget]
+) -> List[VideoTarget]:
+    """Keeps the targets listed in a non-default --targets-file; the default one is rewritten by every scan."""
+    if args.targets_file == DEFAULT_TARGETS_PATH or not Path(args.targets_file).is_file():
+        return targets
+    listed = match_nas_paths(load_targets_file(Path(args.targets_file), "", set()), all_videos)
+    wanted = {video.filename for video in listed}
+    return [video for video in targets if video.filename in wanted]
+
+
 def _initial_targets(
     args: argparse.Namespace,
     all_videos: List[VideoTarget],
@@ -926,7 +937,9 @@ def _initial_targets(
         return []
     if args.retry_failed:
         # An explicit retry ignores the blacklist
-        targets = match_nas_paths(resolve_retry_targets(events_log, done_stems), all_videos)
+        targets = _narrow_to_targets_file(
+            args, match_nas_paths(resolve_retry_targets(events_log, done_stems), all_videos), all_videos
+        )
         print(f"✓ Found {len(targets)} failed videos to retry under {args.nas_base}.")
         return targets
     targets_path = Path(args.targets_file)
