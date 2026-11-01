@@ -593,6 +593,8 @@ REMOTE_SCRIPT
       mkdir -p data/__PHASH__
       echo "-> Pulling loose .phash fingerprints (backup mode)..."
       rsync -avz --progress --ignore-existing --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/__PHASH__/" "data/__PHASH__/" || true
+      # --ignore-existing keeps the legacy copy of each .phash migrated to its moviehash name
+      python3 scripts/phash_dedupe.py "data/__PHASH__" --apply || true
     fi
     echo "✓ Pull completed from ${O2SWITCH_HOST}."
     ;;
@@ -622,6 +624,7 @@ REMOTE_SCRIPT
     mkdir -p "${TARGET_DIR}"
     echo "-> Backing up to ${TARGET_DIR}..."
     rsync -avz --progress --ignore-existing --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/__PHASH__/" "${TARGET_DIR}/" || true
+    python3 scripts/phash_dedupe.py "${TARGET_DIR}" --apply || true
     echo "✓ Backup of raw .phash fingerprints completed to ${TARGET_DIR}."
     ;;
 

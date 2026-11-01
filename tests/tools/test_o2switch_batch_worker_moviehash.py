@@ -3,8 +3,9 @@
 import ftplib
 import os
 import threading
+from http.server import BaseHTTPRequestHandler, SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Callable, cast
+from typing import Callable, Iterator, cast
 
 import pytest
 
@@ -15,6 +16,7 @@ from scripts.o2switch_batch_worker import (
     ftp_moviehash,
     moviehash_from_chunks,
 )
+from scripts.rpi4_freebox_gateway import FreeboxRangeHTTPHandler
 
 VECTORS = [
     (200_000, "e19d5212c9812cd6"),
@@ -150,6 +152,56 @@ def test_process_single_video_names_the_log_by_moviehash(tmp_path: Path, monkeyp
 def test_process_single_video_without_moviehash_keeps_the_stem(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     assert _run_video(tmp_path, monkeypatch, None) == ["Raw Name.log"]
     assert "--moviehash" not in (tmp_path / "logs" / "workers" / "Raw Name.log").read_text(encoding="utf-8")
+
+
+FREEBOX_TARGET = VideoTarget("/Disque_1_1/Vidéos/Raw Name.mkv", "Raw Name.mkv", 200_000)
+
+
+def _serve(handler: type[BaseHTTPRequestHandler], root: Path) -> Iterator[str]:
+    media = root / "Disque_1_1" / "Vidéos" / "Raw Name.mkv"
+    media.parent.mkdir(parents=True)
+    media.write_bytes(pattern(200_000))
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.fixture
+def freebox_gateway(tmp_path: Path) -> Iterator[str]:
+    """The real RPi4 Freebox gateway handler, serving one media from a temp library."""
+    handler = type("Gateway", (FreeboxRangeHTTPHandler,), {"server_root": tmp_path, "log_message": lambda *_: None})
+    yield from _serve(handler, tmp_path)
+
+
+@pytest.fixture
+def rangeless_server(tmp_path: Path) -> Iterator[str]:
+    """A server that ignores Range and always sends the whole file (200)."""
+    handler = type(
+        "Rangeless",
+        (SimpleHTTPRequestHandler,),
+        {"__init__": lambda self, *a, **kw: SimpleHTTPRequestHandler.__init__(self, *a, directory=str(tmp_path), **kw)},
+    )
+    handler.log_message = lambda *_: None  # type: ignore[method-assign]
+    yield from _serve(handler, tmp_path)
+
+
+def test_target_moviehash_reads_head_and_tail_through_the_freebox_gateway(freebox_gateway: str) -> None:
+    assert worker.target_moviehash(FREEBOX_TARGET, freebox_gateway, {}) == "e19d5212c9812cd6"
+
+
+def test_target_moviehash_over_http_is_none_when_the_listed_size_is_wrong(freebox_gateway: str) -> None:
+    # A hash of the wrong bytes would name the wrong .phash
+    target = FREEBOX_TARGET._replace(size_bytes=300_000)
+    assert worker.target_moviehash(target, freebox_gateway, {}) is None
+
+
+def test_target_moviehash_over_http_is_none_when_the_server_ignores_range(rangeless_server: str) -> None:
+    # A 200 full body would hash the head twice
+    assert worker.target_moviehash(FREEBOX_TARGET, rangeless_server, {}) is None
 
 
 def test_target_moviehash_is_none_when_the_nas_is_unreachable() -> None:

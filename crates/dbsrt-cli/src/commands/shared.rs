@@ -11,6 +11,8 @@ use std::path::{Path, PathBuf};
 use crate::cli::PostgresArgs;
 use crate::constants::{DEFAULT_POSTGRES_HOST, KNOWN_VIDEO_EXTS, PHASH_DOT_EXT, PHASH_EXT};
 
+pub use dbsrt_core::{phash_file_name, PhashSidecar};
+
 /// Resolve target PostgreSQL host falling back to PSQL_IP env or DEFAULT_POSTGRES_HOST.
 pub fn resolve_db_host(db: &PostgresArgs) -> String {
     db.host
@@ -54,38 +56,6 @@ fn resolve_media_path_filename(media_file: &Path) -> Result<String> {
         .file_name()
         .map(|s| s.to_string_lossy().to_string())
         .ok_or_else(|| anyhow::anyhow!("Cannot derive filename from media path {:?}", media_file))
-}
-
-/// `.phash` file name: the moviehash when known (fits NAME_MAX whatever the media name), else the media file name.
-pub fn phash_file_name(file_name: &str, moviehash: Option<&str>, fps: f64) -> String {
-    format!("{}.{:.1}fps.phash", moviehash.unwrap_or(file_name), fps)
-}
-
-/// `<moviehash>.json` next to the `.phash`: the media name its file name no longer carries.
-pub struct PhashSidecar<'a> {
-    pub moviehash: &'a str,
-    pub media_name: &'a str,
-    pub fps: f64,
-    pub frames: usize,
-}
-
-impl PhashSidecar<'_> {
-    pub fn write(&self, phash_dir: &Path) -> Result<PathBuf> {
-        let extracted_at = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |d| d.as_secs());
-        let sidecar = serde_json::json!({
-            "moviehash": self.moviehash,
-            "media_name": self.media_name,
-            "fps": self.fps,
-            "frames": self.frames,
-            "extracted_at": extracted_at,
-        });
-        let path = phash_dir.join(format!("{}.json", self.moviehash));
-        std::fs::write(&path, serde_json::to_string_pretty(&sidecar)?)
-            .with_context(|| format!("Cannot write sidecar {:?}", path))?;
-        Ok(path)
-    }
 }
 
 fn match_prefix_phash(entries: &[PathBuf], full_name: &str) -> Option<(PathBuf, Vec<u64>, f64)> {

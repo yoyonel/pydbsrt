@@ -23,6 +23,8 @@ SUPERVISOR_SCRIPTS=(
   scripts/o2switch_ctl.sh
   scripts/load_env.sh
   scripts/o2switch_batch_worker.py
+  scripts/phash_dedupe.py
+  scripts/phash_names.py
   scripts/freebox_batch_ctl.sh
   scripts/scan_freebox_targets.py
 )
@@ -35,17 +37,29 @@ run_systemctl() {
   run_ssh "systemctl --user $*"
 }
 
+sync_scripts() {
+  rsync -az -e "ssh -o BatchMode=yes -o ConnectTimeout=${DEFAULT_CONNECT_TIMEOUT}" \
+    "${SUPERVISOR_SCRIPTS[@]}" "${RPI_HOST}:${REMOTE_BASE}/scripts/"
+}
+
 case "${ACTION}" in
   install)
     echo "=== Installing supervisor scripts and ${SERVICE_NAME} on ${RPI_HOST} ==="
     run_ssh "mkdir -p ${REMOTE_DIR}/scripts ${REMOTE_DIR}/logs ${REMOTE_DIR}/run \$HOME/.config/systemd/user"
-    rsync -az -e "ssh -o BatchMode=yes -o ConnectTimeout=${DEFAULT_CONNECT_TIMEOUT}" \
-      "${SUPERVISOR_SCRIPTS[@]}" "${RPI_HOST}:${REMOTE_BASE}/scripts/"
+    sync_scripts
     rsync -az -e "ssh -o BatchMode=yes -o ConnectTimeout=${DEFAULT_CONNECT_TIMEOUT}" \
       "${UNIT_FILE}" "${RPI_HOST}:.config/systemd/user/${SERVICE_NAME}"
     run_systemctl "daemon-reload"
     run_systemctl "enable ${SERVICE_NAME}"
     echo "✓ Installed and enabled ${SERVICE_NAME} (run 'restart' to load new code)."
+    ;;
+
+  sync)
+    # Scripts only: the RPi4 pushes its own o2switch_batch_worker.py on every batch launch
+    echo "=== Syncing supervisor scripts to ${RPI_HOST} ==="
+    sync_scripts
+    echo "local  $(sha256sum scripts/o2switch_batch_worker.py | cut -c1-16)"
+    echo "remote $(run_ssh "sha256sum ${REMOTE_BASE}/scripts/o2switch_batch_worker.py" | cut -c1-16)"
     ;;
 
   status)
@@ -79,7 +93,7 @@ case "${ACTION}" in
     ;;
 
   *)
-    echo "Usage: $0 {install|status|start|stop|restart|logs}"
+    echo "Usage: $0 {install|sync|status|start|stop|restart|logs}"
     exit 1
     ;;
 esac

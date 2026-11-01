@@ -16,6 +16,7 @@ import contextlib
 import hashlib
 import json
 import re
+import sys
 import time
 import unicodedata
 import urllib.parse
@@ -24,6 +25,10 @@ from typing import Any, Dict, List, Tuple
 
 import psycopg2
 from psycopg2.extras import execute_batch
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from scripts.phash_names import phash_logical_name  # noqa: E402
 
 DEFAULT_FPS: float = 25.0
 MILLIS_PER_SEC: float = 1000.0
@@ -162,18 +167,19 @@ def build_media_row(pfile: Path, telemetry: Dict[str, Dict[str, Any]]) -> Tuple[
         return None
 
     frame_count = len(data) // HASH_BYTE_LEN
-    fps = parse_fps_from_stem(pfile.name)
+    name = phash_logical_name(pfile)
+    fps = parse_fps_from_stem(name)
     duration_ms = int(round(frame_count / fps * MILLIS_PER_SEC))
     media_hash = compute_media_phash_digest(data)
 
-    clean_name = clean_media_name(pfile.name)
+    clean_name = clean_media_name(name)
     raw_name = clean_name if any(clean_name.endswith(ext) for ext in KNOWN_VIDEO_EXTS) else f"{clean_name}.mkv"
     meta = classify_and_parse(clean_name)
 
     cand_keys = [
         unicodedata.normalize("NFC", clean_name),
         unicodedata.normalize("NFC", raw_name),
-        unicodedata.normalize("NFC", urllib.parse.unquote(pfile.name)),
+        unicodedata.normalize("NFC", urllib.parse.unquote(name)),
     ]
     t_info = next((telemetry[k] for k in cand_keys if k in telemetry), None)
     video_rel_path = t_info["video_rel_path"] if t_info else None

@@ -228,14 +228,34 @@ fn resolve_tool(env_vars: [&str; 2], name: &str) -> PathBuf {
         .map(PathBuf::from)
         .filter(|p| p.exists());
     let sibling = || {
-        std::env::current_exe()
-            .ok()
-            .and_then(|exe| exe.parent().map(|dir| dir.join(name)))
-            .filter(|candidate| candidate.is_file())
+        sibling_tool(
+            std::env::args_os().next().map(PathBuf::from),
+            std::env::current_exe().ok(),
+            name,
+        )
     };
     env_path
         .or_else(sibling)
         .unwrap_or_else(|| PathBuf::from(name))
+}
+
+/// `name` next to the executable: first beside argv[0] as invoked (a symlinked `bin/` keeps its
+/// bundled tools), then beside the symlink-resolved `current_exe()`.
+fn sibling_tool(
+    invoked: Option<PathBuf>,
+    resolved: Option<PathBuf>,
+    name: &str,
+) -> Option<PathBuf> {
+    [invoked, resolved]
+        .into_iter()
+        .flatten()
+        // A bare argv[0] (found on PATH) has an empty parent: never look in the cwd
+        .filter_map(|exe| {
+            exe.parent()
+                .filter(|dir| !dir.as_os_str().is_empty())
+                .map(|dir| dir.join(name))
+        })
+        .find(|candidate| candidate.is_file())
 }
 
 /// Resolves the absolute or system path to the fallback CPU `ffmpeg` executable.
@@ -1111,6 +1131,27 @@ pub fn extract_frames_phash(path: &Path, start_sec: f64, nb_frames: usize) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn test_sibling_tool_finds_tools_beside_a_symlinked_executable() {
+        // o2switch layout: bin/dbsrt-server -> ../current/dbsrt-server, ffprobe only in bin/
+        let root = std::env::temp_dir().join(format!("dbsrt_sibling_tool_{}", std::process::id()));
+        let (bin, release) = (root.join("bin"), root.join("release"));
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::create_dir_all(&release).unwrap();
+        std::fs::write(release.join("dbsrt-server"), b"").unwrap();
+        std::fs::write(bin.join("ffprobe"), b"").unwrap();
+        std::os::unix::fs::symlink(release.join("dbsrt-server"), bin.join("dbsrt-server")).unwrap();
+        let resolved = bin.join("dbsrt-server").canonicalize().ok();
+
+        let found = sibling_tool(Some(bin.join("dbsrt-server")), resolved.clone(), "ffprobe");
+        let none = sibling_tool(None, resolved, "ffprobe");
+        let _ = std::fs::remove_dir_all(&root);
+
+        assert_eq!(found, Some(bin.join("ffprobe")));
+        assert_eq!(none, None);
+    }
 
     #[test]
     fn test_probe_remote_stream_only_probes_full_remote_streams() {

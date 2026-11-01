@@ -713,25 +713,57 @@ pub fn get_certified_stems(events_path: &Path, couplings_path: &Path) -> HashSet
     stems
 }
 
+/// Media file stem of a `.phash` media name: `Show.S01E01.mkv.25.0fps` and a bare `Show.S01E01`
+/// both give `Show.S01E01`.
+fn phash_media_stem(media_name: &str) -> &str {
+    let without_fps = media_name
+        .strip_suffix("fps")
+        .and_then(|s| s.rsplit_once('.'))
+        .filter(|(_, frac)| frac.bytes().all(|b| b.is_ascii_digit()))
+        .and_then(|(s, _)| s.rsplit_once('.'))
+        .filter(|(_, int)| !int.is_empty() && int.bytes().all(|b| b.is_ascii_digit()))
+        .map_or(media_name, |(s, _)| s);
+    match without_fps.rsplit_once('.') {
+        Some((stem, ext)) if VIDEO_EXTS.contains(&ext.to_lowercase().as_str()) => stem,
+        _ => without_fps,
+    }
+}
+
+const VIDEO_EXTS: [&str; 5] = ["mkv", "mp4", "webm", "avi", "mov"];
+
+/// Fingerprint of each media stem with a `.phash` in `phash_dir`, under its legacy name or its
+/// `<moviehash>.<fps>fps.phash` name (media name read from the sidecar). One directory scan.
+pub fn phash_index(phash_dir: &Path) -> HashMap<String, PhashFingerprintInfo> {
+    let Ok(entries) = fs::read_dir(phash_dir) else {
+        return HashMap::new();
+    };
+    entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|e| e == "phash"))
+        .filter_map(|p| {
+            let bytes = fs::metadata(&p).ok()?.len();
+            let info = PhashFingerprintInfo {
+                exists: true,
+                frame_count: (bytes / 8) as usize,
+                size_bytes: bytes,
+            };
+            let media_name = dbsrt_core::phash_media_name(&p);
+            Some((phash_media_stem(&media_name).to_string(), info))
+        })
+        .collect()
+}
+
 /// Loads cached discovered media items from disk, enriching with local pHash metadata if present.
 pub fn load_media_cache(cache_path: &Path) -> HashMap<String, DiscoveredMediaItem> {
     let mut map = HashMap::new();
-    let phash_dir = Path::new(DEFAULT_PHASH_DIR);
+    let phash_by_stem = phash_index(Path::new(DEFAULT_PHASH_DIR));
     if cache_path.exists() {
         if let Ok(content) = fs::read_to_string(cache_path) {
             if let Ok(items) = serde_json::from_str::<Vec<DiscoveredMediaItem>>(&content) {
                 for mut item in items {
                     if item.phash.is_none() {
-                        let phash_file = phash_dir.join(format!("{}.phash", item.stem));
-                        if let Ok(meta) = fs::metadata(&phash_file) {
-                            let bytes = meta.len();
-                            let frame_count = (bytes / 8) as usize;
-                            item.phash = Some(PhashFingerprintInfo {
-                                exists: true,
-                                frame_count,
-                                size_bytes: bytes,
-                            });
-                        }
+                        item.phash = phash_by_stem.get(&item.stem).cloned();
                     }
                     map.insert(item.stem.clone(), item);
                 }
@@ -840,6 +872,7 @@ pub fn scan_nas_tvshows(
     if video_paths.is_empty() && !cached_map.is_empty() {
         discovered = cached_map.into_values().collect();
     } else {
+        let phash_by_stem = phash_index(phash_dir);
         for p in video_paths {
             let stem = p
                 .file_stem()
@@ -866,18 +899,7 @@ pub fn scan_nas_tvshows(
                 probe_media_file(&p)
             };
 
-            let phash_path = phash_dir.join(format!("{stem}.phash"));
-            let phash_info = if let Ok(meta) = fs::metadata(&phash_path) {
-                let bytes = meta.len();
-                let frame_count = (bytes / 8) as usize;
-                Some(PhashFingerprintInfo {
-                    exists: true,
-                    frame_count,
-                    size_bytes: bytes,
-                })
-            } else {
-                None
-            };
+            let phash_info = phash_by_stem.get(&stem).cloned();
 
             let status = if active_jobs.iter().any(|j| j.media_name == stem) {
                 IngestionStatus::InProgress
@@ -1157,6 +1179,7 @@ fn discover_single_media_file(
     p: &Path,
     cached_map: &HashMap<String, DiscoveredMediaItem>,
     criteria: &MediaDiscoveryCriteria,
+    phash_by_stem: &HashMap<String, PhashFingerprintInfo>,
 ) -> Option<DiscoveredMediaItem> {
     let stem = p
         .file_stem()
@@ -1182,18 +1205,7 @@ fn discover_single_media_file(
         probe_media_file(p)
     };
 
-    let phash_path = criteria.phash_dir.join(format!("{stem}.phash"));
-    let phash_info = if let Ok(meta) = fs::metadata(&phash_path) {
-        let bytes = meta.len();
-        let frame_count = (bytes / 8) as usize;
-        Some(PhashFingerprintInfo {
-            exists: true,
-            frame_count,
-            size_bytes: bytes,
-        })
-    } else {
-        None
-    };
+    let phash_info = phash_by_stem.get(&stem).cloned();
 
     let status = if criteria.active_jobs.iter().any(|j| j.media_name == stem) {
         IngestionStatus::InProgress
@@ -1235,6 +1247,7 @@ fn discover_single_media_file(
 fn parse_batch_target_value(
     val: &serde_json::Value,
     criteria: &MediaDiscoveryCriteria,
+    phash_by_stem: &HashMap<String, PhashFingerprintInfo>,
 ) -> Option<DiscoveredMediaItem> {
     let (path_str, stem, size_bytes) = if let Some(s) = val.as_str() {
         let p = Path::new(s);
@@ -1256,18 +1269,7 @@ fn parse_batch_target_value(
         (path.to_string(), stem, size)
     };
 
-    let phash_path = criteria.phash_dir.join(format!("{stem}.phash"));
-    let phash_info = if let Ok(meta) = fs::metadata(&phash_path) {
-        let bytes = meta.len();
-        let frame_count = (bytes / 8) as usize;
-        Some(PhashFingerprintInfo {
-            exists: true,
-            frame_count,
-            size_bytes: bytes,
-        })
-    } else {
-        None
-    };
+    let phash_info = phash_by_stem.get(&stem).cloned();
 
     let status = if criteria.active_jobs.iter().any(|j| j.media_name == stem) {
         IngestionStatus::InProgress
@@ -1318,9 +1320,10 @@ pub fn load_remote_batch_media_items(
         return Vec::new();
     };
 
+    let phash_by_stem = phash_index(criteria.phash_dir);
     let mut items: Vec<DiscoveredMediaItem> = arr
         .iter()
-        .filter_map(|val| parse_batch_target_value(val, criteria))
+        .filter_map(|val| parse_batch_target_value(val, criteria, &phash_by_stem))
         .collect();
 
     items.sort_by_key(|a| a.stem.to_lowercase());
@@ -1392,13 +1395,16 @@ fn scan_single_source_chunked<F>(
         source_id: &src_id,
     };
 
+    let phash_by_stem = phash_index(criteria.phash_dir);
     let mut count = 0;
     let mut added_count = 0;
 
     for chunk in video_paths.chunks(SCAN_STREAMING_CHUNK_SIZE) {
         let chunk_items: Vec<DiscoveredMediaItem> = chunk
             .par_iter()
-            .filter_map(|p| discover_single_media_file(p, data.persistent_cache, &criteria))
+            .filter_map(|p| {
+                discover_single_media_file(p, data.persistent_cache, &criteria, &phash_by_stem)
+            })
             .collect();
 
         for item in chunk_items {
