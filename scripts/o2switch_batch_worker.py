@@ -337,30 +337,36 @@ def moviehash_from_chunks(size: int, head: bytes, tail: bytes) -> str:
     return f"{total & 0xFFFFFFFFFFFFFFFF:016x}"
 
 
-def _ftp_read_at(ftp: ftplib.FTP, path: str, offset: int) -> bytes:
-    """Reads MOVIEHASH_CHUNK_BYTES at `offset`, then drops the rest of the transfer."""
-    conn = ftp.transfercmd(f"RETR {path}", rest=offset)
-    data = bytearray()
+def _ftp_read_at(connect: Callable[[], ftplib.FTP], path: str, offset: int) -> bytes:
+    """Reads MOVIEHASH_CHUNK_BYTES at `offset` in its own FTP session, then drops the rest of the transfer."""
+    ftp = connect()
     try:
-        while len(data) < MOVIEHASH_CHUNK_BYTES:
-            chunk = conn.recv(MOVIEHASH_CHUNK_BYTES - len(data))
-            if not chunk:
-                break
-            data += chunk
+        conn = ftp.transfercmd(f"RETR {path}", rest=offset)
+        data = bytearray()
+        try:
+            while len(data) < MOVIEHASH_CHUNK_BYTES:
+                chunk = conn.recv(MOVIEHASH_CHUNK_BYTES - len(data))
+                if not chunk:
+                    break
+                data += chunk
+        finally:
+            conn.close()
+        # An early close gets 426 (226 when the file ended); the Synology NAS drops the control connection
+        # instead (EOFError), which is why each read opens its own session
+        with contextlib.suppress(ftplib.error_temp, ftplib.error_reply, EOFError):
+            ftp.voidresp()
+        return bytes(data)
     finally:
-        conn.close()
-    # An early close makes the server answer 426 (226 when the file ended): both end the transfer
-    with contextlib.suppress(ftplib.error_temp, ftplib.error_reply):
-        ftp.voidresp()
-    return bytes(data)
+        with contextlib.suppress(Exception):
+            ftp.close()
 
 
-def ftp_moviehash(ftp: ftplib.FTP, path: str, size: int) -> str | None:
+def ftp_moviehash(connect: Callable[[], ftplib.FTP], path: str, size: int) -> str | None:
     """Moviehash of a NAS file from two ranged reads; None when the exact bytes cannot be read."""
     if size < MOVIEHASH_CHUNK_BYTES:
         return None
-    head = _ftp_read_at(ftp, path, 0)
-    tail = _ftp_read_at(ftp, path, size - MOVIEHASH_CHUNK_BYTES)
+    head = _ftp_read_at(connect, path, 0)
+    tail = _ftp_read_at(connect, path, size - MOVIEHASH_CHUNK_BYTES)
     if len(head) < MOVIEHASH_CHUNK_BYTES or len(tail) < MOVIEHASH_CHUNK_BYTES:
         return None
     return moviehash_from_chunks(size, head, tail)
@@ -371,17 +377,22 @@ def target_moviehash(target: VideoTarget, stream_base: str, child_env: Dict[str,
     url = urllib.parse.urlsplit(stream_base)
     if url.scheme != "ftp" or not url.hostname:
         return None
-    ftp = ftplib.FTP()
+    host = url.hostname
+
+    def connect() -> ftplib.FTP:
+        ftp = ftplib.FTP(encoding="utf-8")
+        try:
+            ftp.connect(host, url.port or DEFAULT_FTP_PORT, timeout=15)
+            ftp.login(child_env.get("DBSRT_FTP_USER", ""), child_env.get("DBSRT_FTP_PASSWORD", ""))
+        except BaseException:
+            ftp.close()
+            raise
+        return ftp
+
     try:
-        ftp.connect(url.hostname, url.port or DEFAULT_FTP_PORT, timeout=15)
-        ftp.login(child_env.get("DBSRT_FTP_USER", ""), child_env.get("DBSRT_FTP_PASSWORD", ""))
-        ftp.encoding = "utf-8"
-        return ftp_moviehash(ftp, target.rel_path, target.size_bytes)
+        return ftp_moviehash(connect, target.rel_path, target.size_bytes)
     except ftplib.all_errors:
         return None
-    finally:
-        with contextlib.suppress(Exception):
-            ftp.close()
 
 
 def load_targets_file(targets_path: Path, nas_base: str, skip_stems: Set[str]) -> List[VideoTarget]:

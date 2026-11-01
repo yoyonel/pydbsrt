@@ -4,7 +4,7 @@ import ftplib
 import os
 import threading
 from pathlib import Path
-from typing import cast
+from typing import Callable, cast
 
 import pytest
 
@@ -47,6 +47,10 @@ class FakeFtp:
         self.data = data
         self.commands: list[tuple[str, int | None]] = []
         self.conns: list[FakeConn] = []
+        self.closed = False
+
+    def close(self) -> None:
+        self.closed = True
 
     def transfercmd(self, cmd: str, rest: int | None = None) -> FakeConn:
         self.commands.append((cmd, rest))
@@ -59,6 +63,34 @@ class FakeFtp:
         raise ftplib.error_temp("426 Connection closed; transfer aborted.")
 
 
+class DroppingFtp(FakeFtp):
+    """Measured on the Synology NAS: an early-closed RETR gets no 426, the control connection is dropped."""
+
+    def __init__(self, data: bytes) -> None:
+        super().__init__(data)
+        self.dropped = False
+
+    def transfercmd(self, cmd: str, rest: int | None = None) -> FakeConn:
+        if self.dropped:
+            raise EOFError
+        return super().transfercmd(cmd, rest)
+
+    def voidresp(self) -> str:
+        self.dropped = True
+        raise EOFError
+
+
+def sessions(cls: type[FakeFtp], data: bytes) -> tuple[list[FakeFtp], Callable[[], ftplib.FTP]]:
+    """FTP session factory that records every session it opens."""
+    opened: list[FakeFtp] = []
+
+    def connect() -> ftplib.FTP:
+        opened.append(cls(data))
+        return cast(ftplib.FTP, opened[-1])
+
+    return opened, connect
+
+
 @pytest.mark.parametrize(("size", "expected"), VECTORS)
 def test_moviehash_from_chunks_matches_rust_vectors(size: int, expected: str) -> None:
     data = pattern(size)
@@ -68,25 +100,31 @@ def test_moviehash_from_chunks_matches_rust_vectors(size: int, expected: str) ->
 
 @pytest.mark.parametrize(("size", "expected"), VECTORS)
 def test_ftp_moviehash_reads_head_and_tail_only(size: int, expected: str) -> None:
-    ftp = FakeFtp(pattern(size))
-    assert ftp_moviehash(cast(ftplib.FTP, ftp), "/video/Raw Name.mkv", size) == expected
-    assert ftp.commands == [
-        ("RETR /video/Raw Name.mkv", 0),
-        ("RETR /video/Raw Name.mkv", size - MOVIEHASH_CHUNK_BYTES),
+    opened, connect = sessions(FakeFtp, pattern(size))
+    assert ftp_moviehash(connect, "/video/Raw Name.mkv", size) == expected
+    assert [ftp.commands for ftp in opened] == [
+        [("RETR /video/Raw Name.mkv", 0)],
+        [("RETR /video/Raw Name.mkv", size - MOVIEHASH_CHUNK_BYTES)],
     ]
-    assert all(conn.closed for conn in ftp.conns)
+    assert all(ftp.closed and all(conn.closed for conn in ftp.conns) for ftp in opened)
+
+
+def test_ftp_moviehash_survives_a_nas_that_drops_the_control_connection() -> None:
+    opened, connect = sessions(DroppingFtp, pattern(200_000))
+    assert ftp_moviehash(connect, "/video/x.mkv", 200_000) == "e19d5212c9812cd6"
+    assert len(opened) == 2 and all(ftp.closed for ftp in opened)
 
 
 def test_ftp_moviehash_skips_files_under_one_chunk() -> None:
-    ftp = FakeFtp(pattern(65_535))
-    assert ftp_moviehash(cast(ftplib.FTP, ftp), "/video/x.mkv", 65_535) is None
-    assert ftp.commands == []
+    opened, connect = sessions(FakeFtp, pattern(65_535))
+    assert ftp_moviehash(connect, "/video/x.mkv", 65_535) is None
+    assert opened == []
 
 
 def test_ftp_moviehash_short_read_gives_no_hash() -> None:
     # Listed size larger than what the server sends: a hash of the wrong bytes would name the wrong .phash
-    ftp = FakeFtp(pattern(100_000))
-    assert ftp_moviehash(cast(ftplib.FTP, ftp), "/video/x.mkv", 200_000) is None
+    _, connect = sessions(FakeFtp, pattern(100_000))
+    assert ftp_moviehash(connect, "/video/x.mkv", 200_000) is None
 
 
 def _run_video(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, moviehash: str | None) -> list[str]:
