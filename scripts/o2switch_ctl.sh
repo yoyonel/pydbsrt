@@ -389,6 +389,10 @@ REMOTE_SCRIPT
     echo "=== Remote API Status (internal unix:${SERVER_SOCKET}) ==="
     # shellcheck disable=SC2029
     ssh "${O2SWITCH_HOST}" "${REMOTE_AUTH_HEADER} | curl -s -f -H @- --unix-socket ${SERVER_SOCKET} http://localhost/v1/status || echo 'API unreachable'" | jq . 2>/dev/null || true
+    echo ""
+    echo "=== Remote Catalog Status (internal unix:${SERVER_SOCKET}) ==="
+    # shellcheck disable=SC2029
+    ssh "${O2SWITCH_HOST}" "${REMOTE_AUTH_HEADER} | curl -s -f -H @- --unix-socket ${SERVER_SOCKET} http://localhost/v1/catalog/status || echo 'API unreachable'" | jq . 2>/dev/null || true
     # 0 = one daemon, 3 = not running (stopped or awaiting respawn), 1 = duplicate daemons
     exit "${STATUS_RC}"
     ;;

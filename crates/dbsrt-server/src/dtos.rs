@@ -41,6 +41,11 @@ pub struct CatalogStatusResponse {
     pub delta_sparse: usize,
     pub certified_couplings: usize,
     pub total_medias: usize,
+    /// Exact frame hashes over Base + Delta (same scope as `total_medias`)
+    pub total_frames: u64,
+    /// Medias whose frame count is unknown (catalog packed before it was stored): while > 0,
+    /// `total_frames` is a lower bound
+    pub medias_without_frame_count: usize,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

@@ -299,3 +299,45 @@ fn test_rank_media_matches_breaks_exact_ties_deterministically() {
         vec![("Alpha", Some(1)), ("Alpha", Some(2)), ("Beta", Some(1))]
     );
 }
+
+#[test]
+fn test_frame_count_round_trips_and_tells_empty_from_unknown() {
+    let tmp = tempfile::tempdir().unwrap();
+    let meta = MediaMetadata::parse("Some.Movie.2001.mkv");
+    let mut builder = DbphashBuilder::new();
+    let counted = builder.add_media(&meta, 1_800_000, 24.0, &[(1, 0)], &[(1, 0)]);
+    let empty = builder.add_media(&meta, 0, 24.0, &[], &[]);
+    builder.add_media(&meta, 1_000, 24.0, &[(2, 0)], &[(2, 0)]);
+    builder.set_frame_count(counted, 43_201);
+    builder.set_frame_count(empty, 0);
+    let first = tmp.path().join("first.dbphash");
+    builder.write_to_file(&first).unwrap();
+
+    let reader = MmapDbphash::open(&first).unwrap();
+    let counts: Vec<Option<u64>> = reader
+        .media_entries()
+        .iter()
+        .map(|m| m.known_frame_count())
+        .collect();
+    assert_eq!(
+        counts,
+        vec![Some(43_201), Some(0), None],
+        "an empty .phash is 0 frames, a count never recorded is unknown"
+    );
+
+    let mut repacked = DbphashBuilder::new();
+    reader.export_to_builder(&mut repacked);
+    let second = tmp.path().join("second.dbphash");
+    repacked.write_to_file(&second).unwrap();
+    let reader2 = MmapDbphash::open(&second).unwrap();
+    let counts2: Vec<Option<u64>> = reader2
+        .media_entries()
+        .iter()
+        .map(|m| m.known_frame_count())
+        .collect();
+    assert_eq!(
+        counts2,
+        vec![Some(43_201), Some(0), None],
+        "compaction keeps exact and unknown counts apart"
+    );
+}

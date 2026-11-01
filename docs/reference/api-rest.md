@@ -211,5 +211,11 @@ Déclenche le rechargement à chaud atomique (zéro coupure de service) des inde
 ### `GET /v1/catalog/status`
 Retourne l'état des tables de mémoire MIH et les métriques de segmentation du catalogue.
 
+- `total_frames` : nombre exact de frames pHash indexées (Base + Delta, même périmètre que
+  `total_medias`), somme des comptes stockés par média à l'empaquetage (`dbsrt pack`) ou à
+  l'ingestion.
+- `medias_without_frame_count` : médias dont le compte est inconnu (catalogue empaqueté avant
+  l'ajout du champ). Tant qu'il vaut plus de 0, `total_frames` est un minorant : réempaqueter.
+
 ### `POST /v1/catalog/ingest`
 Ingère dynamiquement un lot d'empreintes pHash dans le catalogue en cours d'exécution.

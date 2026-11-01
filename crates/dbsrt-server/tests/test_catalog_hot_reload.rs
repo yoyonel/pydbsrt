@@ -281,7 +281,8 @@ async fn test_pillar2_delta_ingest_and_compaction() {
     };
     let cuts_base = [(0x1111_2222_3333_4444_u64, 1000u32)];
     let sparse_base = [(0x1111_2222_3333_4444_u64, 0u32)];
-    builder.add_media(&meta_base, 10_000_000, 24.0, &cuts_base, &sparse_base);
+    let base_id = builder.add_media(&meta_base, 10_000_000, 24.0, &cuts_base, &sparse_base);
+    builder.set_frame_count(base_id, 240_000);
     builder.write_to_file(&catalog_path).unwrap();
 
     let state = AppState::new(
@@ -317,6 +318,8 @@ async fn test_pillar2_delta_ingest_and_compaction() {
     assert_eq!(st1["base_medias"], 1);
     assert_eq!(st1["delta_medias"], 0);
     assert_eq!(st1["total_medias"], 1);
+    assert_eq!(st1["total_frames"], 240_000);
+    assert_eq!(st1["medias_without_frame_count"], 0);
 
     // 3. Ingest a new media into Delta Index in RAM
     let ingest_hashes = vec![0x9999_8888_7777_6666_u64; 100];
@@ -347,6 +350,7 @@ async fn test_pillar2_delta_ingest_and_compaction() {
     assert_eq!(st2["base_medias"], 1);
     assert_eq!(st2["delta_medias"], 1);
     assert_eq!(st2["total_medias"], 2);
+    assert_eq!(st2["total_frames"], 240_100);
 
     // 5. Query recognize for the delta-ingested media
     let rec_payload = RecognizeRequest {
@@ -396,6 +400,8 @@ async fn test_pillar2_delta_ingest_and_compaction() {
     assert_eq!(st3["base_medias"], 2);
     assert_eq!(st3["delta_medias"], 0);
     assert_eq!(st3["total_medias"], 2);
+    assert_eq!(st3["total_frames"], 240_100);
+    assert_eq!(st3["medias_without_frame_count"], 0);
 
     // 8. Recognize both media 1 and media 2 now served directly from Base
     let rec_res_dune = client
@@ -470,6 +476,9 @@ async fn test_pre_swap_validation_rejects_corrupted_file() {
         .await
         .unwrap();
     assert_eq!(st["base_medias"], 1);
+    // Catalog packed without frame counts: the total cannot be exact, and says so.
+    assert_eq!(st["total_frames"], 0);
+    assert_eq!(st["medias_without_frame_count"], 1);
 
     // 2. Corrupt the file on disk (simulate interrupted rsync or truncated transfer)
     std::fs::write(&catalog_path, b"CORRUPTED_TRUNCATED_BYTES").unwrap();
@@ -921,4 +930,36 @@ async fn test_catalog_handlers_coverage_edge_cases() {
 
     // Clean up
     let _ = std::fs::remove_dir_all(&tmp_dir);
+}
+
+#[test]
+fn test_catalog_status_counts_empty_media_as_known_zero() {
+    let tmp = std::env::temp_dir().join(format!("test_status_frames_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    let catalog_path = tmp.join("catalog.dbphash");
+    let meta = MediaMetadata::parse("Some.Movie.2001.mkv");
+    let mut builder = DbphashBuilder::new();
+    let counted = builder.add_media(&meta, 1_000, 24.0, &[(1, 0)], &[(1, 0)]);
+    let empty = builder.add_media(&meta, 0, 24.0, &[], &[]);
+    builder.add_media(&meta, 1_000, 24.0, &[(2, 0)], &[(2, 0)]);
+    builder.set_frame_count(counted, 5);
+    builder.set_frame_count(empty, 0);
+    builder.write_to_file(&catalog_path).unwrap();
+
+    let state = AppState::new(
+        tmp.join("phash"),
+        tmp.join("SRT"),
+        Arc::new(dbsrt_core::OpenSubtitlesProvider::new(None)),
+        dbsrt_core::SubtitleCache::default(),
+    );
+    state.set_dbphash(Some(catalog_path));
+    let status = state.catalog_status();
+
+    assert_eq!(status.total_frames, 5);
+    assert_eq!(
+        status.medias_without_frame_count, 1,
+        "only the never-counted media"
+    );
+    let _ = std::fs::remove_dir_all(&tmp);
 }
