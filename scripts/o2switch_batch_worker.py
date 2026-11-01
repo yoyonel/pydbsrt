@@ -906,6 +906,9 @@ def main() -> int:
     print(f"✓ Selected {len(targets)} target videos to process (fresh_only={args.fresh_only}, limit={args.limit}).")
     if not targets:
         print("🎉 No target videos to process. Library is up-to-date!")
+        # A drained queue is what batch-status reports as "finished": without it an empty library reads
+        # as "crashed" and the supervisor relaunches it instead of rotating to the next one
+        write_batch_queue_state(0, 0, 0, 0)
         return 0
 
     if args.stream_base:
