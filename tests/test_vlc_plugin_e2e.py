@@ -113,7 +113,8 @@ def test_cvlc_chaos_readonly_directory_fallback():
     shutil.copy(src_video, ro_video)
     ro_dir.chmod(0o555)
 
-    expected_cache_srt = Path.home() / ".cache/dbsrt/subtitles/sample_ro.mp4.auto.synced.srt"
+    # The name depends on the backend: `sample_ro.mp4.auto.synced.srt` (local retarget), `sample_ro.fr.srt` (certified)
+    cache_dir = Path.home() / ".cache/dbsrt/subtitles"
 
     try:
         env = os.environ.copy()
@@ -132,14 +133,12 @@ def test_cvlc_chaos_readonly_directory_fallback():
         output = res.stdout + res.stderr
         assert res.returncode == 0, f"cvlc failed on read-only dir:\n{output}"
         assert "SUCCESS! Media matched" in output, f"Media matching failed:\n{output}"
-        assert ".cache/dbsrt/subtitles/sample_ro.mp4.auto.synced.srt" in output, (
-            f"Expected fallback to cache subtitles dir:\n{output}"
-        )
+        assert ".cache/dbsrt/subtitles/sample_ro." in output, f"Expected fallback to cache subtitles dir:\n{output}"
     finally:
         ro_dir.chmod(0o755)
         shutil.rmtree(ro_dir, ignore_errors=True)
-        if expected_cache_srt.exists():
-            expected_cache_srt.unlink()
+        for srt in cache_dir.glob("sample_ro.*.srt"):
+            srt.unlink()
 
 
 def test_vlc_gui_phash_search_e2e():
