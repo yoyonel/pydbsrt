@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fails a PR whose description lacks a filled business-goals section.
+"""Fails a PR whose description lacks business goals or a prod proof (or why there is none).
 
 Usage: printf '%s' "$PR_BODY" | python3 scripts/check_pr_body.py
 """
@@ -11,7 +11,10 @@ import sys
 import unicodedata
 
 SECTION = "Objectif métier"
+PROOF_SECTION = "Validation Empirique"
 BENEFIT_RE = re.compile(r"^- \*\*[^*]+\*\*\s*\S")
+# Masked terminal proof recorded by `task proof:record` (scripts/record_proof.py)
+PROOF_RE = re.compile(r"\.github/proofs/[\w-]+\.svg")
 
 
 def _fold(text: str) -> str:
@@ -19,10 +22,10 @@ def _fold(text: str) -> str:
     return unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode().lower()
 
 
-def _section_lines(body: str) -> list[str] | None:
+def _section_lines(body: str, title: str) -> list[str] | None:
     body = re.sub(r"<!--.*?-->", "", body, flags=re.DOTALL)
     lines = [line.strip() for line in body.splitlines()]
-    starts = [i for i, line in enumerate(lines) if line.startswith("## ") and _fold(SECTION) in _fold(line)]
+    starts = [i for i, line in enumerate(lines) if line.startswith("## ") and _fold(title) in _fold(line)]
     if not starts:
         return None
     section = []
@@ -42,9 +45,8 @@ def _has_labelled_value(lines: list[str], label: str) -> bool:
     return False
 
 
-def check(body: str) -> list[str]:
-    """Returns one message per missing item; empty when the section is complete."""
-    lines = _section_lines(body)
+def _check_goals(body: str) -> list[str]:
+    lines = _section_lines(body, SECTION)
     if lines is None:
         return [f"Section « ## {SECTION} » absente : voir .github/pull_request_template.md"]
     errors = []
@@ -55,6 +57,23 @@ def check(body: str) -> list[str]:
     if not _has_labelled_value(lines, "KPI"):
         errors.append("« **KPI / preuve :** » vide : chiffre mesuré ou comment on le voit en prod")
     return errors
+
+
+def _check_proof(body: str) -> list[str]:
+    lines = _section_lines(body, PROOF_SECTION)
+    if lines is None:
+        return [f"Section « ## {PROOF_SECTION} » absente : voir .github/pull_request_template.md"]
+    if any(PROOF_RE.search(line) for line in lines) or _has_labelled_value(lines, "Non déployé"):
+        return []
+    return [
+        "Ni preuve prod (image .github/proofs/<nom>.svg, via task proof:record) "
+        "ni « **Non déployé :** raison » dans la validation"
+    ]
+
+
+def check(body: str) -> list[str]:
+    """Returns one message per missing item; empty when the description is complete."""
+    return _check_goals(body) + _check_proof(body)
 
 
 def main() -> int:

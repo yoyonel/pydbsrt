@@ -34,6 +34,16 @@ VALID = """## 🎯 Objectif métier (en 30 secondes)
 ## 🛡️ Changements & Périmètre Technique
 
 - détail technique
+
+---
+
+## 🧪 Validation Empirique & Preuves Terminales
+
+<!-- guide -->
+
+![o2switch_status](https://github.com/yoyonel/pydbsrt/raw/0123abc/.github/proofs/o2switch_status.svg)
+
+**Non déployé :**
 """
 
 
@@ -45,15 +55,41 @@ def test_heading_without_accent_is_accepted() -> None:
     assert check_pr_body.check(VALID.replace("Objectif métier", "Objectif metier")) == []
 
 
-def test_missing_section_fails() -> None:
+def test_missing_sections_fail() -> None:
     errors = check_pr_body.check("## Summary\n\n- **Fix.** something\n")
-    assert len(errors) == 1
+    assert len(errors) == 2, errors
     assert "Objectif métier" in errors[0]
+    assert "Validation Empirique" in errors[1]
 
 
 def test_unfilled_template_fails_on_every_item() -> None:
     errors = check_pr_body.check(TEMPLATE.read_text(encoding="utf-8"))
-    assert len(errors) == 3, errors
+    assert len(errors) == 4, errors
+
+
+def test_not_deployed_with_a_reason_replaces_the_prod_proof() -> None:
+    body = VALID.replace("![o2switch_status]", "[lien]").replace(".github/proofs/o2switch_status.svg", "x.png")
+    assert len(check_pr_body.check(body)) == 1
+    assert check_pr_body.check(body.replace("**Non déployé :**", "**Non déployé :** doc seule")) == []
+
+
+@pytest.mark.parametrize(
+    "old,new",
+    [
+        (".github/proofs/o2switch_status.svg", "docs/assets/x.svg"),
+        ("![o2switch_status]", "<!-- ![o2switch_status]"),
+        ("**Non déployé :**", "**Non déployé :** :"),
+    ],
+)
+def test_validation_without_prod_proof_fails(old: str, new: str) -> None:
+    body = VALID.replace(old, new)
+    if new.startswith("<!--"):
+        body = body.replace("o2switch_status.svg)", "o2switch_status.svg) -->")
+    if old.startswith("**Non"):
+        body = body.replace(".github/proofs/o2switch_status.svg", "docs/assets/x.svg")
+    errors = check_pr_body.check(body)
+    assert len(errors) == 1, errors
+    assert ".github/proofs/" in errors[0] and "Non déployé" in errors[0]
 
 
 @pytest.mark.parametrize(
@@ -87,7 +123,7 @@ def test_items_outside_the_section_do_not_count() -> None:
 
 **KPI / preuve :** chiffre
 """
-    assert len(check_pr_body.check(body)) == 3
+    assert len(check_pr_body.check(body)) == 4
 
 
 def test_items_hidden_in_comments_do_not_count() -> None:
