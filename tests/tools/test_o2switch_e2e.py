@@ -314,6 +314,23 @@ def test_cut_queries_golden_replays_the_fixed_set(remote_base: Path) -> None:
     assert run_cut_queries(remote_base, "golden", "4")[0] == first
 
 
+def test_cut_queries_golden_follows_a_deduped_file_to_its_moviehash_twin(remote_base: Path) -> None:
+    """The RPi4 dedupe removes a legacy .phash identical to its moviehash version: replay the twin."""
+    phash = remote_base / "data" / "__PHASH__"
+    (phash / "0123456789abcdef.25.000fps.phash").write_bytes(b"".join(n.to_bytes(8, "big") for n in range(1000)))
+    (phash / "0123456789abcdef.json").write_text(json.dumps({"media_name": "Twin.S02E03.mkv"}))
+    (remote_base / "etc").mkdir()
+    golden = [{"file": "Twin.S02E03.25.000fps.phash", "coupled": True}]
+    (remote_base / "etc" / "e2e_golden.json").write_text(json.dumps(golden))
+    [query] = run_cut_queries(remote_base, "golden", "4")
+    assert (query["_file"], query["_coupled"], query["_stem"]) == (
+        "0123456789abcdef.25.000fps.phash",
+        True,
+        "Twin.S02E03",
+    )
+    assert query["query_fingerprint"][0] == f"0x{450:016x}"
+
+
 class FakeGolden(Recette):
     """Serves a fixed set from `queries` and answers every recognize with `resp`; records SSH commands."""
 
