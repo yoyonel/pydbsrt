@@ -3,11 +3,19 @@
 # Manages dbsrt-agent binary, VLC plugin, and systemd user service.
 set -euo pipefail
 
+# Load optional unversioned local environment file (O2SWITCH_URL) and resolve_api_key
+# shellcheck source=scripts/load_env.sh
+source "$(dirname "${BASH_SOURCE[0]}")/load_env.sh"
+load_local_env "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
 BIN_DIR="${HOME}/.local/bin"
 SYSTEMD_USER_DIR="${HOME}/.config/systemd/user"
 SERVICE_NAME="dbsrt-agent.service"
 VLC_EXT_DIR="${HOME}/.local/share/vlc/lua/extensions"
-DEFAULT_REMOTE_API="${DEFAULT_REMOTE_API:-http://127.0.0.1:8765}"
+# Holds the remote API key (mode 0600): argv and the unit file are world-readable
+AGENT_KEY_FILE="${HOME}/.config/pydbsrt/dbsrt-remote-api-key"
+# Former EnvironmentFile holding the key in clear: removed on install and uninstall
+LEGACY_ENV_FILE="${HOME}/.config/pydbsrt/dbsrt-agent.env"
 DEFAULT_PORT=8765
 
 ACTION="${1:-install}"
@@ -15,12 +23,20 @@ if [[ "${ACTION}" =~ ^https?:// ]]; then
   REMOTE_API="${ACTION}"
   ACTION="install"
 else
-  REMOTE_API="${2:-${DEFAULT_REMOTE_API}}"
+  REMOTE_API="${2:-${O2SWITCH_URL:-}}"
 fi
 
 case "${ACTION}" in
   install)
     echo "=== Installing dbsrt-agent on Debian/Ubuntu ==="
+    if [[ -z "${REMOTE_API}" ]]; then
+      echo "❌ No remote API: pass REMOTE_URL or set O2SWITCH_URL (env or .env)." >&2
+      exit 1
+    fi
+    if [[ "${REMOTE_API}" =~ ^https?://(127\.0\.0\.1|localhost|\[::1\]):${DEFAULT_PORT}(/|$) ]]; then
+      echo "❌ Remote API ${REMOTE_API} is the agent itself: it would relay to itself." >&2
+      exit 1
+    fi
     echo "Configuring Remote API Target: ${REMOTE_API}"
 
     # 1. Compile release binary if missing
@@ -42,7 +58,23 @@ case "${ACTION}" in
       echo "✓ Installed VLC extension ${VLC_EXT_DIR}/vlsub_dbsrt.lua"
     fi
 
-    # 4. Create systemd user service unit
+    # 4. Write the remote API key to a private file, handed over by systemd LoadCredential=:
+    #    unlike an env var, the agent's ffmpeg children never inherit it
+    rm -f "${LEGACY_ENV_FILE}"
+    API_KEY="$(resolve_api_key)"
+    CREDENTIAL_LINE=""
+    if [[ -n "${API_KEY}" ]]; then
+      mkdir -p "$(dirname "${AGENT_KEY_FILE}")"
+      (umask 077 && printf '%s' "${API_KEY}" >"${AGENT_KEY_FILE}")
+      chmod 600 "${AGENT_KEY_FILE}"
+      CREDENTIAL_LINE="LoadCredential=dbsrt_remote_api_key:${AGENT_KEY_FILE}"
+      echo "✓ Stored remote API key in ${AGENT_KEY_FILE} (mode 600)"
+    else
+      rm -f "${AGENT_KEY_FILE}"
+      echo "⚠️ No remote API key in DBSRT_REMOTE_API_KEY or 'pass': protected remotes answer 401."
+    fi
+
+    # 5. Create systemd user service unit
     mkdir -p "${SYSTEMD_USER_DIR}"
     cat <<UNIT >"${SYSTEMD_USER_DIR}/${SERVICE_NAME}"
 [Unit]
@@ -51,6 +83,7 @@ After=network.target
 
 [Service]
 Type=simple
+${CREDENTIAL_LINE}
 ExecStart=${BIN_DIR}/dbsrt-agent --host 127.0.0.1 --port ${DEFAULT_PORT} --agent --remote-api ${REMOTE_API} --phash-dir /tmp --subtitles-dir /tmp
 Restart=always
 RestartSec=3
@@ -64,10 +97,12 @@ UNIT
 
     echo "✓ Created systemd unit: ${SYSTEMD_USER_DIR}/${SERVICE_NAME}"
 
-    # 5. Reload and start systemd user service
+    # 6. Reload and start systemd user service
     if command -v systemctl >/dev/null 2>&1; then
       systemctl --user daemon-reload
-      systemctl --user enable --now "${SERVICE_NAME}"
+      systemctl --user enable "${SERVICE_NAME}"
+      # restart, not start: a reinstall must reload the new unit and key
+      systemctl --user restart "${SERVICE_NAME}"
       echo "✓ Service ${SERVICE_NAME} enabled and started."
 
       # Healthcheck
@@ -127,8 +162,8 @@ UNIT
       systemctl --user daemon-reload
       echo "✓ Removed systemd user unit."
     fi
-    rm -f "${BIN_DIR}/dbsrt-agent"
-    echo "✓ Removed binary ${BIN_DIR}/dbsrt-agent."
+    rm -f "${BIN_DIR}/dbsrt-agent" "${AGENT_KEY_FILE}" "${LEGACY_ENV_FILE}"
+    echo "✓ Removed binary ${BIN_DIR}/dbsrt-agent and key file ${AGENT_KEY_FILE}."
     rm -f "${VLC_EXT_DIR}/vlsub_dbsrt.lua"
     echo "✓ Removed VLC extension ${VLC_EXT_DIR}/vlsub_dbsrt.lua."
     echo "✓ Complete uninstallation finished."

@@ -11,6 +11,11 @@ CONTAINER_NAME="dbsrt-recipe-test-$$"
 TEST_USER_NAME="testuser"
 TEST_USER_ID=1000
 TEST_PORT=8765
+# Unreachable dummy remote and key: the recipe checks wiring, never calls a real remote
+TEST_REMOTE_API="http://127.0.0.1:9"
+TEST_API_KEY="recipe-test-key"
+TEST_KEY_FILE="/home/${TEST_USER_NAME}/.config/pydbsrt/dbsrt-remote-api-key"
+TEST_CREDENTIAL="/run/user/${TEST_USER_ID}/credentials/dbsrt-agent.service/dbsrt_remote_api_key"
 
 CONTAINER_STARTUP_WAIT_SECONDS="2"
 CONTAINER_RESTART_WAIT_SECONDS="2"
@@ -80,6 +85,7 @@ docker exec -u "${TEST_USER_NAME}" "${CONTAINER_NAME}" mkdir -p \
 docker cp target/release/dbsrt-server "${CONTAINER_NAME}:/home/${TEST_USER_NAME}/pydbsrt/target/release/dbsrt-server"
 docker cp vlc-plugin/vlsub_dbsrt.lua "${CONTAINER_NAME}:/home/${TEST_USER_NAME}/pydbsrt/vlc-plugin/vlsub_dbsrt.lua"
 docker cp scripts/install_debian.sh "${CONTAINER_NAME}:/home/${TEST_USER_NAME}/pydbsrt/scripts/install_debian.sh"
+docker cp scripts/load_env.sh "${CONTAINER_NAME}:/home/${TEST_USER_NAME}/pydbsrt/scripts/load_env.sh"
 docker exec -u root "${CONTAINER_NAME}" chown -R "${TEST_USER_NAME}:${TEST_USER_NAME}" "/home/${TEST_USER_NAME}/pydbsrt"
 
 echo -e "${COLOR_BOLD}=== [Recipe Test] 4. Executing install recipe as unprivileged user ===${COLOR_RESET}"
@@ -88,8 +94,9 @@ docker exec \
   -w "/home/${TEST_USER_NAME}/pydbsrt" \
   -e "XDG_RUNTIME_DIR=/run/user/${TEST_USER_ID}" \
   -e "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/${TEST_USER_ID}/bus" \
+  -e "DBSRT_REMOTE_API_KEY=${TEST_API_KEY}" \
   "${CONTAINER_NAME}" \
-  ./scripts/install_debian.sh install
+  ./scripts/install_debian.sh install "${TEST_REMOTE_API}"
 
 echo -e "${COLOR_BOLD}=== [Recipe Test] 5. Asserting service state & API responsiveness ===${COLOR_RESET}"
 # 1. Check unit is active
@@ -116,6 +123,29 @@ if [[ "${local_health_ok}" -ne 1 ]]; then
 fi
 echo -e "${COLOR_GREEN}✓ Local Agent HTTP health endpoint responsive on port ${TEST_PORT}.${COLOR_RESET}"
 
+# 3. Remote target and key reach the running agent; the key stays off argv
+AGENT_PID="$(docker exec -u "${TEST_USER_NAME}" -e "XDG_RUNTIME_DIR=/run/user/${TEST_USER_ID}" "${CONTAINER_NAME}" systemctl --user show -p MainPID --value dbsrt-agent.service)"
+AGENT_ARGV="$(docker exec "${CONTAINER_NAME}" sh -c "tr '\\0' ' ' </proc/${AGENT_PID}/cmdline")"
+if [[ "${AGENT_ARGV}" != *"--remote-api ${TEST_REMOTE_API}"* || "${AGENT_ARGV}" == *"${TEST_API_KEY}"* ]]; then
+  echo -e "${COLOR_RED}❌ Agent argv lacks the remote API or exposes the key.${COLOR_RESET}" >&2
+  exit 1
+fi
+# The key must not be inherited by the agent's children (ffmpeg): credential, not env var
+if docker exec "${CONTAINER_NAME}" sh -c "tr '\\0' '\\n' </proc/${AGENT_PID}/environ" | grep -q "${TEST_API_KEY}"; then
+  echo -e "${COLOR_RED}❌ Agent environment exposes the key.${COLOR_RESET}" >&2
+  exit 1
+fi
+if [[ "$(docker exec "${CONTAINER_NAME}" cat "${TEST_CREDENTIAL}")" != "${TEST_API_KEY}" ]]; then
+  echo -e "${COLOR_RED}❌ systemd credential dbsrt_remote_api_key missing or wrong.${COLOR_RESET}" >&2
+  exit 1
+fi
+KEY_FILE_MODE="$(docker exec "${CONTAINER_NAME}" stat -c '%a' "${TEST_KEY_FILE}")"
+if [[ "${KEY_FILE_MODE}" != "600" ]]; then
+  echo -e "${COLOR_RED}❌ Key file mode is ${KEY_FILE_MODE}, expected 600.${COLOR_RESET}" >&2
+  exit 1
+fi
+echo -e "${COLOR_GREEN}✓ Agent relays to the given remote; key passed as a systemd credential, not argv/env.${COLOR_RESET}"
+
 echo -e "${COLOR_BOLD}=== [Recipe Test] 6. Simulating host reboot & verifying auto-start ===${COLOR_RESET}"
 docker restart "${CONTAINER_NAME}" >/dev/null
 sleep "${CONTAINER_RESTART_WAIT_SECONDS}"
@@ -139,6 +169,12 @@ docker exec \
 # Assert unit is stopped/removed
 if docker exec -u "${TEST_USER_NAME}" -e "XDG_RUNTIME_DIR=/run/user/${TEST_USER_ID}" "${CONTAINER_NAME}" systemctl --user is-active dbsrt-agent.service >/dev/null 2>&1; then
   echo -e "${COLOR_RED}❌ Service still active after uninstallation!${COLOR_RESET}" >&2
+  exit 1
+fi
+
+# Assert key file removed
+if docker exec "${CONTAINER_NAME}" test -f "${TEST_KEY_FILE}"; then
+  echo -e "${COLOR_RED}❌ Key file still exists after uninstallation!${COLOR_RESET}" >&2
   exit 1
 fi
 

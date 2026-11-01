@@ -20,3 +20,14 @@ load_local_env() {
     return 0
   done
 }
+
+# Remote relay API key: DBSRT_REMOTE_API_KEY env, else the pass entry, else empty.
+resolve_api_key() {
+  if [[ -n "${DBSRT_REMOTE_API_KEY:-}" ]]; then
+    echo "${DBSRT_REMOTE_API_KEY}"
+    return 0
+  fi
+  if command -v pass >/dev/null 2>&1; then
+    pass show "services/pydbsrt/o2switch_api_key" 2>/dev/null || true
+  fi
+}
