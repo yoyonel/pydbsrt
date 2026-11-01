@@ -1,9 +1,10 @@
 name: "PR Body Lint"
 
-# pull_request_target: the check runs from the base branch, so it also covers PRs opened before it
-# existed. Safe: only the base checkout runs, the PR body is passed as data through env.
+# pull_request, not pull_request_target: GitHub reads pull_request_target workflows from the default
+# branch (master), which has no .github/ here, so the check would never run. The PR body is passed
+# as data through env, never interpolated into the shell.
 on:
-  pull_request_target:
+  pull_request:
     types: [opened, edited, synchronize, reopened]
 
 permissions:
@@ -15,7 +16,7 @@ jobs:
     name: "Validate PR Body (business goals)"
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout base branch
+      - name: Checkout checker script
         uses: actions/checkout@v4
         with:
           sparse-checkout: scripts/check_pr_body.py
