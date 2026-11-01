@@ -353,6 +353,20 @@ def test_main_reexecs_same_argv_after_reload(tmp_path: Path, monkeypatch):
     assert execs == [(worker.sys.executable, worker.sys.orig_argv)]
 
 
+def test_main_without_targets_leaves_a_drained_queue(tmp_path: Path, monkeypatch):
+    """Prod bug: an empty run left no queue file, batch-status said "crashed" and the supervisor
+    relaunched the same empty library every 30 min instead of rotating to the next one."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(worker.sys, "argv", ["worker", "--nas-host", "nas", "--nas-user", "u", "--nas-base", "/video"])
+    monkeypatch.setattr(worker, "resolve_nas_password", lambda: "p")
+    monkeypatch.setattr(worker, "list_nas_videos_ftp", lambda **_k: [])
+
+    assert worker.main() == 0
+
+    # The exact text batch-status greps for its "finished" state
+    assert '"remaining_targets": 0,' in (tmp_path / worker.DEFAULT_BATCH_QUEUE_PATH).read_text(encoding="utf-8")
+
+
 def test_reload_drain_timeout_kills_slow_video_without_failure_event(tmp_path: Path, monkeypatch):
     """A video still running after the drain window is killed and requeued, not recorded as failed."""
     monkeypatch.chdir(tmp_path)
