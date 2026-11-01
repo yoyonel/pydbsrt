@@ -29,6 +29,9 @@ pub struct DeltaMediaEntry {
     pub episode: Option<u32>,
     pub duration_ms: u64,
     pub fps: f64,
+    /// Exact number of ingested frame hashes, `None` when added without them
+    #[serde(default)]
+    pub frame_count: Option<u64>,
     pub cuts: Vec<DbphashCutEntry>,
     pub sparse: Vec<DbphashSparseEntry>,
 }
@@ -123,7 +126,10 @@ impl DeltaIndex {
                 .map(|s| (s.phash, s.timestamp_ms))
                 .collect();
 
-            builder.add_media(&meta, media.duration_ms, media.fps, &cuts, &sparse);
+            let media_id = builder.add_media(&meta, media.duration_ms, media.fps, &cuts, &sparse);
+            if let Some(frame_count) = media.frame_count {
+                builder.set_frame_count(media_id, frame_count);
+            }
         }
     }
 
@@ -239,6 +245,7 @@ impl DeltaIndex {
                 episode: item.meta.episode,
                 duration_ms: item.duration_ms,
                 fps: item.fps,
+                frame_count: None,
                 cuts: delta_cuts,
                 sparse: delta_sparse,
             });
@@ -317,7 +324,11 @@ impl DeltaIndex {
             })
             .collect();
 
-        self.add_media(&meta, duration_ms, safe_fps, &cuts, &sparse)
+        let media_id = self.add_media(&meta, duration_ms, safe_fps, &cuts, &sparse);
+        if let Some(media) = Arc::make_mut(&mut self.medias).last_mut() {
+            media.frame_count = Some(hashes.len() as u64);
+        }
+        media_id
     }
 
     /// Search the delta index using Multi-Index Hashing (MIH).
@@ -532,6 +543,30 @@ mod tests {
         assert_eq!(ranked[0].confidence, 100.0);
         assert_eq!(ranked[1].confidence, 100.0);
         assert_eq!(ranked[0].clean_title, "Source");
+    }
+
+    #[test]
+    fn test_ingest_raw_frames_keeps_exact_frame_count() {
+        let mut delta = DeltaIndex::new();
+        delta.ingest_raw_frames("Matrix.1999.1080p.mkv", &[0x1111_2222_3333_4444; 101], 24.0);
+        delta.ingest_raw_frames("Empty.2001.mkv", &[], 24.0);
+        let meta = MediaMetadata::parse("Uncounted.2002.mkv");
+        delta.add_media(&meta, 1_000, 24.0, &[], &[(5, 0)]);
+        let counts: Vec<Option<u64>> = delta.medias().iter().map(|m| m.frame_count).collect();
+        assert_eq!(counts, vec![Some(101), Some(0), None]);
+
+        let mut builder = DbphashBuilder::new();
+        delta.export_to_builder(&mut builder);
+        let temp_dir = tempfile::tempdir().unwrap();
+        let catalog_path = temp_dir.path().join("catalog.dbphash");
+        builder.write_to_file(&catalog_path).unwrap();
+        let reader = crate::dbphash::MmapDbphash::open(&catalog_path).unwrap();
+        let stored: Vec<Option<u64>> = reader
+            .media_entries()
+            .iter()
+            .map(|m| m.known_frame_count())
+            .collect();
+        assert_eq!(stored, vec![Some(101), Some(0), None]);
     }
 
     #[test]

@@ -58,7 +58,8 @@ pub struct DbphashMediaEntry {
     pub media_id: u32,
     /// Media classification (1=Movie, 2=TvEpisode, 3=Anime, 4=Other)
     pub media_type: u8,
-    pub _reserved1: u8,
+    /// 1 when `frame_count` is recorded; 0 in catalogs packed before it (former reserved byte)
+    pub has_frame_count: u8,
     /// Production or release year (or 0)
     pub year: u16,
     /// Season index (or 0)
@@ -81,10 +82,17 @@ pub struct DbphashMediaEntry {
     pub sparse_count: u32,
     /// Starting index in flat sparse table
     pub sparse_start_idx: u32,
-    pub _padding: [u8; 8],
+    /// Exact number of frame hashes of the source `.phash`, valid only when `has_frame_count`
+    /// is set (former padding bytes)
+    pub frame_count: u64,
 }
 
 impl DbphashMediaEntry {
+    /// Exact frame count, `None` when the catalog was packed before it was recorded.
+    pub fn known_frame_count(&self) -> Option<u64> {
+        (self.has_frame_count != 0).then_some(self.frame_count)
+    }
+
     pub fn media_type_enum(&self) -> MediaType {
         match self.media_type {
             1 => MediaType::Movie,
@@ -215,7 +223,7 @@ impl DbphashBuilder {
         let entry = DbphashMediaEntry {
             media_id,
             media_type: media_type_byte,
-            _reserved1: 0,
+            has_frame_count: 0,
             year: meta.year.unwrap_or(0),
             season: meta.season.unwrap_or(0),
             episode: meta.episode.unwrap_or(0),
@@ -227,11 +235,20 @@ impl DbphashBuilder {
             cuts_start_idx,
             sparse_count,
             sparse_start_idx,
-            _padding: [0u8; 8],
+            frame_count: 0,
         };
 
         self.media_records.push((entry, meta.clean_title.clone()));
         media_id
+    }
+
+    /// Records the exact frame count of a media returned by [`Self::add_media`].
+    pub fn set_frame_count(&mut self, media_id: u32, frame_count: u64) {
+        let idx = media_id.checked_sub(1).map(|i| i as usize);
+        if let Some((entry, _)) = idx.and_then(|i| self.media_records.get_mut(i)) {
+            entry.frame_count = frame_count;
+            entry.has_frame_count = 1;
+        }
     }
 
     /// Compiles and serializes the complete binary database to a `.dbphash` file.
@@ -783,7 +800,10 @@ impl MmapDbphash {
                 .map(|s| (s.phash, s.timestamp_ms))
                 .collect();
 
-            builder.add_media(&meta, media.duration_ms, fps, &cuts, &sparse);
+            let media_id = builder.add_media(&meta, media.duration_ms, fps, &cuts, &sparse);
+            if let Some(frame_count) = media.known_frame_count() {
+                builder.set_frame_count(media_id, frame_count);
+            }
         }
     }
 }

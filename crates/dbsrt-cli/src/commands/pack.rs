@@ -129,8 +129,7 @@ pub fn run_pack(args: &PackArgs) -> Result<()> {
     for (idx, file_path) in files.iter().enumerate() {
         let meta = MediaMetadata::parse_from_path(file_path);
         let hashes = read_phash_file(file_path)?;
-        let file_len = std::fs::metadata(file_path)?.len();
-        total_raw_bytes += file_len;
+        total_raw_bytes += std::fs::metadata(file_path)?.len();
 
         let fps = extract_fps_from_path(file_path).unwrap_or(args.default_fps);
         let duration_ms = (hashes.len() as f64 / fps * MILLIS_PER_SEC).round() as u64;
@@ -159,7 +158,8 @@ pub fn run_pack(args: &PackArgs) -> Result<()> {
 
         let cuts_cnt = cuts.len();
         let sparse_cnt = sparse.len();
-        builder.add_media(&meta, duration_ms, fps, &cuts, &sparse);
+        let media_id = builder.add_media(&meta, duration_ms, fps, &cuts, &sparse);
+        builder.set_frame_count(media_id, hashes.len() as u64);
 
         if (idx + 1) % PACK_PROGRESS_INTERVAL == 0 || idx + 1 == files.len() {
             println!(
@@ -228,6 +228,35 @@ mod tests {
             extract_fps_from_path(Path::new("video.500.0fps.phash")),
             None
         );
+    }
+
+    #[test]
+    fn test_pack_stores_exact_frame_count_per_media() {
+        let dir = std::env::temp_dir().join(format!("test_pack_frames_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dbsrt_core::write_phash_file(&dir.join("a.25.0fps.phash"), &[7u64; 251]).unwrap();
+        dbsrt_core::write_phash_file(&dir.join("b.24.0fps.phash"), &[9u64; 3]).unwrap();
+        dbsrt_core::write_phash_file(&dir.join("c.24.0fps.phash"), &[]).unwrap();
+        let output = dir.join("out").with_extension("dbphash");
+        let args = PackArgs {
+            phash_dir: dir.clone(),
+            extra_dirs: vec![],
+            output: output.clone(),
+            threshold: DEFAULT_CUT_THRESHOLD,
+            default_fps: DEFAULT_BASELINE_FPS,
+        };
+
+        run_pack(&args).unwrap();
+
+        let reader = dbsrt_index::MmapDbphash::open(&output).unwrap();
+        let counts: Vec<Option<u64>> = reader
+            .media_entries()
+            .iter()
+            .map(|m| m.known_frame_count())
+            .collect();
+        assert_eq!(counts, vec![Some(251), Some(3), Some(0)]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

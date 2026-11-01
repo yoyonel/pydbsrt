@@ -570,6 +570,14 @@ impl AppState {
             0
         };
 
+        let mut frame_counts: Vec<Option<u64>> = Vec::new();
+        if let Some(ref reader) = *self.dbphash_reader.load() {
+            frame_counts.extend(reader.media_entries().iter().map(|m| m.known_frame_count()));
+        }
+        if let Ok(delta) = self.delta_index.read() {
+            frame_counts.extend(delta.medias().iter().map(|m| m.frame_count));
+        }
+
         CatalogStatusResponse {
             base_medias,
             base_cuts,
@@ -579,6 +587,8 @@ impl AppState {
             delta_sparse,
             certified_couplings,
             total_medias: base_medias + delta_medias,
+            total_frames: frame_counts.iter().flatten().sum(),
+            medias_without_frame_count: frame_counts.iter().filter(|n| n.is_none()).count(),
         }
     }
 
