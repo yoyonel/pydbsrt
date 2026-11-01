@@ -17,6 +17,7 @@ RUN rustup target add aarch64-unknown-linux-gnu
 COPY Cargo.toml Cargo.lock ./
 COPY crates/dbsrt-core crates/dbsrt-core
 COPY crates/dbsrt-index crates/dbsrt-index
+COPY crates/dbsrt-tui crates/dbsrt-tui
 COPY crates/dbsrt-cli crates/dbsrt-cli
 COPY crates/dbsrt-server crates/dbsrt-server
 
