@@ -48,7 +48,11 @@ def unit(repo: Path) -> Path:
     return repo.parent / "home" / ".config" / "systemd" / "user" / "dbsrt-agent.service"
 
 
-def env_file(repo: Path) -> Path:
+def key_file(repo: Path) -> Path:
+    return repo.parent / "home" / ".config" / "pydbsrt" / "dbsrt-remote-api-key"
+
+
+def legacy_env_file(repo: Path) -> Path:
     return repo.parent / "home" / ".config" / "pydbsrt" / "dbsrt-agent.env"
 
 
@@ -72,32 +76,42 @@ def test_install_defaults_to_o2switch_url_from_local_env(repo: Path) -> None:
     assert f"--remote-api {REMOTE}" in unit(repo).read_text()
 
 
-def test_install_puts_the_key_in_a_private_env_file_not_in_the_unit(repo: Path) -> None:
+def test_install_hands_the_key_to_systemd_as_a_credential_not_an_env_var(repo: Path) -> None:
     out = run(repo, "install", REMOTE, DBSRT_REMOTE_API_KEY=KEY)
     assert out.returncode == 0, out.stderr
     text = unit(repo).read_text()
     assert KEY not in text
-    assert f"EnvironmentFile=-{env_file(repo)}" in text
-    assert env_file(repo).read_text() == f"DBSRT_REMOTE_API_KEY={KEY}\n"
-    assert stat.S_IMODE(env_file(repo).stat().st_mode) == 0o600
+    assert f"LoadCredential=dbsrt_remote_api_key:{key_file(repo)}" in text
+    assert "EnvironmentFile" not in text
+    assert key_file(repo).read_text() == KEY
+    assert stat.S_IMODE(key_file(repo).stat().st_mode) == 0o600
     assert KEY not in out.stdout + out.stderr
 
 
 def test_install_reads_the_key_from_pass(repo: Path) -> None:
     (repo.parent / "stubs" / "pass").write_text(f"#!/bin/sh\necho {KEY}\n")
     assert run(repo, "install", REMOTE).returncode == 0
-    assert env_file(repo).read_text() == f"DBSRT_REMOTE_API_KEY={KEY}\n"
+    assert key_file(repo).read_text() == KEY
 
 
-def test_install_without_key_drops_a_stale_env_file(repo: Path) -> None:
+def test_install_without_key_drops_the_key_file_and_the_credential(repo: Path) -> None:
     assert run(repo, "install", REMOTE, DBSRT_REMOTE_API_KEY=KEY).returncode == 0
     out = run(repo, "install", REMOTE)
     assert out.returncode == 0, out.stderr
-    assert not env_file(repo).exists()
+    assert not key_file(repo).exists()
+    # systemd refuses to start a unit whose LoadCredential source is missing
+    assert "LoadCredential" not in unit(repo).read_text()
+
+
+def test_install_removes_the_legacy_env_file_holding_the_key(repo: Path) -> None:
+    legacy_env_file(repo).parent.mkdir(parents=True)
+    legacy_env_file(repo).write_text(f"DBSRT_REMOTE_API_KEY={KEY}\n")
+    assert run(repo, "install", REMOTE, DBSRT_REMOTE_API_KEY=KEY).returncode == 0
+    assert not legacy_env_file(repo).exists()
 
 
 def test_uninstall_removes_the_key_file(repo: Path) -> None:
     assert run(repo, "install", REMOTE, DBSRT_REMOTE_API_KEY=KEY).returncode == 0
     assert run(repo, "uninstall").returncode == 0
-    assert not env_file(repo).exists()
+    assert not key_file(repo).exists()
     assert not unit(repo).exists()

@@ -13,7 +13,9 @@ SYSTEMD_USER_DIR="${HOME}/.config/systemd/user"
 SERVICE_NAME="dbsrt-agent.service"
 VLC_EXT_DIR="${HOME}/.local/share/vlc/lua/extensions"
 # Holds the remote API key (mode 0600): argv and the unit file are world-readable
-AGENT_ENV_FILE="${HOME}/.config/pydbsrt/dbsrt-agent.env"
+AGENT_KEY_FILE="${HOME}/.config/pydbsrt/dbsrt-remote-api-key"
+# Former EnvironmentFile holding the key in clear: removed on install and uninstall
+LEGACY_ENV_FILE="${HOME}/.config/pydbsrt/dbsrt-agent.env"
 DEFAULT_PORT=8765
 
 ACTION="${1:-install}"
@@ -56,15 +58,19 @@ case "${ACTION}" in
       echo "✓ Installed VLC extension ${VLC_EXT_DIR}/vlsub_dbsrt.lua"
     fi
 
-    # 4. Write the remote API key to a private env file read by the unit
+    # 4. Write the remote API key to a private file, handed over by systemd LoadCredential=:
+    #    unlike an env var, the agent's ffmpeg children never inherit it
+    rm -f "${LEGACY_ENV_FILE}"
     API_KEY="$(resolve_api_key)"
+    CREDENTIAL_LINE=""
     if [[ -n "${API_KEY}" ]]; then
-      mkdir -p "$(dirname "${AGENT_ENV_FILE}")"
-      (umask 077 && printf 'DBSRT_REMOTE_API_KEY=%s\n' "${API_KEY}" >"${AGENT_ENV_FILE}")
-      chmod 600 "${AGENT_ENV_FILE}"
-      echo "✓ Stored remote API key in ${AGENT_ENV_FILE} (mode 600)"
+      mkdir -p "$(dirname "${AGENT_KEY_FILE}")"
+      (umask 077 && printf '%s' "${API_KEY}" >"${AGENT_KEY_FILE}")
+      chmod 600 "${AGENT_KEY_FILE}"
+      CREDENTIAL_LINE="LoadCredential=dbsrt_remote_api_key:${AGENT_KEY_FILE}"
+      echo "✓ Stored remote API key in ${AGENT_KEY_FILE} (mode 600)"
     else
-      rm -f "${AGENT_ENV_FILE}"
+      rm -f "${AGENT_KEY_FILE}"
       echo "⚠️ No remote API key in DBSRT_REMOTE_API_KEY or 'pass': protected remotes answer 401."
     fi
 
@@ -77,7 +83,7 @@ After=network.target
 
 [Service]
 Type=simple
-EnvironmentFile=-${AGENT_ENV_FILE}
+${CREDENTIAL_LINE}
 ExecStart=${BIN_DIR}/dbsrt-agent --host 127.0.0.1 --port ${DEFAULT_PORT} --agent --remote-api ${REMOTE_API} --phash-dir /tmp --subtitles-dir /tmp
 Restart=always
 RestartSec=3
@@ -156,8 +162,8 @@ UNIT
       systemctl --user daemon-reload
       echo "✓ Removed systemd user unit."
     fi
-    rm -f "${BIN_DIR}/dbsrt-agent" "${AGENT_ENV_FILE}"
-    echo "✓ Removed binary ${BIN_DIR}/dbsrt-agent and key file ${AGENT_ENV_FILE}."
+    rm -f "${BIN_DIR}/dbsrt-agent" "${AGENT_KEY_FILE}" "${LEGACY_ENV_FILE}"
+    echo "✓ Removed binary ${BIN_DIR}/dbsrt-agent and key file ${AGENT_KEY_FILE}."
     rm -f "${VLC_EXT_DIR}/vlsub_dbsrt.lua"
     echo "✓ Removed VLC extension ${VLC_EXT_DIR}/vlsub_dbsrt.lua."
     echo "✓ Complete uninstallation finished."

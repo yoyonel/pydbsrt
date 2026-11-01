@@ -14,7 +14,8 @@ TEST_PORT=8765
 # Unreachable dummy remote and key: the recipe checks wiring, never calls a real remote
 TEST_REMOTE_API="http://127.0.0.1:9"
 TEST_API_KEY="recipe-test-key"
-TEST_ENV_FILE="/home/${TEST_USER_NAME}/.config/pydbsrt/dbsrt-agent.env"
+TEST_KEY_FILE="/home/${TEST_USER_NAME}/.config/pydbsrt/dbsrt-remote-api-key"
+TEST_CREDENTIAL="/run/user/${TEST_USER_ID}/credentials/dbsrt-agent.service/dbsrt_remote_api_key"
 
 CONTAINER_STARTUP_WAIT_SECONDS="2"
 CONTAINER_RESTART_WAIT_SECONDS="2"
@@ -129,16 +130,21 @@ if [[ "${AGENT_ARGV}" != *"--remote-api ${TEST_REMOTE_API}"* || "${AGENT_ARGV}" 
   echo -e "${COLOR_RED}❌ Agent argv lacks the remote API or exposes the key.${COLOR_RESET}" >&2
   exit 1
 fi
-if ! docker exec "${CONTAINER_NAME}" sh -c "tr '\\0' '\\n' </proc/${AGENT_PID}/environ" | grep -qx "DBSRT_REMOTE_API_KEY=${TEST_API_KEY}"; then
-  echo -e "${COLOR_RED}❌ Agent process did not receive DBSRT_REMOTE_API_KEY.${COLOR_RESET}" >&2
+# The key must not be inherited by the agent's children (ffmpeg): credential, not env var
+if docker exec "${CONTAINER_NAME}" sh -c "tr '\\0' '\\n' </proc/${AGENT_PID}/environ" | grep -q "${TEST_API_KEY}"; then
+  echo -e "${COLOR_RED}❌ Agent environment exposes the key.${COLOR_RESET}" >&2
   exit 1
 fi
-ENV_FILE_MODE="$(docker exec "${CONTAINER_NAME}" stat -c '%a' "${TEST_ENV_FILE}")"
-if [[ "${ENV_FILE_MODE}" != "600" ]]; then
-  echo -e "${COLOR_RED}❌ Key file mode is ${ENV_FILE_MODE}, expected 600.${COLOR_RESET}" >&2
+if [[ "$(docker exec "${CONTAINER_NAME}" cat "${TEST_CREDENTIAL}")" != "${TEST_API_KEY}" ]]; then
+  echo -e "${COLOR_RED}❌ systemd credential dbsrt_remote_api_key missing or wrong.${COLOR_RESET}" >&2
   exit 1
 fi
-echo -e "${COLOR_GREEN}✓ Agent relays to the given remote; key passed via a 600 env file, not argv.${COLOR_RESET}"
+KEY_FILE_MODE="$(docker exec "${CONTAINER_NAME}" stat -c '%a' "${TEST_KEY_FILE}")"
+if [[ "${KEY_FILE_MODE}" != "600" ]]; then
+  echo -e "${COLOR_RED}❌ Key file mode is ${KEY_FILE_MODE}, expected 600.${COLOR_RESET}" >&2
+  exit 1
+fi
+echo -e "${COLOR_GREEN}✓ Agent relays to the given remote; key passed as a systemd credential, not argv/env.${COLOR_RESET}"
 
 echo -e "${COLOR_BOLD}=== [Recipe Test] 6. Simulating host reboot & verifying auto-start ===${COLOR_RESET}"
 docker restart "${CONTAINER_NAME}" >/dev/null
@@ -167,7 +173,7 @@ if docker exec -u "${TEST_USER_NAME}" -e "XDG_RUNTIME_DIR=/run/user/${TEST_USER_
 fi
 
 # Assert key file removed
-if docker exec "${CONTAINER_NAME}" test -f "${TEST_ENV_FILE}"; then
+if docker exec "${CONTAINER_NAME}" test -f "${TEST_KEY_FILE}"; then
   echo -e "${COLOR_RED}❌ Key file still exists after uninstallation!${COLOR_RESET}" >&2
   exit 1
 fi

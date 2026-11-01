@@ -89,6 +89,16 @@ pub struct ServerCli {
     pub agent: bool,
 }
 
+/// systemd `LoadCredential=` name of the relay key: unlike an env var, ffmpeg children never inherit it.
+const REMOTE_API_KEY_CREDENTIAL: &str = "dbsrt_remote_api_key";
+
+/// Reads the relay key from `$CREDENTIALS_DIRECTORY`, if systemd provided one.
+fn credential_remote_api_key(credentials_dir: Option<&std::ffi::OsStr>) -> Option<String> {
+    let path = PathBuf::from(credentials_dir?).join(REMOTE_API_KEY_CREDENTIAL);
+    let key = std::fs::read_to_string(path).ok()?.trim().to_string();
+    (!key.is_empty()).then_some(key)
+}
+
 impl ServerCli {
     pub fn into_app_state(self) -> AppState {
         let db_config = self.db_host.map(|host| {
@@ -106,7 +116,9 @@ impl ServerCli {
         );
         state.db_config = db_config;
         state.remote_api = self.remote_api;
-        state.remote_api_key = self.remote_api_key;
+        state.remote_api_key = self.remote_api_key.or_else(|| {
+            credential_remote_api_key(std::env::var_os("CREDENTIALS_DIRECTORY").as_deref())
+        });
         state.api_key_file = self.api_key_file;
         state.is_agent = self.agent;
         state
@@ -353,6 +365,30 @@ async fn run_main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_remote_api_key_read_from_systemd_credential() {
+        let dir = std::env::temp_dir().join(format!("dbsrt_creds_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        assert_eq!(credential_remote_api_key(None), None);
+        assert_eq!(credential_remote_api_key(Some(dir.as_os_str())), None);
+
+        std::fs::write(dir.join(REMOTE_API_KEY_CREDENTIAL), "  \n").unwrap();
+        assert_eq!(credential_remote_api_key(Some(dir.as_os_str())), None);
+
+        std::fs::write(
+            dir.join(REMOTE_API_KEY_CREDENTIAL),
+            "k\"ey\\with$specials\n",
+        )
+        .unwrap();
+        assert_eq!(
+            credential_remote_api_key(Some(dir.as_os_str())).as_deref(),
+            Some("k\"ey\\with$specials")
+        );
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[tokio::test]
     async fn test_server_cli_parsing_state_and_lifecycle() {
