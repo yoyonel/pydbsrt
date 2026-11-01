@@ -350,6 +350,24 @@ def ftp_moviehash(ftp: ftplib.FTP, path: str, size: int) -> str | None:
     return moviehash_from_chunks(size, head, tail)
 
 
+def target_moviehash(target: VideoTarget, stream_base: str, child_env: Dict[str, str]) -> str | None:
+    """Moviehash of a target on the FTP NAS; None for HTTP streams or any FTP error (the stem names the files)."""
+    url = urllib.parse.urlsplit(stream_base)
+    if url.scheme != "ftp" or not url.hostname:
+        return None
+    ftp = ftplib.FTP()
+    try:
+        ftp.connect(url.hostname, url.port or DEFAULT_FTP_PORT, timeout=15)
+        ftp.login(child_env.get("DBSRT_FTP_USER", ""), child_env.get("DBSRT_FTP_PASSWORD", ""))
+        ftp.encoding = "utf-8"
+        return ftp_moviehash(ftp, target.rel_path, target.size_bytes)
+    except ftplib.all_errors:
+        return None
+    finally:
+        with contextlib.suppress(Exception):
+            ftp.close()
+
+
 def load_targets_file(targets_path: Path, nas_base: str, skip_stems: Set[str]) -> List[VideoTarget]:
     """Loads explicit targets (list of paths or {path, filename, stem, size_bytes} dicts).
 
@@ -607,11 +625,15 @@ def process_single_video(
         DEFAULT_SUBTITLES_DIR,
         "--skip-certify",
     ]
+    moviehash = target_moviehash(target, stream_base, child_env)
+    if moviehash:
+        base_cmd += ["--moviehash", moviehash]
 
     start_time = time.time()
     print(f"--> [DEBUG] Launching dbsrt for {target.filename}...", flush=True)
 
-    log_path = Path("logs") / "workers" / f"{Path(target.filename).stem}.log"
+    # The moviehash names the log: a 250+ byte media name cannot (os error 36)
+    log_path = Path("logs") / "workers" / f"{moviehash or Path(target.filename).stem}.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     status = "ERROR"
     returncode: int | None = None

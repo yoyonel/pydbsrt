@@ -432,6 +432,8 @@ def test_redact_nas(text, host, password, expected):
 def test_failed_video_event_never_carries_nas_secrets(tmp_path: Path, monkeypatch):
     """dbsrt output echoing the credentialed URL and the raw password is redacted before the 300-char cut."""
     monkeypatch.chdir(tmp_path)
+    # No FTP connection to the fake NAS host from a unit test
+    monkeypatch.setattr(worker, "target_moviehash", lambda target, stream_base, env: None)
     fake_dbsrt = tmp_path / "dbsrt"
     leak = f"ftp://u:{NAS_PASS_ENC}@{NAS_HOST}:21/tv/a.mkv"
     # Without redaction first, the 300-char cut would keep the raw password's last 4 chars, no '@' after them

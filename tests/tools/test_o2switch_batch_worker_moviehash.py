@@ -1,11 +1,20 @@
 """Moviehash of a NAS media read over FTP: same vectors as crates/dbsrt-core/tests/test_moviehash.rs."""
 
 import ftplib
+import os
+import threading
+from pathlib import Path
 from typing import cast
 
 import pytest
 
-from scripts.o2switch_batch_worker import MOVIEHASH_CHUNK_BYTES, ftp_moviehash, moviehash_from_chunks
+import scripts.o2switch_batch_worker as worker
+from scripts.o2switch_batch_worker import (
+    MOVIEHASH_CHUNK_BYTES,
+    VideoTarget,
+    ftp_moviehash,
+    moviehash_from_chunks,
+)
 
 VECTORS = [
     (200_000, "e19d5212c9812cd6"),
@@ -78,3 +87,35 @@ def test_ftp_moviehash_short_read_gives_no_hash() -> None:
     # Listed size larger than what the server sends: a hash of the wrong bytes would name the wrong .phash
     ftp = FakeFtp(pattern(100_000))
     assert ftp_moviehash(cast(ftplib.FTP, ftp), "/video/x.mkv", 200_000) is None
+
+
+def _run_video(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, moviehash: str | None) -> list[str]:
+    """Runs process_single_video with a fake dbsrt that prints its argv, one arg per line."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(worker, "target_moviehash", lambda target, stream_base, env: moviehash)
+    fake_dbsrt = tmp_path / "dbsrt"
+    fake_dbsrt.write_text('#!/bin/sh\nprintf "%s\\n" "$@"\n', encoding="utf-8")
+    fake_dbsrt.chmod(0o755)
+    target = VideoTarget("/tv/Raw Name.mkv", "Raw Name.mkv", 200_000)
+    env = {"PATH": os.environ["PATH"]}
+    worker.process_single_video(target, "ftp://nas:21", str(fake_dbsrt), env, threading.Lock(), tmp_path / "ev.jsonl")
+    return sorted(p.name for p in (tmp_path / "logs" / "workers").iterdir())
+
+
+def test_process_single_video_names_the_log_by_moviehash(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # A 250+ byte media name cannot name a file (os error 36): the moviehash can
+    assert _run_video(tmp_path, monkeypatch, "e19d5212c9812cd6") == ["e19d5212c9812cd6.log"]
+    argv = (tmp_path / "logs" / "workers" / "e19d5212c9812cd6.log").read_text(encoding="utf-8").splitlines()
+    assert argv[argv.index("--moviehash") + 1] == "e19d5212c9812cd6"
+
+
+def test_process_single_video_without_moviehash_keeps_the_stem(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    assert _run_video(tmp_path, monkeypatch, None) == ["Raw Name.log"]
+    assert "--moviehash" not in (tmp_path / "logs" / "workers" / "Raw Name.log").read_text(encoding="utf-8")
+
+
+def test_target_moviehash_is_none_when_the_nas_is_unreachable() -> None:
+    target = VideoTarget("/tv/a.mkv", "a.mkv", 200_000)
+    # Port 1 on localhost refuses the connection: no hash, the worker falls back to the stem
+    assert worker.target_moviehash(target, "ftp://127.0.0.1:1", {}) is None
+    assert worker.target_moviehash(target, "http://127.0.0.1:1", {}) is None

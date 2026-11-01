@@ -40,7 +40,7 @@ pub fn find_or_build_phash(
     media_file: &Path,
     phash_dir: &Path,
 ) -> Result<(PathBuf, Vec<u64>, f64)> {
-    find_or_build_phash_with_hwaccel(media_file, phash_dir, dbsrt_core::HwAccel::Auto)
+    find_or_build_phash_with_hwaccel(media_file, phash_dir, dbsrt_core::HwAccel::Auto, None)
 }
 
 fn resolve_media_path_filename(media_file: &Path) -> Result<String> {
@@ -54,6 +54,38 @@ fn resolve_media_path_filename(media_file: &Path) -> Result<String> {
         .file_name()
         .map(|s| s.to_string_lossy().to_string())
         .ok_or_else(|| anyhow::anyhow!("Cannot derive filename from media path {:?}", media_file))
+}
+
+/// `.phash` file name: the moviehash when known (fits NAME_MAX whatever the media name), else the media file name.
+pub fn phash_file_name(file_name: &str, moviehash: Option<&str>, fps: f64) -> String {
+    format!("{}.{:.1}fps.phash", moviehash.unwrap_or(file_name), fps)
+}
+
+/// `<moviehash>.json` next to the `.phash`: the media name its file name no longer carries.
+pub struct PhashSidecar<'a> {
+    pub moviehash: &'a str,
+    pub media_name: &'a str,
+    pub fps: f64,
+    pub frames: usize,
+}
+
+impl PhashSidecar<'_> {
+    pub fn write(&self, phash_dir: &Path) -> Result<PathBuf> {
+        let extracted_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs());
+        let sidecar = serde_json::json!({
+            "moviehash": self.moviehash,
+            "media_name": self.media_name,
+            "fps": self.fps,
+            "frames": self.frames,
+            "extracted_at": extracted_at,
+        });
+        let path = phash_dir.join(format!("{}.json", self.moviehash));
+        std::fs::write(&path, serde_json::to_string_pretty(&sidecar)?)
+            .with_context(|| format!("Cannot write sidecar {:?}", path))?;
+        Ok(path)
+    }
 }
 
 fn match_prefix_phash(entries: &[PathBuf], full_name: &str) -> Option<(PathBuf, Vec<u64>, f64)> {
@@ -145,6 +177,7 @@ pub fn find_or_build_phash_with_hwaccel(
     media_file: &Path,
     phash_dir: &Path,
     hwaccel: dbsrt_core::HwAccel,
+    moviehash: Option<&str>,
 ) -> Result<(PathBuf, Vec<u64>, f64)> {
     let full_name = media_file
         .file_name()
@@ -187,7 +220,7 @@ pub fn find_or_build_phash_with_hwaccel(
         _ => 0,
     };
     let file_name = resolve_media_path_filename(media_file)?;
-    let out_name = format!("{}.{:.1}fps.phash", file_name, meta_fps);
+    let out_name = phash_file_name(&file_name, moviehash, meta_fps);
     let out_path = phash_dir.join(&out_name);
     let base = VideoExtractionOptions {
         max_frames: (max_frames > 0).then_some(max_frames),
@@ -313,6 +346,38 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn test_phash_file_name_uses_moviehash_whatever_the_media_name() {
+        let long = format!("{}.mkv", "x".repeat(300));
+        assert_eq!(
+            phash_file_name(&long, Some("e19d5212c9812cd6"), 23.976),
+            "e19d5212c9812cd6.24.0fps.phash"
+        );
+        assert_eq!(phash_file_name("a.mkv", None, 25.0), "a.mkv.25.0fps.phash");
+    }
+
+    #[test]
+    fn test_write_phash_sidecar_keeps_the_media_name() {
+        let dir = scratch_dir("sidecar");
+        // 300 bytes: longer than NAME_MAX, only the sidecar content carries it
+        let long = format!("{}.mkv", "\u{e9}".repeat(148));
+        let sidecar = PhashSidecar {
+            moviehash: "e19d5212c9812cd6",
+            media_name: &long,
+            fps: 25.0,
+            frames: 1200,
+        };
+        let path = sidecar.write(&dir).unwrap();
+        assert_eq!(path, dir.join("e19d5212c9812cd6.json"));
+        let v: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(v["moviehash"], "e19d5212c9812cd6");
+        assert_eq!(v["media_name"], long);
+        assert_eq!(v["fps"], 25.0);
+        assert_eq!(v["frames"], 1200);
+        assert!(v["extracted_at"].as_u64().unwrap() > 0);
     }
 
     #[test]
