@@ -308,6 +308,48 @@ def _walk_nas_videos_ftp(
     return results
 
 
+# OpenSubtitles moviehash: file size plus its 64 KiB head and tail summed as little-endian u64 words
+MOVIEHASH_CHUNK_BYTES = 65536
+
+
+def moviehash_from_chunks(size: int, head: bytes, tail: bytes) -> str:
+    """Same value as compute_opensubtitles_hash (dbsrt-core) for the same file."""
+    total = size
+    for block in (head, tail):
+        for i in range(0, len(block), 8):
+            total += int.from_bytes(block[i : i + 8], "little")
+    return f"{total & 0xFFFFFFFFFFFFFFFF:016x}"
+
+
+def _ftp_read_at(ftp: ftplib.FTP, path: str, offset: int) -> bytes:
+    """Reads MOVIEHASH_CHUNK_BYTES at `offset`, then drops the rest of the transfer."""
+    conn = ftp.transfercmd(f"RETR {path}", rest=offset)
+    data = bytearray()
+    try:
+        while len(data) < MOVIEHASH_CHUNK_BYTES:
+            chunk = conn.recv(MOVIEHASH_CHUNK_BYTES - len(data))
+            if not chunk:
+                break
+            data += chunk
+    finally:
+        conn.close()
+    # An early close makes the server answer 426 (226 when the file ended): both end the transfer
+    with contextlib.suppress(ftplib.error_temp, ftplib.error_reply):
+        ftp.voidresp()
+    return bytes(data)
+
+
+def ftp_moviehash(ftp: ftplib.FTP, path: str, size: int) -> str | None:
+    """Moviehash of a NAS file from two ranged reads; None when the exact bytes cannot be read."""
+    if size < MOVIEHASH_CHUNK_BYTES:
+        return None
+    head = _ftp_read_at(ftp, path, 0)
+    tail = _ftp_read_at(ftp, path, size - MOVIEHASH_CHUNK_BYTES)
+    if len(head) < MOVIEHASH_CHUNK_BYTES or len(tail) < MOVIEHASH_CHUNK_BYTES:
+        return None
+    return moviehash_from_chunks(size, head, tail)
+
+
 def load_targets_file(targets_path: Path, nas_base: str, skip_stems: Set[str]) -> List[VideoTarget]:
     """Loads explicit targets (list of paths or {path, filename, stem, size_bytes} dicts).
 
