@@ -158,6 +158,7 @@ nav:
       - Étalon Sanity Check Multi-Cibles VLC: reference/2026-10-28-etalon-sanity-check-multi-cibles-vlc.md
   - 💡 Explications & Architecture:
       - Vue d'Ensemble Conceptuelle: explanation/index.md
+      - Glossaire Métier: explanation/glossaire-metier.md
       - Principe Fondamental du pHash & Retargeting: explanation/principe-fondamental-phash-et-retargeting.md
       - Performances Décodage pHash & Contentions: explanation/performances-decodage-phash-et-contentions.md
       - Plafond Théorique Pipe pHash (o2switch): explanation/2026-10-29-etude-theorique-plafond-pipe-phash-o2switch.md
