@@ -181,9 +181,9 @@ pub fn read_ref_phash_for_media(phash_dir: &Path, media_name: &str) -> Result<Ve
     let mut candidate_paths = Vec::new();
     let norm_target = norm_alnum(clean_name);
 
-    for entry in entries.flatten() {
-        let p = entry.path();
-        if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
+    for p in entries.flatten().map(|e| e.path()) {
+        let logical = dbsrt_core::phash_logical_name(&p);
+        if let Some(name) = Some(logical.as_str()).filter(|n| !n.is_empty()) {
             if name.ends_with(".phash") && !name.contains("_mid15s") {
                 let cand_stem = name.trim_end_matches(".phash");
                 if name == format!("{}.phash", clean_name) || name == clean_name {
@@ -606,5 +606,22 @@ mod tests {
         let found = find_existing_phash(&media, &dir);
         std::fs::remove_dir_all(&dir).ok();
         assert_eq!(found, Some((phash, vec![1, 2, 3], 25.0)));
+    }
+
+    #[test]
+    fn test_read_ref_phash_for_media_finds_a_moviehash_file_by_its_media_name() {
+        let dir = std::env::temp_dir().join(format!("dbsrt_srv_ref_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        write_phash_file(&dir.join("e19d5212c9812cd6.25.0fps.phash"), &[4, 5]).unwrap();
+        std::fs::write(
+            dir.join("e19d5212c9812cd6.json"),
+            r#"{"media_name":"Show.S01E02.mkv"}"#,
+        )
+        .unwrap();
+
+        let found = read_ref_phash_for_media(&dir, "Show.S01E02.mkv.25.0fps.phash");
+        std::fs::remove_dir_all(&dir).ok();
+        assert_eq!(found.unwrap(), vec![4, 5]);
     }
 }

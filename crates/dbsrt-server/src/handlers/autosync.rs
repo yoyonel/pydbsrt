@@ -612,10 +612,7 @@ pub async fn certify_handler(
         .unwrap_or_default()
         .to_string_lossy()
         .to_string();
-    let media_name = phash_fname
-        .strip_suffix(".phash")
-        .unwrap_or(&phash_fname)
-        .to_string();
+    let media_name = dbsrt_core::phash_media_name(&phash_file);
 
     let dest_srt_path = if subtitle_path.starts_with(&subtitles_dir) {
         subtitle_path.clone()

@@ -172,7 +172,8 @@ pub fn calculate_best_sequence_shift(
         if let Ok(entries) = std::fs::read_dir(dir) {
             for entry in entries.flatten() {
                 let p = entry.path();
-                if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
+                let logical = dbsrt_core::phash_logical_name(&p);
+                if let Some(name) = Some(logical.as_str()).filter(|n| !n.is_empty()) {
                     if name.ends_with(".phash")
                         && !name.contains("_mid15s")
                         && is_reference_of(recognized, name.trim_end_matches(".phash"))

@@ -57,6 +57,21 @@ def test_load_existing_phash_stems_comprehensive():
         assert "corrupted_movie" not in stems
 
 
+def test_load_existing_phash_stems_reads_the_media_name_of_a_moviehash_file(tmp_path: Path) -> None:
+    (tmp_path / "e19d5212c9812cd6.25.0fps.phash").write_bytes(b"DATA")
+    (tmp_path / "e19d5212c9812cd6.json").write_text('{"media_name": "Show.S01E02.mkv"}', encoding="utf-8")
+    # No sidecar or a broken one: the file still counts under its own stem, nothing raises
+    (tmp_path / "0123456789abcdef.24.0fps.phash").write_bytes(b"DATA")
+    (tmp_path / "fedcba9876543210.24.0fps.phash").write_bytes(b"DATA")
+    (tmp_path / "fedcba9876543210.json").write_text("not json {", encoding="utf-8")
+
+    stems = load_existing_phash_stems(tmp_path)
+
+    assert "Show.S01E02" in stems
+    assert "0123456789abcdef" in stems
+    assert "fedcba9876543210" in stems
+
+
 def test_load_certified_stems_from_couplings():
     """Verifies parsing of certified stems from Zero-DB couplings.json."""
     with tempfile.TemporaryDirectory() as tmp_dir:

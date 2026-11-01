@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use clap::Args;
-use dbsrt_core::{detect_cuts, read_phash_file, MediaMetadata};
+use dbsrt_core::{detect_cuts, phash_logical_name, read_phash_file, MediaMetadata};
 use dbsrt_index::DbphashBuilder;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -127,7 +127,7 @@ pub fn run_pack(args: &PackArgs) -> Result<()> {
     let mut total_raw_bytes = 0u64;
 
     for (idx, file_path) in files.iter().enumerate() {
-        let meta = MediaMetadata::parse_from_path(file_path);
+        let meta = MediaMetadata::parse(&phash_logical_name(file_path));
         let hashes = read_phash_file(file_path)?;
         total_raw_bytes += std::fs::metadata(file_path)?.len();
 
@@ -256,6 +256,36 @@ mod tests {
             .map(|m| m.known_frame_count())
             .collect();
         assert_eq!(counts, vec![Some(251), Some(3), Some(0)]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_pack_titles_a_moviehash_named_phash_from_its_sidecar() {
+        let dir = std::env::temp_dir().join(format!("test_pack_sidecar_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dbsrt_core::write_phash_file(&dir.join("e19d5212c9812cd6.25.0fps.phash"), &[7u64; 30])
+            .unwrap();
+        std::fs::write(
+            dir.join("e19d5212c9812cd6.json"),
+            r#"{"media_name":"Silicon.Valley.S02E01.1080p.mkv"}"#,
+        )
+        .unwrap();
+        let output = dir.join("out.dbphash");
+        let args = PackArgs {
+            phash_dir: dir.clone(),
+            extra_dirs: vec![],
+            output: output.clone(),
+            threshold: DEFAULT_CUT_THRESHOLD,
+            default_fps: DEFAULT_BASELINE_FPS,
+        };
+
+        run_pack(&args).unwrap();
+
+        let reader = dbsrt_index::MmapDbphash::open(&output).unwrap();
+        let entry = &reader.media_entries()[0];
+        assert_eq!(reader.get_title(entry), "Silicon Valley");
+        assert_eq!((entry.season, entry.episode), (2, 1));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

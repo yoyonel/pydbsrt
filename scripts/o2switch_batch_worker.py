@@ -186,6 +186,7 @@ VIDEO_EXTENSIONS: Tuple[str, ...] = (".mkv", ".mp4", ".webm", ".avi")
 # MLSD entries that never hold library videos (Synology metadata, subtitle and placeholder folders)
 FTP_SKIPPED_NAMES: Tuple[str, ...] = (".", "..", "EMPTY_DIRS", "SRT", "@eaDir")
 PHASH_FPS_SUFFIX_RE = re.compile(r"\.\d+(\.\d+)?fps$")
+MOVIEHASH_RE = re.compile(r"[0-9a-f]{16}")
 
 
 def resolve_nas_password() -> str:
@@ -236,6 +237,18 @@ def _file_size(path: Path) -> int:
         return 0
 
 
+def _sidecar_media_name(phash: Path) -> str:
+    """media_name of the <moviehash>.json sidecar next to a <moviehash>.<fps>fps.phash, or ""."""
+    head = phash.name.split(".", 1)[0]
+    if not MOVIEHASH_RE.fullmatch(head):
+        return ""
+    try:
+        media_name = json.loads(phash.with_name(f"{head}.json").read_text(encoding="utf-8")).get("media_name")
+    except (OSError, ValueError, AttributeError):
+        return ""
+    return media_name if isinstance(media_name, str) else ""
+
+
 def load_existing_phash_stems(phash_dir: Path) -> Set[str]:
     """Loads all media stems with existing non-empty .phash files on disk."""
     stems: Set[str] = set()
@@ -243,6 +256,9 @@ def load_existing_phash_stems(phash_dir: Path) -> Set[str]:
         for p in phash_dir.glob("*.phash"):
             if _file_size(p) > 0:
                 stems.update((phash_media_stem(p.name), p.stem))
+                media_name = _sidecar_media_name(p)
+                if media_name:
+                    stems.add(phash_media_stem(media_name))
     return stems
 
 
