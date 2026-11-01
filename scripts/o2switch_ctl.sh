@@ -829,6 +829,16 @@ REMOTE_SCRIPT
     echo "remote $(ssh "${O2SWITCH_HOST}" "sha256sum '${REMOTE_BASE}/scripts/o2switch_batch_worker.py'" | cut -c1-16)"
     ;;
 
+  phash-migrate)
+    # Legacy .phash names to moviehash names; dry run unless --apply. Counts only (no media name)
+    check_ssh
+    shift || true
+    rsync -a --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" --chmod=F755 \
+      "scripts/o2switch_batch_worker.py" "scripts/o2switch_phash_migrate.py" "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/"
+    # shellcheck disable=SC2029
+    ssh "${O2SWITCH_HOST}" "cd $(printf '%q' "${REMOTE_BASE}") && ./bin/python3 -u scripts/o2switch_phash_migrate.py ${*:+$(printf '%q ' "$@")}"
+    ;;
+
   batch-stop)
     check_ssh
     echo "=== Stopping Batch Worker Daemon on ${O2SWITCH_HOST} ==="

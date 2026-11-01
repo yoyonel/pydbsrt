@@ -68,6 +68,7 @@ def test_count_notes_counts_files_not_lines() -> None:
         "Extraction: no checkpoint, full decode\nExtraction: no checkpoint, full decode",
         "Extraction: resumed 1500 frames from checkpoint",
         "Extraction: checkpoint unreadable (bad magic), full decode",
+        "Extraction: reused existing .phash (1500 frames), no decode",
         TOO_LONG_NEW,
         "nothing",
     ]
@@ -76,6 +77,7 @@ def test_count_notes_counts_files_not_lines() -> None:
         "no checkpoint, full decode": 1,
         "resumed from checkpoint": 1,
         "checkpoint unreadable": 1,
+        "reused existing .phash": 1,
     }
 
 

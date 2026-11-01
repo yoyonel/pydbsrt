@@ -249,6 +249,39 @@ impl PhashCheckpoint {
     }
 }
 
+/// Name a `.phash` would have under the media name: `<moviehash>.<fps>fps.phash` becomes
+/// `<media_name>.<fps>fps.phash` when its `<moviehash>.json` sidecar is next to it.
+/// Any other file keeps its own name.
+pub fn phash_logical_name(path: &Path) -> String {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let Some((hash, rest)) = name.split_once('.') else {
+        return name;
+    };
+    if hash.len() != 16 || !hash.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return name;
+    }
+    let sidecar = path.with_file_name(format!("{hash}.json"));
+    let media_name = fs::read_to_string(sidecar)
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| v.get("media_name")?.as_str().map(str::to_string));
+    match media_name {
+        Some(media) if !media.is_empty() => format!("{media}.{rest}"),
+        _ => name,
+    }
+}
+
+/// [`phash_logical_name`] without its `.phash` extension: the media name consumers store.
+pub fn phash_media_name(path: &Path) -> String {
+    let name = phash_logical_name(path);
+    name.strip_suffix(".phash")
+        .map(str::to_string)
+        .unwrap_or(name)
+}
+
 /// Writes a binary .phash file (8-byte big-endian integers).
 pub fn write_phash_file(path: &Path, hashes: &[u64]) -> Result<()> {
     let mut file = fs::File::create(path)
@@ -362,6 +395,29 @@ mod tests {
         let h1 = 0xAAAA_AAAA_5555_5555;
         let cuts_identical = detect_cuts(&[h1, h1, h1], 16);
         assert!(cuts_identical.is_empty());
+    }
+
+    #[test]
+    fn test_phash_logical_name_rebuilds_the_media_name_from_the_sidecar() {
+        let dir = std::env::temp_dir().join(format!("logical_name_{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let named = dir.join("e19d5212c9812cd6.25.0fps.phash");
+        fs::write(
+            dir.join("e19d5212c9812cd6.json"),
+            r#"{"moviehash":"e19d5212c9812cd6","media_name":"Show.S01E02.mkv"}"#,
+        )
+        .unwrap();
+        assert_eq!(phash_logical_name(&named), "Show.S01E02.mkv.25.0fps.phash");
+        assert_eq!(phash_media_name(&named), "Show.S01E02.mkv.25.0fps");
+        // No sidecar, or not a moviehash name: the file name itself
+        let orphan = dir.join("0123456789abcdef.24.0fps.phash");
+        assert_eq!(
+            phash_logical_name(&orphan),
+            "0123456789abcdef.24.0fps.phash"
+        );
+        let old = dir.join("Old Name.mkv.23.976fps.phash");
+        assert_eq!(phash_logical_name(&old), "Old Name.mkv.23.976fps.phash");
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]

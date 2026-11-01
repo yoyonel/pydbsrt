@@ -88,10 +88,7 @@ impl MmapPhashFile {
     /// Opens and loads a .phash file into memory without keeping the file descriptor open.
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
         let path_buf = path.as_ref().to_path_buf();
-        let name = path_buf
-            .file_name()
-            .map(|s| s.to_string_lossy().to_string())
-            .unwrap_or_default();
+        let name = dbsrt_core::phash_logical_name(&path_buf);
 
         let hashes = dbsrt_core::read_phash_file(&path_buf)?;
 
@@ -436,6 +433,24 @@ mod tests {
     use super::*;
     use std::fs::File;
     use std::io::Write;
+
+    #[test]
+    fn test_mmap_phash_file_names_a_moviehash_file_by_its_media() -> Result<()> {
+        let dir = std::env::temp_dir().join(format!("mmap_sidecar_{}", std::process::id()));
+        std::fs::create_dir_all(&dir)?;
+        let path = dir.join("e19d5212c9812cd6.25.0fps.phash");
+        dbsrt_core::write_phash_file(&path, &[1, 2, 3])?;
+        std::fs::write(
+            dir.join("e19d5212c9812cd6.json"),
+            r#"{"media_name":"Show.S01E02.mkv"}"#,
+        )?;
+        assert_eq!(
+            MmapPhashFile::open(&path)?.name,
+            "Show.S01E02.mkv.25.0fps.phash"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+        Ok(())
+    }
 
     #[test]
     fn test_mmap_phash_file() -> Result<()> {

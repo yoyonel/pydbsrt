@@ -1,5 +1,6 @@
 """Unit tests for o2switch_batch_worker script."""
 
+import argparse
 import json
 import os
 import signal
@@ -15,7 +16,9 @@ import pytest
 import scripts.o2switch_batch_worker as worker
 from scripts.o2switch_batch_worker import (
     ACTIVE_CHILD_PGIDS,
+    DEFAULT_TARGETS_PATH,
     VideoTarget,
+    _initial_targets,
     _kill_active_children,
     abort_batch,
     build_child_env,
@@ -55,6 +58,21 @@ def test_load_existing_phash_stems_comprehensive():
         assert "L'illusion du temps (1_4) [ARTE]" in stems
         assert "legacy_movie" in stems
         assert "corrupted_movie" not in stems
+
+
+def test_load_existing_phash_stems_reads_the_media_name_of_a_moviehash_file(tmp_path: Path) -> None:
+    (tmp_path / "e19d5212c9812cd6.25.0fps.phash").write_bytes(b"DATA")
+    (tmp_path / "e19d5212c9812cd6.json").write_text('{"media_name": "Show.S01E02.mkv"}', encoding="utf-8")
+    # No sidecar or a broken one: the file still counts under its own stem, nothing raises
+    (tmp_path / "0123456789abcdef.24.0fps.phash").write_bytes(b"DATA")
+    (tmp_path / "fedcba9876543210.24.0fps.phash").write_bytes(b"DATA")
+    (tmp_path / "fedcba9876543210.json").write_text("not json {", encoding="utf-8")
+
+    stems = load_existing_phash_stems(tmp_path)
+
+    assert "Show.S01E02" in stems
+    assert "0123456789abcdef" in stems
+    assert "fedcba9876543210" in stems
 
 
 def test_load_certified_stems_from_couplings():
@@ -98,6 +116,27 @@ def test_resolve_retry_targets_keeps_only_last_failures(tmp_path: Path):
 
     assert resolve_retry_targets(events, skip_stems={"c"}) == [VideoTarget("/tvshow/b.mkv", "b.mkv", 20)]
     assert resolve_retry_targets(tmp_path / "missing.jsonl", set()) == []
+
+
+def test_retry_failed_with_an_explicit_targets_file_retries_only_those(tmp_path: Path):
+    """A blacklisted video can be retried alone: an explicit targets file narrows --retry-failed."""
+    events = tmp_path / "events.jsonl"
+    lines = [
+        {"video_stem": s, "video_rel_path": f"/tvshow/{s}.mkv", "file_size_bytes": 1, "success": False}
+        for s in ("a", "long", "long", "long")
+    ]
+    events.write_text("\n".join(json.dumps(r) for r in lines), encoding="utf-8")
+    nas = [VideoTarget("/tvshow/a.mkv", "a.mkv", 1), VideoTarget("/tvshow/long.mkv", "long.mkv", 1)]
+    explicit = tmp_path / "one.json"
+    explicit.write_text(json.dumps([{"path": "/tvshow/long.mkv", "stem": "long"}]), encoding="utf-8")
+
+    def run(targets_file: str) -> list[VideoTarget]:
+        args = argparse.Namespace(stream_base=None, retry_failed=True, targets_file=targets_file, nas_base="/tvshow")
+        return _initial_targets(args, nas, events, set(), {"long"})
+
+    assert run(str(explicit)) == [VideoTarget("/tvshow/long.mkv", "long.mkv", 1)]
+    # The default targets file, rewritten by every scan, never narrows a retry
+    assert run(DEFAULT_TARGETS_PATH) == nas
 
 
 def test_load_targets_file_rebases_and_skips(tmp_path: Path):
@@ -432,6 +471,8 @@ def test_redact_nas(text, host, password, expected):
 def test_failed_video_event_never_carries_nas_secrets(tmp_path: Path, monkeypatch):
     """dbsrt output echoing the credentialed URL and the raw password is redacted before the 300-char cut."""
     monkeypatch.chdir(tmp_path)
+    # No FTP connection to the fake NAS host from a unit test
+    monkeypatch.setattr(worker, "target_moviehash", lambda target, stream_base, env: None)
     fake_dbsrt = tmp_path / "dbsrt"
     leak = f"ftp://u:{NAS_PASS_ENC}@{NAS_HOST}:21/tv/a.mkv"
     # Without redaction first, the 300-char cut would keep the raw password's last 4 chars, no '@' after them

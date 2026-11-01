@@ -180,10 +180,7 @@ pub fn run_certify_coupling(args: &CertifyCouplingArgs) -> Result<()> {
         .unwrap_or_default()
         .to_string_lossy()
         .to_string();
-    let media_name = phash_fname
-        .strip_suffix(".phash")
-        .unwrap_or(&phash_fname)
-        .to_string();
+    let media_name = dbsrt_core::phash_media_name(&phash_path);
 
     let dest_srt_path = if args.db_only || args.subtitle.starts_with(&args.subtitles_dir) {
         args.subtitle.clone()

@@ -186,6 +186,7 @@ VIDEO_EXTENSIONS: Tuple[str, ...] = (".mkv", ".mp4", ".webm", ".avi")
 # MLSD entries that never hold library videos (Synology metadata, subtitle and placeholder folders)
 FTP_SKIPPED_NAMES: Tuple[str, ...] = (".", "..", "EMPTY_DIRS", "SRT", "@eaDir")
 PHASH_FPS_SUFFIX_RE = re.compile(r"\.\d+(\.\d+)?fps$")
+MOVIEHASH_RE = re.compile(r"[0-9a-f]{16}")
 
 
 def resolve_nas_password() -> str:
@@ -236,6 +237,18 @@ def _file_size(path: Path) -> int:
         return 0
 
 
+def _sidecar_media_name(phash: Path) -> str:
+    """media_name of the <moviehash>.json sidecar next to a <moviehash>.<fps>fps.phash, or ""."""
+    head = phash.name.split(".", 1)[0]
+    if not MOVIEHASH_RE.fullmatch(head):
+        return ""
+    try:
+        media_name = json.loads(phash.with_name(f"{head}.json").read_text(encoding="utf-8")).get("media_name")
+    except (OSError, ValueError, AttributeError):
+        return ""
+    return media_name if isinstance(media_name, str) else ""
+
+
 def load_existing_phash_stems(phash_dir: Path) -> Set[str]:
     """Loads all media stems with existing non-empty .phash files on disk."""
     stems: Set[str] = set()
@@ -243,6 +256,9 @@ def load_existing_phash_stems(phash_dir: Path) -> Set[str]:
         for p in phash_dir.glob("*.phash"):
             if _file_size(p) > 0:
                 stems.update((phash_media_stem(p.name), p.stem))
+                media_name = _sidecar_media_name(p)
+                if media_name:
+                    stems.add(phash_media_stem(media_name))
     return stems
 
 
@@ -306,6 +322,77 @@ def _walk_nas_videos_ftp(
     with contextlib.suppress(Exception):
         ftp.quit()
     return results
+
+
+# OpenSubtitles moviehash: file size plus its 64 KiB head and tail summed as little-endian u64 words
+MOVIEHASH_CHUNK_BYTES = 65536
+
+
+def moviehash_from_chunks(size: int, head: bytes, tail: bytes) -> str:
+    """Same value as compute_opensubtitles_hash (dbsrt-core) for the same file."""
+    total = size
+    for block in (head, tail):
+        for i in range(0, len(block), 8):
+            total += int.from_bytes(block[i : i + 8], "little")
+    return f"{total & 0xFFFFFFFFFFFFFFFF:016x}"
+
+
+def _ftp_read_at(connect: Callable[[], ftplib.FTP], path: str, offset: int) -> bytes:
+    """Reads MOVIEHASH_CHUNK_BYTES at `offset` in its own FTP session, then drops the rest of the transfer."""
+    ftp = connect()
+    try:
+        conn = ftp.transfercmd(f"RETR {path}", rest=offset)
+        data = bytearray()
+        try:
+            while len(data) < MOVIEHASH_CHUNK_BYTES:
+                chunk = conn.recv(MOVIEHASH_CHUNK_BYTES - len(data))
+                if not chunk:
+                    break
+                data += chunk
+        finally:
+            conn.close()
+        # An early close gets 426 (226 when the file ended); the Synology NAS drops the control connection
+        # instead (EOFError), which is why each read opens its own session
+        with contextlib.suppress(ftplib.error_temp, ftplib.error_reply, EOFError):
+            ftp.voidresp()
+        return bytes(data)
+    finally:
+        with contextlib.suppress(Exception):
+            ftp.close()
+
+
+def ftp_moviehash(connect: Callable[[], ftplib.FTP], path: str, size: int) -> str | None:
+    """Moviehash of a NAS file from two ranged reads; None when the exact bytes cannot be read."""
+    if size < MOVIEHASH_CHUNK_BYTES:
+        return None
+    head = _ftp_read_at(connect, path, 0)
+    tail = _ftp_read_at(connect, path, size - MOVIEHASH_CHUNK_BYTES)
+    if len(head) < MOVIEHASH_CHUNK_BYTES or len(tail) < MOVIEHASH_CHUNK_BYTES:
+        return None
+    return moviehash_from_chunks(size, head, tail)
+
+
+def target_moviehash(target: VideoTarget, stream_base: str, child_env: Dict[str, str]) -> str | None:
+    """Moviehash of a target on the FTP NAS; None for HTTP streams or any FTP error (the stem names the files)."""
+    url = urllib.parse.urlsplit(stream_base)
+    if url.scheme != "ftp" or not url.hostname:
+        return None
+    host = url.hostname
+
+    def connect() -> ftplib.FTP:
+        ftp = ftplib.FTP(encoding="utf-8")
+        try:
+            ftp.connect(host, url.port or DEFAULT_FTP_PORT, timeout=15)
+            ftp.login(child_env.get("DBSRT_FTP_USER", ""), child_env.get("DBSRT_FTP_PASSWORD", ""))
+        except BaseException:
+            ftp.close()
+            raise
+        return ftp
+
+    try:
+        return ftp_moviehash(connect, target.rel_path, target.size_bytes)
+    except ftplib.all_errors:
+        return None
 
 
 def load_targets_file(targets_path: Path, nas_base: str, skip_stems: Set[str]) -> List[VideoTarget]:
@@ -565,11 +652,15 @@ def process_single_video(
         DEFAULT_SUBTITLES_DIR,
         "--skip-certify",
     ]
+    moviehash = target_moviehash(target, stream_base, child_env)
+    if moviehash:
+        base_cmd += ["--moviehash", moviehash]
 
     start_time = time.time()
     print(f"--> [DEBUG] Launching dbsrt for {target.filename}...", flush=True)
 
-    log_path = Path("logs") / "workers" / f"{Path(target.filename).stem}.log"
+    # The moviehash names the log: a 250+ byte media name cannot (os error 36)
+    log_path = Path("logs") / "workers" / f"{moviehash or Path(target.filename).stem}.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     status = "ERROR"
     returncode: int | None = None
@@ -792,7 +883,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--retry-failed",
         action="store_true",
-        help="Retry only videos whose last run failed in the events log (ignores --targets-file)",
+        help="Retry only videos whose last run failed in the events log (a non-default --targets-file narrows it)",
     )
     parser.add_argument(
         "--max-extraction-secs",
@@ -817,6 +908,17 @@ def build_arg_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _narrow_to_targets_file(
+    args: argparse.Namespace, targets: List[VideoTarget], all_videos: List[VideoTarget]
+) -> List[VideoTarget]:
+    """Keeps the targets listed in a non-default --targets-file; the default one is rewritten by every scan."""
+    if args.targets_file == DEFAULT_TARGETS_PATH or not Path(args.targets_file).is_file():
+        return targets
+    listed = match_nas_paths(load_targets_file(Path(args.targets_file), "", set()), all_videos)
+    wanted = {video.filename for video in listed}
+    return [video for video in targets if video.filename in wanted]
+
+
 def _initial_targets(
     args: argparse.Namespace,
     all_videos: List[VideoTarget],
@@ -835,7 +937,9 @@ def _initial_targets(
         return []
     if args.retry_failed:
         # An explicit retry ignores the blacklist
-        targets = match_nas_paths(resolve_retry_targets(events_log, done_stems), all_videos)
+        targets = _narrow_to_targets_file(
+            args, match_nas_paths(resolve_retry_targets(events_log, done_stems), all_videos), all_videos
+        )
         print(f"✓ Found {len(targets)} failed videos to retry under {args.nas_base}.")
         return targets
     targets_path = Path(args.targets_file)

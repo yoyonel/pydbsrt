@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use crate::cli::PostgresArgs;
 use crate::commands::certify::detect_cli_subtitle_lang_status;
-use crate::commands::shared::find_or_build_phash_with_hwaccel;
+use crate::commands::shared::{find_or_build_phash_with_hwaccel, phash_file_name, PhashSidecar};
 use crate::constants::{
     DEFAULT_HTTP_TIMEOUT_SECS, DEFAULT_SERVER_URL, DEFAULT_SUBTITLES_DIR, DEFAULT_TMP_DIR,
 };
@@ -319,6 +319,10 @@ pub struct MediaAddArgs {
     #[arg(long, value_name = "NAME")]
     pub media_name: Option<String>,
 
+    /// OpenSubtitles moviehash naming the .phash (16 hex chars); computed on a local file when absent
+    #[arg(long, value_name = "HASH", value_parser = parse_moviehash)]
+    pub moviehash: Option<String>,
+
     /// Reference subtitle file (.srt)
     #[arg(short, long, value_name = "SRT")]
     pub srt: Option<PathBuf>,
@@ -412,6 +416,26 @@ pub(crate) fn resolve_media_video_path(args: &MediaAddArgs) -> Result<&PathBuf> 
         bail!("Media video file not found: {:?}", video_path);
     }
     Ok(video_path)
+}
+
+/// Validates `--moviehash`: it becomes a file name, so 16 hexadecimal characters only.
+pub(crate) fn parse_moviehash(raw: &str) -> Result<String, String> {
+    if raw.len() == 16 && raw.bytes().all(|b| b.is_ascii_hexdigit()) {
+        Ok(raw.to_ascii_lowercase())
+    } else {
+        Err(format!("expected 16 hexadecimal characters, got {raw:?}"))
+    }
+}
+
+/// Moviehash naming the .phash: `--moviehash`, else computed on a local file; None for a stream without one.
+pub(crate) fn resolve_moviehash(explicit: Option<&str>, video_path: &Path) -> Option<String> {
+    if let Some(hash) = explicit {
+        return Some(hash.to_string());
+    }
+    if dbsrt_core::container::is_remote_stream_or_pipe(video_path) {
+        return None;
+    }
+    dbsrt_core::metadata::compute_opensubtitles_hash(video_path).ok()
 }
 
 /// Derives logical media stem name, respecting explicit `--media-name` overrides and remote stream URLs.
@@ -833,20 +857,14 @@ async fn extract_embedded_and_phash(
     candidates: Vec<(usize, Option<String>, PathBuf)>,
     discovered: Vec<(PathBuf, Option<String>)>,
     args: &MediaAddArgs,
+    moviehash: Option<String>,
 ) -> Result<(Vec<(PathBuf, LangStatus)>, PathBuf, Vec<u64>, f64)> {
     let video_path_sub = video_path.to_path_buf();
     let video_path_phash = video_path.to_path_buf();
     let phash_dir = args.phash_dir.clone();
     let target_lang = args.lang.clone();
     let is_json = args.json;
-
-    let hw_backend = match args.hwaccel.to_lowercase().as_str() {
-        "vaapi" => dbsrt_core::HwAccel::Vaapi,
-        "cuda" => dbsrt_core::HwAccel::Cuda,
-        "qsv" => dbsrt_core::HwAccel::Qsv,
-        "disabled" | "none" | "cpu" => dbsrt_core::HwAccel::Disabled,
-        _ => dbsrt_core::HwAccel::Auto,
-    };
+    let hw_backend = parse_hwaccel(&args.hwaccel);
 
     let sub_task = tokio::task::spawn_blocking(move || -> Result<Vec<(PathBuf, LangStatus)>> {
         extract_embedded_subtitles_and_select(
@@ -863,7 +881,12 @@ async fn extract_embedded_and_phash(
         .map_err(|e| anyhow!("Subtitle extraction task panicked: {}", e))??;
 
     let phash_task = tokio::task::spawn_blocking(move || -> Result<(PathBuf, Vec<u64>, f64)> {
-        find_or_build_phash_with_hwaccel(&video_path_phash, &phash_dir, hw_backend)
+        find_or_build_phash_with_hwaccel(
+            &video_path_phash,
+            &phash_dir,
+            hw_backend,
+            moviehash.as_deref(),
+        )
     });
 
     let (phash_path, hashes, detected_fps) = phash_task
@@ -883,9 +906,10 @@ pub(crate) async fn extract_phash_and_subtitles(
     fs::create_dir_all(&args.phash_dir)?;
 
     let video_name = resolve_media_filename(args, video_path);
-    let estimated_phash = args
-        .phash_dir
-        .join(format!("{}.{:.1}fps.phash", video_name, fps));
+    let moviehash = resolve_moviehash(args.moviehash.as_deref(), video_path);
+    let estimated_phash =
+        args.phash_dir
+            .join(phash_file_name(&video_name, moviehash.as_deref(), fps));
     *cleanup.phash.lock().unwrap() = Some(estimated_phash);
 
     if !args.json {
@@ -896,28 +920,58 @@ pub(crate) async fn extract_phash_and_subtitles(
         eprintln!("   FPS detected: {:.3}", fps);
     }
 
-    let (pairs, phash_path, hashes, detected_fps) = match sub_job {
-        SubtitleJob::AlreadyResolved(pairs) => {
-            let hw_backend = match args.hwaccel.to_lowercase().as_str() {
-                "vaapi" => dbsrt_core::HwAccel::Vaapi,
-                "cuda" => dbsrt_core::HwAccel::Cuda,
-                "qsv" => dbsrt_core::HwAccel::Qsv,
-                "disabled" | "none" | "cpu" => dbsrt_core::HwAccel::Disabled,
-                _ => dbsrt_core::HwAccel::Auto,
-            };
-            let (phash_path, hashes, detected_fps) =
-                find_or_build_phash_with_hwaccel(video_path, &args.phash_dir, hw_backend)?;
-            (pairs, phash_path, hashes, detected_fps)
-        }
-        SubtitleJob::NeedsExtraction {
-            candidates,
-            discovered,
-        } => extract_embedded_and_phash(video_path, candidates, discovered, args).await?,
-    };
+    let (pairs, phash_path, hashes, detected_fps) =
+        run_phash_job(args, video_path, sub_job, moviehash.as_deref()).await?;
+    if let Some(hash) = &moviehash {
+        let sidecar = PhashSidecar {
+            moviehash: hash,
+            media_name: &video_name,
+            fps: detected_fps,
+            frames: hashes.len(),
+        };
+        sidecar.write(&args.phash_dir)?;
+    }
 
     cleanup.phash_done.store(true, Ordering::SeqCst);
     *cleanup.phash.lock().unwrap() = Some(phash_path.clone());
     Ok((pairs, phash_path, hashes, detected_fps))
+}
+
+fn parse_hwaccel(name: &str) -> dbsrt_core::HwAccel {
+    match name.to_lowercase().as_str() {
+        "vaapi" => dbsrt_core::HwAccel::Vaapi,
+        "cuda" => dbsrt_core::HwAccel::Cuda,
+        "qsv" => dbsrt_core::HwAccel::Qsv,
+        "disabled" | "none" | "cpu" => dbsrt_core::HwAccel::Disabled,
+        _ => dbsrt_core::HwAccel::Auto,
+    }
+}
+
+/// pHash of `video_path`, alongside the embedded subtitle extraction when the job needs it.
+async fn run_phash_job(
+    args: &MediaAddArgs,
+    video_path: &Path,
+    sub_job: SubtitleJob,
+    moviehash: Option<&str>,
+) -> Result<(Vec<(PathBuf, LangStatus)>, PathBuf, Vec<u64>, f64)> {
+    match sub_job {
+        SubtitleJob::AlreadyResolved(pairs) => {
+            let (phash_path, hashes, detected_fps) = find_or_build_phash_with_hwaccel(
+                video_path,
+                &args.phash_dir,
+                parse_hwaccel(&args.hwaccel),
+                moviehash,
+            )?;
+            Ok((pairs, phash_path, hashes, detected_fps))
+        }
+        SubtitleJob::NeedsExtraction {
+            candidates,
+            discovered,
+        } => {
+            let moviehash = moviehash.map(str::to_string);
+            extract_embedded_and_phash(video_path, candidates, discovered, args, moviehash).await
+        }
+    }
 }
 
 /// Certifies subtitle couplings and sub_frames in Zero-DB registry with CAS idempotence.
@@ -1329,6 +1383,7 @@ mod tests {
             video: Some(PathBuf::from("non_existent_file.mkv")),
             video_pos: None,
             media_name: None,
+            moviehash: None,
             srt: None,
             srt_pos: None,
             lang: None,
@@ -1357,6 +1412,7 @@ mod tests {
             video: Some(video),
             video_pos: None,
             media_name: None,
+            moviehash: None,
             srt: None,
             srt_pos: None,
             lang: None,
@@ -1391,6 +1447,7 @@ mod tests {
             video: Some(video),
             video_pos: None,
             media_name: None,
+            moviehash: None,
             srt: Some(srt),
             srt_pos: None,
             lang: Some("auto".to_string()),
@@ -1420,6 +1477,7 @@ mod tests {
             video: None,
             video_pos: None,
             media_name: None,
+            moviehash: None,
             srt: None,
             srt_pos: None,
             lang: None,
@@ -1481,6 +1539,37 @@ mod tests {
         assert_eq!(
             resolve_media_filename(&with_override, pipe),
             "Custom.Title.2024"
+        );
+    }
+
+    #[test]
+    fn test_parse_moviehash_accepts_16_hex_only() {
+        assert_eq!(
+            parse_moviehash("E19D5212C9812CD6").unwrap(),
+            "e19d5212c9812cd6"
+        );
+        assert!(parse_moviehash("e19d").is_err());
+        // It becomes a file name: no path component may get through
+        assert!(parse_moviehash("../../etc/passw").is_err());
+        assert!(parse_moviehash("e19d5212c9812cd6/").is_err());
+    }
+
+    #[test]
+    fn test_resolve_moviehash_explicit_then_local_then_none() {
+        let remote = Path::new("ftp://nas:21/video/a.mkv");
+        assert_eq!(
+            resolve_moviehash(Some("e19d5212c9812cd6"), remote).as_deref(),
+            Some("e19d5212c9812cd6")
+        );
+        assert_eq!(resolve_moviehash(None, remote), None);
+
+        let dir = TempTestDir::new("moviehash");
+        let local = dir.path.join("a.mkv");
+        let data: Vec<u8> = (0..200_000).map(|i| (i % 251) as u8).collect();
+        fs::write(&local, data).unwrap();
+        assert_eq!(
+            resolve_moviehash(None, &local).as_deref(),
+            Some("e19d5212c9812cd6")
         );
     }
 }

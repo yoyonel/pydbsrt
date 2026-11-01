@@ -112,7 +112,7 @@ pub async fn couplings_handler(
                     }
                     let size_bytes = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
                     let frame_count = (size_bytes / 8) as usize;
-                    let media_name = fname.strip_suffix(".phash").unwrap_or(&fname).to_string();
+                    let media_name = dbsrt_core::phash_media_name(&p);
                     let fps = parse_fps_from_phash_stem(&media_name);
                     let is_certified =
                         certified_names.contains(&media_name) || certified_names.contains(&fname);

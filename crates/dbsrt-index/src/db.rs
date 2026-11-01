@@ -232,10 +232,8 @@ impl DbClient {
     /// Runs inside an explicit transaction: rolls back completely on COPY failure.
     /// Returns `(media_id, frames_inserted)`. If already exists, updates metadata and returns `(existing_id, 0)`.
     pub fn import_phash_file(&mut self, path: &Path) -> Result<(i32, usize)> {
-        let name = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("unknown");
+        let logical = dbsrt_core::phash_logical_name(path);
+        let name = logical.strip_suffix(".phash").unwrap_or("unknown");
 
         let hashes = read_phash_file(path)?;
         if hashes.is_empty() {
