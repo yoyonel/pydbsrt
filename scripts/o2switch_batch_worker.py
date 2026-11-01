@@ -13,6 +13,7 @@ import argparse
 import atexit
 import contextlib
 import ftplib
+import http.client
 import json
 import mmap
 import os
@@ -26,6 +27,7 @@ import time
 import traceback
 import unicodedata
 import urllib.parse
+import urllib.request
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, List, NamedTuple, Set, TextIO, Tuple
 
@@ -361,20 +363,41 @@ def _ftp_read_at(connect: Callable[[], ftplib.FTP], path: str, offset: int) -> b
             ftp.close()
 
 
-def ftp_moviehash(connect: Callable[[], ftplib.FTP], path: str, size: int) -> str | None:
-    """Moviehash of a NAS file from two ranged reads; None when the exact bytes cannot be read."""
+def _http_read_at(url: str, offset: int) -> bytes:
+    """Reads MOVIEHASH_CHUNK_BYTES at `offset` with a Range request; empty unless the server honours that range."""
+    request = urllib.request.Request(url, headers={"Range": f"bytes={offset}-{offset + MOVIEHASH_CHUNK_BYTES - 1}"})
+    with urllib.request.urlopen(request, timeout=15) as resp:
+        # A 200 full body would hand the head back for the tail
+        if resp.status != 206 or not resp.headers.get("Content-Range", "").startswith(f"bytes {offset}-"):
+            return b""
+        return resp.read(MOVIEHASH_CHUNK_BYTES)
+
+
+def ranged_moviehash(read_at: Callable[[int], bytes], size: int) -> str | None:
+    """Moviehash of a remote file from two ranged reads; None when the exact bytes cannot be read."""
     if size < MOVIEHASH_CHUNK_BYTES:
         return None
-    head = _ftp_read_at(connect, path, 0)
-    tail = _ftp_read_at(connect, path, size - MOVIEHASH_CHUNK_BYTES)
+    head = read_at(0)
+    tail = read_at(size - MOVIEHASH_CHUNK_BYTES)
     if len(head) < MOVIEHASH_CHUNK_BYTES or len(tail) < MOVIEHASH_CHUNK_BYTES:
         return None
     return moviehash_from_chunks(size, head, tail)
 
 
+def ftp_moviehash(connect: Callable[[], ftplib.FTP], path: str, size: int) -> str | None:
+    """Moviehash of a NAS file read over FTP."""
+    return ranged_moviehash(lambda offset: _ftp_read_at(connect, path, offset), size)
+
+
 def target_moviehash(target: VideoTarget, stream_base: str, child_env: Dict[str, str]) -> str | None:
-    """Moviehash of a target on the FTP NAS; None for HTTP streams or any FTP error (the stem names the files)."""
+    """Moviehash of a target on the FTP NAS or behind the HTTP gateway; None on any read error (the stem names the files)."""
     url = urllib.parse.urlsplit(stream_base)
+    if url.scheme in ("http", "https"):
+        media_url = build_stream_url(stream_base, target.rel_path)
+        try:
+            return ranged_moviehash(lambda offset: _http_read_at(media_url, offset), target.size_bytes)
+        except (OSError, http.client.HTTPException):
+            return None
     if url.scheme != "ftp" or not url.hostname:
         return None
     host = url.hostname
