@@ -282,6 +282,38 @@ pub fn phash_media_name(path: &Path) -> String {
         .unwrap_or(name)
 }
 
+/// `.phash` file name: the moviehash when known (fits NAME_MAX whatever the media name), else the media file name.
+pub fn phash_file_name(file_name: &str, moviehash: Option<&str>, fps: f64) -> String {
+    format!("{}.{:.1}fps.phash", moviehash.unwrap_or(file_name), fps)
+}
+
+/// `<moviehash>.json` next to the `.phash`: the media name its file name no longer carries.
+pub struct PhashSidecar<'a> {
+    pub moviehash: &'a str,
+    pub media_name: &'a str,
+    pub fps: f64,
+    pub frames: usize,
+}
+
+impl PhashSidecar<'_> {
+    pub fn write(&self, phash_dir: &Path) -> Result<PathBuf> {
+        let extracted_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs());
+        let sidecar = serde_json::json!({
+            "moviehash": self.moviehash,
+            "media_name": self.media_name,
+            "fps": self.fps,
+            "frames": self.frames,
+            "extracted_at": extracted_at,
+        });
+        let path = phash_dir.join(format!("{}.json", self.moviehash));
+        fs::write(&path, serde_json::to_string_pretty(&sidecar)?)
+            .with_context(|| format!("Cannot write sidecar {:?}", path))?;
+        Ok(path)
+    }
+}
+
 /// Writes a binary .phash file (8-byte big-endian integers).
 pub fn write_phash_file(path: &Path, hashes: &[u64]) -> Result<()> {
     let mut file = fs::File::create(path)
@@ -440,7 +472,7 @@ mod tests {
         // Two whole hashes plus a torn third write.
         let mut raw = [1u64, 2, 3].map(u64::to_be_bytes).concat();
         raw.truncate(20);
-        std::fs::write(&path, raw).unwrap();
+        fs::write(&path, raw).unwrap();
 
         let checkpoint = PhashCheckpoint {
             path: path.clone(),

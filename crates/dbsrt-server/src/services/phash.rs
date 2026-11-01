@@ -9,7 +9,8 @@ use crate::constants::{
 };
 use anyhow::Result;
 use dbsrt_core::{
-    detect_cuts, extract_frames_phash, probe_video, read_phash_file, write_phash_file, CutItem,
+    detect_cuts, extract_frames_phash, phash_file_name, probe_video, read_phash_file,
+    write_phash_file, CutItem, PhashSidecar,
 };
 use dbsrt_index::{parse_fps_from_phash_stem, BkItem, BkTree};
 use std::collections::HashMap;
@@ -164,13 +165,19 @@ pub fn resolve_or_extract_phash(media_file: &Path, phash_dir: &Path) -> Result<E
     let total_frames = (meta.duration * meta.fps).floor() as usize;
     let hashes = extract_frames_phash(media_file, 0.0, total_frames)?;
 
-    let out_name = format!(
-        "{}.{:.1}fps.phash",
-        media_file.file_name().unwrap().to_string_lossy(),
-        meta.fps
-    );
-    let out_path = phash_dir.join(&out_name);
+    let media_name = media_file.file_name().unwrap().to_string_lossy();
+    let moviehash = dbsrt_core::metadata::compute_opensubtitles_hash(media_file).ok();
+    let out_path = phash_dir.join(phash_file_name(&media_name, moviehash.as_deref(), meta.fps));
     write_phash_file(&out_path, &hashes)?;
+    if let Some(hash) = &moviehash {
+        let sidecar = PhashSidecar {
+            moviehash: hash,
+            media_name: &media_name,
+            fps: meta.fps,
+            frames: hashes.len(),
+        };
+        sidecar.write(phash_dir)?;
+    }
 
     Ok((out_path, hashes, meta.fps))
 }
@@ -623,5 +630,27 @@ mod tests {
         let found = read_ref_phash_for_media(&dir, "Show.S01E02.mkv.25.0fps.phash");
         std::fs::remove_dir_all(&dir).ok();
         assert_eq!(found.unwrap(), vec![4, 5]);
+    }
+
+    #[test]
+    fn test_resolve_or_extract_phash_names_a_new_phash_by_moviehash_with_its_sidecar() {
+        let dir = std::env::temp_dir().join(format!("dbsrt_srv_extract_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let media = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/data/big_buck_bunny_trailer_480p.mp4");
+        let moviehash = dbsrt_core::metadata::compute_opensubtitles_hash(&media).unwrap();
+
+        let (path, hashes, _) = resolve_or_extract_phash(&media, &dir).unwrap();
+
+        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        let logical = dbsrt_core::phash_logical_name(&path);
+        std::fs::remove_dir_all(&dir).ok();
+        assert!(name.starts_with(&format!("{moviehash}.")), "{name}");
+        assert!(!hashes.is_empty());
+        assert!(
+            logical.starts_with("big_buck_bunny_trailer_480p.mp4."),
+            "{logical}"
+        );
     }
 }
