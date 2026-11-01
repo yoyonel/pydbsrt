@@ -1,0 +1,28 @@
+name: "PR Body Lint"
+
+# pull_request, not pull_request_target: GitHub reads pull_request_target workflows from the default
+# branch (master), which has no .github/ here, so the check would never run. The PR body is passed
+# as data through env, never interpolated into the shell.
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  validate-body:
+    # ASCII on purpose: branch protection matches required checks by this exact name
+    name: "Validate PR Body (business goals)"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout checker script
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts/check_pr_body.py
+          sparse-checkout-cone-mode: false
+
+      - name: Check business-goals section
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: printf '%s' "$PR_BODY" | python3 scripts/check_pr_body.py
