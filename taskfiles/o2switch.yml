@@ -56,6 +56,38 @@ tasks:
     cmds:
       - uv run python scripts/o2switch_e2e.py --reset-golden
 
+  o2switch:audit:start:
+    desc: "Start the catalog self-recognition audit detached ON o2switch (RUN, SECONDS=10, CUTS=1); the PC can disconnect"
+    summary: |
+      Runs scripts/o2switch_audit_remote.py on o2switch, detached from the SSH session (fork + setsid): the command
+      returns at once and the audit goes on without the workstation. For each .phash already ingested in the catalog
+      it sends CUTS windows (1 = the middle; 5 = at 10/30/50/70/90%) of SECONDS to the prod daemon over the internal
+      socket (/v1/recognize, no public URL, no OpenSubtitles) and checks the answered title and season/episode.
+      Rows hold media names and stay on o2switch in ~/dbsrt/audit/RUN.jsonl; progress goes to ~/dbsrt/logs/audit.log.
+      Starting the same RUN again resumes it; a second audit is refused while one runs.
+      Example: task o2switch:audit:start RUN=recognize_cuts5_2026-11-02 CUTS=5
+    vars:
+      RUN: '{{.RUN | default (printf "recognize_%s" (now | date "2006-01-02"))}}'
+      SECONDS: '{{.SECONDS | default "10"}}'
+      CUTS: '{{.CUTS | default "1"}}'
+    cmds:
+      - ./scripts/o2switch_ctl.sh audit start {{.RUN}} {{.SECONDS}} {{.CUTS}}
+
+  o2switch:audit:status:
+    desc: Is the o2switch catalog audit running, and how many files are done (counts only)
+    cmds:
+      - ./scripts/o2switch_ctl.sh audit status
+
+  o2switch:audit:stop:
+    desc: Stop the o2switch catalog audit (SIGTERM, only to the audit's own PID); start the same RUN to resume
+    cmds:
+      - ./scripts/o2switch_ctl.sh audit stop
+
+  o2switch:audit:report:
+    desc: Counts-only report of an o2switch catalog audit (RUN, default the last started run), computed on o2switch
+    cmds:
+      - ./scripts/o2switch_ctl.sh audit report {{.RUN}}
+
   o2switch:status:
     desc: Check standalone dbsrt-server process and API telemetry on o2switch
     cmds:

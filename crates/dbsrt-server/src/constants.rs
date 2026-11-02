@@ -66,6 +66,12 @@ pub const DEFAULT_BATCH_QUEUE_PATH: &str = "run/batch_queue.json";
 /// Path to volatile supervisor telemetry state written by RPi4 supervisor.
 pub const DEFAULT_SUPERVISOR_STATUS_PATH: &str = "run/supervisor_status.json";
 
+/// Path to the catalog audit counts written by `scripts/o2switch_audit_remote.py`.
+pub const DEFAULT_AUDIT_STATUS_PATH: &str = "run/audit_status.json";
+
+/// Script name an audit process carries in `/proc/<pid>/cmdline`.
+pub const AUDIT_SCRIPT_NAME: &str = "o2switch_audit_remote.py";
+
 /// Default directory holding volatile per-process active job progress files.
 pub const DEFAULT_JOBS_DIR: &str = "run/jobs";
 

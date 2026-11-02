@@ -1,14 +1,14 @@
 //! Web Backoffice Monitoring endpoints providing live telemetry and supervisor tracking.
 
 use crate::constants::{
-    BYTES_PER_GIB_F64, CIVIL_DAYS_PER_400_YEARS, CIVIL_EPOCH_DAYS_OFFSET,
-    DEFAULT_BATCH_EVENTS_PATH, DEFAULT_BATCH_QUEUE_PATH, DEFAULT_ESTIMATED_MEDIA_DURATION_SECS,
-    DEFAULT_JOBS_DIR, DEFAULT_SUPERVISOR_STATUS_PATH, DEFAULT_TOP_PAGE_LIMIT,
-    FALLBACK_BATCH_EVENTS_PATH, MAX_MONITORING_RECENT_EVENTS, SECONDS_PER_DAY, SECONDS_PER_HOUR,
-    SECONDS_PER_MINUTE, SUPERVISOR_STALE_THRESHOLD_SECS,
+    AUDIT_SCRIPT_NAME, BYTES_PER_GIB_F64, CIVIL_DAYS_PER_400_YEARS, CIVIL_EPOCH_DAYS_OFFSET,
+    DEFAULT_AUDIT_STATUS_PATH, DEFAULT_BATCH_EVENTS_PATH, DEFAULT_BATCH_QUEUE_PATH,
+    DEFAULT_ESTIMATED_MEDIA_DURATION_SECS, DEFAULT_JOBS_DIR, DEFAULT_SUPERVISOR_STATUS_PATH,
+    DEFAULT_TOP_PAGE_LIMIT, FALLBACK_BATCH_EVENTS_PATH, MAX_MONITORING_RECENT_EVENTS,
+    SECONDS_PER_DAY, SECONDS_PER_HOUR, SECONDS_PER_MINUTE, SUPERVISOR_STALE_THRESHOLD_SECS,
 };
 use crate::dtos::{
-    ActiveJobStatus, BatchQueueStatus, MonitoringTelemetryResponse, RecentBatchEvent,
+    ActiveJobStatus, AuditStatus, BatchQueueStatus, MonitoringTelemetryResponse, RecentBatchEvent,
     SupervisorHeartbeatPayload, SupervisorTelemetry, SystemStats, TopPageQuery,
 };
 use crate::state::AppState;
@@ -200,6 +200,49 @@ pub fn load_batch_queue_status() -> BatchQueueStatus {
         }
     }
     BatchQueueStatus::default()
+}
+
+/// Parses the audit counts and checks that a `"running"` audit is still alive.
+///
+/// # Panics
+/// Never panics.
+///
+/// # Data Flow & Invariants
+/// A SIGTERM or a kill leaves `"running"` in the file: without a live audit pid the state
+/// becomes `"stopped"`. `None` (no file) reports `"none"`.
+pub fn parse_audit_status(
+    content: Option<&str>,
+    is_audit_pid: impl Fn(u32) -> bool,
+) -> AuditStatus {
+    let Some(content) = content else {
+        return AuditStatus {
+            state: "none".to_string(),
+            ..Default::default()
+        };
+    };
+    let Ok(mut status) = serde_json::from_str::<AuditStatus>(content) else {
+        return AuditStatus {
+            state: "corrupted".to_string(),
+            ..Default::default()
+        };
+    };
+    if status.state == "running" && !status.pid.is_some_and(is_audit_pid) {
+        status.state = "stopped".to_string();
+    }
+    status
+}
+
+/// True when `pid` is alive and runs the audit script (a reused pid runs something else).
+pub fn pid_runs_audit(pid: u32) -> bool {
+    let needle = AUDIT_SCRIPT_NAME.as_bytes();
+    fs::read(format!("/proc/{pid}/cmdline"))
+        .is_ok_and(|c| c.windows(needle.len()).any(|w| w == needle))
+}
+
+/// Reads `DEFAULT_AUDIT_STATUS_PATH`, never the audit rows (they hold media names).
+pub fn load_audit_status() -> AuditStatus {
+    let path = resolve_monitoring_path(DEFAULT_AUDIT_STATUS_PATH);
+    parse_audit_status(fs::read_to_string(path).ok().as_deref(), pid_runs_audit)
 }
 
 fn extract_media_name_flag(parts: &[&str]) -> Option<String> {
@@ -559,6 +602,7 @@ pub async fn monitoring_telemetry_handler(
     let active_jobs = sample_active_jobs();
     let supervisor = load_supervisor_status();
     let recent_events = load_recent_events();
+    let audit = load_audit_status();
 
     Json(MonitoringTelemetryResponse {
         system,
@@ -566,6 +610,7 @@ pub async fn monitoring_telemetry_handler(
         active_jobs,
         supervisor,
         recent_events,
+        audit,
         server_time_iso: now_iso,
     })
 }
