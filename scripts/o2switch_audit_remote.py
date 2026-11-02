@@ -5,6 +5,7 @@ disconnect. For each .phash already in the catalog it sends CUTS windows of SECO
 internal socket (/v1/recognize) and appends one row per window to audit/RUN.jsonl. A rerun skips the files already
 done. A lock (run/audit.lock, released by the kernel when the process dies) forbids two audits at once.
 `status`, `stop` and `report [RUN]` print counts only: rows hold media names and never leave o2switch.
+The run publishes its counts (never a media name) to run/audit_status.json, which the monitoring page reads.
 """
 
 import argparse
@@ -26,6 +27,7 @@ KEY_FILE = "etc/api_key.secret"
 AUDIT_DIR = "audit"
 LOCK = "run/audit.lock"
 STATE = "run/audit.json"
+STATUS = "run/audit_status.json"
 LOG = "logs/audit.log"
 PROGRESS_EVERY = 50
 PHASH_NAME = re.compile(r"^(.*)\.([0-9]+\.[0-9]+)fps\.phash$")
@@ -203,10 +205,33 @@ def now():
     return datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def summarize(rows):
+    """Counts only, never a media name: run/audit_status.json is shown on the monitoring page."""
+    answered = list({row_key(r): r for r in rows if r["http_ok"]}.values())
+    eps = [r for r in answered if r["stem_se"]]
+    return {
+        "files_done": len({r.get("file", r["stem"]) for r in rows}),
+        "answered": len(answered),
+        "no_reply": len({row_key(r) for r in rows}) - len(answered),
+        "title_right": sum(r["right"] for r in answered),
+        "episodes": len(eps),
+        "episode_right": sum(r["right"] and r["resp_se"] == r["stem_se"] for r in eps),
+    }
+
+
+def write_status(status):
+    # tmp + rename: the daemon never reads a half-written file.
+    tmp = STATUS + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(status, fh)
+    os.replace(tmp, STATUS)
+
+
 def audit_run(run, seconds, cuts, key):
     path = run_file(run)
     files = eligible_files()
     _, rows = load(path)
+    started = now()
     done = {r.get("file") for r in rows}
     with open(CATALOG, "rb") as fh:
         (catalog_media,) = struct.unpack_from("<I", fh.read(16), 12)
@@ -217,13 +242,28 @@ def audit_run(run, seconds, cuts, key):
         out.write(json.dumps(meta) + "\n")
         out.flush()
         todo = [f for f in files if f not in done]
+        head = {"run": run, "pid": os.getpid(), "started": started, "seconds": seconds, "cuts": cuts}
+        head.update(eligible=len(files), resumed_from=len(files) - len(todo))
+
+        def publish(state):
+            write_status(dict(head, state=state, heartbeat=now(), **summarize(rows)))
+
         print(f"{now()} start run={run} eligible={len(files)} done={len(files) - len(todo)} cuts={cuts}", flush=True)
-        for i, name in enumerate(todo, 1):
-            # One write per file: an interrupted run never leaves a file with only some of its cuts.
-            out.write("".join(json.dumps(r) + "\n" for r in audit_file(name, seconds, key, cuts)))
-            out.flush()
-            if i % PROGRESS_EVERY == 0:
-                print(f"{now()} progress files={len(files) - len(todo) + i}/{len(files)}", flush=True)
+        publish("running")
+        try:
+            for i, name in enumerate(todo, 1):
+                new = audit_file(name, seconds, key, cuts)
+                # One write per file: an interrupted run never leaves a file with only some of its cuts.
+                out.write("".join(json.dumps(r) + "\n" for r in new))
+                out.flush()
+                rows.extend(new)
+                if i % PROGRESS_EVERY == 0:
+                    print(f"{now()} progress files={len(files) - len(todo) + i}/{len(files)}", flush=True)
+                    publish("running")
+        except BaseException:
+            publish("failed")  # a SIGTERM kills without this: the daemon sees a dead pid and says stopped
+            raise
+        publish("finished")
     print(f"{now()} finished run={run} files={len(files)}/{len(files)}", flush=True)
     return 0
 
@@ -263,9 +303,9 @@ def start(run, seconds, cuts):
         os._exit(rc)
 
 
-def read_state():
+def read_state(path=STATE):
     try:
-        with open(STATE, encoding="utf-8") as fh:
+        with open(path, encoding="utf-8") as fh:
             return json.load(fh)
     except (OSError, ValueError):
         return {}
@@ -286,9 +326,14 @@ def status():
         f"{'RUNNING' if running else 'not running'} pid={state.get('pid')} run={state.get('run')} "
         f"cuts={state.get('cuts')} seconds={state.get('seconds')} started={state.get('started')}"
     )
-    if state.get("run"):
-        meta, rows = load(run_file(state["run"]))
-        print(f"files={len({r.get('file') for r in rows})}/{meta['eligible'] if meta else '?'} rows={len(rows)}")
+    st = read_state(STATUS)
+    if st:
+        print(
+            f"state={st['state']} files={st['files_done']}/{st['eligible']} heartbeat={st['heartbeat']}"
+            f" title_right={st['title_right']}/{st['answered']} ({pct(st['title_right'], st['answered'])})"
+            f" episode_right={st['episode_right']}/{st['episodes']} ({pct(st['episode_right'], st['episodes'])})"
+            f" no_reply={st['no_reply']}"
+        )
     return 0
 
 
