@@ -258,3 +258,86 @@ def test_stop_never_signals_a_pid_that_is_not_the_audit(catalog: list[dict], cap
 def test_stop_when_nothing_runs_is_a_no_op(catalog: list[dict], capsys: pytest.CaptureFixture) -> None:
     assert audit.stop() == 0
     assert "not running" in capsys.readouterr().out
+
+
+def status_file() -> dict:
+    return json.loads(Path(audit.STATUS).read_text())
+
+
+def test_audit_run_publishes_a_counts_only_status_for_the_monitoring_page(catalog: list[dict]) -> None:
+    assert audit.audit_run("r1", 1.0, 2, "key") == 0
+
+    text = Path(audit.STATUS).read_text()
+    assert "Film" not in text
+    st = json.loads(text)
+    assert (st["state"], st["run"], st["pid"]) == ("finished", "r1", os.getpid())
+    assert (st["files_done"], st["eligible"], st["resumed_from"]) == (2, 2, 0)
+    assert (st["answered"], st["title_right"], st["no_reply"]) == (4, 2, 0)
+    assert (st["seconds"], st["cuts"]) == (1.0, 2)
+    assert st["started"] and st["heartbeat"]
+    assert not Path(audit.STATUS + ".tmp").exists()
+
+
+def test_audit_status_says_how_many_files_were_done_before_this_process(catalog: list[dict]) -> None:
+    done = dict(row("FilmA", "FilmA", True), file="FilmA.25.000fps.phash")
+    Path(run_file("r1")).write_text(json.dumps(done) + "\n")
+
+    audit.audit_run("r1", 1.0, 2, "key")
+
+    assert (status_file()["resumed_from"], status_file()["files_done"]) == (1, 2)
+
+
+def test_audit_status_is_refreshed_while_the_run_goes(catalog: list[dict], monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[tuple] = []
+
+    def spy(payload: dict, key: str) -> dict:
+        st = status_file()
+        seen.append((st["state"], st["files_done"]))
+        return {"media_match": "FilmA"}
+
+    monkeypatch.setattr(audit, "PROGRESS_EVERY", 1)
+    monkeypatch.setattr(audit, "recognize", spy)
+
+    audit.audit_run("r1", 1.0, 2, "key")
+
+    assert seen == [("running", 0), ("running", 0), ("running", 1), ("running", 1)]
+
+
+def test_audit_status_is_failed_when_the_run_crashes(catalog: list[dict], monkeypatch: pytest.MonkeyPatch) -> None:
+    def broken(payload: dict, key: str) -> dict:
+        raise RuntimeError("socket gone")
+
+    monkeypatch.setattr(audit, "recognize", broken)
+
+    with pytest.raises(RuntimeError):
+        audit.audit_run("r1", 1.0, 2, "key")
+
+    assert status_file()["state"] == "failed"
+
+
+def test_summarize_counts_episodes_and_no_reply_like_the_report() -> None:
+    rows = [
+        dict(row("Show S01E02", "Show", True, [1, 2], [1, 2]), file="a"),
+        dict(row("Show S01E03", "Show", True, [1, 3], [1, 4]), file="b"),
+        dict(row("Film", "", False), file="c", http_ok=False),
+    ]
+
+    assert audit.summarize(rows) == {
+        "files_done": 3,
+        "answered": 2,
+        "no_reply": 1,
+        "title_right": 2,
+        "episodes": 2,
+        "episode_right": 1,
+    }
+
+
+def test_status_prints_the_published_counts(catalog: list[dict], capsys: pytest.CaptureFixture) -> None:
+    audit.audit_run("r1", 1.0, 2, "key")
+    capsys.readouterr()
+
+    assert audit.status() == 0
+
+    out = capsys.readouterr().out
+    assert "state=finished" in out and "files=2/2" in out and "title_right=2/4 (50.0%)" in out
+    assert "Film" not in out

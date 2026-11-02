@@ -592,6 +592,44 @@ pub struct RecentBatchEvent {
     pub timestamp_iso: String,
 }
 
+/// Catalog self-recognition audit progress, read from `run/audit_status.json`.
+///
+/// Counts only: the audit rows hold media names and never leave o2switch.
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+#[serde(default)]
+pub struct AuditStatus {
+    /// `"none"`, `"running"`, `"stopped"`, `"finished"`, `"failed"` or `"corrupted"`.
+    pub state: String,
+    /// Run name chosen at start (letters, digits, `_`, `-`, `.`).
+    pub run: String,
+    /// Process identifier of the audit.
+    pub pid: Option<u32>,
+    /// ISO-8601 start of the current audit process.
+    pub started: String,
+    /// ISO-8601 time of the last published counts.
+    pub heartbeat: String,
+    /// Window length in seconds sent per cut.
+    pub seconds: f64,
+    /// Windows sent per file.
+    pub cuts: u32,
+    /// Catalog `.phash` files the run covers.
+    pub eligible: usize,
+    /// Files already done when the current process started (rate and ETA baseline).
+    pub resumed_from: usize,
+    /// Files done so far.
+    pub files_done: usize,
+    /// Windows the daemon answered.
+    pub answered: usize,
+    /// Windows without a reply.
+    pub no_reply: usize,
+    /// Answered windows naming the right title.
+    pub title_right: usize,
+    /// Answered windows of episode files.
+    pub episodes: usize,
+    /// Episode windows naming the right title, season and episode.
+    pub episode_right: usize,
+}
+
 /// Unified telemetry payload for the mobile-responsive web monitoring dashboard.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct MonitoringTelemetryResponse {
@@ -605,6 +643,9 @@ pub struct MonitoringTelemetryResponse {
     pub supervisor: SupervisorTelemetry,
     /// Ring buffer of recently finished video events.
     pub recent_events: Vec<RecentBatchEvent>,
+    /// Catalog self-recognition audit progress.
+    #[serde(default)]
+    pub audit: AuditStatus,
     /// Server wall time at snapshot creation (ISO-8601).
     pub server_time_iso: String,
 }
