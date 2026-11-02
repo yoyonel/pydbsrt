@@ -41,6 +41,11 @@ tasks:
     cmds:
       - cargo run --release -p dbsrt-index --example bench_100m
 
+  bench:flood:
+    desc: "End-to-end HTTP matching flood benchmark against local dbsrt-server (usage: task bench:flood -- [-n 1000] [-c 32])"
+    cmds:
+      - ./scripts/bench_http_flood.sh {{.CLI_ARGS}}
+
   bench:cuts-scale:single:
     desc: Benchmark scene cuts detection single-core throughput (Rust Single-thread)
     internal: true
