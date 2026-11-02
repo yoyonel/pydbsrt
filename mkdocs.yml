@@ -188,6 +188,7 @@ nav:
       - Audit Qualité & Complexité Fonctions Rust: explanation/2026-10-27-audit-qualite-et-complexite-fonctions-rust.md
       - Traçabilité & Versioning des Binaires Distribués: explanation/tracabilite-et-versioning-des-binaires-distribues.md
       - Enquête Kill Périodique dbsrt-server (o2switch): explanation/2026-10-31-enquete-kill-periodique-dbsrt-server-o2switch.md
+      - Étude R&D Temporal Pooling vs Ancres MIH: explanation/2026-11-02-etude-rd-temporal-pooling-et-ancres-mih.md
   - 📊 Benchmarks & Preuves:
       - Campagnes Empiriques:
           - Rapport Batch TVShow Synology: history/2026-10-25-rapport-batch-import-tvshow-synology.md
