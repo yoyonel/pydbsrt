@@ -69,8 +69,17 @@ pub const DEFAULT_SUPERVISOR_STATUS_PATH: &str = "run/supervisor_status.json";
 /// Path to the catalog audit counts written by `scripts/o2switch_audit_remote.py`.
 pub const DEFAULT_AUDIT_STATUS_PATH: &str = "run/audit_status.json";
 
+/// Last complete audit, kept apart so a later stopped or test run does not hide it.
+pub const DEFAULT_AUDIT_LAST_FINISHED_PATH: &str = "run/audit_last_finished.json";
+
 /// Script name an audit process carries in `/proc/<pid>/cmdline`.
 pub const AUDIT_SCRIPT_NAME: &str = "o2switch_audit_remote.py";
+
+/// Audit script under the dbsrt home, run by the portal stop and resume actions.
+pub const AUDIT_SCRIPT_PATH: &str = "scripts/o2switch_audit_remote.py";
+
+/// Bound on a stop or resume call: the script signals or forks a detached audit, then returns.
+pub const AUDIT_ACTION_TIMEOUT_SECS: u64 = 15;
 
 /// Default directory holding volatile per-process active job progress files.
 pub const DEFAULT_JOBS_DIR: &str = "run/jobs";

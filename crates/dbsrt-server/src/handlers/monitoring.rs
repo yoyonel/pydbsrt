@@ -1,15 +1,17 @@
 //! Web Backoffice Monitoring endpoints providing live telemetry and supervisor tracking.
 
 use crate::constants::{
-    AUDIT_SCRIPT_NAME, BYTES_PER_GIB_F64, CIVIL_DAYS_PER_400_YEARS, CIVIL_EPOCH_DAYS_OFFSET,
+    AUDIT_ACTION_TIMEOUT_SECS, AUDIT_SCRIPT_NAME, AUDIT_SCRIPT_PATH, BYTES_PER_GIB_F64,
+    CIVIL_DAYS_PER_400_YEARS, CIVIL_EPOCH_DAYS_OFFSET, DEFAULT_AUDIT_LAST_FINISHED_PATH,
     DEFAULT_AUDIT_STATUS_PATH, DEFAULT_BATCH_EVENTS_PATH, DEFAULT_BATCH_QUEUE_PATH,
     DEFAULT_ESTIMATED_MEDIA_DURATION_SECS, DEFAULT_JOBS_DIR, DEFAULT_SUPERVISOR_STATUS_PATH,
     DEFAULT_TOP_PAGE_LIMIT, FALLBACK_BATCH_EVENTS_PATH, MAX_MONITORING_RECENT_EVENTS,
     SECONDS_PER_DAY, SECONDS_PER_HOUR, SECONDS_PER_MINUTE, SUPERVISOR_STALE_THRESHOLD_SECS,
 };
 use crate::dtos::{
-    ActiveJobStatus, AuditStatus, BatchQueueStatus, MonitoringTelemetryResponse, RecentBatchEvent,
-    SupervisorHeartbeatPayload, SupervisorTelemetry, SystemStats, TopPageQuery,
+    ActiveJobStatus, AuditActionResponse, AuditStatus, BatchQueueStatus,
+    MonitoringTelemetryResponse, RecentBatchEvent, SupervisorHeartbeatPayload, SupervisorTelemetry,
+    SystemStats, TopPageQuery,
 };
 use crate::state::AppState;
 use axum::extract::{Query, State};
@@ -208,8 +210,9 @@ pub fn load_batch_queue_status() -> BatchQueueStatus {
 /// Never panics.
 ///
 /// # Data Flow & Invariants
-/// A SIGTERM or a kill leaves `"running"` in the file: without a live audit pid the state
-/// becomes `"stopped"`. `None` (no file) reports `"none"`.
+/// A requested stop (SIGTERM) publishes `"stopped"` itself, so `"running"` without a live
+/// audit pid means the audit was killed: the state becomes `"interrupted"`. `None` (no file)
+/// reports `"none"`.
 pub fn parse_audit_status(
     content: Option<&str>,
     is_audit_pid: impl Fn(u32) -> bool,
@@ -227,9 +230,41 @@ pub fn parse_audit_status(
         };
     };
     if status.state == "running" && !status.pid.is_some_and(is_audit_pid) {
-        status.state = "stopped".to_string();
+        status.state = "interrupted".to_string();
     }
     status
+}
+
+/// The last complete audit, or `None` when absent, unreadable or not finished.
+pub fn parse_last_finished_audit(content: Option<&str>) -> Option<AuditStatus> {
+    serde_json::from_str::<AuditStatus>(content?)
+        .ok()
+        .filter(|s| s.state == "finished")
+}
+
+/// Script arguments resuming the published run with its own name, window length and cuts.
+///
+/// # Errors
+/// A running, finished or unknown audit has nothing to resume. The run name must stay a plain
+/// file name not starting with `-`, which argparse would read as an option.
+pub fn audit_resume_args(status: &AuditStatus) -> Result<Vec<String>, String> {
+    if !matches!(status.state.as_str(), "stopped" | "interrupted" | "failed") {
+        return Err(format!("Nothing to resume: audit is {}.", status.state));
+    }
+    let run = &status.run;
+    let plain = run.starts_with(|c: char| c.is_ascii_alphanumeric())
+        && run
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "_-.".contains(c));
+    if !plain {
+        return Err("Invalid run name in the audit status.".to_string());
+    }
+    Ok(vec![
+        "start".to_string(),
+        run.clone(),
+        status.seconds.to_string(),
+        status.cuts.to_string(),
+    ])
 }
 
 /// True when `pid` is alive and runs the audit script (a reused pid runs something else).
@@ -243,6 +278,94 @@ pub fn pid_runs_audit(pid: u32) -> bool {
 pub fn load_audit_status() -> AuditStatus {
     let path = resolve_monitoring_path(DEFAULT_AUDIT_STATUS_PATH);
     parse_audit_status(fs::read_to_string(path).ok().as_deref(), pid_runs_audit)
+}
+
+fn load_last_finished_audit() -> Option<AuditStatus> {
+    let path = resolve_monitoring_path(DEFAULT_AUDIT_LAST_FINISHED_PATH);
+    parse_last_finished_audit(fs::read_to_string(path).ok().as_deref())
+}
+
+type AuditAction = (StatusCode, Json<AuditActionResponse>);
+
+fn audit_answer(status: StatusCode, message: impl Into<String>) -> AuditAction {
+    let ok = status.is_success();
+    let message = message.into();
+    (status, Json(AuditActionResponse { ok, message }))
+}
+
+/// Runs `bin/python3 -I scripts/o2switch_audit_remote.py <args>` from the dbsrt home.
+///
+/// Hosts without the audit script (RPi4, workstation) answer 404. The script's stdout (pids,
+/// run names, counts) is returned; its stderr may hold home paths and only goes to the log.
+async fn run_audit_script(args: Vec<String>) -> AuditAction {
+    let script = resolve_monitoring_path(AUDIT_SCRIPT_PATH);
+    // <home>/scripts/<script>: <home> holds bin/python3 and the run/ files the script uses
+    let home = script
+        .parent()
+        .and_then(Path::parent)
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."))
+        .to_path_buf();
+    let python = home.join("bin").join("python3");
+    if !script.is_file() || !python.is_file() {
+        return audit_answer(StatusCode::NOT_FOUND, "No audit on this host.");
+    }
+    let mut command = tokio::process::Command::new(&python);
+    command
+        .arg("-I")
+        .arg(AUDIT_SCRIPT_PATH)
+        .args(&args)
+        .current_dir(&home)
+        .stdin(std::process::Stdio::null())
+        .kill_on_drop(true);
+    let timeout = std::time::Duration::from_secs(AUDIT_ACTION_TIMEOUT_SECS);
+    let output = match tokio::time::timeout(timeout, command.output()).await {
+        Ok(Ok(output)) => output,
+        Ok(Err(e)) => {
+            tracing::error!("audit {:?}: spawn failed: {}", args.first(), e);
+            return audit_answer(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Audit script failed to start.",
+            );
+        }
+        Err(_) => {
+            return audit_answer(
+                StatusCode::GATEWAY_TIMEOUT,
+                "Audit script did not answer in time.",
+            )
+        }
+    };
+    if !output.stderr.is_empty() {
+        tracing::warn!(
+            "audit {:?} stderr: {}",
+            args.first(),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let message = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let status = if output.status.success() {
+        StatusCode::OK
+    } else {
+        StatusCode::CONFLICT
+    };
+    tracing::info!("audit {:?} from the portal: {}", args.first(), message);
+    audit_answer(status, message)
+}
+
+/// `POST /v1/monitoring/audit/stop`: SIGTERM through the audit script, which checks the pid
+/// really runs the audit; the run then publishes `"stopped"` and can be resumed.
+pub async fn monitoring_audit_stop_handler() -> AuditAction {
+    run_audit_script(vec!["stop".to_string()]).await
+}
+
+/// `POST /v1/monitoring/audit/resume`: restarts the published run where it stopped.
+///
+/// The script's lock refuses a second audit, so two clicks never start two runs.
+pub async fn monitoring_audit_resume_handler() -> AuditAction {
+    match audit_resume_args(&load_audit_status()) {
+        Ok(args) => run_audit_script(args).await,
+        Err(message) => audit_answer(StatusCode::CONFLICT, message),
+    }
 }
 
 fn extract_media_name_flag(parts: &[&str]) -> Option<String> {
@@ -611,6 +734,7 @@ pub async fn monitoring_telemetry_handler(
         supervisor,
         recent_events,
         audit,
+        audit_last_finished: load_last_finished_audit(),
         server_time_iso: now_iso,
     })
 }

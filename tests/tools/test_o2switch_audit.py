@@ -2,7 +2,9 @@
 
 import json
 import os
+import signal
 import struct
+import threading
 from pathlib import Path
 
 import pytest
@@ -164,6 +166,28 @@ def test_take_lock_refuses_a_second_holder_until_the_first_one_is_gone(tmp_path:
     os.close(second)
 
 
+def test_take_lock_waits_for_a_holder_that_is_exiting(tmp_path: Path) -> None:
+    """Resume right after stop: the stopping audit still holds the lock for a few ms."""
+    lock = str(tmp_path / "audit.lock")
+    fd = take_lock(lock)
+    assert fd is not None
+    threading.Timer(0.2, os.close, [fd]).start()
+
+    second = take_lock(lock, wait=2.0)
+
+    assert second is not None
+    os.close(second)
+
+
+def test_take_lock_gives_up_after_the_wait(tmp_path: Path) -> None:
+    lock = str(tmp_path / "audit.lock")
+    fd = take_lock(lock)
+    assert fd is not None
+
+    assert take_lock(lock, wait=0.2) is None
+    os.close(fd)
+
+
 def held(path: str) -> int:
     fd = take_lock(path)
     assert fd is not None
@@ -218,8 +242,9 @@ def test_audit_run_resumes_without_asking_the_daemon_again_for_a_done_file(catal
 
 
 def test_start_refuses_a_second_audit_while_one_holds_the_lock(
-    catalog: list[dict], capsys: pytest.CaptureFixture
+    catalog: list[dict], capsys: pytest.CaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr(audit, "STOPPING_GRACE_SECS", 0.2)
     fd = held(audit.LOCK)
 
     assert audit.start("r2", 1.0, 2) == 1
@@ -341,3 +366,134 @@ def test_status_prints_the_published_counts(catalog: list[dict], capsys: pytest.
     out = capsys.readouterr().out
     assert "state=finished" in out and "files=2/2" in out and "title_right=2/4 (50.0%)" in out
     assert "Film" not in out
+
+
+def sigterm_on_first_window(catalog: list[dict], monkeypatch: pytest.MonkeyPatch) -> None:
+    """The daemon answers, then `audit stop` (or the portal) sends SIGTERM to the audit."""
+
+    def stopped_here(payload: dict, key: str) -> dict:
+        os.kill(os.getpid(), signal.SIGTERM)
+        return {"media_match": "FilmA"}
+
+    monkeypatch.setattr(audit, "recognize", stopped_here)
+
+
+def test_a_sigterm_stops_the_run_cleanly_and_publishes_stopped(
+    catalog: list[dict], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    before = signal.getsignal(signal.SIGTERM)
+    sigterm_on_first_window(catalog, monkeypatch)
+
+    assert audit.audit_run("r1", 1.0, 2, "key") == 0
+
+    st = status_file()
+    assert (st["state"], st["run"], st["files_done"]) == ("stopped", "r1", 0)
+    assert signal.getsignal(signal.SIGTERM) == before
+
+
+def test_the_last_finished_run_stays_published_when_a_later_run_stops(
+    catalog: list[dict], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert audit.audit_run("r1", 1.0, 2, "key") == 0
+    finished = status_file()
+    assert json.loads(Path(audit.LAST_FINISHED).read_text()) == finished
+
+    sigterm_on_first_window(catalog, monkeypatch)
+    audit.audit_run("r2", 1.0, 2, "key")
+
+    assert status_file()["state"] == "stopped"
+    last = json.loads(Path(audit.LAST_FINISHED).read_text())
+    assert (last["run"], last["state"], last["files_done"]) == ("r1", "finished", 2)
+    assert "Film" not in Path(audit.LAST_FINISHED).read_text()
+
+
+def test_a_sigterm_sent_before_the_run_is_ready_still_publishes_stopped(
+    catalog: list[dict], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Resume then stop at once: `start` blocks SIGTERM across the fork, so it waits for the handler."""
+    signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM})
+    # pending, as when the stop beats the child's setup; thread-directed because pytest may run other
+    # threads (the forked audit child has only one)
+    signal.pthread_kill(threading.get_ident(), signal.SIGTERM)
+    try:
+        assert audit.audit_run("r1", 1.0, 2, "key") == 0
+        st = status_file()
+        assert (st["state"], st["files_done"]) == ("stopped", 0)
+    finally:
+        previous = signal.signal(signal.SIGTERM, signal.SIG_IGN)  # drain a SIGTERM still pending on RED
+        signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGTERM})
+        signal.signal(signal.SIGTERM, previous)
+
+
+def test_a_second_sigterm_while_stopping_does_not_break_the_stop(
+    catalog: list[dict], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two stop clicks in a row: the second SIGTERM lands while `stopped` is being written."""
+    sigterm_on_first_window(catalog, monkeypatch)
+    write = audit.write_status
+
+    def write_after_second_sigterm(status: dict, path: str = audit.STATUS) -> None:
+        if status["state"] == "stopped":
+            os.kill(os.getpid(), signal.SIGTERM)
+        write(status, path)
+
+    monkeypatch.setattr(audit, "write_status", write_after_second_sigterm)
+
+    assert audit.audit_run("r1", 1.0, 2, "key") == 0
+    assert status_file()["state"] == "stopped"
+
+
+class FakeDaemon:
+    """Portal routes of the daemon: an order takes `lag` telemetry reads to show, as a stopping process does."""
+
+    def __init__(self, lag: int = 2, publish_on_double_stop: str = "stopped") -> None:
+        self.state, self.target, self.lag = "stopped", "stopped", 0
+        self.lag_reads, self.double_stop = lag, publish_on_double_stop
+        self.now = 0.0
+
+    def clock(self) -> float:
+        return self.now
+
+    def sleep(self, secs: float) -> None:
+        self.now += secs
+
+    def call(self, method: str, path: str) -> tuple[int, dict]:
+        self.now += 0.05
+        if path.endswith("/telemetry"):
+            if self.lag > 0:
+                self.lag -= 1
+            else:
+                self.state = self.target
+            return 200, {"audit": {"state": self.state}}
+        if path.endswith("/stop"):
+            if self.target == "stopped":
+                if self.state == "running":  # second stop while the first one is still landing
+                    self.target = self.double_stop
+                return 200, {}
+            self.target, self.lag = "stopped", self.lag_reads
+            return 200, {}
+        if self.state == "running" or self.target == "running":
+            return 409, {}
+        self.target, self.lag = "running", self.lag_reads
+        return 200, {}
+
+
+def test_burst_follows_every_accepted_order_and_ends_on_the_last_one() -> None:
+    d = FakeDaemon()
+
+    rows, summary = audit.burst(3, d.call, d.clock, d.sleep)
+
+    assert summary["anomalies"] == []
+    assert summary["final_state"] == summary["expected"] == "stopped"
+    accepted = [r for r in rows if r["code"] == 200 and r["waited"]]
+    assert accepted and all(r["sync"] is not None for r in accepted)
+    assert summary["sync_max"] >= summary["sync_p95"] > 0
+    assert {r["order"] for r in rows} == {"stop", "resume"}
+
+
+def test_burst_flags_a_double_stop_that_ends_interrupted() -> None:
+    d = FakeDaemon(publish_on_double_stop="interrupted")
+
+    _, summary = audit.burst(1, d.call, d.clock, d.sleep)
+
+    assert any("interrupted" in a for a in summary["anomalies"])

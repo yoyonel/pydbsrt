@@ -1,4 +1,6 @@
-use dbsrt_server::handlers::monitoring::{parse_audit_status, pid_runs_audit};
+use dbsrt_server::handlers::monitoring::{
+    audit_resume_args, parse_audit_status, parse_last_finished_audit, pid_runs_audit,
+};
 use std::process::Command;
 
 const RUNNING: &str = r#"{"state": "running", "run": "r1", "pid": 4242, "started": "t0", "heartbeat": "t1",
@@ -33,18 +35,22 @@ fn a_running_audit_with_a_live_audit_pid_stays_running_with_its_counts() {
 }
 
 #[test]
-fn a_running_audit_whose_pid_is_gone_or_reused_is_stopped() {
+fn a_running_audit_whose_pid_is_gone_or_reused_is_interrupted() {
+    // A requested stop publishes "stopped" itself: a dead pid behind "running" was killed
     assert_eq!(
         parse_audit_status(Some(RUNNING), |_| false).state,
-        "stopped"
+        "interrupted"
     );
     let no_pid = RUNNING.replace(r#""pid": 4242,"#, "");
-    assert_eq!(parse_audit_status(Some(&no_pid), |_| true).state, "stopped");
+    assert_eq!(
+        parse_audit_status(Some(&no_pid), |_| true).state,
+        "interrupted"
+    );
 }
 
 #[test]
 fn a_finished_or_failed_audit_keeps_its_state_without_a_live_pid() {
-    for state in ["finished", "failed"] {
+    for state in ["finished", "failed", "stopped"] {
         let content = RUNNING.replace("running", state);
         assert_eq!(parse_audit_status(Some(&content), |_| false).state, state);
     }
@@ -67,4 +73,46 @@ fn pid_runs_audit_matches_the_audit_script_in_the_process_cmdline_only() {
     assert!(is_audit);
     assert!(!is_other);
     assert!(!pid_runs_audit(u32::MAX));
+}
+
+fn status_in(state: &str) -> dbsrt_server::dtos::AuditStatus {
+    let mut st = parse_audit_status(Some(RUNNING), |_| true);
+    st.state = state.to_string();
+    st
+}
+
+#[test]
+fn resume_restarts_the_same_run_with_its_own_window_settings() {
+    for state in ["stopped", "interrupted", "failed"] {
+        assert_eq!(
+            audit_resume_args(&status_in(state)).as_deref(),
+            Ok(&["start", "r1", "10", "5"].map(String::from)[..])
+        );
+    }
+}
+
+#[test]
+fn resume_refuses_a_running_finished_or_unknown_audit() {
+    for state in ["running", "finished", "none", "corrupted"] {
+        assert!(audit_resume_args(&status_in(state)).is_err(), "{state}");
+    }
+}
+
+#[test]
+fn resume_refuses_a_run_name_that_is_not_a_plain_file_name() {
+    for run in ["", "-h", "../x", "a/b", "a b"] {
+        let mut st = status_in("stopped");
+        st.run = run.to_string();
+        assert!(audit_resume_args(&st).is_err(), "{run:?}");
+    }
+}
+
+#[test]
+fn the_last_finished_audit_is_kept_only_when_readable_and_finished() {
+    let finished = RUNNING.replace("running", "finished");
+    let last = parse_last_finished_audit(Some(&finished)).expect("finished run");
+    assert_eq!((last.run.as_str(), last.files_done), ("r1", 1190));
+    assert!(parse_last_finished_audit(None).is_none());
+    assert!(parse_last_finished_audit(Some("{not json")).is_none());
+    assert!(parse_last_finished_audit(Some(RUNNING)).is_none());
 }

@@ -83,6 +83,19 @@ tasks:
     cmds:
       - ./scripts/o2switch_ctl.sh audit stop
 
+  o2switch:audit:burst:
+    desc: "Burst-test the portal's stop/resume routes ON o2switch (CYCLES=3): reply and display-sync times, counts only"
+    summary: |
+      Drives the published run through POST /v1/monitoring/audit/{stop,resume} on the internal socket, like the
+      portal buttons: CYCLES paced resume/stop pairs, then clicks with no wait (stop during setup, double stop,
+      resume right after stop). Times each HTTP reply and how long until the telemetry shows the state of the last
+      accepted order. Fails on any interrupted/failed state or a final state that is not the last order.
+      Only runs when the audit is stopped; each resume sends PROD load (~300 recognize/min) until the next stop.
+    vars:
+      CYCLES: '{{.CYCLES | default "3"}}'
+    cmds:
+      - ./scripts/o2switch_ctl.sh audit burst {{.CYCLES}}
+
   o2switch:audit:report:
     desc: Counts-only report of an o2switch catalog audit (RUN, default the last started run), computed on o2switch
     cmds:

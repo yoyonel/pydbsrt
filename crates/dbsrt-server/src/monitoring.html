@@ -282,6 +282,14 @@
       color: var(--text-muted);
       margin-bottom: 16px;
     }
+    .modal-card .modal-load {
+      font-size: 0.82rem;
+      color: var(--warning);
+      border-left: 3px solid var(--warning);
+      padding-left: 10px;
+      margin-bottom: 16px;
+    }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
     .input-field {
       width: 100%;
       background: #0d1117;
@@ -363,6 +371,8 @@
     .tile-val { font-size: 1.6rem; font-weight: 800; color: #fff; margin: 6px 0 2px; font-family: var(--font-mono); }
     .tile-sub { font-size: 0.8rem; color: var(--text-muted); }
     .audit-meta { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; font-size: 0.8rem; color: var(--text-muted); }
+    .audit-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 12px; font-size: 0.8rem; color: var(--text-muted); }
+    .audit-actions .btn:disabled { opacity: 0.4; cursor: default; }
   </style>
 </head>
 <body>
@@ -532,7 +542,14 @@
       </div>
       <div class="progress-bar-wrap"><div class="progress-bar-fill" id="audit-bar"></div></div>
       <div class="audit-meta"><span id="audit-files">Aucun audit publié (run/audit_status.json absent)</span><span id="audit-eta"></span></div>
+      <div class="audit-actions">
+        <button class="btn" id="audit-stop" style="display: none;">■ Arrêter</button>
+        <button class="btn btn-accent" id="audit-resume" style="display: none;">▶ Reprendre</button>
+        <span id="audit-action-msg"></span>
+      </div>
+      <div class="audit-meta" id="audit-order" style="display: none;"></div>
     </section>
+    <div class="audit-meta" id="audit-last" style="display: none; margin-bottom: 10px;"></div>
     <div class="kpi-grid">
       <div class="kpi-cell"><div class="kpi-val" id="audit-title">--</div><div class="kpi-lbl">Titre juste</div></div>
       <div class="kpi-cell"><div class="kpi-val" id="audit-episode">--</div><div class="kpi-lbl">Bon épisode</div></div>
@@ -585,6 +602,7 @@
     <span id="sys-host">Hôte : --</span>
     <span id="sys-ram">RAM : -- / -- GiB</span>
     <span id="sys-uptime">Uptime : --</span>
+    <span id="sys-sync" title="Latence : aller-retour HTTP de la dernière requête de télémétrie (réseau + passerelle + démon). Sync : âge des données affichées (relues toutes les 3 s).">Latence -- ms · Sync --</span>
   </footer>
 
   <!-- Modal Authentification API Key -->
@@ -595,6 +613,19 @@
       <input type="password" id="api-key-input" class="input-field" placeholder="Clé secrète API (Bearer / X-API-Key)" autofocus>
       <div style="display: flex; gap: 8px;">
         <button id="btn-save-key" class="btn btn-accent" style="flex: 1; justify-content: center;">Valider</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- In-page confirmation for the audit actions (replaces the browser's confirm()) -->
+  <div id="confirm-modal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+    <div class="modal-card">
+      <h2 id="confirm-title"></h2>
+      <p id="confirm-text"></p>
+      <div class="modal-load" id="confirm-load"></div>
+      <div class="modal-actions">
+        <button class="btn" id="confirm-cancel">Annuler</button>
+        <button class="btn btn-accent" id="confirm-ok"></button>
       </div>
     </div>
   </div>
@@ -675,13 +706,16 @@
 
     async function fetchTelemetry() {
       try {
+        const t0 = performance.now();
         const resp = await fetch('v1/monitoring/telemetry', { headers: getAuthHeaders() });
+        lastLatencyMs = performance.now() - t0;
         if (resp.status === 401 || resp.status === 403) {
           showAuthModal();
           return;
         }
         if (!resp.ok) throw new Error('HTTP ' + resp.status);
         const data = await resp.json();
+        lastTelemetryAt = Date.now();
         renderTelemetry(data);
       } catch (err) {
         console.warn('Erreur télémétrie:', err);
@@ -746,7 +780,7 @@
         logsBox.textContent = 'Aucun log superviseur disponible.';
       }
 
-      renderAudit(data.audit || { state: 'none' });
+      renderAudit(data.audit || { state: 'none' }, data.audit_last_finished);
       lastTelemetry = data;
       renderTiles();
 
@@ -777,11 +811,27 @@
     // ── Audit view: counts only, the status file never holds media names ──
     const AUDIT_STATES = {
       running: ['badge-online', 'EN COURS'], finished: ['badge-blue', 'TERMINÉ'],
-      stopped: ['badge-offline', 'ARRÊTÉ'], failed: ['badge-offline', 'ÉCHEC'],
+      stopped: ['badge-warn', 'ARRÊTÉ'], interrupted: ['badge-offline', 'INTERROMPU'], failed: ['badge-offline', 'ÉCHEC'],
       corrupted: ['badge-offline', 'ILLISIBLE'], none: ['badge-blue', 'AUCUN'],
     };
+    const AUDIT_RESUMABLE = ['stopped', 'interrupted', 'failed'];
     const pctOf = (a, b) => b > 0 ? `${fmt(a / b * 100, 1)}%` : '--';
     let lastTelemetry = null;
+    let lastTelemetryAt = null;
+    let lastLatencyMs = null;
+    const ageText = (secs) => secs < 60 ? `${Math.round(secs)} s` : formatDuration(secs);
+
+    // Footer line: round trip of the last telemetry request and age of the data on screen.
+    // Muted while fresh; orange past 2 polls, red past 30 s (network down or paused).
+    function renderFreshness() {
+      const el = document.getElementById('sys-sync');
+      if (lastTelemetryAt == null) return;
+      const age = (Date.now() - lastTelemetryAt) / 1000;
+      el.style.color = age <= 2 * REFRESH_INTERVAL_MS / 1000 ? '' : age <= 30 ? 'var(--warning)' : 'var(--danger)';
+      const latency = lastLatencyMs == null ? '--' : Math.round(lastLatencyMs);
+      el.textContent = `Latence ${latency} ms · Sync il y a ${ageText(age)}${isPaused ? ' (pause)' : ''}`;
+    }
+    setInterval(renderFreshness, 1000);
 
     // Rate from the files this process did: resumed files were done by an earlier run
     function auditEtaSecs(a) {
@@ -791,7 +841,12 @@
       return Math.max(a.eligible - a.files_done, 0) * secs / done;
     }
 
-    function renderAudit(a) {
+    // Matches PROGRESS_EVERY in scripts/o2switch_audit_remote.py: counts move by steps of this size
+    const AUDIT_PROGRESS_EVERY = 50;
+    // shortcut: compares the o2switch clock with the browser's, a skewed browser clock shifts this age
+    const heartbeatAgeSecs = (a) => Math.max((Date.now() - Date.parse(a.heartbeat)) / 1000, 0);
+
+    function renderAudit(a, lastFinished) {
       const [cls, label] = AUDIT_STATES[a.state] || ['badge-offline', String(a.state).toUpperCase()];
       const stateBadge = document.getElementById('audit-state');
       stateBadge.className = 'badge ' + cls;
@@ -803,15 +858,16 @@
       document.getElementById('audit-bar').style.width = known ? pct : '0%';
       document.getElementById('audit-files').textContent = !known
         ? (a.state === 'none' ? 'Aucun audit publié (run/audit_status.json absent)' : 'Fichier de statut illisible')
-        : `${a.files_done} / ${a.eligible} fichiers${a.resumed_from ? ` (reprise à ${a.resumed_from})` : ''} · battement ${a.heartbeat}`;
+        : `${a.files_done} / ${a.eligible} fichiers${a.resumed_from ? ` (reprise à ${a.resumed_from})` : ''} · battement ${a.heartbeat}`
+          + (a.state === 'running' ? ` (il y a ${ageText(heartbeatAgeSecs(a))}, publié tous les ${AUDIT_PROGRESS_EVERY} fichiers)` : '');
       const eta = auditEtaSecs(a);
       document.getElementById('audit-eta').textContent = eta == null ? '' : `fin estimée dans ${formatDuration(eta)}`;
       document.getElementById('audit-title').textContent = known ? pctOf(a.title_right, a.answered) : '--';
       document.getElementById('audit-episode').textContent = known ? pctOf(a.episode_right, a.episodes) : '--';
       document.getElementById('audit-answered').textContent = known ? a.answered : '--';
       document.getElementById('audit-noreply').textContent = known ? a.no_reply : '--';
-      // Header and nav only flag an audit that needs a look: running, or ended badly
-      const flag = a.state === 'running' || a.state === 'stopped' || a.state === 'failed';
+      // Header and nav only flag an audit that needs a look: running, or ended badly (a requested stop is not)
+      const flag = a.state === 'running' || a.state === 'interrupted' || a.state === 'failed';
       const head = document.getElementById('audit-badge');
       head.style.display = flag ? '' : 'none';
       head.className = 'badge ' + cls;
@@ -819,7 +875,110 @@
       const nav = document.getElementById('nav-audit');
       nav.style.display = flag ? '' : 'none';
       nav.className = 'badge ' + cls;
+      document.getElementById('audit-stop').style.display = a.state === 'running' ? '' : 'none';
+      document.getElementById('audit-resume').style.display = AUDIT_RESUMABLE.includes(a.state) ? '' : 'none';
+      renderLastFinished(a, lastFinished);
     }
+
+    // The last complete run stays visible when a later run is stopped or is a test
+    function renderLastFinished(a, lf) {
+      const el = document.getElementById('audit-last');
+      const show = lf && !(a.state === 'finished' && a.run === lf.run);
+      el.style.display = show ? '' : 'none';
+      if (show) {
+        el.textContent = `Dernier audit complet : ${lf.run} · ${lf.files_done} / ${lf.eligible} fichiers · fini ${lf.heartbeat}`
+          + ` · titre ${pctOf(lf.title_right, lf.answered)} · épisode ${pctOf(lf.episode_right, lf.episodes)} · sans réponse ${lf.no_reply}`;
+      }
+    }
+
+    // Resolves true on confirm, false on cancel, Escape or a click outside the card
+    function askConfirm({ title, text, load, ok }) {
+      const modal = document.getElementById('confirm-modal');
+      document.getElementById('confirm-title').textContent = title;
+      document.getElementById('confirm-text').textContent = text;
+      const loadEl = document.getElementById('confirm-load');
+      loadEl.textContent = load || '';
+      loadEl.style.display = load ? '' : 'none';
+      const okBtn = document.getElementById('confirm-ok');
+      const cancelBtn = document.getElementById('confirm-cancel');
+      okBtn.textContent = ok;
+      modal.style.display = 'flex';
+      cancelBtn.focus();
+      return new Promise((resolve) => {
+        const close = (answer) => {
+          modal.style.display = 'none';
+          okBtn.onclick = cancelBtn.onclick = modal.onclick = modal.onkeydown = null;
+          resolve(answer);
+        };
+        okBtn.onclick = () => close(true);
+        cancelBtn.onclick = () => close(false);
+        modal.onclick = (e) => { if (e.target === modal) close(false); };
+        modal.onkeydown = (e) => { if (e.key === 'Escape') close(false); };
+      });
+    }
+
+    // Polls fast until the published state matches the order; null when it never does within limitMs
+    async function waitAuditState(want, limitMs) {
+      const t0 = performance.now();
+      while (performance.now() - t0 < limitMs) {
+        await fetchTelemetry();
+        if (want(((lastTelemetry || {}).audit || {}).state)) return performance.now() - t0;
+        await new Promise((r) => setTimeout(r, 500));
+      }
+      return null;
+    }
+
+    const AUDIT_ORDERS = {
+      stop: { label: 'Arrêter', pending: 'Arrêt demandé…', want: (st) => st !== 'running' },
+      resume: { label: 'Reprendre', pending: 'Reprise demandée…', want: (st) => st === 'running' },
+    };
+    const AUDIT_CONFIRM_LIMIT_MS = 15000;
+    const secsText = (ms) => `${(ms / 1000).toFixed(1).replace('.', ',')} s`;
+
+    // Stop and resume go through the audit script on o2switch; a read-only key gets 403.
+    // Buttons stay disabled until the published state matches the order, so clicks cannot pile up.
+    async function auditAction(action) {
+      const ask = action === 'stop'
+        ? { title: "■ Arrêter l'audit", text: "Le run s'arrête proprement ; « Reprendre » le relance là où il s'est arrêté.", ok: 'Arrêter' }
+        : { title: "▶ Reprendre l'audit", text: 'Le run repart du dernier fichier traité.',
+            load: 'Charge PROD : environ 300 requêtes de reconnaissance par minute vers le démon, jusqu\'à la fin ou un arrêt.',
+            ok: 'Reprendre' };
+      if (!(await askConfirm(ask))) return;
+      const order = AUDIT_ORDERS[action];
+      const msg = document.getElementById('audit-action-msg');
+      const orderEl = document.getElementById('audit-order');
+      const buttons = [document.getElementById('audit-stop'), document.getElementById('audit-resume')];
+      buttons.forEach((b) => { b.disabled = true; });
+      msg.textContent = order.pending;
+      const sentAt = new Date();
+      const t0 = performance.now();
+      let line = `Dernier ordre : ${order.label} · envoyé ${sentAt.toLocaleTimeString('fr-FR')}`;
+      try {
+        const resp = await fetch(`v1/monitoring/audit/${action}`, { method: 'POST', headers: getAuthHeaders() });
+        const body = await resp.json().catch(() => ({}));
+        const replyMs = performance.now() - t0;
+        if (!resp.ok) {
+          msg.textContent = resp.status === 403 ? 'Refusé : clé en lecture seule.' : (body.message || `HTTP ${resp.status}`);
+          line += ` · refusé (HTTP ${resp.status}) en ${secsText(replyMs)}`;
+        } else {
+          msg.textContent = `${order.pending} accepté, attente de l'état publié…`;
+          const seenMs = await waitAuditState(order.want, AUDIT_CONFIRM_LIMIT_MS);
+          msg.textContent = '';
+          line += ` · accepté en ${secsText(replyMs)} · `
+            + (seenMs == null ? `état NON confirmé après ${secsText(AUDIT_CONFIRM_LIMIT_MS)}` : `état affiché ${secsText(replyMs + seenMs)} après le clic`);
+        }
+      } catch (e) {
+        msg.textContent = 'Erreur réseau : ' + e.message;
+        line += ' · erreur réseau';
+      } finally {
+        orderEl.textContent = line;
+        orderEl.style.display = '';
+        buttons.forEach((b) => { b.disabled = false; });
+        fetchTelemetry();
+      }
+    }
+    document.getElementById('audit-stop').addEventListener('click', () => auditAction('stop'));
+    document.getElementById('audit-resume').addEventListener('click', () => auditAction('resume'));
 
     // ── Overview tiles: one per view, from the last telemetry and top snapshots ──
     function renderTiles() {

@@ -5,7 +5,10 @@ disconnect. For each .phash already in the catalog it sends CUTS windows of SECO
 internal socket (/v1/recognize) and appends one row per window to audit/RUN.jsonl. A rerun skips the files already
 done. A lock (run/audit.lock, released by the kernel when the process dies) forbids two audits at once.
 `status`, `stop` and `report [RUN]` print counts only: rows hold media names and never leave o2switch.
-The run publishes its counts (never a media name) to run/audit_status.json, which the monitoring page reads.
+The run publishes its counts (never a media name) to run/audit_status.json, which the monitoring page reads; a
+SIGTERM publishes "stopped", and a finished run is also kept in run/audit_last_finished.json.
+`burst [CYCLES]` resumes and stops the published stopped run through the daemon routes the portal uses, in
+bursts, and prints reply and display-sync times (counts only); it refuses to touch a running audit.
 """
 
 import argparse
@@ -28,8 +31,11 @@ AUDIT_DIR = "audit"
 LOCK = "run/audit.lock"
 STATE = "run/audit.json"
 STATUS = "run/audit_status.json"
+LAST_FINISHED = "run/audit_last_finished.json"
 LOG = "logs/audit.log"
 PROGRESS_EVERY = 50
+# A stopped audit publishes `stopped` then exits: a resume clicked right after waits for its lock.
+STOPPING_GRACE_SECS = 3.0
 PHASH_NAME = re.compile(r"^(.*)\.([0-9]+\.[0-9]+)fps\.phash$")
 SEASON_EPISODE = re.compile(r"[Ss]([0-9]{1,2})[ ._-]?[Ee]([0-9]{1,3})")
 RUN_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
@@ -156,15 +162,22 @@ def run_file(run):
     return os.path.join(AUDIT_DIR, run + ".jsonl")
 
 
-def take_lock(path):
-    """An exclusive lock fd, or None when another process holds it. The kernel drops it when its holder dies."""
-    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
-        os.close(fd)
-        return None
-    return fd
+def take_lock(path, wait=0.0):
+    """An exclusive lock fd, or None when another process holds it for `wait` seconds.
+
+    The kernel drops the lock when its holder dies.
+    """
+    deadline = time.monotonic() + wait
+    while True:
+        fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return fd
+        except OSError:
+            os.close(fd)
+        if time.monotonic() >= deadline:
+            return None
+        time.sleep(0.05)
 
 
 def load(path):
@@ -219,12 +232,22 @@ def summarize(rows):
     }
 
 
-def write_status(status):
+def write_status(status, path=STATUS):
     # tmp + rename: the daemon never reads a half-written file.
-    tmp = STATUS + ".tmp"
+    tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
         json.dump(status, fh)
-    os.replace(tmp, STATUS)
+    os.replace(tmp, path)
+
+
+class Stopped(Exception):
+    """SIGTERM from `audit stop` or the monitoring portal: a requested stop, not a crash."""
+
+
+def raise_stopped(signum, frame):
+    # A second stop click must not interrupt the first one while it publishes `stopped`.
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    raise Stopped
 
 
 def audit_run(run, seconds, cuts, key):
@@ -246,11 +269,16 @@ def audit_run(run, seconds, cuts, key):
         head.update(eligible=len(files), resumed_from=len(files) - len(todo))
 
         def publish(state):
-            write_status(dict(head, state=state, heartbeat=now(), **summarize(rows)))
+            status = dict(head, state=state, heartbeat=now(), **summarize(rows))
+            write_status(status)
+            return status
 
         print(f"{now()} start run={run} eligible={len(files)} done={len(files) - len(todo)} cuts={cuts}", flush=True)
         publish("running")
+        previous = signal.signal(signal.SIGTERM, raise_stopped)
         try:
+            # `start` blocked SIGTERM across the fork: a stop sent during the setup lands here.
+            signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGTERM})
             for i, name in enumerate(todo, 1):
                 new = audit_file(name, seconds, key, cuts)
                 # One write per file: an interrupted run never leaves a file with only some of its cuts.
@@ -260,17 +288,24 @@ def audit_run(run, seconds, cuts, key):
                 if i % PROGRESS_EVERY == 0:
                     print(f"{now()} progress files={len(files) - len(todo) + i}/{len(files)}", flush=True)
                     publish("running")
+        except Stopped:
+            publish("stopped")
+            print(f"{now()} stopped run={run} files={summarize(rows)['files_done']}/{len(files)}", flush=True)
+            return 0
         except BaseException:
-            publish("failed")  # a SIGTERM kills without this: the daemon sees a dead pid and says stopped
+            publish("failed")  # a SIGKILL skips this: the daemon sees a dead pid and says interrupted
             raise
-        publish("finished")
+        finally:
+            signal.signal(signal.SIGTERM, previous)
+        # Kept apart so a later stopped or test run does not hide the last complete result.
+        write_status(publish("finished"), LAST_FINISHED)
     print(f"{now()} finished run={run} files={len(files)}/{len(files)}", flush=True)
     return 0
 
 
 def start(run, seconds, cuts):
     path = run_file(run)
-    lock = take_lock(LOCK)
+    lock = take_lock(LOCK, wait=STOPPING_GRACE_SECS)
     if lock is None:
         print(f"Audit already running: {json.dumps(read_state())}")
         return 1
@@ -281,6 +316,8 @@ def start(run, seconds, cuts):
         key = fh.read().strip()
     os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
     sys.stdout.flush()
+    # Until audit_run handles it, a SIGTERM would kill the child without publishing `stopped`.
+    signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM})
     pid = os.fork()
     if pid:
         with open(STATE, "w", encoding="utf-8") as fh:
@@ -411,6 +448,152 @@ def report_distinct_bins(rows):
         print(f"  [{lo:.2f},{hi:.2f}) n={len(b):5d} wrong={pct(sum(not r['right'] for r in b), len(b))}")
 
 
+BURST_TARGET = {"stop": "stopped", "resume": "running"}
+BURST_BAD_STATES = ("interrupted", "failed", "corrupted")
+BURST_SYNC_LIMIT_SECS = 15.0
+
+
+def burst_plan(cycles):
+    """(order, wait for the published state) pairs: paced cycles, then clicks sent with no wait at all."""
+    return [("resume", True), ("stop", True)] * cycles + [
+        ("resume", False),
+        ("stop", True),  # stop while the resumed child is still setting up
+        ("resume", True),
+        ("stop", False),
+        ("stop", True),  # double stop click
+        ("resume", True),
+        ("stop", False),
+        ("resume", True),
+        ("stop", True),  # resume right after a stop
+    ]
+
+
+def p95(values):
+    values = sorted(values)
+    return values[int(0.95 * (len(values) - 1))] if values else None
+
+
+def published_state(call, anomalies):
+    st = ((call("GET", "/v1/monitoring/telemetry")[1] or {}).get("audit") or {}).get("state")
+    if st in BURST_BAD_STATES:
+        anomalies.append(f"state {st} published")
+    return st
+
+
+def wait_published(target, t0, call, anomalies, clock, sleep):
+    """Seconds from t0 until the telemetry publishes `target`, None past BURST_SYNC_LIMIT_SECS."""
+    while clock() - t0 < BURST_SYNC_LIMIT_SECS:
+        if published_state(call, anomalies) == target:
+            return clock() - t0
+        sleep(0.1)
+    return None
+
+
+def burst_summary(rows, expected, final_state, anomalies):
+    syncs = [r["sync"] for r in rows if r["sync"] is not None]
+    replies = [r["reply"] for r in rows]
+    return {
+        "orders": len(rows),
+        "accepted": sum(r["code"] == 200 for r in rows),
+        "refused": sum(r["code"] != 200 for r in rows),
+        "reply_p95": p95(replies),
+        "reply_max": max(replies),
+        "sync_p95": p95(syncs),
+        "sync_max": max(syncs) if syncs else None,
+        "expected": expected,
+        "final_state": final_state,
+        "anomalies": sorted(set(anomalies)),
+    }
+
+
+def burst(cycles, call, clock=time.monotonic, sleep=time.sleep):
+    """Sends the portal's stop/resume orders through the daemon and times them.
+
+    Per order: `reply` = HTTP answer time, `sync` = time from the click until the telemetry publishes the state of
+    the last accepted order (a refused order keeps the previous target). Returns (rows, summary).
+    """
+    anomalies, expected, rows = [], None, []
+    for n, (order, wait) in enumerate(burst_plan(cycles), 1):
+        t0 = clock()
+        code, _ = call("POST", f"/v1/monitoring/audit/{order}")
+        row = {"n": n, "order": order, "code": code, "reply": clock() - t0, "waited": wait, "sync": None}
+        if code == 200:
+            expected = BURST_TARGET[order]
+        if wait and expected:
+            row["sync"] = wait_published(expected, t0, call, anomalies, clock, sleep)
+            if row["sync"] is None:
+                anomalies.append(f"#{n} {order}: {expected} not published within {BURST_SYNC_LIMIT_SECS:g}s")
+        rows.append(row)
+    settled = expected and wait_published(expected, clock(), call, anomalies, clock, sleep) is not None
+    final_state = expected if settled else published_state(call, anomalies)
+    return rows, burst_summary(rows, expected, final_state, anomalies)
+
+
+def portal_call(key):
+    """Daemon routes over the internal socket, key via curl -K so it never shows in ps."""
+
+    def call(method, path):
+        r = subprocess.run(
+            [
+                "curl",
+                "-s",
+                "-m",
+                "20",
+                "-K",
+                "-",
+                "-X",
+                method,
+                "--unix-socket",
+                SOCK,
+                "-w",
+                "\n%{http_code}",
+                "http://localhost" + path,
+            ],
+            input=f'header = "x-api-key: {key}"\n',
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+        body, _, code = r.stdout.rpartition("\n")
+        try:
+            data = json.loads(body)
+        except ValueError:
+            data = {}
+        return int(code) if code.isdigit() else 0, data
+
+    return call
+
+
+def run_burst(cycles):
+    """`burst CYCLES`: resumes and stops the published (stopped) run in bursts; counts and timings only."""
+    with open(KEY_FILE, encoding="utf-8") as fh:
+        call = portal_call(fh.read().strip())
+    st = (call("GET", "/v1/monitoring/telemetry")[1].get("audit") or {}).get("state")
+    if st not in ("stopped", "interrupted", "failed"):
+        print(f"Audit state is {st}: the burst only drives a stopped run, it never cuts a real one.")
+        return 1
+    rows, summary = burst(cycles, call)
+    for r in rows:
+        sync = "--" if r["sync"] is None else f"{r['sync']:.2f}s"
+        print(
+            f"#{r['n']:<2} {r['order']:<6} {'wait' if r['waited'] else 'now '} HTTP {r['code']} "
+            f"reply {r['reply']:.2f}s sync {sync}"
+        )
+    fmt = lambda v: "--" if v is None else f"{v:.2f}s"  # noqa: E731
+    print(
+        f"orders {summary['orders']} accepted {summary['accepted']} refused {summary['refused']}"
+        f" | reply p95 {fmt(summary['reply_p95'])} max {fmt(summary['reply_max'])}"
+        f" | sync p95 {fmt(summary['sync_p95'])} max {fmt(summary['sync_max'])}"
+    )
+    print(
+        f"last accepted order -> {summary['expected']}, published {summary['final_state']}"
+        f" | anomalies {len(summary['anomalies'])}"
+    )
+    for a in summary["anomalies"]:
+        print(f"  ANOMALY {a}")
+    return 0 if not summary["anomalies"] and summary["final_state"] == summary["expected"] else 1
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -420,10 +603,13 @@ def main():
     s.add_argument("cuts", type=int)
     sub.add_parser("status")
     sub.add_parser("stop")
+    sub.add_parser("burst").add_argument("cycles", type=int, nargs="?", default=3)
     sub.add_parser("report").add_argument("run", nargs="?", help="default: the last started run")
     a = p.parse_args()
     if a.cmd == "start":
         return start(a.run, a.seconds, a.cuts)
+    if a.cmd == "burst":
+        return run_burst(a.cycles)
     if a.cmd == "report":
         return report(run_file(a.run or read_state().get("run")))
     return status() if a.cmd == "status" else stop()

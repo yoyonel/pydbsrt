@@ -598,7 +598,8 @@ pub struct RecentBatchEvent {
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 #[serde(default)]
 pub struct AuditStatus {
-    /// `"none"`, `"running"`, `"stopped"`, `"finished"`, `"failed"` or `"corrupted"`.
+    /// `"none"`, `"running"`, `"stopped"` (requested), `"interrupted"` (killed), `"finished"`,
+    /// `"failed"` or `"corrupted"`.
     pub state: String,
     /// Run name chosen at start (letters, digits, `_`, `-`, `.`).
     pub run: String,
@@ -630,6 +631,17 @@ pub struct AuditStatus {
     pub episode_right: usize,
 }
 
+/// Outcome of a portal audit action (stop or resume): the audit script's own answer.
+///
+/// The script prints counts, pids and run names only, never a media name.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct AuditActionResponse {
+    /// True when the script accepted the action.
+    pub ok: bool,
+    /// Script output, or why the action was refused.
+    pub message: String,
+}
+
 /// Unified telemetry payload for the mobile-responsive web monitoring dashboard.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct MonitoringTelemetryResponse {
@@ -646,6 +658,9 @@ pub struct MonitoringTelemetryResponse {
     /// Catalog self-recognition audit progress.
     #[serde(default)]
     pub audit: AuditStatus,
+    /// Last complete audit, absent until a run finishes.
+    #[serde(default)]
+    pub audit_last_finished: Option<AuditStatus>,
     /// Server wall time at snapshot creation (ISO-8601).
     pub server_time_iso: String,
 }
