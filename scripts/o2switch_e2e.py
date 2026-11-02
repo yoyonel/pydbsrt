@@ -318,7 +318,7 @@ class Recette:
         self.check("kill -9: killed daemon gone", not set(left) & set(pids))
 
     def cut_queries(self, *args: object) -> list[dict]:
-        out = self.ssh(f"cd {REMOTE_BASE} && python3 -I - {' '.join(map(str, args))}", CUT_QUERIES)
+        out = self.ssh(f"cd {REMOTE_BASE} && ./bin/python3 -I - {' '.join(map(str, args))}", CUT_QUERIES)
         return [json.loads(line) for line in out.stdout.splitlines()]
 
     def ask(self, query: dict) -> dict:

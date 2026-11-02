@@ -6,6 +6,8 @@ set -euo pipefail
 DEFAULT_O2SWITCH_HOST="o2switch"
 DEFAULT_REMOTE_BASE="dbsrt"
 DEFAULT_REMOTE_PUBLIC_HTML="public_html/dbsrt"
+# Remote scripts run through ${REMOTE_BASE}/bin/python3, linked here by sync: the bare python3 is the system 3.6
+O2SWITCH_PYTHON="/opt/alt/python313/bin/python3"
 DEFAULT_SERVER_SOCKET_REL="run/dbsrt-server.sock"
 DEFAULT_LOCAL_TEST_PORT=8769
 DEFAULT_HEALTHCHECK_MAX_RETRIES=20
@@ -251,7 +253,7 @@ case "${ACTION}" in
     check_ssh
     echo "=== Synchronizing standalone stack to ${O2SWITCH_HOST} ==="
     # shellcheck disable=SC2029
-    ssh "${O2SWITCH_HOST}" "mkdir -p ${REMOTE_BASE}/bin ${REMOTE_BASE}/data ${REMOTE_BASE}/run ${REMOTE_BASE}/logs ${REMOTE_PUBLIC_HTML} ${REMOTE_BASE}/scripts"
+    ssh "${O2SWITCH_HOST}" "mkdir -p ${REMOTE_BASE}/bin ${REMOTE_BASE}/data ${REMOTE_BASE}/run ${REMOTE_BASE}/logs ${REMOTE_PUBLIC_HTML} ${REMOTE_BASE}/scripts && ln -sfn ${O2SWITCH_PYTHON} ${REMOTE_BASE}/bin/python3"
 
     # Binaries ship as releases (deploy): copying over bin/ would replace the release links
     rsync -a --chmod=F755 "deploy/o2switch/dbsrt_server_ctl.sh" "${O2SWITCH_HOST}:${REMOTE_BASE}/bin/"
@@ -791,7 +793,7 @@ fi
 if [[ -f "${QUEUE_FILE}" ]]; then
   echo ""
   echo "--- File de Traitement Batch (Progression) ---"
-  python3 -c "
+  "${BASE}/bin/python3" -c "
 import json
 try:
     with open('${QUEUE_FILE}') as f:
@@ -820,7 +822,7 @@ REMOTE_SCRIPT
     fi
     check_ssh
     # shellcheck disable=SC2029
-    ssh "${O2SWITCH_HOST}" "cd '${REMOTE_BASE}' && python3 - '${SINCE}'" <"${SCRIPT_DIR}/o2switch_batch_summary.py"
+    ssh "${O2SWITCH_HOST}" "cd '${REMOTE_BASE}' && ./bin/python3 - '${SINCE}'" <"${SCRIPT_DIR}/o2switch_batch_summary.py"
     ;;
 
   batch-sync)
