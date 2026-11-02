@@ -45,6 +45,7 @@
     }
     .brand {
       display: flex;
+      flex-wrap: wrap;
       align-items: center;
       gap: 8px;
     }
@@ -55,6 +56,7 @@
       display: flex;
       align-items: center;
       gap: 6px;
+      white-space: nowrap;
     }
     .badge {
       font-size: 0.72rem;
@@ -343,6 +345,24 @@
     .top-table tr.detail .sys-row { white-space: pre-wrap; }
     .pager { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 8px; font-family: var(--font-mono); font-size: 0.74rem; }
     .pager .btn:disabled { opacity: 0.4; cursor: default; }
+
+    /* Top-level views: one per scope, picked by the URL hash (#ingestion, #audit, ...) */
+    .views-nav { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; margin: -8px -12px 16px; padding: 0 12px; border-bottom: 1px solid var(--card-border); }
+    .views-nav::-webkit-scrollbar { display: none; }
+    .views-nav a { flex: none; padding: 9px 12px; color: var(--text-muted); text-decoration: none; font-weight: 600; border-bottom: 2px solid transparent; white-space: nowrap; }
+    .views-nav a:hover { color: #fff; }
+    .views-nav a.active { color: #fff; border-bottom-color: var(--accent); }
+    .views-nav .badge { margin-left: 4px; }
+    .view { display: none; }
+    .view.active { display: block; }
+    .badge { white-space: nowrap; }
+    .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+    .tile { display: block; text-decoration: none; color: inherit; background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px; padding: 14px; transition: border-color 0.15s; }
+    .tile:hover { border-color: var(--accent); }
+    .tile-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600; }
+    .tile-val { font-size: 1.6rem; font-weight: 800; color: #fff; margin: 6px 0 2px; font-family: var(--font-mono); }
+    .tile-sub { font-size: 0.8rem; color: var(--text-muted); }
+    .audit-meta { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; font-size: 0.8rem; color: var(--text-muted); }
   </style>
 </head>
 <body>
@@ -353,6 +373,7 @@
       <h1>📡 dbsrt Monitor</h1>
       <span id="node-badge" class="badge badge-blue">o2switch</span>
       <span id="health-badge" class="badge badge-online">Actif</span>
+      <span id="audit-badge" class="badge badge-blue" style="display: none;"></span>
     </div>
     <div class="header-controls">
       <button class="btn" id="btn-refresh" title="Actualiser maintenant">↻</button>
@@ -361,6 +382,21 @@
     </div>
   </header>
 
+  <nav class="views-nav" id="views-nav">
+    <a href="#overview">Vue d'ensemble</a>
+    <a href="#ingestion">Ingestion <span id="nav-jobs" class="badge badge-blue">0</span></a>
+    <a href="#catalogue">Catalogue</a>
+    <a href="#audit">Audit <span id="nav-audit" class="badge badge-blue" style="display: none;">●</span></a>
+    <a href="#supervisor">Superviseur</a>
+    <a href="#system">Système</a>
+  </nav>
+
+  <section class="view" id="view-overview">
+    <div class="tab-caption">ÉTAT PAR SCOPE - cliquer une tuile pour ouvrir sa vue</div>
+    <div class="tiles" id="tiles"></div>
+  </section>
+
+  <section class="view" id="view-ingestion">
   <!-- dbsrt top header banner (same 4 lines as the TUI) -->
   <section class="top-banner" id="top-banner">
     <div class="top-title"><span id="top-title">pydbsrt top ── Moniteur de Décodage pHash &amp; Ingestion Temps Réel</span><span id="top-clock"></span></div>
@@ -403,14 +439,13 @@
     </div>
   </section>
 
-  <!-- dbsrt top tabs, read-only (TUI actions such as select, rescan or source CRUD are left out) -->
+  <!-- dbsrt top tabs, read-only (TUI actions such as select, rescan or source CRUD are left out);
+       Médias and Système are the Catalogue and Système views -->
   <nav class="tabs">
     <button class="btn tab-btn active" data-tab="jobs">[1] Tâches <span id="active-jobs-count" class="badge badge-blue">0</span></button>
     <button class="btn tab-btn" data-tab="stats">[2] Stats</button>
     <button class="btn tab-btn" data-tab="completed">[3] Récents</button>
-    <button class="btn tab-btn" data-tab="media">[4] Médias</button>
     <button class="btn tab-btn" data-tab="sources">[5] Sources</button>
-    <button class="btn tab-btn" data-tab="system">[6] Système</button>
   </nav>
 
   <section class="tab-pane active" id="tab-jobs">
@@ -452,7 +487,30 @@
     <div class="pager" data-list="completed"></div>
   </section>
 
-  <section class="tab-pane" id="tab-media">
+  <section class="tab-pane" id="tab-sources">
+    <div class="tab-caption" id="sources-caption">SOURCES DE MÉDIAS</div>
+    <div class="table-wrap">
+      <table class="top-table">
+        <thead id="sources-thead"></thead>
+        <tbody id="sources-tbody"></tbody>
+      </table>
+    </div>
+    <div class="sys-tree" id="sources-specs" style="margin-top: 10px; display: none;"></div>
+  </section>
+
+  <!-- Section: Recent Completed Batch Events -->
+  <div class="section-title">
+    <span>📜 Dernières Extractions Terminées</span>
+  </div>
+  <div id="events-list" class="events-list">
+    <div style="padding: 12px; text-align: center; color: var(--text-muted);">
+      Chargement de l'historique...
+    </div>
+  </div>
+
+  </section>
+
+  <section class="view" id="view-catalogue">
     <div class="tab-caption" id="media-caption">EXPLORATEUR DE MÉDIAS MULTI-SOURCES</div>
     <div class="table-wrap">
       <table class="top-table">
@@ -465,22 +523,26 @@
     <div class="pager" data-list="media"></div>
   </section>
 
-  <section class="tab-pane" id="tab-sources">
-    <div class="tab-caption" id="sources-caption">SOURCES DE MÉDIAS</div>
-    <div class="table-wrap">
-      <table class="top-table">
-        <thead id="sources-thead"></thead>
-        <tbody id="sources-tbody"></tbody>
-      </table>
+  <section class="view" id="view-audit">
+    <div class="tab-caption">AUDIT D'AUTO-RECONNAISSANCE DU CATALOGUE (o2switch)</div>
+    <section class="hero-card">
+      <div class="hero-header">
+        <div class="hero-title"><span id="audit-state" class="badge badge-blue">--</span> <span id="audit-run"></span></div>
+        <div class="hero-pct" id="audit-pct">--</div>
+      </div>
+      <div class="progress-bar-wrap"><div class="progress-bar-fill" id="audit-bar"></div></div>
+      <div class="audit-meta"><span id="audit-files">Aucun audit publié (run/audit_status.json absent)</span><span id="audit-eta"></span></div>
+    </section>
+    <div class="kpi-grid">
+      <div class="kpi-cell"><div class="kpi-val" id="audit-title">--</div><div class="kpi-lbl">Titre juste</div></div>
+      <div class="kpi-cell"><div class="kpi-val" id="audit-episode">--</div><div class="kpi-lbl">Bon épisode</div></div>
+      <div class="kpi-cell"><div class="kpi-val" id="audit-answered">--</div><div class="kpi-lbl">Fenêtres répondues</div></div>
+      <div class="kpi-cell"><div class="kpi-val" id="audit-noreply">--</div><div class="kpi-lbl">Sans réponse</div></div>
     </div>
-    <div class="sys-tree" id="sources-specs" style="margin-top: 10px; display: none;"></div>
+    <div class="tab-caption" style="margin-top: 10px;">Comptages seuls : aucun nom de média ne quitte o2switch. Rapport détaillé : task o2switch:audit:report</div>
   </section>
 
-  <section class="tab-pane" id="tab-system">
-    <div class="tab-caption">INFORMATIONS SYSTÈME &amp; MATÉRIEL (VUE FASTFETCH)</div>
-    <div class="sys-tree" id="sys-tree"><span class="top-dim">En attente de télémétrie...</span></div>
-  </section>
-
+  <section class="view" id="view-supervisor">
   <!-- Section: RPi4 Autonomous Supervisor -->
   <div class="section-title">
     <span>🛡️ Superviseur Autonome RPi4</span>
@@ -511,19 +573,16 @@
     <div id="sup-logs-box" class="terminal-box">En attente de télémétrie superviseur...</div>
   </section>
 
-  <!-- Section: Recent Completed Batch Events -->
-  <div class="section-title">
-    <span>📜 Dernières Extractions Terminées</span>
-  </div>
-  <div id="events-list" class="events-list">
-    <div style="padding: 12px; text-align: center; color: var(--text-muted);">
-      Chargement de l'historique...
-    </div>
-  </div>
+  </section>
+
+  <section class="view" id="view-system">
+    <div class="tab-caption">INFORMATIONS SYSTÈME &amp; MATÉRIEL (VUE FASTFETCH)</div>
+    <div class="sys-tree" id="sys-tree"><span class="top-dim">En attente de télémétrie...</span></div>
+  </section>
 
   <!-- Footer Host Metrics -->
   <footer>
-    <span id="sys-host">Hôte : sapin.o2switch.net</span>
+    <span id="sys-host">Hôte : --</span>
     <span id="sys-ram">RAM : -- / -- GiB</span>
     <span id="sys-uptime">Uptime : --</span>
   </footer>
@@ -687,6 +746,10 @@
         logsBox.textContent = 'Aucun log superviseur disponible.';
       }
 
+      renderAudit(data.audit || { state: 'none' });
+      lastTelemetry = data;
+      renderTiles();
+
       // 5. Recent Completed Events
       const events = data.recent_events || [];
       const eventsList = document.getElementById('events-list');
@@ -709,6 +772,80 @@
           `;
         }).join('');
       }
+    }
+
+    // ── Audit view: counts only, the status file never holds media names ──
+    const AUDIT_STATES = {
+      running: ['badge-online', 'EN COURS'], finished: ['badge-blue', 'TERMINÉ'],
+      stopped: ['badge-offline', 'ARRÊTÉ'], failed: ['badge-offline', 'ÉCHEC'],
+      corrupted: ['badge-offline', 'ILLISIBLE'], none: ['badge-blue', 'AUCUN'],
+    };
+    const pctOf = (a, b) => b > 0 ? `${fmt(a / b * 100, 1)}%` : '--';
+    let lastTelemetry = null;
+
+    // Rate from the files this process did: resumed files were done by an earlier run
+    function auditEtaSecs(a) {
+      const done = a.files_done - a.resumed_from;
+      const secs = (Date.parse(a.heartbeat) - Date.parse(a.started)) / 1000;
+      if (a.state !== 'running' || done <= 0 || !(secs > 0)) return null;
+      return Math.max(a.eligible - a.files_done, 0) * secs / done;
+    }
+
+    function renderAudit(a) {
+      const [cls, label] = AUDIT_STATES[a.state] || ['badge-offline', String(a.state).toUpperCase()];
+      const stateBadge = document.getElementById('audit-state');
+      stateBadge.className = 'badge ' + cls;
+      stateBadge.textContent = label;
+      const known = a.state !== 'none' && a.state !== 'corrupted';
+      document.getElementById('audit-run').textContent = known ? `${a.run} · ${a.cuts} coupes × ${a.seconds}s` : '';
+      const pct = known ? pctOf(a.files_done, a.eligible) : '--';
+      document.getElementById('audit-pct').textContent = pct;
+      document.getElementById('audit-bar').style.width = known ? pct : '0%';
+      document.getElementById('audit-files').textContent = !known
+        ? (a.state === 'none' ? 'Aucun audit publié (run/audit_status.json absent)' : 'Fichier de statut illisible')
+        : `${a.files_done} / ${a.eligible} fichiers${a.resumed_from ? ` (reprise à ${a.resumed_from})` : ''} · battement ${a.heartbeat}`;
+      const eta = auditEtaSecs(a);
+      document.getElementById('audit-eta').textContent = eta == null ? '' : `fin estimée dans ${formatDuration(eta)}`;
+      document.getElementById('audit-title').textContent = known ? pctOf(a.title_right, a.answered) : '--';
+      document.getElementById('audit-episode').textContent = known ? pctOf(a.episode_right, a.episodes) : '--';
+      document.getElementById('audit-answered').textContent = known ? a.answered : '--';
+      document.getElementById('audit-noreply').textContent = known ? a.no_reply : '--';
+      // Header and nav only flag an audit that needs a look: running, or ended badly
+      const flag = a.state === 'running' || a.state === 'stopped' || a.state === 'failed';
+      const head = document.getElementById('audit-badge');
+      head.style.display = flag ? '' : 'none';
+      head.className = 'badge ' + cls;
+      head.textContent = `Audit ${a.state === 'running' ? pct : label}`;
+      const nav = document.getElementById('nav-audit');
+      nav.style.display = flag ? '' : 'none';
+      nav.className = 'badge ' + cls;
+    }
+
+    // ── Overview tiles: one per view, from the last telemetry and top snapshots ──
+    function renderTiles() {
+      const d = lastTelemetry || {};
+      const q = d.batch_queue || {};
+      const a = d.audit || { state: 'none' };
+      const sup = d.supervisor || {};
+      const sys = d.system || {};
+      const [acls, alabel] = AUDIT_STATES[a.state] || ['badge-offline', String(a.state).toUpperCase()];
+      const tile = (view, title, badge, val, sub) => `<a class="tile" href="#${view}">
+        <div class="tile-head"><span>${title}</span>${badge}</div>
+        <div class="tile-val">${escapeHtml(val)}</div><div class="tile-sub">${escapeHtml(sub)}</div></a>`;
+      const b = (cls, txt) => `<span class="badge ${cls}">${escapeHtml(txt)}</span>`;
+      const jobs = lastTop ? (lastTop.active_jobs || []).length : (q.active_workers || 0);
+      const auditKnown = a.state !== 'none' && a.state !== 'corrupted';
+      document.getElementById('tiles').innerHTML = [
+        tile('ingestion', 'Ingestion', b(jobs > 0 ? 'badge-online' : 'badge-blue', `${jobs} tâche(s)`),
+          `${fmt(q.progress_pct, 1)}%`, `${q.completed_targets || 0} / ${q.total_targets || 0} cibles · ${q.failed_targets || 0} échec(s)`),
+        tile('catalogue', 'Catalogue', '', lastTop ? `${lastTop.discovered_media_total || 0}` : '--', 'médias disponibles'),
+        tile('audit', 'Audit', b(acls, alabel), auditKnown ? pctOf(a.files_done, a.eligible) : '--',
+          auditKnown ? `titre juste ${pctOf(a.title_right, a.answered)} · épisode ${pctOf(a.episode_right, a.episodes)}` : 'aucun audit publié'),
+        tile('supervisor', 'Superviseur', b(sup.is_online ? 'badge-online' : 'badge-offline', sup.is_online ? 'ONLINE' : 'OFFLINE'),
+          sup.is_online && sup.heartbeat_age_secs != null ? `${sup.heartbeat_age_secs}s` : '--', `battement · ${sup.desired_workers || '--'} workers`),
+        tile('system', 'Système', '', sys.ram_total_gib ? `${fmt(sys.ram_used_gib, 1)} GiB` : '--',
+          `RAM / ${fmt(sys.ram_total_gib, 1)} GiB · uptime ${formatDuration(sys.uptime_secs)}`),
+      ].join('');
     }
 
     // ── dbsrt top parity (/v1/monitoring/top?limit=0: live fields only, heavy lists cut) ──
@@ -738,10 +875,14 @@
     let topSeq = 0;
     let lastTop = null;
 
+    let activeView = 'overview';
+    const shownList = () => activeView === 'catalogue' ? 'media' : activeView === 'ingestion' ? activeTab : null;
+
     function topQuery() {
-      if (activeTab in pageIndex) return `limit=${PAGE_SIZE}&offset=${pageIndex[activeTab] * PAGE_SIZE}`;
+      const list = shownList();
+      if (list in pageIndex) return `limit=${PAGE_SIZE}&offset=${pageIndex[list] * PAGE_SIZE}`;
       // The remote source row reads the NAS endpoint from one media path
-      return activeTab === 'sources' ? 'limit=1' : 'limit=0';
+      return list === 'sources' ? 'limit=1' : 'limit=0';
     }
 
     async function fetchTop() {
@@ -817,6 +958,7 @@
       const jobs = t.active_jobs || [];
       const q = t.batch_queue || {};
       document.getElementById('active-jobs-count').textContent = jobs.length;
+      document.getElementById('nav-jobs').textContent = jobs.length;
       document.getElementById('jobs-caption').textContent = q.total_targets > 0
         ? `TÂCHES EN COURS (DÉCODAGE & PHASH TEMPS RÉEL) [${jobs.length} actifs │ File: ${q.completed_targets}/${q.total_targets} traités, ${q.remaining_targets} restants (dont ${jobs.length} en cours)]`
         : `TÂCHES EN COURS (DÉCODAGE & PHASH TEMPS RÉEL) [${jobs.length}]`;
@@ -1122,10 +1264,12 @@
       renderTopJobs(t);
       renderTopStats(t);
       // List tabs only hold real rows while shown (other fetches use limit=0)
-      if (activeTab === 'completed') renderTopCompleted(t);
-      if (activeTab === 'media') renderTopMedia(t);
-      if (activeTab === 'sources') renderTopSources(t);
+      const list = shownList();
+      if (list === 'completed') renderTopCompleted(t);
+      if (list === 'media') renderTopMedia(t);
+      if (list === 'sources') renderTopSources(t);
       renderTopSystem(t);
+      renderTiles();
     }
 
     ['completed-tbody', 'media-tbody'].forEach(id => document.getElementById(id).addEventListener('click', e => {
@@ -1150,15 +1294,32 @@
       fetchTop();
     }));
 
-    // Keyboard shortcuts mirror `dbsrt top`: 1 / 2,h / 3,r / 4,m / 5,s / 6,y
+    // One view per URL hash, so a view can be bookmarked and the back button works
+    const VIEWS = ['overview', 'ingestion', 'catalogue', 'audit', 'supervisor', 'system'];
+    function showView() {
+      const view = location.hash.slice(1);
+      activeView = VIEWS.includes(view) ? view : 'overview';
+      document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === 'view-' + activeView));
+      document.querySelectorAll('#views-nav a').forEach(a => a.classList.toggle('active', a.getAttribute('href') === '#' + activeView));
+      fetchTop();
+    }
+    window.addEventListener('hashchange', showView);
+
+    // Keyboard shortcuts mirror `dbsrt top`: 1 / 2,h / 3,r / 4,m / 5,s / 6,y; media and system are views
     const TAB_KEYS = {
       '1': 'jobs', '2': 'stats', 'h': 'stats', '3': 'completed', 'r': 'completed',
-      '4': 'media', 'm': 'media', '5': 'sources', 's': 'sources', '6': 'system', 'y': 'system',
+      '5': 'sources', 's': 'sources',
     };
+    const VIEW_KEYS = { '4': 'catalogue', 'm': 'catalogue', '6': 'system', 'y': 'system', 'a': 'audit', 'o': 'overview' };
     document.addEventListener('keydown', e => {
       if (e.target.tagName === 'INPUT' || e.ctrlKey || e.metaKey || e.altKey) return;
       const tab = TAB_KEYS[e.key];
-      if (tab) document.querySelector(`.tab-btn[data-tab="${tab}"]`).click();
+      if (tab) {
+        location.hash = 'ingestion';
+        document.querySelector(`.tab-btn[data-tab="${tab}"]`).click();
+      } else if (VIEW_KEYS[e.key]) {
+        location.hash = VIEW_KEYS[e.key];
+      }
     });
 
     // Auto-refresh loop
@@ -1167,8 +1328,9 @@
       if (!isPaused) refreshAll();
     }, REFRESH_INTERVAL_MS);
 
-    // Initial load
-    refreshAll();
+    // Initial load (showView fetches the top snapshot of the view)
+    fetchTelemetry();
+    showView();
   </script>
 </body>
 </html>
