@@ -56,6 +56,30 @@ tasks:
     cmds:
       - uv run python scripts/o2switch_e2e.py --reset-golden
 
+  o2switch:audit:
+    desc: "Catalog self-recognition audit on o2switch: every .phash in the catalog, middle window, title/episode accuracy (resumable)"
+    summary: |
+      For each .phash already ingested in the o2switch catalog (films and TV shows), sends CUTS windows
+      (default 1 = the middle; 5 = at 10/30/50/70/90%) of SECONDS (default 10) to the prod daemon over the internal socket (/v1/recognize, no public
+      URL, no OpenSubtitles) and records whether the answered title and season/episode match the file name.
+      The query comes from the stored .phash, not from the original video on the NAS.
+      Rows (with media names) go to OUT under the gitignored target/audit/; rerun the task to resume.
+      Example: task o2switch:audit OUT=target/audit/recognize_2026-11-01.jsonl CUTS=5
+    vars:
+      OUT: '{{.OUT | default (printf "target/audit/recognize_%s.jsonl" (now | date "2006-01-02"))}}'
+      SECONDS: '{{.SECONDS | default "10"}}'
+      CUTS: '{{.CUTS | default "1"}}'
+    cmds:
+      - uv run python scripts/o2switch_audit.py run {{.OUT}} --seconds {{.SECONDS}} --cuts {{.CUTS}}
+      - uv run python scripts/o2switch_audit.py report {{.OUT}}
+
+  o2switch:audit:report:
+    desc: Counts-only report of an o2switch catalog audit file (OUT=target/audit/recognize_<date>.jsonl)
+    vars:
+      OUT: '{{.OUT | default (printf "target/audit/recognize_%s.jsonl" (now | date "2006-01-02"))}}'
+    cmds:
+      - uv run python scripts/o2switch_audit.py report {{.OUT}}
+
   o2switch:status:
     desc: Check standalone dbsrt-server process and API telemetry on o2switch
     cmds:
