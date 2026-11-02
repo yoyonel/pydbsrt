@@ -911,8 +911,18 @@ REMOTE_SCRIPT
     esac
     ;;
 
+  audit)
+    # Catalog self-recognition audit: runs detached ON o2switch, one short SSH per command, see the script docstring
+    check_ssh
+    AUDIT_ARGS=("${@:2}")
+    [[ ${#AUDIT_ARGS[@]} -eq 0 ]] && AUDIT_ARGS=(status)
+    rsync -a --chmod=F644 "scripts/o2switch_audit_remote.py" "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/"
+    # shellcheck disable=SC2029
+    ssh "${O2SWITCH_HOST}" "cd $(printf '%q' "${REMOTE_BASE}") && ./bin/python3 -I scripts/o2switch_audit_remote.py $(printf '%q ' "${AUDIT_ARGS[@]}")"
+    ;;
+
   *)
-    echo "Usage: $0 {build|test-local|sync|deploy|rollback|releases|start|stop|restart|status|logs|demo|setup-cron|remove-cron|rotate-key|rotate-readonly-key|monitoring|top|pull-catalog|backup-nas|batch-tvshow|batch-movies|batch-status|batch-summary|batch-sync|batch-workers|batch-stop|batch-logs|faultwatch}"
+    echo "Usage: $0 {build|test-local|sync|deploy|rollback|releases|start|stop|restart|status|logs|demo|setup-cron|remove-cron|rotate-key|rotate-readonly-key|monitoring|top|pull-catalog|backup-nas|batch-tvshow|batch-movies|batch-status|batch-summary|batch-sync|batch-workers|batch-stop|batch-logs|faultwatch|audit}"
     exit 1
     ;;
 esac

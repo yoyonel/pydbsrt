@@ -1,12 +1,24 @@
-"""Catalog self-recognition audit: title/episode matching rules and the counts-only report."""
+"""Catalog self-recognition audit run detached on o2switch: matching rules, resume, lock, control and report."""
 
 import json
+import os
+import struct
 from pathlib import Path
 
 import pytest
 
-from scripts.o2switch_audit import report
-from scripts.o2switch_audit_remote import cut_positions, logical_name, season_episode, title_matches, window_at
+from scripts import o2switch_audit_remote as audit
+from scripts.o2switch_audit_remote import (
+    cut_positions,
+    load,
+    logical_name,
+    report,
+    run_file,
+    season_episode,
+    take_lock,
+    title_matches,
+    window_at,
+)
 
 
 def test_logical_name_reads_the_media_name_of_a_moviehash_named_file(tmp_path: Path) -> None:
@@ -80,7 +92,7 @@ def test_report_counts_titles_episodes_and_prints_no_media_name(tmp_path: Path, 
     out = tmp_path / "audit.jsonl"
     out.write_text("".join(json.dumps(r) + "\n" for r in rows))
 
-    assert report(out) == 0
+    assert report(str(out)) == 0
 
     text = capsys.readouterr().out
     assert "answered=4 no_reply=1" in text
@@ -100,7 +112,7 @@ def test_report_counts_each_cut_of_a_file(tmp_path: Path, capsys: pytest.Capture
     out = tmp_path / "audit.jsonl"
     out.write_text("".join(json.dumps(r) + "\n" for r in rows))
 
-    assert report(out) == 0
+    assert report(str(out)) == 0
 
     text = capsys.readouterr().out
     assert "answered=4 no_reply=0" in text
@@ -113,6 +125,136 @@ def test_report_counts_moviehash_names_left_without_sidecar(tmp_path: Path, caps
     out = tmp_path / "audit.jsonl"
     out.write_text(json.dumps(row("0123456789abcdef", "SecretFilmA", False)) + "\n")
 
-    assert report(out) == 0
+    assert report(str(out)) == 0
 
     assert "moviehash_without_sidecar=1" in capsys.readouterr().out
+
+
+def test_load_skips_a_line_cut_by_a_kill(tmp_path: Path) -> None:
+    out = tmp_path / "audit.jsonl"
+    out.write_text(
+        json.dumps({"_meta": True, "eligible": 2}) + "\n" + json.dumps(row("A", "A", True)) + '\n{"stem": "B", "ma'
+    )
+
+    meta, rows = load(str(out))
+
+    assert meta == {"_meta": True, "eligible": 2}
+    assert [r["stem"] for r in rows] == ["A"]
+
+
+@pytest.mark.parametrize("name", ["../etc/x", "a/b", ".hidden", "", "a b"])
+def test_run_file_refuses_a_name_that_is_not_a_plain_file_name(name: str) -> None:
+    with pytest.raises(SystemExit):
+        run_file(name)
+
+
+def test_run_file_keeps_the_run_under_the_audit_directory() -> None:
+    assert run_file("recognize_2026-11-02") == os.path.join("audit", "recognize_2026-11-02.jsonl")
+
+
+def test_take_lock_refuses_a_second_holder_until_the_first_one_is_gone(tmp_path: Path) -> None:
+    lock = str(tmp_path / "audit.lock")
+    fd = take_lock(lock)
+
+    assert fd is not None
+    assert take_lock(lock) is None
+    os.close(fd)
+    second = take_lock(lock)
+    assert second is not None
+    os.close(second)
+
+
+def held(path: str) -> int:
+    fd = take_lock(path)
+    assert fd is not None
+    return fd
+
+
+@pytest.fixture
+def catalog(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[dict]:
+    """Two ingested .phash files of 100 frames in a fake ~/dbsrt, and a daemon that answers every window."""
+    monkeypatch.chdir(tmp_path)
+    phash = tmp_path / "data" / "__PHASH__"
+    phash.mkdir(parents=True)
+    for name in ("FilmA.25.000fps.phash", "FilmB.25.000fps.phash"):
+        (phash / name).write_bytes(b"".join(i.to_bytes(8, "big") for i in range(100)))
+        os.utime(phash / name, (1_000, 1_000))
+    (tmp_path / "data" / "catalog.dbphash").write_bytes(b"\0" * 12 + struct.pack("<I", 2))
+    for d in ("audit", "run", "logs"):
+        (tmp_path / d).mkdir()
+    calls: list[dict] = []
+
+    def fake_recognize(payload: dict, key: str) -> dict:
+        calls.append(payload)
+        return {"media_match": "FilmA", "found": True}
+
+    monkeypatch.setattr(audit, "recognize", fake_recognize)
+    return calls
+
+
+def test_audit_run_writes_every_cut_of_every_ingested_file(catalog: list[dict]) -> None:
+    assert audit.audit_run("r1", 1.0, 2, "key") == 0
+
+    meta, rows = load(run_file("r1"))
+    assert meta is not None and meta["eligible"] == 2
+    assert sorted((r["file"], r["cut"]) for r in rows) == [
+        ("FilmA.25.000fps.phash", 0.25),
+        ("FilmA.25.000fps.phash", 0.75),
+        ("FilmB.25.000fps.phash", 0.25),
+        ("FilmB.25.000fps.phash", 0.75),
+    ]
+    assert len(catalog) == 4
+
+
+def test_audit_run_resumes_without_asking_the_daemon_again_for_a_done_file(catalog: list[dict]) -> None:
+    done = dict(row("FilmA", "FilmA", True), file="FilmA.25.000fps.phash")
+    Path(run_file("r1")).write_text(json.dumps(done) + '\n{"stem": "cut by a ki')
+
+    assert audit.audit_run("r1", 1.0, 2, "key") == 0
+
+    _, rows = load(run_file("r1"))
+    assert sorted({r["file"] for r in rows}) == ["FilmA.25.000fps.phash", "FilmB.25.000fps.phash"]
+    assert len(catalog) == 2
+
+
+def test_start_refuses_a_second_audit_while_one_holds_the_lock(
+    catalog: list[dict], capsys: pytest.CaptureFixture
+) -> None:
+    fd = held(audit.LOCK)
+
+    assert audit.start("r2", 1.0, 2) == 1
+
+    assert "already running" in capsys.readouterr().out
+    assert not Path(run_file("r2")).exists()
+    os.close(fd)
+
+
+def test_status_reports_progress_and_whether_the_audit_runs(catalog: list[dict], capsys: pytest.CaptureFixture) -> None:
+    audit.audit_run("r1", 1.0, 2, "key")
+    Path(audit.STATE).write_text(json.dumps({"pid": 1, "run": "r1", "seconds": 1.0, "cuts": 2, "started": "t0"}))
+
+    assert audit.status() == 0
+    assert "not running" in capsys.readouterr().out
+
+    fd = held(audit.LOCK)
+    assert audit.status() == 0
+    text = capsys.readouterr().out
+    assert "RUNNING" in text and "run=r1" in text and "files=2/2" in text
+    assert "Film" not in text
+    os.close(fd)
+
+
+def test_stop_never_signals_a_pid_that_is_not_the_audit(catalog: list[dict], capsys: pytest.CaptureFixture) -> None:
+    fd = held(audit.LOCK)
+    # The pid of pytest itself: a stale or reused pid must be refused, not killed.
+    Path(audit.STATE).write_text(json.dumps({"pid": os.getpid(), "run": "r1"}))
+
+    assert audit.stop() == 1
+
+    assert "not the audit" in capsys.readouterr().out
+    os.close(fd)
+
+
+def test_stop_when_nothing_runs_is_a_no_op(catalog: list[dict], capsys: pytest.CaptureFixture) -> None:
+    assert audit.stop() == 0
+    assert "not running" in capsys.readouterr().out
