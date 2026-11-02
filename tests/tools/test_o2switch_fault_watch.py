@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 
@@ -42,6 +43,24 @@ def test_read_sample_skips_other_uids_and_vanished_pids(tmp_path):
     uid = ok.stat().st_uid
     assert read_sample(tmp_path, uid) == {10: ("dbsrt", 10, 4, 3000000)}
     assert read_sample(tmp_path, uid + 1) == {}
+
+
+def test_read_sample_skips_a_process_that_exits_while_its_threads_are_listed(tmp_path, monkeypatch):
+    # Crash of 2026-10-31 on o2switch: ProcessLookupError on /proc/<pid>/task killed the watcher
+    for pid in ("10", "20"):
+        (tmp_path / pid / "task" / pid).mkdir(parents=True)
+        (tmp_path / pid / "stat").write_text(f"{pid} (dbsrt) S 1 1 1 0 0 0 0 0 0 0 5 5 0 0 20 0 1 0 1\n")
+        (tmp_path / pid / "task" / pid / "schedstat").write_text("1000 700 3\n")
+    real_glob = Path.glob
+
+    def glob(self, pattern):
+        if self == tmp_path / "20" / "task":
+            raise ProcessLookupError(3, "No such process", str(self))
+        return real_glob(self, pattern)
+
+    monkeypatch.setattr(Path, "glob", glob)
+    uid = (tmp_path / "10").stat().st_uid
+    assert read_sample(tmp_path, uid) == {10: ("dbsrt", 10, 1, 700)}
 
 
 def test_second_metrics_uses_deltas_and_counts_spawns():

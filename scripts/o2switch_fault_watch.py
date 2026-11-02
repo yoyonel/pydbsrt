@@ -57,11 +57,14 @@ def read_sample(proc: Path = Path("/proc"), uid: int | None = None) -> Sample:
             continue
         # /proc/<pid>/schedstat only covers the main thread: decoders wait in their worker threads
         run_delay = 0
-        for task in (entry / "task").glob("*/schedstat"):
-            try:
-                run_delay += int(task.read_text().split()[1])
-            except (OSError, ValueError, IndexError):
-                continue
+        try:
+            for task in (entry / "task").glob("*/schedstat"):
+                try:
+                    run_delay += int(task.read_text().split()[1])
+                except (OSError, ValueError, IndexError):
+                    continue
+        except OSError:  # the process exited while its threads were listed (ProcessLookupError)
+            continue
         sample[int(entry.name)] = (comm, ticks, threads, run_delay)
     return sample
 
