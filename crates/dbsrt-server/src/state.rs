@@ -221,7 +221,11 @@ impl AppState {
         provider: Arc<dyn SubtitleProvider>,
         options: AppStateInitOptions,
     ) -> Self {
-        let default_catalog = PathBuf::from("data/catalog.dbphash");
+        let default_catalog = if Path::new("data/catalog.dbphash").exists() {
+            PathBuf::from("data/catalog.dbphash")
+        } else {
+            PathBuf::from("../../data/catalog.dbphash")
+        };
         let initial_catalog_path = match options.dbphash_path {
             Some(p) => Some(p),
             None if default_catalog.exists() => Some(default_catalog),
@@ -229,7 +233,11 @@ impl AppState {
         };
 
         let mut extra_phash_dirs = options.extra_phash_dirs;
-        let default_repo_phash = PathBuf::from("data/__PHASH__");
+        let default_repo_phash = if Path::new("data/__PHASH__").exists() {
+            PathBuf::from("data/__PHASH__")
+        } else {
+            PathBuf::from("../../data/__PHASH__")
+        };
         if initial_catalog_path.is_none()
             && default_repo_phash != phash_dir
             && !extra_phash_dirs.contains(&default_repo_phash)
@@ -238,7 +246,11 @@ impl AppState {
             extra_phash_dirs.push(default_repo_phash);
         }
 
-        let default_srt = PathBuf::from("data/SRT");
+        let default_srt = if Path::new("data/SRT").exists() {
+            PathBuf::from("data/SRT")
+        } else {
+            PathBuf::from("../../data/SRT")
+        };
         let subtitles_dir = if (!subtitles_dir.exists() || subtitles_dir == Path::new("/tmp"))
             && default_srt.exists()
         {
