@@ -125,3 +125,9 @@ tasks:
     desc: Synchronize local virtualenv with uv
     cmds:
       - uv sync --all-groups
+
+  data:sync:
+    desc: Strictly synchronize all production data (catalog.dbphash, phashes, subtitles, audit runs) from o2switch
+    aliases: [data:pull, pull:data]
+    cmds:
+      - task: o2switch:pull-catalog

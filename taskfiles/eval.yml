@@ -46,6 +46,21 @@ tasks:
     cmds:
       - ./scripts/bench_http_flood.sh {{.CLI_ARGS}}
 
+  search:pulp:
+    desc: Trigger live end-to-end subtitle search for Pulp Fiction (1080p) against local agent (port 8765)
+    cmds:
+      - 'curl -s -X POST http://127.0.0.1:8765/v1/search -H "Content-Type: application/json" -d "{\"media_path\": \"{{.USER_WORKING_DIR}}/data/snippets/Pulp.Fiction.1994.1080p.BrRip.x264.YIFY_mid15s.mp4\", \"language\": \"fr\", \"search_mode\": \"phash\"}" | jq .timing'
+
+  search:bullet:
+    desc: Trigger live end-to-end subtitle search for Bullet Train (1080p) against local agent (port 8765)
+    cmds:
+      - 'curl -s -X POST http://127.0.0.1:8765/v1/search -H "Content-Type: application/json" -d "{\"media_path\": \"{{.USER_WORKING_DIR}}/data/snippets/Bullet_Train_(2022)[MULTi][1080p]_mid15s.mp4\", \"language\": \"fr\", \"search_mode\": \"phash\"}" | jq .timing'
+
+  search:madmax:
+    desc: Trigger live end-to-end subtitle search for Mad Max (4K HEVC) against local agent (port 8765)
+    cmds:
+      - 'curl -s -X POST http://127.0.0.1:8765/v1/search -H "Content-Type: application/json" -d "{\"media_path\": \"{{.USER_WORKING_DIR}}/data/snippets/Mad.Max.Fury.Road.2015.2160p.4K.BluRay.x265.10bit.AAC5.1-[YTS.MX]_mid15s.mp4\", \"language\": \"fr\", \"search_mode\": \"phash\"}" | jq .timing'
+
   bench:cuts-scale:single:
     desc: Benchmark scene cuts detection single-core throughput (Rust Single-thread)
     internal: true
@@ -78,3 +93,14 @@ tasks:
     internal: true
     cmds:
       - uv run --no-sync python scripts/enrich_snippets_metadata.py {{.CLI_ARGS}}
+
+  nas:ftp:scan:
+    desc: Robust Synology NAS FTP crawl (CWD + MLSD) with explicit error, retry, and timeout diagnostics
+    cmds:
+      - uv run --no-sync python scripts/scan_nas_ftp.py {{.CLI_ARGS}}
+
+  nas:snippets:fill:
+    desc: Fill missing 15s video snippets from Synology NAS over FTP to achieve 100% coverage of catalog.dbphash (3,061 medias)
+    deps: [rs:build]
+    cmds:
+      - uv run --no-sync python scripts/fill_nas_snippets_catalog.py {{.CLI_ARGS}}
