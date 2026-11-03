@@ -119,11 +119,92 @@ Un banc de charge automatisé (`bench_http_flood.rs`) a été déployé pour sim
 
 ---
 
-## 5. Analyse des Écarts : Prédictions Théoriques vs Réalité Terrain
+## 5. Chaîne de Traitement Bout-en-Bout & Métriques Empiriques Terrain
 
-Le gain mesuré en débit est de **\( \times 2.34 \) (+134%)** et la latence P50 est réduite de **56.3%**.
+Pour mesurer l'impact réel de l'optimisation MIH sur l'expérience utilisateur finale, nous avons décomposé et chronométré chaque segment du cycle de vie d'une requête de recherche de sous-titres, depuis le lecteur multimédia jusqu'à l'injection du sous-titre calé.
 
-### Pourquoi pas un gain de \( \times 6 \) ? (Loi d'Amdahl)
+### 5.1 Décomposition du Pipeline Réel (VLC → Agent → Serveur → SRT)
+
+Le cycle complet traverse quatre étages successifs :
+
+```mermaid
+flowchart LR
+    subgraph Client["Poste Client (VLC / dbsrt-agent)"]
+        direction TB
+        FF["1. Décodage FFmpeg & pHash<br/>~200 à 740 ms<br/>(45% à 95% du temps local)"]
+        SRT["4. Découverte & Calage SRT<br/>~50 à 80 ms<br/>(~2% à 5% du temps total)"]
+    end
+    subgraph Reseau["Réseau"]
+        direction TB
+        WAN["2. Transport Réseau WAN<br/>(HTTP POST / TLS o2switch)<br/>~750 ms (Cloud) / < 2 ms (Local)"]
+    end
+    subgraph Serveur["Serveur (dbsrt-server o2switch)"]
+        direction TB
+        MIH["3. Lookup Index MIH (15M frames)<br/>~2.2 à 8.4 ms<br/>(< 1% du temps total)"]
+    end
+
+    FF --> WAN
+    WAN --> MIH
+    MIH --> SRT
+```
+
+### 5.2 Mesures Empiriques Constatées en Situation Réelle
+
+Les mesures suivantes proviennent de tests exécutés sur des extraits vidéo réels de 1080p et 4K (`data/snippets/`) et sur une requête live relayée vers l'infrastructure Cloud o2switch (`https://2026-pydbsrt.fr/dbsrt`) indexant 14.85 millions d'empreintes :
+
+#### A. Étage 1 : Décodage FFmpeg & Extraction pHash (Client Local)
+
+Mesuré via le banc natif `dbsrt bench-video` sur CPU x86_64 standard (décodage FFmpeg swscale YUV → RGB → pHash 8x8 DCT) :
+
+| Fichier Vidéo Réel | Définition / Codec | Durée Extrait | Trames Traitées | Temps Décodage + pHash | Débit Effectif |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| `Pulp.Fiction..._mid15s.mp4` | 1080p H.264 | 10 s | 240 trames | **192.1 ms** | 1 249 trames/s |
+| `Bullet_Train..._mid15s.mp4` | 1080p H.264 | 15 s | 359 trames | **335.7 ms** | 1 069 trames/s |
+| `Mad.Max.Fury.Road...` | 2160p (4K) HEVC/x265 | 10 s | 240 trames | **233.4 ms** | 1 028 trames/s |
+
+*Constat :* Même avec un décodeur multithreadé optimisé, l'extraction de 10 à 15 secondes d'images brutes requiert incompressiblement **190 à 340 ms** (hors overhead de lancement de sous-processus et de sondage de conteneur). Lorsque l'agent local invoque un processus FFmpeg externe avec probing de flux, ce temps monte à **~740 ms**.
+
+#### B. Étage 2 & 3 : Transport Réseau WAN et Matching Serveur Cloud
+
+Mesuré lors d'une requête réelle de recherche de bout en bout (`GET /v1/search` sur `dbsrt-agent` local relayant à `https://2026-pydbsrt.fr/dbsrt`) :
+
+| Étape du Pipeline | Durée Mesurée | Part du Temps Total | Rôle Opérationnel |
+| :--- | :---: | :---: | :--- |
+| **1. FFmpeg probe + extraction trames** | **739.7 ms** | **47.01%** | Extraction des flux vidéo et génération pHash locale |
+| **2. Transport Réseau WAN (TLS o2switch)** | **751.7 ms** | **47.78%** | Latence aller-retour HTTPS vers le serveur Cloud |
+| **3. Lookup Index MIH Serveur (14.85M frames)** | **8.36 ms** | **0.53%** | Recherche Multi-Index Hashing en mémoire sur le serveur |
+| **4. Scan & filtrage sous-titres locaux SRT** | **81.8 ms** | **5.20%** | Parcours du répertoire local et association |
+| **5. MovieHash (128 Ko head+tail)** | **0.15 ms** | **< 0.01%** | Calcul MovieHash OpenSubtitles |
+| **TOTAL BOUT EN BOUT** | **1 573.3 ms** | **100.0%** | Cycle complet jusqu'à la réponse finale |
+
+*Constat en mode 100% local (serveur sur `127.0.0.1:8769`) :* Sans latence WAN, le temps total est de **2 766 ms** (extraction FFmpeg complète et analyse de conteneur représentant **95.6%** du temps, le MIH occupant **0.3%** et la lecture disque des SRT **2.2%**).
+
+---
+
+### 5.3 Le Paradoxe Opérationnel : Client Monoposte vs Serveur Multi-Tenant
+
+Ces données révèlent un paradoxe architectural fondamental :
+
+#### 1. Pour l'utilisateur unique devant VLC (Latence Unitaire) : Gain Imperceptible
+- Faire passer le temps de lookup MIH de **8.36 ms** (25 trames) à **2.20 ms** (4 ancres) fait gagner **~6 ms** sur une requête qui dure au total **1 573 ms** (Cloud) ou **2 766 ms** (Local).
+- Le gain relatif perçu par l'utilisateur final n'est que de **0.38%** de la latence totale. Le goulot d'étranglement est à 95% dans le décodage FFmpeg et le réseau WAN.
+- Optimiser le ressenti utilisateur passe prioritairement par :
+  1. L'élimination du fork de sous-processus FFmpeg (capture directe des frames depuis le buffer VLC via plugin C/Rust en mémoire partagée).
+  2. L'interrogation asynchrone en arrière-plan sans bloquer la lecture.
+
+#### 2. Pour le Serveur Cloud (Débit & Résilience Concurrente) : Gain Vital
+- À l'inverse, du point de vue du serveur central hébergeant 15 millions d'empreintes :
+  - En mode dense (25 fps), le serveur sature dès **280 QPS** avec un P99 qui dérape à **509 ms**.
+  - En mode ancres (4 fps), le serveur absorbe **656 QPS** (+134% de débit) avec un P99 maintenu à **209 ms**.
+- **Conclusion :** La sélection d'ancres temporelles n'a pas pour vocation d'accélérer VLC de façon perceptible, mais de **multiplier par 2.34 la capacité d'accueil simultanée de l'infrastructure Cloud** sans dégrader la précision de calage.
+
+---
+
+### 5.4 Analyse des Écarts & Loi d'Amdahl
+
+Le gain mesuré en débit serveur est de **\( \times 2.34 \) (+134%)** et la latence P50 serveur est réduite de **56.3%**.
+
+#### Pourquoi pas un gain de \( \times 6 \) ?
 
 La réduction du nombre de trames (\( 25 \to 4 \)) divise le temps de calcul MIH brut par ~6. Toutefois, sur une requête HTTP de bout en bout, le pipeline comporte des étapes incompressibles :
 

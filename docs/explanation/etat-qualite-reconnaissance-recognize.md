@@ -32,9 +32,9 @@ Une requête est une suite de pHash 64 bits, un par frame, extraite par le clien
 | Fenêtres statiques (< 5 % de frames distinctes) | 17,5 % d'erreur | même audit |
 | Médias avec couplage français, live | 36/40 bons médias, chacun avec son sous-titre certifié | échantillon aléatoire, release `b46ead268f446619` |
 | Confiance des réponses fausses | presque toujours 100 | même audit |
-| Latence | non mesurée de façon systématique | banc, phase P1 |
+| Capture VLC réelle (2 758 snippets) | 78,0 % matches exacts, 11,9 % collisions, 1,37s latence | [Évaluation E2E VLC Corpus Réel (2 758 Vidéos)](2026-11-03-analyse-exhaustive-evaluation-vlc-corpus-reel.md) |
 
-Ces chiffres viennent de requêtes **extraites du catalogue lui-même** : même encodage, aucun bruit. C'est le meilleur cas. Une capture VLC réelle (autre encodage, recadrage, logo, autre cadence) n'est pas encore mesurée.
+Pour l'analyse détaillée des collisions, rejets propres, latences de session et timeouts sur conteneurs réels, se référer à l'étude dédiée : [Analyse Exhaustive : Évaluation E2E VLC sur Corpus Réel (2 758 Vidéos)](2026-11-03-analyse-exhaustive-evaluation-vlc-corpus-reel.md).
 
 ## Avantages
 
