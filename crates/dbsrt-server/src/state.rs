@@ -169,6 +169,7 @@ pub struct AppState {
     pub reload_in_progress: Arc<std::sync::atomic::AtomicBool>,
     pub compact_in_progress: Arc<std::sync::atomic::AtomicBool>,
     pub delta_index: Arc<std::sync::RwLock<DeltaIndex>>,
+    pub latest_search: Arc<std::sync::RwLock<Option<crate::dtos::LatestSearchTelemetry>>>,
 }
 
 /// Optional configuration parameters for initializing [`AppState`].
@@ -237,6 +238,15 @@ impl AppState {
             extra_phash_dirs.push(default_repo_phash);
         }
 
+        let default_srt = PathBuf::from("data/SRT");
+        let subtitles_dir = if (!subtitles_dir.exists() || subtitles_dir == Path::new("/tmp"))
+            && default_srt.exists()
+        {
+            default_srt
+        } else {
+            subtitles_dir
+        };
+
         let reg_path = CouplingRegistry::default_path(&subtitles_dir);
         let coupling_registry = Arc::new(std::sync::RwLock::new(
             CouplingRegistry::load_or_default(&reg_path).unwrap_or_default(),
@@ -276,6 +286,26 @@ impl AppState {
             reload_in_progress: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             compact_in_progress: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             delta_index: Arc::new(std::sync::RwLock::new(DeltaIndex::new())),
+            latest_search: Arc::new(std::sync::RwLock::new(None)),
+        }
+    }
+
+    /// Records the latest search query timing breakdown for real-time dashboard telemetry.
+    ///
+    /// # Arguments
+    /// - `telemetry`: End-to-end 4-stage pipeline telemetry record.
+    ///
+    /// # Returns
+    /// Nothing (`()`).
+    ///
+    /// # Panics
+    /// Guaranteed panic-free.
+    ///
+    /// # Data Flow & Invariants
+    /// Atomic write lock acquisition updates shared state for immediate asynchronous polling.
+    pub fn record_latest_search(&self, telemetry: crate::dtos::LatestSearchTelemetry) {
+        if let Ok(mut lock) = self.latest_search.write() {
+            *lock = Some(telemetry);
         }
     }
 

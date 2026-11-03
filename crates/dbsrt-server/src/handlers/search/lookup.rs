@@ -173,15 +173,17 @@ pub async fn search_handler(
     .await;
 
     finalize_search_response(
-        payload,
-        matched_media,
-        moviehash,
-        fingerprint_preview,
-        candidates,
-        timing,
-        start_overall,
         &state,
-        phash_conf,
+        FinalizeSearchContext {
+            payload,
+            matched_media,
+            moviehash,
+            fingerprint_preview,
+            candidates,
+            timing,
+            start_overall,
+            phash_conf,
+        },
     )
 }
 
@@ -193,12 +195,61 @@ struct RemoteRelayProcessingContext<'a> {
     timing: &'a mut SearchTimingStats,
 }
 
-/// True when the local file stem and the remote match title contain one another
-/// (case-insensitive). Both must be non-empty: `contains("")` is always true.
+/// True when the local file stem and the remote match title share significant words
+/// (case-insensitive, ignoring underscores, dots, hyphens, and punctuation).
+///
+/// # Arguments
+/// - `file_stem`: Local media filename stem.
+/// - `match_title`: Candidate media title answered by recognition service.
+///
+/// # Returns
+/// `true` if titles overlap significantly; `false` otherwise.
+///
+/// # Errors
+/// None.
+///
+/// # Panics
+/// Guaranteed panic-free.
+///
+/// # Data Flow & Invariants
+/// Normalizes strings by replacing punctuation and delimiters with spaces, then checks
+/// substring inclusion and word set intersection.
 fn stem_and_title_overlap(file_stem: &str, match_title: &str) -> bool {
-    let stem = file_stem.trim().to_lowercase();
-    let title = match_title.trim().to_lowercase();
-    !stem.is_empty() && !title.is_empty() && (title.contains(&stem) || stem.contains(&title))
+    let normalize = |s: &str| {
+        s.to_lowercase()
+            .replace(['_', '.', '-', '(', ')', '[', ']', '+'], " ")
+    };
+    let norm_stem = normalize(file_stem);
+    let norm_title = normalize(match_title);
+
+    let trimmed_stem = norm_stem.trim();
+    let trimmed_title = norm_title.trim();
+    if trimmed_stem.is_empty() || trimmed_title.is_empty() {
+        return false;
+    }
+
+    if trimmed_stem.contains(trimmed_title) || trimmed_title.contains(trimmed_stem) {
+        return true;
+    }
+
+    let stem_words: std::collections::HashSet<&str> = norm_stem
+        .split_whitespace()
+        .filter(|w| w.len() > 1)
+        .collect();
+    let title_words: Vec<&str> = norm_title
+        .split_whitespace()
+        .filter(|w| w.len() > 1)
+        .collect();
+
+    if title_words.is_empty() {
+        return false;
+    }
+
+    let matches = title_words
+        .iter()
+        .filter(|w| stem_words.contains(*w))
+        .count();
+    matches >= title_words.len().min(2) || (matches * 2) >= title_words.len()
 }
 
 /// Processes upstream remote recognition response, verifying candidate presence and title consistency.
@@ -227,6 +278,15 @@ fn process_remote_recognition_result(
     rec_resp: RecognizeResponse,
     net_rtt_ms: f64,
 ) -> (Option<String>, f64) {
+    let server_mih_ms = rec_resp.timer_seconds * 1000.0;
+    ctx.timing.phash_match_ms = server_mih_ms;
+    ctx.timing.wan_rtt_ms = (net_rtt_ms - server_mih_ms).max(0.0);
+    ctx.timing.matching_tier = format!(
+        "Remote Relay ({} via {})",
+        rec_resp.tier.as_deref().unwrap_or("Tier 1 MIH"),
+        ctx.remote_url
+    );
+
     if !rec_resp.found {
         ctx.state.push_log(
             "RELAY",
@@ -267,12 +327,6 @@ fn process_remote_recognition_result(
     let matched_media = rec_resp.media_match;
     let phash_conf = rec_resp.confidence;
     ctx.timing.confidence_percent = phash_conf;
-    ctx.timing.matching_tier = format!(
-        "Remote Relay ({} via {})",
-        rec_resp.tier.unwrap_or_else(|| "Tier 1 MIH".to_string()),
-        ctx.remote_url
-    );
-    ctx.timing.phash_match_ms = net_rtt_ms;
 
     ctx.state.push_log(
         "RELAY",
@@ -359,8 +413,8 @@ async fn execute_remote_relay_recognition(
     let t0 = Instant::now();
     let (target_fps, query_sample, existing_phash) =
         extract_query_sample_off_runtime(media_path, phash_dirs).await;
-
     let extract_ms = t0.elapsed().as_secs_f64() * 1000.0;
+    timing.ffmpeg_ms = extract_ms;
     state.push_log(
         "RELAY",
         "INFO",
@@ -1248,53 +1302,150 @@ async fn fetch_remote_provider_and_filter(
 /// # Data Flow & Invariants
 /// Computes total elapsed time, accumulates latency into server atomics, calculates unaccounted overhead,
 /// logs structured operation completion, and packages response JSON.
-#[allow(clippy::too_many_arguments)]
-fn finalize_search_response(
-    payload: SearchSubtitlesRequest,
-    matched_media: Option<String>,
-    moviehash: Option<String>,
-    fingerprint_preview: Option<Vec<String>>,
-    candidates: Vec<SubtitleCandidate>,
-    mut timing: SearchTimingStats,
-    start_overall: Instant,
+struct SearchTelemetryPayload<'a> {
+    pub media_path: &'a str,
+    pub matched_media: Option<&'a str>,
+    pub phash_conf: f64,
+    pub total_candidates: usize,
+}
+
+/// Records end-to-end 4-stage search telemetry into AppState for real-time dashboard visualization.
+///
+/// # Arguments
+/// - `state`: Shared server state container (`AppState`).
+/// - `payload`: Core query metadata and results (`SearchTelemetryPayload`).
+/// - `timing`: Search timing profiling statistics (`SearchTimingStats`).
+///
+/// # Returns
+/// Nothing (`()`).
+///
+/// # Errors
+/// Guaranteed infallible.
+///
+/// # Panics
+/// Guaranteed panic-free.
+///
+/// # Data Flow & Invariants
+/// Extracts filename basename, formats local ISO timestamp, calculates relative stage percentages,
+/// clamps percentages to `[0.0, 100.0]`, and atomically stores record in `state.latest_search`.
+fn record_search_telemetry(
     state: &AppState,
-    phash_conf: f64,
+    payload: &SearchTelemetryPayload<'_>,
+    timing: &SearchTimingStats,
+) {
+    let total_for_pct = if timing.total_ms > 0.0 {
+        timing.total_ms
+    } else {
+        1.0
+    };
+    let ffmpeg_ms = if timing.ffmpeg_ms > 0.0 {
+        timing.ffmpeg_ms
+    } else {
+        timing.container_ms.max(timing.overhead_ms)
+    };
+    let wan_ms = timing.wan_rtt_ms;
+    let mih_ms = timing.phash_match_ms;
+    let srt_ms = timing.disk_catalog_ms;
+
+    let filename = std::path::Path::new(payload.media_path)
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| payload.media_path.to_string());
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let secs = now.as_secs() % crate::constants::SECONDS_PER_DAY;
+    let h = secs / crate::constants::SECONDS_PER_HOUR;
+    let m = (secs % crate::constants::SECONDS_PER_HOUR) / crate::constants::SECONDS_PER_MINUTE;
+    let s = secs % crate::constants::SECONDS_PER_MINUTE;
+    let ms = now.subsec_millis();
+    let ts = format!("{:02}:{:02}:{:02}.{:03}", h, m, s, ms);
+
+    let telemetry = crate::dtos::LatestSearchTelemetry {
+        timestamp: ts,
+        media_path: payload.media_path.to_string(),
+        filename,
+        matched_media: payload.matched_media.map(|s| s.to_string()),
+        confidence_percent: payload.phash_conf,
+        ffmpeg_ms,
+        wan_rtt_ms: wan_ms,
+        mih_match_ms: mih_ms,
+        srt_disk_ms: srt_ms,
+        moviehash_ms: timing.moviehash_ms,
+        total_ms: timing.total_ms,
+        ffmpeg_pct: (ffmpeg_ms / total_for_pct * 100.0).clamp(0.0, 100.0),
+        wan_pct: (wan_ms / total_for_pct * 100.0).clamp(0.0, 100.0),
+        mih_pct: (mih_ms / total_for_pct * 100.0).clamp(0.0, 100.0),
+        srt_pct: (srt_ms / total_for_pct * 100.0).clamp(0.0, 100.0),
+        is_relay: state.remote_api.is_some(),
+        total_candidates: payload.total_candidates,
+        matching_tier: timing.matching_tier.clone(),
+    };
+    state.record_latest_search(telemetry);
+}
+
+struct FinalizeSearchContext {
+    pub payload: SearchSubtitlesRequest,
+    pub matched_media: Option<String>,
+    pub moviehash: Option<String>,
+    pub fingerprint_preview: Option<Vec<String>>,
+    pub candidates: Vec<SubtitleCandidate>,
+    pub timing: SearchTimingStats,
+    pub start_overall: Instant,
+    pub phash_conf: f64,
+}
+
+fn finalize_search_response(
+    state: &AppState,
+    mut ctx: FinalizeSearchContext,
 ) -> Json<SearchSubtitlesResponse> {
-    let total_candidates = candidates.len();
-    timing.total_ms = start_overall.elapsed().as_secs_f64() * 1000.0;
+    let total_candidates = ctx.candidates.len();
+    ctx.timing.total_ms = ctx.start_overall.elapsed().as_secs_f64() * 1000.0;
     state.metrics.total_latency_us.fetch_add(
-        start_overall.elapsed().as_micros() as u64,
+        ctx.start_overall.elapsed().as_micros() as u64,
         std::sync::atomic::Ordering::Relaxed,
     );
-    let accounted_ms = timing.phash_match_ms
-        + timing.pg_lookup_ms
-        + timing.json_lookup_ms
-        + timing.container_ms
-        + timing.disk_catalog_ms
-        + timing.moviehash_ms;
-    timing.overhead_ms = (timing.total_ms - accounted_ms).max(0.0);
+    let accounted_ms = ctx.timing.phash_match_ms
+        + ctx.timing.pg_lookup_ms
+        + ctx.timing.json_lookup_ms
+        + ctx.timing.container_ms
+        + ctx.timing.disk_catalog_ms
+        + ctx.timing.moviehash_ms;
+    ctx.timing.overhead_ms = (ctx.timing.total_ms - accounted_ms).max(0.0);
+
+    record_search_telemetry(
+        state,
+        &SearchTelemetryPayload {
+            media_path: &ctx.payload.media_path,
+            matched_media: ctx.matched_media.as_deref(),
+            phash_conf: ctx.phash_conf,
+            total_candidates,
+        },
+        &ctx.timing,
+    );
 
     state.push_log(
         "SEARCH",
         "INFO",
         format!(
             "Completed in {:.2}ms: matched='{}' (conf={:.1}%), candidates={}",
-            timing.total_ms,
-            matched_media.as_deref().unwrap_or("none"),
-            phash_conf,
+            ctx.timing.total_ms,
+            ctx.matched_media.as_deref().unwrap_or("none"),
+            ctx.phash_conf,
             total_candidates
         ),
     );
 
     Json(SearchSubtitlesResponse {
-        media_path: payload.media_path,
-        language: payload.language,
-        matched_media,
-        moviehash,
-        fingerprint_preview,
+        media_path: ctx.payload.media_path,
+        language: ctx.payload.language,
+        matched_media: ctx.matched_media,
+        moviehash: ctx.moviehash,
+        fingerprint_preview: ctx.fingerprint_preview,
         total_candidates,
-        candidates,
-        timing,
+        candidates: ctx.candidates,
+        timing: ctx.timing,
     })
 }
 
@@ -1693,5 +1844,28 @@ mod tests {
                 c.title
             );
         }
+    }
+
+    #[test]
+    fn test_stem_and_title_overlap_normalizes_delimiters() {
+        // Legitimate matches with underscores and dots
+        assert!(stem_and_title_overlap(
+            "Miracle_Workers_(2019)_-_S02E09_-_Moving_Out_Part_1_(1080p_AMZN_WEB-DL_x265_t3nzin)_mid15s",
+            "Miracle Workers"
+        ));
+        assert!(stem_and_title_overlap(
+            "Bullet.Train.2022.1080p.WEBRip.x264",
+            "Bullet Train"
+        ));
+
+        // Disparate cross-media mismatches must be rejected
+        assert!(!stem_and_title_overlap(
+            "Pulp.Fiction.1994.1080p.BrRip.x264.YIFY_mid15s",
+            "24 L'Entrai 24 0fps"
+        ));
+        assert!(!stem_and_title_overlap(
+            "Mad.Max.1979.2160p.4K.BluRay.x265.10bit.AAC5.1-[YTS.MX]_mid15s",
+            "L'été de kikujiro"
+        ));
     }
 }

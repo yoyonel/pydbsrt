@@ -14,7 +14,7 @@
     "scope": "mod",
     "function_name": "run_certify_coupling",
     "start_line": 121,
-    "max_loc": 159,
+    "max_loc": 156,
     "max_ccn": 44,
     "max_parameters": 1,
     "max_nesting": 5
@@ -54,10 +54,10 @@
     "scope": "mod",
     "function_name": "extract_phash_and_subtitles",
     "start_line": 876,
-    "max_loc": 46,
-    "max_ccn": 14,
+    "max_loc": 40,
+    "max_ccn": 8,
     "max_parameters": 5,
-    "max_nesting": 4
+    "max_nesting": 3
   },
   "crates/dbsrt-cli/src/commands/media_add.rs::mod::plan_subtitle_job": {
     "file_path": "crates/dbsrt-cli/src/commands/media_add.rs",
@@ -194,10 +194,10 @@
     "scope": "mod",
     "function_name": "load_media_cache",
     "start_line": 717,
-    "max_loc": 26,
-    "max_ccn": 7,
+    "max_loc": 17,
+    "max_ccn": 6,
     "max_parameters": 1,
-    "max_nesting": 8
+    "max_nesting": 6
   },
   "crates/dbsrt-cli/src/commands/top/sampler.rs::mod::load_media_sources": {
     "file_path": "crates/dbsrt-cli/src/commands/top/sampler.rs",
@@ -244,8 +244,8 @@
     "scope": "mod",
     "function_name": "scan_nas_tvshows",
     "start_line": 822,
-    "max_loc": 101,
-    "max_ccn": 18,
+    "max_loc": 91,
+    "max_ccn": 17,
     "max_parameters": 6,
     "max_nesting": 5
   },
@@ -499,16 +499,6 @@
     "max_parameters": 5,
     "max_nesting": 3
   },
-  "crates/dbsrt-index/src/dbphash.rs::MmapDbphash::aggregate_matches": {
-    "file_path": "crates/dbsrt-index/src/dbphash.rs",
-    "scope": "MmapDbphash",
-    "function_name": "aggregate_matches",
-    "start_line": 544,
-    "max_loc": 169,
-    "max_ccn": 27,
-    "max_parameters": 4,
-    "max_nesting": 6
-  },
   "crates/dbsrt-index/src/dbphash.rs::MmapDbphash::search_cuts_linear": {
     "file_path": "crates/dbsrt-index/src/dbphash.rs",
     "scope": "MmapDbphash",
@@ -538,16 +528,6 @@
     "max_ccn": 1,
     "max_parameters": 5,
     "max_nesting": 2
-  },
-  "crates/dbsrt-index/src/delta.rs::DeltaIndex::aggregate_matches": {
-    "file_path": "crates/dbsrt-index/src/delta.rs",
-    "scope": "DeltaIndex",
-    "function_name": "aggregate_matches",
-    "start_line": 367,
-    "max_loc": 146,
-    "max_ccn": 24,
-    "max_parameters": 4,
-    "max_nesting": 6
   },
   "crates/dbsrt-index/src/engine.rs::PhashEngine::recognize": {
     "file_path": "crates/dbsrt-index/src/engine.rs",
@@ -594,7 +574,7 @@
     "scope": "mod",
     "function_name": "certify_handler",
     "start_line": 530,
-    "max_loc": 186,
+    "max_loc": 183,
     "max_ccn": 35,
     "max_parameters": 1,
     "max_nesting": 4
@@ -699,16 +679,6 @@
     "max_parameters": 7,
     "max_nesting": 5
   },
-  "crates/dbsrt-server/src/handlers/search/lookup.rs::mod::finalize_search_response": {
-    "file_path": "crates/dbsrt-server/src/handlers/search/lookup.rs",
-    "scope": "mod",
-    "function_name": "finalize_search_response",
-    "start_line": 1249,
-    "max_loc": 48,
-    "max_ccn": 1,
-    "max_parameters": 9,
-    "max_nesting": 2
-  },
   "crates/dbsrt-server/src/handlers/search/lookup.rs::mod::match_certified_couplings_and_shifts": {
     "file_path": "crates/dbsrt-server/src/handlers/search/lookup.rs",
     "scope": "mod",
@@ -734,20 +704,10 @@
     "scope": "mod",
     "function_name": "calculate_best_sequence_shift",
     "start_line": 158,
-    "max_loc": 44,
-    "max_ccn": 14,
+    "max_loc": 39,
+    "max_ccn": 11,
     "max_parameters": 4,
-    "max_nesting": 9
-  },
-  "crates/dbsrt-server/src/handlers/search/recognize.rs::mod::recognize_from_fingerprint": {
-    "file_path": "crates/dbsrt-server/src/handlers/search/recognize.rs",
-    "scope": "mod",
-    "function_name": "recognize_from_fingerprint",
-    "start_line": 292,
-    "max_loc": 75,
-    "max_ccn": 6,
-    "max_parameters": 5,
-    "max_nesting": 3
+    "max_nesting": 8
   },
   "crates/dbsrt-server/src/handlers/search/recognize.rs::mod::resolve_certified_candidates_with_shift": {
     "file_path": "crates/dbsrt-server/src/handlers/search/recognize.rs",
@@ -756,7 +716,7 @@
     "start_line": 225,
     "max_loc": 43,
     "max_ccn": 5,
-    "max_parameters": 5,
+    "max_parameters": 4,
     "max_nesting": 5
   },
   "crates/dbsrt-server/src/handlers/studio.rs::mod::couplings_handler": {
@@ -784,8 +744,8 @@
     "scope": "mod",
     "function_name": "run_server_until",
     "start_line": 105,
-    "max_loc": 162,
-    "max_ccn": 34,
+    "max_loc": 152,
+    "max_ccn": 33,
     "max_parameters": 2,
     "max_nesting": 12
   },
@@ -844,8 +804,8 @@
     "scope": "mod",
     "function_name": "find_existing_phash",
     "start_line": 79,
-    "max_loc": 68,
-    "max_ccn": 21,
+    "max_loc": 63,
+    "max_ccn": 17,
     "max_parameters": 2,
     "max_nesting": 6
   },

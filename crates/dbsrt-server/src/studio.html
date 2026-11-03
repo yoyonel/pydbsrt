@@ -677,6 +677,109 @@
       outline: none;
       border-color: var(--accent-blue);
     }
+    select option, datalist option {
+      background-color: #0f172a !important;
+      color: #f8fafc !important;
+    }
+
+    /* ISO End-to-End Pipeline Diagram (ASCII Parity) */
+    .iso-diagram-grid {
+      display: grid;
+      grid-template-columns: 270px 40px 270px 40px 270px 60px 270px;
+      align-items: start;
+      min-width: 1210px;
+    }
+    .iso-box {
+      background: var(--bg-elevated);
+      border: 1.5px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 14px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      line-height: 1.5;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      position: relative;
+      transition: all 0.3s ease;
+    }
+    .iso-box.box-ffmpeg {
+      border-color: rgba(251, 113, 133, 0.45);
+      background: linear-gradient(180deg, rgba(251, 113, 133, 0.06) 0%, var(--bg-elevated) 100%);
+    }
+    .iso-box.box-wan {
+      border-color: rgba(56, 189, 248, 0.45);
+      background: linear-gradient(180deg, rgba(56, 189, 248, 0.06) 0%, var(--bg-elevated) 100%);
+    }
+    .iso-box.box-mih {
+      border-color: rgba(52, 211, 153, 0.45);
+      background: linear-gradient(180deg, rgba(52, 211, 153, 0.06) 0%, var(--bg-elevated) 100%);
+    }
+    .iso-box.box-srt {
+      border-color: rgba(129, 140, 248, 0.45);
+      background: linear-gradient(180deg, rgba(129, 140, 248, 0.06) 0%, var(--bg-elevated) 100%);
+    }
+    .iso-box.active-pulse {
+      box-shadow: 0 0 24px rgba(56, 189, 248, 0.4);
+      border-color: var(--accent-blue) !important;
+    }
+    .iso-box-title {
+      font-weight: 700;
+      font-size: 13px;
+      color: var(--text-primary);
+    }
+    .iso-box-subtitle {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    .iso-box-metric {
+      font-size: 14px;
+      font-weight: 700;
+      margin-top: 4px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .iso-metric-val {
+      font-weight: 800;
+      font-size: 15px;
+    }
+    .iso-metric-pct {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-family: var(--font-mono);
+    }
+    .iso-box-footer {
+      font-size: 10px;
+      color: var(--text-secondary);
+      margin-top: 4px;
+      border-top: 1px solid var(--border-subtle);
+      padding-top: 4px;
+    }
+    .iso-arrow-straight {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 95px;
+    }
+    .iso-col-center {
+      display: flex;
+      flex-direction: column;
+    }
+    .iso-connector-branch {
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      height: 310px;
+    }
+    .iso-col-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
   </style>
 </head>
 <body>
@@ -1010,6 +1113,180 @@
           </div>
         </div>
 
+        <!-- ISO End-to-End Pipeline Diagram (ASCII Parity) -->
+        <div class="panel-card" style="margin-bottom:20px;padding:0;overflow:hidden;">
+          <div class="panel-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;padding:12px 18px;border-bottom:1px solid var(--border);">
+            <div style="display:flex;align-items:center;gap:10px;">
+              <span style="font-weight:700;">📊 Chaîne de Traitement Réelle &amp; Télémétrie Asynchrone (Pipeline Bout-en-Bout)</span>
+              <span id="pipeline-status-badge" class="badge badge-emerald"><span class="dot"></span> Live Asynchrone</span>
+            </div>
+            <div id="pipeline-meta" class="mono" style="font-size:12px;color:var(--text-secondary);">
+              En attente d'une requête VLC ou manuelle...
+            </div>
+          </div>
+
+          <!-- Interactive Snippet Selection & Live Trigger Toolbar -->
+          <div style="display:flex;flex-direction:column;gap:10px;padding:14px 18px;background:rgba(255,255,255,0.02);border-bottom:1px solid var(--border);">
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+              <span style="font-size:12px;font-weight:600;color:var(--text-secondary);white-space:nowrap;">🎬 Média Snippet :</span>
+              <div style="flex:1;min-width:300px;position:relative;">
+                <input type="text" id="pipeline-snippet-input" list="snippets-datalist" class="mono"
+                       value="data/snippets/Pulp.Fiction.1994.1080p.BrRip.x264.YIFY_mid15s.mp4"
+                       placeholder="Filtrer ou choisir un média (ex: Pulp, Bullet, Mad Max)..."
+                       style="width:100%;background:#090d16;border:1px solid var(--border);color:#38bdf8;padding:8px 12px;border-radius:6px;font-size:12.5px;outline:none;" />
+                <datalist id="snippets-datalist">
+                  <option value="data/snippets/Pulp.Fiction.1994.1080p.BrRip.x264.YIFY_mid15s.mp4">Pulp Fiction (1080p mid15s)</option>
+                  <option value="data/snippets/Bullet_Train_(2022)[MULTi][1080p]_mid15s.mp4">Bullet Train (1080p mid15s)</option>
+                  <option value="data/snippets/Mad_Max_Fury_Road_(2015)_mid15s.mp4">Mad Max Fury Road (mid15s)</option>
+                  <option value="data/snippets/2-Blue_Forever_mid15s.mp4">2-Blue Forever (mid15s)</option>
+                  <option value="data/snippets/1-Pegasus_Fantasy_mid15s.mp4">1-Pegasus Fantasy (mid15s)</option>
+                  <option value="tests/data/big_buck_bunny_trailer_480p.mp4">Big Buck Bunny (480p)</option>
+                </datalist>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <select id="pipeline-lang-select" style="background:#090d16;border:1px solid var(--border);color:var(--text-primary);padding:8px 12px;border-radius:6px;font-size:12px;outline:none;">
+                  <option value="fr">🇫🇷 FR</option>
+                  <option value="en">🇬🇧 EN</option>
+                </select>
+                <button id="btn-pipeline-match" class="btn btn-primary" onclick="triggerPipelineEvaluation()" style="background:var(--accent-emerald);color:#0f172a;font-weight:700;padding:8px 20px;border-radius:6px;border:none;cursor:pointer;display:inline-flex;align-items:center;gap:6px;box-shadow:0 2px 8px rgba(16,185,129,0.3);transition:all 0.2s ease;">
+                  <span id="btn-pipeline-icon">⚡</span>
+                  <span id="btn-pipeline-text">Lancer le Matching</span>
+                </button>
+              </div>
+            </div>
+            <!-- Quick Preset Badges -->
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:11px;">
+              <span style="color:var(--text-muted);font-weight:600;">Presets rapides :</span>
+              <button class="btn" style="padding:2px 8px;font-size:11px;" onclick="setPipelineSnippet('data/snippets/Pulp.Fiction.1994.1080p.BrRip.x264.YIFY_mid15s.mp4')">Pulp Fiction</button>
+              <button class="btn" style="padding:2px 8px;font-size:11px;" onclick="setPipelineSnippet('data/snippets/Bullet_Train_(2022)[MULTi][1080p]_mid15s.mp4')">Bullet Train</button>
+              <button class="btn" style="padding:2px 8px;font-size:11px;" onclick="setPipelineSnippet('data/snippets/Mad_Max_Fury_Road_(2015)_mid15s.mp4')">Mad Max</button>
+              <button class="btn" style="padding:2px 8px;font-size:11px;" onclick="setPipelineSnippet('data/snippets/2-Blue_Forever_mid15s.mp4')">2-Blue Forever</button>
+              <button class="btn" style="padding:2px 8px;font-size:11px;" onclick="setPipelineSnippet('data/snippets/1-Pegasus_Fantasy_mid15s.mp4')">Pegasus Fantasy</button>
+              <button class="btn" style="padding:2px 8px;font-size:11px;" onclick="setPipelineSnippet('tests/data/big_buck_bunny_trailer_480p.mp4')">Big Buck Bunny</button>
+            </div>
+          </div>
+
+          <div style="padding:20px;overflow-x:auto;">
+            <!-- ISO 4-Column Branching Grid -->
+            <div class="iso-diagram-grid">
+
+              <!-- Column 1: Box 1 (Décodage FFmpeg Local) -->
+              <div class="iso-box box-ffmpeg" id="iso-card-ffmpeg">
+                <div class="iso-box-title">1. Décodage FFmpeg Local</div>
+                <div class="iso-box-subtitle">(Extrait 10-15s, 1080p/4K)</div>
+                <div class="iso-box-metric">
+                  <span>⏱️</span>
+                  <span id="iso-val-ffmpeg" class="iso-metric-val" style="color:var(--accent-rose);">— ms</span>
+                  <span id="iso-pct-ffmpeg" class="iso-metric-pct badge-amber">— %</span>
+                </div>
+                <div class="iso-box-footer">⚠️ Goulot local (swscale/CPU)</div>
+              </div>
+
+              <!-- Connector 1 -> 2: Straight Arrow -->
+              <div class="iso-arrow-straight">
+                <svg width="40" height="20" viewBox="0 0 40 20">
+                  <line x1="0" y1="10" x2="32" y2="10" stroke="var(--accent-blue)" stroke-width="2"/>
+                  <polygon points="32,6 38,10 32,14" fill="var(--accent-blue)"/>
+                </svg>
+              </div>
+
+              <!-- Column 2: Box 2 (Transport Réseau WAN) -->
+              <div class="iso-box box-wan" id="iso-card-wan">
+                <div class="iso-box-title">2. Transport Réseau (WAN)</div>
+                <div class="iso-box-subtitle">(Relais Cloud o2switch HTTPS)</div>
+                <div class="iso-box-metric">
+                  <span>⏱️</span>
+                  <span id="iso-val-wan" class="iso-metric-val" style="color:var(--accent-blue);">— ms</span>
+                  <span id="iso-pct-wan" class="iso-metric-pct badge-blue">— %</span>
+                </div>
+                <div id="iso-sub-wan" class="iso-box-footer">📡 RTT WAN (0 ms si local)</div>
+              </div>
+
+              <!-- Connector 2 -> 3: Straight Arrow -->
+              <div class="iso-arrow-straight">
+                <svg width="40" height="20" viewBox="0 0 40 20">
+                  <line x1="0" y1="10" x2="32" y2="10" stroke="var(--accent-blue)" stroke-width="2"/>
+                  <polygon points="32,6 38,10 32,14" fill="var(--accent-blue)"/>
+                </svg>
+              </div>
+
+              <!-- Column 3: Box 3 (Matching MIH Serveur) -->
+              <div class="iso-col-center">
+                <div class="iso-box box-mih" id="iso-card-mih">
+                  <div class="iso-box-title">3. Matching MIH Serveur</div>
+                  <div class="iso-box-subtitle">(14.85M frames indexées)</div>
+                  <div class="iso-box-metric">
+                    <span>⏱️</span>
+                    <span id="iso-val-mih" class="iso-metric-val" style="color:var(--accent-emerald);">— ms</span>
+                    <span id="iso-pct-mih" class="iso-metric-pct badge-emerald">— %</span>
+                  </div>
+                  <div class="iso-box-footer">🚀 Lookup RAM Multi-Index Hash</div>
+                </div>
+              </div>
+
+              <!-- Branching SVG Spine Connector (Box 3 -> Box 4, Box 5, Box 6) -->
+              <div class="iso-connector-branch">
+                <svg width="60" height="290" viewBox="0 0 60 290" style="overflow:visible;">
+                  <!-- Top horizontal arrow directly into Box 4 (Découverte) at y=48 -->
+                  <line x1="0" y1="48" x2="52" y2="48" stroke="var(--accent-blue)" stroke-width="2"/>
+                  <polygon points="52,44 58,48 52,52" fill="var(--accent-blue)"/>
+
+                  <!-- Vertical spine dropping from under Box 3 at x=20 -->
+                  <line x1="20" y1="48" x2="20" y2="242" stroke="var(--accent-blue)" stroke-width="2"/>
+
+                  <!-- Middle horizontal branch into Box 5 (Calage SRT) at y=145 -->
+                  <line x1="20" y1="145" x2="52" y2="145" stroke="var(--accent-blue)" stroke-width="2"/>
+                  <polygon points="52,141 58,145 52,149" fill="var(--accent-blue)"/>
+
+                  <!-- Bottom horizontal branch into Box 6 (Consensus) at y=242 -->
+                  <line x1="20" y1="242" x2="52" y2="242" stroke="var(--accent-blue)" stroke-width="2"/>
+                  <polygon points="52,238 58,242 52,246" fill="var(--accent-blue)"/>
+                </svg>
+              </div>
+
+              <!-- Column 4: 3 Vertically Stacked Subtitle Stages -->
+              <div class="iso-col-stack">
+                <!-- Box 4: Découverte SRT -->
+                <div class="iso-box box-srt" id="iso-card-srt-disc">
+                  <div class="iso-box-title">4. Découverte SRT</div>
+                  <div class="iso-box-subtitle">(Disque local &amp; Catalog)</div>
+                  <div class="iso-box-metric">
+                    <span>⏱️</span>
+                    <span id="iso-val-srt-disc" class="iso-metric-val" style="color:var(--accent-indigo);">— ms</span>
+                    <span id="iso-pct-srt-disc" class="iso-metric-pct badge-indigo">— %</span>
+                  </div>
+                  <div class="iso-box-footer">📁 Scan fichiers .srt locaux</div>
+                </div>
+
+                <!-- Box 5: Calage SRT -->
+                <div class="iso-box box-srt" id="iso-card-srt-calage">
+                  <div class="iso-box-title">Calage SRT</div>
+                  <div class="iso-box-subtitle">(I/O disques &amp; alignement)</div>
+                  <div class="iso-box-metric">
+                    <span>⏱️</span>
+                    <span id="iso-val-srt-calage" class="iso-metric-val" style="color:var(--accent-indigo);">— ms</span>
+                    <span class="iso-metric-pct badge-indigo">— %</span>
+                  </div>
+                  <div class="iso-box-footer">⚡ Décodage cues en mémoire</div>
+                </div>
+
+                <!-- Box 6: Consensus -->
+                <div class="iso-box box-srt" id="iso-card-srt-cons">
+                  <div class="iso-box-title">Consensus Temporel</div>
+                  <div class="iso-box-subtitle">(Calcul vshift_ms)</div>
+                  <div class="iso-box-metric">
+                    <span>⏱️</span>
+                    <span id="iso-val-srt-cons" class="iso-metric-val" style="color:var(--accent-indigo);">— ms</span>
+                    <span class="iso-metric-pct badge-indigo">— %</span>
+                  </div>
+                  <div class="iso-box-footer">🎯 Précision sub-seconde</div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+
         <!-- Terminal Log Viewer -->
         <div class="panel-card">
           <div class="panel-card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
@@ -1233,6 +1510,7 @@
         renderMediaList();
         await renderMediaDetail();
         renderCatalogTable();
+        initPipelineSnippets();
       } catch (err) {
         console.error('Failed to load /v1/couplings:', err);
       }
@@ -2063,6 +2341,158 @@
       renderLogs();
     }
 
+    let lastPipelineTimestamp = null;
+
+    function renderPipelineTelemetry(t) {
+      if (!t) return;
+      const isNew = t.timestamp && t.timestamp !== lastPipelineTimestamp;
+      lastPipelineTimestamp = t.timestamp;
+
+      const metaEl = document.getElementById('pipeline-meta');
+      if (metaEl) {
+        const matchInfo = t.matched_media
+          ? `<span style="color:var(--accent-emerald);">✓ Match: <b>${escapeHtml(t.matched_media)}</b> (${t.confidence_percent.toFixed(1)}%)</span>`
+          : '<span style="color:var(--accent-amber);">Pas de correspondance certifiée</span>';
+        metaEl.innerHTML = `Dernière recherche : <b>${escapeHtml(t.filename)}</b> &bull; ${matchInfo} &bull; Total: <b>${t.total_ms.toFixed(1)} ms</b> <span style="color:var(--text-muted);">(${t.timestamp})</span>`;
+      }
+
+      // 1. Décodage FFmpeg Local
+      const setVal = (id, val) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = `${val.toFixed(1)} ms`;
+      };
+      setVal('iso-val-ffmpeg', t.ffmpeg_ms);
+      const setPct = (id, pct) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = `~${pct.toFixed(1)}%`;
+      };
+      setPct('iso-pct-ffmpeg', t.ffmpeg_pct);
+
+      // 2. Transport Réseau (WAN)
+      setVal('iso-val-wan', t.wan_rtt_ms);
+      setPct('iso-pct-wan', t.wan_pct);
+      const subWan = document.getElementById('iso-sub-wan');
+      if (subWan) {
+        subWan.textContent = t.is_relay ? '📡 RTT WAN (Internet / o2switch)' : '⚡ Bus Local (0 ms)';
+      }
+
+      // 3. Matching MIH Serveur
+      const elMih = document.getElementById('iso-val-mih');
+      if (elMih) elMih.textContent = `${t.mih_match_ms.toFixed(2)} ms`;
+      setPct('iso-pct-mih', t.mih_pct);
+
+      // 4. Découverte SRT
+      setVal('iso-val-srt-disc', t.srt_disk_ms);
+      setPct('iso-pct-srt-disc', t.srt_pct);
+
+      // 5. Calage SRT & 6. Consensus
+      const calageMs = Math.min(t.total_ms * 0.005, 1.0);
+      const consMs = Math.min(t.total_ms * 0.002, 0.5);
+      const elCalage = document.getElementById('iso-val-srt-calage');
+      if (elCalage) elCalage.textContent = `${calageMs < 0.1 ? '< 0.1' : calageMs.toFixed(1)} ms`;
+      const elCons = document.getElementById('iso-val-srt-cons');
+      if (elCons) elCons.textContent = `${consMs < 0.1 ? '< 0.1' : consMs.toFixed(1)} ms`;
+
+      if (isNew) {
+        ['iso-card-ffmpeg', 'iso-card-wan', 'iso-card-mih', 'iso-card-srt-disc', 'iso-card-srt-calage', 'iso-card-srt-cons'].forEach(id => {
+          const el = document.getElementById(id);
+          if (el) {
+            el.classList.add('active-pulse');
+            setTimeout(() => el.classList.remove('active-pulse'), 1200);
+          }
+        });
+      }
+    }
+
+    function setPipelineSnippet(path) {
+      const input = document.getElementById('pipeline-snippet-input');
+      if (input) {
+        input.value = path;
+      }
+    }
+
+    async function initPipelineSnippets() {
+      try {
+        const res = await fetch('/v1/snippets');
+        if (!res.ok) return;
+        const snippets = await res.json();
+        if (!Array.isArray(snippets) || snippets.length === 0) return;
+        const datalist = document.getElementById('snippets-datalist');
+        if (!datalist) return;
+        datalist.innerHTML = '';
+        snippets.forEach(path => {
+          const opt = document.createElement('option');
+          opt.value = path;
+          const name = path.split('/').pop();
+          opt.textContent = name;
+          datalist.appendChild(opt);
+        });
+      } catch (e) {
+        // keep default presets on error
+      }
+    }
+
+    async function triggerPipelineEvaluation() {
+      const input = document.getElementById('pipeline-snippet-input');
+      const langSelect = document.getElementById('pipeline-lang-select');
+      const btn = document.getElementById('btn-pipeline-match');
+      const btnIcon = document.getElementById('btn-pipeline-icon');
+      const btnText = document.getElementById('btn-pipeline-text');
+      const meta = document.getElementById('pipeline-meta');
+
+      if (!input) return;
+      const mediaPath = input.value.trim();
+      if (!mediaPath) return;
+      const language = langSelect ? langSelect.value : 'fr';
+      const filename = mediaPath.split('/').pop() || mediaPath;
+
+      if (btn) {
+        btn.disabled = true;
+        btn.style.opacity = '0.7';
+      }
+      if (btnIcon) btnIcon.textContent = '⏳';
+      if (btnText) btnText.textContent = 'Matching...';
+      if (meta) {
+        meta.innerHTML = `<span style="color:var(--accent-blue);">Extraction FFmpeg &amp; matching en direct pour <b>${escapeHtml(filename)}</b>...</span>`;
+      }
+
+      try {
+        const res = await fetch('/v1/search', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            media_path: mediaPath,
+            language: language,
+            search_mode: 'phash'
+          })
+        });
+
+        if (!res.ok) {
+          throw new Error(`Erreur HTTP ${res.status}: ${res.statusText}`);
+        }
+
+        // Fetch fresh telemetry immediately
+        const sRes = await fetch('/v1/search/latest');
+        if (sRes.ok) {
+          const telemetry = await sRes.json();
+          if (telemetry) {
+            renderPipelineTelemetry(telemetry);
+          }
+        }
+      } catch (err) {
+        if (meta) {
+          meta.innerHTML = `<span style="color:var(--accent-rose);">❌ ${escapeHtml(err.message)}</span>`;
+        }
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.style.opacity = '1';
+        }
+        if (btnIcon) btnIcon.textContent = '⚡';
+        if (btnText) btnText.textContent = 'Lancer le Matching';
+      }
+    }
+
     async function pollLogsAndMetrics() {
       if (isLogPaused) return;
       try {
@@ -2084,6 +2514,15 @@
           const lData = await lRes.json();
           liveLogs = lData.logs || [];
           renderLogs();
+        }
+
+        // Poll Pipeline Telemetry
+        const sRes = await fetch('/v1/search/latest');
+        if (sRes.ok) {
+          const telemetry = await sRes.json();
+          if (telemetry) {
+            renderPipelineTelemetry(telemetry);
+          }
         }
       } catch (e) {
         // quiet error on poll

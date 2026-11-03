@@ -221,6 +221,10 @@ pub struct SubtitleCandidate {
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct SearchTimingStats {
     pub phash_match_ms: f64,
+    #[serde(default)]
+    pub ffmpeg_ms: f64,
+    #[serde(default)]
+    pub wan_rtt_ms: f64,
     pub pg_lookup_ms: f64,
     pub json_lookup_ms: f64,
     pub container_ms: f64,
@@ -238,6 +242,29 @@ pub struct SearchTimingStats {
     pub mfps_throughput: f64,
     pub matching_tier: String,
     pub confidence_percent: f64,
+}
+
+/// Telemetry record capturing the exact 4-stage timing breakdown of the latest search query.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct LatestSearchTelemetry {
+    pub timestamp: String,
+    pub media_path: String,
+    pub filename: String,
+    pub matched_media: Option<String>,
+    pub confidence_percent: f64,
+    pub ffmpeg_ms: f64,
+    pub wan_rtt_ms: f64,
+    pub mih_match_ms: f64,
+    pub srt_disk_ms: f64,
+    pub moviehash_ms: f64,
+    pub total_ms: f64,
+    pub ffmpeg_pct: f64,
+    pub wan_pct: f64,
+    pub mih_pct: f64,
+    pub srt_pct: f64,
+    pub is_relay: bool,
+    pub total_candidates: usize,
+    pub matching_tier: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
