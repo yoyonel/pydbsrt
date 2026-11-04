@@ -152,3 +152,9 @@ pub const REFINEMENT_STEP_RADIUS: usize = 2;
 
 /// Default page size of the `history_records` and `discovered_media` lists of `/v1/monitoring/top`.
 pub const DEFAULT_TOP_PAGE_LIMIT: usize = 50;
+
+/// Interval in milliseconds between SSE telemetry and top event pushes to connected web clients.
+pub const DEFAULT_SSE_INTERVAL_MS: u64 = 2_000;
+
+/// Keep-alive ping interval in seconds for SSE connections to prevent proxy timeouts.
+pub const DEFAULT_SSE_KEEPALIVE_SECS: u64 = 15;

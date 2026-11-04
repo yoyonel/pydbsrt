@@ -97,6 +97,27 @@ async fn test_server_monitoring_endpoints() {
     assert!(!logs.contains("hb-secret") && !logs.contains("hb-url-secret"));
     assert!(logs.contains("-ftp-password *** -i ftp://u:***@nas/x.mkv"));
 
+    // 6. Test /v1/monitoring/events SSE endpoint
+    let mut res_sse = client
+        .get(format!("{}/v1/monitoring/events", base_url))
+        .send()
+        .await
+        .expect("Failed to GET /v1/monitoring/events");
+    assert_eq!(res_sse.status(), reqwest::StatusCode::OK);
+    let content_type = res_sse
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default();
+    assert!(content_type.starts_with("text/event-stream"));
+
+    // Read first chunk from SSE stream
+    if let Ok(Some(chunk)) = res_sse.chunk().await {
+        let chunk_str = String::from_utf8_lossy(&chunk);
+        assert!(chunk_str.contains("event: state"));
+        assert!(chunk_str.contains("telemetry"));
+    }
+
     // Clean up temporary run file
     let _ = std::fs::remove_file("run/supervisor_status.json");
     let _ = std::fs::remove_dir_all(&test_phash_dir);

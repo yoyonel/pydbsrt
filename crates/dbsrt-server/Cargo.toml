@@ -24,5 +24,6 @@ anyhow = { workspace = true }
 clap = { workspace = true }
 reqwest = { workspace = true }
 arc-swap = "1.7"
+futures-util = "0.3"
 
 [dev-dependencies]

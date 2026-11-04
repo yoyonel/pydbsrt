@@ -149,6 +149,7 @@ pub fn create_router_with_state(state: AppState) -> Router {
             get(monitoring_telemetry_handler),
         )
         .route("/v1/monitoring/top", get(monitoring_top_handler))
+        .route("/v1/monitoring/events", get(monitoring_events_handler))
         .route(
             "/v1/monitoring/audit/stop",
             post(monitoring_audit_stop_handler),

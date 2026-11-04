@@ -1010,9 +1010,11 @@
 
   <script>
     // Configuration & State
-    const REFRESH_INTERVAL_MS = 3000;
+    const REFRESH_INTERVAL_MS = 5000;
     let isPaused = false;
     let apiKey = localStorage.getItem('dbsrt_api_key') || '';
+    let sseSource = null;
+    let sseActive = false;
 
     // Handle initial URL token query param (?token=... or ?key=...)
     const urlParams = new URLSearchParams(window.location.search);
@@ -1040,6 +1042,65 @@
       return headers;
     }
 
+    function initSse() {
+      if (!window.EventSource) return;
+      if (sseSource) {
+        sseSource.close();
+        sseSource = null;
+      }
+      const query = apiKey ? '?token=' + encodeURIComponent(apiKey) : '';
+      const url = apiEndpoint('v1/monitoring/events' + query);
+
+      sseSource = new EventSource(url);
+
+      sseSource.addEventListener('state', (e) => {
+        if (isPaused || document.hidden) return;
+        try {
+          const payload = JSON.parse(e.data);
+          sseActive = true;
+          if (payload.telemetry) {
+            lastTelemetryAt = Date.now();
+            renderTelemetry(payload.telemetry);
+          }
+          if (payload.top) {
+            const t = payload.top;
+            if (lastTop) {
+              if (lastTop.discovered_media && !t.discovered_media) t.discovered_media = lastTop.discovered_media;
+              if (lastTop.history_records && !t.history_records) t.history_records = lastTop.history_records;
+              if (lastTop.discovered_media_per_source && !t.discovered_media_per_source) {
+                t.discovered_media_per_source = lastTop.discovered_media_per_source;
+              }
+            }
+            lastTop = t;
+            renderTop(t);
+          }
+        } catch (err) {
+          console.warn('Erreur parsing SSE state:', err);
+        }
+      });
+
+      sseSource.addEventListener('open', () => {
+        sseActive = true;
+      });
+
+      sseSource.addEventListener('error', () => {
+        sseActive = false;
+      });
+    }
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        if (sseSource) {
+          sseSource.close();
+          sseSource = null;
+          sseActive = false;
+        }
+      } else if (!isPaused) {
+        refreshAll();
+        initSse();
+      }
+    });
+
     function showAuthModal() {
       document.getElementById('auth-modal').style.display = 'flex';
       document.getElementById('api-key-input').focus();
@@ -1055,6 +1116,7 @@
         apiKey = val;
         localStorage.setItem('dbsrt_api_key', apiKey);
         hideAuthModal();
+        initSse();
         refreshAll();
       }
     });
@@ -1067,6 +1129,14 @@
       isPaused = !isPaused;
       document.getElementById('btn-pause').textContent = isPaused ? '▶' : '⏸';
       document.getElementById('btn-pause').classList.toggle('btn-accent', isPaused);
+      if (isPaused && sseSource) {
+        sseSource.close();
+        sseSource = null;
+        sseActive = false;
+      } else if (!isPaused) {
+        initSse();
+        refreshAll();
+      }
     });
 
     function escapeHtml(str) {
@@ -1217,6 +1287,18 @@
       el.textContent = `Latence ${latency} ms · Sync il y a ${ageText(age)}${isPaused ? ' (pause)' : ''}`;
     }
     setInterval(renderFreshness, 1000);
+
+    const LATENCY_PING_INTERVAL_MS = 10000;
+    async function pingLatency() {
+      if (isPaused || document.hidden) return;
+      try {
+        const t0 = performance.now();
+        await fetch(apiEndpoint('v1/health'), { method: 'HEAD', cache: 'no-store' });
+        lastLatencyMs = performance.now() - t0;
+        renderFreshness();
+      } catch (_) {}
+    }
+    setInterval(pingLatency, LATENCY_PING_INTERVAL_MS);
 
     // Rate from the files this process did: resumed files were done by an earlier run
     function auditEtaSecs(a) {
@@ -1422,22 +1504,30 @@
     let activeView = 'overview';
     const shownList = () => activeView === 'catalogue' ? 'media' : activeView === 'ingestion' ? activeTab : null;
 
-    function topQuery() {
+    function topQuery(forceList = false) {
       const list = shownList();
-      if (list in pageIndex) return `limit=${PAGE_SIZE}&offset=${pageIndex[list] * PAGE_SIZE}`;
-      // The remote source row reads the NAS endpoint from one media path
+      if (forceList && list in pageIndex) return `limit=${PAGE_SIZE}&offset=${pageIndex[list] * PAGE_SIZE}`;
+      // In background polling/SSE, don't re-fetch 50 heavy items
       return list === 'sources' ? 'limit=1' : 'limit=0';
     }
 
-    async function fetchTop() {
+    async function fetchTop(forceList = false) {
       const seq = ++topSeq;
       try {
-        const resp = await fetch(apiEndpoint('v1/monitoring/top?' + topQuery()), { headers: getAuthHeaders() });
+        const resp = await fetch(apiEndpoint('v1/monitoring/top?' + topQuery(forceList)), { headers: getAuthHeaders() });
         if (resp.status === 401 || resp.status === 403) return;
         if (!resp.ok) throw new Error('HTTP ' + resp.status);
         const t = await resp.json();
         // A slower answer for a previous tab or page must not overwrite the current one
         if (seq !== topSeq) return;
+        // Merge preserved list if limit=0 was fetched
+        if (!forceList && lastTop) {
+          if (lastTop.discovered_media && !t.discovered_media) t.discovered_media = lastTop.discovered_media;
+          if (lastTop.history_records && !t.history_records) t.history_records = lastTop.history_records;
+          if (lastTop.discovered_media_per_source && !t.discovered_media_per_source) {
+            t.discovered_media_per_source = lastTop.discovered_media_per_source;
+          }
+        }
         lastTop = t;
         renderTop(t);
       } catch (err) {
@@ -1448,7 +1538,7 @@
 
     function refreshAll() {
       fetchTelemetry();
-      fetchTop();
+      fetchTop(false);
     }
 
     function renderTopBanner(t) {
@@ -1588,16 +1678,24 @@
           `<div class="sys-row"><span class="top-dim">${i === rows.length - 1 ? '└─' : '├─'} </span>${escapeHtml(k.padEnd(17, ' '))}: ${escapeHtml(v == null ? 'N/A' : String(v))}</div>`
         ).join('')).join('');
 
-      fetchCatalogStatus();
+      if (activeView === 'system') {
+        fetchCatalogStatus();
+      }
     }
 
-    async function fetchCatalogStatus() {
+    let lastCatalogStatusAt = 0;
+    const CATALOG_STATUS_CACHE_MS = 30000;
+
+    async function fetchCatalogStatus(force = false) {
       const el = document.getElementById('catalog-ram-stats');
       if (!el) return;
+      const now = Date.now();
+      if (!force && now - lastCatalogStatusAt < CATALOG_STATUS_CACHE_MS) return;
       try {
         const res = await fetch(apiEndpoint('v1/catalog/status'), { headers: getAuthHeaders() });
         if (!res.ok) return;
         const d = await res.json();
+        lastCatalogStatusAt = Date.now();
         el.innerHTML = `Médias indexés : <b>${(d.total_medias||0).toLocaleString()}</b> (${fmt((d.total_frames||0)/1000000, 1)}M frames) │ Index Base : <b>${(d.base_medias||0).toLocaleString()}</b> (${(d.base_cuts||0).toLocaleString()} cuts) │ Delta RAM : <b>${d.delta_medias}</b> │ Couplages certifiés : <b>${d.certified_couplings}</b>`;
       } catch (e) {
         el.textContent = 'Index RAM : statut indisponible';
@@ -2198,14 +2296,14 @@
       const step = Number(e.target.dataset.step);
       if (!step) return;
       pageIndex[p.dataset.list] = Math.max(pageIndex[p.dataset.list] + step, 0);
-      fetchTop();
+      fetchTop(true);
     }));
 
     document.querySelectorAll('.tab-btn').forEach(btn => btn.addEventListener('click', () => {
       document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b === btn));
       document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('active', p.id === 'tab-' + btn.dataset.tab));
       activeTab = btn.dataset.tab;
-      fetchTop();
+      fetchTop(true);
     }));
 
     // One view per URL hash, so a view can be bookmarked and the back button works
@@ -2215,7 +2313,8 @@
       activeView = VIEWS.includes(view) ? view : 'overview';
       document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === 'view-' + activeView));
       document.querySelectorAll('#views-nav a').forEach(a => a.classList.toggle('active', a.getAttribute('href') === '#' + activeView));
-      fetchTop();
+      fetchTop(true);
+      if (activeView === 'system') fetchCatalogStatus(true);
     }
     window.addEventListener('hashchange', showView);
 
@@ -2241,16 +2340,17 @@
       }
     });
 
-    // Auto-refresh loop
+    // Auto-refresh fallback loop (only active if SSE is disconnected and tab is visible)
     // Silent auto-refresh: the banner clock already shows the last update time
     setInterval(() => {
-      if (!isPaused) refreshAll();
+      if (!isPaused && !document.hidden && !sseActive) refreshAll();
     }, REFRESH_INTERVAL_MS);
 
     // Initial load (showView fetches the top snapshot of the view)
     fetchTelemetry();
     showView();
     initPipelineSnippets();
+    initSse();
 
     // Check URL parameters for direct matching
     const matchParams = new URLSearchParams(window.location.search);

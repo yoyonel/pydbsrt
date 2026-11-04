@@ -692,6 +692,16 @@ pub struct MonitoringTelemetryResponse {
     pub server_time_iso: String,
 }
 
+/// Unified composite payload pushed over Server-Sent Events (SSE) stream.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct MonitoringStreamState {
+    /// Live host and pipeline telemetry metrics.
+    pub telemetry: MonitoringTelemetryResponse,
+    /// Live `dbsrt top` snapshot without heavy lists (limit=0).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub top: Option<serde_json::Value>,
+}
+
 /// Incoming heartbeat payload pushed by RPi4 supervisor agent.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SupervisorHeartbeatPayload {

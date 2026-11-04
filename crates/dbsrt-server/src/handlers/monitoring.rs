@@ -4,20 +4,23 @@ use crate::constants::{
     AUDIT_ACTION_TIMEOUT_SECS, AUDIT_SCRIPT_NAME, AUDIT_SCRIPT_PATH, BYTES_PER_GIB_F64,
     CIVIL_DAYS_PER_400_YEARS, CIVIL_EPOCH_DAYS_OFFSET, DEFAULT_AUDIT_LAST_FINISHED_PATH,
     DEFAULT_AUDIT_STATUS_PATH, DEFAULT_BATCH_EVENTS_PATH, DEFAULT_BATCH_QUEUE_PATH,
-    DEFAULT_ESTIMATED_MEDIA_DURATION_SECS, DEFAULT_JOBS_DIR, DEFAULT_SUPERVISOR_STATUS_PATH,
-    DEFAULT_TOP_PAGE_LIMIT, FALLBACK_BATCH_EVENTS_PATH, MAX_MONITORING_RECENT_EVENTS,
-    SECONDS_PER_DAY, SECONDS_PER_HOUR, SECONDS_PER_MINUTE, SUPERVISOR_STALE_THRESHOLD_SECS,
+    DEFAULT_ESTIMATED_MEDIA_DURATION_SECS, DEFAULT_JOBS_DIR, DEFAULT_SSE_INTERVAL_MS,
+    DEFAULT_SSE_KEEPALIVE_SECS, DEFAULT_SUPERVISOR_STATUS_PATH, DEFAULT_TOP_PAGE_LIMIT,
+    FALLBACK_BATCH_EVENTS_PATH, MAX_MONITORING_RECENT_EVENTS, SECONDS_PER_DAY, SECONDS_PER_HOUR,
+    SECONDS_PER_MINUTE, SUPERVISOR_STALE_THRESHOLD_SECS,
 };
 use crate::dtos::{
-    ActiveJobStatus, AuditActionResponse, AuditStatus, BatchQueueStatus,
+    ActiveJobStatus, AuditActionResponse, AuditStatus, BatchQueueStatus, MonitoringStreamState,
     MonitoringTelemetryResponse, RecentBatchEvent, SupervisorHeartbeatPayload, SupervisorTelemetry,
     SystemStats, TopPageQuery,
 };
 use crate::state::AppState;
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
+use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::Html;
 use axum::Json;
+use std::convert::Infallible;
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -714,11 +717,24 @@ pub fn load_recent_events() -> Vec<RecentBatchEvent> {
 /// Never panics.
 ///
 /// # Data Flow & Invariants
+/// Gathers a unified snapshot of volatile host state, batch queue, and supervisor tracking.
+///
+/// # Arguments
+/// None.
+///
+/// # Returns
+/// A [`MonitoringTelemetryResponse`] instance populated with current host and pipeline metrics.
+///
+/// # Errors
+/// Infallible (missing or corrupt files fall back to nominal defaults).
+///
+/// # Panics
+/// Never panics.
+///
+/// # Data Flow & Invariants
 /// Samples volatile Linux host state, batch queue, active processes, and supervisor heartbeats
 /// in sub-millisecond execution time without holding long locks.
-pub async fn monitoring_telemetry_handler(
-    State(_state): State<Arc<AppState>>,
-) -> Json<MonitoringTelemetryResponse> {
+pub fn sample_monitoring_telemetry() -> MonitoringTelemetryResponse {
     let now_iso = current_time_iso();
     let system = sample_system_stats();
     let batch_queue = load_batch_queue_status();
@@ -727,7 +743,7 @@ pub async fn monitoring_telemetry_handler(
     let recent_events = load_recent_events();
     let audit = load_audit_status();
 
-    Json(MonitoringTelemetryResponse {
+    MonitoringTelemetryResponse {
         system,
         batch_queue,
         active_jobs,
@@ -736,7 +752,29 @@ pub async fn monitoring_telemetry_handler(
         audit,
         audit_last_finished: load_last_finished_audit(),
         server_time_iso: now_iso,
-    })
+    }
+}
+
+/// Serves live system and queue telemetry via HTTP GET.
+///
+/// # Arguments
+/// * `_state` - Axum application state.
+///
+/// # Returns
+/// JSON payload wrapped in [`MonitoringTelemetryResponse`].
+///
+/// # Errors
+/// Infallible.
+///
+/// # Panics
+/// Never panics.
+///
+/// # Data Flow & Invariants
+/// Delegated to [`sample_monitoring_telemetry`].
+pub async fn monitoring_telemetry_handler(
+    State(_state): State<Arc<AppState>>,
+) -> Json<MonitoringTelemetryResponse> {
+    Json(sample_monitoring_telemetry())
 }
 
 /// Reuse window for the `dbsrt top --json` snapshot shared by concurrent web clients.
@@ -882,6 +920,74 @@ pub async fn monitoring_top_handler(
         [(axum::http::header::CONTENT_TYPE, "application/json")],
         body,
     ))
+}
+
+/// Gathers a unified snapshot for real-time SSE streaming without heavy lists.
+///
+/// # Arguments
+/// None.
+///
+/// # Returns
+/// A [`MonitoringStreamState`] holding current telemetry and optional top snapshot.
+///
+/// # Errors
+/// Infallible (defaults to `None` on sub-probe failure).
+///
+/// # Panics
+/// Never panics.
+///
+/// # Data Flow & Invariants
+/// Samples live telemetry and queries cached `dbsrt top` snapshot without heavy lists
+/// (offset 0, limit 0) to avoid unnecessary allocations and JSON serialization overhead.
+pub async fn sample_monitoring_stream_state() -> MonitoringStreamState {
+    let telemetry = sample_monitoring_telemetry();
+    let top = match std::env::current_exe() {
+        Ok(exe) => match top_snapshot(&exe, &TOP_SNAPSHOT_CACHE).await {
+            Ok(body) => match paginate_top_snapshot(&body, 0, 0) {
+                Ok(bytes) => serde_json::from_slice(&bytes).ok(),
+                Err(_) => None,
+            },
+            Err(_) => None,
+        },
+        Err(_) => None,
+    };
+
+    MonitoringStreamState { telemetry, top }
+}
+
+/// Handles persistent Server-Sent Events (SSE) connections for live monitoring.
+///
+/// # Arguments
+/// * `_state` - Axum application state.
+///
+/// # Returns
+/// An SSE stream pushing live telemetry and top metrics every [`DEFAULT_SSE_INTERVAL_MS`].
+///
+/// # Errors
+/// Infallible (client disconnection drops stream).
+///
+/// # Panics
+/// Never panics.
+///
+/// # Data Flow & Invariants
+/// Emits unified `state` events containing [`MonitoringStreamState`]. Axum automatically
+/// manages HTTP keep-alive pings and stream teardown upon socket closure.
+pub async fn monitoring_events_handler(
+    State(_state): State<Arc<AppState>>,
+) -> Sse<impl futures_util::stream::Stream<Item = Result<Event, Infallible>>> {
+    let stream = futures_util::stream::unfold((), |_| async move {
+        tokio::time::sleep(std::time::Duration::from_millis(DEFAULT_SSE_INTERVAL_MS)).await;
+        let payload = sample_monitoring_stream_state().await;
+        let json_str = serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string());
+        let event = Event::default().event("state").data(json_str);
+        Some((Ok(event), ()))
+    });
+
+    Sse::new(stream).keep_alive(
+        KeepAlive::new()
+            .interval(std::time::Duration::from_secs(DEFAULT_SSE_KEEPALIVE_SECS))
+            .text("keep-alive"),
+    )
 }
 
 /// Receives and persists supervisor heartbeat payloads from RPi4 agent.
