@@ -19,6 +19,16 @@ tasks:
     cmds:
       - uv run python scripts/download_and_audit_all_trailers.py
 
+  eval:cuts:audit:
+    desc: Comprehensive performance audit of the 6-stage matching pipeline across all video cuts/snippets
+    cmds:
+      - uv run python scripts/audit_cuts_pipeline.py {{.CLI_ARGS}}
+
+  eval:cuts:audit:rejected:
+    desc: Exhaustive forensic diagnostic audit of all rejected cuts in the matching pipeline
+    cmds:
+      - uv run python scripts/audit_rejected_cuts.py {{.CLI_ARGS}}
+
   bench:mmap-scale:
     desc: Benchmark Zero-DB mmap scanner across all 125 files / 5.08M frames in data/__PHASH__/
     deps: [rs:build]

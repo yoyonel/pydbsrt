@@ -512,9 +512,14 @@ async fn dispatch_remote_relay_call(
         .build()
         .unwrap_or_default();
 
-    let mut req_builder = client.post(endpoint).json(remote_req);
+    let mut req_builder = client
+        .post(endpoint)
+        .header(reqwest::header::USER_AGENT, "dbsrt-agent/0.1.0")
+        .json(remote_req);
     if let Some(ref api_key) = state.remote_api_key {
-        req_builder = req_builder.header("X-API-Key", api_key);
+        req_builder = req_builder
+            .header("X-API-Key", api_key)
+            .header("Authorization", format!("Bearer {}", api_key));
     }
 
     let t_net = Instant::now();

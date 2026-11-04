@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>dbsrt Studio — Relational Couplings & pHash Backoffice</title>
+  <title>dbsrt Studio — Relational Couplings &amp; pHash Backoffice</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎬</text></svg>">
   <style>
     :root {
       --bg-base: #090d16;
@@ -798,6 +799,7 @@
       <a href="http://127.0.0.1:8086" target="_blank" rel="noopener" class="btn" title="Open PgWeb PostgreSQL Explorer">PgWeb (:8086) ↗</a>
       <a href="http://127.0.0.1:8000" target="_blank" rel="noopener" class="btn" title="Open MkDocs Documentation Portal">Docs (:8000) ↗</a>
       <button class="btn btn-primary" onclick="loadStudioData()">↻ Refresh</button>
+      <button class="btn" style="background:var(--accent-indigo);color:#fff;border-color:transparent;" onclick="triggerCatalogReload()" title="Hot-reload .dbphash catalog into RAM (POST /v1/catalog/reload)">↻ Reload RAM Index</button>
     </div>
   </header>
 
@@ -970,12 +972,23 @@
             <button class="btn" onclick="resetCatalogFilters()">Reset</button>
           </div>
         </div>
+        <div style="padding:10px 16px;background:var(--bg-elevated);border-bottom:1px solid var(--border-subtle);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span id="catalog-selected-badge" class="badge badge-blue">0 video(s) selected</span>
+            <button class="btn" onclick="toggleSelectAllCatalog()">Select / Deselect Page</button>
+            <button class="btn" onclick="clearCatalogSelection()">Clear Selection</button>
+          </div>
+          <div>
+            <button class="btn btn-primary" id="btn-catalog-batch-match" style="background:var(--accent-emerald);color:#0f172a;font-weight:700;" onclick="launchBatchMatchingOnCatalog()" disabled>⚡ Lancer le Matching sur la Sélection</button>
+          </div>
+        </div>
         <div style="padding:16px;display:flex;flex-direction:column;gap:12px;">
           <div id="catalog-pagination-top"></div>
           <div class="table-wrap">
             <table>
               <thead>
                 <tr>
+                  <th style="width:34px;text-align:center;"><input type="checkbox" id="chk-catalog-select-all" onchange="toggleSelectAllCatalog(this.checked)" title="Select all on page" /></th>
                   <th style="width:55px;">#</th>
                   <th>Media Stem / Release Name</th>
                   <th style="width:85px;">FPS</th>
@@ -990,6 +1003,31 @@
             </table>
           </div>
           <div id="catalog-pagination-bottom"></div>
+
+          <!-- Batch Matching Results Panel -->
+          <div id="catalog-batch-panel" style="display:none;background:var(--bg-elevated);border:1px solid var(--accent-emerald);border-radius:8px;padding:14px;margin-top:12px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+              <div style="font-weight:700;color:var(--text-primary);display:flex;align-items:center;gap:8px;">
+                <span id="catalog-batch-status-badge" class="badge badge-blue">RUNNING</span>
+                <span>⚡ Batch Matching Results</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:10px;">
+                <span id="catalog-batch-counts" class="mono" style="font-size:12px;color:var(--text-secondary);">0 / 0</span>
+                <button class="btn" onclick="document.getElementById('catalog-batch-panel').style.display='none'">Close</button>
+              </div>
+            </div>
+            <div style="height:6px;background:var(--bg-tertiary);border-radius:3px;overflow:hidden;margin-bottom:12px;">
+              <div id="catalog-batch-bar" style="width:0%;height:100%;background:var(--accent-emerald);transition:width 0.2s;"></div>
+            </div>
+            <div class="table-wrap" style="max-height:260px;overflow-y:auto;">
+              <table>
+                <thead>
+                  <tr><th>#</th><th>Target Video (.phash)</th><th>Matched Release</th><th>Confidence</th><th>Visual Shift</th><th>Latency</th></tr>
+                </thead>
+                <tbody id="catalog-batch-tbody"></tbody>
+              </table>
+            </div>
+          </div>
         </div>
       </div>
     </section>
@@ -1079,6 +1117,94 @@
           </div>
         </div>
       </div>
+
+      <div class="explorer-layout" style="grid-template-columns: 1fr 1fr; margin-top: 16px; margin-bottom: 16px;">
+        <!-- Card 3: POST /v1/autosync -->
+        <div class="panel-card">
+          <div class="panel-card-header">
+            <span>⚡ End-to-End AutoSync (<code>POST /v1/autosync</code>)</span>
+          </div>
+          <div class="detail-body">
+            <div class="form-row">
+              <div class="field">
+                <label>Target Media Path (Video or Snippet)</label>
+                <input type="text" id="autosync-media-path" value="tests/data/big_buck_bunny_trailer_480p.mp4" />
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="field" style="max-width:120px;">
+                <label>Language</label>
+                <select id="autosync-lang">
+                  <option value="fr">fr (French)</option>
+                  <option value="en">en (English)</option>
+                </select>
+              </div>
+              <button class="btn btn-primary" style="height:36px;background:var(--accent-emerald);color:#0f172a;font-weight:700;" onclick="runLiveAutoSync()">Run AutoSync E2E</button>
+            </div>
+            <div id="autosync-result-box" class="mono" style="font-size:12px;color:var(--text-secondary);"></div>
+          </div>
+        </div>
+
+        <!-- Card 4: POST /v1/retarget -->
+        <div class="panel-card">
+          <div class="panel-card-header">
+            <span>🎯 Retarget External Subtitle (<code>POST /v1/retarget</code>)</span>
+          </div>
+          <div class="detail-body">
+            <div class="form-row">
+              <div class="field">
+                <label>Target Media Path</label>
+                <input type="text" id="retarget-target-media" value="tests/data/big_buck_bunny_trailer_480p.mp4" />
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="field">
+                <label>Reference Subtitle Path (.srt)</label>
+                <input type="text" id="retarget-ref-subtitles" value="tests/data/big_buck_bunny_trailer_480p.fr.srt" />
+              </div>
+              <button class="btn btn-primary" style="height:36px;" onclick="runLiveRetarget()">Retarget Subtitle</button>
+            </div>
+            <div id="retarget-result-box" class="mono" style="font-size:12px;color:var(--text-secondary);"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="explorer-layout" style="grid-template-columns: 1fr 1fr;">
+        <!-- Card 5: POST /v1/recognize -->
+        <div class="panel-card">
+          <div class="panel-card-header">
+            <span>🔬 Visual Recognition Probe (<code>POST /v1/recognize</code>)</span>
+          </div>
+          <div class="detail-body">
+            <div class="form-row">
+              <div class="field">
+                <label>Query Media or Snippet Path</label>
+                <input type="text" id="recognize-media-path" value="data/snippets/01_Cruauté_mid15s.mp4" />
+              </div>
+              <div class="field" style="max-width:110px;">
+                <label>Language</label>
+                <input type="text" id="recognize-lang" value="fr" />
+              </div>
+              <button class="btn btn-primary" style="height:36px;" onclick="runLiveRecognize()">Probe Recognition</button>
+            </div>
+            <div id="recognize-result-box" class="mono" style="font-size:12px;color:var(--text-secondary);"></div>
+          </div>
+        </div>
+
+        <!-- Card 6: GET /v1/catalog/status & POST /v1/catalog/reload -->
+        <div class="panel-card">
+          <div class="panel-card-header">
+            <span>💾 In-Memory Catalog Index (<code>/v1/catalog/{status,reload}</code>)</span>
+          </div>
+          <div class="detail-body">
+            <div style="display:flex;gap:8px;margin-bottom:8px;">
+              <button class="btn" onclick="queryCatalogStatus()">📊 Query Status</button>
+              <button class="btn btn-primary" style="background:var(--accent-indigo);" onclick="triggerCatalogReload()">↻ Hot-Reload Catalog</button>
+            </div>
+            <div id="catalog-ctrl-result-box" class="mono" style="font-size:12px;color:var(--text-secondary);">Click Query Status or Hot-Reload to check RAM index metrics.</div>
+          </div>
+        </div>
+      </div>
     </section>
 
     <!-- TAB 4: Observability & Live Logs -->
@@ -1137,7 +1263,7 @@
                 <datalist id="snippets-datalist">
                   <option value="data/snippets/Pulp.Fiction.1994.1080p.BrRip.x264.YIFY_mid15s.mp4">Pulp Fiction (1080p mid15s)</option>
                   <option value="data/snippets/Bullet_Train_(2022)[MULTi][1080p]_mid15s.mp4">Bullet Train (1080p mid15s)</option>
-                  <option value="data/snippets/Mad_Max_Fury_Road_(2015)_mid15s.mp4">Mad Max Fury Road (mid15s)</option>
+                  <option value="data/snippets/Mad_Max_Beyond_Thunderdome-SEG_FPL_MainFeature_t01_mid15s.mp4">Mad Max Beyond Thunderdome (mid15s)</option>
                   <option value="data/snippets/2-Blue_Forever_mid15s.mp4">2-Blue Forever (mid15s)</option>
                   <option value="data/snippets/1-Pegasus_Fantasy_mid15s.mp4">1-Pegasus Fantasy (mid15s)</option>
                   <option value="tests/data/big_buck_bunny_trailer_480p.mp4">Big Buck Bunny (480p)</option>
@@ -1159,7 +1285,7 @@
               <span style="color:var(--text-muted);font-weight:600;">Presets rapides :</span>
               <button class="btn" style="padding:2px 8px;font-size:11px;" onclick="setPipelineSnippet('data/snippets/Pulp.Fiction.1994.1080p.BrRip.x264.YIFY_mid15s.mp4')">Pulp Fiction</button>
               <button class="btn" style="padding:2px 8px;font-size:11px;" onclick="setPipelineSnippet('data/snippets/Bullet_Train_(2022)[MULTi][1080p]_mid15s.mp4')">Bullet Train</button>
-              <button class="btn" style="padding:2px 8px;font-size:11px;" onclick="setPipelineSnippet('data/snippets/Mad_Max_Fury_Road_(2015)_mid15s.mp4')">Mad Max</button>
+              <button class="btn" style="padding:2px 8px;font-size:11px;" onclick="setPipelineSnippet('data/snippets/Mad_Max_Beyond_Thunderdome-SEG_FPL_MainFeature_t01_mid15s.mp4')">Mad Max</button>
               <button class="btn" style="padding:2px 8px;font-size:11px;" onclick="setPipelineSnippet('data/snippets/2-Blue_Forever_mid15s.mp4')">2-Blue Forever</button>
               <button class="btn" style="padding:2px 8px;font-size:11px;" onclick="setPipelineSnippet('data/snippets/1-Pegasus_Fantasy_mid15s.mp4')">Pegasus Fantasy</button>
               <button class="btn" style="padding:2px 8px;font-size:11px;" onclick="setPipelineSnippet('tests/data/big_buck_bunny_trailer_480p.mp4')">Big Buck Bunny</button>
@@ -1167,19 +1293,34 @@
           </div>
 
           <div style="padding:20px;overflow-x:auto;">
+            <!-- Architectural Legend & Execution Tier Badges -->
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap;font-size:11px;font-family:var(--font-mono);">
+              <span style="color:var(--text-muted);font-weight:600;">Légende des tiers :</span>
+              <span style="display:inline-flex;align-items:center;gap:5px;background:rgba(251,113,133,0.12);color:#fb7185;border:1px solid rgba(251,113,133,0.3);padding:2px 8px;border-radius:4px;">💻 Machine Client (CPU/FFmpeg)</span>
+              <span style="display:inline-flex;align-items:center;gap:5px;background:rgba(56,189,248,0.12);color:#38bdf8;border:1px solid rgba(56,189,248,0.3);padding:2px 8px;border-radius:4px;">🌐 Transit Réseau WAN (HTTPS :443)</span>
+              <span style="display:inline-flex;align-items:center;gap:5px;background:rgba(52,211,153,0.12);color:#34d399;border:1px solid rgba(52,211,153,0.3);padding:2px 8px;border-radius:4px;">☁️ Serveur Cloud o2switch (RAM MIH)</span>
+              <span style="display:inline-flex;align-items:center;gap:5px;background:rgba(192,132,252,0.12);color:#c084fc;border:1px solid rgba(192,132,252,0.3);padding:2px 8px;border-radius:4px;">📡 Serveur API SRT (REST :8765/:443)</span>
+            </div>
+
             <!-- ISO 4-Column Branching Grid -->
             <div class="iso-diagram-grid">
 
               <!-- Column 1: Box 1 (Décodage FFmpeg Local) -->
               <div class="iso-box box-ffmpeg" id="iso-card-ffmpeg">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;">
+                  <span class="badge" style="background:rgba(251,113,133,0.2);color:#fb7185;border:1px solid rgba(251,113,133,0.4);font-size:9px;">💻 LOCAL (Machine Client)</span>
+                  <span style="font-size:9px;color:var(--text-muted);">CPU / swscale</span>
+                </div>
                 <div class="iso-box-title">1. Décodage FFmpeg Local</div>
                 <div class="iso-box-subtitle">(Extrait 10-15s, 1080p/4K)</div>
+                <div style="font-size:10px;color:var(--text-muted);font-family:var(--font-mono);margin:2px 0;"><code>CLI / C-ABI</code> · <span>IPC Pipes</span></div>
                 <div class="iso-box-metric">
                   <span>⏱️</span>
                   <span id="iso-val-ffmpeg" class="iso-metric-val" style="color:var(--accent-rose);">— ms</span>
                   <span id="iso-pct-ffmpeg" class="iso-metric-pct badge-amber">— %</span>
                 </div>
-                <div class="iso-box-footer">⚠️ Goulot local (swscale/CPU)</div>
+                <div class="iso-box-footer" style="color:var(--warning);">⚠️ Goulot local (swscale/CPU)</div>
+                <div class="iso-box-footer" style="border-top:1px dashed rgba(255,255,255,0.1);padding-top:4px;margin-top:4px;font-size:10px;">📦 <b>Flux</b> : Vidéo source (~1-15 Mo) ➔ <b>24 pHash</b> (192 B)</div>
               </div>
 
               <!-- Connector 1 -> 2: Straight Arrow -->
@@ -1192,14 +1333,20 @@
 
               <!-- Column 2: Box 2 (Transport Réseau WAN) -->
               <div class="iso-box box-wan" id="iso-card-wan">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;">
+                  <span class="badge" style="background:rgba(56,189,248,0.2);color:#38bdf8;border:1px solid rgba(56,189,248,0.4);font-size:9px;">🌐 WAN (Transit Internet)</span>
+                  <span style="font-size:9px;color:var(--text-muted);">TLS HTTPS :443</span>
+                </div>
                 <div class="iso-box-title">2. Transport Réseau (WAN)</div>
                 <div class="iso-box-subtitle">(Relais Cloud o2switch HTTPS)</div>
+                <div style="font-size:10px;color:var(--text-muted);font-family:var(--font-mono);margin:2px 0;"><code>POST /v1/recognize</code> · <span style="color:#38bdf8;">REST HTTPS</span></div>
                 <div class="iso-box-metric">
                   <span>⏱️</span>
                   <span id="iso-val-wan" class="iso-metric-val" style="color:var(--accent-blue);">— ms</span>
                   <span id="iso-pct-wan" class="iso-metric-pct badge-blue">— %</span>
                 </div>
-                <div id="iso-sub-wan" class="iso-box-footer">📡 RTT WAN (0 ms si local)</div>
+                <div id="iso-sub-wan" class="iso-box-footer">📡 RTT WAN (0 ms si local direct)</div>
+                <div class="iso-box-footer" style="border-top:1px dashed rgba(255,255,255,0.1);padding-top:4px;margin-top:4px;font-size:10px;">📦 <b>Flux</b> : JSON POST <b>~1.1 Ko</b> ➔ RTT FAI/Fibre</div>
               </div>
 
               <!-- Connector 2 -> 3: Straight Arrow -->
@@ -1213,14 +1360,20 @@
               <!-- Column 3: Box 3 (Matching MIH Serveur) -->
               <div class="iso-col-center">
                 <div class="iso-box box-mih" id="iso-card-mih">
+                  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;">
+                    <span class="badge" style="background:rgba(52,211,153,0.2);color:#34d399;border:1px solid rgba(52,211,153,0.4);font-size:9px;">☁️ REMOTE (sapin.o2switch.net)</span>
+                    <span style="font-size:9px;color:var(--text-muted);">RAM Multi-Index</span>
+                  </div>
                   <div class="iso-box-title">3. Matching MIH Serveur</div>
                   <div class="iso-box-subtitle">(14.85M frames indexées)</div>
+                  <div style="font-size:10px;color:var(--text-muted);font-family:var(--font-mono);margin:2px 0;"><code>POST /v1/recognize</code> · <span style="color:#34d399;">Axum REST Engine</span></div>
                   <div class="iso-box-metric">
                     <span>⏱️</span>
                     <span id="iso-val-mih" class="iso-metric-val" style="color:var(--accent-emerald);">— ms</span>
                     <span id="iso-pct-mih" class="iso-metric-pct badge-emerald">— %</span>
                   </div>
                   <div class="iso-box-footer">🚀 Lookup RAM Multi-Index Hash</div>
+                  <div class="iso-box-footer" style="border-top:1px dashed rgba(255,255,255,0.1);padding-top:4px;margin-top:4px;font-size:10px;">📦 <b>Flux</b> : Index RAM ➔ Réponse JSON <b>~480 B</b></div>
                 </div>
               </div>
 
@@ -1246,40 +1399,58 @@
 
               <!-- Column 4: 3 Vertically Stacked Subtitle Stages -->
               <div class="iso-col-stack">
-                <!-- Box 4: Découverte SRT -->
+                <!-- Box 4: Découverte SRT via API -->
                 <div class="iso-box box-srt" id="iso-card-srt-disc">
-                  <div class="iso-box-title">4. Découverte SRT</div>
-                  <div class="iso-box-subtitle">(Disque local &amp; Catalog)</div>
+                  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;">
+                    <span class="badge" style="background:rgba(192,132,252,0.2);color:#c084fc;border:1px solid rgba(192,132,252,0.4);font-size:9px;">📡 SERVEUR API SRT</span>
+                    <span style="font-size:9px;color:var(--text-muted);">REST :8765 / :443</span>
+                  </div>
+                  <div class="iso-box-title">4. Découverte SRT (API REST)</div>
+                  <div class="iso-box-subtitle">(Couplages certifiés &amp; Catalog)</div>
+                  <div style="font-size:10px;color:var(--text-muted);font-family:var(--font-mono);margin:2px 0;"><code>GET /v1/subtitles/{hash}</code> · <span style="color:#c084fc;">HTTP JSON</span></div>
                   <div class="iso-box-metric">
                     <span>⏱️</span>
                     <span id="iso-val-srt-disc" class="iso-metric-val" style="color:var(--accent-indigo);">— ms</span>
                     <span id="iso-pct-srt-disc" class="iso-metric-pct badge-indigo">— %</span>
                   </div>
-                  <div class="iso-box-footer">📁 Scan fichiers .srt locaux</div>
+                  <div class="iso-box-footer">📁 Service API SRT (Zero-DB / PG17 / Disk)</div>
+                  <div class="iso-box-footer" style="border-top:1px dashed rgba(255,255,255,0.1);padding-top:4px;margin-top:4px;font-size:10px;">📦 <b>Flux</b> : Requête REST ➔ Fichier SRT <b>~30-80 Ko</b></div>
                 </div>
 
                 <!-- Box 5: Calage SRT -->
                 <div class="iso-box box-srt" id="iso-card-srt-calage">
+                  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;">
+                    <span class="badge" style="background:rgba(192,132,252,0.2);color:#c084fc;border:1px solid rgba(192,132,252,0.4);font-size:9px;">💻 LOCAL (RAM Client)</span>
+                    <span style="font-size:9px;color:var(--text-muted);">Timeline Cues</span>
+                  </div>
                   <div class="iso-box-title">Calage SRT</div>
                   <div class="iso-box-subtitle">(I/O disques &amp; alignement)</div>
+                  <div style="font-size:10px;color:var(--text-muted);font-family:var(--font-mono);margin:2px 0;"><code>POST /v1/retarget</code> · <span style="color:#c084fc;">Rust Parser</span></div>
                   <div class="iso-box-metric">
                     <span>⏱️</span>
                     <span id="iso-val-srt-calage" class="iso-metric-val" style="color:var(--accent-indigo);">— ms</span>
                     <span class="iso-metric-pct badge-indigo">— %</span>
                   </div>
                   <div class="iso-box-footer">⚡ Décodage cues en mémoire</div>
+                  <div class="iso-box-footer" style="border-top:1px dashed rgba(255,255,255,0.1);padding-top:4px;margin-top:4px;font-size:10px;">📦 <b>Flux</b> : Alignement ~200-600 répliques</div>
                 </div>
 
                 <!-- Box 6: Consensus -->
                 <div class="iso-box box-srt" id="iso-card-srt-cons">
+                  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;">
+                    <span class="badge" style="background:rgba(192,132,252,0.2);color:#c084fc;border:1px solid rgba(192,132,252,0.4);font-size:9px;">💻 LOCAL (Sortie VLC)</span>
+                    <span style="font-size:9px;color:var(--text-muted);">OSD Subtitles</span>
+                  </div>
                   <div class="iso-box-title">Consensus Temporel</div>
                   <div class="iso-box-subtitle">(Calcul vshift_ms)</div>
+                  <div style="font-size:10px;color:var(--text-muted);font-family:var(--font-mono);margin:2px 0;"><code>POST /v1/autosync</code> · <span style="color:#c084fc;">Lua Socket</span></div>
                   <div class="iso-box-metric">
                     <span>⏱️</span>
                     <span id="iso-val-srt-cons" class="iso-metric-val" style="color:var(--accent-indigo);">— ms</span>
                     <span class="iso-metric-pct badge-indigo">— %</span>
                   </div>
                   <div class="iso-box-footer">🎯 Précision sub-seconde</div>
+                  <div class="iso-box-footer" style="border-top:1px dashed rgba(255,255,255,0.1);padding-top:4px;margin-top:4px;font-size:10px;">📦 <b>Flux</b> : SRT recalé (+vshift_ms) injecté</div>
                 </div>
               </div>
 
@@ -1311,6 +1482,31 @@
   </main>
 
   <script>
+    let apiKey = localStorage.getItem('dbsrt_api_key') || '';
+    const studioUrlParams = new URLSearchParams(window.location.search);
+    const studioTokenParam = studioUrlParams.get('token') || studioUrlParams.get('key');
+    if (studioTokenParam) {
+      apiKey = studioTokenParam;
+      localStorage.setItem('dbsrt_api_key', apiKey);
+      window.history.replaceState({}, document.title, window.location.pathname + window.location.hash);
+    }
+
+    function apiEndpoint(path) {
+      const p = window.location.pathname;
+      const idx = p.indexOf('/dbsrt');
+      const base = idx !== -1 ? p.substring(0, idx + 6) + '/' : '/';
+      return base + path.replace(/^\/+/, '');
+    }
+
+    function getAuthHeaders() {
+      const headers = { 'Accept': 'application/json' };
+      if (apiKey) {
+        headers['X-API-Key'] = apiKey;
+        headers['Authorization'] = 'Bearer ' + apiKey;
+      }
+      return headers;
+    }
+
     let studioState = null;
     // Selected media is tracked by media_hash so sorting/filtering/paging never loses selection
     let selectedMediaHash = null;
@@ -1386,6 +1582,14 @@
       document.getElementById('cert-media-path').value = p.media;
       document.getElementById('cert-srt-path').value = p.srt;
       document.getElementById('cert-lang').value = p.lang;
+      const autoMedia = document.getElementById('autosync-media-path');
+      if (autoMedia) autoMedia.value = p.media;
+      const retMedia = document.getElementById('retarget-target-media');
+      if (retMedia) retMedia.value = p.media;
+      const retSrt = document.getElementById('retarget-ref-subtitles');
+      if (retSrt) retSrt.value = p.srt;
+      const recMedia = document.getElementById('recognize-media-path');
+      if (recMedia) recMedia.value = p.media;
     }
 
     function switchTab(tabId, btnEl) {
@@ -1499,7 +1703,7 @@
     async function loadStudioData() {
       try {
         // Use summary=true so initial overview omits heavy sub_frames arrays and scales to 10,000+ medias
-        const res = await fetch('/v1/couplings?summary=true');
+        const res = await fetch(apiEndpoint('v1/couplings?summary=true'), { headers: getAuthHeaders() });
         studioState = await res.json();
         if (!initialLoadDone && studioState.couplings && studioState.couplings.length > 0) {
           const richMedia = studioState.couplings.find(c => c.frame_count > 5000) || studioState.couplings[0];
@@ -1511,6 +1715,7 @@
         await renderMediaDetail();
         renderCatalogTable();
         initPipelineSnippets();
+        handleInitialUrlParams();
       } catch (err) {
         console.error('Failed to load /v1/couplings:', err);
       }
@@ -1744,7 +1949,7 @@
       }
 
       try {
-        const res = await fetch('/v1/couplings/sub_frames?' + params.toString());
+        const res = await fetch(apiEndpoint('v1/couplings/sub_frames?' + params.toString()), { headers: getAuthHeaders() });
         if (!res.ok) return;
         subFramesPageData = await res.json();
         cuePage = subFramesPageData.page;
@@ -1831,10 +2036,12 @@
       }
 
       selectedMediaHash = media.media_hash;
+      const safePhash = (media.phash_filename || '').replace(/'/g, "\\'");
       document.getElementById('detail-media-title').textContent = media.media_name;
       document.getElementById('detail-badges').innerHTML = `
         <span class="badge badge-blue">${media.frame_count.toLocaleString()} frames (${formatDurationShort(media.frame_count, media.fps)})</span>
         <span class="badge badge-emerald">${media.fps.toFixed(2)} fps</span>
+        <button class="btn btn-primary" style="font-size:11px;padding:3px 10px;background:var(--accent-emerald);color:#0f172a;font-weight:700;border:none;cursor:pointer;border-radius:4px;display:inline-flex;align-items:center;gap:4px;" onclick="launchPipelineFromCatalog('${safePhash}')">⚡ Lancer le Matching</button>
       `;
 
       const sub = getCurrentSub();
@@ -1855,7 +2062,7 @@
 
         <div class="meta-grid">
           <div class="meta-kv"><label>Media Digest (CHAR(32))</label><span>${media.media_hash}</span></div>
-          <div class="meta-kv"><label>Subtitles Digest (CHAR(32))</label><span>${sub.subtitles_hash}</span></div>
+          <div class="meta-kv"><label>Subtitles Digest (CHAR(32))</label><span>${sub.subtitles_hash} <a href="v1/subtitles/${sub.subtitles_hash}" target="_blank" class="btn" style="padding:1px 6px;font-size:10px;margin-left:6px;text-decoration:none;">📄 View Raw SRT</a></span></div>
           <div class="meta-kv"><label>pHash Binary File</label><span>${media.phash_filename}</span></div>
           <div class="meta-kv"><label>Certified SRT Path</label><span>${sub.srt_path}</span></div>
         </div>
@@ -2074,6 +2281,153 @@
       runLiveSearch();
     }
 
+    function launchPipelineFromCatalog(phashFilename) {
+      if (!phashFilename) return;
+      const path = phashFilename.startsWith('data/') || phashFilename.startsWith('/')
+        ? phashFilename
+        : 'data/__PHASH__/' + phashFilename;
+      setPipelineSnippet(path);
+      switchTab('observability');
+      triggerPipelineEvaluation();
+    }
+
+    function handleInitialUrlParams() {
+      const params = new URLSearchParams(window.location.search);
+      const media = params.get('media') || params.get('match');
+      if (media) {
+        setPipelineSnippet(media);
+        switchTab('observability');
+        setTimeout(() => triggerPipelineEvaluation(), 400);
+      } else if (window.location.hash) {
+        const tab = window.location.hash.replace(/^#tab-|^#/, '');
+        if (['couplings', 'catalog', 'playground', 'observability'].includes(tab)) {
+          switchTab(tab);
+        }
+      }
+    }
+
+    const selectedCatalogFiles = new Set();
+    let currentCatalogPageItems = [];
+
+    function updateCatalogSelectionUI() {
+      const cnt = selectedCatalogFiles.size;
+      const badge = document.getElementById('catalog-selected-badge');
+      if (badge) badge.textContent = `${cnt} video(s) selected`;
+      const btn = document.getElementById('btn-catalog-batch-match');
+      if (btn) {
+        btn.disabled = cnt === 0;
+        btn.textContent = `⚡ Lancer le Matching sur la Sélection (${cnt})`;
+      }
+      const chkAll = document.getElementById('chk-catalog-select-all');
+      if (chkAll && currentCatalogPageItems.length > 0) {
+        chkAll.checked = currentCatalogPageItems.every(it => selectedCatalogFiles.has(it.filename));
+      }
+    }
+
+    function toggleCatalogItemSelection(filename) {
+      if (selectedCatalogFiles.has(filename)) selectedCatalogFiles.delete(filename);
+      else selectedCatalogFiles.add(filename);
+      updateCatalogSelectionUI();
+    }
+
+    function toggleSelectAllCatalog(forceVal) {
+      const shouldSelect = typeof forceVal === 'boolean' ? forceVal : !currentCatalogPageItems.every(it => selectedCatalogFiles.has(it.filename));
+      if (shouldSelect) {
+        currentCatalogPageItems.forEach(it => selectedCatalogFiles.add(it.filename));
+      } else {
+        currentCatalogPageItems.forEach(it => selectedCatalogFiles.delete(it.filename));
+      }
+      updateCatalogSelectionUI();
+      renderCatalogTable();
+    }
+
+    function clearCatalogSelection() {
+      selectedCatalogFiles.clear();
+      updateCatalogSelectionUI();
+      renderCatalogTable();
+    }
+
+    async function launchBatchMatchingOnCatalog() {
+      if (selectedCatalogFiles.size === 0) return;
+      const files = Array.from(selectedCatalogFiles);
+      const panel = document.getElementById('catalog-batch-panel');
+      const badge = document.getElementById('catalog-batch-status-badge');
+      const bar = document.getElementById('catalog-batch-bar');
+      const counts = document.getElementById('catalog-batch-counts');
+      const tbody = document.getElementById('catalog-batch-tbody');
+
+      panel.style.display = 'block';
+      badge.className = 'badge badge-blue';
+      badge.textContent = 'RUNNING';
+      tbody.innerHTML = '';
+
+      let done = 0;
+      for (const [idx, fname] of files.entries()) {
+        const path = 'data/__PHASH__/' + fname;
+        const rowId = `cat-batch-row-${idx}`;
+        tbody.innerHTML += `
+          <tr id="${rowId}">
+            <td class="mono">#${idx + 1}</td>
+            <td class="mono" style="font-weight:600;">${escapeHtml(fname)}</td>
+            <td class="mono" style="color:var(--accent-blue);">Matching in progress...</td>
+            <td class="num">--</td>
+            <td class="num">--</td>
+            <td class="num">--</td>
+          </tr>
+        `;
+
+        const t0 = performance.now();
+        try {
+          const res = await fetch(apiEndpoint('v1/search'), {
+            method: 'POST',
+            headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ media_path: path, language: 'fr', search_mode: 'phash' })
+          });
+          const dt = (performance.now() - t0).toFixed(0);
+          const rowEl = document.getElementById(rowId);
+          if (res.ok) {
+            const data = await res.json();
+            const cand = (data.candidates || [])[0];
+            const matchName = data.matched_media || (cand ? cand.title : 'No match');
+            const conf = data.timing?.confidence_percent != null ? `${data.timing.confidence_percent.toFixed(1)}%` : (cand ? '100%' : '0%');
+            const shift = cand?.shift_ms != null ? `${cand.shift_ms.toFixed(1)} ms` : '0 ms';
+            const color = data.matched_media || cand ? 'var(--accent-emerald)' : 'var(--text-muted)';
+
+            if (rowEl) {
+              rowEl.innerHTML = `
+                <td class="mono">#${idx + 1}</td>
+                <td class="mono" style="font-weight:600;">${escapeHtml(fname)}</td>
+                <td class="mono" style="color:${color};font-weight:600;">${escapeHtml(matchName)}</td>
+                <td class="num">${conf}</td>
+                <td class="num">${shift}</td>
+                <td class="num">${dt} ms</td>
+              `;
+            }
+          }
+        } catch (e) {
+          const rowEl = document.getElementById(rowId);
+          if (rowEl) {
+            rowEl.innerHTML = `
+              <td class="mono">#${idx + 1}</td>
+              <td class="mono" style="font-weight:600;">${escapeHtml(fname)}</td>
+              <td style="color:var(--accent-rose);">Network error</td>
+              <td class="num">0%</td>
+              <td class="num">--</td>
+              <td class="num">--</td>
+            `;
+          }
+        }
+
+        done++;
+        const pct = Math.round((done / files.length) * 100);
+        bar.style.width = `${pct}%`;
+        counts.textContent = `${done} / ${files.length} (${pct}%)`;
+      }
+
+      badge.className = 'badge badge-emerald';
+      badge.textContent = 'FINISHED';
+    }
+
     function renderCatalogTable() {
       if (!studioState) return;
       const q = (document.getElementById('catalog-filter')?.value || '').toLowerCase().trim();
@@ -2104,6 +2458,8 @@
       catalogPage = Math.min(Math.max(1, catalogPage), totalPages);
       const startIdx = (catalogPage - 1) * catalogPageSize;
       const pageItems = items.slice(startIdx, startIdx + catalogPageSize);
+      currentCatalogPageItems = pageItems;
+      updateCatalogSelectionUI();
 
       const paginationHtml = buildPaginationBarHtml({
         totalItems: items.length,
@@ -2130,11 +2486,13 @@
           : '<span class="badge badge-amber">Uncoupled (.phash only)</span>';
         const safeMediaName = item.media_name.replace(/'/g, "\\'");
         const safeFilename = item.filename.replace(/'/g, "\\'");
+        const isChecked = selectedCatalogFiles.has(item.filename);
         const actionBtn = item.is_certified
-          ? `<button class="page-btn" onclick="inspectCertifiedFromCatalog('${safeMediaName}')">🔍 Inspect</button>`
-          : `<button class="page-btn" onclick="openInPlaygroundFromCatalog('${safeFilename}')">⚡ Search Subs</button>`;
+          ? `<div style="display:flex;gap:4px;"><button class="page-btn" onclick="inspectCertifiedFromCatalog('${safeMediaName}')">🔍 Inspect</button><button class="page-btn" style="background:var(--accent-emerald);color:#0f172a;font-weight:700;" onclick="launchPipelineFromCatalog('${safeFilename}')">⚡ Match</button></div>`
+          : `<div style="display:flex;gap:4px;"><button class="page-btn" onclick="openInPlaygroundFromCatalog('${safeFilename}')">⚡ Search</button><button class="page-btn" style="background:var(--accent-emerald);color:#0f172a;font-weight:700;" onclick="launchPipelineFromCatalog('${safeFilename}')">⚡ Match</button></div>`;
         return `
           <tr>
+            <td style="text-align:center;"><input type="checkbox" ${isChecked ? 'checked' : ''} onclick="event.stopPropagation(); toggleCatalogItemSelection('${safeFilename}')" /></td>
             <td class="mono" style="color:var(--text-muted);">${startIdx + i + 1}</td>
             <td class="mono" style="font-weight:600;color:var(--text-primary);">${item.media_name}</td>
             <td class="mono">${item.fps.toFixed(2)}</td>
@@ -2152,9 +2510,9 @@
       const box = document.getElementById('search-result-box');
       box.textContent = 'Searching...';
       try {
-        const res = await fetch('/v1/search', {
+        const res = await fetch(apiEndpoint('v1/search'), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
           body: JSON.stringify({
             media_path: document.getElementById('search-media-path').value,
             search_mode: document.getElementById('search-mode').value,
@@ -2164,15 +2522,25 @@
         });
         const data = await res.json();
         const t = data.timing || {};
-        const rows = (data.candidates || []).map((c, idx) => `
+        const mediaPath = document.getElementById('search-media-path').value;
+        const safeMediaPath = mediaPath.replace(/'/g, "\\'");
+        const rows = (data.candidates || []).map((c, idx) => {
+          const candId = (c.candidate_id || '').replace(/'/g, "\\'");
+          return `
           <tr>
             <td class="mono">#${idx + 1}</td>
             <td><span class="badge ${c.source === 'certified' ? 'badge-emerald' : 'badge-blue'}">${c.source.toUpperCase()}</span></td>
             <td class="mono">${c.language.toUpperCase()}</td>
             <td class="mono" style="font-weight:600;">${c.title}</td>
             <td style="font-size:12px;color:var(--text-secondary);">${c.details || ''}</td>
+            <td>
+              <button class="btn btn-primary" style="font-size:10px;padding:2px 8px;background:var(--accent-indigo);" onclick="runLiveDownload('${safeMediaPath}', '${c.source}', '${candId}', '${c.language}', ${c.shift_ms || 0})">
+                📥 Download &amp; Resync
+              </button>
+            </td>
           </tr>
-        `).join('');
+        `;
+        }).join('');
 
         const totalMs = (t.total_ms && t.total_ms > 0) ? t.total_ms : 1.0;
         const pctVal = (val) => Math.max(0, ((val || 0) / totalMs) * 100);
@@ -2282,8 +2650,8 @@
           </div>
           <div class="table-wrap">
             <table>
-              <thead><tr><th>#</th><th>Source</th><th>Lang</th><th>Title</th><th>Details</th></tr></thead>
-              <tbody>${rows.length > 0 ? rows : '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:14px;">No candidates found</td></tr>'}</tbody>
+              <thead><tr><th>#</th><th>Source</th><th>Lang</th><th>Title</th><th>Details</th><th>Action (POST /v1/download)</th></tr></thead>
+              <tbody>${rows.length > 0 ? rows : '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:14px;">No candidates found</td></tr>'}</tbody>
             </table>
           </div>
         `;
@@ -2296,9 +2664,9 @@
       const box = document.getElementById('cert-result-box');
       box.textContent = 'Certifying ground-truth coupling...';
       try {
-        const res = await fetch('/v1/certify', {
+        const res = await fetch(apiEndpoint('v1/certify'), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
           body: JSON.stringify({
             media_path: document.getElementById('cert-media-path').value,
             subtitle_path: document.getElementById('cert-srt-path').value,
@@ -2315,6 +2683,151 @@
         }
       } catch (e) {
         box.textContent = 'Error: ' + e;
+      }
+    }
+
+    async function runLiveDownload(mediaPath, source, candidateId, language, shiftMs) {
+      alert(`Lancement du téléchargement et resynchronisation pour ${mediaPath}...`);
+      try {
+        const res = await fetch(apiEndpoint('v1/download'), {
+          method: 'POST',
+          headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            media_path: mediaPath,
+            source: source,
+            candidate_id: candidateId || undefined,
+            language: language,
+            resync: true,
+            shift_ms: shiftMs
+          })
+        });
+        const data = await res.json();
+        if (data.success) {
+          alert(`✓ Sous-titre synchronisé avec succès !\nFichier : ${data.output_srt_path}\nDécalage : ${data.shift_ms.toFixed(1)} ms (${data.shift_frames} frames)`);
+        } else {
+          alert(`✗ Échec du téléchargement : ${data.error}`);
+        }
+      } catch (e) {
+        alert(`Erreur réseau /v1/download: ${e}`);
+      }
+    }
+
+    async function runLiveAutoSync() {
+      const box = document.getElementById('autosync-result-box');
+      box.innerHTML = '<span style="color:var(--accent-blue);">Exécution du pipeline complet AutoSync E2E (POST /v1/autosync)...</span>';
+      try {
+        const res = await fetch(apiEndpoint('v1/autosync'), {
+          method: 'POST',
+          headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            media_path: document.getElementById('autosync-media-path').value,
+            language: document.getElementById('autosync-lang').value
+          })
+        });
+        const data = await res.json();
+        if (data.success) {
+          box.innerHTML = `
+            <div style="color:var(--accent-emerald);font-weight:600;margin-bottom:4px;">✓ AutoSync Réussi en ${(data.elapsed_seconds || 0).toFixed(2)}s !</div>
+            <div>Média reconnu : <b>${escapeHtml(data.matched_media || 'inconnu')}</b> (${(data.confidence_percent || 0).toFixed(1)}% confiance)</div>
+            <div>Décalage visuel : <b>${data.shift_ms.toFixed(1)} ms</b> (${data.shift_frames} frames)</div>
+            <div>Fichier SRT généré : <code style="color:var(--accent-blue);">${escapeHtml(data.output_srt_path)}</code></div>
+          `;
+        } else {
+          box.innerHTML = `<span style="color:var(--accent-rose);">✗ AutoSync Échoué : ${escapeHtml(data.error || 'Erreur inconnue')}</span>`;
+        }
+      } catch (e) {
+        box.innerHTML = `<span style="color:var(--accent-rose);">Erreur réseau : ${escapeHtml(String(e))}</span>`;
+      }
+    }
+
+    async function runLiveRetarget() {
+      const box = document.getElementById('retarget-result-box');
+      box.innerHTML = '<span style="color:var(--accent-blue);">Recalage pHash en cours (POST /v1/retarget)...</span>';
+      try {
+        const res = await fetch(apiEndpoint('v1/retarget'), {
+          method: 'POST',
+          headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            target_media: document.getElementById('retarget-target-media').value,
+            ref_subtitles: document.getElementById('retarget-ref-subtitles').value
+          })
+        });
+        const data = await res.json();
+        if (data.success) {
+          box.innerHTML = `
+            <div style="color:var(--accent-emerald);font-weight:600;margin-bottom:4px;">✓ Retarget Réussi en ${(data.elapsed_seconds || 0).toFixed(3)}s !</div>
+            <div>Décalage appliqué : <b>${data.shift_ms.toFixed(1)} ms</b> (${data.shift_frames} frames)</div>
+            <div>Confiance : <b>${(data.confidence_percent || 0).toFixed(1)}%</b></div>
+            <div>Fichier recalé : <code style="color:var(--accent-blue);">${escapeHtml(data.output_srt_path)}</code></div>
+          `;
+        } else {
+          box.innerHTML = `<span style="color:var(--accent-rose);">✗ Retarget Échoué : ${escapeHtml(data.error || 'Erreur inconnue')}</span>`;
+        }
+      } catch (e) {
+        box.innerHTML = `<span style="color:var(--accent-rose);">Erreur réseau : ${escapeHtml(String(e))}</span>`;
+      }
+    }
+
+    async function runLiveRecognize() {
+      const box = document.getElementById('recognize-result-box');
+      box.innerHTML = '<span style="color:var(--accent-blue);">Sondage d\'empreinte visuelle (POST /v1/recognize)...</span>';
+      try {
+        const res = await fetch(apiEndpoint('v1/recognize'), {
+          method: 'POST',
+          headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            media_path: document.getElementById('recognize-media-path').value,
+            language: document.getElementById('recognize-lang').value
+          })
+        });
+        const data = await res.json();
+        if (data.found) {
+          box.innerHTML = `
+            <div style="color:var(--accent-emerald);font-weight:600;margin-bottom:4px;">✓ Média Reconnu en ${(data.timer_seconds || 0).toFixed(3)}s !</div>
+            <div>Match : <b>${escapeHtml(data.media_match || '')}</b></div>
+            <div>Confiance : <b>${(data.confidence || 0).toFixed(1)}%</b> (Offsets match: ${data.nb_offsets_match})</div>
+          `;
+        } else {
+          box.innerHTML = `<span style="color:var(--accent-amber);">Aucune correspondance visuelle trouvée (${(data.timer_seconds || 0).toFixed(3)}s, recherche: ${escapeHtml(data.media_name_search || '')}).</span>`;
+        }
+      } catch (e) {
+        box.innerHTML = `<span style="color:var(--accent-rose);">Erreur réseau : ${escapeHtml(String(e))}</span>`;
+      }
+    }
+
+    async function triggerCatalogReload() {
+      const box = document.getElementById('catalog-ctrl-result-box');
+      if (box) box.innerHTML = '<span style="color:var(--accent-blue);">Hot-reload du catalogue en cours (POST /v1/catalog/reload)...</span>';
+      try {
+        const res = await fetch(apiEndpoint('v1/catalog/reload'), { method: 'POST', headers: getAuthHeaders() });
+        const data = await res.json();
+        if (data.success) {
+          const msg = `✓ Catalogue rechargé en ${data.elapsed_ms.toFixed(2)} ms (${data.indexed_medias} médias, ${data.cuts_entries.toLocaleString()} cuts, ${data.certified_couplings} couplages).`;
+          if (box) box.innerHTML = `<span style="color:var(--accent-emerald);font-weight:600;">${msg}</span>`;
+          await loadStudioData();
+        } else {
+          if (box) box.innerHTML = `<span style="color:var(--accent-rose);">✗ Échec reload : ${escapeHtml(data.error)}</span>`;
+        }
+      } catch (e) {
+        if (box) box.innerHTML = `<span style="color:var(--accent-rose);">Erreur réseau : ${escapeHtml(String(e))}</span>`;
+      }
+    }
+
+    async function queryCatalogStatus() {
+      const box = document.getElementById('catalog-ctrl-result-box');
+      if (box) box.innerHTML = '<span style="color:var(--accent-blue);">Interrogation du statut de l\'index (GET /v1/catalog/status)...</span>';
+      try {
+        const res = await fetch(apiEndpoint('v1/catalog/status'), { headers: getAuthHeaders() });
+        const data = await res.json();
+        if (box) {
+          box.innerHTML = `
+            <div>Total Médias : <b>${(data.total_medias || 0).toLocaleString()}</b> | Frames : <b>${(data.total_frames || 0).toLocaleString()}</b></div>
+            <div>Index RAM Base : <b>${(data.base_medias || 0).toLocaleString()}</b> médias (${(data.base_cuts || 0).toLocaleString()} cuts, ${(data.base_sparse || 0).toLocaleString()} sparse)</div>
+            <div>Delta RAM : <b>${data.delta_medias}</b> médias | Couplages certifiés : <b>${data.certified_couplings}</b></div>
+          `;
+        }
+      } catch (e) {
+        if (box) box.innerHTML = `<span style="color:var(--accent-rose);">Erreur réseau : ${escapeHtml(String(e))}</span>`;
       }
     }
 
@@ -2413,7 +2926,7 @@
 
     async function initPipelineSnippets() {
       try {
-        const res = await fetch('/v1/snippets');
+        const res = await fetch(apiEndpoint('v1/snippets'), { headers: getAuthHeaders() });
         if (!res.ok) return;
         const snippets = await res.json();
         if (!Array.isArray(snippets) || snippets.length === 0) return;
@@ -2457,9 +2970,9 @@
       }
 
       try {
-        const res = await fetch('/v1/search', {
+        const res = await fetch(apiEndpoint('v1/search'), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
           body: JSON.stringify({
             media_path: mediaPath,
             language: language,
@@ -2472,7 +2985,7 @@
         }
 
         // Fetch fresh telemetry immediately
-        const sRes = await fetch('/v1/search/latest');
+        const sRes = await fetch(apiEndpoint('v1/search/latest'), { headers: getAuthHeaders() });
         if (sRes.ok) {
           const telemetry = await sRes.json();
           if (telemetry) {
@@ -2497,7 +3010,7 @@
       if (isLogPaused) return;
       try {
         // Poll Metrics
-        const mRes = await fetch('/v1/metrics');
+        const mRes = await fetch(apiEndpoint('v1/metrics'), { headers: getAuthHeaders() });
         if (mRes.ok) {
           const m = await mRes.json();
           document.getElementById('metric-total-requests').textContent = m.total_requests.toLocaleString();
@@ -2509,7 +3022,7 @@
         }
 
         // Poll Logs
-        const lRes = await fetch('/v1/logs');
+        const lRes = await fetch(apiEndpoint('v1/logs'), { headers: getAuthHeaders() });
         if (lRes.ok) {
           const lData = await lRes.json();
           liveLogs = lData.logs || [];
@@ -2517,7 +3030,7 @@
         }
 
         // Poll Pipeline Telemetry
-        const sRes = await fetch('/v1/search/latest');
+        const sRes = await fetch(apiEndpoint('v1/search/latest'), { headers: getAuthHeaders() });
         if (sRes.ok) {
           const telemetry = await sRes.json();
           if (telemetry) {

@@ -155,9 +155,13 @@ async fn fetch_remote_cas_subtitle(
         .build()
         .unwrap_or_default();
 
-    let mut req_builder = client.get(&url);
+    let mut req_builder = client
+        .get(&url)
+        .header(reqwest::header::USER_AGENT, "dbsrt-agent/0.1.0");
     if let Some(ref api_key) = state.remote_api_key {
-        req_builder = req_builder.header("X-API-Key", api_key);
+        req_builder = req_builder
+            .header("X-API-Key", api_key)
+            .header("Authorization", format!("Bearer {}", api_key));
     }
 
     let resp = req_builder.send().await.ok()?;

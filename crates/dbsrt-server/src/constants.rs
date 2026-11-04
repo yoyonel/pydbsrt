@@ -19,10 +19,10 @@ pub const LOG_BUFFER_CAPACITY: usize = 300;
 pub const DEFAULT_EXTRACT_SAMPLE_SECONDS: f64 = 1.0;
 
 /// Default network timeout in milliseconds for remote relay requests (bounded under VLC watchdog 5s threshold).
-pub const DEFAULT_RELAY_TIMEOUT_MS: u64 = 3_500;
+pub const DEFAULT_RELAY_TIMEOUT_MS: u64 = 4_500;
 
 /// Default connect timeout in milliseconds for remote relay TCP socket.
-pub const DEFAULT_RELAY_CONNECT_TIMEOUT_MS: u64 = 2_000;
+pub const DEFAULT_RELAY_CONNECT_TIMEOUT_MS: u64 = 3_500;
 
 /// Default network timeout in milliseconds for remote relay download requests.
 pub const DEFAULT_DOWNLOAD_RELAY_TIMEOUT_MS: u64 = 3_500;
