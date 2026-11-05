@@ -132,7 +132,8 @@ pub fn create_router_with_state(state: AppState) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods(Any)
-        .allow_headers(Any);
+        .allow_headers(Any)
+        .expose_headers([axum::http::HeaderName::from_static("x-server-time-ms")]);
 
     Router::new()
         .route("/studio", get(studio_ui_handler))

@@ -13,6 +13,7 @@
 - **Human Approval Before Commit/Push**: STRICTLY FORBIDDEN from executing `git commit` or `git push` automatically. Always present summary and proposed commit message, and wait for explicit human validation.
 - **Zero Diffs in Chat Responses**: STRICTLY FORBIDDEN from printing code diffs or `git diff` in chat responses (the user uses Git and IDE to inspect diffs). Provide concise summaries, modified file links, and proposed commit message only.
 - **Taskfile-First Execution**: All recurring commands, builds, tests, demos, benchmarks must be in `Taskfile.yml` and invoked via `task <name>`.
+- **Mandatory Git Worktree Data Seeding**: Whenever branching into or running from an isolated Git worktree, MUST systematically repatriate/symlink all unversioned binary datasets and test fixtures from the parent repository (`data/catalog.dbphash`, `data/snippets/`, `data/__PHASH__/`, `data/reports/batch_*.jsonl`, `data/SRT/couplings.json`) BEFORE starting dev daemons or running benchmarks, preventing zero-data illusions and cold start failures.
 ## Continuous Documentation, Diátaxis & README Synchronization
 - **Mandatory Diátaxis 4-Quadrant Architecture**: All documentation in `docs/` MUST strictly comply with the Diátaxis framework (https://diataxis.fr/):
   1. **🎓 Tutorials (`docs/tutorials/`)**: Learning-oriented step-by-step lessons for beginners (linear, zero alternatives, guaranteed success).

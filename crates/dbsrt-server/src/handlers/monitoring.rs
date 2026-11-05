@@ -10,9 +10,9 @@ use crate::constants::{
     SECONDS_PER_MINUTE, SUPERVISOR_STALE_THRESHOLD_SECS,
 };
 use crate::dtos::{
-    ActiveJobStatus, AuditActionResponse, AuditStatus, BatchQueueStatus, MonitoringStreamState,
-    MonitoringTelemetryResponse, RecentBatchEvent, SupervisorHeartbeatPayload, SupervisorTelemetry,
-    SystemStats, TopPageQuery,
+    ActiveJobStatus, AuditActionResponse, AuditStatus, BatchQueueStatus, MetricsResponse,
+    MonitoringStreamState, MonitoringTelemetryResponse, RecentBatchEvent,
+    SupervisorHeartbeatPayload, SupervisorTelemetry, SystemStats, TopPageQuery,
 };
 use crate::state::AppState;
 use axum::extract::{Query, State};
@@ -755,13 +755,13 @@ pub fn sample_monitoring_telemetry() -> MonitoringTelemetryResponse {
     }
 }
 
-/// Serves live system and queue telemetry via HTTP GET.
+/// Builds an HTTP header map containing the server Unix epoch timestamp in milliseconds.
 ///
 /// # Arguments
-/// * `_state` - Axum application state.
+/// None.
 ///
 /// # Returns
-/// JSON payload wrapped in [`MonitoringTelemetryResponse`].
+/// [`axum::http::HeaderMap`] containing `X-Server-Time-Ms`.
 ///
 /// # Errors
 /// Infallible.
@@ -770,15 +770,44 @@ pub fn sample_monitoring_telemetry() -> MonitoringTelemetryResponse {
 /// Never panics.
 ///
 /// # Data Flow & Invariants
-/// Delegated to [`sample_monitoring_telemetry`].
+/// Samples [`std::time::SystemTime::now()`] and formats milliseconds as decimal ASCII.
+fn server_time_header() -> axum::http::HeaderMap {
+    let mut headers = axum::http::HeaderMap::new();
+    if let Ok(duration) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+        if let Ok(val) = axum::http::HeaderValue::from_str(&duration.as_millis().to_string()) {
+            headers.insert(axum::http::HeaderName::from_static("x-server-time-ms"), val);
+        }
+    }
+    headers
+}
+
+/// Serves live system and queue telemetry via HTTP GET with server clock sync.
+///
+/// # Arguments
+/// * `_state` - Axum application state.
+///
+/// # Returns
+/// Tuple containing [`axum::http::HeaderMap`] with `X-Server-Time-Ms` and [`Json<MonitoringTelemetryResponse>`].
+///
+/// # Errors
+/// Infallible.
+///
+/// # Panics
+/// Never panics.
+///
+/// # Data Flow & Invariants
+/// Attaches [`server_time_header`] and samples telemetry via [`sample_monitoring_telemetry`].
 pub async fn monitoring_telemetry_handler(
     State(_state): State<Arc<AppState>>,
-) -> Json<MonitoringTelemetryResponse> {
-    Json(sample_monitoring_telemetry())
+) -> (axum::http::HeaderMap, Json<MonitoringTelemetryResponse>) {
+    (server_time_header(), Json(sample_monitoring_telemetry()))
 }
 
 /// Reuse window for the `dbsrt top --json` snapshot shared by concurrent web clients.
-const TOP_SNAPSHOT_TTL: std::time::Duration = std::time::Duration::from_secs(2);
+const TOP_SNAPSHOT_TTL: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// Fast telemetry sampling window in milliseconds passed to `dbsrt top --json`.
+const TOP_CLI_FAST_REFRESH_MS: &str = "200";
 
 /// Cached `dbsrt top --json` output and the instant it was captured.
 pub type TopSnapshotCache = tokio::sync::Mutex<Option<(std::time::Instant, axum::body::Bytes)>>;
@@ -786,29 +815,36 @@ pub type TopSnapshotCache = tokio::sync::Mutex<Option<(std::time::Instant, axum:
 /// Last native snapshot; the lock is held across the spawn so only one probe runs at a time.
 static TOP_SNAPSHOT_CACHE: TopSnapshotCache = tokio::sync::Mutex::const_new(None);
 
-/// Runs `dbsrt top --json` next to `server_exe`, reusing `cache` for [`TOP_SNAPSHOT_TTL`].
+/// Atomic flag tracking whether a background cache revalidation task is already active.
+static TOP_PROBE_IN_FLIGHT: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Spawns `dbsrt top --json --refresh-ms 200` to probe a full system telemetry snapshot.
+///
+/// # Arguments
+/// * `server_exe` - Filesystem path to the current server executable.
+///
+/// # Returns
+/// Raw JSON bytes redacted of sensitive credentials.
 ///
 /// # Errors
-/// [`StatusCode::INTERNAL_SERVER_ERROR`] when the binary cannot be spawned,
-/// [`StatusCode::BAD_GATEWAY`] when it exits non-zero.
+/// * [`StatusCode::INTERNAL_SERVER_ERROR`] when the binary cannot be spawned or environment paths fail.
+/// * [`StatusCode::BAD_GATEWAY`] when the process exits non-zero.
+///
+/// # Panics
+/// Never panics.
 ///
 /// # Data Flow & Invariants
-/// Runs the CLI with the server cwd and its directory first in `PATH`, so relative state paths
-/// (`~/dbsrt` on o2switch) resolve identically to an interactive `dbsrt top`.
-pub async fn top_snapshot(
+/// Executes the CLI binary with fast sampling (200ms) and inherits directory PATH so relative
+/// Zero-DB state files resolve identically.
+async fn execute_top_probe(
     server_exe: &std::path::Path,
-    cache: &TopSnapshotCache,
 ) -> Result<axum::body::Bytes, (StatusCode, String)> {
-    let mut cache = cache.lock().await;
-    if let Some((at, body)) = cache.as_ref() {
-        if at.elapsed() < TOP_SNAPSHOT_TTL {
-            return Ok(body.clone());
-        }
-    }
-
     let cli = server_exe.with_file_name("dbsrt");
     let mut command = tokio::process::Command::new(&cli);
-    command.args(["top", "--json"]).kill_on_drop(true);
+    command
+        .args(["top", "--json", "--refresh-ms", TOP_CLI_FAST_REFRESH_MS])
+        .kill_on_drop(true);
     if let Some(dir) = server_exe.parent() {
         let path = std::env::var_os("PATH").unwrap_or_default();
         let joined = std::env::join_paths(
@@ -830,13 +866,76 @@ pub async fn top_snapshot(
         ));
     }
 
-    // Defense in depth over every field (paths, error tails): no URL password leaves the server.
-    // JSON-safe: an authority ends at '"' and ':'/'@' never sit inside an escape sequence.
-    let body = axum::body::Bytes::from(dbsrt_core::redact_url_userinfo(&String::from_utf8_lossy(
-        &output.stdout,
-    )));
-    *cache = Some((std::time::Instant::now(), body.clone()));
-    Ok(body)
+    Ok(axum::body::Bytes::from(dbsrt_core::redact_url_userinfo(
+        &String::from_utf8_lossy(&output.stdout),
+    )))
+}
+
+/// Launches a background tokio task to revalidate the `dbsrt top` snapshot without blocking.
+///
+/// # Arguments
+/// * `exe` - Server executable path used to locate the sibling `dbsrt` CLI.
+///
+/// # Returns
+/// None. Task runs detached and clears the in-flight atomic flag upon completion.
+///
+/// # Panics
+/// Never panics.
+///
+/// # Data Flow & Invariants
+/// Ensures strictly one background probe executes concurrently via [`TOP_PROBE_IN_FLIGHT`].
+fn spawn_top_probe_background(exe: std::path::PathBuf) {
+    if TOP_PROBE_IN_FLIGHT.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
+    tokio::spawn(async move {
+        if let Ok(fresh) = execute_top_probe(&exe).await {
+            let mut g = TOP_SNAPSHOT_CACHE.lock().await;
+            *g = Some((std::time::Instant::now(), fresh));
+        }
+        TOP_PROBE_IN_FLIGHT.store(false, std::sync::atomic::Ordering::SeqCst);
+    });
+}
+
+/// Runs `dbsrt top --json` next to `server_exe`, reusing `cache` with stale-while-revalidate.
+///
+/// # Arguments
+/// * `server_exe` - Filesystem path to the server binary.
+/// * `cache` - Shared locked cache holding the latest snapshot.
+///
+/// # Returns
+/// Redacted JSON bytes of the snapshot.
+///
+/// # Errors
+/// Returns error on initial cold-start if binary fails to execute.
+///
+/// # Panics
+/// Never panics.
+///
+/// # Data Flow & Invariants
+/// Implements non-blocking Stale-While-Revalidate: if a previous snapshot is cached but expired,
+/// it is returned immediately to the caller in 0ms while a detached tokio task refreshes the
+/// cache in the background without blocking the HTTP request thread.
+pub async fn top_snapshot(
+    server_exe: &std::path::Path,
+    cache: &TopSnapshotCache,
+) -> Result<axum::body::Bytes, (StatusCode, String)> {
+    let mut guard = cache.lock().await;
+    if let Some((at, body)) = guard.as_ref() {
+        if at.elapsed() < TOP_SNAPSHOT_TTL {
+            return Ok(body.clone());
+        }
+    }
+
+    if let Some((_, stale_body)) = guard.as_ref() {
+        let stale = stale_body.clone();
+        spawn_top_probe_background(server_exe.to_path_buf());
+        return Ok(stale);
+    }
+
+    let fresh = execute_top_probe(server_exe).await?;
+    *guard = Some((std::time::Instant::now(), fresh.clone()));
+    Ok(fresh)
 }
 
 /// Lists of `dbsrt top --json` paginated by `/v1/monitoring/top`, each with its total field.
@@ -891,23 +990,27 @@ pub fn paginate_top_snapshot(
 
 /// Serves the `SystemTelemetry` rendered by the native `dbsrt top`, heavy lists paginated.
 ///
+/// # Arguments
+/// * `_state` - Axum application state.
+/// * `page` - Query parameters specifying pagination offset and limit.
+///
 /// # Returns
-/// JSON from the sibling `dbsrt top --json` binary (see [`top_snapshot`]), with
-/// `history_records` and `discovered_media` cut by [`paginate_top_snapshot`].
+/// HTTP response tuple containing headers (`Content-Type: application/json` and `X-Server-Time-Ms`)
+/// and JSON bytes from the sibling `dbsrt top --json` binary.
 ///
 /// # Errors
 /// Same as [`top_snapshot`], plus [`StatusCode::INTERNAL_SERVER_ERROR`] when the server
 /// executable path is unknown.
+///
+/// # Panics
+/// Never panics.
+///
+/// # Data Flow & Invariants
+/// Samples [`top_snapshot`], paginates results, attaches [`server_time_header`], and returns response bytes.
 pub async fn monitoring_top_handler(
     State(_state): State<Arc<AppState>>,
     Query(page): Query<TopPageQuery>,
-) -> Result<
-    (
-        [(axum::http::header::HeaderName, &'static str); 1],
-        axum::body::Bytes,
-    ),
-    (StatusCode, String),
-> {
+) -> Result<(axum::http::HeaderMap, axum::body::Bytes), (StatusCode, String)> {
     let exe =
         std::env::current_exe().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let body = top_snapshot(&exe, &TOP_SNAPSHOT_CACHE).await?;
@@ -916,19 +1019,21 @@ pub async fn monitoring_top_handler(
         page.offset.unwrap_or(0),
         page.limit.unwrap_or(DEFAULT_TOP_PAGE_LIMIT),
     )?;
-    Ok((
-        [(axum::http::header::CONTENT_TYPE, "application/json")],
-        body,
-    ))
+    let mut headers = server_time_header();
+    headers.insert(
+        axum::http::header::CONTENT_TYPE,
+        axum::http::HeaderValue::from_static("application/json"),
+    );
+    Ok((headers, body))
 }
 
 /// Gathers a unified snapshot for real-time SSE streaming without heavy lists.
 ///
 /// # Arguments
-/// None.
+/// * `state` - Shared server state container.
 ///
 /// # Returns
-/// A [`MonitoringStreamState`] holding current telemetry and optional top snapshot.
+/// A [`MonitoringStreamState`] holding current telemetry, optional top snapshot, and pipeline timing.
 ///
 /// # Errors
 /// Infallible (defaults to `None` on sub-probe failure).
@@ -937,9 +1042,13 @@ pub async fn monitoring_top_handler(
 /// Never panics.
 ///
 /// # Data Flow & Invariants
-/// Samples live telemetry and queries cached `dbsrt top` snapshot without heavy lists
-/// (offset 0, limit 0) to avoid unnecessary allocations and JSON serialization overhead.
-pub async fn sample_monitoring_stream_state() -> MonitoringStreamState {
+/// Samples live telemetry, queries cached `dbsrt top` snapshot without heavy lists
+/// (offset 0, limit 0), and reads the latest search pipeline timing metrics.
+pub async fn sample_monitoring_stream_state(state: &AppState) -> MonitoringStreamState {
+    let sent_at_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
     let telemetry = sample_monitoring_telemetry();
     let top = match std::env::current_exe() {
         Ok(exe) => match top_snapshot(&exe, &TOP_SNAPSHOT_CACHE).await {
@@ -951,14 +1060,63 @@ pub async fn sample_monitoring_stream_state() -> MonitoringStreamState {
         },
         Err(_) => None,
     };
+    let pipeline = state.latest_search.read().ok().and_then(|g| g.clone());
 
-    MonitoringStreamState { telemetry, top }
+    let total = state
+        .metrics
+        .total_requests
+        .load(std::sync::atomic::Ordering::Relaxed);
+    let total_us = state
+        .metrics
+        .total_latency_us
+        .load(std::sync::atomic::Ordering::Relaxed);
+    let avg_latency_ms = if total > 0 {
+        (total_us as f64 / total as f64) / 1000.0
+    } else {
+        0.0
+    };
+    let server_metrics = Some(MetricsResponse {
+        status: "ok".to_string(),
+        uptime_seconds: state.start_time.elapsed().as_secs(),
+        total_requests: total,
+        recognize_requests: state
+            .metrics
+            .recognize_requests
+            .load(std::sync::atomic::Ordering::Relaxed),
+        search_requests: state
+            .metrics
+            .search_requests
+            .load(std::sync::atomic::Ordering::Relaxed),
+        cache_hits: state
+            .metrics
+            .cache_hits
+            .load(std::sync::atomic::Ordering::Relaxed),
+        remote_errors: state
+            .metrics
+            .remote_errors
+            .load(std::sync::atomic::Ordering::Relaxed),
+        avg_latency_ms,
+    });
+    let server_logs = state
+        .log_buffer
+        .read()
+        .map(|b| b.iter().cloned().collect::<Vec<_>>())
+        .ok();
+
+    MonitoringStreamState {
+        sent_at_ms,
+        telemetry,
+        top,
+        pipeline,
+        server_metrics,
+        server_logs,
+    }
 }
 
 /// Handles persistent Server-Sent Events (SSE) connections for live monitoring.
 ///
 /// # Arguments
-/// * `_state` - Axum application state.
+/// * `state` - Axum application state.
 ///
 /// # Returns
 /// An SSE stream pushing live telemetry and top metrics every [`DEFAULT_SSE_INTERVAL_MS`].
@@ -973,14 +1131,14 @@ pub async fn sample_monitoring_stream_state() -> MonitoringStreamState {
 /// Emits unified `state` events containing [`MonitoringStreamState`]. Axum automatically
 /// manages HTTP keep-alive pings and stream teardown upon socket closure.
 pub async fn monitoring_events_handler(
-    State(_state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
 ) -> Sse<impl futures_util::stream::Stream<Item = Result<Event, Infallible>>> {
-    let stream = futures_util::stream::unfold((), |_| async move {
+    let stream = futures_util::stream::unfold(state, |state| async move {
         tokio::time::sleep(std::time::Duration::from_millis(DEFAULT_SSE_INTERVAL_MS)).await;
-        let payload = sample_monitoring_stream_state().await;
+        let payload = sample_monitoring_stream_state(&state).await;
         let json_str = serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string());
         let event = Event::default().event("state").data(json_str);
-        Some((Ok(event), ()))
+        Some((Ok(event), state))
     });
 
     Sse::new(stream).keep_alive(

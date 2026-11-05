@@ -1042,6 +1042,81 @@
       return headers;
     }
 
+    function mergeTopLists(dest, src) {
+      if (!src) return;
+      if ((!dest.discovered_media || dest.discovered_media.length === 0) && (src.discovered_media && src.discovered_media.length > 0)) {
+        dest.discovered_media = src.discovered_media;
+      }
+      if ((!dest.history_records || dest.history_records.length === 0) && (src.history_records && src.history_records.length > 0)) {
+        dest.history_records = src.history_records;
+      }
+      if ((!dest.discovered_media_per_source || Object.keys(dest.discovered_media_per_source).length === 0) && (src.discovered_media_per_source && Object.keys(src.discovered_media_per_source).length > 0)) {
+        dest.discovered_media_per_source = src.discovered_media_per_source;
+      }
+    }
+
+    // Cristian's algorithm for clock offset synchronization and jitter tracking
+    class ClockSync {
+      constructor(maxSamples = 10) {
+        this.maxSamples = maxSamples;
+        this.samples = [];
+        this.effectiveOffset = 0;
+        this.lastTransitMs = null;
+        this.lastJitterMs = 0;
+        this.lastRttMs = null;
+        this.calibrated = false;
+      }
+
+      calibrate(t1, serverTimeMs, t4, ttfbMs = null) {
+        if (!serverTimeMs || isNaN(serverTimeMs)) return;
+        const rtt = ttfbMs != null && ttfbMs > 0 ? ttfbMs : Math.max(1, t4 - t1);
+        const offset = serverTimeMs - (t1 + rtt / 2);
+        this.samples.push({ rtt, offset });
+        if (this.samples.length > this.maxSamples) {
+          this.samples.shift();
+        }
+        const sorted = this.samples.map(s => s.offset).sort((a, b) => a - b);
+        this.effectiveOffset = sorted[Math.floor(sorted.length / 2)];
+        this.lastRttMs = rtt;
+        this.calibrated = true;
+      }
+
+      processSseTick(sentAtMs) {
+        if (!sentAtMs || isNaN(sentAtMs)) return null;
+        const now = Date.now();
+        const transit = Math.max(0, (now - this.effectiveOffset) - sentAtMs);
+        if (this.lastTransitMs != null) {
+          this.lastJitterMs = Math.abs(transit - this.lastTransitMs);
+        }
+        this.lastTransitMs = transit;
+        this.lastRttMs = this.calibrated ? transit * 2 : transit;
+        return { transit, jitter: this.lastJitterMs, rtt: this.lastRttMs };
+      }
+    }
+
+    const clockSync = new ClockSync(10);
+
+    // Performance Resource Timing API observer: captures exact network TTFB on REST calls
+    if (typeof PerformanceObserver !== 'undefined') {
+      try {
+        const perfObserver = new PerformanceObserver((list) => {
+          for (const entry of list.getEntries()) {
+            if (entry.name && (entry.name.includes('/v1/monitoring/telemetry') || entry.name.includes('/v1/monitoring/top'))) {
+              if (entry.responseStart > 0 && entry.requestStart > 0) {
+                const ttfb = entry.responseStart - entry.requestStart;
+                if (ttfb > 0) {
+                  clockSync.lastRttMs = ttfb;
+                }
+              }
+            }
+          }
+        });
+        perfObserver.observe({ type: 'resource', buffered: true });
+      } catch (err) {
+        // Fallback silently if PerformanceObserver is not supported
+      }
+    }
+
     function initSse() {
       if (!window.EventSource) return;
       if (sseSource) {
@@ -1058,6 +1133,12 @@
         try {
           const payload = JSON.parse(e.data);
           sseActive = true;
+          if (payload.sent_at_ms) {
+            const metrics = clockSync.processSseTick(payload.sent_at_ms);
+            if (metrics) {
+              lastLatencyMs = metrics.rtt;
+            }
+          }
           if (payload.telemetry) {
             lastTelemetryAt = Date.now();
             renderTelemetry(payload.telemetry);
@@ -1065,15 +1146,15 @@
           if (payload.top) {
             const t = payload.top;
             if (lastTop) {
-              if (lastTop.discovered_media && !t.discovered_media) t.discovered_media = lastTop.discovered_media;
-              if (lastTop.history_records && !t.history_records) t.history_records = lastTop.history_records;
-              if (lastTop.discovered_media_per_source && !t.discovered_media_per_source) {
-                t.discovered_media_per_source = lastTop.discovered_media_per_source;
-              }
+              mergeTopLists(t, lastTop);
             }
             lastTop = t;
             renderTop(t);
           }
+          if (payload.pipeline) {
+            renderPipelineTelemetry(payload.pipeline);
+          }
+          renderFreshness();
         } catch (err) {
           console.warn('Erreur parsing SSE state:', err);
         }
@@ -1162,16 +1243,21 @@
     async function fetchTelemetry() {
       try {
         const t0 = performance.now();
+        const t1 = Date.now();
         const resp = await fetch(apiEndpoint('v1/monitoring/telemetry'), { headers: getAuthHeaders() });
-        lastLatencyMs = performance.now() - t0;
+        const t4 = Date.now();
         if (resp.status === 401 || resp.status === 403) {
           showAuthModal();
           return;
         }
         if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const serverTime = parseInt(resp.headers.get('x-server-time-ms'), 10);
+        clockSync.calibrate(t1, serverTime, t4);
+        lastLatencyMs = clockSync.lastRttMs || (performance.now() - t0);
         const data = await resp.json();
         lastTelemetryAt = Date.now();
         renderTelemetry(data);
+        renderFreshness();
       } catch (err) {
         console.warn('Erreur télémétrie:', err);
         document.getElementById('health-badge').className = 'badge badge-offline';
@@ -1274,6 +1360,7 @@
     let lastTelemetry = null;
     let lastTelemetryAt = null;
     let lastLatencyMs = null;
+    let lastJitterMs = 0;
     const ageText = (secs) => secs < 60 ? `${Math.round(secs)} s` : formatDuration(secs);
 
     // Footer line: round trip of the last telemetry request and age of the data on screen.
@@ -1284,21 +1371,10 @@
       const age = (Date.now() - lastTelemetryAt) / 1000;
       el.style.color = age <= 2 * REFRESH_INTERVAL_MS / 1000 ? '' : age <= 30 ? 'var(--warning)' : 'var(--danger)';
       const latency = lastLatencyMs == null ? '--' : Math.round(lastLatencyMs);
-      el.textContent = `Latence ${latency} ms · Sync il y a ${ageText(age)}${isPaused ? ' (pause)' : ''}`;
+      const jitterStr = clockSync && clockSync.lastJitterMs > 0 ? ` (±${Math.round(clockSync.lastJitterMs)} ms)` : '';
+      el.textContent = `Latence ${latency} ms${jitterStr} · Sync il y a ${ageText(age)}${isPaused ? ' (pause)' : ''}`;
     }
     setInterval(renderFreshness, 1000);
-
-    const LATENCY_PING_INTERVAL_MS = 10000;
-    async function pingLatency() {
-      if (isPaused || document.hidden) return;
-      try {
-        const t0 = performance.now();
-        await fetch(apiEndpoint('v1/health'), { method: 'HEAD', cache: 'no-store' });
-        lastLatencyMs = performance.now() - t0;
-        renderFreshness();
-      } catch (_) {}
-    }
-    setInterval(pingLatency, LATENCY_PING_INTERVAL_MS);
 
     // Rate from the files this process did: resumed files were done by an earlier run
     function auditEtaSecs(a) {
@@ -1514,7 +1590,14 @@
     async function fetchTop(forceList = false) {
       const seq = ++topSeq;
       try {
+        const t0 = performance.now();
+        const t1 = Date.now();
         const resp = await fetch(apiEndpoint('v1/monitoring/top?' + topQuery(forceList)), { headers: getAuthHeaders() });
+        const t4 = Date.now();
+        const serverTime = parseInt(resp.headers.get('x-server-time-ms'), 10);
+        clockSync.calibrate(t1, serverTime, t4);
+        lastLatencyMs = clockSync.lastRttMs || (performance.now() - t0);
+        renderFreshness();
         if (resp.status === 401 || resp.status === 403) return;
         if (!resp.ok) throw new Error('HTTP ' + resp.status);
         const t = await resp.json();
@@ -1522,11 +1605,7 @@
         if (seq !== topSeq) return;
         // Merge preserved list if limit=0 was fetched
         if (!forceList && lastTop) {
-          if (lastTop.discovered_media && !t.discovered_media) t.discovered_media = lastTop.discovered_media;
-          if (lastTop.history_records && !t.history_records) t.history_records = lastTop.history_records;
-          if (lastTop.discovered_media_per_source && !t.discovered_media_per_source) {
-            t.discovered_media_per_source = lastTop.discovered_media_per_source;
-          }
+          mergeTopLists(t, lastTop);
         }
         lastTop = t;
         renderTop(t);
@@ -1771,6 +1850,7 @@
       document.getElementById('completed-caption').textContent = `DERNIERS TRAITEMENTS COMPLÉTÉS & CERTIFIÉS [${total} RÉFÉRENCÉS] - du plus récent au plus ancien, cliquer une ligne pour sa fiche`;
       renderPager('completed', total);
       const tbody = document.getElementById('completed-tbody');
+      tbody.style.opacity = '1';
       if (records.length === 0) {
         tbody.innerHTML = '<tr><td colspan="7" class="top-dim" style="text-align: center;">Aucun enregistrement dans data/reports/batch_tvshow_nightly.jsonl</td></tr>';
         return;
@@ -2160,6 +2240,7 @@
       renderPager('media', total);
       updateMediaSelectionUI();
       const tbody = document.getElementById('media-tbody');
+      tbody.style.opacity = '1';
       if (items.length === 0) {
         tbody.innerHTML = '<tr><td colspan="8" class="top-dim" style="text-align: center;">Aucun média ne correspond aux filtres</td></tr>';
         return;
@@ -2296,6 +2377,8 @@
       const step = Number(e.target.dataset.step);
       if (!step) return;
       pageIndex[p.dataset.list] = Math.max(pageIndex[p.dataset.list] + step, 0);
+      const tbody = document.getElementById(p.dataset.list === 'completed' ? 'completed-tbody' : 'media-tbody');
+      if (tbody) tbody.style.opacity = '0.4';
       fetchTop(true);
     }));
 
@@ -2303,6 +2386,16 @@
       document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b === btn));
       document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('active', p.id === 'tab-' + btn.dataset.tab));
       activeTab = btn.dataset.tab;
+      if (activeTab === 'completed') {
+        const tbody = document.getElementById('completed-tbody');
+        if (tbody) {
+          if (!lastTop || !lastTop.history_records || lastTop.history_records.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7" class="top-dim" style="text-align: center; padding: 24px;">⏳ Chargement des traitements récents...</td></tr>';
+          } else {
+            tbody.style.opacity = '0.4';
+          }
+        }
+      }
       fetchTop(true);
     }));
 

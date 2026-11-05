@@ -695,11 +695,22 @@ pub struct MonitoringTelemetryResponse {
 /// Unified composite payload pushed over Server-Sent Events (SSE) stream.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct MonitoringStreamState {
+    /// High-precision server timestamp in Unix epoch milliseconds when the event was emitted.
+    pub sent_at_ms: u64,
     /// Live host and pipeline telemetry metrics.
     pub telemetry: MonitoringTelemetryResponse,
     /// Live `dbsrt top` snapshot without heavy lists (limit=0).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub top: Option<serde_json::Value>,
+    /// Latest end-to-end matching pipeline timing breakdown.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pipeline: Option<LatestSearchTelemetry>,
+    /// Live server microservice metrics for Studio.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub server_metrics: Option<MetricsResponse>,
+    /// Live daemon logs ring buffer.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub server_logs: Option<Vec<crate::state::ServerLogEntry>>,
 }
 
 /// Incoming heartbeat payload pushed by RPi4 supervisor agent.

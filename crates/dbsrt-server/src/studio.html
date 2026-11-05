@@ -3006,39 +3006,83 @@
       }
     }
 
-    async function pollLogsAndMetrics() {
-      if (isLogPaused) return;
-      try {
-        // Poll Metrics
-        const mRes = await fetch(apiEndpoint('v1/metrics'), { headers: getAuthHeaders() });
-        if (mRes.ok) {
-          const m = await mRes.json();
-          document.getElementById('metric-total-requests').textContent = m.total_requests.toLocaleString();
-          document.getElementById('metric-search-requests').textContent = m.search_requests.toLocaleString();
-          document.getElementById('metric-recognize-requests').textContent = m.recognize_requests.toLocaleString();
-          document.getElementById('metric-avg-latency').textContent = `${m.avg_latency_ms.toFixed(2)} ms`;
-          document.getElementById('metric-relay-mode').textContent = m.is_agent ? `Agent -> ${m.remote_api || 'Remote'}` : 'Standalone Server';
-          document.getElementById('metric-relay-errors').textContent = `${m.remote_errors} remote errors`;
-        }
+    function renderMetrics(m) {
+      if (!m) return;
+      const totalEl = document.getElementById('metric-total-requests');
+      if (totalEl) totalEl.textContent = m.total_requests.toLocaleString();
+      const searchEl = document.getElementById('metric-search-requests');
+      if (searchEl) searchEl.textContent = m.search_requests.toLocaleString();
+      const recogEl = document.getElementById('metric-recognize-requests');
+      if (recogEl) recogEl.textContent = m.recognize_requests.toLocaleString();
+      const latEl = document.getElementById('metric-avg-latency');
+      if (latEl) latEl.textContent = `${m.avg_latency_ms.toFixed(2)} ms`;
+      const relayEl = document.getElementById('metric-relay-mode');
+      if (relayEl) relayEl.textContent = m.is_agent ? `Agent -> ${m.remote_api || 'Remote'}` : 'Standalone Server';
+      const errEl = document.getElementById('metric-relay-errors');
+      if (errEl) errEl.textContent = `${m.remote_errors} remote errors`;
+    }
 
-        // Poll Logs
+    let sseSource = null;
+    let sseActive = false;
+
+    function initSse() {
+      if (!window.EventSource) return;
+      if (sseSource) {
+        sseSource.close();
+        sseSource = null;
+      }
+      const query = apiKey ? '?token=' + encodeURIComponent(apiKey) : '';
+      const url = apiEndpoint('v1/monitoring/events' + query);
+
+      sseSource = new EventSource(url);
+
+      sseSource.addEventListener('state', (e) => {
+        if (document.hidden) return;
+        try {
+          const payload = JSON.parse(e.data);
+          sseActive = true;
+          if (payload.server_metrics) {
+            renderMetrics(payload.server_metrics);
+          }
+          if (payload.server_logs && !isLogPaused) {
+            liveLogs = payload.server_logs;
+            renderLogs();
+          }
+          if (payload.pipeline) {
+            renderPipelineTelemetry(payload.pipeline);
+          }
+        } catch (err) {
+          console.warn('Erreur parsing SSE state dans Studio:', err);
+        }
+      });
+
+      sseSource.addEventListener('open', () => {
+        sseActive = true;
+      });
+
+      sseSource.addEventListener('error', () => {
+        sseActive = false;
+      });
+    }
+
+    async function pollLogsAndMetricsFallback() {
+      if (isLogPaused || sseActive) return;
+      try {
+        const mRes = await fetch(apiEndpoint('v1/metrics'), { headers: getAuthHeaders() });
+        if (mRes.ok) renderMetrics(await mRes.json());
         const lRes = await fetch(apiEndpoint('v1/logs'), { headers: getAuthHeaders() });
         if (lRes.ok) {
           const lData = await lRes.json();
           liveLogs = lData.logs || [];
           renderLogs();
         }
-
-        // Poll Pipeline Telemetry
         const sRes = await fetch(apiEndpoint('v1/search/latest'), { headers: getAuthHeaders() });
         if (sRes.ok) {
           const telemetry = await sRes.json();
-          if (telemetry) {
-            renderPipelineTelemetry(telemetry);
-          }
+          if (telemetry) renderPipelineTelemetry(telemetry);
         }
       } catch (e) {
-        // quiet error on poll
+        // quiet error on fallback poll
       }
     }
 
@@ -3091,8 +3135,21 @@
     }
 
     loadStudioData();
-    setInterval(pollLogsAndMetrics, 2000);
-    pollLogsAndMetrics();
+    pollLogsAndMetricsFallback();
+    initSse();
+
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden && (!sseActive || !sseSource)) {
+        initSse();
+      }
+    });
+
+    // Fallback polling only when SSE is offline or disconnected
+    setInterval(() => {
+      if (!sseActive && !document.hidden && !isLogPaused) {
+        pollLogsAndMetricsFallback();
+      }
+    }, 10000);
   </script>
 </body>
 </html>

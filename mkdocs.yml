@@ -125,6 +125,7 @@ nav:
       - Catalogue des Recettes: how-to/index.md
       - Synchroniser des Sous-Titres dans VLC: how-to/synchroniser-sous-titres-vlc.md
       - Basculer les Cibles de Backend VLC: how-to/basculer-cibles-vlc-local-cloud-rpi4.md
+      - Exécuter un Matching E2E Réel & Relais Cloud: how-to/executer-matching-e2e-reel-et-relais-cloud.md
       - Ajouter et Indexer un Média (media:add): how-to/ajouter-et-indexer-un-media.md
       - Guide Façade Unifiée media:add: how-to/2026-10-25-guide-media-add-facade.md
       - Certifier un Couplage Média-Sous-Titres: how-to/certifier-un-couplage.md
