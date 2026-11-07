@@ -56,6 +56,10 @@ pub struct MatchTrajectoryArgs {
     /// Allow establishing initial t0 hypothesis seed on uniform/blank/black frames
     #[arg(long, default_value_t = false)]
     pub allow_blank_seed: bool,
+
+    /// Output format (DataFrame, CSV, JSON) [default: DataFrame]
+    #[arg(long, value_enum, default_value_t = crate::cli::OutputFormat::DataFrame)]
+    pub output_format: crate::cli::OutputFormat,
 }
 
 /// Executes trajectory matching command.
@@ -81,12 +85,14 @@ pub fn run_match_trajectory(args: MatchTrajectoryArgs) -> Result<()> {
         election_strategy: dbsrt_core::trajectory::ElectionStrategy::QualityScore,
     };
 
-    println!(
-        "🚀 Trajectory Tracking on '{}' (evaluating {} frames from t={:.1}s)...",
-        args.media.file_name().unwrap_or_default().to_string_lossy(),
-        args.frames,
-        args.start
-    );
+    if args.output_format == crate::cli::OutputFormat::DataFrame {
+        println!(
+            "🚀 Trajectory Tracking on '{}' (evaluating {} frames from t={:.1}s)...",
+            args.media.file_name().unwrap_or_default().to_string_lossy(),
+            args.frames,
+            args.start
+        );
+    }
 
     let req = dbsrt_index::trajectory_runner::TrajectoryMatchRequest {
         dbphash: &dbphash,
@@ -95,6 +101,32 @@ pub fn run_match_trajectory(args: MatchTrajectoryArgs) -> Result<()> {
         nb_frames: args.frames,
     };
     let res = execute_trajectory_matching(&req, config)?;
+
+    if args.output_format == crate::cli::OutputFormat::Json {
+        println!("{}", serde_json::to_string_pretty(&res)?);
+        return Ok(());
+    }
+
+    if args.output_format == crate::cli::OutputFormat::Csv {
+        println!("target_media,evaluated_frames,initial_candidates,surviving,winner_id,winner_title,matched_frames,coverage_ratio,score,ref_start_ms,elapsed_sec");
+        println!(
+            "{},{},{},{},{},\"{}\",{},{:.4},{:.2},{},{:.3}",
+            res.target_media,
+            res.evaluated_frames_count,
+            res.initial_candidates_count,
+            res.surviving_trajectories_count,
+            res.winner_media_id
+                .map(|id| id.to_string())
+                .unwrap_or_default(),
+            res.winner_title,
+            res.winner_matched_frames,
+            res.winner_coverage_ratio,
+            res.winner_score,
+            res.winner_initial_timestamp_ms,
+            res.elapsed_seconds
+        );
+        return Ok(());
+    }
 
     println!("================================================================================");
     println!("🎯 TRAJECTORY TRACKING VERDICT:");

@@ -5,7 +5,7 @@ use std::path::Path;
 use std::time::Instant;
 
 /// Result summary of an end-to-end trajectory tracking run.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TrajectoryMatchResult {
     pub target_media: String,
     pub evaluated_frames_count: u32,
@@ -14,6 +14,7 @@ pub struct TrajectoryMatchResult {
     pub winner_media_id: Option<u32>,
     pub winner_title: String,
     pub winner_matched_frames: u32,
+    pub winner_coverage_ratio: f64,
     pub winner_score: f64,
     pub winner_initial_timestamp_ms: u32,
     pub elapsed_seconds: f64,
@@ -28,12 +29,66 @@ pub struct TrajectoryMatchRequest<'a> {
     pub nb_frames: usize,
 }
 
-/// Executes trajectory tracking against an MmapDbphash catalog on an extracted frame sequence.
-pub fn execute_trajectory_matching(
-    req: &TrajectoryMatchRequest<'_>,
-    config: TrajectoryTrackerConfig,
-) -> Result<TrajectoryMatchResult> {
-    let t0 = Instant::now();
+/// Extracts query perceptual hashes from video via FFmpeg or directly from .phash binary.
+///
+/// # Arguments
+/// * `req` - Trajectory match request containing target path, start timestamp and requested frames count.
+///
+/// # Returns
+/// * `Result<Vec<u64>>` - Sequence of extracted perceptual hashes sampled at 1.0 fps.
+///
+/// # Errors
+/// * Returns Err if target path does not exist or decoding fails.
+///
+/// # Panics
+/// * Never panics.
+///
+/// # Data Flow & Invariants
+/// 1. If file extension is `.phash`, reads binary fingerprint directly via `read_phash_file` and samples at 1.0 fps.
+/// 2. If file is a video, invokes FFmpeg frame extraction at 1.0 fps.
+pub fn extract_query_hashes(req: &TrajectoryMatchRequest<'_>) -> Result<Vec<u64>> {
+    if req.target_path.extension().and_then(|e| e.to_str()) == Some("phash") {
+        extract_from_phash_file(req)
+    } else {
+        extract_from_video_file(req)
+    }
+}
+
+fn extract_from_phash_file(req: &TrajectoryMatchRequest<'_>) -> Result<Vec<u64>> {
+    let all_hashes = dbsrt_core::read_phash_file(req.target_path)?;
+    let stem = req
+        .target_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default();
+    let fps = dbsrt_core::parse_fps_from_stem(stem);
+    let effective_fps = if fps > 0.0 {
+        fps
+    } else {
+        dbsrt_core::DEFAULT_BASELINE_FPS
+    };
+    let total_frames = all_hashes.len();
+    let total_duration_sec = total_frames as f64 / effective_fps;
+    let start_sec = if req.start_sec >= total_duration_sec {
+        (total_duration_sec * 0.2).max(0.0)
+    } else {
+        req.start_sec
+    };
+    let nb_samples = if req.nb_frames > 0 { req.nb_frames } else { 24 };
+    let mut sampled = Vec::with_capacity(nb_samples);
+    for i in 0..nb_samples {
+        let t = start_sec + i as f64;
+        let f_idx = (t * effective_fps).round() as usize;
+        if f_idx < all_hashes.len() {
+            sampled.push(all_hashes[f_idx]);
+        } else {
+            break;
+        }
+    }
+    Ok(sampled)
+}
+
+fn extract_from_video_file(req: &TrajectoryMatchRequest<'_>) -> Result<Vec<u64>> {
     let opts = dbsrt_core::video::VideoExtractionOptions {
         start_sec: req.start_sec,
         max_frames: if req.nb_frames > 0 {
@@ -46,7 +101,16 @@ pub fn execute_trajectory_matching(
         ..Default::default()
     };
     let samples = dbsrt_core::video::extract_frames_advanced(req.target_path, &opts)?;
-    let hashes: Vec<u64> = samples.into_iter().map(|s| s.phash).collect();
+    Ok(samples.into_iter().map(|s| s.phash).collect())
+}
+
+/// Executes trajectory tracking against an MmapDbphash catalog on an extracted frame sequence.
+pub fn execute_trajectory_matching(
+    req: &TrajectoryMatchRequest<'_>,
+    config: TrajectoryTrackerConfig,
+) -> Result<TrajectoryMatchResult> {
+    let t0 = Instant::now();
+    let hashes = extract_query_hashes(req)?;
     if hashes.is_empty() {
         anyhow::bail!("No frames extracted from target media");
     }
@@ -75,6 +139,7 @@ pub fn execute_trajectory_matching(
                 winner_media_id: None,
                 winner_title: "NONE".to_string(),
                 winner_matched_frames: 0,
+                winner_coverage_ratio: 0.0,
                 winner_score: 0.0,
                 winner_initial_timestamp_ms: 0,
                 elapsed_seconds: t0.elapsed().as_secs_f64(),
@@ -136,14 +201,22 @@ pub fn execute_trajectory_matching(
         (None, "NONE".to_string(), 0, 0.0, 0)
     };
 
+    let total_frames = hashes.len() as u32;
+    let coverage_ratio = if total_frames > 0 {
+        winner_matched as f64 / total_frames as f64
+    } else {
+        0.0
+    };
+
     Ok(TrajectoryMatchResult {
         target_media: target_name,
-        evaluated_frames_count: hashes.len() as u32,
+        evaluated_frames_count: total_frames,
         initial_candidates_count: initial_count,
         surviving_trajectories_count: surviving_count,
         winner_media_id: winner_id,
         winner_title,
         winner_matched_frames: winner_matched,
+        winner_coverage_ratio: coverage_ratio,
         winner_score,
         winner_initial_timestamp_ms: winner_ts,
         elapsed_seconds: elapsed,
