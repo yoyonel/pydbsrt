@@ -11,6 +11,7 @@ pub mod job_progress;
 pub mod lang_status;
 pub mod media_pairing;
 pub mod metadata;
+pub mod multi_window;
 pub mod phash;
 pub mod probe_cache;
 pub mod providers;
@@ -45,6 +46,10 @@ pub use media_pairing::{
     SUBTITLE_SUBDIRS, SUPPORTED_VIDEO_EXTENSIONS,
 };
 pub use metadata::{MediaMetadata, MediaType};
+pub use multi_window::{
+    aggregate_multi_window_matches, evaluate_multi_window_consensus, MultiWindowConsensus,
+    MultiWindowPlan, WindowMatchItem, DEFAULT_MULTI_WINDOW_RATIOS, MAX_SHIFT_DRIFT_TOLERANCE_MS,
+};
 pub use phash::{hamming_distance, phash_32x32};
 pub use probe_cache::{
     compute_local_file_moviehash, compute_moviehash_from_head_tail, fetch_http_range_moviehash,

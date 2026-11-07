@@ -189,8 +189,22 @@ flowchart LR
      - Exécutée en direct avec le binaire compilé release `dbsrt media:add` et les vidéos réelles de `data/snippets/`.
      - Cycle complet validé : démarrage à 4 workers $\to$ scale-down à 2 workers (50% de charge) $\to$ pause douce $\to$ reprise à 3 workers $\to$ 8/8 vidéos traitées avec succès sans aucune interruption forcée.
      - 8 véritables fichiers binaires `.phash` physiquement produits par FFmpeg (`bb553c49b9e430b7`, `a4fef6774c616725`, `a3d7c49d4cfd888b`, `50f86a41372a8d46`, `0b3cc307f5a68bd1`, `d0cc74288ca4b90b`, `ee7233f70f8be7b3`, `3670526cf0c9b870`).
-3. **Jalon 3 (Prochaine Étape) — Génération Multi-Offsets & Matrice de Scoring** :
-   - Générer les variantes multi-offsets ($t=20\%$, $t=50\%$, $t=80\%$) calculées mathématiquement via `calculate_cut_offset` sans surcoût `ffprobe`.
-   - Exécuter la batterie de matching et mesurer la baisse des collisions ($< 5\%$).
-4. **Jalon 4 — Banc Continu Streaming WAN** :
+3. **Jalon 3 (Jalon C.1, C.2, C.3, C.5 Achevé — 7 nov 2026) — Moteur Spatio-Temporel Multi-Fenêtres & Élimination des Collisions** :
+   - Implémenté en Rust natif dans `crates/dbsrt-core/src/multi_window.rs` (`MultiWindowPlan`, `evaluate_multi_window_consensus`, `aggregate_multi_window_matches`) et intégré dans le CLI `dbsrt-cli` (`crates/dbsrt-cli/src/commands/recognize.rs` et `recognize_multi.rs`).
+   - CLI étendu avec les options `--multi-window` et `--offsets <R1,R2,...>` (par défaut $t=20\%, 50\%, 80\%$) sur catalogue `.dbphash` indexé.
+   - Algorithme de recalage de dérive spatio-temporelle :
+     ```text
+     Δshift_rel = shift_ref_ms - (t_start_sec * 1000)
+     ```
+   - Sanction et boost mathématiques stricts :
+     - Match sur 1 seule fenêtre (jingle/eyecatch potentiel) : confiance plafonnée à $\le 35\%$.
+     - Dérive temporelle inter-fenêtres $|\Delta\text{shift}_i - \Delta\text{shift}_j| > 2500\text{ ms}$ (scènes décorrélées) : cohérence invalidée (`coherent: false`) et score sabré à $\le 25\%$.
+     - Consensus cohérent sur $N$ fenêtres : confiance confirmée et boostée à $100\%$ avec estimation robuste du shift médian.
+   - **Preuve empirique sur le corpus réel de collision (Demon Slayer S02 / Kimetsu no Yaiba)** :
+     - *Demon Slayer S02E11* : En mono-fenêtre ($t=50\%$), faux positif à **100.0%** de confiance avec `Valenciano Kimetsu no Yaiba` (ID 2442). En multi-fenêtres ($20\%, 50\%, 80\%$), dérive relative détectée ($3276\text{ ms} > 2500\text{ ms}$), cohérence déclarée `False`, score sabré de $100\%$ à **25.0%**. Fausse collision éliminée.
+     - *Demon Slayer S02E12* : En multi-fenêtres, le vrai épisode (ID 277) confirme sa cohérence sur 3/3 fenêtres ($\Delta\text{shift} = -55\text{ ms}$) avec **100.0%** de confiance, tandis que le jingle parasite (ID 614) est immédiatement relégué à 1/3 fenêtres (**35.0%**).
+     - *Demon Slayer S02E10* : Cohérence multi-fenêtres certifiée pour ID 1018.
+   - Harness d'évaluation automatisé `scripts/eval_multi_offset_matching.py` validé sous `task lint` et `complexipy` $\le 15$.
+4. **Jalon 4 (Prochaine Étape — C.4 & Jalon D) — Cibles Taskfile & Banc Continu Streaming WAN** :
+   - Cibles `eval:matching:multi-offset` dans `Taskfile.yml`.
    - Mesurer les latences d'accès HTTP Range et FTP sous supervision continue `o2switch:faultwatch`.

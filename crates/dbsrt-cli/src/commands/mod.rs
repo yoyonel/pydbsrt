@@ -10,6 +10,7 @@ pub mod media_add;
 pub mod migrate;
 pub mod pack;
 pub mod recognize;
+pub mod recognize_multi;
 pub mod relabel;
 pub mod retarget;
 pub mod scan;

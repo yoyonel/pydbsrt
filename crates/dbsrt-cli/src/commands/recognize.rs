@@ -3,19 +3,20 @@
 use anyhow::Result;
 use clap::Args;
 use dbsrt_core::{extract_frames_phash, probe_video};
-use dbsrt_index::{MmapDbphash, MmapLibrary};
+use dbsrt_index::{DbphashMediaMatch, LibraryMediaMatch, MmapDbphash, MmapLibrary};
 use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
 use std::time::Instant;
 
 use crate::cli::{OutputFormat, PostgresArgs};
 use crate::commands::connect_db;
+use crate::commands::recognize_multi::{execute_multi_window_dbphash, MultiWindowContext};
 use crate::constants::{
     DEFAULT_EXTRACTION_DURATION_SEC, DEFAULT_RECOGNIZE_LIMIT, DEFAULT_SEARCH_DISTANCE,
     MIDPOINT_DURATION_DIVISOR,
 };
 
-#[derive(Args, Debug)]
+#[derive(Args, Debug, Clone)]
 pub struct RecognizeArgs {
     /// Media to recognize
     #[arg(short, long, alias = "ref_media")]
@@ -52,6 +53,14 @@ pub struct RecognizeArgs {
     /// Maximum number of matched media results to output (0 for all)
     #[arg(long, default_value_t = DEFAULT_RECOGNIZE_LIMIT)]
     pub limit: usize,
+
+    /// Multi-window matching mode (evaluates multiple timeline windows to eliminate collisions)
+    #[arg(long)]
+    pub multi_window: bool,
+
+    /// Custom temporal offset ratios for multi-window matching (comma-separated, e.g. "0.2,0.5,0.8")
+    #[arg(long)]
+    pub offsets: Option<String>,
 }
 
 #[derive(Default)]
@@ -66,10 +75,183 @@ pub fn format_set<T: std::fmt::Display>(set: &BTreeSet<T>) -> String {
     format!("{{{}}}", items.join(", "))
 }
 
+fn maybe_run_multi_window(
+    args: &RecognizeArgs,
+    meta: &dbsrt_core::VideoMetadata,
+) -> Result<Option<()>> {
+    if (!args.multi_window && args.offsets.is_none()) || args.dbphash.is_none() {
+        return Ok(None);
+    }
+
+    let ratios = if let Some(ref offset_str) = args.offsets {
+        offset_str
+            .split(',')
+            .map(|s| s.trim().parse::<f64>())
+            .collect::<Result<Vec<f64>, _>>()
+            .map_err(|e| anyhow::anyhow!("Invalid offset ratio: {e}"))?
+    } else {
+        dbsrt_core::multi_window::DEFAULT_MULTI_WINDOW_RATIOS.to_vec()
+    };
+
+    let plan = dbsrt_core::multi_window::MultiWindowPlan::new(ratios, args.nb_seconds_to_extract)?;
+    let dbphash = MmapDbphash::open(args.dbphash.as_ref().unwrap())?;
+    let ctx = MultiWindowContext {
+        media_path: &args.media,
+        meta,
+        dbphash: &dbphash,
+        plan: &plan,
+    };
+    execute_multi_window_dbphash(&ctx, args)?;
+    Ok(Some(()))
+}
+
+fn render_dbphash_match(m: &DbphashMediaMatch, media_name: &str, timer: f64, fmt: OutputFormat) {
+    let media_found = m.clean_title.contains(media_name) || media_name.contains(&m.clean_title);
+    match fmt {
+        OutputFormat::Csv => {
+            println!(
+                "{},{},{},{},{},{:.16},{:.1}",
+                if media_found { "True" } else { "False" },
+                media_name,
+                m.clean_title,
+                m.media_id,
+                m.matching_cuts,
+                timer,
+                m.confidence
+            );
+        }
+        OutputFormat::DataFrame => {
+            println!(
+                "   media_found            media_name_search  media_id_match             media_name_match  nb_offsets_match  ... timer_in_seconds  confidence\n\
+                 0         {}  {}               {}  {}               {}  ...         {:.6}         {:.1}\n\n\
+                 [1 rows x 7 columns]",
+                if media_found { "True" } else { "False" },
+                media_name,
+                m.media_id,
+                m.clean_title,
+                m.matching_cuts,
+                timer,
+                m.confidence
+            );
+        }
+    }
+}
+
+fn execute_dbphash_recognize(
+    args: &RecognizeArgs,
+    hashes: &[u64],
+    media_name: &str,
+    dbphash_path: &std::path::Path,
+) -> Result<()> {
+    let dbphash = MmapDbphash::open(dbphash_path)?;
+    let match_start = Instant::now();
+    let matches = dbphash.recognize(hashes, args.search_distance);
+    let timer_in_seconds = match_start.elapsed().as_secs_f64();
+
+    if matches.is_empty() {
+        if args.output_format == OutputFormat::DataFrame {
+            println!("Empty DataFrame\nColumns: [media_found, media_name_search, media_id_match, media_name_match, nb_offsets_match, timer_in_seconds, confidence]\nIndex: []");
+        }
+        return Ok(());
+    }
+
+    let limit = if args.limit > 0 {
+        args.limit
+    } else {
+        matches.len()
+    };
+    for m in matches.iter().take(limit) {
+        render_dbphash_match(m, media_name, timer_in_seconds, args.output_format);
+    }
+    Ok(())
+}
+
+struct MmapRenderRow<'a> {
+    idx: usize,
+    m: &'a LibraryMediaMatch,
+    media_name: &'a str,
+    timer: f64,
+}
+
+fn render_mmap_match(row: &MmapRenderRow<'_>, fmt: OutputFormat) {
+    let m = row.m;
+    let media_found =
+        m.media_name.contains(row.media_name) || row.media_name.contains(&m.media_name);
+    let search_set: BTreeSet<usize> = m.search_offsets_match.iter().copied().collect();
+    let match_set: BTreeSet<usize> = m.match_frames_offsets.iter().copied().collect();
+
+    match fmt {
+        OutputFormat::Csv => {
+            println!(
+                "{},{},{},{},{},\"{}\",\"{}\",{:.16},{:.1}",
+                if media_found { "True" } else { "False" },
+                row.media_name,
+                m.media_name,
+                row.idx + 1,
+                m.nb_offsets_match,
+                format_set(&search_set),
+                format_set(&match_set),
+                row.timer,
+                m.confidence
+            );
+        }
+        OutputFormat::DataFrame => {
+            println!(
+                "   media_found            media_name_search  media_id_match             media_name_match  nb_offsets_match  ... timer_in_seconds  confidence\n\
+                 0         {}  {}               {}  {}               {}  ...         {:.6}         {:.1}\n\n\
+                 [1 rows x 9 columns]",
+                if media_found { "True" } else { "False" },
+                row.media_name,
+                row.idx + 1,
+                m.media_name,
+                m.nb_offsets_match,
+                row.timer,
+                m.confidence
+            );
+        }
+    }
+}
+
+fn execute_mmap_recognize(args: &RecognizeArgs, hashes: &[u64], media_name: &str) -> Result<()> {
+    let phash_dir = args.phash_dir.clone().unwrap_or_else(std::env::temp_dir);
+    let library = MmapLibrary::from_directory(&phash_dir)?;
+    let match_start = Instant::now();
+    let matches = library.recognize(hashes, args.search_distance);
+    let timer_in_seconds = match_start.elapsed().as_secs_f64();
+
+    if matches.is_empty() {
+        if args.output_format == OutputFormat::DataFrame {
+            println!("Empty DataFrame\nColumns: [media_found, media_name_search, media_id_match, media_name_match, nb_offsets_match, search_offsets_match, match_frames_offsets, timer_in_seconds, confidence]\nIndex: []");
+        }
+        return Ok(());
+    }
+
+    let limit = if args.limit > 0 {
+        args.limit
+    } else {
+        matches.len()
+    };
+    for (idx, m) in matches.iter().take(limit).enumerate() {
+        let row = MmapRenderRow {
+            idx,
+            m,
+            media_name,
+            timer: timer_in_seconds,
+        };
+        render_mmap_match(&row, args.output_format);
+    }
+    Ok(())
+}
+
 /// Run media recognition pipeline against .dbphash, Zero-DB mmap library, or PostgreSQL.
 pub fn run_recognize_media(args: &RecognizeArgs) -> Result<()> {
     // 1. Probe video
     let meta = probe_video(&args.media)?;
+
+    if let Some(()) = maybe_run_multi_window(args, &meta)? {
+        return Ok(());
+    }
+
     let start_sec = (meta.duration / MIDPOINT_DURATION_DIVISOR).floor();
     let nb_frames = (args.nb_seconds_to_extract * meta.fps).round() as usize;
     if nb_frames == 0 {
@@ -85,121 +267,14 @@ pub fn run_recognize_media(args: &RecognizeArgs) -> Result<()> {
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_default();
 
-    // Unified .dbphash mode: search directly over single compiled index
+    // Unified .dbphash mode
     if let Some(ref dbphash_path) = args.dbphash {
-        let dbphash = MmapDbphash::open(dbphash_path)?;
-        let match_start = Instant::now();
-        let matches = dbphash.recognize(&hashes, args.search_distance);
-        let timer_in_seconds = match_start.elapsed().as_secs_f64();
-
-        if matches.is_empty() {
-            if args.output_format == OutputFormat::DataFrame {
-                println!("Empty DataFrame\nColumns: [media_found, media_name_search, media_id_match, media_name_match, nb_offsets_match, timer_in_seconds, confidence]\nIndex: []");
-            }
-            return Ok(());
-        }
-
-        let display_matches = if args.limit > 0 && args.limit < matches.len() {
-            &matches[..args.limit]
-        } else {
-            &matches[..]
-        };
-
-        for m in display_matches.iter() {
-            let media_found = m.clean_title.contains(&media_name_search)
-                || media_name_search.contains(&m.clean_title);
-
-            match args.output_format {
-                OutputFormat::Csv => {
-                    println!(
-                        "{},{},{},{},{},{:.16},{:.1}",
-                        if media_found { "True" } else { "False" },
-                        media_name_search,
-                        m.clean_title,
-                        m.media_id,
-                        m.matching_cuts,
-                        timer_in_seconds,
-                        m.confidence
-                    );
-                }
-                OutputFormat::DataFrame => {
-                    println!(
-                        "   media_found            media_name_search  media_id_match             media_name_match  nb_offsets_match  ... timer_in_seconds  confidence\n\
-                         0         {}  {}               {}  {}               {}  ...         {:.6}         {:.1}\n\n\
-                         [1 rows x 7 columns]",
-                        if media_found { "True" } else { "False" },
-                        media_name_search,
-                        m.media_id,
-                        m.clean_title,
-                        m.matching_cuts,
-                        timer_in_seconds,
-                        m.confidence
-                    );
-                }
-            }
-        }
-        return Ok(());
+        return execute_dbphash_recognize(args, &hashes, &media_name_search, dbphash_path);
     }
 
-    // Zero-DB mode: search directly over memory-mapped .phash files
+    // Zero-DB mode
     if args.no_db {
-        let phash_dir = args.phash_dir.clone().unwrap_or_else(std::env::temp_dir);
-        let library = MmapLibrary::from_directory(&phash_dir)?;
-        let match_start = Instant::now();
-        let matches = library.recognize(&hashes, args.search_distance);
-        let timer_in_seconds = match_start.elapsed().as_secs_f64();
-
-        if matches.is_empty() {
-            if args.output_format == OutputFormat::DataFrame {
-                println!("Empty DataFrame\nColumns: [media_found, media_name_search, media_id_match, media_name_match, nb_offsets_match, search_offsets_match, match_frames_offsets, timer_in_seconds, confidence]\nIndex: []");
-            }
-            return Ok(());
-        }
-
-        let display_matches = if args.limit > 0 && args.limit < matches.len() {
-            &matches[..args.limit]
-        } else {
-            &matches[..]
-        };
-
-        for (idx, m) in display_matches.iter().enumerate() {
-            let media_found = m.media_name.contains(&media_name_search)
-                || media_name_search.contains(&m.media_name);
-            let search_set: BTreeSet<usize> = m.search_offsets_match.iter().copied().collect();
-            let match_set: BTreeSet<usize> = m.match_frames_offsets.iter().copied().collect();
-
-            match args.output_format {
-                OutputFormat::Csv => {
-                    println!(
-                        "{},{},{},{},{},\"{}\",\"{}\",{:.16},{:.1}",
-                        if media_found { "True" } else { "False" },
-                        media_name_search,
-                        m.media_name,
-                        idx + 1,
-                        m.nb_offsets_match,
-                        format_set(&search_set),
-                        format_set(&match_set),
-                        timer_in_seconds,
-                        m.confidence
-                    );
-                }
-                OutputFormat::DataFrame => {
-                    println!(
-                        "   media_found            media_name_search  media_id_match             media_name_match  nb_offsets_match  ... timer_in_seconds  confidence\n\
-                         0         {}  {}               {}  {}               {}  ...         {:.6}         {:.1}\n\n\
-                         [1 rows x 9 columns]",
-                        if media_found { "True" } else { "False" },
-                        media_name_search,
-                        idx + 1,
-                        m.media_name,
-                        m.nb_offsets_match,
-                        timer_in_seconds,
-                        m.confidence
-                    );
-                }
-            }
-        }
-        return Ok(());
+        return execute_mmap_recognize(args, &hashes, &media_name_search);
     }
 
     // 3. Connect to DB
@@ -218,14 +293,8 @@ pub fn run_recognize_media(args: &RecognizeArgs) -> Result<()> {
             entry.match_frames_offsets.insert(m.frame_offset);
         }
     }
-    let timer_in_seconds = match_start.elapsed().as_secs_f64();
 
-    // 5. Build results
-    let media_name_search = args
-        .media
-        .file_stem()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_default();
+    let timer_in_seconds = match_start.elapsed().as_secs_f64();
 
     if matches_by_media.is_empty() {
         if args.output_format == OutputFormat::DataFrame {
@@ -234,7 +303,6 @@ pub fn run_recognize_media(args: &RecognizeArgs) -> Result<()> {
         return Ok(());
     }
 
-    // Sort by confidence / nb_offsets descending
     let mut sorted_media: Vec<(i32, AggregatedMatch)> = matches_by_media.into_iter().collect();
     sorted_media.sort_by_key(|a| std::cmp::Reverse(a.1.nb_offsets_match));
 
@@ -319,6 +387,8 @@ mod tests {
             no_db: true,
             phash_dir: None,
             db: PostgresArgs::default(),
+            multi_window: false,
+            offsets: None,
         };
         let err = run_recognize_media(&args).unwrap_err();
         assert!(err
