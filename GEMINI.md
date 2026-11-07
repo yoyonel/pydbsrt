@@ -54,7 +54,12 @@
   - Enforced via `scripts/lint_complexity.py` invoked via `task complexity` (and wired into `task lint`, pre-commit hook `rust-complexity-gate`, and `.github/workflows/main.yml`).
 
 ## Code Quality & Zero Magic Constants (Strictly Enforced)
+- **Zero Dynamic Heap Allocations in Hot-Loop Matching (Arena / Pre-allocated Memory Strict Mandate)**:
+  - STRICTLY FORBIDDEN from performing ad-hoc dynamic heap allocations (`Vec::new()`, `Vec::collect()`, `String::clone()`, `Box::new()`, or reallocations) inside the frame-by-frame matching hot-loops.
+  - All tracking buffers, candidate indexes, and hypothesis pools MUST be pre-allocated once (via reusable workspace scratchpads, Arenas, or fixed capacity buffers with `clear()`).
+  - Search complexity in matching hot-loops MUST be sub-quadratic: strict ban on $\mathcal{O}(H \times C)$ nested full-scans; mandate indexed lookups $\mathcal{O}(H + C)$ or direct addressable maps by `media_id`.
 - **Zero Inline Language Nesting (Anti-Pattern Ban)**: STRICTLY FORBIDDEN from embedding multi-line inline scripts of one language inside another (e.g. `python -c "..."` or `python - <<'EOF'` heredocs inside shell scripts, inline shell inside Python via string interpolation, or inline Lua/JS strings). Every language runtime MUST reside in its own dedicated, first-class file (`.py`, `.sh`, `.rs`, `.lua`) under `scripts/` or the source tree, fully typed, formatted, and linted by its native toolchain. Shell scripts are strictly orchestrators of native CLI commands, NEVER container shells for inline Python code.
+
 - **STRICTLY FORBIDDEN from using Magic Constants / Numbers / Unnamed Literals**: Hardcoded numeric literals, timeouts, buffer sizes, frame counts, bit depths, and thresholds are strictly forbidden in business logic, HTTP endpoints, parsers, and data pipelines across Rust, Python, and Lua.
 - **Mandatory Named & Documented Constants**: Every operational, algorithmic, or temporal value MUST be declared as a typed, named constant (`pub const` in Rust, `UPPER_SNAKE_CASE` in Python/Lua) placed at the top of the relevant module or in dedicated configuration structs with docstrings explaining units and rationales.
   - Examples: `LOG_BUFFER_CAPACITY`, `DEFAULT_EXTRACT_SAMPLE_SECONDS`, `DEFAULT_RELAY_TIMEOUT_MS`, `FINGERPRINT_PREVIEW_SAMPLE_COUNT`, `SECONDS_PER_DAY`, `DEFAULT_BASELINE_FPS`.
