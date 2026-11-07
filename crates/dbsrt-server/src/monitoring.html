@@ -495,7 +495,6 @@
   <nav class="views-nav" id="views-nav">
     <a href="#overview">Vue d'ensemble</a>
     <a href="#ingestion">Ingestion <span id="nav-jobs" class="badge badge-blue">0</span></a>
-    <a href="#catalogue">Catalogue</a>
     <a href="#audit">Audit <span id="nav-audit" class="badge badge-blue" style="display: none;">●</span></a>
     <a href="#supervisor">Superviseur</a>
     <a href="#system">Système</a>
@@ -550,11 +549,12 @@
   </section>
 
   <!-- dbsrt top tabs, read-only (TUI actions such as select, rescan or source CRUD are left out);
-       Médias and Système are the Catalogue and Système views -->
+       Système is its own view -->
   <nav class="tabs">
     <button class="btn tab-btn active" data-tab="jobs">[1] Tâches <span id="active-jobs-count" class="badge badge-blue">0</span></button>
     <button class="btn tab-btn" data-tab="stats">[2] Stats</button>
     <button class="btn tab-btn" data-tab="completed">[3] Récents</button>
+    <button class="btn tab-btn" data-tab="media">[4] Catalogue</button>
     <button class="btn tab-btn" data-tab="sources">[5] Sources</button>
   </nav>
 
@@ -1578,7 +1578,7 @@
     let lastTop = null;
 
     let activeView = 'overview';
-    const shownList = () => activeView === 'catalogue' ? 'media' : activeView === 'ingestion' ? activeTab : null;
+    const shownList = () => activeView === 'ingestion' ? activeTab : null;
 
     function topQuery(forceList = false) {
       const list = shownList();
@@ -2400,9 +2400,15 @@
     }));
 
     // One view per URL hash, so a view can be bookmarked and the back button works
-    const VIEWS = ['overview', 'ingestion', 'catalogue', 'audit', 'supervisor', 'system'];
+    const VIEWS = ['overview', 'ingestion', 'audit', 'supervisor', 'system'];
     function showView() {
       const view = location.hash.slice(1);
+      // #catalogue (overview tile, old bookmarks) is now the Catalogue tab of Ingestion
+      if (view === 'catalogue') {
+        document.querySelector('.tab-btn[data-tab="media"]').click();
+        location.replace('#ingestion');
+        return;
+      }
       activeView = VIEWS.includes(view) ? view : 'overview';
       document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === 'view-' + activeView));
       document.querySelectorAll('#views-nav a').forEach(a => a.classList.toggle('active', a.getAttribute('href') === '#' + activeView));
@@ -2411,12 +2417,12 @@
     }
     window.addEventListener('hashchange', showView);
 
-    // Keyboard shortcuts mirror `dbsrt top`: 1 / 2,h / 3,r / 4,m / 5,s / 6,y; media and system are views
+    // Keyboard shortcuts mirror `dbsrt top`: 1 / 2,h / 3,r / 4,m / 5,s / 6,y; system is a view
     const TAB_KEYS = {
       '1': 'jobs', '2': 'stats', 'h': 'stats', '3': 'completed', 'r': 'completed',
-      '5': 'sources', 's': 'sources',
+      '4': 'media', 'm': 'media', '5': 'sources', 's': 'sources',
     };
-    const VIEW_KEYS = { '4': 'catalogue', 'm': 'catalogue', '6': 'system', 'y': 'system', 'a': 'audit', 'o': 'overview' };
+    const VIEW_KEYS = { '6': 'system', 'y': 'system', 'a': 'audit', 'o': 'overview' };
     document.addEventListener('keydown', e => {
       if (e.target.tagName === 'INPUT' || e.ctrlKey || e.metaKey || e.altKey) return;
       if (activeView === 'catalogue' && e.key === 'a') {
