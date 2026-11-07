@@ -104,6 +104,8 @@ Cette page dresse le dictionnaire exhaustif de toutes les cibles d'orchestration
 | `task test:scenarios` | Exécute la suite de scénarios TUI déclaratifs headless (`test_scenarios.rs`) en moins de 0.5s. (Alias : `task test:tui`). |
 | `task test:portal:e2e` | Exécute la suite de tests Playwright E2E automatisée du portail de monitoring avec enregistrement vidéo. (Alias : `task portal:e2e`). |
 | `task test:infra` | Exécute le harnais de tests d'infrastructure et chaos testing. |
+| `task eval:nas-snippets` | Exécute la matrice d'évaluation quantitative sur l'ensemble des snippets NAS réels (`scripts/eval_exhaustive_nas_snippets.py`). |
+| `task eval:matching:multi-offset` | Benchmark de comparaison Mono-Fenêtre ($t=50\%$) vs Multi-Fenêtres Spatio-Temporel ($20\%, 50\%, 80\%$) sur corpus difficile (`scripts/eval_multi_offset_matching.py`). |
 | `task eval:cuts:audit` | Exécute l'audit complet de performance du pipeline sur l'ensemble des cuts vidéo (`scripts/audit_cuts_pipeline.py`). |
 | `task eval:cuts:audit:rejected` | Exécute l'analyse forensique exhaustive des cuts rejetés et met à jour la documentation (`scripts/audit_rejected_cuts.py`). |
 
