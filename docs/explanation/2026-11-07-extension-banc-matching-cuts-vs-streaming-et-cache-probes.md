@@ -179,10 +179,17 @@ flowchart LR
      - 182 stubs/fichiers corrompus ($< 64\text{ KiB}$) protégés par rejet immédiat sécurisé avec `Err` sans aucun crash ni panique.
      - 2 574 entrées uniques stockées et coalescées en mémoire (2 doublons stricts coalescés : `BigBuckBunny(1)` et `Mustang`).
      - Accélération mesurée : Cold miss 59,7 ms vs Warm hit 118,5 µs (503x speedup unitaire, 258x speedup sur batch réel). Lookup mémoire pur : 1,48M requêtes/s (0,67 µs/lookup).
-2. **Jalon 2 (Jalon B en cours) — Contrôle Dynamique d'Exécution & Allocation de Ressources** :
-   - Mise en pause (`task batch:pause`), reprise à chaud (`task batch:resume`) et redimensionnement dynamique des workers (`task batch:scale -- <workers>`) pour réguler le load CPU sans tuer les tâches en cours.
-   - Export exhaustif des métadonnées d'exécution et de contexte (`moviehash`, offsets, workers actifs, télémétrie LVE).
-3. **Jalon 3 — Génération Multi-Offsets & Matrice de Scoring** :
+2. **Jalon 2 (Jalon B Achevé — 7 nov 2026) — Contrôle Dynamique d'Exécution & Allocation de Ressources** :
+   - Implémenté dans `scripts/o2switch_batch_worker.py`, `scripts/o2switch_ctl.sh`, `taskfiles/o2switch.yml` et documenté dans `docs/reference/taskfile.md`.
+   - Support natif de la pause douce (`task o2switch:batch:pause` via sentinelle `run/batch_paused`) : bloque instantanément le dépilage sans tuer les tâches en vol (`SIGKILL` interdit en pause).
+   - Reprise immédiate à chaud (`task o2switch:batch:resume`) : dépilage immédiat des tâches en attente.
+   - Redimensionnement dynamique de charge (`task o2switch:batch:scale -- <workers>` ou `task o2switch:batch:workers -- <workers>`) : passage à chaud de 100% à 50% de ressources sans heurts (retrait fluide des workers excédentaires).
+   - Enrichissement contextuel complet dans `events.jsonl` et `run/batch_queue.json` : `moviehash`, `file_size_bytes`, `duration_seconds`, `fps`, `active_workers`, `desired_workers`, `is_paused`.
+   - **Preuve empirique E2E sans mock (`tests/tools/test_real_ffmpeg_batch_e2e.py`)** :
+     - Exécutée en direct avec le binaire compilé release `dbsrt media:add` et les vidéos réelles de `data/snippets/`.
+     - Cycle complet validé : démarrage à 4 workers $\to$ scale-down à 2 workers (50% de charge) $\to$ pause douce $\to$ reprise à 3 workers $\to$ 8/8 vidéos traitées avec succès sans aucune interruption forcée.
+     - 8 véritables fichiers binaires `.phash` physiquement produits par FFmpeg (`bb553c49b9e430b7`, `a4fef6774c616725`, `a3d7c49d4cfd888b`, `50f86a41372a8d46`, `0b3cc307f5a68bd1`, `d0cc74288ca4b90b`, `ee7233f70f8be7b3`, `3670526cf0c9b870`).
+3. **Jalon 3 (Prochaine Étape) — Génération Multi-Offsets & Matrice de Scoring** :
    - Générer les variantes multi-offsets ($t=20\%$, $t=50\%$, $t=80\%$) calculées mathématiquement via `calculate_cut_offset` sans surcoût `ffprobe`.
    - Exécuter la batterie de matching et mesurer la baisse des collisions ($< 5\%$).
 4. **Jalon 4 — Banc Continu Streaming WAN** :

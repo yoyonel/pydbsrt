@@ -160,6 +160,9 @@ Cette page dresse le dictionnaire exhaustif de toutes les cibles d'orchestration
 | `task o2switch:batch:tvshow` | Exécute l'ingestion par batch distante sur les séries vierges (/tvshow, supporte `--daemon`, `--fresh-only`, `--retry-failed`, `--max-extraction-secs`). |
 | `task o2switch:batch:movies` | Exécute l'ingestion par batch distante sur les films vierges (/video, supporte `--daemon`, `--fresh-only`, `--retry-failed`, `--max-extraction-secs`). |
 | `task o2switch:batch:status` | Vérifie l'état d'exécution du démon batch (PID, CPU, mémoire, progression détaillée de la file). |
+| `task o2switch:batch:pause` | Met en pause douce le batch distant sur o2switch (`run/batch_paused` : les jobs en cours finissent, aucun nouveau job dépilé). |
+| `task o2switch:batch:resume` | Reprend l'exécution du batch distant sur o2switch en supprimant `run/batch_paused`. |
+| `task o2switch:batch:scale` | Règle dynamiquement le nombre de workers alloués au batch distant (`task o2switch:batch:scale -- <workers>`). |
 | `task o2switch:batch:workers` | Interroge ou règle dynamiquement la concurrence des workers sur o2switch (`run/desired_workers`). |
 | `task o2switch:batch:stop` | Arrête proprement le travailleur batch en arrière-plan sur o2switch. |
 | `task o2switch:batch:logs` | Suit en direct (`tail -f`) les journaux d'exécution du batch distant sur o2switch. |

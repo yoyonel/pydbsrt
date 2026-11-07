@@ -227,6 +227,21 @@ tasks:
     cmds:
       - ./scripts/o2switch_ctl.sh phash-migrate {{.CLI_ARGS}}
 
+  o2switch:batch:pause:
+    desc: Soft-pause remote batch pHash worker on o2switch (in-flight jobs finish, new jobs blocked)
+    cmds:
+      - ./scripts/o2switch_ctl.sh batch-pause
+
+  o2switch:batch:resume:
+    desc: Resume remote batch pHash worker on o2switch
+    cmds:
+      - ./scripts/o2switch_ctl.sh batch-resume
+
+  o2switch:batch:scale:
+    desc: "Dynamically scale batch worker concurrency (usage: task o2switch:batch:scale -- <workers>)"
+    cmds:
+      - ./scripts/o2switch_ctl.sh batch-workers {{.CLI_ARGS}}
+
   o2switch:batch:workers:
     desc: Query or set dynamic batch worker concurrency on o2switch
     cmds:

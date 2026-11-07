@@ -38,7 +38,7 @@ DEFAULT_NAS_PASS_ENTRY="services/synology/nas_pass"
 DEFAULT_API_KEY_PASS_ENTRY="services/pydbsrt/o2switch_api_key"
 DEFAULT_READONLY_KEY_PASS_ENTRY="services/pydbsrt/o2switch_readonly_key"
 # Worker concurrency bounds, kept in sync with MIN/MAX_CONCURRENT_WORKERS in o2switch_batch_worker.py
-MIN_BATCH_WORKERS=1
+MIN_BATCH_WORKERS=0
 MAX_BATCH_WORKERS=8
 
 # NAS endpoint comes from .env / environment only (no versioned default)
@@ -863,6 +863,22 @@ REMOTE_SCRIPT
     ssh "${O2SWITCH_HOST}" "pkill -KILL -u \$(id -u) -f '[b]in/dbsrt media:add' || true; screen -X -S dbsrt_batch quit 2>/dev/null || true"
     ;;
 
+  batch-pause)
+    check_ssh
+    echo "=== Pausing remote batch worker on ${O2SWITCH_HOST} (soft pause, jobs drain) ==="
+    # shellcheck disable=SC2029
+    ssh "${O2SWITCH_HOST}" "mkdir -p $(printf '%q' "${REMOTE_BASE}/run") && touch $(printf '%q' "${REMOTE_BASE}/run/batch_paused")"
+    echo "✓ Batch worker paused (sentinel run/batch_paused set)."
+    ;;
+
+  batch-resume)
+    check_ssh
+    echo "=== Resuming remote batch worker on ${O2SWITCH_HOST} ==="
+    # shellcheck disable=SC2029
+    ssh "${O2SWITCH_HOST}" "rm -f $(printf '%q' "${REMOTE_BASE}/run/batch_paused")"
+    echo "✓ Batch worker resumed (sentinel run/batch_paused removed)."
+    ;;
+
   batch-workers)
     check_ssh
     shift || true
@@ -929,7 +945,7 @@ REMOTE_SCRIPT
     ;;
 
   *)
-    echo "Usage: $0 {build|test-local|sync|deploy|rollback|releases|start|stop|restart|status|logs|demo|setup-cron|remove-cron|rotate-key|rotate-readonly-key|monitoring|top|pull-catalog|backup-nas|batch-tvshow|batch-movies|batch-status|batch-summary|batch-sync|batch-workers|batch-stop|batch-logs|faultwatch|audit}"
+    echo "Usage: $0 {build|test-local|sync|deploy|rollback|releases|start|stop|restart|status|logs|demo|setup-cron|remove-cron|rotate-key|rotate-readonly-key|monitoring|top|pull-catalog|backup-nas|batch-tvshow|batch-movies|batch-status|batch-summary|batch-sync|batch-pause|batch-resume|batch-workers|batch-stop|batch-logs|faultwatch|audit}"
     exit 1
     ;;
 esac

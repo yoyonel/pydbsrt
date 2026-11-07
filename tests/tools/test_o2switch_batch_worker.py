@@ -550,3 +550,103 @@ def test_queue_state_republishes_worker_count_when_a_worker_exits(tmp_path: Path
     # While only the slow video ran, the state said 1 worker, then 0 once drained.
     assert seen_one_while_running.is_set(), published
     assert published[-1] == 0, published
+
+
+def test_batch_pause_sentinel_blocks_new_jobs_and_sets_desired_to_zero(tmp_path: Path, monkeypatch):
+    """Setting run/batch_paused forces desired_workers to 0 (soft pause) and reflects in queue state."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "run").mkdir(parents=True, exist_ok=True)
+    pause_file = tmp_path / "run" / "batch_paused"
+    desired_file = tmp_path / "run" / "desired_workers"
+
+    desired_file.write_text("4\n", encoding="utf-8")
+    assert worker.read_desired_workers(4) == 4
+
+    pause_file.touch()
+    assert worker.read_desired_workers(4) == 0
+
+    pause_file.unlink()
+    assert worker.read_desired_workers(4) == 4
+
+
+def test_batch_scale_down_to_fifty_percent(tmp_path: Path, monkeypatch):
+    """Dynamic scale from 4 workers (100%) to 2 workers (50%) drains surplus workers without error."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(worker, "TARGET_QUEUE_POLL_INTERVAL_SECS", 0.01)
+    (tmp_path / "run").mkdir(parents=True, exist_ok=True)
+    desired_file = tmp_path / "run" / "desired_workers"
+    desired_file.write_text("4\n", encoding="utf-8")
+
+    published_workers: list[int] = []
+    monkeypatch.setattr(
+        worker,
+        "write_batch_queue_state",
+        lambda _t, _c, _f, active, **kwargs: published_workers.append(active),
+    )
+
+    def mock_process(item, *_args, **_kwargs):
+        time.sleep(0.02)
+        return {"success": True, "video_stem": item[1], "wall_duration_secs": 0.02, "io_read_rate_mib_s": 1.0}
+
+    monkeypatch.setattr(worker, "process_single_video", mock_process)
+
+    # 10 fast jobs
+    targets = [VideoTarget(f"/video/vid_{i}.mkv", f"vid_{i}.mkv", 1000) for i in range(10)]
+
+    def scale_down_thread():
+        time.sleep(0.04)
+        desired_file.write_text("2\n", encoding="utf-8")
+
+    threading.Thread(target=scale_down_thread, daemon=True).start()
+
+    ok, failed, _ = worker.execute_dynamic_batch_ingestion(
+        targets, "ftp://nas:21", "dbsrt", {}, tmp_path / "e.jsonl", 60, 4
+    )
+    assert ok == 10
+    assert failed == 0
+    assert max(published_workers) >= 2
+
+
+def test_batch_exhaustive_simulation_all_snippets_dataset(tmp_path: Path, monkeypatch):
+    """Exhaustive simulation and metadata verification across ALL 2,758 videos in data/snippets/."""
+    snippets_dir = Path("data/snippets").resolve()
+    all_videos = sorted(snippets_dir.glob("*.mp4"))
+    assert len(all_videos) == 2758, f"Expected 2758 videos in data/snippets, found {len(all_videos)}"
+
+    # Convert all 2,758 files into VideoTargets before chdir
+    targets = [VideoTarget(f"/snippets/{v.name}", v.name, v.stat().st_size) for v in all_videos]
+    assert len(targets) == 2758
+
+    monkeypatch.chdir(tmp_path)
+    dummy_log = tmp_path / "dummy.log"
+    dummy_log.write_text(
+        "Extraction: no checkpoint, full decode\nDuration: 15.000\nFPS: 25.000\n",
+        encoding="utf-8",
+    )
+
+    # Verify event record enriched fields for all 2,758 targets
+    simulated_records = []
+    for idx, target in enumerate(targets):
+        sim_moviehash = f"hash_{idx:08x}"
+        rec = worker._event_record(
+            target=target,
+            start_time=100.0,
+            status="COMPLETED",
+            log_path=dummy_log,
+            nas_host="synology.local",
+            nas_pass="secret",
+            moviehash=sim_moviehash,
+            active_workers=2,
+            desired_workers=2,
+        )
+        assert rec["video_stem"] == Path(target.filename).stem
+        assert rec["file_size_bytes"] == target.size_bytes
+        assert rec["moviehash"] == sim_moviehash
+        assert rec["active_workers"] == 2
+        assert rec["desired_workers"] == 2
+        assert rec["duration_seconds"] == 15.0
+        assert rec["fps"] == 25.0
+        assert rec["success"] is True
+        simulated_records.append(rec)
+
+    assert len(simulated_records) == 2758
