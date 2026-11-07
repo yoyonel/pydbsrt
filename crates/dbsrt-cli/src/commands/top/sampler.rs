@@ -2105,6 +2105,8 @@ fn load_batch_queue_from_manifest(targets_path: &Path) -> Option<BatchQueueTelem
         progress_pct: pct,
         active_workers: 0,
         is_active: false,
+        is_paused: false,
+        desired_workers: None,
         updated_at: String::new(),
     })
 }
@@ -2125,12 +2127,19 @@ fn load_batch_queue_from_manifest(targets_path: &Path) -> Option<BatchQueueTelem
 /// 2. If missing, attempts fallback count from `data/reports/selected_batch_targets.json`.
 /// 3. Returns default empty struct if no active queue manifest is detected.
 pub fn sample_batch_queue(active_workers: usize) -> BatchQueueTelemetry {
+    let is_paused = Path::new("run/batch_paused").is_file();
+    let desired_workers = fs::read_to_string("run/desired_workers")
+        .ok()
+        .and_then(|s| s.trim().parse::<usize>().ok());
+
     let queue_path = Path::new("run/batch_queue.json");
     if let Some(mut data) = load_batch_queue_from_json(queue_path) {
         if active_workers > 0 {
             data.active_workers = active_workers;
             data.is_active = true;
         }
+        data.is_paused = is_paused;
+        data.desired_workers = desired_workers;
         return data;
     }
 
@@ -2138,10 +2147,16 @@ pub fn sample_batch_queue(active_workers: usize) -> BatchQueueTelemetry {
     if let Some(mut data) = load_batch_queue_from_manifest(targets_path) {
         data.active_workers = active_workers;
         data.is_active = active_workers > 0 && data.remaining_targets > 0;
+        data.is_paused = is_paused;
+        data.desired_workers = desired_workers;
         return data;
     }
 
-    BatchQueueTelemetry::default()
+    BatchQueueTelemetry {
+        is_paused,
+        desired_workers,
+        ..Default::default()
+    }
 }
 
 fn count_completed_events_fast(events_path: &Path) -> usize {

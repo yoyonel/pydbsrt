@@ -366,6 +366,38 @@ impl TopActions for NativeActions<'_> {
         process_ctl::stop_entire_batch(force, pids).1
     }
 
+    fn toggle_soft_pause_batch(&mut self) -> String {
+        let paused_path = std::path::Path::new("run/batch_paused");
+        if paused_path.is_file() {
+            let _ = std::fs::remove_file(paused_path);
+            "Reprise batch : sentinelle run/batch_paused supprimée".to_string()
+        } else {
+            if let Some(parent) = paused_path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            match std::fs::File::create(paused_path) {
+                Ok(_) => "Pause douce batch activée (attente fin jobs en vol)".to_string(),
+                Err(e) => format!("Erreur activation pause batch: {e}"),
+            }
+        }
+    }
+
+    fn adjust_desired_workers(&mut self, delta: i32) -> String {
+        let workers_path = std::path::Path::new("run/desired_workers");
+        let current = std::fs::read_to_string(workers_path)
+            .ok()
+            .and_then(|s| s.trim().parse::<i32>().ok())
+            .unwrap_or(4);
+        let next = (current + delta).clamp(1, 8);
+        if let Some(parent) = workers_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        match std::fs::write(workers_path, format!("{next}\n")) {
+            Ok(_) => format!("Workers souhaités ajustés : {next} (était {current})"),
+            Err(e) => format!("Erreur écriture desired_workers: {e}"),
+        }
+    }
+
     fn launch_selected_batch(&mut self, paths: &[PathBuf]) -> Result<String, String> {
         Ok(sampler::launch_selected_batch(paths).1)
     }

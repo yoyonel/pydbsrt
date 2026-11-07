@@ -172,9 +172,9 @@ fn build_active_jobs_shortcuts(ctx: &UiContext) -> &'static str {
     if ctx.search_active {
         "[Entrée] Valider recherche  [Échap] Annuler  [Texte] Filtrer  [?] Aide"
     } else if !ctx.search_query.is_empty() {
-        "[↑/k] Défiler  [/] Chercher  [Échap] Effacer recherche  [Enter/i] Inspecter  [p] Pause  [c] Stop  [x/X] Arrêter Batch  [?] Aide  [q] Quitter"
+        "[↑/k] Défiler  [/] Chercher  [Échap] Effacer  [Enter/i] Inspecter  [p] Pause job  [P] Pause batch  [+/-] Workers  [c] Stop  [x/X] Arrêter Batch  [?] Aide  [q] Quitter"
     } else {
-        "[↑/k] Défiler  [/] Chercher  [Enter/i] Inspecter  [p] Pause  [c] Stop  [x/X] Arrêter Batch  [?] Aide  [q] Quitter"
+        "[↑/k] Défiler  [/] Chercher  [Enter/i] Inspecter  [p] Pause job  [P] Pause batch  [+/-] Workers  [c] Stop  [x/X] Arrêter Batch  [?] Aide  [q] Quitter"
     }
 }
 

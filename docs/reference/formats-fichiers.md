@@ -98,4 +98,114 @@ Le fichier `data/SRT/couplings.json` garantit l'alignement certifié en mode Zer
 
 - **Jeu de caractères** : Strictement `UTF-8` sans BOM (Byte Order Mark). Les encodages legacy (CP1252, ISO-8859-1) sont automatiquement convertis lors de l'ingestion par la bibliothèque `chardetng` / `encoding_rs`.
 - **Sauts de ligne** : Normalisés en fins de ligne Unix (`\n`, LF).
+
+---
+
+## 5. Fichiers de Contrôle d'Exécution & Sentinelles (`run/`)
+
+Ces fichiers légers orchestrent dynamiquement l'exécution des processus d'ingestion et des daemons sans nécessiter de redémarrage.
+
+### 5.1. Concurrence Dynamique : `run/desired_workers`
+- **Format** : Fichier texte brut ASCII contenant un entier unique terminé par un retour chariot (ex. `2\n`).
+- **Domaine de valeurs** : Entier compris entre `0` (mise en pause complète) et `8` (plafond maximal autorisé sous CloudLinux LVE).
+- **Cycle de vie** :
+  - **Initialisation** : Créé au lancement du worker batch avec la valeur par défaut `DEFAULT_WORKERS = 4`.
+  - **Modification** : Altéré à chaud par l'opérateur via `task o2switch:batch:workers -- <N>` ou `task o2switch:batch:scale -- <N>`.
+  - **Consommation** : Relu de manière non bloquante toutes les secondes (`TARGET_QUEUE_POLL_INTERVAL_SECS`) par la boucle d'orchestration `execute_dynamic_batch_ingestion`.
+  - **Effet dynamique** : Si `desired < active`, le superviseur ne démarre aucun nouveau worker et attend la terminaison naturelle des tâches en vol sans émettre de `SIGKILL`. Si `desired > active`, de nouveaux sous-processus `dbsrt` sont immédiatement instanciés.
+
+### 5.2. Sentinelle de Pause Douce : `run/batch_paused`
+- **Format** : Fichier sentinelle vide (`0 octet`).
+- **Cycle de vie** :
+  - **Création** : Posé atomiquement par `task o2switch:batch:pause` (`touch run/batch_paused`).
+  - **Détection** : Contrôlé à chaque itération de la boucle de dépilage.
+  - **Effet dynamique** : Suspend immédiatement la prise en charge de nouvelles cibles vidéo. Les workers en cours d'exécution achèvent leur traitement vidéo en cours (zéro corruption, zéro troncature de fichier `.phash`).
+  - **Reprise** : Supprimé par `task o2switch:batch:resume` (`rm -f run/batch_paused`), reprenant instantanément le dépilage des flux.
+
+### 5.3. État Global de la File : `run/batch_queue.json`
+- **Format** : Document JSON UTF-8 mis à jour atomiquement (écriture temporaire puis `os.replace`).
+- **Champs & Schéma (vérifié sur données réelles de production)** :
+  ```json
+  {
+    "total_targets": 401,
+    "completed_targets": 12,
+    "failed_targets": 0,
+    "remaining_targets": 389,
+    "progress_pct": 2.99,
+    "active_workers": 2,
+    "is_active": true,
+    "updated_at": "2026-11-07T16:18:32Z"
+  }
+  ```
+- **Cycle de vie** :
+  - Généré dès l'évaluation du plan de cibles initial.
+  - Réécrit à chaque début et fin d'ingestion de vidéo unitaire par un worker.
+  - Consommé par les dashboards TUI (`dbsrt top`), les sondes de monitoring HTTP et la commande `task o2switch:batch:status`.
+
+---
+
+## 6. Journaux d'Événements & Télémétrie Cloud (`data/reports/` & `logs/`)
+
+### 6.1. Journal d'Ingestion : `data/reports/batch_tvshow_nightly.jsonl`
+- **Format** : Lignes JSON délimitées par `\n` (`JSON Lines`), écrites en mode append non bufferisé (`a+`).
+- **Schéma Réel (extrait direct o2switch)** :
+  ```json
+  {
+    "video_stem": "Cold.War (2018) [1080p](Pendant la guerre froide...)",
+    "video_rel_path": "/video/Cold.War (2018) [1080p](...).mkv",
+    "file_size_bytes": 7037755790,
+    "wall_duration_secs": 893.91,
+    "io_read_rate_mib_s": 7.51,
+    "cifs_read_rate_mib_s": 7.51,
+    "resumed_frames": 0,
+    "start_iso": "2026-11-01T09:18:49Z",
+    "end_iso": "2026-11-01T09:33:43Z",
+    "timestamp_iso": "2026-11-01T09:33:43Z",
+    "success": true,
+    "status": "COMPLETED"
+  }
+  ```
+- **Utilisation** :
+  - **Reprise après crash** : Au démarrage, `select_targets` rejoue ce journal via `iter_events` pour exclure automatiquement les vidéos déjà marquées `success: true`.
+  - **Blacklist automatique** : Les vidéos cumulant plus de 3 échecs consécutifs (`status != COMPLETED`) sont isolées via `load_blacklisted_stems` pour ne pas saturer la file.
+
+### 6.2. Surveillance Quotas LVE CloudLinux : `logs/faultwatch/YYYY-MM-DD.jsonl`
+- **Format** : Enregistrement minute par minute sous format JSONL horodaté UTC.
+- **Schéma Réel (extrait direct o2switch)** :
+  ```json
+  {
+    "minute": "2026-11-07T15:26Z",
+    "n": 60,
+    "cpu_mean": 0.1,
+    "cpu_p90": 0.2,
+    "cpu_max": 0.2,
+    "secs_over_90": 0,
+    "secs_over_100": 0,
+    "run_delay_ms_mean": 0.0,
+    "run_delay_ms_max": 0.0,
+    "nproc_max": 7,
+    "threads_max": 107,
+    "ffmpeg_max": 0,
+    "spawns": 12,
+    "ffmpeg_spawns": 0,
+    "dbsrt-server_spawns": 0
+  }
+  ```
+- **Cycle de vie** :
+  - Produit en continu par le daemon de surveillance `scripts/o2switch_fault_watch.py` tournant sous `screen`.
+  - Échantillonne 60 fois par minute l'état des processus et de l'ordonnanceur.
+  - Consommé par `task o2switch:faultwatch:status` et `task o2switch:faultwatch:correlate` pour prouver l'absence d'impact LVE CPU et I/O.
+
+---
+
+## 7. Matrice des Cycles de Vie des Ressources
+
+| Ressource | Phase Initiale | En Cours de Processing | Pause Douce (`task ...:pause`) | Redimensionnement (`scale N`) | Clôture / Terminaison |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **`desired_workers`** | Créé à 4 | Lu à chaque boucle (1s) | Préservé inchangé | Mis à jour atomiquement | Préservé |
+| **`batch_paused`** | Absent | Absent | Créé (0 octet) | Inchangé | Supprimé |
+| **`batch_queue.json`** | Initialisé (`is_active: true`) | Réécrit à chaque vidéo | Mis à jour (`active_workers: 0` à terme) | Ajusté avec la nouvelle cible | `is_active: false` |
+| **`*.phash` temporaires** | Absents | Fichier ouvert en écriture séquentielle | Écriture menée à son terme | Pas d'interruption violente | Fermé et vérifié bit-à-bit |
+| **`events.jsonl`** | Chargé pour filtrage | Écrit à la complétion de chaque tâche | Aucune écriture (attente) | Écritures au fil de l'eau | Enregistrement final |
+| **`faultwatch/*.jsonl`** | Rotation journalière | 1 ligne JSONL / minute | Poursuite de la mesure (repos) | Poursuite de la mesure | Poursuite continue H24 |
 - **Format temporel** : `HH:MM:SS,mmm --> HH:MM:SS,mmm` (virgule décimale pour les millisecondes).

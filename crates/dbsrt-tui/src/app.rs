@@ -59,6 +59,10 @@ pub trait TopActions {
     fn kill_job(&mut self, pid: u32) -> String;
     /// Stops the whole batch (`[x]` graceful, `[X]` forced).
     fn stop_entire_batch(&mut self, force: bool, pids: &[u32]) -> String;
+    /// Toggles soft pause on the whole batch (`[P]`, touch/rm `run/batch_paused`).
+    fn toggle_soft_pause_batch(&mut self) -> String;
+    /// Scales desired worker concurrency (`[+]`/`[-]`, writes `run/desired_workers`).
+    fn adjust_desired_workers(&mut self, delta: i32) -> String;
     /// Launches a batch (`[b]`). `Ok` clears the selection and returns to Active Jobs.
     fn launch_selected_batch(&mut self, paths: &[PathBuf]) -> Result<String, String>;
     /// Removes media from the persistent catalog cache (`[d]`).
@@ -1232,13 +1236,25 @@ fn handle_active_jobs_view_keys(
     actions: &mut dyn TopActions,
 ) {
     match code {
-        KeyCode::Char('p') | KeyCode::Char('P') => {
+        KeyCode::Char('p') => {
             if !telemetry.active_jobs.is_empty() && app.selected_index < telemetry.active_jobs.len()
             {
                 let pid = telemetry.active_jobs[app.selected_index].pid;
                 let msg = actions.toggle_pause_job(pid);
                 app.set_feedback(msg);
             }
+        }
+        KeyCode::Char('P') => {
+            let msg = actions.toggle_soft_pause_batch();
+            app.set_feedback(msg);
+        }
+        KeyCode::Char('+') => {
+            let msg = actions.adjust_desired_workers(1);
+            app.set_feedback(msg);
+        }
+        KeyCode::Char('-') => {
+            let msg = actions.adjust_desired_workers(-1);
+            app.set_feedback(msg);
         }
         KeyCode::Char('c') | KeyCode::Char('C') => {
             if !telemetry.active_jobs.is_empty() && app.selected_index < telemetry.active_jobs.len()

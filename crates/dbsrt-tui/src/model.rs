@@ -850,6 +850,12 @@ pub struct BatchQueueTelemetry {
     pub active_workers: usize,
     /// Flag indicating whether the batch queue is actively running.
     pub is_active: bool,
+    /// Flag indicating whether the batch worker is softly paused (via `run/batch_paused`).
+    #[serde(default)]
+    pub is_paused: bool,
+    /// Desired concurrent worker processes requested by operator (via `run/desired_workers`).
+    #[serde(default)]
+    pub desired_workers: Option<usize>,
     /// ISO 8601 UTC timestamp of last status update.
     pub updated_at: String,
 }

@@ -3421,6 +3421,8 @@ fn test_batch_queue_telemetry_rendered_in_header_and_table() {
             progress_pct: 2.8,
             active_workers: 4,
             is_active: true,
+            is_paused: false,
+            desired_workers: Some(4),
             updated_at: "2026-10-29T07:45:00Z".to_string(),
         },
         ..Default::default()
