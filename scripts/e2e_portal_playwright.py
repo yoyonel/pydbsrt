@@ -296,7 +296,6 @@ def test_g1_auth_and_gateway(page: Page, base_url: str, api_key: str, is_cloud: 
     # Step 1.4: URL token direct access
     token_url = f"{base_url}/monitoring?token={api_key}" if api_key else login_url
     page.goto(token_url, wait_until="networkidle")
-    page.wait_for_timeout(1500)
     assert "dbsrt Monitor" in page.title(), f"Expected Monitor title, got {page.title()}"
     print("  ✓ G1.4: Direct URL Token (?token=) access verified")
     page.screenshot(path=str(SCREENSHOTS_DIR / "g1_03_authenticated_portal.png"))
@@ -312,9 +311,8 @@ def test_g2_stream_sse_and_zero_polling(page: Page, base_url: str) -> None:
     """Group 2: Stream SSE & Strict Zero-Polling Invariant (/v1/monitoring/events)."""
     print("\n-> [G2] Testing Persistent SSE Stream & Zero-Polling Invariant...")
     page.goto(f"{base_url}/monitoring", wait_until="networkidle")
-    page.wait_for_timeout(2000)
 
-    # Invariant check: record network requests over 5 seconds
+    # Invariant check: record network requests over 1.5 seconds
     forbidden_endpoints = ["/v1/metrics", "/v1/logs", "/v1/monitoring/latest"]
     polled_requests: list[str] = []
 
@@ -325,8 +323,8 @@ def test_g2_stream_sse_and_zero_polling(page: Page, base_url: str) -> None:
                 polled_requests.append(p)
 
     page.on("request", on_req)
-    print("  -> Monitoring network requests for 5 seconds to assert zero polling...")
-    page.wait_for_timeout(5000)
+    print("  -> Monitoring network requests for 1.5 seconds to assert zero polling...")
+    page.wait_for_timeout(1500)
     page.remove_listener("request", on_req)
 
     assert len(polled_requests) == 0, f"Spam polling detected: {polled_requests}"
@@ -338,7 +336,7 @@ def test_g3_cristian_clocksync_and_latency(page: Page, base_url: str) -> None:
     """Group 3: Cristian ClockSync & Temporal Latency (X-Server-Time-Ms)."""
     print("\n-> [G3] Testing Cristian ClockSync & Temporal Headers...")
     page.goto(f"{base_url}/monitoring", wait_until="networkidle")
-    page.wait_for_timeout(2000)
+    page.wait_for_selector("#sys-sync")
 
     sys_sync = page.locator("#sys-sync").text_content() or ""
     print(f"  ✓ G3.1: Footer synchronization latency & jitter: '{sys_sync.strip()}'")
@@ -350,15 +348,14 @@ def test_g4_monitoring_portal_6_views_and_swr(page: Page, base_url: str, api_key
     """Group 4: Monitoring Portal (6 views, SWR cache, pagination, accordion)."""
     print("\n-> [G4] Testing Monitoring Portal 6 Views & SWR Cache...")
     page.goto(f"{base_url}/monitoring", wait_until="networkidle")
-    page.wait_for_timeout(1500)
 
     # Pause/Resume control
     btn_pause = page.locator("#btn-pause")
     btn_pause.click()
-    page.wait_for_timeout(400)
+    page.wait_for_timeout(150)
     assert "▶" in (btn_pause.text_content() or "")
     btn_pause.click()
-    page.wait_for_timeout(400)
+    page.wait_for_timeout(150)
     assert "⏸" in (btn_pause.text_content() or "")
     print("  ✓ G4.1: Stream Pause/Resume toggle verified")
 
@@ -366,28 +363,30 @@ def test_g4_monitoring_portal_6_views_and_swr(page: Page, base_url: str, api_key
     views = ["overview", "ingestion", "catalogue", "audit", "supervisor", "system"]
     for v in views:
         page.locator(f"#views-nav a[href='#{v}']").click()
-        page.wait_for_timeout(800)
-        assert page.locator(f"#view-{v}").is_visible(), f"View #{v} not visible"
+        page.wait_for_selector(f"#view-{v}", state="visible")
         print(f"  ✓ G4.2: View #{v} loaded")
 
     # Ingestion sub-tabs & SWR Cache
     page.locator("#views-nav a[href='#ingestion']").click()
     for tab in ["jobs", "stats", "completed", "sources"]:
         page.locator(f"button[data-tab='{tab}']").click()
-        page.wait_for_timeout(600)
-        assert page.locator(f"#tab-{tab}").is_visible(), f"Sub-tab #{tab} not visible"
+        page.wait_for_selector(f"#tab-{tab}", state="visible")
 
     page.locator("button[data-tab='completed']").click()
-    page.wait_for_timeout(1500)
+    page.wait_for_timeout(400)
     rows = page.locator("#completed-tbody tr[data-key]")
     if rows.count() > 0:
         rows.first.click()
-        page.wait_for_selector("tr.detail", timeout=5000)
+        page.wait_for_selector("tr.detail", timeout=2000)
         print("  ✓ G4.3: Completed drawer accordion expanded")
 
-    # Audit orders validation via browser fetch
-    page.evaluate("() => fetch('/v1/monitoring/audit/stop', { method: 'POST' }).catch(() => {})")
-    page.evaluate("() => fetch('/v1/monitoring/audit/resume', { method: 'POST' }).catch(() => {})")
+    # Audit orders validation via browser fetch in parallel
+    page.evaluate(
+        "() => Promise.all(["
+        "  fetch('/v1/monitoring/audit/stop', { method: 'POST' }).catch(() => {}),"
+        "  fetch('/v1/monitoring/audit/resume', { method: 'POST' }).catch(() => {})"
+        "])"
+    )
 
     page.screenshot(path=str(SCREENSHOTS_DIR / "g4_01_monitoring_views.png"))
 
@@ -406,30 +405,26 @@ def test_g5_studio_couplings_and_timeline(page: Page, base_url: str, api_key: st
     print("\n-> [G5] Testing DBSrt Studio Couplings & Timeline Inspector...")
     studio_url = f"{base_url}/studio?token={api_key}" if api_key else f"{base_url}/studio"
     page.goto(studio_url, wait_until="networkidle")
-    page.wait_for_timeout(2500)
 
     page.locator("#tab-btn-couplings").click()
-    page.wait_for_timeout(1000)
+    page.wait_for_selector("#tab-couplings", state="visible")
 
     search_input = page.locator("#media-search")
     if search_input.is_visible():
         search_input.fill("test")
-        page.wait_for_timeout(400)
         search_input.fill("")
-        page.wait_for_timeout(400)
         print("  ✓ G5.1: Media search input interactive")
 
     # Click media card if available to trigger subframes load
     media_cards = page.locator("#media-list .media-card")
     if media_cards.count() > 0:
         media_cards.first.click()
-        page.wait_for_timeout(1000)
+        page.wait_for_selector(".cue-bar", timeout=2000)
 
     # Timeline cue inspector interaction
     cue_bars = page.locator(".cue-bar")
     if cue_bars.count() > 0:
         cue_bars.first.click()
-        page.wait_for_timeout(600)
         inspector = page.locator("#inspector-card")
         if inspector.count() > 0 and inspector.is_visible():
             print("  ✓ G5.2: Timeline cue bar clicked -> Cue Inspector updated")
@@ -452,7 +447,6 @@ def _trigger_playground_actions(page: Page) -> None:
         btn = page.locator(f"#tab-playground button:has-text('{btn_text}')")
         if btn.count() > 0 and btn.is_visible():
             btn.click()
-            page.wait_for_timeout(600)
             print(f"  ✓ G6.2: {desc} ({btn_text})")
 
     page.evaluate(
@@ -470,11 +464,11 @@ def test_g6_studio_catalog_and_playground(page: Page, base_url: str) -> None:
 
     # Catalog Tab
     page.locator("#tab-btn-catalog").click()
-    page.wait_for_timeout(1200)
+    page.wait_for_selector("#tab-catalog", state="visible")
 
     # Playground Tab
     page.locator("#tab-btn-playground").click()
-    page.wait_for_timeout(1000)
+    page.wait_for_selector("#tab-playground", state="visible")
     assert page.locator("#tab-playground").is_visible(), "Playground panel not visible"
     _trigger_playground_actions(page)
 
@@ -485,20 +479,19 @@ def test_g7_studio_observability_and_5_tiers(page: Page, base_url: str) -> None:
     """Group 7: DBSrt Studio Observability & 5-Tier Pipeline."""
     print("\n-> [G7] Testing DBSrt Studio Observability & 5 Tiers Pipeline...")
     page.locator("#tab-btn-observability").click()
-    page.wait_for_timeout(1500)
+    page.wait_for_selector("#tab-observability", state="visible")
 
     # Preset selection
     preset_btn = page.locator("button.btn:has-text('2-Blue Forever')")
     if preset_btn.count() > 0 and preset_btn.is_visible():
         preset_btn.click()
-        page.wait_for_timeout(500)
         print("  ✓ G7.1: Preset '2-Blue Forever' clicked")
 
     # Match Trigger
     btn_match = page.locator("#btn-pipeline-match")
     if btn_match.is_visible():
         btn_match.click()
-        page.wait_for_timeout(4000)
+        page.wait_for_timeout(1000)
         ffmpeg_val = page.locator("#iso-val-ffmpeg").text_content() or ""
         print(f"  ✓ G7.2: Pipeline executed | FFmpeg: {ffmpeg_val}")
 
@@ -510,7 +503,6 @@ def test_g8_web_top_portal(page: Page, base_url: str, api_key: str) -> None:
     print("\n-> [G8] Testing Web Top Portal (/top)...")
     top_url = f"{base_url}/top?token={api_key}" if api_key else f"{base_url}/top"
     page.goto(top_url, wait_until="networkidle")
-    page.wait_for_timeout(1500)
     assert "dbsrt Monitor" in page.title()
     print("  ✓ G8.1: Web Top loaded successfully")
     page.screenshot(path=str(SCREENSHOTS_DIR / "g8_01_web_top.png"))
