@@ -61,6 +61,10 @@ pub struct RecognizeArgs {
     /// Custom temporal offset ratios for multi-window matching (comma-separated, e.g. "0.2,0.5,0.8")
     #[arg(long)]
     pub offsets: Option<String>,
+
+    /// Path to persistent probe cache JSON file (bypasses ffprobe when moviehash matches)
+    #[arg(long)]
+    pub probe_cache: Option<PathBuf>,
 }
 
 #[derive(Default)]
@@ -243,10 +247,28 @@ fn execute_mmap_recognize(args: &RecognizeArgs, hashes: &[u64], media_name: &str
     Ok(())
 }
 
+/// Resolves video metadata either from the probe cache (if provided) or falling back to ffprobe.
+fn resolve_video_metadata(args: &RecognizeArgs) -> Result<dbsrt_core::VideoMetadata> {
+    if let Some(meta) = try_resolve_from_cache(args) {
+        return Ok(meta);
+    }
+    probe_video(&args.media)
+}
+
+fn try_resolve_from_cache(args: &RecognizeArgs) -> Option<dbsrt_core::VideoMetadata> {
+    let cache_path = args.probe_cache.as_ref()?;
+    let cache = dbsrt_core::probe_cache::ProbeCache::load_or_create(cache_path.clone()).ok()?;
+    let entry = cache.query_or_probe_local(&args.media).ok()?;
+    Some(dbsrt_core::VideoMetadata {
+        duration: entry.duration_seconds,
+        fps: entry.fps,
+    })
+}
+
 /// Run media recognition pipeline against .dbphash, Zero-DB mmap library, or PostgreSQL.
 pub fn run_recognize_media(args: &RecognizeArgs) -> Result<()> {
-    // 1. Probe video
-    let meta = probe_video(&args.media)?;
+    // 1. Probe video (cached or direct)
+    let meta = resolve_video_metadata(args)?;
 
     if let Some(()) = maybe_run_multi_window(args, &meta)? {
         return Ok(());
@@ -389,6 +411,7 @@ mod tests {
             db: PostgresArgs::default(),
             multi_window: false,
             offsets: None,
+            probe_cache: None,
         };
         let err = run_recognize_media(&args).unwrap_err();
         assert!(err
