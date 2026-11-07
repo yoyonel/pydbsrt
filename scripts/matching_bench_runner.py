@@ -57,6 +57,8 @@ signal.signal(signal.SIGTERM, _sig_handler)
 class MatchingEvalRecord:
     media_path: str
     media_stem: str
+    offsets: str
+    nb_seconds: float
     mono_found: bool
     mono_title: str
     mono_id: int
@@ -69,39 +71,9 @@ class MatchingEvalRecord:
     multi_windows: str
     multi_coherent: bool
     multi_timer_sec: float
+    consensus_shift_ms: int
     collision_eliminated: bool
-
-
-def parse_csv_line(line: str, elapsed: float, is_multi: bool) -> Dict[str, Any]:
-    parts = line.strip().split(",") if line.strip() else []
-    found = len(parts) > 0 and parts[0] == "True"
-    clean_title = parts[2] if len(parts) > 2 else ""
-    m_id = int(parts[3]) if len(parts) > 3 and parts[3].isdigit() else 0
-
-    if is_multi:
-        windows = parts[4] if len(parts) > 4 else "0/0"
-        coherent = len(parts) > 5 and parts[5] == "True"
-        conf = float(parts[7]) if len(parts) > 7 else 0.0
-        return {
-            "found": found,
-            "title": clean_title,
-            "media_id": m_id,
-            "confidence": conf,
-            "windows": windows,
-            "coherent": coherent,
-            "timer": elapsed,
-        }
-
-    conf = float(parts[6]) if len(parts) > 6 else 0.0
-    return {
-        "found": found,
-        "title": clean_title,
-        "media_id": m_id,
-        "confidence": conf,
-        "windows": "1/1",
-        "coherent": True,
-        "timer": elapsed,
-    }
+    window_matches: List[Dict[str, Any]]
 
 
 def execute_dbsrt_recognize(
@@ -111,6 +83,7 @@ def execute_dbsrt_recognize(
     probe_cache: Path | None,
     multi_window: bool,
     nb_seconds: float = 1.0,
+    offsets: str | None = None,
 ) -> Dict[str, Any]:
     cmd = [
         str(dbsrt_bin),
@@ -122,14 +95,17 @@ def execute_dbsrt_recognize(
         "-s",
         str(nb_seconds),
         "--output-format",
-        "CSV",
+        "JSON",
         "--limit",
         "1",
     ]
     if probe_cache:
         cmd.extend(["--probe-cache", str(probe_cache)])
     if multi_window:
-        cmd.append("--multi-window")
+        if offsets:
+            cmd.extend(["--offsets", offsets])
+        else:
+            cmd.append("--multi-window")
 
     t0 = time.perf_counter()
     proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
@@ -144,8 +120,61 @@ def execute_dbsrt_recognize(
             "windows": "0/0",
             "coherent": False,
             "timer": elapsed,
+            "consensus_shift_ms": 0,
+            "window_matches": [],
         }
-    return parse_csv_line(proc.stdout.strip().split("\n")[0], elapsed, multi_window)
+
+    try:
+        data = json.loads(proc.stdout.strip())
+        if not data:
+            return {
+                "found": False,
+                "title": "NONE",
+                "media_id": 0,
+                "confidence": 0.0,
+                "windows": "0/0",
+                "coherent": False,
+                "timer": elapsed,
+                "consensus_shift_ms": 0,
+                "window_matches": [],
+            }
+        item = data[0]
+        if multi_window:
+            win_str = f"{item.get('matching_windows', 0)}/{item.get('total_windows', 0)}"
+            return {
+                "found": item.get("media_found", False),
+                "title": item.get("media_name_match", ""),
+                "media_id": item.get("media_id_match", 0),
+                "confidence": float(item.get("confidence", 0.0)),
+                "windows": win_str,
+                "coherent": item.get("is_temporally_coherent", False),
+                "timer": elapsed,
+                "consensus_shift_ms": item.get("consensus_shift_ms", 0),
+                "window_matches": item.get("window_matches", []),
+            }
+        return {
+            "found": item.get("media_found", False),
+            "title": item.get("media_name_match", ""),
+            "media_id": item.get("media_id_match", 0),
+            "confidence": float(item.get("confidence", 0.0)),
+            "windows": "1/1",
+            "coherent": True,
+            "timer": elapsed,
+            "consensus_shift_ms": item.get("estimated_shift_ms", 0),
+            "window_matches": [],
+        }
+    except Exception:
+        return {
+            "found": False,
+            "title": "NONE",
+            "media_id": 0,
+            "confidence": 0.0,
+            "windows": "0/0",
+            "coherent": False,
+            "timer": elapsed,
+            "consensus_shift_ms": 0,
+            "window_matches": [],
+        }
 
 
 def evaluate_single_target(
@@ -154,10 +183,11 @@ def evaluate_single_target(
     probe_cache: Path | None,
     path: Path,
     nb_seconds: float = 1.0,
+    offsets: str | None = None,
 ) -> MatchingEvalRecord:
     stem = path.stem
     mono = execute_dbsrt_recognize(dbsrt_bin, path, dbphash_path, probe_cache, False, nb_seconds)
-    multi = execute_dbsrt_recognize(dbsrt_bin, path, dbphash_path, probe_cache, True, nb_seconds)
+    multi = execute_dbsrt_recognize(dbsrt_bin, path, dbphash_path, probe_cache, True, nb_seconds, offsets)
 
     is_mono_collision = (not mono["found"]) and (mono["confidence"] >= 90.0)
     collision_eliminated = is_mono_collision and (multi["confidence"] < 50.0 or not multi["coherent"])
@@ -173,6 +203,8 @@ def evaluate_single_target(
     return MatchingEvalRecord(
         media_path=str(path),
         media_stem=stem,
+        offsets=offsets or "0.2,0.5,0.8",
+        nb_seconds=nb_seconds,
         mono_found=mono["found"],
         mono_title=mono["title"],
         mono_id=mono["media_id"],
@@ -185,7 +217,9 @@ def evaluate_single_target(
         multi_windows=multi["windows"],
         multi_coherent=multi["coherent"],
         multi_timer_sec=multi["timer"],
+        consensus_shift_ms=multi["consensus_shift_ms"],
         collision_eliminated=collision_eliminated,
+        window_matches=multi["window_matches"],
     )
 
 
@@ -256,7 +290,14 @@ def _process_target(
     cur_workers: int,
     state: Dict[str, Any],
 ) -> MatchingEvalRecord:
-    rec = evaluate_single_target(args.bin, args.dbphash, args.probe_cache, path, args.seconds)
+    rec = evaluate_single_target(
+        args.bin,
+        args.dbphash,
+        args.probe_cache,
+        path,
+        args.seconds,
+        args.offsets,
+    )
     state["completed"] += 1
     if (not rec.mono_found) and (rec.mono_confidence >= 90.0):
         state["mono_collisions"] += 1
@@ -339,6 +380,12 @@ def parse_cli_args() -> argparse.Namespace:
     parser.add_argument("--workers-file", type=Path, default=Path(DEFAULT_WORKERS_FILE))
     parser.add_argument("--workers", type=int, default=DEFAULT_WORKERS_COUNT)
     parser.add_argument("-s", "--seconds", type=float, default=1.0)
+    parser.add_argument(
+        "--offsets",
+        type=str,
+        default="0.2,0.5,0.8",
+        help="Comma-separated offset ratios (e.g. 0.2,0.5,0.8 or 0.1,0.3,0.5,0.7,0.9)",
+    )
     parser.add_argument("files", nargs="*", help="Video files to benchmark")
     return parser.parse_args()
 
