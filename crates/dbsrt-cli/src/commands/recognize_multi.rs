@@ -100,6 +100,8 @@ pub fn execute_multi_window_dbphash(
     if consensus.is_empty() {
         if args.output_format == OutputFormat::DataFrame {
             println!("Empty DataFrame\nColumns: [media_found, media_name_search, media_id_match, media_name_match, nb_windows, coherent, timer_in_seconds, confidence]\nIndex: []");
+        } else if args.output_format == OutputFormat::Json {
+            println!("[]");
         }
         return Ok(());
     }
@@ -110,6 +112,31 @@ pub fn execute_multi_window_dbphash(
     } else {
         &consensus[..]
     };
+
+    if args.output_format == OutputFormat::Json {
+        let rows: Vec<serde_json::Value> = display_matches
+            .iter()
+            .map(|m| {
+                let media_found = m.clean_title.contains(&media_name_search)
+                    || media_name_search.contains(&m.clean_title);
+                serde_json::json!({
+                    "media_found": media_found,
+                    "media_name_search": media_name_search,
+                    "media_id_match": m.media_id,
+                    "media_name_match": m.clean_title,
+                    "matching_windows": m.matching_windows,
+                    "total_windows": m.total_windows,
+                    "is_temporally_coherent": m.is_temporally_coherent,
+                    "timer_in_seconds": timer_in_seconds,
+                    "confidence": m.consensus_confidence,
+                    "consensus_shift_ms": m.consensus_shift_ms,
+                    "window_matches": m.window_matches,
+                })
+            })
+            .collect();
+        println!("{}", serde_json::to_string(&rows)?);
+        return Ok(());
+    }
 
     for m in display_matches {
         let row = ConsensusRenderRow {
@@ -162,6 +189,9 @@ fn render_consensus_row(row: &ConsensusRenderRow<'_>, output_format: OutputForma
                 row.timer_in_seconds,
                 m.consensus_confidence
             );
+        }
+        OutputFormat::Json => {
+            // Handled globally in execute_multi_window_dbphash before rendering individual rows
         }
     }
 }

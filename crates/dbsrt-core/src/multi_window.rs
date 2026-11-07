@@ -4,6 +4,7 @@
 //! to eliminate false positive collisions caused by shared eyecatches, intros, or static jingles.
 
 use anyhow::{anyhow, Result};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Default multi-window temporal ratios (20%, 50%, 80% along the media timeline).
@@ -98,7 +99,7 @@ impl MultiWindowPlan {
 }
 
 /// Single window match result for a candidate media entry.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WindowMatchItem {
     /// Window index in the evaluation plan (0-based).
     pub window_idx: usize,
@@ -117,7 +118,7 @@ pub struct WindowMatchItem {
 }
 
 /// Aggregated multi-window consensus result for a candidate media entry.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MultiWindowConsensus {
     /// Candidate media identifier.
     pub media_id: u32,

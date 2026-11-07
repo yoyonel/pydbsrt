@@ -138,6 +138,19 @@ fn render_dbphash_match(m: &DbphashMediaMatch, media_name: &str, timer: f64, fmt
                 m.confidence
             );
         }
+        OutputFormat::Json => {
+            let val = serde_json::json!([{
+                "media_found": media_found,
+                "media_name_search": media_name,
+                "media_id_match": m.media_id,
+                "media_name_match": m.clean_title,
+                "matching_cuts": m.matching_cuts,
+                "timer_in_seconds": timer,
+                "confidence": m.confidence,
+                "estimated_shift_ms": m.estimated_shift_ms,
+            }]);
+            println!("{}", val);
+        }
     }
 }
 
@@ -212,6 +225,18 @@ fn render_mmap_match(row: &MmapRenderRow<'_>, fmt: OutputFormat) {
                 row.timer,
                 m.confidence
             );
+        }
+        OutputFormat::Json => {
+            let val = serde_json::json!([{
+                "media_found": media_found,
+                "media_name_search": row.media_name,
+                "media_id_match": row.idx + 1,
+                "media_name_match": m.media_name,
+                "nb_offsets_match": m.nb_offsets_match,
+                "timer_in_seconds": row.timer,
+                "confidence": m.confidence,
+            }]);
+            println!("{}", val);
         }
     }
 }
@@ -368,6 +393,18 @@ pub fn run_recognize_media(args: &RecognizeArgs) -> Result<()> {
                     timer_in_seconds,
                     confidence
                 );
+            }
+            OutputFormat::Json => {
+                let val = serde_json::json!([{
+                    "media_found": media_found,
+                    "media_name_search": media_name_search,
+                    "media_id_match": media_id,
+                    "media_name_match": media_name_match,
+                    "nb_offsets_match": agg.nb_offsets_match,
+                    "timer_in_seconds": timer_in_seconds,
+                    "confidence": confidence,
+                }]);
+                println!("{}", val);
             }
         }
     }

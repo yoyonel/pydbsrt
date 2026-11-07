@@ -97,6 +97,8 @@ pub enum OutputFormat {
     DataFrame,
     #[value(name = "CSV", alias = "csv")]
     Csv,
+    #[value(name = "JSON", alias = "json")]
+    Json,
 }
 
 #[derive(Subcommand, Debug)]
