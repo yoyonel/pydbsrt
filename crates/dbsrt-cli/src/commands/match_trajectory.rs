@@ -1,0 +1,125 @@
+//! CLI Subcommand: match-trajectory
+//!
+//! Evaluates candidate media through sequential trajectory accumulation, tracking
+//! valid hypotheses across frames and pruning divergent candidates in real-time.
+
+use anyhow::{bail, Result};
+use clap::Args;
+use dbsrt_core::trajectory::TrajectoryTrackerConfig;
+use dbsrt_index::dbphash::MmapDbphash;
+use dbsrt_index::trajectory_runner::execute_trajectory_matching;
+use std::path::PathBuf;
+
+/// Arguments for `match-trajectory` subcommand.
+#[derive(Args, Debug, Clone)]
+pub struct MatchTrajectoryArgs {
+    /// Video media file to evaluate
+    #[arg(short, long)]
+    pub media: PathBuf,
+
+    /// Unified .dbphash index catalog to search against
+    #[arg(long, default_value = "data/catalog.dbphash")]
+    pub dbphash: PathBuf,
+
+    /// Start timestamp along target media timeline in seconds (default: 50.0% of duration if available, or 0.0)
+    #[arg(short, long, default_value_t = 0.0)]
+    pub start: f64,
+
+    /// Number of consecutive frames to evaluate (e.g. 24, 48, 120)
+    #[arg(short = 'n', long, default_value_t = 24)]
+    pub frames: usize,
+
+    /// Initial seed Hamming distance threshold (default: 10)
+    #[arg(long, default_value_t = 10)]
+    pub seed_threshold: u32,
+
+    /// Step propagation Hamming distance threshold (default: 8)
+    #[arg(long, default_value_t = 8)]
+    pub step_threshold: u32,
+
+    /// Maximum consecutive misses before pruning hypothesis (default: 3)
+    #[arg(long, default_value_t = 3)]
+    pub max_misses: u32,
+
+    /// Minimum coverage ratio (0.0 to 1.0) of evaluated frames required to elect winner (default: 0.50)
+    #[arg(long, default_value_t = 0.50)]
+    pub min_coverage: f64,
+
+    /// Temporal slack tolerance in milliseconds around expected timestamp (default: 1200 ms)
+    #[arg(long, default_value_t = 1200)]
+    pub time_slack_ms: i64,
+}
+
+/// Executes trajectory matching command.
+pub fn run_match_trajectory(args: MatchTrajectoryArgs) -> Result<()> {
+    if !args.media.is_file() {
+        bail!("Media file not found: {}", args.media.display());
+    }
+    if !args.dbphash.is_file() {
+        bail!("Catalog file not found: {}", args.dbphash.display());
+    }
+
+    let dbphash = MmapDbphash::open(&args.dbphash)?;
+    let config = TrajectoryTrackerConfig {
+        seed_threshold: args.seed_threshold,
+        step_threshold: args.step_threshold,
+        max_consecutive_misses: args.max_misses,
+        time_slack_ms: args.time_slack_ms,
+        step_interval_ms: 1000,
+        min_coverage_ratio: args.min_coverage,
+        election_strategy: dbsrt_core::trajectory::ElectionStrategy::QualityScore,
+    };
+
+    println!(
+        "🚀 Trajectory Tracking on '{}' (evaluating {} frames from t={:.1}s)...",
+        args.media.file_name().unwrap_or_default().to_string_lossy(),
+        args.frames,
+        args.start
+    );
+
+    let req = dbsrt_index::trajectory_runner::TrajectoryMatchRequest {
+        dbphash: &dbphash,
+        target_path: &args.media,
+        start_sec: args.start,
+        nb_frames: args.frames,
+    };
+    let res = execute_trajectory_matching(&req, config)?;
+
+    println!("================================================================================");
+    println!("🎯 TRAJECTORY TRACKING VERDICT:");
+    println!("  Target Media:                {}", res.target_media);
+    println!(
+        "  Evaluated Target Frames:     {}",
+        res.evaluated_frames_count
+    );
+    println!(
+        "  Initial Seed Candidates:     {}",
+        res.initial_candidates_count
+    );
+    println!(
+        "  Surviving Trajectories:      {}",
+        res.surviving_trajectories_count
+    );
+    if let Some(winner_id) = res.winner_media_id {
+        let confidence_pct =
+            (res.winner_matched_frames as f64 / res.evaluated_frames_count.max(1) as f64) * 100.0;
+        println!("  Elected Winner Media ID:     {}", winner_id);
+        println!("  Elected Winner Title:        {}", res.winner_title);
+        println!(
+            "  Matched Frames in Trajectory: {}/{} ({:.1}%)",
+            res.winner_matched_frames, res.evaluated_frames_count, confidence_pct
+        );
+        println!(
+            "  Reference Start Timestamp:   {:.3}s ({} ms)",
+            res.winner_initial_timestamp_ms as f64 / 1000.0,
+            res.winner_initial_timestamp_ms
+        );
+        println!("  Quality Accumulated Score:   {:.2}", res.winner_score);
+    } else {
+        println!("  Elected Winner:              NONE (All hypotheses pruned)");
+    }
+    println!("  Evaluation Time:             {:.3}s", res.elapsed_seconds);
+    println!("================================================================================");
+
+    Ok(())
+}

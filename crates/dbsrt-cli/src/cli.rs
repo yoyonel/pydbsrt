@@ -115,6 +115,9 @@ pub enum Commands {
     /// Recognize media from database or local phash files by computing perceptual hash fingerprint
     RecognizeMedia(RecognizeArgs),
 
+    /// Multi-hypothesis trajectory tracking matching across temporal sequence of frames
+    MatchTrajectory(crate::commands::MatchTrajectoryArgs),
+
     /// Retarget and synchronize SRT subtitles from reference to target media
     RetargetSubtitles(RetargetArgs),
 

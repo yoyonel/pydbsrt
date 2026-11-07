@@ -114,10 +114,10 @@
     "scope": "mod",
     "function_name": "run_recognize_media",
     "start_line": 70,
-    "max_loc": 217,
-    "max_ccn": 43,
+    "max_loc": 120,
+    "max_ccn": 24,
     "max_parameters": 1,
-    "max_nesting": 6
+    "max_nesting": 5
   },
   "crates/dbsrt-cli/src/commands/retarget.rs::mod::run_retarget_subtitles": {
     "file_path": "crates/dbsrt-cli/src/commands/retarget.rs",
@@ -277,16 +277,6 @@
     "max_loc": 23,
     "max_ccn": 4,
     "max_parameters": 5,
-    "max_nesting": 3
-  },
-  "crates/dbsrt-cli/src/main.rs::mod::main": {
-    "file_path": "crates/dbsrt-cli/src/main.rs",
-    "scope": "mod",
-    "function_name": "main",
-    "start_line": 20,
-    "max_loc": 27,
-    "max_ccn": 33,
-    "max_parameters": 0,
     "max_nesting": 3
   },
   "crates/dbsrt-core/src/coupling.rs::CouplingRegistry::find_all_by_matched_media_opts": {
