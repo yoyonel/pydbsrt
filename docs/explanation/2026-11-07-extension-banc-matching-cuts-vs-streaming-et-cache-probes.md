@@ -177,7 +177,60 @@ ON media_probes (moviehash, file_size);
 
 ---
 
-## 5. Plan d'Implémentation & Prochaines Étapes
+## 6. Architecture Déportée du Banc de Matching Multi-Offsets (Poste Local vs Cloud o2switch)
+
+Pour exécuter des campagnes d'évaluation massives (sur 2 758 snippets ou l'intégralité du corpus de production) sans immobiliser le poste de développement local ni risquer d'interruption réseau, le système sépare strictement le **commanditaire**, l'**orchestrateur** et l'**exécuteur** :
+
+```mermaid
+flowchart TD
+    subgraph Workstation ["Poste de Travail Développeur (Local)"]
+        CLI["Commanditaire Client (Taskfile)<br/>• task o2switch:eval:matching:start<br/>• task o2switch:eval:matching:pause<br/>• task o2switch:eval:matching:scale"]
+        TUI["Supervision TUI Optionnelle<br/>task o2switch:top (session SSH éphémère)"]
+    end
+
+    subgraph O2Switch ["Serveur Cloud o2switch (Distant)"]
+        ScreenSession["Session GNU screen persistante (screen -dmS matching_bench)<br/>(Autonomie H24, survit aux déconnexions réseau)"]
+        Runner["Orchestrateur Python (scripts/matching_bench_runner.py)"]
+        DbsrtBin["Exécuteur Rust Statique musl (dbsrt recognize-media)"]
+        Catalog["Catalogue Haute Densité (data/catalog.dbphash mmap)"]
+        Sentinels["Sentinelles d'Orchestration Volatiles (dbsrt/run/) :<br/>• matching_bench_paused (Pause Douce)<br/>• matching_bench_workers (Scaling Concurrence)<br/>• matching_bench_status.json (Télémétrie en Direct)"]
+
+        ScreenSession --> Runner
+        Runner --> DbsrtBin
+        DbsrtBin --> Catalog
+        Runner <--> Sentinels
+    end
+
+    subgraph Storage ["Sources de Médias (NAS Synology / Freebox)"]
+        NAS["Vidéos Complètes (1 à 4 GiB)<br/>Accès WAN sécurisé FTP (port 21) ou HTTP Range"]
+    end
+
+    CLI -->|Appel SSH ponctuel (<1s)| ScreenSession
+    CLI -->|Appel SSH ponctuel (<1s)| Sentinels
+    DbsrtBin -->|Streaming ciblé 128 KiB head/tail + 5s d'images| NAS
+```
+
+### 6.1. Répartition des Rôles & Indépendance SSH
+
+| Entité | Composant | Localisation | Mode de Connexion & Résilience |
+| :--- | :--- | :--- | :--- |
+| **Commanditaire** | `task o2switch:eval:matching:*` | Poste Local | **SSH éphémère (< 1s)** : envoie un ordre bref (création de sentinelle, spawn daemon) puis se ferme immédiatement. |
+| **Orchestrateur** | `scripts/matching_bench_runner.py` | Cloud o2switch | **Session détachée `screen -dmS`** : tourne de manière 100% autonome H24. Le PC portable local peut être éteint. |
+| **Exécuteur** | `dbsrt recognize-media` | Cloud o2switch | **Binaire statique musl** : interroge `catalog.dbphash` en mémoire vive sans allocation tas. |
+| **Source Vidéo** | NAS Synology / Freebox | Réseau Local / WAN | **Lecture sélective à distance** : 128 KiB pour le moviehash + seeks de 5s pour les fenêtres $t=20\%, 50\%, 80\%$. |
+
+### 6.2. Cycle de Contrôle Asynchrone (Zero-Downtime)
+
+1. **Lancement Autonome (`task o2switch:eval:matching:start -- --daemon`)** :
+   - Ouvre une session `screen` détachée nommée `matching_bench` sur le serveur distant et rend la main immédiatement au terminal local.
+2. **Pause Douce Non Destructive (`task o2switch:eval:matching:pause`)** :
+   - Écrit la sentinelle `run/matching_bench_paused` via un appel SSH de 200 ms. L'orchestrateur distant suspend le dépilage de nouvelles vidéos et attend la terminaison propre des évaluations en cours.
+3. **Reprise Immédiate (`task o2switch:eval:matching:resume`)** :
+   - Supprime la sentinelle atomiquement (`rm run/matching_bench_paused`).
+4. **Redimensionnement Dynamique (`task o2switch:eval:matching:scale -- <workers>`)** :
+   - Modifie la valeur dans `run/matching_bench_workers` (1 à 8 workers), relue à chaque itération par l'orchestrateur distant.
+5. **Consultation de Télémétrie Instantanée (`task o2switch:eval:matching:status`)** :
+   - Lit le fichier JSON `run/matching_bench_status.json` contenant la progression en pourcentage, les collisions mono détectées et les collisions éliminées.
 
 ```mermaid
 flowchart LR
