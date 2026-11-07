@@ -16,6 +16,7 @@ pub mod phash;
 pub mod probe_cache;
 pub mod providers;
 pub mod srt;
+pub mod trajectory;
 pub mod video;
 
 pub use container::{
