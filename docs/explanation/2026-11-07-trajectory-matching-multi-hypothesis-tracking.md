@@ -64,3 +64,25 @@ flowchart TD
 ### Jalon 4 : Intégration CLI, Taskfile & Documentation Diátaxis
 - Exposition CLI sous `dbsrt match-trajectory`.
 - Câblage dans `Taskfile.yml` et documentation dans `docs/reference/` et `docs/explanation/`.
+
+---
+
+## 4. Sémantique des Frames Noires : Le Principe du « Silence Musical »
+
+Les frames noires, uniformes ou à très basse énergie visuelle (évaluées via `is_blank_phash`) constituent une difficulté majeure du matching visuel. Leur gestion repose sur une analogie fondamentale avec la musique : **les silences ont une valeur structurelle**.
+
+### A. Non-discrimination au démarrage ($t_0$) : L'impossibilité d'identifier une oeuvre par le silence
+
+- Une frame noire possède un pHash dégénéré (popcount faible ou invariant uniforme) qui matche des dizaines de milliers d'autres frames noires dans le catalogue (logos de distribution, transitions au noir, génériques de fin).
+- **Contrainte $t_0$** : Établir $t_0$ sur une frame noire provoque une explosion combinatoire immédiate (ex: 14 743 candidats sur `data/black_frames.mp4` ou `Westworld S04E01` à $t=0$).
+- **Règle retenue** : Interdiction d'ancrer le seed $t_0$ sur une frame noire. Le moteur avance jusqu'à la première frame porteuse d'énergie visuelle (`!is_blank_phash`) pour initier le pool d'hypothèses, puis compense l'offset temporel pour préserver le calage initial.
+
+### B. Progression temporelle : Les silences comme respirations et concordances structurelles
+
+- **Interdiction de requête globale** : En cours de trajectoire, interroger le catalogue global sur une frame noire n'a aucun sens algorithmique (cela réinjecterait du bruit issu de milliers de médias étrangers).
+- **Valeur contextuelle du silence** : En musique, un silence n'est pas une absence de musique mais une respiration délibérée. Dans une vidéo, un fondu au noir ou une coupe au noir fait partie intégrante du rythme d'un média :
+  - **Silence Concordant** : Si la cible est noire à $t_k$ et que la référence suivie par l'hypothèse prévoyait également une frame noire à $t_{\text{ref}} + k \cdot \Delta t$, cette concordance confirme le rythme temporel de l'oeuvre sans qu'il soit nécessaire d'interroger l'index.
+  - **Silence Discordant** : Si la cible est noire alors que la référence présentait une scène d'action lumineuse (ou inversement), la rupture rythmique constitue un véritable miss pénalisant l'hypothèse.
+- **État d'implémentation actuel vs cible** :
+  - *Actuel* : Les frames noires en propagation avancent sans requête index (`std::iter::empty()`), tolérées jusqu'à `max_consecutive_misses` sans polluer le scratchpad de faux candidats.
+  - *Cible expérimentale* : Vérification locale directe $\mathcal{O}(1)$ dans la tranche `sparse_entries` de l'hypothèse active pour qualifier le silence de *concordant* (maintien ou renforcement du score) ou *discordant* (miss avéré).
