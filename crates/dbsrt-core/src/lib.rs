@@ -12,6 +12,7 @@ pub mod lang_status;
 pub mod media_pairing;
 pub mod metadata;
 pub mod phash;
+pub mod probe_cache;
 pub mod providers;
 pub mod srt;
 pub mod video;
@@ -45,6 +46,11 @@ pub use media_pairing::{
 };
 pub use metadata::{MediaMetadata, MediaType};
 pub use phash::{hamming_distance, phash_32x32};
+pub use probe_cache::{
+    compute_local_file_moviehash, compute_moviehash_from_head_tail, fetch_http_range_moviehash,
+    ProbeCache, ProbeEntry, CHUNK_SIZE_BYTES, DEFAULT_CUT_DURATION_SECONDS,
+    DEFAULT_PROBE_CACHE_FILE, MOVIEHASH_HEX_LENGTH, PROBE_CACHE_SCHEMA_VERSION,
+};
 pub use providers::{
     cache::SubtitleCache, mock::MockSubtitleProvider, opensubtitles::OpenSubtitlesProvider,
     score_candidate, RemoteSubtitleCandidate, SubtitleProvider,

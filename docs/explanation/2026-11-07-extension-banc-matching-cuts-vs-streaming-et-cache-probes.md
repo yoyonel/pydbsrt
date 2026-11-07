@@ -172,12 +172,18 @@ flowchart LR
     Etape3 --> Etape4["4. Banc Continu Streaming WAN (Validation TTFS)"]
 ```
 
-1. **Jalon 1 — Composant Cache Probe** :
-   - Intégrer un cache de sondage dans `scripts/` (ou `dbsrt-core`) s'appuyant sur `compute_opensubtitles_hash`.
-   - Remplir le cache rétroactivement à partir de `data/snippets/metadata.json` et de la base existante (3 061 médias).
-2. **Jalon 2 — Génération des Nouveaux Cuts Élargis** :
-   - Générer les variantes multi-offsets ($t=20\%$, $t=50\%$, $t=80\%$) pour résoudre les cas d'ambiguïté documentés le 3 novembre.
-3. **Jalon 3 — Exécution de la Batterie Élargie** :
-   - Mesurer la baisse du taux de collisions ($< 5\%$) avec validation formelle des gains de précision.
-4. **Jalon 4 — Banc Streaming WAN** :
+1. **Jalon 1 (Achevé — 7 nov 2026) — Composant Core Cache Probe & Audit 100% Corpus** :
+   - Implémenté en Rust natif dans `crates/dbsrt-core/src/probe_cache.rs` avec conformité bit-à-bit OpenSubtitles `moviehash` 64-bit (`compute_local_file_moviehash`, `compute_moviehash_from_head_tail`, `fetch_http_range_moviehash`).
+   - Audit empirique exécuté sur l'intégralité des 2 758 fichiers de `data/snippets/` (`crates/dbsrt-core/tests/test_probe_cache.rs`) :
+     - 2 576 vidéos valides ($\ge 64\text{ KiB}$) auditées en 327 ms (débit : 8 423 fichiers/s).
+     - 182 stubs/fichiers corrompus ($< 64\text{ KiB}$) protégés par rejet immédiat sécurisé avec `Err` sans aucun crash ni panique.
+     - 2 574 entrées uniques stockées et coalescées en mémoire (2 doublons stricts coalescés : `BigBuckBunny(1)` et `Mustang`).
+     - Accélération mesurée : Cold miss 59,7 ms vs Warm hit 118,5 µs (503x speedup unitaire, 258x speedup sur batch réel). Lookup mémoire pur : 1,48M requêtes/s (0,67 µs/lookup).
+2. **Jalon 2 (Jalon B en cours) — Contrôle Dynamique d'Exécution & Allocation de Ressources** :
+   - Mise en pause (`task batch:pause`), reprise à chaud (`task batch:resume`) et redimensionnement dynamique des workers (`task batch:scale -- <workers>`) pour réguler le load CPU sans tuer les tâches en cours.
+   - Export exhaustif des métadonnées d'exécution et de contexte (`moviehash`, offsets, workers actifs, télémétrie LVE).
+3. **Jalon 3 — Génération Multi-Offsets & Matrice de Scoring** :
+   - Générer les variantes multi-offsets ($t=20\%$, $t=50\%$, $t=80\%$) calculées mathématiquement via `calculate_cut_offset` sans surcoût `ffprobe`.
+   - Exécuter la batterie de matching et mesurer la baisse des collisions ($< 5\%$).
+4. **Jalon 4 — Banc Continu Streaming WAN** :
    - Mesurer les latences d'accès HTTP Range et FTP sous supervision continue `o2switch:faultwatch`.
