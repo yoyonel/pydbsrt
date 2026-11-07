@@ -125,6 +125,7 @@ nav:
       - Catalogue des Recettes: how-to/index.md
       - Synchroniser des Sous-Titres dans VLC: how-to/synchroniser-sous-titres-vlc.md
       - Basculer les Cibles de Backend VLC: how-to/basculer-cibles-vlc-local-cloud-rpi4.md
+      - Exécuter un Matching E2E Réel & Relais Cloud: how-to/executer-matching-e2e-reel-et-relais-cloud.md
       - Ajouter et Indexer un Média (media:add): how-to/ajouter-et-indexer-un-media.md
       - Guide Façade Unifiée media:add: how-to/2026-10-25-guide-media-add-facade.md
       - Certifier un Couplage Média-Sous-Titres: how-to/certifier-un-couplage.md
@@ -145,6 +146,7 @@ nav:
       - Compiler, Déployer et Lancer le CLI dbsrt sur RPi4: how-to/compiler-deployer-cli-top-sur-rpi4.md
       - Exécuter les Recettes de Chaos Testing: how-to/executer-recettes-chaos-testing.md
       - Contribuer à la Documentation Diátaxis: how-to/contribuer-documentation-diataxis.md
+      - Valider le Portail Monitoring avec Playwright: how-to/valider-le-portail-monitoring-avec-playwright.md
   - 📖 Référence Technique:
       - Index des Spécifications: reference/index.md
       - CLI Standalone Rust (dbsrt): reference/cli.md
@@ -188,6 +190,11 @@ nav:
       - Audit Qualité & Complexité Fonctions Rust: explanation/2026-10-27-audit-qualite-et-complexite-fonctions-rust.md
       - Traçabilité & Versioning des Binaires Distribués: explanation/tracabilite-et-versioning-des-binaires-distribues.md
       - Enquête Kill Périodique dbsrt-server (o2switch): explanation/2026-10-31-enquete-kill-periodique-dbsrt-server-o2switch.md
+      - Étude R&D Temporal Pooling vs Ancres MIH: explanation/2026-11-02-etude-rd-temporal-pooling-et-ancres-mih.md
+      - Analyse Qualité E2E VLC (Corpus Réel 2 758 Vidéos): explanation/2026-11-03-analyse-exhaustive-evaluation-vlc-corpus-reel.md
+      - Étude Backoffices & Refonte Portail: explanation/2026-11-03-etude-comparative-backoffices-et-refonte-portail-monitoring.md
+      - Architecture des Flux & Relais WAN (Pipeline E2E): explanation/2026-11-03-architecture-flux-pipeline-matching-et-relais-wan.md
+      - Audit de Performance Pipeline (2 758 Cuts): explanation/2026-11-04-audit-global-performance-pipeline-matching.md
   - 📊 Benchmarks & Preuves:
       - Campagnes Empiriques:
           - Rapport Batch TVShow Synology: history/2026-10-25-rapport-batch-import-tvshow-synology.md

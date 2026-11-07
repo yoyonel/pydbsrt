@@ -19,10 +19,10 @@ pub const LOG_BUFFER_CAPACITY: usize = 300;
 pub const DEFAULT_EXTRACT_SAMPLE_SECONDS: f64 = 1.0;
 
 /// Default network timeout in milliseconds for remote relay requests (bounded under VLC watchdog 5s threshold).
-pub const DEFAULT_RELAY_TIMEOUT_MS: u64 = 3_500;
+pub const DEFAULT_RELAY_TIMEOUT_MS: u64 = 4_500;
 
 /// Default connect timeout in milliseconds for remote relay TCP socket.
-pub const DEFAULT_RELAY_CONNECT_TIMEOUT_MS: u64 = 2_000;
+pub const DEFAULT_RELAY_CONNECT_TIMEOUT_MS: u64 = 3_500;
 
 /// Default network timeout in milliseconds for remote relay download requests.
 pub const DEFAULT_DOWNLOAD_RELAY_TIMEOUT_MS: u64 = 3_500;
@@ -69,8 +69,17 @@ pub const DEFAULT_SUPERVISOR_STATUS_PATH: &str = "run/supervisor_status.json";
 /// Path to the catalog audit counts written by `scripts/o2switch_audit_remote.py`.
 pub const DEFAULT_AUDIT_STATUS_PATH: &str = "run/audit_status.json";
 
+/// Last complete audit, kept apart so a later stopped or test run does not hide it.
+pub const DEFAULT_AUDIT_LAST_FINISHED_PATH: &str = "run/audit_last_finished.json";
+
 /// Script name an audit process carries in `/proc/<pid>/cmdline`.
 pub const AUDIT_SCRIPT_NAME: &str = "o2switch_audit_remote.py";
+
+/// Audit script under the dbsrt home, run by the portal stop and resume actions.
+pub const AUDIT_SCRIPT_PATH: &str = "scripts/o2switch_audit_remote.py";
+
+/// Bound on a stop or resume call: the script signals or forks a detached audit, then returns.
+pub const AUDIT_ACTION_TIMEOUT_SECS: u64 = 15;
 
 /// Default directory holding volatile per-process active job progress files.
 pub const DEFAULT_JOBS_DIR: &str = "run/jobs";
@@ -143,3 +152,9 @@ pub const REFINEMENT_STEP_RADIUS: usize = 2;
 
 /// Default page size of the `history_records` and `discovered_media` lists of `/v1/monitoring/top`.
 pub const DEFAULT_TOP_PAGE_LIMIT: usize = 50;
+
+/// Interval in milliseconds between SSE telemetry and top event pushes to connected web clients.
+pub const DEFAULT_SSE_INTERVAL_MS: u64 = 2_000;
+
+/// Keep-alive ping interval in seconds for SSE connections to prevent proxy timeouts.
+pub const DEFAULT_SSE_KEEPALIVE_SECS: u64 = 15;

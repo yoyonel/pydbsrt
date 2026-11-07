@@ -117,3 +117,13 @@ def test_array_shaped_login_form_key_counts_as_a_failure_without_php_error(gatew
     locked = json.loads((tmp_path / "dbsrt" / "run" / "auth_rate_limit.json").read_text())
     assert set(locked) == {"127.0.0.1"}
     assert php_errors(tmp_path) == []
+
+
+@pytest.mark.parametrize("action", ["stop", "resume"])
+def test_a_read_only_key_cannot_drive_the_audit(gateway_url: str, tmp_path: Path, action: str) -> None:
+    # Shared dashboards get the read-only key: stopping or resuming the PROD audit needs the master key
+    (tmp_path / "dbsrt" / "etc" / "api_key_readonly.secret").write_text("the-read-only-key\n")
+    url = gateway_url.replace("/v1/status", f"/v1/monitoring/audit/{action}")
+    req = urllib.request.Request(url, data=b"", method="POST", headers={"X-API-Key": "the-read-only-key"})
+
+    assert status_of(req) == 403

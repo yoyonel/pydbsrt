@@ -292,6 +292,12 @@ async fn run_local_autosync(
         .unwrap_or("")
         .to_string();
 
+    let eff_search_distance = if payload.search_distance > 0 {
+        payload.search_distance
+    } else {
+        crate::constants::DEFAULT_SEARCH_DISTANCE
+    };
+
     let reader_guard = state.dbphash_reader.load();
     let (matched, target_fps, existing_phash) = identify_media_by_phash_multi_with_reader(
         &media_path,
@@ -299,7 +305,7 @@ async fn run_local_autosync(
         reader_guard.as_deref(),
         state.db_config.as_ref(),
         payload.nb_seconds,
-        payload.search_distance,
+        eff_search_distance,
     );
 
     let (is_recognized, matched_stem_opt, match_conf) = match matched {
@@ -355,7 +361,7 @@ async fn run_local_autosync(
             match_conf,
             target_fps,
             &existing_phash,
-            payload.search_distance,
+            eff_search_distance,
         )
     } else {
         (0, 0.0, 0.0)

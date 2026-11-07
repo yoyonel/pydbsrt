@@ -221,6 +221,10 @@ pub struct SubtitleCandidate {
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct SearchTimingStats {
     pub phash_match_ms: f64,
+    #[serde(default)]
+    pub ffmpeg_ms: f64,
+    #[serde(default)]
+    pub wan_rtt_ms: f64,
     pub pg_lookup_ms: f64,
     pub json_lookup_ms: f64,
     pub container_ms: f64,
@@ -238,6 +242,29 @@ pub struct SearchTimingStats {
     pub mfps_throughput: f64,
     pub matching_tier: String,
     pub confidence_percent: f64,
+}
+
+/// Telemetry record capturing the exact 4-stage timing breakdown of the latest search query.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct LatestSearchTelemetry {
+    pub timestamp: String,
+    pub media_path: String,
+    pub filename: String,
+    pub matched_media: Option<String>,
+    pub confidence_percent: f64,
+    pub ffmpeg_ms: f64,
+    pub wan_rtt_ms: f64,
+    pub mih_match_ms: f64,
+    pub srt_disk_ms: f64,
+    pub moviehash_ms: f64,
+    pub total_ms: f64,
+    pub ffmpeg_pct: f64,
+    pub wan_pct: f64,
+    pub mih_pct: f64,
+    pub srt_pct: f64,
+    pub is_relay: bool,
+    pub total_candidates: usize,
+    pub matching_tier: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -598,7 +625,8 @@ pub struct RecentBatchEvent {
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 #[serde(default)]
 pub struct AuditStatus {
-    /// `"none"`, `"running"`, `"stopped"`, `"finished"`, `"failed"` or `"corrupted"`.
+    /// `"none"`, `"running"`, `"stopped"` (requested), `"interrupted"` (killed), `"finished"`,
+    /// `"failed"` or `"corrupted"`.
     pub state: String,
     /// Run name chosen at start (letters, digits, `_`, `-`, `.`).
     pub run: String,
@@ -630,6 +658,17 @@ pub struct AuditStatus {
     pub episode_right: usize,
 }
 
+/// Outcome of a portal audit action (stop or resume): the audit script's own answer.
+///
+/// The script prints counts, pids and run names only, never a media name.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct AuditActionResponse {
+    /// True when the script accepted the action.
+    pub ok: bool,
+    /// Script output, or why the action was refused.
+    pub message: String,
+}
+
 /// Unified telemetry payload for the mobile-responsive web monitoring dashboard.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct MonitoringTelemetryResponse {
@@ -646,8 +685,32 @@ pub struct MonitoringTelemetryResponse {
     /// Catalog self-recognition audit progress.
     #[serde(default)]
     pub audit: AuditStatus,
+    /// Last complete audit, absent until a run finishes.
+    #[serde(default)]
+    pub audit_last_finished: Option<AuditStatus>,
     /// Server wall time at snapshot creation (ISO-8601).
     pub server_time_iso: String,
+}
+
+/// Unified composite payload pushed over Server-Sent Events (SSE) stream.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct MonitoringStreamState {
+    /// High-precision server timestamp in Unix epoch milliseconds when the event was emitted.
+    pub sent_at_ms: u64,
+    /// Live host and pipeline telemetry metrics.
+    pub telemetry: MonitoringTelemetryResponse,
+    /// Live `dbsrt top` snapshot without heavy lists (limit=0).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub top: Option<serde_json::Value>,
+    /// Latest end-to-end matching pipeline timing breakdown.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pipeline: Option<LatestSearchTelemetry>,
+    /// Live server microservice metrics for Studio.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub server_metrics: Option<MetricsResponse>,
+    /// Live daemon logs ring buffer.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub server_logs: Option<Vec<crate::state::ServerLogEntry>>,
 }
 
 /// Incoming heartbeat payload pushed by RPi4 supervisor agent.

@@ -132,6 +132,10 @@ UNIT
     ;;
 
   restart)
+    if [[ -f "target/release/dbsrt-server" ]]; then
+      cp -f "target/release/dbsrt-server" "${BIN_DIR}/dbsrt-agent"
+      chmod +x "${BIN_DIR}/dbsrt-agent"
+    fi
     echo "Restarting ${SERVICE_NAME}..."
     systemctl --user restart "${SERVICE_NAME}"
     systemctl --user status "${SERVICE_NAME}" --no-pager

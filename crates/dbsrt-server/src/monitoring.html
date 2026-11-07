@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="theme-color" content="#0d1117">
   <title>dbsrt Monitor ── o2switch & RPi4 Watchdog</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛰️</text></svg>">
   <style>
     :root {
       --bg: #0d1117;
@@ -282,6 +283,14 @@
       color: var(--text-muted);
       margin-bottom: 16px;
     }
+    .modal-card .modal-load {
+      font-size: 0.82rem;
+      color: var(--warning);
+      border-left: 3px solid var(--warning);
+      padding-left: 10px;
+      margin-bottom: 16px;
+    }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
     .input-field {
       width: 100%;
       background: #0d1117;
@@ -363,6 +372,107 @@
     .tile-val { font-size: 1.6rem; font-weight: 800; color: #fff; margin: 6px 0 2px; font-family: var(--font-mono); }
     .tile-sub { font-size: 0.8rem; color: var(--text-muted); }
     .audit-meta { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; font-size: 0.8rem; color: var(--text-muted); }
+    .audit-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 12px; font-size: 0.8rem; color: var(--text-muted); }
+    .audit-actions .btn:disabled { opacity: 0.4; cursor: default; }
+
+    /* ISO End-to-End Pipeline Diagram (ASCII Parity) */
+    .iso-diagram-grid {
+      display: grid;
+      grid-template-columns: 270px 40px 270px 40px 270px 60px 270px;
+      align-items: start;
+      min-width: 1210px;
+    }
+    .iso-box {
+      background: var(--card-bg);
+      border: 1.5px solid var(--card-border);
+      border-radius: 8px;
+      padding: 12px 14px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      line-height: 1.5;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      position: relative;
+      transition: all 0.3s ease;
+    }
+    .iso-box.box-ffmpeg {
+      border-color: rgba(251, 113, 133, 0.45);
+      background: linear-gradient(180deg, rgba(251, 113, 133, 0.06) 0%, var(--card-bg) 100%);
+    }
+    .iso-box.box-wan {
+      border-color: rgba(56, 189, 248, 0.45);
+      background: linear-gradient(180deg, rgba(56, 189, 248, 0.06) 0%, var(--card-bg) 100%);
+    }
+    .iso-box.box-mih {
+      border-color: rgba(52, 211, 153, 0.45);
+      background: linear-gradient(180deg, rgba(52, 211, 153, 0.06) 0%, var(--card-bg) 100%);
+    }
+    .iso-box.box-srt {
+      border-color: rgba(129, 140, 248, 0.45);
+      background: linear-gradient(180deg, rgba(129, 140, 248, 0.06) 0%, var(--card-bg) 100%);
+    }
+    .iso-box.active-pulse {
+      box-shadow: 0 0 24px rgba(56, 189, 248, 0.4);
+      border-color: var(--accent) !important;
+    }
+    .iso-box-title {
+      font-weight: 700;
+      font-size: 13px;
+      color: #fff;
+    }
+    .iso-box-subtitle {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    .iso-box-metric {
+      font-size: 14px;
+      font-weight: 700;
+      margin-top: 4px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .iso-metric-val {
+      font-weight: 800;
+      font-size: 15px;
+    }
+    .iso-metric-pct {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-family: var(--font-mono);
+    }
+    .iso-box-footer {
+      font-size: 10px;
+      color: var(--text-muted);
+      margin-top: 4px;
+      border-top: 1px solid #21262d;
+      padding-top: 4px;
+    }
+    .iso-arrow-straight {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 95px;
+    }
+    .iso-col-center {
+      display: flex;
+      flex-direction: column;
+    }
+    .iso-connector-branch {
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      height: 310px;
+    }
+    .iso-col-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
   </style>
 </head>
 <body>
@@ -498,19 +608,6 @@
     <div class="sys-tree" id="sources-specs" style="margin-top: 10px; display: none;"></div>
   </section>
 
-  <section class="tab-pane" id="tab-media">
-    <div class="tab-caption" id="media-caption">EXPLORATEUR DE MÉDIAS MULTI-SOURCES</div>
-    <div class="table-wrap">
-      <table class="top-table">
-        <thead>
-          <tr><th>MÉDIA / RELEASE NAS</th><th class="num hide-sm">TAILLE</th><th class="num hide-sm">DURÉE</th><th class="hide-sm">EMPREINTE PHASH</th><th>SOUS-TITRES</th><th class="hide-sm">ENCODAGE</th><th>STATUT</th></tr>
-        </thead>
-        <tbody id="media-tbody"></tbody>
-      </table>
-    </div>
-    <div class="pager" data-list="media"></div>
-  </section>
-
   <!-- Section: Recent Completed Batch Events -->
   <div class="section-title">
     <span>📜 Dernières Extractions Terminées</span>
@@ -523,6 +620,283 @@
 
   </section>
 
+  <section class="view" id="view-catalogue">
+    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:8px;">
+      <div class="tab-caption" id="media-caption" style="margin:0;">EXPLORATEUR DE MÉDIAS MULTI-SOURCES</div>
+      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+        <span id="media-selected-badge" class="badge badge-blue">0 coché(s)</span>
+        <button class="btn" id="btn-media-select-all" onclick="toggleSelectAllMedia()">Tout cocher [a]</button>
+        <button class="btn" id="btn-media-clear-sel" onclick="clearMediaSelection()">Décocher</button>
+        <button class="btn btn-accent" id="btn-media-launch-matching" onclick="launchBatchMatchingOnSelection()" disabled>⚡ Lancer le Matching sur la Sélection [b]</button>
+      </div>
+    </div>
+    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:10px;">
+      <input type="text" id="media-search-filter" placeholder="🔍 Filtrer par titre, release, codec..." oninput="onMediaFilterChange()" style="flex:1; min-width:200px; padding:6px 10px; background:var(--bg-elevated); border:1px solid var(--border-subtle); color:var(--text-primary); border-radius:4px; font-family:var(--font-mono); font-size:0.82rem;" />
+      <select id="media-filter-select" onchange="onMediaFilterChange()" style="padding:6px 10px; background:var(--bg-elevated); border:1px solid var(--border-subtle); color:var(--text-primary); border-radius:4px; font-size:0.82rem;">
+        <option value="all">Tous les médias [f]</option>
+        <option value="subs">Avec sous-titres</option>
+        <option value="nosubs">Sans sous-titres</option>
+        <option value="virgin">Non traités (Vierge)</option>
+      </select>
+      <select id="media-sort-select" onchange="onMediaFilterChange()" style="padding:6px 10px; background:var(--bg-elevated); border:1px solid var(--border-subtle); color:var(--text-primary); border-radius:4px; font-size:0.82rem;">
+        <option value="name">↕ Tri : Nom (A→Z) [o]</option>
+        <option value="size">↕ Tri : Taille (Grand→Petit)</option>
+        <option value="duration">↕ Tri : Durée (Long→Court)</option>
+        <option value="status">↕ Tri : Statut</option>
+        <option value="subs">↕ Tri : Sous-titres d'abord</option>
+      </select>
+    </div>
+    <div class="table-wrap">
+      <table class="top-table">
+        <thead>
+          <tr>
+            <th style="width:34px; text-align:center;"><input type="checkbox" id="chk-media-header" onchange="toggleSelectAllMedia(this.checked)" title="Tout cocher / décocher" /></th>
+            <th>MÉDIA / RELEASE NAS</th>
+            <th class="num hide-sm">TAILLE</th>
+            <th class="num hide-sm">DURÉE</th>
+            <th class="hide-sm">EMPREINTE PHASH</th>
+            <th>SOUS-TITRES</th>
+            <th class="hide-sm">ENCODAGE</th>
+            <th>STATUT</th>
+          </tr>
+        </thead>
+        <tbody id="media-tbody"></tbody>
+      </table>
+    </div>
+    <div class="pager" data-list="media"></div>
+
+    <!-- Batch Matching Execution Panel -->
+    <div id="batch-matching-panel" class="hero-card" style="display:none; margin-top:16px; padding:16px;">
+      <div class="hero-header">
+        <div class="hero-title"><span id="batch-match-status-badge" class="badge badge-blue">EN COURS</span> ⚡ Matching en Direct sur la Sélection</div>
+        <div class="hero-pct" id="batch-match-progress-pct">0%</div>
+      </div>
+      <div class="progress-bar-wrap"><div class="progress-bar-fill" id="batch-match-progress-bar"></div></div>
+      <div style="margin-top:8px; display:flex; justify-content:space-between; align-items:center; font-size:0.8rem; font-family:var(--font-mono); color:var(--text-secondary);">
+        <span id="batch-match-counts">0 / 0 médias traités</span>
+        <button class="btn" onclick="document.getElementById('batch-matching-panel').style.display='none'">Fermer</button>
+      </div>
+      <div class="table-wrap" style="margin-top:10px; max-height:280px; overflow-y:auto;">
+        <table class="top-table">
+          <thead>
+            <tr><th>#</th><th>MÉDIA SÉLECTIONNÉ</th><th>RÉSULTAT MATCH</th><th>CONFIANCE</th><th>DÉCALAGE</th><th>LATENCE</th></tr>
+          </thead>
+          <tbody id="batch-match-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ISO End-to-End Pipeline Diagram & Performance Audit -->
+    <div class="hero-card" id="performance-pipeline-card" style="margin-top:20px; padding:0; overflow:hidden;">
+      <div class="hero-header" style="padding:14px 18px; border-bottom:1px solid var(--card-border);">
+        <div class="hero-title">
+          <span id="pipeline-status-badge" class="badge badge-blue"><span class="dot"></span> Prêt</span>
+          <span>📊 Audit de Matching &amp; Diagramme de Performance (Pipeline Réel)</span>
+        </div>
+        <div id="pipeline-meta" style="font-family:var(--font-mono); font-size:0.8rem; color:var(--text-muted);">
+          Sélectionner un média ou snippet pour lancer l'audit de matching...
+        </div>
+      </div>
+
+      <!-- Interactive Snippet Selection & Live Trigger Toolbar -->
+      <div style="display:flex; flex-direction:column; gap:10px; padding:14px 18px; background:rgba(255,255,255,0.02); border-bottom:1px solid var(--card-border);">
+        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+          <span style="font-size:0.82rem; font-weight:600; color:var(--text-muted); white-space:nowrap;">🎬 Média / Snippet :</span>
+          <div style="flex:1; min-width:300px; position:relative;">
+            <input type="text" id="pipeline-snippet-input" list="snippets-datalist"
+                   value="data/snippets/Pulp.Fiction.1994.1080p.BrRip.x264.YIFY_mid15s.mp4"
+                   placeholder="Filtrer ou choisir un média (ex: Pulp, Bullet, Mad Max)..."
+                   style="width:100%; background:var(--terminal-bg); border:1px solid var(--card-border); color:var(--accent); padding:6px 12px; border-radius:6px; font-family:var(--font-mono); font-size:0.82rem; outline:none;" />
+            <datalist id="snippets-datalist">
+              <option value="data/snippets/Pulp.Fiction.1994.1080p.BrRip.x264.YIFY_mid15s.mp4">Pulp Fiction (1080p mid15s)</option>
+              <option value="data/snippets/Bullet_Train_(2022)[MULTi][1080p]_mid15s.mp4">Bullet Train (1080p mid15s)</option>
+              <option value="data/snippets/Mad_Max_Beyond_Thunderdome-SEG_FPL_MainFeature_t01_mid15s.mp4">Mad Max Beyond Thunderdome (mid15s)</option>
+              <option value="data/snippets/2-Blue_Forever_mid15s.mp4">2-Blue Forever (mid15s)</option>
+              <option value="data/snippets/1-Pegasus_Fantasy_mid15s.mp4">1-Pegasus Fantasy (mid15s)</option>
+              <option value="tests/data/big_buck_bunny_trailer_480p.mp4">Big Buck Bunny (480p)</option>
+            </datalist>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <select id="pipeline-lang-select" style="background:var(--terminal-bg); border:1px solid var(--card-border); color:#fff; padding:6px 10px; border-radius:6px; font-size:0.82rem; outline:none;">
+              <option value="fr">🇫🇷 FR</option>
+              <option value="en">🇬🇧 EN</option>
+            </select>
+            <button id="btn-pipeline-match" class="btn btn-accent" onclick="triggerPipelineEvaluation()" style="font-weight:700; padding:6px 18px; border-radius:6px; display:inline-flex; align-items:center; gap:6px;">
+              <span id="btn-pipeline-icon">⚡</span>
+              <span id="btn-pipeline-text">Lancer le Matching</span>
+            </button>
+          </div>
+        </div>
+        <!-- Quick Preset Badges -->
+        <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap; font-size:0.75rem;">
+          <span style="color:var(--text-muted); font-weight:600;">Presets rapides :</span>
+          <button class="btn" style="padding:2px 8px; font-size:0.75rem;" onclick="setPipelineSnippet('data/snippets/Pulp.Fiction.1994.1080p.BrRip.x264.YIFY_mid15s.mp4')">Pulp Fiction</button>
+          <button class="btn" style="padding:2px 8px; font-size:0.75rem;" onclick="setPipelineSnippet('data/snippets/Bullet_Train_(2022)[MULTi][1080p]_mid15s.mp4')">Bullet Train</button>
+          <button class="btn" style="padding:2px 8px; font-size:0.75rem;" onclick="setPipelineSnippet('data/snippets/Mad_Max_Beyond_Thunderdome-SEG_FPL_MainFeature_t01_mid15s.mp4')">Mad Max</button>
+          <button class="btn" style="padding:2px 8px; font-size:0.75rem;" onclick="setPipelineSnippet('data/snippets/2-Blue_Forever_mid15s.mp4')">2-Blue Forever</button>
+          <button class="btn" style="padding:2px 8px; font-size:0.75rem;" onclick="setPipelineSnippet('data/snippets/1-Pegasus_Fantasy_mid15s.mp4')">Pegasus Fantasy</button>
+          <button class="btn" style="padding:2px 8px; font-size:0.75rem;" onclick="setPipelineSnippet('tests/data/big_buck_bunny_trailer_480p.mp4')">Big Buck Bunny</button>
+        </div>
+      </div>
+
+      <div style="padding:20px; overflow-x:auto;">
+        <!-- Architectural Legend & Execution Tier Badges -->
+        <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px; flex-wrap:wrap; font-size:0.75rem; font-family:var(--font-mono);">
+          <span style="color:var(--text-muted); font-weight:600;">Légende des tiers :</span>
+          <span style="display:inline-flex; align-items:center; gap:5px; background:rgba(251,113,133,0.12); color:#fb7185; border:1px solid rgba(251,113,133,0.3); padding:2px 8px; border-radius:4px;">💻 Machine Client (CPU/FFmpeg)</span>
+          <span style="display:inline-flex; align-items:center; gap:5px; background:rgba(56,189,248,0.12); color:#38bdf8; border:1px solid rgba(56,189,248,0.3); padding:2px 8px; border-radius:4px;">🌐 Transit Réseau WAN (HTTPS :443)</span>
+          <span style="display:inline-flex; align-items:center; gap:5px; background:rgba(52,211,153,0.12); color:#34d399; border:1px solid rgba(52,211,153,0.3); padding:2px 8px; border-radius:4px;">☁️ Serveur Cloud o2switch (RAM MIH)</span>
+          <span style="display:inline-flex; align-items:center; gap:5px; background:rgba(192,132,252,0.12); color:#c084fc; border:1px solid rgba(192,132,252,0.3); padding:2px 8px; border-radius:4px;">📡 Serveur API SRT (REST :8765/:443)</span>
+        </div>
+
+        <!-- ISO 4-Column Branching Grid -->
+        <div class="iso-diagram-grid">
+          <!-- Column 1: Box 1 (Décodage FFmpeg Local) -->
+          <div class="iso-box box-ffmpeg" id="iso-card-ffmpeg">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:2px;">
+              <span class="badge" style="background:rgba(251,113,133,0.2); color:#fb7185; border:1px solid rgba(251,113,133,0.4); font-size:9px;">💻 LOCAL (Machine Client)</span>
+              <span style="font-size:9px; color:var(--text-muted);">CPU / swscale</span>
+            </div>
+            <div class="iso-box-title">1. Décodage FFmpeg Local</div>
+            <div class="iso-box-subtitle">(Extrait 10-15s, 1080p/4K)</div>
+            <div style="font-size:10px; color:var(--text-muted); font-family:var(--font-mono); margin:2px 0;"><code>CLI / C-ABI</code> · <span>IPC Pipes</span></div>
+            <div class="iso-box-metric">
+              <span>⏱️</span>
+              <span id="iso-val-ffmpeg" class="iso-metric-val" style="color:#f85149;">— ms</span>
+              <span id="iso-pct-ffmpeg" class="iso-metric-pct badge-amber">— %</span>
+            </div>
+            <div class="iso-box-footer" style="color:var(--warning);">⚠️ Goulot local (swscale/CPU)</div>
+            <div class="iso-box-footer" style="border-top:1px dashed rgba(255,255,255,0.1); padding-top:4px; margin-top:4px; font-size:10px;">📦 <b>Flux</b> : Vidéo source (~1-15 Mo) ➔ <b>24 pHash</b> (192 B)</div>
+          </div>
+
+          <!-- Connector 1 -> 2: Straight Arrow -->
+          <div class="iso-arrow-straight">
+            <svg width="40" height="20" viewBox="0 0 40 20">
+              <line x1="0" y1="10" x2="32" y2="10" stroke="var(--accent)" stroke-width="2"/>
+              <polygon points="32,6 38,10 32,14" fill="var(--accent)"/>
+            </svg>
+          </div>
+
+          <!-- Column 2: Box 2 (Transport Réseau WAN) -->
+          <div class="iso-box box-wan" id="iso-card-wan">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:2px;">
+              <span class="badge" style="background:rgba(56,189,248,0.2); color:#38bdf8; border:1px solid rgba(56,189,248,0.4); font-size:9px;">🌐 WAN (Transit Internet)</span>
+              <span style="font-size:9px; color:var(--text-muted);">TLS HTTPS :443</span>
+            </div>
+            <div class="iso-box-title">2. Transport Réseau (WAN)</div>
+            <div class="iso-box-subtitle">(Relais Cloud o2switch HTTPS)</div>
+            <div style="font-size:10px; color:var(--text-muted); font-family:var(--font-mono); margin:2px 0;"><code>POST /v1/recognize</code> · <span style="color:#38bdf8;">REST HTTPS</span></div>
+            <div class="iso-box-metric">
+              <span>⏱️</span>
+              <span id="iso-val-wan" class="iso-metric-val" style="color:var(--accent);">— ms</span>
+              <span id="iso-pct-wan" class="iso-metric-pct badge-blue">— %</span>
+            </div>
+            <div id="iso-sub-wan" class="iso-box-footer">📡 RTT WAN (0 ms si local direct)</div>
+            <div class="iso-box-footer" style="border-top:1px dashed rgba(255,255,255,0.1); padding-top:4px; margin-top:4px; font-size:10px;">📦 <b>Flux</b> : JSON POST <b>~1.1 Ko</b> ➔ RTT FAI/Fibre</div>
+          </div>
+
+          <!-- Connector 2 -> 3: Straight Arrow -->
+          <div class="iso-arrow-straight">
+            <svg width="40" height="20" viewBox="0 0 40 20">
+              <line x1="0" y1="10" x2="32" y2="10" stroke="var(--accent)" stroke-width="2"/>
+              <polygon points="32,6 38,10 32,14" fill="var(--accent)"/>
+            </svg>
+          </div>
+
+          <!-- Column 3: Box 3 (Matching MIH Serveur) -->
+          <div class="iso-col-center">
+            <div class="iso-box box-mih" id="iso-card-mih">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:2px;">
+                <span class="badge" style="background:rgba(52,211,153,0.2); color:#34d399; border:1px solid rgba(52,211,153,0.4); font-size:9px;">☁️ REMOTE (sapin.o2switch.net)</span>
+                <span style="font-size:9px; color:var(--text-muted);">RAM Multi-Index</span>
+              </div>
+              <div class="iso-box-title">3. Matching MIH Serveur</div>
+              <div class="iso-box-subtitle">(14.85M frames indexées)</div>
+              <div style="font-size:10px; color:var(--text-muted); font-family:var(--font-mono); margin:2px 0;"><code>POST /v1/recognize</code> · <span style="color:#34d399;">Axum REST Engine</span></div>
+              <div class="iso-box-metric">
+                <span>⏱️</span>
+                <span id="iso-val-mih" class="iso-metric-val" style="color:#7ee787;">— ms</span>
+                <span id="iso-pct-mih" class="iso-metric-pct badge-emerald">— %</span>
+              </div>
+              <div class="iso-box-footer">🚀 Lookup RAM Multi-Index Hash</div>
+              <div class="iso-box-footer" style="border-top:1px dashed rgba(255,255,255,0.1); padding-top:4px; margin-top:4px; font-size:10px;">📦 <b>Flux</b> : Index RAM ➔ Réponse JSON <b>~480 B</b></div>
+            </div>
+          </div>
+
+          <!-- Branching SVG Spine Connector (Box 3 -> Box 4, Box 5, Box 6) -->
+          <div class="iso-connector-branch">
+            <svg width="60" height="290" viewBox="0 0 60 290" style="overflow:visible;">
+              <line x1="0" y1="48" x2="52" y2="48" stroke="var(--accent)" stroke-width="2"/>
+              <polygon points="52,44 58,48 52,52" fill="var(--accent)"/>
+              <line x1="20" y1="48" x2="20" y2="242" stroke="var(--accent)" stroke-width="2"/>
+              <line x1="20" y1="145" x2="52" y2="145" stroke="var(--accent)" stroke-width="2"/>
+              <polygon points="52,141 58,145 52,149" fill="var(--accent)"/>
+              <line x1="20" y1="242" x2="52" y2="242" stroke="var(--accent)" stroke-width="2"/>
+              <polygon points="52,238 58,242 52,246" fill="var(--accent)"/>
+            </svg>
+          </div>
+
+          <!-- Column 4: 3 Vertically Stacked Subtitle Stages -->
+          <div class="iso-col-stack">
+            <!-- Box 4: Découverte SRT via API -->
+            <div class="iso-box box-srt" id="iso-card-srt-disc">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:2px;">
+                <span class="badge" style="background:rgba(192,132,252,0.2); color:#c084fc; border:1px solid rgba(192,132,252,0.4); font-size:9px;">📡 SERVEUR API SRT</span>
+                <span style="font-size:9px; color:var(--text-muted);">REST :8765 / :443</span>
+              </div>
+              <div class="iso-box-title">4. Découverte SRT (API REST)</div>
+              <div class="iso-box-subtitle">(Couplages certifiés &amp; Catalog)</div>
+              <div style="font-size:10px; color:var(--text-muted); font-family:var(--font-mono); margin:2px 0;"><code>GET /v1/subtitles/{hash}</code> · <span style="color:#c084fc;">HTTP JSON</span></div>
+              <div class="iso-box-metric">
+                <span>⏱️</span>
+                <span id="iso-val-srt-disc" class="iso-metric-val" style="color:#d2a8ff;">— ms</span>
+                <span id="iso-pct-srt-disc" class="iso-metric-pct badge-indigo">— %</span>
+              </div>
+              <div class="iso-box-footer">📁 Service API SRT (Zero-DB / PG17 / Disk)</div>
+              <div class="iso-box-footer" style="border-top:1px dashed rgba(255,255,255,0.1); padding-top:4px; margin-top:4px; font-size:10px;">📦 <b>Flux</b> : Requête REST ➔ Fichier SRT <b>~30-80 Ko</b></div>
+            </div>
+
+            <!-- Box 5: Calage SRT -->
+            <div class="iso-box box-srt" id="iso-card-srt-calage">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:2px;">
+                <span class="badge" style="background:rgba(192,132,252,0.2); color:#c084fc; border:1px solid rgba(192,132,252,0.4); font-size:9px;">💻 LOCAL (RAM Client)</span>
+                <span style="font-size:9px; color:var(--text-muted);">Timeline Cues</span>
+              </div>
+              <div class="iso-box-title">Calage SRT</div>
+              <div class="iso-box-subtitle">(I/O disques &amp; alignement)</div>
+              <div style="font-size:10px; color:var(--text-muted); font-family:var(--font-mono); margin:2px 0;"><code>POST /v1/retarget</code> · <span style="color:#c084fc;">Rust Parser</span></div>
+              <div class="iso-box-metric">
+                <span>⏱️</span>
+                <span id="iso-val-srt-calage" class="iso-metric-val" style="color:#d2a8ff;">— ms</span>
+                <span class="iso-metric-pct badge-indigo">— %</span>
+              </div>
+              <div class="iso-box-footer">⚡ Décodage cues en mémoire</div>
+              <div class="iso-box-footer" style="border-top:1px dashed rgba(255,255,255,0.1); padding-top:4px; margin-top:4px; font-size:10px;">📦 <b>Flux</b> : Alignement ~200-600 répliques</div>
+            </div>
+
+            <!-- Box 6: Consensus -->
+            <div class="iso-box box-srt" id="iso-card-srt-cons">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:2px;">
+                <span class="badge" style="background:rgba(192,132,252,0.2); color:#c084fc; border:1px solid rgba(192,132,252,0.4); font-size:9px;">💻 LOCAL (Sortie VLC)</span>
+                <span style="font-size:9px; color:var(--text-muted);">OSD Subtitles</span>
+              </div>
+              <div class="iso-box-title">Consensus Temporel</div>
+              <div class="iso-box-subtitle">(Calcul vshift_ms)</div>
+              <div style="font-size:10px; color:var(--text-muted); font-family:var(--font-mono); margin:2px 0;"><code>POST /v1/autosync</code> · <span style="color:#c084fc;">Lua Socket</span></div>
+              <div class="iso-box-metric">
+                <span>⏱️</span>
+                <span id="iso-val-srt-cons" class="iso-metric-val" style="color:#d2a8ff;">— ms</span>
+                <span class="iso-metric-pct badge-indigo">— %</span>
+              </div>
+              <div class="iso-box-footer">🎯 Précision sub-seconde</div>
+              <div class="iso-box-footer" style="border-top:1px dashed rgba(255,255,255,0.1); padding-top:4px; margin-top:4px; font-size:10px;">📦 <b>Flux</b> : SRT recalé (+vshift_ms) injecté</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <section class="view" id="view-audit">
     <div class="tab-caption">AUDIT D'AUTO-RECONNAISSANCE DU CATALOGUE (o2switch)</div>
     <section class="hero-card">
@@ -532,7 +906,14 @@
       </div>
       <div class="progress-bar-wrap"><div class="progress-bar-fill" id="audit-bar"></div></div>
       <div class="audit-meta"><span id="audit-files">Aucun audit publié (run/audit_status.json absent)</span><span id="audit-eta"></span></div>
+      <div class="audit-actions">
+        <button class="btn" id="audit-stop" style="display: none;">■ Arrêter</button>
+        <button class="btn btn-accent" id="audit-resume" style="display: none;">▶ Reprendre</button>
+        <span id="audit-action-msg"></span>
+      </div>
+      <div class="audit-meta" id="audit-order" style="display: none;"></div>
     </section>
+    <div class="audit-meta" id="audit-last" style="display: none; margin-bottom: 10px;"></div>
     <div class="kpi-grid">
       <div class="kpi-cell"><div class="kpi-val" id="audit-title">--</div><div class="kpi-lbl">Titre juste</div></div>
       <div class="kpi-cell"><div class="kpi-val" id="audit-episode">--</div><div class="kpi-lbl">Bon épisode</div></div>
@@ -578,6 +959,20 @@
   <section class="view" id="view-system">
     <div class="tab-caption">INFORMATIONS SYSTÈME &amp; MATÉRIEL (VUE FASTFETCH)</div>
     <div class="sys-tree" id="sys-tree"><span class="top-dim">En attente de télémétrie...</span></div>
+
+    <div class="tab-caption" style="margin-top: 24px;">GESTION DE L'INDEX DU CATALOGUE EN MÉMOIRE (RAM)</div>
+    <div class="hero-card" style="padding: 16px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+        <div id="catalog-ram-stats" style="font-family:var(--font-mono); font-size:0.85rem; color:var(--text-secondary);">
+          Index RAM : interrogation...
+        </div>
+        <div style="display:flex; gap:8px;">
+          <button class="btn" id="btn-catalog-status" onclick="fetchCatalogStatus()">📊 Statut Index</button>
+          <button class="btn btn-accent" id="btn-catalog-reload" onclick="triggerCatalogReload()">↻ Recharger Index en RAM</button>
+        </div>
+      </div>
+      <div id="catalog-reload-feedback" style="margin-top:8px; font-size:0.8rem; font-family:var(--font-mono);"></div>
+    </div>
   </section>
 
   <!-- Footer Host Metrics -->
@@ -585,6 +980,7 @@
     <span id="sys-host">Hôte : --</span>
     <span id="sys-ram">RAM : -- / -- GiB</span>
     <span id="sys-uptime">Uptime : --</span>
+    <span id="sys-sync" title="Latence : aller-retour HTTP de la dernière requête de télémétrie (réseau + passerelle + démon). Sync : âge des données affichées (relues toutes les 3 s).">Latence -- ms · Sync --</span>
   </footer>
 
   <!-- Modal Authentification API Key -->
@@ -599,11 +995,26 @@
     </div>
   </div>
 
+  <!-- In-page confirmation for the audit actions (replaces the browser's confirm()) -->
+  <div id="confirm-modal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+    <div class="modal-card">
+      <h2 id="confirm-title"></h2>
+      <p id="confirm-text"></p>
+      <div class="modal-load" id="confirm-load"></div>
+      <div class="modal-actions">
+        <button class="btn" id="confirm-cancel">Annuler</button>
+        <button class="btn btn-accent" id="confirm-ok"></button>
+      </div>
+    </div>
+  </div>
+
   <script>
     // Configuration & State
-    const REFRESH_INTERVAL_MS = 3000;
+    const REFRESH_INTERVAL_MS = 5000;
     let isPaused = false;
     let apiKey = localStorage.getItem('dbsrt_api_key') || '';
+    let sseSource = null;
+    let sseActive = false;
 
     // Handle initial URL token query param (?token=... or ?key=...)
     const urlParams = new URLSearchParams(window.location.search);
@@ -612,7 +1023,14 @@
       apiKey = tokenParam;
       localStorage.setItem('dbsrt_api_key', apiKey);
       // Clean query params from URL address bar without reload
-      window.history.replaceState({}, document.title, window.location.pathname);
+      window.history.replaceState({}, document.title, window.location.pathname + window.location.hash);
+    }
+
+    function apiEndpoint(path) {
+      const p = window.location.pathname;
+      const idx = p.indexOf('/dbsrt');
+      const base = idx !== -1 ? p.substring(0, idx + 6) + '/' : '/';
+      return base + path.replace(/^\/+/, '');
     }
 
     function getAuthHeaders() {
@@ -623,6 +1041,146 @@
       }
       return headers;
     }
+
+    function mergeTopLists(dest, src) {
+      if (!src) return;
+      if ((!dest.discovered_media || dest.discovered_media.length === 0) && (src.discovered_media && src.discovered_media.length > 0)) {
+        dest.discovered_media = src.discovered_media;
+      }
+      if ((!dest.history_records || dest.history_records.length === 0) && (src.history_records && src.history_records.length > 0)) {
+        dest.history_records = src.history_records;
+      }
+      if ((!dest.discovered_media_per_source || Object.keys(dest.discovered_media_per_source).length === 0) && (src.discovered_media_per_source && Object.keys(src.discovered_media_per_source).length > 0)) {
+        dest.discovered_media_per_source = src.discovered_media_per_source;
+      }
+    }
+
+    // Cristian's algorithm for clock offset synchronization and jitter tracking
+    class ClockSync {
+      constructor(maxSamples = 10) {
+        this.maxSamples = maxSamples;
+        this.samples = [];
+        this.effectiveOffset = 0;
+        this.lastTransitMs = null;
+        this.lastJitterMs = 0;
+        this.lastRttMs = null;
+        this.calibrated = false;
+      }
+
+      calibrate(t1, serverTimeMs, t4, ttfbMs = null) {
+        if (!serverTimeMs || isNaN(serverTimeMs)) return;
+        const rtt = ttfbMs != null && ttfbMs > 0 ? ttfbMs : Math.max(1, t4 - t1);
+        const offset = serverTimeMs - (t1 + rtt / 2);
+        this.samples.push({ rtt, offset });
+        if (this.samples.length > this.maxSamples) {
+          this.samples.shift();
+        }
+        const sorted = this.samples.map(s => s.offset).sort((a, b) => a - b);
+        this.effectiveOffset = sorted[Math.floor(sorted.length / 2)];
+        this.lastRttMs = rtt;
+        this.calibrated = true;
+      }
+
+      processSseTick(sentAtMs) {
+        if (!sentAtMs || isNaN(sentAtMs)) return null;
+        const now = Date.now();
+        const transit = Math.max(0, (now - this.effectiveOffset) - sentAtMs);
+        if (this.lastTransitMs != null) {
+          this.lastJitterMs = Math.abs(transit - this.lastTransitMs);
+        }
+        this.lastTransitMs = transit;
+        this.lastRttMs = this.calibrated ? transit * 2 : transit;
+        return { transit, jitter: this.lastJitterMs, rtt: this.lastRttMs };
+      }
+    }
+
+    const clockSync = new ClockSync(10);
+
+    // Performance Resource Timing API observer: captures exact network TTFB on REST calls
+    if (typeof PerformanceObserver !== 'undefined') {
+      try {
+        const perfObserver = new PerformanceObserver((list) => {
+          for (const entry of list.getEntries()) {
+            if (entry.name && (entry.name.includes('/v1/monitoring/telemetry') || entry.name.includes('/v1/monitoring/top'))) {
+              if (entry.responseStart > 0 && entry.requestStart > 0) {
+                const ttfb = entry.responseStart - entry.requestStart;
+                if (ttfb > 0) {
+                  clockSync.lastRttMs = ttfb;
+                }
+              }
+            }
+          }
+        });
+        perfObserver.observe({ type: 'resource', buffered: true });
+      } catch (err) {
+        // Fallback silently if PerformanceObserver is not supported
+      }
+    }
+
+    function initSse() {
+      if (!window.EventSource) return;
+      if (sseSource) {
+        sseSource.close();
+        sseSource = null;
+      }
+      const query = apiKey ? '?token=' + encodeURIComponent(apiKey) : '';
+      const url = apiEndpoint('v1/monitoring/events' + query);
+
+      sseSource = new EventSource(url);
+
+      sseSource.addEventListener('state', (e) => {
+        if (isPaused || document.hidden) return;
+        try {
+          const payload = JSON.parse(e.data);
+          sseActive = true;
+          if (payload.sent_at_ms) {
+            const metrics = clockSync.processSseTick(payload.sent_at_ms);
+            if (metrics) {
+              lastLatencyMs = metrics.rtt;
+            }
+          }
+          if (payload.telemetry) {
+            lastTelemetryAt = Date.now();
+            renderTelemetry(payload.telemetry);
+          }
+          if (payload.top) {
+            const t = payload.top;
+            if (lastTop) {
+              mergeTopLists(t, lastTop);
+            }
+            lastTop = t;
+            renderTop(t);
+          }
+          if (payload.pipeline) {
+            renderPipelineTelemetry(payload.pipeline);
+          }
+          renderFreshness();
+        } catch (err) {
+          console.warn('Erreur parsing SSE state:', err);
+        }
+      });
+
+      sseSource.addEventListener('open', () => {
+        sseActive = true;
+      });
+
+      sseSource.addEventListener('error', () => {
+        sseActive = false;
+      });
+    }
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        if (sseSource) {
+          sseSource.close();
+          sseSource = null;
+          sseActive = false;
+        }
+      } else if (!isPaused) {
+        refreshAll();
+        initSse();
+      }
+    });
 
     function showAuthModal() {
       document.getElementById('auth-modal').style.display = 'flex';
@@ -639,6 +1197,7 @@
         apiKey = val;
         localStorage.setItem('dbsrt_api_key', apiKey);
         hideAuthModal();
+        initSse();
         refreshAll();
       }
     });
@@ -651,6 +1210,14 @@
       isPaused = !isPaused;
       document.getElementById('btn-pause').textContent = isPaused ? '▶' : '⏸';
       document.getElementById('btn-pause').classList.toggle('btn-accent', isPaused);
+      if (isPaused && sseSource) {
+        sseSource.close();
+        sseSource = null;
+        sseActive = false;
+      } else if (!isPaused) {
+        initSse();
+        refreshAll();
+      }
     });
 
     function escapeHtml(str) {
@@ -675,14 +1242,22 @@
 
     async function fetchTelemetry() {
       try {
-        const resp = await fetch('v1/monitoring/telemetry', { headers: getAuthHeaders() });
+        const t0 = performance.now();
+        const t1 = Date.now();
+        const resp = await fetch(apiEndpoint('v1/monitoring/telemetry'), { headers: getAuthHeaders() });
+        const t4 = Date.now();
         if (resp.status === 401 || resp.status === 403) {
           showAuthModal();
           return;
         }
         if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const serverTime = parseInt(resp.headers.get('x-server-time-ms'), 10);
+        clockSync.calibrate(t1, serverTime, t4);
+        lastLatencyMs = clockSync.lastRttMs || (performance.now() - t0);
         const data = await resp.json();
+        lastTelemetryAt = Date.now();
         renderTelemetry(data);
+        renderFreshness();
       } catch (err) {
         console.warn('Erreur télémétrie:', err);
         document.getElementById('health-badge').className = 'badge badge-offline';
@@ -746,7 +1321,7 @@
         logsBox.textContent = 'Aucun log superviseur disponible.';
       }
 
-      renderAudit(data.audit || { state: 'none' });
+      renderAudit(data.audit || { state: 'none' }, data.audit_last_finished);
       lastTelemetry = data;
       renderTiles();
 
@@ -777,11 +1352,29 @@
     // ── Audit view: counts only, the status file never holds media names ──
     const AUDIT_STATES = {
       running: ['badge-online', 'EN COURS'], finished: ['badge-blue', 'TERMINÉ'],
-      stopped: ['badge-offline', 'ARRÊTÉ'], failed: ['badge-offline', 'ÉCHEC'],
+      stopped: ['badge-warn', 'ARRÊTÉ'], interrupted: ['badge-offline', 'INTERROMPU'], failed: ['badge-offline', 'ÉCHEC'],
       corrupted: ['badge-offline', 'ILLISIBLE'], none: ['badge-blue', 'AUCUN'],
     };
+    const AUDIT_RESUMABLE = ['stopped', 'interrupted', 'failed'];
     const pctOf = (a, b) => b > 0 ? `${fmt(a / b * 100, 1)}%` : '--';
     let lastTelemetry = null;
+    let lastTelemetryAt = null;
+    let lastLatencyMs = null;
+    let lastJitterMs = 0;
+    const ageText = (secs) => secs < 60 ? `${Math.round(secs)} s` : formatDuration(secs);
+
+    // Footer line: round trip of the last telemetry request and age of the data on screen.
+    // Muted while fresh; orange past 2 polls, red past 30 s (network down or paused).
+    function renderFreshness() {
+      const el = document.getElementById('sys-sync');
+      if (lastTelemetryAt == null) return;
+      const age = (Date.now() - lastTelemetryAt) / 1000;
+      el.style.color = age <= 2 * REFRESH_INTERVAL_MS / 1000 ? '' : age <= 30 ? 'var(--warning)' : 'var(--danger)';
+      const latency = lastLatencyMs == null ? '--' : Math.round(lastLatencyMs);
+      const jitterStr = clockSync && clockSync.lastJitterMs > 0 ? ` (±${Math.round(clockSync.lastJitterMs)} ms)` : '';
+      el.textContent = `Latence ${latency} ms${jitterStr} · Sync il y a ${ageText(age)}${isPaused ? ' (pause)' : ''}`;
+    }
+    setInterval(renderFreshness, 1000);
 
     // Rate from the files this process did: resumed files were done by an earlier run
     function auditEtaSecs(a) {
@@ -791,7 +1384,12 @@
       return Math.max(a.eligible - a.files_done, 0) * secs / done;
     }
 
-    function renderAudit(a) {
+    // Matches PROGRESS_EVERY in scripts/o2switch_audit_remote.py: counts move by steps of this size
+    const AUDIT_PROGRESS_EVERY = 50;
+    // shortcut: compares the o2switch clock with the browser's, a skewed browser clock shifts this age
+    const heartbeatAgeSecs = (a) => Math.max((Date.now() - Date.parse(a.heartbeat)) / 1000, 0);
+
+    function renderAudit(a, lastFinished) {
       const [cls, label] = AUDIT_STATES[a.state] || ['badge-offline', String(a.state).toUpperCase()];
       const stateBadge = document.getElementById('audit-state');
       stateBadge.className = 'badge ' + cls;
@@ -803,15 +1401,16 @@
       document.getElementById('audit-bar').style.width = known ? pct : '0%';
       document.getElementById('audit-files').textContent = !known
         ? (a.state === 'none' ? 'Aucun audit publié (run/audit_status.json absent)' : 'Fichier de statut illisible')
-        : `${a.files_done} / ${a.eligible} fichiers${a.resumed_from ? ` (reprise à ${a.resumed_from})` : ''} · battement ${a.heartbeat}`;
+        : `${a.files_done} / ${a.eligible} fichiers${a.resumed_from ? ` (reprise à ${a.resumed_from})` : ''} · battement ${a.heartbeat}`
+          + (a.state === 'running' ? ` (il y a ${ageText(heartbeatAgeSecs(a))}, publié tous les ${AUDIT_PROGRESS_EVERY} fichiers)` : '');
       const eta = auditEtaSecs(a);
       document.getElementById('audit-eta').textContent = eta == null ? '' : `fin estimée dans ${formatDuration(eta)}`;
       document.getElementById('audit-title').textContent = known ? pctOf(a.title_right, a.answered) : '--';
       document.getElementById('audit-episode').textContent = known ? pctOf(a.episode_right, a.episodes) : '--';
       document.getElementById('audit-answered').textContent = known ? a.answered : '--';
       document.getElementById('audit-noreply').textContent = known ? a.no_reply : '--';
-      // Header and nav only flag an audit that needs a look: running, or ended badly
-      const flag = a.state === 'running' || a.state === 'stopped' || a.state === 'failed';
+      // Header and nav only flag an audit that needs a look: running, or ended badly (a requested stop is not)
+      const flag = a.state === 'running' || a.state === 'interrupted' || a.state === 'failed';
       const head = document.getElementById('audit-badge');
       head.style.display = flag ? '' : 'none';
       head.className = 'badge ' + cls;
@@ -819,7 +1418,110 @@
       const nav = document.getElementById('nav-audit');
       nav.style.display = flag ? '' : 'none';
       nav.className = 'badge ' + cls;
+      document.getElementById('audit-stop').style.display = a.state === 'running' ? '' : 'none';
+      document.getElementById('audit-resume').style.display = AUDIT_RESUMABLE.includes(a.state) ? '' : 'none';
+      renderLastFinished(a, lastFinished);
     }
+
+    // The last complete run stays visible when a later run is stopped or is a test
+    function renderLastFinished(a, lf) {
+      const el = document.getElementById('audit-last');
+      const show = lf && !(a.state === 'finished' && a.run === lf.run);
+      el.style.display = show ? '' : 'none';
+      if (show) {
+        el.textContent = `Dernier audit complet : ${lf.run} · ${lf.files_done} / ${lf.eligible} fichiers · fini ${lf.heartbeat}`
+          + ` · titre ${pctOf(lf.title_right, lf.answered)} · épisode ${pctOf(lf.episode_right, lf.episodes)} · sans réponse ${lf.no_reply}`;
+      }
+    }
+
+    // Resolves true on confirm, false on cancel, Escape or a click outside the card
+    function askConfirm({ title, text, load, ok }) {
+      const modal = document.getElementById('confirm-modal');
+      document.getElementById('confirm-title').textContent = title;
+      document.getElementById('confirm-text').textContent = text;
+      const loadEl = document.getElementById('confirm-load');
+      loadEl.textContent = load || '';
+      loadEl.style.display = load ? '' : 'none';
+      const okBtn = document.getElementById('confirm-ok');
+      const cancelBtn = document.getElementById('confirm-cancel');
+      okBtn.textContent = ok;
+      modal.style.display = 'flex';
+      cancelBtn.focus();
+      return new Promise((resolve) => {
+        const close = (answer) => {
+          modal.style.display = 'none';
+          okBtn.onclick = cancelBtn.onclick = modal.onclick = modal.onkeydown = null;
+          resolve(answer);
+        };
+        okBtn.onclick = () => close(true);
+        cancelBtn.onclick = () => close(false);
+        modal.onclick = (e) => { if (e.target === modal) close(false); };
+        modal.onkeydown = (e) => { if (e.key === 'Escape') close(false); };
+      });
+    }
+
+    // Polls fast until the published state matches the order; null when it never does within limitMs
+    async function waitAuditState(want, limitMs) {
+      const t0 = performance.now();
+      while (performance.now() - t0 < limitMs) {
+        await fetchTelemetry();
+        if (want(((lastTelemetry || {}).audit || {}).state)) return performance.now() - t0;
+        await new Promise((r) => setTimeout(r, 500));
+      }
+      return null;
+    }
+
+    const AUDIT_ORDERS = {
+      stop: { label: 'Arrêter', pending: 'Arrêt demandé…', want: (st) => st !== 'running' },
+      resume: { label: 'Reprendre', pending: 'Reprise demandée…', want: (st) => st === 'running' },
+    };
+    const AUDIT_CONFIRM_LIMIT_MS = 15000;
+    const secsText = (ms) => `${(ms / 1000).toFixed(1).replace('.', ',')} s`;
+
+    // Stop and resume go through the audit script on o2switch; a read-only key gets 403.
+    // Buttons stay disabled until the published state matches the order, so clicks cannot pile up.
+    async function auditAction(action) {
+      const ask = action === 'stop'
+        ? { title: "■ Arrêter l'audit", text: "Le run s'arrête proprement ; « Reprendre » le relance là où il s'est arrêté.", ok: 'Arrêter' }
+        : { title: "▶ Reprendre l'audit", text: 'Le run repart du dernier fichier traité.',
+            load: 'Charge PROD : environ 300 requêtes de reconnaissance par minute vers le démon, jusqu\'à la fin ou un arrêt.',
+            ok: 'Reprendre' };
+      if (!(await askConfirm(ask))) return;
+      const order = AUDIT_ORDERS[action];
+      const msg = document.getElementById('audit-action-msg');
+      const orderEl = document.getElementById('audit-order');
+      const buttons = [document.getElementById('audit-stop'), document.getElementById('audit-resume')];
+      buttons.forEach((b) => { b.disabled = true; });
+      msg.textContent = order.pending;
+      const sentAt = new Date();
+      const t0 = performance.now();
+      let line = `Dernier ordre : ${order.label} · envoyé ${sentAt.toLocaleTimeString('fr-FR')}`;
+      try {
+        const resp = await fetch(apiEndpoint(`v1/monitoring/audit/${action}`), { method: 'POST', headers: getAuthHeaders() });
+        const body = await resp.json().catch(() => ({}));
+        const replyMs = performance.now() - t0;
+        if (!resp.ok) {
+          msg.textContent = resp.status === 403 ? 'Refusé : clé en lecture seule.' : (body.message || `HTTP ${resp.status}`);
+          line += ` · refusé (HTTP ${resp.status}) en ${secsText(replyMs)}`;
+        } else {
+          msg.textContent = `${order.pending} accepté, attente de l'état publié…`;
+          const seenMs = await waitAuditState(order.want, AUDIT_CONFIRM_LIMIT_MS);
+          msg.textContent = '';
+          line += ` · accepté en ${secsText(replyMs)} · `
+            + (seenMs == null ? `état NON confirmé après ${secsText(AUDIT_CONFIRM_LIMIT_MS)}` : `état affiché ${secsText(replyMs + seenMs)} après le clic`);
+        }
+      } catch (e) {
+        msg.textContent = 'Erreur réseau : ' + e.message;
+        line += ' · erreur réseau';
+      } finally {
+        orderEl.textContent = line;
+        orderEl.style.display = '';
+        buttons.forEach((b) => { b.disabled = false; });
+        fetchTelemetry();
+      }
+    }
+    document.getElementById('audit-stop').addEventListener('click', () => auditAction('stop'));
+    document.getElementById('audit-resume').addEventListener('click', () => auditAction('resume'));
 
     // ── Overview tiles: one per view, from the last telemetry and top snapshots ──
     function renderTiles() {
@@ -878,22 +1580,33 @@
     let activeView = 'overview';
     const shownList = () => activeView === 'ingestion' ? activeTab : null;
 
-    function topQuery() {
+    function topQuery(forceList = false) {
       const list = shownList();
-      if (list in pageIndex) return `limit=${PAGE_SIZE}&offset=${pageIndex[list] * PAGE_SIZE}`;
-      // The remote source row reads the NAS endpoint from one media path
+      if (forceList && list in pageIndex) return `limit=${PAGE_SIZE}&offset=${pageIndex[list] * PAGE_SIZE}`;
+      // In background polling/SSE, don't re-fetch 50 heavy items
       return list === 'sources' ? 'limit=1' : 'limit=0';
     }
 
-    async function fetchTop() {
+    async function fetchTop(forceList = false) {
       const seq = ++topSeq;
       try {
-        const resp = await fetch('v1/monitoring/top?' + topQuery(), { headers: getAuthHeaders() });
+        const t0 = performance.now();
+        const t1 = Date.now();
+        const resp = await fetch(apiEndpoint('v1/monitoring/top?' + topQuery(forceList)), { headers: getAuthHeaders() });
+        const t4 = Date.now();
+        const serverTime = parseInt(resp.headers.get('x-server-time-ms'), 10);
+        clockSync.calibrate(t1, serverTime, t4);
+        lastLatencyMs = clockSync.lastRttMs || (performance.now() - t0);
+        renderFreshness();
         if (resp.status === 401 || resp.status === 403) return;
         if (!resp.ok) throw new Error('HTTP ' + resp.status);
         const t = await resp.json();
         // A slower answer for a previous tab or page must not overwrite the current one
         if (seq !== topSeq) return;
+        // Merge preserved list if limit=0 was fetched
+        if (!forceList && lastTop) {
+          mergeTopLists(t, lastTop);
+        }
         lastTop = t;
         renderTop(t);
       } catch (err) {
@@ -904,7 +1617,7 @@
 
     function refreshAll() {
       fetchTelemetry();
-      fetchTop();
+      fetchTop(false);
     }
 
     function renderTopBanner(t) {
@@ -1043,6 +1756,50 @@
         `<div class="sys-group">${escapeHtml(title)}</div>` + rows.map(([k, v], i) =>
           `<div class="sys-row"><span class="top-dim">${i === rows.length - 1 ? '└─' : '├─'} </span>${escapeHtml(k.padEnd(17, ' '))}: ${escapeHtml(v == null ? 'N/A' : String(v))}</div>`
         ).join('')).join('');
+
+      if (activeView === 'system') {
+        fetchCatalogStatus();
+      }
+    }
+
+    let lastCatalogStatusAt = 0;
+    const CATALOG_STATUS_CACHE_MS = 30000;
+
+    async function fetchCatalogStatus(force = false) {
+      const el = document.getElementById('catalog-ram-stats');
+      if (!el) return;
+      const now = Date.now();
+      if (!force && now - lastCatalogStatusAt < CATALOG_STATUS_CACHE_MS) return;
+      try {
+        const res = await fetch(apiEndpoint('v1/catalog/status'), { headers: getAuthHeaders() });
+        if (!res.ok) return;
+        const d = await res.json();
+        lastCatalogStatusAt = Date.now();
+        el.innerHTML = `Médias indexés : <b>${(d.total_medias||0).toLocaleString()}</b> (${fmt((d.total_frames||0)/1000000, 1)}M frames) │ Index Base : <b>${(d.base_medias||0).toLocaleString()}</b> (${(d.base_cuts||0).toLocaleString()} cuts) │ Delta RAM : <b>${d.delta_medias}</b> │ Couplages certifiés : <b>${d.certified_couplings}</b>`;
+      } catch (e) {
+        el.textContent = 'Index RAM : statut indisponible';
+      }
+    }
+
+    async function triggerCatalogReload() {
+      const fb = document.getElementById('catalog-reload-feedback');
+      const btn = document.getElementById('btn-catalog-reload');
+      if (fb) fb.innerHTML = '<span class="top-key">Rechargement atomique de l\'index en RAM en cours...</span>';
+      if (btn) btn.disabled = true;
+      try {
+        const res = await fetch(apiEndpoint('v1/catalog/reload'), { method: 'POST', headers: getAuthHeaders() });
+        const d = await res.json();
+        if (d.success) {
+          if (fb) fb.innerHTML = `<span class="eng-gpu">✓ Index rechargé en ${d.elapsed_ms.toFixed(1)} ms (${d.indexed_medias} médias, ${d.cuts_entries.toLocaleString()} cuts, ${d.certified_couplings} couplages certifiés).</span>`;
+          fetchCatalogStatus();
+        } else {
+          if (fb) fb.innerHTML = `<span class="st-info">✗ Échec du rechargement : ${escapeHtml(d.error || 'Erreur inconnue')}</span>`;
+        }
+      } catch (e) {
+        if (fb) fb.innerHTML = `<span class="st-info">✗ Erreur réseau : ${escapeHtml(String(e))}</span>`;
+      } finally {
+        if (btn) btn.disabled = false;
+      }
     }
 
     // Rows clicked open their inspection sheet (TUI Enter/i); kept open across refreshes
@@ -1093,6 +1850,7 @@
       document.getElementById('completed-caption').textContent = `DERNIERS TRAITEMENTS COMPLÉTÉS & CERTIFIÉS [${total} RÉFÉRENCÉS] - du plus récent au plus ancien, cliquer une ligne pour sa fiche`;
       renderPager('completed', total);
       const tbody = document.getElementById('completed-tbody');
+      tbody.style.opacity = '1';
       if (records.length === 0) {
         tbody.innerHTML = '<tr><td colspan="7" class="top-dim" style="text-align: center;">Aucun enregistrement dans data/reports/batch_tvshow_nightly.jsonl</td></tr>';
         return;
@@ -1145,14 +1903,346 @@
       return src.name.replace(/^Synology NAS \(/, '').replace(/\)$/, '').trim() || src.id;
     }
 
+    const selectedMediaPaths = new Set();
+
+    function updateMediaSelectionUI() {
+      const cnt = selectedMediaPaths.size;
+      const badge = document.getElementById('media-selected-badge');
+      if (badge) badge.textContent = `${cnt} coché(s)`;
+      const btn = document.getElementById('btn-media-launch-matching');
+      if (btn) {
+        btn.disabled = cnt === 0;
+        btn.textContent = `⚡ Lancer le Matching sur la Sélection (${cnt})`;
+      }
+      const hdrChk = document.getElementById('chk-media-header');
+      if (hdrChk && lastTop) {
+        const items = lastTop.discovered_media || [];
+        hdrChk.checked = items.length > 0 && items.every(m => selectedMediaPaths.has(m.path));
+      }
+    }
+
+    function toggleMediaSelection(path) {
+      if (selectedMediaPaths.has(path)) selectedMediaPaths.delete(path);
+      else selectedMediaPaths.add(path);
+      updateMediaSelectionUI();
+    }
+
+    function toggleSelectAllMedia(forceVal) {
+      if (!lastTop) return;
+      const items = lastTop.discovered_media || [];
+      const shouldSelect = typeof forceVal === 'boolean' ? forceVal : selectedMediaPaths.size < items.length;
+      if (shouldSelect) {
+        items.forEach(m => selectedMediaPaths.add(m.path));
+      } else {
+        selectedMediaPaths.clear();
+      }
+      updateMediaSelectionUI();
+      if (lastTop) renderTopMedia(lastTop);
+    }
+
+    function clearMediaSelection() {
+      selectedMediaPaths.clear();
+      updateMediaSelectionUI();
+      if (lastTop) renderTopMedia(lastTop);
+    }
+
+    async function launchBatchMatchingOnSelection() {
+      if (selectedMediaPaths.size === 0) return;
+      const paths = Array.from(selectedMediaPaths);
+      const panel = document.getElementById('batch-matching-panel');
+      const badge = document.getElementById('batch-match-status-badge');
+      const bar = document.getElementById('batch-match-progress-bar');
+      const pct = document.getElementById('batch-match-progress-pct');
+      const counts = document.getElementById('batch-match-counts');
+      const tbody = document.getElementById('batch-match-tbody');
+
+      panel.style.display = '';
+      badge.className = 'badge badge-blue';
+      badge.textContent = 'EN COURS';
+      tbody.innerHTML = '';
+
+      let done = 0;
+      for (const [idx, path] of paths.entries()) {
+        const filename = path.split('/').pop() || path;
+        const rowId = `batch-row-${idx}`;
+        tbody.innerHTML += `
+          <tr id="${rowId}">
+            <td class="mono">#${idx + 1}</td>
+            <td class="media" title="${escapeHtml(path)}">${escapeHtml(filename)}</td>
+            <td class="mono top-key">Matching en cours...</td>
+            <td class="num">--</td>
+            <td class="num">--</td>
+            <td class="num">--</td>
+          </tr>
+        `;
+        tbody.scrollTop = tbody.scrollHeight;
+
+        const t0 = performance.now();
+        try {
+          const res = await fetch(apiEndpoint('v1/search'), {
+            method: 'POST',
+            headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ media_path: path, language: 'fr', search_mode: 'phash' })
+          });
+          const dt = (performance.now() - t0).toFixed(0);
+          const rowEl = document.getElementById(rowId);
+          if (res.ok) {
+            const data = await res.json();
+            const cand = (data.candidates || [])[0];
+            const matchName = data.matched_media || (cand ? cand.title : 'Aucun match');
+            const conf = data.timing?.confidence_percent != null ? `${data.timing.confidence_percent.toFixed(1)}%` : (cand ? '100%' : '0%');
+            const shift = cand?.shift_ms != null ? `${cand.shift_ms.toFixed(1)} ms` : '0 ms';
+            const cls = data.matched_media || cand ? 'eng-gpu' : 'top-dim';
+
+            if (rowEl) {
+              rowEl.innerHTML = `
+                <td class="mono">#${idx + 1}</td>
+                <td class="media" title="${escapeHtml(path)}">${escapeHtml(filename)}</td>
+                <td class="mono"><span class="${cls}">${escapeHtml(matchName)}</span></td>
+                <td class="num">${conf}</td>
+                <td class="num">${shift}</td>
+                <td class="num">${dt} ms</td>
+              `;
+            }
+          } else {
+            if (rowEl) {
+              rowEl.innerHTML = `
+                <td class="mono">#${idx + 1}</td>
+                <td class="media" title="${escapeHtml(path)}">${escapeHtml(filename)}</td>
+                <td class="st-info">Erreur HTTP ${res.status}</td>
+                <td class="num">0%</td>
+                <td class="num">--</td>
+                <td class="num">${dt} ms</td>
+              `;
+            }
+          }
+        } catch (e) {
+          const rowEl = document.getElementById(rowId);
+          if (rowEl) {
+            rowEl.innerHTML = `
+              <td class="mono">#${idx + 1}</td>
+              <td class="media" title="${escapeHtml(path)}">${escapeHtml(filename)}</td>
+              <td class="st-info">Erreur réseau</td>
+              <td class="num">0%</td>
+              <td class="num">--</td>
+              <td class="num">--</td>
+            `;
+          }
+        }
+
+        done++;
+        const percent = Math.round((done / paths.length) * 100);
+        bar.style.width = `${percent}%`;
+        pct.textContent = `${percent}%`;
+        counts.textContent = `${done} / ${paths.length} médias traités`;
+      }
+
+      badge.className = 'badge badge-emerald';
+      badge.textContent = 'TERMINÉ';
+    }
+
+    let lastPipelineTimestamp = null;
+
+    function renderPipelineTelemetry(t) {
+      if (!t) return;
+      const isNew = t.timestamp && t.timestamp !== lastPipelineTimestamp;
+      lastPipelineTimestamp = t.timestamp;
+
+      const metaEl = document.getElementById('pipeline-meta');
+      if (metaEl) {
+        const matchInfo = t.matched_media
+          ? `<span class="eng-gpu">✓ Match : <b>${escapeHtml(t.matched_media)}</b> (${t.confidence_percent.toFixed(1)}%)</span>`
+          : '<span class="top-dim">Pas de correspondance certifiée</span>';
+        metaEl.innerHTML = `Dernière recherche : <b>${escapeHtml(t.filename)}</b> &bull; ${matchInfo} &bull; Total: <b>${t.total_ms.toFixed(1)} ms</b> <span class="top-dim">(${t.timestamp})</span>`;
+      }
+
+      // 1. Décodage FFmpeg Local
+      const setVal = (id, val) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = `${val.toFixed(1)} ms`;
+      };
+      setVal('iso-val-ffmpeg', t.ffmpeg_ms);
+      const setPct = (id, pct) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = `~${pct.toFixed(1)}%`;
+      };
+      setPct('iso-pct-ffmpeg', t.ffmpeg_pct);
+
+      // 2. Transport Réseau (WAN)
+      setVal('iso-val-wan', t.wan_rtt_ms);
+      setPct('iso-pct-wan', t.wan_pct);
+      const subWan = document.getElementById('iso-sub-wan');
+      if (subWan) {
+        subWan.textContent = t.is_relay ? '📡 RTT WAN (Internet / o2switch)' : '⚡ Bus Local (0 ms)';
+      }
+
+      // 3. Matching MIH Serveur
+      const elMih = document.getElementById('iso-val-mih');
+      if (elMih) elMih.textContent = `${t.mih_match_ms.toFixed(2)} ms`;
+      setPct('iso-pct-mih', t.mih_pct);
+
+      // 4. Découverte SRT
+      setVal('iso-val-srt-disc', t.srt_disk_ms);
+      setPct('iso-pct-srt-disc', t.srt_pct);
+
+      // 5. Calage SRT & 6. Consensus
+      const calageMs = Math.min(t.total_ms * 0.005, 1.0);
+      const consMs = Math.min(t.total_ms * 0.002, 0.5);
+      const elCalage = document.getElementById('iso-val-srt-calage');
+      if (elCalage) elCalage.textContent = `${calageMs < 0.1 ? '< 0.1' : calageMs.toFixed(1)} ms`;
+      const elCons = document.getElementById('iso-val-srt-cons');
+      if (elCons) elCons.textContent = `${consMs < 0.1 ? '< 0.1' : consMs.toFixed(1)} ms`;
+
+      if (isNew) {
+        ['iso-card-ffmpeg', 'iso-card-wan', 'iso-card-mih', 'iso-card-srt-disc', 'iso-card-srt-calage', 'iso-card-srt-cons'].forEach(id => {
+          const el = document.getElementById(id);
+          if (el) {
+            el.classList.add('active-pulse');
+            setTimeout(() => el.classList.remove('active-pulse'), 1200);
+          }
+        });
+      }
+    }
+
+    function setPipelineSnippet(path) {
+      const input = document.getElementById('pipeline-snippet-input');
+      if (input) input.value = path;
+      const card = document.getElementById('performance-pipeline-card');
+      if (card) card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    async function initPipelineSnippets() {
+      try {
+        const res = await fetch(apiEndpoint('v1/snippets'), { headers: getAuthHeaders() });
+        if (!res.ok) return;
+        const snippets = await res.json();
+        if (!Array.isArray(snippets) || snippets.length === 0) return;
+        const datalist = document.getElementById('snippets-datalist');
+        if (!datalist) return;
+        datalist.innerHTML = '';
+        snippets.forEach(path => {
+          const opt = document.createElement('option');
+          opt.value = path;
+          const name = path.split('/').pop();
+          opt.textContent = name;
+          datalist.appendChild(opt);
+        });
+      } catch (e) {}
+    }
+
+    async function triggerPipelineEvaluation() {
+      const input = document.getElementById('pipeline-snippet-input');
+      const langSelect = document.getElementById('pipeline-lang-select');
+      const btn = document.getElementById('btn-pipeline-match');
+      const btnIcon = document.getElementById('btn-pipeline-icon');
+      const btnText = document.getElementById('btn-pipeline-text');
+      const meta = document.getElementById('pipeline-meta');
+
+      if (!input) return;
+      const mediaPath = input.value.trim();
+      if (!mediaPath) return;
+      const language = langSelect ? langSelect.value : 'fr';
+      const filename = mediaPath.split('/').pop() || mediaPath;
+
+      if (btn) { btn.disabled = true; btn.style.opacity = '0.7'; }
+      if (btnIcon) btnIcon.textContent = '⏳';
+      if (btnText) btnText.textContent = 'Matching...';
+      if (meta) {
+        meta.innerHTML = `<span class="top-key">Extraction FFmpeg &amp; matching en direct pour <b>${escapeHtml(filename)}</b>...</span>`;
+      }
+
+      try {
+        const res = await fetch(apiEndpoint('v1/search'), {
+          method: 'POST',
+          headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            media_path: mediaPath,
+            language: language,
+            search_mode: 'phash'
+          })
+        });
+
+        if (!res.ok) throw new Error(`Erreur HTTP ${res.status}: ${res.statusText}`);
+
+        const sRes = await fetch(apiEndpoint('v1/search/latest'), { headers: getAuthHeaders() });
+        if (sRes.ok) {
+          const telemetry = await sRes.json();
+          if (telemetry) renderPipelineTelemetry(telemetry);
+        }
+      } catch (err) {
+        if (meta) meta.innerHTML = `<span class="st-fail">✗ ${escapeHtml(err.message)}</span>`;
+      } finally {
+        if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
+        if (btnIcon) btnIcon.textContent = '⚡';
+        if (btnText) btnText.textContent = 'Lancer le Matching';
+      }
+    }
+
+    let mediaCurrentSort = 'name';
+    let mediaCurrentFilter = 'all';
+
+    function cycleMediaSort() {
+      const modes = ['name', 'size', 'duration', 'status', 'subs'];
+      const idx = (modes.indexOf(mediaCurrentSort) + 1) % modes.length;
+      mediaCurrentSort = modes[idx];
+      const sel = document.getElementById('media-sort-select');
+      if (sel) sel.value = mediaCurrentSort;
+      if (lastTop) renderTopMedia(lastTop);
+    }
+
+    function cycleMediaFilter() {
+      const modes = ['all', 'subs', 'nosubs', 'virgin'];
+      const idx = (modes.indexOf(mediaCurrentFilter) + 1) % modes.length;
+      mediaCurrentFilter = modes[idx];
+      const sel = document.getElementById('media-filter-select');
+      if (sel) sel.value = mediaCurrentFilter;
+      if (lastTop) renderTopMedia(lastTop);
+    }
+
+    function onMediaFilterChange() {
+      const selFilter = document.getElementById('media-filter-select');
+      if (selFilter) mediaCurrentFilter = selFilter.value;
+      const selSort = document.getElementById('media-sort-select');
+      if (selSort) mediaCurrentSort = selSort.value;
+      if (lastTop) renderTopMedia(lastTop);
+    }
+
     function renderTopMedia(t) {
-      const items = t.discovered_media || [];
-      const total = t.discovered_media_total || 0;
-      document.getElementById('media-caption').textContent = `EXPLORATEUR DE MÉDIAS MULTI-SOURCES [${total} DISPONIBLES] - par nom, cliquer une ligne pour sa fiche`;
+      let items = (t.discovered_media || []).slice();
+      const totalRaw = t.discovered_media_total || items.length;
+
+      const q = (document.getElementById('media-search-filter')?.value || '').toLowerCase().trim();
+      if (q) {
+        items = items.filter(m =>
+          (m.stem && m.stem.toLowerCase().includes(q)) ||
+          (m.path && m.path.toLowerCase().includes(q)) ||
+          (m.video_codec && m.video_codec.toLowerCase().includes(q))
+        );
+      }
+      if (mediaCurrentFilter === 'subs') {
+        items = items.filter(m => (m.subtitles || []).length > 0);
+      } else if (mediaCurrentFilter === 'nosubs') {
+        items = items.filter(m => (m.subtitles || []).length === 0);
+      } else if (mediaCurrentFilter === 'virgin') {
+        items = items.filter(m => m.status === 'Virgin');
+      }
+
+      items.sort((a, b) => {
+        if (mediaCurrentSort === 'size') return (b.size_bytes || 0) - (a.size_bytes || 0);
+        if (mediaCurrentSort === 'duration') return (b.duration_secs || 0) - (a.duration_secs || 0);
+        if (mediaCurrentSort === 'status') return (a.status || '').localeCompare(b.status || '');
+        if (mediaCurrentSort === 'subs') return (b.subtitles?.length || 0) - (a.subtitles?.length || 0);
+        return (a.stem || '').localeCompare(b.stem || '');
+      });
+
+      const total = items.length;
+      document.getElementById('media-caption').textContent = `EXPLORATEUR DE MÉDIAS MULTI-SOURCES [${total} AFFICHÉ(S) / ${totalRaw} DISPONIBLES] - par nom, cliquer une ligne pour sa fiche`;
       renderPager('media', total);
+      updateMediaSelectionUI();
       const tbody = document.getElementById('media-tbody');
+      tbody.style.opacity = '1';
       if (items.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" class="top-dim" style="text-align: center;">Aucun média découvert (scan des sources en attente)</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" class="top-dim" style="text-align: center;">Aucun média ne correspond aux filtres</td></tr>';
         return;
       }
       tbody.innerHTML = items.map(m => {
@@ -1164,7 +2254,9 @@
         const subs = m.subtitles || [];
         const subsLabel = subs.length === 0 ? '0 (Aucun)' : `${subs.length} (${subs.slice(0, 3).map(s => s.lang).join(',')})`;
         const dur = m.duration_secs != null ? formatDuration(m.duration_secs) : '-';
+        const isChecked = selectedMediaPaths.has(m.path);
         let html = `<tr data-key="${escapeHtml(m.path)}">
+          <td style="text-align:center;"><input type="checkbox" class="chk-media-row" ${isChecked ? 'checked' : ''} onclick="event.stopPropagation(); toggleMediaSelection('${escapeHtml(m.path)}')" /></td>
           <td class="media" title="${escapeHtml(m.stem)}">${badge}${escapeHtml(m.stem)}</td>
           <td class="num hide-sm">${sizeLabel(m.size_bytes)}</td>
           <td class="num hide-sm">${dur}</td>
@@ -1174,7 +2266,7 @@
           <td>${span(cls, label)}</td>
         </tr>`;
         if (openDetails.has(m.path)) {
-          html += detailRow(7, [
+          html += detailRow(8, [
             ['Release', escapeHtml(m.stem)],
             ['Source', escapeHtml(m.source_id ? sourceName(t, m.source_id) : '-')],
             ['Chemin', escapeHtml(m.path)],
@@ -1185,6 +2277,7 @@
             ['Sous-titres', subs.length === 0 ? span('top-dim', 'Aucun') : escapeHtml(subs.map(s =>
               `#${s.index} ${s.lang} ${s.codec}${s.title ? ` "${s.title}"` : ''}`).join(' │ '))],
             ['Statut Actuel', span(cls, label)],
+            ['Actions', `<button class="btn btn-accent" style="display:inline-block;padding:3px 10px;font-size:11px;" onclick="event.stopPropagation(); setPipelineSnippet('${escapeHtml(m.path)}'); triggerPipelineEvaluation();">⚡ Lancer le Matching &amp; Diagramme</button> <a class="btn" style="display:inline-block;padding:3px 10px;font-size:11px;text-decoration:none;" href="/studio?match=${encodeURIComponent(m.path)}#tab-observability" target="_blank">Ouvrir dans Studio ↗</a>`],
           ]);
         }
         return html;
@@ -1284,14 +2377,26 @@
       const step = Number(e.target.dataset.step);
       if (!step) return;
       pageIndex[p.dataset.list] = Math.max(pageIndex[p.dataset.list] + step, 0);
-      fetchTop();
+      const tbody = document.getElementById(p.dataset.list === 'completed' ? 'completed-tbody' : 'media-tbody');
+      if (tbody) tbody.style.opacity = '0.4';
+      fetchTop(true);
     }));
 
     document.querySelectorAll('.tab-btn').forEach(btn => btn.addEventListener('click', () => {
       document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b === btn));
       document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('active', p.id === 'tab-' + btn.dataset.tab));
       activeTab = btn.dataset.tab;
-      fetchTop();
+      if (activeTab === 'completed') {
+        const tbody = document.getElementById('completed-tbody');
+        if (tbody) {
+          if (!lastTop || !lastTop.history_records || lastTop.history_records.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7" class="top-dim" style="text-align: center; padding: 24px;">⏳ Chargement des traitements récents...</td></tr>';
+          } else {
+            tbody.style.opacity = '0.4';
+          }
+        }
+      }
+      fetchTop(true);
     }));
 
     // One view per URL hash, so a view can be bookmarked and the back button works
@@ -1307,7 +2412,8 @@
       activeView = VIEWS.includes(view) ? view : 'overview';
       document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === 'view-' + activeView));
       document.querySelectorAll('#views-nav a').forEach(a => a.classList.toggle('active', a.getAttribute('href') === '#' + activeView));
-      fetchTop();
+      fetchTop(true);
+      if (activeView === 'system') fetchCatalogStatus(true);
     }
     window.addEventListener('hashchange', showView);
 
@@ -1319,6 +2425,11 @@
     const VIEW_KEYS = { '6': 'system', 'y': 'system', 'a': 'audit', 'o': 'overview' };
     document.addEventListener('keydown', e => {
       if (e.target.tagName === 'INPUT' || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (activeView === 'catalogue' && e.key === 'a') {
+        e.preventDefault();
+        toggleSelectAllMedia();
+        return;
+      }
       const tab = TAB_KEYS[e.key];
       if (tab) {
         location.hash = 'ingestion';
@@ -1328,15 +2439,26 @@
       }
     });
 
-    // Auto-refresh loop
+    // Auto-refresh fallback loop (only active if SSE is disconnected and tab is visible)
     // Silent auto-refresh: the banner clock already shows the last update time
     setInterval(() => {
-      if (!isPaused) refreshAll();
+      if (!isPaused && !document.hidden && !sseActive) refreshAll();
     }, REFRESH_INTERVAL_MS);
 
     // Initial load (showView fetches the top snapshot of the view)
     fetchTelemetry();
     showView();
+    initPipelineSnippets();
+    initSse();
+
+    // Check URL parameters for direct matching
+    const matchParams = new URLSearchParams(window.location.search);
+    const matchTarget = matchParams.get('match') || matchParams.get('media');
+    if (matchTarget) {
+      location.hash = 'catalogue';
+      setPipelineSnippet(matchTarget);
+      setTimeout(() => triggerPipelineEvaluation(), 500);
+    }
   </script>
 </body>
 </html>

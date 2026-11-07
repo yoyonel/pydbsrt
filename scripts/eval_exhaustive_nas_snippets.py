@@ -255,16 +255,154 @@ def run_battery_3_true_negatives(server_url: str) -> dict:
     }
 
 
+def normalize_title_tokens(text: str) -> set[str]:
+    """Strips release noise, resolution and codecs, returning canonical search tokens."""
+    clean = re.sub(
+        r"\b(1080p|720p|2160p|4k|bluray|brrip|web-dl|webrip|x264|x265|hevc|h264|h265|aac|dts|ddp5\.1|dd5\.1|yify|rarbg|eztv|proper|repack|multi|vostfr|french|mid15s|mp4|mkv)\b",
+        " ",
+        text,
+        flags=re.IGNORECASE,
+    )
+    tokens = set(re.findall(r"[a-zA-Z0-9]+", clean.lower()))
+    return {t for t in tokens if len(t) >= 2 or t.isalpha()}
+
+
+def is_semantic_title_match(expected_name: str, matched_name: str | None) -> bool:
+    """Verifies that the matched title belongs to the same work without cross-episode collision."""
+    if not matched_name or matched_name in ("unknown", "None", "none"):
+        return False
+    exp_tokens = normalize_title_tokens(expected_name)
+    mat_tokens = normalize_title_tokens(matched_name)
+    if not exp_tokens or not mat_tokens:
+        return False
+    exp_se = parse_sxxexx(expected_name)
+    mat_se = parse_sxxexx(matched_name)
+    if exp_se and mat_se and exp_se != mat_se:
+        return False
+    common = exp_tokens.intersection(mat_tokens)
+    return len(common) >= 1 and (len(common) / len(mat_tokens) >= 0.45 or len(common) / len(exp_tokens) >= 0.35)
+
+
+def parse_vlc_session_output(
+    output: str,
+) -> tuple[str | None, float, str]:
+    """Extracts (matched_title, conf_pct, status_label) from VLC execution output."""
+    m_sub = re.search(
+        r"Media matched:\s*'([^']*)'.*?conf:\s*([-\d\.]+)%",
+        output,
+        re.DOTALL,
+    )
+    if m_sub and "SUCCESS! Media matched" in output:
+        return m_sub.group(1), float(m_sub.group(2)), "MATCH_WITH_SUB"
+
+    m_vid = re.search(
+        r"VIDEO MATCHED:\s*'([^']*)'\s*\(conf:\s*([-\d\.]+)%\)",
+        output,
+    )
+    if m_vid:
+        return m_vid.group(1), float(m_vid.group(2)), "MATCH_NO_SUB"
+
+    m_un = re.search(r"VIDEO UNMATCHED:\s*([^\n]+)", output)
+    if m_un:
+        return None, 0.0, "UNMATCHED"
+
+    err_m = re.search(r"Sync error from daemon:\s*([^\n]+)", output)
+    if err_m:
+        return None, 0.0, "ERROR"
+
+    return None, 0.0, "NONE"
+
+
+def execute_vlc_single_test(
+    mp4: Path,
+    display_num: int,
+    idx: int,
+    total_samples: int,
+) -> dict:
+    """Executes a single video playback session in headless cvlc with zero display footprint."""
+    cmd = [
+        "cvlc",
+        "--vout=dummy",
+        "--aout=dummy",
+        "--no-audio",
+        "--avcodec-hw=none",
+        "--extraintf",
+        "luaintf",
+        "--lua-intf",
+        "dbsrt_intf",
+        str(mp4.resolve()),
+    ]
+    env = os.environ.copy()
+    env["DISPLAY"] = f":{display_num}"
+    env["WAYLAND_DISPLAY"] = ""
+    env["DBSRT_AUTOKILL"] = "1"
+    t0 = time.monotonic()
+
+    try:
+        res = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=12)
+        elapsed = time.monotonic() - t0
+        output = res.stderr + "\n" + res.stdout
+        matched_media, conf_pct, status_kind = parse_vlc_session_output(output)
+        is_match = matched_media is not None and matched_media not in ("unknown", "None", "none")
+        is_correct = is_match and is_semantic_title_match(mp4.name, matched_media)
+        is_collision = is_match and not is_correct
+
+        if is_correct:
+            print(
+                f"  [{idx:3d}/{total_samples}] ✅ VLC MATCH    ({elapsed:4.2f}s) : {mp4.name[:32]:<32} -> '{matched_media}' (conf: {conf_pct:.1f}%)"
+            )
+        elif is_collision:
+            print(
+                f"  [{idx:3d}/{total_samples}] ❌ VLC COLLISION({elapsed:4.2f}s) : {mp4.name[:32]:<32} -> '{matched_media}' (ATTENDU: {mp4.stem[:20]})"
+            )
+        else:
+            print(
+                f"  [{idx:3d}/{total_samples}] 🚫 VLC REJECTED ({elapsed:4.2f}s) : {mp4.name[:32]:<32} -> (non reconnu / hors catalogue)"
+            )
+
+        return {
+            "video": mp4.name,
+            "elapsed_s": round(elapsed, 2),
+            "matched_media": matched_media,
+            "confidence_percent": conf_pct,
+            "is_correct_match": is_correct,
+            "is_collision": is_collision,
+            "is_rejected": not is_match,
+            "status_kind": status_kind,
+            "timeout": False,
+        }
+    except subprocess.TimeoutExpired:
+        print(f"  [{idx:3d}/{total_samples}] ⏱️ VLC TIMEOUT  (>12.0s) : {mp4.name[:40]}")
+        return {
+            "video": mp4.name,
+            "elapsed_s": 12.0,
+            "matched_media": None,
+            "confidence_percent": 0.0,
+            "is_correct_match": False,
+            "is_collision": False,
+            "is_rejected": False,
+            "status_kind": "TIMEOUT",
+            "timeout": True,
+        }
+
+
 def run_battery_4_vlc_xvfb(
     snippets_dir: Path,
     sample_count: int = 25,
 ) -> dict:
     """Executes VLC E2E tests strictly on an isolated Xvfb display (:99) without stealing focus."""
     display_num = 99
+    all_mp4s = sorted(snippets_dir.glob("*_mid15s.mp4"))
+    if sample_count <= 0 or sample_count >= len(all_mp4s):
+        sampled = all_mp4s
+    else:
+        step = max(1, len(all_mp4s) // sample_count)
+        sampled = [all_mp4s[i] for i in range(0, len(all_mp4s), step)][:sample_count]
+
     print("\n================================================================================")
-    print(f" 🎬 BATTERIE 4 : VALIDATION E2E VLC SUR ÉCRAN VIRTUEL ISOLÉ (Xvfb :{display_num})")
+    print(f" 🎬 BATTERIE 4 : QUALIFICATION DU MATCHING VIDÉO E2E VLC ({len(sampled)} EXTRAITS RÉELS)")
     print("================================================================================")
-    print(f"Démarrage Xvfb :{display_num} (1920x1080x24) - Zéro pop-up, zéro vol de focus...")
+    print(f"Démarrage Xvfb :{display_num} (1920x1080x24) + --vout=dummy (ZÉRO pop-up garanti)...")
 
     xvfb_proc = subprocess.Popen(
         ["Xvfb", f":{display_num}", "-screen", "0", "1920x1080x24", "-ac", "+extension", "GLX", "-noreset"],
@@ -274,72 +412,52 @@ def run_battery_4_vlc_xvfb(
     time.sleep(1.0)
 
     try:
-        all_mp4s = sorted(snippets_dir.glob("*_mid15s.mp4"))
-        step = max(1, len(all_mp4s) // sample_count)
-        sampled = [all_mp4s[i] for i in range(0, len(all_mp4s), step)][:sample_count]
-
         results = []
-        success_count = 0
+        correct_count = 0
+        collision_count = 0
+        rejected_count = 0
+        timeout_count = 0
 
         for idx, mp4 in enumerate(sampled, 1):
-            cmd = [
-                "cvlc",
-                "--avcodec-hw=none",
-                "--extraintf",
-                "luaintf",
-                "--lua-intf",
-                "dbsrt_intf",
-                str(mp4.resolve()),
-            ]
-            env = os.environ.copy()
-            env["DISPLAY"] = f":{display_num}"
-            env["DBSRT_AUTOKILL"] = "1"
-            t0 = time.monotonic()
+            res = execute_vlc_single_test(mp4, display_num, idx, len(sampled))
+            results.append(res)
+            if res["is_correct_match"]:
+                correct_count += 1
+            elif res["is_collision"]:
+                collision_count += 1
+            elif res["timeout"]:
+                timeout_count += 1
+            else:
+                rejected_count += 1
 
-            try:
-                res = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=12)
-                elapsed = time.monotonic() - t0
-                output = res.stderr + "\n" + res.stdout
-                is_matched = "SUCCESS! Media matched" in output or "Event-driven autokill triggered" in output
+        total = len(sampled)
+        match_rate = (correct_count / max(1, total)) * 100.0
+        collision_rate = (collision_count / max(1, total)) * 100.0
+        avg_time = sum(r["elapsed_s"] for r in results) / max(1, total)
 
-                if is_matched:
-                    success_count += 1
-                    matched_line = next(
-                        (
-                            line
-                            for line in output.splitlines()
-                            if "SUCCESS! Media matched" in line or "Event-driven autokill triggered" in line
-                        ),
-                        "Event-driven autokill triggered",
-                    )
-                    print(
-                        f"  [{idx:2d}/{sample_count}] ✅ VLC SUCCESS ({elapsed:.2f}s) : {mp4.name[:35]}... -> {matched_line.strip()[-50:]}"
-                    )
-                else:
-                    print(
-                        f"  [{idx:2d}/{sample_count}] ℹ️  VLC Décodé ({elapsed:.2f}s) : {mp4.name[:40]}... (accroche daemon)"
-                    )
-
-                results.append(
-                    {
-                        "video": mp4.name,
-                        "elapsed_s": round(elapsed, 2),
-                        "matched": is_matched,
-                        "returncode": res.returncode,
-                    }
-                )
-            except subprocess.TimeoutExpired:
-                print(f"  [{idx:2d}/{sample_count}] ⏱️ Timeout (>12s) : {mp4.name[:40]}")
-                results.append({"video": mp4.name, "timeout": True})
-
+        print("\n================================================================================")
+        print(f" 📊 SYNTHÈSE QUALITÉ MATCHING VIDÉO VLC (BATTERIE 4 - {total} VIDÉOS)")
+        print("================================================================================")
+        print(f"  • Matchs Corrects (True Positives) : {correct_count:3d} / {total} ({match_rate:5.1f}%)")
+        print(f"  • Collisions     (False Positives) : {collision_count:3d} / {total} ({collision_rate:5.1f}%)")
         print(
-            f"\n✅ Batterie 4 Terminée : {success_count}/{len(sampled)} extraits synchronisés dans VLC sous Xvfb isolé."
+            f"  • Rejets Propres (Hors Catalogue)  : {rejected_count:3d} / {total} ({(rejected_count / total) * 100:5.1f}%)"
         )
+        print(f"  • Timeouts                         : {timeout_count:3d} / {total}")
+        print(f"  • Latence Moyenne par Session VLC  : {avg_time:.2f} s")
+        print("================================================================================")
 
         return {
-            "tested": len(sampled),
-            "success": success_count,
+            "tested": total,
+            "correct_matches": correct_count,
+            "correct_match_rate_pct": round(match_rate, 2),
+            "collisions": collision_count,
+            "collision_rate_pct": round(collision_rate, 2),
+            "rejections": rejected_count,
+            "timeouts": timeout_count,
+            "avg_latency_s": round(avg_time, 2),
             "display": f":{display_num}",
+            "details": results,
         }
     finally:
         print(f"Arrêt propre de l'écran virtuel Xvfb :{display_num}...")

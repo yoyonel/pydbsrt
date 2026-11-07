@@ -572,14 +572,15 @@ REMOTE_SCRIPT
   pull-catalog)
     check_ssh
     shift || true
-    WITH_PHASH=false
+    WITH_PHASH=true
     for arg in "$@"; do
       case "${arg}" in
+        --no-phash | --without-phash) WITH_PHASH=false ;;
         --with-phash) WITH_PHASH=true ;;
       esac
     done
-    echo "=== Pulling processed catalog and artifacts from ${O2SWITCH_HOST} ==="
-    mkdir -p data/SRT data/reports
+    echo "=== Pulling processed catalog, subtitles, and audit artifacts from ${O2SWITCH_HOST} ==="
+    mkdir -p data/SRT data/reports audit
     echo "-> Pulling unified binary catalog (catalog.dbphash)..."
     rsync -avz --progress --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" \
       "${O2SWITCH_HOST}:${REMOTE_BASE}/data/catalog.dbphash" "data/catalog.dbphash.tmp" || true
@@ -588,15 +589,21 @@ REMOTE_SCRIPT
       echo "✓ catalog.dbphash updated."
     fi
     echo "-> Pulling CAS SRT subtitles..."
-    rsync -avz --progress --ignore-existing --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/SRT/" "data/SRT/" || true
+    rsync -avz --progress --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/SRT/" "data/SRT/" || true
     echo "-> Pulling telemetry reports..."
     rsync -avz --progress --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/reports/" "data/reports/" || true
+    echo "-> Pulling audit runs & logs..."
+    rsync -avz --progress --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${O2SWITCH_HOST}:${REMOTE_BASE}/audit/" "audit/" || true
     if [[ "${WITH_PHASH}" == "true" ]]; then
       mkdir -p data/__PHASH__
-      echo "-> Pulling loose .phash fingerprints (backup mode)..."
-      rsync -avz --progress --ignore-existing --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/__PHASH__/" "data/__PHASH__/" || true
-      # --ignore-existing keeps the legacy copy of each .phash migrated to its moviehash name
+      echo "-> Pulling loose .phash fingerprints & metadata..."
+      rsync -avz --progress --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/__PHASH__/" "data/__PHASH__/" || true
       python3 scripts/phash_dedupe.py "data/__PHASH__" --apply || true
+    fi
+    if systemctl --user is-active --quiet dbsrt-agent 2>/dev/null; then
+      echo "-> Reloading local dbsrt-agent daemon with synchronized catalog..."
+      systemctl --user restart dbsrt-agent
+      echo "✓ dbsrt-agent restarted."
     fi
     echo "✓ Pull completed from ${O2SWITCH_HOST}."
     ;;

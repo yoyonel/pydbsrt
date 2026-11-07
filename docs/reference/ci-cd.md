@@ -189,3 +189,28 @@ Tous les contrôles exécutés en CI sont reproductibles à l'identique en local
 | **Validation Stricte Documentation** | `task doc:check` | ~8 secondes |
 | **Rapport Couverture Unifiée** | `task coverage` | ~45 secondes |
 | **Vérification Rendu Terminaux** | `task doc:verify-terminal` | ~4 secondes |
+
+---
+
+## 6. Architecture des Git Hooks Locaux (`pre-commit` & `pre-push`)
+
+Afin de préserver les ressources CPU et la réactivité du poste de développement tout en garantissant une étanchéité totale avant publication, les contrôles locaux sont scindés en deux étapes :
+
+```mermaid
+flowchart LR
+    Dev["Développeur"] --> Commit["git commit"]
+    Commit --> PreCommit["Hook pre-commit (< 15s)<br/>Formatage, Linters, Pyright, Clippy, AST"]
+    PreCommit --> GitTree["Arborescence Git Locale"]
+
+    GitTree --> Push["git push"]
+    Push --> PrePush["Hook pre-push (~50s)<br/>cargo test --workspace"]
+    PrePush --> Remote["GitHub Remote / CI"]
+```
+
+1. **Stade `pre-commit`** : Contrôles légers et déterministes (Ruff, Pyright, Shellcheck, Hadolint, Clippy, Complexité cyclomatique & cognitive, assets web). Temps d'exécution : **< 15 secondes**, charge CPU modérée sans contention.
+2. **Stade `pre-push`** : Suite complète de tests Rust (`cargo test --workspace`). Isolée au moment de la publication distante pour éviter tout freeze CPU ou emballement thermique lors des commits atomiques intermédiaires.
+
+Installation unifiée des deux types de hooks :
+```bash
+uv run pre-commit install --hook-type pre-commit --hook-type pre-push
+```

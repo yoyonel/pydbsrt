@@ -42,6 +42,7 @@ tags:
 
 ### 📊 Observabilité, Surveillance & Fiabilité
 * [Comment surveiller la stack avec Prometheus & Grafana](surveiller-stack-telemetrie.md) : Accéder aux métriques temps réel, surveiller les latences d'interrogation et la mémoire vive.
+* [Comment exécuter un matching réel E2E et mesurer la chaîne de performance](executer-matching-e2e-reel-et-relais-cloud.md) : Déclencher un vrai décodage FFmpeg, observer le transit WAN o2switch et diagnostiquer les 5 paliers du pipeline.
 * [Comment exécuter les recettes de chaos testing et tests d'infra](executer-recettes-chaos-testing.md) : Valider la résilience du démon face aux coupures réseau, plantages de sockets et redémarrages inopinés.
 
 ### 🌐 Déploiement Multi-Cibles & Hébergement

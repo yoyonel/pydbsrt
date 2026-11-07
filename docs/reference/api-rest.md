@@ -74,10 +74,21 @@ Tableau de bord web interactif monopage (HTML5/CSS/JS), responsive pour smartpho
 ### `GET /v1/monitoring/telemetry`
 Snapshot unifié en JSON de la télémétrie du serveur (statistiques système, file batch, workers d'extraction actifs, télémétrie et logs du superviseur RPi4, derniers événements terminés).
 
-### `GET /v1/monitoring/top`
-Snapshot JSON de `dbsrt top --json` (binaire `dbsrt` voisin de `dbsrt-server`), destiné aux clients web de supervision (lecture seule). Mis en cache 2 s ; les échecs ne sont pas mis en cache.
+- **En-têtes de réponse** : `X-Server-Time-Ms: <epoch_ms>` pour la calibration de l'horloge OS (algorithme de Cristian côté client).
 
-Les listes lourdes `history_records` et `discovered_media` sont paginées :
+### `GET /v1/monitoring/top`
+Snapshot JSON de `dbsrt top --json` (binaire `dbsrt` voisin de `dbsrt-server`), destiné aux clients web de supervision (lecture seule).
+
+- **En-têtes de réponse** : `X-Server-Time-Ms: <epoch_ms>` pour la synchronisation d'horloge et l'évaluation du RTT.
+
+**Architecture de Cache Non-Bloquant (Stale-While-Revalidate)** :
+
+- **TTL de réutilisation** : 15 s (`TOP_SNAPSHOT_TTL`).
+- **Comportement à l'expiration** : Si un snapshot précédent existe en mémoire, il est renvoyé **immédiatement (0 ms de temps serveur)** au client HTTP sans le bloquer.
+- **Réévaluation en tâche de fond** : Une tâche Tokio détachée (`spawn_top_probe_background`) exécute `dbsrt top --json --refresh-ms 200` en arrière-plan pour actualiser le cache silencieusement.
+- **Protection contre l'avalanche** : Drapeau atomique `TOP_PROBE_IN_FLIGHT` garantissant qu'un seul sous-processus d'échantillonnage ne s'exécute à la fois.
+
+Les listes lourdes `history_records` et `discovered_media` sont paginées en mémoire vive :
 
 | Paramètre | Défaut | Rôle |
 |---|---|---|
@@ -93,6 +104,18 @@ Secrets masqués : la valeur suivant `-ftp-password` et le mot de passe des URL 
 - `200 OK` : snapshot JSON compact (quelques Ko avec `limit=0`, environ 1 Mo non paginé).
 - `502 Bad Gateway` : `dbsrt top` a terminé en erreur ; le corps contient son `stderr`.
 - `500 Internal Server Error` : binaire `dbsrt` introuvable ou non exécutable.
+
+### `GET /v1/monitoring/events`
+Flux continu Server-Sent Events (SSE, `text/event-stream`) poussant l'état consolidé (`state`) en temps réel toutes les 2 secondes avec pings keep-alive toutes les 15 secondes.
+
+- **Authentification** : en-têtes HTTP (`Authorization: Bearer <clé>`, `X-API-Key`) ou paramètres d'URL query `?token=<clé>` / `?key=<clé>` (requis pour l'`EventSource` natif du navigateur).
+- **Structure de l'événement** :
+  - `event: state`
+  - `data: {"telemetry": {...}, "top": {...}, "pipeline": {...}}`
+    - `telemetry` : [`MonitoringTelemetryResponse`](#get-v1monitoringtelemetry) (système, file batch, workers, superviseur, audit).
+    - `top` : [`dbsrt top` snapshot](#get-v1monitoringtop) paginé en `limit=0` (métriques chaudes uniquement, zéro surcoût de liste catalogue).
+    - `pipeline` : chronométrie des 6 étapes du dernier matching exécuté (FFmpeg, WAN, MIH, SRT).
+- `200 OK` : flux persistant HTTP/1.1 ou HTTP/2 streaming.
 
 ### `POST /v1/supervisor/heartbeat`
 Réceptionne et persiste de manière atomique la pulsation et les logs de l'agent superviseur RPi4 dans `run/supervisor_status.json`. Les secrets FTP des logs sont masqués à l'écriture et à la lecture.

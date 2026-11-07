@@ -153,9 +153,13 @@ local function run_sync()
             end
         else
             local err_msg = string.match(body, '"error":%s*"([^"]+)"') or "Failed to match/sync"
-            vlc.msg.err("[dbsrt-intf] Sync error from daemon: " .. err_msg)
+            if matched and matched ~= "unknown" and matched ~= "null" then
+                vlc.msg.info(string.format("[dbsrt-intf] VIDEO MATCHED: '%s' (conf: %s%%) [no subtitle: %s]", matched, conf or "0", err_msg))
+            else
+                vlc.msg.warn(string.format("[dbsrt-intf] VIDEO UNMATCHED: %s", err_msg))
+            end
             if os.getenv("DBSRT_AUTOKILL") == "1" then
-                vlc.msg.info("[dbsrt-intf] Event-driven autokill triggered (match completed without subtitle) -> quitting VLC")
+                vlc.msg.info("[dbsrt-intf] Event-driven autokill triggered (video recognition completed) -> quitting VLC")
                 vlc.misc.quit()
             end
         end

@@ -392,6 +392,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'OPTIONS') {
     header('Access-Control-Allow-Origin: *');
     header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
     header('Access-Control-Allow-Headers: Content-Type, Authorization, X-API-Key');
+    header('Access-Control-Expose-Headers: X-Server-Time-Ms');
     http_response_code(204);
     exit;
 }
@@ -459,10 +460,10 @@ clear_auth_failures($rateLimitFile, $clientIp);
 // 3. Determine requested sub-path
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 $scriptName = $_SERVER['SCRIPT_NAME'] ?? '';
-$scriptDir = dirname($scriptName);
+$scriptDir = rtrim(dirname($scriptName), '/\\');
 
 $path = parse_url($requestUri, PHP_URL_PATH) ?? '/';
-if ($scriptDir !== '/' && str_starts_with($path, $scriptDir)) {
+if ($scriptDir !== '' && $scriptDir !== '.' && str_ends_with($scriptName, '.php') && str_starts_with($path, $scriptDir)) {
     $path = substr($path, strlen($scriptDir));
 }
 if (!str_starts_with($path, '/')) {
@@ -482,7 +483,9 @@ if ($isReadOnly && (!in_array($method, ['GET', 'HEAD'], true) || !$readOnlyPathA
     send_json_error(403, ['error' => 'Forbidden: read-only key']);
 }
 
-$upstreamQuery = $_SERVER['QUERY_STRING'] ?? '';
+$upstreamParams = $_GET;
+unset($upstreamParams['token'], $upstreamParams['key']);
+$upstreamQuery = http_build_query($upstreamParams);
 $upstreamUrl = sprintf('%s%s%s', UPSTREAM_BASE_URL, $path, $upstreamQuery !== '' ? '?' . $upstreamQuery : '');
 
 // Forward request headers, minus hop-by-hop, client forwarding and client credential headers:
@@ -502,6 +505,60 @@ $forwardHeaders[] = 'X-Forwarded-Proto: https';
 $forwardHeaders[] = sprintf('Authorization: Bearer %s', $masterKeys[0]);
 
 $requestBody = in_array($method, ['POST', 'PUT', 'PATCH'], true) ? file_get_contents('php://input') : false;
+
+// Direct unbuffered streaming passthrough for Server-Sent Events (SSE)
+if ($path === '/v1/monitoring/events') {
+    set_time_limit(0);
+    while (ob_get_level() > 0) {
+        ob_end_clean();
+    }
+
+    header('Content-Type: text/event-stream');
+    header('Cache-Control: no-cache, no-transform');
+    header('X-Accel-Buffering: no');
+
+    $ch = curl_init($upstreamUrl);
+    curl_setopt($ch, CURLOPT_UNIX_SOCKET_PATH, $homeDir . UPSTREAM_SOCKET_REL_PATH);
+    curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'GET');
+    curl_setopt($ch, CURLOPT_HTTPHEADER, $forwardHeaders);
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, CONNECT_TIMEOUT_SECONDS);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 0); // No execution timeout for long-lived stream
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, false);
+    curl_setopt($ch, CURLOPT_BUFFERSIZE, 1024);
+
+    curl_setopt($ch, CURLOPT_HEADERFUNCTION, function ($ch, $headerLine) {
+        $trimmed = trim($headerLine);
+        if ($trimmed === '' || str_starts_with(strtoupper($trimmed), 'HTTP/')) {
+            return strlen($headerLine);
+        }
+        $parts = explode(':', $trimmed, 2);
+        if (count($parts) === 2) {
+            $name = strtolower(trim($parts[0]));
+            if (!in_array($name, ['transfer-encoding', 'connection', 'content-length'], true)) {
+                header($trimmed, true);
+            }
+        }
+        return strlen($headerLine);
+    });
+
+    curl_setopt($ch, CURLOPT_WRITEFUNCTION, function ($ch, $data) {
+        echo $data;
+        @ob_flush();
+        flush();
+        return connection_aborted() ? 0 : strlen($data);
+    });
+
+    $res = curl_exec($ch);
+
+    if ($res === false && curl_errno($ch) === CURLE_COULDNT_CONNECT) {
+        if (spawn_daemon($homeDir)) {
+            $res = curl_exec($ch);
+        }
+    }
+
+    curl_close($ch);
+    exit;
+}
 
 $ch = curl_init($upstreamUrl);
 curl_setopt($ch, CURLOPT_UNIX_SOCKET_PATH, $homeDir . UPSTREAM_SOCKET_REL_PATH);

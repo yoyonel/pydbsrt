@@ -50,6 +50,7 @@ async fn test_server_monitoring_endpoints() {
         .await
         .expect("Failed to GET telemetry");
     assert!(res_tel.status().is_success());
+    assert!(res_tel.headers().contains_key("x-server-time-ms"));
     let tel: MonitoringTelemetryResponse =
         res_tel.json().await.expect("Failed parsing telemetry JSON");
     assert!(!tel.server_time_iso.is_empty());
@@ -97,9 +98,87 @@ async fn test_server_monitoring_endpoints() {
     assert!(!logs.contains("hb-secret") && !logs.contains("hb-url-secret"));
     assert!(logs.contains("-ftp-password *** -i ftp://u:***@nas/x.mkv"));
 
+    // 6. Test /v1/monitoring/events SSE endpoint
+    let mut res_sse = client
+        .get(format!("{}/v1/monitoring/events", base_url))
+        .send()
+        .await
+        .expect("Failed to GET /v1/monitoring/events");
+    assert_eq!(res_sse.status(), reqwest::StatusCode::OK);
+    let content_type = res_sse
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default();
+    assert!(content_type.starts_with("text/event-stream"));
+
+    // Read first chunk from SSE stream
+    if let Ok(Some(chunk)) = res_sse.chunk().await {
+        let chunk_str = String::from_utf8_lossy(&chunk);
+        assert!(chunk_str.contains("event: state"));
+        assert!(chunk_str.contains("telemetry"));
+        assert!(chunk_str.contains("sent_at_ms"));
+    }
+
     // Clean up temporary run file
     let _ = std::fs::remove_file("run/supervisor_status.json");
     let _ = std::fs::remove_dir_all(&test_phash_dir);
+}
+
+#[test]
+fn test_monitoring_html_javascript_syntax_validity() {
+    let html = include_str!("../src/monitoring.html");
+    for (i, part) in html.split("<script>").enumerate().skip(1) {
+        if let Some(script) = part.split("</script>").next() {
+            if let Ok(mut child) = std::process::Command::new("node")
+                .arg("--check")
+                .arg("-")
+                .stdin(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+            {
+                use std::io::Write;
+                if let Some(mut stdin) = child.stdin.take() {
+                    let _ = stdin.write_all(script.as_bytes());
+                }
+                let output = child.wait_with_output().expect("Failed to wait on node");
+                assert!(
+                    output.status.success(),
+                    "monitoring.html script #{} syntax error:\n{}",
+                    i,
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn test_studio_html_javascript_syntax_validity() {
+    let html = include_str!("../src/studio.html");
+    for (i, part) in html.split("<script>").enumerate().skip(1) {
+        if let Some(script) = part.split("</script>").next() {
+            if let Ok(mut child) = std::process::Command::new("node")
+                .arg("--check")
+                .arg("-")
+                .stdin(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+            {
+                use std::io::Write;
+                if let Some(mut stdin) = child.stdin.take() {
+                    let _ = stdin.write_all(script.as_bytes());
+                }
+                let output = child.wait_with_output().expect("Failed to wait on node");
+                assert!(
+                    output.status.success(),
+                    "studio.html script #{} syntax error:\n{}",
+                    i,
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            }
+        }
+    }
 }
 
 #[test]

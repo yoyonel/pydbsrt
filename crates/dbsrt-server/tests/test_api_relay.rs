@@ -34,11 +34,20 @@ async fn test_dual_process_remote_relay_e2e() {
     }
 
     // 1. Start Server B (Simulated Remote / o2switch / NAS)
-    let remote_state = AppState::new(
+    let catalog_path = repo_root.join("data/catalog.dbphash");
+    let remote_options = dbsrt_server::AppStateInitOptions {
+        dbphash_path: if catalog_path.exists() {
+            Some(catalog_path)
+        } else {
+            None
+        },
+        ..Default::default()
+    };
+    let remote_state = AppState::with_options(
         phash_dir.clone(),
         srt_dir.clone(),
         Arc::new(OpenSubtitlesProvider::new(None)),
-        SubtitleCache::default(),
+        remote_options,
     );
     let remote_app = create_router_with_state(remote_state);
     let remote_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
