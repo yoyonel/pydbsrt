@@ -18,6 +18,7 @@ import argparse
 import concurrent.futures
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -27,16 +28,17 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 DEFAULT_DBPHASH = "data/catalog.dbphash"
-DEFAULT_STATUS_PATH = "run/trajectory_bench_status.json"
-DEFAULT_PAUSE_SENTINEL = "run/trajectory_bench_paused"
-DEFAULT_WORKERS_FILE = "run/trajectory_bench_workers"
+DEFAULT_STATUS_PATH = "run/trajectory_status.json"
+DEFAULT_PAUSE_SENTINEL = "run/trajectory_paused"
+DEFAULT_WORKERS_FILE = "run/trajectory_workers"
 DEFAULT_REPORT_OUT = "data/reports/trajectory_batch_report.json"
 DEFAULT_JSONL_OUT = "data/reports/trajectory_batch_results.jsonl"
 DEFAULT_POLL_INTERVAL_SEC = 0.5
-DEFAULT_START_SEC = 300.0
+DEFAULT_CUTS_SPEC = "3"
 DEFAULT_FRAMES_COUNT = 20
 DEFAULT_WORKERS_COUNT = 4
 MAX_WORKERS_LIMIT = 16
+DEFAULT_TEMPORAL_SLACK_SEC = 3.5
 
 SHUTDOWN_REQUESTED = False
 
@@ -69,6 +71,134 @@ class TrajectoryBatchResult:
     elapsed_seconds: float
     success: bool
     error_message: str | None = None
+
+
+@dataclass
+class MediaTrajectoryAudit:
+    target_path: str
+    target_media: str
+    duration_sec: float
+    cuts_count: int
+    matched_cuts_count: int
+    consensus_media_id: int | None
+    consensus_title: str
+    is_temporally_coherent: bool
+    total_elapsed_seconds: float
+    success: bool
+    cuts: List[TrajectoryBatchResult]
+    error_message: str | None = None
+
+
+def check_temporal_coherence(matching_cuts: List[TrajectoryBatchResult]) -> bool:
+    if len(matching_cuts) < 2:
+        return True
+    for i in range(len(matching_cuts) - 1):
+        c1, c2 = matching_cuts[i], matching_cuts[i + 1]
+        delta_target_sec = c2.start_sec - c1.start_sec
+        delta_ref_sec = (c2.winner_initial_timestamp_ms - c1.winner_initial_timestamp_ms) / 1000.0
+        if abs(delta_target_sec - delta_ref_sec) > DEFAULT_TEMPORAL_SLACK_SEC:
+            return False
+    return True
+
+
+def get_media_duration_sec(media_path: str) -> float:
+    p = Path(media_path)
+    if p.suffix == ".phash":
+        size_bytes = p.stat().st_size
+        total_frames = size_bytes // 8
+        fps = 24.0
+        m = re.search(r"(\d+(?:\.\d+)?)fps", p.stem)
+        if m:
+            try:
+                fps = float(m.group(1))
+            except ValueError:
+                fps = 24.0
+        return total_frames / fps if fps > 0 else total_frames / 24.0
+    return 3600.0
+
+
+def compute_cut_offsets(duration_sec: float, cuts_spec: str) -> List[float]:
+    if "," in cuts_spec:
+        ratios = [float(x.strip()) for x in cuts_spec.split(",") if x.strip()]
+    else:
+        preset_map = {
+            1: [0.50],
+            3: [0.20, 0.50, 0.80],
+            5: [0.10, 0.30, 0.50, 0.70, 0.90],
+            7: [0.10, 0.25, 0.40, 0.55, 0.70, 0.85, 0.95],
+        }
+        try:
+            n = int(cuts_spec)
+            ratios = preset_map.get(n, [0.20, 0.50, 0.80])
+        except ValueError:
+            ratios = [0.20, 0.50, 0.80]
+    return [round(r * duration_sec, 2) for r in ratios]
+
+
+def elect_consensus_candidate(
+    matched_cuts: List[TrajectoryBatchResult],
+    cuts_count: int,
+) -> tuple[int | None, str, bool]:
+    """Elects consensus media ID and checks temporal coherence across matching cuts."""
+    if not matched_cuts:
+        return None, "NONE", False
+
+    vote_counts: Dict[int, int] = {}
+    title_map: Dict[int, str] = {}
+    for c in matched_cuts:
+        if c.winner_media_id is not None:
+            vote_counts[c.winner_media_id] = vote_counts.get(c.winner_media_id, 0) + 1
+            title_map[c.winner_media_id] = c.winner_title
+
+    if not vote_counts:
+        return None, "NONE", False
+
+    top_id, count = max(vote_counts.items(), key=lambda kv: kv[1])
+    min_required_votes = max(1, cuts_count // 2)
+    if count < min_required_votes:
+        return None, "NONE", False
+
+    consensus_title = title_map.get(top_id, "NONE")
+    id_cuts = [c for c in matched_cuts if c.winner_media_id == top_id]
+    is_coherent = check_temporal_coherence(id_cuts)
+    return top_id, consensus_title, is_coherent
+
+
+def run_media_audit(
+    dbsrt_bin: str,
+    media_path: str,
+    dbphash: str,
+    cuts_spec: str,
+    nb_frames: int,
+    min_coverage: float,
+    max_misses: int,
+) -> MediaTrajectoryAudit:
+    duration_sec = get_media_duration_sec(media_path)
+    cut_offsets = compute_cut_offsets(duration_sec, cuts_spec)
+    cut_results: List[TrajectoryBatchResult] = []
+    t0 = time.perf_counter()
+
+    for offset in cut_offsets:
+        res = run_single_trajectory(dbsrt_bin, media_path, dbphash, offset, nb_frames, min_coverage, max_misses)
+        cut_results.append(res)
+
+    total_wall_sec = time.perf_counter() - t0
+    matched_cuts = [c for c in cut_results if c.success and c.winner_media_id is not None]
+    consensus_id, consensus_title, is_coherent = elect_consensus_candidate(matched_cuts, len(cut_offsets))
+
+    return MediaTrajectoryAudit(
+        target_path=media_path,
+        target_media=Path(media_path).stem,
+        duration_sec=round(duration_sec, 2),
+        cuts_count=len(cut_offsets),
+        matched_cuts_count=len(matched_cuts),
+        consensus_media_id=consensus_id,
+        consensus_title=consensus_title,
+        is_temporally_coherent=is_coherent,
+        total_elapsed_seconds=round(total_wall_sec, 3),
+        success=True,
+        cuts=cut_results,
+    )
 
 
 def find_dbsrt_binary() -> str:
@@ -266,9 +396,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--phash-dir", help="Directory of .phash files to evaluate (e.g. data/__PHASH__)")
     p.add_argument("--dbphash", default=DEFAULT_DBPHASH, help="Path to .dbphash catalog file")
     p.add_argument(
-        "-s", "--start", type=float, default=DEFAULT_START_SEC, help="Start offset in seconds (default: 300.0)"
+        "-c",
+        "--cuts",
+        default=DEFAULT_CUTS_SPEC,
+        help="Multi-cuts specification (e.g. '3', '5', or '0.2,0.5,0.8') [default: '3']",
     )
-    p.add_argument("-n", "--frames", type=int, default=DEFAULT_FRAMES_COUNT, help="Number of frames (default: 20)")
+    p.add_argument(
+        "-n", "--frames", type=int, default=DEFAULT_FRAMES_COUNT, help="Number of frames per cut (default: 20)"
+    )
     p.add_argument("--min-coverage", type=float, default=0.50, help="Min coverage ratio (default: 0.50)")
     p.add_argument("--max-misses", type=int, default=3, help="Max consecutive misses (default: 3)")
     p.add_argument("-w", "--workers", type=int, default=DEFAULT_WORKERS_COUNT, help="Worker concurrency (default: 4)")
@@ -282,7 +417,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 
 def process_future_result(
-    fut: concurrent.futures.Future[TrajectoryBatchResult],
+    fut: concurrent.futures.Future[MediaTrajectoryAudit],
     target_path: str,
     done_count: int,
     total: int,
@@ -294,19 +429,20 @@ def process_future_result(
         out_f.write(json.dumps(asdict(res)) + "\n")
         out_f.flush()
         if res.success:
-            if res.winner_media_id is not None:
+            if res.consensus_media_id is not None:
                 matched_inc = 1
-                tag = f"✅ {res.winner_title} ({res.winner_matched_frames}/{res.evaluated_frames_count})"
+                coherent_tag = "coherent" if res.is_temporally_coherent else "drift"
+                tag = f"✅ {res.consensus_title} ({res.matched_cuts_count}/{res.cuts_count} cuts, {coherent_tag})"
             else:
                 pruned_inc = 1
-                tag = "⚪ NONE (Pruned)"
+                tag = f"⚪ NONE ({res.matched_cuts_count}/{res.cuts_count} cuts)"
         else:
             error_inc = 1
             tag = f"❌ ERROR: {res.error_message}"
 
         pct = done_count / total * 100.0 if total > 0 else 0.0
         print(
-            f"[{done_count}/{total} - {pct:.1f}%] {Path(target_path).name[:45]:<45} -> {tag} ({res.elapsed_seconds:.2f}s)",
+            f"[{done_count}/{total} - {pct:.1f}%] {Path(target_path).name[:40]:<40} -> {tag} ({res.total_elapsed_seconds:.2f}s)",
             flush=True,
         )
     except Exception as exc:
@@ -318,18 +454,18 @@ def process_future_result(
 def spawn_job(
     executor: concurrent.futures.ThreadPoolExecutor,
     pending_iter: Any,
-    in_flight: Dict[concurrent.futures.Future[TrajectoryBatchResult], str],
+    in_flight: Dict[concurrent.futures.Future[MediaTrajectoryAudit], str],
     dbsrt_bin: str,
     args: argparse.Namespace,
 ) -> bool:
     try:
         target = next(pending_iter)
         fut = executor.submit(
-            run_single_trajectory,
+            run_media_audit,
             dbsrt_bin,
             target,
             args.dbphash,
-            args.start,
+            args.cuts,
             args.frames,
             args.min_coverage,
             args.max_misses,
@@ -341,7 +477,7 @@ def spawn_job(
 
 
 def drain_step(
-    in_flight: Dict[concurrent.futures.Future[TrajectoryBatchResult], str],
+    in_flight: Dict[concurrent.futures.Future[MediaTrajectoryAudit], str],
     executor: concurrent.futures.ThreadPoolExecutor,
     pending_iter: Any,
     dbsrt_bin: str,
@@ -349,6 +485,7 @@ def drain_step(
     total: int,
     done_count: int,
     out_f: Any,
+    allow_spawn: bool = True,
 ) -> tuple[int, int, int, int]:
     done_futs, _ = concurrent.futures.wait(
         in_flight.keys(),
@@ -364,7 +501,7 @@ def drain_step(
         m_tot += m
         p_tot += p
         e_tot += e
-        if not SHUTDOWN_REQUESTED:
+        if allow_spawn and not SHUTDOWN_REQUESTED:
             spawn_job(executor, pending_iter, in_flight, dbsrt_bin, args)
     return cur_done, m_tot, p_tot, e_tot
 
@@ -398,21 +535,62 @@ def execute_batch(
     )
 
     with open(jsonl_path, "a", encoding="utf-8") as out_f:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=current_workers) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS_LIMIT) as executor:
             pending_iter = iter(pending_targets)
-            in_flight: Dict[concurrent.futures.Future[TrajectoryBatchResult], str] = {}
+            in_flight: Dict[concurrent.futures.Future[MediaTrajectoryAudit], str] = {}
 
-            for _ in range(current_workers):
-                if not spawn_job(executor, pending_iter, in_flight, dbsrt_bin, args):
-                    break
+            while not SHUTDOWN_REQUESTED:
+                is_paused = pause_sentinel.exists()
+                current_workers = read_desired_workers(workers_file, args.workers)
 
-            while in_flight and not SHUTDOWN_REQUESTED:
-                if pause_sentinel.exists():
-                    time.sleep(DEFAULT_POLL_INTERVAL_SEC)
+                if is_paused:
+                    if in_flight:
+                        done_count, m, p, e = drain_step(
+                            in_flight,
+                            executor,
+                            pending_iter,
+                            dbsrt_bin,
+                            args,
+                            total,
+                            done_count,
+                            out_f,
+                            allow_spawn=False,
+                        )
+                        matched_count += m
+                        pruned_count += p
+                        error_count += e
+                    else:
+                        time.sleep(DEFAULT_POLL_INTERVAL_SEC)
+                    write_status(
+                        status_path,
+                        total,
+                        done_count,
+                        matched_count,
+                        pruned_count,
+                        error_count,
+                        True,
+                        len(in_flight),
+                    )
                     continue
 
+                # Not paused: refill in_flight up to current_workers
+                while len(in_flight) < current_workers and not SHUTDOWN_REQUESTED:
+                    if not spawn_job(executor, pending_iter, in_flight, dbsrt_bin, args):
+                        break
+
+                if not in_flight:
+                    break
+
                 done_count, m, p, e = drain_step(
-                    in_flight, executor, pending_iter, dbsrt_bin, args, total, done_count, out_f
+                    in_flight,
+                    executor,
+                    pending_iter,
+                    dbsrt_bin,
+                    args,
+                    total,
+                    done_count,
+                    out_f,
+                    allow_spawn=True,
                 )
                 matched_count += m
                 pruned_count += p

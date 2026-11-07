@@ -101,11 +101,6 @@ tasks:
     cmds:
       - ./scripts/o2switch_ctl.sh audit report {{.RUN}}
 
-  o2switch:trajectory:run:
-    desc: Execute autonomous spatiotemporal trajectory tracking batch on o2switch across all .phash files
-    cmds:
-      - ./scripts/o2switch_ctl.sh trajectory {{.CLI_ARGS | default "--phash-dir data/__PHASH__ --jsonl audit/trajectory_batch.jsonl"}}
-
   o2switch:status:
     desc: Check standalone dbsrt-server process and API telemetry on o2switch
     cmds:
@@ -261,6 +256,46 @@ tasks:
     desc: Tail execution logs of remote batch pHash worker on o2switch
     cmds:
       - ./scripts/o2switch_ctl.sh batch-logs
+
+  o2switch:trajectory:run:
+    desc: Run spatiotemporal trajectory tracking batch in foreground on o2switch
+    cmds:
+      - ./scripts/o2switch_ctl.sh trajectory run {{.CLI_ARGS}}
+
+  o2switch:trajectory:start:
+    desc: Start spatiotemporal trajectory tracking batch detached in background on o2switch
+    cmds:
+      - ./scripts/o2switch_ctl.sh trajectory start {{.CLI_ARGS}}
+
+  o2switch:trajectory:status:
+    desc: Query background trajectory batch worker status and telemetry on o2switch
+    cmds:
+      - ./scripts/o2switch_ctl.sh trajectory status
+
+  o2switch:trajectory:stop:
+    desc: Stop background trajectory batch worker on o2switch
+    cmds:
+      - ./scripts/o2switch_ctl.sh trajectory stop
+
+  o2switch:trajectory:pause:
+    desc: Soft-pause background trajectory batch worker on o2switch
+    cmds:
+      - ./scripts/o2switch_ctl.sh trajectory pause
+
+  o2switch:trajectory:resume:
+    desc: Resume background trajectory batch worker on o2switch
+    cmds:
+      - ./scripts/o2switch_ctl.sh trajectory resume
+
+  o2switch:trajectory:logs:
+    desc: Tail live execution logs of background trajectory batch on o2switch
+    cmds:
+      - ./scripts/o2switch_ctl.sh trajectory logs
+
+  o2switch:trajectory:pull:
+    desc: Pull trajectory audit results from o2switch into local data/reports/audit/
+    cmds:
+      - ./scripts/o2switch_ctl.sh trajectory pull
 
   o2switch:faultwatch:start:
     desc: Deploy and start the per-minute LVE fault proxy watcher on o2switch

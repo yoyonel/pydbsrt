@@ -86,3 +86,25 @@ Les frames noires, uniformes ou à très basse énergie visuelle (évaluées via
 - **État d'implémentation actuel vs cible** :
   - *Actuel* : Les frames noires en propagation avancent sans requête index (`std::iter::empty()`), tolérées jusqu'à `max_consecutive_misses` sans polluer le scratchpad de faux candidats.
   - *Cible expérimentale* : Vérification locale directe $\mathcal{O}(1)$ dans la tranche `sparse_entries` de l'hypothèse active pour qualifier le silence de *concordant* (maintien ou renforcement du score) ou *discordant* (miss avéré).
+
+---
+
+## 4. Architecture Hybride Actuelle & Feuille de Route WAN Streaming (Option 2)
+
+### A. Phase 1 : Pipeline Hybride Déployé (Batch Haute Vitesse sur .phash Denses)
+
+L'architecture immédiate pour les campagnes de masse sur serveur distant (o2switch / appliance) découple la phase de transcodage de la phase d'inférence spatiotemporelle :
+
+1. **Source dense** : Lecture directe des fichiers `.phash` natifs (`data/__PHASH__/*.phash`), contenant l'intégralité des empreintes 64-bit brutes calculées sans sous-échantillonnage destructif.
+2. **Multi-Cuts paramétrique** : Découpage temporel automatique (ex: $N=3$ cuts à 20%, 50%, 80% ou $N=5$ cuts à 10%, 30%, 50%, 70%, 90% de la durée réelle du média).
+3. **Tracking & Consensus** : Exécution de 20 frames de propagation par cut, élection du candidat majoritaire et validation de la cohérence temporelle inter-cuts ($|(T_2 - T_1) - (R_2 - R_1)| \le \Delta_{\text{slack}}$).
+4. **Débit observé** : ~800 ms à 1.0 s par média pour 3 cuts complets en multi-workers, permettant d'auditer l'ensemble du catalogue en moins de 15 minutes sans charge CPU excessive ni saturation disque.
+
+### B. Phase 2 (Roadmap) : Pipeline Streaming WAN Distant (Option 2)
+
+Pour les nouveaux médias non encore indexés ou stockés sur des passerelles de stockage distantes (NAS Synology en FTP, disques Freebox en passerelle HTTP) :
+
+1. **Entrée réseau distante** : URLs distantes de flux vidéo (`ftp://synology/...`, `http://freebox/...`).
+2. **Extraction ciblée sans rapatriement total** : FFmpeg avec seeking distant rapide (`-ss <offset> -i <url> -t <duration>`) pour extraire uniquement les 20 à 30 secondes requises pour chaque cut, sans télécharger les dizaines de gigaoctets du conteneur MKV/AVI.
+3. **Calcul pHash à la volée** : Décodage en mémoire des frames ciblées, calcul des pHashes 64-bit et injection directe dans l'évaluateur de trajectoire.
+4. **Résilience et limitation de bande passante** : Gestion des timeouts de transport réseau, reconnexions automatiques et découplage via queue de travail asynchrone.
