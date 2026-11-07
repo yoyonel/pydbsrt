@@ -48,6 +48,14 @@ pub struct MatchTrajectoryArgs {
     /// Temporal slack tolerance in milliseconds around expected timestamp (default: 1200 ms)
     #[arg(long, default_value_t = 1200)]
     pub time_slack_ms: i64,
+
+    /// Maximum active hypotheses tracked in memory (default: 1000)
+    #[arg(long, default_value_t = 1000)]
+    pub max_active: usize,
+
+    /// Allow establishing initial t0 hypothesis seed on uniform/blank/black frames
+    #[arg(long, default_value_t = false)]
+    pub allow_blank_seed: bool,
 }
 
 /// Executes trajectory matching command.
@@ -66,6 +74,9 @@ pub fn run_match_trajectory(args: MatchTrajectoryArgs) -> Result<()> {
         max_consecutive_misses: args.max_misses,
         time_slack_ms: args.time_slack_ms,
         step_interval_ms: 1000,
+        max_active_hypotheses: args.max_active,
+        reject_blank_seed: !args.allow_blank_seed,
+        skip_blank_steps: true,
         min_coverage_ratio: args.min_coverage,
         election_strategy: dbsrt_core::trajectory::ElectionStrategy::QualityScore,
     };

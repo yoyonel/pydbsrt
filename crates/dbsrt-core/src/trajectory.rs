@@ -32,6 +32,12 @@ pub enum ElectionStrategy {
     LowestHammingCost,
 }
 
+/// Default maximum number of concurrent active hypotheses allowed.
+pub const DEFAULT_MAX_ACTIVE_HYPOTHESES: usize = 1000;
+
+/// Default initial pre-allocated scratchpad capacity for candidates buffer.
+pub const DEFAULT_SCRATCHPAD_INITIAL_CAPACITY: usize = 2048;
+
 /// Configuration criteria for trajectory tracking.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TrajectoryTrackerConfig {
@@ -45,6 +51,12 @@ pub struct TrajectoryTrackerConfig {
     pub time_slack_ms: i64,
     /// Expected interval in milliseconds between consecutive query frames.
     pub step_interval_ms: u32,
+    /// Maximum number of active hypotheses tracked concurrently in memory.
+    pub max_active_hypotheses: usize,
+    /// Whether to prohibit establishing t0 seed on uniform, blank or black frames (low visual energy).
+    pub reject_blank_seed: bool,
+    /// Whether to skip sparse catalog candidate lookups on blank or black frames during tracking propagation.
+    pub skip_blank_steps: bool,
     /// Minimum percentage of evaluated frames matched (0.0 to 1.0) required to elect a winner.
     pub min_coverage_ratio: f64,
     /// Selection strategy used to rank and elect survivor hypotheses.
@@ -59,6 +71,9 @@ impl Default for TrajectoryTrackerConfig {
             max_consecutive_misses: DEFAULT_MAX_CONSECUTIVE_MISSES,
             time_slack_ms: DEFAULT_TIME_SLACK_MS,
             step_interval_ms: DEFAULT_STEP_INTERVAL_MS,
+            max_active_hypotheses: DEFAULT_MAX_ACTIVE_HYPOTHESES,
+            reject_blank_seed: true,
+            skip_blank_steps: true,
             min_coverage_ratio: 0.50,
             election_strategy: ElectionStrategy::QualityScore,
         }
@@ -105,20 +120,84 @@ impl TrajectoryHypothesis {
     }
 }
 
+/// Candidate match observation with distance and timestamp.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CandidateObservation {
+    pub media_id: u32,
+    pub ref_timestamp_ms: u32,
+    pub distance: u32,
+}
+
+/// Pre-allocated reusable workspace scratchpad for zero-allocation trajectory updates.
+#[derive(Debug, Clone)]
+pub struct TrajectoryScratchpad {
+    /// Reusable flat vector of candidate matches for the current frame.
+    pub candidates: Vec<CandidateObservation>,
+    /// Range map of offsets: (media_id, start_idx, count) inside `candidates` sorted by media_id.
+    pub media_ranges: std::collections::HashMap<u32, (usize, usize)>,
+}
+
+impl Default for TrajectoryScratchpad {
+    fn default() -> Self {
+        Self {
+            candidates: Vec::with_capacity(DEFAULT_SCRATCHPAD_INITIAL_CAPACITY),
+            media_ranges: std::collections::HashMap::with_capacity(DEFAULT_MAX_ACTIVE_HYPOTHESES),
+        }
+    }
+}
+
+impl TrajectoryScratchpad {
+    /// Clears and loads candidate observations without reallocating underlying memory.
+    pub fn reset_and_index<I>(&mut self, candidates: I, step_threshold: u32)
+    where
+        I: IntoIterator<Item = (u32, u32, u32)>,
+    {
+        self.candidates.clear();
+        self.media_ranges.clear();
+
+        for (m_id, ts, dist) in candidates {
+            if dist <= step_threshold {
+                self.candidates.push(CandidateObservation {
+                    media_id: m_id,
+                    ref_timestamp_ms: ts,
+                    distance: dist,
+                });
+            }
+        }
+
+        // Sort by media_id to allow O(1) indexed lookup per hypothesis
+        self.candidates.sort_unstable_by_key(|c| c.media_id);
+
+        let mut idx = 0;
+        while idx < self.candidates.len() {
+            let m_id = self.candidates[idx].media_id;
+            let start = idx;
+            while idx < self.candidates.len() && self.candidates[idx].media_id == m_id {
+                idx += 1;
+            }
+            let count = idx - start;
+            self.media_ranges.insert(m_id, (start, count));
+        }
+    }
+}
+
 /// Trajectory tracker maintaining concurrent candidate paths across consecutive target frames.
 #[derive(Debug, Clone)]
 pub struct TrajectoryTracker {
     config: TrajectoryTrackerConfig,
     active_hypotheses: Vec<TrajectoryHypothesis>,
+    scratchpad: TrajectoryScratchpad,
     processed_target_frames: u32,
 }
 
 impl TrajectoryTracker {
-    /// Creates a new tracker with given configuration.
+    /// Creates a new tracker with given configuration and pre-allocated capacity.
     pub fn new(config: TrajectoryTrackerConfig) -> Self {
+        let max_hyp = config.max_active_hypotheses;
         Self {
             config,
-            active_hypotheses: Vec::new(),
+            active_hypotheses: Vec::with_capacity(max_hyp),
+            scratchpad: TrajectoryScratchpad::default(),
             processed_target_frames: 0,
         }
     }
@@ -134,9 +213,6 @@ impl TrajectoryTracker {
     }
 
     /// Seeds initial hypotheses from frame 0 candidate matches.
-    ///
-    /// # Arguments
-    /// * `candidates` - Iterator of `(media_id, ref_timestamp_ms, hamming_dist)`.
     pub fn seed<I>(&mut self, candidates: I)
     where
         I: IntoIterator<Item = (u32, u32, u32)>,
@@ -150,24 +226,16 @@ impl TrajectoryTracker {
                     dist,
                     self.config.seed_threshold,
                 ));
+                if self.active_hypotheses.len() >= self.config.max_active_hypotheses {
+                    break;
+                }
             }
         }
         self.processed_target_frames = 1;
     }
 
     /// Advances tracker with candidates observed at next target frame.
-    ///
-    /// # Arguments
-    /// * `candidates` - Candidate matches observed at current target frame: `(media_id, ref_timestamp_ms, hamming_dist)`.
-    ///
-    /// # Data Flow & Invariants
-    /// 1. Increments target frame counter.
-    /// 2. For each active hypothesis, looks for a candidate match within expected temporal slack:
-    ///    `expected_timestamp = initial_ref_timestamp_ms + target_frame_idx * step_interval_ms`
-    ///    `|ref_timestamp_ms - expected_timestamp| <= time_slack_ms`.
-    /// 3. If found with `dist <= step_threshold`: updates hypothesis score and resets misses.
-    /// 4. If not found: increments consecutive misses.
-    /// 5. Prunes hypotheses where `consecutive_misses > max_consecutive_misses`.
+    /// Uses pre-allocated scratchpad and range index: O(H + C) total update complexity.
     pub fn advance<I>(&mut self, candidates: I)
     where
         I: IntoIterator<Item = (u32, u32, u32)>,
@@ -175,30 +243,35 @@ impl TrajectoryTracker {
         let target_idx = self.processed_target_frames;
         self.processed_target_frames += 1;
 
-        let cand_list: Vec<(u32, u32, u32)> = candidates
-            .into_iter()
-            .filter(|&(_, _, d)| d <= self.config.step_threshold)
-            .collect();
+        // Zero-alloc indexed reset of frame candidate observations
+        self.scratchpad
+            .reset_and_index(candidates, self.config.step_threshold);
+
+        let time_slack = self.config.time_slack_ms;
+        let step_ms = self.config.step_interval_ms as i64;
+        let step_thresh = self.config.step_threshold;
 
         for hyp in &mut self.active_hypotheses {
-            let expected_ref = hyp.initial_ref_timestamp_ms as i64
-                + (target_idx as i64 * self.config.step_interval_ms as i64);
-            let best_match = cand_list
-                .iter()
-                .filter(|&&(m_id, ref_ts, _)| {
-                    m_id == hyp.media_id
-                        && (ref_ts as i64 - expected_ref).abs() <= self.config.time_slack_ms
-                })
-                .min_by_key(|&&(_, _, dist)| dist);
+            let expected_ref = hyp.initial_ref_timestamp_ms as i64 + (target_idx as i64 * step_ms);
 
-            if let Some(&(_, ref_ts, dist)) = best_match {
-                let quality =
-                    1.0 - (dist as f64 / (self.config.step_threshold.max(1) as f64 + 1.0));
+            // O(1) retrieval of candidates for this specific media_id via scratchpad range
+            let best_match =
+                if let Some(&(start, count)) = self.scratchpad.media_ranges.get(&hyp.media_id) {
+                    self.scratchpad.candidates[start..start + count]
+                        .iter()
+                        .filter(|c| (c.ref_timestamp_ms as i64 - expected_ref).abs() <= time_slack)
+                        .min_by_key(|c| c.distance)
+                } else {
+                    None
+                };
+
+            if let Some(cand) = best_match {
+                let quality = 1.0 - (cand.distance as f64 / (step_thresh.max(1) as f64 + 1.0));
                 hyp.matched_frames += 1;
-                hyp.last_ref_timestamp_ms = ref_ts;
+                hyp.last_ref_timestamp_ms = cand.ref_timestamp_ms;
                 hyp.consecutive_misses = 0;
                 hyp.accumulated_score += quality.max(0.0);
-                hyp.total_hamming_cost += dist;
+                hyp.total_hamming_cost += cand.distance;
             } else {
                 hyp.consecutive_misses += 1;
             }
@@ -278,6 +351,9 @@ mod tests {
             max_consecutive_misses: 2,
             time_slack_ms: 200,
             step_interval_ms: 1000,
+            max_active_hypotheses: 100,
+            reject_blank_seed: true,
+            skip_blank_steps: true,
             min_coverage_ratio: 0.50,
             election_strategy: ElectionStrategy::QualityScore,
         };

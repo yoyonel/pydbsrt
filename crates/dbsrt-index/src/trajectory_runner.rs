@@ -51,12 +51,43 @@ pub fn execute_trajectory_matching(
         anyhow::bail!("No frames extracted from target media");
     }
 
+    let target_name = req
+        .target_path
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
+
+    // Find first frame suitable for t0 seeding (reject blank/black frames if configured)
+    let seed_idx_opt = if config.reject_blank_seed {
+        hashes.iter().position(|&h| !dbsrt_core::is_blank_phash(h))
+    } else {
+        Some(0)
+    };
+
+    let seed_idx = match seed_idx_opt {
+        Some(idx) => idx,
+        None => {
+            return Ok(TrajectoryMatchResult {
+                target_media: target_name,
+                evaluated_frames_count: hashes.len() as u32,
+                initial_candidates_count: 0,
+                surviving_trajectories_count: 0,
+                winner_media_id: None,
+                winner_title: "NONE".to_string(),
+                winner_matched_frames: 0,
+                winner_score: 0.0,
+                winner_initial_timestamp_ms: 0,
+                elapsed_seconds: t0.elapsed().as_secs_f64(),
+            });
+        }
+    };
+
     let mut tracker = TrajectoryTracker::new(config.clone());
 
-    // Frame 0: Seed hypotheses from sparse index matches
+    // Frame seed_idx: Seed hypotheses from sparse index matches
     let f0_matches = req
         .dbphash
-        .search_sparse(&hashes[..1], config.seed_threshold);
+        .search_sparse(&hashes[seed_idx..=seed_idx], config.seed_threshold);
     let initial_candidates: Vec<(u32, u32, u32)> = f0_matches
         .into_iter()
         .map(|m| (m.cut_entry.media_id, m.cut_entry.timestamp_ms, m.distance))
@@ -64,17 +95,21 @@ pub fn execute_trajectory_matching(
     let initial_count = initial_candidates.len();
     tracker.seed(initial_candidates);
 
-    // Frames 1..N: Advance and filter trajectories
-    for (_idx, &hash) in hashes.iter().enumerate().skip(1) {
+    // Frames (seed_idx + 1)..N: Advance and filter trajectories
+    for &hash in &hashes[(seed_idx + 1)..] {
         if tracker.active_count() == 0 {
             break; // All hypotheses pruned early
         }
-        let step_matches = req.dbphash.search_sparse(&[hash], config.step_threshold);
-        let step_candidates: Vec<(u32, u32, u32)> = step_matches
-            .into_iter()
-            .map(|m| (m.cut_entry.media_id, m.cut_entry.timestamp_ms, m.distance))
-            .collect();
-        tracker.advance(step_candidates);
+        if config.skip_blank_steps && dbsrt_core::is_blank_phash(hash) {
+            tracker.advance(std::iter::empty());
+        } else {
+            let step_matches = req.dbphash.search_sparse(&[hash], config.step_threshold);
+            let step_candidates: Vec<(u32, u32, u32)> = step_matches
+                .into_iter()
+                .map(|m| (m.cut_entry.media_id, m.cut_entry.timestamp_ms, m.distance))
+                .collect();
+            tracker.advance(step_candidates);
+        }
     }
 
     let elapsed = t0.elapsed().as_secs_f64();
@@ -87,22 +122,19 @@ pub fn execute_trajectory_matching(
             .find_media_by_id(h.media_id)
             .map(|m| req.dbphash.get_title(m).to_string())
             .unwrap_or_else(|| "UNKNOWN".to_string());
+        let initial_ts = h
+            .initial_ref_timestamp_ms
+            .saturating_sub(seed_idx as u32 * config.step_interval_ms);
         (
             Some(h.media_id),
             title,
             h.matched_frames,
             h.accumulated_score,
-            h.initial_ref_timestamp_ms,
+            initial_ts,
         )
     } else {
         (None, "NONE".to_string(), 0, 0.0, 0)
     };
-
-    let target_name = req
-        .target_path
-        .file_stem()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_default();
 
     Ok(TrajectoryMatchResult {
         target_media: target_name,
