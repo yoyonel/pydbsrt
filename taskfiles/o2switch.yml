@@ -101,6 +101,11 @@ tasks:
     cmds:
       - ./scripts/o2switch_ctl.sh audit report {{.RUN}}
 
+  o2switch:trajectory:run:
+    desc: Execute autonomous spatiotemporal trajectory tracking batch on o2switch across all .phash files
+    cmds:
+      - ./scripts/o2switch_ctl.sh trajectory {{.CLI_ARGS | default "--phash-dir data/__PHASH__ --jsonl audit/trajectory_batch.jsonl"}}
+
   o2switch:status:
     desc: Check standalone dbsrt-server process and API telemetry on o2switch
     cmds:

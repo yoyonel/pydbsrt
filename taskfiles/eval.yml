@@ -25,6 +25,12 @@ tasks:
     cmds:
       - uv run --no-sync python scripts/matching_bench_runner.py {{.CLI_ARGS}}
 
+  eval:trajectory:batch:
+    desc: Autonomous spatiotemporal trajectory tracking batch runner with streaming JSONL and dynamic workers
+    deps: [rs:build]
+    cmds:
+      - uv run --no-sync python scripts/trajectory_bench_runner.py {{.CLI_ARGS}}
+
   eval:trailers:
     desc: Automated empirical verification of pHash matching on remote video streams (YouTube trailers/clips)
     deps: [rs:build]

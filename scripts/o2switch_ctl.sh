@@ -944,8 +944,17 @@ REMOTE_SCRIPT
     ssh "${O2SWITCH_HOST}" "cd $(printf '%q' "${REMOTE_BASE}") && ./bin/python3 -I scripts/o2switch_audit_remote.py $(printf '%q ' "${AUDIT_ARGS[@]}")"
     ;;
 
+  trajectory)
+    # Spatiotemporal trajectory tracking batch runner on o2switch
+    check_ssh
+    TRAJ_ARGS=("${@:2}")
+    rsync -a --chmod=F755 "scripts/trajectory_bench_runner.py" "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/"
+    # shellcheck disable=SC2029
+    ssh "${O2SWITCH_HOST}" "cd $(printf '%q' "${REMOTE_BASE}") && ./bin/python3 -I scripts/trajectory_bench_runner.py $(printf '%q ' "${TRAJ_ARGS[@]}")"
+    ;;
+
   *)
-    echo "Usage: $0 {build|test-local|sync|deploy|rollback|releases|start|stop|restart|status|logs|demo|setup-cron|remove-cron|rotate-key|rotate-readonly-key|monitoring|top|pull-catalog|backup-nas|batch-tvshow|batch-movies|batch-status|batch-summary|batch-sync|batch-pause|batch-resume|batch-workers|batch-stop|batch-logs|faultwatch|audit}"
+    echo "Usage: $0 {build|test-local|sync|deploy|rollback|releases|start|stop|restart|status|logs|demo|setup-cron|remove-cron|rotate-key|rotate-readonly-key|monitoring|top|pull-catalog|backup-nas|batch-tvshow|batch-movies|batch-status|batch-summary|batch-sync|batch-pause|batch-resume|batch-workers|batch-stop|batch-logs|faultwatch|audit|trajectory}"
     exit 1
     ;;
 esac
