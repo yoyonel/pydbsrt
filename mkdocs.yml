@@ -195,6 +195,7 @@ nav:
       - Étude Backoffices & Refonte Portail: explanation/2026-11-03-etude-comparative-backoffices-et-refonte-portail-monitoring.md
       - Architecture des Flux & Relais WAN (Pipeline E2E): explanation/2026-11-03-architecture-flux-pipeline-matching-et-relais-wan.md
       - Audit de Performance Pipeline (2 758 Cuts): explanation/2026-11-04-audit-global-performance-pipeline-matching.md
+      - Extension Banc Matching & Cache Probes: explanation/2026-11-07-extension-banc-matching-cuts-vs-streaming-et-cache-probes.md
   - 📊 Benchmarks & Preuves:
       - Campagnes Empiriques:
           - Rapport Batch TVShow Synology: history/2026-10-25-rapport-batch-import-tvshow-synology.md
