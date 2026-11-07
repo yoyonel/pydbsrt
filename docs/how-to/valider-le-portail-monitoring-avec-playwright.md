@@ -9,9 +9,9 @@ tags:
   - Monitoring
 ---
 
-# Valider le Portail de Monitoring avec Playwright
+# Valider les Portails Web et l'API avec Playwright
 
-Ce guide décrit la procédure pour exécuter la suite de tests end-to-end (E2E) automatisée sur le portail web de monitoring embarqué (`dbsrt-server`), générer un screencast vidéo de session et vérifier formellement la conformité des 13 scopes de fonctionnalités héritées.
+Ce guide décrit la procédure pour exécuter la suite de tests end-to-end (E2E) automatisée sur les portails web (`monitoring.html`, `studio.html`, web top `/top`) et la passerelle de sécurité o2switch, générer un screencast vidéo de session, et vérifier formellement la couverture d'API à 100% ainsi que le profilage JavaScript V8 via CDP.
 
 ---
 
@@ -21,50 +21,58 @@ Pour exécuter la recette E2E sans installer de dépendances système lourdes :
 
 - **Navigateur** : Google Chrome ou Chromium installé sur le système (`/usr/bin/google-chrome` ou `/usr/bin/chromium`).
 - **Gestionnaire Python** : `uv` installé pour isoler automatiquement les dépendances Playwright.
-- **Daemon local dbsrt** : Le serveur dbsrt doit être actif sur le port local par défaut (`http://127.0.0.1:8765`).
+- **Daemon dbsrt** : Actif localement (`http://127.0.0.1:8765` ou port auto-découvert via `/tmp/dbsrt-server.json`), ou distant sur o2switch (`O2SWITCH_URL`).
 
-Vérifiez la disponibilité du démon avant de lancer le test :
+Vérifiez la disponibilité du démon local avant de lancer le test :
 
 ```bash
 task server:status
-# ou pour le service utilisateur systemd :
-task client:linux:status
 ```
 
 ---
 
-## 2. Exécution du Test E2E Automatisé
+## 2. Exécution des Tests E2E Automatisés
 
-La suite complète est déclarée dans le Taskfile et s'invoque via une commande unique :
+La suite propose deux cibles déclaratives dans le Taskfile :
+
+### Cible 1 : Validation locale (Daemon dbsrt-server)
 
 ```bash
 task test:portal:e2e
 ```
 
+### Cible 2 : Validation Cloud réelle (o2switch cPanel Gateway)
+
+```bash
+task test:portal:e2e:cloud
+```
+
 Cette commande orchestre les étapes suivantes :
 
-1. Téléchargement à la volée de Playwright et de son module d'enregistrement vidéo FFmpeg.
-2. Lancement de Chrome en mode Headless (résolution 1400×900).
-3. Parcours complet des 8 étapes d'automatisation et assertion des 13 scopes fonctionnels.
-4. Découpage et capture de 9 captures d'écran HD.
-5. Finalisation de l'enregistrement vidéo WebM et transcodage automatique en MP4 (H.264 / AAC) lisible sur le web.
+1. Lancement de Chromium en mode Headless (résolution 1440×920).
+2. Activation du profiler V8 CDP (`Profiler.startPreciseCoverage`) pour mesurer la couverture de code JavaScript.
+3. Interception et traçage de 100% des requêtes réseau (`page.on("request")` et `page.on("response")`).
+4. Parcours séquentiel des **8 groupes de scénarios use cases**.
+5. Capture de copies d'écran HD par étape dans `target/e2e_portal/screenshots/`.
+6. Enregistrement vidéo continu WebM transcodé automatiquement en MP4 (H.264 / AAC) lisible sur le web.
+7. Calcul mathématique et affichage de la matrice de couverture d'API (`coverage_endpoints.json`) et du rapport V8 JS (`coverage_v8_js.json`).
 
 ---
 
-## 3. Scopes Fonctionnels Validés par le Scénario
+## 3. Scopes Fonctionnels Validés par les 8 Groupes
 
 Le script `scripts/e2e_portal_playwright.py` valide séquentiellement :
 
-| Étape | Scope Testé | Assertions Clés |
+| Groupe | Composant Testé | Assertions Clés |
 | :--- | :--- | :--- |
-| **1** | En-tête & Contrôles | Présence du titre, pastille d'état `Actif`, bascule pause/reprise (`⏸` ➔ `▶` ➔ `⏸`), affichage de la modal d'authentification API. |
-| **2** | Vue d'Ensemble (`#overview`) | Chargement asynchrone des 5 tuiles d'état système. |
-| **3** | Ingestion & Décodage (`#ingestion`) | Bannière TUI 4 lignes, métriques de la file batch, sous-onglets Tâches (`tab-jobs`), Statistiques réelles (`tab-stats`), Récents (`tab-completed`) avec dépliement de l'accordéon détail et pagination, et Sources (`tab-sources`). |
-| **4** | Catalogue (`#catalogue`) | Affichage de l'explorateur multi-sources et métadonnées pHash. |
-| **5** | Audit (`#audit`) | Vérification du cartouche de run, boutons de contrôle et indicateurs de précision. |
-| **6** | Superviseur (`#supervisor`) | Affichage de la carte d'état RPi4, vCPU LVE et terminal de logs. |
-| **7** | Système (`#system`) | Rendu de l'arbre d'informations système et matériel fastfetch. |
-| **8** | Pied de Page | Vérification des métriques hôte, RAM, Uptime, latence RTT et âge de synchronisation. |
+| **G1** | Passerelle Sécurisée & Auth | Formulaire de login HTML (401), rejet de clé invalide (.err-box), session cookie `dbsrt_session`, accès direct URL token (`?token=`), et déconnexion `/logout`. |
+| **G2** | Stream SSE & Anti-Polling | Connexion persistance `/v1/monitoring/events`, header `X-Accel-Buffering: no`, invariant strict zéro-polling (0 appel vers `metrics`, `logs`, `latest`). |
+| **G3** | Horloge de Cristian | Présence header `X-Server-Time-Ms`, calcul de la latence RTT et du jitter réseau dans le footer (`#sys-sync`). |
+| **G4** | Monitoring 6 Vues & SWR | Navigation `#overview`, `#ingestion`, `#catalogue`, `#audit`, `#supervisor`, `#system`, cache SWR (<15 ms), pagination et drawer détail accordéon. |
+| **G5** | Studio Couplages & Timeline | Recherche/filtres médias, sélection de piste SRT, clic sur cue bar dans la minimap timeline -> inspecteur `#inspector-card`, extraction brute `/v1/subtitles/{hash}`. |
+| **G6** | Studio Catalogue & Playground | Consultation statut catalogue (`/v1/catalog/status`), hot-reload (`/v1/catalog/reload`), formulaires interactifs (`/v1/search`, `/v1/recognize`, `/v1/certify`, `/v1/retarget`, `/v1/autosync`, `/v1/download`). |
+| **G7** | Studio Observabilité 5 Tiers | Sélection preset (`2-Blue Forever`), déclenchement matching `#btn-pipeline-match`, rendu des 5 tiers avec timings réels >0 ms (FFmpeg, WAN, MIH, SRT, Calage). |
+| **G8** | Portail Web Top (`/top`) | Chargement de la vue top web et validation du rendu des tables de processus. |
 
 ---
 
@@ -72,15 +80,10 @@ Le script `scripts/e2e_portal_playwright.py` valide séquentiellement :
 
 Par défaut, les artefacts d'exécution sont générés dans `target/e2e_portal/` :
 
-- **Captures d'écran individuelles** : `target/e2e_portal/screenshots/*.png`
-- **Screencast vidéo MP4 (H.264)** : `target/e2e_portal/screencasts/portal_e2e_screencast.mp4`
-- **Screencast vidéo WebM** : `target/e2e_portal/screencasts/portal_e2e_screencast.webm`
-
-Pour rediriger le dossier de sortie vers un répertoire personnalisé :
-
-```bash
-PORTAL_E2E_OUTPUT_DIR=/tmp/mon_rapport task test:portal:e2e
-```
+- **Rapport de Couverture d'API (100% routes)** : `target/e2e_portal/coverage_endpoints.json`
+- **Rapport de Profilage V8 JavaScript** : `target/e2e_portal/coverage_v8_js.json`
+- **Captures d'écran individuelles par groupe** : `target/e2e_portal/screenshots/*.png`
+- **Screencast vidéo complet MP4 (H.264)** : `target/e2e_portal/screencasts/portal_e2e_screencast.mp4`
 
 ---
 
@@ -94,7 +97,7 @@ uv run --with playwright playwright install ffmpeg
 ```
 
 ### Le test échoue avec `TimeoutError: Page.wait_for_selector`
-Si le serveur local subit une contention disque lors du snapshot `dbsrt top --json`, augmentez le délai d'attente ou assurez-vous que le binaire `dbsrt` est présent dans le `PATH` :
+Si le serveur local subit une contention disque lors du snapshot `dbsrt top --json`, assurez-vous que le binaire `dbsrt` est présent dans le `PATH` :
 
 ```bash
 which dbsrt || cp target/release/dbsrt ~/.local/bin/dbsrt
