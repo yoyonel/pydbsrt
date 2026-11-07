@@ -102,3 +102,17 @@ Si le serveur local subit une contention disque lors du snapshot `dbsrt top --js
 ```bash
 which dbsrt || cp target/release/dbsrt ~/.local/bin/dbsrt
 ```
+
+### Le test Cloud (`--cloud`) échoue sur HTTP 503 / 429 (WAF Tiger Protect)
+
+L'hébergeur o2switch applique un filtrage WAF strict (**Tiger Protect**) bloquant les navigateurs headless non interactifs venant du WAN public. Pour tester le serveur o2switch sans blocage :
+
+- Utilisez la recette E2E SSH hermétique interne :
+  ```bash
+  task o2switch:e2e
+  ```
+
+- Ou effectuez les tests Playwright locaux ou sur l'appliance Raspberry Pi 4 :
+  ```bash
+  uv run --with playwright python scripts/e2e_portal_playwright.py --url http://<RPI4_IP>:8766 --key ""
+  ```
