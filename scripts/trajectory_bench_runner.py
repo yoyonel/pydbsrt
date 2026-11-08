@@ -120,18 +120,19 @@ def get_media_duration_sec(media_path: str) -> float:
 def compute_cut_offsets(duration_sec: float, cuts_spec: str) -> List[float]:
     if "," in cuts_spec:
         ratios = [float(x.strip()) for x in cuts_spec.split(",") if x.strip()]
-    else:
-        preset_map = {
-            1: [0.50],
-            3: [0.20, 0.50, 0.80],
-            5: [0.10, 0.30, 0.50, 0.70, 0.90],
-            7: [0.10, 0.25, 0.40, 0.55, 0.70, 0.85, 0.95],
-        }
-        try:
-            n = int(cuts_spec)
-            ratios = preset_map.get(n, [0.20, 0.50, 0.80])
-        except ValueError:
-            ratios = [0.20, 0.50, 0.80]
+        return [round(r * duration_sec, 2) for r in ratios]
+
+    preset_map = {
+        1: [0.50],
+        3: [0.20, 0.50, 0.80],
+        5: [0.10, 0.30, 0.50, 0.70, 0.90],
+        7: [0.10, 0.25, 0.40, 0.55, 0.70, 0.85, 0.95],
+    }
+    try:
+        n = int(cuts_spec)
+        ratios = preset_map.get(n, [(i + 1) / (n + 1) for i in range(n)] if n > 0 else [0.20, 0.50, 0.80])
+    except ValueError:
+        ratios = [0.20, 0.50, 0.80]
     return [round(r * duration_sec, 2) for r in ratios]
 
 

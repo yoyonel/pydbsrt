@@ -142,6 +142,7 @@ nav:
       - Interconnecter NAS Synology & o2switch FTP: how-to/interconnecter-nas-synology-et-o2switch-ftp.md
       - Ingérer les Médias Freebox via RPi4 & o2switch: how-to/ingerer-medias-freebox-via-rpi4-et-o2switch.md
       - Batch de Calcul & Synchronisation o2switch: how-to/executer-batch-calcul-et-synchronisation-o2switch.md
+      - Batch de Tracking Spatiotemporel o2switch: how-to/executer-batch-trajectory-tracking-o2switch.md
       - Superviser les Batchs o2switch depuis un RPi4: how-to/superviser-batch-o2switch-depuis-rpi4.md
       - Compiler, Déployer et Lancer le CLI dbsrt sur RPi4: how-to/compiler-deployer-cli-top-sur-rpi4.md
       - Exécuter les Recettes de Chaos Testing: how-to/executer-recettes-chaos-testing.md
@@ -196,6 +197,7 @@ nav:
       - Architecture des Flux & Relais WAN (Pipeline E2E): explanation/2026-11-03-architecture-flux-pipeline-matching-et-relais-wan.md
       - Audit de Performance Pipeline (2 758 Cuts): explanation/2026-11-04-audit-global-performance-pipeline-matching.md
       - Extension Banc Matching & Cache Probes: explanation/2026-11-07-extension-banc-matching-cuts-vs-streaming-et-cache-probes.md
+      - Tracking Spatiotemporel Multi-Hypothèses: explanation/2026-11-07-trajectory-matching-multi-hypothesis-tracking.md
   - 📊 Benchmarks & Preuves:
       - Campagnes Empiriques:
           - Rapport Batch TVShow Synology: history/2026-10-25-rapport-batch-import-tvshow-synology.md

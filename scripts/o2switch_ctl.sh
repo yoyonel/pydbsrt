@@ -974,9 +974,10 @@ fi
 screen -X -S dbsrt_trajectory quit 2>/dev/null || true
 export PATH="$HOME/${BASE}/bin:$PATH"
 export RAYON_NUM_THREADS=2
+ARGS=$(printf '%q ' "$@")
 
 # Launch in persistent detached screen session
-screen -dmS dbsrt_trajectory bash -c "echo \$\$ > '${PID_FILE}'; exec ./bin/python3 -u scripts/trajectory_bench_runner.py $* >> '${LOG_FILE}' 2>&1"
+screen -dmS dbsrt_trajectory bash -c "echo \$\$ > '${PID_FILE}'; exec ./bin/python3 -u scripts/trajectory_bench_runner.py ${ARGS} >> '${LOG_FILE}' 2>&1"
 sleep 1
 PID=$(cat "${PID_FILE}" 2>/dev/null || true)
 echo "✓ Started persistent trajectory batch daemon (screen: dbsrt_trajectory, PID: ${PID})."

@@ -168,6 +168,14 @@ Cette page dresse le dictionnaire exhaustif de toutes les cibles d'orchestration
 | `task o2switch:batch:workers` | Interroge ou règle dynamiquement la concurrence des workers sur o2switch (`run/desired_workers`). |
 | `task o2switch:batch:stop` | Arrête proprement le travailleur batch en arrière-plan sur o2switch. |
 | `task o2switch:batch:logs` | Suit en direct (`tail -f`) les journaux d'exécution du batch distant sur o2switch. |
+| `task o2switch:trajectory:run` | Exécute le batch de tracking spatiotemporel en avant-plan sur o2switch (`--phash-dir`, `--cuts`, `--limit`). |
+| `task o2switch:trajectory:start` | Lance le batch de tracking spatiotemporel en tâche de fond détachée sous `screen` sur o2switch (persistant, libère immédiatement le poste local). |
+| `task o2switch:trajectory:status` | Interroge l'état d'avancement, la télémétrie JSON et le statut de pause du batch distant. |
+| `task o2switch:trajectory:pause` | Met en pause douce le batch distant sur o2switch (`run/trajectory_paused`). |
+| `task o2switch:trajectory:resume` | Reprend l'exécution du batch distant sur o2switch. |
+| `task o2switch:trajectory:stop` | Arrête proprement le batch distant par `SIGTERM` et termine la session `screen`. |
+| `task o2switch:trajectory:logs` | Suit en direct les logs d'exécution du batch distant sur o2switch (`tail -f`). |
+| `task o2switch:trajectory:pull` | Rapatrie les résultats d'audit (`audit/*.jsonl`) depuis o2switch vers `data/reports/audit/`. |
 | `task o2switch:monitoring` | Affiche l'URL publique du tableau de bord web et le lien direct d'authentification mobile 4G/5G. |
 | `task o2switch:top` | Ouvre le moniteur TUI plein écran en direct sur o2switch via SSH (`ssh -t`). |
 | `task o2switch:pull-catalog` | Rapatrie le catalogue compilé `catalog.dbphash`, les sous-titres SRT et journaux depuis o2switch vers le stockage local / appliance. |
