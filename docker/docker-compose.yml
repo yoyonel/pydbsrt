@@ -68,9 +68,12 @@ services:
   pgweb:
     image: sosedoff/pgweb:latest
     restart: unless-stopped
-    environment:
-      - PGWEB_DATABASE_URL=postgres://docker:docker@bktreedb:5432/bktreedb?sslmode=disable
+    command: ["/usr/bin/pgweb", "--bind=0.0.0.0", "--listen=8081", "--sessions", "--bookmarks-dir=/etc/pgweb/bookmarks"]
     ports:
       - "${PGWEB_PORT:-8086}:8081"
+    volumes:
+      - ./pgweb/bookmarks:/etc/pgweb/bookmarks:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       - bktreedb

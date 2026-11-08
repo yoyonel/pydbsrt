@@ -1,0 +1,7 @@
+# PostgreSQL 17 Local BK-Tree Database
+host = "bktreedb"
+port = 5432
+user = "docker"
+password = "docker"
+database = "bktreedb"
+sslmode = "disable"

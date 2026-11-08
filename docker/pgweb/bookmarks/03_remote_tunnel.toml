@@ -1,0 +1,8 @@
+# PostgreSQL via SSH Tunnel (ex: o2switch / remote jump host)
+# Requires a running tunnel or direct port forward
+host = "host.docker.internal"
+port = 5434
+user = "docker"
+password = "docker"
+database = "bktreedb"
+sslmode = "disable"
