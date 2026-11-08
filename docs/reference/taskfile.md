@@ -52,6 +52,7 @@ Cette page dresse le dictionnaire exhaustif de toutes les cibles d'orchestration
 | `task db:psql` | Ouvre une session interactive `psql` dans le conteneur PostgreSQL actif. |
 | `task db:import:all-phash` | Importe en lot les fichiers `.phash` dans PostgreSQL via flux binaire `COPY`. |
 | `task db:lint:safety` | Vérifie la compatibilité et la non-régression des scripts de migration DDL. |
+| `task db:test:migration` | Exécute le banc d'essai d'intégrité des migrations et contraintes SQL sur base sandbox isolée (`scripts/test_db_migrations.py`). |
 | `task db:tui` | Lance l'explorateur interactif plein écran SQL TUI Harlequin sur PostgreSQL 17 local (`:5433`). |
 | `task db:backfill:medias` | Rétro-propage les métadonnées riches depuis les `.phash` et la télémétrie JSONL vers la table `medias`. |
 | `task db:audit` | Génère un bilan d'intégrité exhaustif des valeurs `NULL` de la table `medias` et inspecte la vue `v_productions`. |

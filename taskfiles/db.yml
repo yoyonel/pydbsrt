@@ -45,6 +45,12 @@ tasks:
     cmds:
       - python3 scripts/lint_migrations.py {{.CLI_ARGS}}
 
+  db:test:migration:
+    desc: Automated integration test of pending migrations and domain constraints on isolated sandbox DB
+    deps: [db:up]
+    cmds:
+      - uv run python scripts/test_db_migrations.py {{.CLI_ARGS}}
+
   build-db:
     desc: Build custom PostgreSQL 17 BK-tree Docker image
     internal: true

@@ -3,6 +3,7 @@
 //! - Hardware-accelerated Hamming distance (`hamming_distance`)
 //! - Binary file format definitions
 
+pub mod assets;
 pub mod container;
 pub mod coupling;
 pub mod cuts;
@@ -19,6 +20,11 @@ pub mod srt;
 pub mod trajectory;
 pub mod video;
 
+pub use assets::{
+    check_completeness, AssetKind, ContainerIdentity, MediaAsset, MediaSource,
+    PHashLifecycleStatus, ProbeSpecs, StorageKind, SyntheticQueryKind, DEFAULT_TOLERANCE_RATIO_CFR,
+    DEFAULT_TOLERANCE_RATIO_VFR, MIN_COMPLETENESS_MARGIN_FRAMES,
+};
 pub use container::{
     extract_embedded_subtitle, inspect_container, language_matches, ContainerInspection,
     SubtitleStreamInfo,

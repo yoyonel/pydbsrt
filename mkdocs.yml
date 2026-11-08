@@ -136,6 +136,7 @@ nav:
       - Invalider et Purger des Données pHash: how-to/invalider-donnees-phash.md
       - Recette E2E du Moniteur TUI Rust (dbsrt top): how-to/2026-10-26-recette-e2e-tui-rust.md
       - Guide Tests Scénarios TUI Headless: how-to/2026-10-27-guide-tests-scenarios-tui.md
+      - Installation From Scratch & Recette Autonome (Sans IA): how-to/2026-11-08-installation-from-scratch-et-recette-autonome-sans-ia.md
       - Audit d'Intégrité Catalogue & Stockage: how-to/2026-10-26-audit-integrite-catalogue-et-stockage.md
       - Déployer sur Hébergement Cloud o2switch: how-to/deployer-o2switch-cloud-cpanel.md
       - Déployer & Restaurer une Release o2switch: how-to/deployer-et-restaurer-une-release-o2switch.md
@@ -198,6 +199,8 @@ nav:
       - Audit de Performance Pipeline (2 758 Cuts): explanation/2026-11-04-audit-global-performance-pipeline-matching.md
       - Extension Banc Matching & Cache Probes: explanation/2026-11-07-extension-banc-matching-cuts-vs-streaming-et-cache-probes.md
       - Tracking Spatiotemporel Multi-Hypothèses: explanation/2026-11-07-trajectory-matching-multi-hypothesis-tracking.md
+      - Modèle Inputs-First (Sources & Assets): explanation/2026-11-08-modele-donnees-inputs-media-sources-et-assets.md
+      - Identité Binaire des Conteneurs & Anti-Shadowing: explanation/2026-11-08-etude-architecture-identite-binaire-conteneurs-et-anti-shadowing.md
   - 📊 Benchmarks & Preuves:
       - Campagnes Empiriques:
           - Rapport Batch TVShow Synology: history/2026-10-25-rapport-batch-import-tvshow-synology.md

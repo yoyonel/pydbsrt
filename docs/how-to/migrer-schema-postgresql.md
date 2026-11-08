@@ -73,9 +73,10 @@ Toutes les migrations sont stockées sous `crates/dbsrt-index/migrations/`.
    task db:status
    ```
 
-4. Exécutez la suite de vérification de sécurité DDL et de non-régression :
+4. Validez l'intégrité fonctionnelle et la sécurité de migration sur sandbox isolée :
    ```bash
    task db:lint:safety
+   task db:test:migration
    task test:rs
    ```
 
