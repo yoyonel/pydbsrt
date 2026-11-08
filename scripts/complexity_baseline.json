@@ -99,16 +99,6 @@
     "max_parameters": 1,
     "max_nesting": 5
   },
-  "crates/dbsrt-cli/src/commands/pack.rs::mod::run_pack": {
-    "file_path": "crates/dbsrt-cli/src/commands/pack.rs",
-    "scope": "mod",
-    "function_name": "run_pack",
-    "start_line": 81,
-    "max_loc": 125,
-    "max_ccn": 24,
-    "max_parameters": 1,
-    "max_nesting": 6
-  },
   "crates/dbsrt-cli/src/commands/recognize.rs::mod::run_recognize_media": {
     "file_path": "crates/dbsrt-cli/src/commands/recognize.rs",
     "scope": "mod",

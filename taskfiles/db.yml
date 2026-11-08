@@ -56,6 +56,12 @@ tasks:
     cmds:
       - uv run python scripts/quarantine_truncated_phashes.py {{.CLI_ARGS}}
 
+  phash:reconcile:
+    desc: Reconcile release-named phashes into canonical <moviehash>.<fps>fps.phash + sidecar JSON
+    deps: [db:up]
+    cmds:
+      - uv run python scripts/reconcile_phash_filenames.py {{.CLI_ARGS}}
+
   db:backfill:assets:
     desc: Backfill media_sources, moviehash, expected_frames, and V6 lineage columns in PostgreSQL
     deps: [db:up]
