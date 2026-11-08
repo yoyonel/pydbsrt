@@ -9,7 +9,7 @@ expression: grid
 │ 📈  CUMUL SESS │ 0.0 MB traités en 0s (En attente de flux...)                                                                             │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ┌ 📚  AIDE CONTEXTUELLE, GLOSSAIRE TECHNIQUE & COMMANDES D'EXPLOITATION (FULL-FRAME) ───────────────────────────────────────────────────────┐
-│  [0/g] Général   [1] Tâches   [2/h] Stats   [3/r] Récents   [4/m] Médias   [5/s] Sources   [6/y] Système                                 │
+│  [0/g] Général   [1] Tâches   [2/h] Stats   [3/r] Récents   [4/m] Médias   [5/s] Sources   [6/y] Système   [7/t] Trajectoires            │
 │  [0-5] ou [Tab/Shift+Tab / ←/→] Naviguer entre onglets d'aide  │  [↑/↓/k/j/PgUp/PgDn] Défiler  │  [Esc/?] Revenir à la vue précédente    │
 │                                                                                                                                          │
 │                                                                                                                                          │
@@ -31,4 +31,4 @@ expression: grid
 │      VIERGE     : Fichier découvert lors du scan mais JAMAIS traité. Aucune empreinte pHash ni sous-titre.                               │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 
-  [1] Tâches   [2/h] Stats   [3/r] Récents   [4/m] Médias   [5/s] Sources   [6/y] Système  │ [0-6/Tab] Onglet Aide  [↑/↓/k/j] Défiler  [Esc/
+  [1] Tâches   [2/h] Stats   [3/r] Récents   [4/m] Médias   [5/s] Sources   [6/y] Système   [7/t] Trajectoires  │ [0-7/Tab] Onglet Aide  [↑/

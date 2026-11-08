@@ -39,6 +39,7 @@ DEFAULT_FRAMES_COUNT = 20
 DEFAULT_WORKERS_COUNT = 4
 MAX_WORKERS_LIMIT = 16
 DEFAULT_TEMPORAL_SLACK_SEC = 3.5
+DEFAULT_MIN_CONSENSUS_RATIO = 0.30
 
 SHUTDOWN_REQUESTED = False
 
@@ -87,6 +88,15 @@ class MediaTrajectoryAudit:
     success: bool
     cuts: List[TrajectoryBatchResult]
     error_message: str | None = None
+
+
+@dataclass(frozen=True)
+class TrajectoryAuditCriteria:
+    cuts_spec: str = DEFAULT_CUTS_SPEC
+    nb_frames: int = DEFAULT_FRAMES_COUNT
+    min_coverage: float = 0.50
+    max_misses: int = 3
+    min_consensus_ratio: float = DEFAULT_MIN_CONSENSUS_RATIO
 
 
 def check_temporal_coherence(matching_cuts: List[TrajectoryBatchResult]) -> bool:
@@ -139,6 +149,7 @@ def compute_cut_offsets(duration_sec: float, cuts_spec: str) -> List[float]:
 def elect_consensus_candidate(
     matched_cuts: List[TrajectoryBatchResult],
     cuts_count: int,
+    min_consensus_ratio: float = DEFAULT_MIN_CONSENSUS_RATIO,
 ) -> tuple[int | None, str, bool]:
     """Elects consensus media ID and checks temporal coherence across matching cuts."""
     if not matched_cuts:
@@ -155,7 +166,7 @@ def elect_consensus_candidate(
         return None, "NONE", False
 
     top_id, count = max(vote_counts.items(), key=lambda kv: kv[1])
-    min_required_votes = max(1, cuts_count // 2)
+    min_required_votes = max(1, int(cuts_count * min_consensus_ratio))
     if count < min_required_votes:
         return None, "NONE", False
 
@@ -169,23 +180,30 @@ def run_media_audit(
     dbsrt_bin: str,
     media_path: str,
     dbphash: str,
-    cuts_spec: str,
-    nb_frames: int,
-    min_coverage: float,
-    max_misses: int,
+    criteria: TrajectoryAuditCriteria,
 ) -> MediaTrajectoryAudit:
     duration_sec = get_media_duration_sec(media_path)
-    cut_offsets = compute_cut_offsets(duration_sec, cuts_spec)
+    cut_offsets = compute_cut_offsets(duration_sec, criteria.cuts_spec)
     cut_results: List[TrajectoryBatchResult] = []
     t0 = time.perf_counter()
 
     for offset in cut_offsets:
-        res = run_single_trajectory(dbsrt_bin, media_path, dbphash, offset, nb_frames, min_coverage, max_misses)
+        res = run_single_trajectory(
+            dbsrt_bin,
+            media_path,
+            dbphash,
+            offset,
+            criteria.nb_frames,
+            criteria.min_coverage,
+            criteria.max_misses,
+        )
         cut_results.append(res)
 
     total_wall_sec = time.perf_counter() - t0
     matched_cuts = [c for c in cut_results if c.success and c.winner_media_id is not None]
-    consensus_id, consensus_title, is_coherent = elect_consensus_candidate(matched_cuts, len(cut_offsets))
+    consensus_id, consensus_title, is_coherent = elect_consensus_candidate(
+        matched_cuts, len(cut_offsets), criteria.min_consensus_ratio
+    )
 
     return MediaTrajectoryAudit(
         target_path=media_path,
@@ -407,6 +425,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--min-coverage", type=float, default=0.50, help="Min coverage ratio (default: 0.50)")
     p.add_argument("--max-misses", type=int, default=3, help="Max consecutive misses (default: 3)")
+    p.add_argument(
+        "--min-consensus-ratio",
+        type=float,
+        default=DEFAULT_MIN_CONSENSUS_RATIO,
+        help="Min ratio of winning cuts for consensus (default: 0.30)",
+    )
     p.add_argument("-w", "--workers", type=int, default=DEFAULT_WORKERS_COUNT, help="Worker concurrency (default: 4)")
     p.add_argument("--limit", type=int, help="Optional maximum number of targets to evaluate")
     p.add_argument("--jsonl", default=DEFAULT_JSONL_OUT, help="Path to streaming output JSONL file")
@@ -461,15 +485,19 @@ def spawn_job(
 ) -> bool:
     try:
         target = next(pending_iter)
+        criteria = TrajectoryAuditCriteria(
+            cuts_spec=args.cuts,
+            nb_frames=args.frames,
+            min_coverage=args.min_coverage,
+            max_misses=args.max_misses,
+            min_consensus_ratio=args.min_consensus_ratio,
+        )
         fut = executor.submit(
             run_media_audit,
             dbsrt_bin,
             target,
             args.dbphash,
-            args.cuts,
-            args.frames,
-            args.min_coverage,
-            args.max_misses,
+            criteria,
         )
         in_flight[fut] = target
         return True

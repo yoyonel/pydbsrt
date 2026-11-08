@@ -12,7 +12,8 @@ use crate::{
     constants::{FOOTER_BLOCK_HEIGHT, HEADER_BLOCK_HEIGHT, MIN_BODY_HEIGHT},
     model::{
         CompletedFilter, CompletedSort, HelpTab, MediaFilter, MediaSort, MediaSourceFilter,
-        SourceInputModalState, SystemTelemetry, ViewPage,
+        SourceInputModalState, SystemTelemetry, TrajectoryFileModalState, TrajectoryFilter,
+        TrajectorySort, ViewPage,
     },
     views::{
         active_jobs::{render_active_jobs_page, render_inspection_page},
@@ -26,6 +27,8 @@ use crate::{
         media_sources::{render_media_sources_page, render_source_modal},
         stats::render_stats_page,
         system::render_system_page,
+        trajectory::{render_trajectory_file_modal, render_trajectory_page},
+        trajectory_inspection::render_trajectory_inspection_page,
     },
 };
 
@@ -38,12 +41,19 @@ pub struct UiContext<'a> {
     pub media_scroll_index: usize,
     pub source_scroll_index: usize,
     pub source_modal: Option<&'a SourceInputModalState>,
+    pub trajectory_file_modal: Option<&'a TrajectoryFileModalState>,
     pub selected_media_paths: &'a HashSet<PathBuf>,
     pub media_filter: MediaFilter,
     pub media_sort: MediaSort,
     pub source_filter: &'a MediaSourceFilter,
     pub completed_filter: CompletedFilter,
     pub completed_sort: CompletedSort,
+    pub trajectory_scroll_index: usize,
+    pub trajectory_table_offset: usize,
+    pub trajectory_filter: TrajectoryFilter,
+    pub trajectory_sort: TrajectorySort,
+    pub trajectory_inspection_scroll: usize,
+    pub trajectory_indices: &'a [usize],
     pub search_query: &'a str,
     pub search_active: bool,
     pub help_tab: HelpTab,
@@ -85,6 +95,8 @@ pub fn render_ui(frame: &mut Frame, ctx: &UiContext) {
         ViewPage::JobInspection => render_inspection_page(frame, chunks[1], ctx),
         ViewPage::MediaInspection => render_media_inspection_page(frame, chunks[1], ctx),
         ViewPage::CompletedInspection => render_completed_inspection_page(frame, chunks[1], ctx),
+        ViewPage::Trajectory => render_trajectory_page(frame, chunks[1], ctx),
+        ViewPage::TrajectoryInspection => render_trajectory_inspection_page(frame, chunks[1], ctx),
         ViewPage::Help => render_help_page(frame, chunks[1], ctx),
     }
 
@@ -92,5 +104,9 @@ pub fn render_ui(frame: &mut Frame, ctx: &UiContext) {
 
     if let Some(modal) = ctx.source_modal {
         render_source_modal(frame, size, modal);
+    }
+
+    if let Some(modal) = ctx.trajectory_file_modal {
+        render_trajectory_file_modal(frame, size, ctx, modal);
     }
 }

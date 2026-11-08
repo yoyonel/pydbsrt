@@ -51,6 +51,7 @@ pub fn render_help_page(frame: &mut Frame, area: Rect, ctx: &UiContext) {
         HelpTab::MediaBrowser => build_help_media_browser(),
         HelpTab::MediaSources => build_help_media_sources(),
         HelpTab::System => build_help_system(),
+        HelpTab::Trajectory => build_help_trajectory(),
     };
 
     let p = Paragraph::new(lines)
@@ -339,5 +340,50 @@ pub fn build_help_system() -> Vec<Line<'static>> {
         Line::from("    [6] ou [y]     : Basculer vers l'onglet Système / Revenir aux Tâches actives."),
         Line::from("    [↑/k] / [↓/j]  : Défilement vertical du panneau si la hauteur de console est restreinte."),
         Line::from("    [?]            : Afficher / Masquer cette aide contextuelle."),
+    ]
+}
+
+/// Builds Spatiotemporal Trajectory Tracking help content lines.
+pub fn build_help_trajectory() -> Vec<Line<'static>> {
+    vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            "  🎯 ONGLET [7/t] AUDIT DES TRAJECTOIRES SPATIOTEMPORELLES (MULTI-CUTS)",
+            Style::default().fg(Color::Rgb(255, 140, 0)).add_modifier(Modifier::BOLD),
+        )),
+        Line::from("  Panneau d'analyse et de diagnostic du suivi de trajectoire multi-hypothèses sur les empreintes denses pHash."),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  Signification des Colonnes de la Table :",
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        )),
+        Line::from("    • #                  : Index ordinal du média dans la liste filtrée active."),
+        Line::from("    • MÉDIA CIBLE        : Nom canonique du fichier analysé ou titre de l'œuvre élue par consensus."),
+        Line::from("    • DURÉE              : Durée temporelle totale du flux vidéo déduite du nombre de trames."),
+        Line::from("    • SCORE              : Score moyen de confiance barycentrique cumulé sur les coupes gagnantes."),
+        Line::from("    • TIMELINE SPARKLINE : Ruban horizontal visuel matérialisant chaque coupe temporelle le long de l'œuvre :"),
+        Line::from("                           ■ (Vert)   : Coupe concordante avec alignement monotone vérifié."),
+        Line::from("                           ▲ (Jaune)  : Coupe concordante avec dérive temporelle détectée (écran statique)."),
+        Line::from("                           · (Gris)   : Silence temporel / scène sombre sans candidat."),
+        Line::from("                           x (Rouge)  : Conflit d'hypothèses / rejet d'élagage."),
+        Line::from("    • CUTS               : Nombre de coupes ayant voté pour le gagnant par rapport au total (ex: 14/20)."),
+        Line::from("    • ALIGNEMENT         : Statut qualitatif global de la trajectoire :"),
+        Line::from("                           ✅ Cohérent : Alignement temporel monotone certifié (erreur absolue < 3.5s)."),
+        Line::from("                           ⚠️ Drift    : Dérive d'horloge ou boucle statique (screencasts informatiques)."),
+        Line::from("                           ⚪ Élagué   : Nombre de coupes insuffisant sous le seuil de consensus."),
+        Line::from("    • TEMPS              : Temps CPU / horloge total consommé pour évaluer l'ensemble des coupes du film."),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  Raccourcis Dédiés :",
+            Style::default().fg(Color::LightGreen).add_modifier(Modifier::BOLD),
+        )),
+        Line::from("    [7] ou [t]         : Basculer vers l'onglet Trajectoires / Revenir aux Tâches actives."),
+        Line::from("    [Enter]            : Ouvrir l'inspection détaillée coupe par coupe du média sélectionné."),
+        Line::from("    [Esc / Backspace]  : Revenir de l'inspecteur à la liste principale des trajectoires."),
+        Line::from("    [f]                : Cycler le filtre (Tous -> Reconnus -> Cohérents -> Drift -> Élagués)."),
+        Line::from("    [o]                : Cycler le tri (Nom A-Z -> Cuts Max -> Score Max -> Durée Max)."),
+        Line::from("    [F]                : Ouvrir la boîte de dialogue pour filtrer et sélectionner une campagne d'audit."),
+        Line::from("    [/]                : Activer la recherche floue multi-tokens en direct."),
+        Line::from("    [?]                : Afficher / Masquer cette aide contextuelle."),
     ]
 }
