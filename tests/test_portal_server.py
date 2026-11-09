@@ -200,11 +200,29 @@ def test_portal_http_api_endpoints() -> None:
                     assert ddata["status"] == "ok"
                     assert ddata["name"] == sample.name
 
-        # 4. GET /sources.html
+        # 4. GET /api/assets (PostgreSQL / graceful fallback)
+        with urllib.request.urlopen(f"{base_url}/api/assets?limit=5", timeout=5) as resp:
+            assert resp.status == 200
+            assets_data = json.loads(resp.read().decode())
+            assert "status" in assets_data
+            assert "summary" in assets_data
+            assert "items" in assets_data
+
+        # 4b. GET /api/assets with page exceeding total_pages -> auto-clamped to page 1
+        with urllib.request.urlopen(f"{base_url}/api/assets?page=9999&limit=25", timeout=5) as resp:
+            assert resp.status == 200
+            assets_data = json.loads(resp.read().decode())
+            if assets_data["status"] == "ok" and assets_data["total_items"] > 0:
+                assert assets_data["page"] == 1
+                assert len(assets_data["items"]) > 0
+
+        # 5. GET /sources.html
         with urllib.request.urlopen(f"{base_url}/sources.html", timeout=5) as resp:
             assert resp.status == 200
             html = resp.read().decode()
             assert "Sources Médias" in html
+            assert "Actifs Médias (DB)" in html
+            assert "Aide & Définitions Métier" in html
 
     finally:
         server.shutdown()

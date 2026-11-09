@@ -50,6 +50,9 @@ CACHE_LISTING_TTL_SECONDS: float = 300.0
 CACHE_DETAILS_TTL_SECONDS: float = 86400.0
 FFPROBE_TIMEOUT_SECONDS: float = 12.0
 
+DEFAULT_PG_URL: str = os.environ.get("DATABASE_URL", "postgresql://docker:docker@127.0.0.1:5433/bktreedb")
+PG_CONNECT_TIMEOUT_SECS: float = 2.0
+
 DEFAULT_NAS_HOST: str = "yoyonel.synology.me"
 DEFAULT_NAS_USER: str = "qzsl2686"
 DEFAULT_PASS_ENTRY: str = os.environ.get("NAS_PASS_ENTRY", ".".join(["192", "168", "1", "58"]) + ":5000/qzsl2686")
@@ -1138,6 +1141,501 @@ def inspect_file_details(source_id: str, profile_id: str, file_path: str, force:
     return details
 
 
+def _connect_pg() -> Any:
+    """Safely connects to PostgreSQL (local Docker :5433 or remote cPanel :5432) or returns None."""
+    # 1. Try environment URL if explicitly defined
+    env_url = os.environ.get("DATABASE_URL")
+    if env_url:
+        try:
+            import psycopg2
+
+            return psycopg2.connect(env_url, connect_timeout=int(PG_CONNECT_TIMEOUT_SECS))
+        except Exception:
+            pass
+
+    # 2. Try o2switch cPanel PostgreSQL credentials if present
+    o2_pass_file = Path.home() / "dbsrt" / "etc" / ".pg_pass"
+    if o2_pass_file.is_file():
+        try:
+            import psycopg2
+
+            pw = o2_pass_file.read_text(encoding="utf-8").strip()
+            return psycopg2.connect(
+                dbname="atli6249_bktreedb",
+                user="atli6249_dbsrt",
+                password=pw,
+                host="127.0.0.1",
+                port=5432,
+                connect_timeout=int(PG_CONNECT_TIMEOUT_SECS),
+            )
+        except Exception:
+            pass
+
+    # 3. Fallback to local Docker URL (:5433)
+    try:
+        import psycopg2
+
+        return psycopg2.connect(DEFAULT_PG_URL, connect_timeout=int(PG_CONNECT_TIMEOUT_SECS))
+    except Exception:
+        return None
+
+
+def _query_pg_cli(sql: str) -> str | None:
+    """Executes SQL via psql CLI wrapper when psycopg2 is not installed in the python environment."""
+    o2_pass_file = Path.home() / "dbsrt" / "etc" / ".pg_pass"
+    if not o2_pass_file.is_file():
+        return None
+    try:
+        pw = o2_pass_file.read_text(encoding="utf-8").strip()
+        env = os.environ.copy()
+        env["PGPASSWORD"] = pw
+        cmd = [
+            "psql",
+            "-U",
+            "atli6249_dbsrt",
+            "-d",
+            "atli6249_bktreedb",
+            "-t",
+            "-A",
+            "-c",
+            sql,
+        ]
+        out = subprocess.check_output(cmd, env=env, timeout=10.0)
+        return out.decode("utf-8").strip()
+    except Exception:
+        return None
+
+
+def _resolve_physical_file_exists(source_id: str | None, video_rel_path: str | None) -> tuple[bool, str]:
+    """Checks whether video_rel_path exists physically on current host local mounts/directories."""
+    if not video_rel_path:
+        return False, ""
+
+    clean_path = video_rel_path.lstrip("/")
+    resolved_path: Path | None = None
+
+    if source_id == "synology-video":
+        resolved_path = Path(_user_media_path("Synology", "video")) / clean_path.replace("video/", "", 1)
+    elif source_id == "synology-tvshow":
+        resolved_path = Path(_user_media_path("Synology", "tvshow")) / clean_path.replace("tvshow/", "", 1)
+    elif source_id == "local-snippets":
+        resolved_path = Path(__file__).resolve().parents[1] / "data" / "snippets" / Path(clean_path).name
+    else:
+        # Fallback to direct path or known mount
+        cand = Path("/" + clean_path)
+        if cand.is_file():
+            return True, str(cand)
+        cand_user = Path(_user_media_path("Synology")) / clean_path
+        if cand_user.is_file():
+            return True, str(cand_user)
+        resolved_path = Path(__file__).resolve().parents[1] / clean_path
+
+    if resolved_path and resolved_path.is_file():
+        return True, str(resolved_path)
+    return False, str(resolved_path) if resolved_path else ""
+
+
+def _check_phash_file_exists(moviehash: str | None, fps: float | None) -> bool:
+    """Checks presence of .phash file in data/__PHASH__/ on disk."""
+    if not moviehash:
+        return False
+    phash_dir = Path(__file__).resolve().parents[1] / "data" / "__PHASH__"
+    fps_val = f"{fps:.1f}" if fps is not None else "25.0"
+    cand1 = phash_dir / f"{moviehash}.{fps_val}fps.phash"
+    if cand1.is_file():
+        return True
+    cand2 = phash_dir / f"{moviehash}.24.0fps.phash"
+    if cand2.is_file():
+        return True
+    cand3 = phash_dir / f"{moviehash}.23.976fps.phash"
+    return cand3.is_file()
+
+
+ASSETS_SORT_MAP: dict[str, str] = {
+    "title_asc": "clean_title ASC NULLS LAST, name ASC",
+    "title_desc": "clean_title DESC NULLS LAST, name DESC",
+    "frames_desc": "frame_count DESC, id DESC",
+    "duration_desc": "duration_ms DESC, id DESC",
+    "id_desc": "id DESC",
+    "id_asc": "id ASC",
+}
+
+
+def _compute_asset_status_tag(phash_status: str | None, video_rel_path: str | None) -> str:
+    """Computes nominal, missing_phash, or unmapped_path business tag."""
+    if phash_status == "complete" and video_rel_path:
+        return "nominal"
+    if phash_status != "complete":
+        return "missing_phash"
+    return "unmapped_path"
+
+
+def _get_asset_alt_channels(source_id: str | None, video_rel_path: str | None) -> list[dict[str, Any]]:
+    """Builds remote streaming WAN FTP fallback profile when source is Synology."""
+    if source_id in ("synology-video", "synology-tvshow") and video_rel_path:
+        return [
+            {
+                "id": "wan_ftp",
+                "name": "Streaming WAN FTP (Synology)",
+                "accessible": True,
+                "target": f"ftp://{DEFAULT_NAS_USER}@{DEFAULT_NAS_HOST}:21{video_rel_path}",
+            }
+        ]
+    return []
+
+
+def _format_asset_row(r: dict[str, Any]) -> dict[str, Any]:
+    """Formats an asset database record into an enriched frontend descriptor."""
+    phys_exists, phys_path = _resolve_physical_file_exists(r.get("source_id"), r.get("video_rel_path"))
+    phash_on_disk = _check_phash_file_exists(r.get("moviehash"), r.get("fps"))
+    status_tag = _compute_asset_status_tag(r.get("phash_status"), r.get("video_rel_path"))
+    alt_channels = _get_asset_alt_channels(r.get("source_id"), r.get("video_rel_path"))
+
+    codec_raw = r.get("video_codec") or "—"
+    return {
+        "id": r["id"],
+        "name": r["name"],
+        "clean_title": r.get("clean_title") or r["name"],
+        "season": r.get("season"),
+        "episode": r.get("episode"),
+        "year": r.get("year"),
+        "resolution": r.get("resolution") or "—",
+        "video_codec": codec_raw.upper(),
+        "fps": r.get("fps") or 25.0,
+        "is_vfr": r.get("is_vfr") or False,
+        "frame_count": r.get("frame_count") or 0,
+        "expected_frames": r.get("expected_frames") or 0,
+        "duration_ms": r.get("duration_ms") or 0,
+        "duration_fmt": _format_duration(r.get("duration_ms")),
+        "file_size_bytes": r.get("file_size_bytes") or 0,
+        "file_size_human": format_human_size(r.get("file_size_bytes") or 0),
+        "moviehash": r.get("moviehash") or "",
+        "media_hash": r.get("media_hash") or "",
+        "source_id": r.get("source_id") or "",
+        "video_rel_path": r.get("video_rel_path") or "",
+        "physical_exists": phys_exists,
+        "physical_resolved_path": phys_path,
+        "phash_status": r.get("phash_status"),
+        "phash_on_disk": phash_on_disk,
+        "status_tag": status_tag,
+        "alt_channels": alt_channels,
+    }
+
+
+def _build_assets_where(
+    status_filter: str, source_filter: str, search_q: str, is_psycopg: bool
+) -> tuple[str, list[Any]]:
+    """Builds SQL WHERE clause and parameters for assets queries."""
+    where_clauses: list[str] = []
+    params: list[Any] = []
+    if status_filter == "nominal":
+        where_clauses.append("phash_status = 'complete' AND video_rel_path IS NOT NULL AND video_rel_path != ''")
+    elif status_filter == "missing_phash":
+        where_clauses.append("phash_status != 'complete'")
+    elif status_filter == "unmapped_path":
+        where_clauses.append("(video_rel_path IS NULL OR video_rel_path = '')")
+
+    if source_filter:
+        if is_psycopg:
+            where_clauses.append("source_id = %s")
+            params.append(source_filter)
+        else:
+            safe_src = re.sub(r"[^a-zA-Z0-9_-]", "", source_filter)
+            where_clauses.append(f"source_id = '{safe_src}'")
+
+    if search_q:
+        if is_psycopg:
+            clean_q = f"%{search_q.strip()}%"
+            where_clauses.append("(clean_title ILIKE %s OR name ILIKE %s OR moviehash ILIKE %s)")
+            params.extend([clean_q, clean_q, clean_q])
+        else:
+            safe_q = re.sub(r"['\";\\]", "", search_q.strip())
+            where_clauses.append(
+                f"(clean_title ILIKE '%{safe_q}%' OR name ILIKE '%{safe_q}%' OR moviehash ILIKE '%{safe_q}%')"
+            )
+
+    where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+    return where_sql, params
+
+
+def _get_pg_assets_cli(
+    page: int,
+    limit: int,
+    status_filter: str,
+    source_filter: str,
+    search_q: str,
+    sort_by: str,
+) -> dict[str, Any]:
+    """Queries assets using native psql CLI (fallback when psycopg2 is absent)."""
+    cli_summary_raw = _query_pg_cli("""
+        SELECT json_build_object(
+            'total', count(*),
+            'nominal', count(CASE WHEN phash_status = 'complete' AND video_rel_path IS NOT NULL AND video_rel_path != '' THEN 1 END),
+            'missing_phash', count(CASE WHEN phash_status != 'complete' THEN 1 END),
+            'unmapped_path', count(CASE WHEN video_rel_path IS NULL OR video_rel_path = '' THEN 1 END)
+        )::text FROM medias;
+    """)
+    if not cli_summary_raw:
+        return {
+            "status": "error",
+            "message": "PostgreSQL non disponible (:5433 / :5432). Vérifiez 'task db:up'.",
+            "connected": False,
+            "summary": {"total": 0, "nominal": 0, "missing_phash": 0, "unmapped_path": 0},
+            "page": page,
+            "limit": limit,
+            "total_items": 0,
+            "total_pages": 0,
+            "items": [],
+        }
+
+    try:
+        summary = json.loads(cli_summary_raw)
+        where_sql, _ = _build_assets_where(status_filter, source_filter, search_q, is_psycopg=False)
+
+        count_raw = _query_pg_cli(f"SELECT count(*) FROM medias {where_sql};")
+        total_items = int(count_raw) if count_raw and count_raw.isdigit() else 0
+
+        total_pages = (total_items + limit - 1) // limit if total_items > 0 else 1
+        if page > total_pages and total_items > 0:
+            page = 1
+        offset = max(0, (page - 1) * limit)
+        order_sql = ASSETS_SORT_MAP.get(sort_by, "clean_title ASC NULLS LAST, name ASC")
+
+        data_raw = _query_pg_cli(f"""
+            SELECT json_agg(t)::text FROM (
+                SELECT
+                    id, name, clean_title, season, episode, year, resolution, video_codec,
+                    fps, frame_count, expected_frames, is_vfr, duration_ms, file_size_bytes,
+                    moviehash, media_hash, video_rel_path, source_id, phash_status
+                FROM medias
+                {where_sql}
+                ORDER BY {order_sql}
+                LIMIT {limit} OFFSET {offset}
+            ) t;
+        """)
+        rows = json.loads(data_raw) if data_raw and data_raw != "null" else []
+        items = [_format_asset_row(r) for r in rows]
+
+        return {
+            "status": "ok",
+            "connected": True,
+            "summary": summary,
+            "page": page,
+            "limit": limit,
+            "total_items": total_items,
+            "total_pages": total_pages,
+            "items": items,
+        }
+    except Exception as exc:
+        return {
+            "status": "error",
+            "message": str(exc),
+            "connected": False,
+            "summary": {"total": 0, "nominal": 0, "missing_phash": 0, "unmapped_path": 0},
+            "page": page,
+            "limit": limit,
+            "total_items": 0,
+            "total_pages": 0,
+            "items": [],
+        }
+
+
+def _get_pg_assets_psycopg2(
+    conn: Any,
+    page: int,
+    limit: int,
+    status_filter: str,
+    source_filter: str,
+    search_q: str,
+    sort_by: str,
+) -> dict[str, Any]:
+    """Queries assets using native psycopg2 connection."""
+    from psycopg2.extras import RealDictCursor
+
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT
+                count(*) AS total,
+                count(CASE WHEN phash_status = 'complete' AND video_rel_path IS NOT NULL AND video_rel_path != '' THEN 1 END) AS nominal,
+                count(CASE WHEN phash_status != 'complete' THEN 1 END) AS missing_phash,
+                count(CASE WHEN video_rel_path IS NULL OR video_rel_path = '' THEN 1 END) AS unmapped_path
+            FROM medias;
+        """)
+        srow = cur.fetchone()
+        summary = {
+            "total": srow["total"] if srow else 0,
+            "nominal": srow["nominal"] if srow else 0,
+            "missing_phash": srow["missing_phash"] if srow else 0,
+            "unmapped_path": srow["unmapped_path"] if srow else 0,
+        }
+
+        where_sql, params = _build_assets_where(status_filter, source_filter, search_q, is_psycopg=True)
+        count_query = f"SELECT count(*) FROM medias {where_sql};"
+        cur.execute(count_query, params)
+        total_items = cur.fetchone()["count"]
+
+        total_pages = (total_items + limit - 1) // limit if total_items > 0 else 1
+        if page > total_pages and total_items > 0:
+            page = 1
+        offset = max(0, (page - 1) * limit)
+        order_sql = ASSETS_SORT_MAP.get(sort_by, "clean_title ASC NULLS LAST, name ASC")
+
+        data_query = f"""
+            SELECT
+                id, name, clean_title, season, episode, year, resolution, video_codec,
+                fps, frame_count, expected_frames, is_vfr, duration_ms, file_size_bytes,
+                moviehash, media_hash, video_rel_path, source_id, phash_status
+            FROM medias
+            {where_sql}
+            ORDER BY {order_sql}
+            LIMIT %s OFFSET %s;
+        """
+        cur.execute(data_query, params + [limit, offset])
+        rows = cur.fetchall()
+        items = [_format_asset_row(r) for r in rows]
+
+        return {
+            "status": "ok",
+            "connected": True,
+            "summary": summary,
+            "page": page,
+            "limit": limit,
+            "total_items": total_items,
+            "total_pages": total_pages,
+            "items": items,
+        }
+    except Exception as exc:
+        return {
+            "status": "error",
+            "message": str(exc),
+            "connected": False,
+            "summary": {"total": 0, "nominal": 0, "missing_phash": 0, "unmapped_path": 0},
+            "page": page,
+            "limit": limit,
+            "total_items": 0,
+            "total_pages": 0,
+            "items": [],
+        }
+    finally:
+        conn.close()
+
+
+def get_pg_assets(
+    page: int = 1,
+    limit: int = DEFAULT_PAGE_SIZE,
+    status_filter: str = "all",
+    source_filter: str = "",
+    search_q: str = "",
+    sort_by: str = "title_asc",
+) -> dict[str, Any]:
+    """Queries PostgreSQL 17 medias table, computes physical & pHash health metrics."""
+    conn = _connect_pg()
+    if conn is None:
+        return _get_pg_assets_cli(page, limit, status_filter, source_filter, search_q, sort_by)
+    return _get_pg_assets_psycopg2(conn, page, limit, status_filter, source_filter, search_q, sort_by)
+
+
+def _format_duration(duration_ms: int | None) -> str:
+    """Formats milliseconds into hh:mm:ss string."""
+    if not duration_ms or duration_ms <= 0:
+        return "—"
+    total_secs = int(duration_ms / MILLIS_PER_SEC)
+    h = total_secs // SECONDS_PER_HOUR
+    m = (total_secs % SECONDS_PER_HOUR) // SECONDS_PER_MINUTE
+    s = total_secs % SECONDS_PER_MINUTE
+    if h > 0:
+        return f"{h:02d}:{m:02d}:{s:02d}"
+    return f"{m:02d}:{s:02d}"
+
+
+def _format_asset_detail(row: dict[str, Any], frames_in_db: int = 0) -> dict[str, Any]:
+    """Enriches raw media row with formatted metrics and storage audit."""
+    phys_exists, phys_path = _resolve_physical_file_exists(row.get("source_id"), row.get("video_rel_path"))
+    phash_on_disk = _check_phash_file_exists(row.get("moviehash"), row.get("fps"))
+    alt_channels = _get_asset_alt_channels(row.get("source_id"), row.get("video_rel_path"))
+
+    res = dict(row)
+    res["status"] = "ok"
+    res["frames_in_db"] = frames_in_db
+    res["physical_exists"] = phys_exists
+    res["physical_resolved_path"] = phys_path
+    res["phash_on_disk"] = phash_on_disk
+    res["duration_fmt"] = _format_duration(row.get("duration_ms"))
+    res["file_size_human"] = format_human_size(row.get("file_size_bytes") or 0)
+    res["created_at_fmt"] = str(row.get("created_at") or "—")[:19]
+    res["updated_at_fmt"] = str(row.get("updated_at") or "—")[:19]
+    res["alt_channels"] = alt_channels
+    return res
+
+
+def _get_pg_asset_detail_cli(media_id: int) -> dict[str, Any]:
+    """Queries media detail using psql CLI fallback."""
+    cli_detail_raw = _query_pg_cli(f"""
+        SELECT json_build_object(
+            'id', id, 'name', name, 'clean_title', clean_title,
+            'season', season, 'episode', episode, 'year', year,
+            'resolution', resolution, 'video_codec', video_codec,
+            'width', width, 'height', height, 'fps', fps,
+            'frame_count', frame_count, 'expected_frames', expected_frames,
+            'is_vfr', is_vfr, 'duration_ms', duration_ms,
+            'file_size_bytes', file_size_bytes, 'moviehash', moviehash,
+            'media_hash', media_hash, 'video_rel_path', video_rel_path,
+            'source_id', source_id, 'phash_status', phash_status,
+            'phash_path', phash_path, 'asset_kind', asset_kind,
+            'parent_media_id', parent_media_id, 'source_mtime_unix', source_mtime_unix,
+            'created_at', created_at, 'updated_at', updated_at
+        )::text FROM medias WHERE id = {media_id};
+    """)
+    if not cli_detail_raw:
+        return {"status": "error", "message": "PostgreSQL non disponible"}
+    try:
+        row = json.loads(cli_detail_raw)
+        return _format_asset_detail(row, frames_in_db=0)
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
+def _get_pg_asset_detail_psycopg2(conn: Any, media_id: int) -> dict[str, Any]:
+    """Queries media detail using psycopg2 connection."""
+    from psycopg2.extras import RealDictCursor
+
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute(
+            """
+            SELECT
+                id, name, clean_title, season, episode, year, resolution, video_codec,
+                width, height, fps, frame_count, expected_frames, is_vfr, duration_ms,
+                file_size_bytes, moviehash, media_hash, video_rel_path, source_id,
+                phash_status, phash_path, asset_kind, parent_media_id, source_mtime_unix,
+                created_at, updated_at
+            FROM medias
+            WHERE id = %s;
+        """,
+            (media_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return {"status": "not_found", "message": f"Média #{media_id} introuvable"}
+
+        cur.execute("SELECT count(*) AS frames_in_db FROM frames WHERE media_id = %s;", (media_id,))
+        frames_db_cnt = cur.fetchone()["frames_in_db"]
+        return _format_asset_detail(dict(row), frames_in_db=frames_db_cnt)
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+    finally:
+        conn.close()
+
+
+def get_pg_asset_detail(media_id: int) -> dict[str, Any]:
+    """Returns deep technical details for single media asset from PostgreSQL."""
+    conn = _connect_pg()
+    if conn is None:
+        return _get_pg_asset_detail_cli(media_id)
+    return _get_pg_asset_detail_psycopg2(conn, media_id)
+
+
 class PortalRequestHandler(http.server.SimpleHTTPRequestHandler):
     """Custom HTTP handler serving API JSON endpoints and clean use-case HTML pages."""
 
@@ -1147,63 +1645,103 @@ class PortalRequestHandler(http.server.SimpleHTTPRequestHandler):
     def do_HEAD(self) -> None:
         self.do_GET()
 
+    def _handle_favicon(self, path: str) -> bool:
+        if path != "/favicon.ico":
+            return False
+        self.send_response(HTTP_OK)
+        self.send_header("Content-Type", "image/svg+xml")
+        svg_icon = b"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>\xf0\x9f\x8e\xac</text></svg>"
+        self.send_header("Content-Length", str(len(svg_icon)))
+        self.end_headers()
+        self.wfile.write(svg_icon)
+        return True
+
+    def _handle_api_assets(self, query: dict[str, list[str]]) -> None:
+        page_val = int(query.get("page", ["1"])[0]) if query.get("page", ["1"])[0].isdigit() else 1
+        limit_val = (
+            int(query.get("limit", [str(DEFAULT_PAGE_SIZE)])[0])
+            if query.get("limit", [str(DEFAULT_PAGE_SIZE)])[0].isdigit()
+            else DEFAULT_PAGE_SIZE
+        )
+        status_f = query.get("status", ["all"])[0]
+        source_f = query.get("source", [""])[0]
+        q_val = query.get("q", [""])[0]
+        sort_val = query.get("sort", ["title_asc"])[0]
+        result = get_pg_assets(
+            page=page_val,
+            limit=limit_val,
+            status_filter=status_f,
+            source_filter=source_f,
+            search_q=q_val,
+            sort_by=sort_val,
+        )
+        self._send_json(result)
+
+    def _handle_api_source_routes(self, path: str, query: dict[str, list[str]]) -> bool:
+        if path == "/api/sources":
+            self._send_json(get_sources_metadata())
+            return True
+        if path == "/api/probe":
+            result = execute_single_probe(query.get("source", [""])[0], query.get("profile", [""])[0])
+            self._send_json(result)
+            return True
+        if path == "/api/files":
+            p = int(query.get("page", ["1"])[0]) if query.get("page", ["1"])[0].isdigit() else 1
+            l_val = (
+                int(query.get("limit", [str(DEFAULT_PAGE_SIZE)])[0])
+                if query.get("limit", [str(DEFAULT_PAGE_SIZE)])[0].isdigit()
+                else DEFAULT_PAGE_SIZE
+            )
+            force = query.get("force", ["0"])[0] in ("1", "true", "yes")
+            result = list_source_files(
+                query.get("source", [""])[0],
+                query.get("profile", [""])[0],
+                query.get("subdir", [""])[0],
+                p,
+                l_val,
+                query.get("q", [""])[0],
+                query.get("sort", ["name_asc"])[0],
+                force=force,
+            )
+            self._send_json(result)
+            return True
+        if path == "/api/file/details":
+            force = query.get("force", ["0"])[0] in ("1", "true", "yes")
+            result = inspect_file_details(
+                query.get("source", [""])[0], query.get("profile", [""])[0], query.get("path", [""])[0], force=force
+            )
+            self._send_json(result)
+            return True
+        return False
+
+    def _handle_api_asset_routes(self, path: str, query: dict[str, list[str]]) -> bool:
+        if path == "/api/assets":
+            self._handle_api_assets(query)
+            return True
+        if path == "/api/asset/details":
+            id_str = query.get("id", ["0"])[0]
+            media_id = int(id_str) if id_str.isdigit() else 0
+            result = get_pg_asset_detail(media_id)
+            status_code = (
+                HTTP_OK
+                if result.get("status") == "ok"
+                else (HTTP_NOT_FOUND if result.get("status") == "not_found" else HTTP_SERVER_ERROR)
+            )
+            self._send_json(result, status=status_code)
+            return True
+        return False
+
+    def _handle_api(self, path: str, query: dict[str, list[str]]) -> bool:
+        return self._handle_api_source_routes(path, query) or self._handle_api_asset_routes(path, query)
+
     def do_GET(self) -> None:
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
         query = urllib.parse.parse_qs(parsed.query)
 
-        # 0. Favicon handler (clean zero-404)
-        if path == "/favicon.ico":
-            self.send_response(HTTP_OK)
-            self.send_header("Content-Type", "image/svg+xml")
-            svg_icon = b"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>\xf0\x9f\x8e\xac</text></svg>"
-            self.send_header("Content-Length", str(len(svg_icon)))
-            self.end_headers()
-            self.wfile.write(svg_icon)
+        if self._handle_favicon(path):
             return
-
-        # 1. Instant metadata definition
-        if path == "/api/sources":
-            data = get_sources_metadata()
-            self._send_json(data)
-            return
-
-        # 2. Granular probe per channel
-        if path == "/api/probe":
-            source_id = query.get("source", [""])[0]
-            profile_id = query.get("profile", [""])[0]
-            result = execute_single_probe(source_id, profile_id)
-            self._send_json(result)
-            return
-
-        # 3. Explore files listing (paginated, filtered, sorted)
-        if path == "/api/files":
-            source_id = query.get("source", [""])[0]
-            profile_id = query.get("profile", [""])[0]
-            subdir = query.get("subdir", [""])[0]
-            page_val = int(query.get("page", ["1"])[0]) if query.get("page", ["1"])[0].isdigit() else 1
-            limit_val = (
-                int(query.get("limit", [str(DEFAULT_PAGE_SIZE)])[0])
-                if query.get("limit", [str(DEFAULT_PAGE_SIZE)])[0].isdigit()
-                else DEFAULT_PAGE_SIZE
-            )
-            q_val = query.get("q", [""])[0]
-            sort_val = query.get("sort", ["name_asc"])[0]
-            force_val = query.get("force", ["0"])[0] in ("1", "true", "yes")
-            result = list_source_files(
-                source_id, profile_id, subdir, page_val, limit_val, q_val, sort_val, force=force_val
-            )
-            self._send_json(result)
-            return
-
-        # 4. Detailed file inspection (multimedia ffprobe & DB metadata)
-        if path == "/api/file/details":
-            source_id = query.get("source", [""])[0]
-            profile_id = query.get("profile", [""])[0]
-            file_path = query.get("path", [""])[0]
-            force_val = query.get("force", ["0"])[0] in ("1", "true", "yes")
-            result = inspect_file_details(source_id, profile_id, file_path, force=force_val)
-            self._send_json(result)
+        if self._handle_api(path, query):
             return
 
         if path in ("/", "/sources", "/sources/"):
@@ -1212,7 +1750,7 @@ class PortalRequestHandler(http.server.SimpleHTTPRequestHandler):
         super().do_GET()
 
     def _send_json(self, payload: Any, status: int = HTTP_OK) -> None:
-        raw = json.dumps(payload, indent=2).encode("utf-8")
+        raw = json.dumps(payload, indent=2, default=str).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(raw)))
@@ -1249,6 +1787,12 @@ if __name__ == "__main__":
         "--sort", default="name_asc", help="Sort order (name_asc, name_desc, size_desc, size_asc, date_desc)"
     )
     parser.add_argument("--details", nargs=3, metavar=("SOURCE", "PROFILE", "PATH"), help="Inspect multimedia details")
+    parser.add_argument("--assets", action="store_true", help="List PG media assets (JSON)")
+    parser.add_argument("--asset-id", type=int, help="Single media asset ID for detailed inspection")
+    parser.add_argument(
+        "--status", default="all", help="Status filter for assets (all, nominal, missing_phash, unmapped_path)"
+    )
+    parser.add_argument("--source", default="", help="Source filter for assets")
     parser.add_argument("--force", action="store_true", help="Bypass cache and force fresh live probe")
     args = parser.parse_args()
 
@@ -1278,5 +1822,22 @@ if __name__ == "__main__":
                 inspect_file_details(args.details[0], args.details[1], args.details[2], force=args.force), indent=2
             )
         )
+    elif args.assets:
+        print(
+            json.dumps(
+                get_pg_assets(
+                    page=args.page,
+                    limit=args.limit,
+                    status_filter=args.status,
+                    source_filter=args.source,
+                    search_q=args.search,
+                    sort_by=args.sort,
+                ),
+                indent=2,
+                default=str,
+            )
+        )
+    elif args.asset_id:
+        print(json.dumps(get_pg_asset_detail(args.asset_id), indent=2, default=str))
     else:
         run_server(args.port)
