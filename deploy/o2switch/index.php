@@ -477,10 +477,48 @@ if ($path === '/' || $path === '') {
 
 // Read-only keys (web-top QR, shared dashboards) only reach monitoring GETs
 $isReadOnly = !check_key_match($matchedKey, $masterKeys);
-$readOnlyPathAllowed = in_array($path, ['/monitoring', '/top', '/health', '/v1/health'], true)
+$readOnlyPathAllowed = in_array($path, ['/monitoring', '/top', '/health', '/v1/health', '/sources', '/sources.html', '/api/sources', '/api/probe'], true)
     || str_starts_with($path, '/v1/monitoring/');
 if ($isReadOnly && (!in_array($method, ['GET', 'HEAD'], true) || !$readOnlyPathAllowed)) {
     send_json_error(403, ['error' => 'Forbidden: read-only key']);
+}
+
+// 3.1 Favicon Handler
+if ($path === '/favicon.ico') {
+    header('Content-Type: image/svg+xml');
+    echo "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎬</text></svg>";
+    exit;
+}
+
+// 3.2 Sources Médias Portal & API Handlers (authenticated)
+if ($path === '/sources' || $path === '/sources.html') {
+    $sourcesFile = $homeDir . '/dbsrt/web/sources.html';
+    if (is_file($sourcesFile)) {
+        header('Content-Type: text/html; charset=utf-8');
+        readfile($sourcesFile);
+        exit;
+    }
+    send_json_error(404, ['error' => 'sources.html not deployed in ~/dbsrt/web/']);
+}
+
+if ($path === '/api/sources' || $path === '/api/probe') {
+    $pythonBin = $homeDir . '/dbsrt/bin/python3';
+    $script = $homeDir . '/dbsrt/scripts/portal_server.py';
+    if (!is_file($pythonBin) || !is_file($script)) {
+        send_json_error(500, ['error' => 'Portal backend not installed on host']);
+    }
+
+    if ($path === '/api/sources') {
+        $cmd = escapeshellcmd($pythonBin) . ' ' . escapeshellarg($script) . ' --metadata';
+    } else {
+        $sourceId = preg_replace('/[^a-zA-Z0-9_-]/', '', (string)($_GET['source'] ?? ''));
+        $profileId = preg_replace('/[^a-zA-Z0-9_-]/', '', (string)($_GET['profile'] ?? ''));
+        $cmd = escapeshellcmd($pythonBin) . ' ' . escapeshellarg($script) . ' --probe ' . escapeshellarg($sourceId) . ' ' . escapeshellarg($profileId);
+    }
+    header('Content-Type: application/json; charset=utf-8');
+    header('Access-Control-Allow-Origin: *');
+    passthru($cmd);
+    exit;
 }
 
 $upstreamParams = $_GET;

@@ -253,16 +253,22 @@ case "${ACTION}" in
     check_ssh
     echo "=== Synchronizing standalone stack to ${O2SWITCH_HOST} ==="
     # shellcheck disable=SC2029
-    ssh "${O2SWITCH_HOST}" "mkdir -p ${REMOTE_BASE}/bin ${REMOTE_BASE}/data ${REMOTE_BASE}/run ${REMOTE_BASE}/logs ${REMOTE_PUBLIC_HTML} ${REMOTE_BASE}/scripts && ln -sfn ${O2SWITCH_PYTHON} ${REMOTE_BASE}/bin/python3"
+    ssh "${O2SWITCH_HOST}" "mkdir -p ${REMOTE_BASE}/bin ${REMOTE_BASE}/data ${REMOTE_BASE}/run ${REMOTE_BASE}/logs ${REMOTE_PUBLIC_HTML} ${REMOTE_BASE}/scripts ${REMOTE_BASE}/web && ln -sfn ${O2SWITCH_PYTHON} ${REMOTE_BASE}/bin/python3"
 
     # Binaries ship as releases (deploy): copying over bin/ would replace the release links
     rsync -a --chmod=F755 "deploy/o2switch/dbsrt_server_ctl.sh" "${O2SWITCH_HOST}:${REMOTE_BASE}/bin/"
 
-    echo "-> Transferring batch worker scripts..."
+    echo "-> Transferring batch worker and portal scripts..."
     if [[ -f "scripts/o2switch_batch_worker.py" ]]; then
       rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "scripts/o2switch_batch_worker.py" "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/"
       # shellcheck disable=SC2029
       ssh "${O2SWITCH_HOST}" "chmod +x ${REMOTE_BASE}/scripts/o2switch_batch_worker.py"
+    fi
+    if [[ -f "scripts/portal_server.py" ]]; then
+      rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "scripts/portal_server.py" "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/"
+    fi
+    if [[ -f "scripts/static/sources.html" ]]; then
+      rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "scripts/static/sources.html" "${O2SWITCH_HOST}:${REMOTE_BASE}/web/sources.html"
     fi
 
     echo "-> Transferring Zero-DB catalog and SRT store (bwlimit ${DEFAULT_RSYNC_BWLIMIT_KBPS} KB/s)..."
