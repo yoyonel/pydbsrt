@@ -16,6 +16,7 @@ import json
 import struct
 import sys
 import time
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -112,11 +113,18 @@ def process_single_sidecar(cur: Any, sc_path: Path, dry_run: bool) -> bool:
         if not media_name or not moviehash:
             return False
 
+        # Match by direct media_name, or NFC-normalized media_name
         cur.execute(
-            "SELECT id, duration_ms, source_id, video_rel_path FROM medias WHERE name = %s",
-            (media_name,),
+            "SELECT id, duration_ms, source_id, video_rel_path FROM medias WHERE name = %s OR name = %s",
+            (media_name, unicodedata.normalize("NFD", media_name)),
         )
         row = cur.fetchone()
+        if not row:
+            cur.execute(
+                "SELECT id, duration_ms, source_id, video_rel_path FROM medias WHERE name = %s",
+                (unicodedata.normalize("NFC", media_name),),
+            )
+            row = cur.fetchone()
         if not row:
             return False
 
