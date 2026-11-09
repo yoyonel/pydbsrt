@@ -70,15 +70,17 @@
         <span class="font-bold tracking-tight text-white text-lg">PYDBSRT <span class="text-indigo-400 text-xs px-2 py-0.5 rounded bg-indigo-950/60 border border-indigo-800">STUDIO</span></span>
       </div>
       <nav class="flex items-center gap-1.5 text-sm">
-        <button @click="closeExplorer()"
-                class="px-3 py-1.5 rounded-md font-medium transition"
+        <button @click="switchView('sources')"
+                class="px-3 py-1.5 rounded-md font-medium transition cursor-pointer"
                 :class="currentView === 'sources' ? 'bg-indigo-600/20 text-indigo-300 border border-indigo-500/30' : 'text-slate-400 hover:text-white'">
           Sources Médias (Physique)
         </button>
-        <span class="px-3 py-1.5 rounded-md text-slate-500/60 cursor-not-allowed select-none flex items-center gap-1.5" title="Page en cours de spécification">
+        <button @click="switchView('assets')"
+                class="px-3 py-1.5 rounded-md font-medium transition cursor-pointer flex items-center gap-2"
+                :class="currentView === 'assets' ? 'bg-indigo-600/20 text-indigo-300 border border-indigo-500/30' : 'text-slate-400 hover:text-white'">
           <span>Actifs Médias (DB)</span>
-          <span class="text-[9px] uppercase font-mono px-1.5 py-0.2 rounded bg-slate-900 text-slate-500 border border-slate-800">Bientôt</span>
-        </span>
+          <span class="text-[10px] font-mono px-1.5 py-0.2 rounded bg-indigo-900/60 text-indigo-300 border border-indigo-700/50" x-text="assetsSummary.total ? assetsSummary.total : '2.3k'"></span>
+        </button>
         <span class="px-3 py-1.5 rounded-md text-slate-500/60 cursor-not-allowed select-none flex items-center gap-1.5" title="Fonctionnalité ultérieure">
           <span>Trajectoires</span>
           <span class="text-[9px] uppercase font-mono px-1.5 py-0.2 rounded bg-slate-900 text-slate-500 border border-slate-800">Bientôt</span>
@@ -112,7 +114,7 @@
 
   <!-- Main Content Area -->
   <main class="flex-1 p-6 max-w-7xl mx-auto w-full flex flex-col min-h-0"
-        :class="currentView === 'sources' ? 'overflow-y-auto space-y-6 custom-scroll' : 'overflow-hidden'">
+        :class="currentView === 'sources' || currentView === 'assets' ? 'overflow-y-auto space-y-6 custom-scroll' : 'overflow-hidden'">
 
     <!-- ================================================================= -->
     <!-- VIEW 1: SOURCES MÉDIAS DASHBOARD (OVERVIEW)                      -->
@@ -656,6 +658,649 @@
 
     </div>
 
+    <!-- ================================================================= -->
+    <!-- VIEW 3: ACTIFS MÉDIAS (POSTGRESQL 17 & PHASH ASSETS)            -->
+    <!-- ================================================================= -->
+    <div x-show="currentView === 'assets'" x-transition.opacity.duration.200ms class="space-y-6">
+
+      <!-- Page Header -->
+      <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-2 border-b border-slate-800/60">
+        <div>
+          <h1 class="text-2xl font-bold tracking-tight text-white flex items-center gap-2">
+            Actifs Médias : Intégrité Base & Empreintes pHash
+            <span class="text-xs font-normal text-slate-400 bg-slate-800/60 px-2.5 py-0.5 rounded-full border border-slate-700/50" x-text="assetsTotalItems + ' enregistrements'"></span>
+          </h1>
+          <p class="text-xs text-slate-400 mt-1">Audit métier de l'ancrage physique et de l'état d'extraction pHash des conteneurs vidéo dans PostgreSQL 17 (bktreedb).</p>
+        </div>
+
+        <div class="flex items-center gap-3 text-xs">
+          <!-- Contextual Help Modal Trigger -->
+          <button @click="showGlossaryModal = true" class="px-3 py-1.5 rounded-lg bg-indigo-950/60 hover:bg-indigo-900/80 text-indigo-300 font-semibold border border-indigo-800 shadow flex items-center gap-1.5 transition cursor-pointer">
+            <span>💡</span>
+            <span>Aide & Définitions Métier</span>
+          </button>
+          <button @click="fetchAssets(true)" :disabled="assetsLoading" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-indigo-300 font-semibold border border-slate-700 shadow flex items-center gap-1.5 transition cursor-pointer">
+            <span :class="{'animate-spin': assetsLoading}">🔄</span>
+            <span>Actualiser</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Disconnected Database Banner (Explicit Feedback) -->
+      <template x-if="!assetsConnected && !assetsLoading">
+        <div class="bg-amber-950/40 border border-amber-800/80 rounded-xl p-5 shadow-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div class="flex items-start gap-3">
+            <span class="text-2xl mt-0.5">🔌</span>
+            <div>
+              <div class="flex items-center gap-2">
+                <h3 class="text-sm font-bold text-amber-300">Base de Données Relationnelle Non Joignable</h3>
+                <span class="text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-amber-900/60 text-amber-200 border border-amber-700/60">PostgreSQL</span>
+              </div>
+              <p class="text-xs text-amber-200/80 mt-1" x-text="assetsErrorMessage || 'Impossible d\'établir la connexion avec la base de données sur cet hôte.'"></p>
+              <div class="text-[11px] text-slate-400 mt-2 flex flex-wrap items-center gap-3">
+                <span class="flex items-center gap-1 font-mono">
+                  <span>Hôte actuel :</span>
+                  <span class="text-indigo-300 font-semibold" x-text="hostName"></span>
+                </span>
+                <span class="text-slate-600">•</span>
+                <span class="flex items-center gap-1">
+                  <span>💡 Solution en local :</span>
+                  <code class="bg-slate-900 px-1.5 py-0.5 rounded text-amber-300 font-mono text-[10px] border border-slate-800">task db:up</code>
+                </span>
+                <span class="text-slate-600">•</span>
+                <span class="flex items-center gap-1">
+                  <span>☁️ Sur o2switch :</span>
+                  <span class="text-slate-300">Base PostgreSQL non encore déployée sur cet environnement distant</span>
+                </span>
+              </div>
+            </div>
+          </div>
+          <button @click="fetchAssets(true)" class="px-3.5 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-xs font-semibold text-white shadow shrink-0 flex items-center gap-1.5 transition cursor-pointer">
+            <span>🔄</span>
+            <span>Réessayer la connexion</span>
+          </button>
+        </div>
+      </template>
+
+      <!-- KPI Cards (Clickable Filters) -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <!-- KPI 1: Total -->
+        <div @click="setAssetsStatusFilter('all')"
+             class="bg-slate-900 border rounded-xl p-4 shadow cursor-pointer transition flex flex-col justify-between"
+             :class="assetsStatusFilter === 'all' ? 'border-indigo-500 bg-indigo-950/20' : 'border-slate-800 hover:border-slate-700'">
+          <div class="flex items-center justify-between text-xs text-slate-400 font-medium">
+            <span>🎬 TOTAL EN BASE</span>
+            <span class="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">PG 17</span>
+          </div>
+          <div class="mt-2 text-2xl font-bold font-mono text-white" x-text="assetsSummary.total"></div>
+          <div class="mt-1 text-[11px] text-slate-400">Total actifs vidéo répertoriés</div>
+        </div>
+
+        <!-- KPI 2: Nominal -->
+        <div @click="setAssetsStatusFilter('nominal')"
+             class="bg-slate-900 border rounded-xl p-4 shadow cursor-pointer transition flex flex-col justify-between"
+             :class="assetsStatusFilter === 'nominal' ? 'border-emerald-500 bg-emerald-950/20' : 'border-slate-800 hover:border-slate-700'">
+          <div class="flex items-center justify-between text-xs text-emerald-400 font-medium">
+            <span>🟢 EMPREINTÉ & LOCALISÉ</span>
+            <span class="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-emerald-950/60 text-emerald-300 border border-emerald-800">Nominal</span>
+          </div>
+          <div class="mt-2 text-2xl font-bold font-mono text-emerald-400" x-text="assetsSummary.nominal"></div>
+          <div class="mt-1 text-[11px] text-slate-400">pHash complet + chemin vidéo lié</div>
+        </div>
+
+        <!-- KPI 3: Missing pHash -->
+        <div @click="setAssetsStatusFilter('missing_phash')"
+             class="bg-slate-900 border rounded-xl p-4 shadow cursor-pointer transition flex flex-col justify-between"
+             :class="assetsStatusFilter === 'missing_phash' ? 'border-amber-500 bg-amber-950/20' : 'border-slate-800 hover:border-slate-700'">
+          <div class="flex items-center justify-between text-xs text-amber-400 font-medium">
+            <span>⚠️ SANS EMPREINTE</span>
+            <span class="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-amber-950/60 text-amber-300 border border-amber-800">Chantier</span>
+          </div>
+          <div class="mt-2 text-2xl font-bold font-mono text-amber-400" x-text="assetsSummary.missing_phash"></div>
+          <div class="mt-1 text-[11px] text-slate-400">pHash pending / absent / corrompu</div>
+        </div>
+
+        <!-- KPI 4: Unmapped path -->
+        <div @click="setAssetsStatusFilter('unmapped_path')"
+             class="bg-slate-900 border rounded-xl p-4 shadow cursor-pointer transition flex flex-col justify-between"
+             :class="assetsStatusFilter === 'unmapped_path' ? 'border-rose-500 bg-rose-950/20' : 'border-slate-800 hover:border-slate-700'">
+          <div class="flex items-center justify-between text-xs text-rose-400 font-medium">
+            <span>🛑 CHEMIN MANQUANT</span>
+            <span class="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-rose-950/60 text-rose-300 border border-rose-800">Alerte</span>
+          </div>
+          <div class="mt-2 text-2xl font-bold font-mono text-rose-400" x-text="assetsSummary.unmapped_path"></div>
+          <div class="mt-1 text-[11px] text-slate-400">Sans chemin relatif vidéo en base</div>
+        </div>
+      </div>
+
+      <!-- Filters & Search Toolbar -->
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow flex flex-col md:flex-row items-center justify-between gap-3 text-xs">
+        <div class="flex items-center gap-3 w-full md:w-auto flex-1">
+          <!-- Text Search -->
+          <div class="relative flex-1 max-w-md">
+            <span class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-500">🔍</span>
+            <input type="text"
+                   x-model="assetsSearchQuery"
+                   @input.debounce.300ms="onAssetsFilterChange()"
+                   placeholder="Rechercher par titre, release, moviehash..."
+                   class="w-full pl-9 pr-3 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500">
+          </div>
+
+          <!-- Source Filter -->
+          <select x-model="assetsSourceFilter" @change="onAssetsFilterChange()" class="bg-slate-950 border border-slate-700 text-xs text-slate-300 rounded-lg px-3 py-1.5 focus:outline-none focus:border-indigo-500 cursor-pointer">
+            <option value="">Toutes les sources</option>
+            <option value="synology-video">Synology Video</option>
+            <option value="synology-tvshow">Synology TV Shows</option>
+            <option value="local-snippets">Snippets Locaux</option>
+          </select>
+
+          <!-- Sort Filter -->
+          <select x-model="assetsSort" @change="onAssetsFilterChange()" class="bg-slate-950 border border-slate-700 text-xs text-slate-300 rounded-lg px-3 py-1.5 focus:outline-none focus:border-indigo-500 cursor-pointer">
+            <option value="title_asc">Titre (A → Z)</option>
+            <option value="title_desc">Titre (Z → A)</option>
+            <option value="frames_desc">Nombre de frames (décroissant)</option>
+            <option value="duration_desc">Durée (décroissante)</option>
+            <option value="id_desc">ID Média (récents en premier)</option>
+          </select>
+        </div>
+
+        <div class="text-slate-400 font-mono text-[11px] whitespace-nowrap">
+          <span x-text="assetsTotalItems + ' résultats'"></span>
+          <span class="mx-1.5 text-slate-700">•</span>
+          <span x-text="'Page ' + assetsPage + ' / ' + (assetsTotalPages || 1)"></span>
+        </div>
+      </div>
+
+      <!-- Assets Table View -->
+      <div class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-lg">
+        <div class="overflow-x-auto">
+          <table class="w-full text-left border-collapse text-xs">
+            <thead>
+              <tr class="bg-slate-950/80 border-b border-slate-800 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+                <th class="py-3 px-4">ID & Titre Épuré</th>
+                <th class="py-3 px-4">Gisement & Conteneur</th>
+                <th class="py-3 px-4">Moviehash (16h)</th>
+                <th class="py-3 px-4">
+                  <div class="flex items-center gap-1">
+                    <span>Empreinte pHash</span>
+                    <button @click.stop="openGlossaryTopic('phash')" class="text-slate-500 hover:text-indigo-400 cursor-pointer" title="Aide sur les empreintes pHash">ⓘ</button>
+                  </div>
+                </th>
+                <th class="py-3 px-4">Propriétés Flux</th>
+                <th class="py-3 px-4">
+                  <div class="flex items-center gap-1">
+                    <span>Statut Métier</span>
+                    <button @click.stop="openGlossaryTopic('statut')" class="text-slate-500 hover:text-indigo-400 cursor-pointer" title="Aide sur les statuts métier">ⓘ</button>
+                  </div>
+                </th>
+                <th class="py-3 px-4 text-right">Action</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-800/60 font-sans">
+              <!-- Loading Skeleton -->
+              <template x-if="assetsLoading">
+                <tr>
+                  <td colspan="7" class="py-12 text-center text-slate-400">
+                    <div class="flex items-center justify-center gap-2">
+                      <span class="animate-spin text-indigo-400 text-base">⚡</span>
+                      <span>Interrogation de PostgreSQL 17...</span>
+                    </div>
+                  </td>
+                </tr>
+              </template>
+
+              <!-- Disconnected / Unreachable DB State -->
+              <template x-if="!assetsLoading && !assetsConnected">
+                <tr>
+                  <td colspan="7" class="py-16 text-center text-slate-400">
+                    <div class="max-w-md mx-auto space-y-3">
+                      <div class="text-3xl">🔌</div>
+                      <div class="font-bold text-white text-sm">Connexion à la base de données impossible</div>
+                      <p class="text-xs text-slate-400" x-text="assetsErrorMessage || 'Le serveur de base de données PostgreSQL n\'est pas joignable.'"></p>
+                      <button @click="fetchAssets(true)" class="mt-2 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs font-semibold text-white shadow inline-flex items-center gap-1.5 transition">
+                        <span>🔄</span>
+                        <span>Réessayer</span>
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              </template>
+
+              <!-- Empty State -->
+              <template x-if="!assetsLoading && assetsConnected && assetsItems.length === 0">
+                <tr>
+                  <td colspan="7" class="py-12 text-center text-slate-500">
+                    Aucun actif média ne correspond aux critères sélectionnés.
+                  </td>
+                </tr>
+              </template>
+
+              <!-- Rows -->
+              <template x-for="item in assetsItems" :key="item.id">
+                <tr class="hover:bg-slate-800/40 transition cursor-pointer"
+                    :class="selectedAsset && selectedAsset.id === item.id ? 'bg-indigo-950/30' : ''"
+                    @click="openAssetDetail(item.id)">
+
+                  <!-- ID & Title -->
+                  <td class="py-3 px-4">
+                    <div class="flex items-center gap-2">
+                      <span class="font-mono text-[10px] text-slate-500" x-text="'#' + item.id"></span>
+                      <span class="font-semibold text-white truncate max-w-xs block" x-text="item.clean_title" :title="item.name"></span>
+                    </div>
+                    <div class="text-[11px] text-slate-500 truncate max-w-xs mt-0.5" x-text="item.name"></div>
+                  </td>
+
+                  <!-- Source & Container -->
+                  <td class="py-3 px-4">
+                    <template x-if="item.source_id">
+                      <div>
+                        <span class="px-1.5 py-0.5 rounded text-[10px] font-mono bg-slate-800 text-indigo-300 border border-slate-700" x-text="item.source_id"></span>
+                        <div class="text-[10px] font-mono text-slate-400 truncate max-w-[200px] mt-1" x-text="item.video_rel_path" :title="item.video_rel_path"></div>
+                      </div>
+                    </template>
+                    <template x-if="!item.source_id">
+                      <span class="text-amber-400/80 text-[11px] italic">Non rattaché</span>
+                    </template>
+                  </td>
+
+                  <!-- Moviehash -->
+                  <td class="py-3 px-4">
+                    <template x-if="item.moviehash">
+                      <span class="font-mono text-xs text-indigo-400 bg-indigo-950/40 px-2 py-0.5 rounded border border-indigo-900/60" x-text="item.moviehash"></span>
+                    </template>
+                    <template x-if="!item.moviehash">
+                      <span class="text-slate-600 font-mono text-xs">—</span>
+                    </template>
+                  </td>
+
+                  <!-- pHash Frames -->
+                  <td class="py-3 px-4">
+                    <div class="flex items-center gap-1.5">
+                      <span class="font-mono font-semibold"
+                            :class="item.frame_count > 0 ? 'text-emerald-400' : 'text-slate-500'"
+                            x-text="item.frame_count.toLocaleString() + ' fr'"></span>
+                      <template x-if="item.phash_on_disk">
+                        <span class="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[10px] bg-slate-800 text-emerald-400 border border-emerald-800/60 font-mono" title="Fichier .phash présent sur disque dans data/__PHASH__/">
+                          <span>💾</span>
+                          <span>.phash</span>
+                        </span>
+                      </template>
+                    </div>
+                    <div class="text-[10px] uppercase font-mono mt-0.5"
+                         :class="item.phash_status === 'complete' ? 'text-emerald-400' : (item.phash_status === 'pending' ? 'text-amber-400' : 'text-rose-400')"
+                         x-text="'Statut : ' + item.phash_status"></div>
+                  </td>
+
+                  <!-- Probed Specs -->
+                  <td class="py-3 px-4">
+                    <div class="text-slate-300 font-medium">
+                      <span x-text="item.resolution"></span>
+                      <span class="text-slate-600 mx-1">•</span>
+                      <span x-text="item.video_codec"></span>
+                    </div>
+                    <div class="text-[11px] text-slate-500 mt-0.5">
+                      <span x-text="item.fps + ' fps'"></span>
+                      <span class="text-slate-600 mx-1">•</span>
+                      <span x-text="item.duration_fmt"></span>
+                    </div>
+                  </td>
+
+                  <!-- Status Tag -->
+                  <td class="py-3 px-4 whitespace-nowrap">
+                    <template x-if="item.status_tag === 'nominal'">
+                      <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold bg-emerald-950/80 text-emerald-400 border border-emerald-800 shadow-sm">
+                        <span>🟢</span>
+                        <span>Nominal</span>
+                      </span>
+                    </template>
+                    <template x-if="item.status_tag === 'missing_phash'">
+                      <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold bg-amber-950/80 text-amber-300 border border-amber-800 shadow-sm">
+                        <span>⚠️</span>
+                        <span>Sans pHash</span>
+                      </span>
+                    </template>
+                    <template x-if="item.status_tag === 'unmapped_path'">
+                      <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold bg-rose-950/80 text-rose-300 border border-rose-800 shadow-sm">
+                        <span>🛑</span>
+                        <span>Non localisé</span>
+                      </span>
+                    </template>
+                  </td>
+
+                  <!-- Action -->
+                  <td class="py-3 px-4 text-right">
+                    <button @click.stop="openAssetDetail(item.id)" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-indigo-300 font-medium border border-slate-700 transition">
+                      Inspecter
+                    </button>
+                  </td>
+
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Table Pagination Controls -->
+        <div class="bg-slate-950/80 px-4 py-3 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400">
+          <div class="flex items-center gap-2">
+            <span>Lignes par page :</span>
+            <select x-model="assetsLimit" @change="onAssetsFilterChange()" class="bg-slate-900 border border-slate-700 text-xs rounded px-2 py-0.5 text-slate-300">
+              <option value="15">15</option>
+              <option value="25">25</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+            </select>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <button @click="prevAssetsPage()" :disabled="assetsPage <= 1" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed text-white font-medium border border-slate-700 transition">
+              ← Précédent
+            </button>
+            <span class="px-2 font-mono" x-text="assetsPage + ' / ' + (assetsTotalPages || 1)"></span>
+            <button @click="nextAssetsPage()" :disabled="assetsPage >= assetsTotalPages" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed text-white font-medium border border-slate-700 transition">
+              Suivant →
+            </button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Slide-over Drawer: Technical Asset Inspection -->
+    <div x-show="selectedAssetModal"
+         class="fixed inset-0 z-50 overflow-hidden"
+         aria-labelledby="slide-over-title"
+         role="dialog"
+         aria-modal="true"
+         x-cloak>
+      <div class="absolute inset-0 bg-slate-950/80 backdrop-blur-sm transition-opacity"
+           @click="selectedAssetModal = false"></div>
+
+      <div class="fixed inset-y-0 right-0 pl-10 max-w-full flex">
+        <div class="w-screen max-w-xl bg-slate-900 border-l border-slate-800 shadow-2xl flex flex-col h-full">
+
+          <!-- Drawer Header -->
+          <div class="px-6 py-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <span class="text-lg">🎞️</span>
+              <h2 class="text-base font-bold text-white tracking-tight" x-text="selectedAsset ? selectedAsset.clean_title : 'Détail Actif'"></h2>
+            </div>
+            <button @click="selectedAssetModal = false" class="text-slate-400 hover:text-white text-lg p-1">✕</button>
+          </div>
+
+          <!-- Drawer Body -->
+          <div class="flex-1 overflow-y-auto p-6 space-y-6 custom-scroll">
+            <template x-if="assetDetailLoading">
+              <div class="py-16 text-center text-slate-400">
+                <span class="animate-spin text-xl text-indigo-400 inline-block mb-2">⚡</span>
+                <p>Chargement des spécifications techniques...</p>
+              </div>
+            </template>
+
+            <template x-if="!assetDetailLoading && selectedAsset">
+              <div class="space-y-6 text-xs">
+
+                <!-- Identification Block -->
+                <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
+                  <div class="text-[11px] font-semibold text-indigo-400 uppercase tracking-wider flex items-center justify-between">
+                    <span>1. Identifiants & Hashes Uniques</span>
+                    <span class="font-mono text-slate-500" x-text="'ID #' + selectedAsset.id"></span>
+                  </div>
+
+                  <div class="grid grid-cols-2 gap-3 pt-1">
+                    <div>
+                      <span class="text-slate-500 block text-[10px]">OpenSubtitles Moviehash (16h)</span>
+                      <span class="font-mono text-xs font-semibold text-white select-all" x-text="selectedAsset.moviehash || 'Non calculé'"></span>
+                    </div>
+                    <div>
+                      <span class="text-slate-500 block text-[10px]">pydbsrt Media Hash (MD5 32h)</span>
+                      <span class="font-mono text-xs text-slate-300 select-all truncate block" x-text="selectedAsset.media_hash || '—'"></span>
+                    </div>
+                  </div>
+
+                  <div class="pt-2 border-t border-slate-800/80">
+                    <span class="text-slate-500 block text-[10px]">Nom de release originel</span>
+                    <span class="text-slate-300 font-mono text-[11px] break-all" x-text="selectedAsset.name"></span>
+                  </div>
+                </div>
+
+                <!-- Physical Storage Alignment -->
+                <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
+                  <div class="text-[11px] font-semibold text-indigo-400 uppercase tracking-wider flex items-center justify-between">
+                    <span>2. Localisation Physique & Montage</span>
+                    <span class="px-2 py-0.5 rounded text-[10px] font-mono"
+                          :class="selectedAsset.physical_exists ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-rose-950 text-rose-400 border border-rose-800'"
+                          x-text="selectedAsset.physical_exists ? '🟢 Accessible' : '🔴 Inaccessible sur cet hôte'"></span>
+                  </div>
+
+                  <div>
+                    <span class="text-slate-500 block text-[10px]">Gisement Source PG</span>
+                    <span class="font-semibold text-white font-mono" x-text="selectedAsset.source_id || 'Aucun'"></span>
+                  </div>
+
+                  <div>
+                    <span class="text-slate-500 block text-[10px]">Chemin Relatif Déclaré</span>
+                    <span class="text-slate-300 font-mono text-[11px] break-all block" x-text="selectedAsset.video_rel_path || '—'"></span>
+                  </div>
+
+                  <div>
+                    <span class="text-slate-500 block text-[10px]">Chemin Absolu Résolu sur l'Hôte Courant</span>
+                    <span class="text-slate-400 font-mono text-[10px] break-all block bg-slate-900/80 p-2 rounded border border-slate-800" x-text="selectedAsset.physical_resolved_path || 'Non résolu'"></span>
+                  </div>
+
+                  <!-- Alternative Transport Profile (e.g. WAN FTP when local CIFS unmounted) -->
+                  <template x-if="selectedAsset.alt_channels && selectedAsset.alt_channels.length > 0">
+                    <div class="pt-2 border-t border-slate-800/80 space-y-2">
+                      <div class="text-[10px] uppercase font-mono text-indigo-400 font-semibold flex items-center gap-1.5">
+                        <span>📡 Canaux Alternatifs Actifs</span>
+                        <span class="text-[9px] bg-indigo-950 px-1.5 py-0.2 rounded border border-indigo-800 text-indigo-300">Réseau distant</span>
+                      </div>
+                      <template x-for="ch in selectedAsset.alt_channels" :key="ch.id">
+                        <div class="bg-indigo-950/20 border border-indigo-900/50 rounded-lg p-2.5 space-y-1">
+                          <div class="flex items-center justify-between">
+                            <span class="font-semibold text-white text-xs" x-text="ch.name"></span>
+                            <span class="text-emerald-400 font-mono text-[10px] bg-emerald-950 px-1.5 py-0.5 rounded border border-emerald-800">🟢 Disponible</span>
+                          </div>
+                          <div class="text-[10px] text-slate-400" x-text="ch.note"></div>
+                          <div class="text-[10px] font-mono text-indigo-300 break-all select-all bg-slate-950/80 p-1.5 rounded border border-slate-800" x-text="ch.target"></div>
+                        </div>
+                      </template>
+                    </div>
+                  </template>
+                </div>
+
+                <!-- pHash & SP-GiST BK-Tree Diagnostic -->
+                <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
+                  <div class="text-[11px] font-semibold text-indigo-400 uppercase tracking-wider">
+                    3. Empreinte Perceptuelle (pHash)
+                  </div>
+
+                  <div class="grid grid-cols-2 gap-3">
+                    <div>
+                      <span class="text-slate-500 block text-[10px]">Statut Empreinte</span>
+                      <span class="font-semibold font-mono uppercase"
+                            :class="selectedAsset.phash_status === 'complete' ? 'text-emerald-400' : 'text-amber-400'"
+                            x-text="selectedAsset.phash_status"></span>
+                    </div>
+                    <div>
+                      <span class="text-slate-500 block text-[10px]">Fichier .phash Disque</span>
+                      <span class="font-semibold"
+                            :class="selectedAsset.phash_on_disk ? 'text-emerald-400' : 'text-slate-500'"
+                            x-text="selectedAsset.phash_on_disk ? '💾 Présent (data/__PHASH__)' : 'Introuvable'"></span>
+                    </div>
+                    <div>
+                      <span class="text-slate-500 block text-[10px]">Nombre de Frames pHash</span>
+                      <span class="font-mono text-white font-semibold" x-text="selectedAsset.frame_count ? selectedAsset.frame_count.toLocaleString() : '0'"></span>
+                    </div>
+                    <div>
+                      <span class="text-slate-500 block text-[10px]">Frames dans Table 'frames' (PG)</span>
+                      <span class="font-mono font-semibold"
+                            :class="selectedAsset.frames_in_db > 0 ? 'text-indigo-400' : 'text-slate-500'"
+                            x-text="selectedAsset.frames_in_db ? selectedAsset.frames_in_db.toLocaleString() : '0'"></span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Technical Media Stream Specs -->
+                <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
+                  <div class="text-[11px] font-semibold text-indigo-400 uppercase tracking-wider">
+                    4. Propriétés du Flux & Cadence
+                  </div>
+
+                  <div class="grid grid-cols-3 gap-3">
+                    <div>
+                      <span class="text-slate-500 block text-[10px]">Résolution</span>
+                      <span class="font-mono text-white" x-text="selectedAsset.resolution ? selectedAsset.resolution + ' (' + (selectedAsset.width || '?') + 'x' + (selectedAsset.height || '?') + ')' : '—'"></span>
+                    </div>
+                    <div>
+                      <span class="text-slate-500 block text-[10px]">Codec Vidéo</span>
+                      <span class="font-mono text-white uppercase" x-text="selectedAsset.video_codec || '—'"></span>
+                    </div>
+                    <div>
+                      <span class="text-slate-500 block text-[10px]">Cadence (FPS)</span>
+                      <span class="font-mono text-white" x-text="selectedAsset.fps + ' fps ' + (selectedAsset.is_vfr ? '(VFR)' : '(CFR)')"></span>
+                    </div>
+                    <div>
+                      <span class="text-slate-500 block text-[10px]">Durée Décodée</span>
+                      <span class="font-mono text-white" x-text="selectedAsset.duration_fmt"></span>
+                    </div>
+                    <div>
+                      <span class="text-slate-500 block text-[10px]">Taille Fichier</span>
+                      <span class="font-mono text-white" x-text="selectedAsset.file_size_human"></span>
+                    </div>
+                    <div>
+                      <span class="text-slate-500 block text-[10px]">Dernière MàJ</span>
+                      <span class="font-mono text-slate-400" x-text="selectedAsset.updated_at_fmt"></span>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+            </template>
+          </div>
+
+          <!-- Drawer Footer -->
+          <div class="p-4 bg-slate-950 border-t border-slate-800 flex items-center justify-between">
+            <button @click="selectedAssetModal = false" class="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 transition">
+              Fermer
+            </button>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal: Contextual Glossary & Domain Definitions -->
+    <div x-show="showGlossaryModal"
+         class="fixed inset-0 z-50 overflow-hidden flex items-center justify-center p-4"
+         aria-labelledby="glossary-modal-title"
+         role="dialog"
+         aria-modal="true"
+         x-cloak>
+      <div class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm transition-opacity"
+           @click="showGlossaryModal = false"></div>
+
+      <div class="relative bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl max-w-2xl w-full p-6 space-y-6 max-h-[85vh] flex flex-col z-10">
+
+        <!-- Modal Header -->
+        <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+          <div class="flex items-center gap-2">
+            <span class="text-xl">💡</span>
+            <h3 class="text-base font-bold text-white tracking-tight">Glossaire & Définitions Métier pydbsrt</h3>
+          </div>
+          <button @click="showGlossaryModal = false" class="text-slate-400 hover:text-white p-1 text-base">✕</button>
+        </div>
+
+        <!-- Modal Content (Scrollable) -->
+        <div class="flex-1 overflow-y-auto space-y-5 text-xs text-slate-300 custom-scroll pr-1">
+
+          <!-- Section 1: Statuts Métier -->
+          <div class="bg-slate-950/80 border border-slate-800 rounded-xl p-4 space-y-2">
+            <h4 class="font-bold text-indigo-400 uppercase text-[11px] flex items-center gap-1.5">
+              <span>🏷️</span>
+              <span>1. Statut Métier de l'Actif Vidéo</span>
+            </h4>
+            <p class="text-slate-400">Qualifie l'état d'exploitabilité de l'actif vidéo pour les opérations de calage et de synchronisation :</p>
+            <ul class="space-y-2 pt-1 font-sans">
+              <li class="flex items-start gap-2">
+                <span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-950 text-emerald-400 border border-emerald-800 shrink-0">🟢 Nominal</span>
+                <span><strong>Empreinté & Localisé :</strong> L'empreinte pHash est calculée et complète, et le fichier vidéo est physiquement relié à une source de stockage valide.</span>
+              </li>
+              <li class="flex items-start gap-2">
+                <span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-950 text-amber-300 border border-amber-800 shrink-0">⚠️ Sans pHash</span>
+                <span><strong>Empreinte Incomplète :</strong> Le média est référencé en base, mais son extraction pHash est en attente (<code class="text-amber-300">pending</code>), tronquée ou non finalisée.</span>
+              </li>
+              <li class="flex items-start gap-2">
+                <span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-rose-950 text-rose-300 border border-rose-800 shrink-0">🛑 Non localisé</span>
+                <span><strong>Lien Rompu :</strong> L'enregistrement existe en base de données mais son chemin physique (<code class="text-slate-400">video_rel_path</code>) est absent ou non rattaché à une source.</span>
+              </li>
+            </ul>
+          </div>
+
+          <!-- Section 2: Empreinte pHash & Statut PENDING -->
+          <div class="bg-slate-950/80 border border-slate-800 rounded-xl p-4 space-y-2">
+            <h4 class="font-bold text-indigo-400 uppercase text-[11px] flex items-center gap-1.5">
+              <span>🎞️</span>
+              <span>2. Empreinte Perceptuelle & Fichier Disque (💾 .phash)</span>
+            </h4>
+            <p class="text-slate-400">État du cycle de vie de l'empreinte perceptuelle 64-bit calculée par frame décodée :</p>
+            <ul class="space-y-2 pt-1 font-sans">
+              <li class="flex items-start gap-2">
+                <span class="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[10px] bg-slate-800 text-emerald-400 border border-emerald-800 font-mono shrink-0">💾 .phash</span>
+                <span><strong>Présence Disque :</strong> Indique que le fichier binaire d'empreintes pré-calculées (<code class="text-indigo-300">&lt;moviehash&gt;.&lt;fps&gt;fps.phash</code>) existe physiquement sur le disque local dans <code class="text-slate-400">data/__PHASH__/</code>, prêt à être injecté ou compacté.</span>
+              </li>
+              <li>
+                <strong class="text-emerald-400">COMPLETE :</strong> L'empreinte couvre 100% de la durée attendue du média. Prête pour l'index SP-GiST BK-Tree et le matching.
+              </li>
+              <li>
+                <strong class="text-amber-400">PENDING :</strong> L'actif a été inséré en base sans que l'extraction pHash finale ait été consolidée via <code class="text-indigo-300">task db:backfill:assets</code> ou <code class="text-indigo-300">dbsrt import-phash</code>.
+              </li>
+              <li>
+                <strong class="text-rose-400">TRUNCATED / CORRUPTED :</strong> Le flux vidéo décodé s'est interrompu prématurément ou le fichier pHash fait moins de 50 Ko.
+              </li>
+            </ul>
+          </div>
+
+          <!-- Section 3: Hashes Uniques -->
+          <div class="bg-slate-950/80 border border-slate-800 rounded-xl p-4 space-y-2">
+            <h4 class="font-bold text-indigo-400 uppercase text-[11px] flex items-center gap-1.5">
+              <span>🔑</span>
+              <span>3. Hashes d'Identité Vidéo</span>
+            </h4>
+            <ul class="space-y-2 pt-1 font-sans">
+              <li>
+                <strong class="text-indigo-300">Moviehash (16h) :</strong> Empreinte instantanée normalisée OpenSubtitles calculée sur la taille du fichier et les 64 premiers/derniers Ko. Permet la réconciliation $O(1)$ sans décoder la vidéo.
+              </li>
+              <li>
+                <strong class="text-indigo-300">Media Hash (32h) :</strong> Somme de contrôle MD5 du conteneur physique ou du fichier .phash assurant l'unicité stricte au sein du catalogue.
+              </li>
+            </ul>
+          </div>
+
+          <!-- Section 4: Canaux Physiques vs Flux Distants -->
+          <div class="bg-slate-950/80 border border-slate-800 rounded-xl p-4 space-y-2">
+            <h4 class="font-bold text-indigo-400 uppercase text-[11px] flex items-center gap-1.5">
+              <span>📡</span>
+              <span>4. Ancrage Physique vs Canaux Distants</span>
+            </h4>
+            <p class="text-slate-400">
+              Un média peut être marqué <span class="text-rose-400 font-semibold">"Inaccessible sur cet hôte"</span> si son montage local direct (CIFS <code class="text-slate-400">/media/latty/...</code>) n'est pas monté dans l'environnement courant (ex: poste au travail sans réseau local Synology).
+              Cependant, le média reste accessible via ses <strong>canaux distants</strong> (ex: <code class="text-indigo-300">Streaming WAN FTP</code>) déclarés dans les profils actifs.
+            </p>
+          </div>
+
+        </div>
+
+        <!-- Modal Footer -->
+        <div class="pt-3 border-t border-slate-800 flex justify-end">
+          <button @click="showGlossaryModal = false" class="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs font-semibold text-white transition">
+            Compris
+          </button>
+        </div>
+
+      </div>
+    </div>
+
   </main>
 
   <script>
@@ -695,6 +1340,26 @@
         highlightedItemPath: null,
         highlightTargetName: null,
         pendingSelectedFilePath: null,
+
+        // Assets View State (PostgreSQL 17)
+        assetsSummary: { total: 0, nominal: 0, missing_phash: 0, unmapped_path: 0 },
+        assetsItems: [],
+        assetsPage: 1,
+        assetsLimit: 25,
+        assetsTotalItems: 0,
+        assetsTotalPages: 1,
+        assetsStatusFilter: 'all',
+        assetsSourceFilter: '',
+        assetsSearchQuery: '',
+        assetsSort: 'title_asc',
+        assetsLoading: false,
+        assetsConnected: true,
+        assetsErrorMessage: '',
+        selectedAssetModal: false,
+        selectedAsset: null,
+        assetDetailLoading: false,
+        showGlossaryModal: false,
+        glossaryTopic: 'all',
 
         async initApp() {
           const stored = this.loadStoredState();
@@ -770,6 +1435,20 @@
           if (this.activeEnv) {
             params.set('env', this.activeEnv);
           }
+          if (this.currentView === 'assets') {
+            if (this.assetsStatusFilter && this.assetsStatusFilter !== 'all') {
+              params.set('status', this.assetsStatusFilter);
+            }
+            if (this.assetsSourceFilter) {
+              params.set('source', this.assetsSourceFilter);
+            }
+            if (this.assetsPage > 1) {
+              params.set('page', this.assetsPage);
+            }
+            if (this.assetsSearchQuery) {
+              params.set('q', this.assetsSearchQuery);
+            }
+          }
           if (this.currentView === 'explorer' && this.explorerSource && this.explorerProfile) {
             params.set('source', this.explorerSource.id);
             params.set('profile', this.explorerProfile.id);
@@ -820,6 +1499,16 @@
             this.activeEnv = env;
           }
 
+          if (view === 'assets') {
+            this.currentView = 'assets';
+            this.assetsStatusFilter = hashParams.get('status') || 'all';
+            this.assetsSourceFilter = hashParams.get('source') || '';
+            this.assetsPage = parseInt(hashParams.get('page') || '1') || 1;
+            this.assetsSearchQuery = hashParams.get('q') || '';
+            this.fetchAssets();
+            return;
+          }
+
           if (view === 'explorer') {
             const sourceId = hashParams.get('source');
             const profileId = hashParams.get('profile');
@@ -859,6 +1548,16 @@
           const view = hashParams?.get('view') || stored?.currentView || 'sources';
           const sourceId = hashParams?.get('source') || stored?.sourceId;
           const profileId = hashParams?.get('profile') || stored?.profileId;
+
+          if (view === 'assets') {
+            this.currentView = 'assets';
+            this.assetsStatusFilter = hashParams?.get('status') || stored?.assetsStatusFilter || 'all';
+            this.assetsSourceFilter = hashParams?.get('source') || stored?.assetsSourceFilter || '';
+            this.assetsPage = parseInt(hashParams?.get('page') || (stored?.assetsPage || 1)) || 1;
+            this.assetsSearchQuery = hashParams?.get('q') || stored?.assetsSearchQuery || '';
+            this.fetchAssets();
+            return;
+          }
 
           if (view === 'explorer' && sourceId && profileId) {
             const src = this.sources.find(s => s.id === sourceId);
@@ -1340,6 +2039,116 @@
           } catch (err) {
             console.warn('Clipboard write failed:', err);
           }
+        },
+
+        // Assets View Actions (PostgreSQL 17)
+        switchView(newView) {
+          this.currentView = newView;
+          this.syncUrlHash(true);
+          this.saveStoredState();
+          if (newView === 'assets') {
+            this.fetchAssets();
+          }
+        },
+
+        onAssetsFilterChange() {
+          this.assetsPage = 1;
+          this.syncUrlHash(true);
+          this.fetchAssets();
+        },
+
+        setAssetsStatusFilter(status) {
+          this.assetsStatusFilter = status;
+          this.onAssetsFilterChange();
+        },
+
+        prevAssetsPage() {
+          if (this.assetsPage > 1) {
+            this.assetsPage--;
+            this.syncUrlHash(false);
+            this.fetchAssets();
+          }
+        },
+
+        nextAssetsPage() {
+          if (this.assetsPage < this.assetsTotalPages) {
+            this.assetsPage++;
+            this.syncUrlHash(false);
+            this.fetchAssets();
+          }
+        },
+
+        async fetchAssets(force = false) {
+          this.assetsLoading = true;
+          const params = new URLSearchParams({
+            page: this.assetsPage,
+            limit: this.assetsLimit,
+            status: this.assetsStatusFilter,
+            source: this.assetsSourceFilter,
+            q: this.assetsSearchQuery,
+            sort: this.assetsSort,
+          });
+
+          try {
+            const url = this.getApiUrl('assets', params.toString());
+            const res = await fetch(url);
+            const data = await res.json();
+            if (data.status === 'ok') {
+              this.assetsConnected = true;
+              this.assetsErrorMessage = '';
+              this.assetsSummary = data.summary || this.assetsSummary;
+              this.assetsItems = data.items || [];
+              this.assetsTotalItems = data.total_items || 0;
+              this.assetsTotalPages = data.total_pages || 1;
+              if (this.assetsPage > this.assetsTotalPages && this.assetsTotalItems > 0) {
+                this.assetsPage = 1;
+                this.syncUrlHash(true);
+                return this.fetchAssets();
+              }
+            } else {
+              this.assetsConnected = false;
+              this.assetsErrorMessage = data.message || 'Serveur de base de données PostgreSQL non joignable.';
+              this.assetsItems = [];
+              this.assetsTotalItems = 0;
+              this.assetsTotalPages = 1;
+              console.warn('Assets API warning:', data.message);
+            }
+          } catch (err) {
+            this.assetsConnected = false;
+            this.assetsErrorMessage = 'Erreur réseau ou passerelle lors de l\'appel API.';
+            this.assetsItems = [];
+            this.assetsTotalItems = 0;
+            this.assetsTotalPages = 1;
+            console.error('Assets fetch failed:', err);
+          } finally {
+            this.assetsLoading = false;
+          }
+        },
+
+        async openAssetDetail(mediaId) {
+          this.selectedAssetModal = true;
+          this.assetDetailLoading = true;
+          this.selectedAsset = null;
+
+          try {
+            const url = this.getApiUrl('asset/details', `id=${mediaId}`);
+            const res = await fetch(url);
+            const data = await res.json();
+            if (data.status === 'ok') {
+              this.selectedAsset = data;
+            } else {
+              console.warn('Asset detail error:', data.message);
+            }
+          } catch (err) {
+            console.error('Asset detail request failed:', err);
+          } finally {
+            this.assetDetailLoading = false;
+          }
+        },
+
+        openGlossaryTopic(topic) {
+          this.glossaryTopic = topic;
+          this.showGlossaryModal = true;
         }
       };
     }
