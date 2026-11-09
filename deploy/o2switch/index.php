@@ -477,7 +477,7 @@ if ($path === '/' || $path === '') {
 
 // Read-only keys (web-top QR, shared dashboards) only reach monitoring GETs
 $isReadOnly = !check_key_match($matchedKey, $masterKeys);
-$readOnlyPathAllowed = in_array($path, ['/monitoring', '/top', '/health', '/v1/health', '/sources', '/sources.html', '/api/sources', '/api/probe', '/api/files', '/api/file/details', '/api/assets', '/api/asset/details'], true)
+$readOnlyPathAllowed = in_array($path, ['/monitoring', '/top', '/health', '/v1/health', '/sources', '/sources.html', '/api/sources', '/api/probe', '/api/files', '/api/file/details', '/api/assets', '/api/asset/details', '/api/phashes', '/api/phash/details'], true)
     || str_starts_with($path, '/v1/monitoring/');
 if ($isReadOnly && (!in_array($method, ['GET', 'HEAD'], true) || !$readOnlyPathAllowed)) {
     send_json_error(403, ['error' => 'Forbidden: read-only key']);
@@ -501,7 +501,7 @@ if ($path === '/sources' || $path === '/sources.html') {
     send_json_error(404, ['error' => 'sources.html not deployed in ~/dbsrt/web/']);
 }
 
-if (in_array($path, ['/api/sources', '/api/probe', '/api/files', '/api/file/details', '/api/assets', '/api/asset/details'], true)) {
+if (in_array($path, ['/api/sources', '/api/probe', '/api/files', '/api/file/details', '/api/assets', '/api/asset/details', '/api/phashes', '/api/phash/details'], true)) {
     $binDir = $homeDir . '/dbsrt/bin';
     $pythonBin = $binDir . '/python3';
     $script = $homeDir . '/dbsrt/scripts/portal_server.py';
@@ -559,6 +559,21 @@ if (in_array($path, ['/api/sources', '/api/probe', '/api/files', '/api/file/deta
     } elseif ($path === '/api/asset/details') {
         $id = (int)($_GET['id'] ?? 0);
         $cmd = escapeshellcmd($pythonBin) . ' ' . escapeshellarg($script) . ' --asset-id ' . $id;
+    } elseif ($path === '/api/phashes') {
+        $page = (int)($_GET['page'] ?? 1);
+        $limit = (int)($_GET['limit'] ?? 25);
+        $filter = preg_replace('/[^a-zA-Z0-9_]/', '', (string)($_GET['filter'] ?? 'all'));
+        $search = (string)($_GET['q'] ?? '');
+        $sort = preg_replace('/[^a-zA-Z0-9_]/', '', (string)($_GET['sort'] ?? 'id_asc'));
+        $cmd = escapeshellcmd($pythonBin) . ' ' . escapeshellarg($script)
+            . ' --phashes --page ' . $page . ' --limit ' . $limit . ' --phash-filter ' . escapeshellarg($filter)
+            . ' --sort ' . escapeshellarg($sort);
+        if ($search !== '') {
+            $cmd .= ' --search ' . escapeshellarg($search);
+        }
+    } elseif ($path === '/api/phash/details') {
+        $mhash = preg_replace('/[^a-zA-Z0-9_.-]/', '', (string)($_GET['moviehash'] ?? ($_GET['file'] ?? '')));
+        $cmd = escapeshellcmd($pythonBin) . ' ' . escapeshellarg($script) . ' --phash-moviehash ' . escapeshellarg($mhash);
     } else {
         $sourceId = preg_replace('/[^a-zA-Z0-9_-]/', '', (string)($_GET['source'] ?? ''));
         $profileId = preg_replace('/[^a-zA-Z0-9_-]/', '', (string)($_GET['profile'] ?? ''));

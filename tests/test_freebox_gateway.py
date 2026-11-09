@@ -1,8 +1,12 @@
 """Unit tests for Freebox Range HTTP Gateway logic and byte range parsing."""
 
+import http.server
+import json
+import threading
 import unicodedata
+import urllib.request
 
-from scripts.rpi4_freebox_gateway import is_served_path, parse_byte_range
+from scripts.rpi4_freebox_gateway import FreeboxRangeHTTPHandler, is_served_path, parse_byte_range
 
 
 def test_parse_byte_range_full_span():
@@ -45,3 +49,31 @@ def test_served_paths_are_limited_to_media_libraries():
     assert not is_served_path("Disque_1/Photos/a.jpg")
     assert not is_served_path("Disque_1/Backup/a.mkv")
     assert not is_served_path("Disque_1/Téléchargements")
+
+
+def test_health_check_endpoint():
+    """Verifies that /health responds 200 OK on both HEAD and GET with valid JSON."""
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), FreeboxRangeHTTPHandler)
+    port = server.server_port
+    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+    server_thread.start()
+
+    try:
+        url = f"http://127.0.0.1:{port}/health"
+
+        # 1. HEAD request
+        req_head = urllib.request.Request(url, method="HEAD")
+        with urllib.request.urlopen(req_head, timeout=2) as resp:
+            assert resp.status == 200
+            assert resp.headers.get("Content-Type") == "application/json"
+
+        # 2. GET request
+        with urllib.request.urlopen(url, timeout=2) as resp:
+            assert resp.status == 200
+            data = json.loads(resp.read().decode("utf-8"))
+            assert data["status"] == "ok"
+            assert data["service"] == "dbsrt-freebox-gateway"
+            assert "mounted_shares" in data
+    finally:
+        server.shutdown()
+        server.server_close()

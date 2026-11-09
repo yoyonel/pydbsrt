@@ -46,7 +46,7 @@ flowchart LR
 ### Définition des Rôles
 
 1. **Le Conteneur Physique** : Le fichier stocké sur le support de masse (ex: `/media/user/Synology/tvshow/...`). Il possède une taille en octets, un horodatage système (`mtime`) et un protocole de transport (CIFS, FTP, HTTP Range).
-2. **L'Actif Relationnel (`medias`)** : L'enregistrement dans PostgreSQL 17. Il consigne l'identité épurée du média (`clean_title`, saison, épisode), les caractéristiques intrinsèques du flux (`fps`, `is_vfr`, `duration_ms`), et l'état d'avancement de l'analyse (`phash_status`).
+2. **L'Actif Relationnel (`medias`)** : L'enregistrement dans PostgreSQL. Il consigne l'identité épurée du média (`clean_title`, saison, épisode), les caractéristiques intrinsèques du flux (`fps`, `is_vfr`, `duration_ms`), et l'état d'avancement de l'analyse (`phash_status`).
 3. **L'Empreinte Perceptuelle (`pHash`)** : La série temporelle d'empreintes perceptuelles 64 bits calculées à 24 ou 25 fps. Elle est stockée soit en base (`frames`), soit dans un fichier binaire sidecar (`.phash`), permettant la recherche sans base de données (Zero-DB) en production.
 
 ---
@@ -117,3 +117,63 @@ Si un opérateur consulte la page 5 d'un statut global (100 éléments), puis ta
 2. **Backend Sécurisé (`portal_server.py`)** :
    - Clamping formel : si $\text{page} > \text{total\_pages}$ et $\text{total\_items} > 0$, alors $\text{page} = 1$ et $\text{offset} = 0$.
    - Le serveur garantit qu'aucune requête valide avec des résultats ne renverra jamais une liste vide par dérive de pagination.
+
+---
+
+## 5. L'Observatoire des 3 Piliers d'Empreintes pHash
+
+L'empreinte perceptuelle d'un média existe sous trois formes physiques et relationnelles distinctes au sein du système `pydbsrt` :
+
+```mermaid
+flowchart TD
+    subgraph P1["📁 PILIER 1 : RAW STORE"]
+        RAW["Fichiers binaires bruts<br/>data/__PHASH__/*.phash<br/>(1 u64/frame, 1.49 GB, 2 779 fichiers)"]
+    end
+
+    subgraph P2["⚡ PILIER 2 : CATALOGUE ZERO-DB"]
+        CAT["Catalogue compilé mmap<br/>data/catalog.dbphash v2.0<br/>(Cuts + 1fps, 220 MB, ratio ~12x)"]
+    end
+
+    subgraph P3["🐘 PILIER 3 : BKTREEDB RELATIONNEL"]
+        PG["PostgreSQL Relationnel<br/>Tables medias (2 321) & frames<br/>Index SP-GiST Hamming bktree_ops"]
+    end
+
+    RAW -->|"Compaction sélective (task catalog:compact)"| CAT
+    RAW -.->|"Ingestion batch (task db:import:all-phash)"| PG
+    CAT <-->|"Réconciliation 3/3 (2 219 médias alignés)"| PG
+```
+
+### Caractéristiques Comparées des 3 Piliers
+
+| Caractéristique | Pilier 1 : RAW Store | Pilier 2 : Catalogue Zero-DB | Pilier 3 : BKtreeDB Relationnel |
+| :--- | :--- | :--- | :--- |
+| **Support de stockage** | Fichiers `.phash` sur disque | Fichier binaire unique `catalog.dbphash` | Tables PostgreSQL (`medias`, `frames`) |
+| **Structure interne** | Suite continue d'entiers `u64` big-endian | En-tête structuré (128 o) + Entrées médias (64 o) + Tranches binaires | Lignes relationnelles + index SP-GiST |
+| **Échantillonnage** | Exhaustif (100% des trames à 24/25 fps) | Élagué : Cuts de plans ($\Delta \ge 10$ bits) + Sparse 1 fps | Configurable lors de l'ingestion |
+| **Objectif opérationnel** | Archivage de référence & ré-échantillonnage | Matching sub-milliseconde en mémoire projetée (`mmap`) | Requêtes analytiques complexes, lignage & métadonnées |
+| **Empreinte disque** | ~1.49 GB (2 779 médias) | ~220 MB (gain de compression ~12x) | Variable selon la rétention des trames |
+
+### Microscopie d'Empreinte en Temps Réel
+
+Le point d'accès `/api/phash/details` permet une inspection microscopique instantanée (< 45 ms sur un long métrage de 2 heures / 170 000 trames) :
+
+- **Popcount spectral** : moyenne des bits à 1 par empreinte (théoriquement proche de 32 bits pour une distribution uniforme).
+- **Entropie par histogramme 8 buckets** : contrôle de la dispersion statistique (absence de saturation noire ou blanche).
+- **Détection des changements de plans (Cuts)** : saut de distance de Hamming $\Delta \ge 10$ bits entre trames consécutives.
+- **Ratio d'efficacité Zero-DB** : comparaison volumétrique entre l'archive RAW et son empreinte compactée dans le catalogue compilé.
+
+---
+
+## 6. Recherche Insensible aux Accents sans Extension C
+
+Sur un hébergement mutualisé comme `o2switch` (PostgreSQL 9.6 sans droits super-administrateur pour installer l'extension `unaccent`), les requêtes `ILIKE` échouent par défaut sur les caractères diacritiques (ex: rechercher `Carnivale` ne retournait aucun des 26 épisodes de `Carnivàle`).
+
+Pour garantir un fonctionnement 100% déterministe sur toutes les versions de PostgreSQL sans dépendance C externe :
+
+1. **Normalisation SQL native par `translate()`** :
+   ```sql
+   translate(lower(clean_title), 'àáâãäåèéêëìíîïòóôõöùúûüýÿñç', 'aaaaaaeeeeiiiiooooouuuuyync') LIKE '%carnivale%'
+   ```
+2. **Normalisation Unicode côté Python** :
+   La chaîne de recherche opérateur est préalablement décomposée par `unicodedata.normalize('NFD', search_q)` en retirant les marques combinatoires (`Mn`).
+   La chaîne transmise à la requête SQL est garantie 100% ASCII, éliminant tout conflit d'encodage `LC_CTYPE` / `psql` tout en maximisant la vitesse de filtrage.

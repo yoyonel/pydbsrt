@@ -17,7 +17,7 @@ Ce guide pratique explique comment utiliser la vue **Actifs Médias (DB)** du po
 
 ## 🎯 Objectif
 
-- Contrôler l'intégrité globale du catalogue multimédia stocké dans PostgreSQL 17 (`medias`, `frames`).
+- Contrôler l'intégrité globale du catalogue multimédia stocké dans PostgreSQL (`medias`, `frames`).
 - Détecter immédiatement les médias sans empreinte pHash (`phash_status != 'complete'`) ou non localisés sur le stockage physique.
 - Inspecter les métadonnées techniques détaillées (flux, moviehash, cadences, résolutions, durées) via le tiroir d'inspection.
 - Diagnostiquer la disponibilité de la base relationnelle en local ou sur l'hébergement cloud distant `o2switch`.
@@ -52,7 +52,7 @@ En haut de la vue, 4 cartes interactives résument la santé globale du catalogu
 
 | Carte KPI | Statut Métier | Signification Technique | Action Recommandée |
 | :--- | :--- | :--- | :--- |
-| **🎬 TOTAL EN BASE** | `PG 17` | Nombre total d'enregistrements dans la table `medias`. | Cliquez pour réinitialiser tous les filtres (`status=all`). |
+| **🎬 TOTAL EN BASE** | `PostgreSQL` | Nombre total d'enregistrements dans la table `medias`. | Cliquez pour réinitialiser tous les filtres (`status=all`). |
 | **🟢 EMPREINTÉ & LOCALISÉ** | `Nominal` | Média dont l'empreinte pHash est calculée (`phash_status = 'complete'`) et dont le conteneur physique est accessible. | État nominal de production prêt pour le retargeting. |
 | **⚠️ SANS EMPREINTE** | `Chantier` | Média sans empreinte complète (`phash_status = 'pending'`, absent ou corrompu). | Lancer le worker d'extraction pHash (`task o2switch:sync` ou pipeline local). |
 | **🛑 CHEMIN MANQUANT** | `Alerte` | Média sans chemin relatif vidéo (`video_rel_path IS NULL`). | Réconcilier le média avec son fichier physique ou archiver. |
@@ -88,3 +88,23 @@ Pour lever toute ambiguïté sur la sémantique des colonnes :
    - Différence fondamentale entre `moviehash` (OpenSubtitles) et `media_hash`.
    - Rôle du couplage certifié Zero-DB (`couplings.json`).
 3. Vous pouvez également cliquer sur l'icône **`ⓘ`** présente dans l'en-tête de la colonne *Empreinte pHash* pour ouvrir directement la rubrique dédiée.
+
+---
+
+### Étape 6 : Auditer la Trinité des Empreintes via la Vue « Empreintes pHash »
+
+Pour contrôler la réconciliation bas niveau entre les différents formats physiques et compilés de l'empreinte perceptuelle :
+
+1. Dans la barre de navigation, cliquez sur l'onglet **`Empreintes pHash`** (`#view=phashes`).
+2. Observez les 3 Cartes Bento des Piliers :
+   - **📁 Pilier 1 : RAW Store** : Nombre total de fichiers bruts `.phash` sur disque (`data/__PHASH__/*.phash`) et volume total (~1.5 Go).
+   - **⚡ Pilier 2 : Catalogue Zero-DB** : Nombre de médias compilés dans `catalog.dbphash` v2.0, total de cuts et trames sparse 1fps, et gain de compression.
+   - **🐘 Pilier 3 : BKtreeDB Relationnel** : Nombre d'empreintes synchronisées dans la table `medias` et trames indexées dans `frames`.
+3. Utilisez la barre de filtres pour isoler les anomalies :
+   - **`🟢 Alignés 3/3`** : Empreintes parfaitement réconciliées à travers les trois piliers.
+   - **`⚠️ Non ingérés PG`** : Empreintes présentes sur disque et dans le catalogue Zero-DB mais absentes de PostgreSQL (à injecter via `task db:backfill:assets`).
+   - **`⚠️ À compiler`** : Nouveaux fichiers `.phash` bruts en attente de compactage dans `catalog.dbphash` (à traiter via `task pack`).
+4. Cliquez sur **`Inspecter`** pour ouvrir l'inspection microscopique trame par trame :
+   - **Radar d'Entropie & Popcount** : Distribution spectrale des 64 bits et validation de l'absence de trames plates ou bloquées.
+   - **Timeline des Cuts** : Liste chronologique des changements de plan détectés ($\Delta \ge 10$ bits) avec horodatage millimétrique.
+   - **Efficacité Zero-DB** : Comparaison du poids fichier brut vs empreinte compacte (généralement 85% à 92% d'économie d'espace mémoire).

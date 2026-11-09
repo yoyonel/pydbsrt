@@ -134,12 +134,12 @@ Déclenche le test en direct d'un canal d'accès spécifique et renvoie la mesur
 {
   "name": "Passerelle HTTP WAN",
   "protocol": "http_gateway",
-  "target": "http://yoyonel.synology.me:18089/health",
+  "target": "http://yoyonel.synology.me:80/health",
   "accessible": false,
   "status": "offline",
   "latency_ms": 2534.3,
   "files_count": 0,
-  "reason": "Passerelle injoignable (RPi4 offline)"
+  "reason": "Passerelle injoignable (HTTPError)"
 }
 ```
 
@@ -426,6 +426,144 @@ Retourne la fiche d'inspection unitaire détaillée pour un média spécifique i
 
 ---
 
+### `GET /api/phashes`
+
+Interroge et réconcilie la trinité des empreintes visuelles : Stockage RAW sur disque (`data/__PHASH__/*.phash`), Catalogue Compilé Zero-DB (`data/catalog.dbphash` v2.0) et Base de Données Relationnelle PostgreSQL (`medias` / `frames`).
+
+#### Paramètres Query String
+
+| Paramètre | Type | Requis | Défaut | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `page` | `integer` | Non | `1` | Numéro de la page (commence à 1). Auto-clampé si supérieur au nombre total de pages. |
+| `limit` | `integer` | Non | `25` | Nombre d'enregistrements par page (15, 25, 50, 100). |
+| `filter` | `string` | Non | `all` | Filtre d'intégrité tripartite (`all`, `aligned_3_3`, `missing_pg`, `uncompiled`, `orphan_catalog`). |
+| `q` | `string` | Non | `""` | Recherche textuelle insensible à la casse sur le titre nettoyé, le moviehash ou le nom de fichier brut. |
+| `sort` | `string` | Non | `id_asc` | Ordre de tri (`id_asc`, `id_desc`, `title_asc`, `title_desc`, `frames_desc`, `frames_asc`, `size_desc`, `cuts_desc`). |
+| `token` | `string` | Non | - | Jeton d'authentification sur passerelle o2switch. |
+
+#### Schéma de Réponse (`200 OK`)
+
+```json
+{
+  "status": "ok",
+  "summary": {
+    "raw_count": 2779,
+    "raw_size_bytes": 1598758120,
+    "raw_size_human": "1.49 GB",
+    "catalog_count": 2779,
+    "catalog_size_bytes": 231350872,
+    "catalog_size_human": "220.63 MB",
+    "catalog_cuts_total": 6152654,
+    "catalog_sparse_total": 8290762,
+    "pg_count": 2321,
+    "pg_frames_total": 812,
+    "aligned_3_3": 2219,
+    "missing_pg": 560,
+    "uncompiled": 0,
+    "orphan_catalog": 0
+  },
+  "page": 1,
+  "limit": 25,
+  "total_items": 2779,
+  "total_pages": 112,
+  "items": [
+    {
+      "catalog_id": 6,
+      "title": "Tre Piani",
+      "year": 2021,
+      "moviehash": "002835455e305309",
+      "raw_filename": "002835455e305309.24.0fps.phash",
+      "fps": 24.0,
+      "frame_count": 172749,
+      "duration_ms": 7197875,
+      "duration_fmt": "01:59:57",
+      "raw_present": true,
+      "raw_size_bytes": 1381992,
+      "raw_size_human": "1.32 MB",
+      "catalog_present": true,
+      "catalog_cuts_count": 2411,
+      "catalog_sparse_count": 7198,
+      "catalog_compression_ratio": "9.0x",
+      "pg_present": true,
+      "pg_media_id": 1420,
+      "pg_status": "complete",
+      "integrity_status": "aligned_3_3",
+      "integrity_label": "Aligné 3/3"
+    }
+  ]
+}
+```
+
+---
+
+### `GET /api/phash/details`
+
+Exécute l'inspection microscopique trame par trame d'un fichier d'empreinte `.phash` : décodage complet des 64-bit entiers non compressés, radar d'entropie (popcount moyen et distribution en 8 buckets spectriques), détection des changements de plan (Cuts à $\Delta \ge 10$ bits) et mesure du ratio de compression Zero-DB.
+
+#### Paramètres Query String
+
+| Paramètre | Type | Requis | Défaut | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `moviehash` | `string` | Conditionnel | - | Empreinte MovieHash 16 hexadécimale du média. |
+| `file` | `string` | Conditionnel | - | Nom exact du fichier `.phash` sur disque (fallback pour conteneurs non-hex). |
+| `token` | `string` | Non | - | Jeton d'authentification sur passerelle o2switch. |
+
+#### Schéma de Réponse (`200 OK`)
+
+```json
+{
+  "status": "ok",
+  "filename": "002835455e305309.24.0fps.phash",
+  "moviehash": "002835455e305309",
+  "fps": 24.0,
+  "frame_count": 172749,
+  "duration_ms": 7197875,
+  "duration_fmt": "01:59:57",
+  "file_size_bytes": 1381992,
+  "file_size_human": "1.32 MB",
+  "entropy": {
+    "mean_popcount": 31.9,
+    "entropy_pct": 49.8,
+    "histogram": [564, 0, 0, 0, 172185, 0, 0, 0],
+    "health": "Excellente (trame visuelle diversifiée)"
+  },
+  "mobility": {
+    "mean_delta": 2.69,
+    "histogram": [203063, 122541, 46947, 21650, 11326, 27861],
+    "labels": ["0-1b", "2-3b", "4-5b", "6-7b", "8-9b", "≥10b"],
+    "descriptions": [
+      "Statique (identique/fond fixe)",
+      "Variation minime",
+      "Mouvement doux",
+      "Mouvement dynamique",
+      "Mouvement rapide",
+      "Rupture de plan (Cut)"
+    ]
+  },
+  "cuts": {
+    "cuts_sample": [
+      {
+        "frame": 2,
+        "time_ms": 83,
+        "time_fmt": "00:00",
+        "distance": 32,
+        "hash": "999966669999cc66"
+      }
+    ],
+    "cuts_count": 20,
+    "threshold": 10
+  },
+  "compression": {
+    "raw_bytes": 1381992,
+    "estimated_indexed_bytes": 115472,
+    "saved_space_pct": 91.6,
+    "ratio": 12.0
+  }
+}
+```
+
+---
+
 ## 3. Options CLI du Démon (`scripts/portal_server.py`)
 
 Le script supporte à la fois le mode serveur HTTP daemonisé et l'exécution unitaire en ligne de commande pour scripts ou cron jobs :
@@ -455,11 +593,16 @@ options:
   --sort SORT           Ordre de tri (title_asc, title_desc, frames_desc, duration_desc, id_desc).
   --details SOURCE PROFILE PATH
                         Inspecte les caractéristiques multimédia complètes d'un fichier.
-  --assets              Interroge et audite les actifs vidéo de PostgreSQL 17.
+  --assets              Interroge et audite les actifs vidéo de PostgreSQL.
   --asset-id ASSET_ID   Affiche la fiche détaillée d'un actif média par son ID PostgreSQL.
   --status STATUS       Filtre de statut métier pour les actifs (all, nominal, missing_phash, unmapped_path).
   --source SOURCE       Filtre de gisement pour les actifs ou les conteneurs.
   --force               Ignore le cache disque et force une nouvelle sonde brute.
+  --phashes             Interroge et réconcilie la trinité des empreintes pHash (JSON).
+  --phash-moviehash MHASH
+                        Inspecte les caractéristiques microscopiques d'un pHash unique.
+  --phash-filter FILTER
+                        Filtre d'intégrité pour les empreintes (all, aligned_3_3, missing_pg, uncompiled, orphan_catalog).
 ```
 
 ---
@@ -469,17 +612,20 @@ options:
 | Source ID | Profile ID | Protocole | Environnements Cibles | Port / Cible |
 | :--- | :--- | :--- | :--- | :--- |
 | `synology-video` | `cifs` | `local_fs` | `local` | `/media/<user>/Synology/video` |
-| `synology-video` | `wan_ftp` | `ftp` | `local`, `o2switch`, `rpi4` | `TCP 21` (FTP PASV) |
+| `synology-video` | `lan_ftp` | `ftp` | `local`, `rpi4` | `<NAS_LAN_IP>:21/video` (FTP LAN) |
+| `synology-video` | `wan_ftp` | `ftp` | `o2switch`, `nomad` | `TCP 21` (FTP WAN PASV) |
 | `synology-tvshow` | `cifs` | `local_fs` | `local` | `/media/<user>/Synology/tvshow` |
-| `synology-tvshow` | `wan_ftp` | `ftp` | `local`, `o2switch`, `rpi4` | `TCP 21` (FTP PASV) |
+| `synology-tvshow` | `lan_ftp` | `ftp` | `local`, `rpi4` | `<NAS_LAN_IP>:21/tvshow` (FTP LAN) |
+| `synology-tvshow` | `wan_ftp` | `ftp` | `o2switch`, `nomad` | `TCP 21` (FTP WAN PASV) |
 | `freebox-disks` | `disque1` | `local_fs` | `local` | `/media/<user>/Freebox/Disque_1` |
 | `freebox-disks` | `disque2` | `local_fs` | `local` | `/media/<user>/Freebox/Disque_2` |
 | `freebox-disks` | `rpi4_disque1` | `local_fs` | `rpi4` | `/mnt/freebox/Disque_1` |
 | `freebox-disks` | `rpi4_disque2` | `local_fs` | `rpi4` | `/mnt/freebox/Disque_2` |
 | `freebox-disks` | `lan_ftp` | `ftp` | `local`, `rpi4` | `mafreebox.freebox.fr:21` |
-| `freebox-disks` | `wan_http` | `http_gateway` | `local`, `o2switch` | `TCP 80 / 18089` (Range Gateway) |
-| `freebox-disks` | `rpi4_gateway` | `http_gateway` | `rpi4` | `127.0.0.1:18089/health` |
-| `local-snippets` | `local` | `local_fs` | `local` | `data/snippets` |
+| `freebox-disks` | `lan_http` | `http_gateway` | `local` | `<RPI4_LAN_IP>:18089/health` (Range Gateway LAN) |
+| `freebox-disks` | `wan_http` | `http_gateway` | `o2switch` | `TCP 80` (Freebox NAT WAN → RPi4:18089) |
+| `freebox-disks` | `rpi4_gateway` | `http_gateway` | `rpi4` | `127.0.0.1:18089/health` (Loopback RPi4) |
+| `local-snippets` | `local` | `local_fs` | `local`, `nomad` | `data/snippets` |
 
 ---
 
@@ -492,13 +638,13 @@ L'interface web monopage (`sources.html`) implémente un contrat d'état bidirec
 Le fragment d'URL encapsule l'intégralité du contexte d'exploration et d'audit :
 
 ```text
-#view=<sources|explorer|assets>&env=<local|o2switch|rpi4|all>&source=<id>&profile=<id>&subdir=<rel_path>&page=<int>&limit=<int>&q=<query>&sort=<key>&tag=<tag>&file=<rel_path>&status=<status>
+#view=<sources|explorer|assets|phashes>&env=<local|o2switch|rpi4|all>&source=<id>&profile=<id>&subdir=<rel_path>&page=<int>&limit=<int>&q=<query>&sort=<key>&tag=<tag>&file=<rel_path>&status=<status>
 ```
 
 | Clé | Type | Rôle | Valeur par défaut |
 | :--- | :--- | :--- | :--- |
-| `view` | `string` | Vue active (`sources`, `explorer` ou `assets`). | `sources` |
-| `env` | `string` | Filtre d'environnement actif. | Détection dynamique de l'hôte |
+| `view` | `string` | Vue active (`sources`, `explorer`, `assets` ou `phashes`). | `sources` |
+| `env` | `string` | Filtre d'environnement actif (`local`, `nomad`, `o2switch`, `rpi4`, `all`). | Détection dynamique de l'hôte |
 | `status` | `string` | Filtre de statut pour les actifs médias (`all`, `nominal`, `missing_phash`, `unmapped_path`). | `all` |
 | `source` | `string` | Identifiant du gisement sélectionné. | `""` |
 | `profile` | `string` | Canal d'accès choisi (vue explorer). | `""` |
@@ -509,6 +655,37 @@ Le fragment d'URL encapsule l'intégralité du contexte d'exploration et d'audit
 | `sort` | `string` | Critère d'ordonnancement. | `name_asc` (explorer) / `title_asc` (assets) |
 | `tag` | `string` | Filtre rapide de définition ou format (`2160p`, `1080p`, `hevc`, `mkv`). | `""` |
 | `file` | `string` | Chemin relatif du média inspecté dans la fiche de détail (vue explorer). | `""` |
+
+---
+
+## 6. Profils d'Exécution : Domicile (LAN) vs Nomade Hors Foyer (WAN)
+
+Le portail unifié prend en charge deux modes d'utilisation sur le poste de développement portable (`debian-latty`) :
+
+### Matrice Opérationnelle Domicile vs Nomade
+
+| Caractéristique | 🏠 Poste Local - Domicile (`env=local`) | ✈️ Poste Local - Nomade (`env=nomad`) |
+| :--- | :--- | :--- |
+| **Contexte physique** | Réseau local domestique (Wi-Fi / Ethernet maison) | Hors du domicile (bureau/travail, déplacement, partage 4G/5G, sans VPN) |
+| **Accès Synology NAS** | • `lan_ftp` : `ftp://<NAS_LAN_IP>:21` (~140 ms, 100% nominal)<br/>• `cifs` : `/media/<user>/Synology/*` | • `wan_ftp` : `ftp://<NAS_WAN_HOST>:21` (accès via DynDNS Synology WAN)<br/>• Traversée NAT sans blocage de loopback |
+| **Accès Freebox Disks** | • `lan_http` : Passerelle Range HTTP locale via RPi4 (`<RPI4_LAN_IP>:18089`)<br/>• `lan_ftp` : `ftp://mafreebox.freebox.fr:21` | • Inaccessible en direct sans VPN (passerelle WAN port 80 filtrée sur IP cloud o2switch)<br/>• Déblocage possible via tunnel VPN (WireGuard/OpenVPN maison) qui rétablit alors le profil `local` |
+| **Extraits Vidéo & Cuts** | `data/snippets` (système de fichiers local) | `data/snippets` (système de fichiers local autonome) |
+| **Gestion des Secrets** | Cache mémoire thread-safe (`_SECRET_MEMORY_CACHE`) résolu via `pass` ou fichiers locaux | Cache mémoire thread-safe (`_SECRET_MEMORY_CACHE`) résolu via `pass` ou fichiers locaux |
+
+### Guide Pratique : Travailler Hors Foyer (au Bureau / Déplacement)
+
+1. **Lancement du Portail en Local** :
+   ```bash
+   task db:portal
+   ```
+2. **Bascule en Mode Nomade** :
+   - Depuis le sélecteur d'environnement en haut à droite du portail : sélectionner **✈️ Poste Local - Nomade (WAN)**.
+   - Ou directement par l'URL : `http://127.0.0.1:8780/sources.html#view=sources&env=nomad`.
+3. **Comportement Attendu en Nomade** :
+   - Les gisements **Synology Movies** et **TV Shows** interrogent automatiquement le canal `Streaming WAN FTP` (`wan_ftp`). Le FQDN DynDNS (`yoyonel.synology.me:21`) est contacté en mode passif (PASV), ce qui fonctionne car le client est à l'extérieur du réseau local (zéro hairpinning).
+   - Le gisement **Local Test Snippets** reste disponible pour tous les tests hors-ligne de banc d'essai pHash.
+4. **Si Connexion VPN Active (WireGuard / OpenVPN vers le domicile)** :
+   - Basculer sur **🏠 Poste Local - Domicile (LAN)** (`env=local`). Le routage VPN réachemine les adresses `<NAS_LAN_IP>` et `<RPI4_LAN_IP>` comme si la machine était physiquement branchée à la maison.
 
 ### Architecture de Défilement Découplé
 

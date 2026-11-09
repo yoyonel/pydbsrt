@@ -5,6 +5,7 @@ from __future__ import annotations
 import http.server
 import json
 import threading
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -83,6 +84,20 @@ def test_list_source_files_snippets() -> None:
         assert "watchmen" in item["name"].lower()
 
 
+def test_list_source_files_freebox_gateway() -> None:
+    """Tests listing files from Freebox targets catalog over HTTP gateway profile."""
+    targets_file = Path("data/reports/freebox_batch_targets.json")
+    if not targets_file.is_file():
+        pytest.skip("freebox_batch_targets.json not present")
+
+    res = list_source_files("freebox-disks", "lan_http", page=1, limit=5, force=True)
+    assert res["status"] == "ok"
+    assert res["total_items"] > 100
+    assert len(res["items"]) == 5
+    assert res["items"][0]["size_bytes"] > 0
+    assert not res["items"][0]["is_dir"]
+
+
 def test_inspect_file_details_snippet() -> None:
     """Verifies detailed multimedia inspection on a local snippet file."""
     sample = Path("data/snippets/Watchmen.Ultimate.Cut.2009.1080p.BrRip.x264.YIFY_mid15s.mp4")
@@ -142,6 +157,24 @@ def test_get_sources_metadata() -> None:
     assert "synology-video" in source_ids
     assert "synology-tvshow" in source_ids
     assert "freebox-disks" in source_ids
+
+    fbx = next(s for s in meta["sources"] if s["id"] == "freebox-disks")
+    fbx_profiles = {p["id"]: p for p in fbx["profiles"]}
+    assert "lan_ftp" in fbx_profiles
+    assert fbx_profiles["lan_ftp"]["envs"] == ["local", "rpi4"]
+    assert "lan_http" in fbx_profiles
+    assert fbx_profiles["lan_http"]["envs"] == ["local"]
+    assert "wan_http" in fbx_profiles
+    assert fbx_profiles["wan_http"]["envs"] == ["o2switch"]
+    assert "rpi4_gateway" in fbx_profiles
+    assert fbx_profiles["rpi4_gateway"]["envs"] == ["rpi4"]
+
+    syn_v = next(s for s in meta["sources"] if s["id"] == "synology-video")
+    syn_profiles = {p["id"]: p for p in syn_v["profiles"]}
+    assert "lan_ftp" in syn_profiles
+    assert syn_profiles["lan_ftp"]["envs"] == ["local", "rpi4"]
+    assert "wan_ftp" in syn_profiles
+    assert syn_profiles["wan_ftp"]["envs"] == ["o2switch", "nomad"]
 
 
 def test_execute_single_probe_snippets() -> None:
@@ -216,13 +249,53 @@ def test_portal_http_api_endpoints() -> None:
                 assert assets_data["page"] == 1
                 assert len(assets_data["items"]) > 0
 
-        # 5. GET /sources.html
+        # 4c. GET /api/phashes (Tripartite pHash reconciliation)
+        with urllib.request.urlopen(f"{base_url}/api/phashes?limit=5", timeout=5) as resp:
+            assert resp.status == 200
+            phashes_data = json.loads(resp.read().decode())
+            assert phashes_data["status"] == "ok"
+            assert "summary" in phashes_data
+            assert "items" in phashes_data
+            assert phashes_data["summary"]["raw_count"] > 0
+            assert phashes_data["summary"]["catalog_count"] > 0
+            assert len(phashes_data["items"]) <= 5
+
+        # 4d. GET /api/phash/details (Microscopic inspection & Path Traversal Prevention)
+        with pytest.raises(urllib.error.HTTPError) as exc_info:
+            urllib.request.urlopen(f"{base_url}/api/phash/details?moviehash=../../etc/passwd", timeout=5)
+        assert exc_info.value.code == 404
+
+        sample_phash = Path("data/__PHASH__/002835455e305309.24.0fps.phash")
+        if sample_phash.is_file():
+            detail_url = f"{base_url}/api/phash/details?moviehash=002835455e305309"
+            with urllib.request.urlopen(detail_url, timeout=5) as resp:
+                assert resp.status == 200
+                pdetail = json.loads(resp.read().decode())
+                assert pdetail["status"] == "ok"
+                assert pdetail["moviehash"] == "002835455e305309"
+                assert "entropy" in pdetail
+                assert "cuts" in pdetail
+                assert "compression" in pdetail
+                assert "mobility" in pdetail
+                assert "mean_delta" in pdetail["mobility"]
+                assert "histogram" in pdetail["mobility"]
+                assert len(pdetail["mobility"]["histogram"]) == 6
+                assert pdetail["entropy"]["mean_popcount"] > 0
+                assert "timeline" in pdetail["cuts"]
+                assert len(pdetail["cuts"]["timeline"]) > 0
+
+        # 5. GET /sources.html (Includes Interactive Sismographe & Zoom & Brush & Mobility)
         with urllib.request.urlopen(f"{base_url}/sources.html", timeout=5) as resp:
             assert resp.status == 200
             html = resp.read().decode()
             assert "Sources Médias" in html
             assert "Actifs Médias (DB)" in html
             assert "Aide & Définitions Métier" in html
+            assert "Sismographe" in html
+            assert "VUE PANORAMIQUE" in html
+            assert "timelineZoom" in html
+            assert "Mobilité Temporelle" in html
+            assert "getHoverCursorY" in html
 
     finally:
         server.shutdown()

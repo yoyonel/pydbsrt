@@ -18,17 +18,21 @@ import re
 import shutil
 import socket
 import socketserver
+import struct
 import subprocess
+import threading
 import time
+import unicodedata
 import urllib.parse
 import urllib.request
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict
 
 DEFAULT_PORT: int = 8780
 PROBE_FS_TIMEOUT_SECS: float = 0.3
-PROBE_FTP_TIMEOUT_SECS: float = 3.0
-PROBE_HTTP_TIMEOUT_SECS: float = 1.5
+PROBE_FTP_TIMEOUT_SECS: float = 6.0
+PROBE_HTTP_TIMEOUT_SECS: float = 2.5
 HTTP_OK: int = 200
 HTTP_NOT_FOUND: int = 404
 HTTP_BAD_REQUEST: int = 400
@@ -53,10 +57,52 @@ FFPROBE_TIMEOUT_SECONDS: float = 12.0
 DEFAULT_PG_URL: str = os.environ.get("DATABASE_URL", "postgresql://docker:docker@127.0.0.1:5433/bktreedb")
 PG_CONNECT_TIMEOUT_SECS: float = 2.0
 
-DEFAULT_NAS_HOST: str = "yoyonel.synology.me"
+ACCENTED_CHARS: str = "àáâãäåèéêëìíîïòóôõöùúûüýÿñçÀÁÂÃÄÅÈÉÊËÌÍÎÏÒÓÔÕÖÙÚÛÜÝŸÑÇ"
+UNACCENTED_CHARS: str = "aaaaaaeeeeiiiiooooouuuuyyncAAAAAAEEEEIIIIOOOOOUUUUYYNC"
+
+
+def strip_accents(text: str) -> str:
+    """Strips common diacritics and accents for robust insensitive matching."""
+    return "".join(c for c in unicodedata.normalize("NFD", text) if unicodedata.category(c) != "Mn")
+
+
+CATALOG_DBPHASH_HEADER_FORMAT: str = "<8sHHI8Q48s"
+CATALOG_DBPHASH_ENTRY_FORMAT: str = "<IBBHIIQIIIIQIIQ"
+CATALOG_DBPHASH_ENTRY_SIZE: int = 64
+CATALOG_DBPHASH_HEADER_SIZE: int = 128
+PHASH_FRAME_BYTES: int = 8
+DELTA_MOBILITY_BUCKETS: int = 6  # [0-1b], [2-3b], [4-5b], [6-7b], [8-9b], [10b+]
+DELTA_STEP_BITS: int = 2
+DELTA_MOBILITY_LABELS: tuple[str, ...] = ("0-1b", "2-3b", "4-5b", "6-7b", "8-9b", "≥10b")
+DELTA_MOBILITY_DESCRIPTIONS: tuple[str, ...] = (
+    "Statique (identique/fond fixe)",
+    "Variation minime",
+    "Mouvement doux",
+    "Mouvement dynamique",
+    "Mouvement rapide",
+    "Rupture de plan (Cut)",
+)
+PHASH_CUT_HAMMING_THRESHOLD: int = 10
+MICROSCOPIC_CUTS_SAMPLE_LIMIT: int = 200
+TIMELINE_SERIES_POINTS: int = 120
+DEFAULT_BASELINE_FPS: float = 25.0
+BITS_PER_HASH: int = 64
+ENTROPY_HISTOGRAM_BUCKETS: int = 8
+HISTOGRAM_BUCKET_WIDTH: int = 8
+PHASHES_CACHE_TTL_SECONDS: float = 10.0
+
+DEFAULT_NAS_WAN_HOST: str = "yoyonel.synology.me"
+DEFAULT_NAS_LAN_HOST: str = os.environ.get("NAS_LAN_HOST", ".".join(["192", "168", "1", "58"]))
+DEFAULT_NAS_HOST: str = DEFAULT_NAS_WAN_HOST
 DEFAULT_NAS_USER: str = "qzsl2686"
 DEFAULT_PASS_ENTRY: str = os.environ.get("NAS_PASS_ENTRY", ".".join(["192", "168", "1", "58"]) + ":5000/qzsl2686")
-DEFAULT_GATEWAY_URL: str = "http://yoyonel.synology.me:18089/health"
+DEFAULT_RPI_LAN_HOST: str = os.environ.get("RPI_HOST", ".".join(["192", "168", "1", "24"]))
+DEFAULT_FREEBOX_GATEWAY_PORT: int = 18089
+DEFAULT_FREEBOX_WAN_PORT: int = 80
+DEFAULT_FREEBOX_WAN_HOST: str = os.environ.get("FREEBOX_WAN_HOST", DEFAULT_NAS_WAN_HOST)
+DEFAULT_GATEWAY_LAN_URL: str = f"http://{DEFAULT_RPI_LAN_HOST}:{DEFAULT_FREEBOX_GATEWAY_PORT}/health"
+DEFAULT_GATEWAY_WAN_URL: str = f"http://{DEFAULT_FREEBOX_WAN_HOST}:{DEFAULT_FREEBOX_WAN_PORT}/health"
+DEFAULT_GATEWAY_URL: str = DEFAULT_GATEWAY_LAN_URL
 
 DEFAULT_FREEBOX_HOST: str = "mafreebox.freebox.fr"
 DEFAULT_FREEBOX_USER: str = "freebox"
@@ -71,9 +117,15 @@ AVAILABLE_ENVIRONMENTS: list[dict[str, str]] = [
     },
     {
         "id": "local",
-        "name": "Poste Local (debian-latty)",
-        "icon": "💻",
-        "description": "Poste de dev (Montages CIFS locaux, Snippets, FTP WAN)",
+        "name": "Poste Local - Domicile (LAN)",
+        "icon": "🏠",
+        "description": "Poste de dev au foyer (Montages CIFS, FTP LAN, Passerelle HTTP LAN)",
+    },
+    {
+        "id": "nomad",
+        "name": "Poste Local - Nomade (WAN)",
+        "icon": "✈️",
+        "description": "Poste de dev hors foyer sans VPN (Streaming WAN FTP, Snippets)",
     },
     {
         "id": "rpi4",
@@ -98,9 +150,12 @@ RE_CODEC = re.compile(r"\b(hevc|x265|h\.?265|x264|h\.?264|avc|xvid|divx)\b", re.
 RE_SOURCE = re.compile(r"\b(remux|bluray|bdrip|brrip|web-dl|webrip|web|hdtv)\b", re.IGNORECASE)
 RE_AUDIO = re.compile(r"\b(atmos|truehd|ddp5\.1|dd5\.1|dts-hd|dts|aac|ac3)\b", re.IGNORECASE)
 RE_LANGUAGE = re.compile(r"\b(french|vostfr|multi|dual|truefrench|eng|subfrench)\b", re.IGNORECASE)
+RE_FPS = re.compile(r"(\d+(?:\.\d+)?)fps", re.IGNORECASE)
 
 _LISTING_CACHE: dict[str, tuple[float, str, str, str, list[dict[str, Any]]]] = {}
 _DETAILS_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+_PHASHES_AUDIT_CACHE: tuple[float, list[dict[str, Any]], dict[str, Any]] | None = None
+_CACHE_LOCK = threading.Lock()
 
 
 def _get_portal_cache_dir() -> Path:
@@ -256,8 +311,12 @@ def _read_secret_file(path: Path) -> str:
     return ""
 
 
-def _resolve_secret(env_var: str, secret_filename: str, pass_entry: str) -> str:
-    """Resolves credential from env, ~/.dbsrt/etc/<file>, or pass store."""
+_SECRET_MEMORY_CACHE: dict[str, str] = {}
+_SECRET_CACHE_LOCK: threading.Lock = threading.Lock()
+
+
+def _lookup_secret_uncached(env_var: str, secret_filename: str, pass_entry: str) -> str:
+    """Performs raw credential discovery across env, file paths, and pass store."""
     if env_var in os.environ:
         return os.environ[env_var]
     for path in (
@@ -268,12 +327,26 @@ def _resolve_secret(env_var: str, secret_filename: str, pass_entry: str) -> str:
         if secret:
             return secret
     try:
-        proc = subprocess.run(["pass", "show", pass_entry], capture_output=True, text=True, timeout=1.0)
+        proc = subprocess.run(["pass", "show", pass_entry], capture_output=True, text=True, timeout=2.0)
         if proc.returncode == 0 and proc.stdout.strip():
             return proc.stdout.strip().splitlines()[0]
     except (OSError, subprocess.SubprocessError):
         pass
     return ""
+
+
+def _resolve_secret(env_var: str, secret_filename: str, pass_entry: str) -> str:
+    """Resolves credential from thread-safe memory cache or fallback discovery."""
+    cache_key = f"{env_var}:{pass_entry}"
+    with _SECRET_CACHE_LOCK:
+        if cache_key in _SECRET_MEMORY_CACHE:
+            return _SECRET_MEMORY_CACHE[cache_key]
+
+    resolved = _lookup_secret_uncached(env_var, secret_filename, pass_entry)
+    if resolved:
+        with _SECRET_CACHE_LOCK:
+            _SECRET_MEMORY_CACHE[cache_key] = resolved
+    return resolved
 
 
 def resolve_nas_password() -> str:
@@ -418,12 +491,32 @@ def probe_ftp_profile(name: str, host: str, user: str, passwd: str, path_str: st
 
 
 def probe_http_gateway_profile(name: str, url: str) -> Dict[str, Any]:
-    """Tests HTTP streaming gateway reachability."""
+    """Tests HTTP streaming gateway reachability and mounted shares."""
     t0 = time.perf_counter()
     try:
-        req = urllib.request.Request(url, method="HEAD")
+        req = urllib.request.Request(url, headers={"User-Agent": "dbsrt-portal/1.0"})
         with urllib.request.urlopen(req, timeout=PROBE_HTTP_TIMEOUT_SECS) as resp:
             dt_ms = (time.perf_counter() - t0) * 1000.0
+            data = {}
+            if resp.headers.get_content_type() == "application/json":
+                try:
+                    data = json.loads(resp.read().decode("utf-8"))
+                except Exception:
+                    pass
+            mounted = data.get("mounted_shares", [])
+            targets_file = Path("data/reports/freebox_batch_targets.json")
+            media_count = 0
+            if targets_file.is_file():
+                try:
+                    targets_data = json.loads(targets_file.read_text(encoding="utf-8"))
+                    media_count = len(targets_data)
+                except Exception:
+                    pass
+            files_count = media_count if media_count > 0 else len(mounted)
+            shares_str = f" ({', '.join(mounted)})" if mounted else ""
+            reason_str = f"Passerelle HTTP active{shares_str}"
+            if media_count > 0:
+                reason_str += f" • {media_count} médias indexés"
             return {
                 "name": name,
                 "protocol": "http_gateway",
@@ -431,10 +524,10 @@ def probe_http_gateway_profile(name: str, url: str) -> Dict[str, Any]:
                 "accessible": True,
                 "status": "online",
                 "latency_ms": round(dt_ms, 1),
-                "files_count": 0,
-                "reason": f"Passerelle HTTP active (HTTP {resp.status})",
+                "files_count": files_count,
+                "reason": reason_str,
             }
-    except Exception:
+    except Exception as err:
         dt_ms = (time.perf_counter() - t0) * 1000.0
         return {
             "name": name,
@@ -444,7 +537,7 @@ def probe_http_gateway_profile(name: str, url: str) -> Dict[str, Any]:
             "status": "offline",
             "latency_ms": round(dt_ms, 1),
             "files_count": 0,
-            "reason": "Passerelle injoignable (RPi4 offline)",
+            "reason": f"Passerelle injoignable ({err.__class__.__name__})",
         }
 
 
@@ -468,11 +561,19 @@ def get_sources_metadata() -> Dict[str, Any]:
                     "status": "pending",
                 },
                 {
+                    "id": "lan_ftp",
+                    "name": "Streaming LAN FTP",
+                    "protocol": "ftp",
+                    "target": f"ftp://{DEFAULT_NAS_USER}@{DEFAULT_NAS_LAN_HOST}:21/video",
+                    "envs": ["local", "rpi4"],
+                    "status": "pending",
+                },
+                {
                     "id": "wan_ftp",
                     "name": "Streaming WAN FTP",
                     "protocol": "ftp",
-                    "target": f"ftp://{DEFAULT_NAS_USER}@{DEFAULT_NAS_HOST}:21/video",
-                    "envs": ["local", "o2switch", "rpi4"],
+                    "target": f"ftp://{DEFAULT_NAS_USER}@{DEFAULT_NAS_WAN_HOST}:21/video",
+                    "envs": ["o2switch", "nomad"],
                     "status": "pending",
                 },
             ],
@@ -491,11 +592,19 @@ def get_sources_metadata() -> Dict[str, Any]:
                     "status": "pending",
                 },
                 {
+                    "id": "lan_ftp",
+                    "name": "Streaming LAN FTP",
+                    "protocol": "ftp",
+                    "target": f"ftp://{DEFAULT_NAS_USER}@{DEFAULT_NAS_LAN_HOST}:21/tvshow",
+                    "envs": ["local", "rpi4"],
+                    "status": "pending",
+                },
+                {
                     "id": "wan_ftp",
                     "name": "Streaming WAN FTP",
                     "protocol": "ftp",
-                    "target": f"ftp://{DEFAULT_NAS_USER}@{DEFAULT_NAS_HOST}:21/tvshow",
-                    "envs": ["local", "o2switch", "rpi4"],
+                    "target": f"ftp://{DEFAULT_NAS_USER}@{DEFAULT_NAS_WAN_HOST}:21/tvshow",
+                    "envs": ["o2switch", "nomad"],
                     "status": "pending",
                 },
             ],
@@ -546,18 +655,26 @@ def get_sources_metadata() -> Dict[str, Any]:
                     "status": "pending",
                 },
                 {
+                    "id": "lan_http",
+                    "name": "Passerelle HTTP LAN (RPi4)",
+                    "protocol": "http_gateway",
+                    "target": DEFAULT_GATEWAY_LAN_URL,
+                    "envs": ["local"],
+                    "status": "pending",
+                },
+                {
                     "id": "wan_http",
                     "name": "Passerelle HTTP WAN",
                     "protocol": "http_gateway",
-                    "target": DEFAULT_GATEWAY_URL,
-                    "envs": ["local", "o2switch"],
+                    "target": DEFAULT_GATEWAY_WAN_URL,
+                    "envs": ["o2switch"],
                     "status": "pending",
                 },
                 {
                     "id": "rpi4_gateway",
                     "name": "Passerelle HTTP Locale (RPi4)",
                     "protocol": "http_gateway",
-                    "target": "http://127.0.0.1:18089/health",
+                    "target": f"http://127.0.0.1:{DEFAULT_FREEBOX_GATEWAY_PORT}/health",
                     "envs": ["rpi4"],
                     "status": "pending",
                 },
@@ -573,7 +690,7 @@ def get_sources_metadata() -> Dict[str, Any]:
                     "name": "Système de Fichiers Local",
                     "protocol": "local_fs",
                     "target": "data/snippets",
-                    "envs": ["local"],
+                    "envs": ["local", "nomad"],
                     "status": "pending",
                 },
             ],
@@ -596,8 +713,10 @@ def _probe_synology(source_id: str, profile_id: str, passwd: str) -> Dict[str, A
 
     if profile_id == "cifs":
         return probe_local_fs_profile("Montage CIFS Local", mount_dir)
+    if profile_id == "lan_ftp":
+        return probe_ftp_profile("Streaming LAN FTP", DEFAULT_NAS_LAN_HOST, DEFAULT_NAS_USER, passwd, path_key)
     if profile_id == "wan_ftp":
-        return probe_ftp_profile("Streaming WAN FTP", DEFAULT_NAS_HOST, DEFAULT_NAS_USER, passwd, path_key)
+        return probe_ftp_profile("Streaming WAN FTP", DEFAULT_NAS_WAN_HOST, DEFAULT_NAS_USER, passwd, path_key)
     return None
 
 
@@ -614,10 +733,14 @@ def _probe_freebox(profile_id: str) -> Dict[str, Any] | None:
     if profile_id == "lan_ftp":
         passwd = resolve_freebox_password()
         return probe_ftp_profile("FTP LAN Freebox", DEFAULT_FREEBOX_HOST, DEFAULT_FREEBOX_USER, passwd, "/")
+    if profile_id == "lan_http":
+        return probe_http_gateway_profile("Passerelle HTTP LAN (RPi4)", DEFAULT_GATEWAY_LAN_URL)
     if profile_id == "wan_http":
-        return probe_http_gateway_profile("Passerelle HTTP WAN", DEFAULT_GATEWAY_URL)
+        return probe_http_gateway_profile("Passerelle HTTP WAN", DEFAULT_GATEWAY_WAN_URL)
     if profile_id == "rpi4_gateway":
-        return probe_http_gateway_profile("Passerelle HTTP Locale (RPi4)", "http://127.0.0.1:18089/health")
+        return probe_http_gateway_profile(
+            "Passerelle HTTP Locale (RPi4)", f"http://127.0.0.1:{DEFAULT_FREEBOX_GATEWAY_PORT}/health"
+        )
     return None
 
 
@@ -744,19 +867,79 @@ def _parse_nlst_item(name: str, clean_sub: str) -> dict[str, Any] | None:
     }
 
 
+FTP_LIST_REGEX: re.Pattern[str] = re.compile(r"^([drwxsStT\-]{10})\s+\d+\s+\S+\s+\S+\s+(\d+)\s+\S+\s+\S+\s+\S+\s+(.*)$")
+
+
+def _parse_ftp_list_line(line: str, clean_sub: str) -> dict[str, Any] | None:
+    """Parses single UNIX LIST output line into structured item dict."""
+    m = FTP_LIST_REGEX.match(line.strip())
+    if not m:
+        return None
+    perms, size_str, name = m.groups()
+    if name in (".", "..", ".Trash-1000", "@eaDir"):
+        return None
+    rel = name if not clean_sub else f"{clean_sub}/{name}"
+    is_dir = perms.startswith("d")
+    ext = Path(name).suffix.lower()
+    if not is_dir and ext not in VIDEO_EXTENSIONS:
+        return None
+    sb = int(size_str)
+    return {
+        "name": name,
+        "path": rel,
+        "size_bytes": 0 if is_dir else sb,
+        "size_human": "-" if is_dir else format_human_size(sb),
+        "is_dir": is_dir,
+        "modify": "",
+        "extension": "" if is_dir else ext,
+        "parsed": {"title": name} if is_dir else parse_media_filename(name),
+    }
+
+
+def _try_parse_mlsd(ftp: ftplib.FTP, clean_sub: str) -> list[dict[str, Any]]:
+    """Attempts MLSD listing if supported by FTP server."""
+    try:
+        feats = ftp.sendcmd("FEAT")
+        if "MLSD" in feats or "MLST" in feats:
+            mlsd_items = list(ftp.mlsd())
+            items = [_parse_mlsd_item(name, facts, clean_sub) for name, facts in mlsd_items]
+            return [it for it in items if it is not None]
+    except Exception:
+        pass
+    return []
+
+
+def _try_parse_retrlines(ftp: ftplib.FTP, clean_sub: str) -> list[dict[str, Any]]:
+    """Attempts standard UNIX LIST retrieval and regex parsing."""
+    lines: list[str] = []
+    try:
+        ftp.retrlines("LIST", lines.append)
+    except Exception:
+        pass
+    if lines:
+        parsed_items = [_parse_ftp_list_line(line, clean_sub) for line in lines]
+        valid_items = [it for it in parsed_items if it is not None]
+        if valid_items:
+            return valid_items
+    return []
+
+
 def _parse_ftp_directory_items(ftp: ftplib.FTP, clean_sub: str) -> list[dict[str, Any]]:
     """Lists and parses items from connected FTP server directory."""
+    mlsd_res = _try_parse_mlsd(ftp, clean_sub)
+    if mlsd_res:
+        return mlsd_res
+
+    list_res = _try_parse_retrlines(ftp, clean_sub)
+    if list_res:
+        return list_res
+
     try:
-        mlsd_items = list(ftp.mlsd())
-    except Exception:
-        mlsd_items = []
-
-    if mlsd_items:
-        items = [_parse_mlsd_item(name, facts, clean_sub) for name, facts in mlsd_items]
+        raw_names = ftp.nlst()
+        items = [_parse_nlst_item(name, clean_sub) for name in raw_names]
         return [it for it in items if it is not None]
-
-    items = [_parse_nlst_item(name, clean_sub) for name in ftp.nlst()]
-    return [it for it in items if it is not None]
+    except Exception:
+        return []
 
 
 def _fetch_cifs_items(source_id: str, profile_id: str, clean_sub: str) -> tuple[str, str, str, list[dict[str, Any]]]:
@@ -780,6 +963,82 @@ def _fetch_cifs_items(source_id: str, profile_id: str, clean_sub: str) -> tuple[
     return chan_name, "local_fs", mount_path, items
 
 
+def _fetch_synology_ftp_items(
+    source_id: str, profile_id: str, clean_sub: str
+) -> tuple[str, str, str, list[dict[str, Any]]]:
+    """Retrieves items via FTP from Synology video or tvshow root."""
+    base_dir = "/video" if source_id == "synology-video" else "/tvshow"
+    target_dir = base_dir if not clean_sub else f"{base_dir}/{clean_sub}"
+    passwd = resolve_nas_password()
+    host = DEFAULT_NAS_LAN_HOST if profile_id == "lan_ftp" else DEFAULT_NAS_WAN_HOST
+    chan_name = "Streaming LAN FTP" if profile_id == "lan_ftp" else "Streaming WAN FTP"
+    base_target = f"ftp://{DEFAULT_NAS_USER}@{host}:21{base_dir}"
+
+    items: list[dict[str, Any]] = []
+    try:
+        ftp = ftplib.FTP(timeout=PROBE_FTP_TIMEOUT_SECS * 2)
+        ftp.connect(host, 21, timeout=PROBE_FTP_TIMEOUT_SECS * 2)
+        ftp.login(DEFAULT_NAS_USER, passwd)
+        ftp.cwd(target_dir)
+        items = _parse_ftp_directory_items(ftp, clean_sub)
+        ftp.quit()
+    except Exception:
+        pass
+    return chan_name, "ftp", base_target, items
+
+
+def _fetch_freebox_ftp_items(clean_sub: str) -> tuple[str, str, str, list[dict[str, Any]]]:
+    """Retrieves items via FTP from Freebox root or subfolder."""
+    passwd = resolve_freebox_password()
+    chan_name = "FTP LAN Freebox"
+    base_target = f"ftp://{DEFAULT_FREEBOX_USER}@{DEFAULT_FREEBOX_HOST}:21"
+    items: list[dict[str, Any]] = []
+    try:
+        ftp = ftplib.FTP(timeout=PROBE_FTP_TIMEOUT_SECS * 2)
+        ftp.connect(DEFAULT_FREEBOX_HOST, 21, timeout=PROBE_FTP_TIMEOUT_SECS * 2)
+        ftp.login(DEFAULT_FREEBOX_USER, passwd)
+        if clean_sub:
+            ftp.cwd(clean_sub)
+        items = _parse_ftp_directory_items(ftp, clean_sub)
+        ftp.quit()
+    except Exception:
+        pass
+    return chan_name, "ftp", base_target, items
+
+
+def _fetch_freebox_http_gateway_items(profile_id: str, clean_sub: str) -> tuple[str, str, str, list[dict[str, Any]]]:
+    """Retrieves items from local cached catalog of Freebox files for HTTP gateway."""
+    targets_file = Path("data/reports/freebox_batch_targets.json")
+    items: list[dict[str, Any]] = []
+    if targets_file.is_file():
+        try:
+            targets = json.loads(targets_file.read_text(encoding="utf-8"))
+            for t in targets:
+                rel_p = t.get("path", "")
+                if clean_sub and not rel_p.startswith(clean_sub):
+                    continue
+                fname = t.get("filename", Path(rel_p).name)
+                ext = Path(fname).suffix.lower()
+                sb = t.get("size_bytes", 0)
+                items.append(
+                    {
+                        "name": fname,
+                        "path": rel_p,
+                        "size_bytes": sb,
+                        "size_human": format_human_size(sb) if sb > 0 else "-",
+                        "is_dir": False,
+                        "modify": "-",
+                        "extension": ext,
+                        "parsed": parse_media_filename(fname),
+                    }
+                )
+        except Exception:
+            pass
+    chan_name = "Passerelle HTTP LAN (RPi4)" if profile_id == "lan_http" else "Passerelle HTTP"
+    base_tgt = DEFAULT_GATEWAY_LAN_URL.replace("/health", "")
+    return chan_name, "http_gateway", base_tgt, items
+
+
 def _fetch_raw_file_list(
     source_id: str, profile_id: str, subdir: str = ""
 ) -> tuple[str, str, str, list[dict[str, Any]]]:
@@ -801,25 +1060,17 @@ def _fetch_raw_file_list(
     if profile_id in ("cifs", "disque1", "disque2"):
         return _fetch_cifs_items(source_id, profile_id, clean_sub)
 
-    # 3. WAN FTP (Synology)
-    if profile_id == "wan_ftp" and source_id in ("synology-video", "synology-tvshow"):
-        base_dir = "/video" if source_id == "synology-video" else "/tvshow"
-        target_dir = base_dir if not clean_sub else f"{base_dir}/{clean_sub}"
-        passwd = resolve_nas_password()
-        chan_name = "Streaming WAN FTP"
-        base_target = f"ftp://{DEFAULT_NAS_USER}@{DEFAULT_NAS_HOST}:21{base_dir}"
+    # 3. FTP (Synology LAN/WAN)
+    if profile_id in ("lan_ftp", "wan_ftp") and source_id in ("synology-video", "synology-tvshow"):
+        return _fetch_synology_ftp_items(source_id, profile_id, clean_sub)
 
-        items: list[dict[str, Any]] = []
-        try:
-            ftp = ftplib.FTP(timeout=PROBE_FTP_TIMEOUT_SECS * 2)
-            ftp.connect(DEFAULT_NAS_HOST, 21, timeout=PROBE_FTP_TIMEOUT_SECS * 2)
-            ftp.login(DEFAULT_NAS_USER, passwd)
-            ftp.cwd(target_dir)
-            items = _parse_ftp_directory_items(ftp, clean_sub)
-            ftp.quit()
-        except Exception:
-            pass
-        return chan_name, "ftp", base_target, items
+    # 4. FTP (Freebox LAN)
+    if profile_id == "lan_ftp" and source_id == "freebox-disks":
+        return _fetch_freebox_ftp_items(clean_sub)
+
+    # 5. HTTP Gateway (Freebox via RPi4 targets catalog)
+    if profile_id in ("lan_http", "wan_http", "rpi4_gateway") and source_id == "freebox-disks":
+        return _fetch_freebox_http_gateway_items(profile_id, clean_sub)
 
     return "Inconnu", "unknown", "", []
 
@@ -882,14 +1133,14 @@ def _filter_listing_items(raw_items: list[dict[str, Any]], query_str: str) -> li
 def _sort_listing_items(items: list[dict[str, Any]], sort_mode: str) -> list[dict[str, Any]]:
     """Sorts items with directories first, then requested order."""
     if sort_mode == "name_desc":
-        return sorted(items, key=lambda x: (not x["is_dir"], x["name"].lower()), reverse=True)
+        return sorted(items, key=lambda x: (not x.get("is_dir", False), str(x.get("name", "")).lower()), reverse=True)
     if sort_mode == "size_desc":
-        return sorted(items, key=lambda x: (not x["is_dir"], x["size_bytes"]), reverse=True)
+        return sorted(items, key=lambda x: (not x.get("is_dir", False), x.get("size_bytes", 0)), reverse=True)
     if sort_mode == "size_asc":
-        return sorted(items, key=lambda x: (x["is_dir"], x["size_bytes"]))
+        return sorted(items, key=lambda x: (x.get("is_dir", False), x.get("size_bytes", 0)))
     if sort_mode == "date_desc":
-        return sorted(items, key=lambda x: (not x["is_dir"], x.get("modify", "")), reverse=True)
-    return sorted(items, key=lambda x: (not x["is_dir"], x["name"].lower()))
+        return sorted(items, key=lambda x: (not x.get("is_dir", False), x.get("modify", "")), reverse=True)
+    return sorted(items, key=lambda x: (not x.get("is_dir", False), str(x.get("name", "")).lower()))
 
 
 def list_source_files(
@@ -933,17 +1184,39 @@ def list_source_files(
     }
 
 
+def _resolve_synology_endpoint(source_id: str, profile_id: str, clean_path: str) -> tuple[bool, bool, str, str, str]:
+    """Resolves local CIFS or remote FTP endpoint for Synology media."""
+    if profile_id == "cifs":
+        sub = "video" if source_id == "synology-video" else "tvshow"
+        return True, False, str(Path(_user_media_path("Synology", sub)) / clean_path), "", ""
+    if profile_id in ("lan_ftp", "wan_ftp"):
+        base_dir = "/video" if source_id == "synology-video" else "/tvshow"
+        host = DEFAULT_NAS_LAN_HOST if profile_id == "lan_ftp" else DEFAULT_NAS_WAN_HOST
+        return False, True, "", f"ftp://{host}:21{base_dir}/{clean_path}", resolve_nas_password()
+    return False, False, "", "", ""
+
+
+def _resolve_freebox_endpoint(profile_id: str, clean_path: str) -> tuple[bool, bool, str, str, str]:
+    """Resolves local CIFS, LAN FTP, or HTTP range gateway for Freebox media."""
+    if profile_id in ("disque1", "disque2"):
+        sub = "Disque_1" if profile_id == "disque1" else "Disque_2"
+        return True, False, str(Path(_user_media_path("Freebox", sub)) / clean_path), "", ""
+    if profile_id == "lan_ftp":
+        return False, True, "", f"ftp://{DEFAULT_FREEBOX_HOST}:21/{clean_path}", resolve_freebox_password()
+    if profile_id in ("lan_http", "wan_http", "rpi4_gateway"):
+        quoted_path = "/".join(urllib.parse.quote(seg) for seg in clean_path.split("/"))
+        return False, False, "", f"http://{DEFAULT_RPI_LAN_HOST}:{DEFAULT_FREEBOX_GATEWAY_PORT}/{quoted_path}", ""
+    return False, False, "", "", ""
+
+
 def _resolve_target_endpoint(source_id: str, profile_id: str, clean_path: str) -> tuple[bool, bool, str, str, str]:
     """Resolves local vs remote target path, ftp url, and credentials."""
     if source_id == "local-snippets" and profile_id == "local":
         return True, False, str(Path("data/snippets") / clean_path), "", ""
-    if profile_id in ("cifs", "disque1", "disque2"):
-        base_cifs = _user_media_path("Synology", "video" if source_id == "synology-video" else "tvshow")
-        return True, False, str(Path(base_cifs) / clean_path), "", ""
-    if profile_id == "wan_ftp":
-        base_dir = "/video" if source_id == "synology-video" else "/tvshow"
-        ftp_url = f"ftp://{DEFAULT_NAS_HOST}:21{base_dir}/{clean_path}"
-        return False, True, "", ftp_url, resolve_nas_password()
+    if source_id in ("synology-video", "synology-tvshow"):
+        return _resolve_synology_endpoint(source_id, profile_id, clean_path)
+    if source_id == "freebox-disks":
+        return _resolve_freebox_endpoint(profile_id, clean_path)
     return False, False, "", "", ""
 
 
@@ -1020,14 +1293,26 @@ def _execute_ffprobe(
     if is_local and Path(abs_path).is_file():
         cmd = [ffprobe_bin, "-v", "error", "-print_format", "json", "-show_format", "-show_streams", abs_path]
     elif is_ftp and passwd:
+        ftp_user = DEFAULT_FREEBOX_USER if "mafreebox" in ftp_url else DEFAULT_NAS_USER
         cmd = [
             ffprobe_bin,
             "-v",
             "error",
             "-ftp-user",
-            DEFAULT_NAS_USER,
+            ftp_user,
             "-ftp-password",
             passwd,
+            "-print_format",
+            "json",
+            "-show_format",
+            "-show_streams",
+            ftp_url,
+        ]
+    elif ftp_url.startswith("http://"):
+        cmd = [
+            ffprobe_bin,
+            "-v",
+            "error",
             "-print_format",
             "json",
             "-show_format",
@@ -1191,6 +1476,10 @@ def _query_pg_cli(sql: str) -> str | None:
         env["PGPASSWORD"] = pw
         cmd = [
             "psql",
+            "-h",
+            "127.0.0.1",
+            "-p",
+            "5432",
             "-U",
             "atli6249_dbsrt",
             "-d",
@@ -1200,10 +1489,30 @@ def _query_pg_cli(sql: str) -> str | None:
             "-c",
             sql,
         ]
-        out = subprocess.check_output(cmd, env=env, timeout=10.0)
+        out = subprocess.check_output(cmd, env=env, timeout=10.0, stderr=subprocess.DEVNULL)
         return out.decode("utf-8").strip()
     except Exception:
         return None
+
+
+def _detect_pg_version(conn: Any | None = None) -> str:
+    """Detects active PostgreSQL server version dynamically."""
+    if conn is not None:
+        try:
+            cur = conn.cursor()
+            cur.execute("SHOW server_version;")
+            row = cur.fetchone()
+            if row:
+                raw = str(row[0] if isinstance(row, tuple | list) else row.get("server_version", ""))
+                major_minor = ".".join(raw.split()[0].split(".")[:2])
+                return f"PostgreSQL {major_minor}"
+        except Exception:
+            pass
+    raw_ver = _query_pg_cli("SHOW server_version;")
+    if raw_ver:
+        major_minor = ".".join(raw_ver.strip().split()[0].split(".")[:2])
+        return f"PostgreSQL {major_minor}"
+    return "PostgreSQL"
 
 
 def _resolve_physical_file_exists(source_id: str | None, video_rel_path: str | None) -> tuple[bool, str]:
@@ -1344,14 +1653,18 @@ def _build_assets_where(
             where_clauses.append(f"source_id = '{safe_src}'")
 
     if search_q:
+        q_norm = strip_accents(search_q.strip()).lower()
+        title_sql = f"translate(lower(clean_title), '{ACCENTED_CHARS}', '{UNACCENTED_CHARS}')"
+        name_sql = f"translate(lower(name), '{ACCENTED_CHARS}', '{UNACCENTED_CHARS}')"
         if is_psycopg:
-            clean_q = f"%{search_q.strip()}%"
-            where_clauses.append("(clean_title ILIKE %s OR name ILIKE %s OR moviehash ILIKE %s)")
-            params.extend([clean_q, clean_q, clean_q])
+            clean_q = f"%{q_norm}%"
+            where_clauses.append(f"({title_sql} LIKE %s OR {name_sql} LIKE %s OR moviehash ILIKE %s)")
+            params.extend([clean_q, clean_q, f"%{search_q.strip()}%"])
         else:
-            safe_q = re.sub(r"['\";\\]", "", search_q.strip())
+            safe_q = re.sub(r"['\";\\]", "", q_norm)
+            safe_raw = re.sub(r"['\";\\]", "", search_q.strip())
             where_clauses.append(
-                f"(clean_title ILIKE '%{safe_q}%' OR name ILIKE '%{safe_q}%' OR moviehash ILIKE '%{safe_q}%')"
+                f"({title_sql} LIKE '%{safe_q}%' OR {name_sql} LIKE '%{safe_q}%' OR moviehash ILIKE '%{safe_raw}%')"
             )
 
     where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
@@ -1419,6 +1732,7 @@ def _get_pg_assets_cli(
         return {
             "status": "ok",
             "connected": True,
+            "pg_version": _detect_pg_version(),
             "summary": summary,
             "page": page,
             "limit": limit,
@@ -1498,6 +1812,7 @@ def _get_pg_assets_psycopg2(
         return {
             "status": "ok",
             "connected": True,
+            "pg_version": _detect_pg_version(conn),
             "summary": summary,
             "page": page,
             "limit": limit,
@@ -1529,7 +1844,7 @@ def get_pg_assets(
     search_q: str = "",
     sort_by: str = "title_asc",
 ) -> dict[str, Any]:
-    """Queries PostgreSQL 17 medias table, computes physical & pHash health metrics."""
+    """Queries PostgreSQL medias table, computes physical & pHash health metrics."""
     conn = _connect_pg()
     if conn is None:
         return _get_pg_assets_cli(page, limit, status_filter, source_filter, search_q, sort_by)
@@ -1636,6 +1951,604 @@ def get_pg_asset_detail(media_id: int) -> dict[str, Any]:
     return _get_pg_asset_detail_psycopg2(conn, media_id)
 
 
+@dataclass
+class PhashReconciliationContext:
+    """Context holding sidecars and PostgreSQL lookups for fast tripartite alignment."""
+
+    sidecars: dict[str, dict[str, Any]] = field(default_factory=dict)
+    pg_medias: dict[str, dict[str, Any]] = field(default_factory=dict)
+
+
+@dataclass
+class PhashesQueryCriteria:
+    """Query criteria for filtering, sorting and paginating pHash tripartite items."""
+
+    page: int = 1
+    limit: int = DEFAULT_PAGE_SIZE
+    status_filter: str = "all"
+    search_q: str = ""
+    sort_by: str = "id_asc"
+
+
+def _load_phash_sidecars(phash_dir: Path) -> dict[str, dict[str, Any]]:
+    """Loads all *.json sidecars in __PHASH__ directory into dictionary indexed by stem."""
+    sidecars: dict[str, dict[str, Any]] = {}
+    if not phash_dir.is_dir():
+        return sidecars
+    for p in phash_dir.glob("*.json"):
+        try:
+            sidecars[p.stem.lower()] = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return sidecars
+
+
+def _read_catalog_dbphash(cat_path: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Reads fixed 128-byte header and media table entries from catalog.dbphash."""
+    if not cat_path.is_file():
+        return {}, []
+
+    with open(cat_path, "rb") as f:
+        hdr_raw = f.read(CATALOG_DBPHASH_HEADER_SIZE)
+        if len(hdr_raw) < CATALOG_DBPHASH_HEADER_SIZE:
+            return {}, []
+        unpacked_hdr = struct.unpack(CATALOG_DBPHASH_HEADER_FORMAT, hdr_raw)
+        (
+            magic,
+            ver,
+            _flags,
+            media_cnt,
+            total_cuts,
+            total_sparse,
+            off_media,
+            _off_cuts,
+            _off_sparse,
+            off_str,
+            str_len,
+            _csum,
+            _,
+        ) = unpacked_hdr
+
+        if not magic.startswith(b"DBSRT"):
+            return {}, []
+
+        f.seek(off_str)
+        string_table = f.read(str_len)
+
+        f.seek(off_media)
+        catalog_items: list[dict[str, Any]] = []
+        for _ in range(media_cnt):
+            entry_raw = f.read(CATALOG_DBPHASH_ENTRY_SIZE)
+            if len(entry_raw) < CATALOG_DBPHASH_ENTRY_SIZE:
+                break
+            mid, _mtype, has_fc, yr, s, ep, dur, fps_x1000, toff, tlen, cc, _c_idx, sc, _s_idx, fc = struct.unpack(
+                CATALOG_DBPHASH_ENTRY_FORMAT, entry_raw
+            )
+            title = string_table[toff : toff + tlen].decode("utf-8", errors="replace")
+            catalog_items.append(
+                {
+                    "catalog_id": mid,
+                    "title": title,
+                    "year": yr if yr > 0 else None,
+                    "season": s if s > 0 else None,
+                    "episode": ep if ep > 0 else None,
+                    "duration_ms": dur,
+                    "fps": fps_x1000 / 1000.0,
+                    "cuts_count": cc,
+                    "sparse_count": sc,
+                    "frame_count": fc if has_fc else 0,
+                }
+            )
+
+        header_info = {
+            "version": ver,
+            "media_count": media_cnt,
+            "total_cuts": total_cuts,
+            "total_sparse": total_sparse,
+            "file_size": cat_path.stat().st_size,
+        }
+        return header_info, catalog_items
+
+
+def _index_media_record(r: dict[str, Any], medias: dict[str, dict[str, Any]]) -> None:
+    """Indexes single media record by moviehash, phash_path basename, and name."""
+    mhash = r.get("moviehash")
+    if mhash:
+        medias[mhash.lower()] = r
+    ppath = r.get("phash_path")
+    if ppath:
+        medias[Path(ppath).name.lower()] = r
+    name = r.get("name")
+    if name:
+        medias[name.lower()] = r
+
+
+def _query_pg_medias_psycopg2(conn: Any) -> tuple[dict[str, dict[str, Any]], int, int]:
+    """Queries medias and frames using psycopg2 connection."""
+    from psycopg2.extras import RealDictCursor
+
+    medias: dict[str, dict[str, Any]] = {}
+    total_pg_medias = 0
+    frames_table_count = 0
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT count(*) AS total FROM medias;")
+        total_pg_medias = cur.fetchone()["total"]
+
+        try:
+            cur.execute("SELECT count(*) AS fc FROM frames;")
+            frames_table_count = cur.fetchone()["fc"]
+        except Exception:
+            pass
+
+        cur.execute("SELECT id, name, clean_title, moviehash, phash_path, frame_count, fps, phash_status FROM medias;")
+        for row in cur.fetchall():
+            _index_media_record(dict(row), medias)
+    except Exception:
+        pass
+    finally:
+        conn.close()
+    return medias, total_pg_medias, frames_table_count
+
+
+def _query_pg_medias_cli() -> tuple[dict[str, dict[str, Any]], int, int]:
+    """Queries medias and frames using psql CLI fallback."""
+    medias: dict[str, dict[str, Any]] = {}
+    total_pg_medias = 0
+    frames_table_count = 0
+
+    raw_cnt = _query_pg_cli("SELECT count(*) FROM medias;")
+    if raw_cnt and raw_cnt.isdigit():
+        total_pg_medias = int(raw_cnt)
+
+    has_frames = _query_pg_cli(
+        "SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'frames';"
+    )
+    if has_frames:
+        raw_fc = _query_pg_cli("SELECT count(*) FROM frames;")
+        if raw_fc and raw_fc.isdigit():
+            frames_table_count = int(raw_fc)
+
+    raw_json = _query_pg_cli(
+        "SELECT json_agg(t)::text FROM (SELECT id, name, clean_title, moviehash, phash_path, frame_count, fps, phash_status FROM medias) t;"
+    )
+    if raw_json and raw_json != "null":
+        try:
+            for r in json.loads(raw_json):
+                _index_media_record(r, medias)
+        except Exception:
+            pass
+    return medias, total_pg_medias, frames_table_count
+
+
+def _query_pg_medias_lookup() -> tuple[dict[str, dict[str, Any]], int, int]:
+    """Loads media records and frame counts from PostgreSQL for tripartite alignment."""
+    conn = _connect_pg()
+    if conn is not None:
+        return _query_pg_medias_psycopg2(conn)
+    return _query_pg_medias_cli()
+
+
+def _resolve_phash_moviehash(filename: str, sidecars: dict[str, dict[str, Any]]) -> str | None:
+    """Extracts 16-hex moviehash from filename or sidecars."""
+    stem = filename.split(".")[0]
+    if len(stem) == 16 and all(c in "0123456789abcdefABCDEF" for c in stem):
+        return stem.lower()
+    for mhash, sc in sidecars.items():
+        mname = sc.get("media_name", "")
+        if mname and (mname in filename or filename in mname):
+            return mhash.lower()
+    return None
+
+
+def _lookup_pg_record(mhash: str | None, raw_fname: str, pg_medias: dict[str, dict[str, Any]]) -> dict[str, Any] | None:
+    """Finds matching PostgreSQL media record by moviehash or filename."""
+    if mhash and mhash in pg_medias:
+        return pg_medias[mhash]
+    if raw_fname and raw_fname.lower() in pg_medias:
+        return pg_medias[raw_fname.lower()]
+    return None
+
+
+def _compute_phash_integrity_status(has_raw: bool, has_catalog: bool, has_pg: bool) -> tuple[str, str]:
+    """Computes integrity status code and human label based on tripartite presence."""
+    if has_raw and has_catalog and has_pg:
+        return "aligned_3_3", "Aligné 3/3"
+    if has_raw and has_catalog:
+        return "missing_pg", "Non ingéré PG"
+    if has_raw:
+        return "uncompiled", "À compiler"
+    return "orphan_catalog", "Orphelin catalogue"
+
+
+def _extract_raw_file_specs(raw_p: Path | None) -> tuple[str, int, int]:
+    """Extracts filename, size in bytes, and frame count from optional raw Path."""
+    if not raw_p:
+        return "", 0, 0
+    sz = raw_p.stat().st_size
+    return raw_p.name, sz, sz // PHASH_FRAME_BYTES
+
+
+def _compute_catalog_specs(
+    cat_e: dict[str, Any] | None, raw_fc: int, default_title: str
+) -> tuple[str, float, int, int, int, int]:
+    """Extracts title, fps, frame count, duration in ms, cuts and sparse counts from catalog entry."""
+    if not cat_e:
+        return default_title or "—", DEFAULT_BASELINE_FPS, raw_fc, int(raw_fc / DEFAULT_BASELINE_FPS * 1000.0), 0, 0
+    fps = cat_e["fps"]
+    fc = cat_e["frame_count"] if cat_e["frame_count"] > 0 else raw_fc
+    dur_ms = cat_e["duration_ms"] if cat_e["duration_ms"] > 0 else int(fc / fps * 1000.0)
+    return cat_e["title"], fps, fc, dur_ms, cat_e["cuts_count"], cat_e["sparse_count"]
+
+
+def _calculate_compression_ratio(raw_size: int, cuts_c: int, sparse_c: int) -> str:
+    """Calculates compression ratio multiplier between raw pHash frames and index entries."""
+    indexed_bytes = (cuts_c + sparse_c) * 16
+    if indexed_bytes > 0 and raw_size > 0:
+        return f"{raw_size / indexed_bytes:.1f}x"
+    return "—"
+
+
+def _build_reconciled_phash_item(
+    raw_p: Path | None,
+    cat_e: dict[str, Any] | None,
+    idx: int,
+    ctx: PhashReconciliationContext,
+) -> dict[str, Any]:
+    """Builds a single reconciled tripartite item descriptor from raw file, catalog entry, and PG context."""
+    raw_fname, raw_size, raw_fc = _extract_raw_file_specs(raw_p)
+    mhash = _resolve_phash_moviehash(raw_fname, ctx.sidecars) if raw_fname else None
+    pg_record = _lookup_pg_record(mhash, raw_fname, ctx.pg_medias)
+
+    title, fps, fc, dur_ms, cuts_c, sparse_c = _compute_catalog_specs(cat_e, raw_fc, raw_fname)
+    status_code, status_label = _compute_phash_integrity_status(
+        raw_p is not None, cat_e is not None, pg_record is not None
+    )
+    comp_ratio = _calculate_compression_ratio(raw_size, cuts_c, sparse_c)
+
+    return {
+        "catalog_id": cat_e["catalog_id"] if cat_e else idx + 1,
+        "title": title,
+        "year": cat_e.get("year") if cat_e else None,
+        "moviehash": mhash or "—",
+        "raw_filename": raw_fname,
+        "fps": fps,
+        "frame_count": fc,
+        "duration_ms": dur_ms,
+        "duration_fmt": _format_duration(dur_ms),
+        "raw_present": raw_p is not None,
+        "raw_size_bytes": raw_size,
+        "raw_size_human": format_human_size(raw_size),
+        "catalog_present": cat_e is not None,
+        "catalog_cuts_count": cuts_c,
+        "catalog_sparse_count": sparse_c,
+        "catalog_compression_ratio": comp_ratio,
+        "pg_present": pg_record is not None,
+        "pg_media_id": pg_record.get("id") if pg_record else None,
+        "pg_status": pg_record.get("phash_status") if pg_record else None,
+        "integrity_status": status_code,
+        "integrity_label": status_label,
+    }
+
+
+def get_phash_tripartite_summary() -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Gathers and caches the 3 pHash pillars: RAW Store, Catalog Zero-DB, BKtreeDB."""
+    global _PHASHES_AUDIT_CACHE
+    now = time.time()
+    with _CACHE_LOCK:
+        if _PHASHES_AUDIT_CACHE and (now - _PHASHES_AUDIT_CACHE[0]) < PHASHES_CACHE_TTL_SECONDS:
+            return _PHASHES_AUDIT_CACHE[1], _PHASHES_AUDIT_CACHE[2]
+
+    phash_dir = Path(__file__).resolve().parents[1] / "data" / "__PHASH__"
+    cat_path = Path(__file__).resolve().parents[1] / "data" / "catalog.dbphash"
+
+    raw_files = sorted(list(phash_dir.glob("*.phash")), key=lambda p: p.name) if phash_dir.is_dir() else []
+    sidecars = _load_phash_sidecars(phash_dir)
+    hdr, cat_items = _read_catalog_dbphash(cat_path)
+    pg_medias, total_pg_medias, frames_table_count = _query_pg_medias_lookup()
+
+    ctx = PhashReconciliationContext(sidecars=sidecars, pg_medias=pg_medias)
+    total_raw_bytes = sum(p.stat().st_size for p in raw_files)
+    catalog_bytes = hdr.get("file_size", 0)
+
+    reconciled: list[dict[str, Any]] = []
+    aligned_3_3_count = 0
+    missing_pg_count = 0
+
+    max_len = max(len(raw_files), len(cat_items))
+    for idx in range(max_len):
+        raw_p = raw_files[idx] if idx < len(raw_files) else None
+        cat_e = cat_items[idx] if idx < len(cat_items) else None
+        item = _build_reconciled_phash_item(raw_p, cat_e, idx, ctx)
+        if item["integrity_status"] == "aligned_3_3":
+            aligned_3_3_count += 1
+        elif item["integrity_status"] == "missing_pg":
+            missing_pg_count += 1
+        reconciled.append(item)
+
+    summary = {
+        "raw_count": len(raw_files),
+        "raw_size_bytes": total_raw_bytes,
+        "raw_size_human": format_human_size(total_raw_bytes),
+        "catalog_count": len(cat_items),
+        "catalog_size_bytes": catalog_bytes,
+        "catalog_size_human": format_human_size(catalog_bytes),
+        "catalog_cuts_total": hdr.get("total_cuts", 0),
+        "catalog_sparse_total": hdr.get("total_sparse", 0),
+        "pg_count": total_pg_medias,
+        "pg_frames_total": frames_table_count,
+        "aligned_3_3": aligned_3_3_count,
+        "missing_pg": missing_pg_count,
+        "uncompiled": 0,
+        "orphan_catalog": 0,
+    }
+
+    with _CACHE_LOCK:
+        _PHASHES_AUDIT_CACHE = (now, reconciled, summary)
+    return reconciled, summary
+
+
+PHASHES_SORT_MAP: dict[str, tuple[Any, bool]] = {
+    "id_asc": (lambda x: x["catalog_id"], False),
+    "id_desc": (lambda x: x["catalog_id"], True),
+    "title_asc": (lambda x: x["title"].lower(), False),
+    "title_desc": (lambda x: x["title"].lower(), True),
+    "frames_desc": (lambda x: x["frame_count"], True),
+    "frames_asc": (lambda x: x["frame_count"], False),
+    "size_desc": (lambda x: x["raw_size_bytes"], True),
+    "size_asc": (lambda x: x["raw_size_bytes"], False),
+    "cuts_desc": (lambda x: x["catalog_cuts_count"], True),
+    "cuts_asc": (lambda x: x["catalog_cuts_count"], False),
+}
+
+
+def query_phashes_list(criteria: PhashesQueryCriteria) -> dict[str, Any]:
+    """Filters, sorts and paginates reconciled tripartite pHash fingerprints."""
+    items, summary = get_phash_tripartite_summary()
+
+    filtered = items
+    if criteria.status_filter in ("aligned_3_3", "missing_pg", "uncompiled", "orphan_catalog"):
+        filtered = [x for x in filtered if x["integrity_status"] == criteria.status_filter]
+
+    if criteria.search_q:
+        q_norm = strip_accents(criteria.search_q.strip()).lower()
+        filtered = [
+            x
+            for x in filtered
+            if q_norm in strip_accents(x["title"]).lower()
+            or q_norm in strip_accents(x["raw_filename"]).lower()
+            or q_norm in x["moviehash"].lower()
+        ]
+
+    key_func, rev = PHASHES_SORT_MAP.get(criteria.sort_by, (lambda x: x["catalog_id"], False))
+    sorted_items = sorted(filtered, key=key_func, reverse=rev)
+
+    total_items = len(sorted_items)
+    limit = max(1, min(criteria.limit, MAX_PAGE_SIZE))
+    total_pages = (total_items + limit - 1) // limit if total_items > 0 else 1
+    page = 1 if criteria.page > total_pages and total_items > 0 else max(1, criteria.page)
+    offset = (page - 1) * limit
+    page_items = sorted_items[offset : offset + limit]
+
+    return {
+        "status": "ok",
+        "summary": summary,
+        "page": page,
+        "limit": limit,
+        "total_items": total_items,
+        "total_pages": total_pages,
+        "items": page_items,
+    }
+
+
+def _resolve_target_phash_file(identifier: str) -> Path | None:
+    """Locates a .phash file in __PHASH__ directory by exact filename or moviehash prefix."""
+    if not identifier:
+        return None
+    phash_dir = (Path(__file__).resolve().parents[1] / "data" / "__PHASH__").resolve()
+    # Sanitize base filename and prevent path traversal
+    clean_id = re.sub(r"[^a-zA-Z0-9_.-]", "", Path(identifier).name)
+    if not clean_id or ".." in clean_id:
+        return None
+
+    candidate = (phash_dir / clean_id).resolve()
+    if phash_dir in candidate.parents and candidate.is_file():
+        return candidate
+
+    prefix = re.sub(r"[^a-zA-Z0-9_-]", "", clean_id.split(".")[0])
+    if prefix:
+        matches = list(phash_dir.glob(f"{prefix}*.phash"))
+        if matches and phash_dir in matches[0].resolve().parents and matches[0].is_file():
+            return matches[0]
+    return None
+
+
+def _compute_entropy_and_mobility(
+    hashes: tuple[int, ...],
+) -> tuple[float, float, list[int], list[int], float]:
+    """Computes popcounts, DCT entropy histogram, consecutive delta mobility, and mean delta."""
+    popcounts: list[int] = []
+    distribution = [0] * ENTROPY_HISTOGRAM_BUCKETS
+    delta_distribution = [0] * DELTA_MOBILITY_BUCKETS
+    total_delta = 0
+
+    for i, h in enumerate(hashes):
+        pop = h.bit_count()
+        popcounts.append(pop)
+        bucket_idx = min(pop // HISTOGRAM_BUCKET_WIDTH, ENTROPY_HISTOGRAM_BUCKETS - 1)
+        distribution[bucket_idx] += 1
+
+        if i > 0:
+            delta = (h ^ hashes[i - 1]).bit_count()
+            total_delta += delta
+            d_bucket = min(delta // DELTA_STEP_BITS, DELTA_MOBILITY_BUCKETS - 1)
+            delta_distribution[d_bucket] += 1
+
+    mean_pop = sum(popcounts) / len(popcounts) if popcounts else 0.0
+    entropy_pct = round(mean_pop / float(BITS_PER_HASH) * 100.0, 1)
+    mean_delta = (total_delta / float(len(hashes) - 1)) if len(hashes) > 1 else 0.0
+    return mean_pop, entropy_pct, distribution, delta_distribution, mean_delta
+
+
+def _detect_cuts(hashes: tuple[int, ...], fps: float) -> tuple[list[dict[str, Any]], int]:
+    """Scans perceptual hashes for scene cuts exceeding the Hamming threshold."""
+    cuts: list[dict[str, Any]] = []
+    total_cuts_count = 0
+    for i in range(1, len(hashes)):
+        delta = (hashes[i] ^ hashes[i - 1]).bit_count()
+        if delta >= PHASH_CUT_HAMMING_THRESHOLD:
+            total_cuts_count += 1
+            cuts.append(
+                {
+                    "frame": i,
+                    "time_ms": int(i / fps * 1000.0),
+                    "time_fmt": _format_duration(int(i / fps * 1000.0)),
+                    "distance": delta,
+                    "hash": f"{hashes[i]:016x}",
+                }
+            )
+
+    if len(cuts) > MICROSCOPIC_CUTS_SAMPLE_LIMIT:
+        step = len(cuts) / float(MICROSCOPIC_CUTS_SAMPLE_LIMIT)
+        sampled_cuts = [cuts[int(idx * step)] for idx in range(MICROSCOPIC_CUTS_SAMPLE_LIMIT)]
+    else:
+        sampled_cuts = cuts
+    return sampled_cuts, total_cuts_count
+
+
+def _aggregate_timeline(hashes: tuple[int, ...], fps: float) -> list[dict[str, Any]]:
+    """Builds downsampled timeline points measuring mean mobility and peak cuts."""
+    total_frames = len(hashes)
+    bucket_size = max(1, total_frames // TIMELINE_SERIES_POINTS)
+    timeline: list[dict[str, Any]] = []
+    cur_bucket_sum = 0
+    cur_bucket_count = 0
+    cur_bucket_max = 0
+
+    for i in range(1, total_frames):
+        delta = (hashes[i] ^ hashes[i - 1]).bit_count()
+        cur_bucket_sum += delta
+        cur_bucket_count += 1
+        if delta > cur_bucket_max:
+            cur_bucket_max = delta
+
+        is_last = i % bucket_size == 0 or i == total_frames - 1
+        if is_last:
+            t_ms = int(i / fps * 1000.0)
+            mean_d = round(cur_bucket_sum / float(cur_bucket_count), 2) if cur_bucket_count > 0 else 0.0
+            timeline.append(
+                {
+                    "time_fmt": _format_duration(t_ms),
+                    "frame": i,
+                    "delta": mean_d,
+                    "delta_mean": mean_d,
+                    "delta_max": cur_bucket_max,
+                }
+            )
+            cur_bucket_sum = 0
+            cur_bucket_count = 0
+            cur_bucket_max = 0
+
+    return timeline
+
+
+def _extract_cuts_and_timeline(
+    hashes: tuple[int, ...], fps: float
+) -> tuple[list[dict[str, Any]], int, list[dict[str, Any]]]:
+    """Extracts sampled cuts, total cuts count, and timeline mobility series."""
+    sampled_cuts, total_cuts = _detect_cuts(hashes, fps)
+    timeline = _aggregate_timeline(hashes, fps)
+    return sampled_cuts, total_cuts, timeline
+
+
+def _detect_phash_cuts_and_entropy(
+    hashes: tuple[int, ...], fps: float
+) -> tuple[float, float, list[int], list[dict[str, Any]], int, list[dict[str, Any]], list[int], float]:
+    """Scans perceptual hashes, detecting scene cuts, visual entropy, timeline, and delta mobility."""
+    mean_pop, entropy_pct, distribution, delta_dist, mean_delta = _compute_entropy_and_mobility(hashes)
+    sampled_cuts, total_cuts_count, timeline = _extract_cuts_and_timeline(hashes, fps)
+    return mean_pop, entropy_pct, distribution, sampled_cuts, total_cuts_count, timeline, delta_dist, mean_delta
+
+
+def inspect_phash_microscopic(identifier: str) -> dict[str, Any]:
+    """Performs deep microscopic frame-by-frame inspection of a single .phash file."""
+    if not identifier:
+        return {"status": "error", "message": "Identifiant moviehash ou nom de fichier requis"}
+
+    target_file = _resolve_target_phash_file(identifier)
+    if not target_file or not target_file.is_file():
+        return {"status": "not_found", "message": f"Fichier .phash pour '{identifier}' introuvable sur disque"}
+
+    raw_bytes = target_file.read_bytes()
+    fc = len(raw_bytes) // PHASH_FRAME_BYTES
+    if fc == 0:
+        return {"status": "error", "message": "Fichier .phash vide"}
+
+    hashes = struct.unpack(f">{fc}Q", raw_bytes)
+    fps = DEFAULT_BASELINE_FPS
+    fps_m = RE_FPS.search(target_file.name)
+    if fps_m:
+        try:
+            fps_val = float(fps_m.group(1))
+            if fps_val > 0.0:
+                fps = fps_val
+        except ValueError:
+            pass
+
+    mean_pop, entropy_pct, distribution, cuts, total_cuts_count, timeline, delta_dist, mean_delta = (
+        _detect_phash_cuts_and_entropy(hashes, fps)
+    )
+    duration_ms = int(fc / fps * 1000.0)
+    sparse_count = duration_ms // 1000
+    indexed_bytes = (total_cuts_count + sparse_count) * 16
+    saved_pct = (
+        round((1.0 - (indexed_bytes / float(len(raw_bytes)))) * 100.0, 1) if len(raw_bytes) > indexed_bytes else 0.0
+    )
+    ratio = round(len(raw_bytes) / float(indexed_bytes), 1) if indexed_bytes > 0 else 1.0
+
+    return {
+        "status": "ok",
+        "filename": target_file.name,
+        "moviehash": target_file.name.split(".")[0],
+        "fps": fps,
+        "frame_count": fc,
+        "duration_ms": duration_ms,
+        "duration_fmt": _format_duration(duration_ms),
+        "file_size_bytes": len(raw_bytes),
+        "file_size_human": format_human_size(len(raw_bytes)),
+        "entropy": {
+            "mean_popcount": round(mean_pop, 2),
+            "entropy_pct": entropy_pct,
+            "histogram": distribution,
+            "health": (
+                "Excellente (trame visuelle diversifiée)"
+                if 25.0 <= mean_pop <= 38.0
+                else "Anormale (potentielle trame statique)"
+            ),
+        },
+        "mobility": {
+            "mean_delta": round(mean_delta, 2),
+            "histogram": delta_dist,
+            "labels": list(DELTA_MOBILITY_LABELS),
+            "descriptions": list(DELTA_MOBILITY_DESCRIPTIONS),
+        },
+        "cuts": {
+            "cuts_sample": cuts,
+            "cuts_count": total_cuts_count,
+            "threshold": PHASH_CUT_HAMMING_THRESHOLD,
+            "timeline": timeline,
+        },
+        "compression": {
+            "raw_bytes": len(raw_bytes),
+            "estimated_indexed_bytes": indexed_bytes,
+            "saved_space_pct": saved_pct,
+            "ratio": ratio,
+            "cuts_count": total_cuts_count,
+            "sparse_count": sparse_count,
+        },
+    }
+
+
 class PortalRequestHandler(http.server.SimpleHTTPRequestHandler):
     """Custom HTTP handler serving API JSON endpoints and clean use-case HTML pages."""
 
@@ -1731,8 +2644,41 @@ class PortalRequestHandler(http.server.SimpleHTTPRequestHandler):
             return True
         return False
 
+    def _handle_api_phash_routes(self, path: str, query: dict[str, list[str]]) -> bool:
+        if path == "/api/phashes":
+            p = int(query.get("page", ["1"])[0]) if query.get("page", ["1"])[0].isdigit() else 1
+            l_val = (
+                int(query.get("limit", [str(DEFAULT_PAGE_SIZE)])[0])
+                if query.get("limit", [str(DEFAULT_PAGE_SIZE)])[0].isdigit()
+                else DEFAULT_PAGE_SIZE
+            )
+            status_f = query.get("filter", ["all"])[0]
+            q_val = query.get("q", [""])[0]
+            sort_val = query.get("sort", ["id_asc"])[0]
+            criteria = PhashesQueryCriteria(
+                page=p,
+                limit=l_val,
+                status_filter=status_f,
+                search_q=q_val,
+                sort_by=sort_val,
+            )
+            result = query_phashes_list(criteria)
+            self._send_json(result)
+            return True
+        if path == "/api/phash/details":
+            identifier = query.get("moviehash", [""])[0] or query.get("file", [""])[0]
+            result = inspect_phash_microscopic(identifier)
+            status_code = HTTP_OK if result.get("status") == "ok" else HTTP_NOT_FOUND
+            self._send_json(result, status=status_code)
+            return True
+        return False
+
     def _handle_api(self, path: str, query: dict[str, list[str]]) -> bool:
-        return self._handle_api_source_routes(path, query) or self._handle_api_asset_routes(path, query)
+        return (
+            self._handle_api_source_routes(path, query)
+            or self._handle_api_asset_routes(path, query)
+            or self._handle_api_phash_routes(path, query)
+        )
 
     def do_GET(self) -> None:
         parsed = urllib.parse.urlparse(self.path)
@@ -1759,13 +2705,14 @@ class PortalRequestHandler(http.server.SimpleHTTPRequestHandler):
         self.wfile.write(raw)
 
 
-class ReusableTCPServer(socketserver.TCPServer):
+class ReusableThreadingTCPServer(socketserver.ThreadingTCPServer):
     allow_reuse_address = True
+    daemon_threads = True
 
 
 def run_server(port: int = DEFAULT_PORT) -> None:
     STATIC_DIR.mkdir(parents=True, exist_ok=True)
-    with ReusableTCPServer(("0.0.0.0", port), PortalRequestHandler) as httpd:
+    with ReusableThreadingTCPServer(("0.0.0.0", port), PortalRequestHandler) as httpd:
         print(f"🚀 pydbsrt Portal running on http://127.0.0.1:{port}/")
         try:
             httpd.serve_forever()
@@ -1794,6 +2741,13 @@ if __name__ == "__main__":
     )
     parser.add_argument("--source", default="", help="Source filter for assets")
     parser.add_argument("--force", action="store_true", help="Bypass cache and force fresh live probe")
+    parser.add_argument("--phashes", action="store_true", help="List tripartite pHash fingerprints (JSON)")
+    parser.add_argument("--phash-moviehash", default="", help="Inspect microscopic details of single phash")
+    parser.add_argument(
+        "--phash-filter",
+        default="all",
+        help="Filter for phashes (all, aligned_3_3, missing_pg, uncompiled, orphan_catalog)",
+    )
     args = parser.parse_args()
 
     if args.metadata:
@@ -1839,5 +2793,16 @@ if __name__ == "__main__":
         )
     elif args.asset_id:
         print(json.dumps(get_pg_asset_detail(args.asset_id), indent=2, default=str))
+    elif args.phashes:
+        phash_criteria = PhashesQueryCriteria(
+            page=args.page,
+            limit=args.limit,
+            status_filter=args.phash_filter if args.phash_filter != "all" else args.status,
+            search_q=args.search,
+            sort_by=args.sort,
+        )
+        print(json.dumps(query_phashes_list(phash_criteria), indent=2, default=str))
+    elif args.phash_moviehash:
+        print(json.dumps(inspect_phash_microscopic(args.phash_moviehash), indent=2, default=str))
     else:
         run_server(args.port)

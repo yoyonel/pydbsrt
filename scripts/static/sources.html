@@ -81,6 +81,12 @@
           <span>Actifs Médias (DB)</span>
           <span class="text-[10px] font-mono px-1.5 py-0.2 rounded bg-indigo-900/60 text-indigo-300 border border-indigo-700/50" x-text="assetsSummary.total ? assetsSummary.total : '2.3k'"></span>
         </button>
+        <button @click="switchView('phashes')"
+                class="px-3 py-1.5 rounded-md font-medium transition cursor-pointer flex items-center gap-2"
+                :class="currentView === 'phashes' ? 'bg-indigo-600/20 text-indigo-300 border border-indigo-500/30' : 'text-slate-400 hover:text-white'">
+          <span>Empreintes pHash</span>
+          <span class="text-[10px] font-mono px-1.5 py-0.2 rounded bg-indigo-900/60 text-indigo-300 border border-indigo-700/50" x-text="phashesSummary.catalog_count ? phashesSummary.catalog_count : '2.8k'"></span>
+        </button>
         <span class="px-3 py-1.5 rounded-md text-slate-500/60 cursor-not-allowed select-none flex items-center gap-1.5" title="Fonctionnalité ultérieure">
           <span>Trajectoires</span>
           <span class="text-[9px] uppercase font-mono px-1.5 py-0.2 rounded bg-slate-900 text-slate-500 border border-slate-800">Bientôt</span>
@@ -114,7 +120,7 @@
 
   <!-- Main Content Area -->
   <main class="flex-1 p-6 max-w-7xl mx-auto w-full flex flex-col min-h-0"
-        :class="currentView === 'sources' || currentView === 'assets' ? 'overflow-y-auto space-y-6 custom-scroll' : 'overflow-hidden'">
+        :class="currentView === 'sources' || currentView === 'assets' || currentView === 'phashes' ? 'overflow-y-auto space-y-6 custom-scroll' : 'overflow-hidden'">
 
     <!-- ================================================================= -->
     <!-- VIEW 1: SOURCES MÉDIAS DASHBOARD (OVERVIEW)                      -->
@@ -670,7 +676,7 @@
             Actifs Médias : Intégrité Base & Empreintes pHash
             <span class="text-xs font-normal text-slate-400 bg-slate-800/60 px-2.5 py-0.5 rounded-full border border-slate-700/50" x-text="assetsTotalItems + ' enregistrements'"></span>
           </h1>
-          <p class="text-xs text-slate-400 mt-1">Audit métier de l'ancrage physique et de l'état d'extraction pHash des conteneurs vidéo dans PostgreSQL 17 (bktreedb).</p>
+          <p class="text-xs text-slate-400 mt-1">Audit métier de l'ancrage physique et de l'état d'extraction pHash des conteneurs vidéo dans <span x-text="assetsPgVersion"></span> (bktreedb).</p>
         </div>
 
         <div class="flex items-center gap-3 text-xs">
@@ -730,7 +736,7 @@
              :class="assetsStatusFilter === 'all' ? 'border-indigo-500 bg-indigo-950/20' : 'border-slate-800 hover:border-slate-700'">
           <div class="flex items-center justify-between text-xs text-slate-400 font-medium">
             <span>🎬 TOTAL EN BASE</span>
-            <span class="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">PG 17</span>
+            <span class="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700" x-text="assetsPgVersion"></span>
           </div>
           <div class="mt-2 text-2xl font-bold font-mono text-white" x-text="assetsSummary.total"></div>
           <div class="mt-1 text-[11px] text-slate-400">Total actifs vidéo répertoriés</div>
@@ -843,7 +849,7 @@
                   <td colspan="7" class="py-12 text-center text-slate-400">
                     <div class="flex items-center justify-center gap-2">
                       <span class="animate-spin text-indigo-400 text-base">⚡</span>
-                      <span>Interrogation de PostgreSQL 17...</span>
+                      <span x-text="'Interrogation de ' + assetsPgVersion + '...'"></span>
                     </div>
                   </td>
                 </tr>
@@ -1006,6 +1012,367 @@
 
     </div>
 
+    <!-- ================================================================= -->
+    <!-- VIEW 3: EMPREINTES PHASH (OBSERVATOIRE D'INTÉGRITÉ TRIPARTITE)    -->
+    <!-- ================================================================= -->
+    <div x-show="currentView === 'phashes'" x-transition.opacity.duration.200ms class="space-y-6">
+
+      <!-- Page Header -->
+      <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-2 border-b border-slate-800/60">
+        <div>
+          <h1 class="text-2xl font-bold tracking-tight text-white flex items-center gap-2">
+            Empreintes pHash : Observatoire d'Intégrité Tripartite
+            <span class="text-xs font-normal text-slate-400 bg-slate-800/60 px-2.5 py-0.5 rounded-full border border-slate-700/50" x-text="phashesTotalItems + ' empreintes'"></span>
+          </h1>
+          <p class="text-xs text-slate-400 mt-1">Surveillance et réconciliation de la trinité des empreintes visuelles : Stockage RAW (disque), Catalogue Compilé Zero-DB (.dbphash v2.0) et Base Relationnelle (<span x-text="assetsPgVersion"></span>).</p>
+        </div>
+
+        <div class="flex items-center gap-3 text-xs">
+          <button @click="showGlossaryModal = true" class="px-3 py-1.5 rounded-lg bg-indigo-950/60 hover:bg-indigo-900/80 text-indigo-300 font-semibold border border-indigo-800 shadow flex items-center gap-1.5 transition cursor-pointer">
+            <span>💡</span>
+            <span>Aide & Définitions Métier</span>
+          </button>
+          <button @click="fetchPhashes(true)" :disabled="phashesLoading" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-indigo-300 font-semibold border border-slate-700 shadow flex items-center gap-1.5 transition cursor-pointer">
+            <span :class="{'animate-spin': phashesLoading}">🔄</span>
+            <span>Actualiser</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Bento Cards: The 3 Pillars of pHash -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+
+        <!-- Pillar 1: RAW pHash Store -->
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow flex flex-col justify-between relative overflow-hidden">
+          <div class="absolute -right-6 -bottom-6 text-7xl opacity-5 select-none pointer-events-none">📁</div>
+          <div>
+            <div class="flex items-center justify-between text-xs font-medium">
+              <span class="text-sky-400 flex items-center gap-1.5">
+                <span>📁</span>
+                <span class="font-bold uppercase tracking-wider">PILIER 1 : RAW STORE</span>
+              </span>
+              <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-sky-950/60 text-sky-300 border border-sky-800">1 hash / frame</span>
+            </div>
+            <div class="mt-3 flex items-baseline gap-2">
+              <span class="text-3xl font-extrabold font-mono text-white" x-text="phashesSummary.raw_count"></span>
+              <span class="text-xs text-slate-400 font-mono">fichiers bruts</span>
+            </div>
+            <div class="mt-2 text-xs text-slate-300 flex items-center justify-between border-t border-slate-800/80 pt-2 font-mono">
+              <span class="text-slate-400">Poids disque total :</span>
+              <span class="font-bold text-sky-300" x-text="phashesSummary.raw_size_human"></span>
+            </div>
+          </div>
+          <div class="mt-3 text-[11px] text-slate-400 flex items-center gap-1">
+            <span>Empreintes complètes 64-bit :</span>
+            <code class="bg-slate-950 px-1 py-0.5 rounded text-sky-300 font-mono text-[10px] border border-slate-800">data/__PHASH__/*.phash</code>
+          </div>
+        </div>
+
+        <!-- Pillar 2: Compiled Zero-DB Catalog -->
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow flex flex-col justify-between relative overflow-hidden">
+          <div class="absolute -right-6 -bottom-6 text-7xl opacity-5 select-none pointer-events-none">⚡</div>
+          <div>
+            <div class="flex items-center justify-between text-xs font-medium">
+              <span class="text-indigo-400 flex items-center gap-1.5">
+                <span>⚡</span>
+                <span class="font-bold uppercase tracking-wider">PILIER 2 : CATALOGUE ZERO-DB</span>
+              </span>
+              <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-950/60 text-indigo-300 border border-indigo-800">mmap v2.0</span>
+            </div>
+            <div class="mt-3 flex items-baseline gap-2">
+              <span class="text-3xl font-extrabold font-mono text-white" x-text="phashesSummary.catalog_count"></span>
+              <span class="text-xs text-slate-400 font-mono">médias compilés</span>
+            </div>
+            <div class="mt-2 text-xs text-slate-300 flex items-center justify-between border-t border-slate-800/80 pt-2 font-mono">
+              <span class="text-slate-400">Taille & Densité :</span>
+              <div class="flex items-center gap-2">
+                <span class="font-bold text-indigo-300" x-text="phashesSummary.catalog_size_human"></span>
+                <span class="text-[10px] px-1.5 py-0.2 rounded bg-indigo-900/60 text-indigo-200 border border-indigo-700/50" x-text="'~' + (phashesSummary.raw_size_bytes && phashesSummary.catalog_size_bytes ? (phashesSummary.raw_size_bytes / phashesSummary.catalog_size_bytes).toFixed(1) + 'x comp.' : '—')"></span>
+              </div>
+            </div>
+          </div>
+          <div class="mt-3 text-[11px] text-slate-400 flex items-center justify-between">
+            <span class="flex items-center gap-1">
+              <span>Points d'ancrage :</span>
+              <span class="text-indigo-300 font-mono font-semibold" x-text="(phashesSummary.catalog_cuts_total ? (phashesSummary.catalog_cuts_total / 1000000).toFixed(2) + 'M' : '0') + ' cuts + ' + (phashesSummary.catalog_sparse_total ? (phashesSummary.catalog_sparse_total / 1000000).toFixed(2) + 'M' : '0') + ' régulières (1/s)'"></span>
+            </span>
+          </div>
+        </div>
+
+        <!-- Pillar 3: Relational BKtreeDB -->
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow flex flex-col justify-between relative overflow-hidden">
+          <div class="absolute -right-6 -bottom-6 text-7xl opacity-5 select-none pointer-events-none">🐘</div>
+          <div>
+            <div class="flex items-center justify-between text-xs font-medium">
+              <span class="text-emerald-400 flex items-center gap-1.5">
+                <span>🐘</span>
+                <span class="font-bold uppercase tracking-wider">PILIER 3 : BKTREEDB RELATIONNEL</span>
+              </span>
+              <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-950/60 text-emerald-300 border border-emerald-800" x-text="assetsPgVersion"></span>
+            </div>
+            <div class="mt-3 flex items-baseline gap-2">
+              <span class="text-3xl font-extrabold font-mono text-emerald-400" x-text="phashesSummary.aligned_3_3"></span>
+              <span class="text-xs text-slate-400 font-mono">/ <span x-text="phashesSummary.catalog_count"></span> alignés</span>
+            </div>
+            <div class="mt-2 text-xs text-slate-300 flex items-center justify-between border-t border-slate-800/80 pt-2 font-mono">
+              <span class="text-slate-400">Trames SQL (SP-GiST) :</span>
+              <span class="font-bold text-emerald-300" x-text="phashesSummary.pg_frames_total + ' indexées'"></span>
+            </div>
+          </div>
+          <div class="mt-3 text-[11px] text-slate-400 flex items-center justify-between">
+            <span class="flex items-center gap-1">
+              <span>Non ingérés SQL :</span>
+              <span class="font-mono font-semibold" :class="phashesSummary.missing_pg > 0 ? 'text-amber-400' : 'text-slate-500'" x-text="phashesSummary.missing_pg + ' médias'"></span>
+            </span>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Integrity Status Filter Bar & Query Controls -->
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow space-y-4">
+        <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+
+          <!-- Filter Pills -->
+          <div class="flex flex-wrap items-center gap-2 text-xs">
+            <button @click="setPhashesStatusFilter('all')"
+                    class="px-3 py-1.5 rounded-lg font-medium transition cursor-pointer border flex items-center gap-1.5"
+                    :class="phashesStatusFilter === 'all' ? 'bg-indigo-600/30 text-indigo-300 border-indigo-500/50' : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-white'">
+              <span>Tous</span>
+              <span class="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-900 border border-slate-700" x-text="phashesSummary.catalog_count"></span>
+            </button>
+
+            <button @click="setPhashesStatusFilter('aligned_3_3')"
+                    class="px-3 py-1.5 rounded-lg font-medium transition cursor-pointer border flex items-center gap-1.5"
+                    :class="phashesStatusFilter === 'aligned_3_3' ? 'bg-emerald-950 text-emerald-300 border-emerald-700/60' : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-white'">
+              <span>🟢 Alignés 3/3</span>
+              <span class="text-[10px] font-mono px-1.5 py-0.2 rounded bg-emerald-950/60 text-emerald-300 border border-emerald-800" x-text="phashesSummary.aligned_3_3"></span>
+            </button>
+
+            <button @click="setPhashesStatusFilter('missing_pg')"
+                    class="px-3 py-1.5 rounded-lg font-medium transition cursor-pointer border flex items-center gap-1.5"
+                    :class="phashesStatusFilter === 'missing_pg' ? 'bg-amber-950 text-amber-300 border-amber-700/60' : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-white'">
+              <span>⚠️ Non ingérés PG</span>
+              <span class="text-[10px] font-mono px-1.5 py-0.2 rounded bg-amber-950/60 text-amber-300 border border-amber-800" x-text="phashesSummary.missing_pg"></span>
+            </button>
+
+            <button @click="setPhashesStatusFilter('uncompiled')"
+                    class="px-3 py-1.5 rounded-lg font-medium transition cursor-pointer border flex items-center gap-1.5"
+                    :class="phashesStatusFilter === 'uncompiled' ? 'bg-rose-950 text-rose-300 border-rose-700/60' : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-white'">
+              <span>⚠️ À compiler</span>
+              <span class="text-[10px] font-mono px-1.5 py-0.2 rounded bg-rose-950/60 text-rose-300 border border-rose-800" x-text="phashesSummary.uncompiled"></span>
+            </button>
+          </div>
+
+          <!-- Search & Sorting Controls -->
+          <div class="flex flex-wrap items-center gap-3">
+            <div class="relative w-full sm:w-64">
+              <span class="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-slate-500">🔍</span>
+              <input type="text"
+                     x-model="phashesSearchQuery"
+                     @input.debounce.300ms="onPhashesFilterChange()"
+                     placeholder="Titre, moviehash (16h)..."
+                     class="w-full bg-slate-950 border border-slate-800 rounded-lg pl-8 pr-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500">
+            </div>
+
+            <div class="flex items-center gap-2 text-xs">
+              <label class="text-slate-400 shrink-0">Tri :</label>
+              <select x-model="phashesSort" @change="onPhashesFilterChange()" class="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-indigo-500">
+                <option value="id_asc">ID Catalogue (1 → N)</option>
+                <option value="id_desc">ID Catalogue (N → 1)</option>
+                <option value="title_asc">Titre (A → Z)</option>
+                <option value="title_desc">Titre (Z → A)</option>
+                <option value="frames_desc">Frames (Décroissant)</option>
+                <option value="frames_asc">Frames (Croissant)</option>
+                <option value="size_desc">Poids RAW (Décroissant)</option>
+                <option value="cuts_desc">Cuts (Décroissant)</option>
+              </select>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- Tripartite Reconciliation Table -->
+      <div class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow">
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs">
+            <thead class="bg-slate-950/80 border-b border-slate-800 text-slate-400 uppercase font-mono text-[10px]">
+              <tr>
+                <th class="py-3 px-4 font-semibold"># & Titre du Média</th>
+                <th class="py-3 px-4 font-semibold" title="Empreinte OpenSubtitles 64 bits (16 caractères hex)">MovieHash</th>
+                <th class="py-3 px-4 font-semibold">📁 RAW .phash</th>
+                <th class="py-3 px-4 font-semibold">⚡ Catalogue Zero-DB</th>
+                <th class="py-3 px-4 font-semibold">🐘 PostgreSQL</th>
+                <th class="py-3 px-4 font-semibold text-center">Intégrité</th>
+                <th class="py-3 px-4 font-semibold text-right">Action</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-800/60 font-sans">
+              <template x-if="phashesLoading">
+                <tr>
+                  <td colspan="7" class="py-12 text-center text-slate-400">
+                    <span class="animate-spin text-lg text-indigo-400 inline-block mb-1">⚡</span>
+                    <p>Reconciliation des 3 piliers d'empreintes...</p>
+                  </td>
+                </tr>
+              </template>
+
+              <template x-if="!phashesLoading && phashesItems.length === 0">
+                <tr>
+                  <td colspan="7" class="py-12 text-center text-slate-500">
+                    <span class="text-2xl block mb-2">🔍</span>
+                    <p>Aucune empreinte ne correspond aux critères sélectionnés.</p>
+                  </td>
+                </tr>
+              </template>
+
+              <template x-for="item in phashesItems" :key="item.catalog_id + '_' + item.moviehash">
+                <tr class="hover:bg-slate-800/40 transition">
+
+                  <!-- Title & Spec -->
+                  <td class="py-3 px-4">
+                    <div class="flex items-center gap-2">
+                      <span class="text-slate-500 font-mono text-[10px]" x-text="'#' + item.catalog_id"></span>
+                      <span class="font-semibold text-white truncate max-w-[280px]" x-text="item.title" :title="item.title"></span>
+                      <template x-if="item.year">
+                        <span class="text-[10px] text-slate-500" x-text="'(' + item.year + ')'"></span>
+                      </template>
+                    </div>
+                    <div class="text-[11px] text-slate-400 mt-0.5 flex items-center gap-2 font-mono">
+                      <span x-text="item.duration_fmt"></span>
+                      <span class="text-slate-600">•</span>
+                      <span x-text="item.fps + ' fps'"></span>
+                      <span class="text-slate-600">•</span>
+                      <span x-text="item.frame_count ? item.frame_count.toLocaleString() + ' fr' : '—'"></span>
+                    </div>
+                  </td>
+
+                  <!-- MovieHash (16h) with Quick Copy -->
+                  <td class="py-3 px-4">
+                    <template x-if="item.moviehash && item.moviehash !== '—'">
+                      <div class="flex items-center gap-1.5">
+                        <code class="font-mono text-xs px-2 py-0.5 rounded bg-slate-950 text-indigo-300 border border-slate-800 select-all" x-text="item.moviehash"></code>
+                        <button @click.stop="copyToClipboard(item.moviehash)" class="text-slate-500 hover:text-indigo-400 p-0.5 text-[11px]" title="Copier le MovieHash">📋</button>
+                      </div>
+                    </template>
+                    <template x-if="!item.moviehash || item.moviehash === '—'">
+                      <span class="text-slate-500 font-mono text-[11px]">Non identifié</span>
+                    </template>
+                  </td>
+
+                  <!-- Pillar 1: RAW .phash Store -->
+                  <td class="py-3 px-4">
+                    <div class="flex items-center gap-2">
+                      <template x-if="item.raw_present">
+                        <div class="flex flex-col font-mono text-[11px]">
+                          <span class="text-sky-300 font-semibold" x-text="item.raw_size_human"></span>
+                          <span class="text-slate-500 text-[10px]" x-text="item.frame_count ? item.frame_count.toLocaleString() + ' hashes' : '—'"></span>
+                        </div>
+                      </template>
+                      <template x-if="!item.raw_present">
+                        <span class="text-rose-400 text-[11px] font-mono">Absent</span>
+                      </template>
+                    </div>
+                  </td>
+
+                  <!-- Pillar 2: Compiled Zero-DB Catalog -->
+                  <td class="py-3 px-4">
+                    <template x-if="item.catalog_present">
+                      <div class="flex flex-col font-mono text-[11px]">
+                        <span class="text-indigo-300 flex items-center gap-1">
+                          <span x-text="item.catalog_cuts_count.toLocaleString() + ' cuts'"></span>
+                          <span class="text-slate-600">•</span>
+                          <span x-text="item.catalog_sparse_count.toLocaleString() + ' régulières (1/s)'"></span>
+                        </span>
+                        <span class="text-slate-500 text-[10px]" x-text="'Gain mémoire : ' + item.catalog_compression_ratio"></span>
+                      </div>
+                    </template>
+                    <template x-if="!item.catalog_present">
+                      <span class="text-amber-400 text-[11px] font-mono">Non compilé</span>
+                    </template>
+                  </td>
+
+                  <!-- Pillar 3: PostgreSQL Relationnel -->
+                  <td class="py-3 px-4">
+                    <template x-if="item.pg_present">
+                      <div class="flex flex-col font-mono text-[11px]">
+                        <span class="text-emerald-400 font-semibold" x-text="'Média #' + item.pg_media_id"></span>
+                        <span class="text-slate-500 text-[10px]" x-text="'Statut: ' + (item.pg_status || 'ok')"></span>
+                      </div>
+                    </template>
+                    <template x-if="!item.pg_present">
+                      <span class="text-amber-400/90 text-[11px] font-mono">Non ingéré</span>
+                    </template>
+                  </td>
+
+                  <!-- Tripartite Integrity Badge -->
+                  <td class="py-3 px-4 text-center">
+                    <template x-if="item.integrity_status === 'aligned_3_3'">
+                      <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold bg-emerald-950/80 text-emerald-400 border border-emerald-800 shadow-sm">
+                        <span>🟢</span>
+                        <span>Aligné 3/3</span>
+                      </span>
+                    </template>
+                    <template x-if="item.integrity_status === 'missing_pg'">
+                      <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold bg-amber-950/80 text-amber-300 border border-amber-800 shadow-sm">
+                        <span>⚠️</span>
+                        <span>Non ingéré PG</span>
+                      </span>
+                    </template>
+                    <template x-if="item.integrity_status === 'uncompiled'">
+                      <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold bg-rose-950/80 text-rose-300 border border-rose-800 shadow-sm">
+                        <span>🛑</span>
+                        <span>À compiler</span>
+                      </span>
+                    </template>
+                    <template x-if="item.integrity_status === 'orphan_catalog'">
+                      <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold bg-red-950/80 text-red-400 border border-red-800 shadow-sm">
+                        <span>🛑</span>
+                        <span>Orphelin</span>
+                      </span>
+                    </template>
+                  </td>
+
+                  <!-- Action -->
+                  <td class="py-3 px-4 text-right">
+                    <button @click.stop="openPhashDetail(item)" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-indigo-300 font-medium border border-slate-700 transition cursor-pointer">
+                      Inspecter
+                    </button>
+                  </td>
+
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Table Pagination Controls -->
+        <div class="bg-slate-950/80 px-4 py-3 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400">
+          <div class="flex items-center gap-2">
+            <span>Lignes par page :</span>
+            <select x-model="phashesLimit" @change="onPhashesFilterChange()" class="bg-slate-900 border border-slate-700 text-xs rounded px-2 py-0.5 text-slate-300">
+              <option value="15">15</option>
+              <option value="25">25</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+            </select>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <button @click="prevPhashesPage()" :disabled="phashesPage <= 1" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed text-white font-medium border border-slate-700 transition cursor-pointer">
+              ← Précédent
+            </button>
+            <span class="px-2 font-mono" x-text="phashesPage + ' / ' + (phashesTotalPages || 1)"></span>
+            <button @click="nextPhashesPage()" :disabled="phashesPage >= phashesTotalPages" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed text-white font-medium border border-slate-700 transition cursor-pointer">
+              Suivant →
+            </button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
     <!-- Slide-over Drawer: Technical Asset Inspection -->
     <div x-show="selectedAssetModal"
          class="fixed inset-0 z-50 overflow-hidden"
@@ -1034,6 +1401,14 @@
               <div class="py-16 text-center text-slate-400">
                 <span class="animate-spin text-xl text-indigo-400 inline-block mb-2">⚡</span>
                 <p>Chargement des spécifications techniques...</p>
+              </div>
+            </template>
+
+            <template x-if="!assetDetailLoading && !selectedAsset">
+              <div class="py-16 text-center space-y-3">
+                <span class="text-3xl text-rose-400 block">⚠️</span>
+                <p class="font-semibold text-sm text-slate-200">Impossible de charger le détail de l'actif</p>
+                <p class="text-xs text-rose-400 max-w-sm mx-auto bg-rose-950/40 border border-rose-900/50 rounded-lg p-3 font-mono" x-text="assetDetailError || 'Média introuvable ou service de base de données inaccessible.'"></p>
               </div>
             </template>
 
@@ -1190,6 +1565,910 @@
       </div>
     </div>
 
+    <!-- Centered Modal: Microscopic pHash Inspection -->
+    <div x-show="selectedPhashModal"
+         class="fixed inset-0 z-50 overflow-y-auto custom-scroll flex items-center justify-center p-4 sm:p-6"
+         aria-labelledby="slide-over-phash-title"
+         role="dialog"
+         aria-modal="true"
+         x-cloak>
+      <!-- Fullscreen Backdrop blur covering entire viewport including header -->
+      <div class="fixed inset-0 bg-slate-950/85 backdrop-blur-md transition-opacity"
+           @click="selectedPhashModal = false"></div>
+
+      <!-- Centered Wide Modal Container (max-w-4xl) -->
+      <div class="relative w-full max-w-4xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden my-auto z-10"
+           @click.stop>
+
+        <!-- Modal Header -->
+        <div class="px-6 py-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between shrink-0">
+          <div class="flex items-center gap-3">
+            <span class="text-xl">🔬</span>
+            <div>
+              <h2 class="text-base font-bold text-white tracking-tight" x-text="selectedPhash ? selectedPhash.title : 'Microscopie pHash'"></h2>
+              <span class="text-[10px] text-slate-400 font-mono" x-text="selectedPhash ? selectedPhash.raw_filename : ''"></span>
+            </div>
+          </div>
+          <button @click="selectedPhashModal = false" class="text-slate-400 hover:text-white text-lg p-1.5 rounded-lg hover:bg-slate-800 transition cursor-pointer">✕</button>
+        </div>
+
+        <!-- Modal Body -->
+        <div class="flex-1 overflow-y-auto p-6 space-y-6 custom-scroll">
+          <template x-if="selectedPhash">
+            <div class="space-y-6 text-xs">
+
+                <!-- 1. Identity & Container Block (Palier 1: Affichage instantané 0ms) -->
+                <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
+                  <div class="text-[11px] font-semibold text-indigo-400 uppercase tracking-wider flex items-center justify-between">
+                    <span>1. Identifiants & Spécifications</span>
+                    <div class="flex items-center gap-2">
+                      <template x-if="phashDetailLoading">
+                        <span class="inline-flex items-center gap-1 text-[10px] text-amber-400 font-mono animate-pulse">
+                          <span>⚡</span>
+                          <span>Analyse microscopique...</span>
+                        </span>
+                      </template>
+                      <span class="font-mono text-slate-500" x-text="selectedPhash.catalog_id ? '#' + selectedPhash.catalog_id : ''"></span>
+                    </div>
+                  </div>
+
+                  <div class="grid grid-cols-2 gap-3 pt-1">
+                    <div>
+                      <span class="text-slate-500 block text-[10px]">MovieHash (16 hex)</span>
+                      <div class="flex items-center gap-1 mt-0.5">
+                        <code class="font-mono text-indigo-300 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 text-[11px]" x-text="selectedPhash.moviehash"></code>
+                        <button @click="copyToClipboard(selectedPhash.moviehash)" class="text-slate-500 hover:text-white text-[11px]" title="Copier MovieHash">📋</button>
+                      </div>
+                    </div>
+                    <div>
+                      <span class="text-slate-500 block text-[10px]">Durée & Cadence</span>
+                      <span class="font-mono text-slate-300 font-semibold mt-0.5 block" x-text="(selectedPhash.duration_fmt || selectedPhash.duration_hms || '—') + (selectedPhash.fps ? ' (' + selectedPhash.fps + ' fps)' : '')"></span>
+                    </div>
+                  </div>
+
+                  <div class="grid grid-cols-2 gap-3 pt-1 border-t border-slate-900">
+                    <div>
+                      <span class="text-slate-500 block text-[10px]">Trames Totales</span>
+                      <span class="font-mono text-slate-300 font-semibold" x-text="selectedPhash.frame_count ? selectedPhash.frame_count.toLocaleString() + ' frames' : '—'"></span>
+                    </div>
+                    <div>
+                      <span class="text-slate-500 block text-[10px]">Poids Brut .phash</span>
+                      <span class="font-mono text-sky-300 font-semibold" x-text="selectedPhash.raw_size_human || selectedPhash.file_size_human || '—'"></span>
+                    </div>
+                  </div>
+
+                  <!-- Étape 1 Réintégrée : Contrôle d'Intégrité Binaire pHash avec Info-bulle -->
+                  <div class="pt-2 border-t border-slate-900 space-y-2">
+                    <div class="flex items-center justify-between">
+                      <div class="flex items-center gap-1.5 text-[11px] text-slate-400">
+                        <span>Intégrité de l'empreinte :</span>
+                        <button type="button"
+                                @click.stop="showIntegrityTip = !showIntegrityTip"
+                                class="w-4 h-4 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-indigo-300 text-[10px] font-bold flex items-center justify-center border border-slate-700 transition cursor-pointer"
+                                title="Aide technique">?</button>
+                      </div>
+
+                      <div>
+                        <template x-if="!selectedPhash.entropy && phashDetailLoading">
+                          <span class="text-[10px] font-mono text-slate-500 animate-pulse">Vérification en cours...</span>
+                        </template>
+                        <template x-if="selectedPhash.entropy">
+                          <div class="flex items-center gap-2">
+                            <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded text-[10px] font-semibold"
+                                  :class="(selectedPhash.entropy.mean_popcount >= 25 && selectedPhash.entropy.mean_popcount <= 38) ? 'bg-emerald-950/80 text-emerald-400 border border-emerald-800' : 'bg-rose-950/80 text-rose-400 border border-rose-800'">
+                              <span x-text="(selectedPhash.entropy.mean_popcount >= 25 && selectedPhash.entropy.mean_popcount <= 38) ? '🟢' : '🔴'"></span>
+                              <span x-text="(selectedPhash.entropy.mean_popcount >= 25 && selectedPhash.entropy.mean_popcount <= 38) ? 'Valide (Signal sain & diversifié)' : 'Anomalie (Flux plat ou corrompu)'"></span>
+                            </span>
+                            <span class="text-[10px] font-mono text-slate-500" x-text="'(' + selectedPhash.entropy.mean_popcount + ' / 64b)'"></span>
+                          </div>
+                        </template>
+                      </div>
+                    </div>
+
+                    <!-- Info-bulle d'aide sur l'intégrité -->
+                    <div x-show="showIntegrityTip"
+                         x-transition
+                         class="bg-slate-900 border border-slate-800 rounded-lg p-2.5 text-[10px] text-slate-300 space-y-1">
+                      <div class="font-semibold text-indigo-300 flex items-center gap-1">
+                        <span>💡</span>
+                        <span>À quoi sert ce contrôle d'intégrité ?</span>
+                      </div>
+                      <p class="leading-relaxed text-slate-400">
+                        L'algorithme pHash segmente les 64 fréquences DCT de chaque trame autour de leur médiane.
+                        Un flux vidéo valide oscille naturellement autour de <strong>32 bits / 64</strong>. Une valeur proche de 0 ou 64 révélerait un fichier vidéo corrompu (écran noir continu, bruit uniforme ou capture tronquée).
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 2. Consecutive Inter-frame Mobility Card (Élément 2 Réintégré avec Aide Dépliable) -->
+                <template x-if="selectedPhash.mobility">
+                  <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
+                    <div class="text-[11px] font-semibold text-emerald-400 uppercase tracking-wider flex items-center justify-between">
+                      <div class="flex items-center gap-1.5">
+                        <span>2. Dynamisme & Mobilité Inter-Trames (Δ)</span>
+                        <button type="button"
+                                @click.stop="showMobilityTip = !showMobilityTip"
+                                class="w-4 h-4 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-emerald-300 text-[10px] font-bold flex items-center justify-center border border-slate-700 transition cursor-pointer"
+                                title="Aide technique sur la mobilité Δ">?</button>
+                      </div>
+                      <span class="text-[10px] font-mono text-slate-500"
+                            x-text="(selectedPhash.frame_count ? (selectedPhash.frame_count - 1).toLocaleString() : 0) + ' transitions consécutives'"></span>
+                    </div>
+
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
+                      <div>
+                        <div class="text-3xl font-bold font-mono text-emerald-400 flex items-baseline gap-2">
+                          <span x-text="selectedPhash.mobility.mean_delta"></span>
+                          <span class="text-sm font-normal text-slate-400">bits / trame</span>
+                        </div>
+                        <div class="text-[11px] text-slate-400 mt-0.5">
+                          Distance de Hamming moyenne consécutive entre l'image(t) et l'image(t-1).
+                        </div>
+                      </div>
+
+                      <div class="shrink-0">
+                        <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-semibold"
+                              :class="selectedPhash.mobility.mean_delta < 2.0 ? 'bg-sky-950 text-sky-400 border border-sky-800' :
+                                      (selectedPhash.mobility.mean_delta < 3.5 ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' :
+                                      'bg-amber-950 text-amber-400 border border-amber-800')">
+                          <span x-text="selectedPhash.mobility.mean_delta < 2.0 ? '🌊' : (selectedPhash.mobility.mean_delta < 3.5 ? '🎬' : '⚡')"></span>
+                          <span x-text="selectedPhash.mobility.mean_delta < 2.0 ? 'Flux calme & stable (plans posés)' :
+                                        (selectedPhash.mobility.mean_delta < 3.5 ? 'Rythme cinématographique standard' :
+                                        'Flux très dynamique / haché')"></span>
+                        </span>
+                      </div>
+                    </div>
+
+                    <!-- Info-bulle pédagogique sur la mobilité inter-trames -->
+                    <div x-show="showMobilityTip"
+                         x-transition
+                         class="bg-slate-900 border border-slate-800 rounded-lg p-3 text-[11px] text-slate-300 space-y-2">
+                      <div class="font-semibold text-emerald-300 flex items-center gap-1.5">
+                        <span>💡</span>
+                        <span>Comprendre la métrique de Mobilité Inter-Trames (Δ)</span>
+                      </div>
+
+                      <div class="space-y-1.5 text-[10px] text-slate-400 leading-relaxed">
+                        <p>
+                          <strong class="text-slate-200">• Qu'est-ce que Δ ?</strong> C'est la <em>distance de Hamming</em> entre l'empreinte 64-bit d'une image et celle de l'image précédente (<code class="text-indigo-300 bg-slate-950 px-1 py-0.5 rounded">Δ = (hash[t] ^ hash[t-1]).bit_count()</code>). Elle compte exactement combien de bits fréquentiels ont basculé d'une image à la suivante.
+                        </p>
+                        <p>
+                          <strong class="text-slate-200">• Calcul :</strong> C'est la moyenne arithmétique calculée sur l'intégralité du film :
+                          <code class="text-emerald-300 bg-slate-950 px-1 py-0.5 rounded">Moyenne = (Somme des Δ) / (Nombre total de trames - 1)</code>.
+                        </p>
+                        <div class="pt-1.5 border-t border-slate-800 text-[10px] space-y-1">
+                          <div class="text-slate-300 font-semibold mb-1">Grille d'interprétation métier :</div>
+                          <div class="flex items-center gap-2"><span class="text-sky-400 font-mono w-20 shrink-0">&lt; 2.0 b/trame</span> <span>Film calme, plans longs, animation, dialogues en plan fixe.</span></div>
+                          <div class="flex items-center gap-2"><span class="text-emerald-400 font-mono w-20 shrink-0">2.0 à 3.5 b</span> <span>Rythme standard de long-métrage (travellings modérés, alternance de plans).</span></div>
+                          <div class="flex items-center gap-2"><span class="text-amber-400 font-mono w-20 shrink-0">&gt; 3.5 b/trame</span> <span>Action vive, caméra portée à l'épaule, montages clips/rapides.</span></div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- Sous-élément 3A : Histogramme des 6 tranches de mobilité temporelle Δ -->
+                    <div class="pt-3 border-t border-slate-900 space-y-2">
+                      <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-1.5 text-[11px] font-semibold text-slate-300">
+                          <span>Distribution de la mobilité temporelle (6 tranches de variation consécutive Δ) :</span>
+                          <button type="button"
+                                  @click.stop="showMobilityHistTip = !showMobilityHistTip"
+                                  class="w-4 h-4 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-emerald-300 text-[10px] font-bold flex items-center justify-center border border-slate-700 transition cursor-pointer"
+                                  title="Aide sur l'histogramme de mobilité">?</button>
+                        </div>
+                        <span class="font-mono text-[10px] text-slate-500">0 → ≥10 bits</span>
+                      </div>
+
+                      <!-- Info-bulle d'aide sur l'histogramme -->
+                      <div x-show="showMobilityHistTip"
+                           x-transition
+                           class="bg-slate-900 border border-slate-800 rounded-lg p-2.5 text-[10px] text-slate-300 space-y-1">
+                        <div class="font-semibold text-indigo-300 flex items-center gap-1">
+                          <span>💡</span>
+                          <span>Pourquoi classer les transitions en 6 tranches ?</span>
+                        </div>
+                        <p class="leading-relaxed text-slate-400">
+                          Chaque changement d'image consécutive (t vs t-1) génère un écart Δ. Dans la grande majorité des films, <strong>80% à 95% des trames ont un Δ ≤ 3 bits</strong> (statique ou mouvements doux). Seules les scènes d'action intense et les coupures de plans (&ge; 10 bits) créent des sauts marqués.
+                        </p>
+                      </div>
+
+                      <div class="grid grid-cols-6 gap-2 bg-slate-950 p-3 rounded-lg border border-slate-800/80">
+                        <template x-for="(count, dIdx) in (selectedPhash.mobility.histogram || [0,0,0,0,0,0])" :key="dIdx">
+                          <div class="flex flex-col items-center gap-1 group">
+                            <!-- Pourcentage en haut -->
+                            <span class="text-[10px] font-mono font-bold"
+                                  :class="count > 0 ? (dIdx === 0 ? 'text-cyan-400' : (dIdx === 1 ? 'text-emerald-400' : (dIdx === 2 ? 'text-amber-400' : (dIdx === 3 ? 'text-orange-400' : 'text-rose-400')))) : 'text-slate-700'"
+                                  x-text="selectedPhash.frame_count && selectedPhash.frame_count > 1 ? (count === 0 ? '0%' : (count / (selectedPhash.frame_count - 1) * 100 < 0.1 ? '<0.1%' : (count / (selectedPhash.frame_count - 1) * 100).toFixed(1) + '%')) : '0%'">
+                            </span>
+
+                            <!-- Barre verticale -->
+                            <div class="w-full h-16 bg-slate-900 border border-slate-800/80 rounded flex flex-col justify-end p-0.5 overflow-hidden group-hover:border-slate-700 transition"
+                                 :title="(selectedPhash.mobility.labels ? selectedPhash.mobility.labels[dIdx] : '') + ' (' + (selectedPhash.mobility.descriptions ? selectedPhash.mobility.descriptions[dIdx] : '') + ') : ' + count.toLocaleString() + ' transitions (' + (selectedPhash.frame_count && selectedPhash.frame_count > 1 ? (count/(selectedPhash.frame_count - 1)*100).toFixed(2) : 0) + '%)'">
+                              <div class="w-full rounded-sm transition-all duration-300"
+                                   :class="dIdx === 0 ? 'bg-gradient-to-t from-cyan-600 to-cyan-400' :
+                                           (dIdx === 1 ? 'bg-gradient-to-t from-emerald-600 to-emerald-400' :
+                                           (dIdx === 2 ? 'bg-gradient-to-t from-teal-500 to-amber-400' :
+                                           (dIdx === 3 ? 'bg-gradient-to-t from-amber-600 to-orange-400' :
+                                           (dIdx === 4 ? 'bg-gradient-to-t from-orange-600 to-rose-400' :
+                                           'bg-gradient-to-t from-rose-600 to-red-500'))))"
+                                   :style="'height: ' + (count > 0 ? Math.max(6, Math.min(100, Math.round(count / (selectedPhash.frame_count > 1 ? selectedPhash.frame_count - 1 : 1) * 100))) : 0) + '%'"></div>
+                            </div>
+
+                            <!-- Label de plage -->
+                            <span class="text-[10px] font-mono text-slate-300 font-semibold text-center leading-none mt-0.5"
+                                  x-text="selectedPhash.mobility.labels ? selectedPhash.mobility.labels[dIdx] : ''">
+                            </span>
+
+                            <!-- Descriptif métier -->
+                            <span class="text-[9px] text-slate-400 text-center leading-none truncate max-w-full font-sans"
+                                  :class="dIdx === 5 ? 'text-amber-400 font-medium' : ''"
+                                  x-text="dIdx === 0 ? 'Statique' : (dIdx === 1 ? 'Doux' : (dIdx === 2 ? 'Modéré' : (dIdx === 3 ? 'Rythmé' : (dIdx === 4 ? 'Vif' : 'Coupe'))))">
+                            </span>
+
+                            <!-- Nombre de transitions -->
+                            <span class="text-[8px] font-mono text-slate-500 text-center leading-none truncate max-w-full"
+                                  x-text="count > 0 ? (count >= 1000 ? (count/1000).toFixed(1) + 'k' : count) : '—'">
+                            </span>
+                          </div>
+                        </template>
+                      </div>
+                    </div>
+
+                    <!-- Sous-élément 3B : Courbe d'évolution temporelle continue Δ(t) -->
+                    <template x-if="selectedPhash.cuts && selectedPhash.cuts.timeline">
+                      <div class="pt-3 border-t border-slate-900 space-y-2">
+                        <div class="flex items-center justify-between">
+                          <div class="flex items-center gap-1.5 text-[11px] font-semibold text-slate-300">
+                            <span>Évolution temporelle progressive de la mobilité Δ(t) :</span>
+                            <button type="button"
+                                    @click.stop="showTimelineTip = !showTimelineTip"
+                                    class="w-4 h-4 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-emerald-300 text-[10px] font-bold flex items-center justify-center border border-slate-700 transition cursor-pointer"
+                                    title="Aide sur la courbe temporelle">?</button>
+                          </div>
+
+                          <!-- Zoom & Reset toolbar -->
+                          <div class="flex items-center gap-1 text-[10px] font-mono">
+                            <span class="text-slate-500 px-1" x-text="getZoomLevelLabel()"></span>
+                            <button @click.stop="zoomInStep()" class="px-1.5 py-0.5 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 cursor-pointer font-bold" title="Zoom avant">+</button>
+                            <button @click.stop="zoomOutStep()" class="px-1.5 py-0.5 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 cursor-pointer font-bold" title="Zoom arrière">−</button>
+                            <button @click.stop="panStep(-1)" class="px-1.5 py-0.5 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 cursor-pointer font-bold" title="Déplacer à gauche">◀</button>
+                            <button @click.stop="panStep(1)" class="px-1.5 py-0.5 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 cursor-pointer font-bold" title="Déplacer à droite">▶</button>
+                            <button @click.stop="resetTimelineZoom()" class="px-1.5 py-0.5 rounded bg-slate-900 hover:bg-slate-800 text-indigo-300 border border-slate-800 cursor-pointer" title="Vue d'ensemble">↺ Tout</button>
+                          </div>
+                        </div>
+
+                        <!-- Info-bulle d'aide sur la courbe temporelle -->
+                        <div x-show="showTimelineTip"
+                             x-transition
+                             class="bg-slate-900 border border-slate-800 rounded-lg p-2.5 text-[10px] text-slate-300 space-y-1">
+                          <div class="font-semibold text-emerald-300 flex items-center gap-1">
+                            <span>💡</span>
+                            <span>Comment lire cette courbe d'évolution temporelle ?</span>
+                          </div>
+                          <p class="leading-relaxed text-slate-400">
+                            Cette courbe trace la <strong>mobilité moyenne réelle</strong> au fil du temps (axe de 00:00 à la fin du film).
+                            Comme la majorité du film est composée de plans posés, la courbe reste naturellement <strong>basse (plateau entre 0.5 et 3 bits)</strong>. Les montées progressives correspondent aux séquences d'action dynamiques, tandis que la ligne pointillée orange à 10 bits marque le seuil des coupures de plans.
+                          </p>
+                        </div>
+
+                        <!-- Graphique SVG Interactif (Courbe continue calibrée à l'échelle 0-10 bits) -->
+                        <div class="bg-slate-950 border border-slate-800 rounded-lg p-3 space-y-1.5 select-none">
+                          <div class="flex items-center justify-between text-[9px] font-mono text-slate-400">
+                            <!-- Légende multi-paniers synchronisée -->
+                            <div class="flex items-center gap-2.5">
+                              <span class="text-slate-400 font-semibold">Mobilité Δ(t) par tranche :</span>
+                              <span class="flex items-center gap-1"><span class="inline-block w-2 h-2 rounded-sm bg-[#06b6d4]"></span><span class="text-slate-300">0-1b</span></span>
+                              <span class="flex items-center gap-1"><span class="inline-block w-2 h-2 rounded-sm bg-[#10b981]"></span><span class="text-slate-300">2-3b</span></span>
+                              <span class="flex items-center gap-1"><span class="inline-block w-2 h-2 rounded-sm bg-[#f59e0b]"></span><span class="text-slate-300">4-5b</span></span>
+                              <span class="flex items-center gap-1"><span class="inline-block w-2 h-2 rounded-sm bg-[#f97316]"></span><span class="text-slate-300">6-7b</span></span>
+                              <span class="flex items-center gap-1"><span class="inline-block w-2 h-2 rounded-sm bg-[#f43f5e]"></span><span class="text-slate-300">8-9b</span></span>
+                              <span class="flex items-center gap-1"><span class="inline-block w-2 h-2 rounded-sm bg-[#ef4444]"></span><span class="text-slate-300">≥10b</span></span>
+                            </div>
+                            <span class="flex items-center gap-1.5 text-amber-400/90">
+                              <span class="inline-block w-3 border-t border-dashed border-amber-400"></span>
+                              <span>Seuil de coupure (Δ ≥ 10b)</span>
+                            </span>
+                          </div>
+
+                          <div class="relative w-full h-28 bg-slate-950/60 rounded overflow-hidden">
+                            <svg viewBox="0 0 600 120" preserveAspectRatio="none"
+                                 class="w-full h-full cursor-crosshair"
+                                 @mousedown="onTimelineMouseDown($event)"
+                                 @mousemove="onTimelineMouseMove($event, selectedPhash.cuts.timeline)"
+                                 @mouseup="onTimelineMouseUp()"
+                                 @mouseleave="hoveredTimelinePoint = null; timelineZoom.isSelecting = false"
+                                 @wheel="onTimelineWheel($event)">
+
+                              <defs>
+                                <linearGradient id="mobilityGradient" x1="0" y1="0" x2="0" y2="1">
+                                  <stop offset="0%" stop-color="#10b981" stop-opacity="0.25" />
+                                  <stop offset="100%" stop-color="#064e3b" stop-opacity="0.0" />
+                                </linearGradient>
+                              </defs>
+
+                              <!-- Lignes repères horizontales (0b et seuil Cut 10b dynamique) -->
+                              <line x1="0" y1="105" x2="600" y2="105" stroke="#334155" stroke-width="0.8" stroke-dasharray="2 3" />
+                              <line x1="0" :y1="getTimelineCutThresholdY(selectedPhash.cuts.timeline)" x2="600" :y2="getTimelineCutThresholdY(selectedPhash.cuts.timeline)" stroke="#f59e0b" stroke-width="1.0" stroke-dasharray="3 3" opacity="0.8" />
+                              <text x="595" :y="Math.max(10, getTimelineCutThresholdY(selectedPhash.cuts.timeline) - 3)" fill="#f59e0b" font-size="8" font-family="monospace" text-anchor="end" x-text="'Seuil Cut (10b) · Max ' + getTimelineMaxScale(selectedPhash.cuts.timeline) + 'b'"></text>
+
+                              <!-- Halo dégradé de fond sous la courbe -->
+                              <path :d="getTimelineSvgPoints(selectedPhash.cuts.timeline).area" fill="url(#mobilityGradient)" />
+
+                              <!-- Segments de courbe colorés par panier de mobilité (6 tranches) -->
+                              <path :d="getTimelineBucketPaths(selectedPhash.cuts.timeline)[0]" fill="none" stroke="#06b6d4" stroke-width="2" stroke-linecap="round" />
+                              <path :d="getTimelineBucketPaths(selectedPhash.cuts.timeline)[1]" fill="none" stroke="#10b981" stroke-width="2" stroke-linecap="round" />
+                              <path :d="getTimelineBucketPaths(selectedPhash.cuts.timeline)[2]" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" />
+                              <path :d="getTimelineBucketPaths(selectedPhash.cuts.timeline)[3]" fill="none" stroke="#f97316" stroke-width="2" stroke-linecap="round" />
+                              <path :d="getTimelineBucketPaths(selectedPhash.cuts.timeline)[4]" fill="none" stroke="#f43f5e" stroke-width="2" stroke-linecap="round" />
+                              <path :d="getTimelineBucketPaths(selectedPhash.cuts.timeline)[5]" fill="none" stroke="#ef4444" stroke-width="2.5" stroke-linecap="round" />
+
+                              <!-- Sélection Brush (Glisser-Déposer pour zoomer) -->
+                              <rect x-show="timelineZoom.isSelecting"
+                                    :x="Math.min(timelineZoom.selectStartX, timelineZoom.selectCurrentX)"
+                                    y="0"
+                                    :width="Math.abs(timelineZoom.selectCurrentX - timelineZoom.selectStartX)"
+                                    height="120"
+                                    fill="#6366f1"
+                                    opacity="0.25"
+                                    stroke="#818cf8"
+                                    stroke-width="1"
+                                    stroke-dasharray="3 3" />
+
+                              <!-- Curseur de survol vertical -->
+                              <line x-show="hoveredTimelinePoint !== null"
+                                    :x1="hoverTimelineX"
+                                    y1="0"
+                                    :x2="hoverTimelineX"
+                                    y2="120"
+                                    stroke="#38bdf8"
+                                    stroke-width="1"
+                                    stroke-dasharray="2 2" />
+
+                              <!-- Point de survol sur la courbe coloré selon son panier -->
+                              <circle x-show="hoveredTimelinePoint !== null"
+                                      :cx="hoverTimelineX"
+                                      :cy="getHoverCursorY()"
+                                      r="4"
+                                      :fill="getDeltaBucketColor(hoveredTimelinePoint ? (hoveredTimelinePoint.delta_mean ?? hoveredTimelinePoint.delta) : 0)"
+                                      stroke="#0f172a"
+                                      stroke-width="1.5" />
+                            </svg>
+
+                            <!-- Tooltip flottant au survol -->
+                            <div x-show="hoveredTimelinePoint !== null"
+                                 class="absolute top-2 pointer-events-none bg-slate-900/95 border border-slate-700 rounded px-2 py-1 text-[10px] font-mono text-white shadow-xl flex items-center gap-2"
+                                 :style="'left: ' + Math.max(10, Math.min(500, hoverTimelineX - 45)) + 'px;'">
+                              <span class="text-sky-300 font-bold" x-text="hoveredTimelinePoint ? hoveredTimelinePoint.time_fmt : ''"></span>
+                              <div class="flex items-center gap-1.5">
+                                <span class="font-bold"
+                                      :style="'color: ' + getDeltaBucketColor(hoveredTimelinePoint ? (hoveredTimelinePoint.delta_mean ?? hoveredTimelinePoint.delta) : 0)"
+                                      x-text="hoveredTimelinePoint && hoveredTimelinePoint.delta !== undefined ? 'Δ ' + (hoveredTimelinePoint.delta_mean ?? hoveredTimelinePoint.delta) + 'b' : ''"></span>
+                                <span class="text-[9px] px-1 py-0.2 rounded font-semibold"
+                                      :style="'background-color: ' + getDeltaBucketColor(hoveredTimelinePoint ? (hoveredTimelinePoint.delta_mean ?? hoveredTimelinePoint.delta) : 0) + '22; color: ' + getDeltaBucketColor(hoveredTimelinePoint ? (hoveredTimelinePoint.delta_mean ?? hoveredTimelinePoint.delta) : 0) + '; border: 1px solid ' + getDeltaBucketColor(hoveredTimelinePoint ? (hoveredTimelinePoint.delta_mean ?? hoveredTimelinePoint.delta) : 0) + '66;'"
+                                      x-text="hoveredTimelinePoint ? getDeltaBucketLabel(hoveredTimelinePoint.delta_mean ?? hoveredTimelinePoint.delta) : ''"></span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <!-- Graduation temporelle visible -->
+                          <div class="flex items-center justify-between text-[9px] font-mono text-slate-500 pt-1.5 border-t border-slate-800/60">
+                            <span x-text="getTimeLabelAtRatio(timelineZoom.startRatio)"></span>
+                            <span x-text="getTimeLabelAtRatio(timelineZoom.startRatio + (timelineZoom.endRatio - timelineZoom.startRatio) * 0.25)"></span>
+                            <span x-text="getTimeLabelAtRatio(timelineZoom.startRatio + (timelineZoom.endRatio - timelineZoom.startRatio) * 0.5)"></span>
+                            <span x-text="getTimeLabelAtRatio(timelineZoom.startRatio + (timelineZoom.endRatio - timelineZoom.startRatio) * 0.75)"></span>
+                            <span x-text="getTimeLabelAtRatio(timelineZoom.endRatio)"></span>
+                          </div>
+                        </div>
+
+                        <!-- Mini-Map Panoramique Globale (00:00 → Fin avec fenêtre de cadrage) -->
+                        <div class="bg-slate-950 border border-slate-800/80 rounded-lg p-2 space-y-1">
+                          <div class="flex items-center justify-between text-[9px] text-slate-500 font-mono">
+                            <span>VUE PANORAMIQUE GLOBALE (00:00 → <span x-text="selectedPhash.duration_fmt || 'Fin'"></span>)</span>
+                            <span class="text-[8px] text-slate-600">Glisser / cliquer pour cadrer</span>
+                          </div>
+                          <div class="relative w-full h-6 bg-slate-900 rounded overflow-hidden cursor-pointer"
+                               @mousedown="onMiniMapMouseDown($event)">
+                            <svg viewBox="0 0 600 24" preserveAspectRatio="none" class="w-full h-full opacity-40">
+                              <polyline :points="getMiniMapSvgPoints(selectedPhash.cuts.timeline)"
+                                        fill="none"
+                                        stroke="#10b981"
+                                        stroke-width="1.2" />
+                            </svg>
+                            <!-- Fenêtre visible active -->
+                            <div class="absolute top-0 bottom-0 bg-emerald-500/20 border-x-2 border-emerald-400 shadow-sm pointer-events-none"
+                                 :style="'left: ' + (timelineZoom.startRatio * 100) + '%; width: ' + ((timelineZoom.endRatio - timelineZoom.startRatio) * 100) + '%;'">
+                            </div>
+                          </div>
+                        </div>
+
+                      </div>
+                    </template>
+                  </div>
+                </template>
+
+                <!-- Palier 2 & 3 Loading Skeleton (DÉSACTIVÉ SUR DEMANDE UTILISATEUR) -->
+                <template x-if="false && phashDetailLoading && !selectedPhash.entropy">
+                  <div class="space-y-4 animate-pulse">
+                    <div class="bg-slate-950/60 border border-slate-800/80 rounded-xl p-4 space-y-3">
+                      <div class="h-3 w-44 bg-slate-800 rounded"></div>
+                      <div class="h-8 w-24 bg-slate-800/80 rounded"></div>
+                      <div class="grid grid-cols-8 gap-1.5 pt-2">
+                        <div class="h-16 bg-slate-900 rounded"></div>
+                        <div class="h-16 bg-slate-900 rounded"></div>
+                        <div class="h-16 bg-slate-900 rounded"></div>
+                        <div class="h-16 bg-slate-800/60 rounded"></div>
+                        <div class="h-16 bg-emerald-950/30 rounded"></div>
+                        <div class="h-16 bg-slate-900 rounded"></div>
+                        <div class="h-16 bg-slate-900 rounded"></div>
+                        <div class="h-16 bg-slate-900 rounded"></div>
+                      </div>
+                    </div>
+                    <div class="bg-slate-950/60 border border-slate-800/80 rounded-xl p-4 space-y-3">
+                      <div class="h-3 w-52 bg-slate-800 rounded"></div>
+                      <div class="h-28 bg-slate-900 rounded"></div>
+                    </div>
+                  </div>
+                </template>
+
+                <!-- 2. Visual Entropy, DCT Popcount & Inter-frame Mobility (DÉSACTIVÉ SUR DEMANDE UTILISATEUR) -->
+                <template x-if="false && selectedPhash.entropy">
+                  <div x-data="{ showPopcountDist: false }" class="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-4">
+                    <!-- Section Header -->
+                    <div class="text-[11px] font-semibold text-emerald-400 uppercase tracking-wider flex items-center justify-between">
+                      <span>2. Analyse Spectrale DCT & Mobilité Temporelle (Δ)</span>
+                      <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-950/60 text-emerald-300 border border-emerald-800" x-text="selectedPhash.entropy.entropy_pct + '% de bits actifs'"></span>
+                    </div>
+
+                    <!-- Dual Metric KPI Cards -->
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                      <!-- KPI 1: DCT Popcount -->
+                      <div class="bg-slate-900/70 border border-slate-800/80 rounded-lg p-3 flex flex-col justify-between">
+                        <div>
+                          <div class="text-[10px] text-slate-400 uppercase tracking-wide font-semibold mb-1">Dispersion DCT (Santé Image)</div>
+                          <div class="text-2xl font-bold font-mono text-white flex items-baseline gap-2">
+                            <span x-text="selectedPhash.entropy.mean_popcount"></span>
+                            <span class="text-sm font-normal text-slate-500">/ 64 bits</span>
+                          </div>
+                          <div class="text-[10px] text-slate-400 mt-1 leading-snug">
+                            Médiane fréquentielle DCT équilibrée (valeur nominale = 32b).
+                          </div>
+                        </div>
+                        <div class="mt-2.5 pt-2 border-t border-slate-800/60 flex items-center justify-between">
+                          <span class="text-[10px] font-semibold text-emerald-400 bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-800" x-text="selectedPhash.entropy.health"></span>
+                          <button type="button" @click="showPopcountDist = !showPopcountDist" class="text-[10px] text-indigo-400 hover:text-indigo-300 transition underline cursor-pointer" x-text="showPopcountDist ? 'Masquer détails DCT' : 'Voir tranches 8b'"></button>
+                        </div>
+                      </div>
+
+                      <!-- KPI 2: Consecutive Inter-frame Mobility Δ -->
+                      <div class="bg-slate-900/70 border border-slate-800/80 rounded-lg p-3 flex flex-col justify-between">
+                        <div>
+                          <div class="text-[10px] text-slate-400 uppercase tracking-wide font-semibold mb-1">Mobilité Inter-Trames Moyenne (Δ)</div>
+                          <div class="text-2xl font-bold font-mono text-emerald-400 flex items-baseline gap-2">
+                            <span x-text="selectedPhash.mobility ? selectedPhash.mobility.mean_delta : '—'"></span>
+                            <span class="text-sm font-normal text-slate-500">bits / trame</span>
+                          </div>
+                          <div class="text-[10px] text-slate-400 mt-1 leading-snug">
+                            Distance de Hamming moyenne consécutive entre trame(t) et trame(t-1).
+                          </div>
+                        </div>
+                        <div class="mt-2.5 pt-2 border-t border-slate-800/60 flex items-center justify-between">
+                          <span class="text-[10px] font-semibold text-sky-400 bg-sky-950/80 px-2 py-0.5 rounded border border-sky-800"
+                                x-text="(selectedPhash.mobility && selectedPhash.mobility.mean_delta < 2.5) ? 'Flux visuel stable' : 'Flux dynamique / rythmé'"></span>
+                          <span class="text-[10px] font-mono text-slate-500" x-text="(selectedPhash.frame_count ? (selectedPhash.frame_count - 1).toLocaleString() : 0) + ' deltas'"></span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- Main Histogram: Temporal Mobility Distribution Δ (6 buckets) -->
+                    <div class="pt-1">
+                      <div class="text-[10px] text-slate-400 mb-2 flex items-center justify-between">
+                        <span class="text-slate-300 font-semibold">Distribution de la mobilité temporelle (6 tranches de variation consécutive Δ) :</span>
+                        <span class="font-mono text-slate-500">0 → ≥10 bits</span>
+                      </div>
+                      <div class="grid grid-cols-6 gap-2 bg-slate-950 p-3 rounded-lg border border-slate-800/80">
+                        <template x-for="(count, dIdx) in ((selectedPhash.mobility && selectedPhash.mobility.histogram) || [0,0,0,0,0,0])" :key="dIdx">
+                          <div class="flex flex-col items-center gap-1 group">
+                            <!-- Percentage on top -->
+                            <span class="text-[10px] font-mono font-bold"
+                                  :class="count > 0 ? (dIdx === 0 ? 'text-cyan-400' : (dIdx === 1 ? 'text-emerald-400' : (dIdx === 2 ? 'text-amber-400' : (dIdx === 3 ? 'text-orange-400' : 'text-rose-400')))) : 'text-slate-700'"
+                                  x-text="selectedPhash.frame_count && selectedPhash.frame_count > 1 ? (count === 0 ? '0%' : (count / (selectedPhash.frame_count - 1) * 100 < 0.1 ? '<0.1%' : (count / (selectedPhash.frame_count - 1) * 100).toFixed(1) + '%')) : '0%'">
+                            </span>
+
+                            <!-- Vertical Bar Track -->
+                            <div class="w-full h-20 bg-slate-900 border border-slate-800/80 rounded flex flex-col justify-end p-0.5 overflow-hidden group-hover:border-slate-700 transition"
+                                 :title="(selectedPhash.mobility && selectedPhash.mobility.labels ? selectedPhash.mobility.labels[dIdx] : '') + ' (' + (selectedPhash.mobility && selectedPhash.mobility.descriptions ? selectedPhash.mobility.descriptions[dIdx] : '') + ') : ' + count.toLocaleString() + ' transitions (' + (selectedPhash.frame_count && selectedPhash.frame_count > 1 ? (count/(selectedPhash.frame_count - 1)*100).toFixed(2) : 0) + '%)'">
+                              <div class="w-full rounded-sm transition-all duration-300"
+                                   :class="dIdx === 0 ? 'bg-gradient-to-t from-cyan-600 to-cyan-400' :
+                                           (dIdx === 1 ? 'bg-gradient-to-t from-emerald-600 to-emerald-400' :
+                                           (dIdx === 2 ? 'bg-gradient-to-t from-teal-500 to-amber-400' :
+                                           (dIdx === 3 ? 'bg-gradient-to-t from-amber-600 to-orange-400' :
+                                           (dIdx === 4 ? 'bg-gradient-to-t from-orange-600 to-rose-400' :
+                                           'bg-gradient-to-t from-rose-600 to-red-500'))))"
+                                   :style="'height: ' + (count > 0 ? Math.max(6, Math.min(100, Math.round(count / (selectedPhash.frame_count > 1 ? selectedPhash.frame_count - 1 : 1) * 100))) : 0) + '%'"></div>
+                            </div>
+
+                            <!-- Range Label -->
+                            <span class="text-[10px] font-mono text-slate-300 font-semibold text-center leading-none mt-0.5"
+                                  x-text="selectedPhash.mobility && selectedPhash.mobility.labels ? selectedPhash.mobility.labels[dIdx] : ''">
+                            </span>
+
+                            <!-- Category Descriptor -->
+                            <span class="text-[9px] text-slate-400 text-center leading-none truncate max-w-full font-sans"
+                                  :class="dIdx === 5 ? 'text-amber-400 font-medium' : ''"
+                                  x-text="dIdx === 0 ? 'Statique' : (dIdx === 1 ? 'Doux' : (dIdx === 2 ? 'Modéré' : (dIdx === 3 ? 'Rythmé' : (dIdx === 4 ? 'Vif' : 'Coupe'))))">
+                            </span>
+
+                            <!-- Transition Count -->
+                            <span class="text-[8px] font-mono text-slate-500 text-center leading-none truncate max-w-full"
+                                  x-text="count > 0 ? (count >= 1000 ? (count/1000).toFixed(1) + 'k' : count) : '—'">
+                            </span>
+                          </div>
+                        </template>
+                      </div>
+                    </div>
+
+                    <!-- Collapsible Popcount DCT Histogram (Option 2 Retention) -->
+                    <div x-show="showPopcountDist" x-cloak class="pt-2 border-t border-slate-800/80">
+                      <div class="text-[10px] text-slate-400 mb-2 flex items-center justify-between">
+                        <span class="text-slate-300 font-semibold">Distribution de la médiane DCT (8 tranches de 8 bits) :</span>
+                        <span class="font-mono text-slate-500">0 → 64 bits</span>
+                      </div>
+                      <div class="grid grid-cols-8 gap-1.5 bg-slate-900/60 p-2.5 rounded-lg border border-slate-800/80">
+                        <template x-for="(count, bIdx) in (selectedPhash.entropy.histogram || [])" :key="bIdx">
+                          <div class="flex flex-col items-center gap-1 group">
+                            <span class="text-[9px] font-mono font-bold"
+                                  :class="count > 0 ? (bIdx === 4 || bIdx === 3 ? 'text-emerald-400' : 'text-indigo-300') : 'text-slate-700'"
+                                  x-text="selectedPhash.frame_count ? (count === 0 ? '0%' : (count / selectedPhash.frame_count * 100 < 0.1 ? '<0.1%' : (count / selectedPhash.frame_count * 100).toFixed(1) + '%')) : '0%'">
+                            </span>
+
+                            <div class="w-full h-12 bg-slate-950 border border-slate-800/80 rounded flex flex-col justify-end p-0.5 overflow-hidden group-hover:border-slate-700 transition"
+                                 :title="'Tranche ' + (bIdx*8) + '-' + (bIdx===7?'64':(bIdx*8+7)) + ' bits : ' + count.toLocaleString() + ' trames (' + (selectedPhash.frame_count ? (count/selectedPhash.frame_count*100).toFixed(2) : 0) + '%)'">
+                              <div class="w-full rounded-sm transition-all duration-300"
+                                   :class="bIdx === 4 || bIdx === 3 ? 'bg-gradient-to-t from-emerald-600 to-emerald-400' : 'bg-gradient-to-t from-indigo-600 to-indigo-400'"
+                                   :style="'height: ' + (count > 0 ? Math.max(8, Math.min(100, Math.round(count / (selectedPhash.frame_count || 1) * 100))) : 0) + '%'"></div>
+                            </div>
+
+                            <span class="text-[9px] font-mono text-slate-400 text-center leading-none mt-0.5"
+                                  x-text="(bIdx * 8) + '-' + (bIdx === 7 ? '64' : (bIdx * 8 + 7)) + 'b'">
+                            </span>
+
+                            <span class="text-[8px] font-mono text-slate-500 text-center leading-none truncate max-w-full"
+                                  x-text="count > 0 ? (count >= 1000 ? (count/1000).toFixed(1) + 'k' : count) : '—'">
+                            </span>
+                          </div>
+                        </template>
+                      </div>
+                    </div>
+
+                  </div>
+                </template>
+
+                <!-- 3. Cuts Detection Timeline (DÉSACTIVÉ SUR DEMANDE UTILISATEUR) -->
+                <template x-if="false && selectedPhash.cuts">
+                  <div x-data="{ showCutsGuide: false }" class="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
+                    <div class="text-[11px] font-semibold text-amber-400 uppercase tracking-wider flex items-center justify-between">
+                      <span>3. Détection des Cuts (Changements de Scène)</span>
+                      <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-950/60 text-amber-300 border border-amber-800" x-text="'Seuil: Distance Δ ≥ ' + selectedPhash.cuts.threshold + ' bits'"></span>
+                    </div>
+
+                    <div class="flex items-center justify-between text-slate-400">
+                      <span>Total cuts détectés dans le fichier :</span>
+                      <span class="font-bold font-mono text-amber-300" x-text="selectedPhash.catalog_cuts_count ? selectedPhash.catalog_cuts_count.toLocaleString() : (selectedPhash.cuts.cuts_count || 0).toLocaleString()"></span>
+                    </div>
+
+                    <!-- View Switcher (Chart vs List) -->
+                    <div class="flex items-center justify-between pt-1 border-t border-slate-900">
+                      <div class="flex items-center gap-1 bg-slate-900 p-0.5 rounded-lg border border-slate-800 text-[10px] font-medium">
+                        <button type="button"
+                                @click="cutsSubView = 'chart'"
+                                :class="cutsSubView === 'chart' ? 'bg-amber-950/80 text-amber-300 border border-amber-800 shadow-sm' : 'text-slate-400 hover:text-white'"
+                                class="px-2.5 py-1 rounded transition cursor-pointer flex items-center gap-1">
+                          <span>📈</span>
+                          <span>Sismographe Δ(t)</span>
+                        </button>
+                        <button type="button"
+                                @click="cutsSubView = 'list'"
+                                :class="cutsSubView === 'list' ? 'bg-amber-950/80 text-amber-300 border border-amber-800 shadow-sm' : 'text-slate-400 hover:text-white'"
+                                class="px-2.5 py-1 rounded transition cursor-pointer flex items-center gap-1">
+                          <span>📋</span>
+                          <span>Transitions</span>
+                        </button>
+                      </div>
+
+                      <template x-if="cutsSubView === 'list'">
+                        <button @click="showCutsGuide = !showCutsGuide"
+                                type="button"
+                                class="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-800/60 transition cursor-pointer"
+                                title="Afficher/masquer l'aide de lecture">
+                          <span class="font-bold">?</span>
+                          <span x-text="showCutsGuide ? 'Masquer' : 'Aide'"></span>
+                        </button>
+                      </template>
+                      <template x-if="cutsSubView === 'chart'">
+                        <span class="text-slate-500 font-mono text-[10px]">120 échantillons temporels</span>
+                      </template>
+                    </div>
+
+                    <!-- View A: Interactive Sismographe Chart with Brush Zoom & MiniMap -->
+                    <template x-if="cutsSubView === 'chart' && selectedPhash.cuts.timeline && selectedPhash.cuts.timeline.length > 0">
+                      <div class="space-y-2.5">
+
+                        <!-- Main Zoomable Chart Card -->
+                        <div class="bg-slate-900 border border-slate-800 rounded-lg p-2.5 relative select-none"
+                             @mouseleave="hoveredTimelinePoint = null; if (timelineZoom.isSelecting) onTimelineMouseUp()"
+                             @mouseup="onTimelineMouseUp()">
+
+                          <div class="flex items-center justify-between text-[10px] text-slate-400 mb-1.5">
+                            <div class="flex items-center gap-2">
+                              <span class="font-semibold text-slate-300">Évolution de la distance Δ :</span>
+                              <span class="font-mono text-indigo-400 font-bold" x-text="getTimeLabelAtRatio(timelineZoom.startRatio) + ' → ' + getTimeLabelAtRatio(timelineZoom.endRatio)"></span>
+                              <template x-if="isTimelineZoomed()">
+                                <span class="bg-indigo-950 text-indigo-300 border border-indigo-800/80 px-1.5 py-0.2 rounded text-[9px] font-mono"
+                                      x-text="'Zoom ' + (1 / (timelineZoom.endRatio - timelineZoom.startRatio)).toFixed(1) + 'x'"></span>
+                              </template>
+                            </div>
+
+                            <!-- Zoom Action Controls Toolbar -->
+                            <div class="flex items-center gap-1">
+                              <button type="button" @click="zoomInStep()" class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 font-mono text-[10px] cursor-pointer" title="Zoom avant (+)">+</button>
+                              <button type="button" @click="zoomOutStep()" class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 font-mono text-[10px] cursor-pointer" title="Zoom arrière (-)">-</button>
+                              <button type="button" @click="panStep(-1)" :disabled="timelineZoom.startRatio <= 0.001" class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 font-mono text-[10px] cursor-pointer disabled:opacity-30" title="Pan vers la gauche (←)">◀</button>
+                              <button type="button" @click="panStep(1)" :disabled="timelineZoom.endRatio >= 0.999" class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 font-mono text-[10px] cursor-pointer disabled:opacity-30" title="Pan vers la droite (→)">▶</button>
+                              <template x-if="isTimelineZoomed()">
+                                <button type="button" @click="resetTimelineZoom()" class="px-1.5 py-0.5 rounded bg-amber-950 hover:bg-amber-900 text-amber-300 border border-amber-800 font-mono text-[9px] cursor-pointer" title="Réinitialiser le zoom (Vue 100%)">↺ Tout</button>
+                              </template>
+                            </div>
+                          </div>
+
+                          <!-- SVG Chart Canvas with Brush Selection & Wheel Zoom -->
+                          <div class="relative w-full h-32">
+                            <svg viewBox="0 0 600 115"
+                                 preserveAspectRatio="none"
+                                 class="w-full h-full cursor-crosshair overflow-visible"
+                                 @mousedown="onTimelineMouseDown($event)"
+                                 @mousemove="onTimelineMouseMove($event, selectedPhash.cuts.timeline)"
+                                 @wheel="onTimelineWheel($event)">
+                              <defs>
+                                <linearGradient id="deltaGradient" x1="0" y1="0" x2="0" y2="1">
+                                  <stop offset="0%" stop-color="#f59e0b" stop-opacity="0.5" />
+                                  <stop offset="40%" stop-color="#f59e0b" stop-opacity="0.2" />
+                                  <stop offset="85%" stop-color="#6366f1" stop-opacity="0.08" />
+                                  <stop offset="100%" stop-color="#6366f1" stop-opacity="0.0" />
+                                </linearGradient>
+                              </defs>
+
+                              <!-- Baseline Y=105 (Delta=0) -->
+                              <line x1="0" y1="105" x2="600" y2="105" stroke="#334155" stroke-width="1" />
+
+                              <!-- Cut Threshold Line Y=91 (Delta=10 bits) -->
+                              <line x1="0" y1="91" x2="600" y2="91" stroke="#f59e0b" stroke-dasharray="3 3" stroke-width="1" opacity="0.7" />
+                              <text x="595" y="87" fill="#f59e0b" font-size="8" font-family="monospace" text-anchor="end" opacity="0.85">Seuil Cut (10b)</text>
+
+                              <!-- Mid Reference Line Y=55 (Delta=32 bits) -->
+                              <line x1="0" y1="55" x2="600" y2="55" stroke="#475569" stroke-dasharray="2 4" stroke-width="0.5" opacity="0.4" />
+                              <text x="6" y="52" fill="#64748b" font-size="8" font-family="monospace" opacity="0.8">32b</text>
+
+                              <!-- Area & Line Curve (Dynamically Zoomed Slice) -->
+                              <path :d="getTimelineSvgPoints(selectedPhash.cuts.timeline).area" fill="url(#deltaGradient)" />
+                              <path :d="getTimelineSvgPoints(selectedPhash.cuts.timeline).line" fill="none" stroke="#f59e0b" stroke-width="1.5" />
+
+                              <!-- Interactive Brush Selection Overlay (during click-drag) -->
+                              <rect x-show="timelineZoom.isSelecting"
+                                    :x="Math.min(timelineZoom.selectStartX, timelineZoom.selectCurrentX)"
+                                    y="10"
+                                    :width="Math.abs(timelineZoom.selectCurrentX - timelineZoom.selectStartX)"
+                                    height="95"
+                                    fill="#6366f1"
+                                    fill-opacity="0.25"
+                                    stroke="#818cf8"
+                                    stroke-width="1"
+                                    stroke-dasharray="3 3" />
+
+                              <!-- Interactive Hover Cursor -->
+                              <g x-show="hoveredTimelinePoint">
+                                <line :x1="hoverTimelineX" y1="10" :x2="hoverTimelineX" y2="105" stroke="#fbbf24" stroke-width="1" stroke-dasharray="2 2" />
+                                <circle :cx="hoverTimelineX"
+                                        :cy="getHoverCursorY()"
+                                        r="3.5"
+                                        fill="#fbbf24"
+                                        stroke="#0f172a"
+                                        stroke-width="1.5" />
+                              </g>
+                            </svg>
+
+                            <!-- Floating Hover Tooltip -->
+                            <div x-show="hoveredTimelinePoint"
+                                 class="absolute top-1 left-2 pointer-events-none bg-slate-950/95 border border-amber-800/80 rounded px-2.5 py-1 text-[10px] font-mono shadow-xl flex items-center gap-3">
+                              <div class="flex items-center gap-1.5">
+                                <span class="text-indigo-400 font-semibold" x-text="hoveredTimelinePoint ? hoveredTimelinePoint.time_fmt : ''"></span>
+                                <span class="text-slate-500">•</span>
+                                <span class="text-slate-400" x-text="hoveredTimelinePoint && hoveredTimelinePoint.frame !== undefined ? 'Trame #' + hoveredTimelinePoint.frame.toLocaleString() : ''"></span>
+                              </div>
+                              <div class="flex items-center gap-1.5">
+                                <span class="text-amber-400 font-bold" x-text="hoveredTimelinePoint && hoveredTimelinePoint.delta !== undefined ? 'Δ ' + hoveredTimelinePoint.delta + 'b' : ''"></span>
+                                <span class="text-[9px] px-1 py-0.2 rounded"
+                                      :class="hoveredTimelinePoint && hoveredTimelinePoint.delta >= 10 ? 'bg-amber-950 text-amber-300 border border-amber-800/60' : 'bg-slate-800 text-slate-400'"
+                                      x-text="hoveredTimelinePoint && hoveredTimelinePoint.delta >= 10 ? 'Coupe (Cut)' : 'Plan continu'"></span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <!-- Dynamic Visible Time Axis Labels -->
+                          <div class="flex items-center justify-between text-[9px] font-mono text-slate-500 pt-1.5 border-t border-slate-800/60">
+                            <span x-text="getTimeLabelAtRatio(timelineZoom.startRatio)"></span>
+                            <span x-text="getTimeLabelAtRatio(timelineZoom.startRatio + (timelineZoom.endRatio - timelineZoom.startRatio) * 0.25)"></span>
+                            <span x-text="getTimeLabelAtRatio(timelineZoom.startRatio + (timelineZoom.endRatio - timelineZoom.startRatio) * 0.5)"></span>
+                            <span x-text="getTimeLabelAtRatio(timelineZoom.startRatio + (timelineZoom.endRatio - timelineZoom.startRatio) * 0.75)"></span>
+                            <span x-text="getTimeLabelAtRatio(timelineZoom.endRatio)"></span>
+                          </div>
+                        </div>
+
+                        <!-- Mini-Map Global Panorama (Full film 0% -> 100% with draggable view finder window) -->
+                        <div class="bg-slate-950 border border-slate-800/80 rounded-lg p-2 space-y-1">
+                          <div class="flex items-center justify-between text-[9px] text-slate-500 font-mono">
+                            <span>VUE PANORAMIQUE (00:00 → <span x-text="selectedPhash.duration_fmt || 'Fin'"></span>)</span>
+                            <span class="text-[8px] text-slate-600">Glisser / cliquer pour cadrer</span>
+                          </div>
+                          <div class="relative w-full h-7 bg-slate-900 rounded overflow-hidden cursor-pointer"
+                               @mousedown="onMiniMapMouseDown($event)">
+                            <!-- Static full-range sparkline in background -->
+                            <svg viewBox="0 0 600 24" preserveAspectRatio="none" class="w-full h-full opacity-40">
+                              <polyline :points="getMiniMapSvgPoints(selectedPhash.cuts.timeline)"
+                                        fill="none"
+                                        stroke="#818cf8"
+                                        stroke-width="1.2" />
+                            </svg>
+
+                            <!-- Visible viewport window highlight -->
+                            <div class="absolute top-0 bottom-0 bg-indigo-500/25 border-x-2 border-indigo-400 shadow-sm pointer-events-none"
+                                 :style="'left: ' + (timelineZoom.startRatio * 100) + '%; width: ' + ((timelineZoom.endRatio - timelineZoom.startRatio) * 100) + '%;'">
+                            </div>
+                          </div>
+                        </div>
+
+                      </div>
+                    </template>
+
+                    <!-- View B: Transitions List Table -->
+                    <template x-if="cutsSubView === 'list'">
+                      <div class="space-y-3">
+                        <!-- Guide Pédagogique de Lecture (Conditionnel sur demande) -->
+                        <div x-show="showCutsGuide" x-cloak class="bg-slate-900 border border-slate-800 rounded-lg p-3 text-[11px] space-y-2">
+                          <div class="font-semibold text-amber-300 flex items-center gap-1.5">
+                            <span>💡</span>
+                            <span>Que signifie une ligne de transition ?</span>
+                            <code class="text-[10px] bg-slate-950 px-1.5 py-0.5 rounded text-amber-200 border border-slate-800 font-mono">00:03 Trame #82 Δ 12b cc8933...</code>
+                          </div>
+                          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-slate-300 pt-1 text-[10px]">
+                            <div class="flex items-start gap-1.5 bg-slate-950/60 p-2 rounded border border-slate-800/60">
+                              <span class="text-indigo-400 font-mono font-bold whitespace-nowrap">00:03 :</span>
+                              <span>Horodatage précis dans le film (à 3 secondes).</span>
+                            </div>
+                            <div class="flex items-start gap-1.5 bg-slate-950/60 p-2 rounded border border-slate-800/60">
+                              <span class="text-slate-400 font-mono font-bold whitespace-nowrap">Trame #82 :</span>
+                              <span>82ème image de la vidéo (cadence 24 ou 25 fps).</span>
+                            </div>
+                            <div class="flex items-start gap-1.5 bg-slate-950/60 p-2 rounded border border-slate-800/60 sm:col-span-2">
+                              <span class="text-amber-400 font-mono font-bold whitespace-nowrap">Δ 12b :</span>
+                              <span><strong>Distance de Hamming</strong> : 12 bits sur 64 ont basculé d'un coup par rapport à la trame #81 (au-dessus du seuil Δ ≥ 10b, attestant d'un véritable changement de plan de caméra).</span>
+                            </div>
+                            <div class="flex items-start gap-1.5 bg-slate-950/60 p-2 rounded border border-slate-800/60 sm:col-span-2">
+                              <span class="text-sky-400 font-mono font-bold whitespace-nowrap">cc89... :</span>
+                              <span>Empreinte visuelle pHash 64 bits (en hexadécimal) du nouveau plan ainsi détecté.</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <!-- Cuts Sample List (Filtered by active zoom window) -->
+                        <div class="space-y-1 max-h-48 overflow-y-auto custom-scroll pr-1 font-mono text-[11px]">
+                          <template x-for="cut in getFilteredCutsSample(selectedPhash.cuts.cuts_sample)" :key="cut.frame">
+                            <div class="flex items-center justify-between bg-slate-900 px-2 py-1 rounded border border-slate-800/80">
+                              <span class="text-indigo-300 font-semibold" x-text="cut.time_fmt"></span>
+                              <span class="text-slate-400" x-text="'Trame #' + cut.frame"></span>
+                              <span class="text-amber-400" :title="'Distance de Hamming : ' + cut.distance + ' bits modifiés par rapport à la trame précédente'" x-text="'Δ ' + cut.distance + 'b'"></span>
+                              <code class="text-slate-500 text-[10px]" x-text="cut.hash"></code>
+                            </div>
+                          </template>
+                          <template x-if="getFilteredCutsSample(selectedPhash.cuts.cuts_sample).length === 0">
+                            <div class="py-6 text-center text-slate-500 text-xs font-sans">
+                              Aucune coupure de plan détectée dans cette tranche temporelle zoomée.
+                            </div>
+                          </template>
+                        </div>
+                      </div>
+                    </template>
+                  </div>
+                </template>
+
+                <!-- 4. Zero-DB Indexing & Compression Ratio -->
+                <template x-if="selectedPhash.compression">
+                  <div class="bg-slate-950 border border-slate-800 rounded-xl p-5 space-y-4 text-left">
+                    <div class="text-[11px] font-semibold text-indigo-400 uppercase tracking-wider flex items-center justify-between">
+                      <span>3. Efficacité de Compression Zero-DB (Index Compact)</span>
+                      <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-950/60 text-indigo-300 border border-indigo-800" x-text="selectedPhash.compression.ratio + 'x plus compact'"></span>
+                    </div>
+
+                    <!-- Left-aligned Summary Metric -->
+                    <div class="space-y-1 text-left">
+                      <div class="text-[11px] text-slate-400">Économie d'espace mémoire :</div>
+                      <div class="flex items-baseline gap-3">
+                        <span class="text-3xl font-bold text-emerald-400 font-mono" x-text="selectedPhash.compression.saved_space_pct + '% économisés'"></span>
+                        <span class="text-xs text-slate-400">par rapport au stockage de l'intégralité des trames brutes</span>
+                      </div>
+                    </div>
+
+                    <!-- Comparison Grid -->
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                      <!-- RAW Box -->
+                      <div class="bg-slate-900/70 border border-slate-800 rounded-lg p-3 space-y-1.5 text-left">
+                        <span class="text-slate-400 block text-[10px] font-semibold uppercase tracking-wide">Fichier Brut .phash (100% des trames)</span>
+                        <div class="text-xl font-mono text-sky-300 font-bold" x-text="selectedPhash.raw_size_human || selectedPhash.file_size_human"></div>
+                        <div class="text-[11px] text-slate-400 font-mono leading-relaxed">
+                          <span x-text="(selectedPhash.frame_count || 0).toLocaleString() + ' trames'"></span> × 8 octets / trame
+                          <span class="block text-[10px] text-slate-500" x-text="'= ' + (selectedPhash.compression.raw_bytes || 0).toLocaleString() + ' octets'"></span>
+                        </div>
+                      </div>
+
+                      <!-- Compact Zero-DB Box -->
+                      <div class="bg-slate-900/70 border border-slate-800 rounded-lg p-3 space-y-1.5 text-left">
+                        <span class="text-slate-400 block text-[10px] font-semibold uppercase tracking-wide">Empreinte Indexée Zero-DB (catalog.dbphash)</span>
+                        <div class="text-xl font-mono text-indigo-300 font-bold" x-text="(selectedPhash.compression.estimated_indexed_bytes ? (selectedPhash.compression.estimated_indexed_bytes / 1024).toFixed(1) + ' KB' : '—')"></div>
+                        <div class="text-[11px] text-slate-400 font-mono leading-relaxed">
+                          <span x-text="((selectedPhash.compression.cuts_count || 0) + (selectedPhash.compression.sparse_count || 0)).toLocaleString() + ' points clés'"></span> × 16 octets
+                          <span class="block text-[10px] text-slate-500" x-text="'= ' + (selectedPhash.compression.estimated_indexed_bytes || 0).toLocaleString() + ' octets'"></span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- Detailed Technical Calculation Breakdown -->
+                    <div class="bg-slate-900/40 border border-slate-800/80 rounded-lg p-3.5 space-y-2 text-left">
+                      <div class="text-[11px] font-semibold text-slate-300 flex items-center gap-1.5">
+                        <span>📐</span>
+                        <span>Détail et justification du calcul :</span>
+                      </div>
+
+                      <div class="space-y-1.5 text-[11px] text-slate-400 font-mono leading-normal">
+                        <div class="flex items-start gap-2">
+                          <span class="text-slate-500">•</span>
+                          <span><strong>Points de coupure (Cuts) :</strong> <span class="text-slate-200" x-text="(selectedPhash.compression.cuts_count || 0).toLocaleString()"></span> transitions franches indexées (Δ ≥ 10 bits).</span>
+                        </div>
+                        <div class="flex items-start gap-2">
+                          <span class="text-slate-500">•</span>
+                          <span><strong>Échantillonnage temporel (Sparse) :</strong> <span class="text-slate-200" x-text="(selectedPhash.compression.sparse_count || 0).toLocaleString()"></span> trames de repère régulières (1 trame / seconde).</span>
+                        </div>
+                        <div class="flex items-start gap-2">
+                          <span class="text-slate-500">•</span>
+                          <span><strong>Formule d'index compact :</strong> <code class="text-indigo-300 bg-slate-950 px-1 py-0.5 rounded border border-slate-800">(N_cuts + N_sparse) × 16 octets</code> = <span class="text-indigo-300" x-text="(selectedPhash.compression.estimated_indexed_bytes || 0).toLocaleString() + ' octets'"></span>.</span>
+                        </div>
+                        <div class="flex items-start gap-2">
+                          <span class="text-slate-500">•</span>
+                          <span><strong>Taux d'économie :</strong> <code class="text-emerald-300 bg-slate-950 px-1 py-0.5 rounded border border-slate-800">(1 - Taille_ZeroDB / Taille_RAW) × 100</code> = <span class="text-emerald-400 font-bold" x-text="selectedPhash.compression.saved_space_pct + '%'"></span>.</span>
+                        </div>
+                        <div class="flex items-start gap-2">
+                          <span class="text-slate-500">•</span>
+                          <span><strong>Ratio de réduction :</strong> <code class="text-indigo-300 bg-slate-950 px-1 py-0.5 rounded border border-slate-800">Taille_RAW / Taille_ZeroDB</code> = <span class="text-indigo-300 font-bold" x-text="selectedPhash.compression.ratio + 'x'"></span>.</span>
+                        </div>
+                      </div>
+                    </div>
+
+                  </div>
+                </template>
+
+              </div>
+            </template>
+          </div>
+
+          <!-- Modal Footer -->
+          <div class="p-4 bg-slate-950 border-t border-slate-800 flex items-center justify-between shrink-0">
+            <span class="text-[11px] text-slate-500 font-mono">Appuyez sur Échap ou cliquez à l'extérieur pour fermer</span>
+            <button @click="selectedPhashModal = false" class="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs font-semibold text-white shadow transition cursor-pointer">
+              Fermer
+            </button>
+          </div>
+
+        </div>
+      </div>
+
     <!-- Modal: Contextual Glossary & Domain Definitions -->
     <div x-show="showGlossaryModal"
          class="fixed inset-0 z-50 overflow-hidden flex items-center justify-center p-4"
@@ -1289,6 +2568,33 @@
             </p>
           </div>
 
+          <!-- Section 5: Les 3 Piliers de l'Empreinte pHash -->
+          <div class="bg-slate-950/80 border border-slate-800 rounded-xl p-4 space-y-2">
+            <h4 class="font-bold text-indigo-400 uppercase text-[11px] flex items-center gap-1.5">
+              <span>🏛️</span>
+              <span>5. Trinité des Empreintes : Les 3 Piliers pHash</span>
+            </h4>
+            <p class="text-slate-400">Comprendre l'hétérogénéité des états d'une empreinte perceptuelle au sein de pydbsrt :</p>
+            <ul class="space-y-2 pt-1 font-sans">
+              <li class="flex items-start gap-2">
+                <span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-sky-950 text-sky-300 border border-sky-800 shrink-0">📁 Pilier 1 : RAW Store</span>
+                <span><strong>Fichiers Bruts Disque :</strong> Suite linéaire continue de 64-bit entiers non compressés (1 hash par trame vidéo). Gisement maître non altéré stocké dans <code class="text-slate-400">data/__PHASH__/*.phash</code> (~1.5 Go).</span>
+              </li>
+              <li class="flex items-start gap-2">
+                <span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-indigo-950 text-indigo-300 border border-indigo-800 shrink-0">⚡ Pilier 2 : Catalogue Zero-DB</span>
+                <span><strong>Catalogue Compilé mmap :</strong> Fichier binaire compacté haute densité (<code class="text-indigo-300">catalog.dbphash</code> v2.0) filtrant uniquement les changements de scènes (Cuts) et 1 frame par seconde (Sparse), permettant une recherche O(1) sans base de données avec un gain d'espace de 6x à 12x.</span>
+              </li>
+              <li class="flex items-start gap-2">
+                <span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-950 text-emerald-300 border border-emerald-800 shrink-0">🐘 Pilier 3 : BKtreeDB</span>
+                <span><strong>Indexation Relationnelle :</strong> Table PostgreSQL <code class="text-emerald-300">medias</code> couplée à la table de trames <code class="text-emerald-300">frames</code> indexée par l'extension SP-GiST Hamming pour la recherche floue indexée par arbre BK relationnel.</span>
+              </li>
+              <li class="flex items-start gap-2">
+                <span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-950 text-emerald-400 border border-emerald-800 shrink-0">🟢 Aligné 3/3</span>
+                <span><strong>Parité Maximale :</strong> L'empreinte existe sous forme brute sur disque, est compilée dans le catalogue Zero-DB et est réconciliée avec la base relationnelle.</span>
+              </li>
+            </ul>
+          </div>
+
         </div>
 
         <!-- Modal Footer -->
@@ -1341,7 +2647,8 @@
         highlightTargetName: null,
         pendingSelectedFilePath: null,
 
-        // Assets View State (PostgreSQL 17)
+        // Assets View State (PostgreSQL Dynamic Engine)
+        assetsPgVersion: 'PostgreSQL',
         assetsSummary: { total: 0, nominal: 0, missing_phash: 0, unmapped_path: 0 },
         assetsItems: [],
         assetsPage: 1,
@@ -1358,8 +2665,58 @@
         selectedAssetModal: false,
         selectedAsset: null,
         assetDetailLoading: false,
+        assetDetailError: '',
         showGlossaryModal: false,
         glossaryTopic: 'all',
+
+        // pHash Tripartite Observatory State
+        phashesSummary: {
+          raw_count: 0,
+          raw_size_bytes: 0,
+          raw_size_human: '0 B',
+          catalog_count: 0,
+          catalog_size_bytes: 0,
+          catalog_size_human: '0 B',
+          catalog_cuts_total: 0,
+          catalog_sparse_total: 0,
+          pg_count: 0,
+          pg_frames_total: 0,
+          aligned_3_3: 0,
+          missing_pg: 0,
+          uncompiled: 0,
+          orphan_catalog: 0,
+        },
+        phashesItems: [],
+        phashesPage: 1,
+        phashesLimit: 25,
+        phashesTotalItems: 0,
+        phashesTotalPages: 1,
+        phashesStatusFilter: 'all',
+        phashesSearchQuery: '',
+        phashesSort: 'id_asc',
+        phashesLoading: false,
+        selectedPhashModal: false,
+        selectedPhash: null,
+        phashDetailLoading: false,
+        showIntegrityTip: false,
+        showMobilityTip: false,
+        showMobilityHistTip: false,
+        showTimelineTip: false,
+        cutsSubView: 'chart',
+        hoveredTimelinePoint: null,
+        hoverTimelineX: 0,
+
+        // Sismographe Zoom & Brush Selection State
+        timelineZoom: {
+          startRatio: 0.0,
+          endRatio: 1.0,
+          isSelecting: false,
+          selectStartX: 0,
+          selectCurrentX: 0,
+          isPanningMini: false,
+          panStartClientX: 0,
+          panStartRatio: 0,
+        },
 
         async initApp() {
           const stored = this.loadStoredState();
@@ -1377,7 +2734,10 @@
             this.handlePopState();
           });
 
-          this.probeAllProfiles();
+          // Only launch physical storage probes if the active view requires it (sources explorer)
+          if (this.currentView === 'sources' || this.currentView === 'explorer') {
+            this.probeAllProfiles();
+          }
         },
 
         loadStoredState() {
@@ -1412,6 +2772,11 @@
               selectedPath: this.selectedItem ? this.selectedItem.path : null,
               folderStateMap: this.folderStateMap || {},
               sourcesCollapsedMap: collapsedMap,
+              phashesStatusFilter: this.phashesStatusFilter || 'all',
+              phashesPage: this.phashesPage || 1,
+              phashesLimit: this.phashesLimit || 25,
+              phashesSort: this.phashesSort || 'id_asc',
+              phashesSearchQuery: this.phashesSearchQuery || '',
             };
             localStorage.setItem('pydbsrt_sources_state_v1', JSON.stringify(state));
           } catch (err) {
@@ -1447,6 +2812,20 @@
             }
             if (this.assetsSearchQuery) {
               params.set('q', this.assetsSearchQuery);
+            }
+          }
+          if (this.currentView === 'phashes') {
+            if (this.phashesStatusFilter && this.phashesStatusFilter !== 'all') {
+              params.set('status', this.phashesStatusFilter);
+            }
+            if (this.phashesPage > 1) {
+              params.set('page', this.phashesPage);
+            }
+            if (this.phashesSearchQuery) {
+              params.set('q', this.phashesSearchQuery);
+            }
+            if (this.phashesSort && this.phashesSort !== 'id_asc') {
+              params.set('sort', this.phashesSort);
             }
           }
           if (this.currentView === 'explorer' && this.explorerSource && this.explorerProfile) {
@@ -1509,6 +2888,16 @@
             return;
           }
 
+          if (view === 'phashes') {
+            this.currentView = 'phashes';
+            this.phashesStatusFilter = hashParams.get('status') || 'all';
+            this.phashesPage = parseInt(hashParams.get('page') || '1') || 1;
+            this.phashesSearchQuery = hashParams.get('q') || '';
+            this.phashesSort = hashParams.get('sort') || 'id_asc';
+            this.fetchPhashes();
+            return;
+          }
+
           if (view === 'explorer') {
             const sourceId = hashParams.get('source');
             const profileId = hashParams.get('profile');
@@ -1556,6 +2945,16 @@
             this.assetsPage = parseInt(hashParams?.get('page') || (stored?.assetsPage || 1)) || 1;
             this.assetsSearchQuery = hashParams?.get('q') || stored?.assetsSearchQuery || '';
             this.fetchAssets();
+            return;
+          }
+
+          if (view === 'phashes') {
+            this.currentView = 'phashes';
+            this.phashesStatusFilter = hashParams?.get('status') || stored?.phashesStatusFilter || 'all';
+            this.phashesPage = parseInt(hashParams?.get('page') || (stored?.phashesPage || 1)) || 1;
+            this.phashesSearchQuery = hashParams?.get('q') || stored?.phashesSearchQuery || '';
+            this.phashesSort = hashParams?.get('sort') || stored?.phashesSort || 'id_asc';
+            this.fetchPhashes();
             return;
           }
 
@@ -2041,13 +3440,15 @@
           }
         },
 
-        // Assets View Actions (PostgreSQL 17)
+        // Assets & pHash View Actions
         switchView(newView) {
           this.currentView = newView;
           this.syncUrlHash(true);
           this.saveStoredState();
           if (newView === 'assets') {
             this.fetchAssets();
+          } else if (newView === 'phashes') {
+            this.fetchPhashes();
           }
         },
 
@@ -2096,6 +3497,7 @@
             if (data.status === 'ok') {
               this.assetsConnected = true;
               this.assetsErrorMessage = '';
+              this.assetsPgVersion = data.pg_version || this.assetsPgVersion;
               this.assetsSummary = data.summary || this.assetsSummary;
               this.assetsItems = data.items || [];
               this.assetsTotalItems = data.total_items || 0;
@@ -2129,6 +3531,7 @@
           this.selectedAssetModal = true;
           this.assetDetailLoading = true;
           this.selectedAsset = null;
+          this.assetDetailError = '';
 
           try {
             const url = this.getApiUrl('asset/details', `id=${mediaId}`);
@@ -2137,13 +3540,382 @@
             if (data.status === 'ok') {
               this.selectedAsset = data;
             } else {
+              this.assetDetailError = data.message || 'Erreur lors de la récupération des détails techniques.';
               console.warn('Asset detail error:', data.message);
             }
           } catch (err) {
+            this.assetDetailError = err.message || 'Erreur de communication réseau avec le serveur.';
             console.error('Asset detail request failed:', err);
           } finally {
             this.assetDetailLoading = false;
           }
+        },
+
+        // pHash Tripartite Observatory Actions
+        async fetchPhashes(force = false) {
+          this.phashesLoading = true;
+          const params = new URLSearchParams({
+            page: this.phashesPage,
+            limit: this.phashesLimit,
+            filter: this.phashesStatusFilter,
+            sort: this.phashesSort,
+          });
+          if (this.phashesSearchQuery) {
+            params.set('q', this.phashesSearchQuery.trim());
+          }
+
+          try {
+            const url = this.getApiUrl('phashes', params.toString());
+            const res = await fetch(url);
+            const data = await res.json();
+            if (data.status === 'ok') {
+              this.phashesSummary = data.summary || this.phashesSummary;
+              this.phashesItems = data.items || [];
+              this.phashesTotalItems = data.total_items || 0;
+              this.phashesTotalPages = data.total_pages || 1;
+              if (this.phashesPage > this.phashesTotalPages && this.phashesTotalItems > 0) {
+                this.phashesPage = 1;
+                this.syncUrlHash(true);
+                return this.fetchPhashes();
+              }
+            } else {
+              console.warn('Phashes API warning:', data.message);
+            }
+          } catch (err) {
+            console.error('Phashes fetch failed:', err);
+          } finally {
+            this.phashesLoading = false;
+          }
+        },
+
+        setPhashesStatusFilter(status) {
+          this.phashesStatusFilter = status;
+          this.phashesPage = 1;
+          this.syncUrlHash(true);
+          this.fetchPhashes();
+        },
+
+        onPhashesFilterChange() {
+          this.phashesPage = 1;
+          this.syncUrlHash(true);
+          this.fetchPhashes();
+        },
+
+        prevPhashesPage() {
+          if (this.phashesPage > 1) {
+            this.phashesPage--;
+            this.syncUrlHash(false);
+            this.fetchPhashes();
+          }
+        },
+
+        nextPhashesPage() {
+          if (this.phashesPage < this.phashesTotalPages) {
+            this.phashesPage++;
+            this.syncUrlHash(false);
+            this.fetchPhashes();
+          }
+        },
+
+        async openPhashDetail(item) {
+          this.selectedPhashModal = true;
+          this.phashDetailLoading = true;
+          this.showIntegrityTip = false;
+          this.showMobilityTip = false;
+          this.showMobilityHistTip = false;
+          this.showTimelineTip = false;
+          this.resetTimelineZoom();
+          // Palier 1: Afficher immédiatement la ligne cliquée sans attendre le réseau
+          this.selectedPhash = {
+            ...item,
+            entropy: null,
+            cuts: null,
+            compression: null,
+          };
+
+          try {
+            const queryParam = (item.moviehash && item.moviehash !== '—')
+              ? `moviehash=${item.moviehash}`
+              : `file=${encodeURIComponent(item.raw_filename)}`;
+            const url = this.getApiUrl('phash/details', queryParam);
+            const res = await fetch(url);
+            const data = await res.json();
+            if (data.status === 'ok') {
+              this.selectedPhash = { ...item, ...data };
+              this.hoveredTimelinePoint = null;
+            } else {
+              console.warn('Phash detail error:', data.message);
+            }
+          } catch (err) {
+            console.error('Phash detail request failed:', err);
+          } finally {
+            this.phashDetailLoading = false;
+          }
+        },
+
+        resetTimelineZoom() {
+          this.timelineZoom = {
+            startRatio: 0.0,
+            endRatio: 1.0,
+            isSelecting: false,
+            selectStartX: 0,
+            selectCurrentX: 0,
+            isPanningMini: false,
+            panStartClientX: 0,
+            panStartRatio: 0,
+          };
+          this.hoveredTimelinePoint = null;
+        },
+
+        isTimelineZoomed() {
+          return this.timelineZoom.startRatio > 0.005 || this.timelineZoom.endRatio < 0.995;
+        },
+
+        getZoomedTimelinePoints(timeline) {
+          if (!timeline || timeline.length === 0) return [];
+          const N = timeline.length;
+          const startIdx = Math.max(0, Math.floor(this.timelineZoom.startRatio * (N - 1)));
+          const endIdx = Math.min(N - 1, Math.ceil(this.timelineZoom.endRatio * (N - 1)));
+          if (startIdx >= endIdx) return [timeline[startIdx]];
+          return timeline.slice(startIdx, endIdx + 1);
+        },
+
+        getFilteredCutsSample(cutsSample) {
+          if (!cutsSample || cutsSample.length === 0) return [];
+          if (!this.isTimelineZoomed() || !this.selectedPhash?.frame_count) return cutsSample;
+          const fc = this.selectedPhash.frame_count;
+          const minFrame = Math.floor(this.timelineZoom.startRatio * fc);
+          const maxFrame = Math.ceil(this.timelineZoom.endRatio * fc);
+          return cutsSample.filter(c => c.frame >= minFrame && c.frame <= maxFrame);
+        },
+
+        getTimelineMaxScale(timeline) {
+          if (!timeline || timeline.length === 0) return 12;
+          let maxVal = 0;
+          for (let i = 0; i < timeline.length; i++) {
+            const v = (timeline[i].delta_mean !== undefined) ? timeline[i].delta_mean : timeline[i].delta;
+            if (typeof v === 'number' && v > maxVal) maxVal = v;
+          }
+          // Minimum 12 pour laisser de la marge au-dessus du seuil Cut (10b), arrondi au supérieur avec marge
+          return Math.max(12, Math.ceil(maxVal + 2));
+        },
+
+        getTimelineCutThresholdY(timeline) {
+          const maxScale = this.getTimelineMaxScale(timeline);
+          const Y_BASE = 105;
+          const H = 90;
+          return Math.round((Y_BASE - (10 / maxScale) * H) * 10) / 10;
+        },
+
+        getTimelineSvgPoints(timeline) {
+          const visible = this.getZoomedTimelinePoints(timeline);
+          if (!visible || visible.length === 0) return { area: '', line: '' };
+          const W = 600;
+          const H = 90;
+          const Y_BASE = 105;
+          const maxScale = this.getTimelineMaxScale(timeline);
+          const pts = visible.map((pt, i) => {
+            const x = visible.length > 1 ? (i / (visible.length - 1)) * W : W / 2;
+            const dVal = (pt.delta_mean !== undefined) ? pt.delta_mean : pt.delta;
+            const clampedDelta = Math.max(0, Math.min(maxScale, dVal));
+            const y = Y_BASE - (clampedDelta / maxScale) * H;
+            return { x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10 };
+          });
+
+          const lineD = pts.map((p, i) => (i === 0 ? `M ${p.x} ${p.y}` : `L ${p.x} ${p.y}`)).join(' ');
+          const areaD = `M 0 ${Y_BASE} ` + pts.map(p => `L ${p.x} ${p.y}`).join(' ') + ` L ${W} ${Y_BASE} Z`;
+          return { area: areaD, line: lineD };
+        },
+
+        getMiniMapSvgPoints(timeline) {
+          if (!timeline || timeline.length === 0) return '';
+          const W = 600;
+          const H = 22;
+          const Y_BASE = 24;
+          const maxScale = this.getTimelineMaxScale(timeline);
+          const pts = timeline.map((pt, i) => {
+            const x = (i / (timeline.length - 1)) * W;
+            const dVal = (pt.delta_mean !== undefined) ? pt.delta_mean : pt.delta;
+            const clampedDelta = Math.max(0, Math.min(maxScale, dVal));
+            const y = Y_BASE - (clampedDelta / maxScale) * H;
+            return `${Math.round(x * 10) / 10},${Math.round(y * 10) / 10}`;
+          });
+          return pts.join(' ');
+        },
+
+        onTimelineMouseDown(event) {
+          const rect = event.currentTarget.getBoundingClientRect();
+          const relX = Math.max(0, Math.min(600, ((event.clientX - rect.left) / rect.width) * 600));
+          this.timelineZoom.isSelecting = true;
+          this.timelineZoom.selectStartX = relX;
+          this.timelineZoom.selectCurrentX = relX;
+        },
+
+        onTimelineMouseMove(event, timeline) {
+          const visible = this.getZoomedTimelinePoints(timeline);
+          if (!visible || visible.length === 0) return;
+          const rect = event.currentTarget.getBoundingClientRect();
+          const relX = Math.max(0, Math.min(rect.width, event.clientX - rect.left));
+          const svgX = (relX / rect.width) * 600;
+
+          if (this.timelineZoom.isSelecting) {
+            this.timelineZoom.selectCurrentX = svgX;
+          }
+
+          const ratio = relX / rect.width;
+          const idx = Math.min(visible.length - 1, Math.round(ratio * (visible.length - 1)));
+          this.hoveredTimelinePoint = visible[idx];
+          this.hoverTimelineX = Math.round(svgX * 10) / 10;
+        },
+
+        onTimelineMouseUp() {
+          if (!this.timelineZoom.isSelecting) return;
+          this.timelineZoom.isSelecting = false;
+          const x1 = Math.min(this.timelineZoom.selectStartX, this.timelineZoom.selectCurrentX);
+          const x2 = Math.max(this.timelineZoom.selectStartX, this.timelineZoom.selectCurrentX);
+          const minDragPx = 8; // Avoid accidental microscopic clicks
+
+          if (x2 - x1 >= minDragPx) {
+            const currentSpan = this.timelineZoom.endRatio - this.timelineZoom.startRatio;
+            const newStartRatio = this.timelineZoom.startRatio + (x1 / 600) * currentSpan;
+            const newEndRatio = this.timelineZoom.startRatio + (x2 / 600) * currentSpan;
+            this.applyZoomRatios(newStartRatio, newEndRatio);
+          }
+        },
+
+        onTimelineWheel(event) {
+          event.preventDefault();
+          const rect = event.currentTarget.getBoundingClientRect();
+          const cursorRatio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+          const currentSpan = this.timelineZoom.endRatio - this.timelineZoom.startRatio;
+          const zoomFactor = event.deltaY < 0 ? 0.75 : 1.35; // negative = zoom in
+          const targetSpan = Math.max(0.01, Math.min(1.0, currentSpan * zoomFactor));
+
+          const centerPoint = this.timelineZoom.startRatio + cursorRatio * currentSpan;
+          const newStartRatio = centerPoint - cursorRatio * targetSpan;
+          const newEndRatio = centerPoint + (1 - cursorRatio) * targetSpan;
+          this.applyZoomRatios(newStartRatio, newEndRatio);
+        },
+
+        applyZoomRatios(start, end) {
+          let s = Math.max(0.0, Math.min(0.99, start));
+          let e = Math.max(s + 0.01, Math.min(1.0, end));
+          if (e - s < 0.01) {
+            e = Math.min(1.0, s + 0.01);
+          }
+          this.timelineZoom.startRatio = Math.round(s * 1000) / 1000;
+          this.timelineZoom.endRatio = Math.round(e * 1000) / 1000;
+          this.hoveredTimelinePoint = null;
+        },
+
+        zoomInStep() {
+          const currentSpan = this.timelineZoom.endRatio - this.timelineZoom.startRatio;
+          const center = (this.timelineZoom.startRatio + this.timelineZoom.endRatio) / 2;
+          const newSpan = Math.max(0.02, currentSpan * 0.6);
+          this.applyZoomRatios(center - newSpan / 2, center + newSpan / 2);
+        },
+
+        zoomOutStep() {
+          const currentSpan = this.timelineZoom.endRatio - this.timelineZoom.startRatio;
+          const center = (this.timelineZoom.startRatio + this.timelineZoom.endRatio) / 2;
+          const newSpan = Math.min(1.0, currentSpan * 1.6);
+          this.applyZoomRatios(center - newSpan / 2, center + newSpan / 2);
+        },
+
+        panStep(direction) {
+          const span = this.timelineZoom.endRatio - this.timelineZoom.startRatio;
+          const delta = span * 0.25 * direction;
+          let s = this.timelineZoom.startRatio + delta;
+          let e = this.timelineZoom.endRatio + delta;
+          if (s < 0) { e -= s; s = 0; }
+          if (e > 1) { s -= (e - 1); e = 1; }
+          this.applyZoomRatios(s, e);
+        },
+
+        onMiniMapMouseDown(event) {
+          const rect = event.currentTarget.getBoundingClientRect();
+          const clickRatio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+          const span = this.timelineZoom.endRatio - this.timelineZoom.startRatio;
+          // Center the visible window around click
+          this.applyZoomRatios(clickRatio - span / 2, clickRatio + span / 2);
+        },
+
+        getTimeLabelAtRatio(ratio) {
+          if (!this.selectedPhash?.duration_ms) return '—';
+          const ms = Math.round(this.selectedPhash.duration_ms * Math.max(0, Math.min(1, ratio)));
+          return this._formatDurationSec(Math.round(ms / 1000));
+        },
+
+        _formatDurationSec(totalSec) {
+          const h = Math.floor(totalSec / 3600);
+          const m = Math.floor((totalSec % 3600) / 60);
+          const s = totalSec % 60;
+          if (h > 0) {
+            return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+          }
+          return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+        },
+
+        getHoverCursorY() {
+          if (!this.hoveredTimelinePoint || typeof this.hoveredTimelinePoint.delta !== 'number') {
+            return 105;
+          }
+          const maxScale = this.getTimelineMaxScale(this.selectedPhash?.cuts?.timeline);
+          const dVal = (this.hoveredTimelinePoint.delta_mean !== undefined) ? this.hoveredTimelinePoint.delta_mean : this.hoveredTimelinePoint.delta;
+          const clamped = Math.max(0, Math.min(maxScale, dVal));
+          return Math.round((105 - (clamped / maxScale) * 90) * 10) / 10;
+        },
+
+        getDeltaBucketIndex(d) {
+          if (d < 2) return 0;  // 0-1b Statique (Cyan)
+          if (d < 4) return 1;  // 2-3b Doux (Emerald)
+          if (d < 6) return 2;  // 4-5b Modéré (Amber)
+          if (d < 8) return 3;  // 6-7b Rythmé (Orange)
+          if (d < 10) return 4; // 8-9b Vif (Rose)
+          return 5;             // >=10b Coupe (Red)
+        },
+
+        getDeltaBucketColor(d) {
+          const colors = ['#06b6d4', '#10b981', '#f59e0b', '#f97316', '#f43f5e', '#ef4444'];
+          return colors[this.getDeltaBucketIndex(d)] || '#10b981';
+        },
+
+        getDeltaBucketLabel(d) {
+          const labels = ['0-1b Statique', '2-3b Doux', '4-5b Modéré', '6-7b Rythmé', '8-9b Vif', '≥10b Coupe'];
+          return labels[this.getDeltaBucketIndex(d)] || '';
+        },
+
+        getTimelineBucketPaths(timeline) {
+          const visible = this.getZoomedTimelinePoints(timeline);
+          const paths = ['', '', '', '', '', ''];
+          if (!visible || visible.length === 0) return paths;
+
+          const W = 600;
+          const H = 90;
+          const Y_BASE = 105;
+          const maxScale = this.getTimelineMaxScale(timeline);
+
+          const pts = visible.map((pt, i) => {
+            const x = visible.length > 1 ? (i / (visible.length - 1)) * W : W / 2;
+            const dVal = (pt.delta_mean !== undefined) ? pt.delta_mean : pt.delta;
+            const clampedDelta = Math.max(0, Math.min(maxScale, dVal));
+            const y = Y_BASE - (clampedDelta / maxScale) * H;
+            return {
+              x: Math.round(x * 10) / 10,
+              y: Math.round(y * 10) / 10,
+              dVal: dVal,
+              bucket: this.getDeltaBucketIndex(dVal),
+            };
+          });
+
+          for (let i = 0; i < pts.length - 1; i++) {
+            const p1 = pts[i];
+            const p2 = pts[i + 1];
+            // Le segment prend la couleur du niveau d'activité le plus haut entre les 2 trames
+            const bIdx = Math.max(p1.bucket, p2.bucket);
+            paths[bIdx] += `M ${p1.x} ${p1.y} L ${p2.x} ${p2.y} `;
+          }
+          return paths;
         },
 
         openGlossaryTopic(topic) {
