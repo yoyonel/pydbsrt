@@ -22,6 +22,8 @@ Cette référence technique décrit les spécifications formelles des points d'a
 | `GET` | `/favicon.ico` | Favicon SVG vectoriel (zéro erreur 404 dans la console). | $< 1\text{ ms}$ |
 | `GET` | `/api/sources` | Métadonnées statiques des gisements, profils et environnements déclarés. | $< 1\text{ ms}$ |
 | `GET` | `/api/probe` | Exécution synchrone d'une sonde granulaire par canal. | $5\text{ ms}$ (FS) à $3\text{ s}$ (FTP) |
+| `GET` | `/api/files` | Listing paginé, filtré et trié des conteneurs réels d'un canal accessible. | $< 1\text{ ms}$ (cache) à $400\text{ ms}$ (FTP) |
+| `GET` | `/api/file/details` | Inspection multimédia approfondie (`ffprobe`) et statut couplage Zero-DB. | $50\text{ ms}$ (FS) à $1.5\text{ s}$ (FTP) |
 
 ---
 
@@ -149,12 +151,153 @@ Déclenche le test en direct d'un canal d'accès spécifique et renvoie la mesur
 
 ---
 
+### `GET /api/files`
+
+Retourne la liste paginée, filtrée et triée des fichiers vidéo conteneurs et sous-dossiers disponibles sur un canal accessible.
+
+> [!NOTE]
+> **Architecture de Cache Double Étage (Mémoire & Disque)** :
+>
+> 1. **Étage 1 (Mémoire vive)** : TTL de 300 s au sein du démon HTTP local.
+> 2. **Étage 2 (Disque persistant)** : Enregistré dans `~/.cache/dbsrt/portal/listing_<hash>.json`. Partagé universellement entre le démon résident, les nano-ordinateurs (RPi4) et les invocations CLI cPanel sur le cloud distant (`o2switch`), éliminant les latences WAN répétées ($< 1\text{ ms}$ au lieu de $1.2\text{ s}$).
+
+#### Paramètres Query String
+
+| Paramètre | Type | Requis | Défaut | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `source` | `string` | **Oui** | - | Identifiant du gisement (`synology-video`, `synology-tvshow`, etc.). |
+| `profile` | `string` | **Oui** | - | Identifiant du canal (`wan_ftp`, `local`, `cifs`). |
+| `subdir` | `string` | Non | `""` | Sous-répertoire relatif pour la navigation hiérarchique. |
+| `page` | `integer` | Non | `1` | Numéro de la page (commence à 1). |
+| `limit` | `integer` | Non | `25` | Nombre d'éléments par page (`25`, `50`, `100`, max 100). |
+| `q` | `string` | Non | `""` | Requête de recherche syntaxique / fuzzy (titre, année, 4K, 1080p, HEVC, etc.). |
+| `sort` | `string` | Non | `name_asc` | Ordre de tri (`name_asc`, `name_desc`, `size_desc`, `size_asc`, `date_desc`). |
+| `force` | `boolean` | Non | `false` | Forcer l'invalidation du cache et relancer une sonde brute (`1` ou `true`). |
+| `token` | `string` | Non | - | Jeton d'authentification sur passerelle o2switch. |
+
+#### Schéma de Réponse (`200 OK`)
+
+```json
+{
+  "status": "ok",
+  "source_id": "synology-video",
+  "profile_id": "wan_ftp",
+  "subdir": "",
+  "channel_name": "Streaming WAN FTP",
+  "protocol": "ftp",
+  "base_target": "ftp://<user>@<nas_host>:21/video",
+  "total_items": 474,
+  "filtered_items": 2,
+  "page": 1,
+  "limit": 25,
+  "total_pages": 1,
+  "items": [
+    {
+      "name": "Dune (2021)[2160p](fr SRT).mkv",
+      "path": "Dune (2021)[2160p](fr SRT).mkv",
+      "size_bytes": 22344195047,
+      "size_human": "20.81 GB",
+      "is_dir": false,
+      "modify": "2022-02-17 11:21:49",
+      "extension": ".mkv",
+      "parsed": {
+        "title": "Dune",
+        "year": "2021",
+        "resolution": "2160P",
+        "codec": null,
+        "source": null,
+        "audio": null,
+        "language": null
+      }
+    }
+  ]
+}
+```
+
+---
+
+### `GET /api/file/details`
+
+Exécute l'inspection multimédia approfondie via `ffprobe` (ou fallback transparent si non disponible) et vérifie l'existence d'un couplage certifié dans le registre Zero-DB local (`couplings.json`). Les résultats sont mis en cache persistant sur disque (TTL de 24 heures) pour éviter toute ré-analyse superflue.
+
+#### Paramètres Query String
+
+| Paramètre | Type | Requis | Défaut | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `source` | `string` | **Oui** | - | Identifiant du gisement. |
+| `profile` | `string` | **Oui** | - | Identifiant du canal d'accès. |
+| `path` | `string` | **Oui** | - | Chemin relatif du conteneur vidéo à inspecter. |
+| `force` | `boolean` | Non | `false` | Forcer une ré-analyse live `ffprobe` en ignorant le cache (`1` ou `true`). |
+| `token` | `string` | Non | - | Jeton d'authentification sur passerelle o2switch. |
+
+#### Schéma de Réponse (`200 OK`)
+
+```json
+{
+  "status": "ok",
+  "name": "Dune (2021)[2160p](fr SRT).mkv",
+  "path": "Dune (2021)[2160p](fr SRT).mkv",
+  "extension": ".mkv",
+  "size_bytes": 22344195047,
+  "size_human": "20.81 GB",
+  "modify": "2022-02-17 11:21:49",
+  "source_id": "synology-video",
+  "profile_id": "wan_ftp",
+  "uri": "ftp://<nas_host>:21/video/Dune (2021)[2160p](fr SRT).mkv",
+  "parsed": {
+    "title": "Dune",
+    "year": "2021",
+    "resolution": "2160P"
+  },
+  "coupling": null,
+  "probed": true,
+  "reason": "",
+  "duration_seconds": 9354.984,
+  "duration_formatted": "02h 35m 55s",
+  "video": {
+    "codec": "hevc",
+    "codec_long": "H.265 / HEVC",
+    "profile": "Main 10",
+    "width": 3840,
+    "height": 2160,
+    "aspect_ratio": "16:9",
+    "fps": "24000/1001",
+    "pix_fmt": "yuv420p10le"
+  },
+  "audio_streams": [
+    {
+      "index": 1,
+      "codec": "eac3",
+      "channels": 6,
+      "channel_layout": "5.1(side)",
+      "language": "fre",
+      "title": "French"
+    }
+  ],
+  "subtitle_streams": [
+    {
+      "index": 1,
+      "codec": "subrip",
+      "language": "fre",
+      "title": "Forced",
+      "forced": true,
+      "default": true
+    }
+  ]
+}
+```
+
+---
+
 ## 3. Options CLI du Démon (`scripts/portal_server.py`)
 
 Le script supporte à la fois le mode serveur HTTP daemonisé et l'exécution unitaire en ligne de commande pour scripts ou cron jobs :
 
 ```bash
 usage: portal_server.py [-h] [--port PORT] [--metadata] [--probe SOURCE PROFILE]
+                        [--files SOURCE PROFILE] [--subdir SUBDIR] [--page PAGE]
+                        [--limit LIMIT] [--search SEARCH] [--sort SORT]
+                        [--details SOURCE PROFILE PATH]
 
 pydbsrt MediaSources Portal Server
 
@@ -164,6 +307,16 @@ options:
   --metadata            Affiche la structure JSON des métadonnées sources et quitte.
   --probe SOURCE PROFILE
                         Exécute une sonde unique et affiche le JSON résultant.
+  --files SOURCE PROFILE
+                        Liste les fichiers conteneurs du canal spécifié.
+  --subdir SUBDIR       Sous-répertoire au sein du gisement (défaut: racine).
+  --page PAGE           Numéro de la page demandée (défaut: 1).
+  --limit LIMIT         Nombre d'éléments par page (défaut: 25).
+  --search SEARCH       Termes de recherche / filtre (nom, année, 4K, HEVC...).
+  --sort SORT           Ordre de tri (name_asc, name_desc, size_desc, size_asc, date_desc).
+  --details SOURCE PROFILE PATH
+                        Inspecte les caractéristiques multimédia complètes d'un fichier.
+  --force               Ignore le cache disque et force une nouvelle sonde brute.
 ```
 
 ---
@@ -184,3 +337,41 @@ options:
 | `freebox-disks` | `wan_http` | `http_gateway` | `local`, `o2switch` | `TCP 80 / 18089` (Range Gateway) |
 | `freebox-disks` | `rpi4_gateway` | `http_gateway` | `rpi4` | `127.0.0.1:18089/health` |
 | `local-snippets` | `local` | `local_fs` | `local` | `data/snippets` |
+
+---
+
+## 5. Routage Client SPA, État Persistant & Layout Découplé
+
+L'interface web monopage (`sources.html`) implémente un contrat d'état bidirectionnel sans dépendance externe lourde :
+
+### Grammaire du Hash URL
+
+Le fragment d'URL encapsule l'intégralité du contexte d'exploration :
+
+```text
+#view=<sources|explorer>&env=<local|o2switch|rpi4|all>&source=<id>&profile=<id>&subdir=<rel_path>&page=<int>&limit=<int>&q=<query>&sort=<key>&tag=<tag>&file=<rel_path>
+```
+
+| Clé | Type | Rôle | Valeur par défaut |
+| :--- | :--- | :--- | :--- |
+| `view` | `string` | Vue active (`sources` ou `explorer`). | `sources` |
+| `env` | `string` | Filtre d'environnement actif. | Détection dynamique de l'hôte |
+| `source` | `string` | Identifiant du gisement sélectionné. | `""` |
+| `profile` | `string` | Canal d'accès choisi. | `""` |
+| `subdir` | `string` | Sous-chemin relatif dans le gisement. | `""` (racine) |
+| `page` | `integer` | Index de pagination courante. | `1` |
+| `limit` | `integer` | Nombre de conteneurs affichés par page. | `25` |
+| `q` | `string` | Terme de recherche textuelle. | `""` |
+| `sort` | `string` | Critère d'ordonnancement. | `name_asc` |
+| `tag` | `string` | Filtre rapide de définition ou format (`2160p`, `1080p`, `hevc`, `mkv`). | `""` |
+| `file` | `string` | Chemin relatif du média inspecté dans la fiche de détail. | `""` |
+
+### Architecture de Défilement Découplé
+
+Afin de garantir un confort d'usage optimal sans saut de page lors de l'inspection de bibliothèques volumineuses :
+
+1. **Isolation Viewport (`overflow: hidden`)** : En mode explorateur, le conteneur principal (`<main>`) et le `<body>` sont strictement verrouillés en hauteur viewport (`100vh`). La fenêtre racine n'a aucun ascenseur global (`window.scrollY = 0`).
+2. **Double Conteneur Flex Scrollable** :
+   - Le bloc de gauche (Master) possède son propre conteneur scrollable (`overflow-y: auto`) avec barre de pagination et bouton de retour parent épinglés (`shrink-0`).
+   - Le bloc de droite (Detail) possède son propre conteneur scrollable (`overflow-y: auto`) affichant l'intégralité des flux multimédia sans influencer la position de la liste de gauche.
+3. **Thème Sombre Intégral** : La directive `color-scheme: dark` couplée aux pseudo-éléments `::-webkit-scrollbar` et `scrollbar-color` garantit l'affichage exclusif de barres de défilement sombres ardoise/indigo compactes (6px) sur tous les navigateurs modernes (Chromium, Firefox, Safari).

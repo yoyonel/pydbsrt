@@ -80,11 +80,40 @@ Dans le bandeau supérieur de l'interface :
 - **Badge Rouge (`Inaccessible 🔴`)** : Le point de montage est absent, le serveur FTP est injoignable ou la passerelle HTTP est hors ligne.
 - **Auto-Collapse** : Si tous les canaux d'un gisement sont inaccessibles, le bloc se replie automatiquement avec le badge `Tous canaux inaccessibles 🔴`. Cliquez sur l'en-tête pour le déplier à la demande.
 
+### Étape 5 : Explorer et Inspecter les Conteneurs Réels (Master-Detail)
+
+Sur n'importe quel canal marqué **`Accessible 🟢`** avec des conteneurs réels visibles :
+
+1. Cliquez sur le bouton vert **`Explorer →`** ou directement sur la carte du canal.
+2. L'interface bascule instantanément vers la vue explorateur en deux colonnes découplées :
+   - **Colonne gauche (Liste & Filtres)** : Naviguez parmi les conteneurs avec pagination (`25`, `50`, `100`), tri par nom, taille ou date, et filtres rapides (`4K / 2160p`, `1080p`, `HEVC`, `MKV`).
+   - **Recherche Smart/Fuzzy** : Saisissez n'importe quel mot-clé (ex: `Dune 4K`) pour filtrer en temps réel.
+   - **Colonne droite (Fiche Détaillée)** : Cliquez sur un conteneur vidéo pour afficher sa fiche multimédia complète :
+     - Codecs vidéo (`HEVC Main 10`, `H.264`), résolution exacte, cadence d'images (`FPS`), bitrate.
+     - Pistes audio complètes (langues, canaux 5.1/7.1, formats TrueHD/Atmos/DDP).
+     - Pistes de sous-titres intégrées (Full, Forced, SDH).
+     - Statut de couplage certifié Zero-DB (`couplings.json`).
+     - Bouton de copie directe de l'URI réseau ou du chemin local.
+3. Pour revenir à la vue globale des gisements, cliquez sur **`← Sources Médias`** dans le fil d'Ariane.
+
+### Étape 6 : Navigation Persistante & Ascenseurs Découplés
+
+Le portail multimédia intègre un gestionnaire d'état de navigation et un moteur de rendu de défilement découplé :
+
+- **Persistance par URL Hash & F5** :
+  Toute action (changement d'environnement, sélection de source/profil, sous-dossier, filtre de recherche, page courante, média inspecté) est répercutée en direct dans le fragment d'URL (`#view=explorer&env=o2switch&source=synology-tvshow&subdir=Fargo...`). Un rechargement complet de page (`F5`) restaure exactement le même contexte de travail.
+- **Mémoire Contextuelle de Répertoire (`folderStateMap`)** :
+  En entrant dans un sous-dossier (ex: une saison) puis en cliquant sur `📁 ⬆ .. (Dossier parent)`, l'application restaure la page exacte, le tri et la recherche du dossier parent, et applique une brève pulsation lumineuse vert émeraude (`highlightedItemPath`) avec auto-scroll sur le dossier quitté pour ne jamais perdre le repère visuel.
+- **Découplage Strict des Scrollbars (Zéro Scroll Global)** :
+  L'application désactive tout ascenseur de défilement global de fenêtre (`window.scrollY = 0`). La liste de gauche (Master) et la fiche de droite (Detail) disposent chacune de leur propre conteneur de défilement indépendant. Faire défiler les épisodes à gauche ne bouge pas la fiche technique à droite, et inversement.
+- **Thème Sombre Unifié des Barres de Défilement** :
+  Toutes les barres natives blanches inesthétiques sont remplacées par des scrollbars fines (6px) aux tons indigo/ardoise (`scrollbar-color`, `::-webkit-scrollbar` et `color-scheme: dark`), appliquées à l'ensemble des vues, tableaux et tiroirs.
+
 ---
 
 ## 🔍 Vérification en Ligne de Commande (Mode Headless)
 
-Il est possible de tester unitairement une sonde sans ouvrir de navigateur :
+Il est possible de tester unitairement une sonde ou d'explorer les fichiers sans ouvrir de navigateur :
 
 ```bash
 # Tester le flux FTP WAN du NAS Synology
@@ -92,6 +121,12 @@ python3 scripts/portal_server.py --probe synology-video wan_ftp
 
 # Tester la passerelle HTTP Freebox
 python3 scripts/portal_server.py --probe freebox-disks wan_http
+
+# Lister les conteneurs d'un canal (avec filtre et pagination)
+python3 scripts/portal_server.py --files synology-video wan_ftp --search "Dune" --limit 5
+
+# Inspecter les métadonnées multimédia d'un conteneur
+python3 scripts/portal_server.py --details synology-video wan_ftp "Dune (2021)[2160p](fr SRT).mkv"
 
 # Exporter la structure des métadonnées et profils déclarés
 python3 scripts/portal_server.py --metadata
