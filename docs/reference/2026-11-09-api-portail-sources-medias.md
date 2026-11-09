@@ -24,6 +24,8 @@ Cette référence technique décrit les spécifications formelles des points d'a
 | `GET` | `/api/probe` | Exécution synchrone d'une sonde granulaire par canal. | $5\text{ ms}$ (FS) à $3\text{ s}$ (FTP) |
 | `GET` | `/api/files` | Listing paginé, filtré et trié des conteneurs réels d'un canal accessible. | $< 1\text{ ms}$ (cache) à $400\text{ ms}$ (FTP) |
 | `GET` | `/api/file/details` | Inspection multimédia approfondie (`ffprobe`) et statut couplage Zero-DB. | $50\text{ ms}$ (FS) à $1.5\text{ s}$ (FTP) |
+| `GET` | `/api/assets` | Audit paginé, filtré et trié des actifs vidéos répertoriés en base PostgreSQL. | $< 15\text{ ms}$ |
+| `GET` | `/api/asset/details` | Fiche d'inspection technique unitaire d'un actif média en base PostgreSQL. | $< 10\text{ ms}$ |
 
 ---
 
@@ -289,6 +291,141 @@ Exécute l'inspection multimédia approfondie via `ffprobe` (ou fallback transpa
 
 ---
 
+### `GET /api/assets`
+
+Interroge la table relationnelle `medias` dans PostgreSQL (avec fallback transparent sur le binaire `psql` CLI si le module Python `psycopg2` est indisponible sur l'hôte, ex: hébergement mutualisé o2switch). Calcule les KPIs globaux du catalogue, audite la présence physique des fichiers conteneurs, vérifie l'ancrage des sidecars `.phash` sur disque, et clampe automatiquement la pagination si la page demandée dépasse le total d'enregistrements filtrés.
+
+#### Paramètres Query String
+
+| Paramètre | Type | Requis | Défaut | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `page` | `integer` | Non | `1` | Index de la page courante (auto-clampé à 1 si supérieur au nombre de pages). |
+| `limit` | `integer` | Non | `25` | Nombre d'enregistrements par page (`15`, `25`, `50`, `100`). |
+| `status` | `string` | Non | `all` | Filtre métier : `all` (tous), `nominal` (complet & localisé), `missing_phash` (empreinte absente/pending), `unmapped_path` (chemin manquant). |
+| `source` | `string` | Non | `""` | Filtre par identifiant de gisement (`synology-video`, `synology-tvshow`, `local-snippets`). |
+| `q` | `string` | Non | `""` | Recherche textuelle insensible à la casse sur `clean_title`, `name` ou `moviehash`. |
+| `sort` | `string` | Non | `title_asc` | Critère d'ordonnancement : `title_asc`, `title_desc`, `frames_desc`, `duration_desc`, `id_desc`, `id_asc`. |
+| `token` | `string` | Non | - | Jeton d'authentification sur passerelle distante o2switch. |
+
+#### Schéma de Réponse (`200 OK`)
+
+```json
+{
+  "status": "ok",
+  "connected": true,
+  "summary": {
+    "total": 2321,
+    "nominal": 1782,
+    "missing_phash": 398,
+    "unmapped_path": 505
+  },
+  "page": 1,
+  "limit": 25,
+  "total_items": 24,
+  "total_pages": 1,
+  "items": [
+    {
+      "id": 1358,
+      "name": "Carnivàle (2003) - S01E01 - Milfay (1080p AMZN WEBRip x265 Panda).mkv",
+      "clean_title": "Carnivàle",
+      "season": 1,
+      "episode": 1,
+      "year": 2003,
+      "resolution": "1080p",
+      "video_codec": "HEVC",
+      "fps": 24.0,
+      "is_vfr": false,
+      "frame_count": 82950,
+      "expected_frames": 82950,
+      "duration_ms": 3456250,
+      "duration_fmt": "57:36",
+      "file_size_bytes": 1420580922,
+      "file_size_human": "1.32 GB",
+      "moviehash": "8f2a1b9c3e4d5f6a",
+      "media_hash": "dd599e4f1f9b6478edc4b779cd172ff4",
+      "source_id": "synology-tvshow",
+      "video_rel_path": "/tvshow/Carnivàle/Season 01/S01E01.mkv",
+      "physical_exists": true,
+      "physical_resolved_path": "/media/user/Synology/tvshow/Carnivàle/Season 01/S01E01.mkv",
+      "phash_status": "complete",
+      "phash_on_disk": true,
+      "status_tag": "nominal",
+      "alt_channels": [
+        {
+          "id": "wan_ftp",
+          "name": "Streaming WAN FTP (Synology)",
+          "accessible": true,
+          "target": "ftp://user@nas.me:21/tvshow/Carnivàle/Season 01/S01E01.mkv"
+        }
+      ]
+    }
+  ]
+}
+```
+
+---
+
+### `GET /api/asset/details`
+
+Retourne la fiche d'inspection unitaire détaillée pour un média spécifique identifié par son identifiant unique PostgreSQL (`id`).
+
+#### Paramètres Query String
+
+| Paramètre | Type | Requis | Défaut | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `id` | `integer` | **Oui** | - | Identifiant numérique primaire du média (`medias.id`). |
+| `token` | `string` | Non | - | Jeton d'authentification sur passerelle distante o2switch. |
+
+#### Schéma de Réponse (`200 OK`)
+
+```json
+{
+  "status": "ok",
+  "id": 1358,
+  "name": "Carnivàle (2003) - S01E01 - Milfay (1080p AMZN WEBRip x265 Panda).mkv",
+  "clean_title": "Carnivàle",
+  "season": 1,
+  "episode": 1,
+  "year": 2003,
+  "resolution": "1080p",
+  "video_codec": "HEVC",
+  "width": 1920,
+  "height": 1080,
+  "fps": 24.0,
+  "frame_count": 82950,
+  "expected_frames": 82950,
+  "is_vfr": false,
+  "duration_ms": 3456250,
+  "duration_fmt": "57:36",
+  "file_size_bytes": 1420580922,
+  "file_size_human": "1.32 GB",
+  "moviehash": "8f2a1b9c3e4d5f6a",
+  "media_hash": "dd599e4f1f9b6478edc4b779cd172ff4",
+  "video_rel_path": "/tvshow/Carnivàle/Season 01/S01E01.mkv",
+  "source_id": "synology-tvshow",
+  "phash_status": "complete",
+  "phash_path": "data/__PHASH__/8f2a1b9c3e4d5f6a_24fps.phash",
+  "frames_in_db": 82950,
+  "physical_exists": true,
+  "physical_resolved_path": "/media/user/Synology/tvshow/Carnivàle/Season 01/S01E01.mkv",
+  "phash_on_disk": true,
+  "created_at_fmt": "2026-10-24 14:12:00",
+  "updated_at_fmt": "2026-11-09 11:30:15",
+  "alt_channels": [
+    {
+      "id": "wan_ftp",
+      "name": "Streaming WAN FTP (Synology NAS)",
+      "protocol": "ftp",
+      "accessible": true,
+      "target": "ftp://user@nas.me:21/tvshow/Carnivàle/Season 01/S01E01.mkv",
+      "note": "Accessible publiquement via Internet avec authentification pass"
+    }
+  ]
+}
+```
+
+---
+
 ## 3. Options CLI du Démon (`scripts/portal_server.py`)
 
 Le script supporte à la fois le mode serveur HTTP daemonisé et l'exécution unitaire en ligne de commande pour scripts ou cron jobs :
@@ -297,7 +434,9 @@ Le script supporte à la fois le mode serveur HTTP daemonisé et l'exécution un
 usage: portal_server.py [-h] [--port PORT] [--metadata] [--probe SOURCE PROFILE]
                         [--files SOURCE PROFILE] [--subdir SUBDIR] [--page PAGE]
                         [--limit LIMIT] [--search SEARCH] [--sort SORT]
-                        [--details SOURCE PROFILE PATH]
+                        [--details SOURCE PROFILE PATH] [--assets]
+                        [--asset-id ASSET_ID] [--status STATUS]
+                        [--source SOURCE] [--force]
 
 pydbsrt MediaSources Portal Server
 
@@ -313,9 +452,13 @@ options:
   --page PAGE           Numéro de la page demandée (défaut: 1).
   --limit LIMIT         Nombre d'éléments par page (défaut: 25).
   --search SEARCH       Termes de recherche / filtre (nom, année, 4K, HEVC...).
-  --sort SORT           Ordre de tri (name_asc, name_desc, size_desc, size_asc, date_desc).
+  --sort SORT           Ordre de tri (title_asc, title_desc, frames_desc, duration_desc, id_desc).
   --details SOURCE PROFILE PATH
                         Inspecte les caractéristiques multimédia complètes d'un fichier.
+  --assets              Interroge et audite les actifs vidéo de PostgreSQL 17.
+  --asset-id ASSET_ID   Affiche la fiche détaillée d'un actif média par son ID PostgreSQL.
+  --status STATUS       Filtre de statut métier pour les actifs (all, nominal, missing_phash, unmapped_path).
+  --source SOURCE       Filtre de gisement pour les actifs ou les conteneurs.
   --force               Ignore le cache disque et force une nouvelle sonde brute.
 ```
 
@@ -346,25 +489,26 @@ L'interface web monopage (`sources.html`) implémente un contrat d'état bidirec
 
 ### Grammaire du Hash URL
 
-Le fragment d'URL encapsule l'intégralité du contexte d'exploration :
+Le fragment d'URL encapsule l'intégralité du contexte d'exploration et d'audit :
 
 ```text
-#view=<sources|explorer>&env=<local|o2switch|rpi4|all>&source=<id>&profile=<id>&subdir=<rel_path>&page=<int>&limit=<int>&q=<query>&sort=<key>&tag=<tag>&file=<rel_path>
+#view=<sources|explorer|assets>&env=<local|o2switch|rpi4|all>&source=<id>&profile=<id>&subdir=<rel_path>&page=<int>&limit=<int>&q=<query>&sort=<key>&tag=<tag>&file=<rel_path>&status=<status>
 ```
 
 | Clé | Type | Rôle | Valeur par défaut |
 | :--- | :--- | :--- | :--- |
-| `view` | `string` | Vue active (`sources` ou `explorer`). | `sources` |
+| `view` | `string` | Vue active (`sources`, `explorer` ou `assets`). | `sources` |
 | `env` | `string` | Filtre d'environnement actif. | Détection dynamique de l'hôte |
+| `status` | `string` | Filtre de statut pour les actifs médias (`all`, `nominal`, `missing_phash`, `unmapped_path`). | `all` |
 | `source` | `string` | Identifiant du gisement sélectionné. | `""` |
-| `profile` | `string` | Canal d'accès choisi. | `""` |
-| `subdir` | `string` | Sous-chemin relatif dans le gisement. | `""` (racine) |
-| `page` | `integer` | Index de pagination courante. | `1` |
-| `limit` | `integer` | Nombre de conteneurs affichés par page. | `25` |
+| `profile` | `string` | Canal d'accès choisi (vue explorer). | `""` |
+| `subdir` | `string` | Sous-chemin relatif dans le gisement (vue explorer). | `""` (racine) |
+| `page` | `integer` | Index de pagination courante (auto-reset à 1 lors de filtre ou recherche). | `1` |
+| `limit` | `integer` | Nombre d'enregistrements par page. | `25` |
 | `q` | `string` | Terme de recherche textuelle. | `""` |
-| `sort` | `string` | Critère d'ordonnancement. | `name_asc` |
+| `sort` | `string` | Critère d'ordonnancement. | `name_asc` (explorer) / `title_asc` (assets) |
 | `tag` | `string` | Filtre rapide de définition ou format (`2160p`, `1080p`, `hevc`, `mkv`). | `""` |
-| `file` | `string` | Chemin relatif du média inspecté dans la fiche de détail. | `""` |
+| `file` | `string` | Chemin relatif du média inspecté dans la fiche de détail (vue explorer). | `""` |
 
 ### Architecture de Défilement Découplé
 
