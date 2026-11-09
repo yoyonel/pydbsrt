@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Sources Médias & Accès Réseau | pydbsrt Studio</title>
+  <title>Sources Médias & Explorateur | pydbsrt Studio</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎬</text></svg>">
   <script>
     // Suppress development banner from Tailwind CDN
@@ -16,6 +16,9 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
   <style>
+    :root, html {
+      color-scheme: dark;
+    }
     [x-cloak] { display: none !important; }
     @keyframes pulse-subtle {
       0%, 100% { opacity: 1; }
@@ -24,19 +27,54 @@
     .animate-pulse-subtle {
       animation: pulse-subtle 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
     }
+
+    /* Universal sleek dark custom scrollbars matching studio theme */
+    *, html, body {
+      scrollbar-width: thin;
+      scrollbar-color: rgba(99, 102, 241, 0.45) rgba(15, 23, 42, 0.7);
+    }
+    ::-webkit-scrollbar, *::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track, *::-webkit-scrollbar-track {
+      background: rgba(15, 23, 42, 0.6);
+      border-radius: 9999px;
+    }
+    ::-webkit-scrollbar-thumb, *::-webkit-scrollbar-thumb {
+      background: rgba(99, 102, 241, 0.4);
+      border-radius: 9999px;
+      border: 1px solid rgba(15, 23, 42, 0.8);
+      transition: background 0.2s ease;
+    }
+    ::-webkit-scrollbar-thumb:hover, *::-webkit-scrollbar-thumb:hover {
+      background: rgba(99, 102, 241, 0.8);
+    }
+    ::-webkit-scrollbar-corner, *::-webkit-scrollbar-corner {
+      background: transparent;
+    }
+
+    /* Dedicated independent pane scroll styling */
+    .custom-scroll {
+      scrollbar-gutter: stable;
+    }
   </style>
 </head>
-<body class="h-full flex flex-col font-sans antialiased" x-data="mediaSourcesApp()" x-init="initApp()" x-cloak>
+<body class="h-screen overflow-hidden flex flex-col font-sans antialiased bg-slate-950 text-slate-100" x-data="mediaSourcesApp()" x-init="initApp()" x-cloak>
 
   <!-- Top Navigation Bar -->
   <header class="bg-slate-900 border-b border-slate-800 px-6 py-3 flex items-center justify-between shadow-md">
     <div class="flex items-center gap-6">
-      <div class="flex items-center gap-2">
+      <div class="flex items-center gap-2 cursor-pointer" @click="closeExplorer()">
         <span class="text-xl">🎬</span>
         <span class="font-bold tracking-tight text-white text-lg">PYDBSRT <span class="text-indigo-400 text-xs px-2 py-0.5 rounded bg-indigo-950/60 border border-indigo-800">STUDIO</span></span>
       </div>
       <nav class="flex items-center gap-1.5 text-sm">
-        <span class="px-3 py-1.5 rounded-md bg-indigo-600/20 text-indigo-300 font-medium border border-indigo-500/30">Sources Médias (Physique)</span>
+        <button @click="closeExplorer()"
+                class="px-3 py-1.5 rounded-md font-medium transition"
+                :class="currentView === 'sources' ? 'bg-indigo-600/20 text-indigo-300 border border-indigo-500/30' : 'text-slate-400 hover:text-white'">
+          Sources Médias (Physique)
+        </button>
         <span class="px-3 py-1.5 rounded-md text-slate-500/60 cursor-not-allowed select-none flex items-center gap-1.5" title="Page en cours de spécification">
           <span>Actifs Médias (DB)</span>
           <span class="text-[9px] uppercase font-mono px-1.5 py-0.2 rounded bg-slate-900 text-slate-500 border border-slate-800">Bientôt</span>
@@ -48,7 +86,7 @@
       </nav>
     </div>
 
-    <!-- Active Host Context, Environment Selector & Re-Probe Action -->
+    <!-- Active Host Context, Environment Selector & Actions -->
     <div class="flex items-center gap-3">
       <div class="text-xs text-slate-400 flex items-center gap-2 bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800">
         <span>💻 Hôte :</span>
@@ -67,161 +105,555 @@
 
       <button @click="probeAllProfiles()" :disabled="probingAny" class="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs font-semibold text-white shadow flex items-center gap-1.5 transition">
         <span :class="{'animate-spin': probingAny}">⚡</span>
-        <span x-text="probingAny ? 'Diagnostic en cours...' : 'Tester Accessibilité Directe'"></span>
+        <span x-text="probingAny ? 'Diagnostic...' : 'Tester Accessibilité'"></span>
       </button>
     </div>
   </header>
 
-  <!-- Main Content -->
-  <main class="flex-1 overflow-y-auto p-6 max-w-7xl mx-auto w-full space-y-6">
+  <!-- Main Content Area -->
+  <main class="flex-1 p-6 max-w-7xl mx-auto w-full flex flex-col min-h-0"
+        :class="currentView === 'sources' ? 'overflow-y-auto space-y-6 custom-scroll' : 'overflow-hidden'">
 
-    <!-- Page Header -->
-    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-2 border-b border-slate-800/60">
-      <div>
-        <h1 class="text-2xl font-bold tracking-tight text-white flex items-center gap-2">
-          Sources Médias : Accès Réseau & Disques
-          <span class="text-xs font-normal text-slate-400 bg-slate-800/60 px-2.5 py-0.5 rounded-full border border-slate-700/50" x-text="visibleSources().length + ' gisements applicables'"></span>
-        </h1>
-        <p class="text-xs text-slate-400 mt-1">Diagnostic d'accessibilité physique des conteneurs vidéo (.mkv, .mp4) depuis cet hôte (Disques locaux, partages CIFS, flux FTP WAN, passerelle HTTP).</p>
+    <!-- ================================================================= -->
+    <!-- VIEW 1: SOURCES MÉDIAS DASHBOARD (OVERVIEW)                      -->
+    <!-- ================================================================= -->
+    <div x-show="currentView === 'sources'" x-transition.opacity.duration.200ms class="space-y-6">
+
+      <!-- Page Header -->
+      <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-2 border-b border-slate-800/60">
+        <div>
+          <h1 class="text-2xl font-bold tracking-tight text-white flex items-center gap-2">
+            Sources Médias : Accès Réseau & Disques
+            <span class="text-xs font-normal text-slate-400 bg-slate-800/60 px-2.5 py-0.5 rounded-full border border-slate-700/50" x-text="visibleSources().length + ' gisements applicables'"></span>
+          </h1>
+          <p class="text-xs text-slate-400 mt-1">Diagnostic d'accessibilité physique des conteneurs vidéo (.mkv, .mp4). Cliquez sur un canal vert pour explorer ses conteneurs réels.</p>
+        </div>
+
+        <div class="flex items-center gap-3 text-xs">
+          <div class="flex items-center gap-1.5 bg-slate-900 border border-slate-800 rounded-lg p-1">
+            <button @click="expandAll(true)" class="px-2.5 py-1 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition">Tout Déplier</button>
+            <span class="text-slate-700">|</span>
+            <button @click="expandAll(false)" class="px-2.5 py-1 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition">Tout Replier</button>
+          </div>
+          <div class="text-slate-500 font-mono pl-2">
+            <span x-text="completedProbesCount + ' / ' + totalProbesCount + ' canaux sondés'"></span>
+          </div>
+        </div>
       </div>
 
-      <div class="flex items-center gap-3 text-xs">
-        <div class="flex items-center gap-1.5 bg-slate-900 border border-slate-800 rounded-lg p-1">
-          <button @click="expandAll(true)" class="px-2.5 py-1 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition">Tout Déplier</button>
-          <span class="text-slate-700">|</span>
-          <button @click="expandAll(false)" class="px-2.5 py-1 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition">Tout Replier</button>
-        </div>
-        <div class="text-slate-500 font-mono pl-2">
-          <span x-text="completedProbesCount + ' / ' + totalProbesCount + ' canaux sondés'"></span>
-        </div>
-      </div>
-    </div>
+      <!-- Sources Cards -->
+      <div class="grid grid-cols-1 gap-5">
+        <template x-for="source in visibleSources()" :key="source.id">
+          <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-lg transition"
+               :class="source.collapsed ? 'border-slate-800/80 hover:border-slate-700' : 'space-y-4 hover:border-slate-700/80'">
 
-    <!-- Sources Cards -->
-    <div class="grid grid-cols-1 gap-5">
-      <template x-for="source in visibleSources()" :key="source.id">
-        <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-lg transition"
-             :class="source.collapsed ? 'border-slate-800/80 hover:border-slate-700' : 'space-y-4 hover:border-slate-700/80'">
+            <!-- Card Header (Clickable Accordion) -->
+            <div class="flex flex-col md:flex-row md:items-center justify-between gap-2 cursor-pointer select-none group"
+                 :class="source.collapsed ? '' : 'border-b border-slate-800/80 pb-3'"
+                 @click="toggleCollapse(source)">
 
-          <!-- Card Header (Clickable Accordion) -->
-          <div class="flex flex-col md:flex-row md:items-center justify-between gap-2 cursor-pointer select-none group"
-               :class="source.collapsed ? '' : 'border-b border-slate-800/80 pb-3'"
-               @click="toggleCollapse(source)">
+              <div class="flex items-center gap-3">
+                <svg class="w-4 h-4 text-slate-400 group-hover:text-indigo-400 transition-transform duration-200"
+                     :class="source.collapsed ? '-rotate-90' : 'rotate-0'"
+                     fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7"></path>
+                </svg>
 
-            <div class="flex items-center gap-3">
-              <!-- Chevron Indicator -->
-              <svg class="w-4 h-4 text-slate-400 group-hover:text-indigo-400 transition-transform duration-200"
-                   :class="source.collapsed ? '-rotate-90' : 'rotate-0'"
-                   fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7"></path>
-              </svg>
+                <span class="px-2.5 py-1 rounded bg-slate-800 border border-slate-700 text-xs font-mono font-bold text-indigo-300" x-text="source.id"></span>
+                <h2 class="text-lg font-bold text-white tracking-tight group-hover:text-indigo-200 transition" x-text="source.name"></h2>
 
-              <span class="px-2.5 py-1 rounded bg-slate-800 border border-slate-700 text-xs font-mono font-bold text-indigo-300" x-text="source.id"></span>
-              <h2 class="text-lg font-bold text-white tracking-tight group-hover:text-indigo-200 transition" x-text="source.name"></h2>
+                <template x-if="source.collapsed && sourceAccessibleCount(source) > 0">
+                  <span class="px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-800 flex items-center gap-1">
+                    <span>🟢</span>
+                    <span x-text="sourceAccessibleCount(source) + ' accessible' + (sourceAccessibleCount(source) > 1 ? 's' : '')"></span>
+                    <span class="text-slate-400 font-normal" x-show="maxFilesCount(source) > 0" x-text="'(' + maxFilesCount(source) + ' fichiers)'"></span>
+                  </span>
+                </template>
 
-              <!-- Collapsed Summary Badges -->
-              <template x-if="source.collapsed">
-                <div class="flex items-center gap-2 ml-2">
-                  <template x-if="filteredProfiles(source).length === 0">
-                    <span class="px-2 py-0.5 rounded text-[11px] font-medium bg-slate-800/80 text-slate-500 border border-slate-700/50">
-                      Non applicable à ce profil
-                    </span>
-                  </template>
-                  <template x-if="filteredProfiles(source).length > 0 && sourceAnyAccessible(source)">
-                    <span class="px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-800 flex items-center gap-1.5">
-                      <span>Accessible 🟢</span>
-                      <span class="text-emerald-300/80 font-normal" x-text="'(' + maxFilesCount(source) + ' fichiers réels)'"></span>
-                    </span>
-                  </template>
-                  <template x-if="filteredProfiles(source).length > 0 && !sourceAnyAccessible(source) && !sourceAnyPending(source)">
-                    <span class="px-2 py-0.5 rounded text-[11px] font-bold bg-rose-950/80 text-rose-400 border border-rose-900">
-                      Tous canaux inaccessibles 🔴
-                    </span>
-                  </template>
-                  <template x-if="filteredProfiles(source).length > 0 && sourceAnyPending(source)">
-                    <span class="px-2 py-0.5 rounded text-[11px] font-medium bg-slate-800 text-slate-400 border border-slate-700 animate-pulse-subtle">
-                      Test en cours...
-                    </span>
-                  </template>
+                <template x-if="source.collapsed && !sourceAnyPending(source) && sourceAccessibleCount(source) === 0">
+                  <span class="px-2 py-0.5 rounded text-[11px] font-bold bg-rose-950 text-rose-400 border border-rose-900">
+                    Tous canaux inaccessibles 🔴
+                  </span>
+                </template>
+              </div>
+
+              <div class="flex items-center gap-4">
+                <p class="text-xs text-slate-400 hidden sm:block" x-text="source.description"></p>
+                <span class="text-[11px] text-slate-500 font-medium group-hover:text-slate-300 transition"
+                      x-text="source.collapsed ? 'Déplier ▾' : 'Replier ▴'"></span>
+              </div>
+            </div>
+
+            <!-- Channel Profiles Grid (Collapsible) -->
+            <div x-show="!source.collapsed" x-transition.opacity.duration.200ms class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <template x-for="prof in filteredProfiles(source)" :key="prof.id">
+                <div class="bg-slate-950/80 border rounded-xl p-4 flex flex-col justify-between space-y-3 transition-all duration-200 group/card"
+                     :class="{
+                       'border-slate-800 opacity-60 animate-pulse-subtle': prof.status === 'pending',
+                       'border-emerald-700/80 shadow-[0_0_20px_rgba(16,185,129,0.08)] opacity-100 hover:border-emerald-500 hover:bg-slate-900/90 cursor-pointer': prof.accessible && prof.files_count > 0,
+                       'border-emerald-900/50 opacity-100': prof.status === 'online' && (!prof.files_count || prof.files_count === 0),
+                       'border-slate-800 opacity-90': prof.status === 'unmounted' || prof.status === 'offline' || prof.status === 'missing'
+                     }"
+                     @click="if (prof.accessible && prof.files_count > 0) openExplorer(source, prof)">
+
+                  <div>
+                    <!-- Profile Header -->
+                    <div class="flex items-center justify-between">
+                      <span class="text-xs font-semibold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+                        <span x-text="prof.protocol === 'local_fs' ? '💾' : (prof.protocol === 'ftp' ? '🌐' : '⚡')"></span>
+                        <span x-text="prof.name"></span>
+                      </span>
+
+                      <!-- Badge Status -->
+                      <template x-if="prof.status === 'pending'">
+                        <span class="px-2 py-0.5 rounded text-[11px] font-medium bg-slate-800 text-slate-400 border border-slate-700 flex items-center gap-1">
+                          <span class="inline-block w-1.5 h-1.5 rounded-full bg-slate-500 animate-ping"></span>
+                          <span>Vérification...</span>
+                        </span>
+                      </template>
+                      <template x-if="prof.status === 'online'">
+                        <span class="px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-800">
+                          Accessible 🟢
+                        </span>
+                      </template>
+                      <template x-if="prof.status !== 'pending' && prof.status !== 'online'">
+                        <span class="px-2 py-0.5 rounded text-[11px] font-bold bg-rose-950 text-rose-400 border border-rose-900">
+                          Inaccessible 🔴
+                        </span>
+                      </template>
+                    </div>
+
+                    <!-- Target URI -->
+                    <div class="mt-2">
+                      <code class="text-[11px] text-indigo-300 font-mono break-all bg-slate-900 px-2 py-1 rounded block border border-slate-800" x-text="prof.target"></code>
+                    </div>
+
+                    <!-- Diagnostic Reason / Latency -->
+                    <div class="mt-2 text-xs flex items-center justify-between">
+                      <span class="text-slate-400" x-text="prof.status === 'pending' ? 'Test du canal en cours...' : (prof.reason || 'Prêt')"></span>
+                      <span class="text-[10px] font-mono text-slate-500" x-show="prof.latency_ms" x-text="prof.latency_ms + ' ms'"></span>
+                    </div>
+                  </div>
+
+                  <!-- Footer Metric & Explorer CTA -->
+                  <div class="border-t border-slate-800/80 pt-2 flex items-center justify-between">
+                    <span class="text-xs text-slate-500 font-medium">Conteneurs vidéo visibles :</span>
+                    <template x-if="prof.status === 'pending'">
+                      <span class="text-xs font-mono text-slate-600">Calcul...</span>
+                    </template>
+                    <template x-if="prof.status !== 'pending'">
+                      <div class="flex items-center gap-2">
+                        <span class="text-sm font-bold font-mono"
+                              :class="prof.files_count > 0 ? 'text-emerald-400' : 'text-slate-500'"
+                              x-text="prof.files_count > 0 ? prof.files_count + ' fichiers réels' : '0 fichier'"></span>
+                        <template x-if="prof.accessible && prof.files_count > 0">
+                          <button @click.stop="openExplorer(source, prof)"
+                                  class="text-[11px] px-2 py-0.5 rounded bg-emerald-950/80 border border-emerald-700 text-emerald-300 font-semibold group-hover/card:bg-emerald-600 group-hover/card:text-white transition flex items-center gap-1 shadow cursor-pointer">
+                            <span>Explorer</span>
+                            <span>→</span>
+                          </button>
+                        </template>
+                      </div>
+                    </template>
+                  </div>
+
                 </div>
               </template>
             </div>
 
-            <div class="flex items-center gap-4">
-              <p class="text-xs text-slate-400 hidden sm:block" x-text="source.description"></p>
-              <span class="text-[11px] text-slate-500 font-medium group-hover:text-slate-300 transition"
-                    x-text="source.collapsed ? 'Déplier ▾' : 'Replier ▴'"></span>
-            </div>
           </div>
+        </template>
+      </div>
 
-          <!-- Channel Profiles Grid (Collapsible) -->
-          <div x-show="!source.collapsed" x-transition.opacity.duration.200ms class="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <template x-for="prof in filteredProfiles(source)" :key="prof.id">
-                <div class="bg-slate-950/80 border rounded-xl p-4 flex flex-col justify-between space-y-3 transition-colors duration-300"
-                     :class="{
-                       'border-slate-800 opacity-60 animate-pulse-subtle': prof.status === 'pending',
-                       'border-emerald-800/60 shadow-[0_0_15px_rgba(16,185,129,0.05)] opacity-100': prof.status === 'online',
-                       'border-slate-800 opacity-90': prof.status === 'unmounted' || prof.status === 'offline' || prof.status === 'missing'
-                     }">
+    </div>
 
-                <div>
-                  <!-- Profile Header -->
-                  <div class="flex items-center justify-between">
-                    <span class="text-xs font-semibold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
-                      <span x-text="prof.protocol === 'local_fs' ? '💾' : (prof.protocol === 'ftp' ? '🌐' : '⚡')"></span>
-                      <span x-text="prof.name"></span>
-                    </span>
+    <!-- ================================================================= -->
+    <!-- VIEW 2: MASTER-DETAIL FILE EXPLORER (PROPOSITION 1)              -->
+    <!-- ================================================================= -->
+    <div x-show="currentView === 'explorer'" x-transition.opacity.duration.200ms class="flex-1 min-h-0 flex flex-col space-y-3 overflow-hidden">
 
-                    <!-- Badge Status -->
-                    <template x-if="prof.status === 'pending'">
-                      <span class="px-2 py-0.5 rounded text-[11px] font-medium bg-slate-800 text-slate-400 border border-slate-700 flex items-center gap-1">
-                        <span class="inline-block w-1.5 h-1.5 rounded-full bg-slate-500 animate-ping"></span>
-                        <span>Vérification...</span>
-                      </span>
-                    </template>
-                    <template x-if="prof.status === 'online'">
-                      <span class="px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-800">
-                        Accessible 🟢
-                      </span>
-                    </template>
-                    <template x-if="prof.status !== 'pending' && prof.status !== 'online'">
-                      <span class="px-2 py-0.5 rounded text-[11px] font-bold bg-rose-950 text-rose-400 border border-rose-900">
-                        Inaccessible 🔴
-                      </span>
-                    </template>
-                  </div>
+      <!-- Breadcrumb Navigation & Top Action Bar -->
+      <div class="shrink-0 flex flex-col md:flex-row md:items-center justify-between gap-4 pb-2 border-b border-slate-800">
+        <div class="flex items-center gap-2 flex-wrap text-sm">
+          <button @click="closeExplorer()" class="px-2.5 py-1 rounded bg-slate-900 hover:bg-slate-800 text-indigo-400 font-medium border border-slate-800 flex items-center gap-1 transition shadow-sm cursor-pointer">
+            <span>←</span>
+            <span>Sources Médias</span>
+          </button>
+          <span class="text-slate-600">/</span>
+          <span class="text-slate-200 font-bold" x-text="explorerSource?.name"></span>
+          <span class="text-slate-600">/</span>
+          <button @click="navigateToSubdirSegment('')"
+                  class="text-emerald-400 hover:text-emerald-300 font-semibold flex items-center gap-1.5 cursor-pointer hover:underline"
+                  title="Revenir à la racine du gisement">
+            <span x-text="explorerProfile?.protocol === 'local_fs' ? '💾' : (explorerProfile?.protocol === 'ftp' ? '🌐' : '⚡')"></span>
+            <span x-text="explorerProfile?.name"></span>
+          </button>
+          <template x-for="(seg, idx) in subdirSegments()" :key="seg.path">
+            <div class="flex items-center gap-1.5">
+              <span class="text-slate-600">/</span>
+              <button @click="navigateToSubdirSegment(seg.path)"
+                      class="text-xs font-mono px-2 py-0.5 rounded border transition cursor-pointer"
+                      :class="idx === subdirSegments().length - 1 ? 'bg-indigo-950/80 text-indigo-200 border-indigo-700 font-bold' : 'bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800 hover:text-white'"
+                      x-text="seg.name"></button>
+            </div>
+          </template>
+          <template x-if="explorerSubdir">
+            <button @click="navigateUpSubdir()" class="text-xs text-slate-400 hover:text-white underline ml-1 cursor-pointer" title="Remonter au dossier parent">(parent ⬆)</button>
+          </template>
+        </div>
 
-                  <!-- Target URI -->
-                  <div class="mt-2">
-                    <code class="text-[11px] text-indigo-300 font-mono break-all bg-slate-900 px-2 py-1 rounded block border border-slate-800" x-text="prof.target"></code>
-                  </div>
+        <div class="flex items-center gap-3 text-xs">
+          <span class="text-slate-400 font-mono bg-slate-900 px-2.5 py-1 rounded border border-slate-800"
+                x-text="explorerData ? (explorerData.filtered_items + ' / ' + explorerData.total_items + ' conteneurs') : 'Chargement...'"></span>
+          <button @click="refreshExplorer()" class="p-1.5 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 transition" title="Rafraîchir la liste">
+            <span :class="{'animate-spin inline-block': explorerLoading}">🔄</span>
+          </button>
+        </div>
+      </div>
 
-                  <!-- Diagnostic Reason / Error -->
-                  <div class="mt-2 text-xs flex items-center justify-between">
-                    <span class="text-slate-400" x-text="prof.status === 'pending' ? 'Test du canal en cours...' : (prof.reason || 'Prêt')"></span>
-                    <span class="text-[10px] font-mono text-slate-500" x-show="prof.latency_ms" x-text="prof.latency_ms + ' ms'"></span>
+      <!-- Controls Bar: Smart Fuzzy Search, Quick Tags, Sort & Pagination Limit -->
+      <div class="shrink-0 bg-slate-900 border border-slate-800 rounded-xl p-3 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 shadow">
+        <!-- Search Input -->
+        <div class="relative flex-1">
+          <span class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">🔍</span>
+          <input type="text"
+                 x-model="explorerQuery"
+                 @input.debounce.250ms="fetchExplorerFiles(1)"
+                 placeholder="Filtrer par titre, année, 4K, 1080p, HEVC, REMUX..."
+                 class="w-full pl-9 pr-8 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition">
+          <button x-show="explorerQuery" @click="clearSearch()" class="absolute inset-y-0 right-0 pr-2.5 flex items-center text-slate-500 hover:text-slate-300">✕</button>
+        </div>
+
+        <!-- Quick Definition / Codec Tags -->
+        <div class="flex items-center gap-1.5 flex-wrap text-[11px]">
+          <button @click="setTagFilter('')" :class="!explorerTag ? 'bg-indigo-600 text-white font-bold' : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'" class="px-2 py-1 rounded transition">Tous</button>
+          <button @click="setTagFilter('2160p')" :class="explorerTag === '2160p' ? 'bg-indigo-600 text-white font-bold' : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'" class="px-2 py-1 rounded transition">4K / 2160p</button>
+          <button @click="setTagFilter('1080p')" :class="explorerTag === '1080p' ? 'bg-indigo-600 text-white font-bold' : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'" class="px-2 py-1 rounded transition">1080p</button>
+          <button @click="setTagFilter('hevc')" :class="explorerTag === 'hevc' ? 'bg-indigo-600 text-white font-bold' : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'" class="px-2 py-1 rounded transition">HEVC</button>
+          <button @click="setTagFilter('mkv')" :class="explorerTag === 'mkv' ? 'bg-indigo-600 text-white font-bold' : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'" class="px-2 py-1 rounded transition">MKV</button>
+        </div>
+
+        <!-- Sort & Items Per Page -->
+        <div class="flex items-center gap-2 text-xs">
+          <select x-model="explorerSort" @change="fetchExplorerFiles(1)" class="bg-slate-950 border border-slate-800 text-xs text-indigo-300 rounded px-2.5 py-1.5 focus:outline-none cursor-pointer">
+            <option value="name_asc">Nom (A → Z)</option>
+            <option value="name_desc">Nom (Z → A)</option>
+            <option value="size_desc">Taille (⬇ Lourd)</option>
+            <option value="size_asc">Taille (⬆ Léger)</option>
+            <option value="date_desc">Date récente</option>
+          </select>
+
+          <select x-model="explorerLimit" @change="fetchExplorerFiles(1)" class="bg-slate-950 border border-slate-800 text-xs text-slate-300 rounded px-2.5 py-1.5 focus:outline-none cursor-pointer">
+            <option value="25">25 / page</option>
+            <option value="50">50 / page</option>
+            <option value="100">100 / page</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Master-Detail Grid (2 Columns) -->
+      <div class="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch overflow-hidden">
+
+        <!-- ============================================================= -->
+        <!-- LEFT COLUMN: Files List (Master) - 7 cols                     -->
+        <!-- ============================================================= -->
+        <div class="lg:col-span-7 flex flex-col min-h-0 h-full space-y-2">
+
+          <!-- Parent directory navigation row -->
+          <template x-if="explorerSubdir">
+            <div @click="navigateUpSubdir()" class="shrink-0 p-2.5 rounded-lg bg-slate-900/60 border border-slate-800 hover:bg-slate-800/80 cursor-pointer flex items-center gap-2 text-xs text-indigo-300 font-semibold transition">
+              <span>📁 ⬆</span>
+              <span>.. (Dossier parent)</span>
+            </div>
+          </template>
+
+          <!-- Scrollable files container -->
+          <div class="flex-1 min-h-0 overflow-y-auto pr-2 space-y-2 custom-scroll">
+            <!-- Empty state -->
+            <template x-if="!explorerLoading && explorerFiles.length === 0">
+              <div class="bg-slate-900/40 border border-slate-800/80 rounded-xl p-8 text-center text-slate-400 space-y-2">
+                <span class="text-3xl block">🔍</span>
+                <p class="font-medium text-slate-300">Aucun fichier conteneur correspondant aux critères.</p>
+                <p class="text-xs text-slate-500">Modifiez votre recherche ou réinitialisez les filtres.</p>
+              </div>
+            </template>
+
+            <!-- Loading Skeleton -->
+            <template x-if="explorerLoading">
+              <div class="space-y-2">
+                <div class="h-16 bg-slate-900/60 rounded-xl animate-pulse border border-slate-800"></div>
+                <div class="h-16 bg-slate-900/60 rounded-xl animate-pulse border border-slate-800"></div>
+                <div class="h-16 bg-slate-900/60 rounded-xl animate-pulse border border-slate-800"></div>
+              </div>
+            </template>
+
+            <!-- Items List -->
+            <div class="space-y-2" x-show="!explorerLoading && explorerFiles.length > 0">
+            <template x-for="item in explorerFiles" :key="item.path">
+              <div :id="'item-' + itemDomId(item.path)"
+                   @click="onItemClick(item)"
+                   class="p-3 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-3 select-none"
+                   :class="{
+                     'bg-slate-900/70 border-slate-800 hover:border-slate-700 hover:bg-slate-900': selectedItem?.path !== item.path && highlightedItemPath !== item.path,
+                     'bg-indigo-950/40 border-indigo-500 shadow-[0_0_15px_rgba(99,102,241,0.15)] ring-1 ring-indigo-500/50': selectedItem?.path === item.path && highlightedItemPath !== item.path,
+                     'bg-emerald-950/40 border-emerald-500 shadow-[0_0_20px_rgba(16,185,129,0.3)] ring-2 ring-emerald-500 animate-pulse': highlightedItemPath === item.path
+                   }">
+                <div class="flex items-start gap-2.5 min-w-0">
+                  <span class="text-lg mt-0.5 shrink-0" x-text="item.is_dir ? '📁' : '🎬'"></span>
+                  <div class="min-w-0">
+                    <div class="flex items-center gap-2 flex-wrap">
+                      <span class="font-semibold text-xs text-white truncate" x-text="item.parsed?.title || item.name"></span>
+                      <span class="text-[10px] text-slate-400" x-show="item.parsed?.year" x-text="'(' + item.parsed?.year + ')'"></span>
+                    </div>
+                    <div class="text-[11px] font-mono text-slate-400 truncate mt-0.5" x-text="item.name"></div>
+
+                    <!-- Tags & Badges -->
+                    <div class="flex items-center gap-1.5 flex-wrap mt-1.5 text-[10px]">
+                      <template x-if="item.is_dir">
+                        <span class="px-1.5 py-0.2 rounded bg-amber-950/60 text-amber-300 border border-amber-800 font-medium">Dossier</span>
+                      </template>
+                      <template x-if="!item.is_dir && item.parsed?.resolution">
+                        <span class="px-1.5 py-0.2 rounded font-bold"
+                              :class="item.parsed.resolution.includes('2160') || item.parsed.resolution.includes('4K') ? 'bg-purple-950 text-purple-300 border border-purple-800' : 'bg-blue-950 text-blue-300 border border-blue-800'"
+                              x-text="item.parsed.resolution"></span>
+                      </template>
+                      <template x-if="!item.is_dir && item.parsed?.codec">
+                        <span class="px-1.5 py-0.2 rounded bg-emerald-950 text-emerald-300 border border-emerald-800 font-mono" x-text="item.parsed.codec"></span>
+                      </template>
+                      <template x-if="!item.is_dir && item.parsed?.source">
+                        <span class="px-1.5 py-0.2 rounded bg-slate-800 text-slate-300 border border-slate-700" x-text="item.parsed.source"></span>
+                      </template>
+                      <template x-if="!item.is_dir && item.parsed?.audio">
+                        <span class="px-1.5 py-0.2 rounded bg-rose-950/80 text-rose-300 border border-rose-900" x-text="item.parsed.audio"></span>
+                      </template>
+                    </div>
                   </div>
                 </div>
 
-                <!-- Footer Metric: Real Video Files Accessible -->
-                <div class="border-t border-slate-800/80 pt-2 flex items-center justify-between">
-                  <span class="text-xs text-slate-500 font-medium">Conteneurs vidéo visibles :</span>
-                  <template x-if="prof.status === 'pending'">
-                    <span class="text-xs font-mono text-slate-600">Calcul...</span>
+                <div class="text-right shrink-0">
+                  <template x-if="!item.is_dir">
+                    <span class="text-xs font-mono font-semibold text-emerald-400 block" x-text="item.size_human"></span>
                   </template>
-                  <template x-if="prof.status !== 'pending'">
-                    <span class="text-sm font-bold font-mono"
-                          :class="prof.files_count > 0 ? 'text-emerald-400' : 'text-slate-500'"
-                          x-text="prof.files_count > 0 ? prof.files_count + ' fichiers réels' : '0 fichier'"></span>
+                  <template x-if="item.is_dir">
+                    <span class="text-xs text-indigo-400 font-medium flex items-center gap-1">
+                      <span>Ouvrir</span>
+                      <span>→</span>
+                    </span>
+                  </template>
+                  <span class="text-[10px] text-slate-500 font-mono block mt-1" x-text="item.modify ? item.modify.split(' ')[0] : ''"></span>
+                </div>
+              </div>
+            </template>
+          </div>
+          </div>
+
+          <!-- Pagination Controls -->
+          <div class="shrink-0 flex items-center justify-between pt-2.5 border-t border-slate-800/80 text-xs text-slate-400" x-show="explorerData && explorerData.total_pages > 1">
+            <div class="flex items-center gap-1">
+              <button @click="fetchExplorerFiles(1)" :disabled="explorerPage <= 1" class="px-2.5 py-1 rounded bg-slate-900 border border-slate-800 hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition">Premier</button>
+              <button @click="fetchExplorerFiles(explorerPage - 1)" :disabled="explorerPage <= 1" class="px-2.5 py-1 rounded bg-slate-900 border border-slate-800 hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition">◀ Précédent</button>
+            </div>
+            <div class="font-mono">
+              <span>Page </span>
+              <span class="text-white font-bold" x-text="explorerPage"></span>
+              <span> / </span>
+              <span x-text="explorerData?.total_pages"></span>
+            </div>
+            <div class="flex items-center gap-1">
+              <button @click="fetchExplorerFiles(explorerPage + 1)" :disabled="explorerPage >= (explorerData?.total_pages || 1)" class="px-2.5 py-1 rounded bg-slate-900 border border-slate-800 hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition">Suivant ▶</button>
+              <button @click="fetchExplorerFiles(explorerData?.total_pages || 1)" :disabled="explorerPage >= (explorerData?.total_pages || 1)" class="px-2.5 py-1 rounded bg-slate-900 border border-slate-800 hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition">Dernier</button>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- ============================================================= -->
+        <!-- RIGHT COLUMN: Independent Detail Pane (Detail) - 5 cols       -->
+        <!-- ============================================================= -->
+        <div class="lg:col-span-5 flex flex-col min-h-0 h-full">
+          <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-xl flex flex-col h-full min-h-0">
+            <div class="flex-1 min-h-0 overflow-y-auto pr-1 space-y-4 custom-scroll">
+
+            <!-- Empty Selection Placeholder -->
+            <template x-if="!selectedItem || selectedItem.is_dir">
+              <div class="text-center py-12 text-slate-500 space-y-3">
+                <span class="text-4xl block">🎞️</span>
+                <h3 class="font-bold text-slate-300 text-sm">Fiche Détaillée du Média</h3>
+                <p class="text-xs max-w-xs mx-auto text-slate-400">Sélectionnez un conteneur vidéo dans la liste à gauche pour inspecter ses caractéristiques multimédia complètes (ffprobe, pistes, codecs, indexation).</p>
+              </div>
+            </template>
+
+            <!-- Active Selected File Card -->
+            <template x-if="selectedItem && !selectedItem.is_dir">
+              <div class="space-y-4">
+
+                <!-- Header Title & Badges -->
+                <div class="border-b border-slate-800/80 pb-3">
+                  <div class="flex items-center justify-between gap-2">
+                    <span class="px-2 py-0.5 rounded bg-indigo-950 text-indigo-300 border border-indigo-800 text-[10px] font-mono font-bold" x-text="selectedItem.extension.toUpperCase()"></span>
+                    <span class="text-xs font-mono font-bold text-emerald-400" x-text="selectedDetails?.size_human || selectedItem.size_human"></span>
+                  </div>
+                  <h3 class="text-base font-bold text-white mt-1.5" x-text="selectedItem.parsed?.title || selectedItem.name"></h3>
+                  <p class="text-[11px] font-mono text-slate-400 break-all mt-1" x-text="selectedItem.name"></p>
+                </div>
+
+                <!-- Basic File Specs Grid -->
+                <div class="grid grid-cols-2 gap-2 text-xs">
+                  <div class="bg-slate-950/70 p-2.5 rounded-lg border border-slate-800/80">
+                    <span class="text-slate-500 block text-[10px] uppercase font-semibold">Taille exacte</span>
+                    <span class="text-slate-200 font-mono font-semibold" x-text="(selectedDetails?.size_bytes || selectedItem.size_bytes).toLocaleString('fr-FR') + ' octets'"></span>
+                  </div>
+                  <div class="bg-slate-950/70 p-2.5 rounded-lg border border-slate-800/80">
+                    <span class="text-slate-500 block text-[10px] uppercase font-semibold">Modification</span>
+                    <span class="text-slate-200 font-mono" x-text="selectedItem.modify || '-'"></span>
+                  </div>
+                </div>
+
+                <!-- Path & URI Box with Copy Button -->
+                <div class="space-y-1">
+                  <div class="flex items-center justify-between text-[11px]">
+                    <span class="text-slate-400 font-medium">URI / Emplacement :</span>
+                    <button @click="copyToClipboard(selectedDetails?.uri || selectedItem.path)" class="text-indigo-400 hover:text-indigo-300 flex items-center gap-1">
+                      <span x-text="copiedFeedback ? 'Copié ! ✅' : 'Copier 📋'"></span>
+                    </button>
+                  </div>
+                  <code class="text-[11px] text-indigo-300 font-mono break-all bg-slate-950 px-2.5 py-1.5 rounded-lg block border border-slate-800" x-text="selectedDetails?.uri || selectedItem.path"></code>
+                </div>
+
+                <!-- Deep Multimedia Inspection (ffprobe) -->
+                <div class="border-t border-slate-800/80 pt-3 space-y-3">
+                  <div class="flex items-center justify-between">
+                    <span class="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+                      <span>📊</span>
+                      <span>Caractéristiques Multimédia</span>
+                    </span>
+                    <button @click="fetchFileDetails(selectedItem, true)" :disabled="detailsLoading" class="text-[10px] px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition" title="Relancer ffprobe">
+                      <span :class="{'animate-spin inline-block': detailsLoading}">🔄</span>
+                      <span>Relancer ffprobe</span>
+                    </button>
+                  </div>
+
+                  <!-- Details Loading Spinner -->
+                  <template x-if="detailsLoading">
+                    <div class="p-4 rounded-lg bg-slate-950/70 border border-slate-800 text-center space-y-2">
+                      <div class="inline-block animate-spin text-xl text-indigo-400">⚡</div>
+                      <p class="text-xs text-slate-400">Analyse ffprobe du flux conteneur...</p>
+                    </div>
+                  </template>
+
+                  <!-- Successfully Probed Multimédia Specs -->
+                  <template x-if="!detailsLoading && selectedDetails && selectedDetails.probed">
+                    <div class="space-y-3">
+                      <!-- Video Stream Specs -->
+                      <div class="p-3 rounded-lg bg-slate-950/80 border border-indigo-950 space-y-2">
+                        <span class="text-[10px] uppercase font-bold text-indigo-400 block tracking-wider">Flux Vidéo</span>
+                        <div class="grid grid-cols-2 gap-2 text-xs">
+                          <div>
+                            <span class="text-slate-500 block text-[10px]">Résolution</span>
+                            <span class="text-white font-semibold font-mono" x-text="selectedDetails.video ? (selectedDetails.video.width + ' × ' + selectedDetails.video.height + ' (' + (selectedDetails.video.aspect_ratio || '16:9') + ')') : '-'"></span>
+                          </div>
+                          <div>
+                            <span class="text-slate-500 block text-[10px]">Codec Vidéo</span>
+                            <span class="text-emerald-400 font-semibold font-mono" x-text="selectedDetails.video ? (selectedDetails.video.codec?.toUpperCase() + ' ' + (selectedDetails.video.profile || '')) : '-'"></span>
+                          </div>
+                          <div>
+                            <span class="text-slate-500 block text-[10px]">Durée exacte</span>
+                            <span class="text-white font-mono font-semibold" x-text="selectedDetails.duration_formatted || '-'"></span>
+                          </div>
+                          <div>
+                            <span class="text-slate-500 block text-[10px]">Cadence (FPS)</span>
+                            <span class="text-slate-300 font-mono" x-text="selectedDetails.video ? (selectedDetails.video.fps + ' fps') : '-'"></span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <!-- Audio Streams -->
+                      <div class="space-y-1.5">
+                        <span class="text-[10px] uppercase font-bold text-slate-400 block tracking-wider" x-text="'Pistes Audio (' + (selectedDetails.audio_streams ? selectedDetails.audio_streams.length : 0) + ')'"></span>
+                        <div class="space-y-1 max-h-32 overflow-y-auto pr-1 custom-scroll">
+                          <template x-for="aud in selectedDetails.audio_streams || []" :key="aud.index">
+                            <div class="px-2.5 py-1.5 rounded bg-slate-950/70 border border-slate-800 text-xs flex items-center justify-between">
+                              <div class="flex items-center gap-1.5 truncate">
+                                <span class="text-[10px] px-1 rounded bg-slate-800 text-slate-300 font-mono font-bold" x-text="aud.language.toUpperCase()"></span>
+                                <span class="font-medium text-slate-200 truncate" x-text="aud.title || (aud.codec.toUpperCase() + ' ' + (aud.channels ? aud.channels + 'ch' : ''))"></span>
+                              </div>
+                              <span class="text-[10px] text-slate-500 font-mono shrink-0" x-text="aud.channel_layout || (aud.channels + ' canaux')"></span>
+                            </div>
+                          </template>
+                        </div>
+                      </div>
+
+                      <!-- Subtitle Streams -->
+                      <div class="space-y-1.5">
+                        <span class="text-[10px] uppercase font-bold text-slate-400 block tracking-wider" x-text="'Pistes Sous-titres (' + (selectedDetails.subtitle_streams ? selectedDetails.subtitle_streams.length : 0) + ')'"></span>
+                        <div class="space-y-1 max-h-32 overflow-y-auto pr-1 custom-scroll">
+                          <template x-for="sub in selectedDetails.subtitle_streams || []" :key="sub.index">
+                            <div class="px-2.5 py-1.5 rounded bg-slate-950/70 border border-slate-800 text-xs flex items-center justify-between">
+                              <div class="flex items-center gap-1.5 truncate">
+                                <span class="text-[10px] px-1 rounded bg-slate-800 text-slate-300 font-mono font-bold" x-text="sub.language.toUpperCase()"></span>
+                                <span class="font-medium text-slate-200 truncate" x-text="sub.title || ('Piste #' + sub.index)"></span>
+                                <span x-show="sub.forced" class="text-[9px] px-1 rounded bg-rose-950 text-rose-300 border border-rose-900 font-bold">FORCED</span>
+                                <span x-show="sub.default" class="text-[9px] px-1 rounded bg-slate-800 text-slate-400">DEFAULT</span>
+                              </div>
+                              <span class="text-[10px] text-slate-500 font-mono shrink-0" x-text="sub.codec"></span>
+                            </div>
+                          </template>
+                        </div>
+                      </div>
+                    </div>
+                  </template>
+
+                  <!-- ffprobe Fallback Notice -->
+                  <template x-if="!detailsLoading && selectedDetails && !selectedDetails.probed">
+                    <div class="p-3 rounded-lg bg-slate-950/60 border border-slate-800 text-xs space-y-1 text-slate-400">
+                      <div class="flex items-center gap-1.5 text-amber-400 font-medium">
+                        <span>⚠️</span>
+                        <span>Analyse approfondie non effectuée</span>
+                      </div>
+                      <p class="text-[11px]" x-text="selectedDetails.reason || 'ffprobe non disponible sur cet hôte'"></p>
+                    </div>
+                  </template>
+                </div>
+
+                <!-- Database Ground-Truth Coupling Status -->
+                <div class="border-t border-slate-800/80 pt-3 space-y-2">
+                  <span class="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+                    <span>🔗</span>
+                    <span>Statut Couplage & Catalogue</span>
+                  </span>
+                  <template x-if="selectedDetails?.coupling">
+                    <div class="p-2.5 rounded-lg bg-emerald-950/40 border border-emerald-800/80 space-y-1 text-xs">
+                      <div class="flex items-center gap-1.5 text-emerald-300 font-bold">
+                        <span>✅</span>
+                        <span>Couplage Certifié Actif</span>
+                      </div>
+                      <p class="text-[11px] text-slate-300">
+                        Média lié : <span class="font-mono text-emerald-400 font-semibold" x-text="selectedDetails.coupling.media_name"></span>
+                      </p>
+                      <div class="flex items-center gap-3 text-[10px] font-mono text-slate-400">
+                        <span x-text="'FPS: ' + selectedDetails.coupling.fps"></span>
+                        <span x-text="'Frames: ' + selectedDetails.coupling.frame_count"></span>
+                        <span x-text="'Sous-titres certifiés: ' + selectedDetails.coupling.subtitles_count"></span>
+                      </div>
+                    </div>
+                  </template>
+                  <template x-if="!selectedDetails?.coupling">
+                    <div class="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80 text-xs text-slate-500 flex items-center gap-2">
+                      <span>ℹ️</span>
+                      <span>Non couplé dans le registre certifié local (couplings.json)</span>
+                    </div>
                   </template>
                 </div>
 
               </div>
             </template>
-          </div>
 
+            </div>
+          </div>
         </div>
-      </template>
+
+      </div>
+
     </div>
 
   </main>
@@ -229,6 +661,8 @@
   <script>
     function mediaSourcesApp() {
       return {
+        // App Navigation & Environment
+        currentView: 'sources', // 'sources' | 'explorer'
         hostName: 'chargement...',
         detectedEnv: 'local',
         activeEnv: 'local',
@@ -238,9 +672,215 @@
         totalProbesCount: 0,
         completedProbesCount: 0,
 
+        // Explorer State (Proposition 1)
+        explorerSource: null,
+        explorerProfile: null,
+        explorerSubdir: '',
+        explorerQuery: '',
+        explorerTag: '',
+        explorerSort: 'name_asc',
+        explorerLimit: 25,
+        explorerPage: 1,
+        explorerData: null,
+        explorerFiles: [],
+        explorerLoading: false,
+        selectedItem: null,
+        selectedDetails: null,
+        detailsLoading: false,
+        copiedFeedback: false,
+
+        // Storage & Navigation Persistence
+        folderStateMap: {},
+        sourcesCollapsedMap: {},
+        highlightedItemPath: null,
+        highlightTargetName: null,
+        pendingSelectedFilePath: null,
+
         async initApp() {
+          const stored = this.loadStoredState();
+          if (stored?.folderStateMap) {
+            this.folderStateMap = stored.folderStateMap;
+          }
+          if (stored?.sourcesCollapsedMap) {
+            this.sourcesCollapsedMap = stored.sourcesCollapsedMap;
+          }
+
           await this.loadSourcesMetadata();
+          this.restoreNavigationState(stored);
+
+          window.addEventListener('popstate', () => {
+            this.handlePopState();
+          });
+
           this.probeAllProfiles();
+        },
+
+        loadStoredState() {
+          try {
+            const raw = localStorage.getItem('pydbsrt_sources_state_v1');
+            return raw ? JSON.parse(raw) : null;
+          } catch (err) {
+            console.warn('Storage load failed:', err);
+            return null;
+          }
+        },
+
+        saveStoredState() {
+          try {
+            const collapsedMap = {};
+            if (this.sources) {
+              this.sources.forEach(s => {
+                collapsedMap[s.id] = s.collapsed;
+              });
+            }
+            const state = {
+              activeEnv: this.activeEnv,
+              currentView: this.currentView,
+              sourceId: this.explorerSource ? this.explorerSource.id : null,
+              profileId: this.explorerProfile ? this.explorerProfile.id : null,
+              subdir: this.explorerSubdir || '',
+              page: this.explorerPage || 1,
+              limit: this.explorerLimit || 25,
+              sort: this.explorerSort || 'name_asc',
+              query: this.explorerQuery || '',
+              tag: this.explorerTag || '',
+              selectedPath: this.selectedItem ? this.selectedItem.path : null,
+              folderStateMap: this.folderStateMap || {},
+              sourcesCollapsedMap: collapsedMap,
+            };
+            localStorage.setItem('pydbsrt_sources_state_v1', JSON.stringify(state));
+          } catch (err) {
+            console.warn('Storage save failed:', err);
+          }
+        },
+
+        readUrlHashParams() {
+          const hash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : '';
+          if (!hash) return null;
+          try {
+            return new URLSearchParams(hash);
+          } catch (e) {
+            return null;
+          }
+        },
+
+        syncUrlHash(pushHistory = false) {
+          const params = new URLSearchParams();
+          params.set('view', this.currentView);
+          if (this.activeEnv) {
+            params.set('env', this.activeEnv);
+          }
+          if (this.currentView === 'explorer' && this.explorerSource && this.explorerProfile) {
+            params.set('source', this.explorerSource.id);
+            params.set('profile', this.explorerProfile.id);
+            if (this.explorerSubdir) {
+              params.set('subdir', this.explorerSubdir);
+            }
+            if (this.explorerPage > 1) {
+              params.set('page', String(this.explorerPage));
+            }
+            if (this.explorerLimit !== 25) {
+              params.set('limit', String(this.explorerLimit));
+            }
+            if (this.explorerSort && this.explorerSort !== 'name_asc') {
+              params.set('sort', this.explorerSort);
+            }
+            if (this.explorerQuery) {
+              params.set('q', this.explorerQuery);
+            }
+            if (this.explorerTag) {
+              params.set('tag', this.explorerTag);
+            }
+            if (this.selectedItem && !this.selectedItem.is_dir) {
+              params.set('file', this.selectedItem.path);
+            }
+          }
+
+          const newHash = '#' + params.toString();
+          if (window.location.hash !== newHash) {
+            if (pushHistory) {
+              history.pushState(null, '', newHash);
+            } else {
+              history.replaceState(null, '', newHash);
+            }
+          }
+          this.saveStoredState();
+        },
+
+        handlePopState() {
+          const hashParams = this.readUrlHashParams();
+          if (!hashParams) {
+            this.currentView = 'sources';
+            return;
+          }
+
+          const view = hashParams.get('view') || 'sources';
+          const env = hashParams.get('env');
+          if (env && (env === 'all' || this.availableEnvs.some(e => e.id === env))) {
+            this.activeEnv = env;
+          }
+
+          if (view === 'explorer') {
+            const sourceId = hashParams.get('source');
+            const profileId = hashParams.get('profile');
+            const src = this.sources.find(s => s.id === sourceId);
+            const prof = src?.profiles?.find(p => p.id === profileId);
+            if (src && prof) {
+              this.explorerSource = src;
+              this.explorerProfile = prof;
+              this.explorerSubdir = hashParams.get('subdir') || '';
+              this.explorerPage = parseInt(hashParams.get('page') || '1') || 1;
+              this.explorerLimit = parseInt(hashParams.get('limit') || '25') || 25;
+              this.explorerSort = hashParams.get('sort') || 'name_asc';
+              this.explorerQuery = hashParams.get('q') || '';
+              this.explorerTag = hashParams.get('tag') || '';
+              this.pendingSelectedFilePath = hashParams.get('file') || null;
+              this.currentView = 'explorer';
+              this.fetchExplorerFiles(this.explorerPage);
+              return;
+            }
+          }
+
+          this.currentView = 'sources';
+        },
+
+        restoreNavigationState(stored) {
+          const hashParams = this.readUrlHashParams();
+
+          // 1. Restore activeEnv: hash > stored > detected
+          const envFromHash = hashParams?.get('env');
+          if (envFromHash && (envFromHash === 'all' || this.availableEnvs.some(e => e.id === envFromHash))) {
+            this.activeEnv = envFromHash;
+          } else if (stored?.activeEnv && (stored.activeEnv === 'all' || this.availableEnvs.some(e => e.id === stored.activeEnv))) {
+            this.activeEnv = stored.activeEnv;
+          }
+
+          // 2. Restore view and explorer parameters
+          const view = hashParams?.get('view') || stored?.currentView || 'sources';
+          const sourceId = hashParams?.get('source') || stored?.sourceId;
+          const profileId = hashParams?.get('profile') || stored?.profileId;
+
+          if (view === 'explorer' && sourceId && profileId) {
+            const src = this.sources.find(s => s.id === sourceId);
+            const prof = src?.profiles?.find(p => p.id === profileId);
+            if (src && prof) {
+              this.explorerSource = src;
+              this.explorerProfile = prof;
+              this.explorerSubdir = hashParams?.get('subdir') ?? (stored?.subdir || '');
+              this.explorerPage = parseInt(hashParams?.get('page') ?? (stored?.page || 1)) || 1;
+              this.explorerLimit = parseInt(hashParams?.get('limit') ?? (stored?.limit || 25)) || 25;
+              this.explorerSort = hashParams?.get('sort') || stored?.sort || 'name_asc';
+              this.explorerQuery = hashParams?.get('q') ?? (stored?.query || '');
+              this.explorerTag = hashParams?.get('tag') ?? (stored?.tag || '');
+              this.pendingSelectedFilePath = hashParams?.get('file') || stored?.selectedPath || null;
+              this.currentView = 'explorer';
+              this.fetchExplorerFiles(this.explorerPage);
+              return;
+            }
+          }
+
+          this.currentView = 'sources';
+          this.syncUrlHash(false);
         },
 
         getApiUrl(endpoint, params = '') {
@@ -269,8 +909,13 @@
             const rawSources = data.sources || [];
 
             rawSources.forEach(s => {
-              s.collapsed = false;
-              s.userToggled = false;
+              if (this.sourcesCollapsedMap && this.sourcesCollapsedMap[s.id] !== undefined) {
+                s.collapsed = this.sourcesCollapsedMap[s.id];
+                s.userToggled = true;
+              } else {
+                s.collapsed = false;
+                s.userToggled = false;
+              }
             });
             this.sources = rawSources;
             this.updateProbesTotal();
@@ -285,7 +930,12 @@
             s.userToggled = false;
             this.updateSourceCollapseAuto(s);
           });
+          this.saveStoredState();
+          this.syncUrlHash(false);
           this.probeAllProfiles();
+          if (this.currentView === 'explorer') {
+            this.closeExplorer();
+          }
         },
 
         visibleSources() {
@@ -314,13 +964,19 @@
         toggleCollapse(source) {
           source.collapsed = !source.collapsed;
           source.userToggled = true;
+          if (!this.sourcesCollapsedMap) this.sourcesCollapsedMap = {};
+          this.sourcesCollapsedMap[source.id] = source.collapsed;
+          this.saveStoredState();
         },
 
         expandAll(expand) {
+          if (!this.sourcesCollapsedMap) this.sourcesCollapsedMap = {};
           this.sources.forEach(s => {
             s.collapsed = !expand;
             s.userToggled = true;
+            this.sourcesCollapsedMap[s.id] = s.collapsed;
           });
+          this.saveStoredState();
         },
 
         sourceAnyAccessible(source) {
@@ -402,6 +1058,287 @@
           } finally {
             this.completedProbesCount++;
             this.updateSourceCollapseAuto(source);
+          }
+        },
+
+        // ===============================================================
+        // EXPLORER ACTIONS & NAVIGATION PERSISTENCE (PROPOSITION 1)
+        // ===============================================================
+        folderKey(subdir) {
+          const sId = this.explorerSource ? this.explorerSource.id : '';
+          const pId = this.explorerProfile ? this.explorerProfile.id : '';
+          return `${sId}:${pId}:${subdir || ''}`;
+        },
+
+        itemDomId(path) {
+          return String(path || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+        },
+
+        subdirSegments() {
+          if (!this.explorerSubdir) return [];
+          const parts = this.explorerSubdir.split('/');
+          const segments = [];
+          let cum = '';
+          for (const part of parts) {
+            if (!part) continue;
+            cum = cum ? `${cum}/${part}` : part;
+            segments.push({ name: part, path: cum });
+          }
+          return segments;
+        },
+
+        openExplorer(source, profile) {
+          this.explorerSource = source;
+          this.explorerProfile = profile;
+
+          const rootKey = `${source.id}:${profile.id}:`;
+          const saved = this.folderStateMap[rootKey];
+          if (saved) {
+            this.explorerSubdir = '';
+            this.explorerPage = saved.page || 1;
+            this.explorerLimit = saved.limit || 25;
+            this.explorerSort = saved.sort || 'name_asc';
+            this.explorerQuery = saved.query || '';
+            this.explorerTag = saved.tag || '';
+          } else {
+            this.explorerSubdir = '';
+            this.explorerPage = 1;
+            this.explorerLimit = 25;
+            this.explorerSort = 'name_asc';
+            this.explorerQuery = '';
+            this.explorerTag = '';
+          }
+
+          this.selectedItem = null;
+          this.selectedDetails = null;
+          this.currentView = 'explorer';
+          this.syncUrlHash(true);
+          this.fetchExplorerFiles(this.explorerPage);
+        },
+
+        closeExplorer() {
+          this.currentView = 'sources';
+          this.selectedItem = null;
+          this.selectedDetails = null;
+          this.syncUrlHash(true);
+        },
+
+        refreshExplorer() {
+          this.fetchExplorerFiles(this.explorerPage, true);
+        },
+
+        setTagFilter(tag) {
+          this.explorerTag = tag;
+          this.fetchExplorerFiles(1);
+        },
+
+        clearSearch() {
+          this.explorerQuery = '';
+          this.explorerTag = '';
+          this.fetchExplorerFiles(1);
+        },
+
+        onItemClick(item) {
+          if (item.is_dir) {
+            this.navigateSubdir(item.path);
+          } else {
+            this.selectMediaFile(item);
+          }
+        },
+
+        navigateSubdir(path) {
+          // 1. Save state of current directory before drilling down
+          const currentKey = this.folderKey(this.explorerSubdir);
+          const childName = path.split('/').pop();
+          this.folderStateMap[currentKey] = {
+            page: this.explorerPage,
+            query: this.explorerQuery,
+            tag: this.explorerTag,
+            sort: this.explorerSort,
+            limit: this.explorerLimit,
+            lastChild: childName,
+          };
+
+          // 2. Setup target subdirectory
+          this.explorerSubdir = path;
+          const targetKey = this.folderKey(path);
+          const savedTarget = this.folderStateMap[targetKey];
+          if (savedTarget) {
+            this.explorerPage = savedTarget.page || 1;
+            this.explorerQuery = savedTarget.query || '';
+            this.explorerTag = savedTarget.tag || '';
+            this.explorerSort = savedTarget.sort || 'name_asc';
+            this.explorerLimit = savedTarget.limit || 25;
+          } else {
+            this.explorerPage = 1;
+            this.explorerQuery = '';
+            this.explorerTag = '';
+          }
+
+          this.selectedItem = null;
+          this.selectedDetails = null;
+          this.syncUrlHash(true);
+          this.fetchExplorerFiles(this.explorerPage);
+        },
+
+        navigateUpSubdir() {
+          if (!this.explorerSubdir) return;
+          const parts = this.explorerSubdir.split('/');
+          const leavingName = parts.pop();
+          const parentSubdir = parts.join('/');
+          this.navigateToSubdirSegment(parentSubdir, leavingName);
+        },
+
+        navigateToSubdirSegment(targetSubdir, childToHighlight = null) {
+          if (!childToHighlight && this.explorerSubdir.startsWith(targetSubdir)) {
+            const rel = targetSubdir ? this.explorerSubdir.slice(targetSubdir.length + 1) : this.explorerSubdir;
+            childToHighlight = rel.split('/')[0] || null;
+          }
+
+          // Save current directory state before moving
+          const currentKey = this.folderKey(this.explorerSubdir);
+          this.folderStateMap[currentKey] = {
+            page: this.explorerPage,
+            query: this.explorerQuery,
+            tag: this.explorerTag,
+            sort: this.explorerSort,
+            limit: this.explorerLimit,
+          };
+
+          this.explorerSubdir = targetSubdir;
+          const targetKey = this.folderKey(targetSubdir);
+          const saved = this.folderStateMap[targetKey];
+
+          if (saved) {
+            this.explorerPage = saved.page || 1;
+            this.explorerQuery = saved.query || '';
+            this.explorerTag = saved.tag || '';
+            this.explorerSort = saved.sort || 'name_asc';
+            this.explorerLimit = saved.limit || 25;
+          } else {
+            this.explorerPage = 1;
+          }
+
+          this.highlightTargetName = childToHighlight || saved?.lastChild || null;
+          this.selectedItem = null;
+          this.selectedDetails = null;
+          this.syncUrlHash(true);
+          this.fetchExplorerFiles(this.explorerPage);
+        },
+
+        async fetchExplorerFiles(page = 1, force = false) {
+          if (!this.explorerSource || !this.explorerProfile) return;
+          this.explorerLoading = true;
+          this.explorerPage = page;
+
+          let combinedQuery = this.explorerQuery.trim();
+          if (this.explorerTag) {
+            combinedQuery = combinedQuery ? `${combinedQuery} ${this.explorerTag}` : this.explorerTag;
+          }
+
+          const params = new URLSearchParams({
+            source: this.explorerSource.id,
+            profile: this.explorerProfile.id,
+            subdir: this.explorerSubdir,
+            page: String(this.explorerPage),
+            limit: String(this.explorerLimit),
+            q: combinedQuery,
+            sort: this.explorerSort,
+          });
+          if (force) {
+            params.set('force', '1');
+          }
+
+          this.syncUrlHash(false);
+
+          try {
+            const url = this.getApiUrl('files', params.toString());
+            const res = await fetch(url);
+            const data = await res.json();
+            this.explorerData = data;
+            this.explorerFiles = data.items || [];
+
+            // 1. Auto-highlight child folder if returning from deeper directory
+            if (this.highlightTargetName) {
+              const match = this.explorerFiles.find(it => it.name === this.highlightTargetName);
+              if (match) {
+                this.highlightedItemPath = match.path;
+                this.$nextTick(() => {
+                  const domId = 'item-' + this.itemDomId(match.path);
+                  const el = document.getElementById(domId);
+                  if (el) {
+                    el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                  }
+                });
+                setTimeout(() => {
+                  if (this.highlightedItemPath === match.path) {
+                    this.highlightedItemPath = null;
+                  }
+                }, 3000);
+              }
+              this.highlightTargetName = null;
+            }
+
+            // 2. Auto-select requested or first video file
+            if (this.pendingSelectedFilePath) {
+              const found = this.explorerFiles.find(it => it.path === this.pendingSelectedFilePath);
+              if (found && !found.is_dir) {
+                this.selectMediaFile(found);
+              }
+              this.pendingSelectedFilePath = null;
+            } else if (!this.selectedItem && this.explorerFiles.length > 0) {
+              const firstFile = this.explorerFiles.find(it => !it.is_dir);
+              if (firstFile) {
+                this.selectMediaFile(firstFile);
+              }
+            }
+          } catch (err) {
+            console.error('Files fetch error:', err);
+            this.explorerFiles = [];
+          } finally {
+            this.explorerLoading = false;
+          }
+        },
+
+        selectMediaFile(item) {
+          this.selectedItem = item;
+          this.syncUrlHash(false);
+          this.fetchFileDetails(item);
+        },
+
+        async fetchFileDetails(item, force = false) {
+          if (!item || item.is_dir) return;
+          this.detailsLoading = true;
+
+          const params = new URLSearchParams({
+            source: this.explorerSource.id,
+            profile: this.explorerProfile.id,
+            path: item.path,
+          });
+          if (force) {
+            params.set('force', '1');
+          }
+
+          try {
+            const url = this.getApiUrl('file/details', params.toString());
+            const res = await fetch(url);
+            const data = await res.json();
+            this.selectedDetails = data;
+          } catch (err) {
+            console.error('Details fetch error:', err);
+          } finally {
+            this.detailsLoading = false;
+          }
+        },
+
+        async copyToClipboard(text) {
+          if (!text) return;
+          try {
+            await navigator.clipboard.writeText(text);
+            this.copiedFeedback = true;
+            setTimeout(() => { this.copiedFeedback = false; }, 2000);
+          } catch (err) {
+            console.warn('Clipboard write failed:', err);
           }
         }
       };

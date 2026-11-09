@@ -168,3 +168,9 @@ tasks:
     aliases: [portal:e2e:cloud]
     cmds:
       - uv run --with playwright python scripts/e2e_portal_playwright.py --cloud {{.CLI_ARGS}}
+
+  test:sources:e2e:
+    desc: Run Playwright E2E browser suite for Media Sources & Master-Detail Explorer
+    aliases: [sources:e2e]
+    cmds:
+      - uv run --with playwright python scripts/e2e_sources_explorer.py {{.CLI_ARGS}}
