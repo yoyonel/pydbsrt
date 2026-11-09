@@ -10,9 +10,12 @@ from __future__ import annotations
 
 import argparse
 import ftplib
+import hashlib
 import http.server
 import json
 import os
+import re
+import shutil
 import socket
 import socketserver
 import subprocess
@@ -30,6 +33,22 @@ HTTP_OK: int = 200
 HTTP_NOT_FOUND: int = 404
 HTTP_BAD_REQUEST: int = 400
 HTTP_SERVER_ERROR: int = 500
+
+BYTES_PER_KB: int = 1024
+BYTES_PER_MB: int = 1024 * 1024
+BYTES_PER_GB: int = 1024 * 1024 * 1024
+BYTES_PER_TB: int = 1024 * 1024 * 1024 * 1024
+
+SECONDS_PER_MINUTE: int = 60
+SECONDS_PER_HOUR: int = 3600
+SECONDS_PER_DAY: int = 86400
+MILLIS_PER_SEC: float = 1000.0
+
+DEFAULT_PAGE_SIZE: int = 25
+MAX_PAGE_SIZE: int = 100
+CACHE_LISTING_TTL_SECONDS: float = 300.0
+CACHE_DETAILS_TTL_SECONDS: float = 86400.0
+FFPROBE_TIMEOUT_SECONDS: float = 12.0
 
 DEFAULT_NAS_HOST: str = "yoyonel.synology.me"
 DEFAULT_NAS_USER: str = "qzsl2686"
@@ -69,6 +88,151 @@ AVAILABLE_ENVIRONMENTS: list[dict[str, str]] = [
 
 VIDEO_EXTENSIONS: set[str] = {".mkv", ".mp4", ".avi", ".m4v", ".ts", ".webm"}
 STATIC_DIR: Path = Path(__file__).resolve().parent / "static"
+
+RE_RESOLUTION = re.compile(r"\b(2160p|4k|uhd|1080p|1080i|720p|576p|480p)\b", re.IGNORECASE)
+RE_YEAR = re.compile(r"\b(19\d\d|20\d\d)\b")
+RE_CODEC = re.compile(r"\b(hevc|x265|h\.?265|x264|h\.?264|avc|xvid|divx)\b", re.IGNORECASE)
+RE_SOURCE = re.compile(r"\b(remux|bluray|bdrip|brrip|web-dl|webrip|web|hdtv)\b", re.IGNORECASE)
+RE_AUDIO = re.compile(r"\b(atmos|truehd|ddp5\.1|dd5\.1|dts-hd|dts|aac|ac3)\b", re.IGNORECASE)
+RE_LANGUAGE = re.compile(r"\b(french|vostfr|multi|dual|truefrench|eng|subfrench)\b", re.IGNORECASE)
+
+_LISTING_CACHE: dict[str, tuple[float, str, str, str, list[dict[str, Any]]]] = {}
+_DETAILS_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+
+
+def _get_portal_cache_dir() -> Path:
+    """Returns persistent disk cache directory across local, o2switch, and RPi4 hosts."""
+    env_dir = os.environ.get("DBSRT_PORTAL_CACHE_DIR")
+    if env_dir:
+        p = Path(env_dir)
+    else:
+        p = Path.home() / ".cache" / "dbsrt" / "portal"
+    try:
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+    except OSError:
+        fallback = Path(__file__).resolve().parents[1] / "data" / "cache" / "portal"
+        fallback.mkdir(parents=True, exist_ok=True)
+        return fallback
+
+
+def _cache_key_hash(key: str) -> str:
+    """Computes stable truncated SHA256 hex digest for cache key."""
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+
+
+def _read_disk_cache(cache_type: str, key: str, ttl_seconds: float) -> tuple[float, Any] | None:
+    """Reads unexpired JSON payload from persistent disk cache."""
+    cache_dir = _get_portal_cache_dir()
+    cache_file = cache_dir / f"{cache_type}_{_cache_key_hash(key)}.json"
+    if not cache_file.is_file():
+        return None
+    try:
+        payload = json.loads(cache_file.read_text(encoding="utf-8"))
+        ts = float(payload.get("timestamp", 0.0))
+        if time.time() - ts < ttl_seconds:
+            return ts, payload.get("data")
+    except Exception:
+        pass
+    return None
+
+
+def _write_disk_cache(cache_type: str, key: str, data: Any) -> None:
+    """Atomically writes JSON payload to persistent disk cache."""
+    cache_dir = _get_portal_cache_dir()
+    cache_file = cache_dir / f"{cache_type}_{_cache_key_hash(key)}.json"
+    tmp_file = cache_dir / f"{cache_type}_{_cache_key_hash(key)}.json.tmp"
+    payload = {
+        "timestamp": time.time(),
+        "key": key,
+        "data": data,
+    }
+    try:
+        tmp_file.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        tmp_file.replace(cache_file)
+    except Exception:
+        pass
+
+
+def format_human_size(size_bytes: int) -> str:
+    """Formats raw byte count into human-readable representation."""
+    if size_bytes >= BYTES_PER_TB:
+        return f"{size_bytes / BYTES_PER_TB:.2f} TB"
+    if size_bytes >= BYTES_PER_GB:
+        return f"{size_bytes / BYTES_PER_GB:.2f} GB"
+    if size_bytes >= BYTES_PER_MB:
+        return f"{size_bytes / BYTES_PER_MB:.2f} MB"
+    if size_bytes >= BYTES_PER_KB:
+        return f"{size_bytes / BYTES_PER_KB:.1f} KB"
+    return f"{size_bytes} B"
+
+
+def format_seconds_duration(seconds: float) -> str:
+    """Formats float duration in seconds into HH:MM:SS or MM:SS string."""
+    total_secs = int(round(seconds))
+    hours = total_secs // SECONDS_PER_HOUR
+    remaining = total_secs % SECONDS_PER_HOUR
+    minutes = remaining // SECONDS_PER_MINUTE
+    secs = remaining % SECONDS_PER_MINUTE
+    if hours > 0:
+        return f"{hours:02d}h {minutes:02d}m {secs:02d}s"
+    return f"{minutes:02d}m {secs:02d}s"
+
+
+def parse_media_filename(filename: str) -> dict[str, Any]:
+    """Extracts syntactic metadata tokens (resolution, year, codec, clean title) from filename."""
+    stem = Path(filename).stem
+    res_m = RE_RESOLUTION.search(stem)
+    year_m = RE_YEAR.search(stem)
+    codec_m = RE_CODEC.search(stem)
+    source_m = RE_SOURCE.search(stem)
+    audio_m = RE_AUDIO.search(stem)
+    lang_m = RE_LANGUAGE.search(stem)
+
+    first_split_idx = len(stem)
+    if year_m and year_m.start() > 0:
+        first_split_idx = min(first_split_idx, year_m.start())
+    if res_m and res_m.start() > 0:
+        first_split_idx = min(first_split_idx, res_m.start())
+
+    clean_title = stem
+    if first_split_idx < len(stem):
+        raw_title = stem[:first_split_idx]
+        clean_title = raw_title.replace(".", " ").replace("_", " ").strip(" -()[]")
+
+    return {
+        "title": clean_title,
+        "year": year_m.group(1) if year_m else None,
+        "resolution": res_m.group(1).upper() if res_m else None,
+        "codec": codec_m.group(1).upper() if codec_m else None,
+        "source": source_m.group(1).upper() if source_m else None,
+        "audio": audio_m.group(1).upper() if audio_m else None,
+        "language": lang_m.group(1).upper() if lang_m else None,
+    }
+
+
+def _lookup_coupling(filename: str) -> dict[str, Any] | None:
+    """Finds matching ground-truth certified coupling from couplings.json."""
+    couplings_file = Path(__file__).resolve().parents[1] / "data" / "SRT" / "couplings.json"
+    if not couplings_file.is_file():
+        return None
+    try:
+        data = json.loads(couplings_file.read_text(encoding="utf-8"))
+        couplings = data.get("couplings", [])
+        stem = Path(filename).stem.lower()
+        for c in couplings:
+            c_name = c.get("media_name", "").lower()
+            if stem in c_name or c_name in stem:
+                return {
+                    "media_name": c.get("media_name"),
+                    "fps": c.get("fps"),
+                    "frame_count": c.get("frame_count"),
+                    "phash_filename": c.get("phash_filename"),
+                    "subtitles_count": len(c.get("subtitles", [])),
+                }
+    except Exception:
+        pass
+    return None
 
 
 def _user_media_path(*parts: str) -> str:
@@ -479,6 +643,501 @@ def execute_single_probe(source_id: str, profile_id: str) -> Dict[str, Any]:
     }
 
 
+def _scan_local_directory(target_dir: Path, clean_sub: str) -> list[dict[str, Any]]:
+    """Scans local filesystem directory for video containers and subdirectories."""
+    items: list[dict[str, Any]] = []
+    if not target_dir.is_dir():
+        return items
+    try:
+        for entry in os.scandir(target_dir):
+            rel = entry.name if not clean_sub else f"{clean_sub}/{entry.name}"
+            stat = entry.stat()
+            mtime_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stat.st_mtime))
+            if entry.is_dir():
+                items.append(
+                    {
+                        "name": entry.name,
+                        "path": rel,
+                        "size_bytes": 0,
+                        "size_human": "-",
+                        "is_dir": True,
+                        "modify": mtime_str,
+                        "extension": "",
+                        "parsed": {"title": entry.name},
+                    }
+                )
+            elif _is_video(entry):
+                ext = Path(entry.name).suffix.lower()
+                items.append(
+                    {
+                        "name": entry.name,
+                        "path": rel,
+                        "size_bytes": stat.st_size,
+                        "size_human": format_human_size(stat.st_size),
+                        "is_dir": False,
+                        "modify": mtime_str,
+                        "extension": ext,
+                        "parsed": parse_media_filename(entry.name),
+                    }
+                )
+    except OSError:
+        pass
+    return items
+
+
+def _parse_mlsd_item(name: str, facts: dict[str, Any], clean_sub: str) -> dict[str, Any] | None:
+    """Parses a single MLSD item into an entry dict or None if filtered out."""
+    if name in (".", "..", ".Trash-1000", "@eaDir"):
+        return None
+    rel = name if not clean_sub else f"{clean_sub}/{name}"
+    ftype = facts.get("type", "file")
+    size = int(facts.get("size", 0))
+    raw_mod = facts.get("modify", "")
+    mod_str = ""
+    if len(raw_mod) >= 14:
+        mod_str = f"{raw_mod[:4]}-{raw_mod[4:6]}-{raw_mod[6:8]} {raw_mod[8:10]}:{raw_mod[10:12]}:{raw_mod[12:14]}"
+    if ftype == "dir":
+        return {
+            "name": name,
+            "path": rel,
+            "size_bytes": 0,
+            "size_human": "-",
+            "is_dir": True,
+            "modify": mod_str,
+            "extension": "",
+            "parsed": {"title": name},
+        }
+    if Path(name).suffix.lower() in VIDEO_EXTENSIONS:
+        ext = Path(name).suffix.lower()
+        return {
+            "name": name,
+            "path": rel,
+            "size_bytes": size,
+            "size_human": format_human_size(size),
+            "is_dir": False,
+            "modify": mod_str,
+            "extension": ext,
+            "parsed": parse_media_filename(name),
+        }
+    return None
+
+
+def _parse_nlst_item(name: str, clean_sub: str) -> dict[str, Any] | None:
+    """Parses a fallback NLST item into an entry dict or None if filtered out."""
+    if name in (".", "..", ".Trash-1000", "@eaDir"):
+        return None
+    rel = name if not clean_sub else f"{clean_sub}/{name}"
+    ext = Path(name).suffix.lower()
+    is_vid = ext in VIDEO_EXTENSIONS
+    return {
+        "name": name,
+        "path": rel,
+        "size_bytes": 0,
+        "size_human": "-",
+        "is_dir": not is_vid,
+        "modify": "",
+        "extension": ext if is_vid else "",
+        "parsed": parse_media_filename(name) if is_vid else {"title": name},
+    }
+
+
+def _parse_ftp_directory_items(ftp: ftplib.FTP, clean_sub: str) -> list[dict[str, Any]]:
+    """Lists and parses items from connected FTP server directory."""
+    try:
+        mlsd_items = list(ftp.mlsd())
+    except Exception:
+        mlsd_items = []
+
+    if mlsd_items:
+        items = [_parse_mlsd_item(name, facts, clean_sub) for name, facts in mlsd_items]
+        return [it for it in items if it is not None]
+
+    items = [_parse_nlst_item(name, clean_sub) for name in ftp.nlst()]
+    return [it for it in items if it is not None]
+
+
+def _fetch_cifs_items(source_id: str, profile_id: str, clean_sub: str) -> tuple[str, str, str, list[dict[str, Any]]]:
+    """Resolves CIFS mount directory and scans files."""
+    if source_id == "synology-video":
+        mount_path = _user_media_path("Synology", "video")
+        chan_name = "Montage CIFS Local"
+    elif source_id == "synology-tvshow":
+        mount_path = _user_media_path("Synology", "tvshow")
+        chan_name = "Montage CIFS Local"
+    elif profile_id == "disque1":
+        mount_path = _user_media_path("Freebox", "Disque_1")
+        chan_name = "Montage CIFS Disque 1"
+    else:
+        mount_path = _user_media_path("Freebox", "Disque_2")
+        chan_name = "Montage CIFS Disque 2"
+
+    base_dir = Path(mount_path)
+    target_dir = base_dir if not clean_sub else base_dir / clean_sub
+    items = _scan_local_directory(target_dir, clean_sub)
+    return chan_name, "local_fs", mount_path, items
+
+
+def _fetch_raw_file_list(
+    source_id: str, profile_id: str, subdir: str = ""
+) -> tuple[str, str, str, list[dict[str, Any]]]:
+    """Retrieves raw file listing from local filesystem, CIFS, or FTP.
+
+    # Returns
+    (channel_name, protocol, base_target, items_list)
+    """
+    clean_sub = subdir.strip("/")
+
+    # 1. Local snippets
+    if source_id == "local-snippets" and profile_id == "local":
+        base_dir = Path("data/snippets")
+        target_dir = base_dir if not clean_sub else base_dir / clean_sub
+        items = _scan_local_directory(target_dir, clean_sub)
+        return "Système de Fichiers Local", "local_fs", str(base_dir), items
+
+    # 2. Local CIFS mounts
+    if profile_id in ("cifs", "disque1", "disque2"):
+        return _fetch_cifs_items(source_id, profile_id, clean_sub)
+
+    # 3. WAN FTP (Synology)
+    if profile_id == "wan_ftp" and source_id in ("synology-video", "synology-tvshow"):
+        base_dir = "/video" if source_id == "synology-video" else "/tvshow"
+        target_dir = base_dir if not clean_sub else f"{base_dir}/{clean_sub}"
+        passwd = resolve_nas_password()
+        chan_name = "Streaming WAN FTP"
+        base_target = f"ftp://{DEFAULT_NAS_USER}@{DEFAULT_NAS_HOST}:21{base_dir}"
+
+        items: list[dict[str, Any]] = []
+        try:
+            ftp = ftplib.FTP(timeout=PROBE_FTP_TIMEOUT_SECS * 2)
+            ftp.connect(DEFAULT_NAS_HOST, 21, timeout=PROBE_FTP_TIMEOUT_SECS * 2)
+            ftp.login(DEFAULT_NAS_USER, passwd)
+            ftp.cwd(target_dir)
+            items = _parse_ftp_directory_items(ftp, clean_sub)
+            ftp.quit()
+        except Exception:
+            pass
+        return chan_name, "ftp", base_target, items
+
+    return "Inconnu", "unknown", "", []
+
+
+def _fetch_or_cache_listing(
+    source_id: str, profile_id: str, subdir: str, force: bool
+) -> tuple[str, str, str, list[dict[str, Any]]]:
+    """Retrieves raw directory listing checking memory, persistent disk, or live probe."""
+    cache_key = f"{source_id}:{profile_id}:{subdir}"
+    now = time.time()
+    if not force and cache_key in _LISTING_CACHE and (now - _LISTING_CACHE[cache_key][0] < CACHE_LISTING_TTL_SECONDS):
+        _, chan_name, proto, base_tgt, raw_items = _LISTING_CACHE[cache_key]
+        return chan_name, proto, base_tgt, raw_items
+
+    disk_hit = None if force else _read_disk_cache("listing", cache_key, CACHE_LISTING_TTL_SECONDS)
+    if disk_hit is not None:
+        ts, cached_data = disk_hit
+        chan_name = cached_data.get("channel_name", "")
+        proto = cached_data.get("protocol", "")
+        base_tgt = cached_data.get("base_target", "")
+        raw_items = cached_data.get("items", [])
+        _LISTING_CACHE[cache_key] = (ts, chan_name, proto, base_tgt, raw_items)
+        return chan_name, proto, base_tgt, raw_items
+
+    chan_name, proto, base_tgt, raw_items = _fetch_raw_file_list(source_id, profile_id, subdir)
+    _LISTING_CACHE[cache_key] = (now, chan_name, proto, base_tgt, raw_items)
+    _write_disk_cache(
+        "listing",
+        cache_key,
+        {
+            "channel_name": chan_name,
+            "protocol": proto,
+            "base_target": base_tgt,
+            "items": raw_items,
+        },
+    )
+    return chan_name, proto, base_tgt, raw_items
+
+
+def _filter_listing_items(raw_items: list[dict[str, Any]], query_str: str) -> list[dict[str, Any]]:
+    """Applies smart token filtering over name, title, year, resolution, and codec."""
+    q = query_str.strip().lower()
+    if not q:
+        return raw_items
+    tokens = q.split()
+    return [
+        it
+        for it in raw_items
+        if all(
+            tok in it["name"].lower()
+            or (it.get("parsed", {}).get("title") and tok in str(it["parsed"]["title"]).lower())
+            or (it.get("parsed", {}).get("year") and tok in str(it["parsed"]["year"]).lower())
+            or (it.get("parsed", {}).get("resolution") and tok in str(it["parsed"]["resolution"]).lower())
+            or (it.get("parsed", {}).get("codec") and tok in str(it["parsed"]["codec"]).lower())
+            for tok in tokens
+        )
+    ]
+
+
+def _sort_listing_items(items: list[dict[str, Any]], sort_mode: str) -> list[dict[str, Any]]:
+    """Sorts items with directories first, then requested order."""
+    if sort_mode == "name_desc":
+        return sorted(items, key=lambda x: (not x["is_dir"], x["name"].lower()), reverse=True)
+    if sort_mode == "size_desc":
+        return sorted(items, key=lambda x: (not x["is_dir"], x["size_bytes"]), reverse=True)
+    if sort_mode == "size_asc":
+        return sorted(items, key=lambda x: (x["is_dir"], x["size_bytes"]))
+    if sort_mode == "date_desc":
+        return sorted(items, key=lambda x: (not x["is_dir"], x.get("modify", "")), reverse=True)
+    return sorted(items, key=lambda x: (not x["is_dir"], x["name"].lower()))
+
+
+def list_source_files(
+    source_id: str,
+    profile_id: str,
+    subdir: str = "",
+    page: int = 1,
+    limit: int = DEFAULT_PAGE_SIZE,
+    query_str: str = "",
+    sort_mode: str = "name_asc",
+    force: bool = False,
+) -> dict[str, Any]:
+    """Lists files with two-tier memory & disk caching, filtering, sorting, and pagination."""
+    limit = max(1, min(limit, MAX_PAGE_SIZE))
+    page = max(1, page)
+    chan_name, proto, base_tgt, raw_items = _fetch_or_cache_listing(source_id, profile_id, subdir, force)
+
+    filtered = _filter_listing_items(raw_items, query_str)
+    sorted_items = _sort_listing_items(filtered, sort_mode)
+
+    total_items = len(raw_items)
+    filtered_count = len(sorted_items)
+    total_pages = max(1, (filtered_count + limit - 1) // limit)
+    start_idx = (page - 1) * limit
+    end_idx = start_idx + limit
+
+    return {
+        "status": "ok",
+        "source_id": source_id,
+        "profile_id": profile_id,
+        "subdir": subdir,
+        "channel_name": chan_name,
+        "protocol": proto,
+        "base_target": base_tgt,
+        "total_items": total_items,
+        "filtered_items": filtered_count,
+        "page": page,
+        "limit": limit,
+        "total_pages": total_pages,
+        "items": sorted_items[start_idx:end_idx],
+    }
+
+
+def _resolve_target_endpoint(source_id: str, profile_id: str, clean_path: str) -> tuple[bool, bool, str, str, str]:
+    """Resolves local vs remote target path, ftp url, and credentials."""
+    if source_id == "local-snippets" and profile_id == "local":
+        return True, False, str(Path("data/snippets") / clean_path), "", ""
+    if profile_id in ("cifs", "disque1", "disque2"):
+        base_cifs = _user_media_path("Synology", "video" if source_id == "synology-video" else "tvshow")
+        return True, False, str(Path(base_cifs) / clean_path), "", ""
+    if profile_id == "wan_ftp":
+        base_dir = "/video" if source_id == "synology-video" else "/tvshow"
+        ftp_url = f"ftp://{DEFAULT_NAS_HOST}:21{base_dir}/{clean_path}"
+        return False, True, "", ftp_url, resolve_nas_password()
+    return False, False, "", "", ""
+
+
+def _parse_probe_streams(
+    probe_data: dict[str, Any],
+) -> tuple[dict[str, Any] | None, list[dict[str, Any]], list[dict[str, Any]]]:
+    """Extracts video, audio, and subtitle streams from ffprobe output."""
+    video_stream: dict[str, Any] | None = None
+    audio_streams: list[dict[str, Any]] = []
+    sub_streams: list[dict[str, Any]] = []
+
+    for s in probe_data.get("streams", []):
+        stype = s.get("codec_type")
+        if stype == "video" and video_stream is None:
+            video_stream = {
+                "codec": s.get("codec_name"),
+                "codec_long": s.get("codec_long_name"),
+                "profile": s.get("profile"),
+                "width": s.get("width"),
+                "height": s.get("height"),
+                "aspect_ratio": s.get("display_aspect_ratio"),
+                "fps": s.get("r_frame_rate"),
+                "pix_fmt": s.get("pix_fmt"),
+                "color_space": s.get("color_space"),
+            }
+        elif stype == "audio":
+            audio_streams.append(
+                {
+                    "index": s.get("index"),
+                    "codec": s.get("codec_name"),
+                    "channels": s.get("channels"),
+                    "channel_layout": s.get("channel_layout"),
+                    "language": s.get("tags", {}).get("language", "und"),
+                    "title": s.get("tags", {}).get("title", ""),
+                }
+            )
+        elif stype == "subtitle":
+            sub_streams.append(
+                {
+                    "index": s.get("index"),
+                    "codec": s.get("codec_name"),
+                    "language": s.get("tags", {}).get("language", "und"),
+                    "title": s.get("tags", {}).get("title", ""),
+                    "forced": s.get("disposition", {}).get("forced", 0) == 1,
+                    "default": s.get("disposition", {}).get("default", 0) == 1,
+                }
+            )
+    return video_stream, audio_streams, sub_streams
+
+
+def _resolve_ffprobe_binary() -> str | None:
+    """Finds ffprobe binary in standard PATH or deploy directories (~/dbsrt/bin, ~/.local/bin)."""
+    found = shutil.which("ffprobe")
+    if found:
+        return found
+    candidates = [
+        Path.home() / "dbsrt/bin/ffprobe",
+        Path.home() / ".local/bin/ffprobe",
+        Path.home() / "bin/ffprobe",
+        Path("/usr/local/bin/ffprobe"),
+        Path("/usr/bin/ffprobe"),
+    ]
+    for c in candidates:
+        if c.is_file() and os.access(c, os.X_OK):
+            return str(c)
+    return None
+
+
+def _execute_ffprobe(
+    is_local: bool, is_ftp: bool, abs_path: str, ftp_url: str, passwd: str, ffprobe_bin: str
+) -> tuple[dict[str, Any] | None, str]:
+    """Runs ffprobe command and returns parsed JSON or error message."""
+    cmd: list[str] = []
+    if is_local and Path(abs_path).is_file():
+        cmd = [ffprobe_bin, "-v", "error", "-print_format", "json", "-show_format", "-show_streams", abs_path]
+    elif is_ftp and passwd:
+        cmd = [
+            ffprobe_bin,
+            "-v",
+            "error",
+            "-ftp-user",
+            DEFAULT_NAS_USER,
+            "-ftp-password",
+            passwd,
+            "-print_format",
+            "json",
+            "-show_format",
+            "-show_streams",
+            ftp_url,
+        ]
+    if not cmd:
+        return None, "Cible non accessible pour analyse ffprobe"
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=FFPROBE_TIMEOUT_SECONDS)
+        if proc.returncode == 0 and proc.stdout.strip():
+            return json.loads(proc.stdout), ""
+        err_raw = proc.stderr.strip()
+        if "I/O error" in err_raw or "Permission denied" in err_raw or "550" in err_raw:
+            return None, "Erreur E/S ou droits NAS insuffisants (FTP 550 Permission denied : fichier en chmod 600)"
+        last_line = err_raw.splitlines()[-1] if err_raw else "Code retour non nul"
+        return None, f"Échec analyse ffprobe: {last_line}"
+    except subprocess.TimeoutExpired:
+        return None, "Timeout analyse ffprobe (> 12s)"
+    except Exception as err:
+        return None, str(err)
+
+
+def _get_cached_details(cache_key: str, force: bool) -> dict[str, Any] | None:
+    """Checks tier-1 memory and tier-2 disk caches for file details."""
+    now = time.time()
+    if not force and cache_key in _DETAILS_CACHE and (now - _DETAILS_CACHE[cache_key][0] < CACHE_DETAILS_TTL_SECONDS):
+        return _DETAILS_CACHE[cache_key][1]
+    if not force:
+        disk_hit = _read_disk_cache("details", cache_key, CACHE_DETAILS_TTL_SECONDS)
+        if disk_hit is not None:
+            ts, cached_details = disk_hit
+            _DETAILS_CACHE[cache_key] = (ts, cached_details)
+            return cached_details
+    return None
+
+
+def _populate_probe_format(details: dict[str, Any], probe_data: dict[str, Any]) -> None:
+    """Populates container and stream properties from valid ffprobe output."""
+    fmt = probe_data.get("format", {})
+    dur = float(fmt.get("duration", 0.0))
+    size = int(fmt.get("size", 0))
+    bitrate = int(fmt.get("bit_rate", 0))
+
+    details["probed"] = True
+    details["duration_seconds"] = dur
+    details["duration_formatted"] = format_seconds_duration(dur)
+    if size > 0 and details["size_bytes"] == 0:
+        details["size_bytes"] = size
+        details["size_human"] = format_human_size(size)
+    details["format_name"] = fmt.get("format_name", "")
+    details["format_long_name"] = fmt.get("format_long_name", "")
+    details["bit_rate"] = bitrate
+    details["bit_rate_human"] = f"{bitrate / 1000000.0:.2f} Mb/s" if bitrate > 0 else "-"
+
+    video_stream, audio_streams, sub_streams = _parse_probe_streams(probe_data)
+    details["video"] = video_stream
+    details["audio_streams"] = audio_streams
+    details["subtitle_streams"] = sub_streams
+
+
+def inspect_file_details(source_id: str, profile_id: str, file_path: str, force: bool = False) -> dict[str, Any]:
+    """Inspects container file with two-tier memory & disk caching, ffprobe and Zero-DB couplings."""
+    clean_path = file_path.strip("/")
+    filename = Path(clean_path).name
+    cache_key = f"{source_id}:{profile_id}:{clean_path}"
+    cached = _get_cached_details(cache_key, force)
+    if cached is not None:
+        return cached
+
+    is_local, is_ftp, abs_path, ftp_url, passwd = _resolve_target_endpoint(source_id, profile_id, clean_path)
+
+    stat_size = 0
+    stat_mod = ""
+    if is_local and Path(abs_path).is_file():
+        st = Path(abs_path).stat()
+        stat_size = st.st_size
+        stat_mod = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(st.st_mtime))
+
+    now = time.time()
+    details: dict[str, Any] = {
+        "status": "ok",
+        "name": filename,
+        "path": clean_path,
+        "extension": Path(filename).suffix.lower(),
+        "size_bytes": stat_size,
+        "size_human": format_human_size(stat_size) if stat_size > 0 else "-",
+        "modify": stat_mod,
+        "source_id": source_id,
+        "profile_id": profile_id,
+        "uri": abs_path if is_local else ftp_url,
+        "parsed": parse_media_filename(filename),
+        "coupling": _lookup_coupling(filename),
+        "probed": False,
+        "reason": "",
+    }
+
+    ffprobe_bin = _resolve_ffprobe_binary()
+    if not ffprobe_bin:
+        details["reason"] = "ffprobe non disponible sur cet hôte"
+    else:
+        probe_data, err_reason = _execute_ffprobe(is_local, is_ftp, abs_path, ftp_url, passwd, ffprobe_bin)
+        if probe_data:
+            _populate_probe_format(details, probe_data)
+        else:
+            details["reason"] = err_reason
+
+    if details["probed"]:
+        _DETAILS_CACHE[cache_key] = (now, details)
+        _write_disk_cache("details", cache_key, details)
+    return details
+
+
 class PortalRequestHandler(http.server.SimpleHTTPRequestHandler):
     """Custom HTTP handler serving API JSON endpoints and clean use-case HTML pages."""
 
@@ -517,6 +1176,36 @@ class PortalRequestHandler(http.server.SimpleHTTPRequestHandler):
             self._send_json(result)
             return
 
+        # 3. Explore files listing (paginated, filtered, sorted)
+        if path == "/api/files":
+            source_id = query.get("source", [""])[0]
+            profile_id = query.get("profile", [""])[0]
+            subdir = query.get("subdir", [""])[0]
+            page_val = int(query.get("page", ["1"])[0]) if query.get("page", ["1"])[0].isdigit() else 1
+            limit_val = (
+                int(query.get("limit", [str(DEFAULT_PAGE_SIZE)])[0])
+                if query.get("limit", [str(DEFAULT_PAGE_SIZE)])[0].isdigit()
+                else DEFAULT_PAGE_SIZE
+            )
+            q_val = query.get("q", [""])[0]
+            sort_val = query.get("sort", ["name_asc"])[0]
+            force_val = query.get("force", ["0"])[0] in ("1", "true", "yes")
+            result = list_source_files(
+                source_id, profile_id, subdir, page_val, limit_val, q_val, sort_val, force=force_val
+            )
+            self._send_json(result)
+            return
+
+        # 4. Detailed file inspection (multimedia ffprobe & DB metadata)
+        if path == "/api/file/details":
+            source_id = query.get("source", [""])[0]
+            profile_id = query.get("profile", [""])[0]
+            file_path = query.get("path", [""])[0]
+            force_val = query.get("force", ["0"])[0] in ("1", "true", "yes")
+            result = inspect_file_details(source_id, profile_id, file_path, force=force_val)
+            self._send_json(result)
+            return
+
         if path in ("/", "/sources", "/sources/"):
             self.path = "/sources.html"
 
@@ -551,11 +1240,43 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help=f"HTTP port (default {DEFAULT_PORT})")
     parser.add_argument("--metadata", action="store_true", help="Print sources metadata JSON and exit")
     parser.add_argument("--probe", nargs=2, metavar=("SOURCE", "PROFILE"), help="Execute single probe and exit")
+    parser.add_argument("--files", nargs=2, metavar=("SOURCE", "PROFILE"), help="List files for source/profile")
+    parser.add_argument("--subdir", default="", help="Subdirectory path within source")
+    parser.add_argument("--page", type=int, default=1, help="Page number (default 1)")
+    parser.add_argument("--limit", type=int, default=DEFAULT_PAGE_SIZE, help="Page limit (default 25)")
+    parser.add_argument("--search", default="", help="Search / filter query")
+    parser.add_argument(
+        "--sort", default="name_asc", help="Sort order (name_asc, name_desc, size_desc, size_asc, date_desc)"
+    )
+    parser.add_argument("--details", nargs=3, metavar=("SOURCE", "PROFILE", "PATH"), help="Inspect multimedia details")
+    parser.add_argument("--force", action="store_true", help="Bypass cache and force fresh live probe")
     args = parser.parse_args()
 
     if args.metadata:
         print(json.dumps(get_sources_metadata(), indent=2))
     elif args.probe:
         print(json.dumps(execute_single_probe(args.probe[0], args.probe[1]), indent=2))
+    elif args.files:
+        print(
+            json.dumps(
+                list_source_files(
+                    args.files[0],
+                    args.files[1],
+                    args.subdir,
+                    args.page,
+                    args.limit,
+                    args.search,
+                    args.sort,
+                    force=args.force,
+                ),
+                indent=2,
+            )
+        )
+    elif args.details:
+        print(
+            json.dumps(
+                inspect_file_details(args.details[0], args.details[1], args.details[2], force=args.force), indent=2
+            )
+        )
     else:
         run_server(args.port)

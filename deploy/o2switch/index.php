@@ -477,7 +477,7 @@ if ($path === '/' || $path === '') {
 
 // Read-only keys (web-top QR, shared dashboards) only reach monitoring GETs
 $isReadOnly = !check_key_match($matchedKey, $masterKeys);
-$readOnlyPathAllowed = in_array($path, ['/monitoring', '/top', '/health', '/v1/health', '/sources', '/sources.html', '/api/sources', '/api/probe'], true)
+$readOnlyPathAllowed = in_array($path, ['/monitoring', '/top', '/health', '/v1/health', '/sources', '/sources.html', '/api/sources', '/api/probe', '/api/files', '/api/file/details'], true)
     || str_starts_with($path, '/v1/monitoring/');
 if ($isReadOnly && (!in_array($method, ['GET', 'HEAD'], true) || !$readOnlyPathAllowed)) {
     send_json_error(403, ['error' => 'Forbidden: read-only key']);
@@ -501,19 +501,55 @@ if ($path === '/sources' || $path === '/sources.html') {
     send_json_error(404, ['error' => 'sources.html not deployed in ~/dbsrt/web/']);
 }
 
-if ($path === '/api/sources' || $path === '/api/probe') {
-    $pythonBin = $homeDir . '/dbsrt/bin/python3';
+if (in_array($path, ['/api/sources', '/api/probe', '/api/files', '/api/file/details'], true)) {
+    $binDir = $homeDir . '/dbsrt/bin';
+    $pythonBin = $binDir . '/python3';
     $script = $homeDir . '/dbsrt/scripts/portal_server.py';
     if (!is_file($pythonBin) || !is_file($script)) {
         send_json_error(500, ['error' => 'Portal backend not installed on host']);
     }
 
+    // Ensure PATH includes local ~/dbsrt/bin for static ffprobe / ffmpeg
+    $currPath = getenv('PATH') ?: '/usr/local/bin:/usr/bin:/bin';
+    putenv('PATH=' . $binDir . ':' . $currPath);
+
     if ($path === '/api/sources') {
         $cmd = escapeshellcmd($pythonBin) . ' ' . escapeshellarg($script) . ' --metadata';
-    } else {
+    } elseif ($path === '/api/probe') {
         $sourceId = preg_replace('/[^a-zA-Z0-9_-]/', '', (string)($_GET['source'] ?? ''));
         $profileId = preg_replace('/[^a-zA-Z0-9_-]/', '', (string)($_GET['profile'] ?? ''));
         $cmd = escapeshellcmd($pythonBin) . ' ' . escapeshellarg($script) . ' --probe ' . escapeshellarg($sourceId) . ' ' . escapeshellarg($profileId);
+    } elseif ($path === '/api/files') {
+        $sourceId = preg_replace('/[^a-zA-Z0-9_-]/', '', (string)($_GET['source'] ?? ''));
+        $profileId = preg_replace('/[^a-zA-Z0-9_-]/', '', (string)($_GET['profile'] ?? ''));
+        $subdir = (string)($_GET['subdir'] ?? '');
+        $page = (int)($_GET['page'] ?? 1);
+        $limit = (int)($_GET['limit'] ?? 25);
+        $search = (string)($_GET['q'] ?? '');
+        $sort = preg_replace('/[^a-zA-Z0-9_]/', '', (string)($_GET['sort'] ?? 'name_asc'));
+        $cmd = escapeshellcmd($pythonBin) . ' ' . escapeshellarg($script)
+            . ' --files ' . escapeshellarg($sourceId) . ' ' . escapeshellarg($profileId)
+            . ' --page ' . $page . ' --limit ' . $limit . ' --sort ' . escapeshellarg($sort);
+        if ($subdir !== '') {
+            $cmd .= ' --subdir ' . escapeshellarg($subdir);
+        }
+        if ($search !== '') {
+            $cmd .= ' --search ' . escapeshellarg($search);
+        }
+        $force = isset($_GET['force']) && in_array((string)$_GET['force'], ['1', 'true', 'yes'], true);
+        if ($force) {
+            $cmd .= ' --force';
+        }
+    } else {
+        $sourceId = preg_replace('/[^a-zA-Z0-9_-]/', '', (string)($_GET['source'] ?? ''));
+        $profileId = preg_replace('/[^a-zA-Z0-9_-]/', '', (string)($_GET['profile'] ?? ''));
+        $filePath = (string)($_GET['path'] ?? '');
+        $cmd = escapeshellcmd($pythonBin) . ' ' . escapeshellarg($script)
+            . ' --details ' . escapeshellarg($sourceId) . ' ' . escapeshellarg($profileId) . ' ' . escapeshellarg($filePath);
+        $force = isset($_GET['force']) && in_array((string)$_GET['force'], ['1', 'true', 'yes'], true);
+        if ($force) {
+            $cmd .= ' --force';
+        }
     }
     header('Content-Type: application/json; charset=utf-8');
     header('Access-Control-Allow-Origin: *');
