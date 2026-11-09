@@ -55,6 +55,97 @@ pub const HEADER_RESERVED_BYTES: usize = 12;
 /// Number of alignment padding bytes at the end of the header.
 pub const HEADER_ALIGNMENT_PADDING_BYTES: usize = 4;
 
+/// Default maximum mean Hamming distance per frame to accept an audio match (out of 64 bits).
+/// Pairs with different encodings of the same audio track typically average 2.0 to 6.0 bits.
+/// Unrelated audio tracks average ~32.0 bits.
+pub const DEFAULT_MAX_AUDIO_MATCH_DISTANCE: f64 = 14.0;
+
+/// Background noise distance floor (random 64-bit uncorrelated hashes).
+pub const RANDOM_AUDIO_HASH_DISTANCE: f64 = 32.0;
+
+/// Result of matching a query audio fingerprint sequence against a reference sequence.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AudioMatchResult {
+    /// Optimal matching frame index in the reference stream.
+    pub ref_frame_offset: usize,
+    /// Estimated time offset in seconds in the reference stream.
+    pub offset_sec: f64,
+    /// Average Hamming distance across all frames of the query.
+    pub mean_distance: f64,
+    /// Normalized match score from 0.0 (unrelated) to 1.0 (identical).
+    pub score: f64,
+    /// Signal-to-noise ratio margin over baseline random noise (distance drop).
+    pub snr_bits: f64,
+}
+
+/// Matches a query audio hash sequence against a reference sequence via temporal sliding cross-correlation.
+///
+/// # Arguments
+/// * `query` - Contiguous slice of query audio hashes (e.g. 5s-10s snippet).
+/// * `reference` - Contiguous slice of reference media audio hashes.
+/// * `audio_fps` - Sampling framerate of the audio hashes (e.g. 86.125 or 24.0).
+/// * `max_distance` - Maximum allowed mean Hamming distance to consider a match valid.
+///
+/// # Returns
+/// `Some(AudioMatchResult)` if a valid match meeting the threshold is found, `None` otherwise.
+///
+/// # Panics
+/// Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// 1. Rejects queries larger than the reference stream or empty queries.
+/// 2. Slides query across reference positions, evaluating sum of Hamming distances via hardware POPCNT.
+/// 3. Identifies the global minimum distance offset.
+/// 4. Validates that the minimum distance is below `max_distance`.
+/// 5. Computes SNR bit margin against expected random noise (32.0 bits).
+pub fn match_audio_sequence(
+    query: &[u64],
+    reference: &[u64],
+    audio_fps: f64,
+    max_distance: f64,
+) -> Option<AudioMatchResult> {
+    if query.is_empty() || reference.len() < query.len() || audio_fps <= 0.0 {
+        return None;
+    }
+
+    let q_len = query.len();
+    let max_shift = reference.len() - q_len;
+
+    let mut best_shift = 0;
+    let mut min_total_distance = u64::MAX;
+
+    for shift in 0..=max_shift {
+        let mut total_dist = 0u64;
+        let ref_slice = &reference[shift..shift + q_len];
+
+        for (q, r) in query.iter().zip(ref_slice) {
+            total_dist += (*q ^ *r).count_ones() as u64;
+        }
+
+        if total_dist < min_total_distance {
+            min_total_distance = total_dist;
+            best_shift = shift;
+        }
+    }
+
+    let mean_distance = min_total_distance as f64 / q_len as f64;
+    if mean_distance > max_distance {
+        return None;
+    }
+
+    let score = (1.0 - (mean_distance / (HASH_TOTAL_BITS as f64))).clamp(0.0, 1.0);
+    let snr_bits = (RANDOM_AUDIO_HASH_DISTANCE - mean_distance).max(0.0);
+    let offset_sec = best_shift as f64 / audio_fps;
+
+    Some(AudioMatchResult {
+        ref_frame_offset: best_shift,
+        offset_sec,
+        mean_distance,
+        score,
+        snr_bits,
+    })
+}
+
 /// Lowest frequency boundary in Hz for Haitsma-Kalker sub-band decomposition.
 pub const MIN_FREQ_HZ: f32 = 300.0;
 

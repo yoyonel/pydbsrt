@@ -23,9 +23,10 @@ pub mod trajectory;
 pub mod video;
 
 pub use ahash::{
-    AhashFile, AhashHeader, HaitsmaKalkerExtractor, HaitsmaScratchpad, AHASH_MAGIC, AHASH_VERSION,
-    DEFAULT_FRAME_SIZE, DEFAULT_HOP_SIZE, DEFAULT_SAMPLE_RATE, DEFAULT_SPECTRAL_LAG,
-    HEADER_SIZE_BYTES, NUM_SPECTRAL_BANDS, NUM_SPECTRAL_BITS, VIDEO_SYNC_HOP_SIZE,
+    match_audio_sequence, AhashFile, AhashHeader, AudioMatchResult, HaitsmaKalkerExtractor,
+    HaitsmaScratchpad, AHASH_MAGIC, AHASH_VERSION, DEFAULT_FRAME_SIZE, DEFAULT_HOP_SIZE,
+    DEFAULT_MAX_AUDIO_MATCH_DISTANCE, DEFAULT_SAMPLE_RATE, DEFAULT_SPECTRAL_LAG, HEADER_SIZE_BYTES,
+    NUM_SPECTRAL_BANDS, NUM_SPECTRAL_BITS, VIDEO_SYNC_HOP_SIZE,
 };
 pub use assets::{
     check_completeness, AssetKind, ContainerIdentity, MediaAsset, MediaSource,
