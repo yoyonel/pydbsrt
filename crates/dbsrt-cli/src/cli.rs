@@ -4,9 +4,9 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use dbsrt_core::HwAccel;
 
 use crate::commands::{
-    BenchCutsArgs, BenchVideoArgs, CertifyCouplingArgs, ExportPhashArgs, FetchSubtitlesArgs,
-    ImportPhashArgs, InspectMediaArgs, MediaAddArgs, MigrateArgs, PackArgs, RecognizeArgs,
-    RelabelCouplingArgs, RetargetArgs, ScanLibraryArgs, TopArgs,
+    BenchCutsArgs, BenchVideoArgs, CertifyCouplingArgs, ExportAhashArgs, ExportPhashArgs,
+    FetchSubtitlesArgs, ImportPhashArgs, InspectMediaArgs, MediaAddArgs, MigrateArgs, PackArgs,
+    RecognizeArgs, RelabelCouplingArgs, RetargetArgs, ScanLibraryArgs, TopArgs,
 };
 use crate::constants::{
     DEFAULT_BENCH_PHASH_COUNT, DEFAULT_POSTGRES_DB, DEFAULT_POSTGRES_PASS, DEFAULT_POSTGRES_PORT,
@@ -123,6 +123,10 @@ pub enum Commands {
 
     /// Export binary .phash file for a media using fast SIMD extraction
     ExportPhash(ExportPhashArgs),
+
+    /// Export binary .ahash v1.0 file for a media using Haitsma-Kalker differential spectral hashing
+    #[command(name = "export-ahash", visible_alias = "export:ahash")]
+    ExportAhash(ExportAhashArgs),
 
     /// Zero-DB fast search across directory of .phash files via memory mapping
     ScanLibrary(ScanLibraryArgs),

@@ -27,6 +27,18 @@ Le format unitaire `.phash` stocke la séquence brute d'empreintes perceptuelles
 
 ---
 
+## 1bis. Format Binaire d'Empreinte Audio Spectrale (`.ahash` v1.0)
+
+Le format unitaire `.ahash` stocke la séquence temporelle d'empreintes audio 64-bit calculées selon Haitsma-Kalker :
+
+- **Taille de l'empreinte** : 64 bits (8 octets non signés, `uint64_t`).
+- **En-tête structuré** : 176 octets garantissant un alignement strict à 8 octets pour projection mémoire `mmap`.
+- **Magic** : `b"AHASH\0\1\0"`.
+- **Spécification détaillée** : Voir la spécification complète dans [RFC Format Binaire `.ahash`](2026-11-10-rfc-ahash-format-audio.md).
+
+
+---
+
 ## 2. Spécification de l'Archive Haute Densité (`.dbphash` v2)
 
 Le format `.dbphash` regroupe plusieurs millions d'empreintes dans un fichier contigu unique projetable directement en mémoire via `mmap` sans allocation tas (`Zero-Allocation`).

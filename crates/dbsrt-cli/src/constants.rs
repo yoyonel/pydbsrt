@@ -69,6 +69,12 @@ pub const DEFAULT_PAL_FPS: f64 = 25.0;
 /// Standard NTSC film framerate (23.976 fps).
 pub const DEFAULT_NTSC_FILM_FPS: f64 = 23.976;
 
+/// Default audio sampling rate in Hz for .ahash extraction.
+pub const DEFAULT_AHASH_SAMPLE_RATE: u32 = 5512;
+
+/// Default hop size in samples for canonical .ahash extraction (~86.1 fps).
+pub const DEFAULT_AHASH_HOP_SIZE: usize = 64;
+
 /// Default sparse sampling framerate (1.0 fps).
 pub const DEFAULT_SPARSE_FPS: f64 = 1.0;
 

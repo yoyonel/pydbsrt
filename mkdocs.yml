@@ -158,6 +158,7 @@ nav:
       - API REST & CLI Portail Sources Médias: reference/2026-11-09-api-portail-sources-medias.md
       - Schéma PostgreSQL 17 & SP-GiST: reference/schema-postgresql.md
       - Formats de Fichiers & Spécifications: reference/formats-fichiers.md
+      - RFC Format Binaire .ahash (Audio): reference/2026-11-10-rfc-ahash-format-audio.md
       - Catalogue des Commandes Taskfile: reference/taskfile.md
       - Inventaire Exhaustif des Scripts: reference/scripts-inventory-2026-11-10.md
       - Audit Régressions & Cartographie Scripts: reference/2026-11-10-audit-exhaustif-scripts-regressions.md
@@ -208,6 +209,7 @@ nav:
       - Modèle Inputs-First (Sources & Assets): explanation/2026-11-08-modele-donnees-inputs-media-sources-et-assets.md
       - Identité Binaire des Conteneurs & Anti-Shadowing: explanation/2026-11-08-etude-architecture-identite-binaire-conteneurs-et-anti-shadowing.md
       - Architecture Portail Sources Médias Multi-Environnements: explanation/2026-11-09-architecture-portail-medias-et-sources-multi-environnements.md
+      - Étude R&D Empreinte Audio aHash (Haitsma-Kalker): explanation/2026-11-10-etude-rd-empreinte-audio-ahash-haitsma-kalker.md
   - 📊 Benchmarks & Preuves:
       - Campagnes Empiriques:
           - Rapport Batch TVShow Synology: history/2026-10-25-rapport-batch-import-tvshow-synology.md

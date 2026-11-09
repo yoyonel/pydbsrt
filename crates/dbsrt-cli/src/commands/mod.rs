@@ -3,6 +3,7 @@
 pub mod bench;
 pub mod certify;
 pub mod export;
+pub mod export_ahash;
 pub mod fetch;
 pub mod import;
 pub mod inspect;
@@ -25,6 +26,7 @@ pub use certify::{
     CertifyCouplingArgs,
 };
 pub use export::{run_export_phash, ExportPhashArgs};
+pub use export_ahash::{run_export_ahash, ExportAhashArgs};
 pub use fetch::{run_fetch_subtitles, FetchSubtitlesArgs};
 pub use import::{run_import_phash, ImportPhashArgs};
 pub use inspect::{run_inspect_media, InspectMediaArgs};

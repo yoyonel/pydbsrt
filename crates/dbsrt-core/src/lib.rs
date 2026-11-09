@@ -3,7 +3,9 @@
 //! - Hardware-accelerated Hamming distance (`hamming_distance`)
 //! - Binary file format definitions
 
+pub mod ahash;
 pub mod assets;
+pub mod audio;
 pub mod container;
 pub mod coupling;
 pub mod cuts;
@@ -20,10 +22,19 @@ pub mod srt;
 pub mod trajectory;
 pub mod video;
 
+pub use ahash::{
+    AhashFile, AhashHeader, HaitsmaKalkerExtractor, HaitsmaScratchpad, AHASH_MAGIC, AHASH_VERSION,
+    DEFAULT_FRAME_SIZE, DEFAULT_HOP_SIZE, DEFAULT_SAMPLE_RATE, DEFAULT_SPECTRAL_LAG,
+    HEADER_SIZE_BYTES, NUM_SPECTRAL_BANDS, NUM_SPECTRAL_BITS, VIDEO_SYNC_HOP_SIZE,
+};
 pub use assets::{
     check_completeness, AssetKind, ContainerIdentity, MediaAsset, MediaSource,
     PHashLifecycleStatus, ProbeSpecs, StorageKind, SyntheticQueryKind, DEFAULT_TOLERANCE_RATIO_CFR,
     DEFAULT_TOLERANCE_RATIO_VFR, MIN_COMPLETENESS_MARGIN_FRAMES,
+};
+pub use audio::{
+    build_ffmpeg_audio_command, extract_ahash, AudioExtractionOptions,
+    DEFAULT_AUDIO_FFMPEG_TIMEOUT_SECS,
 };
 pub use container::{
     extract_embedded_subtitle, inspect_container, language_matches, ContainerInspection,
