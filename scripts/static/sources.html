@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="fr" class="h-full bg-slate-950 text-slate-100">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sources Médias & Accès Réseau | pydbsrt Studio</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎬</text></svg>">
+  <script>
+    // Suppress development banner from Tailwind CDN
+    const _origWarn = console.warn;
+    console.warn = (...args) => {
+      if (typeof args[0] === 'string' && args[0].includes('cdn.tailwindcss.com')) return;
+      _origWarn(...args);
+    };
+  </script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <style>
+    [x-cloak] { display: none !important; }
+    @keyframes pulse-subtle {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+    .animate-pulse-subtle {
+      animation: pulse-subtle 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    }
+  </style>
+</head>
+<body class="h-full flex flex-col font-sans antialiased" x-data="mediaSourcesApp()" x-init="initApp()" x-cloak>
+
+  <!-- Top Navigation Bar -->
+  <header class="bg-slate-900 border-b border-slate-800 px-6 py-3 flex items-center justify-between shadow-md">
+    <div class="flex items-center gap-6">
+      <div class="flex items-center gap-2">
+        <span class="text-xl">🎬</span>
+        <span class="font-bold tracking-tight text-white text-lg">PYDBSRT <span class="text-indigo-400 text-xs px-2 py-0.5 rounded bg-indigo-950/60 border border-indigo-800">STUDIO</span></span>
+      </div>
+      <nav class="flex items-center gap-1.5 text-sm">
+        <span class="px-3 py-1.5 rounded-md bg-indigo-600/20 text-indigo-300 font-medium border border-indigo-500/30">Sources Médias (Physique)</span>
+        <span class="px-3 py-1.5 rounded-md text-slate-500/60 cursor-not-allowed select-none flex items-center gap-1.5" title="Page en cours de spécification">
+          <span>Actifs Médias (DB)</span>
+          <span class="text-[9px] uppercase font-mono px-1.5 py-0.2 rounded bg-slate-900 text-slate-500 border border-slate-800">Bientôt</span>
+        </span>
+        <span class="px-3 py-1.5 rounded-md text-slate-500/60 cursor-not-allowed select-none flex items-center gap-1.5" title="Fonctionnalité ultérieure">
+          <span>Trajectoires</span>
+          <span class="text-[9px] uppercase font-mono px-1.5 py-0.2 rounded bg-slate-900 text-slate-500 border border-slate-800">Bientôt</span>
+        </span>
+      </nav>
+    </div>
+
+    <!-- Active Host Context, Environment Selector & Re-Probe Action -->
+    <div class="flex items-center gap-3">
+      <div class="text-xs text-slate-400 flex items-center gap-2 bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800">
+        <span>💻 Hôte :</span>
+        <span class="text-indigo-300 font-mono font-semibold" x-text="hostName"></span>
+      </div>
+
+      <!-- Environment Preset Dropdown -->
+      <div class="text-xs flex items-center gap-2 bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800">
+        <label for="env-select" class="text-slate-400 font-medium">🎯 Profil :</label>
+        <select id="env-select" x-model="activeEnv" @change="onEnvChange()" class="bg-slate-900 border border-slate-700 text-xs font-semibold text-indigo-300 rounded px-2 py-0.5 focus:outline-none focus:border-indigo-500 cursor-pointer">
+          <template x-for="env in availableEnvs" :key="env.id">
+            <option :value="env.id" x-text="env.icon + ' ' + env.name" :selected="env.id === activeEnv"></option>
+          </template>
+        </select>
+      </div>
+
+      <button @click="probeAllProfiles()" :disabled="probingAny" class="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs font-semibold text-white shadow flex items-center gap-1.5 transition">
+        <span :class="{'animate-spin': probingAny}">⚡</span>
+        <span x-text="probingAny ? 'Diagnostic en cours...' : 'Tester Accessibilité Directe'"></span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="flex-1 overflow-y-auto p-6 max-w-7xl mx-auto w-full space-y-6">
+
+    <!-- Page Header -->
+    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-2 border-b border-slate-800/60">
+      <div>
+        <h1 class="text-2xl font-bold tracking-tight text-white flex items-center gap-2">
+          Sources Médias : Accès Réseau & Disques
+          <span class="text-xs font-normal text-slate-400 bg-slate-800/60 px-2.5 py-0.5 rounded-full border border-slate-700/50" x-text="visibleSources().length + ' gisements applicables'"></span>
+        </h1>
+        <p class="text-xs text-slate-400 mt-1">Diagnostic d'accessibilité physique des conteneurs vidéo (.mkv, .mp4) depuis cet hôte (Disques locaux, partages CIFS, flux FTP WAN, passerelle HTTP).</p>
+      </div>
+
+      <div class="flex items-center gap-3 text-xs">
+        <div class="flex items-center gap-1.5 bg-slate-900 border border-slate-800 rounded-lg p-1">
+          <button @click="expandAll(true)" class="px-2.5 py-1 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition">Tout Déplier</button>
+          <span class="text-slate-700">|</span>
+          <button @click="expandAll(false)" class="px-2.5 py-1 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition">Tout Replier</button>
+        </div>
+        <div class="text-slate-500 font-mono pl-2">
+          <span x-text="completedProbesCount + ' / ' + totalProbesCount + ' canaux sondés'"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Sources Cards -->
+    <div class="grid grid-cols-1 gap-5">
+      <template x-for="source in visibleSources()" :key="source.id">
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-lg transition"
+             :class="source.collapsed ? 'border-slate-800/80 hover:border-slate-700' : 'space-y-4 hover:border-slate-700/80'">
+
+          <!-- Card Header (Clickable Accordion) -->
+          <div class="flex flex-col md:flex-row md:items-center justify-between gap-2 cursor-pointer select-none group"
+               :class="source.collapsed ? '' : 'border-b border-slate-800/80 pb-3'"
+               @click="toggleCollapse(source)">
+
+            <div class="flex items-center gap-3">
+              <!-- Chevron Indicator -->
+              <svg class="w-4 h-4 text-slate-400 group-hover:text-indigo-400 transition-transform duration-200"
+                   :class="source.collapsed ? '-rotate-90' : 'rotate-0'"
+                   fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7"></path>
+              </svg>
+
+              <span class="px-2.5 py-1 rounded bg-slate-800 border border-slate-700 text-xs font-mono font-bold text-indigo-300" x-text="source.id"></span>
+              <h2 class="text-lg font-bold text-white tracking-tight group-hover:text-indigo-200 transition" x-text="source.name"></h2>
+
+              <!-- Collapsed Summary Badges -->
+              <template x-if="source.collapsed">
+                <div class="flex items-center gap-2 ml-2">
+                  <template x-if="filteredProfiles(source).length === 0">
+                    <span class="px-2 py-0.5 rounded text-[11px] font-medium bg-slate-800/80 text-slate-500 border border-slate-700/50">
+                      Non applicable à ce profil
+                    </span>
+                  </template>
+                  <template x-if="filteredProfiles(source).length > 0 && sourceAnyAccessible(source)">
+                    <span class="px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-800 flex items-center gap-1.5">
+                      <span>Accessible 🟢</span>
+                      <span class="text-emerald-300/80 font-normal" x-text="'(' + maxFilesCount(source) + ' fichiers réels)'"></span>
+                    </span>
+                  </template>
+                  <template x-if="filteredProfiles(source).length > 0 && !sourceAnyAccessible(source) && !sourceAnyPending(source)">
+                    <span class="px-2 py-0.5 rounded text-[11px] font-bold bg-rose-950/80 text-rose-400 border border-rose-900">
+                      Tous canaux inaccessibles 🔴
+                    </span>
+                  </template>
+                  <template x-if="filteredProfiles(source).length > 0 && sourceAnyPending(source)">
+                    <span class="px-2 py-0.5 rounded text-[11px] font-medium bg-slate-800 text-slate-400 border border-slate-700 animate-pulse-subtle">
+                      Test en cours...
+                    </span>
+                  </template>
+                </div>
+              </template>
+            </div>
+
+            <div class="flex items-center gap-4">
+              <p class="text-xs text-slate-400 hidden sm:block" x-text="source.description"></p>
+              <span class="text-[11px] text-slate-500 font-medium group-hover:text-slate-300 transition"
+                    x-text="source.collapsed ? 'Déplier ▾' : 'Replier ▴'"></span>
+            </div>
+          </div>
+
+          <!-- Channel Profiles Grid (Collapsible) -->
+          <div x-show="!source.collapsed" x-transition.opacity.duration.200ms class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <template x-for="prof in filteredProfiles(source)" :key="prof.id">
+                <div class="bg-slate-950/80 border rounded-xl p-4 flex flex-col justify-between space-y-3 transition-colors duration-300"
+                     :class="{
+                       'border-slate-800 opacity-60 animate-pulse-subtle': prof.status === 'pending',
+                       'border-emerald-800/60 shadow-[0_0_15px_rgba(16,185,129,0.05)] opacity-100': prof.status === 'online',
+                       'border-slate-800 opacity-90': prof.status === 'unmounted' || prof.status === 'offline' || prof.status === 'missing'
+                     }">
+
+                <div>
+                  <!-- Profile Header -->
+                  <div class="flex items-center justify-between">
+                    <span class="text-xs font-semibold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+                      <span x-text="prof.protocol === 'local_fs' ? '💾' : (prof.protocol === 'ftp' ? '🌐' : '⚡')"></span>
+                      <span x-text="prof.name"></span>
+                    </span>
+
+                    <!-- Badge Status -->
+                    <template x-if="prof.status === 'pending'">
+                      <span class="px-2 py-0.5 rounded text-[11px] font-medium bg-slate-800 text-slate-400 border border-slate-700 flex items-center gap-1">
+                        <span class="inline-block w-1.5 h-1.5 rounded-full bg-slate-500 animate-ping"></span>
+                        <span>Vérification...</span>
+                      </span>
+                    </template>
+                    <template x-if="prof.status === 'online'">
+                      <span class="px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-800">
+                        Accessible 🟢
+                      </span>
+                    </template>
+                    <template x-if="prof.status !== 'pending' && prof.status !== 'online'">
+                      <span class="px-2 py-0.5 rounded text-[11px] font-bold bg-rose-950 text-rose-400 border border-rose-900">
+                        Inaccessible 🔴
+                      </span>
+                    </template>
+                  </div>
+
+                  <!-- Target URI -->
+                  <div class="mt-2">
+                    <code class="text-[11px] text-indigo-300 font-mono break-all bg-slate-900 px-2 py-1 rounded block border border-slate-800" x-text="prof.target"></code>
+                  </div>
+
+                  <!-- Diagnostic Reason / Error -->
+                  <div class="mt-2 text-xs flex items-center justify-between">
+                    <span class="text-slate-400" x-text="prof.status === 'pending' ? 'Test du canal en cours...' : (prof.reason || 'Prêt')"></span>
+                    <span class="text-[10px] font-mono text-slate-500" x-show="prof.latency_ms" x-text="prof.latency_ms + ' ms'"></span>
+                  </div>
+                </div>
+
+                <!-- Footer Metric: Real Video Files Accessible -->
+                <div class="border-t border-slate-800/80 pt-2 flex items-center justify-between">
+                  <span class="text-xs text-slate-500 font-medium">Conteneurs vidéo visibles :</span>
+                  <template x-if="prof.status === 'pending'">
+                    <span class="text-xs font-mono text-slate-600">Calcul...</span>
+                  </template>
+                  <template x-if="prof.status !== 'pending'">
+                    <span class="text-sm font-bold font-mono"
+                          :class="prof.files_count > 0 ? 'text-emerald-400' : 'text-slate-500'"
+                          x-text="prof.files_count > 0 ? prof.files_count + ' fichiers réels' : '0 fichier'"></span>
+                  </template>
+                </div>
+
+              </div>
+            </template>
+          </div>
+
+        </div>
+      </template>
+    </div>
+
+  </main>
+
+  <script>
+    function mediaSourcesApp() {
+      return {
+        hostName: 'chargement...',
+        detectedEnv: 'local',
+        activeEnv: 'local',
+        availableEnvs: [],
+        sources: [],
+        probingAny: false,
+        totalProbesCount: 0,
+        completedProbesCount: 0,
+
+        async initApp() {
+          await this.loadSourcesMetadata();
+          this.probeAllProfiles();
+        },
+
+        getApiUrl(endpoint, params = '') {
+          const pathname = window.location.pathname;
+          const base = pathname.substring(0, pathname.lastIndexOf('/') + 1);
+          const search = new URLSearchParams(window.location.search);
+          const token = search.get('token') || search.get('key');
+          let url = `${base}api/${endpoint}`;
+          const queryParts = [];
+          if (params) queryParts.push(params);
+          if (token) queryParts.push(`token=${encodeURIComponent(token)}`);
+          if (queryParts.length > 0) {
+            url += `?${queryParts.join('&')}`;
+          }
+          return url;
+        },
+
+        async loadSourcesMetadata() {
+          try {
+            const res = await fetch(this.getApiUrl('sources'));
+            const data = await res.json();
+            this.hostName = data.host;
+            this.detectedEnv = data.detected_env || 'local';
+            this.activeEnv = this.detectedEnv;
+            this.availableEnvs = data.available_envs || [];
+            const rawSources = data.sources || [];
+
+            rawSources.forEach(s => {
+              s.collapsed = false;
+              s.userToggled = false;
+            });
+            this.sources = rawSources;
+            this.updateProbesTotal();
+          } catch (err) {
+            console.error('Metadata fetch error:', err);
+          }
+        },
+
+        onEnvChange() {
+          this.updateProbesTotal();
+          this.sources.forEach(s => {
+            s.userToggled = false;
+            this.updateSourceCollapseAuto(s);
+          });
+          this.probeAllProfiles();
+        },
+
+        visibleSources() {
+          if (this.activeEnv === 'all') return this.sources;
+          return this.sources.filter(s => this.filteredProfiles(s).length > 0);
+        },
+
+        updateProbesTotal() {
+          let total = 0;
+          this.visibleSources().forEach(s => {
+            total += this.filteredProfiles(s).length;
+          });
+          this.totalProbesCount = total;
+          this.completedProbesCount = 0;
+        },
+
+        isProfileActive(profile) {
+          if (this.activeEnv === 'all') return true;
+          return !profile.envs || profile.envs.includes(this.activeEnv);
+        },
+
+        filteredProfiles(source) {
+          return (source.profiles || []).filter(p => this.isProfileActive(p));
+        },
+
+        toggleCollapse(source) {
+          source.collapsed = !source.collapsed;
+          source.userToggled = true;
+        },
+
+        expandAll(expand) {
+          this.sources.forEach(s => {
+            s.collapsed = !expand;
+            s.userToggled = true;
+          });
+        },
+
+        sourceAnyAccessible(source) {
+          return this.filteredProfiles(source).some(p => p.status === 'online' || p.accessible);
+        },
+
+        sourceAnyPending(source) {
+          return this.filteredProfiles(source).some(p => p.status === 'pending');
+        },
+
+        sourceAccessibleCount(source) {
+          return this.filteredProfiles(source).filter(p => p.status === 'online' || p.accessible).length;
+        },
+
+        maxFilesCount(source) {
+          return Math.max(0, ...this.filteredProfiles(source).map(p => p.files_count || 0));
+        },
+
+        updateSourceCollapseAuto(source) {
+          if (source.userToggled) return;
+          const filtered = this.filteredProfiles(source);
+          if (filtered.length === 0) {
+            source.collapsed = true;
+            return;
+          }
+          const anyPending = this.sourceAnyPending(source);
+          const anyAccessible = this.sourceAnyAccessible(source);
+
+          if (anyAccessible) {
+            source.collapsed = false;
+          } else if (!anyPending) {
+            source.collapsed = true;
+          }
+        },
+
+        async probeAllProfiles() {
+          this.probingAny = true;
+          this.updateProbesTotal();
+
+          // Reset status to pending for active profiles only
+          this.visibleSources().forEach(s => {
+            this.filteredProfiles(s).forEach(p => {
+              p.status = 'pending';
+              p.reason = '';
+              p.latency_ms = null;
+              p.files_count = 0;
+            });
+          });
+
+          // Launch active probes concurrently
+          const probePromises = [];
+          this.visibleSources().forEach(source => {
+            this.filteredProfiles(source).forEach(profile => {
+              const p = this.runSingleProbe(source, profile);
+              probePromises.push(p);
+            });
+          });
+
+          await Promise.allSettled(probePromises);
+          this.probingAny = false;
+        },
+
+        async runSingleProbe(source, profile) {
+          try {
+            const url = this.getApiUrl('probe', `source=${encodeURIComponent(source.id)}&profile=${encodeURIComponent(profile.id)}`);
+            const res = await fetch(url);
+            const result = await res.json();
+
+            // In-place reactive update
+            profile.status = result.status;
+            profile.accessible = result.accessible;
+            profile.latency_ms = result.latency_ms;
+            profile.files_count = result.files_count;
+            profile.reason = result.reason;
+          } catch (err) {
+            profile.status = 'offline';
+            profile.accessible = false;
+            profile.reason = 'Échec de la requête';
+          } finally {
+            this.completedProbesCount++;
+            this.updateSourceCollapseAuto(source);
+          }
+        }
+      };
+    }
+  </script>
+</body>
+</html>

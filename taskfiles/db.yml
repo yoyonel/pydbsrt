@@ -68,6 +68,12 @@ tasks:
     cmds:
       - uv run python scripts/backfill_media_assets.py {{.CLI_ARGS}}
 
+  db:portal:
+    desc: Start pydbsrt Use-Case Web Portal on http://127.0.0.1:8780 (Sources Médias, Actifs)
+    deps: [db:up]
+    cmds:
+      - uv run python scripts/portal_server.py --port 8780
+
   db:studio:
     desc: Start CloudBeaver Web Studio on port 8978 with pre-configured Local and RPi4 databases
     deps: [db:up]
