@@ -2417,13 +2417,14 @@ def _detect_cuts(hashes: tuple[int, ...], fps: float) -> tuple[list[dict[str, An
 
 
 def _aggregate_timeline(hashes: tuple[int, ...], fps: float) -> list[dict[str, Any]]:
-    """Builds downsampled timeline points measuring mean mobility and peak cuts."""
+    """Builds downsampled timeline points measuring mean mobility, peak cuts, and bucket distribution."""
     total_frames = len(hashes)
     bucket_size = max(1, total_frames // TIMELINE_SERIES_POINTS)
     timeline: list[dict[str, Any]] = []
     cur_bucket_sum = 0
     cur_bucket_count = 0
     cur_bucket_max = 0
+    cur_bucket_deltas = [0] * DELTA_MOBILITY_BUCKETS
 
     for i in range(1, total_frames):
         delta = (hashes[i] ^ hashes[i - 1]).bit_count()
@@ -2431,6 +2432,8 @@ def _aggregate_timeline(hashes: tuple[int, ...], fps: float) -> list[dict[str, A
         cur_bucket_count += 1
         if delta > cur_bucket_max:
             cur_bucket_max = delta
+        d_b = min(delta // DELTA_STEP_BITS, DELTA_MOBILITY_BUCKETS - 1)
+        cur_bucket_deltas[d_b] += 1
 
         is_last = i % bucket_size == 0 or i == total_frames - 1
         if is_last:
@@ -2443,11 +2446,14 @@ def _aggregate_timeline(hashes: tuple[int, ...], fps: float) -> list[dict[str, A
                     "delta": mean_d,
                     "delta_mean": mean_d,
                     "delta_max": cur_bucket_max,
+                    "bucket_counts": list(cur_bucket_deltas),
+                    "total_frames": cur_bucket_count,
                 }
             )
             cur_bucket_sum = 0
             cur_bucket_count = 0
             cur_bucket_max = 0
+            cur_bucket_deltas = [0] * DELTA_MOBILITY_BUCKETS
 
     return timeline
 
