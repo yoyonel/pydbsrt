@@ -210,6 +210,7 @@ nav:
       - Identité Binaire des Conteneurs & Anti-Shadowing: explanation/2026-11-08-etude-architecture-identite-binaire-conteneurs-et-anti-shadowing.md
       - Architecture Portail Sources Médias Multi-Environnements: explanation/2026-11-09-architecture-portail-medias-et-sources-multi-environnements.md
       - Étude R&D Empreinte Audio aHash (Haitsma-Kalker): explanation/2026-11-10-etude-rd-empreinte-audio-ahash-haitsma-kalker.md
+      - Validation Empirique Reconnaissance Audio & Scaling: explanation/2026-11-10-validation-empirique-reconnaissance-audio-ahash-et-scaling.md
   - 📊 Benchmarks & Preuves:
       - Campagnes Empiriques:
           - Rapport Batch TVShow Synology: history/2026-10-25-rapport-batch-import-tvshow-synology.md

@@ -78,9 +78,47 @@ L'algorithme n'évalue jamais l'énergie absolue d'une fréquence, mais uniqueme
 Dans l'écosystème de `pydbsrt`, les utilisateurs synchronisent régulièrement des pistes sous-titrées sur des releases étrangères (ex: sous-titre français sur release japonaise ou américaine).
 
 - Si l'audio de la référence certifiée est en version originale (VO anglaise) et que la cible locale est une version doublée (VF française), l'empreinte spectrale Haitsma-Kalker ne présentera **aucune corrélation** sur la bande de parole (300–2000 Hz).
-- Par conséquent, l'aHash **ne peut pas se substituer** au pHash vidéo comme identifiant primaire universel. Il doit opérer comme modalité **hybride conditionnelle** ou comme vérificateur d'alignement lorsque les pistes audio partagent la même langue.
+- Par conséquent, l'aHash brut mono ne peut pas se substituer au pHash vidéo comme identifiant primaire universel sans pré-traitement.
 
-### 4.2 L'Effet du PAL Speedup (24 fps vers 25 fps)
+### 4.2 Piste de Résolution R&D : Isolation M&E (Music & Effects) & Filtrage Vocal Invariant
+
+Dans la chaîne de post-production cinématographique, le doublage international ne ré-enregistre jamais les bruitages ni la musique. Les studios utilisent la piste **M&E (Music & Effects)** : seuls les dialogues du canal central sont remplacés.
+
+Deux techniques à coût computationnel quasi-nul permettent d'extraire la signature M&E directement dans le pipe FFmpeg :
+
+#### A. Rips Multicanaux (5.1 / 7.1) : Suppression du Canal Central (Center Drop)
+
+Dans un mixage 5.1 cinéma, le canal central ($FC$) concentre 95% à 99% des dialogues. Les canaux latéraux et surround ($FL, FR, SL, SR$) portent la bande originale et les effets sonores.
+
+- **Filtrage FFmpeg (Coût CPU : 0%)** :
+  ```bash
+  ffmpeg -i video.mkv -vn -af "pan=mono|c0=0.5*FL+0.5*FR+0.5*BL+0.5*BR" -ar 5512 -f f32le -
+  ```
+- **Résultat** : La composante vocale est éliminée, tandis que la trame sonore commune (M&E) est préservée. Deux releases VO et VF deviennent alors hautement corrélées au sens de l'aHash.
+
+#### B. Rips Stéréo (2.0) : Annulation de Phase Mid/Side (OOPS : Out-Of-Phase Stereo)
+
+Dans un mix stéréo broadcast, la voix parlée est mixée au centre fantôme (en phase identique sur le canal gauche et droit : $L_{\text{voix}} = R_{\text{voix}}$).
+
+- **Principe de Soustraction** :
+  $S_{\text{M\&E}} \approx L - R$
+- **Filtrage FFmpeg (Coût CPU : 0%)** :
+  ```bash
+  ffmpeg -i video.mkv -vn -af "pan=mono|c0=0.5*c0-0.5*c1" -ar 5512 -f f32le -
+  ```
+- Annule mathématiquement toute source acoustique parfaitement centrée (dialogue) et conserve la musique stéréo, la réverbération et les effets panoramiques.
+
+#### C. Comparatif & Limites de l'Approche M&E
+
+| Méthode | Coût CPU | Efficacité VO vs VF | Limite Structurelle |
+|---|---|---|---|
+| **Center Drop (5.1)** | **0% (gratuit)** | **Excellente** | Nécessite un conteneur multicanal. |
+| **Soustraction $L - R$ (Stéréo)** | **0% (gratuit)** | **Bonne sur musique/effets** | Inopérant si la release source est un pur mono ($L = R \rightarrow S = 0$). |
+| **Séparation par IA (Demucs/Spleeter)** | Lourd (GPU requis) | Maximale | **Incompatible** avec la cible temps réel RPi4/o2switch. |
+
+**Cas limite** : Une scène de dialogue intime sans musique d'ambiance ni effet sonore spatialisé. En supprimant la voix, le signal résiduel tend vers le silence ($E \approx 0$). Dès lors, l'isolation M&E constitue un étage complémentaire puissant pour les génériques, scènes d'action et transitions musicales, le pHash visuel demeurant le filet de sécurité absolu pour les dialogues purs.
+
+### 4.3 L'Effet du PAL Speedup (24 fps vers 25 fps)
 
 Le passage d'un master cinéma (24 fps) à une diffusion européenne (25 fps) accélère le média de 4.1%.
 
@@ -88,7 +126,7 @@ Le passage d'un master cinéma (24 fps) à une diffusion européenne (25 fps) ac
 - **En audio** : si aucun algorithme de pitch-shifting n'a été appliqué au ré-encodage, toutes les composantes fréquentielles sont translatées de +4.1% ($f' = 1.041 \times f$).
 - Avec 33 bandes d'environ 52 Hz de largeur, un décalage de +40 Hz à 1000 Hz fait baver l'énergie sur la sous-bande voisine, augmentant artificiellement la distance de Hamming.
 
-### 4.3 Dimensionnement & Alignement Mémoire ARM64
+### 4.4 Dimensionnement & Alignement Mémoire ARM64
 
 L'en-tête du format `.ahash` est rigoureusement fixé à **176 octets** (avec padding de 4 octets). Cette disposition assure un alignement strict à 8 octets, permettant un accès sans copie (`zero-copy mmap`) sur processeur ARM Cortex-A72 (Raspberry Pi 4) sans risque de faute matérielle ou de baisse de débit.
 
