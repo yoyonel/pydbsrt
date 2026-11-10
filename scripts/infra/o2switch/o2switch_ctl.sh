@@ -21,13 +21,15 @@ DEFAULT_RSYNC_BWLIMIT_KBPS=20000
 # Releases kept on the host by deploy (current and previous included)
 DEFAULT_RELEASES_KEEP=5
 TARGET_TRIPLE="x86_64-unknown-linux-musl"
-TARGET_DIR="target/${TARGET_TRIPLE}/release"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if ! REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"; then
+  REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+fi
+TARGET_DIR="${REPO_ROOT}/target/${TARGET_TRIPLE}/release"
 SERVER_BIN="${TARGET_DIR}/dbsrt-server"
 CLI_BIN="${TARGET_DIR}/dbsrt"
 
 ACTION="${1:-status}"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || cd "${SCRIPT_DIR}/../../.." && pwd)"
 
 # Load optional unversioned local environment file
 # shellcheck source=scripts/infra/local/load_env.sh
@@ -260,36 +262,36 @@ case "${ACTION}" in
     ssh "${O2SWITCH_HOST}" "mkdir -p ${REMOTE_BASE}/bin ${REMOTE_BASE}/data ${REMOTE_BASE}/run ${REMOTE_BASE}/logs ${REMOTE_PUBLIC_HTML} ${REMOTE_BASE}/scripts ${REMOTE_BASE}/web && ln -sfn ${O2SWITCH_PYTHON} ${REMOTE_BASE}/bin/python3"
 
     # Binaries ship as releases (deploy): copying over bin/ would replace the release links
-    rsync -a --chmod=F755 "deploy/o2switch/dbsrt_server_ctl.sh" "${O2SWITCH_HOST}:${REMOTE_BASE}/bin/"
+    rsync -a --chmod=F755 "${REPO_ROOT}/deploy/o2switch/dbsrt_server_ctl.sh" "${O2SWITCH_HOST}:${REMOTE_BASE}/bin/"
 
     echo "-> Transferring batch worker and portal scripts..."
-    if [[ -f "scripts/workers/o2switch_batch_worker.py" ]]; then
-      rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "scripts/workers/o2switch_batch_worker.py" "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/"
+    if [[ -f "${REPO_ROOT}/scripts/workers/o2switch_batch_worker.py" ]]; then
+      rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${REPO_ROOT}/scripts/workers/o2switch_batch_worker.py" "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/"
       # shellcheck disable=SC2029
       ssh "${O2SWITCH_HOST}" "chmod +x ${REMOTE_BASE}/scripts/o2switch_batch_worker.py"
     fi
-    if [[ -f "scripts/portal_server.py" ]]; then
-      rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "scripts/portal_server.py" "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/"
+    if [[ -f "${REPO_ROOT}/scripts/portal_server.py" ]]; then
+      rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${REPO_ROOT}/scripts/portal_server.py" "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/"
     fi
-    if [[ -f "scripts/static/sources.html" ]]; then
-      rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "scripts/static/sources.html" "${O2SWITCH_HOST}:${REMOTE_BASE}/web/sources.html"
+    if [[ -f "${REPO_ROOT}/scripts/static/sources.html" ]]; then
+      rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${REPO_ROOT}/scripts/static/sources.html" "${O2SWITCH_HOST}:${REMOTE_BASE}/web/sources.html"
     fi
 
     echo "-> Transferring Zero-DB catalog and SRT store (bwlimit ${DEFAULT_RSYNC_BWLIMIT_KBPS} KB/s)..."
     # The remote catalog is packed on o2switch at start: the local one only seeds a fresh host
-    if [[ -f "data/catalog.dbphash" ]]; then
-      rsync -avz --progress --ignore-existing --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "data/catalog.dbphash" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/"
+    if [[ -f "${REPO_ROOT}/data/catalog.dbphash" ]]; then
+      rsync -avz --progress --ignore-existing --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${REPO_ROOT}/data/catalog.dbphash" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/"
     fi
-    if [[ -d "data/SRT" ]]; then
-      rsync -avz --progress --update --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "data/SRT/" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/SRT/"
+    if [[ -d "${REPO_ROOT}/data/SRT" ]]; then
+      rsync -avz --progress --update --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${REPO_ROOT}/data/SRT/" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/SRT/"
     fi
 
     echo "-> Deploying reverse-proxy gateway (index.php + .htaccess)..."
-    if [[ -f "deploy/o2switch/index.php" ]]; then
-      rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "deploy/o2switch/index.php" "${O2SWITCH_HOST}:${REMOTE_PUBLIC_HTML}/index.php"
+    if [[ -f "${REPO_ROOT}/deploy/o2switch/index.php" ]]; then
+      rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${REPO_ROOT}/deploy/o2switch/index.php" "${O2SWITCH_HOST}:${REMOTE_PUBLIC_HTML}/index.php"
     fi
-    if [[ -f "deploy/o2switch/.htaccess" ]]; then
-      rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "deploy/o2switch/.htaccess" "${O2SWITCH_HOST}:${REMOTE_PUBLIC_HTML}/.htaccess"
+    if [[ -f "${REPO_ROOT}/deploy/o2switch/.htaccess" ]]; then
+      rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${REPO_ROOT}/deploy/o2switch/.htaccess" "${O2SWITCH_HOST}:${REMOTE_PUBLIC_HTML}/.htaccess"
     fi
 
     echo "✓ Stack synchronized to ${O2SWITCH_HOST}. Binaries: run 'task o2switch:deploy'."
@@ -608,7 +610,7 @@ REMOTE_SCRIPT
       mkdir -p data/__PHASH__
       echo "-> Pulling loose .phash fingerprints & metadata..."
       rsync -avz --progress --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/__PHASH__/" "data/__PHASH__/" || true
-      python3 scripts/ingestion/phash_dedupe.py "data/__PHASH__" --apply || true
+      python3 "${REPO_ROOT}/scripts/ingestion/phash_dedupe.py" "data/__PHASH__" --apply || true
     fi
     if systemctl --user is-active --quiet dbsrt-agent 2>/dev/null; then
       echo "-> Reloading local dbsrt-agent daemon with synchronized catalog..."
@@ -643,7 +645,7 @@ REMOTE_SCRIPT
     mkdir -p "${TARGET_DIR}"
     echo "-> Backing up to ${TARGET_DIR}..."
     rsync -avz --progress --ignore-existing --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/__PHASH__/" "${TARGET_DIR}/" || true
-    python3 scripts/ingestion/phash_dedupe.py "${TARGET_DIR}" --apply || true
+    python3 "${REPO_ROOT}/scripts/ingestion/phash_dedupe.py" "${TARGET_DIR}" --apply || true
     echo "✓ Backup of raw .phash fingerprints completed to ${TARGET_DIR}."
     ;;
 
@@ -683,13 +685,13 @@ REMOTE_SCRIPT
 
     # shellcheck disable=SC2029
     ssh "${O2SWITCH_HOST}" "cd $(printf '%q' "${REMOTE_BASE}") && mkdir -p scripts data/reports data/SRT data/__PHASH__ run logs etc"
-    rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" --chmod=F755 "scripts/workers/o2switch_batch_worker.py" "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/"
+    rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" --chmod=F755 "${REPO_ROOT}/scripts/workers/o2switch_batch_worker.py" "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/"
 
     # With a local NAS mount, select targets locally; otherwise the worker scans the NAS over FTP
     if [[ -d "${LOCAL_SCAN_DIR}" ]]; then
       echo "-> Resolving ${TARGET_TYPE} targets locally (${LOCAL_SCAN_DIR})..."
       rm -f "${TARGETS_FILE}"
-      if ! uv run python scripts/ingestion/batch_media_add_tvshow.py --nas-root "${LOCAL_SCAN_DIR}" --save-targets-only \
+      if ! uv run python "${REPO_ROOT}/scripts/ingestion/batch_media_add_tvshow.py" --nas-root "${LOCAL_SCAN_DIR}" --save-targets-only \
         --max-episodes-per-series 1000 "${SCAN_ARGS[@]}" >/dev/null; then
         echo "❌ Local target scan failed (see error above)."
         exit 1

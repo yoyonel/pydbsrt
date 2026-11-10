@@ -115,7 +115,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 | :--- | :---: | :---: | :---: | :--- |
 | `scripts/infra/o2switch/nas_o2switch_sync.sh` | ⚪ **Statique Seul (Non Exécuté)** | Shell | À évaluer | Syntaxe `bash -n` & `shellcheck` OK. Zéro exécution runtime. |
 | `scripts/infra/o2switch/o2switch_audit_remote.py` | 🟢 **Prouvé Live (o2switch)** | Python | Élevée (Recette Cloud) | Docstring réalignée (`scripts/ingestion/phash_names.py`), constantes de chemins avec surcharges `DBSRT_*`. 43/43 tests unitaires PASS. Exécuté et validé live sur o2switch (`status` et `report` sur 2827 fichiers). |
-| `scripts/infra/o2switch/o2switch_ctl.sh` | 🔴 **Régression** | Shell | À évaluer | Contient des appels de scripts internes non réalignés (voir section 2). |
+| `scripts/infra/o2switch/o2switch_ctl.sh` | 🟢 **Prouvé Live (o2switch)** | Shell | Critique (Contrôleur Cloud) | Bug Bash précédence ligne 30 corrigé (`REPO_ROOT`). Chemins locaux préfixés par `${REPO_ROOT}`. Validé et prouvé live sur o2switch (`batch-sync`, `batch-status`, `status`, `batch-summary`, `faultwatch status`). Plan de migration Python validé (Ticket Phase 2). |
 
 ### 3.5 Infra & Contrôleurs Appliance RPi4 (`scripts/infra/rpi4/`)
 
@@ -256,3 +256,10 @@ Pour sortir de cet état sans spéculation, chaque script des sections 1 et 2 do
 - **Diagnostic** : Docstring obsolète mentionnant `scripts/phash_names.py` au lieu de `scripts/ingestion/phash_names.py`, et 10 constantes de chemins codées en dur sans surcharge possible par variables d'environnement.
 - **Remédiation** : Réalignement de la docstring et conversion de toutes les constantes de configuration avec `os.environ.get("DBSRT_...", default)` pour résilience locale et cloud.
 - **Validation Live** : Suite unitaire complète 43/43 tests PASS (`tests/tools/test_o2switch_audit.py`). Synchronisé par rsync et exécuté en conditions réelles sur le serveur de production o2switch via `task o2switch:audit:status` et `task o2switch:audit:report` (2827 fichiers qualifiés, 85.8% reconnaissance titres).
+
+### Fiche 6 : `scripts/infra/o2switch/o2switch_ctl.sh`
+- **Rôle** : Contrôleur maître d'infrastructure Cloud o2switch (1079 lignes Bash). Pilote les déploiements (`deploy`, `sync`), le cycle de vie du démon `dbsrt-server` (`start`, `stop`, `restart`, `status`, `logs`), les batchs asynchrones (`batch-*`), le watchdog (`faultwatch`), les audits et bancs de test (`audit`, `trajectory`).
+- **KPI / Importance** : `Critique (Contrôleur Maître Cloud o2switch)`.
+- **Diagnostic** : Bug bloquant de précédence Bash à la ligne 30 (`REPO_ROOT` corrompu par un retour chariot `\n` concaténant deux chemins), brisant immédiatement toute commande rsync/ssh exploitant `${REPO_ROOT}` (code d'erreur 23). Chemins locaux relatifs non préfixés.
+- **Remédiation** : Correction de l'assignation de `REPO_ROOT` avec garde conditionnel sain, normalisation de tous les chemins locaux sources (`"${REPO_ROOT}/..."`), et validation de la stratégie en 2 temps (sécurisation immédiate du Bash + création future d'une Issue pour réécriture complète en module Python typé et testé unitairement).
+- **Validation Live** : Exécution et validation réelle de bout en bout sur le serveur de production o2switch : `batch-sync` (rsync sans erreur, parité SHA256 locale/distante vérifiée `e097ea0db462cbd1`), `batch-status` (parse nominal de la file et des logs distants), `status` (démon actif, 3088 médias), `batch-summary` (stream Python distant de 10 855 événements), et `faultwatch status`. `shellcheck` et `shfmt` conformes.
