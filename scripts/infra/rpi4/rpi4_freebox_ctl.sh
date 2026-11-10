@@ -13,6 +13,21 @@ GATEWAY_SERVICE="dbsrt-freebox-gateway.service"
 FREEBOX_MOUNTS=(/mnt/freebox/Disque_1 /mnt/freebox/Disque_2 /mnt/freebox/Disque_1_1)
 
 ACTION="${1:-status}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if ! REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"; then
+  REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+fi
+
+# Load optional unversioned local environment file
+if [[ -f "${SCRIPT_DIR}/../local/load_env.sh" ]]; then
+  # shellcheck source=/dev/null
+  source "${SCRIPT_DIR}/../local/load_env.sh"
+elif [[ -f "${SCRIPT_DIR}/../o2switch/load_env.sh" ]]; then
+  # shellcheck source=/dev/null
+  source "${SCRIPT_DIR}/../o2switch/load_env.sh"
+fi
+load_local_env "${REPO_ROOT}"
+
 RPI_HOST="${RPI_HOST:-${DEFAULT_RPI_HOST}}"
 REMOTE_BASE="${REMOTE_BASE:-${DEFAULT_REMOTE_BASE}}"
 
@@ -73,8 +88,8 @@ install_gateway() {
     exit 1
   fi
   run_rpi "mkdir -p ${REMOTE_BASE}/scripts ${REMOTE_BASE}/logs .config/systemd/user"
-  rsync -az scripts/infra/rpi4/rpi4_freebox_gateway.py "${RPI_HOST}:${REMOTE_BASE}/scripts/"
-  rsync -az "deploy/rpi4/${GATEWAY_SERVICE}" "${RPI_HOST}:.config/systemd/user/${GATEWAY_SERVICE}"
+  rsync -az "${REPO_ROOT}/scripts/infra/rpi4/rpi4_freebox_gateway.py" "${RPI_HOST}:${REMOTE_BASE}/scripts/"
+  rsync -az "${REPO_ROOT}/deploy/rpi4/${GATEWAY_SERVICE}" "${RPI_HOST}:.config/systemd/user/${GATEWAY_SERVICE}"
   run_rpi "systemctl --user daemon-reload && systemctl --user enable ${GATEWAY_SERVICE}"
   echo "✓ Installed and enabled ${GATEWAY_SERVICE} (run 'restart' to load new code)."
 }
@@ -102,7 +117,9 @@ case "${ACTION}" in
   batch-restart)
     # The target scan reads /mnt/freebox, so the batch must be relaunched from the RPi4
     shift
-    run_rpi "cd \$HOME/${REMOTE_BASE} && ./scripts/freebox_batch_ctl.sh stop && ./scripts/freebox_batch_ctl.sh start $*"
+    run_rpi "cd \$HOME/${REMOTE_BASE} && \
+      if [[ -f ./scripts/freebox_batch_ctl.sh ]]; then CTL=./scripts/freebox_batch_ctl.sh; else CTL=./scripts/infra/rpi4/freebox_batch_ctl.sh; fi && \
+      \${CTL} stop && \${CTL} start $*"
     ;;
   *)
     usage

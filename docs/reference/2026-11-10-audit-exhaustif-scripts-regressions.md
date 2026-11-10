@@ -125,7 +125,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 | `scripts/infra/rpi4/rpi4_build.sh` | ⚪ **Statique Seul (Non Exécuté)** | Shell | À évaluer | Syntaxe `bash -n` & `shellcheck` OK. Zéro exécution runtime. |
 | `scripts/infra/rpi4/rpi4_cli.sh` | ⚪ **Statique Seul (Non Exécuté)** | Shell | À évaluer | Syntaxe `bash -n` & `shellcheck` OK. Zéro exécution runtime. |
 | `scripts/infra/rpi4/rpi4_deploy.sh` | ⚪ **Statique Seul (Non Exécuté)** | Shell | À évaluer | Syntaxe `bash -n` & `shellcheck` OK. Zéro exécution runtime. |
-| `scripts/infra/rpi4/rpi4_freebox_ctl.sh` | 🔴 **Régression** | Shell | À évaluer | Contient des appels de scripts internes non réalignés (voir section 2). |
+| `scripts/infra/rpi4/rpi4_freebox_ctl.sh` | 🟢 **Prouvé Live (RPi4)** | Shell | Élevée (Appliance RPi4 & CIFS/HTTP Range) | Résolution `REPO_ROOT` et source `load_env.sh` intégrées. Chemins `install_gateway()` préfixés par `${REPO_ROOT}`. Résilience sur `batch-restart`. Validé et prouvé live sur RPi4 (`status` 3 montages CIFS actifs + daemon systemd actif, `install` synchronisé et activé). |
 | `scripts/infra/rpi4/rpi4_freebox_gateway.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/infra/rpi4/rpi4_o2switch_supervisor.py` | 🔴 **Régression** | Python | À évaluer | Contient des appels de scripts internes non réalignés (voir section 2). |
 | `scripts/infra/rpi4/rpi4_sim.sh` | 🔴 **Régression** | Shell | À évaluer | Contient des appels de scripts internes non réalignés (voir section 2). |
@@ -270,3 +270,10 @@ Pour sortir de cet état sans spéculation, chaque script des sections 1 et 2 do
 - **Diagnostic** : Appel hardcodé cassé ligne 59 vers `scripts/scan_freebox_targets.py` (déplacé sous `ingestion/`), absence de découverte dynamique de `REPO_ROOT` et de chargement d'environnement.
 - **Remédiation** : Intégration de la découverte dynamique de `REPO_ROOT`, source conditionnelle de `load_env.sh`, alignement du chemin du scanner vers `"${REPO_ROOT}/scripts/ingestion/scan_freebox_targets.py"` et préfixage du fichier de cibles.
 - **Validation Live** : Exécution locale du scanner Freebox (`scan`), synchronisation automatique par rsync vers o2switch, test de joignabilité de la passerelle WAN depuis o2switch (`test` -> HTTP 404 nominal), et interrogation de statut (`status` -> queue 100% à jour). `shellcheck` et `shfmt` conformes.
+
+### Fiche 8 : `scripts/infra/rpi4/rpi4_freebox_ctl.sh`
+- **Rôle** : Contrôleur système sur l'appliance physique RPi4 (`raspberrypi`). Gère les points de montage CIFS des volumes Freebox (`/mnt/freebox/Disque_*`), le cycle de vie du service systemd `dbsrt-freebox-gateway.service`, et la relance batch locale.
+- **KPI / Importance** : `Élevée (Infrastructure Appliance RPi4 & Passerelle HTTP Range)`.
+- **Diagnostic** : Absence de découverte dynamique de `REPO_ROOT` et de chargement de variables d'environnement locales, chemins relatifs risquant de casser le déploiement `install_gateway()` hors racine, et dépendance statique au chemin de batch.
+- **Remédiation** : Ajout de la découverte dynamique de `REPO_ROOT` et du sourçage de `load_env.sh`, sécurisation des chemins de synchronisation rsync par `"${REPO_ROOT}/..."` et résolution résiliente de la commande de relance batch.
+- **Validation Live** : Exécution et validation réelle de bout en bout sur l'appliance RPi4 : vérification des montages et de la passerelle (`status` -> 3 montages CIFS confirmés actifs, service systemd actif), déploiement et réactivation du service (`install` -> daemon reloaded et enabled avec succès). `shellcheck` et `shfmt` conformes.
