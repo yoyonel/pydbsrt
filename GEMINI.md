@@ -21,7 +21,13 @@
   - Issues and Tickets MUST be updated continuously if the technical scope or implementation plan evolves during development.
 - **3-Day Inactivity Boundary**: Any active dev branch MUST have commits within the last 3 days. If inactive for > 3 days, it must either be completed/merged or archived (via `archive/<date>/<name>` tag) and deleted from remotes.
 - **Local Dev Session & Worktree Governance**:
-  - **Session Start Alignment**: At the start of every AGY session, explicitly determine the target Issue / Ticket / PR and checkout the corresponding branch before touching code.
+  - **Session Start Alignment & Daily Briefing**:
+    - At the start of every AGY session (first user prompt), the assistant MUST automatically run a brief repository health check (`git status`, active branches, latest commits, pending open PRs/Issues).
+    - Assistant MUST systematically deliver a concise **Daily Briefing**:
+      1. Summary of recent work done (last commits on active dev branches / `develop`).
+      2. Status of active branches vs. 3-day inactivity threshold and 3-branch ceiling.
+      3. Actionable proposals for next steps calibrated for the session (1 hour, half-day, or full day roadmap).
+    - Explicitly confirm or switch to the target branch/issue before touching any code.
   - **Concurrent Session Isolation**: If an AGY session is already running on the repository, developers/agents MUST spawn an isolated Git worktree for the specific branch/task.
   - **Mandatory Git Worktree Data Seeding**: Whenever branching into or running from an isolated Git worktree, MUST systematically repatriate/symlink all unversioned binary datasets and test fixtures from the parent repository (`data/catalog.dbphash`, `data/snippets/`, `data/__PHASH__/`, `data/reports/batch_*.jsonl`, `data/SRT/couplings.json`) BEFORE starting dev daemons or running benchmarks, preventing zero-data illusions and cold start failures.
   - **Worktree Post-Merge Cleanup**: Worktrees must be cleanly removed (`git worktree remove`) immediately upon PR merge.
