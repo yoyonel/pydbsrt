@@ -593,9 +593,9 @@ if (in_array($path, ['/api/sources', '/api/probe', '/api/files', '/api/file/deta
             $cmd .= ' --search ' . escapeshellarg($search);
         }
     } elseif ($path === '/api/trajectory/details') {
-        $id = (int)($_GET['id'] ?? 0);
+        $target = (string)($_GET['target'] ?? $_GET['id'] ?? '');
         $file = preg_replace('/[^a-zA-Z0-9_.-]/', '', (string)($_GET['file'] ?? ''));
-        $cmd = escapeshellcmd($pythonBin) . ' ' . escapeshellarg($script) . ' --trajectory-details ' . $id;
+        $cmd = escapeshellcmd($pythonBin) . ' ' . escapeshellarg($script) . ' --trajectory-details ' . escapeshellarg($target);
         if ($file !== '') {
             $cmd .= ' --trajectory-file ' . escapeshellarg($file);
         }
