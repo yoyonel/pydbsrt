@@ -131,3 +131,17 @@ python3 scripts/portal_server.py --details synology-video wan_ftp "Dune (2021)[2
 # Exporter la structure des métadonnées et profils déclarés
 python3 scripts/portal_server.py --metadata
 ```
+
+---
+
+## 🧪 Validation E2E Automatisée Playwright (Zéro Défaut Console)
+
+Pour valider l'intégrité de l'ensemble des interactions (4 onglets, modales, zoom sismographe, touches Échap, retour trajectoire) et interdire toute erreur console JavaScript (`Alpine Expression Error`, `ReferenceError`, etc.) :
+
+```bash
+# Validation locale complète (3 suites E2E)
+task portal:e2e
+
+# Validation directe sur le cloud o2switch
+uv run --with playwright python scripts/e2e_portal_exhaustive.py --url "https://2026-pydbsrt.fr/dbsrt/sources?token=<VOTRE_CLE_API>"
+```
