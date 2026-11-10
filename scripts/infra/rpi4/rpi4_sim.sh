@@ -3,8 +3,13 @@
 set -euo pipefail
 
 ACTION="${1:-status}"
-COMPOSE_FILE="sim/docker-compose.sim.yml"
-SIM_PORT=8766
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if ! REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"; then
+  REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+fi
+
+COMPOSE_FILE="${REPO_ROOT}/sim/docker-compose.sim.yml"
+SIM_PORT="${SIM_PORT:-8766}"
 
 case "${ACTION}" in
   up)
@@ -94,10 +99,10 @@ case "${ACTION}" in
     echo ""
 
     echo "=== [6/6] Testing /v1/subtitles/:hash (Content-Addressable Storage CAS) ==="
-    if [[ ! -f data/SRT/couplings.json ]]; then
-      echo "⚠ data/SRT/couplings.json not found, skipping CAS test. Run 'bash scripts/init_couplings_seed.sh' first."
+    if [[ ! -f "${REPO_ROOT}/data/SRT/couplings.json" ]]; then
+      echo "⚠ ${REPO_ROOT}/data/SRT/couplings.json not found, skipping CAS test. Run 'task coupling:seed' or 'bash scripts/ingestion/init_couplings_seed.sh' first."
     else
-      SUB_HASH=$(grep -m 1 "subtitles_hash" data/SRT/couplings.json | tr -d '", ' | cut -d: -f2)
+      SUB_HASH=$(grep -m 1 "subtitles_hash" "${REPO_ROOT}/data/SRT/couplings.json" | tr -d '", ' | cut -d: -f2)
       if [[ -n "${SUB_HASH}" ]]; then
         HEAD_SRT=$(curl -s -f "http://127.0.0.1:${SIM_PORT}/v1/subtitles/${SUB_HASH}" | head -n 4)
         echo "✓ CAS successfully retrieved subtitle track for hash ${SUB_HASH}:"
