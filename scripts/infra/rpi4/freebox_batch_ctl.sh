@@ -16,19 +16,34 @@ DEFAULT_TARGETS_FILE="data/reports/freebox_batch_targets.json"
 
 ACTION="${1:-status}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if ! REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"; then
-  REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+if ! REPO_ROOT="$(git -C "${SCRIPT_DIR}" rev-parse --show-toplevel 2>/dev/null)"; then
+  if [[ -f "${SCRIPT_DIR}/../../../Taskfile.yml" ]]; then
+    REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+  elif [[ -d "${SCRIPT_DIR}/../data" || -f "${SCRIPT_DIR}/../bin/python3" || -f "${SCRIPT_DIR}/o2switch_batch_worker.py" ]]; then
+    REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+  else
+    REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+  fi
 fi
 
 # Load optional unversioned local environment file
-if [[ -f "${SCRIPT_DIR}/../o2switch/load_env.sh" ]]; then
+if [[ -f "${SCRIPT_DIR}/load_env.sh" ]]; then
   # shellcheck source=/dev/null
-  source "${SCRIPT_DIR}/../o2switch/load_env.sh"
+  source "${SCRIPT_DIR}/load_env.sh"
 elif [[ -f "${SCRIPT_DIR}/../local/load_env.sh" ]]; then
   # shellcheck source=/dev/null
   source "${SCRIPT_DIR}/../local/load_env.sh"
+elif [[ -f "${SCRIPT_DIR}/../o2switch/load_env.sh" ]]; then
+  # shellcheck source=/dev/null
+  source "${SCRIPT_DIR}/../o2switch/load_env.sh"
+elif [[ -f "${REPO_ROOT}/scripts/infra/local/load_env.sh" ]]; then
+  # shellcheck source=/dev/null
+  source "${REPO_ROOT}/scripts/infra/local/load_env.sh"
 fi
-load_local_env "${REPO_ROOT}"
+
+if command -v load_local_env >/dev/null 2>&1; then
+  load_local_env "${REPO_ROOT}"
+fi
 
 O2SWITCH_HOST="${O2SWITCH_HOST:-${DEFAULT_O2SWITCH_HOST}}"
 REMOTE_BASE="${REMOTE_BASE:-${DEFAULT_REMOTE_BASE}}"

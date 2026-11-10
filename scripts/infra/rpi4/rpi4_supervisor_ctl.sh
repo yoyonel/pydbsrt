@@ -9,6 +9,29 @@ DEFAULT_CONNECT_TIMEOUT=5
 DEFAULT_TAIL_LINES=20
 
 ACTION="${1:-status}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if ! REPO_ROOT="$(git -C "${SCRIPT_DIR}" rev-parse --show-toplevel 2>/dev/null)"; then
+  if [[ -f "${SCRIPT_DIR}/../../../Taskfile.yml" ]]; then
+    REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+  elif [[ -d "${SCRIPT_DIR}/../data" || -f "${SCRIPT_DIR}/../bin/python3" || -f "${SCRIPT_DIR}/o2switch_batch_worker.py" ]]; then
+    REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+  else
+    REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+  fi
+fi
+
+# Load optional unversioned local environment file
+if [[ -f "${SCRIPT_DIR}/../local/load_env.sh" ]]; then
+  # shellcheck source=/dev/null
+  source "${SCRIPT_DIR}/../local/load_env.sh"
+elif [[ -f "${SCRIPT_DIR}/../o2switch/load_env.sh" ]]; then
+  # shellcheck source=/dev/null
+  source "${SCRIPT_DIR}/../o2switch/load_env.sh"
+elif [[ -f "${REPO_ROOT}/scripts/infra/local/load_env.sh" ]]; then
+  # shellcheck source=/dev/null
+  source "${REPO_ROOT}/scripts/infra/local/load_env.sh"
+fi
+
 RPI_HOST="${RPI_HOST:-${DEFAULT_RPI_HOST}}"
 REMOTE_BASE="${REMOTE_BASE:-${DEFAULT_REMOTE_BASE}}"
 
@@ -16,17 +39,18 @@ REMOTE_DIR="\$HOME/${REMOTE_BASE}"
 LOG_FILE="${REMOTE_DIR}/logs/rpi4_supervisor.log"
 # Lifecycle is owned by the systemd user unit (Restart=always): never spawn the script directly
 SERVICE_NAME="${SERVICE_NAME:-dbsrt-supervisor.service}"
-UNIT_FILE="deploy/rpi4/dbsrt-supervisor.service"
+UNIT_FILE="${REPO_ROOT}/deploy/rpi4/dbsrt-supervisor.service"
 # Scripts the supervisor runs on the RPi4 (it drives o2switch through o2switch_ctl.sh)
 SUPERVISOR_SCRIPTS=(
-  scripts/infra/rpi4/rpi4_o2switch_supervisor.py
-  scripts/infra/o2switch/o2switch_ctl.sh
-  scripts/infra/local/load_env.sh
-  scripts/workers/o2switch_batch_worker.py
-  scripts/ingestion/phash_dedupe.py
-  scripts/ingestion/phash_names.py
-  scripts/infra/rpi4/freebox_batch_ctl.sh
-  scripts/ingestion/scan_freebox_targets.py
+  "${REPO_ROOT}/scripts/infra/rpi4/rpi4_o2switch_supervisor.py"
+  "${REPO_ROOT}/scripts/infra/o2switch/o2switch_ctl.sh"
+  "${REPO_ROOT}/scripts/infra/local/load_env.sh"
+  "${REPO_ROOT}/scripts/workers/o2switch_batch_worker.py"
+  "${REPO_ROOT}/scripts/ingestion/phash_dedupe.py"
+  "${REPO_ROOT}/scripts/ingestion/phash_names.py"
+  "${REPO_ROOT}/scripts/infra/rpi4/freebox_batch_ctl.sh"
+  "${REPO_ROOT}/scripts/ingestion/scan_freebox_targets.py"
+  "${REPO_ROOT}/scripts/infra/rpi4/rpi4_supervisor_ctl.sh"
 )
 
 run_ssh() {
@@ -58,7 +82,7 @@ case "${ACTION}" in
     # Scripts only: the RPi4 pushes its own o2switch_batch_worker.py on every batch launch
     echo "=== Syncing supervisor scripts to ${RPI_HOST} ==="
     sync_scripts
-    echo "local  $(sha256sum scripts/workers/o2switch_batch_worker.py | cut -c1-16)"
+    echo "local  $(sha256sum "${REPO_ROOT}/scripts/workers/o2switch_batch_worker.py" | cut -c1-16)"
     echo "remote $(run_ssh "sha256sum ${REMOTE_BASE}/scripts/o2switch_batch_worker.py" | cut -c1-16)"
     ;;
 
