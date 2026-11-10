@@ -9,14 +9,14 @@ from typing import Callable, Iterator, cast
 
 import pytest
 
-import scripts.o2switch_batch_worker as worker
-from scripts.o2switch_batch_worker import (
+import scripts.workers.o2switch_batch_worker as worker
+from scripts.infra.rpi4.rpi4_freebox_gateway import FreeboxRangeHTTPHandler
+from scripts.workers.o2switch_batch_worker import (
     MOVIEHASH_CHUNK_BYTES,
     VideoTarget,
     ftp_moviehash,
     moviehash_from_chunks,
 )
-from scripts.rpi4_freebox_gateway import FreeboxRangeHTTPHandler
 
 VECTORS = [
     (200_000, "e19d5212c9812cd6"),

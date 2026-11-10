@@ -14,19 +14,19 @@ tasks:
     desc: Auto-discover and certify ground-truth (video/.phash <-> subtitle) couplings
     deps: [cli:build]
     cmds:
-      - bash scripts/seed_couplings.sh
+      - bash scripts/ingestion/seed_couplings.sh
 
   media:add:
     desc: "Unified media ingestion facade (usage: task media:add -- <video> [srt] [--lang <lg>] [--fps <val>])"
     deps: [cli:build]
     cmds:
-      - bash scripts/media_add.sh {{.CLI_ARGS}}
+      - bash scripts/ingestion/media_add.sh {{.CLI_ARGS}}
 
   media:batch:tvshow:
     desc: "Overnight profiling batch ingestion for TVShow videos and multilingual subtitles from Synology NAS"
     deps: [cli:build]
     cmds:
-      - uv run python scripts/batch_media_add_tvshow.py {{.CLI_ARGS}}
+      - uv run python scripts/ingestion/batch_media_add_tvshow.py {{.CLI_ARGS}}
 
   media:top:
     desc: "Native Rust full-frame real-time TUI process monitor for pHash decoding, rates and ETAs (usage: task media:top)"
@@ -39,38 +39,38 @@ tasks:
     desc: "Execute full end-to-end recipe and ASCIInema recording on native Rust top TUI with real NAS data (usage: task top:recette)"
     deps: [cli:build]
     cmds:
-      - uv run python scripts/recette_top_e2e.py
+      - uv run python scripts/e2e/recette_top_e2e.py
 
   media:top:py:
     desc: "Legacy Python Rich process monitor (usage: task media:top:py)"
     cmds:
-      - uv run python scripts/dbsrt_top.py {{.CLI_ARGS}}
+      - uv run python scripts/infra/local/dbsrt_top.py {{.CLI_ARGS}}
 
   coupling:relabel:
     desc: "Relabel a certified subtitle coupling language (usage: task coupling:relabel -- --media <hash> [--sub <hash>] --lang <code>)"
     deps: [cli:build]
     cmds:
-      - bash scripts/coupling_relabel.sh {{.CLI_ARGS}}
+      - bash scripts/ingestion/coupling_relabel.sh {{.CLI_ARGS}}
 
   server:status:
     desc: Query dbsrt-server telemetry status endpoint (/v1/status)
     cmds:
-      - bash scripts/stack_ctl.sh server-status
+      - bash scripts/infra/local/stack_ctl.sh server-status
 
   server:reload:
     desc: Trigger atomic zero-downtime catalog reload on dbsrt-server (/v1/catalog/reload)
     cmds:
-      - bash scripts/stack_ctl.sh server-reload
+      - bash scripts/infra/local/stack_ctl.sh server-reload
 
   catalog:status:
     desc: Query catalog snapshot (Base + Delta + Couplings) on dbsrt-server (/v1/catalog/status)
     cmds:
-      - bash scripts/stack_ctl.sh catalog-status
+      - bash scripts/infra/local/stack_ctl.sh catalog-status
 
   catalog:reload:
     desc: Trigger atomic zero-downtime catalog reload on dbsrt-server (/v1/catalog/reload)
     cmds:
-      - bash scripts/stack_ctl.sh server-reload
+      - bash scripts/infra/local/stack_ctl.sh server-reload
 
   catalog:notify:reload:
     desc: Broadcast catalog_reload event to all dbsrt-server instances via PostgreSQL LISTEN/NOTIFY
@@ -85,18 +85,18 @@ tasks:
   catalog:compact:
     desc: Compact Base (.dbphash) and Delta (RAM) on dbsrt-server and hot-reload (/v1/catalog/compact)
     cmds:
-      - bash scripts/stack_ctl.sh catalog-compact
+      - bash scripts/infra/local/stack_ctl.sh catalog-compact
 
   catalog:ingest:
     desc: "Ingest a .phash file dynamically into DeltaIndex in RAM (usage: task catalog:ingest -- <path.phash> [fps])"
     cmds:
-      - bash scripts/stack_ctl.sh catalog-ingest {{.CLI_ARGS}}
+      - bash scripts/infra/local/stack_ctl.sh catalog-ingest {{.CLI_ARGS}}
 
   catalog:verify:
     desc: "Exhaustive programmatic audit of catalog and storage tiers (Zero-DB dbphash, couplings, PostgreSQL, and .phash files)"
     aliases: [catalog:check, db:verify]
     cmds:
-      - uv run python scripts/verify_catalog_integrity.py {{.CLI_ARGS}}
+      - uv run python scripts/ingestion/verify_catalog_integrity.py {{.CLI_ARGS}}
 
   server:run:
     desc: Run dbsrt-server daemon in foreground on http://127.0.0.1:8765
@@ -127,16 +127,16 @@ tasks:
     internal: true
     deps: [server:build]
     cmds:
-      - bash scripts/stack_ctl.sh server-start
+      - bash scripts/infra/local/stack_ctl.sh server-start
 
   server:logs:
     desc: Tail background dbsrt-server daemon logs
     internal: true
     cmds:
-      - bash scripts/stack_ctl.sh server-logs
+      - bash scripts/infra/local/stack_ctl.sh server-logs
 
   server:stop:
     desc: Stop background dbsrt-server daemon
     internal: true
     cmds:
-      - bash scripts/stack_ctl.sh server-stop
+      - bash scripts/infra/local/stack_ctl.sh server-stop

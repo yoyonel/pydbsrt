@@ -4,13 +4,13 @@ tasks:
   lint:
     desc: Run unified linters across Python, Rust, Shell, Lua, YAML, HTML/JS, and JSON
     cmds:
-      - bash scripts/code_quality.sh lint
+      - bash scripts/tooling/code_quality.sh lint
 
   complexity:
     desc: Run Rust architectural complexity and function size gate (LOC <= 150, CCN <= 20)
     aliases: [lint:complexity]
     cmds:
-      - uv run python scripts/lint_complexity.py {{.CLI_ARGS}}
+      - uv run python scripts/tooling/lint_complexity.py {{.CLI_ARGS}}
 
   complexity:py:
     desc: Run Python cognitive complexity gate on scripts/ (complexipy <= 15, legacy frozen in complexipy-snapshot.json)
@@ -22,18 +22,18 @@ tasks:
     desc: Display comprehensive ASCII table of Rust architectural metrics (LOC, CCN, Arity, Nesting) grouped by crate, module, and file
     aliases: [complexity:table]
     cmds:
-      - uv run python scripts/lint_complexity.py --table {{.CLI_ARGS}}
+      - uv run python scripts/tooling/lint_complexity.py --table {{.CLI_ARGS}}
 
   typecheck:
     desc: Run static type checker across Python codebase (Pyright)
     aliases: [types, lint:types]
     cmds:
-      - bash scripts/code_quality.sh typecheck {{.CLI_ARGS}}
+      - bash scripts/tooling/code_quality.sh typecheck {{.CLI_ARGS}}
 
   fmt:
     desc: Format code across Python (Ruff), Rust (rustfmt), Shell (shfmt), and Lua (stylua)
     cmds:
-      - bash scripts/code_quality.sh fmt
+      - bash scripts/tooling/code_quality.sh fmt
 
   test:rs:
     desc: Run all Rust workspace tests (unit + integration + e2e)
@@ -50,7 +50,7 @@ tasks:
   coverage:
     desc: Run unified Rust & Python coverage pipeline (1:1 parity with GitHub Actions CI)
     cmds:
-      - bash scripts/code_quality.sh coverage
+      - bash scripts/tooling/code_quality.sh coverage
 
   coverage:html:
     desc: Generate both Rust and Python HTML coverage reports
@@ -74,13 +74,13 @@ tasks:
   review:pack:
     desc: Pack branch diffs and modified files into an AI-friendly markdown bundle via repomix
     cmds:
-      - ./scripts/pack_review.sh {{.CLI_ARGS}}
+      - ./scripts/tooling/pack_review.sh {{.CLI_ARGS}}
 
   repo:pack:
     desc: Pack entire repository source code into an AI-friendly markdown bundle via repomix
     aliases: [review:pack-all]
     cmds:
-      - ./scripts/pack_repo.sh {{.CLI_ARGS}}
+      - ./scripts/tooling/pack_repo.sh {{.CLI_ARGS}}
 
   test:rs:db:
     desc: Run Rust PostgreSQL BK-Tree integration test (requires db:up)
@@ -148,29 +148,29 @@ tasks:
     desc: Safety guard checking free disk space and target/ size against thresholds
     internal: true
     cmds:
-      - bash scripts/disk_guard.sh check
+      - bash scripts/tooling/disk_guard.sh check
 
   typecheck:summary:
     desc: Generate structured statistical summary of Pyright type errors across files and rules
     internal: true
     aliases: [types:summary]
     cmds:
-      - uv run python scripts/report_type_errors.py
+      - uv run python scripts/tooling/report_type_errors.py
 
   test:portal:e2e:
     desc: Run Playwright E2E browser suite with route coverage and V8 CDP profiling (local daemon)
     aliases: [portal:e2e]
     cmds:
-      - uv run --with playwright python scripts/e2e_portal_playwright.py {{.CLI_ARGS}}
+      - uv run --with playwright python scripts/e2e/e2e_portal_playwright.py {{.CLI_ARGS}}
 
   test:portal:e2e:cloud:
     desc: Run Playwright E2E browser suite against deployed o2switch Cloud instance
     aliases: [portal:e2e:cloud]
     cmds:
-      - uv run --with playwright python scripts/e2e_portal_playwright.py --cloud {{.CLI_ARGS}}
+      - uv run --with playwright python scripts/e2e/e2e_portal_playwright.py --cloud {{.CLI_ARGS}}
 
   test:sources:e2e:
     desc: Run Playwright E2E browser suite for Media Sources & Master-Detail Explorer
     aliases: [sources:e2e]
     cmds:
-      - uv run --with playwright python scripts/e2e_sources_explorer.py {{.CLI_ARGS}}
+      - uv run --with playwright python scripts/e2e/e2e_sources_explorer.py {{.CLI_ARGS}}

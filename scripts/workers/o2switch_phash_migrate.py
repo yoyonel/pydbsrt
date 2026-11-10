@@ -17,20 +17,37 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Callable, Dict, List, Tuple
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+repo_root = Path(__file__).resolve().parent.parent
+if repo_root.name == "scripts":
+    repo_root = repo_root.parent
+sys.path.insert(0, str(repo_root))
 
-from scripts.o2switch_batch_worker import (  # noqa: E402
-    DEFAULT_FTP_PORT,
-    DEFAULT_NAS_HOST,
-    DEFAULT_NAS_USER,
-    DEFAULT_PHASH_DIR,
-    MOVIEHASH_RE,
-    PHASH_FPS_SUFFIX_RE,
-    VideoTarget,
-    list_nas_videos_ftp,
-    resolve_nas_password,
-    target_moviehash,
-)
+try:
+    from scripts.workers.o2switch_batch_worker import (  # noqa: E402
+        DEFAULT_FTP_PORT,
+        DEFAULT_NAS_HOST,
+        DEFAULT_NAS_USER,
+        DEFAULT_PHASH_DIR,
+        MOVIEHASH_RE,
+        PHASH_FPS_SUFFIX_RE,
+        VideoTarget,
+        list_nas_videos_ftp,
+        resolve_nas_password,
+        target_moviehash,
+    )
+except ImportError:
+    from scripts.o2switch_batch_worker import (  # noqa: E402 # pyright: ignore[reportMissingImports]
+        DEFAULT_FTP_PORT,
+        DEFAULT_NAS_HOST,
+        DEFAULT_NAS_USER,
+        DEFAULT_PHASH_DIR,
+        MOVIEHASH_RE,
+        PHASH_FPS_SUFFIX_RE,
+        VideoTarget,
+        list_nas_videos_ftp,
+        resolve_nas_password,
+        target_moviehash,
+    )
 
 Move = Tuple[Path, Path, str]
 

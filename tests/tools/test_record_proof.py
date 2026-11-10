@@ -12,7 +12,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
-_spec = importlib.util.spec_from_file_location("record_proof", ROOT / "scripts" / "record_proof.py")
+_spec = importlib.util.spec_from_file_location("record_proof", ROOT / "scripts" / "benchmarks" / "record_proof.py")
 assert _spec and _spec.loader
 record_proof = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(record_proof)

@@ -3,7 +3,7 @@
 import tempfile
 from pathlib import Path
 
-from scripts.lint_migrations import lint_migration_file
+from scripts.tooling.lint_migrations import lint_migration_file
 
 
 def test_lint_migration_file_valid() -> None:

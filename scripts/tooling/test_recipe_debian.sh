@@ -80,12 +80,12 @@ echo -e "${COLOR_BOLD}=== [Recipe Test] 3. Copying binaries & deployment scripts
 docker exec -u "${TEST_USER_NAME}" "${CONTAINER_NAME}" mkdir -p \
   "/home/${TEST_USER_NAME}/pydbsrt/target/release" \
   "/home/${TEST_USER_NAME}/pydbsrt/vlc-plugin" \
-  "/home/${TEST_USER_NAME}/pydbsrt/scripts"
+  "/home/${TEST_USER_NAME}/pydbsrt/scripts/infra/local"
 
 docker cp target/release/dbsrt-server "${CONTAINER_NAME}:/home/${TEST_USER_NAME}/pydbsrt/target/release/dbsrt-server"
 docker cp vlc-plugin/vlsub_dbsrt.lua "${CONTAINER_NAME}:/home/${TEST_USER_NAME}/pydbsrt/vlc-plugin/vlsub_dbsrt.lua"
-docker cp scripts/install_debian.sh "${CONTAINER_NAME}:/home/${TEST_USER_NAME}/pydbsrt/scripts/install_debian.sh"
-docker cp scripts/load_env.sh "${CONTAINER_NAME}:/home/${TEST_USER_NAME}/pydbsrt/scripts/load_env.sh"
+docker cp scripts/infra/local/install_debian.sh "${CONTAINER_NAME}:/home/${TEST_USER_NAME}/pydbsrt/scripts/infra/local/install_debian.sh"
+docker cp scripts/infra/local/load_env.sh "${CONTAINER_NAME}:/home/${TEST_USER_NAME}/pydbsrt/scripts/infra/local/load_env.sh"
 docker exec -u root "${CONTAINER_NAME}" chown -R "${TEST_USER_NAME}:${TEST_USER_NAME}" "/home/${TEST_USER_NAME}/pydbsrt"
 
 echo -e "${COLOR_BOLD}=== [Recipe Test] 4. Executing install recipe as unprivileged user ===${COLOR_RESET}"
@@ -96,7 +96,7 @@ docker exec \
   -e "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/${TEST_USER_ID}/bus" \
   -e "DBSRT_REMOTE_API_KEY=${TEST_API_KEY}" \
   "${CONTAINER_NAME}" \
-  ./scripts/install_debian.sh install "${TEST_REMOTE_API}"
+  ./scripts/infra/local/install_debian.sh install "${TEST_REMOTE_API}"
 
 echo -e "${COLOR_BOLD}=== [Recipe Test] 5. Asserting service state & API responsiveness ===${COLOR_RESET}"
 # 1. Check unit is active
@@ -164,7 +164,7 @@ docker exec \
   -e "XDG_RUNTIME_DIR=/run/user/${TEST_USER_ID}" \
   -e "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/${TEST_USER_ID}/bus" \
   "${CONTAINER_NAME}" \
-  ./scripts/install_debian.sh uninstall
+  ./scripts/infra/local/install_debian.sh uninstall
 
 # Assert unit is stopped/removed
 if docker exec -u "${TEST_USER_NAME}" -e "XDG_RUNTIME_DIR=/run/user/${TEST_USER_ID}" "${CONTAINER_NAME}" systemctl --user is-active dbsrt-agent.service >/dev/null 2>&1; then

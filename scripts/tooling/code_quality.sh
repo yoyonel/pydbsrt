@@ -15,8 +15,9 @@ run_lint_fast() {
   run_typecheck
 
   echo "=== [3/6] Shell Scripts (shellcheck & shfmt) ==="
-  shellcheck scripts/*.sh data/*.sh
-  shfmt -i 2 -ci -d scripts/*.sh data/*.sh
+  shopt -s globstar nullglob
+  shellcheck scripts/**/*.sh data/*.sh
+  shfmt -i 2 -ci -d scripts/**/*.sh data/*.sh
 
   echo "=== [4/6] Lua VLC Plugins (luac bytecode check & hermetic unit tests) ==="
   for lua_file in vlc-plugin/*.lua; do
@@ -43,10 +44,10 @@ run_lint_fast() {
   fi
 
   echo "=== [7/8] HTML / Embedded JS / JSON Assets ==="
-  uv run python scripts/validate_web_assets.py
+  uv run python scripts/tooling/validate_web_assets.py
 
   echo "=== [8/8] Rust Architectural Complexity Gate (LOC <= 150, CCN <= 20) ==="
-  uv run python scripts/lint_complexity.py
+  uv run python scripts/tooling/lint_complexity.py
 }
 
 run_lint() {
@@ -56,7 +57,7 @@ run_lint() {
   cargo clippy --workspace --all-targets -- -D warnings
 
   echo "=== [10/10] Disk Space Safety Guard ==="
-  bash scripts/disk_guard.sh check
+  bash scripts/tooling/disk_guard.sh check
 }
 
 run_typecheck() {
@@ -73,7 +74,8 @@ run_fmt() {
   cargo fmt --all
 
   echo "=== [3/3] Formatting Shell Scripts (shfmt) ==="
-  shfmt -i 2 -ci -w scripts/*.sh data/*.sh
+  shopt -s globstar nullglob
+  shfmt -i 2 -ci -w scripts/**/*.sh data/*.sh
 }
 
 run_coverage() {
@@ -84,11 +86,11 @@ run_coverage() {
   uv run pytest --cov=src --cov-report=json:coverage-python.json tests/tools/
   if (echo >"/dev/tcp/${PSQL_IP:-127.0.0.1}/${PSQL_PORT:-5433}") >/dev/null 2>&1; then
     PSQL_PORT="${PSQL_PORT:-5433}" uv run pytest --cov=src --cov-report=json:coverage-python-db.json tests/ --ignore=tests/tools/
-    bash scripts/seed_couplings.sh >/dev/null 2>&1 || true
+    bash scripts/ingestion/seed_couplings.sh >/dev/null 2>&1 || true
   fi
 
   echo "=== [3/3] Unified Coverage Report (Rust & Python) ==="
-  uv run python scripts/generate_coverage_report.py \
+  uv run python scripts/tooling/generate_coverage_report.py \
     --rust-json coverage-rust.json \
     --python-json coverage-python.json \
     --python-db-json coverage-python-db.json \

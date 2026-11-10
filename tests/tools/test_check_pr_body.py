@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = ROOT / "scripts" / "check_pr_body.py"
+SCRIPT = ROOT / "scripts" / "tooling" / "check_pr_body.py"
 TEMPLATE = ROOT / ".github" / "pull_request_template.md"
 
 _spec = importlib.util.spec_from_file_location("check_pr_body", SCRIPT)

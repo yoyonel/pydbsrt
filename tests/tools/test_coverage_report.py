@@ -1,6 +1,6 @@
 """Unit tests for coverage aggregation, migration detection, and quality gate enforcement."""
 
-from scripts.generate_coverage_report import (
+from scripts.tooling.generate_coverage_report import (
     check_modified_coverage_gate,
     detect_db_migrations,
     format_migration_alert,

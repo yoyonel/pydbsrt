@@ -11,7 +11,7 @@ BARE_REMOTE_PYTHON = re.compile(r"(?<![/\w])python3 -")
 
 
 def test_sync_links_bin_python3_to_the_alt_python313() -> None:
-    ctl = (ROOT / "scripts/o2switch_ctl.sh").read_text()
+    ctl = (ROOT / "scripts/infra/o2switch/o2switch_ctl.sh").read_text()
 
     assert 'O2SWITCH_PYTHON="/opt/alt/python313/bin/python3"' in ctl
     assert "ln -sfn ${O2SWITCH_PYTHON} ${REMOTE_BASE}/bin/python3" in ctl
@@ -19,7 +19,11 @@ def test_sync_links_bin_python3_to_the_alt_python313() -> None:
 
 @pytest.mark.parametrize(
     "path",
-    ["scripts/o2switch_ctl.sh", "scripts/o2switch_e2e.py", "scripts/freebox_batch_ctl.sh"],
+    [
+        "scripts/infra/o2switch/o2switch_ctl.sh",
+        "scripts/e2e/o2switch_e2e.py",
+        "scripts/infra/rpi4/freebox_batch_ctl.sh",
+    ],
 )
 def test_remote_commands_never_call_the_system_python3(path: str) -> None:
     lines = (ROOT / path).read_text().splitlines()
@@ -28,6 +32,6 @@ def test_remote_commands_never_call_the_system_python3(path: str) -> None:
 
 
 def test_the_audit_runs_on_o2switch_through_bin_python3() -> None:
-    ctl = (ROOT / "scripts/o2switch_ctl.sh").read_text()
+    ctl = (ROOT / "scripts/infra/o2switch/o2switch_ctl.sh").read_text()
 
     assert "./bin/python3 -I scripts/o2switch_audit_remote.py" in ctl

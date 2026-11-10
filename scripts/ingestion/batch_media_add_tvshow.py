@@ -27,9 +27,9 @@ from typing import Any, Dict, List, Set, Tuple
 
 import psutil
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from scripts.phash_names import phash_logical_name  # noqa: E402
+from scripts.ingestion.phash_names import phash_logical_name  # noqa: E402
 
 # Operational & System Constants
 BYTES_PER_KIB: int = 1024

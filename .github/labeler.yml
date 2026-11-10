@@ -27,7 +27,7 @@ db:refinery:
 
 ci:
   - changed-files:
-      - any-glob-to-any-file: ['.github/**', 'taskfiles/**', 'Taskfile.yml', 'scripts/code_quality.sh', 'scripts/lint_*.py']
+      - any-glob-to-any-file: ['.github/**', 'taskfiles/**', 'Taskfile.yml', 'scripts/tooling/code_quality.sh', 'scripts/tooling/lint_*.py']
 
 benchmark:
   - changed-files:

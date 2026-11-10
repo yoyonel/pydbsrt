@@ -19,10 +19,10 @@ jobs:
       - name: Checkout checker script
         uses: actions/checkout@v4
         with:
-          sparse-checkout: scripts/check_pr_body.py
+          sparse-checkout: scripts/tooling/check_pr_body.py
           sparse-checkout-cone-mode: false
 
       - name: Check business-goals section
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
-        run: printf '%s' "$PR_BODY" | python3 scripts/check_pr_body.py
+        run: printf '%s' "$PR_BODY" | python3 scripts/tooling/check_pr_body.py

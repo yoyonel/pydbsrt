@@ -3,9 +3,9 @@
 set -euo pipefail
 
 # Load optional unversioned local environment file (O2SWITCH_URL)
-# shellcheck source=scripts/load_env.sh
+# shellcheck source=scripts/infra/local/load_env.sh
 source "$(dirname "${BASH_SOURCE[0]}")/load_env.sh"
-load_local_env "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+load_local_env "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 
 # Named operational constants
 DEFAULT_AGENT_PORT=8765

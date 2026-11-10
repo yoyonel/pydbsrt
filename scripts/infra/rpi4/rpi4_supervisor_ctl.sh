@@ -19,14 +19,14 @@ SERVICE_NAME="${SERVICE_NAME:-dbsrt-supervisor.service}"
 UNIT_FILE="deploy/rpi4/dbsrt-supervisor.service"
 # Scripts the supervisor runs on the RPi4 (it drives o2switch through o2switch_ctl.sh)
 SUPERVISOR_SCRIPTS=(
-  scripts/rpi4_o2switch_supervisor.py
-  scripts/o2switch_ctl.sh
-  scripts/load_env.sh
-  scripts/o2switch_batch_worker.py
-  scripts/phash_dedupe.py
-  scripts/phash_names.py
-  scripts/freebox_batch_ctl.sh
-  scripts/scan_freebox_targets.py
+  scripts/infra/rpi4/rpi4_o2switch_supervisor.py
+  scripts/infra/o2switch/o2switch_ctl.sh
+  scripts/infra/local/load_env.sh
+  scripts/workers/o2switch_batch_worker.py
+  scripts/ingestion/phash_dedupe.py
+  scripts/ingestion/phash_names.py
+  scripts/infra/rpi4/freebox_batch_ctl.sh
+  scripts/ingestion/scan_freebox_targets.py
 )
 
 run_ssh() {
@@ -58,7 +58,7 @@ case "${ACTION}" in
     # Scripts only: the RPi4 pushes its own o2switch_batch_worker.py on every batch launch
     echo "=== Syncing supervisor scripts to ${RPI_HOST} ==="
     sync_scripts
-    echo "local  $(sha256sum scripts/o2switch_batch_worker.py | cut -c1-16)"
+    echo "local  $(sha256sum scripts/workers/o2switch_batch_worker.py | cut -c1-16)"
     echo "remote $(run_ssh "sha256sum ${REMOTE_BASE}/scripts/o2switch_batch_worker.py" | cut -c1-16)"
     ;;
 

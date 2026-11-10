@@ -28,9 +28,9 @@ import time
 import urllib.request
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from scripts.phash_names import phash_media_name  # noqa: E402
+from scripts.ingestion.phash_names import phash_media_name  # noqa: E402
 
 
 def is_blank_phash(h: int) -> bool:

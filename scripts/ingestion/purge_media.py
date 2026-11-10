@@ -128,7 +128,7 @@ def main():
     # Rebuild dashboard
     if manifest_updated:
         print("5. Rebuilding interactive dashboard...")
-        subprocess.run([sys.executable, "scripts/build_dashboard_html.py"], check=False)
+        subprocess.run([sys.executable, "scripts/tooling/build_dashboard_html.py"], check=False)
 
     print(f"✓ Global purge completed for '{stem}'.")
 

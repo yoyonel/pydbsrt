@@ -1,5 +1,5 @@
-from scripts import rpi4_o2switch_supervisor as sup
-from scripts.rpi4_o2switch_supervisor import NEXT_BATCH_TYPE, RELAUNCH_BACKOFF_SECS, decide_next_batch
+from scripts.infra.rpi4 import rpi4_o2switch_supervisor as sup
+from scripts.infra.rpi4.rpi4_o2switch_supervisor import NEXT_BATCH_TYPE, RELAUNCH_BACKOFF_SECS, decide_next_batch
 
 
 def test_batch_rotation_cycle():

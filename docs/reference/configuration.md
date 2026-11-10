@@ -73,7 +73,7 @@ Le projet applique une règle stricte de **zéro constante magique** : toutes le
 
 Ces variables pilotent les scripts d'orchestration et cibles Taskfile pour les déploiements physiques et hébergés :
 
-### Cible Hébergement Mutualisé o2switch (`scripts/o2switch_ctl.sh`)
+### Cible Hébergement Mutualisé o2switch (`scripts/infra/o2switch/o2switch_ctl.sh`)
 - `O2SWITCH_HOST` (défaut : `o2switch`) : Hôte SSH ou alias configuré dans `~/.ssh/config`.
 - `SERVER_SOCKET` (défaut : `dbsrt/run/dbsrt-server.sock`, relatif au `$HOME` distant) : Socket Unix d'écoute du démon sur l'hôte distant.
 - `REMOTE_BASE` (défaut : `dbsrt`) : Répertoire racine du projet sur l'hébergement mutualisé.
@@ -84,7 +84,7 @@ Ces variables pilotent les scripts d'orchestration et cibles Taskfile pour les d
 - `READONLY_KEY_PASS_ENTRY` (défaut : `services/pydbsrt/o2switch_readonly_key`) : Entrée `pass` de la clé lecture seule.
 - `DEFAULT_RSYNC_BWLIMIT_KBPS` (valeur : `20000`) : Plafond strict de bande passante rsync (20 Mo/s) pour respecter le quota CloudLinux LVE I/O de 42 MiB/s.
 
-### Cible Appliance Raspberry Pi 4 (`scripts/rpi4_*.sh`)
+### Cible Appliance Raspberry Pi 4 (`scripts/infra/rpi4/rpi4_*.sh`)
 - `RPI_HOST` (défaut : `rpi4`) : Hôte SSH ou alias pour le Raspberry Pi 4.
 - `REMOTE_BIN_DIR` (défaut : `~/.local/bin`) : Répertoire d'installation des exécutables autonomes `dbsrt` et `dbsrt-server`.
 - `REMOTE_BASE` (défaut : `~/dbsrt`) : Répertoire racine des données et configurations sur le Raspberry Pi.

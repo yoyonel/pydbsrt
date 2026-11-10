@@ -21,9 +21,9 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-from record_casts import DEFAULT_TERMINAL_WIDTH, write_cast_file
+from scripts.benchmarks.record_casts import DEFAULT_TERMINAL_WIDTH, write_cast_file
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 PROOFS_DIR = ROOT / ".github" / "proofs"
 # Same files as scripts/load_env.sh: they hold the NAS host/user and the public URL
 ENV_FILES = [ROOT / ".env", Path.home() / ".config" / "pydbsrt" / "env"]

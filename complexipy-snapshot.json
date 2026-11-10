@@ -1,6 +1,6 @@
 [
   {
-    "path": "scripts/audit_phash_catalog.py",
+    "path": "scripts/ingestion/audit_phash_catalog.py",
     "file_name": "audit_phash_catalog.py",
     "functions": [
       {
@@ -14,7 +14,7 @@
     ]
   },
   {
-    "path": "scripts/batch_media_add_tvshow.py",
+    "path": "scripts/ingestion/batch_media_add_tvshow.py",
     "file_name": "batch_media_add_tvshow.py",
     "functions": [
       {
@@ -52,7 +52,7 @@
     ]
   },
   {
-    "path": "scripts/benchmark_worker_scaling.py",
+    "path": "scripts/benchmarks/benchmark_worker_scaling.py",
     "file_name": "benchmark_worker_scaling.py",
     "functions": [
       {
@@ -66,7 +66,7 @@
     ]
   },
   {
-    "path": "scripts/compare_top_telemetry.py",
+    "path": "scripts/benchmarks/compare_top_telemetry.py",
     "file_name": "compare_top_telemetry.py",
     "functions": [
       {
@@ -76,7 +76,7 @@
     ]
   },
   {
-    "path": "scripts/convert_dashboard_webp.py",
+    "path": "scripts/tooling/convert_dashboard_webp.py",
     "file_name": "convert_dashboard_webp.py",
     "functions": [
       {
@@ -86,7 +86,7 @@
     ]
   },
   {
-    "path": "scripts/dbsrt_top.py",
+    "path": "scripts/infra/local/dbsrt_top.py",
     "file_name": "dbsrt_top.py",
     "functions": [
       {
@@ -116,7 +116,7 @@
     ]
   },
   {
-    "path": "scripts/download_and_audit_all_trailers.py",
+    "path": "scripts/ingestion/download_and_audit_all_trailers.py",
     "file_name": "download_and_audit_all_trailers.py",
     "functions": [
       {
@@ -126,7 +126,7 @@
     ]
   },
   {
-    "path": "scripts/enrich_snippets_metadata.py",
+    "path": "scripts/ingestion/enrich_snippets_metadata.py",
     "file_name": "enrich_snippets_metadata.py",
     "functions": [
       {
@@ -140,7 +140,7 @@
     ]
   },
   {
-    "path": "scripts/eval_exhaustive_nas_snippets.py",
+    "path": "scripts/benchmarks/eval_exhaustive_nas_snippets.py",
     "file_name": "eval_exhaustive_nas_snippets.py",
     "functions": [
       {
@@ -150,7 +150,7 @@
     ]
   },
   {
-    "path": "scripts/eval_media_batch.py",
+    "path": "scripts/benchmarks/eval_media_batch.py",
     "file_name": "eval_media_batch.py",
     "functions": [
       {
@@ -164,7 +164,7 @@
     ]
   },
   {
-    "path": "scripts/eval_nas_reliability.py",
+    "path": "scripts/benchmarks/eval_nas_reliability.py",
     "file_name": "eval_nas_reliability.py",
     "functions": [
       {
@@ -190,7 +190,7 @@
     ]
   },
   {
-    "path": "scripts/eval_vlc_vlsub_batch.py",
+    "path": "scripts/benchmarks/eval_vlc_vlsub_batch.py",
     "file_name": "eval_vlc_vlsub_batch.py",
     "functions": [
       {
@@ -204,7 +204,7 @@
     ]
   },
   {
-    "path": "scripts/extract_embedded_subs.py",
+    "path": "scripts/ingestion/extract_embedded_subs.py",
     "file_name": "extract_embedded_subs.py",
     "functions": [
       {
@@ -214,7 +214,7 @@
     ]
   },
   {
-    "path": "scripts/extract_nas_snippets.py",
+    "path": "scripts/ingestion/extract_nas_snippets.py",
     "file_name": "extract_nas_snippets.py",
     "functions": [
       {
@@ -232,7 +232,7 @@
     ]
   },
   {
-    "path": "scripts/generate_coverage_report.py",
+    "path": "scripts/tooling/generate_coverage_report.py",
     "file_name": "generate_coverage_report.py",
     "functions": [
       {
@@ -246,7 +246,7 @@
     ]
   },
   {
-    "path": "scripts/generate_nightly_report_enhanced.py",
+    "path": "scripts/tooling/generate_nightly_report_enhanced.py",
     "file_name": "generate_nightly_report_enhanced.py",
     "functions": [
       {
@@ -256,7 +256,7 @@
     ]
   },
   {
-    "path": "scripts/lint_complexity.py",
+    "path": "scripts/tooling/lint_complexity.py",
     "file_name": "lint_complexity.py",
     "functions": [
       {
@@ -278,7 +278,7 @@
     ]
   },
   {
-    "path": "scripts/lint_migrations.py",
+    "path": "scripts/tooling/lint_migrations.py",
     "file_name": "lint_migrations.py",
     "functions": [
       {
@@ -288,7 +288,7 @@
     ]
   },
   {
-    "path": "scripts/repair_corrupted_couplings.py",
+    "path": "scripts/ingestion/repair_corrupted_couplings.py",
     "file_name": "repair_corrupted_couplings.py",
     "functions": [
       {
@@ -298,7 +298,7 @@
     ]
   },
   {
-    "path": "scripts/scale_up_nas_dataset.py",
+    "path": "scripts/benchmarks/scale_up_nas_dataset.py",
     "file_name": "scale_up_nas_dataset.py",
     "functions": [
       {
@@ -324,7 +324,7 @@
     ]
   },
   {
-    "path": "scripts/validate_docs.py",
+    "path": "scripts/tooling/validate_docs.py",
     "file_name": "validate_docs.py",
     "functions": [
       {
@@ -342,7 +342,7 @@
     ]
   },
   {
-    "path": "scripts/verify_catalog_integrity.py",
+    "path": "scripts/ingestion/verify_catalog_integrity.py",
     "file_name": "verify_catalog_integrity.py",
     "functions": [
       {
@@ -352,7 +352,7 @@
     ]
   },
   {
-    "path": "scripts/verify_terminal_rendering.py",
+    "path": "scripts/benchmarks/verify_terminal_rendering.py",
     "file_name": "verify_terminal_rendering.py",
     "functions": [
       {

@@ -7,9 +7,9 @@ import sys
 from pathlib import Path
 
 # Add project root to sys.path
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from scripts.dbsrt_top import scan_active_jobs
+from scripts.infra.local.dbsrt_top import scan_active_jobs
 
 
 def run_comparison():

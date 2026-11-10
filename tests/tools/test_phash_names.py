@@ -1,8 +1,8 @@
 import json
 from pathlib import Path
 
-from scripts.backfill_medias_pg import build_media_row
-from scripts.phash_names import phash_logical_name, phash_media_name
+from scripts.ingestion.backfill_medias_pg import build_media_row
+from scripts.ingestion.phash_names import phash_logical_name, phash_media_name
 
 MOVIEHASH = "0123456789abcdef"
 

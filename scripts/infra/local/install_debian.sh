@@ -4,9 +4,9 @@
 set -euo pipefail
 
 # Load optional unversioned local environment file (O2SWITCH_URL) and resolve_api_key
-# shellcheck source=scripts/load_env.sh
+# shellcheck source=scripts/infra/local/load_env.sh
 source "$(dirname "${BASH_SOURCE[0]}")/load_env.sh"
-load_local_env "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+load_local_env "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 
 BIN_DIR="${HOME}/.local/bin"
 SYSTEMD_USER_DIR="${HOME}/.config/systemd/user"

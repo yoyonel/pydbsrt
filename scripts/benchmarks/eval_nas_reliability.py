@@ -32,9 +32,9 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from scripts.phash_names import phash_media_name  # noqa: E402
+from scripts.ingestion.phash_names import phash_media_name  # noqa: E402
 
 
 def default_nas_root() -> Path:
@@ -770,7 +770,7 @@ def run_suite_5_vlc_e2e() -> dict:
     print("\n=== SUITE 5: Headless VLC Lua Plugin End-to-End Verification ===", flush=True)
     t0 = time.monotonic()
     res = subprocess.run(
-        ["bash", "scripts/vlc_ctl.sh", "test-cvlc"],
+        ["bash", "scripts/infra/local/vlc_ctl.sh", "test-cvlc"],
         capture_output=True,
         text=True,
     )

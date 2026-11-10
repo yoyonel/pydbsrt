@@ -2923,7 +2923,7 @@ def run_on_demand_trajectory(
 
     cmd = [
         "python3",
-        "scripts/trajectory_bench_runner.py",
+        "scripts/benchmarks/trajectory_bench_runner.py",
         target_path,
         "-c",
         str(cuts),

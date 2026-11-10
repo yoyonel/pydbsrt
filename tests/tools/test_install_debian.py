@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
+SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "infra" / "local"
 REMOTE = "https://remote.example.invalid"
 KEY = "test-key-0123456789"
 
@@ -19,9 +19,9 @@ KEY = "test-key-0123456789"
 def repo(tmp_path: Path) -> Path:
     """Copy of the installer in an isolated repo: the real .env and ~/.config are never read."""
     root = tmp_path / "repo"
-    (root / "scripts").mkdir(parents=True)
+    (root / "scripts" / "infra" / "local").mkdir(parents=True)
     for name in ("install_debian.sh", "load_env.sh"):
-        shutil.copy(SCRIPTS / name, root / "scripts" / name)
+        shutil.copy(SCRIPTS / name, root / "scripts" / "infra" / "local" / name)
     (root / "target" / "release").mkdir(parents=True)
     (root / "target" / "release" / "dbsrt-server").write_text("#!/bin/sh\n")
     stubs = tmp_path / "stubs"
@@ -40,7 +40,7 @@ def run(repo: Path, *args: str, **extra: str) -> subprocess.CompletedProcess[str
     env = {k: v for k, v in os.environ.items() if k not in ("O2SWITCH_URL", "DBSRT_REMOTE_API_KEY")}
     env |= {"HOME": str(repo.parent / "home"), "PATH": f"{repo.parent / 'stubs'}:{env['PATH']}", **extra}
     return subprocess.run(
-        ["bash", "scripts/install_debian.sh", *args], cwd=repo, env=env, capture_output=True, text=True
+        ["bash", "scripts/infra/local/install_debian.sh", *args], cwd=repo, env=env, capture_output=True, text=True
     )
 
 

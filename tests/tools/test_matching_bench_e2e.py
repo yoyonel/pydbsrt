@@ -61,7 +61,7 @@ def test_matching_bench_lifecycle_e2e(tmp_path: Path) -> None:
     # 1. Start runner in background process
     cmd = [
         sys.executable,
-        "scripts/matching_bench_runner.py",
+        "scripts/benchmarks/matching_bench_runner.py",
         "--bin",
         str(dbsrt_bin),
         "--dbphash",

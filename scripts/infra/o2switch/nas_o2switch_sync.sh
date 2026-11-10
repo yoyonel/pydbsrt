@@ -4,9 +4,13 @@
 set -euo pipefail
 
 # Load optional unversioned local environment file (O2SWITCH_URL)
-# shellcheck source=scripts/load_env.sh
-source "$(dirname "${BASH_SOURCE[0]}")/load_env.sh"
-load_local_env "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/infra/local/load_env.sh
+if [[ -f "$(dirname "${BASH_SOURCE[0]}")/load_env.sh" ]]; then
+  source "$(dirname "${BASH_SOURCE[0]}")/load_env.sh"
+else
+  source "$(dirname "${BASH_SOURCE[0]}")/../local/load_env.sh"
+fi
+load_local_env "$(git rev-parse --show-toplevel 2>/dev/null || cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 
 # Named operational constants
 DEFAULT_O2SWITCH_HOST="o2switch"
@@ -162,7 +166,7 @@ if [[ "${DRY_RUN}" == "true" ]]; then
 fi
 
 echo "--- 5. Hot-restarting dbsrt-server on o2switch ---"
-./scripts/o2switch_ctl.sh restart
+"$(dirname "${BASH_SOURCE[0]}")/o2switch_ctl.sh" restart
 
 echo "--- 6. Verifying Remote Status & Ingested Catalog ---"
 API_KEY=$(resolve_api_key)

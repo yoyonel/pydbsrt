@@ -111,12 +111,12 @@ Ce document recense les constantes opérationnelles, temporelles et algorithmiqu
 
 | Constante | Type & Valeur | Fichier Source | Rôle & Justification |
 | :--- | :--- | :--- | :--- |
-| `KEYSTROKE_DELAY_SEC` | `0.035` | `scripts/record_casts.py` | Intervalle simulé entre deux frappes clavier pour un rendu fluide dans Asciinema. |
-| `FINAL_PAUSE_SEC` | `6.0` | `scripts/record_casts.py` | Pause terminale avant rebouclage pour permettre la lecture des résultats CLI. |
-| `CHROME_TIMEOUT_SEC` | `25` | `scripts/verify_terminal_rendering.py` | Timeout de sécurité lors du pilotage de Chrome Headless pour les captures. |
-| `CHROME_WINDOW_WIDTH` | `1920` | `scripts/verify_terminal_rendering.py` | Largeur d'affichage standard Full HD pour les captures d'interface. |
-| `CHROME_WINDOW_HEIGHT` | `1400` | `scripts/verify_terminal_rendering.py` | Hauteur d'affichage adaptée englobant le terminal complet. |
-| `DEFAULT_PARALLEL_WORKERS` | `8` | `scripts/batch_media_add_tvshow.py` | Nombre de processus parallèles d'ingestion CIFS. |
+| `KEYSTROKE_DELAY_SEC` | `0.035` | `scripts/benchmarks/record_casts.py` | Intervalle simulé entre deux frappes clavier pour un rendu fluide dans Asciinema. |
+| `FINAL_PAUSE_SEC` | `6.0` | `scripts/benchmarks/record_casts.py` | Pause terminale avant rebouclage pour permettre la lecture des résultats CLI. |
+| `CHROME_TIMEOUT_SEC` | `25` | `scripts/benchmarks/verify_terminal_rendering.py` | Timeout de sécurité lors du pilotage de Chrome Headless pour les captures. |
+| `CHROME_WINDOW_WIDTH` | `1920` | `scripts/benchmarks/verify_terminal_rendering.py` | Largeur d'affichage standard Full HD pour les captures d'interface. |
+| `CHROME_WINDOW_HEIGHT` | `1400` | `scripts/benchmarks/verify_terminal_rendering.py` | Hauteur d'affichage adaptée englobant le terminal complet. |
+| `DEFAULT_PARALLEL_WORKERS` | `8` | `scripts/ingestion/batch_media_add_tvshow.py` | Nombre de processus parallèles d'ingestion CIFS. |
 
 ---
 

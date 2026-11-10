@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from scripts import o2switch_e2e
-from scripts.o2switch_e2e import Recette, golden_ok, parse_releases, pick_golden, right_media
+from scripts.e2e import o2switch_e2e
+from scripts.e2e.o2switch_e2e import Recette, golden_ok, parse_releases, pick_golden, right_media
 
 
 class FakeRecette(Recette):

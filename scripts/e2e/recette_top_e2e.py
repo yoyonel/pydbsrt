@@ -99,7 +99,7 @@ def spawn_background_batch() -> subprocess.Popen:
         "uv",
         "run",
         "python",
-        "scripts/batch_media_add_tvshow.py",
+        "scripts/ingestion/batch_media_add_tvshow.py",
         "--workers",
         str(BATCH_WORKER_COUNT),
         "--limit",

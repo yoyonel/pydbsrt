@@ -92,7 +92,7 @@ def main():
             json.dump(items, f, indent=2, ensure_ascii=False)
         print(f"Updated {updated_count} manifest references.")
 
-    dashboard_builder = Path("scripts/build_dashboard_html.py")
+    dashboard_builder = Path("scripts/tooling/build_dashboard_html.py")
     if dashboard_builder.exists():
         print("Re-generating interactive E2E dashboard...")
         subprocess.run([sys.executable, str(dashboard_builder)], check=True)

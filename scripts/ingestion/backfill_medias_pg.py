@@ -26,9 +26,9 @@ from typing import Any, Dict, List, Tuple
 import psycopg2
 from psycopg2.extras import execute_batch
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from scripts.phash_names import phash_logical_name  # noqa: E402
+from scripts.ingestion.phash_names import phash_logical_name  # noqa: E402
 
 DEFAULT_FPS: float = 25.0
 MILLIS_PER_SEC: float = 1000.0

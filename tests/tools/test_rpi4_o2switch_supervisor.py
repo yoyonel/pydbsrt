@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from scripts.rpi4_o2switch_supervisor import (
+from scripts.infra.rpi4.rpi4_o2switch_supervisor import (
     AUTOSCALE_MAX_WORKERS,
     AUTOSCALE_MIN_WORKERS,
     RELAUNCH_BACKOFF_SECS,
@@ -174,15 +174,15 @@ def test_pull_remote_catalog_success():
 def _run_one_iteration(state: str, batch_type: str = "tvshow") -> MagicMock:
     with (
         patch(
-            "scripts.rpi4_o2switch_supervisor.check_remote_batch_status",
+            "scripts.infra.rpi4.rpi4_o2switch_supervisor.check_remote_batch_status",
             return_value={"state": state, "pid": None, "type": batch_type},
         ),
-        patch("scripts.rpi4_o2switch_supervisor.get_remote_desired_workers", return_value=4),
-        patch("scripts.rpi4_o2switch_supervisor.sample_remote_cpu", return_value=None),
-        patch("scripts.rpi4_o2switch_supervisor.get_remote_running_jobs", return_value=None),
-        patch("scripts.rpi4_o2switch_supervisor.restart_remote_batch") as mock_restart,
-        patch("scripts.rpi4_o2switch_supervisor.pull_remote_catalog") as mock_pull,
-        patch("scripts.rpi4_o2switch_supervisor.time.sleep", side_effect=KeyboardInterrupt),
+        patch("scripts.infra.rpi4.rpi4_o2switch_supervisor.get_remote_desired_workers", return_value=4),
+        patch("scripts.infra.rpi4.rpi4_o2switch_supervisor.sample_remote_cpu", return_value=None),
+        patch("scripts.infra.rpi4.rpi4_o2switch_supervisor.get_remote_running_jobs", return_value=None),
+        patch("scripts.infra.rpi4.rpi4_o2switch_supervisor.restart_remote_batch") as mock_restart,
+        patch("scripts.infra.rpi4.rpi4_o2switch_supervisor.pull_remote_catalog") as mock_pull,
+        patch("scripts.infra.rpi4.rpi4_o2switch_supervisor.time.sleep", side_effect=KeyboardInterrupt),
     ):
         with pytest.raises(KeyboardInterrupt):
             supervisor_loop(remote_host="o2switch", remote_base="dbsrt", check_interval=1, pull_interval=0)

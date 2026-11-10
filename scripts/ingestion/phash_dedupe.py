@@ -13,9 +13,9 @@ import sys
 from pathlib import Path
 from typing import Dict
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from scripts.phash_names import phash_logical_name  # noqa: E402
+from scripts.ingestion.phash_names import phash_logical_name  # noqa: E402
 
 
 def dedupe_legacy_twins(phash_dir: Path, apply: bool) -> Dict[str, int]:

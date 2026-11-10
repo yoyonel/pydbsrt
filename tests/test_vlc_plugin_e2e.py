@@ -50,11 +50,15 @@ def test_cvlc_headless_integration():
         pytest.skip("cvlc executable not found on system")
 
     # Ensure plugins are installed
-    install_res = subprocess.run(["bash", "scripts/vlc_ctl.sh", "install"], capture_output=True, text=True, check=False)
+    install_res = subprocess.run(
+        ["bash", "scripts/infra/local/vlc_ctl.sh", "install"], capture_output=True, text=True, check=False
+    )
     assert install_res.returncode == 0, f"Plugin installation failed: {install_res.stderr}"
 
     # Run cvlc headless auto-sync
-    res = subprocess.run(["bash", "scripts/vlc_ctl.sh", "test-cvlc"], capture_output=True, text=True, check=False)
+    res = subprocess.run(
+        ["bash", "scripts/infra/local/vlc_ctl.sh", "test-cvlc"], capture_output=True, text=True, check=False
+    )
     assert res.returncode == 0, f"cvlc test failed:\n{res.stdout}\n{res.stderr}"
     assert "SUCCESS! Media matched" in res.stdout
 

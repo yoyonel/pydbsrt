@@ -8,7 +8,7 @@ Enforces strict architectural bounds on all Rust functions across `crates/`:
 3. Maximum Function Parameters (Arity): 4 parameters (Use Context/Request structs beyond 4).
 4. Maximum Nesting Depth: 4 levels.
 
-Enforces a strict Ratchet mechanism via `scripts/complexity_baseline.json`:
+Enforces a strict Ratchet mechanism via `scripts/tooling/complexity_baseline.json`:
 - Grandfathered legacy functions cannot increase in LOC, CCN, or parameters.
 - When a grandfathered function is refactored, its baseline entry is ratcheted down.
 - Zero new functions exceeding thresholds are allowed.
@@ -32,7 +32,7 @@ MAX_CYCLOMATIC_COMPLEXITY: int = 20
 MAX_FUNCTION_PARAMETERS: int = 4
 MAX_NESTING_DEPTH: int = 4
 
-DEFAULT_BASELINE_FILE: Path = Path("scripts/complexity_baseline.json")
+DEFAULT_BASELINE_FILE: Path = Path("scripts/tooling/complexity_baseline.json")
 DEFAULT_CRATES_DIR: Path = Path("crates")
 
 # Regex to match function declarations
@@ -645,7 +645,7 @@ def main() -> int:
         "--baseline",
         type=Path,
         default=DEFAULT_BASELINE_FILE,
-        help="Path to grandfathered baseline JSON file (default: scripts/complexity_baseline.json)",
+        help="Path to grandfathered baseline JSON file (default: scripts/tooling/complexity_baseline.json)",
     )
     parser.add_argument(
         "--update-baseline",

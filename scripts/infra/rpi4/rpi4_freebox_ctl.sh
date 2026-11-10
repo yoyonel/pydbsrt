@@ -73,7 +73,7 @@ install_gateway() {
     exit 1
   fi
   run_rpi "mkdir -p ${REMOTE_BASE}/scripts ${REMOTE_BASE}/logs .config/systemd/user"
-  rsync -az scripts/rpi4_freebox_gateway.py "${RPI_HOST}:${REMOTE_BASE}/scripts/"
+  rsync -az scripts/infra/rpi4/rpi4_freebox_gateway.py "${RPI_HOST}:${REMOTE_BASE}/scripts/"
   rsync -az "deploy/rpi4/${GATEWAY_SERVICE}" "${RPI_HOST}:.config/systemd/user/${GATEWAY_SERVICE}"
   run_rpi "systemctl --user daemon-reload && systemctl --user enable ${GATEWAY_SERVICE}"
   echo "✓ Installed and enabled ${GATEWAY_SERVICE} (run 'restart' to load new code)."

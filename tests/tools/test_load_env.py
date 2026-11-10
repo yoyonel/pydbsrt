@@ -6,7 +6,7 @@ import os
 import subprocess
 from pathlib import Path
 
-LOAD_ENV = Path(__file__).resolve().parents[2] / "scripts" / "load_env.sh"
+LOAD_ENV = Path(__file__).resolve().parents[2] / "scripts" / "infra" / "local" / "load_env.sh"
 
 
 def test_load_local_env_keeps_caller_values(tmp_path: Path) -> None:

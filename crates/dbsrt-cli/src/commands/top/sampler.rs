@@ -1675,7 +1675,7 @@ pub fn launch_selected_batch_with_target_file(
         .args([
             "run",
             "python",
-            "scripts/batch_media_add_tvshow.py",
+            "scripts/ingestion/batch_media_add_tvshow.py",
             "--targets-file",
             targets_file
                 .to_str()

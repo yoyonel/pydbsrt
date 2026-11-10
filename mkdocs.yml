@@ -51,7 +51,7 @@ theme:
     - content.code.annotate
 
 hooks:
-  - scripts/mkdocs_hooks.py
+  - scripts/tooling/mkdocs_hooks.py
 
 plugins:
   - search:

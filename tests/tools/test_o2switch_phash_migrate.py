@@ -4,8 +4,8 @@ import json
 import threading
 from pathlib import Path
 
-from scripts.o2switch_batch_worker import VideoTarget
-from scripts.o2switch_phash_migrate import apply_moves, plan_migration
+from scripts.workers.o2switch_batch_worker import VideoTarget
+from scripts.workers.o2switch_phash_migrate import apply_moves, plan_migration
 
 HASH_A = "e19d5212c9812cd6"
 

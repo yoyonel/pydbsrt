@@ -52,7 +52,7 @@ Cette page dresse le dictionnaire exhaustif de toutes les cibles d'orchestration
 | `task db:psql` | Ouvre une session interactive `psql` dans le conteneur PostgreSQL actif. |
 | `task db:import:all-phash` | Importe en lot les fichiers `.phash` dans PostgreSQL via flux binaire `COPY`. |
 | `task db:lint:safety` | Vérifie la compatibilité et la non-régression des scripts de migration DDL. |
-| `task db:test:migration` | Exécute le banc d'essai d'intégrité des migrations et contraintes SQL sur base sandbox isolée (`scripts/test_db_migrations.py`). |
+| `task db:test:migration` | Exécute le banc d'essai d'intégrité des migrations et contraintes SQL sur base sandbox isolée (`scripts/tooling/test_db_migrations.py`). |
 | `task db:tui` | Lance l'explorateur interactif plein écran SQL TUI Harlequin sur PostgreSQL 17 local (`:5433`). |
 | `task db:backfill:medias` | Rétro-propage les métadonnées riches depuis les `.phash` et la télémétrie JSONL vers la table `medias`. |
 | `task db:audit` | Génère un bilan d'intégrité exhaustif des valeurs `NULL` de la table `medias` et inspecte la vue `v_productions`. |
@@ -106,10 +106,10 @@ Cette page dresse le dictionnaire exhaustif de toutes les cibles d'orchestration
 | `task portal:e2e` | Exécute la suite de tests Playwright E2E du portail multimédia sur l'ensemble des 4 vues (Sources, Actifs, pHash, Trajectoires) avec assertion zéro erreur console. |
 | `task test:portal:e2e` | Exécute la suite de tests Playwright E2E automatisée du portail de monitoring avec enregistrement vidéo et couverture V8 JS. |
 | `task test:infra` | Exécute le harnais de tests d'infrastructure et chaos testing. |
-| `task eval:nas-snippets` | Exécute la matrice d'évaluation quantitative sur l'ensemble des snippets NAS réels (`scripts/eval_exhaustive_nas_snippets.py`). |
-| `task eval:matching:multi-offset` | Benchmark de comparaison Mono-Fenêtre ($t=50\%$) vs Multi-Fenêtres Spatio-Temporel ($20\%, 50\%, 80\%$) sur corpus difficile (`scripts/eval_multi_offset_matching.py`). |
-| `task eval:cuts:audit` | Exécute l'audit complet de performance du pipeline sur l'ensemble des cuts vidéo (`scripts/audit_cuts_pipeline.py`). |
-| `task eval:cuts:audit:rejected` | Exécute l'analyse forensique exhaustive des cuts rejetés et met à jour la documentation (`scripts/audit_rejected_cuts.py`). |
+| `task eval:nas-snippets` | Exécute la matrice d'évaluation quantitative sur l'ensemble des snippets NAS réels (`scripts/benchmarks/eval_exhaustive_nas_snippets.py`). |
+| `task eval:matching:multi-offset` | Benchmark de comparaison Mono-Fenêtre ($t=50\%$) vs Multi-Fenêtres Spatio-Temporel ($20\%, 50\%, 80\%$) sur corpus difficile (`scripts/benchmarks/eval_multi_offset_matching.py`). |
+| `task eval:cuts:audit` | Exécute l'audit complet de performance du pipeline sur l'ensemble des cuts vidéo (`scripts/ingestion/audit_cuts_pipeline.py`). |
+| `task eval:cuts:audit:rejected` | Exécute l'analyse forensique exhaustive des cuts rejetés et met à jour la documentation (`scripts/ingestion/audit_rejected_cuts.py`). |
 
 ---
 
