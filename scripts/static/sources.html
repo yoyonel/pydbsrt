@@ -122,7 +122,7 @@
 
   <!-- Main Content Area -->
   <main class="flex-1 p-6 max-w-7xl mx-auto w-full flex flex-col min-h-0"
-        :class="currentView === 'sources' || currentView === 'assets' || currentView === 'phashes' ? 'overflow-y-auto space-y-6 custom-scroll' : 'overflow-hidden'">
+        :class="currentView === 'sources' || currentView === 'assets' || currentView === 'phashes' || currentView === 'trajectories' ? 'overflow-y-auto space-y-6 custom-scroll' : 'overflow-hidden'">
 
     <!-- ================================================================= -->
     <!-- VIEW 1: SOURCES MÉDIAS DASHBOARD (OVERVIEW)                      -->
@@ -1556,7 +1556,7 @@
           <div class="text-[11px] text-slate-500 mt-1">Multi-cuts Rayon multithread</div>
         </div>
 
-        <!-- KPI 5: Catalogue Covered -->
+        <!-- KPI 5: Catalogue Covered (Pourcentage-Centré pour homogénéité stricte) -->
         <div class="bg-slate-900/60 border border-slate-800/80 rounded-xl p-3.5 flex flex-col justify-between">
           <div class="text-[11px] font-semibold text-purple-400 uppercase tracking-wider flex items-center justify-between">
             <span class="flex items-center gap-1.5">
@@ -1566,44 +1566,60 @@
             <span class="text-base">🗄️</span>
           </div>
           <div class="mt-2 flex items-baseline gap-2">
-            <span class="text-2xl font-bold text-purple-300 font-mono" x-text="trajectoriesKpi.unique_catalog_covered || 0"></span>
-            <span class="text-xs text-slate-400">médias uniques</span>
+            <span class="text-2xl font-bold text-purple-300 font-mono" x-text="(trajectoriesKpi.catalog_coverage_pct || (trajectoriesKpi.unique_catalog_covered ? ((trajectoriesKpi.unique_catalog_covered / 2779) * 100).toFixed(1) : '0.0')) + '%'"></span>
+            <span class="text-xs text-slate-400 font-mono" x-text="(trajectoriesKpi.unique_catalog_covered || 0) + ' / ' + (trajectoriesKpi.catalog_total || '2 779')"></span>
           </div>
-          <div class="text-[11px] text-slate-500 mt-1">
-            <span x-text="'sur ' + (phashesSummary?.catalog_count || '2 779') + ' base Zero-DB'"></span>
-          </div>
+          <div class="text-[11px] text-slate-500 mt-1">Médias uniques référencés</div>
         </div>
       </div>
 
       <!-- Filters, Search & Sort Bar -->
       <div class="bg-slate-900/40 border border-slate-800 rounded-xl p-3 flex flex-col md:flex-row items-center justify-between gap-3">
-        <!-- Status Filter Pills -->
+        <!-- Status Filter Pills with dynamic counter badges -->
         <div class="flex items-center gap-1.5 flex-wrap">
           <button @click="setTrajectoriesStatusFilter('all')"
-                  class="px-2.5 py-1 rounded-md text-xs font-semibold transition cursor-pointer"
+                  class="px-2.5 py-1 rounded-md text-xs font-semibold transition cursor-pointer flex items-center gap-1.5"
                   :class="trajectoriesStatusFilter === 'all' ? 'bg-indigo-600 text-white' : 'bg-slate-800/80 text-slate-300 hover:bg-slate-700'">
-            Tous
+            <span>Tous</span>
+            <span class="text-[10px] font-mono px-1.5 py-0.2 rounded"
+                  :class="trajectoriesStatusFilter === 'all' ? 'bg-indigo-800 text-indigo-100' : 'bg-slate-900 text-slate-400 border border-slate-700'"
+                  x-text="trajectoriesKpi.total_audits || 0"></span>
           </button>
+
           <button @click="setTrajectoriesStatusFilter('coherent')"
-                  class="px-2.5 py-1 rounded-md text-xs font-semibold transition cursor-pointer flex items-center gap-1"
+                  class="px-2.5 py-1 rounded-md text-xs font-semibold transition cursor-pointer flex items-center gap-1.5"
                   :class="trajectoriesStatusFilter === 'coherent' ? 'bg-emerald-600 text-white' : 'bg-slate-800/80 text-emerald-300 hover:bg-slate-700'">
-            <span>✓</span>
-            <span>Cohérents</span>
+            <span>✓ Cohérents</span>
+            <span class="text-[10px] font-mono px-1.5 py-0.2 rounded"
+                  :class="trajectoriesStatusFilter === 'coherent' ? 'bg-emerald-800 text-emerald-100' : 'bg-slate-900 text-emerald-400 border border-emerald-900/60'"
+                  x-text="trajectoriesKpi.total_coherent || 0"></span>
           </button>
+
           <button @click="setTrajectoriesStatusFilter('matched')"
-                  class="px-2.5 py-1 rounded-md text-xs font-semibold transition cursor-pointer"
+                  class="px-2.5 py-1 rounded-md text-xs font-semibold transition cursor-pointer flex items-center gap-1.5"
                   :class="trajectoriesStatusFilter === 'matched' ? 'bg-indigo-600 text-white' : 'bg-slate-800/80 text-indigo-300 hover:bg-slate-700'">
-            Consensus Gagné
+            <span>Consensus Gagné</span>
+            <span class="text-[10px] font-mono px-1.5 py-0.2 rounded"
+                  :class="trajectoriesStatusFilter === 'matched' ? 'bg-indigo-800 text-indigo-100' : 'bg-slate-900 text-indigo-400 border border-indigo-900/60'"
+                  x-text="trajectoriesKpi.total_matched || 0"></span>
           </button>
+
           <button @click="setTrajectoriesStatusFilter('divergent')"
-                  class="px-2.5 py-1 rounded-md text-xs font-semibold transition cursor-pointer"
+                  class="px-2.5 py-1 rounded-md text-xs font-semibold transition cursor-pointer flex items-center gap-1.5"
                   :class="trajectoriesStatusFilter === 'divergent' ? 'bg-amber-600 text-white' : 'bg-slate-800/80 text-amber-300 hover:bg-slate-700'">
-            Divergents
+            <span>Divergents</span>
+            <span class="text-[10px] font-mono px-1.5 py-0.2 rounded"
+                  :class="trajectoriesStatusFilter === 'divergent' ? 'bg-amber-800 text-amber-100' : 'bg-slate-900 text-amber-400 border border-amber-900/60'"
+                  x-text="trajectoriesKpi.total_divergent || 0"></span>
           </button>
+
           <button @click="setTrajectoriesStatusFilter('unmatched')"
-                  class="px-2.5 py-1 rounded-md text-xs font-semibold transition cursor-pointer"
+                  class="px-2.5 py-1 rounded-md text-xs font-semibold transition cursor-pointer flex items-center gap-1.5"
                   :class="trajectoriesStatusFilter === 'unmatched' ? 'bg-rose-600 text-white' : 'bg-slate-800/80 text-rose-300 hover:bg-slate-700'">
-            Sans Match
+            <span>Sans Match</span>
+            <span class="text-[10px] font-mono px-1.5 py-0.2 rounded"
+                  :class="trajectoriesStatusFilter === 'unmatched' ? 'bg-rose-800 text-rose-100' : 'bg-slate-900 text-rose-400 border border-rose-900/60'"
+                  x-text="trajectoriesKpi.total_unmatched || 0"></span>
           </button>
         </div>
 
@@ -1622,6 +1638,7 @@
             <option value="name_asc">Titre Cible (A-Z)</option>
             <option value="name_desc">Titre Cible (Z-A)</option>
             <option value="matched_desc">Coupures Gagnées (Max)</option>
+            <option value="matched_asc">Coupures Gagnées (Min)</option>
             <option value="duration_desc">Durée Décroissante</option>
             <option value="duration_asc">Durée Croissante</option>
             <option value="elapsed_desc">Latence Décroissante</option>
@@ -1630,25 +1647,24 @@
         </div>
       </div>
 
-      <!-- Main Trajectories Table Container -->
-      <div class="bg-slate-900/60 border border-slate-800 rounded-xl overflow-hidden shadow-xl">
-        <div class="overflow-x-auto">
-          <table class="w-full text-left text-xs">
-            <thead class="bg-slate-950 text-slate-400 font-semibold uppercase tracking-wider text-[10px] border-b border-slate-800">
+      <!-- Main Trajectories Table Container with Constrained Height & Custom Scroll -->
+      <div class="bg-slate-900/60 border border-slate-800 rounded-xl overflow-hidden shadow-xl flex flex-col">
+        <div class="overflow-x-auto overflow-y-auto max-h-[580px] custom-scroll">
+          <table class="w-full text-left text-xs min-w-[1100px]">
+            <thead class="bg-slate-950 text-slate-400 font-semibold uppercase tracking-wider text-[10px] border-b border-slate-800 sticky top-0 z-10 shadow-sm">
               <tr>
-                <th class="py-3 px-4">Cible Évaluée</th>
-                <th class="py-3 px-3">Durée</th>
-                <th class="py-3 px-4">Coupures Évaluées & Survivants</th>
-                <th class="py-3 px-4">Consensus Élu</th>
-                <th class="py-3 px-3 text-center">Cohérence</th>
-                <th class="py-3 px-3 text-right">Latence</th>
-                <th class="py-3 px-4 text-right">Action</th>
+                <th class="py-3 px-4 min-w-[280px]">Vidéo Analysée</th>
+                <th class="py-3 px-3 min-w-[90px]">Durée</th>
+                <th class="py-3 px-4 min-w-[240px]">Coupures & Survivants</th>
+                <th class="py-3 px-4 min-w-[220px]">Consensus Élu</th>
+                <th class="py-3 px-3 min-w-[120px] text-center">Cohérence</th>
+                <th class="py-3 px-4 min-w-[100px] text-right">Latence</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-slate-800/60">
               <template x-if="trajectoriesLoading">
                 <tr>
-                  <td colspan="7" class="py-12 text-center text-slate-400">
+                  <td colspan="6" class="py-12 text-center text-slate-400">
                     <span class="animate-spin text-xl text-indigo-400 inline-block mb-2">⚡</span>
                     <p>Calcul et extraction des trajectoires spatiotemporelles...</p>
                   </td>
@@ -1657,7 +1673,7 @@
 
               <template x-if="!trajectoriesLoading && trajectoriesItems.length === 0">
                 <tr>
-                  <td colspan="7" class="py-12 text-center text-slate-500">
+                  <td colspan="6" class="py-12 text-center text-slate-500">
                     <span class="text-2xl block mb-1">📭</span>
                     <span>Aucun enregistrement de trajectoire ne correspond aux critères sélectionnés.</span>
                   </td>
@@ -1665,22 +1681,36 @@
               </template>
 
               <template x-for="item in trajectoriesItems" :key="item.target_media">
-                <tr class="hover:bg-slate-800/40 transition">
-                  <!-- Cible Évaluée -->
-                  <td class="py-3 px-4 max-w-xs md:max-w-sm truncate">
-                    <div class="font-medium text-slate-200 truncate" :title="item.target_media" x-text="decodeURIComponent(item.target_media).replace(/\.phash$/, '')"></div>
-                    <div class="text-[10px] font-mono text-slate-500 truncate" :title="item.target_path" x-text="item.target_path"></div>
+                <tr @click="inspectTrajectory(item.target_media)"
+                    class="hover:bg-indigo-950/30 transition cursor-pointer group/row select-none">
+                  <!-- Vidéo Analysée (Nom résolu depuis sidecar JSON si hash anonyme) -->
+                  <td class="py-3 px-4 max-w-xs md:max-w-md">
+                    <div class="flex items-center gap-2">
+                      <span class="text-slate-500 group-hover/row:text-indigo-400 transition text-xs">🔍</span>
+                      <span class="font-medium text-slate-200 group-hover/row:text-white truncate"
+                            :title="item.resolved_title || item.target_media"
+                            x-text="item.resolved_title || decodeURIComponent(item.target_media).replace(/\.phash$/, '')"></span>
+                    </div>
+                    <div class="flex items-center gap-2 text-[10px] font-mono text-slate-500 truncate pl-5 mt-0.5" :title="item.target_path">
+                      <template x-if="item.resolved_title && item.resolved_title !== decodeURIComponent(item.target_media).replace(/\.phash$/, '')">
+                        <span class="text-indigo-400 font-semibold truncate" x-text="decodeURIComponent(item.target_media).replace(/\.phash$/, '')"></span>
+                      </template>
+                      <template x-if="item.resolved_title && item.resolved_title !== decodeURIComponent(item.target_media).replace(/\.phash$/, '')">
+                        <span>•</span>
+                      </template>
+                      <span class="truncate" x-text="item.target_path"></span>
+                    </div>
                   </td>
 
                   <!-- Durée -->
-                  <td class="py-3 px-3 text-slate-300 font-mono whitespace-nowrap" x-text="item.duration_sec ? (Math.floor(item.duration_sec / 60) + 'm ' + Math.floor(item.duration_sec % 60) + 's') : '-'"></td>
+                  <td class="py-3 px-3 text-slate-300 font-mono whitespace-nowrap text-[11px]" x-text="item.duration_sec ? (Math.floor(item.duration_sec / 60) + 'm ' + Math.floor(item.duration_sec % 60) + 's') : '-'"></td>
 
                   <!-- Coupures Évaluées & Ribbon -->
                   <td class="py-3 px-4">
-                    <div class="flex items-center gap-2">
-                      <span class="font-mono font-semibold" :class="item.matched_cuts_count > 0 ? 'text-emerald-400' : 'text-slate-500'" x-text="item.matched_cuts_count + ' / ' + item.cuts_count"></span>
+                    <div class="flex items-center gap-2 flex-wrap">
+                      <span class="font-mono font-semibold text-[11px]" :class="item.matched_cuts_count > 0 ? 'text-emerald-400' : 'text-slate-500'" x-text="item.matched_cuts_count + '/' + item.cuts_count"></span>
                       <!-- Cuts Ribbon Sparkline -->
-                      <div class="flex items-center gap-1 bg-slate-950 px-2 py-1 rounded border border-slate-800">
+                      <div class="flex items-center gap-1 bg-slate-950 px-2 py-1 rounded border border-slate-800/80">
                         <template x-for="(cut, cidx) in item.cuts_summary" :key="cidx">
                           <span class="inline-block w-2.5 h-2.5 rounded-sm"
                                 :class="cut.matched ? 'bg-emerald-500' : 'bg-slate-700'"
@@ -1693,13 +1723,13 @@
                   <!-- Consensus Élu -->
                   <td class="py-3 px-4">
                     <template x-if="item.consensus_media_id !== null">
-                      <div class="flex items-center gap-2">
-                        <span class="px-1.5 py-0.5 rounded bg-indigo-900/60 text-indigo-300 border border-indigo-700 font-mono text-[10px]" x-text="'ID ' + item.consensus_media_id"></span>
-                        <span class="font-medium text-white truncate max-w-[200px]" :title="item.consensus_title" x-text="item.consensus_title"></span>
+                      <div class="flex items-center gap-2 truncate">
+                        <span class="px-1.5 py-0.5 rounded bg-indigo-900/60 text-indigo-300 border border-indigo-700 font-mono text-[10px] shrink-0" x-text="'ID ' + item.consensus_media_id"></span>
+                        <span class="font-medium text-white truncate max-w-[240px] text-[11px]" :title="item.consensus_title" x-text="item.consensus_title"></span>
                       </div>
                     </template>
                     <template x-if="item.consensus_media_id === null">
-                      <span class="text-slate-500 italic">Aucun consensus</span>
+                      <span class="text-slate-500 italic text-[11px]">Aucun consensus</span>
                     </template>
                   </td>
 
@@ -1717,15 +1747,7 @@
                   </td>
 
                   <!-- Latence -->
-                  <td class="py-3 px-3 text-right font-mono text-slate-400 whitespace-nowrap" x-text="item.total_elapsed_seconds ? (item.total_elapsed_seconds.toFixed(2) + 's') : '-'"></td>
-
-                  <!-- Action -->
-                  <td class="py-3 px-4 text-right whitespace-nowrap">
-                    <button @click="inspectTrajectory(item.target_media)"
-                            class="px-2.5 py-1 bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-300 hover:text-white rounded border border-indigo-500/30 transition text-xs font-semibold cursor-pointer">
-                      Inspecter 🔍
-                    </button>
-                  </td>
+                  <td class="py-3 px-4 text-right font-mono text-slate-400 whitespace-nowrap text-[11px]" x-text="item.total_elapsed_seconds ? (item.total_elapsed_seconds.toFixed(2) + 's') : '-'"></td>
                 </tr>
               </template>
             </tbody>
@@ -4093,9 +4115,17 @@
                 this.trajectoriesActiveFile = data.file;
               }
             } else {
+              this.trajectoriesItems = [];
+              this.trajectoriesTotalItems = 0;
+              this.trajectoriesFilteredItems = 0;
+              this.trajectoriesTotalPages = 1;
               this.trajectoriesError = 'Erreur lors du chargement des trajectoires';
             }
           } catch (err) {
+            this.trajectoriesItems = [];
+            this.trajectoriesTotalItems = 0;
+            this.trajectoriesFilteredItems = 0;
+            this.trajectoriesTotalPages = 1;
             this.trajectoriesError = err.message || 'Erreur réseau';
           } finally {
             this.trajectoriesLoading = false;

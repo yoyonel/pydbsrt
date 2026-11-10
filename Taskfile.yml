@@ -116,6 +116,12 @@ tasks:
       - task: test:rs
       - uv run pytest tests/tools/
 
+  portal:e2e:
+    desc: Run Playwright E2E browser tests across all portal views and trajectory reports
+    cmds:
+      - uv run --with playwright python scripts/e2e_sources_explorer.py
+      - uv run --with playwright python scripts/e2e_trajectories_formal.py
+
   clean:
     desc: Unified purge of caches, coverage, and target/ build artifacts
     cmds:

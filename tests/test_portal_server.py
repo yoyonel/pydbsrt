@@ -361,3 +361,36 @@ def test_portal_http_api_endpoints() -> None:
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_trajectory_kpi_coverage_clamped_and_file_filtering() -> None:
+    """Verifies that catalog coverage KPI is strictly bounded in [0%, 100%] and invalid files are filtered."""
+    import tempfile
+
+    from scripts.portal_server import _compute_trajectory_kpi, _is_valid_trajectory_file
+
+    # 1. Invalid file filtering
+    with tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False) as f:
+        f.write('{"_meta": "killtest", "cuts": 1, "seconds": 12}\n')
+        invalid_path = Path(f.name)
+
+    try:
+        assert _is_valid_trajectory_file(invalid_path) is False
+    finally:
+        invalid_path.unlink()
+
+    # 2. Valid file structure
+    with tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False) as f:
+        f.write('{"target_media": "test.mp4", "cuts": [{"start_sec": 10}], "consensus_media_id": 42}\n')
+        valid_path = Path(f.name)
+
+    try:
+        assert _is_valid_trajectory_file(valid_path) is True
+    finally:
+        valid_path.unlink()
+
+    # 3. KPI coverage bound check even with massive mock ids
+    mock_records = [{"consensus_media_id": i, "is_temporally_coherent": True, "cuts_count": 3} for i in range(1, 5000)]
+    kpis = _compute_trajectory_kpi(mock_records)
+    assert 0.0 <= kpis["catalog_coverage_pct"] <= 100.0
+    assert kpis["unique_catalog_covered"] <= kpis["catalog_total"]

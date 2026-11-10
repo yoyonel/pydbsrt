@@ -2568,9 +2568,66 @@ class TrajectoriesQueryCriteria:
 
 
 _TRAJECTORY_FILE_CACHE: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+_PHASH_SIDECAR_TITLE_CACHE: dict[str, str] = {}
+
+
+def _resolve_phash_target_title(target_media: str, target_path: str) -> str:
+    """Resolves human-readable source title from sidecar JSON or cleaned target filename."""
+    if not target_media:
+        return ""
+    clean_target = urllib.parse.unquote(target_media).replace(".phash", "")
+    hex_match = re.match(r"^([a-fA-F0-9]{16})(?:\.\d+\.\d+fps)?$", clean_target)
+    if not hex_match:
+        return clean_target
+
+    moviehash = hex_match.group(1).lower()
+    if moviehash in _PHASH_SIDECAR_TITLE_CACHE:
+        return _PHASH_SIDECAR_TITLE_CACHE[moviehash]
+
+    # Check sidecar JSON next to .phash in target_path or data/__PHASH__/
+    candidates: list[Path] = []
+    if target_path:
+        cand_p = Path(target_path)
+        candidates.append(cand_p.with_suffix(".json"))
+        candidates.append(cand_p.parent / f"{moviehash}.json")
+    candidates.append(DEFAULT_TRAJECTORY_ROOT_DIR / "__PHASH__" / f"{moviehash}.json")
+    candidates.append(DEFAULT_TRAJECTORY_ROOT_DIR / f"{moviehash}.json")
+
+    for c in candidates:
+        if c.is_file():
+            try:
+                meta = json.loads(c.read_text(encoding="utf-8"))
+                media_name = meta.get("media_name") or meta.get("title") or meta.get("clean_title")
+                if media_name:
+                    _PHASH_SIDECAR_TITLE_CACHE[moviehash] = str(media_name)
+                    return str(media_name)
+            except Exception:
+                pass
+
+    _PHASH_SIDECAR_TITLE_CACHE[moviehash] = clean_target
+    return clean_target
 
 
 ACTIVE_BATCH_RECENCY_SECONDS: float = 60.0
+
+
+def _is_valid_trajectory_file(path: Path) -> bool:
+    """Fast probe: checks if a JSONL file conforms to spatiotemporal trajectory schema."""
+    try:
+        with open(path, encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                data = json.loads(line)
+                if not isinstance(data, dict):
+                    return False
+                has_target = "target_media" in data or "target_path" in data
+                has_cuts = isinstance(data.get("cuts"), list) or "cuts_count" in data
+                return bool(has_target and has_cuts)
+    except Exception:
+        return False
+    return False
 
 
 def list_trajectory_audit_files() -> list[dict[str, Any]]:
@@ -2590,7 +2647,7 @@ def list_trajectory_audit_files() -> list[dict[str, Any]]:
         seen.add(path.name)
         try:
             st = path.stat()
-            if st.st_size == 0:
+            if st.st_size == 0 or not _is_valid_trajectory_file(path):
                 continue
             is_active = (now - st.st_mtime) < ACTIVE_BATCH_RECENCY_SECONDS
             results.append(
@@ -2656,26 +2713,63 @@ def _load_trajectory_records(file_name: str) -> tuple[Path | None, list[dict[str
     return path, records
 
 
+def _compute_catalog_coverage(matched_media_ids: set[Any]) -> tuple[int, int, float]:
+    """Computes bounded catalog coverage against catalog.dbphash."""
+    cat_path = Path(__file__).resolve().parents[1] / "data" / "catalog.dbphash"
+    hdr, cat_items = _read_catalog_dbphash(cat_path) if cat_path.is_file() else ({}, [])
+    catalog_ids = {c["catalog_id"] for c in cat_items} if cat_items else set()
+    catalog_total = len(catalog_ids) if catalog_ids else 2779
+
+    if catalog_ids:
+        unique_covered = len(matched_media_ids.intersection(catalog_ids))
+    else:
+        unique_covered = min(len(matched_media_ids), catalog_total)
+
+    pct = round(unique_covered / float(catalog_total) * 100.0, 1) if catalog_total > 0 else 0.0
+    return unique_covered, catalog_total, max(0.0, min(100.0, pct))
+
+
 def _compute_trajectory_kpi(records: list[dict[str, Any]]) -> dict[str, Any]:
     total_audits = len(records)
-    total_matched = sum(1 for r in records if r.get("consensus_media_id") is not None)
-    total_coherent = sum(1 for r in records if r.get("is_temporally_coherent") is True)
-    total_cuts = sum(r.get("cuts_count", 0) for r in records)
-    matched_media_ids = {r.get("consensus_media_id") for r in records if r.get("consensus_media_id") is not None}
-    unique_catalog_covered = len(matched_media_ids)
+    total_coherent = 0
+    total_matched = 0
+    total_divergent = 0
+    total_unmatched = 0
+    total_cuts = 0
+    total_elapsed = 0.0
+    matched_media_ids: set[Any] = set()
+
+    for r in records:
+        mid = r.get("consensus_media_id")
+        is_coh = r.get("is_temporally_coherent") is True
+        total_cuts += r.get("cuts_count", 0)
+        total_elapsed += float(r.get("total_elapsed_seconds", 0.0))
+        if mid is not None:
+            total_matched += 1
+            matched_media_ids.add(mid)
+            if is_coh:
+                total_coherent += 1
+            else:
+                total_divergent += 1
+        else:
+            total_unmatched += 1
+
+    total_consensus_won = total_matched - total_coherent
+    unique_catalog_covered, catalog_total, catalog_coverage_pct = _compute_catalog_coverage(matched_media_ids)
 
     coherence_rate = round(total_coherent / float(total_matched) * 100.0, 1) if total_matched > 0 else 0.0
     match_rate = round(total_matched / float(total_audits) * 100.0, 1) if total_audits > 0 else 0.0
-    avg_elapsed = (
-        round(sum(r.get("total_elapsed_seconds", 0.0) for r in records) / float(total_audits), 3)
-        if total_audits > 0
-        else 0.0
-    )
+    avg_elapsed = round(total_elapsed / float(total_audits), 3) if total_audits > 0 else 0.0
     return {
         "total_audits": total_audits,
         "total_matched": total_matched,
         "total_coherent": total_coherent,
+        "total_consensus_won": total_consensus_won,
+        "total_divergent": total_divergent,
+        "total_unmatched": total_unmatched,
         "unique_catalog_covered": unique_catalog_covered,
+        "catalog_total": catalog_total,
+        "catalog_coverage_pct": catalog_coverage_pct,
         "coherence_rate_pct": coherence_rate,
         "match_rate_pct": match_rate,
         "avg_elapsed_sec": avg_elapsed,
@@ -2710,6 +2804,8 @@ def _sort_trajectory_records(records: list[dict[str, Any]], sort_by: str) -> lis
         return sorted(records, key=lambda r: float(r.get("total_elapsed_seconds", 0.0)))
     if sort_by == "matched_desc":
         return sorted(records, key=lambda r: int(r.get("matched_cuts_count", 0)), reverse=True)
+    if sort_by == "matched_asc":
+        return sorted(records, key=lambda r: int(r.get("matched_cuts_count", 0)))
     return sorted(records, key=lambda r: str(r.get("target_media", "")).lower())
 
 
@@ -2738,10 +2834,16 @@ def query_trajectory_records(criteria: TrajectoriesQueryCriteria) -> dict[str, A
 
     items: list[dict[str, Any]] = []
     for r in paged:
+        t_media = str(r.get("target_media", ""))
+        t_path = str(r.get("target_path", ""))
+        resolved_title = _resolve_phash_target_title(t_media, t_path)
+        cuts_raw = r.get("cuts")
+        cuts_list: list[dict[str, Any]] = cuts_raw if isinstance(cuts_raw, list) else []
         items.append(
             {
-                "target_media": r.get("target_media", ""),
-                "target_path": r.get("target_path", ""),
+                "target_media": t_media,
+                "target_path": t_path,
+                "resolved_title": resolved_title,
                 "duration_sec": r.get("duration_sec", 0.0),
                 "cuts_count": r.get("cuts_count", 0),
                 "matched_cuts_count": r.get("matched_cuts_count", 0),
@@ -2758,7 +2860,7 @@ def query_trajectory_records(criteria: TrajectoriesQueryCriteria) -> dict[str, A
                         "score": round(float(c.get("winner_score", 0.0)), 2),
                         "coverage": round(float(c.get("winner_coverage_ratio", 0.0)), 2),
                     }
-                    for c in r.get("cuts", [])
+                    for c in cuts_list
                 ],
             }
         )
