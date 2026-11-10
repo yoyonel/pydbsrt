@@ -221,4 +221,64 @@ mod tests {
             .to_string()
             .contains("Catalog file not found"));
     }
+
+    #[test]
+    fn test_run_match_trajectory_execution() {
+        let dir = std::env::temp_dir();
+        let catalog_path = dir.join(format!("test_exec_cat_{}.dbphash", std::process::id()));
+        let mut builder = dbsrt_index::dbphash::DbphashBuilder::new();
+        let meta = dbsrt_core::metadata::MediaMetadata {
+            raw_title: "Test.Show.S01E01.mkv".to_string(),
+            clean_title: "Test Show".to_string(),
+            media_type: dbsrt_core::metadata::MediaType::TvEpisode,
+            year: Some(2023),
+            season: Some(1),
+            episode: Some(1),
+            resolution: None,
+            source: None,
+            release_group: None,
+            moviehash: None,
+        };
+        let sparse = [
+            (0x1234_5678_9abc_def0_u64, 0u32),
+            (0x1234_5678_9abc_def1_u64, 1000u32),
+        ];
+        builder.add_media(&meta, 10_000, 24.0, &sparse, &sparse);
+        builder.write_to_file(&catalog_path).expect("write catalog");
+
+        let query_path = dir.join(format!(
+            "test_exec_query_{}.1.0fps.phash",
+            std::process::id()
+        ));
+        dbsrt_core::write_phash_file(
+            &query_path,
+            &[0x1234_5678_9abc_def0_u64, 0x1234_5678_9abc_def1_u64],
+        )
+        .expect("write query");
+
+        for fmt in [
+            crate::cli::OutputFormat::Json,
+            crate::cli::OutputFormat::Csv,
+            crate::cli::OutputFormat::DataFrame,
+        ] {
+            let args = MatchTrajectoryArgs {
+                media: query_path.clone(),
+                dbphash: catalog_path.clone(),
+                start: 0.0,
+                frames: 2,
+                seed_threshold: 5,
+                step_threshold: 5,
+                max_misses: 2,
+                min_coverage: 0.5,
+                time_slack_ms: 1200,
+                max_active: 100,
+                allow_blank_seed: false,
+                output_format: fmt,
+            };
+            assert!(run_match_trajectory(args).is_ok());
+        }
+
+        let _ = std::fs::remove_file(&catalog_path);
+        let _ = std::fs::remove_file(&query_path);
+    }
 }

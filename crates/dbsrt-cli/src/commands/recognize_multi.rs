@@ -114,27 +114,9 @@ pub fn execute_multi_window_dbphash(
     };
 
     if args.output_format == OutputFormat::Json {
-        let rows: Vec<serde_json::Value> = display_matches
-            .iter()
-            .map(|m| {
-                let media_found = m.clean_title.contains(&media_name_search)
-                    || media_name_search.contains(&m.clean_title);
-                serde_json::json!({
-                    "media_found": media_found,
-                    "media_name_search": media_name_search,
-                    "media_id_match": m.media_id,
-                    "media_name_match": m.clean_title,
-                    "matching_windows": m.matching_windows,
-                    "total_windows": m.total_windows,
-                    "is_temporally_coherent": m.is_temporally_coherent,
-                    "timer_in_seconds": timer_in_seconds,
-                    "confidence": m.consensus_confidence,
-                    "consensus_shift_ms": m.consensus_shift_ms,
-                    "window_matches": m.window_matches,
-                })
-            })
-            .collect();
-        println!("{}", serde_json::to_string(&rows)?);
+        let json_str =
+            format_consensus_json(display_matches, &media_name_search, timer_in_seconds)?;
+        println!("{}", json_str);
         return Ok(());
     }
 
@@ -148,6 +130,35 @@ pub fn execute_multi_window_dbphash(
     }
 
     Ok(())
+}
+
+/// Formats multi-window consensus matches into JSON array string.
+pub fn format_consensus_json(
+    display_matches: &[MultiWindowConsensus],
+    media_name_search: &str,
+    timer_in_seconds: f64,
+) -> Result<String> {
+    let rows: Vec<serde_json::Value> = display_matches
+        .iter()
+        .map(|m| {
+            let media_found = m.clean_title.contains(media_name_search)
+                || media_name_search.contains(&m.clean_title);
+            serde_json::json!({
+                "media_found": media_found,
+                "media_name_search": media_name_search,
+                "media_id_match": m.media_id,
+                "media_name_match": m.clean_title,
+                "matching_windows": m.matching_windows,
+                "total_windows": m.total_windows,
+                "is_temporally_coherent": m.is_temporally_coherent,
+                "timer_in_seconds": timer_in_seconds,
+                "confidence": m.consensus_confidence,
+                "consensus_shift_ms": m.consensus_shift_ms,
+                "window_matches": m.window_matches,
+            })
+        })
+        .collect();
+    Ok(serde_json::to_string(&rows)?)
 }
 
 fn render_consensus_row(row: &ConsensusRenderRow<'_>, output_format: OutputFormat) {
@@ -222,5 +233,61 @@ mod tests {
         render_consensus_row(&row, OutputFormat::Csv);
         render_consensus_row(&row, OutputFormat::DataFrame);
         render_consensus_row(&row, OutputFormat::Json);
+    }
+
+    #[test]
+    fn test_format_consensus_json() {
+        let consensus = MultiWindowConsensus {
+            media_id: 42,
+            clean_title: "Test Movie".to_string(),
+            matching_windows: 3,
+            total_windows: 3,
+            is_temporally_coherent: true,
+            consensus_shift_ms: 100,
+            consensus_confidence: 98.5,
+            window_matches: vec![],
+        };
+        let json = format_consensus_json(&[consensus], "Test Movie", 0.5).expect("json");
+        assert!(json.contains("Test Movie"));
+        assert!(json.contains("\"media_found\":true"));
+    }
+
+    #[test]
+    fn test_execute_multi_window_zero_frames_bail() {
+        let meta = dbsrt_core::VideoMetadata {
+            duration: 100.0,
+            fps: 0.0,
+        };
+        let tmp = std::env::temp_dir().join(format!("dummy_mw_{}.dbphash", std::process::id()));
+        let builder = dbsrt_index::dbphash::DbphashBuilder::new();
+        let _ = builder.write_to_file(&tmp);
+        if let Ok(dbphash) = dbsrt_index::dbphash::MmapDbphash::open(&tmp) {
+            let plan = dbsrt_core::multi_window::MultiWindowPlan::new(vec![0.5], 1.0).unwrap();
+            let ctx = MultiWindowContext {
+                media_path: std::path::Path::new("dummy.mp4"),
+                meta: &meta,
+                dbphash: &dbphash,
+                plan: &plan,
+            };
+            let args = RecognizeArgs {
+                media: std::path::PathBuf::from("dummy.mp4"),
+                search_distance: 6,
+                nb_seconds_to_extract: 1.0,
+                output_format: OutputFormat::DataFrame,
+                limit: 10,
+                dbphash: None,
+                no_db: true,
+                phash_dir: None,
+                db: crate::cli::PostgresArgs::default(),
+                multi_window: true,
+                offsets: None,
+                probe_cache: None,
+            };
+            let err = execute_multi_window_dbphash(&ctx, &args).unwrap_err();
+            assert!(err
+                .to_string()
+                .contains("Number of frames to extract per window must be > 0"));
+        }
+        let _ = std::fs::remove_file(&tmp);
     }
 }
