@@ -256,8 +256,12 @@ def test_portal_http_api_endpoints() -> None:
             assert phashes_data["status"] == "ok"
             assert "summary" in phashes_data
             assert "items" in phashes_data
-            assert phashes_data["summary"]["raw_count"] > 0
-            assert phashes_data["summary"]["catalog_count"] > 0
+            assert phashes_data["summary"]["raw_count"] >= 0
+            assert phashes_data["summary"]["catalog_count"] >= 0
+            if Path("data/__PHASH__").is_dir() and any(Path("data/__PHASH__").glob("*.phash")):
+                assert phashes_data["summary"]["raw_count"] > 0
+            if Path("data/catalog.dbphash").is_file():
+                assert phashes_data["summary"]["catalog_count"] > 0
             assert len(phashes_data["items"]) <= 5
 
         # 4d. GET /api/phash/details (Microscopic inspection & Path Traversal Prevention)
