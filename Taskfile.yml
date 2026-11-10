@@ -121,6 +121,7 @@ tasks:
     cmds:
       - uv run --with playwright python scripts/e2e_sources_explorer.py
       - uv run --with playwright python scripts/e2e_trajectories_formal.py
+      - uv run --with playwright python scripts/e2e_portal_exhaustive.py
 
   clean:
     desc: Unified purge of caches, coverage, and target/ build artifacts
