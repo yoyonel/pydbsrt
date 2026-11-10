@@ -93,9 +93,10 @@ def _test_trajectories_tab(page: Any) -> None:
 
     # Check KPI cards
     page.wait_for_selector("text=Médias Évalués", timeout=DEFAULT_TIMEOUT_MS)
-    page.wait_for_selector("text=Taux de Consensus", timeout=DEFAULT_TIMEOUT_MS)
-    page.wait_for_selector("text=Cohérence Temporelle", timeout=DEFAULT_TIMEOUT_MS)
+    page.wait_for_selector("text=Taux Consensus", timeout=DEFAULT_TIMEOUT_MS)
+    page.wait_for_selector("text=Cohérence Temp.", timeout=DEFAULT_TIMEOUT_MS)
     page.wait_for_selector("text=Latence Moyenne", timeout=DEFAULT_TIMEOUT_MS)
+    page.wait_for_selector("text=Catalogue Couvert", timeout=DEFAULT_TIMEOUT_MS)
     print("[E2E] Tab 4: Trajectoires KPIs rendered.")
 
     # Status filter pill check
@@ -106,16 +107,16 @@ def _test_trajectories_tab(page: Any) -> None:
     all_btn = page.locator("[x-show*='trajectories'] button:has-text('Tous')")
     all_btn.click()
 
-    # If any trajectory row is present, click inspect
-    inspect_btns = page.locator("button:has-text('Inspecter 🔍')")
-    if inspect_btns.count() > 0:
-        inspect_btns.first.click()
+    # Click first trajectory row to trigger inspection drawer
+    first_row = page.locator("[x-show*='trajectories'] tbody tr.cursor-pointer").first
+    if first_row.is_visible():
+        first_row.click()
         page.wait_for_selector("text=Verdict du Consensus Multi-Coupures", timeout=DEFAULT_TIMEOUT_MS)
-        page.wait_for_selector("text=Décomposition des Coupures Spatio-Temporelles", timeout=DEFAULT_TIMEOUT_MS)
-        print("[E2E] Tab 4: Trajectory drawer modal displayed with cut breakdown.")
+        page.wait_for_selector("text=Séquence Chronologique des Coupures", timeout=DEFAULT_TIMEOUT_MS)
+        print("[E2E] Tab 4: Trajectory modal displayed with cut breakdown.")
 
-        # Close drawer
-        close_btn = page.locator("button:has-text('Fermer')").last
+        # Close modal
+        close_btn = page.locator("div[x-show='selectedTrajectoryModal'] button:has-text('Fermer')").first
         close_btn.click()
         page.wait_for_timeout(300)
     print("[E2E] Tab 4: Trajectoires tests passed.")

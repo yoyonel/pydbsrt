@@ -118,20 +118,49 @@ def test_all_trajectories_e2e(base_url: str) -> None:
             print(f"[E2E]   Rendered rows: {row_count}")
             assert row_count > 0, f"Expected rows on {report_name}, got 0"
 
-        # 4. Interactive Inspection Drawer Test (tested on active table)
-        print("[E2E] Testing Inspection Drawer modal on active report...")
-        first_row = page.locator("div[x-show*='trajectories'] table tbody tr").first
+        # 4. Interactive Inspection Modal Test (tested on active table)
+        print("[E2E] Testing Inspection Modal on active report...")
+        page.wait_for_selector("div[x-show*='trajectories'] table tbody tr.cursor-pointer", timeout=DEFAULT_TIMEOUT_MS)
+        first_row = page.locator("div[x-show*='trajectories'] table tbody tr.cursor-pointer").first
         first_row.click()
 
         drawer = page.locator("div[x-show='selectedTrajectoryModal']")
         drawer.wait_for(state="visible", timeout=DEFAULT_TIMEOUT_MS)
         page.wait_for_selector("text=Verdict du Consensus Multi-Coupures", timeout=DEFAULT_TIMEOUT_MS)
-        print("[E2E]   Inspection drawer content verified.")
+        print("[E2E]   Inspection modal content verified.")
 
-        close_btn = page.locator("div[x-show='selectedTrajectoryModal'] button:has-text('Fermer')").first
-        close_btn.click()
-        drawer.wait_for(state="hidden", timeout=DEFAULT_TIMEOUT_MS)
-        print("[E2E]   Inspection drawer cleanly closed.")
+        # Test cross-link: switch to microscopic pHash inspection from trajectory target
+        phash_btn = page.locator("div[x-show='selectedTrajectoryModal'] button:has-text('Empreinte pHash')")
+        if phash_btn.count() > 0:
+            phash_btn.click()
+            phash_modal = page.locator("div[x-show='selectedPhashModal']")
+            phash_modal.wait_for(state="visible", timeout=DEFAULT_TIMEOUT_MS)
+            print("[E2E]   Transition to microscopic pHash inspection verified.")
+
+            # Test returning to trajectory via dedicated button
+            retour_btn = page.locator("div[x-show='selectedPhashModal'] button:has-text('Retour Trajectoire')").first
+            retour_btn.wait_for(state="visible", timeout=DEFAULT_TIMEOUT_MS)
+            retour_btn.click()
+            phash_modal.wait_for(state="hidden", timeout=DEFAULT_TIMEOUT_MS)
+            drawer.wait_for(state="visible", timeout=DEFAULT_TIMEOUT_MS)
+            print("[E2E]   Return to trajectory via 'Retour Trajectoire' button verified.")
+
+            # Test switching to pHash again and returning via Escape key
+            phash_btn.click()
+            phash_modal.wait_for(state="visible", timeout=DEFAULT_TIMEOUT_MS)
+            page.keyboard.press("Escape")
+            phash_modal.wait_for(state="hidden", timeout=DEFAULT_TIMEOUT_MS)
+            drawer.wait_for(state="visible", timeout=DEFAULT_TIMEOUT_MS)
+            print("[E2E]   Return to trajectory via 'Escape' key verified.")
+
+            # Test closing trajectory modal via Escape key
+            page.keyboard.press("Escape")
+            drawer.wait_for(state="hidden", timeout=DEFAULT_TIMEOUT_MS)
+            print("[E2E]   Trajectory modal closed via 'Escape' key verified.")
+        else:
+            page.keyboard.press("Escape")
+            drawer.wait_for(state="hidden", timeout=DEFAULT_TIMEOUT_MS)
+            print("[E2E]   Inspection modal cleanly closed via 'Escape'.")
 
         # 4. Check sorting: Coupures Gagnées (Min)
         sort_select = page.locator("select[x-model='trajectoriesSort']")

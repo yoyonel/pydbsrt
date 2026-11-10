@@ -2350,20 +2350,26 @@ def query_phashes_list(criteria: PhashesQueryCriteria) -> dict[str, Any]:
 
 
 def _resolve_target_phash_file(identifier: str) -> Path | None:
-    """Locates a .phash file in __PHASH__ directory by exact filename or moviehash prefix."""
+    """Locates a .phash file in __PHASH__ directory by exact filename, decoded name, or moviehash prefix."""
     if not identifier:
         return None
     phash_dir = (Path(__file__).resolve().parents[1] / "data" / "__PHASH__").resolve()
-    # Sanitize base filename and prevent path traversal
-    clean_id = re.sub(r"[^a-zA-Z0-9_.-]", "", Path(identifier).name)
-    if not clean_id or ".." in clean_id:
-        return None
+    base = Path(identifier).name
+    candidates_names = [
+        base,
+        urllib.parse.unquote(base),
+        urllib.parse.quote(base),
+        urllib.parse.quote(urllib.parse.unquote(base)),
+    ]
+    for cname in candidates_names:
+        clean = re.sub(r"[^a-zA-Z0-9_.% -]", "", cname)
+        if not clean or ".." in clean:
+            continue
+        candidate = (phash_dir / clean).resolve()
+        if phash_dir in candidate.parents and candidate.is_file():
+            return candidate
 
-    candidate = (phash_dir / clean_id).resolve()
-    if phash_dir in candidate.parents and candidate.is_file():
-        return candidate
-
-    prefix = re.sub(r"[^a-zA-Z0-9_-]", "", clean_id.split(".")[0])
+    prefix = re.sub(r"[^a-zA-Z0-9_-]", "", base.split(".")[0])
     if prefix:
         matches = list(phash_dir.glob(f"{prefix}*.phash"))
         if matches and phash_dir in matches[0].resolve().parents and matches[0].is_file():
@@ -2886,7 +2892,11 @@ def get_trajectory_record_detail(file_name: str, target_media: str) -> dict[str,
     for r in all_records:
         cand = strip_accents(str(r.get("target_media", "")).lower().strip())
         if cand == target_clean or strip_accents(str(r.get("target_path", "")).lower().strip()) == target_clean:
-            return {"status": "ok", "file": path.name if path else "", "item": r}
+            item_copy = dict(r)
+            t_media = str(r.get("target_media", ""))
+            t_path = str(r.get("target_path", ""))
+            item_copy["resolved_title"] = _resolve_phash_target_title(t_media, t_path)
+            return {"status": "ok", "file": path.name if path else "", "item": item_copy}
     return {
         "status": "not_found",
         "error": f"Target media '{target_media}' not found in {path.name if path else 'file'}",

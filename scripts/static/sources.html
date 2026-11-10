@@ -1782,6 +1782,7 @@
 
     <!-- Slide-over Drawer: Technical Asset Inspection -->
     <div x-show="selectedAssetModal"
+         @keydown.escape.window="if (selectedAssetModal) selectedAssetModal = false"
          class="fixed inset-0 z-50 overflow-hidden"
          aria-labelledby="slide-over-title"
          role="dialog"
@@ -1974,6 +1975,7 @@
 
     <!-- Centered Modal: Microscopic pHash Inspection -->
     <div x-show="selectedPhashModal"
+         @keydown.escape.window="if (selectedPhashModal) closePhashModal()"
          class="fixed inset-0 z-50 overflow-y-auto custom-scroll flex items-center justify-center p-4 sm:p-6"
          aria-labelledby="slide-over-phash-title"
          role="dialog"
@@ -1981,7 +1983,7 @@
          x-cloak>
       <!-- Fullscreen Backdrop blur covering entire viewport including header -->
       <div class="fixed inset-0 bg-slate-950/85 backdrop-blur-md transition-opacity"
-           @click="selectedPhashModal = false"></div>
+           @click="closePhashModal(true)"></div>
 
       <!-- Centered Wide Modal Container (max-w-4xl) -->
       <div class="relative w-full max-w-4xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden my-auto z-10"
@@ -1996,7 +1998,17 @@
               <span class="text-[10px] text-slate-400 font-mono" x-text="selectedPhash ? selectedPhash.raw_filename : ''"></span>
             </div>
           </div>
-          <button @click="selectedPhashModal = false" class="text-slate-400 hover:text-white text-lg p-1.5 rounded-lg hover:bg-slate-800 transition cursor-pointer">✕</button>
+          <div class="flex items-center gap-2">
+            <template x-if="trajectoryModalOrigin">
+              <button @click="returnToTrajectory()"
+                      class="px-2.5 py-1.5 rounded-lg bg-indigo-950/80 hover:bg-indigo-900/90 text-indigo-300 font-semibold border border-indigo-700/80 text-xs flex items-center gap-1.5 transition cursor-pointer shadow-sm"
+                      title="Revenir à l'inspection de la trajectoire">
+                <span>🎯</span>
+                <span>Retour Trajectoire</span>
+              </button>
+            </template>
+            <button @click="closePhashModal(true)" class="text-slate-400 hover:text-white text-lg p-1.5 rounded-lg hover:bg-slate-800 transition cursor-pointer" title="Fermer">✕</button>
+          </div>
         </div>
 
         <!-- Modal Body -->
@@ -2867,176 +2879,233 @@
 
           <!-- Modal Footer -->
           <div class="p-4 bg-slate-950 border-t border-slate-800 flex items-center justify-between shrink-0">
-            <span class="text-[11px] text-slate-500 font-mono">Appuyez sur Échap ou cliquez à l'extérieur pour fermer</span>
-            <button @click="selectedPhashModal = false" class="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs font-semibold text-white shadow transition cursor-pointer">
-              Fermer
-            </button>
+            <span class="text-[11px] text-slate-500 font-mono"
+                  x-text="trajectoryModalOrigin ? 'Appuyez sur Échap ou Retour pour revenir à la trajectoire • Cliquez à l\'extérieur pour fermer' : 'Appuyez sur Échap ou cliquez à l\'extérieur pour fermer'"></span>
+            <div class="flex items-center gap-2">
+              <template x-if="trajectoryModalOrigin">
+                <button @click="returnToTrajectory()"
+                        class="px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-sm">
+                  <span>🎯</span>
+                  <span>Retour Trajectoire</span>
+                </button>
+              </template>
+              <button @click="closePhashModal(true)"
+                      :class="trajectoryModalOrigin ? 'px-3.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 transition cursor-pointer' : 'px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs font-semibold text-white shadow transition cursor-pointer'">
+                Fermer
+              </button>
+            </div>
           </div>
 
         </div>
       </div>
 
-    <!-- Slide-over Drawer: Microscopic Trajectory & Cuts Sequence Inspection -->
+    <!-- Centered Wide Modal: Spatiotemporal Trajectory & Cuts Consensus Inspection -->
     <div x-show="selectedTrajectoryModal"
-         class="fixed inset-0 z-50 overflow-hidden"
-         aria-labelledby="trajectory-drawer-title"
+         @keydown.escape.window="if (selectedTrajectoryModal && !selectedPhashModal) closeTrajectoryModal()"
+         class="fixed inset-0 z-50 overflow-y-auto custom-scroll flex items-center justify-center p-4 sm:p-6"
+         aria-labelledby="trajectory-modal-title"
          role="dialog"
          aria-modal="true"
          x-cloak>
-      <div class="absolute inset-0 bg-slate-950/80 backdrop-blur-sm transition-opacity"
-           @click="selectedTrajectoryModal = false"></div>
+      <!-- Fullscreen Backdrop blur covering entire viewport -->
+      <div class="fixed inset-0 bg-slate-950/85 backdrop-blur-md transition-opacity"
+           @click="closeTrajectoryModal()"></div>
 
-      <div class="fixed inset-y-0 right-0 pl-10 max-w-full flex">
-        <div class="w-screen max-w-2xl bg-slate-900 border-l border-slate-800 shadow-2xl flex flex-col h-full">
+      <!-- Centered Wide Modal Container (max-w-5xl) -->
+      <div class="relative w-full max-w-5xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden my-auto z-10"
+           @click.stop>
 
-          <!-- Drawer Header -->
-          <div class="px-6 py-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
-            <div class="flex items-center gap-2">
-              <span class="text-lg">🎯</span>
-              <div>
-                <h2 class="text-sm font-bold text-white tracking-tight" x-text="selectedTrajectory ? decodeURIComponent(selectedTrajectory.target_media).replace(/\.phash$/, '') : 'Détail Trajectoire'"></h2>
-                <span class="text-[10px] text-slate-500 font-mono" x-text="selectedTrajectory ? selectedTrajectory.target_path : ''"></span>
+        <!-- Modal Header -->
+        <div class="px-6 py-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between shrink-0">
+          <div class="flex items-center gap-3 truncate max-w-2xl">
+            <span class="text-xl">🎯</span>
+            <div class="truncate">
+              <h2 class="text-base font-bold text-white tracking-tight truncate"
+                  x-text="selectedTrajectory ? (selectedTrajectory.resolved_title || decodeURIComponent(selectedTrajectory.target_media).replace(/\.phash$/, '')) : 'Détail Trajectoire'"></h2>
+              <div class="flex items-center gap-2 text-[10px] text-slate-400 font-mono mt-0.5 truncate">
+                <span class="truncate" x-text="selectedTrajectory ? selectedTrajectory.target_path : ''"></span>
+                <span>•</span>
+                <span class="text-indigo-400 font-semibold" x-text="selectedTrajectory && selectedTrajectory.duration_sec ? formatDuration(selectedTrajectory.duration_sec) : ''"></span>
               </div>
             </div>
-            <button @click="selectedTrajectoryModal = false" class="text-slate-400 hover:text-white text-lg p-1 cursor-pointer">✕</button>
           </div>
-
-          <!-- Drawer Body -->
-          <div class="flex-1 overflow-y-auto p-6 space-y-6 custom-scroll">
-            <template x-if="trajectoryDetailLoading">
-              <div class="py-16 text-center text-slate-400">
-                <span class="animate-spin text-xl text-indigo-400 inline-block mb-2">⚡</span>
-                <p class="text-xs">Chargement de la trajectoire détaillée...</p>
-              </div>
-            </template>
-
-            <template x-if="!trajectoryDetailLoading && !selectedTrajectory">
-              <div class="py-16 text-center space-y-3">
-                <span class="text-3xl text-rose-400 block">⚠️</span>
-                <p class="font-semibold text-sm text-slate-200">Trajectoire introuvable</p>
-                <p class="text-xs text-rose-400 max-w-sm mx-auto bg-rose-950/40 border border-rose-900/50 rounded-lg p-3 font-mono" x-text="trajectoryDetailError || 'Données non trouvées pour cette cible.'"></p>
-              </div>
-            </template>
-
-            <template x-if="!trajectoryDetailLoading && selectedTrajectory">
-              <div class="space-y-6 text-xs">
-
-                <!-- Consensus & Alignment Verdict Card -->
-                <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
-                  <div class="text-[11px] font-semibold text-indigo-400 uppercase tracking-wider flex items-center justify-between">
-                    <span>Verdict du Consensus Multi-Coupures</span>
-                    <template x-if="selectedTrajectory.is_temporally_coherent">
-                      <span class="text-emerald-400 font-mono text-[10px] bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-800">✓ ALIGNEMENT LINÉAIRE VALIDE</span>
-                    </template>
-                    <template x-if="!selectedTrajectory.is_temporally_coherent && selectedTrajectory.consensus_media_id !== null">
-                      <span class="text-amber-400 font-mono text-[10px] bg-amber-950/80 px-2 py-0.5 rounded border border-amber-800">⚠ ATTENTION : DIVERGENT</span>
-                    </template>
-                  </div>
-
-                  <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 font-mono">
-                    <div class="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800/80">
-                      <div class="text-[10px] text-slate-500 uppercase">Média Élu</div>
-                      <div class="text-xs font-bold text-white mt-1 truncate" :title="selectedTrajectory.consensus_title" x-text="selectedTrajectory.consensus_title"></div>
-                    </div>
-                    <div class="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800/80">
-                      <div class="text-[10px] text-slate-500 uppercase">ID Index</div>
-                      <div class="text-xs font-bold text-indigo-400 mt-1" x-text="selectedTrajectory.consensus_media_id !== null ? ('#' + selectedTrajectory.consensus_media_id) : 'AUCUN'"></div>
-                    </div>
-                    <div class="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800/80">
-                      <div class="text-[10px] text-slate-500 uppercase">Coupures Matchées</div>
-                      <div class="text-xs font-bold mt-1" :class="selectedTrajectory.matched_cuts_count > 0 ? 'text-emerald-400' : 'text-slate-400'" x-text="selectedTrajectory.matched_cuts_count + ' / ' + selectedTrajectory.cuts_count"></div>
-                    </div>
-                    <div class="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800/80">
-                      <div class="text-[10px] text-slate-500 uppercase">Durée Totale</div>
-                      <div class="text-xs font-bold text-amber-300 mt-1" x-text="selectedTrajectory.total_elapsed_seconds ? (selectedTrajectory.total_elapsed_seconds.toFixed(2) + 's') : '-'"></div>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Sequence of Cuts Inspection -->
-                <div class="space-y-3">
-                  <div class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center justify-between">
-                    <span>Décomposition des Coupures Spatio-Temporelles</span>
-                    <span class="text-slate-500 font-mono text-[10px]" x-text="(selectedTrajectory.cuts || []).length + ' tranches temporelles'"></span>
-                  </div>
-
-                  <div class="space-y-2">
-                    <template x-for="(cut, cidx) in (selectedTrajectory.cuts || [])" :key="cidx">
-                      <div class="bg-slate-950 border rounded-lg p-3 space-y-2 transition"
-                           :class="cut.winner_media_id !== null ? 'border-slate-800 hover:border-indigo-500/50' : 'border-slate-800/60 opacity-70'">
-
-                        <div class="flex items-center justify-between">
-                          <div class="flex items-center gap-2">
-                            <span class="font-mono text-xs font-bold px-1.5 py-0.5 rounded"
-                                  :class="cut.winner_media_id !== null ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-slate-900 text-slate-500 border border-slate-800'"
-                                  x-text="'Coupure #' + (cidx + 1)"></span>
-                            <span class="text-slate-300 font-mono text-xs" x-text="'@ ' + Math.round(cut.start_sec) + 's (' + cut.nb_frames + ' trames)'"></span>
-                          </div>
-
-                          <div class="flex items-center gap-2">
-                            <template x-if="cut.winner_media_id !== null">
-                              <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-indigo-950/80 text-indigo-300 border border-indigo-800"
-                                    x-text="'Match #' + cut.winner_media_id + ' (score: ' + (cut.winner_score ? cut.winner_score.toFixed(1) : '0') + ')'"></span>
-                            </template>
-                            <template x-if="cut.winner_media_id === null">
-                              <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-900 text-slate-500 border border-slate-800">
-                                Aucun consensus
-                              </span>
-                            </template>
-                            <span class="text-[10px] font-mono text-slate-500" x-text="cut.elapsed_seconds ? (cut.elapsed_seconds.toFixed(2) + 's') : ''"></span>
-                          </div>
-                        </div>
-
-                        <!-- Local Cut Details -->
-                        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[10px] font-mono pt-1 text-slate-400">
-                          <div>
-                            <span class="text-slate-500">Candidats initiaux :</span>
-                            <span class="text-slate-200" x-text="cut.initial_candidates_count"></span>
-                          </div>
-                          <div>
-                            <span class="text-slate-500">Trajectoires survivantes :</span>
-                            <span class="text-slate-200" x-text="cut.surviving_trajectories_count"></span>
-                          </div>
-                          <div>
-                            <span class="text-slate-500">Trames matchées :</span>
-                            <span class="text-slate-200" x-text="cut.winner_matched_frames + ' / ' + cut.evaluated_frames_count"></span>
-                          </div>
-                          <div>
-                            <span class="text-slate-500">Couverture :</span>
-                            <span :class="(cut.winner_coverage_ratio || 0) >= 0.5 ? 'text-emerald-400' : 'text-slate-400'"
-                                  x-text="Math.round((cut.winner_coverage_ratio || 0) * 100) + '%'"></span>
-                          </div>
-                        </div>
-
-                        <!-- Progress Bar of Matched Frames -->
-                        <div class="w-full bg-slate-900 h-1.5 rounded-full overflow-hidden">
-                          <div class="h-full rounded-full transition-all duration-300"
-                               :class="cut.winner_media_id !== null ? 'bg-emerald-500' : 'bg-slate-700'"
-                               :style="'width: ' + Math.min(100, Math.round((cut.winner_coverage_ratio || 0) * 100)) + '%'"></div>
-                        </div>
-
-                      </div>
-                    </template>
-                  </div>
-                </div>
-
-              </div>
-            </template>
-          </div>
-
-          <!-- Drawer Footer -->
-          <div class="px-6 py-4 bg-slate-950 border-t border-slate-800 flex items-center justify-end">
-            <button @click="selectedTrajectoryModal = false" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-semibold cursor-pointer">
-              Fermer
+          <div class="flex items-center gap-2 shrink-0">
+            <button @click="openPhashFromTrajectory()"
+                    class="px-2.5 py-1.5 rounded-lg bg-indigo-950/80 hover:bg-indigo-900/90 text-indigo-300 font-semibold border border-indigo-700/80 text-xs flex items-center gap-1.5 transition cursor-pointer shadow-sm"
+                    title="Inspecter l'empreinte pHash de cette vidéo avec ses coupes d'entropie et son sismographe">
+              <span>🔬</span>
+              <span>Empreinte pHash</span>
             </button>
+            <button @click="closeTrajectoryModal()" class="text-slate-400 hover:text-white text-lg p-1.5 rounded-lg hover:bg-slate-800 transition cursor-pointer">✕</button>
           </div>
-
         </div>
+
+        <!-- Modal Body -->
+        <div class="flex-1 overflow-y-auto p-6 space-y-6 custom-scroll">
+          <template x-if="trajectoryDetailLoading">
+            <div class="py-16 text-center text-slate-400">
+              <span class="animate-spin text-2xl text-indigo-400 inline-block mb-3">⚡</span>
+              <p class="text-xs font-semibold text-slate-300">Chargement de la trajectoire détaillée...</p>
+            </div>
+          </template>
+
+          <template x-if="!trajectoryDetailLoading && !selectedTrajectory">
+            <div class="py-16 text-center space-y-3">
+              <span class="text-3xl text-rose-400 block">⚠️</span>
+              <p class="font-semibold text-sm text-slate-200">Trajectoire introuvable</p>
+              <p class="text-xs text-rose-400 max-w-sm mx-auto bg-rose-950/40 border border-rose-900/50 rounded-lg p-3 font-mono" x-text="trajectoryDetailError || 'Données non trouvées pour cette cible.'"></p>
+            </div>
+          </template>
+
+          <template x-if="!trajectoryDetailLoading && selectedTrajectory">
+            <div class="space-y-6 text-xs">
+
+              <!-- 1. Identifiants & Spécifications de la Vidéo Analysée -->
+              <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
+                <div class="text-[11px] font-semibold text-indigo-400 uppercase tracking-wider flex items-center justify-between">
+                  <span>1. Identifiants & Spécifications de la Vidéo Analysée</span>
+                  <span class="font-mono text-slate-500" x-text="selectedTrajectory.cuts_count + ' fenêtres glissantes'"></span>
+                </div>
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 font-mono">
+                  <div class="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800/80">
+                    <div class="text-[10px] text-slate-500 uppercase">Durée Détectée</div>
+                    <div class="text-xs font-bold text-white mt-1" x-text="formatDuration(selectedTrajectory.duration_sec)"></div>
+                  </div>
+                  <div class="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800/80">
+                    <div class="text-[10px] text-slate-500 uppercase">Coupures Analysées</div>
+                    <div class="text-xs font-bold text-indigo-300 mt-1" x-text="selectedTrajectory.cuts_count + ' coupures'"></div>
+                  </div>
+                  <div class="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800/80">
+                    <div class="text-[10px] text-slate-500 uppercase">Temps d'Analyse</div>
+                    <div class="text-xs font-bold text-amber-300 mt-1" x-text="(selectedTrajectory.total_elapsed_seconds ? selectedTrajectory.total_elapsed_seconds.toFixed(3) : '0') + 's'"></div>
+                  </div>
+                  <div class="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800/80">
+                    <div class="text-[10px] text-slate-500 uppercase">Gisement pHash</div>
+                    <div class="text-xs font-bold text-emerald-400 mt-1 truncate" title="Format binaire .phash 64 bits">RAW .phash</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 2. Verdict du Consensus Spatiotemporel -->
+              <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
+                <div class="text-[11px] font-semibold text-indigo-400 uppercase tracking-wider flex items-center justify-between">
+                  <span>2. Verdict du Consensus Multi-Coupures</span>
+                  <template x-if="selectedTrajectory.is_temporally_coherent">
+                    <span class="text-emerald-400 font-mono text-[10px] bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-800">✓ ALIGNEMENT LINÉAIRE VALIDE</span>
+                  </template>
+                  <template x-if="!selectedTrajectory.is_temporally_coherent && selectedTrajectory.consensus_media_id !== null">
+                    <span class="text-amber-400 font-mono text-[10px] bg-amber-950/80 px-2 py-0.5 rounded border border-amber-800">⚠ ATTENTION : DIVERGENT</span>
+                  </template>
+                  <template x-if="selectedTrajectory.consensus_media_id === null">
+                    <span class="text-slate-400 font-mono text-[10px] bg-slate-900 px-2 py-0.5 rounded border border-slate-800">AUCUN CONSENSUS</span>
+                  </template>
+                </div>
+
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 font-mono">
+                  <div class="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800/80">
+                    <div class="text-[10px] text-slate-500 uppercase">Média Élu</div>
+                    <div class="text-xs font-bold text-white mt-1 truncate" :title="selectedTrajectory.consensus_title" x-text="selectedTrajectory.consensus_title"></div>
+                  </div>
+                  <div class="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800/80">
+                    <div class="text-[10px] text-slate-500 uppercase">ID Index</div>
+                    <div class="text-xs font-bold text-indigo-400 mt-1" x-text="selectedTrajectory.consensus_media_id !== null ? ('#' + selectedTrajectory.consensus_media_id) : 'AUCUN'"></div>
+                  </div>
+                  <div class="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800/80">
+                    <div class="text-[10px] text-slate-500 uppercase">Coupures Matchées</div>
+                    <div class="text-xs font-bold mt-1" :class="selectedTrajectory.matched_cuts_count > 0 ? 'text-emerald-400' : 'text-slate-400'" x-text="selectedTrajectory.matched_cuts_count + ' / ' + selectedTrajectory.cuts_count"></div>
+                  </div>
+                  <div class="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800/80">
+                    <div class="text-[10px] text-slate-500 uppercase">Taux de Victoire</div>
+                    <div class="text-xs font-bold text-emerald-400 mt-1" x-text="selectedTrajectory.cuts_count > 0 ? (Math.round((selectedTrajectory.matched_cuts_count / selectedTrajectory.cuts_count) * 100) + '%') : '0%'"></div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 3. Séquence Chronologique des Coupures & Survivants -->
+              <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-4">
+                <div class="text-[11px] font-semibold text-indigo-400 uppercase tracking-wider flex items-center justify-between">
+                  <span>3. Séquence Chronologique des Coupures & Survivants</span>
+                  <span class="font-mono text-slate-500" x-text="(selectedTrajectory.cuts || []).length + ' tranches temporelles'"></span>
+                </div>
+
+                <div class="space-y-3">
+                  <template x-for="(cut, cidx) in (selectedTrajectory.cuts || [])" :key="cidx">
+                    <div class="p-3.5 bg-slate-900/70 border rounded-xl space-y-2.5 transition"
+                         :class="cut.winner_media_id === selectedTrajectory.consensus_media_id && cut.winner_media_id !== null ? 'border-indigo-500/60 bg-indigo-950/20' : (cut.winner_media_id !== null ? 'border-slate-800 bg-slate-900/40' : 'border-slate-800/60 opacity-60')">
+
+                      <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2">
+                          <span class="font-mono text-xs font-bold px-2 py-0.5 rounded"
+                                :class="cut.winner_media_id !== null ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-slate-900 text-slate-500 border border-slate-800'"
+                                x-text="'Coupure #' + (cidx + 1)"></span>
+                          <span class="text-slate-300 font-mono text-xs" x-text="'@ ' + Math.round(cut.start_sec) + 's (' + cut.nb_frames + ' trames)'"></span>
+                        </div>
+
+                        <div class="flex items-center gap-2">
+                          <template x-if="cut.winner_media_id !== null">
+                            <span class="px-2.5 py-0.5 rounded text-[10px] font-mono bg-indigo-950/80 text-indigo-300 border border-indigo-800"
+                                  x-text="'Match #' + cut.winner_media_id + ' (score: ' + (cut.winner_score ? cut.winner_score.toFixed(1) : '0') + ')'"></span>
+                          </template>
+                          <template x-if="cut.winner_media_id === null">
+                            <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-900 text-slate-500 border border-slate-800">
+                              Aucun consensus
+                            </span>
+                          </template>
+                          <span class="text-[10px] font-mono text-slate-500" x-text="cut.elapsed_seconds ? (cut.elapsed_seconds.toFixed(2) + 's') : ''"></span>
+                        </div>
+                      </div>
+
+                      <!-- Local Cut Details -->
+                      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[10px] font-mono pt-1 text-slate-400">
+                        <div>
+                          <span class="text-slate-500">Candidats initiaux :</span>
+                          <span class="text-slate-200 font-semibold" x-text="cut.initial_candidates_count"></span>
+                        </div>
+                        <div>
+                          <span class="text-slate-500">Trajectoires survivantes :</span>
+                          <span class="text-slate-200 font-semibold" x-text="cut.surviving_trajectories_count"></span>
+                        </div>
+                        <div>
+                          <span class="text-slate-500">Trames matchées :</span>
+                          <span class="text-slate-200 font-semibold" x-text="cut.winner_matched_frames + ' / ' + cut.evaluated_frames_count"></span>
+                        </div>
+                        <div>
+                          <span class="text-slate-500">Score de Couverture :</span>
+                          <span :class="(cut.winner_coverage_ratio || 0) >= 0.5 ? 'text-emerald-400 font-bold' : 'text-slate-400'"
+                                x-text="Math.round((cut.winner_coverage_ratio || 0) * 100) + '%'"></span>
+                        </div>
+                      </div>
+
+                      <!-- Progress Bar of Matched Frames -->
+                      <div class="w-full bg-slate-900 h-2 rounded-full overflow-hidden border border-slate-800/80">
+                        <div class="h-full rounded-full transition-all duration-300"
+                             :class="cut.winner_media_id !== null ? 'bg-gradient-to-r from-indigo-500 to-emerald-400' : 'bg-slate-700'"
+                             :style="'width: ' + Math.min(100, Math.round((cut.winner_coverage_ratio || 0) * 100)) + '%'"></div>
+                      </div>
+
+                    </div>
+                  </template>
+                </div>
+              </div>
+
+            </div>
+          </template>
+        </div>
+
+        <!-- Modal Footer -->
+        <div class="p-4 bg-slate-950 border-t border-slate-800 flex items-center justify-between shrink-0">
+          <span class="text-[11px] text-slate-500 font-mono">Appuyez sur Échap ou cliquez à l'extérieur pour fermer</span>
+          <button @click="closeTrajectoryModal()" class="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs font-semibold text-white shadow transition cursor-pointer">
+            Fermer
+          </button>
+        </div>
+
       </div>
     </div>
 
     <!-- Modal: Contextual Glossary & Domain Definitions -->
     <div x-show="showGlossaryModal"
+         @keydown.escape.window="if (showGlossaryModal) showGlossaryModal = false"
          class="fixed inset-0 z-50 overflow-hidden flex items-center justify-center p-4"
          aria-labelledby="glossary-modal-title"
          role="dialog"
@@ -3267,6 +3336,7 @@
         phashesSort: 'id_asc',
         phashesLoading: false,
         selectedPhashModal: false,
+        trajectoryModalOrigin: false,
         selectedPhash: null,
         phashDetailLoading: false,
         showIntegrityTip: false,
@@ -4206,6 +4276,54 @@
           }
         },
 
+        formatDuration(sec) {
+          if (!sec || sec <= 0) return '-';
+          const m = Math.floor(sec / 60);
+          const s = Math.floor(sec % 60);
+          return `${m}m ${s}s`;
+        },
+
+        openPhashFromTrajectory() {
+          if (!this.selectedTrajectory) return;
+          const traj = this.selectedTrajectory;
+          this.trajectoryModalOrigin = true;
+          this.selectedTrajectoryModal = false;
+          let phashName = traj.target_media || '';
+          if (!phashName.endsWith('.phash')) {
+            phashName += '.phash';
+          }
+          this.openPhashDetail({
+            title: traj.resolved_title || traj.consensus_title || traj.target_media,
+            raw_filename: phashName,
+            moviehash: '—',
+            catalog_id: traj.consensus_media_id,
+            total_duration_sec: traj.duration_sec,
+          }, true);
+        },
+
+        closeTrajectoryModal() {
+          this.selectedTrajectoryModal = false;
+        },
+
+        closePhashModal(forceCloseAll = false) {
+          this.selectedPhashModal = false;
+          if (!forceCloseAll && this.trajectoryModalOrigin) {
+            this.trajectoryModalOrigin = false;
+            // Defer reopening to next event loop tick to prevent Escape keydown cascade on window
+            setTimeout(() => {
+              this.selectedTrajectoryModal = true;
+            }, 50);
+          } else {
+            this.trajectoryModalOrigin = false;
+          }
+        },
+
+        returnToTrajectory() {
+          this.selectedPhashModal = false;
+          this.trajectoryModalOrigin = false;
+          this.selectedTrajectoryModal = true;
+        },
+
         onAssetsFilterChange() {
           this.assetsPage = 1;
           this.syncUrlHash(true);
@@ -4371,7 +4489,10 @@
           }
         },
 
-        async openPhashDetail(item) {
+        async openPhashDetail(item, fromTrajectory = false) {
+          if (!fromTrajectory) {
+            this.trajectoryModalOrigin = false;
+          }
           this.selectedPhashModal = true;
           this.phashDetailLoading = true;
           this.showIntegrityTip = false;

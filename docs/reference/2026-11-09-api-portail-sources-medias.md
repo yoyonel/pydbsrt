@@ -657,14 +657,14 @@ Interroge, filtre et pagine les enregistrements d'évaluation de consensus spati
 
 ### `GET /api/trajectory/details`
 
-Retourne la décomposition unitaire complète de la trajectoire pour un média cible (liste intégrale des coupures, trames évaluées, scores de similarité et horodatages $t_{ref}$).
+Retourne la décomposition unitaire complète de la trajectoire pour un média cible (liste intégrale des coupures, trames évaluées, scores de similarité, horodatages $t_{ref}$ et `resolved_title` résolu pour les identifiants hash binaires).
 
 #### Paramètres
 
 | Paramètre | Type | Requis | Description |
 | :--- | :--- | :--- | :--- |
 | `file` | `string` | Non | Nom du fichier JSONL source. |
-| `target` | `string` | **Oui** | Nom du média cible (`target_media`) ou chemin (`target_path`). |
+| `target` | `string` | **Oui** | Nom du média cible (`target_media`) ou chemin (`target_path`). Accepte les noms encodés URL (`%5B...`) et les extensions `.phash`. |
 
 ---
 

@@ -63,9 +63,25 @@ L'arbitre consolide les $N$ tranches pour produire les métriques d'évaluation 
 2. **Taux de Consensus Global** : Pourcentage des cibles atteignant le consensus (`COHERENT` ou `CONSENSUS_WON`).
 3. **Cohérence Temporelle Stricte** : Pourcentage des cibles reconnues affichant $\Delta t_0 \le 100\text{ ms}$.
 4. **Latence Moyenne par Évaluation** : Temps moyen de calcul par vidéo cible (secondes).
+5. **Catalogue Couvert** : Pourcentage et ratio de couverture unitaire borné mathématiquement ($\le 100\%$) rapportant le nombre de médias uniques reconnus ou référencés au volume total du catalogue Zero-DB / PostgreSQL.
 
 ### 3.2. KPIs au Niveau Unitaire (Par Vidéo Cible)
 
 1. **Ruban des Tranches** : Échantillonnage visuel des tranches (points d'ancrage temporels et scores respectifs).
 2. **Dérive Temporelle $\Delta t_0$** : Mesure de la stabilité du framerate et absence de décalage progressif.
 3. **Marge de Séparation** : Différence de score entre le 1er candidat (élu) et le 2e candidat (runner-up), mesurant l'ambiguïté du choix.
+4. **Résolution d'Identité Cible** : Résolution automatique des identifiants hash binaires (ex. `4a62f81dc0a72967.24.0fps`) vers leur métadonnée textuelle d'origine ou titre catalogue associé.
+
+---
+
+## 4. Ergonomie & Inspection Interactive (Portail Web)
+
+L'onglet **Trajectoires Spatiotemporelles** du portail web embarque les mécanismes d'inspection interactive suivants :
+
+* **Défilement Horizontal Natif** : Barre de défilement horizontal dédiée au tableau des évaluations pour préserver la lisibilité de l'intégralité des colonnes (`Vidéo Analysée`, `Durée`, `Coupures & Survivants`, `Consensus Élu`, `Cohérence`, `Latence`) sans troncature ni écrasement UX.
+* **Tris Multicritères Complets** : Sélection dynamique par `Titre Cible (A-Z / Z-A)`, `Coupures Gagnées (Max / Min)`, `Durée (Décroissante / Croissante)` et `Latence (Décroissante / Croissante)`.
+* **Modale d'Inspection Centrée & Élargie** : Décomposition chronologique complète des coupures évaluées (candidats initiaux, survivants, trames appariées et score de couverture) dans une vue modale centrée haute lisibilité.
+* **Transition Microscopique Bidirectionnelle (`Trajectoire ↔ pHash`)** :
+    * Bouton `🔬 Empreinte pHash` permettant de plonger directement dans la microscopie de l'empreinte perceptuelle associée (sismographe, dynamique inter-trames, coupes d'entropie).
+    * Bouton `🎯 Retour Trajectoire` et gestionnaire clavier de retour instantané sans perte d'état ni rechargement réseau.
+* **Pilotage Clavier Global (`Échap` / `Escape`)** : Fermeture unifiée au clavier sur l'ensemble des modales applicatives (Trajectoires, Microscopie pHash, Actifs techniques DB, Glossaire métier) avec dé-duplication asynchrone anti-cascade.
