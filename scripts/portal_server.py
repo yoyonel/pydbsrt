@@ -13,6 +13,7 @@ import ftplib
 import hashlib
 import http.server
 import json
+import math
 import os
 import re
 import shutil
@@ -107,6 +108,13 @@ DEFAULT_GATEWAY_URL: str = DEFAULT_GATEWAY_LAN_URL
 DEFAULT_FREEBOX_HOST: str = "mafreebox.freebox.fr"
 DEFAULT_FREEBOX_USER: str = "freebox"
 DEFAULT_FREEBOX_PASS_ENTRY: str = "services/freebox/ftp_pass"
+
+DEFAULT_TRAJECTORY_DIR: Path = Path("data/reports/audit")
+DEFAULT_TRAJECTORY_ROOT_DIR: Path = Path("data/reports")
+DEFAULT_TRAJECTORY_PAGE_SIZE: int = 25
+TRAJECTORY_SAMPLE_CUTS: int = 5
+TRAJECTORY_DEFAULT_FRAMES: int = 20
+TRAJECTORY_CACHE_TTL_SECS: float = 10.0
 
 AVAILABLE_ENVIRONMENTS: list[dict[str, str]] = [
     {
@@ -2549,6 +2557,284 @@ def inspect_phash_microscopic(identifier: str) -> dict[str, Any]:
     }
 
 
+@dataclass
+class TrajectoriesQueryCriteria:
+    file_name: str = ""
+    page: int = 1
+    limit: int = DEFAULT_TRAJECTORY_PAGE_SIZE
+    status_filter: str = "all"
+    search_q: str = ""
+    sort_by: str = "name_asc"
+
+
+_TRAJECTORY_FILE_CACHE: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+
+
+ACTIVE_BATCH_RECENCY_SECONDS: float = 60.0
+
+
+def list_trajectory_audit_files() -> list[dict[str, Any]]:
+    """Scans and lists available trajectory tracking audit JSONL files."""
+    candidates: list[Path] = []
+    if DEFAULT_TRAJECTORY_DIR.is_dir():
+        candidates.extend(DEFAULT_TRAJECTORY_DIR.glob("*.jsonl"))
+    if DEFAULT_TRAJECTORY_ROOT_DIR.is_dir():
+        candidates.extend(DEFAULT_TRAJECTORY_ROOT_DIR.glob("*trajectory*.jsonl"))
+
+    results: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    now = time.time()
+    for path in sorted(candidates, key=lambda p: p.stat().st_mtime if p.exists() else 0.0, reverse=True):
+        if path.name in seen or not path.is_file():
+            continue
+        seen.add(path.name)
+        try:
+            st = path.stat()
+            if st.st_size == 0:
+                continue
+            is_active = (now - st.st_mtime) < ACTIVE_BATCH_RECENCY_SECONDS
+            results.append(
+                {
+                    "filename": path.name,
+                    "path": str(path),
+                    "size_bytes": st.st_size,
+                    "size_human": format_human_size(st.st_size),
+                    "mtime": st.st_mtime,
+                    "modified_fmt": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(st.st_mtime)),
+                    "date_short": time.strftime("%d %b %H:%M", time.localtime(st.st_mtime)),
+                    "is_active": is_active,
+                    "status_label": "En cours" if is_active else "Terminé",
+                }
+            )
+        except OSError:
+            continue
+    return results
+
+
+def _resolve_trajectory_file(file_name: str) -> Path | None:
+    if file_name:
+        cand1 = DEFAULT_TRAJECTORY_DIR / file_name
+        if cand1.is_file():
+            return cand1
+        cand2 = DEFAULT_TRAJECTORY_ROOT_DIR / file_name
+        if cand2.is_file():
+            return cand2
+    files = list_trajectory_audit_files()
+    if files:
+        return Path(files[0]["path"])
+    return None
+
+
+def _load_trajectory_records(file_name: str) -> tuple[Path | None, list[dict[str, Any]]]:
+    path = _resolve_trajectory_file(file_name)
+    if path is None or not path.is_file():
+        return None, []
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        return None, []
+
+    cache_key = str(path)
+    cached = _TRAJECTORY_FILE_CACHE.get(cache_key)
+    if cached is not None and cached[0] == mtime:
+        return path, cached[1]
+
+    records: list[dict[str, Any]] = []
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        records.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        continue
+    except OSError:
+        return path, []
+
+    _TRAJECTORY_FILE_CACHE[cache_key] = (mtime, records)
+    return path, records
+
+
+def _compute_trajectory_kpi(records: list[dict[str, Any]]) -> dict[str, Any]:
+    total_audits = len(records)
+    total_matched = sum(1 for r in records if r.get("consensus_media_id") is not None)
+    total_coherent = sum(1 for r in records if r.get("is_temporally_coherent") is True)
+    total_cuts = sum(r.get("cuts_count", 0) for r in records)
+    coherence_rate = round(total_coherent / float(total_matched) * 100.0, 1) if total_matched > 0 else 0.0
+    match_rate = round(total_matched / float(total_audits) * 100.0, 1) if total_audits > 0 else 0.0
+    avg_elapsed = (
+        round(sum(r.get("total_elapsed_seconds", 0.0) for r in records) / float(total_audits), 3)
+        if total_audits > 0
+        else 0.0
+    )
+    return {
+        "total_audits": total_audits,
+        "total_matched": total_matched,
+        "total_coherent": total_coherent,
+        "coherence_rate_pct": coherence_rate,
+        "match_rate_pct": match_rate,
+        "avg_elapsed_sec": avg_elapsed,
+        "total_cuts": total_cuts,
+    }
+
+
+def _matches_trajectory_status(r: dict[str, Any], status: str) -> bool:
+    has_match = r.get("consensus_media_id") is not None
+    is_coherent = bool(r.get("is_temporally_coherent"))
+    if status == "coherent":
+        return is_coherent
+    if status == "matched":
+        return has_match
+    if status == "unmatched":
+        return not has_match
+    if status == "divergent":
+        return has_match and not is_coherent
+    return True
+
+
+def _sort_trajectory_records(records: list[dict[str, Any]], sort_by: str) -> list[dict[str, Any]]:
+    if sort_by == "name_desc":
+        return sorted(records, key=lambda r: str(r.get("target_media", "")).lower(), reverse=True)
+    if sort_by == "duration_desc":
+        return sorted(records, key=lambda r: float(r.get("duration_sec", 0.0)), reverse=True)
+    if sort_by == "duration_asc":
+        return sorted(records, key=lambda r: float(r.get("duration_sec", 0.0)))
+    if sort_by == "elapsed_desc":
+        return sorted(records, key=lambda r: float(r.get("total_elapsed_seconds", 0.0)), reverse=True)
+    if sort_by == "elapsed_asc":
+        return sorted(records, key=lambda r: float(r.get("total_elapsed_seconds", 0.0)))
+    if sort_by == "matched_desc":
+        return sorted(records, key=lambda r: int(r.get("matched_cuts_count", 0)), reverse=True)
+    return sorted(records, key=lambda r: str(r.get("target_media", "")).lower())
+
+
+def query_trajectory_records(criteria: TrajectoriesQueryCriteria) -> dict[str, Any]:
+    """Queries, filters and paginates spatiotemporal trajectory records."""
+    path, all_records = _load_trajectory_records(criteria.file_name)
+    kpis = _compute_trajectory_kpi(all_records)
+
+    q = strip_accents(criteria.search_q.lower().strip())
+    filtered: list[dict[str, Any]] = []
+    for r in all_records:
+        if not _matches_trajectory_status(r, criteria.status_filter):
+            continue
+        if q:
+            target = strip_accents(str(r.get("target_media", "")).lower())
+            title = strip_accents(str(r.get("consensus_title", "")).lower())
+            tpath = strip_accents(str(r.get("target_path", "")).lower())
+            if q not in target and q not in title and q not in tpath:
+                continue
+        filtered.append(r)
+
+    sorted_records = _sort_trajectory_records(filtered, criteria.sort_by)
+    start_idx = (criteria.page - 1) * criteria.limit
+    end_idx = start_idx + criteria.limit
+    paged = sorted_records[start_idx:end_idx]
+
+    items: list[dict[str, Any]] = []
+    for r in paged:
+        items.append(
+            {
+                "target_media": r.get("target_media", ""),
+                "target_path": r.get("target_path", ""),
+                "duration_sec": r.get("duration_sec", 0.0),
+                "cuts_count": r.get("cuts_count", 0),
+                "matched_cuts_count": r.get("matched_cuts_count", 0),
+                "consensus_media_id": r.get("consensus_media_id"),
+                "consensus_title": r.get("consensus_title", "NONE"),
+                "is_temporally_coherent": r.get("is_temporally_coherent", False),
+                "total_elapsed_seconds": r.get("total_elapsed_seconds", 0.0),
+                "success": r.get("success", True),
+                "cuts_summary": [
+                    {
+                        "start_sec": c.get("start_sec", 0.0),
+                        "winner_id": c.get("winner_media_id"),
+                        "matched": c.get("winner_media_id") is not None,
+                        "score": round(float(c.get("winner_score", 0.0)), 2),
+                        "coverage": round(float(c.get("winner_coverage_ratio", 0.0)), 2),
+                    }
+                    for c in r.get("cuts", [])
+                ],
+            }
+        )
+
+    total_pages = max(1, math.ceil(len(filtered) / float(criteria.limit)))
+    return {
+        "status": "ok",
+        "file": path.name if path else "",
+        "kpi": kpis,
+        "total_items": len(all_records),
+        "filtered_items": len(filtered),
+        "page": criteria.page,
+        "limit": criteria.limit,
+        "total_pages": total_pages,
+        "items": items,
+    }
+
+
+def get_trajectory_record_detail(file_name: str, target_media: str) -> dict[str, Any]:
+    """Retrieves full microscopic trajectory cut details for a specific media target."""
+    path, all_records = _load_trajectory_records(file_name)
+    target_clean = strip_accents(target_media.lower().strip())
+    for r in all_records:
+        cand = strip_accents(str(r.get("target_media", "")).lower().strip())
+        if cand == target_clean or strip_accents(str(r.get("target_path", "")).lower().strip()) == target_clean:
+            return {"status": "ok", "file": path.name if path else "", "item": r}
+    return {
+        "status": "not_found",
+        "error": f"Target media '{target_media}' not found in {path.name if path else 'file'}",
+    }
+
+
+def run_on_demand_trajectory(
+    target_path: str,
+    cuts: int = TRAJECTORY_SAMPLE_CUTS,
+    frames: int = TRAJECTORY_DEFAULT_FRAMES,
+) -> dict[str, Any]:
+    """Executes on-demand spatiotemporal trajectory matching against catalog.dbphash."""
+    if not target_path or not Path(target_path).is_file():
+        return {"status": "error", "error": f"Target file '{target_path}' not found on local disk"}
+
+    cmd = [
+        "python3",
+        "scripts/trajectory_bench_runner.py",
+        target_path,
+        "-c",
+        str(cuts),
+        "-n",
+        str(frames),
+        "--dbphash",
+        "data/catalog.dbphash",
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60.0)
+    except subprocess.TimeoutExpired:
+        return {"status": "error", "error": "Trajectory tracking execution timed out (60s)"}
+
+    if proc.returncode != 0:
+        return {"status": "error", "error": proc.stderr or proc.stdout or "Execution failed"}
+
+    res_file = Path("data/reports/trajectory_batch_results.jsonl")
+    if not res_file.is_file():
+        return {"status": "error", "error": "No trajectory output produced"}
+
+    last_line = ""
+    with open(res_file, encoding="utf-8") as f:
+        for line in f:
+            if line.strip():
+                last_line = line.strip()
+
+    if not last_line:
+        return {"status": "error", "error": "Empty trajectory output"}
+
+    try:
+        record = json.loads(last_line)
+        return {"status": "ok", "item": record, "stdout": proc.stdout}
+    except json.JSONDecodeError as exc:
+        return {"status": "error", "error": f"Failed to parse result JSON: {exc}"}
+
+
 class PortalRequestHandler(http.server.SimpleHTTPRequestHandler):
     """Custom HTTP handler serving API JSON endpoints and clean use-case HTML pages."""
 
@@ -2673,12 +2959,67 @@ class PortalRequestHandler(http.server.SimpleHTTPRequestHandler):
             return True
         return False
 
+    def _handle_api_trajectory_routes(self, path: str, query: dict[str, list[str]]) -> bool:
+        if path == "/api/trajectory/files":
+            self._send_json({"status": "ok", "files": list_trajectory_audit_files()})
+            return True
+        if path == "/api/trajectories":
+            f_name = query.get("file", [""])[0]
+            p = int(query.get("page", ["1"])[0]) if query.get("page", ["1"])[0].isdigit() else 1
+            l_val = (
+                int(query.get("limit", [str(DEFAULT_TRAJECTORY_PAGE_SIZE)])[0])
+                if query.get("limit", [str(DEFAULT_TRAJECTORY_PAGE_SIZE)])[0].isdigit()
+                else DEFAULT_TRAJECTORY_PAGE_SIZE
+            )
+            status_f = query.get("filter", ["all"])[0]
+            q_val = query.get("q", [""])[0]
+            sort_val = query.get("sort", ["name_asc"])[0]
+            criteria = TrajectoriesQueryCriteria(
+                file_name=f_name,
+                page=p,
+                limit=l_val,
+                status_filter=status_f,
+                search_q=q_val,
+                sort_by=sort_val,
+            )
+            result = query_trajectory_records(criteria)
+            self._send_json(result)
+            return True
+        if path == "/api/trajectory/details":
+            f_name = query.get("file", [""])[0]
+            target = query.get("target", [""])[0]
+            result = get_trajectory_record_detail(f_name, target)
+            status_code = HTTP_OK if result.get("status") == "ok" else HTTP_NOT_FOUND
+            self._send_json(result, status=status_code)
+            return True
+        return False
+
     def _handle_api(self, path: str, query: dict[str, list[str]]) -> bool:
         return (
             self._handle_api_source_routes(path, query)
             or self._handle_api_asset_routes(path, query)
             or self._handle_api_phash_routes(path, query)
+            or self._handle_api_trajectory_routes(path, query)
         )
+
+    def do_POST(self) -> None:
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path
+        if path == "/api/trajectory/run":
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length).decode("utf-8") if length > 0 else "{}"
+            try:
+                data = json.loads(body)
+            except Exception:
+                data = {}
+            target = data.get("target", "")
+            cuts = int(data.get("cuts", TRAJECTORY_SAMPLE_CUTS))
+            frames = int(data.get("frames", TRAJECTORY_DEFAULT_FRAMES))
+            result = run_on_demand_trajectory(target, cuts=cuts, frames=frames)
+            status_code = HTTP_OK if result.get("status") == "ok" else HTTP_SERVER_ERROR
+            self._send_json(result, status=status_code)
+            return
+        self.send_error(HTTP_NOT_FOUND, "Not found")
 
     def do_GET(self) -> None:
         parsed = urllib.parse.urlparse(self.path)
@@ -2748,6 +3089,31 @@ if __name__ == "__main__":
         default="all",
         help="Filter for phashes (all, aligned_3_3, missing_pg, uncompiled, orphan_catalog)",
     )
+    parser.add_argument(
+        "--trajectory-files",
+        action="store_true",
+        help="List available trajectory audit files (JSON)",
+    )
+    parser.add_argument(
+        "--trajectories",
+        action="store_true",
+        help="Query spatiotemporal trajectory records (JSON)",
+    )
+    parser.add_argument(
+        "--trajectory-file",
+        default="",
+        help="Specific trajectory file to query",
+    )
+    parser.add_argument(
+        "--trajectory-details",
+        default="",
+        help="Inspect detailed cuts sequence for target media",
+    )
+    parser.add_argument(
+        "--trajectory-filter",
+        default="all",
+        help="Trajectory filter (all, coherent, matched, divergent, unmatched)",
+    )
     args = parser.parse_args()
 
     if args.metadata:
@@ -2804,5 +3170,23 @@ if __name__ == "__main__":
         print(json.dumps(query_phashes_list(phash_criteria), indent=2, default=str))
     elif args.phash_moviehash:
         print(json.dumps(inspect_phash_microscopic(args.phash_moviehash), indent=2, default=str))
+    elif args.trajectory_files:
+        print(json.dumps(list_trajectory_audit_files(), indent=2, default=str))
+    elif args.trajectories:
+        traj_crit = TrajectoriesQueryCriteria(
+            file_name=args.trajectory_file,
+            page=args.page,
+            limit=args.limit,
+            status_filter=args.trajectory_filter if args.trajectory_filter != "all" else args.status,
+            search_q=args.search,
+            sort_by=args.sort,
+        )
+        print(json.dumps(query_trajectory_records(traj_crit), indent=2, default=str))
+    elif args.trajectory_details:
+        print(
+            json.dumps(
+                get_trajectory_record_detail(args.trajectory_file, args.trajectory_details), indent=2, default=str
+            )
+        )
     else:
         run_server(args.port)

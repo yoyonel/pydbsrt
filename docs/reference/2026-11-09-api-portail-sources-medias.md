@@ -26,6 +26,10 @@ Cette référence technique décrit les spécifications formelles des points d'a
 | `GET` | `/api/file/details` | Inspection multimédia approfondie (`ffprobe`) et statut couplage Zero-DB. | $50\text{ ms}$ (FS) à $1.5\text{ s}$ (FTP) |
 | `GET` | `/api/assets` | Audit paginé, filtré et trié des actifs vidéos répertoriés en base PostgreSQL. | $< 15\text{ ms}$ |
 | `GET` | `/api/asset/details` | Fiche d'inspection technique unitaire d'un actif média en base PostgreSQL. | $< 10\text{ ms}$ |
+| `GET` | `/api/trajectory/files` | Inventaire des fichiers de rapports de trajectoires JSONL disponibles. | $< 1\text{ ms}$ |
+| `GET` | `/api/trajectories` | Listing paginé et filtré des trajectoires de consensus avec KPIs agrégés. | $< 5\text{ ms}$ |
+| `GET` | `/api/trajectory/details` | Décomposition microscopique d'une trajectoire avec suivi des coupures. | $< 5\text{ ms}$ |
+| `POST` | `/api/trajectory/run` | Exécution à la demande du tracking de trajectoire sur une cible vidéo / pHash. | $200\text{ ms}$ à $1.5\text{ s}$ |
 
 ---
 
@@ -564,6 +568,122 @@ Exécute l'inspection microscopique trame par trame d'un fichier d'empreinte `.p
 
 ---
 
+### `GET /api/trajectory/files`
+
+Retourne l'inventaire des fichiers de rapports JSONL de tracking spatiotemporel disponibles sur le disque local (`data/reports/audit/` et `data/reports/`).
+
+#### Schéma de Réponse (`200 OK`)
+
+```json
+{
+  "status": "ok",
+  "files": [
+    {
+      "filename": "trajectory_cuts20_ratio30.jsonl",
+      "path": "data/reports/audit/trajectory_cuts20_ratio30.jsonl",
+      "size_bytes": 35414617,
+      "size_human": "33.77 MB",
+      "mtime": 1730592000.0,
+      "modified_fmt": "2026-11-03 01:20:00"
+    }
+  ]
+}
+```
+
+---
+
+### `GET /api/trajectories`
+
+Interroge, filtre et pagine les enregistrements d'évaluation de consensus spatiotemporel multi-fenêtres pour un fichier de rapport sélectionné.
+
+#### Paramètres
+
+| Paramètre | Type | Requis | Description |
+| :--- | :--- | :--- | :--- |
+| `file` | `string` | Non | Nom du fichier JSONL source (défaut: premier fichier disponible). |
+| `page` | `integer` | Non | Numéro de la page (défaut: `1`). |
+| `limit` | `integer` | Non | Lignes par page (défaut: `25`). |
+| `filter` | `string` | Non | Filtre de cohérence (`all`, `coherent`, `matched`, `divergent`, `unmatched`). |
+| `q` | `string` | Non | Filtre textuel de recherche par média cible ou titre gagnant. |
+| `sort` | `string` | Non | Ordonnancement (`name_asc`, `name_desc`, `matched_desc`, `duration_desc`, `elapsed_desc`). |
+
+#### Schéma de Réponse (`200 OK`)
+
+```json
+{
+  "status": "ok",
+  "file": "trajectory_cuts5_sample20.jsonl",
+  "kpi": {
+    "total_audits": 20,
+    "total_matched": 18,
+    "total_coherent": 16,
+    "coherence_rate_pct": 88.9,
+    "match_rate_pct": 90.0,
+    "avg_elapsed_sec": 1.693,
+    "total_cuts": 100
+  },
+  "total_items": 20,
+  "filtered_items": 20,
+  "page": 1,
+  "limit": 25,
+  "total_pages": 1,
+  "items": [
+    {
+      "target_media": "%5B%20OxTorrent.com%20%5D%20Cars%202%202011%20FRENCH%20BRRiP%20XviD-FwD.avi.24.0fps",
+      "target_path": "data/__PHASH__/%5B%20OxTorrent.com%20%5D%20Cars%202%202011%20FRENCH%20BRRiP%20XviD-FwD.avi.24.0fps.phash",
+      "duration_sec": 364.08,
+      "cuts_count": 5,
+      "matched_cuts_count": 3,
+      "consensus_media_id": 2,
+      "consensus_title": "OxTorrent com Cars 2",
+      "is_temporally_coherent": true,
+      "total_elapsed_seconds": 1.686,
+      "success": true,
+      "cuts_summary": [
+        {
+          "start_sec": 36.41,
+          "winner_id": 2,
+          "matched": true,
+          "score": 7.87,
+          "coverage": 0.75
+        }
+      ]
+    }
+  ]
+}
+```
+
+---
+
+### `GET /api/trajectory/details`
+
+Retourne la décomposition unitaire complète de la trajectoire pour un média cible (liste intégrale des coupures, trames évaluées, scores de similarité et horodatages $t_{ref}$).
+
+#### Paramètres
+
+| Paramètre | Type | Requis | Description |
+| :--- | :--- | :--- | :--- |
+| `file` | `string` | Non | Nom du fichier JSONL source. |
+| `target` | `string` | **Oui** | Nom du média cible (`target_media`) ou chemin (`target_path`). |
+
+---
+
+### `POST /api/trajectory/run`
+
+Déclenche l'évaluation synchrone à la demande du tracking spatiotemporel sur une cible vidéo ou `.phash` face au catalogue unifié `.dbphash`.
+
+#### Corps JSON de Requête
+
+```json
+{
+  "target": "data/__PHASH__/002835455e305309.24.0fps.phash",
+  "cuts": 5,
+  "frames": 20
+}
+```
+
+---
+
 ## 3. Options CLI du Démon (`scripts/portal_server.py`)
 
 Le script supporte à la fois le mode serveur HTTP daemonisé et l'exécution unitaire en ligne de commande pour scripts ou cron jobs :
@@ -638,12 +758,12 @@ L'interface web monopage (`sources.html`) implémente un contrat d'état bidirec
 Le fragment d'URL encapsule l'intégralité du contexte d'exploration et d'audit :
 
 ```text
-#view=<sources|explorer|assets|phashes>&env=<local|o2switch|rpi4|all>&source=<id>&profile=<id>&subdir=<rel_path>&page=<int>&limit=<int>&q=<query>&sort=<key>&tag=<tag>&file=<rel_path>&status=<status>
+#view=<sources|explorer|assets|phashes|trajectories>&env=<local|o2switch|rpi4|all>&source=<id>&profile=<id>&subdir=<rel_path>&page=<int>&limit=<int>&q=<query>&sort=<key>&tag=<tag>&file=<rel_path>&status=<status>
 ```
 
 | Clé | Type | Rôle | Valeur par défaut |
 | :--- | :--- | :--- | :--- |
-| `view` | `string` | Vue active (`sources`, `explorer`, `assets` ou `phashes`). | `sources` |
+| `view` | `string` | Vue active (`sources`, `explorer`, `assets`, `phashes` ou `trajectories`). | `sources` |
 | `env` | `string` | Filtre d'environnement actif (`local`, `nomad`, `o2switch`, `rpi4`, `all`). | Détection dynamique de l'hôte |
 | `status` | `string` | Filtre de statut pour les actifs médias (`all`, `nominal`, `missing_phash`, `unmapped_path`). | `all` |
 | `source` | `string` | Identifiant du gisement sélectionné. | `""` |
