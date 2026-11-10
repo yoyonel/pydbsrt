@@ -2661,6 +2661,9 @@ def _compute_trajectory_kpi(records: list[dict[str, Any]]) -> dict[str, Any]:
     total_matched = sum(1 for r in records if r.get("consensus_media_id") is not None)
     total_coherent = sum(1 for r in records if r.get("is_temporally_coherent") is True)
     total_cuts = sum(r.get("cuts_count", 0) for r in records)
+    matched_media_ids = {r.get("consensus_media_id") for r in records if r.get("consensus_media_id") is not None}
+    unique_catalog_covered = len(matched_media_ids)
+
     coherence_rate = round(total_coherent / float(total_matched) * 100.0, 1) if total_matched > 0 else 0.0
     match_rate = round(total_matched / float(total_audits) * 100.0, 1) if total_audits > 0 else 0.0
     avg_elapsed = (
@@ -2672,6 +2675,7 @@ def _compute_trajectory_kpi(records: list[dict[str, Any]]) -> dict[str, Any]:
         "total_audits": total_audits,
         "total_matched": total_matched,
         "total_coherent": total_coherent,
+        "unique_catalog_covered": unique_catalog_covered,
         "coherence_rate_pct": coherence_rate,
         "match_rate_pct": match_rate,
         "avg_elapsed_sec": avg_elapsed,

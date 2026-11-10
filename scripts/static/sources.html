@@ -1484,12 +1484,15 @@
         </div>
       </div>
 
-      <!-- KPI Metrics Summary Bar -->
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <!-- KPI Metrics Summary Bar (5 Pillars of Trajectory Audit) -->
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
         <!-- KPI 1: Total Audits -->
-        <div class="bg-slate-900/60 border border-slate-800/80 rounded-xl p-4 flex flex-col justify-between">
+        <div class="bg-slate-900/60 border border-slate-800/80 rounded-xl p-3.5 flex flex-col justify-between">
           <div class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center justify-between">
-            <span>Médias Évalués</span>
+            <span class="flex items-center gap-1.5">
+              <span>Médias Évalués</span>
+              <button @click.stop="openGlossaryTopic('trajectoires')" class="text-slate-500 hover:text-indigo-400 cursor-pointer" title="Explication détaillée">?</button>
+            </span>
             <span class="text-base">🎬</span>
           </div>
           <div class="mt-2 flex items-baseline gap-2">
@@ -1500,42 +1503,75 @@
         </div>
 
         <!-- KPI 2: Consensus Rate -->
-        <div class="bg-slate-900/60 border border-slate-800/80 rounded-xl p-4 flex flex-col justify-between">
-          <div class="text-[11px] font-semibold text-emerald-400 uppercase tracking-wider flex items-center justify-between">
-            <span>Taux de Consensus</span>
+        <div class="bg-slate-900/60 border border-slate-800/80 rounded-xl p-3.5 flex flex-col justify-between">
+          <div class="text-[11px] font-semibold uppercase tracking-wider flex items-center justify-between"
+               :class="trajectoriesKpi.match_rate_pct >= 80 ? 'text-emerald-400' : (trajectoriesKpi.match_rate_pct >= 50 ? 'text-amber-400' : 'text-rose-400')">
+            <span class="flex items-center gap-1.5">
+              <span>Taux Consensus</span>
+              <button @click.stop="openGlossaryTopic('trajectoires')" class="text-slate-500 hover:text-emerald-400 cursor-pointer" title="Explication détaillée">?</button>
+            </span>
             <span class="text-base">🏆</span>
           </div>
           <div class="mt-2 flex items-baseline gap-2">
-            <span class="text-2xl font-bold text-emerald-300 font-mono" x-text="trajectoriesKpi.match_rate_pct + '%'"></span>
+            <span class="text-2xl font-bold font-mono"
+                  :class="trajectoriesKpi.match_rate_pct >= 80 ? 'text-emerald-300' : (trajectoriesKpi.match_rate_pct >= 50 ? 'text-amber-300' : 'text-rose-300')"
+                  x-text="trajectoriesKpi.match_rate_pct + '%'"></span>
             <span class="text-xs text-slate-400" x-text="trajectoriesKpi.total_matched + ' / ' + trajectoriesKpi.total_audits"></span>
           </div>
           <div class="text-[11px] text-slate-500 mt-1">Élection par score cumulé</div>
         </div>
 
         <!-- KPI 3: Temporal Coherence -->
-        <div class="bg-slate-900/60 border border-slate-800/80 rounded-xl p-4 flex flex-col justify-between">
-          <div class="text-[11px] font-semibold text-indigo-400 uppercase tracking-wider flex items-center justify-between">
-            <span>Cohérence Temporelle</span>
+        <div class="bg-slate-900/60 border border-slate-800/80 rounded-xl p-3.5 flex flex-col justify-between">
+          <div class="text-[11px] font-semibold uppercase tracking-wider flex items-center justify-between"
+               :class="trajectoriesKpi.coherence_rate_pct >= 90 ? 'text-indigo-400' : (trajectoriesKpi.coherence_rate_pct >= 70 ? 'text-amber-400' : 'text-rose-400')">
+            <span class="flex items-center gap-1.5">
+              <span>Cohérence Temp.</span>
+              <button @click.stop="openGlossaryTopic('trajectoires')" class="text-slate-500 hover:text-indigo-400 cursor-pointer" title="Explication détaillée">?</button>
+            </span>
             <span class="text-base">⏳</span>
           </div>
           <div class="mt-2 flex items-baseline gap-2">
-            <span class="text-2xl font-bold text-indigo-300 font-mono" x-text="trajectoriesKpi.coherence_rate_pct + '%'"></span>
-            <span class="text-xs text-slate-400" x-text="trajectoriesKpi.total_coherent + ' cohérents'"></span>
+            <span class="text-2xl font-bold font-mono"
+                  :class="trajectoriesKpi.coherence_rate_pct >= 90 ? 'text-indigo-300' : (trajectoriesKpi.coherence_rate_pct >= 70 ? 'text-amber-300' : 'text-rose-300')"
+                  x-text="trajectoriesKpi.coherence_rate_pct + '%'"></span>
+            <span class="text-xs text-slate-400" x-text="trajectoriesKpi.total_coherent + ' certifiés'"></span>
           </div>
-          <div class="text-[11px] text-slate-500 mt-1">Alignement linéaire certifié</div>
+          <div class="text-[11px] text-slate-500 mt-1">Dérive Δt₀ ≤ 100 ms</div>
         </div>
 
         <!-- KPI 4: Mean Evaluation Latency -->
-        <div class="bg-slate-900/60 border border-slate-800/80 rounded-xl p-4 flex flex-col justify-between">
+        <div class="bg-slate-900/60 border border-slate-800/80 rounded-xl p-3.5 flex flex-col justify-between">
           <div class="text-[11px] font-semibold text-amber-400 uppercase tracking-wider flex items-center justify-between">
-            <span>Latence Moyenne</span>
+            <span class="flex items-center gap-1.5">
+              <span>Latence Moyenne</span>
+              <button @click.stop="openGlossaryTopic('trajectoires')" class="text-slate-500 hover:text-amber-400 cursor-pointer" title="Explication détaillée">?</button>
+            </span>
             <span class="text-base">⚡</span>
           </div>
           <div class="mt-2 flex items-baseline gap-2">
             <span class="text-2xl font-bold text-amber-300 font-mono" x-text="trajectoriesKpi.avg_elapsed_sec + 's'"></span>
             <span class="text-xs text-slate-500">par cible</span>
           </div>
-          <div class="text-[11px] text-slate-500 mt-1">Multi-cuts parallélisé Rayon</div>
+          <div class="text-[11px] text-slate-500 mt-1">Multi-cuts Rayon multithread</div>
+        </div>
+
+        <!-- KPI 5: Catalogue Covered -->
+        <div class="bg-slate-900/60 border border-slate-800/80 rounded-xl p-3.5 flex flex-col justify-between">
+          <div class="text-[11px] font-semibold text-purple-400 uppercase tracking-wider flex items-center justify-between">
+            <span class="flex items-center gap-1.5">
+              <span>Catalogue Couvert</span>
+              <button @click.stop="openGlossaryTopic('trajectoires')" class="text-slate-500 hover:text-purple-400 cursor-pointer" title="Explication détaillée">?</button>
+            </span>
+            <span class="text-base">🗄️</span>
+          </div>
+          <div class="mt-2 flex items-baseline gap-2">
+            <span class="text-2xl font-bold text-purple-300 font-mono" x-text="trajectoriesKpi.unique_catalog_covered || 0"></span>
+            <span class="text-xs text-slate-400">médias uniques</span>
+          </div>
+          <div class="text-[11px] text-slate-500 mt-1">
+            <span x-text="'sur ' + (phashesSummary?.catalog_count || '2 779') + ' base Zero-DB'"></span>
+          </div>
         </div>
       </div>
 
@@ -3077,28 +3113,33 @@
           </div>
 
           <!-- Section 5: Les 3 Piliers de l'Empreinte pHash -->
+          <!-- Section 6: Trajectoires & Consensus Spatiotemporel -->
           <div class="bg-slate-950/80 border border-slate-800 rounded-xl p-4 space-y-2">
             <h4 class="font-bold text-indigo-400 uppercase text-[11px] flex items-center gap-1.5">
-              <span>🏛️</span>
-              <span>5. Trinité des Empreintes : Les 3 Piliers pHash</span>
+              <span>🎯</span>
+              <span>6. Métriques de Trajectoires Spatio-temporelles</span>
             </h4>
-            <p class="text-slate-400">Comprendre l'hétérogénéité des états d'une empreinte perceptuelle au sein de pydbsrt :</p>
+            <p class="text-slate-400">Rôle des 5 indicateurs clés d'évaluation multi-coupures :</p>
             <ul class="space-y-2 pt-1 font-sans">
               <li class="flex items-start gap-2">
-                <span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-sky-950 text-sky-300 border border-sky-800 shrink-0">📁 Pilier 1 : RAW Store</span>
-                <span><strong>Fichiers Bruts Disque :</strong> Suite linéaire continue de 64-bit entiers non compressés (1 hash par trame vidéo). Gisement maître non altéré stocké dans <code class="text-slate-400">data/__PHASH__/*.phash</code> (~1.5 Go).</span>
+                <span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-800 text-slate-300 border border-slate-700 shrink-0">🎬 Médias Évalués</span>
+                <span><strong>Volume Cibles :</strong> Nombre total de vidéos candidates ou inconnues évaluées dans le rapport, avec le cumul des tranches temporelles analysées.</span>
               </li>
               <li class="flex items-start gap-2">
-                <span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-indigo-950 text-indigo-300 border border-indigo-800 shrink-0">⚡ Pilier 2 : Catalogue Zero-DB</span>
-                <span><strong>Catalogue Compilé mmap :</strong> Fichier binaire compacté haute densité (<code class="text-indigo-300">catalog.dbphash</code> v2.0) filtrant uniquement les changements de scènes (Cuts) et 1 frame par seconde (Sparse), permettant une recherche O(1) sans base de données avec un gain d'espace de 6x à 12x.</span>
+                <span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-950 text-emerald-400 border border-emerald-800 shrink-0">🏆 Taux de Consensus</span>
+                <span><strong>Vainqueur Incontestable :</strong> Pourcentage de vidéos cibles pour lesquelles un film unique de référence remporte la majorité absolue des tranches d'échantillonnage par score cumulé (statuts <code>COHÉRENT</code> ou <code>CONSENSUS GAGNÉ</code>).</span>
               </li>
               <li class="flex items-start gap-2">
-                <span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-950 text-emerald-300 border border-emerald-800 shrink-0">🐘 Pilier 3 : BKtreeDB</span>
-                <span><strong>Indexation Relationnelle :</strong> Table PostgreSQL <code class="text-emerald-300">medias</code> couplée à la table de trames <code class="text-emerald-300">frames</code> indexée par l'extension SP-GiST Hamming pour la recherche floue indexée par arbre BK relationnel.</span>
+                <span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-indigo-950 text-indigo-300 border border-indigo-800 shrink-0">⏳ Cohérence Temporelle</span>
+                <span><strong>Stabilité du Décalage :</strong> Vérifie que le décalage temporel (<code class="text-indigo-300">Δt₀ ≤ 100 ms</code>) reste identique du début à la fin du film. Détecte si la vidéo a une vitesse de lecture différente (ex. 24 fps vs 25 fps) ou si des scènes ont été ajoutées ou coupées (version longue vs version cinéma).</span>
               </li>
               <li class="flex items-start gap-2">
-                <span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-950 text-emerald-400 border border-emerald-800 shrink-0">🟢 Aligné 3/3</span>
-                <span><strong>Parité Maximale :</strong> L'empreinte existe sous forme brute sur disque, est compilée dans le catalogue Zero-DB et est réconciliée avec la base relationnelle.</span>
+                <span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-950 text-amber-300 border border-amber-800 shrink-0">⚡ Latence Moyenne</span>
+                <span><strong>Coût CPU :</strong> Temps moyen nécessaire pour décoder les tranches vidéo, calculer leurs empreintes pHash et interroger le catalogue en mémoire vive via le moteur multithread Rayon.</span>
+              </li>
+              <li class="flex items-start gap-2">
+                <span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-purple-950 text-purple-300 border border-purple-800 shrink-0">🗄️ Catalogue Couvert</span>
+                <span><strong>Diversité Référencée :</strong> Nombre d'œuvres distinctes de notre catalogue officiel reconnues et validées à travers l'ensemble des vidéos testées dans ce lot.</span>
               </li>
             </ul>
           </div>
