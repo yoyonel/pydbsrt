@@ -159,6 +159,8 @@ nav:
       - Schéma PostgreSQL 17 & SP-GiST: reference/schema-postgresql.md
       - Formats de Fichiers & Spécifications: reference/formats-fichiers.md
       - Catalogue des Commandes Taskfile: reference/taskfile.md
+      - Inventaire Exhaustif des Scripts: reference/scripts-inventory-2026-11-10.md
+      - Audit Régressions & Cartographie Scripts: reference/2026-11-10-audit-exhaustif-scripts-regressions.md
       - Configuration & Variables d'Environnement: reference/configuration.md
       - Constantes Nommées & Seuils Algorithmiques: reference/constants.md
       - Architecture CI/CD & Pipelines: reference/ci-cd.md
