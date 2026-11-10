@@ -73,6 +73,10 @@ Interface web bicanale (`http://127.0.0.1:8765/studio`) permettant de confronter
 - **Extension VLC Moderne & Protocole Local** :
   - Remplacement direct de VLSub (`vlsub_dbsrt.lua`) dialoguant avec le démon local.
   - Affichage direct des candidats avec leur distance de Hamming et application automatique du décalage calculé.
+- **Portail Web Multi-Environnements & Audit de Consensus Spatiotemporel (`task db:portal` / `:8780`)** :
+  - **4 Vues Opérationnelles** : Sources Physiques (NAS/Freebox/Local), Actifs Médias (PostgreSQL 17), Microscopie pHash (sismographe, dynamique inter-trames, coupes d'entropie), et Trajectoires Spatiotemporelles (consensus multi-coupures).
+  - **Audit de Consensus Spatiotemporel** : Exploration des rapports d'audit batch, KPIs bornés de couverture catalogue ($\le 100\%$), défilement horizontal natif, résolution des identifiants hash binaires et navigation modale bidirectionnelle fluide avec raccourcis clavier (`Échap`).
+  - **Recette E2E Automatisée** : Validation continue par Playwright (`task portal:e2e`).
 - **Observabilité & Télémétrie** :
   - Métriques Prometheus natives exposées par le serveur Axum (`/metrics`).
   - Dashboards Grafana provisionnés automatiquement sous `docker/grafana/`.
@@ -204,6 +208,15 @@ task doc
 task doc:check
 ```
 
+### 5. Démarrage du Portail Web d'Exploration & Audit
+```bash
+# Lance le portail unifié multi-environnements sur http://127.0.0.1:8780
+task db:portal
+
+# Exécute la suite complète de recette E2E Playwright (tous rapports de trajectoires & onglets)
+task portal:e2e
+```
+
 ---
 
 ## 🏛️ Architecture Modulaire & SoC (Rust Workspace)
@@ -265,6 +278,8 @@ flowchart TD
 | `task catalog:verify` | Audit programmatique d'intégrité du catalogue (dbphash, couplings, PostgreSQL, phash) | `taskfiles/stack.yml` |
 | `task demo:vlc` | Démonstration interactive VLC avec extension VLSub bonifiée | `taskfiles/demo.yml` |
 | `task demo:studio` | Démarre l'interface web dbsrt Studio (`:8765/studio`) | `taskfiles/demo.yml` |
+| `task db:portal` | Démarre le portail web interactif (:8780) d'exploration et d'audit | `taskfiles/db.yml` |
+| `task portal:e2e` | Exécute la suite formelle de recette E2E Playwright du portail web | `Taskfile.yml` |
 | `task lint` | Exécute l'ensemble des 9 linters polyglottes | `taskfiles/quality.yml` |
 | `task test:rs` | Exécute la suite complète de tests Rust | `taskfiles/quality.yml` |
 | `task ci:local` | Suite rapide de vérification pré-push (< 10 secondes) | `taskfiles/quality.yml` |

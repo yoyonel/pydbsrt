@@ -470,14 +470,14 @@ if (!str_starts_with($path, '/')) {
     $path = '/' . $path;
 }
 
-// Default root or empty path to /monitoring
+// Default root or empty path to /sources
 if ($path === '/' || $path === '') {
-    $path = '/monitoring';
+    $path = '/sources';
 }
 
 // Read-only keys (web-top QR, shared dashboards) only reach monitoring GETs
 $isReadOnly = !check_key_match($matchedKey, $masterKeys);
-$readOnlyPathAllowed = in_array($path, ['/monitoring', '/top', '/health', '/v1/health', '/sources', '/sources.html', '/api/sources', '/api/probe', '/api/files', '/api/file/details', '/api/assets', '/api/asset/details', '/api/phashes', '/api/phash/details'], true)
+$readOnlyPathAllowed = in_array($path, ['/monitoring', '/top', '/health', '/v1/health', '/sources', '/sources.html', '/api/sources', '/api/probe', '/api/files', '/api/file/details', '/api/assets', '/api/asset/details', '/api/phashes', '/api/phash/details', '/api/trajectory/files', '/api/trajectories', '/api/trajectory/details'], true)
     || str_starts_with($path, '/v1/monitoring/');
 if ($isReadOnly && (!in_array($method, ['GET', 'HEAD'], true) || !$readOnlyPathAllowed)) {
     send_json_error(403, ['error' => 'Forbidden: read-only key']);
@@ -501,7 +501,7 @@ if ($path === '/sources' || $path === '/sources.html') {
     send_json_error(404, ['error' => 'sources.html not deployed in ~/dbsrt/web/']);
 }
 
-if (in_array($path, ['/api/sources', '/api/probe', '/api/files', '/api/file/details', '/api/assets', '/api/asset/details', '/api/phashes', '/api/phash/details'], true)) {
+if (in_array($path, ['/api/sources', '/api/probe', '/api/files', '/api/file/details', '/api/assets', '/api/asset/details', '/api/phashes', '/api/phash/details', '/api/trajectory/files', '/api/trajectories', '/api/trajectory/details'], true)) {
     $binDir = $homeDir . '/dbsrt/bin';
     $pythonBin = $binDir . '/python3';
     $script = $homeDir . '/dbsrt/scripts/portal_server.py';
@@ -512,6 +512,7 @@ if (in_array($path, ['/api/sources', '/api/probe', '/api/files', '/api/file/deta
     // Ensure PATH includes local ~/dbsrt/bin for static ffprobe / ffmpeg
     $currPath = getenv('PATH') ?: '/usr/local/bin:/usr/bin:/bin';
     putenv('PATH=' . $binDir . ':' . $currPath);
+    chdir($homeDir . '/dbsrt');
 
     if ($path === '/api/sources') {
         $cmd = escapeshellcmd($pythonBin) . ' ' . escapeshellarg($script) . ' --metadata';
@@ -572,8 +573,33 @@ if (in_array($path, ['/api/sources', '/api/probe', '/api/files', '/api/file/deta
             $cmd .= ' --search ' . escapeshellarg($search);
         }
     } elseif ($path === '/api/phash/details') {
-        $mhash = preg_replace('/[^a-zA-Z0-9_.-]/', '', (string)($_GET['moviehash'] ?? ($_GET['file'] ?? '')));
+        $mhash = preg_replace('/[^a-zA-Z0-9_.% -]/', '', (string)($_GET['moviehash'] ?? ($_GET['file'] ?? '')));
         $cmd = escapeshellcmd($pythonBin) . ' ' . escapeshellarg($script) . ' --phash-moviehash ' . escapeshellarg($mhash);
+    } elseif ($path === '/api/trajectory/files') {
+        $cmd = escapeshellcmd($pythonBin) . ' ' . escapeshellarg($script) . ' --trajectory-files';
+    } elseif ($path === '/api/trajectories') {
+        $page = (int)($_GET['page'] ?? 1);
+        $limit = (int)($_GET['limit'] ?? 25);
+        $filter = preg_replace('/[^a-zA-Z0-9_]/', '', (string)($_GET['filter'] ?? 'all'));
+        $search = (string)($_GET['q'] ?? '');
+        $sort = preg_replace('/[^a-zA-Z0-9_]/', '', (string)($_GET['sort'] ?? 'title_asc'));
+        $file = preg_replace('/[^a-zA-Z0-9_.-]/', '', (string)($_GET['file'] ?? ''));
+        $cmd = escapeshellcmd($pythonBin) . ' ' . escapeshellarg($script)
+            . ' --trajectories --page ' . $page . ' --limit ' . $limit . ' --trajectory-filter ' . escapeshellarg($filter)
+            . ' --sort ' . escapeshellarg($sort);
+        if ($file !== '') {
+            $cmd .= ' --trajectory-file ' . escapeshellarg($file);
+        }
+        if ($search !== '') {
+            $cmd .= ' --search ' . escapeshellarg($search);
+        }
+    } elseif ($path === '/api/trajectory/details') {
+        $target = (string)($_GET['target'] ?? $_GET['id'] ?? '');
+        $file = preg_replace('/[^a-zA-Z0-9_.-]/', '', (string)($_GET['file'] ?? ''));
+        $cmd = escapeshellcmd($pythonBin) . ' ' . escapeshellarg($script) . ' --trajectory-details ' . escapeshellarg($target);
+        if ($file !== '') {
+            $cmd .= ' --trajectory-file ' . escapeshellarg($file);
+        }
     } else {
         $sourceId = preg_replace('/[^a-zA-Z0-9_-]/', '', (string)($_GET['source'] ?? ''));
         $profileId = preg_replace('/[^a-zA-Z0-9_-]/', '', (string)($_GET['profile'] ?? ''));

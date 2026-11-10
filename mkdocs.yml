@@ -202,6 +202,7 @@ nav:
       - Audit de Performance Pipeline (2 758 Cuts): explanation/2026-11-04-audit-global-performance-pipeline-matching.md
       - Extension Banc Matching & Cache Probes: explanation/2026-11-07-extension-banc-matching-cuts-vs-streaming-et-cache-probes.md
       - Tracking Spatiotemporel Multi-Hypothèses: explanation/2026-11-07-trajectory-matching-multi-hypothesis-tracking.md
+      - Trajectoires & Consensus (Modèle Données & KPIs): explanation/2026-11-10-trajectoires-spatiotemporelles-analyse-donnees.md
       - Modèle Inputs-First (Sources & Assets): explanation/2026-11-08-modele-donnees-inputs-media-sources-et-assets.md
       - Identité Binaire des Conteneurs & Anti-Shadowing: explanation/2026-11-08-etude-architecture-identite-binaire-conteneurs-et-anti-shadowing.md
       - Architecture Portail Sources Médias Multi-Environnements: explanation/2026-11-09-architecture-portail-medias-et-sources-multi-environnements.md

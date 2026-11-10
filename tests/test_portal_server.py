@@ -6,6 +6,7 @@ import http.server
 import json
 import threading
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -16,13 +17,17 @@ from scripts.portal_server import (
     BYTES_PER_KB,
     BYTES_PER_MB,
     PortalRequestHandler,
+    TrajectoriesQueryCriteria,
     execute_single_probe,
     format_human_size,
     format_seconds_duration,
     get_sources_metadata,
+    get_trajectory_record_detail,
     inspect_file_details,
     list_source_files,
+    list_trajectory_audit_files,
     parse_media_filename,
+    query_trajectory_records,
 )
 
 
@@ -196,6 +201,34 @@ def test_execute_single_probe_unknown() -> None:
     assert res["accessible"] is False
 
 
+def test_trajectory_api_records() -> None:
+    """Verifies listing and querying spatiotemporal trajectory records."""
+    files = list_trajectory_audit_files()
+    if not files:
+        pytest.skip("No trajectory audit files available in test environment")
+
+    assert len(files) >= 1
+    first_file = files[0]["filename"]
+
+    # 1. Query records from first available file
+    criteria = TrajectoriesQueryCriteria(file_name=first_file, page=1, limit=5)
+    res = query_trajectory_records(criteria)
+    assert res["status"] == "ok"
+    assert "kpi" in res
+    assert "total_audits" in res["kpi"]
+    assert "total_matched" in res["kpi"]
+    assert "coherence_rate_pct" in res["kpi"]
+    assert len(res["items"]) <= 5
+
+    # 2. Get detail of first item if present
+    if res["items"]:
+        first_item = res["items"][0]
+        target = first_item["target_media"]
+        detail = get_trajectory_record_detail(first_file, target)
+        assert detail["status"] == "ok"
+        assert "cuts" in detail["item"]
+
+
 def test_portal_http_api_endpoints() -> None:
     """Spins up a lightweight test HTTP daemon on port 0 and verifies REST API endpoints."""
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), PortalRequestHandler)
@@ -288,6 +321,30 @@ def test_portal_http_api_endpoints() -> None:
                 assert "timeline" in pdetail["cuts"]
                 assert len(pdetail["cuts"]["timeline"]) > 0
 
+        # 4e. GET /api/trajectory/files, /api/trajectories, /api/trajectory/details
+        files_url = f"{base_url}/api/trajectory/files"
+        with urllib.request.urlopen(files_url, timeout=5) as resp:
+            assert resp.status == 200
+            files_data = json.loads(resp.read().decode())
+            assert files_data["status"] == "ok"
+            assert "files" in files_data
+
+        traj_url = f"{base_url}/api/trajectories?limit=5"
+        with urllib.request.urlopen(traj_url, timeout=5) as resp:
+            assert resp.status == 200
+            traj_data = json.loads(resp.read().decode())
+            assert traj_data["status"] == "ok"
+            assert "kpi" in traj_data
+            assert "items" in traj_data
+            if traj_data["items"]:
+                first_target = traj_data["items"][0]["target_media"]
+                detail_url = f"{base_url}/api/trajectory/details?target={urllib.parse.quote(first_target)}"
+                with urllib.request.urlopen(detail_url, timeout=5) as dresp:
+                    assert dresp.status == 200
+                    detail_data = json.loads(dresp.read().decode())
+                    assert detail_data["status"] == "ok"
+                    assert "cuts" in detail_data["item"]
+
         # 5. GET /sources.html (Includes Interactive Sismographe & Zoom & Brush & Mobility)
         with urllib.request.urlopen(f"{base_url}/sources.html", timeout=5) as resp:
             assert resp.status == 200
@@ -304,3 +361,36 @@ def test_portal_http_api_endpoints() -> None:
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_trajectory_kpi_coverage_clamped_and_file_filtering() -> None:
+    """Verifies that catalog coverage KPI is strictly bounded in [0%, 100%] and invalid files are filtered."""
+    import tempfile
+
+    from scripts.portal_server import _compute_trajectory_kpi, _is_valid_trajectory_file
+
+    # 1. Invalid file filtering
+    with tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False) as f:
+        f.write('{"_meta": "killtest", "cuts": 1, "seconds": 12}\n')
+        invalid_path = Path(f.name)
+
+    try:
+        assert _is_valid_trajectory_file(invalid_path) is False
+    finally:
+        invalid_path.unlink()
+
+    # 2. Valid file structure
+    with tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False) as f:
+        f.write('{"target_media": "test.mp4", "cuts": [{"start_sec": 10}], "consensus_media_id": 42}\n')
+        valid_path = Path(f.name)
+
+    try:
+        assert _is_valid_trajectory_file(valid_path) is True
+    finally:
+        valid_path.unlink()
+
+    # 3. KPI coverage bound check even with massive mock ids
+    mock_records = [{"consensus_media_id": i, "is_temporally_coherent": True, "cuts_count": 3} for i in range(1, 5000)]
+    kpis = _compute_trajectory_kpi(mock_records)
+    assert 0.0 <= kpis["catalog_coverage_pct"] <= 100.0
+    assert kpis["unique_catalog_covered"] <= kpis["catalog_total"]

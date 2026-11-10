@@ -87,10 +87,12 @@
           <span>Empreintes pHash</span>
           <span class="text-[10px] font-mono px-1.5 py-0.2 rounded bg-indigo-900/60 text-indigo-300 border border-indigo-700/50" x-text="phashesSummary.catalog_count ? phashesSummary.catalog_count : '2.8k'"></span>
         </button>
-        <span class="px-3 py-1.5 rounded-md text-slate-500/60 cursor-not-allowed select-none flex items-center gap-1.5" title="Fonctionnalité ultérieure">
+        <button @click="switchView('trajectories')"
+                class="px-3 py-1.5 rounded-md font-medium transition cursor-pointer flex items-center gap-2"
+                :class="currentView === 'trajectories' ? 'bg-indigo-600/20 text-indigo-300 border border-indigo-500/30' : 'text-slate-400 hover:text-white'">
           <span>Trajectoires</span>
-          <span class="text-[9px] uppercase font-mono px-1.5 py-0.2 rounded bg-slate-900 text-slate-500 border border-slate-800">Bientôt</span>
-        </span>
+          <span class="text-[10px] font-mono px-1.5 py-0.2 rounded bg-indigo-900/60 text-indigo-300 border border-indigo-700/50" x-text="trajectoriesKpi.total_audits ? trajectoriesKpi.total_audits : '3.0k'"></span>
+        </button>
       </nav>
     </div>
 
@@ -120,7 +122,7 @@
 
   <!-- Main Content Area -->
   <main class="flex-1 p-6 max-w-7xl mx-auto w-full flex flex-col min-h-0"
-        :class="currentView === 'sources' || currentView === 'assets' || currentView === 'phashes' ? 'overflow-y-auto space-y-6 custom-scroll' : 'overflow-hidden'">
+        :class="currentView === 'sources' || currentView === 'assets' || currentView === 'phashes' || currentView === 'trajectories' ? 'overflow-y-auto space-y-6 custom-scroll' : 'overflow-hidden'">
 
     <!-- ================================================================= -->
     <!-- VIEW 1: SOURCES MÉDIAS DASHBOARD (OVERVIEW)                      -->
@@ -1373,8 +1375,414 @@
 
     </div>
 
+    <!-- ================================================================= -->
+    <!-- VIEW 4: TRAJECTOIRES SPATIOTEMPORELLES & CONSENSUS MULTI-COUPURES -->
+    <!-- ================================================================= -->
+    <div x-show="currentView === 'trajectories'" x-transition.opacity.duration.200ms class="space-y-6">
+
+      <!-- Page Header & File Selection -->
+      <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-2 border-b border-slate-800/60">
+        <div>
+          <h1 class="text-2xl font-bold tracking-tight text-white flex items-center gap-2">
+            <span>🎯</span>
+            <span>Trajectoires Spatiotemporelles & Consensus</span>
+          </h1>
+          <p class="text-xs text-slate-400 mt-1">
+            Tracking multi-hypothèses et consensus spatio-temporel sur fenêtres glissantes d'empreintes perceptuelles pHash.
+          </p>
+        </div>
+
+        <div class="flex items-center gap-3">
+          <!-- Active JSONL Audit File Combobox with Live Search & Recency Badges -->
+          <div class="relative" @click.away="trajectoriesFileDropdownOpen = false">
+            <button type="button"
+                    @click="trajectoriesFileDropdownOpen = !trajectoriesFileDropdownOpen"
+                    class="flex items-center gap-2 bg-slate-900 hover:bg-slate-850 border border-slate-700/80 rounded-lg px-3 py-1.5 text-xs text-slate-200 transition shadow-sm cursor-pointer min-w-[280px] justify-between">
+              <div class="flex items-center gap-2 truncate">
+                <span class="text-slate-400 font-medium">Rapport :</span>
+                <span class="font-mono text-indigo-300 font-semibold truncate"
+                      x-text="trajectoriesActiveFile || 'Sélectionner un rapport...'"></span>
+                <template x-if="getActiveTrajectoryFileObj()">
+                  <span class="flex items-center gap-1.5 shrink-0">
+                    <span class="text-[10px] text-slate-400 font-mono" x-text="'(' + getActiveTrajectoryFileObj().size_human + ')'"></span>
+                    <span class="w-1.5 h-1.5 rounded-full"
+                          :class="getActiveTrajectoryFileObj().is_active ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'"
+                          :title="getActiveTrajectoryFileObj().is_active ? 'Batch en cours d\'écriture' : 'Rapport terminé'"></span>
+                  </span>
+                </template>
+              </div>
+              <span class="text-slate-400 text-[10px] ml-1">▼</span>
+            </button>
+
+            <!-- Floating Searchable Dropdown Menu -->
+            <div x-show="trajectoriesFileDropdownOpen"
+                 x-transition:enter="transition ease-out duration-100"
+                 x-transition:enter-start="transform opacity-0 scale-95"
+                 x-transition:enter-end="transform opacity-100 scale-100"
+                 x-transition:leave="transition ease-in duration-75"
+                 x-transition:leave-start="transform opacity-100 scale-100"
+                 x-transition:leave-end="transform opacity-0 scale-95"
+                 class="absolute right-0 mt-1 w-96 max-w-[90vw] bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-50 p-2 space-y-2 backdrop-blur-md"
+                 x-cloak>
+              <!-- Smart Filter Search Input -->
+              <div class="relative">
+                <input type="text"
+                       x-model="trajectoriesFileSearch"
+                       placeholder="Filtrer (nom, date ex: 10 nov, état)..."
+                       class="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500 font-mono"
+                       @keydown.escape="trajectoriesFileDropdownOpen = false" />
+                <span class="absolute right-2.5 top-1.5 text-slate-500 text-xs">🔍</span>
+              </div>
+
+              <!-- List with controlled max-height & custom scroll -->
+              <div class="max-h-64 overflow-y-auto custom-scroll space-y-1 pr-1">
+                <template x-for="f in getFilteredTrajectoryFiles()" :key="f.filename">
+                  <div @click="selectTrajectoryFile(f.filename)"
+                       class="flex items-center justify-between p-2 rounded-lg cursor-pointer transition text-xs border"
+                       :class="f.filename === trajectoriesActiveFile ? 'bg-indigo-950/80 border-indigo-700/80 text-white' : 'bg-slate-950/60 hover:bg-slate-800 border-slate-800/80 text-slate-300'">
+                    <div class="flex flex-col truncate pr-2">
+                      <div class="flex items-center gap-1.5 truncate">
+                        <span class="w-1.5 h-1.5 rounded-full shrink-0"
+                              :class="f.is_active ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'"></span>
+                        <span class="font-mono font-medium truncate" x-text="f.filename"></span>
+                      </div>
+                      <div class="flex items-center gap-2 text-[10px] text-slate-500 mt-0.5">
+                        <span x-text="f.date_short || f.modified_fmt"></span>
+                        <span>•</span>
+                        <span x-text="f.size_human"></span>
+                      </div>
+                    </div>
+                    <div class="shrink-0 flex flex-col items-end gap-1">
+                      <span class="px-1.5 py-0.5 rounded text-[9px] font-semibold tracking-wide uppercase"
+                            :class="f.is_active ? 'bg-amber-950/80 text-amber-300 border border-amber-800/80' : 'bg-emerald-950/80 text-emerald-300 border border-emerald-800/80'"
+                            x-text="f.status_label || (f.is_active ? 'En cours' : 'Terminé')"></span>
+                      <template x-if="f.filename === trajectoriesActiveFile">
+                        <span class="text-indigo-400 text-[10px] font-bold">✓ Actif</span>
+                      </template>
+                    </div>
+                  </div>
+                </template>
+                <template x-if="getFilteredTrajectoryFiles().length === 0">
+                  <div class="py-6 text-center text-slate-500 text-xs">
+                    Aucun rapport correspondant à <span class="text-slate-400 font-mono" x-text="'&quot;' + trajectoriesFileSearch + '&quot;'"></span>
+                  </div>
+                </template>
+              </div>
+
+              <!-- Dropdown Footer summary -->
+              <div class="flex items-center justify-between text-[10px] text-slate-500 pt-1.5 border-t border-slate-800/80 px-1 font-mono">
+                <span x-text="getFilteredTrajectoryFiles().length + ' / ' + trajectoriesFiles.length + ' rapport(s)'"></span>
+                <span>Touche Échap pour fermer</span>
+              </div>
+            </div>
+          </div>
+
+          <button @click="fetchTrajectoryFiles(); fetchTrajectories()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 border border-slate-700 transition cursor-pointer">
+            <span :class="trajectoriesLoading ? 'animate-spin' : ''">🔄</span>
+            <span>Actualiser</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- KPI Metrics Summary Bar (5 Pillars of Trajectory Audit) -->
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
+        <!-- KPI 1: Total Audits -->
+        <div class="bg-slate-900/60 border border-slate-800/80 rounded-xl p-3.5 flex flex-col justify-between">
+          <div class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center justify-between">
+            <span class="flex items-center gap-1.5">
+              <span>Médias Évalués</span>
+              <button @click.stop="openGlossaryTopic('trajectoires')" class="text-slate-500 hover:text-indigo-400 cursor-pointer" title="Explication détaillée">?</button>
+            </span>
+            <span class="text-base">🎬</span>
+          </div>
+          <div class="mt-2 flex items-baseline gap-2">
+            <span class="text-2xl font-bold text-white font-mono" x-text="trajectoriesKpi.total_audits"></span>
+            <span class="text-xs text-slate-500">cibles</span>
+          </div>
+          <div class="text-[11px] text-slate-500 mt-1" x-text="trajectoriesKpi.total_cuts + ' coupures analysées'"></div>
+        </div>
+
+        <!-- KPI 2: Consensus Rate -->
+        <div class="bg-slate-900/60 border border-slate-800/80 rounded-xl p-3.5 flex flex-col justify-between">
+          <div class="text-[11px] font-semibold uppercase tracking-wider flex items-center justify-between"
+               :class="trajectoriesKpi.match_rate_pct >= 80 ? 'text-emerald-400' : (trajectoriesKpi.match_rate_pct >= 50 ? 'text-amber-400' : 'text-rose-400')">
+            <span class="flex items-center gap-1.5">
+              <span>Taux Consensus</span>
+              <button @click.stop="openGlossaryTopic('trajectoires')" class="text-slate-500 hover:text-emerald-400 cursor-pointer" title="Explication détaillée">?</button>
+            </span>
+            <span class="text-base">🏆</span>
+          </div>
+          <div class="mt-2 flex items-baseline gap-2">
+            <span class="text-2xl font-bold font-mono"
+                  :class="trajectoriesKpi.match_rate_pct >= 80 ? 'text-emerald-300' : (trajectoriesKpi.match_rate_pct >= 50 ? 'text-amber-300' : 'text-rose-300')"
+                  x-text="trajectoriesKpi.match_rate_pct + '%'"></span>
+            <span class="text-xs text-slate-400" x-text="trajectoriesKpi.total_matched + ' / ' + trajectoriesKpi.total_audits"></span>
+          </div>
+          <div class="text-[11px] text-slate-500 mt-1">Élection par score cumulé</div>
+        </div>
+
+        <!-- KPI 3: Temporal Coherence -->
+        <div class="bg-slate-900/60 border border-slate-800/80 rounded-xl p-3.5 flex flex-col justify-between">
+          <div class="text-[11px] font-semibold uppercase tracking-wider flex items-center justify-between"
+               :class="trajectoriesKpi.coherence_rate_pct >= 90 ? 'text-indigo-400' : (trajectoriesKpi.coherence_rate_pct >= 70 ? 'text-amber-400' : 'text-rose-400')">
+            <span class="flex items-center gap-1.5">
+              <span>Cohérence Temp.</span>
+              <button @click.stop="openGlossaryTopic('trajectoires')" class="text-slate-500 hover:text-indigo-400 cursor-pointer" title="Explication détaillée">?</button>
+            </span>
+            <span class="text-base">⏳</span>
+          </div>
+          <div class="mt-2 flex items-baseline gap-2">
+            <span class="text-2xl font-bold font-mono"
+                  :class="trajectoriesKpi.coherence_rate_pct >= 90 ? 'text-indigo-300' : (trajectoriesKpi.coherence_rate_pct >= 70 ? 'text-amber-300' : 'text-rose-300')"
+                  x-text="trajectoriesKpi.coherence_rate_pct + '%'"></span>
+            <span class="text-xs text-slate-400" x-text="trajectoriesKpi.total_coherent + ' certifiés'"></span>
+          </div>
+          <div class="text-[11px] text-slate-500 mt-1">Dérive Δt₀ ≤ 100 ms</div>
+        </div>
+
+        <!-- KPI 4: Mean Evaluation Latency -->
+        <div class="bg-slate-900/60 border border-slate-800/80 rounded-xl p-3.5 flex flex-col justify-between">
+          <div class="text-[11px] font-semibold text-amber-400 uppercase tracking-wider flex items-center justify-between">
+            <span class="flex items-center gap-1.5">
+              <span>Latence Moyenne</span>
+              <button @click.stop="openGlossaryTopic('trajectoires')" class="text-slate-500 hover:text-amber-400 cursor-pointer" title="Explication détaillée">?</button>
+            </span>
+            <span class="text-base">⚡</span>
+          </div>
+          <div class="mt-2 flex items-baseline gap-2">
+            <span class="text-2xl font-bold text-amber-300 font-mono" x-text="trajectoriesKpi.avg_elapsed_sec + 's'"></span>
+            <span class="text-xs text-slate-500">par cible</span>
+          </div>
+          <div class="text-[11px] text-slate-500 mt-1">Multi-cuts Rayon multithread</div>
+        </div>
+
+        <!-- KPI 5: Catalogue Covered (Pourcentage-Centré pour homogénéité stricte) -->
+        <div class="bg-slate-900/60 border border-slate-800/80 rounded-xl p-3.5 flex flex-col justify-between">
+          <div class="text-[11px] font-semibold text-purple-400 uppercase tracking-wider flex items-center justify-between">
+            <span class="flex items-center gap-1.5">
+              <span>Catalogue Couvert</span>
+              <button @click.stop="openGlossaryTopic('trajectoires')" class="text-slate-500 hover:text-purple-400 cursor-pointer" title="Explication détaillée">?</button>
+            </span>
+            <span class="text-base">🗄️</span>
+          </div>
+          <div class="mt-2 flex items-baseline gap-2">
+            <span class="text-2xl font-bold text-purple-300 font-mono" x-text="(trajectoriesKpi.catalog_coverage_pct || (trajectoriesKpi.unique_catalog_covered ? ((trajectoriesKpi.unique_catalog_covered / 2779) * 100).toFixed(1) : '0.0')) + '%'"></span>
+            <span class="text-xs text-slate-400 font-mono" x-text="(trajectoriesKpi.unique_catalog_covered || 0) + ' / ' + (trajectoriesKpi.catalog_total || '2 779')"></span>
+          </div>
+          <div class="text-[11px] text-slate-500 mt-1">Médias uniques référencés</div>
+        </div>
+      </div>
+
+      <!-- Filters, Search & Sort Bar -->
+      <div class="bg-slate-900/40 border border-slate-800 rounded-xl p-3 flex flex-col md:flex-row items-center justify-between gap-3">
+        <!-- Status Filter Pills with dynamic counter badges -->
+        <div class="flex items-center gap-1.5 flex-wrap">
+          <button @click="setTrajectoriesStatusFilter('all')"
+                  class="px-2.5 py-1 rounded-md text-xs font-semibold transition cursor-pointer flex items-center gap-1.5"
+                  :class="trajectoriesStatusFilter === 'all' ? 'bg-indigo-600 text-white' : 'bg-slate-800/80 text-slate-300 hover:bg-slate-700'">
+            <span>Tous</span>
+            <span class="text-[10px] font-mono px-1.5 py-0.2 rounded"
+                  :class="trajectoriesStatusFilter === 'all' ? 'bg-indigo-800 text-indigo-100' : 'bg-slate-900 text-slate-400 border border-slate-700'"
+                  x-text="trajectoriesKpi.total_audits || 0"></span>
+          </button>
+
+          <button @click="setTrajectoriesStatusFilter('coherent')"
+                  class="px-2.5 py-1 rounded-md text-xs font-semibold transition cursor-pointer flex items-center gap-1.5"
+                  :class="trajectoriesStatusFilter === 'coherent' ? 'bg-emerald-600 text-white' : 'bg-slate-800/80 text-emerald-300 hover:bg-slate-700'">
+            <span>✓ Cohérents</span>
+            <span class="text-[10px] font-mono px-1.5 py-0.2 rounded"
+                  :class="trajectoriesStatusFilter === 'coherent' ? 'bg-emerald-800 text-emerald-100' : 'bg-slate-900 text-emerald-400 border border-emerald-900/60'"
+                  x-text="trajectoriesKpi.total_coherent || 0"></span>
+          </button>
+
+          <button @click="setTrajectoriesStatusFilter('matched')"
+                  class="px-2.5 py-1 rounded-md text-xs font-semibold transition cursor-pointer flex items-center gap-1.5"
+                  :class="trajectoriesStatusFilter === 'matched' ? 'bg-indigo-600 text-white' : 'bg-slate-800/80 text-indigo-300 hover:bg-slate-700'">
+            <span>Consensus Gagné</span>
+            <span class="text-[10px] font-mono px-1.5 py-0.2 rounded"
+                  :class="trajectoriesStatusFilter === 'matched' ? 'bg-indigo-800 text-indigo-100' : 'bg-slate-900 text-indigo-400 border border-indigo-900/60'"
+                  x-text="trajectoriesKpi.total_matched || 0"></span>
+          </button>
+
+          <button @click="setTrajectoriesStatusFilter('divergent')"
+                  class="px-2.5 py-1 rounded-md text-xs font-semibold transition cursor-pointer flex items-center gap-1.5"
+                  :class="trajectoriesStatusFilter === 'divergent' ? 'bg-amber-600 text-white' : 'bg-slate-800/80 text-amber-300 hover:bg-slate-700'">
+            <span>Divergents</span>
+            <span class="text-[10px] font-mono px-1.5 py-0.2 rounded"
+                  :class="trajectoriesStatusFilter === 'divergent' ? 'bg-amber-800 text-amber-100' : 'bg-slate-900 text-amber-400 border border-amber-900/60'"
+                  x-text="trajectoriesKpi.total_divergent || 0"></span>
+          </button>
+
+          <button @click="setTrajectoriesStatusFilter('unmatched')"
+                  class="px-2.5 py-1 rounded-md text-xs font-semibold transition cursor-pointer flex items-center gap-1.5"
+                  :class="trajectoriesStatusFilter === 'unmatched' ? 'bg-rose-600 text-white' : 'bg-slate-800/80 text-rose-300 hover:bg-slate-700'">
+            <span>Sans Match</span>
+            <span class="text-[10px] font-mono px-1.5 py-0.2 rounded"
+                  :class="trajectoriesStatusFilter === 'unmatched' ? 'bg-rose-800 text-rose-100' : 'bg-slate-900 text-rose-400 border border-rose-900/60'"
+                  x-text="trajectoriesKpi.total_unmatched || 0"></span>
+          </button>
+        </div>
+
+        <!-- Search & Sort Controls -->
+        <div class="flex items-center gap-2 w-full md:w-auto">
+          <div class="relative flex-1 md:w-64">
+            <input type="text"
+                   x-model="trajectoriesSearchQuery"
+                   @input.debounce.300ms="onTrajectoriesFilterChange()"
+                   placeholder="Rechercher cible ou gagnant..."
+                   class="w-full bg-slate-950 border border-slate-700 text-xs rounded-lg pl-8 pr-3 py-1.5 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500" />
+            <span class="absolute left-2.5 top-2 text-slate-500 text-xs">🔍</span>
+          </div>
+
+          <select x-model="trajectoriesSort" @change="onTrajectoriesFilterChange()" class="bg-slate-950 border border-slate-700 text-xs rounded-lg px-2.5 py-1.5 text-slate-300 focus:outline-none focus:border-indigo-500">
+            <option value="name_asc">Titre Cible (A-Z)</option>
+            <option value="name_desc">Titre Cible (Z-A)</option>
+            <option value="matched_desc">Coupures Gagnées (Max)</option>
+            <option value="matched_asc">Coupures Gagnées (Min)</option>
+            <option value="duration_desc">Durée Décroissante</option>
+            <option value="duration_asc">Durée Croissante</option>
+            <option value="elapsed_desc">Latence Décroissante</option>
+            <option value="elapsed_asc">Latence Croissante</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Main Trajectories Table Container with Constrained Height & Custom Scroll -->
+      <div class="bg-slate-900/60 border border-slate-800 rounded-xl overflow-hidden shadow-xl flex flex-col">
+        <div class="overflow-x-auto overflow-y-auto max-h-[580px] custom-scroll">
+          <table class="w-full text-left text-xs min-w-[1100px]">
+            <thead class="bg-slate-950 text-slate-400 font-semibold uppercase tracking-wider text-[10px] border-b border-slate-800 sticky top-0 z-10 shadow-sm">
+              <tr>
+                <th class="py-3 px-4 min-w-[280px]">Vidéo Analysée</th>
+                <th class="py-3 px-3 min-w-[90px]">Durée</th>
+                <th class="py-3 px-4 min-w-[240px]">Coupures & Survivants</th>
+                <th class="py-3 px-4 min-w-[220px]">Consensus Élu</th>
+                <th class="py-3 px-3 min-w-[120px] text-center">Cohérence</th>
+                <th class="py-3 px-4 min-w-[100px] text-right">Latence</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-800/60">
+              <template x-if="trajectoriesLoading">
+                <tr>
+                  <td colspan="6" class="py-12 text-center text-slate-400">
+                    <span class="animate-spin text-xl text-indigo-400 inline-block mb-2">⚡</span>
+                    <p>Calcul et extraction des trajectoires spatiotemporelles...</p>
+                  </td>
+                </tr>
+              </template>
+
+              <template x-if="!trajectoriesLoading && trajectoriesItems.length === 0">
+                <tr>
+                  <td colspan="6" class="py-12 text-center text-slate-500">
+                    <span class="text-2xl block mb-1">📭</span>
+                    <span>Aucun enregistrement de trajectoire ne correspond aux critères sélectionnés.</span>
+                  </td>
+                </tr>
+              </template>
+
+              <template x-for="item in trajectoriesItems" :key="item.target_media">
+                <tr @click="inspectTrajectory(item.target_media)"
+                    class="hover:bg-indigo-950/30 transition cursor-pointer group/row select-none">
+                  <!-- Vidéo Analysée (Nom résolu depuis sidecar JSON si hash anonyme) -->
+                  <td class="py-3 px-4 max-w-xs md:max-w-md">
+                    <div class="flex items-center gap-2">
+                      <span class="text-slate-500 group-hover/row:text-indigo-400 transition text-xs">🔍</span>
+                      <span class="font-medium text-slate-200 group-hover/row:text-white truncate"
+                            :title="item.resolved_title || item.target_media"
+                            x-text="item.resolved_title || decodeURIComponent(item.target_media).replace(/\.phash$/, '')"></span>
+                    </div>
+                    <div class="flex items-center gap-2 text-[10px] font-mono text-slate-500 truncate pl-5 mt-0.5" :title="item.target_path">
+                      <template x-if="item.resolved_title && item.resolved_title !== decodeURIComponent(item.target_media).replace(/\.phash$/, '')">
+                        <span class="text-indigo-400 font-semibold truncate" x-text="decodeURIComponent(item.target_media).replace(/\.phash$/, '')"></span>
+                      </template>
+                      <template x-if="item.resolved_title && item.resolved_title !== decodeURIComponent(item.target_media).replace(/\.phash$/, '')">
+                        <span>•</span>
+                      </template>
+                      <span class="truncate" x-text="item.target_path"></span>
+                    </div>
+                  </td>
+
+                  <!-- Durée -->
+                  <td class="py-3 px-3 text-slate-300 font-mono whitespace-nowrap text-[11px]" x-text="item.duration_sec ? (Math.floor(item.duration_sec / 60) + 'm ' + Math.floor(item.duration_sec % 60) + 's') : '-'"></td>
+
+                  <!-- Coupures Évaluées & Ribbon -->
+                  <td class="py-3 px-4">
+                    <div class="flex items-center gap-2 flex-wrap">
+                      <span class="font-mono font-semibold text-[11px]" :class="item.matched_cuts_count > 0 ? 'text-emerald-400' : 'text-slate-500'" x-text="item.matched_cuts_count + '/' + item.cuts_count"></span>
+                      <!-- Cuts Ribbon Sparkline -->
+                      <div class="flex items-center gap-1 bg-slate-950 px-2 py-1 rounded border border-slate-800/80">
+                        <template x-for="(cut, cidx) in item.cuts_summary" :key="cidx">
+                          <span class="inline-block w-2.5 h-2.5 rounded-sm"
+                                :class="cut.matched ? 'bg-emerald-500' : 'bg-slate-700'"
+                                :title="'Coupure #' + (cidx + 1) + ' @ ' + Math.round(cut.start_sec) + 's : ' + (cut.matched ? 'Match ID ' + cut.winner_id + ' (score: ' + cut.score + ')' : 'Sans consensus')"></span>
+                        </template>
+                      </div>
+                    </div>
+                  </td>
+
+                  <!-- Consensus Élu -->
+                  <td class="py-3 px-4">
+                    <template x-if="item.consensus_media_id !== null">
+                      <div class="flex items-center gap-2 truncate">
+                        <span class="px-1.5 py-0.5 rounded bg-indigo-900/60 text-indigo-300 border border-indigo-700 font-mono text-[10px] shrink-0" x-text="'ID ' + item.consensus_media_id"></span>
+                        <span class="font-medium text-white truncate max-w-[240px] text-[11px]" :title="item.consensus_title" x-text="item.consensus_title"></span>
+                      </div>
+                    </template>
+                    <template x-if="item.consensus_media_id === null">
+                      <span class="text-slate-500 italic text-[11px]">Aucun consensus</span>
+                    </template>
+                  </td>
+
+                  <!-- Cohérence Temporelle -->
+                  <td class="py-3 px-3 text-center whitespace-nowrap">
+                    <template x-if="item.consensus_media_id === null">
+                      <span class="px-2 py-0.5 rounded bg-slate-800 text-slate-500 text-[10px] font-mono">NON APPLICABLE</span>
+                    </template>
+                    <template x-if="item.consensus_media_id !== null && item.is_temporally_coherent">
+                      <span class="px-2 py-0.5 rounded bg-emerald-950/80 text-emerald-300 border border-emerald-800/80 text-[10px] font-semibold font-mono">✓ COHÉRENT</span>
+                    </template>
+                    <template x-if="item.consensus_media_id !== null && !item.is_temporally_coherent">
+                      <span class="px-2 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-800/80 text-[10px] font-semibold font-mono">⚠ DIVERGENT</span>
+                    </template>
+                  </td>
+
+                  <!-- Latence -->
+                  <td class="py-3 px-4 text-right font-mono text-slate-400 whitespace-nowrap text-[11px]" x-text="item.total_elapsed_seconds ? (item.total_elapsed_seconds.toFixed(2) + 's') : '-'"></td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Table Pagination Controls -->
+        <div class="bg-slate-950/80 px-4 py-3 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400">
+          <div class="flex items-center gap-2">
+            <span>Lignes par page :</span>
+            <select x-model="trajectoriesLimit" @change="onTrajectoriesFilterChange()" class="bg-slate-900 border border-slate-700 text-xs rounded px-2 py-0.5 text-slate-300">
+              <option value="15">15</option>
+              <option value="25">25</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+            </select>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <button @click="prevTrajectoriesPage()" :disabled="trajectoriesPage <= 1" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed text-white font-medium border border-slate-700 transition cursor-pointer">
+              ← Précédent
+            </button>
+            <span class="px-2 font-mono" x-text="trajectoriesPage + ' / ' + (trajectoriesTotalPages || 1)"></span>
+            <button @click="nextTrajectoriesPage()" :disabled="trajectoriesPage >= trajectoriesTotalPages" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed text-white font-medium border border-slate-700 transition cursor-pointer">
+              Suivant →
+            </button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
     <!-- Slide-over Drawer: Technical Asset Inspection -->
     <div x-show="selectedAssetModal"
+         @keydown.escape.window="if (selectedAssetModal) selectedAssetModal = false"
          class="fixed inset-0 z-50 overflow-hidden"
          aria-labelledby="slide-over-title"
          role="dialog"
@@ -1567,6 +1975,7 @@
 
     <!-- Centered Modal: Microscopic pHash Inspection -->
     <div x-show="selectedPhashModal"
+         @keydown.escape.window="if (selectedPhashModal) closePhashModal()"
          class="fixed inset-0 z-50 overflow-y-auto custom-scroll flex items-center justify-center p-4 sm:p-6"
          aria-labelledby="slide-over-phash-title"
          role="dialog"
@@ -1574,7 +1983,7 @@
          x-cloak>
       <!-- Fullscreen Backdrop blur covering entire viewport including header -->
       <div class="fixed inset-0 bg-slate-950/85 backdrop-blur-md transition-opacity"
-           @click="selectedPhashModal = false"></div>
+           @click="closePhashModal(true)"></div>
 
       <!-- Centered Wide Modal Container (max-w-4xl) -->
       <div class="relative w-full max-w-4xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden my-auto z-10"
@@ -1589,7 +1998,17 @@
               <span class="text-[10px] text-slate-400 font-mono" x-text="selectedPhash ? selectedPhash.raw_filename : ''"></span>
             </div>
           </div>
-          <button @click="selectedPhashModal = false" class="text-slate-400 hover:text-white text-lg p-1.5 rounded-lg hover:bg-slate-800 transition cursor-pointer">✕</button>
+          <div class="flex items-center gap-2">
+            <template x-if="trajectoryModalOrigin">
+              <button @click="returnToTrajectory()"
+                      class="px-2.5 py-1.5 rounded-lg bg-indigo-950/80 hover:bg-indigo-900/90 text-indigo-300 font-semibold border border-indigo-700/80 text-xs flex items-center gap-1.5 transition cursor-pointer shadow-sm"
+                      title="Revenir à l'inspection de la trajectoire">
+                <span>🎯</span>
+                <span>Retour Trajectoire</span>
+              </button>
+            </template>
+            <button @click="closePhashModal(true)" class="text-slate-400 hover:text-white text-lg p-1.5 rounded-lg hover:bg-slate-800 transition cursor-pointer" title="Fermer">✕</button>
+          </div>
         </div>
 
         <!-- Modal Body -->
@@ -2460,17 +2879,233 @@
 
           <!-- Modal Footer -->
           <div class="p-4 bg-slate-950 border-t border-slate-800 flex items-center justify-between shrink-0">
-            <span class="text-[11px] text-slate-500 font-mono">Appuyez sur Échap ou cliquez à l'extérieur pour fermer</span>
-            <button @click="selectedPhashModal = false" class="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs font-semibold text-white shadow transition cursor-pointer">
-              Fermer
-            </button>
+            <span class="text-[11px] text-slate-500 font-mono"
+                  x-text="trajectoryModalOrigin ? 'Appuyez sur Échap ou Retour pour revenir à la trajectoire • Cliquez à l\'extérieur pour fermer' : 'Appuyez sur Échap ou cliquez à l\'extérieur pour fermer'"></span>
+            <div class="flex items-center gap-2">
+              <template x-if="trajectoryModalOrigin">
+                <button @click="returnToTrajectory()"
+                        class="px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-sm">
+                  <span>🎯</span>
+                  <span>Retour Trajectoire</span>
+                </button>
+              </template>
+              <button @click="closePhashModal(true)"
+                      :class="trajectoryModalOrigin ? 'px-3.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 transition cursor-pointer' : 'px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs font-semibold text-white shadow transition cursor-pointer'">
+                Fermer
+              </button>
+            </div>
           </div>
 
         </div>
       </div>
 
+    <!-- Centered Wide Modal: Spatiotemporal Trajectory & Cuts Consensus Inspection -->
+    <div x-show="selectedTrajectoryModal"
+         @keydown.escape.window="if (selectedTrajectoryModal && !selectedPhashModal) closeTrajectoryModal()"
+         class="fixed inset-0 z-50 overflow-y-auto custom-scroll flex items-center justify-center p-4 sm:p-6"
+         aria-labelledby="trajectory-modal-title"
+         role="dialog"
+         aria-modal="true"
+         x-cloak>
+      <!-- Fullscreen Backdrop blur covering entire viewport -->
+      <div class="fixed inset-0 bg-slate-950/85 backdrop-blur-md transition-opacity"
+           @click="closeTrajectoryModal()"></div>
+
+      <!-- Centered Wide Modal Container (max-w-5xl) -->
+      <div class="relative w-full max-w-5xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden my-auto z-10"
+           @click.stop>
+
+        <!-- Modal Header -->
+        <div class="px-6 py-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between shrink-0">
+          <div class="flex items-center gap-3 truncate max-w-2xl">
+            <span class="text-xl">🎯</span>
+            <div class="truncate">
+              <h2 class="text-base font-bold text-white tracking-tight truncate"
+                  x-text="selectedTrajectory ? (selectedTrajectory.resolved_title || decodeURIComponent(selectedTrajectory.target_media).replace(/\.phash$/, '')) : 'Détail Trajectoire'"></h2>
+              <div class="flex items-center gap-2 text-[10px] text-slate-400 font-mono mt-0.5 truncate">
+                <span class="truncate" x-text="selectedTrajectory ? selectedTrajectory.target_path : ''"></span>
+                <span>•</span>
+                <span class="text-indigo-400 font-semibold" x-text="selectedTrajectory && selectedTrajectory.duration_sec ? formatDuration(selectedTrajectory.duration_sec) : ''"></span>
+              </div>
+            </div>
+          </div>
+          <div class="flex items-center gap-2 shrink-0">
+            <button @click="openPhashFromTrajectory()"
+                    class="px-2.5 py-1.5 rounded-lg bg-indigo-950/80 hover:bg-indigo-900/90 text-indigo-300 font-semibold border border-indigo-700/80 text-xs flex items-center gap-1.5 transition cursor-pointer shadow-sm"
+                    title="Inspecter l'empreinte pHash de cette vidéo avec ses coupes d'entropie et son sismographe">
+              <span>🔬</span>
+              <span>Empreinte pHash</span>
+            </button>
+            <button @click="closeTrajectoryModal()" class="text-slate-400 hover:text-white text-lg p-1.5 rounded-lg hover:bg-slate-800 transition cursor-pointer">✕</button>
+          </div>
+        </div>
+
+        <!-- Modal Body -->
+        <div class="flex-1 overflow-y-auto p-6 space-y-6 custom-scroll">
+          <template x-if="trajectoryDetailLoading">
+            <div class="py-16 text-center text-slate-400">
+              <span class="animate-spin text-2xl text-indigo-400 inline-block mb-3">⚡</span>
+              <p class="text-xs font-semibold text-slate-300">Chargement de la trajectoire détaillée...</p>
+            </div>
+          </template>
+
+          <template x-if="!trajectoryDetailLoading && !selectedTrajectory">
+            <div class="py-16 text-center space-y-3">
+              <span class="text-3xl text-rose-400 block">⚠️</span>
+              <p class="font-semibold text-sm text-slate-200">Trajectoire introuvable</p>
+              <p class="text-xs text-rose-400 max-w-sm mx-auto bg-rose-950/40 border border-rose-900/50 rounded-lg p-3 font-mono" x-text="trajectoryDetailError || 'Données non trouvées pour cette cible.'"></p>
+            </div>
+          </template>
+
+          <template x-if="!trajectoryDetailLoading && selectedTrajectory">
+            <div class="space-y-6 text-xs">
+
+              <!-- 1. Identifiants & Spécifications de la Vidéo Analysée -->
+              <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
+                <div class="text-[11px] font-semibold text-indigo-400 uppercase tracking-wider flex items-center justify-between">
+                  <span>1. Identifiants & Spécifications de la Vidéo Analysée</span>
+                  <span class="font-mono text-slate-500" x-text="selectedTrajectory.cuts_count + ' fenêtres glissantes'"></span>
+                </div>
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 font-mono">
+                  <div class="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800/80">
+                    <div class="text-[10px] text-slate-500 uppercase">Durée Détectée</div>
+                    <div class="text-xs font-bold text-white mt-1" x-text="formatDuration(selectedTrajectory.duration_sec)"></div>
+                  </div>
+                  <div class="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800/80">
+                    <div class="text-[10px] text-slate-500 uppercase">Coupures Analysées</div>
+                    <div class="text-xs font-bold text-indigo-300 mt-1" x-text="selectedTrajectory.cuts_count + ' coupures'"></div>
+                  </div>
+                  <div class="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800/80">
+                    <div class="text-[10px] text-slate-500 uppercase">Temps d'Analyse</div>
+                    <div class="text-xs font-bold text-amber-300 mt-1" x-text="(selectedTrajectory.total_elapsed_seconds ? selectedTrajectory.total_elapsed_seconds.toFixed(3) : '0') + 's'"></div>
+                  </div>
+                  <div class="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800/80">
+                    <div class="text-[10px] text-slate-500 uppercase">Gisement pHash</div>
+                    <div class="text-xs font-bold text-emerald-400 mt-1 truncate" title="Format binaire .phash 64 bits">RAW .phash</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 2. Verdict du Consensus Spatiotemporel -->
+              <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
+                <div class="text-[11px] font-semibold text-indigo-400 uppercase tracking-wider flex items-center justify-between">
+                  <span>2. Verdict du Consensus Multi-Coupures</span>
+                  <template x-if="selectedTrajectory.is_temporally_coherent">
+                    <span class="text-emerald-400 font-mono text-[10px] bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-800">✓ ALIGNEMENT LINÉAIRE VALIDE</span>
+                  </template>
+                  <template x-if="!selectedTrajectory.is_temporally_coherent && selectedTrajectory.consensus_media_id !== null">
+                    <span class="text-amber-400 font-mono text-[10px] bg-amber-950/80 px-2 py-0.5 rounded border border-amber-800">⚠ ATTENTION : DIVERGENT</span>
+                  </template>
+                  <template x-if="selectedTrajectory.consensus_media_id === null">
+                    <span class="text-slate-400 font-mono text-[10px] bg-slate-900 px-2 py-0.5 rounded border border-slate-800">AUCUN CONSENSUS</span>
+                  </template>
+                </div>
+
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 font-mono">
+                  <div class="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800/80">
+                    <div class="text-[10px] text-slate-500 uppercase">Média Élu</div>
+                    <div class="text-xs font-bold text-white mt-1 truncate" :title="selectedTrajectory.consensus_title" x-text="selectedTrajectory.consensus_title"></div>
+                  </div>
+                  <div class="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800/80">
+                    <div class="text-[10px] text-slate-500 uppercase">ID Index</div>
+                    <div class="text-xs font-bold text-indigo-400 mt-1" x-text="selectedTrajectory.consensus_media_id !== null ? ('#' + selectedTrajectory.consensus_media_id) : 'AUCUN'"></div>
+                  </div>
+                  <div class="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800/80">
+                    <div class="text-[10px] text-slate-500 uppercase">Coupures Matchées</div>
+                    <div class="text-xs font-bold mt-1" :class="selectedTrajectory.matched_cuts_count > 0 ? 'text-emerald-400' : 'text-slate-400'" x-text="selectedTrajectory.matched_cuts_count + ' / ' + selectedTrajectory.cuts_count"></div>
+                  </div>
+                  <div class="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800/80">
+                    <div class="text-[10px] text-slate-500 uppercase">Taux de Victoire</div>
+                    <div class="text-xs font-bold text-emerald-400 mt-1" x-text="selectedTrajectory.cuts_count > 0 ? (Math.round((selectedTrajectory.matched_cuts_count / selectedTrajectory.cuts_count) * 100) + '%') : '0%'"></div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 3. Séquence Chronologique des Coupures & Survivants -->
+              <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-4">
+                <div class="text-[11px] font-semibold text-indigo-400 uppercase tracking-wider flex items-center justify-between">
+                  <span>3. Séquence Chronologique des Coupures & Survivants</span>
+                  <span class="font-mono text-slate-500" x-text="(selectedTrajectory.cuts || []).length + ' tranches temporelles'"></span>
+                </div>
+
+                <div class="space-y-3">
+                  <template x-for="(cut, cidx) in (selectedTrajectory.cuts || [])" :key="cidx">
+                    <div class="p-3.5 bg-slate-900/70 border rounded-xl space-y-2.5 transition"
+                         :class="cut.winner_media_id === selectedTrajectory.consensus_media_id && cut.winner_media_id !== null ? 'border-indigo-500/60 bg-indigo-950/20' : (cut.winner_media_id !== null ? 'border-slate-800 bg-slate-900/40' : 'border-slate-800/60 opacity-60')">
+
+                      <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2">
+                          <span class="font-mono text-xs font-bold px-2 py-0.5 rounded"
+                                :class="cut.winner_media_id !== null ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-slate-900 text-slate-500 border border-slate-800'"
+                                x-text="'Coupure #' + (cidx + 1)"></span>
+                          <span class="text-slate-300 font-mono text-xs" x-text="'@ ' + Math.round(cut.start_sec) + 's (' + cut.nb_frames + ' trames)'"></span>
+                        </div>
+
+                        <div class="flex items-center gap-2">
+                          <template x-if="cut.winner_media_id !== null">
+                            <span class="px-2.5 py-0.5 rounded text-[10px] font-mono bg-indigo-950/80 text-indigo-300 border border-indigo-800"
+                                  x-text="'Match #' + cut.winner_media_id + ' (score: ' + (cut.winner_score ? cut.winner_score.toFixed(1) : '0') + ')'"></span>
+                          </template>
+                          <template x-if="cut.winner_media_id === null">
+                            <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-900 text-slate-500 border border-slate-800">
+                              Aucun consensus
+                            </span>
+                          </template>
+                          <span class="text-[10px] font-mono text-slate-500" x-text="cut.elapsed_seconds ? (cut.elapsed_seconds.toFixed(2) + 's') : ''"></span>
+                        </div>
+                      </div>
+
+                      <!-- Local Cut Details -->
+                      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[10px] font-mono pt-1 text-slate-400">
+                        <div>
+                          <span class="text-slate-500">Candidats initiaux :</span>
+                          <span class="text-slate-200 font-semibold" x-text="cut.initial_candidates_count"></span>
+                        </div>
+                        <div>
+                          <span class="text-slate-500">Trajectoires survivantes :</span>
+                          <span class="text-slate-200 font-semibold" x-text="cut.surviving_trajectories_count"></span>
+                        </div>
+                        <div>
+                          <span class="text-slate-500">Trames matchées :</span>
+                          <span class="text-slate-200 font-semibold" x-text="cut.winner_matched_frames + ' / ' + cut.evaluated_frames_count"></span>
+                        </div>
+                        <div>
+                          <span class="text-slate-500">Score de Couverture :</span>
+                          <span :class="(cut.winner_coverage_ratio || 0) >= 0.5 ? 'text-emerald-400 font-bold' : 'text-slate-400'"
+                                x-text="Math.round((cut.winner_coverage_ratio || 0) * 100) + '%'"></span>
+                        </div>
+                      </div>
+
+                      <!-- Progress Bar of Matched Frames -->
+                      <div class="w-full bg-slate-900 h-2 rounded-full overflow-hidden border border-slate-800/80">
+                        <div class="h-full rounded-full transition-all duration-300"
+                             :class="cut.winner_media_id !== null ? 'bg-gradient-to-r from-indigo-500 to-emerald-400' : 'bg-slate-700'"
+                             :style="'width: ' + Math.min(100, Math.round((cut.winner_coverage_ratio || 0) * 100)) + '%'"></div>
+                      </div>
+
+                    </div>
+                  </template>
+                </div>
+              </div>
+
+            </div>
+          </template>
+        </div>
+
+        <!-- Modal Footer -->
+        <div class="p-4 bg-slate-950 border-t border-slate-800 flex items-center justify-between shrink-0">
+          <span class="text-[11px] text-slate-500 font-mono">Appuyez sur Échap ou cliquez à l'extérieur pour fermer</span>
+          <button @click="closeTrajectoryModal()" class="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs font-semibold text-white shadow transition cursor-pointer">
+            Fermer
+          </button>
+        </div>
+
+      </div>
+    </div>
+
     <!-- Modal: Contextual Glossary & Domain Definitions -->
     <div x-show="showGlossaryModal"
+         @keydown.escape.window="if (showGlossaryModal) showGlossaryModal = false"
          class="fixed inset-0 z-50 overflow-hidden flex items-center justify-center p-4"
          aria-labelledby="glossary-modal-title"
          role="dialog"
@@ -2569,28 +3204,33 @@
           </div>
 
           <!-- Section 5: Les 3 Piliers de l'Empreinte pHash -->
+          <!-- Section 6: Trajectoires & Consensus Spatiotemporel -->
           <div class="bg-slate-950/80 border border-slate-800 rounded-xl p-4 space-y-2">
             <h4 class="font-bold text-indigo-400 uppercase text-[11px] flex items-center gap-1.5">
-              <span>🏛️</span>
-              <span>5. Trinité des Empreintes : Les 3 Piliers pHash</span>
+              <span>🎯</span>
+              <span>6. Métriques de Trajectoires Spatio-temporelles</span>
             </h4>
-            <p class="text-slate-400">Comprendre l'hétérogénéité des états d'une empreinte perceptuelle au sein de pydbsrt :</p>
+            <p class="text-slate-400">Rôle des 5 indicateurs clés d'évaluation multi-coupures :</p>
             <ul class="space-y-2 pt-1 font-sans">
               <li class="flex items-start gap-2">
-                <span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-sky-950 text-sky-300 border border-sky-800 shrink-0">📁 Pilier 1 : RAW Store</span>
-                <span><strong>Fichiers Bruts Disque :</strong> Suite linéaire continue de 64-bit entiers non compressés (1 hash par trame vidéo). Gisement maître non altéré stocké dans <code class="text-slate-400">data/__PHASH__/*.phash</code> (~1.5 Go).</span>
+                <span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-800 text-slate-300 border border-slate-700 shrink-0">🎬 Médias Évalués</span>
+                <span><strong>Volume Cibles :</strong> Nombre total de vidéos candidates ou inconnues évaluées dans le rapport, avec le cumul des tranches temporelles analysées.</span>
               </li>
               <li class="flex items-start gap-2">
-                <span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-indigo-950 text-indigo-300 border border-indigo-800 shrink-0">⚡ Pilier 2 : Catalogue Zero-DB</span>
-                <span><strong>Catalogue Compilé mmap :</strong> Fichier binaire compacté haute densité (<code class="text-indigo-300">catalog.dbphash</code> v2.0) filtrant uniquement les changements de scènes (Cuts) et 1 frame par seconde (Sparse), permettant une recherche O(1) sans base de données avec un gain d'espace de 6x à 12x.</span>
+                <span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-950 text-emerald-400 border border-emerald-800 shrink-0">🏆 Taux de Consensus</span>
+                <span><strong>Vainqueur Incontestable :</strong> Pourcentage de vidéos cibles pour lesquelles un film unique de référence remporte la majorité absolue des tranches d'échantillonnage par score cumulé (statuts <code>COHÉRENT</code> ou <code>CONSENSUS GAGNÉ</code>).</span>
               </li>
               <li class="flex items-start gap-2">
-                <span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-950 text-emerald-300 border border-emerald-800 shrink-0">🐘 Pilier 3 : BKtreeDB</span>
-                <span><strong>Indexation Relationnelle :</strong> Table PostgreSQL <code class="text-emerald-300">medias</code> couplée à la table de trames <code class="text-emerald-300">frames</code> indexée par l'extension SP-GiST Hamming pour la recherche floue indexée par arbre BK relationnel.</span>
+                <span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-indigo-950 text-indigo-300 border border-indigo-800 shrink-0">⏳ Cohérence Temporelle</span>
+                <span><strong>Stabilité du Décalage :</strong> Vérifie que le décalage temporel (<code class="text-indigo-300">Δt₀ ≤ 100 ms</code>) reste identique du début à la fin du film. Détecte si la vidéo a une vitesse de lecture différente (ex. 24 fps vs 25 fps) ou si des scènes ont été ajoutées ou coupées (version longue vs version cinéma).</span>
               </li>
               <li class="flex items-start gap-2">
-                <span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-950 text-emerald-400 border border-emerald-800 shrink-0">🟢 Aligné 3/3</span>
-                <span><strong>Parité Maximale :</strong> L'empreinte existe sous forme brute sur disque, est compilée dans le catalogue Zero-DB et est réconciliée avec la base relationnelle.</span>
+                <span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-950 text-amber-300 border border-amber-800 shrink-0">⚡ Latence Moyenne</span>
+                <span><strong>Coût CPU :</strong> Temps moyen nécessaire pour décoder les tranches vidéo, calculer leurs empreintes pHash et interroger le catalogue en mémoire vive via le moteur multithread Rayon.</span>
+              </li>
+              <li class="flex items-start gap-2">
+                <span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-purple-950 text-purple-300 border border-purple-800 shrink-0">🗄️ Catalogue Couvert</span>
+                <span><strong>Diversité Référencée :</strong> Nombre d'œuvres distinctes de notre catalogue officiel reconnues et validées à travers l'ensemble des vidéos testées dans ce lot.</span>
               </li>
             </ul>
           </div>
@@ -2696,6 +3336,7 @@
         phashesSort: 'id_asc',
         phashesLoading: false,
         selectedPhashModal: false,
+        trajectoryModalOrigin: false,
         selectedPhash: null,
         phashDetailLoading: false,
         showIntegrityTip: false,
@@ -2717,6 +3358,36 @@
           panStartClientX: 0,
           panStartRatio: 0,
         },
+
+        // Trajectories View State (Spatiotemporal Trajectory Tracking & Consensus)
+        trajectoriesFiles: [],
+        trajectoriesActiveFile: '',
+        trajectoriesFileDropdownOpen: false,
+        trajectoriesFileSearch: '',
+        trajectoriesKpi: {
+          total_audits: 0,
+          total_matched: 0,
+          total_coherent: 0,
+          coherence_rate_pct: 0,
+          match_rate_pct: 0,
+          avg_elapsed_sec: 0,
+          total_cuts: 0,
+        },
+        trajectoriesItems: [],
+        trajectoriesPage: 1,
+        trajectoriesLimit: 25,
+        trajectoriesTotalItems: 0,
+        trajectoriesFilteredItems: 0,
+        trajectoriesTotalPages: 1,
+        trajectoriesStatusFilter: 'all',
+        trajectoriesSearchQuery: '',
+        trajectoriesSort: 'name_asc',
+        trajectoriesLoading: false,
+        trajectoriesError: null,
+        selectedTrajectory: null,
+        selectedTrajectoryModal: false,
+        trajectoryDetailLoading: false,
+        trajectoryDetailError: null,
 
         async initApp() {
           const stored = this.loadStoredState();
@@ -2777,6 +3448,12 @@
               phashesLimit: this.phashesLimit || 25,
               phashesSort: this.phashesSort || 'id_asc',
               phashesSearchQuery: this.phashesSearchQuery || '',
+              trajectoriesActiveFile: this.trajectoriesActiveFile || '',
+              trajectoriesStatusFilter: this.trajectoriesStatusFilter || 'all',
+              trajectoriesPage: this.trajectoriesPage || 1,
+              trajectoriesLimit: this.trajectoriesLimit || 25,
+              trajectoriesSort: this.trajectoriesSort || 'title_asc',
+              trajectoriesSearchQuery: this.trajectoriesSearchQuery || '',
             };
             localStorage.setItem('pydbsrt_sources_state_v1', JSON.stringify(state));
           } catch (err) {
@@ -2826,6 +3503,23 @@
             }
             if (this.phashesSort && this.phashesSort !== 'id_asc') {
               params.set('sort', this.phashesSort);
+            }
+          }
+          if (this.currentView === 'trajectories') {
+            if (this.trajectoriesActiveFile) {
+              params.set('file', this.trajectoriesActiveFile);
+            }
+            if (this.trajectoriesStatusFilter && this.trajectoriesStatusFilter !== 'all') {
+              params.set('status', this.trajectoriesStatusFilter);
+            }
+            if (this.trajectoriesPage > 1) {
+              params.set('page', String(this.trajectoriesPage));
+            }
+            if (this.trajectoriesSearchQuery) {
+              params.set('q', this.trajectoriesSearchQuery);
+            }
+            if (this.trajectoriesSort && this.trajectoriesSort !== 'name_asc') {
+              params.set('sort', this.trajectoriesSort);
             }
           }
           if (this.currentView === 'explorer' && this.explorerSource && this.explorerProfile) {
@@ -2898,6 +3592,17 @@
             return;
           }
 
+          if (view === 'trajectories') {
+            this.currentView = 'trajectories';
+            this.trajectoriesActiveFile = hashParams.get('file') || '';
+            this.trajectoriesStatusFilter = hashParams.get('status') || hashParams.get('filter') || 'all';
+            this.trajectoriesPage = parseInt(hashParams.get('page') || '1') || 1;
+            this.trajectoriesSearchQuery = hashParams.get('q') || '';
+            this.trajectoriesSort = hashParams.get('sort') || 'title_asc';
+            this.fetchTrajectories();
+            return;
+          }
+
           if (view === 'explorer') {
             const sourceId = hashParams.get('source');
             const profileId = hashParams.get('profile');
@@ -2955,6 +3660,17 @@
             this.phashesSearchQuery = hashParams?.get('q') || stored?.phashesSearchQuery || '';
             this.phashesSort = hashParams?.get('sort') || stored?.phashesSort || 'id_asc';
             this.fetchPhashes();
+            return;
+          }
+
+          if (view === 'trajectories') {
+            this.currentView = 'trajectories';
+            this.trajectoriesActiveFile = hashParams?.get('file') || stored?.trajectoriesActiveFile || '';
+            this.trajectoriesStatusFilter = hashParams?.get('status') || hashParams?.get('filter') || stored?.trajectoriesStatusFilter || 'all';
+            this.trajectoriesPage = parseInt(hashParams?.get('page') || (stored?.trajectoriesPage || 1)) || 1;
+            this.trajectoriesSearchQuery = hashParams?.get('q') || stored?.trajectoriesSearchQuery || '';
+            this.trajectoriesSort = hashParams?.get('sort') || stored?.trajectoriesSort || 'title_asc';
+            this.fetchTrajectories();
             return;
           }
 
@@ -3449,7 +4165,191 @@
             this.fetchAssets();
           } else if (newView === 'phashes') {
             this.fetchPhashes();
+          } else if (newView === 'trajectories') {
+            this.fetchTrajectories();
           }
+        },
+
+        // Trajectories View Actions
+        async fetchTrajectoryFiles() {
+          try {
+            const resp = await fetch(this.getApiUrl('trajectory/files'));
+            if (resp.ok) {
+              const data = await resp.json();
+              this.trajectoriesFiles = Array.isArray(data) ? data : (data.files || []);
+              if (!this.trajectoriesActiveFile && this.trajectoriesFiles.length > 0) {
+                this.trajectoriesActiveFile = this.trajectoriesFiles[0].filename;
+              }
+            }
+          } catch (err) {
+            console.error('Failed to fetch trajectory files:', err);
+          }
+        },
+
+        async fetchTrajectories() {
+          if (!this.trajectoriesActiveFile && this.trajectoriesFiles.length === 0) {
+            await this.fetchTrajectoryFiles();
+          }
+          this.trajectoriesLoading = true;
+          this.trajectoriesError = null;
+          try {
+            const params = new URLSearchParams({
+              file: this.trajectoriesActiveFile,
+              page: this.trajectoriesPage.toString(),
+              limit: this.trajectoriesLimit.toString(),
+              filter: this.trajectoriesStatusFilter,
+              q: this.trajectoriesSearchQuery,
+              sort: this.trajectoriesSort,
+            });
+            const resp = await fetch(this.getApiUrl('trajectories', params.toString()));
+            if (resp.ok) {
+              const data = await resp.json();
+              this.trajectoriesItems = data.items || [];
+              this.trajectoriesKpi = data.kpi || this.trajectoriesKpi;
+              this.trajectoriesTotalItems = data.total_items || 0;
+              this.trajectoriesFilteredItems = data.filtered_items || 0;
+              this.trajectoriesTotalPages = data.total_pages || 1;
+              if (data.file) {
+                this.trajectoriesActiveFile = data.file;
+              }
+            } else {
+              this.trajectoriesItems = [];
+              this.trajectoriesTotalItems = 0;
+              this.trajectoriesFilteredItems = 0;
+              this.trajectoriesTotalPages = 1;
+              this.trajectoriesError = 'Erreur lors du chargement des trajectoires';
+            }
+          } catch (err) {
+            this.trajectoriesItems = [];
+            this.trajectoriesTotalItems = 0;
+            this.trajectoriesFilteredItems = 0;
+            this.trajectoriesTotalPages = 1;
+            this.trajectoriesError = err.message || 'Erreur réseau';
+          } finally {
+            this.trajectoriesLoading = false;
+          }
+        },
+
+        selectTrajectoryFile(filename) {
+          this.trajectoriesActiveFile = filename;
+          this.trajectoriesFileDropdownOpen = false;
+          this.trajectoriesFileSearch = '';
+          this.onTrajectoriesFilterChange();
+        },
+
+        getActiveTrajectoryFileObj() {
+          return this.trajectoriesFiles.find(f => f.filename === this.trajectoriesActiveFile) || null;
+        },
+
+        getFilteredTrajectoryFiles() {
+          const q = (this.trajectoriesFileSearch || '').trim().toLowerCase();
+          if (!q) return this.trajectoriesFiles;
+          return this.trajectoriesFiles.filter(f => {
+            const nameMatch = (f.filename || '').toLowerCase().includes(q);
+            const dateMatch = (f.modified_fmt || '').toLowerCase().includes(q) || (f.date_short || '').toLowerCase().includes(q);
+            const sizeMatch = (f.size_human || '').toLowerCase().includes(q);
+            const statusMatch = (f.status_label || '').toLowerCase().includes(q);
+            return nameMatch || dateMatch || sizeMatch || statusMatch;
+          });
+        },
+
+        onTrajectoriesFilterChange() {
+          this.trajectoriesPage = 1;
+          this.syncUrlHash(true);
+          this.fetchTrajectories();
+        },
+
+        setTrajectoriesStatusFilter(status) {
+          this.trajectoriesStatusFilter = status;
+          this.onTrajectoriesFilterChange();
+        },
+
+        prevTrajectoriesPage() {
+          if (this.trajectoriesPage > 1) {
+            this.trajectoriesPage--;
+            this.syncUrlHash(false);
+            this.fetchTrajectories();
+          }
+        },
+
+        nextTrajectoriesPage() {
+          if (this.trajectoriesPage < this.trajectoriesTotalPages) {
+            this.trajectoriesPage++;
+            this.syncUrlHash(false);
+            this.fetchTrajectories();
+          }
+        },
+
+        async inspectTrajectory(targetMedia) {
+          this.selectedTrajectoryModal = true;
+          this.trajectoryDetailLoading = true;
+          this.trajectoryDetailError = null;
+          this.selectedTrajectory = null;
+          try {
+            const params = new URLSearchParams({
+              file: this.trajectoriesActiveFile,
+              target: targetMedia,
+            });
+            const resp = await fetch(this.getApiUrl('trajectory/details', params.toString()));
+            if (resp.ok) {
+              const data = await resp.json();
+              this.selectedTrajectory = data.item;
+            } else {
+              this.trajectoryDetailError = 'Détails de trajectoire introuvables';
+            }
+          } catch (err) {
+            this.trajectoryDetailError = err.message || 'Erreur réseau';
+          } finally {
+            this.trajectoryDetailLoading = false;
+          }
+        },
+
+        formatDuration(sec) {
+          if (!sec || sec <= 0) return '-';
+          const m = Math.floor(sec / 60);
+          const s = Math.floor(sec % 60);
+          return `${m}m ${s}s`;
+        },
+
+        openPhashFromTrajectory() {
+          if (!this.selectedTrajectory) return;
+          const traj = this.selectedTrajectory;
+          this.trajectoryModalOrigin = true;
+          this.selectedTrajectoryModal = false;
+          let phashName = traj.target_media || '';
+          if (!phashName.endsWith('.phash')) {
+            phashName += '.phash';
+          }
+          this.openPhashDetail({
+            title: traj.resolved_title || traj.consensus_title || traj.target_media,
+            raw_filename: phashName,
+            moviehash: '—',
+            catalog_id: traj.consensus_media_id,
+            total_duration_sec: traj.duration_sec,
+          }, true);
+        },
+
+        closeTrajectoryModal() {
+          this.selectedTrajectoryModal = false;
+        },
+
+        closePhashModal(forceCloseAll = false) {
+          this.selectedPhashModal = false;
+          if (!forceCloseAll && this.trajectoryModalOrigin) {
+            this.trajectoryModalOrigin = false;
+            // Defer reopening to next event loop tick to prevent Escape keydown cascade on window
+            setTimeout(() => {
+              this.selectedTrajectoryModal = true;
+            }, 50);
+          } else {
+            this.trajectoryModalOrigin = false;
+          }
+        },
+
+        returnToTrajectory() {
+          this.selectedPhashModal = false;
+          this.trajectoryModalOrigin = false;
+          this.selectedTrajectoryModal = true;
         },
 
         onAssetsFilterChange() {
@@ -3617,7 +4517,10 @@
           }
         },
 
-        async openPhashDetail(item) {
+        async openPhashDetail(item, fromTrajectory = false) {
+          if (!fromTrajectory) {
+            this.trajectoryModalOrigin = false;
+          }
           this.selectedPhashModal = true;
           this.phashDetailLoading = true;
           this.showIntegrityTip = false;
@@ -3669,6 +4572,13 @@
 
         isTimelineZoomed() {
           return this.timelineZoom.startRatio > 0.005 || this.timelineZoom.endRatio < 0.995;
+        },
+
+        getZoomLevelLabel() {
+          if (!this.timelineZoom) return '1.0x';
+          const span = (this.timelineZoom.endRatio - this.timelineZoom.startRatio) || 1.0;
+          const factor = Math.max(1.0, 1.0 / Math.max(0.001, span));
+          return `${factor.toFixed(1)}x`;
         },
 
         getZoomedTimelinePoints(timeline) {
