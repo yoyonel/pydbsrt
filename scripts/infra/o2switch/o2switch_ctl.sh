@@ -23,7 +23,13 @@ DEFAULT_RELEASES_KEEP=5
 TARGET_TRIPLE="x86_64-unknown-linux-musl"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if ! REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"; then
-  REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+  if [[ -f "${SCRIPT_DIR}/../../../Taskfile.yml" ]]; then
+    REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+  elif [[ -d "${SCRIPT_DIR}/../data" || -f "${SCRIPT_DIR}/../bin/python3" || -f "${SCRIPT_DIR}/o2switch_batch_worker.py" ]]; then
+    REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+  else
+    REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+  fi
 fi
 TARGET_DIR="${REPO_ROOT}/target/${TARGET_TRIPLE}/release"
 SERVER_BIN="${TARGET_DIR}/dbsrt-server"
@@ -685,13 +691,17 @@ REMOTE_SCRIPT
 
     # shellcheck disable=SC2029
     ssh "${O2SWITCH_HOST}" "cd $(printf '%q' "${REMOTE_BASE}") && mkdir -p scripts data/reports data/SRT data/__PHASH__ run logs etc"
-    rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" --chmod=F755 "${REPO_ROOT}/scripts/workers/o2switch_batch_worker.py" "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/"
+    WORKER_SCRIPT="${REPO_ROOT}/scripts/workers/o2switch_batch_worker.py"
+    [[ -f "${WORKER_SCRIPT}" ]] || WORKER_SCRIPT="${SCRIPT_DIR}/o2switch_batch_worker.py"
+    rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" --chmod=F755 "${WORKER_SCRIPT}" "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/"
 
     # With a local NAS mount, select targets locally; otherwise the worker scans the NAS over FTP
     if [[ -d "${LOCAL_SCAN_DIR}" ]]; then
       echo "-> Resolving ${TARGET_TYPE} targets locally (${LOCAL_SCAN_DIR})..."
       rm -f "${TARGETS_FILE}"
-      if ! uv run python "${REPO_ROOT}/scripts/ingestion/batch_media_add_tvshow.py" --nas-root "${LOCAL_SCAN_DIR}" --save-targets-only \
+      SCANNER_SCRIPT="${REPO_ROOT}/scripts/ingestion/batch_media_add_tvshow.py"
+      [[ -f "${SCANNER_SCRIPT}" ]] || SCANNER_SCRIPT="${SCRIPT_DIR}/batch_media_add_tvshow.py"
+      if ! uv run python "${SCANNER_SCRIPT}" --nas-root "${LOCAL_SCAN_DIR}" --save-targets-only \
         --max-episodes-per-series 1000 "${SCAN_ARGS[@]}" >/dev/null; then
         echo "❌ Local target scan failed (see error above)."
         exit 1
@@ -840,15 +850,19 @@ REMOTE_SCRIPT
       exit 1
     fi
     check_ssh
+    SUMMARY_SCRIPT="${REPO_ROOT}/scripts/workers/o2switch_batch_summary.py"
+    [[ -f "${SUMMARY_SCRIPT}" ]] || SUMMARY_SCRIPT="${SCRIPT_DIR}/o2switch_batch_summary.py"
     # shellcheck disable=SC2029
-    ssh "${O2SWITCH_HOST}" "cd '${REMOTE_BASE}' && ./bin/python3 - '${SINCE}'" <"${REPO_ROOT}/scripts/workers/o2switch_batch_summary.py"
+    ssh "${O2SWITCH_HOST}" "cd '${REMOTE_BASE}' && ./bin/python3 - '${SINCE}'" <"${SUMMARY_SCRIPT}"
     ;;
 
   batch-sync)
     # Worker script only (sync also ships SRT and the public gateway); the next launch runs it
     check_ssh
-    rsync -a --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" --chmod=F755 "${REPO_ROOT}/scripts/workers/o2switch_batch_worker.py" "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/"
-    echo "local  $(sha256sum "${REPO_ROOT}/scripts/workers/o2switch_batch_worker.py" | cut -c1-16)"
+    WORKER_SCRIPT="${REPO_ROOT}/scripts/workers/o2switch_batch_worker.py"
+    [[ -f "${WORKER_SCRIPT}" ]] || WORKER_SCRIPT="${SCRIPT_DIR}/o2switch_batch_worker.py"
+    rsync -a --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" --chmod=F755 "${WORKER_SCRIPT}" "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/"
+    echo "local  $(sha256sum "${WORKER_SCRIPT}" | cut -c1-16)"
     # shellcheck disable=SC2029
     echo "remote $(ssh "${O2SWITCH_HOST}" "sha256sum '${REMOTE_BASE}/scripts/o2switch_batch_worker.py'" | cut -c1-16)"
     ;;
@@ -857,8 +871,12 @@ REMOTE_SCRIPT
     # Legacy .phash names to moviehash names; dry run unless --apply. Counts only (no media name)
     check_ssh
     shift || true
+    WORKER_SCRIPT="${REPO_ROOT}/scripts/workers/o2switch_batch_worker.py"
+    [[ -f "${WORKER_SCRIPT}" ]] || WORKER_SCRIPT="${SCRIPT_DIR}/o2switch_batch_worker.py"
+    MIGRATE_SCRIPT="${REPO_ROOT}/scripts/workers/o2switch_phash_migrate.py"
+    [[ -f "${MIGRATE_SCRIPT}" ]] || MIGRATE_SCRIPT="${SCRIPT_DIR}/o2switch_phash_migrate.py"
     rsync -a --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" --chmod=F755 \
-      "${REPO_ROOT}/scripts/workers/o2switch_batch_worker.py" "${REPO_ROOT}/scripts/workers/o2switch_phash_migrate.py" "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/"
+      "${WORKER_SCRIPT}" "${MIGRATE_SCRIPT}" "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/"
     # shellcheck disable=SC2029
     ssh "${O2SWITCH_HOST}" "cd $(printf '%q' "${REMOTE_BASE}") && ./bin/python3 -u scripts/o2switch_phash_migrate.py ${*:+$(printf '%q ' "$@")}"
     ;;

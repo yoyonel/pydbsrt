@@ -38,8 +38,37 @@ DEFAULT_SUPERVISOR_STATUS_FILE: str = "run/supervisor_status.json"
 DEFAULT_SUPERVISOR_LOG_FILE: str = "logs/rpi4_supervisor.log"
 DEFAULT_RECENT_LOG_LINES_COUNT: int = 40
 PID_FILE_PATH: str = "run/rpi4_supervisor.pid"
-CTL_SCRIPT: str = "./scripts/o2switch_ctl.sh"
-FREEBOX_CTL_SCRIPT: str = "./scripts/freebox_batch_ctl.sh"
+
+
+def find_repo_root() -> Path:
+    """Finds repository root dynamically by seeking .git or marker files."""
+    for parent in [Path.cwd(), *Path(__file__).resolve().parents]:
+        if (parent / ".git").exists() or (parent / "Taskfile.yml").exists():
+            return parent
+    return Path.cwd()
+
+
+def resolve_ctl_script(custom_env: str, filename: str, fallback_subpath: str) -> str:
+    """Resolves controller script from env, flat scripts/ dir, or nested repo layout."""
+    if os.environ.get(custom_env):
+        return os.environ[custom_env]
+    flat_path = Path(f"./scripts/{filename}")
+    if flat_path.exists():
+        return str(flat_path)
+    root = find_repo_root()
+    nested_path = root / fallback_subpath
+    if nested_path.exists():
+        return str(nested_path)
+    root_flat = root / "scripts" / filename
+    if root_flat.exists():
+        return str(root_flat)
+    return str(flat_path)
+
+
+CTL_SCRIPT: str = resolve_ctl_script("DBSRT_O2SWITCH_CTL", "o2switch_ctl.sh", "scripts/infra/o2switch/o2switch_ctl.sh")
+FREEBOX_CTL_SCRIPT: str = resolve_ctl_script(
+    "DBSRT_FREEBOX_CTL", "freebox_batch_ctl.sh", "scripts/infra/rpi4/freebox_batch_ctl.sh"
+)
 # batch-status states that call for an automatic restart of the same batch type
 RESTARTABLE_STATES: Tuple[str, ...] = ("crashed", "absent")
 # A drained queue hands the CPUs over to the other library, so o2switch never idles
