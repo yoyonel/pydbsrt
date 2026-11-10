@@ -121,7 +121,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 
 | Script | Statut Réel | Type | KPI / Importance | Détail / Diagnostic Contradictoire |
 | :--- | :---: | :---: | :---: | :--- |
-| `scripts/infra/rpi4/freebox_batch_ctl.sh` | 🔴 **Régression** | Shell | À évaluer | Contient des appels de scripts internes non réalignés (voir section 2). |
+| `scripts/infra/rpi4/freebox_batch_ctl.sh` | 🟢 **Prouvé Live (o2switch & Local)** | Shell | Élevée (Ingestion WAN Freebox / Portail Web) | Résolution `REPO_ROOT` et source `load_env.sh` intégrées. Référence scanner réalignée (`scripts/ingestion/scan_freebox_targets.py`). Validé et prouvé live : scan Freebox local, rsync cibles vers o2switch, probe gateway HTTP o2switch (`test`) et état queue (`status`). |
 | `scripts/infra/rpi4/rpi4_build.sh` | ⚪ **Statique Seul (Non Exécuté)** | Shell | À évaluer | Syntaxe `bash -n` & `shellcheck` OK. Zéro exécution runtime. |
 | `scripts/infra/rpi4/rpi4_cli.sh` | ⚪ **Statique Seul (Non Exécuté)** | Shell | À évaluer | Syntaxe `bash -n` & `shellcheck` OK. Zéro exécution runtime. |
 | `scripts/infra/rpi4/rpi4_deploy.sh` | ⚪ **Statique Seul (Non Exécuté)** | Shell | À évaluer | Syntaxe `bash -n` & `shellcheck` OK. Zéro exécution runtime. |
@@ -263,3 +263,10 @@ Pour sortir de cet état sans spéculation, chaque script des sections 1 et 2 do
 - **Diagnostic** : Bug bloquant de précédence Bash à la ligne 30 (`REPO_ROOT` corrompu par un retour chariot `\n` concaténant deux chemins), brisant immédiatement toute commande rsync/ssh exploitant `${REPO_ROOT}` (code d'erreur 23). Chemins locaux relatifs non préfixés.
 - **Remédiation** : Correction de l'assignation de `REPO_ROOT` avec garde conditionnel sain, normalisation de tous les chemins locaux sources (`"${REPO_ROOT}/..."`), et validation de la stratégie en 2 temps (sécurisation immédiate du Bash + création future d'une Issue pour réécriture complète en module Python typé et testé unitairement).
 - **Validation Live** : Exécution et validation réelle de bout en bout sur le serveur de production o2switch : `batch-sync` (rsync sans erreur, parité SHA256 locale/distante vérifiée `e097ea0db462cbd1`), `batch-status` (parse nominal de la file et des logs distants), `status` (démon actif, 3088 médias), `batch-summary` (stream Python distant de 10 855 événements), et `faultwatch status`. `shellcheck` et `shfmt` conformes.
+
+### Fiche 7 : `scripts/infra/rpi4/freebox_batch_ctl.sh`
+- **Rôle** : Orchestrateur d'ingestion streaming des disques durs Freebox vers le serveur o2switch via la passerelle HTTP de l'appliance RPi4 (traversée NAT Freebox port WAN 80 -> RPi4:18089).
+- **KPI / Importance** : `Élevée (Ingestion WAN Freebox / Portail Web)`.
+- **Diagnostic** : Appel hardcodé cassé ligne 59 vers `scripts/scan_freebox_targets.py` (déplacé sous `ingestion/`), absence de découverte dynamique de `REPO_ROOT` et de chargement d'environnement.
+- **Remédiation** : Intégration de la découverte dynamique de `REPO_ROOT`, source conditionnelle de `load_env.sh`, alignement du chemin du scanner vers `"${REPO_ROOT}/scripts/ingestion/scan_freebox_targets.py"` et préfixage du fichier de cibles.
+- **Validation Live** : Exécution locale du scanner Freebox (`scan`), synchronisation automatique par rsync vers o2switch, test de joignabilité de la passerelle WAN depuis o2switch (`test` -> HTTP 404 nominal), et interrogation de statut (`status` -> queue 100% à jour). `shellcheck` et `shfmt` conformes.

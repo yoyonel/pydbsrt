@@ -15,6 +15,21 @@ DEFAULT_MAX_EXTRACTION_SECS=7200
 DEFAULT_TARGETS_FILE="data/reports/freebox_batch_targets.json"
 
 ACTION="${1:-status}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if ! REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"; then
+  REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+fi
+
+# Load optional unversioned local environment file
+if [[ -f "${SCRIPT_DIR}/../o2switch/load_env.sh" ]]; then
+  # shellcheck source=/dev/null
+  source "${SCRIPT_DIR}/../o2switch/load_env.sh"
+elif [[ -f "${SCRIPT_DIR}/../local/load_env.sh" ]]; then
+  # shellcheck source=/dev/null
+  source "${SCRIPT_DIR}/../local/load_env.sh"
+fi
+load_local_env "${REPO_ROOT}"
+
 O2SWITCH_HOST="${O2SWITCH_HOST:-${DEFAULT_O2SWITCH_HOST}}"
 REMOTE_BASE="${REMOTE_BASE:-${DEFAULT_REMOTE_BASE}}"
 GATEWAY_WAN_PORT="${FREEBOX_GATEWAY_WAN_PORT:-${DEFAULT_GATEWAY_WAN_PORT}}"
@@ -56,12 +71,12 @@ scan_and_sync_targets() {
   fi
 
   echo "=== Scanning eligible Freebox cinema & TV targets (excluding Photos/ and Backup/) ==="
-  python3 scripts/scan_freebox_targets.py "${limit_arg[@]}"
+  python3 "${REPO_ROOT}/scripts/ingestion/scan_freebox_targets.py" "${limit_arg[@]}"
 
   echo "=== Transferring targets catalog to ${O2SWITCH_HOST} ==="
   # shellcheck disable=SC2029
   ssh "${O2SWITCH_HOST}" "mkdir -p ${REMOTE_BASE}/data/reports"
-  rsync -avz "${DEFAULT_TARGETS_FILE}" "${O2SWITCH_HOST}:${REMOTE_BASE}/${DEFAULT_TARGETS_FILE}"
+  rsync -avz "${REPO_ROOT}/${DEFAULT_TARGETS_FILE}" "${O2SWITCH_HOST}:${REMOTE_BASE}/${DEFAULT_TARGETS_FILE}"
 }
 
 start_batch() {
@@ -91,7 +106,11 @@ start_batch() {
     shift
   done
 
-  scan_and_sync_targets
+  if [[ -n "${limit}" ]]; then
+    scan_and_sync_targets --limit "${limit}"
+  else
+    scan_and_sync_targets
+  fi
 
   echo "=== Launching Freebox batch worker daemon on ${O2SWITCH_HOST} ==="
   # shellcheck disable=SC2029
