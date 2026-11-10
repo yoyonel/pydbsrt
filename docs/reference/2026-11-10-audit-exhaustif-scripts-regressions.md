@@ -181,7 +181,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 | `scripts/tooling/code_quality.sh` | 🟢 **Prouvé Live** | Shell | À évaluer | Exécuté live (task lint, task fmt) |
 | `scripts/tooling/convert_dashboard_webp.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/tooling/disk_guard.sh` | 🟢 **Prouvé Live** | Shell | À évaluer | Exécuté live (task lint étape 10) |
-| `scripts/tooling/generate_audit_doc.py` | 🔴 **Régression** | Python | À évaluer | Contient des appels de scripts internes non réalignés (voir section 2). |
+| `scripts/tooling/generate_audit_doc.py` | 🟢 **Prouvé Live** | Python | Moyenne (Métrologie & Méta-Documentation) | Résolution dynamique `REPO_ROOT` (`find_repo_root`), exclusion du self-scan (0 faux positif), mise à jour des scripts live prouvés, préservation dynamique des fiches d'analyse et support CLI (`--check`, `--output`). Validé live (`--check` et génération de test code 0). |
 | `scripts/tooling/generate_coverage_report.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/tooling/generate_nightly_report_enhanced.py` | 🔴 **Régression** | Python | À évaluer | Contient des appels de scripts internes non réalignés (voir section 2). |
 | `scripts/tooling/lint_complexity.py` | 🟢 **Prouvé Live** | Python | À évaluer | Exécuté live (Rust Complexity Gate 1180 fn) |
@@ -319,3 +319,10 @@ Pour sortir de cet état sans spéculation, chaque script des sections 1 et 2 do
 - **Diagnostic** : Docstring CLI (`scripts/check_pr_body.py`) et commentaire interne (`scripts/record_proof.py`) référençant des chemins plats antérieurs à la réorganisation modulaire PR #70.
 - **Remédiation** : Réalignement de la docstring CLI vers `scripts/tooling/check_pr_body.py`, du commentaire interne vers `scripts/benchmarks/record_proof.py`, et de la docstring du test `tests/tools/test_check_pr_body.py`.
 - **Validation Live** : Validé live à 100% : 16/16 tests unitaires PASS (`uv run pytest tests/tools/test_check_pr_body.py`), vérifications statiques `ruff` et `pyright` (0 erreur), et validation live CLI via stdin (rejet immédiat d'un corps vide avec code 1 et messages d'erreur ciblés ; validation d'un corps conforme avec preuve terminale SVG et sortie code 0).
+
+### Fiche 15 : `scripts/tooling/generate_audit_doc.py`
+- **Rôle** : Méta-générateur automatique du rapport d'audit exhaustif des 95 scripts du dépôt (`docs/reference/2026-11-10-audit-exhaustif-scripts-regressions.md`), mesurant la couverture des statuts *Fact-First* et le catalogue des références rompues.
+- **KPI / Importance** : `Moyenne (Métrologie & Méta-Documentation)`.
+- **Diagnostic** : Auto-référencement créant 4 faux positifs (entrées 23 à 26) car la fonction de scan analysait le script lui-même et prenait ses diagnostics textuels pour des dépendances brisées. Risque d'écrasement destructif des fiches manuelles (5 à 14). Absence de `find_repo_root()` dynamique et d'options CLI.
+- **Remédiation** : Découverte dynamique de racine via `find_repo_root()`, exclusion du script dans `_find_broken_refs()` (0 faux positif), mise à jour des 28 scripts live prouvés, préservation automatique de la section `## 5. Fiches d'Analyse Méticuleuse` existante et ajout des options CLI (`--check` / `--dry-run`, `--output`).
+- **Validation Live** : Validé live à 100% : linters `ruff` et `pyright` (0 erreur), mode inspection `--check` confirmant l'absence totale de fausse régression sur ce script (0 entrée) et rapportant fidèlement 17 références réelles restantes, et test de génération vers fichier temporaire (`--output /tmp/test_audit.md`, 209 lignes générées, code 0).
