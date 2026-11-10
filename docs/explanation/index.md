@@ -135,4 +135,28 @@ tags:
       <a href="architecture-deport-calcul-stockage-et-synchronisation-o2switch/">→ Explorer l'architecture de synchronisation</a>
     </div>
   </div>
+
+  <div class="dbsrt-bento-card bento-cyan">
+    <div class="bento-header">
+      <span class="bento-icon">🌐</span>
+      <span class="bento-badge">PORTAIL &amp; STOCKAGE</span>
+    </div>
+    <h3>Portail Sources Médias &amp; Diagnostic Multi-Environnements</h3>
+    <p>Séparation stricte entre réalité physique du stockage (CIFS, WAN FTP, HTTP Range) et profils d'exécution étanches (Local, RPi4, Cloud o2switch).</p>
+    <div class="bento-links">
+      <a href="2026-11-09-architecture-portail-medias-et-sources-multi-environnements/">→ Comprendre l'architecture des sources</a>
+    </div>
+  </div>
+
+  <div class="dbsrt-bento-card bento-emerald">
+    <div class="bento-header">
+      <span class="bento-icon">🗄️</span>
+      <span class="bento-badge">RÉCONCILIATION &amp; PHASH</span>
+    </div>
+    <h3>Réconciliation Actifs Médias &amp; Empreintes pHash</h3>
+    <p>Modèle relationnel PostgreSQL 17, double moteur d'accès transparent (psycopg2 vs psql CLI), audit des sidecars binaires et résilience de pagination.</p>
+    <div class="bento-links">
+      <a href="2026-11-09-reconciliation-actifs-medias-et-empreintes-phash/">→ Comprendre la réconciliation des actifs</a>
+    </div>
+  </div>
 </div>

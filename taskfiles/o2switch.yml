@@ -227,6 +227,21 @@ tasks:
     cmds:
       - ./scripts/o2switch_ctl.sh phash-migrate {{.CLI_ARGS}}
 
+  o2switch:batch:pause:
+    desc: Soft-pause remote batch pHash worker on o2switch (in-flight jobs finish, new jobs blocked)
+    cmds:
+      - ./scripts/o2switch_ctl.sh batch-pause
+
+  o2switch:batch:resume:
+    desc: Resume remote batch pHash worker on o2switch
+    cmds:
+      - ./scripts/o2switch_ctl.sh batch-resume
+
+  o2switch:batch:scale:
+    desc: "Dynamically scale batch worker concurrency (usage: task o2switch:batch:scale -- <workers>)"
+    cmds:
+      - ./scripts/o2switch_ctl.sh batch-workers {{.CLI_ARGS}}
+
   o2switch:batch:workers:
     desc: Query or set dynamic batch worker concurrency on o2switch
     cmds:
@@ -241,6 +256,46 @@ tasks:
     desc: Tail execution logs of remote batch pHash worker on o2switch
     cmds:
       - ./scripts/o2switch_ctl.sh batch-logs
+
+  o2switch:trajectory:run:
+    desc: Run spatiotemporal trajectory tracking batch in foreground on o2switch
+    cmds:
+      - ./scripts/o2switch_ctl.sh trajectory run {{.CLI_ARGS}}
+
+  o2switch:trajectory:start:
+    desc: Start spatiotemporal trajectory tracking batch detached in background on o2switch
+    cmds:
+      - ./scripts/o2switch_ctl.sh trajectory start {{.CLI_ARGS}}
+
+  o2switch:trajectory:status:
+    desc: Query background trajectory batch worker status and telemetry on o2switch
+    cmds:
+      - ./scripts/o2switch_ctl.sh trajectory status
+
+  o2switch:trajectory:stop:
+    desc: Stop background trajectory batch worker on o2switch
+    cmds:
+      - ./scripts/o2switch_ctl.sh trajectory stop
+
+  o2switch:trajectory:pause:
+    desc: Soft-pause background trajectory batch worker on o2switch
+    cmds:
+      - ./scripts/o2switch_ctl.sh trajectory pause
+
+  o2switch:trajectory:resume:
+    desc: Resume background trajectory batch worker on o2switch
+    cmds:
+      - ./scripts/o2switch_ctl.sh trajectory resume
+
+  o2switch:trajectory:logs:
+    desc: Tail live execution logs of background trajectory batch on o2switch
+    cmds:
+      - ./scripts/o2switch_ctl.sh trajectory logs
+
+  o2switch:trajectory:pull:
+    desc: Pull trajectory audit results from o2switch into local data/reports/audit/
+    cmds:
+      - ./scripts/o2switch_ctl.sh trajectory pull
 
   o2switch:faultwatch:start:
     desc: Deploy and start the per-minute LVE fault proxy watcher on o2switch

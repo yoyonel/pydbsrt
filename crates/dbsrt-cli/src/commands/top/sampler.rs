@@ -20,14 +20,16 @@ use crate::commands::top::constants::{
     DEFAULT_MEDIA_SCAN_INTERVAL_SECS, DEFAULT_MEDIA_SOURCES_PATH, DEFAULT_NAS_TVSHOW_PATH,
     DEFAULT_PHASH_DIR, DEFAULT_SELECTED_BATCH_REPORT_PATH, DEFAULT_SELECTED_BATCH_TARGETS_PATH,
     DEFAULT_SOURCE_ID_TVSHOW, DEFAULT_SOURCE_NAME_TVSHOW, DEFAULT_STREAM_EPISODE_DURATION_SECS,
-    MAX_MEDIA_SCAN_LIMIT, MAX_SELECTED_BATCH_WORKERS, MIN_DELTA_TIME_FLOOR_SECS,
-    MIN_PROGRESS_THRESHOLD, NAS_TVSHOW_DIR_ENV, PROC_NET_DEV_HEADER_LINES, PROC_NET_DEV_PATH,
-    RAW_FRAME_BYTES, SCAN_STREAMING_CHUNK_SIZE, SESSION_WINDOW_SECS,
+    DEFAULT_TRAJECTORY_AUDIT_DIR, FALLBACK_TRAJECTORY_AUDIT_DIR, MAX_MEDIA_SCAN_LIMIT,
+    MAX_SELECTED_BATCH_WORKERS, MIN_DELTA_TIME_FLOOR_SECS, MIN_PROGRESS_THRESHOLD,
+    NAS_TVSHOW_DIR_ENV, PROC_NET_DEV_HEADER_LINES, PROC_NET_DEV_PATH, RAW_FRAME_BYTES,
+    SCAN_STREAMING_CHUNK_SIZE, SESSION_WINDOW_SECS,
 };
 use crate::commands::top::model::{
     calculate_overall_stats, format_unix_to_iso, parse_iso_to_unix_secs, ActiveJobTelemetry,
     BatchQueueTelemetry, DiscoveredMediaItem, GpuTelemetry, HistoricalRecord, IngestionStatus,
     MediaSourceConfig, MediaSubtrackInfo, PhashFingerprintInfo, SessionThroughput, SystemTelemetry,
+    TrajectoryAuditItem,
 };
 
 /// Shared handle for background GPU monitoring process.
@@ -596,6 +598,112 @@ fn record_time_key(record: &HistoricalRecord) -> &str {
         .as_deref()
         .or(record.start_iso.as_deref())
         .unwrap_or(&record.video_stem)
+}
+
+/// Checks if a file path represents a trajectory audit JSONL file.
+fn is_trajectory_audit_file(path: &Path) -> bool {
+    let is_jsonl = path.extension().and_then(|s| s.to_str()) == Some("jsonl");
+    let name_matches = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .map(|name| {
+            name.contains("trajectory") || name.contains("recognize") || name.contains("batch")
+        })
+        .unwrap_or(false);
+    path.is_file() && is_jsonl && name_matches
+}
+
+/// Scans a directory for trajectory audit JSONL files with their modification times.
+fn scan_directory_for_trajectory_audits(
+    dir: &Path,
+    files: &mut Vec<(String, std::time::SystemTime)>,
+) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if is_trajectory_audit_file(&path) {
+            let mtime = entry
+                .metadata()
+                .ok()
+                .and_then(|m| m.modified().ok())
+                .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+            files.push((path.display().to_string(), mtime));
+        }
+    }
+}
+
+/// Discovers available trajectory audit files from local audit directories.
+///
+/// # Returns
+/// Sorted list of relative file paths in descending order of modification time.
+pub fn discover_trajectory_audit_files() -> Vec<String> {
+    let mut files = Vec::new();
+    scan_directory_for_trajectory_audits(Path::new(DEFAULT_TRAJECTORY_AUDIT_DIR), &mut files);
+    scan_directory_for_trajectory_audits(Path::new(FALLBACK_TRAJECTORY_AUDIT_DIR), &mut files);
+    files.sort_by_key(|a| std::cmp::Reverse(a.1));
+    files.into_iter().map(|(p, _)| p).collect()
+}
+
+/// In-memory cache holding dynamically discovered trajectory audit records.
+struct TrajectoryTelemetryCache {
+    last_scan: Instant,
+    current_file: Option<String>,
+    last_mtime: Option<std::time::SystemTime>,
+    records: Arc<[TrajectoryAuditItem]>,
+    available_files: Vec<String>,
+    changed: bool,
+}
+
+/// Periodically refreshes trajectory audit records if a change is detected.
+fn maybe_refresh_trajectory_audits(now: Instant, cache: &mut TrajectoryTelemetryCache) {
+    if now.duration_since(cache.last_scan).as_secs() < 5 {
+        return;
+    }
+    cache.last_scan = now;
+    let discovered = discover_trajectory_audit_files();
+    let file_to_load = cache
+        .current_file
+        .as_ref()
+        .filter(|f| discovered.contains(f))
+        .or_else(|| discovered.first())
+        .cloned();
+
+    let mtime = file_to_load
+        .as_ref()
+        .and_then(|f| fs::metadata(f).ok())
+        .and_then(|m| m.modified().ok());
+
+    let file_changed = file_to_load != cache.current_file || cache.available_files != discovered;
+    let mtime_changed = mtime.is_some() && mtime != cache.last_mtime;
+
+    if file_changed || mtime_changed {
+        if let Some(ref target) = file_to_load {
+            cache.records = load_trajectory_records(Path::new(target));
+        } else {
+            cache.records = Arc::from([]);
+        }
+        cache.current_file = file_to_load;
+        cache.available_files = discovered;
+        cache.last_mtime = mtime;
+        cache.changed = true;
+    }
+}
+
+/// Loads trajectory audit records from an NDJSON file into structured memory.
+pub fn load_trajectory_records(path: &Path) -> Arc<[TrajectoryAuditItem]> {
+    let Ok(file) = fs::File::open(path) else {
+        return Arc::from([]);
+    };
+    let reader = BufReader::new(file);
+    let items: Vec<TrajectoryAuditItem> = reader
+        .lines()
+        .map_while(Result::ok)
+        .filter(|line| !line.trim().is_empty())
+        .filter_map(|line| serde_json::from_str::<TrajectoryAuditItem>(line.trim()).ok())
+        .collect();
+    Arc::from(items)
 }
 
 /// Computes global session throughput across recent batch records (within rolling 2 hours) and active jobs.
@@ -1917,13 +2025,25 @@ pub fn run_telemetry_sampler_loop(
         stats: initial_stats,
     };
 
+    let mut trajectory_cache = TrajectoryTelemetryCache {
+        last_scan: Instant::now() - std::time::Duration::from_secs(60),
+        current_file: None,
+        last_mtime: None,
+        records: Arc::from([]),
+        available_files: Vec::new(),
+        changed: false,
+    };
+
     preload_stem_size_cache();
 
     while !stop_flag.load(Ordering::Relaxed) {
         let now = Instant::now();
 
-        // 0. Check for historical record log updates
+        // 0a. Check for historical record log updates
         maybe_reload_history(&events_path, &couplings_path, &mut history_cache);
+
+        // 0b. Periodically refresh trajectory audit records (every 5 seconds)
+        maybe_refresh_trajectory_audits(now, &mut trajectory_cache);
 
         // 1. Refresh system-wide CPU and memory
         system.refresh_cpu_specifics(CpuRefreshKind::everything());
@@ -2003,6 +2123,20 @@ pub fn run_telemetry_sampler_loop(
                 &history_cache.records,
             );
             state.active_jobs = active_jobs;
+            if state.active_trajectory_file != trajectory_cache.current_file {
+                trajectory_cache.current_file = state.active_trajectory_file.clone();
+                trajectory_cache.last_mtime = trajectory_cache
+                    .current_file
+                    .as_ref()
+                    .and_then(|f| fs::metadata(f).ok())
+                    .and_then(|m| m.modified().ok());
+            } else if trajectory_cache.changed {
+                state.trajectory_records = Arc::clone(&trajectory_cache.records);
+                state.trajectory_files = trajectory_cache.available_files.clone();
+                state.active_trajectory_file = trajectory_cache.current_file.clone();
+                state.trajectory_data_rev = state.trajectory_data_rev.wrapping_add(1);
+                trajectory_cache.changed = false;
+            }
         }
 
         std::thread::sleep(std::time::Duration::from_millis(refresh_interval_ms));
@@ -2105,6 +2239,8 @@ fn load_batch_queue_from_manifest(targets_path: &Path) -> Option<BatchQueueTelem
         progress_pct: pct,
         active_workers: 0,
         is_active: false,
+        is_paused: false,
+        desired_workers: None,
         updated_at: String::new(),
     })
 }
@@ -2125,12 +2261,19 @@ fn load_batch_queue_from_manifest(targets_path: &Path) -> Option<BatchQueueTelem
 /// 2. If missing, attempts fallback count from `data/reports/selected_batch_targets.json`.
 /// 3. Returns default empty struct if no active queue manifest is detected.
 pub fn sample_batch_queue(active_workers: usize) -> BatchQueueTelemetry {
+    let is_paused = Path::new("run/batch_paused").is_file();
+    let desired_workers = fs::read_to_string("run/desired_workers")
+        .ok()
+        .and_then(|s| s.trim().parse::<usize>().ok());
+
     let queue_path = Path::new("run/batch_queue.json");
     if let Some(mut data) = load_batch_queue_from_json(queue_path) {
         if active_workers > 0 {
             data.active_workers = active_workers;
             data.is_active = true;
         }
+        data.is_paused = is_paused;
+        data.desired_workers = desired_workers;
         return data;
     }
 
@@ -2138,10 +2281,16 @@ pub fn sample_batch_queue(active_workers: usize) -> BatchQueueTelemetry {
     if let Some(mut data) = load_batch_queue_from_manifest(targets_path) {
         data.active_workers = active_workers;
         data.is_active = active_workers > 0 && data.remaining_targets > 0;
+        data.is_paused = is_paused;
+        data.desired_workers = desired_workers;
         return data;
     }
 
-    BatchQueueTelemetry::default()
+    BatchQueueTelemetry {
+        is_paused,
+        desired_workers,
+        ..Default::default()
+    }
 }
 
 fn count_completed_events_fast(events_path: &Path) -> usize {

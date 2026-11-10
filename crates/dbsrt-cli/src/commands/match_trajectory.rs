@@ -1,0 +1,284 @@
+//! CLI Subcommand: match-trajectory
+//!
+//! Evaluates candidate media through sequential trajectory accumulation, tracking
+//! valid hypotheses across frames and pruning divergent candidates in real-time.
+
+use anyhow::{bail, Result};
+use clap::Args;
+use dbsrt_core::trajectory::TrajectoryTrackerConfig;
+use dbsrt_index::dbphash::MmapDbphash;
+use dbsrt_index::trajectory_runner::execute_trajectory_matching;
+use std::path::PathBuf;
+
+/// Arguments for `match-trajectory` subcommand.
+#[derive(Args, Debug, Clone)]
+pub struct MatchTrajectoryArgs {
+    /// Video media file to evaluate
+    #[arg(short, long)]
+    pub media: PathBuf,
+
+    /// Unified .dbphash index catalog to search against
+    #[arg(long, default_value = "data/catalog.dbphash")]
+    pub dbphash: PathBuf,
+
+    /// Start timestamp along target media timeline in seconds (default: 50.0% of duration if available, or 0.0)
+    #[arg(short, long, default_value_t = 0.0)]
+    pub start: f64,
+
+    /// Number of consecutive frames to evaluate (e.g. 24, 48, 120)
+    #[arg(short = 'n', long, default_value_t = 24)]
+    pub frames: usize,
+
+    /// Initial seed Hamming distance threshold (default: 10)
+    #[arg(long, default_value_t = 10)]
+    pub seed_threshold: u32,
+
+    /// Step propagation Hamming distance threshold (default: 8)
+    #[arg(long, default_value_t = 8)]
+    pub step_threshold: u32,
+
+    /// Maximum consecutive misses before pruning hypothesis (default: 3)
+    #[arg(long, default_value_t = 3)]
+    pub max_misses: u32,
+
+    /// Minimum coverage ratio (0.0 to 1.0) of evaluated frames required to elect winner (default: 0.50)
+    #[arg(long, default_value_t = 0.50)]
+    pub min_coverage: f64,
+
+    /// Temporal slack tolerance in milliseconds around expected timestamp (default: 1200 ms)
+    #[arg(long, default_value_t = 1200)]
+    pub time_slack_ms: i64,
+
+    /// Maximum active hypotheses tracked in memory (default: 1000)
+    #[arg(long, default_value_t = 1000)]
+    pub max_active: usize,
+
+    /// Allow establishing initial t0 hypothesis seed on uniform/blank/black frames
+    #[arg(long, default_value_t = false)]
+    pub allow_blank_seed: bool,
+
+    /// Output format (DataFrame, CSV, JSON) [default: DataFrame]
+    #[arg(long, value_enum, default_value_t = crate::cli::OutputFormat::DataFrame)]
+    pub output_format: crate::cli::OutputFormat,
+}
+
+/// Executes trajectory matching command.
+pub fn run_match_trajectory(args: MatchTrajectoryArgs) -> Result<()> {
+    if !args.media.is_file() {
+        bail!("Media file not found: {}", args.media.display());
+    }
+    if !args.dbphash.is_file() {
+        bail!("Catalog file not found: {}", args.dbphash.display());
+    }
+
+    let dbphash = MmapDbphash::open(&args.dbphash)?;
+    let config = TrajectoryTrackerConfig {
+        seed_threshold: args.seed_threshold,
+        step_threshold: args.step_threshold,
+        max_consecutive_misses: args.max_misses,
+        time_slack_ms: args.time_slack_ms,
+        step_interval_ms: 1000,
+        max_active_hypotheses: args.max_active,
+        reject_blank_seed: !args.allow_blank_seed,
+        skip_blank_steps: true,
+        min_coverage_ratio: args.min_coverage,
+        election_strategy: dbsrt_core::trajectory::ElectionStrategy::QualityScore,
+    };
+
+    if args.output_format == crate::cli::OutputFormat::DataFrame {
+        println!(
+            "🚀 Trajectory Tracking on '{}' (evaluating {} frames from t={:.1}s)...",
+            args.media.file_name().unwrap_or_default().to_string_lossy(),
+            args.frames,
+            args.start
+        );
+    }
+
+    let req = dbsrt_index::trajectory_runner::TrajectoryMatchRequest {
+        dbphash: &dbphash,
+        target_path: &args.media,
+        start_sec: args.start,
+        nb_frames: args.frames,
+    };
+    let res = execute_trajectory_matching(&req, config)?;
+
+    if args.output_format == crate::cli::OutputFormat::Json {
+        println!("{}", serde_json::to_string_pretty(&res)?);
+        return Ok(());
+    }
+
+    if args.output_format == crate::cli::OutputFormat::Csv {
+        println!("target_media,evaluated_frames,initial_candidates,surviving,winner_id,winner_title,matched_frames,coverage_ratio,score,ref_start_ms,elapsed_sec");
+        println!(
+            "{},{},{},{},{},\"{}\",{},{:.4},{:.2},{},{:.3}",
+            res.target_media,
+            res.evaluated_frames_count,
+            res.initial_candidates_count,
+            res.surviving_trajectories_count,
+            res.winner_media_id
+                .map(|id| id.to_string())
+                .unwrap_or_default(),
+            res.winner_title,
+            res.winner_matched_frames,
+            res.winner_coverage_ratio,
+            res.winner_score,
+            res.winner_initial_timestamp_ms,
+            res.elapsed_seconds
+        );
+        return Ok(());
+    }
+
+    println!("================================================================================");
+    println!("🎯 TRAJECTORY TRACKING VERDICT:");
+    println!("  Target Media:                {}", res.target_media);
+    println!(
+        "  Evaluated Target Frames:     {}",
+        res.evaluated_frames_count
+    );
+    println!(
+        "  Initial Seed Candidates:     {}",
+        res.initial_candidates_count
+    );
+    println!(
+        "  Surviving Trajectories:      {}",
+        res.surviving_trajectories_count
+    );
+    if let Some(winner_id) = res.winner_media_id {
+        let confidence_pct =
+            (res.winner_matched_frames as f64 / res.evaluated_frames_count.max(1) as f64) * 100.0;
+        println!("  Elected Winner Media ID:     {}", winner_id);
+        println!("  Elected Winner Title:        {}", res.winner_title);
+        println!(
+            "  Matched Frames in Trajectory: {}/{} ({:.1}%)",
+            res.winner_matched_frames, res.evaluated_frames_count, confidence_pct
+        );
+        println!(
+            "  Reference Start Timestamp:   {:.3}s ({} ms)",
+            res.winner_initial_timestamp_ms as f64 / 1000.0,
+            res.winner_initial_timestamp_ms
+        );
+        println!("  Quality Accumulated Score:   {:.2}", res.winner_score);
+    } else {
+        println!("  Elected Winner:              NONE (All hypotheses pruned)");
+    }
+    println!("  Evaluation Time:             {:.3}s", res.elapsed_seconds);
+    println!("================================================================================");
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_match_trajectory_args_validation() {
+        let args = MatchTrajectoryArgs {
+            media: PathBuf::from("non_existent_video_12345.mp4"),
+            dbphash: PathBuf::from("non_existent_catalog_12345.dbphash"),
+            start: 0.0,
+            frames: 24,
+            seed_threshold: 10,
+            step_threshold: 8,
+            max_misses: 3,
+            min_coverage: 0.5,
+            time_slack_ms: 1200,
+            max_active: 1000,
+            allow_blank_seed: false,
+            output_format: crate::cli::OutputFormat::Json,
+        };
+        let res = run_match_trajectory(args);
+        assert!(res.is_err());
+        assert!(res
+            .unwrap_err()
+            .to_string()
+            .contains("Media file not found"));
+    }
+
+    #[test]
+    fn test_match_trajectory_catalog_not_found() {
+        let tmp = std::env::temp_dir().join(format!("dummy_media_{}.mp4", std::process::id()));
+        let _ = std::fs::write(&tmp, b"dummy");
+        let args = MatchTrajectoryArgs {
+            media: tmp.clone(),
+            dbphash: PathBuf::from("non_existent_catalog_99999.dbphash"),
+            start: 0.0,
+            frames: 24,
+            seed_threshold: 10,
+            step_threshold: 8,
+            max_misses: 3,
+            min_coverage: 0.5,
+            time_slack_ms: 1200,
+            max_active: 1000,
+            allow_blank_seed: false,
+            output_format: crate::cli::OutputFormat::DataFrame,
+        };
+        let res = run_match_trajectory(args);
+        let _ = std::fs::remove_file(&tmp);
+        assert!(res.is_err());
+        assert!(res
+            .unwrap_err()
+            .to_string()
+            .contains("Catalog file not found"));
+    }
+
+    #[test]
+    fn test_run_match_trajectory_execution() {
+        let dir = std::env::temp_dir();
+        let catalog_path = dir.join(format!("test_exec_cat_{}.dbphash", std::process::id()));
+        let mut builder = dbsrt_index::dbphash::DbphashBuilder::new();
+        let meta = dbsrt_core::metadata::MediaMetadata {
+            raw_title: "Test.Show.S01E01.mkv".to_string(),
+            clean_title: "Test Show".to_string(),
+            media_type: dbsrt_core::metadata::MediaType::TvEpisode,
+            year: Some(2023),
+            season: Some(1),
+            episode: Some(1),
+            resolution: None,
+            source: None,
+            release_group: None,
+            moviehash: None,
+        };
+        let sparse = [
+            (0x1234_5678_9abc_def0_u64, 0u32),
+            (0x1234_5678_9abc_def1_u64, 1000u32),
+        ];
+        builder.add_media(&meta, 10_000, 24.0, &sparse, &sparse);
+        builder.write_to_file(&catalog_path).expect("write catalog");
+
+        let query_path = dir.join(format!(
+            "test_exec_query_{}.1.0fps.phash",
+            std::process::id()
+        ));
+        dbsrt_core::write_phash_file(
+            &query_path,
+            &[0x1234_5678_9abc_def0_u64, 0x1234_5678_9abc_def1_u64],
+        )
+        .expect("write query");
+
+        for fmt in [
+            crate::cli::OutputFormat::Json,
+            crate::cli::OutputFormat::Csv,
+            crate::cli::OutputFormat::DataFrame,
+        ] {
+            let args = MatchTrajectoryArgs {
+                media: query_path.clone(),
+                dbphash: catalog_path.clone(),
+                start: 0.0,
+                frames: 2,
+                seed_threshold: 5,
+                step_threshold: 5,
+                max_misses: 2,
+                min_coverage: 0.5,
+                time_slack_ms: 1200,
+                max_active: 100,
+                allow_blank_seed: false,
+                output_format: fmt,
+            };
+            assert!(run_match_trajectory(args).is_ok());
+        }
+
+        let _ = std::fs::remove_file(&catalog_path);
+        let _ = std::fs::remove_file(&query_path);
+    }
+}

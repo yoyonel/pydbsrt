@@ -1,0 +1,25 @@
+services:
+  cloudbeaver:
+    image: dbeaver/cloudbeaver:latest
+    container_name: dbsrt-cloudbeaver
+    restart: unless-stopped
+    ports:
+      - "${CLOUDBEAVER_PORT:-8978}:8978"
+    environment:
+      - CB_SERVER_NAME=pydbsrt Studio
+      - CB_SERVER_URL=http://localhost:8978
+      - CB_ADMIN_NAME=dbsrtadmin
+      - CB_ADMIN_PASSWORD=pydbsrt_admin_pass
+      - CLOUDBEAVER_APP_ANONYMOUS_ACCESS_ENABLED=true
+      - CLOUDBEAVER_APP_GRANT_CONNECTIONS_ACCESS_TO_ANONYMOUS_TEAM=true
+    volumes:
+      - ./cloudbeaver/conf/initial-data-sources.conf:/opt/cloudbeaver/conf/initial-data-sources.conf:ro
+    networks:
+      - default
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+networks:
+  default:
+    name: docker_default
+    external: true

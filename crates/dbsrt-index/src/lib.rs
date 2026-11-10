@@ -7,6 +7,7 @@ pub mod delta;
 pub mod engine;
 pub mod mih;
 pub mod mmap;
+pub mod trajectory_runner;
 
 pub use bktree::{BkItem, BkTree};
 pub use db::{

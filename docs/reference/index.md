@@ -53,6 +53,18 @@ tags:
     </div>
   </div>
 
+  <div class="dbsrt-bento-card bento-cyan">
+    <div class="bento-header">
+      <span class="bento-icon">🗂️</span>
+      <span class="bento-badge">PORTAIL MULTIMÉDIA</span>
+    </div>
+    <h3>API & CLI Portail Sources & Actifs Médias</h3>
+    <p>Spécification des routes `/api/sources`, `/api/probe`, `/api/files`, `/api/assets` et `/api/asset/details`, drapeaux CLI et hash SPA.</p>
+    <div class="bento-links">
+      <a href="2026-11-09-api-portail-sources-medias/">→ Consulter la référence de l'API Portail</a>
+    </div>
+  </div>
+
   <div class="dbsrt-bento-card bento-emerald">
     <div class="bento-header">
       <span class="bento-icon">🐘</span>

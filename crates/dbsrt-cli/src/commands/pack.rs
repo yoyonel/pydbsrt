@@ -34,6 +34,10 @@ pub struct PackArgs {
     /// Default framerate if not detectable from filename
     #[arg(long, default_value_t = DEFAULT_BASELINE_FPS)]
     pub default_fps: f64,
+
+    /// Minimum media duration in seconds to be included in the compiled catalog
+    #[arg(long, default_value_t = 0)]
+    pub min_duration_sec: u64,
 }
 
 /// Helper parsing framerate from dot-separated filename stem (e.g. `foo.25fps.phash` or `foo.25.0fps.phash`).
@@ -77,40 +81,52 @@ pub fn extract_fps_from_path(path: &Path) -> Option<f64> {
     None
 }
 
+fn scan_single_dir(
+    dir: &Path,
+    seen_stems: &mut std::collections::HashSet<String>,
+    files: &mut Vec<PathBuf>,
+) -> Result<()> {
+    if !dir.exists() {
+        eprintln!("Warning: Scanned directory {:?} does not exist", dir);
+        return Ok(());
+    }
+    let mut found_in_dir = 0;
+    for entry in std::fs::read_dir(dir)? {
+        let path = entry?.path();
+        let is_phash = path.extension().and_then(|s| s.to_str()) == Some(PHASH_EXT);
+        let stem_opt = path.file_stem().and_then(|s| s.to_str());
+
+        if is_phash && stem_opt.is_some_and(|stem| seen_stems.insert(stem.to_string())) {
+            files.push(path);
+            found_in_dir += 1;
+        }
+    }
+    if found_in_dir == 0 {
+        eprintln!(
+            "Warning: Scanned directory {:?} contains no .{} files",
+            dir, PHASH_EXT
+        );
+    }
+    Ok(())
+}
+
+fn collect_phash_files(search_dirs: &[PathBuf]) -> Result<Vec<PathBuf>> {
+    let mut files = Vec::new();
+    let mut seen_stems = std::collections::HashSet::new();
+
+    for dir in search_dirs {
+        scan_single_dir(dir, &mut seen_stems, &mut files)?;
+    }
+    files.sort();
+    Ok(files)
+}
+
 /// Run compilation of .phash directories into a single unified .dbphash binary index.
 pub fn run_pack(args: &PackArgs) -> Result<()> {
     let mut search_dirs = vec![args.phash_dir.clone()];
     search_dirs.extend(args.extra_dirs.clone());
 
-    let mut files = Vec::new();
-    let mut seen_stems = std::collections::HashSet::new();
-
-    for dir in &search_dirs {
-        if !dir.exists() {
-            eprintln!("Warning: Scanned directory {:?} does not exist", dir);
-            continue;
-        }
-        let mut found_in_dir = 0;
-        for entry in std::fs::read_dir(dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.extension().and_then(|s| s.to_str()) == Some(PHASH_EXT) {
-                if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                    if seen_stems.insert(stem.to_string()) {
-                        files.push(path);
-                    }
-                    found_in_dir += 1;
-                }
-            }
-        }
-        if found_in_dir == 0 {
-            eprintln!(
-                "Warning: Scanned directory {:?} contains no .{} files",
-                dir, PHASH_EXT
-            );
-        }
-    }
-    files.sort();
+    let files = collect_phash_files(&search_dirs)?;
 
     if files.is_empty() {
         anyhow::bail!("No .{} files found in {:?}", PHASH_EXT, search_dirs);
@@ -133,6 +149,13 @@ pub fn run_pack(args: &PackArgs) -> Result<()> {
 
         let fps = extract_fps_from_path(file_path).unwrap_or(args.default_fps);
         let duration_ms = (hashes.len() as f64 / fps * MILLIS_PER_SEC).round() as u64;
+
+        // Anti-shadowing invariant: skip snippets below requested minimum duration
+        if args.min_duration_sec > 0
+            && duration_ms < (args.min_duration_sec as f64 * MILLIS_PER_SEC).round() as u64
+        {
+            continue;
+        }
 
         let detected = detect_cuts(&hashes, args.threshold);
         let cuts: Vec<(u64, u32)> = detected
@@ -245,6 +268,7 @@ mod tests {
             output: output.clone(),
             threshold: DEFAULT_CUT_THRESHOLD,
             default_fps: DEFAULT_BASELINE_FPS,
+            min_duration_sec: 0,
         };
 
         run_pack(&args).unwrap();
@@ -278,6 +302,7 @@ mod tests {
             output: output.clone(),
             threshold: DEFAULT_CUT_THRESHOLD,
             default_fps: DEFAULT_BASELINE_FPS,
+            min_duration_sec: 0,
         };
 
         run_pack(&args).unwrap();
@@ -301,6 +326,7 @@ mod tests {
             output: out_file,
             threshold: DEFAULT_CUT_THRESHOLD,
             default_fps: DEFAULT_BASELINE_FPS,
+            min_duration_sec: 0,
         };
 
         let err = run_pack(&args).unwrap_err();

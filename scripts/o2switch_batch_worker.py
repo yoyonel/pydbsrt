@@ -95,7 +95,8 @@ for _sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT, signal.SIGQUIT):
 
 
 DEFAULT_DESIRED_WORKERS_PATH: Path = Path("run/desired_workers")
-MIN_CONCURRENT_WORKERS: int = 1
+DEFAULT_BATCH_PAUSED_PATH: Path = Path("run/batch_paused")
+MIN_CONCURRENT_WORKERS: int = 0
 MAX_CONCURRENT_WORKERS: int = 8
 TARGET_QUEUE_POLL_INTERVAL_SECS: float = 0.5
 # A redeployed worker script is picked up between videos: the queue drains, then the process re-execs.
@@ -124,11 +125,13 @@ def max_workers_for_budget(ffmpeg_threads: str) -> int:
     """Highest concurrency whose decode threads fit in CPU_BUDGET_VCPUS ("0" lets FFmpeg take every core)."""
     threads = int(ffmpeg_threads) if ffmpeg_threads.isdigit() else 0
     per_job = threads if threads > 0 else CPU_BUDGET_VCPUS
-    return max(MIN_CONCURRENT_WORKERS, min(MAX_CONCURRENT_WORKERS, CPU_BUDGET_VCPUS // per_job))
+    return max(1, min(MAX_CONCURRENT_WORKERS, CPU_BUDGET_VCPUS // per_job))
 
 
 def read_desired_workers(default_workers: int, max_workers: int = MAX_CONCURRENT_WORKERS) -> int:
-    """Reads desired concurrency dynamically from run/desired_workers, capped at max_workers."""
+    """Reads desired concurrency dynamically from run/desired_workers or run/batch_paused, capped at max_workers."""
+    if DEFAULT_BATCH_PAUSED_PATH.is_file():
+        return 0
     val = default_workers
     if DEFAULT_DESIRED_WORKERS_PATH.is_file():
         # A half-written or garbage file keeps the default until the next poll
@@ -503,13 +506,21 @@ def match_nas_paths(targets: List[VideoTarget], nas_videos: List[VideoTarget]) -
     return list(dict.fromkeys(video for video in matched if video))
 
 
-def write_batch_queue_state(total: int, completed: int, failed: int, active_workers: int) -> None:
+def write_batch_queue_state(
+    total: int,
+    completed: int,
+    failed: int,
+    active_workers: int,
+    desired_workers: int | None = None,
+    is_paused: bool | None = None,
+) -> None:
     """Persists volatile batch queue telemetry to disk for dbsrt top and monitoring."""
     try:
         q_path = Path(DEFAULT_BATCH_QUEUE_PATH)
         q_path.parent.mkdir(parents=True, exist_ok=True)
         rem = max(0, total - (completed + failed))
         pct = round(((completed + failed) / total * 100.0), 1) if total > 0 else 0.0
+        paused = DEFAULT_BATCH_PAUSED_PATH.is_file() if is_paused is None else is_paused
         state = {
             "total_targets": total,
             "completed_targets": completed,
@@ -517,7 +528,9 @@ def write_batch_queue_state(total: int, completed: int, failed: int, active_work
             "remaining_targets": rem,
             "progress_pct": pct,
             "active_workers": active_workers,
-            "is_active": rem > 0 and active_workers > 0,
+            "desired_workers": desired_workers,
+            "is_paused": paused,
+            "is_active": rem > 0 and (active_workers > 0 or paused),
             "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }
         tmp_path = q_path.with_suffix(".tmp")
@@ -567,6 +580,11 @@ def build_stream_url(stream_base: str, rel_path: str) -> str:
     clean_path = rel_path if rel_path.startswith("/") else "/" + rel_path
     if stream_base.lower().startswith(("http://", "https://")):
         clean_path = urllib.parse.quote(clean_path, safe="/")
+        return f"{stream_base}{clean_path}"
+    if stream_base.lower().startswith("file://"):
+        return f"{stream_base.removeprefix('file://')}{clean_path}"
+    if not stream_base:
+        return clean_path
     return f"{stream_base}{clean_path}"
 
 
@@ -616,7 +634,15 @@ def redact_nas(text: str, host: str, password: str) -> str:
 
 
 def _event_record(
-    target: VideoTarget, start_time: float, status: str, log_path: Path, nas_host: str = "", nas_pass: str = ""
+    target: VideoTarget,
+    start_time: float,
+    status: str,
+    log_path: Path,
+    nas_host: str = "",
+    nas_pass: str = "",
+    moviehash: str | None = None,
+    active_workers: int | None = None,
+    desired_workers: int | None = None,
 ) -> Dict[str, object]:
     end_time = time.time()
     end_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(end_time))
@@ -631,11 +657,21 @@ def _event_record(
     actual_bytes = target.size_bytes if full_decode else 0
     rate_mib_s = (actual_bytes / (1024 * 1024)) / wall_duration if wall_duration > 0 else 0.0
 
+    duration_m = re.search(r"duration\s*:\s*([\d\.]+)", log_text, re.IGNORECASE)
+    duration_s = float(duration_m.group(1)) if duration_m else None
+    fps_m = re.search(r"fps\s*:\s*([\d\.]+)", log_text, re.IGNORECASE)
+    fps_val = float(fps_m.group(1)) if fps_m else None
+
     record: Dict[str, object] = {
         "video_stem": Path(target.filename).stem,
         "video_rel_path": target.rel_path,
+        "moviehash": moviehash,
         "file_size_bytes": target.size_bytes,
         "wall_duration_secs": round(wall_duration, 2),
+        "duration_seconds": duration_s,
+        "fps": fps_val,
+        "active_workers": active_workers,
+        "desired_workers": desired_workers,
         "io_read_rate_mib_s": round(rate_mib_s, 2),
         "cifs_read_rate_mib_s": round(rate_mib_s, 2),
         "resumed_frames": int(resumed.group(1)) if resumed else 0,
@@ -659,6 +695,8 @@ def process_single_video(
     log_lock: threading.Lock,
     events_log: Path,
     max_extraction_secs: int = DEFAULT_MAX_EXTRACTION_SECS,
+    active_workers: int | None = None,
+    desired_workers: int | None = None,
 ) -> Dict[str, object]:
     """Processes a single video by invoking dbsrt media:add directly over FTP."""
     base_cmd = [
@@ -710,7 +748,17 @@ def process_single_video(
 
     print(f"--> [DEBUG] dbsrt {status} (returncode {returncode}) for {target.filename}", flush=True)
     nas_host = urllib.parse.urlsplit(stream_base).hostname or ""
-    record = _event_record(target, start_time, status, log_path, nas_host, child_env.get("DBSRT_FTP_PASSWORD", ""))
+    record = _event_record(
+        target,
+        start_time,
+        status,
+        log_path,
+        nas_host,
+        child_env.get("DBSRT_FTP_PASSWORD", ""),
+        moviehash=moviehash,
+        active_workers=active_workers,
+        desired_workers=desired_workers,
+    )
 
     if status == "RELOAD":
         # Not a failure: no event, so the re-exec requeues it and the blacklist ignores it
@@ -770,12 +818,20 @@ class _BatchRun:
 
     def publish(self, active_workers: int | None = None) -> None:
         active = len(self.threads) if active_workers is None else active_workers
-        write_batch_queue_state(self.total, self.success_count, self.fail_count, active)
+        desired = self.desired_workers()
+        is_paused = DEFAULT_BATCH_PAUSED_PATH.is_file() or desired == 0
+        try:
+            write_batch_queue_state(
+                self.total, self.success_count, self.fail_count, active, desired_workers=desired, is_paused=is_paused
+            )
+        except TypeError:
+            # Fallback for mock lambdas expecting 4 positional arguments
+            write_batch_queue_state(self.total, self.success_count, self.fail_count, active)
 
     def worker_loop(self) -> None:
         while True:
             with self.state_lock:
-                if len(self.threads) > self.desired_workers() or not self.remaining:
+                if len(self.threads) > self.desired_workers() or self.desired_workers() == 0 or not self.remaining:
                     return
                 item = self.remaining.pop(0)
             try:

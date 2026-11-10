@@ -121,7 +121,21 @@ fn build_host_telemetry_line(tel: &SystemTelemetry) -> Line<'static> {
             Style::default().fg(Color::DarkGray),
         ),
         Span::raw("│ "),
-        Span::styled(format!("Workers: {workers_count} actifs "), worker_style),
+        Span::styled(
+            match (tel.batch_queue.desired_workers, tel.batch_queue.is_paused) {
+                (Some(w), true) => format!("Workers: {workers_count}/{w} [PAUSE] "),
+                (Some(w), false) => format!("Workers: {workers_count}/{w} actifs "),
+                (None, true) => format!("Workers: {workers_count} [PAUSE] "),
+                (None, false) => format!("Workers: {workers_count} actifs "),
+            },
+            if tel.batch_queue.is_paused {
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                worker_style
+            },
+        ),
         Span::raw("│ "),
     ];
 

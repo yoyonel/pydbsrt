@@ -11,6 +11,7 @@ without pulling entire multi-gigabyte video files over the WAN.
 from __future__ import annotations
 
 import argparse
+import json
 import mimetypes
 import re
 import sys
@@ -81,8 +82,21 @@ class FreeboxRangeHTTPHandler(BaseHTTPRequestHandler):
             return None
         return resolved if resolved.is_file() else None
 
+    def _is_health_check(self) -> bool:
+        """Returns True if the requested URL path matches the /health endpoint."""
+        raw_path = self.path.split("?")[0].strip("/")
+        return raw_path == "health"
+
     def do_HEAD(self) -> None:
-        """Handles HTTP HEAD requests for probing file presence and size."""
+        """Handles HTTP HEAD requests for probing file presence, size or health."""
+        if self._is_health_check():
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", "0")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            return
+
         target = self._resolve_target_path()
         if not target:
             self.send_error(HTTPStatus.NOT_FOUND, "File not found")
@@ -112,7 +126,25 @@ class FreeboxRangeHTTPHandler(BaseHTTPRequestHandler):
             self.wfile.write(chunk)
 
     def do_GET(self) -> None:
-        """Handles HTTP GET requests with transparent 206 Partial Content byte ranges."""
+        """Handles HTTP GET requests with transparent 206 Partial Content byte ranges or /health."""
+        if self._is_health_check():
+            mounted = [p.name for p in self.server_root.glob("Disque_*") if p.is_dir()]
+            payload = json.dumps(
+                {
+                    "status": "ok",
+                    "service": "dbsrt-freebox-gateway",
+                    "serve_root": str(self.server_root),
+                    "mounted_shares": mounted,
+                }
+            ).encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(payload)
+            return
+
         target = self._resolve_target_path()
         if not target:
             self.send_error(HTTPStatus.NOT_FOUND, "File not found")

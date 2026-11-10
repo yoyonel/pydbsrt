@@ -12,7 +12,8 @@ use dbsrt_cli::commands::top::model::{
     matches_fuzzy_search, parse_iso_to_unix_secs, ActiveJobTelemetry, CompletedFilter,
     CompletedSort, DiscoveredMediaItem, GpuTelemetry, HelpTab, HistoricalRecord, HostSystemInfo,
     IngestionStatus, MediaFilter, MediaSort, MediaSourceConfig, MediaSourceFilter,
-    MediaSubtrackInfo, SessionThroughput, SystemTelemetry, ViewPage,
+    MediaSubtrackInfo, SessionThroughput, SystemTelemetry, TrajectoryAuditItem, TrajectoryFilter,
+    TrajectorySort, ViewPage,
 };
 use dbsrt_cli::commands::top::process_ctl::{
     check_if_stopped, inspect_job_details, kill_job, stop_job, toggle_pause_job,
@@ -187,12 +188,19 @@ fn test_negative_zero_rate_sanitization() {
         media_scroll_index: 0,
         source_scroll_index: 0,
         source_modal: None,
+        trajectory_file_modal: None,
         selected_media_paths: &empty_set,
         media_filter: MediaFilter::All,
         media_sort: MediaSort::Name,
         source_filter: &MediaSourceFilter::ActiveOnly,
         completed_filter: CompletedFilter::All,
         completed_sort: CompletedSort::DateDesc,
+        trajectory_scroll_index: 0,
+        trajectory_table_offset: 0,
+        trajectory_filter: TrajectoryFilter::All,
+        trajectory_sort: TrajectorySort::Name,
+        trajectory_inspection_scroll: 0,
+        trajectory_indices: &[],
         search_query: "",
         search_active: false,
         help_tab: HelpTab::General,
@@ -360,6 +368,10 @@ fn test_ui_rendering_all_pages() {
         is_scanning: false,
         batch_queue: Default::default(),
         is_remote_streaming: false,
+        trajectory_records: std::sync::Arc::from([]),
+        trajectory_data_rev: 0,
+        trajectory_files: Vec::new(),
+        active_trajectory_file: None,
     };
 
     let empty_set = HashSet::new();
@@ -373,12 +385,19 @@ fn test_ui_rendering_all_pages() {
         media_scroll_index: 0,
         source_scroll_index: 0,
         source_modal: None,
+        trajectory_file_modal: None,
         selected_media_paths: &empty_set,
         media_filter: MediaFilter::All,
         media_sort: MediaSort::Name,
         source_filter: &MediaSourceFilter::ActiveOnly,
         completed_filter: CompletedFilter::All,
         completed_sort: CompletedSort::DateDesc,
+        trajectory_scroll_index: 0,
+        trajectory_table_offset: 0,
+        trajectory_filter: TrajectoryFilter::All,
+        trajectory_sort: TrajectorySort::Name,
+        trajectory_inspection_scroll: 0,
+        trajectory_indices: &[],
         search_query: "",
         search_active: false,
         help_tab: HelpTab::General,
@@ -398,12 +417,19 @@ fn test_ui_rendering_all_pages() {
         media_scroll_index: 0,
         source_scroll_index: 0,
         source_modal: None,
+        trajectory_file_modal: None,
         selected_media_paths: &empty_set,
         media_filter: MediaFilter::All,
         media_sort: MediaSort::Name,
         source_filter: &MediaSourceFilter::ActiveOnly,
         completed_filter: CompletedFilter::All,
         completed_sort: CompletedSort::DateDesc,
+        trajectory_scroll_index: 0,
+        trajectory_table_offset: 0,
+        trajectory_filter: TrajectoryFilter::All,
+        trajectory_sort: TrajectorySort::Name,
+        trajectory_inspection_scroll: 0,
+        trajectory_indices: &[],
         search_query: "",
         search_active: false,
         help_tab: HelpTab::General,
@@ -421,12 +447,19 @@ fn test_ui_rendering_all_pages() {
         media_scroll_index: 0,
         source_scroll_index: 0,
         source_modal: None,
+        trajectory_file_modal: None,
         selected_media_paths: &empty_set,
         media_filter: MediaFilter::All,
         media_sort: MediaSort::Name,
         source_filter: &MediaSourceFilter::ActiveOnly,
         completed_filter: CompletedFilter::All,
         completed_sort: CompletedSort::DateDesc,
+        trajectory_scroll_index: 0,
+        trajectory_table_offset: 0,
+        trajectory_filter: TrajectoryFilter::All,
+        trajectory_sort: TrajectorySort::Name,
+        trajectory_inspection_scroll: 0,
+        trajectory_indices: &[],
         search_query: "",
         search_active: false,
         help_tab: HelpTab::General,
@@ -445,12 +478,19 @@ fn test_ui_rendering_all_pages() {
         media_scroll_index: 0,
         source_scroll_index: 0,
         source_modal: None,
+        trajectory_file_modal: None,
         selected_media_paths: &empty_set,
         media_filter: MediaFilter::All,
         media_sort: MediaSort::Name,
         source_filter: &MediaSourceFilter::ActiveOnly,
         completed_filter: CompletedFilter::All,
         completed_sort: CompletedSort::DateDesc,
+        trajectory_scroll_index: 0,
+        trajectory_table_offset: 0,
+        trajectory_filter: TrajectoryFilter::All,
+        trajectory_sort: TrajectorySort::Name,
+        trajectory_inspection_scroll: 0,
+        trajectory_indices: &[],
         search_query: "",
         search_active: false,
         help_tab: HelpTab::General,
@@ -468,12 +508,19 @@ fn test_ui_rendering_all_pages() {
         media_scroll_index: 0,
         source_scroll_index: 0,
         source_modal: None,
+        trajectory_file_modal: None,
         selected_media_paths: &empty_set,
         media_filter: MediaFilter::All,
         media_sort: MediaSort::Name,
         source_filter: &MediaSourceFilter::ActiveOnly,
         completed_filter: CompletedFilter::All,
         completed_sort: CompletedSort::DateDesc,
+        trajectory_scroll_index: 0,
+        trajectory_table_offset: 0,
+        trajectory_filter: TrajectoryFilter::All,
+        trajectory_sort: TrajectorySort::Name,
+        trajectory_inspection_scroll: 0,
+        trajectory_indices: &[],
         search_query: "",
         search_active: false,
         help_tab: HelpTab::General,
@@ -491,12 +538,19 @@ fn test_ui_rendering_all_pages() {
         media_scroll_index: 0,
         source_scroll_index: 0,
         source_modal: None,
+        trajectory_file_modal: None,
         selected_media_paths: &empty_set,
         media_filter: MediaFilter::All,
         media_sort: MediaSort::Name,
         source_filter: &MediaSourceFilter::ActiveOnly,
         completed_filter: CompletedFilter::All,
         completed_sort: CompletedSort::DateDesc,
+        trajectory_scroll_index: 0,
+        trajectory_table_offset: 0,
+        trajectory_filter: TrajectoryFilter::All,
+        trajectory_sort: TrajectorySort::Name,
+        trajectory_inspection_scroll: 0,
+        trajectory_indices: &[],
         search_query: "",
         search_active: false,
         help_tab: HelpTab::General,
@@ -514,12 +568,19 @@ fn test_ui_rendering_all_pages() {
         media_scroll_index: 0,
         source_scroll_index: 0,
         source_modal: None,
+        trajectory_file_modal: None,
         selected_media_paths: &empty_set,
         media_filter: MediaFilter::All,
         media_sort: MediaSort::Name,
         source_filter: &MediaSourceFilter::ActiveOnly,
         completed_filter: CompletedFilter::All,
         completed_sort: CompletedSort::DateDesc,
+        trajectory_scroll_index: 0,
+        trajectory_table_offset: 0,
+        trajectory_filter: TrajectoryFilter::All,
+        trajectory_sort: TrajectorySort::Name,
+        trajectory_inspection_scroll: 0,
+        trajectory_indices: &[],
         search_query: "",
         search_active: false,
         help_tab: HelpTab::General,
@@ -539,12 +600,19 @@ fn test_ui_rendering_all_pages() {
         media_scroll_index: 0,
         source_scroll_index: 0,
         source_modal: None,
+        trajectory_file_modal: None,
         selected_media_paths: &empty_set,
         media_filter: MediaFilter::All,
         media_sort: MediaSort::Name,
         source_filter: &MediaSourceFilter::ActiveOnly,
         completed_filter: CompletedFilter::All,
         completed_sort: CompletedSort::DateDesc,
+        trajectory_scroll_index: 0,
+        trajectory_table_offset: 0,
+        trajectory_filter: TrajectoryFilter::All,
+        trajectory_sort: TrajectorySort::Name,
+        trajectory_inspection_scroll: 0,
+        trajectory_indices: &[],
         search_query: "",
         search_active: false,
         help_tab: HelpTab::General,
@@ -562,12 +630,19 @@ fn test_ui_rendering_all_pages() {
         media_scroll_index: 0,
         source_scroll_index: 0,
         source_modal: None,
+        trajectory_file_modal: None,
         selected_media_paths: &empty_set,
         media_filter: MediaFilter::All,
         media_sort: MediaSort::Name,
         source_filter: &MediaSourceFilter::ActiveOnly,
         completed_filter: CompletedFilter::All,
         completed_sort: CompletedSort::DateDesc,
+        trajectory_scroll_index: 0,
+        trajectory_table_offset: 0,
+        trajectory_filter: TrajectoryFilter::All,
+        trajectory_sort: TrajectorySort::Name,
+        trajectory_inspection_scroll: 0,
+        trajectory_indices: &[],
         search_query: "",
         search_active: false,
         help_tab: HelpTab::General,
@@ -587,12 +662,19 @@ fn test_ui_rendering_all_pages() {
         media_scroll_index: 0,
         source_scroll_index: 0,
         source_modal: None,
+        trajectory_file_modal: None,
         selected_media_paths: &selected_paths,
         media_filter: MediaFilter::All,
         media_sort: MediaSort::Name,
         source_filter: &MediaSourceFilter::ActiveOnly,
         completed_filter: CompletedFilter::All,
         completed_sort: CompletedSort::DateDesc,
+        trajectory_scroll_index: 0,
+        trajectory_table_offset: 0,
+        trajectory_filter: TrajectoryFilter::All,
+        trajectory_sort: TrajectorySort::Name,
+        trajectory_inspection_scroll: 0,
+        trajectory_indices: &[],
         search_query: "",
         search_active: false,
         help_tab: HelpTab::General,
@@ -609,12 +691,19 @@ fn test_ui_rendering_all_pages() {
         media_scroll_index: 0,
         source_scroll_index: 0,
         source_modal: None,
+        trajectory_file_modal: None,
         selected_media_paths: &empty_set,
         media_filter: MediaFilter::Status(IngestionStatus::Virgin),
         media_sort: MediaSort::Size,
         source_filter: &MediaSourceFilter::ActiveOnly,
         completed_filter: CompletedFilter::All,
         completed_sort: CompletedSort::DateDesc,
+        trajectory_scroll_index: 0,
+        trajectory_table_offset: 0,
+        trajectory_filter: TrajectoryFilter::All,
+        trajectory_sort: TrajectorySort::Name,
+        trajectory_inspection_scroll: 0,
+        trajectory_indices: &[],
         search_query: "",
         search_active: false,
         help_tab: HelpTab::General,
@@ -632,12 +721,19 @@ fn test_ui_rendering_all_pages() {
         media_scroll_index: 0,
         source_scroll_index: 0,
         source_modal: None,
+        trajectory_file_modal: None,
         selected_media_paths: &empty_set,
         media_filter: MediaFilter::All,
         media_sort: MediaSort::Name,
         source_filter: &MediaSourceFilter::ActiveOnly,
         completed_filter: CompletedFilter::All,
         completed_sort: CompletedSort::DateDesc,
+        trajectory_scroll_index: 0,
+        trajectory_table_offset: 0,
+        trajectory_filter: TrajectoryFilter::All,
+        trajectory_sort: TrajectorySort::Name,
+        trajectory_inspection_scroll: 0,
+        trajectory_indices: &[],
         search_query: "",
         search_active: false,
         help_tab: HelpTab::General,
@@ -657,12 +753,19 @@ fn test_ui_rendering_all_pages() {
         media_scroll_index: 0,
         source_scroll_index: 0,
         source_modal: Some(&modal),
+        trajectory_file_modal: None,
         selected_media_paths: &empty_set,
         media_filter: MediaFilter::All,
         media_sort: MediaSort::Name,
         source_filter: &MediaSourceFilter::ActiveOnly,
         completed_filter: CompletedFilter::All,
         completed_sort: CompletedSort::DateDesc,
+        trajectory_scroll_index: 0,
+        trajectory_table_offset: 0,
+        trajectory_filter: TrajectoryFilter::All,
+        trajectory_sort: TrajectorySort::Name,
+        trajectory_inspection_scroll: 0,
+        trajectory_indices: &[],
         search_query: "",
         search_active: false,
         help_tab: HelpTab::General,
@@ -680,12 +783,19 @@ fn test_ui_rendering_all_pages() {
         media_scroll_index: 0,
         source_scroll_index: 0,
         source_modal: None,
+        trajectory_file_modal: None,
         selected_media_paths: &empty_set,
         media_filter: MediaFilter::All,
         media_sort: MediaSort::Name,
         source_filter: &MediaSourceFilter::ActiveOnly,
         completed_filter: CompletedFilter::All,
         completed_sort: CompletedSort::DateDesc,
+        trajectory_scroll_index: 0,
+        trajectory_table_offset: 0,
+        trajectory_filter: TrajectoryFilter::All,
+        trajectory_sort: TrajectorySort::Name,
+        trajectory_inspection_scroll: 0,
+        trajectory_indices: &[],
         search_query: "",
         search_active: false,
         help_tab: HelpTab::General,
@@ -1454,9 +1564,15 @@ fn test_app_state_new_tabs_and_scrolling() {
     assert_eq!(app.view, ViewPage::System);
 
     handle_key_event(KeyCode::Tab, &mut app, &tel);
+    assert_eq!(app.view, ViewPage::Trajectory);
+
+    handle_key_event(KeyCode::Tab, &mut app, &tel);
     assert_eq!(app.view, ViewPage::ActiveJobs);
 
-    // BackTab cycling: ActiveJobs -> System -> MediaSources -> MediaBrowser -> CompletedMedia -> StatsHistory -> ActiveJobs
+    // BackTab cycling: ActiveJobs -> Trajectory -> System -> MediaSources -> MediaBrowser -> CompletedMedia -> StatsHistory -> ActiveJobs
+    handle_key_event(KeyCode::BackTab, &mut app, &tel);
+    assert_eq!(app.view, ViewPage::Trajectory);
+
     handle_key_event(KeyCode::BackTab, &mut app, &tel);
     assert_eq!(app.view, ViewPage::System);
 
@@ -3047,12 +3163,19 @@ fn test_e2e_contextual_help_navigation_and_glossary() {
         media_scroll_index: 0,
         source_scroll_index: 0,
         source_modal: None,
+        trajectory_file_modal: None,
         selected_media_paths: &empty_set,
         media_filter: MediaFilter::All,
         media_sort: MediaSort::Name,
         source_filter: &MediaSourceFilter::ActiveOnly,
         completed_filter: CompletedFilter::All,
         completed_sort: CompletedSort::DateDesc,
+        trajectory_scroll_index: 0,
+        trajectory_table_offset: 0,
+        trajectory_filter: TrajectoryFilter::All,
+        trajectory_sort: TrajectorySort::Name,
+        trajectory_inspection_scroll: 0,
+        trajectory_indices: &[],
         search_query: "",
         search_active: false,
         help_tab: HelpTab::Completed,
@@ -3076,9 +3199,9 @@ fn test_e2e_contextual_help_navigation_and_glossary() {
     assert_eq!(app.help_tab, HelpTab::MediaBrowser);
 
     // Verify buffer contains VIERGE, EN COURS, COMPLÉTÉ, HACHÉ SEUL definitions
-    let mut ctx_help_media = ctx_help_completed;
-    ctx_help_media.help_tab = HelpTab::MediaBrowser;
-    terminal.draw(|f| render_ui(f, &ctx_help_media)).unwrap();
+    let mut ctx_help_active = ctx_help_completed;
+    ctx_help_active.help_tab = HelpTab::MediaBrowser;
+    terminal.draw(|f| render_ui(f, &ctx_help_active)).unwrap();
     let buf_media = format!("{:?}", terminal.backend().buffer());
     assert!(buf_media.contains("STATUT"));
     assert!(buf_media.contains("VIERGE"));
@@ -3089,6 +3212,15 @@ fn test_e2e_contextual_help_navigation_and_glossary() {
     // 3. Press Tab -> switches to HelpTab::MediaSources
     handle_key_event_with_state(KeyCode::Tab, &mut app, &tel, Some(&shared_state));
     assert_eq!(app.help_tab, HelpTab::MediaSources);
+
+    // 3b. Test HelpTab::Trajectory
+    handle_key_event_with_state(KeyCode::Char('7'), &mut app, &tel, Some(&shared_state));
+    assert_eq!(app.help_tab, HelpTab::Trajectory);
+    ctx_help_active.help_tab = HelpTab::Trajectory;
+    terminal.draw(|f| render_ui(f, &ctx_help_active)).unwrap();
+    let buf_traj = format!("{:?}", terminal.backend().buffer());
+    assert!(buf_traj.contains("TRAJECTOIRES"));
+    assert!(buf_traj.contains("SPARKLINE"));
 
     // 4. Press 'j' -> scrolls down in help
     handle_key_event_with_state(KeyCode::Char('j'), &mut app, &tel, Some(&shared_state));
@@ -3381,12 +3513,19 @@ fn test_system_page_render_and_shortcuts() {
         media_scroll_index: app.media_scroll_index,
         source_scroll_index: app.source_scroll_index,
         source_modal: None,
+        trajectory_file_modal: None,
         selected_media_paths: &app.selected_media_paths,
         media_filter: app.media_filter,
         media_sort: app.media_sort,
         source_filter: &app.source_filter,
         completed_filter: app.completed_filter,
         completed_sort: app.completed_sort,
+        trajectory_scroll_index: 0,
+        trajectory_table_offset: 0,
+        trajectory_filter: TrajectoryFilter::All,
+        trajectory_sort: TrajectorySort::Name,
+        trajectory_inspection_scroll: 0,
+        trajectory_indices: &[],
         search_query: "",
         search_active: false,
         help_tab: app.help_tab,
@@ -3421,6 +3560,8 @@ fn test_batch_queue_telemetry_rendered_in_header_and_table() {
             progress_pct: 2.8,
             active_workers: 4,
             is_active: true,
+            is_paused: false,
+            desired_workers: Some(4),
             updated_at: "2026-10-29T07:45:00Z".to_string(),
         },
         ..Default::default()
@@ -3435,12 +3576,19 @@ fn test_batch_queue_telemetry_rendered_in_header_and_table() {
         media_scroll_index: app.media_scroll_index,
         source_scroll_index: app.source_scroll_index,
         source_modal: None,
+        trajectory_file_modal: None,
         selected_media_paths: &app.selected_media_paths,
         media_filter: app.media_filter,
         media_sort: app.media_sort,
         source_filter: &app.source_filter,
         completed_filter: app.completed_filter,
         completed_sort: app.completed_sort,
+        trajectory_scroll_index: 0,
+        trajectory_table_offset: 0,
+        trajectory_filter: TrajectoryFilter::All,
+        trajectory_sort: TrajectorySort::Name,
+        trajectory_inspection_scroll: 0,
+        trajectory_indices: &[],
         search_query: "",
         search_active: false,
         help_tab: app.help_tab,
@@ -3619,12 +3767,19 @@ fn test_remote_streaming_media_browser_rendered_with_targets() {
         media_scroll_index: app.media_scroll_index,
         source_scroll_index: app.source_scroll_index,
         source_modal: None,
+        trajectory_file_modal: None,
         selected_media_paths: &app.selected_media_paths,
         media_filter: app.media_filter,
         media_sort: app.media_sort,
         source_filter: &app.source_filter,
         completed_filter: app.completed_filter,
         completed_sort: app.completed_sort,
+        trajectory_scroll_index: 0,
+        trajectory_table_offset: 0,
+        trajectory_filter: TrajectoryFilter::All,
+        trajectory_sort: TrajectorySort::Name,
+        trajectory_inspection_scroll: 0,
+        trajectory_indices: &[],
         search_query: "",
         search_active: false,
         help_tab: app.help_tab,
@@ -3782,12 +3937,19 @@ fn test_remote_streaming_sources_view_and_locked_keys() {
         media_scroll_index: 0,
         source_scroll_index: 0,
         source_modal: None,
+        trajectory_file_modal: None,
         selected_media_paths: &empty_set,
         media_filter: MediaFilter::All,
         media_sort: MediaSort::Name,
         source_filter: &MediaSourceFilter::ActiveOnly,
         completed_filter: CompletedFilter::All,
         completed_sort: CompletedSort::DateDesc,
+        trajectory_scroll_index: 0,
+        trajectory_table_offset: 0,
+        trajectory_filter: TrajectoryFilter::All,
+        trajectory_sort: TrajectorySort::Name,
+        trajectory_inspection_scroll: 0,
+        trajectory_indices: &[],
         search_query: "",
         search_active: false,
         help_tab: HelpTab::General,
@@ -3932,4 +4094,383 @@ fn test_account_ram_label_shows_ratio_to_limit() {
         tel(Some(0.7), Some(0.0)).account_ram_label().as_deref(),
         Some("0.70 GiB")
     );
+}
+
+#[test]
+fn test_render_trajectory_views_and_navigation() {
+    use dbsrt_cli::commands::top::model::{TrajectoryAuditItem, TrajectoryCutItem};
+
+    let sample_item = TrajectoryAuditItem {
+        target_path: "data/__PHASH__/cars2.phash".to_string(),
+        target_media: "Cars 2 2011 FRENCH".to_string(),
+        duration_sec: 120.0,
+        cuts_count: 5,
+        matched_cuts_count: 4,
+        consensus_media_id: Some(42),
+        consensus_title: "Cars 2".to_string(),
+        is_temporally_coherent: true,
+        total_elapsed_seconds: 1.45,
+        success: true,
+        cuts: vec![TrajectoryCutItem {
+            target_path: "data/__PHASH__/cars2.phash".to_string(),
+            target_media: "Cars 2 2011 FRENCH".to_string(),
+            start_sec: 24.0,
+            nb_frames: 20,
+            evaluated_frames_count: 20,
+            initial_candidates_count: 10,
+            surviving_trajectories_count: 2,
+            winner_media_id: Some(42),
+            winner_title: "Cars 2".to_string(),
+            winner_matched_frames: 18,
+            winner_coverage_ratio: 0.90,
+            winner_score: 16.5,
+            winner_initial_timestamp_ms: 24000,
+            elapsed_seconds: 0.35,
+            success: true,
+            error_message: None,
+        }],
+        error_message: None,
+    };
+
+    let tel = SystemTelemetry {
+        trajectory_records: std::sync::Arc::from([sample_item]),
+        trajectory_data_rev: 0,
+        trajectory_files: vec!["trajectory_overnight.jsonl".to_string()],
+        active_trajectory_file: Some("trajectory_overnight.jsonl".to_string()),
+        ..Default::default()
+    };
+
+    let backend = TestBackend::new(160, 40);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let empty_set = HashSet::new();
+
+    let mut ctx = UiContext {
+        telemetry: &tel,
+        view: ViewPage::Trajectory,
+        selected_index: 0,
+        completed_scroll_index: 0,
+        media_scroll_index: 0,
+        source_scroll_index: 0,
+        source_modal: None,
+        trajectory_file_modal: None,
+        selected_media_paths: &empty_set,
+        media_filter: MediaFilter::All,
+        media_sort: MediaSort::Name,
+        source_filter: &MediaSourceFilter::ActiveOnly,
+        completed_filter: CompletedFilter::All,
+        completed_sort: CompletedSort::DateDesc,
+        trajectory_scroll_index: 0,
+        trajectory_table_offset: 0,
+        trajectory_filter: TrajectoryFilter::All,
+        trajectory_sort: TrajectorySort::Name,
+        trajectory_inspection_scroll: 0,
+        trajectory_indices: &[],
+        search_query: "",
+        search_active: false,
+        help_tab: HelpTab::General,
+        help_scroll_index: 0,
+        feedback_msg: None,
+    };
+
+    // Render Trajectory table
+    terminal.draw(|f| render_ui(f, &ctx)).unwrap();
+    let buf = format!("{:?}", terminal.backend().buffer());
+    assert!(buf.contains("AUDIT DES TRAJECTOIRES"));
+    assert!(buf.contains("Cars 2"));
+
+    // Render Trajectory drill-down inspection
+    ctx.view = ViewPage::TrajectoryInspection;
+    terminal.draw(|f| render_ui(f, &ctx)).unwrap();
+    let buf_insp = format!("{:?}", terminal.backend().buffer());
+    assert!(buf_insp.contains("INSPECTION TRAJECTOIRE"));
+    assert!(buf_insp.contains("Cars 2"));
+}
+
+#[test]
+fn test_trajectory_indices_cache_invalidation() {
+    let mut app = AppState::new();
+    let sample1 = TrajectoryAuditItem {
+        target_path: "movie1.mkv".to_string(),
+        target_media: "movie1".to_string(),
+        duration_sec: 100.0,
+        cuts_count: 5,
+        matched_cuts_count: 4,
+        consensus_media_id: Some(1),
+        consensus_title: "Movie One".to_string(),
+        is_temporally_coherent: true,
+        total_elapsed_seconds: 1.2,
+        success: true,
+        cuts: Vec::new(),
+        error_message: None,
+    };
+    let sample2 = TrajectoryAuditItem {
+        target_path: "movie2.mkv".to_string(),
+        target_media: "movie2".to_string(),
+        duration_sec: 200.0,
+        cuts_count: 5,
+        matched_cuts_count: 0,
+        consensus_media_id: None,
+        consensus_title: "NONE".to_string(),
+        is_temporally_coherent: false,
+        total_elapsed_seconds: 0.8,
+        success: true,
+        cuts: Vec::new(),
+        error_message: None,
+    };
+
+    let mut tel = SystemTelemetry {
+        trajectory_records: std::sync::Arc::from([sample1, sample2]),
+        trajectory_data_rev: 1,
+        ..Default::default()
+    };
+
+    // 1. Initial computation
+    let indices = app.ensure_trajectory_indices(&tel);
+    assert_eq!(indices.len(), 2);
+
+    // 2. Filter change invalidates cache
+    app.trajectory_filter = TrajectoryFilter::Matched;
+    let indices_filtered = app.ensure_trajectory_indices(&tel);
+    assert_eq!(indices_filtered.len(), 1);
+    assert_eq!(indices_filtered[0], 0);
+
+    // 3. Search query invalidates cache
+    app.trajectory_filter = TrajectoryFilter::All;
+    app.trajectory_search = "movie2".to_string();
+    let indices_searched = app.ensure_trajectory_indices(&tel);
+    assert_eq!(indices_searched.len(), 1);
+    assert_eq!(indices_searched[0], 1);
+
+    // 4. Data rev change invalidates cache
+    app.trajectory_search.clear();
+    tel.trajectory_data_rev = 2;
+    let indices_rev = app.ensure_trajectory_indices(&tel);
+    assert_eq!(indices_rev.len(), 2);
+}
+
+#[test]
+fn test_trajectory_fuzzy_search_case_insensitivity() {
+    let mut app = AppState::new();
+    let spiderman1 = TrajectoryAuditItem {
+        target_path: "Spider-Man - Brand New Day (2026).mkv".to_string(),
+        target_media: "Spider-Man - Brand New Day (2026)".to_string(),
+        duration_sec: 7200.0,
+        cuts_count: 20,
+        matched_cuts_count: 18,
+        consensus_media_id: Some(101),
+        consensus_title: "Spider-Man: Brand New Day".to_string(),
+        is_temporally_coherent: true,
+        total_elapsed_seconds: 4.5,
+        success: true,
+        cuts: Vec::new(),
+        error_message: None,
+    };
+    let spiderman2 = TrajectoryAuditItem {
+        target_path: "spider.man.into.the.spider.verse.2018.mkv".to_string(),
+        target_media: "spider.man.into.the.spider.verse.2018".to_string(),
+        duration_sec: 6800.0,
+        cuts_count: 20,
+        matched_cuts_count: 19,
+        consensus_media_id: Some(102),
+        consensus_title: "Spider-Man: Into the Spider-Verse".to_string(),
+        is_temporally_coherent: true,
+        total_elapsed_seconds: 4.2,
+        success: true,
+        cuts: Vec::new(),
+        error_message: None,
+    };
+    let batman = TrajectoryAuditItem {
+        target_path: "the.batman.2022.mkv".to_string(),
+        target_media: "the.batman.2022".to_string(),
+        duration_sec: 8000.0,
+        cuts_count: 20,
+        matched_cuts_count: 17,
+        consensus_media_id: Some(103),
+        consensus_title: "The Batman".to_string(),
+        is_temporally_coherent: true,
+        total_elapsed_seconds: 5.1,
+        success: true,
+        cuts: Vec::new(),
+        error_message: None,
+    };
+
+    let tel = SystemTelemetry {
+        trajectory_records: std::sync::Arc::from([spiderman1, spiderman2, batman]),
+        trajectory_data_rev: 1,
+        ..Default::default()
+    };
+
+    // Capitalized search query "Spider" matches both Spider-Man items regardless of case and delimiters
+    app.trajectory_search = "Spider".to_string();
+    let indices = app.ensure_trajectory_indices(&tel);
+    assert_eq!(indices.len(), 2);
+    assert!(indices.contains(&0));
+    assert!(indices.contains(&1));
+
+    // Lowercase "spider" also matches both
+    app.trajectory_search = "spider".to_string();
+    let indices_lower = app.ensure_trajectory_indices(&tel);
+    assert_eq!(indices_lower.len(), 2);
+
+    // Multi-token search with punctuation "Brand New Day"
+    app.trajectory_search = "Brand New Day".to_string();
+    let indices_brand = app.ensure_trajectory_indices(&tel);
+    assert_eq!(indices_brand.len(), 1);
+    assert_eq!(indices_brand[0], 0);
+
+    // Delimited token search "into spider verse"
+    app.trajectory_search = "into spider verse".to_string();
+    let indices_verse = app.ensure_trajectory_indices(&tel);
+    assert_eq!(indices_verse.len(), 1);
+    assert_eq!(indices_verse[0], 1);
+
+    // Search "Batman" matches Batman item
+    app.trajectory_search = "Batman".to_string();
+    let indices_batman = app.ensure_trajectory_indices(&tel);
+    assert_eq!(indices_batman.len(), 1);
+    assert_eq!(indices_batman[0], 2);
+}
+
+#[test]
+fn test_trajectory_scrolling_and_viewport_clamp() {
+    let mut app = AppState::new();
+    app.view = ViewPage::Trajectory;
+    app.last_viewport_height = 10;
+
+    let items: Vec<TrajectoryAuditItem> = (0..50)
+        .map(|i| TrajectoryAuditItem {
+            target_path: format!("movie{i}.mkv"),
+            target_media: format!("movie{i}"),
+            duration_sec: 100.0 + i as f64,
+            cuts_count: 5,
+            matched_cuts_count: 4,
+            consensus_media_id: Some(i as i64),
+            consensus_title: format!("Title {i}"),
+            is_temporally_coherent: true,
+            total_elapsed_seconds: 1.0,
+            success: true,
+            cuts: Vec::new(),
+            error_message: None,
+        })
+        .collect();
+
+    let tel = SystemTelemetry {
+        trajectory_records: std::sync::Arc::from(items),
+        trajectory_data_rev: 1,
+        ..Default::default()
+    };
+
+    // Scroll down 12 steps
+    for _ in 0..12 {
+        handle_key_event(KeyCode::Down, &mut app, &tel);
+    }
+    assert_eq!(app.trajectory_scroll_index, 12);
+    // Viewport is 10, so offset should have advanced to keep 12 visible
+    assert!(app.trajectory_table_offset > 0);
+    assert!(app.trajectory_scroll_index >= app.trajectory_table_offset);
+    assert!(app.trajectory_scroll_index < app.trajectory_table_offset + app.last_viewport_height);
+
+    // PageDown advances by PAGE_SCROLL_STEP
+    handle_key_event(KeyCode::PageDown, &mut app, &tel);
+    assert_eq!(app.trajectory_scroll_index, 22);
+    assert!(app.trajectory_scroll_index >= app.trajectory_table_offset);
+    assert!(app.trajectory_scroll_index < app.trajectory_table_offset + app.last_viewport_height);
+
+    // End jumps to last item
+    handle_key_event(KeyCode::End, &mut app, &tel);
+    assert_eq!(app.trajectory_scroll_index, 49);
+    assert!(app.trajectory_scroll_index >= app.trajectory_table_offset);
+
+    // Home jumps back to top
+    handle_key_event(KeyCode::Home, &mut app, &tel);
+    assert_eq!(app.trajectory_scroll_index, 0);
+    assert_eq!(app.trajectory_table_offset, 0);
+}
+
+#[test]
+fn test_trajectory_file_modal_lifecycle() {
+    let mut app = AppState::new();
+    app.view = ViewPage::Trajectory;
+
+    let tel = SystemTelemetry {
+        trajectory_files: vec![
+            "data/reports/audit/trajectory_overnight.jsonl".to_string(),
+            "data/reports/audit/trajectory_strict.jsonl".to_string(),
+            "data/reports/batch_2026-11-08.jsonl".to_string(),
+        ],
+        active_trajectory_file: Some("data/reports/audit/trajectory_overnight.jsonl".to_string()),
+        ..Default::default()
+    };
+
+    assert!(app.trajectory_file_modal.is_none());
+
+    // 1. Press 'F' -> opens modal
+    handle_key_event(KeyCode::Char('F'), &mut app, &tel);
+    assert!(app.trajectory_file_modal.is_some());
+
+    let modal = app.trajectory_file_modal.as_ref().unwrap();
+    assert_eq!(modal.selected_index, 0);
+    assert_eq!(modal.filter_files(&tel.trajectory_files).len(), 3);
+
+    // 2. Typing characters filters list
+    handle_key_event(KeyCode::Char('s'), &mut app, &tel);
+    handle_key_event(KeyCode::Char('t'), &mut app, &tel);
+    handle_key_event(KeyCode::Char('r'), &mut app, &tel);
+    let modal = app.trajectory_file_modal.as_ref().unwrap();
+    assert_eq!(modal.search_query, "str");
+    assert_eq!(modal.filter_files(&tel.trajectory_files).len(), 1);
+    assert_eq!(
+        modal.filter_files(&tel.trajectory_files)[0],
+        "data/reports/audit/trajectory_strict.jsonl"
+    );
+
+    // 3. Backspace clears characters
+    handle_key_event(KeyCode::Backspace, &mut app, &tel);
+    handle_key_event(KeyCode::Backspace, &mut app, &tel);
+    handle_key_event(KeyCode::Backspace, &mut app, &tel);
+    let modal = app.trajectory_file_modal.as_ref().unwrap();
+    assert_eq!(modal.search_query, "");
+    assert_eq!(modal.filter_files(&tel.trajectory_files).len(), 3);
+
+    // 4. Down arrow navigates
+    handle_key_event(KeyCode::Down, &mut app, &tel);
+    assert_eq!(
+        app.trajectory_file_modal.as_ref().unwrap().selected_index,
+        1
+    );
+
+    // 5. Esc closes modal without switching
+    handle_key_event(KeyCode::Esc, &mut app, &tel);
+    assert!(app.trajectory_file_modal.is_none());
+}
+
+#[test]
+fn test_render_trajectory_file_modal() {
+    let backend = ratatui::backend::TestBackend::new(100, 30);
+    let mut terminal = ratatui::Terminal::new(backend).unwrap();
+
+    let tel = SystemTelemetry {
+        trajectory_files: vec![
+            "data/reports/audit/trajectory_overnight.jsonl".to_string(),
+            "data/reports/audit/trajectory_strict.jsonl".to_string(),
+        ],
+        active_trajectory_file: Some("data/reports/audit/trajectory_overnight.jsonl".to_string()),
+        ..Default::default()
+    };
+
+    let mut app = AppState::new();
+    app.view = ViewPage::Trajectory;
+    app.trajectory_file_modal = Some(dbsrt_cli::commands::top::model::TrajectoryFileModalState {
+        search_query: "overnight".to_string(),
+        selected_index: 0,
+        scroll_offset: 0,
+    });
+
+    let ctx = app.ui_context(&tel, None);
+    terminal.draw(|f| render_ui(f, &ctx)).unwrap();
+
+    let buf = format!("{:?}", terminal.backend().buffer());
+    assert!(buf.contains("SÉLECTION DU FICHIER D'AUDIT"));
+    assert!(buf.contains("trajectory_overnight.jsonl"));
+    assert!(buf.contains("[ACTIF]"));
 }

@@ -52,6 +52,7 @@ Cette page dresse le dictionnaire exhaustif de toutes les cibles d'orchestration
 | `task db:psql` | Ouvre une session interactive `psql` dans le conteneur PostgreSQL actif. |
 | `task db:import:all-phash` | Importe en lot les fichiers `.phash` dans PostgreSQL via flux binaire `COPY`. |
 | `task db:lint:safety` | Vérifie la compatibilité et la non-régression des scripts de migration DDL. |
+| `task db:test:migration` | Exécute le banc d'essai d'intégrité des migrations et contraintes SQL sur base sandbox isolée (`scripts/test_db_migrations.py`). |
 | `task db:tui` | Lance l'explorateur interactif plein écran SQL TUI Harlequin sur PostgreSQL 17 local (`:5433`). |
 | `task db:backfill:medias` | Rétro-propage les métadonnées riches depuis les `.phash` et la télémétrie JSONL vers la table `medias`. |
 | `task db:audit` | Génère un bilan d'intégrité exhaustif des valeurs `NULL` de la table `medias` et inspecte la vue `v_productions`. |
@@ -104,6 +105,8 @@ Cette page dresse le dictionnaire exhaustif de toutes les cibles d'orchestration
 | `task test:scenarios` | Exécute la suite de scénarios TUI déclaratifs headless (`test_scenarios.rs`) en moins de 0.5s. (Alias : `task test:tui`). |
 | `task test:portal:e2e` | Exécute la suite de tests Playwright E2E automatisée du portail de monitoring avec enregistrement vidéo. (Alias : `task portal:e2e`). |
 | `task test:infra` | Exécute le harnais de tests d'infrastructure et chaos testing. |
+| `task eval:nas-snippets` | Exécute la matrice d'évaluation quantitative sur l'ensemble des snippets NAS réels (`scripts/eval_exhaustive_nas_snippets.py`). |
+| `task eval:matching:multi-offset` | Benchmark de comparaison Mono-Fenêtre ($t=50\%$) vs Multi-Fenêtres Spatio-Temporel ($20\%, 50\%, 80\%$) sur corpus difficile (`scripts/eval_multi_offset_matching.py`). |
 | `task eval:cuts:audit` | Exécute l'audit complet de performance du pipeline sur l'ensemble des cuts vidéo (`scripts/audit_cuts_pipeline.py`). |
 | `task eval:cuts:audit:rejected` | Exécute l'analyse forensique exhaustive des cuts rejetés et met à jour la documentation (`scripts/audit_rejected_cuts.py`). |
 
@@ -160,9 +163,20 @@ Cette page dresse le dictionnaire exhaustif de toutes les cibles d'orchestration
 | `task o2switch:batch:tvshow` | Exécute l'ingestion par batch distante sur les séries vierges (/tvshow, supporte `--daemon`, `--fresh-only`, `--retry-failed`, `--max-extraction-secs`). |
 | `task o2switch:batch:movies` | Exécute l'ingestion par batch distante sur les films vierges (/video, supporte `--daemon`, `--fresh-only`, `--retry-failed`, `--max-extraction-secs`). |
 | `task o2switch:batch:status` | Vérifie l'état d'exécution du démon batch (PID, CPU, mémoire, progression détaillée de la file). |
+| `task o2switch:batch:pause` | Met en pause douce le batch distant sur o2switch (`run/batch_paused` : les jobs en cours finissent, aucun nouveau job dépilé). |
+| `task o2switch:batch:resume` | Reprend l'exécution du batch distant sur o2switch en supprimant `run/batch_paused`. |
+| `task o2switch:batch:scale` | Règle dynamiquement le nombre de workers alloués au batch distant (`task o2switch:batch:scale -- <workers>`). |
 | `task o2switch:batch:workers` | Interroge ou règle dynamiquement la concurrence des workers sur o2switch (`run/desired_workers`). |
 | `task o2switch:batch:stop` | Arrête proprement le travailleur batch en arrière-plan sur o2switch. |
 | `task o2switch:batch:logs` | Suit en direct (`tail -f`) les journaux d'exécution du batch distant sur o2switch. |
+| `task o2switch:trajectory:run` | Exécute le batch de tracking spatiotemporel en avant-plan sur o2switch (`--phash-dir`, `--cuts`, `--limit`). |
+| `task o2switch:trajectory:start` | Lance le batch de tracking spatiotemporel en tâche de fond détachée sous `screen` sur o2switch (persistant, libère immédiatement le poste local). |
+| `task o2switch:trajectory:status` | Interroge l'état d'avancement, la télémétrie JSON et le statut de pause du batch distant. |
+| `task o2switch:trajectory:pause` | Met en pause douce le batch distant sur o2switch (`run/trajectory_paused`). |
+| `task o2switch:trajectory:resume` | Reprend l'exécution du batch distant sur o2switch. |
+| `task o2switch:trajectory:stop` | Arrête proprement le batch distant par `SIGTERM` et termine la session `screen`. |
+| `task o2switch:trajectory:logs` | Suit en direct les logs d'exécution du batch distant sur o2switch (`tail -f`). |
+| `task o2switch:trajectory:pull` | Rapatrie les résultats d'audit (`audit/*.jsonl`) depuis o2switch vers `data/reports/audit/`. |
 | `task o2switch:monitoring` | Affiche l'URL publique du tableau de bord web et le lien direct d'authentification mobile 4G/5G. |
 | `task o2switch:top` | Ouvre le moniteur TUI plein écran en direct sur o2switch via SSH (`ssh -t`). |
 | `task o2switch:pull-catalog` | Rapatrie le catalogue compilé `catalog.dbphash`, les sous-titres SRT et journaux depuis o2switch vers le stockage local / appliance. |

@@ -1,0 +1,7 @@
+# PostgreSQL 17 Appliance RPi4 BK-Tree Database
+host = "192.168.1.24"
+port = 5433
+user = "docker"
+password = "docker"
+database = "bktreedb"
+sslmode = "disable"

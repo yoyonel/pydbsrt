@@ -38,7 +38,7 @@ DEFAULT_NAS_PASS_ENTRY="services/synology/nas_pass"
 DEFAULT_API_KEY_PASS_ENTRY="services/pydbsrt/o2switch_api_key"
 DEFAULT_READONLY_KEY_PASS_ENTRY="services/pydbsrt/o2switch_readonly_key"
 # Worker concurrency bounds, kept in sync with MIN/MAX_CONCURRENT_WORKERS in o2switch_batch_worker.py
-MIN_BATCH_WORKERS=1
+MIN_BATCH_WORKERS=0
 MAX_BATCH_WORKERS=8
 
 # NAS endpoint comes from .env / environment only (no versioned default)
@@ -253,16 +253,22 @@ case "${ACTION}" in
     check_ssh
     echo "=== Synchronizing standalone stack to ${O2SWITCH_HOST} ==="
     # shellcheck disable=SC2029
-    ssh "${O2SWITCH_HOST}" "mkdir -p ${REMOTE_BASE}/bin ${REMOTE_BASE}/data ${REMOTE_BASE}/run ${REMOTE_BASE}/logs ${REMOTE_PUBLIC_HTML} ${REMOTE_BASE}/scripts && ln -sfn ${O2SWITCH_PYTHON} ${REMOTE_BASE}/bin/python3"
+    ssh "${O2SWITCH_HOST}" "mkdir -p ${REMOTE_BASE}/bin ${REMOTE_BASE}/data ${REMOTE_BASE}/run ${REMOTE_BASE}/logs ${REMOTE_PUBLIC_HTML} ${REMOTE_BASE}/scripts ${REMOTE_BASE}/web && ln -sfn ${O2SWITCH_PYTHON} ${REMOTE_BASE}/bin/python3"
 
     # Binaries ship as releases (deploy): copying over bin/ would replace the release links
     rsync -a --chmod=F755 "deploy/o2switch/dbsrt_server_ctl.sh" "${O2SWITCH_HOST}:${REMOTE_BASE}/bin/"
 
-    echo "-> Transferring batch worker scripts..."
+    echo "-> Transferring batch worker and portal scripts..."
     if [[ -f "scripts/o2switch_batch_worker.py" ]]; then
       rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "scripts/o2switch_batch_worker.py" "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/"
       # shellcheck disable=SC2029
       ssh "${O2SWITCH_HOST}" "chmod +x ${REMOTE_BASE}/scripts/o2switch_batch_worker.py"
+    fi
+    if [[ -f "scripts/portal_server.py" ]]; then
+      rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "scripts/portal_server.py" "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/"
+    fi
+    if [[ -f "scripts/static/sources.html" ]]; then
+      rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "scripts/static/sources.html" "${O2SWITCH_HOST}:${REMOTE_BASE}/web/sources.html"
     fi
 
     echo "-> Transferring Zero-DB catalog and SRT store (bwlimit ${DEFAULT_RSYNC_BWLIMIT_KBPS} KB/s)..."
@@ -863,6 +869,22 @@ REMOTE_SCRIPT
     ssh "${O2SWITCH_HOST}" "pkill -KILL -u \$(id -u) -f '[b]in/dbsrt media:add' || true; screen -X -S dbsrt_batch quit 2>/dev/null || true"
     ;;
 
+  batch-pause)
+    check_ssh
+    echo "=== Pausing remote batch worker on ${O2SWITCH_HOST} (soft pause, jobs drain) ==="
+    # shellcheck disable=SC2029
+    ssh "${O2SWITCH_HOST}" "mkdir -p $(printf '%q' "${REMOTE_BASE}/run") && touch $(printf '%q' "${REMOTE_BASE}/run/batch_paused")"
+    echo "✓ Batch worker paused (sentinel run/batch_paused set)."
+    ;;
+
+  batch-resume)
+    check_ssh
+    echo "=== Resuming remote batch worker on ${O2SWITCH_HOST} ==="
+    # shellcheck disable=SC2029
+    ssh "${O2SWITCH_HOST}" "rm -f $(printf '%q' "${REMOTE_BASE}/run/batch_paused")"
+    echo "✓ Batch worker resumed (sentinel run/batch_paused removed)."
+    ;;
+
   batch-workers)
     check_ssh
     shift || true
@@ -928,8 +950,124 @@ REMOTE_SCRIPT
     ssh "${O2SWITCH_HOST}" "cd $(printf '%q' "${REMOTE_BASE}") && ./bin/python3 -I scripts/o2switch_audit_remote.py $(printf '%q ' "${AUDIT_ARGS[@]}")"
     ;;
 
+  trajectory)
+    # Spatiotemporal trajectory tracking batch runner on o2switch (foreground or detached)
+    check_ssh
+    SUB_CMD="${2:-run}"
+    case "${SUB_CMD}" in
+      start)
+        shift 2 || true
+        TRAJ_ARGS=("${@}")
+        rsync -a --chmod=F755 "scripts/trajectory_bench_runner.py" "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/"
+        REMOTE_CMD_ARGS=$(printf '%q ' "${TRAJ_ARGS[@]}")
+        # shellcheck disable=SC2029
+        ssh "${O2SWITCH_HOST}" "bash -s -- ${REMOTE_BASE} ${REMOTE_CMD_ARGS}" <<'REMOTE_TRAJ_START'
+BASE="$1"
+shift
+cd "${BASE}"
+mkdir -p run logs audit
+PID_FILE="run/trajectory.pid"
+LOG_FILE="logs/trajectory.log"
+
+if [[ -f "${PID_FILE}" ]]; then
+  PID=$(cat "${PID_FILE}")
+  if kill -0 "${PID}" 2>/dev/null; then
+    echo "⚠️ Trajectory runner is already active (PID: ${PID})."
+    exit 0
+  fi
+fi
+
+screen -X -S dbsrt_trajectory quit 2>/dev/null || true
+export PATH="$HOME/${BASE}/bin:$PATH"
+export RAYON_NUM_THREADS=2
+ARGS=$(printf '%q ' "$@")
+
+# Launch in persistent detached screen session
+screen -dmS dbsrt_trajectory bash -c "echo \$\$ > '${PID_FILE}'; exec ./bin/python3 -u scripts/trajectory_bench_runner.py ${ARGS} >> '${LOG_FILE}' 2>&1"
+sleep 1
+PID=$(cat "${PID_FILE}" 2>/dev/null || true)
+echo "✓ Started persistent trajectory batch daemon (screen: dbsrt_trajectory, PID: ${PID})."
+REMOTE_TRAJ_START
+        echo "✓ Trajectory batch worker is running detached on ${O2SWITCH_HOST}."
+        echo "  • Monitor status : task o2switch:trajectory:status"
+        echo "  • Stream logs    : task o2switch:trajectory:logs"
+        echo "  • Pull audit     : task o2switch:trajectory:pull"
+        echo "  • Stop daemon    : task o2switch:trajectory:stop"
+        ;;
+
+      status)
+        # shellcheck disable=SC2029
+        ssh "${O2SWITCH_HOST}" "bash -s -- ${REMOTE_BASE}" <<'REMOTE_TRAJ_STATUS'
+BASE="$1"
+cd "${BASE}"
+PID_FILE="run/trajectory.pid"
+STATUS_FILE="run/trajectory_status.json"
+
+if [[ -f "${PID_FILE}" ]] && kill -0 "$(cat "${PID_FILE}")" 2>/dev/null; then
+  echo "● Trajectory batch worker RUNNING (PID $(cat "${PID_FILE}"))"
+else
+  echo "○ Trajectory batch worker not running."
+fi
+
+if [[ -f "${STATUS_FILE}" ]]; then
+  echo "=== Telemetry (from ${STATUS_FILE}) ==="
+  cat "${STATUS_FILE}"
+  echo ""
+fi
+
+if [[ -f "logs/trajectory.log" ]]; then
+  echo "=== Last 5 log lines ==="
+  tail -n 5 "logs/trajectory.log"
+fi
+REMOTE_TRAJ_STATUS
+        ;;
+
+      stop)
+        remote_stop_pidfile "run/trajectory.pid"
+        # shellcheck disable=SC2029
+        ssh "${O2SWITCH_HOST}" "screen -X -S dbsrt_trajectory quit 2>/dev/null || true"
+        echo "✓ Trajectory screen session terminated."
+        ;;
+
+      pause)
+        check_ssh
+        echo "=== Soft-pausing trajectory batch worker on ${O2SWITCH_HOST} ==="
+        # shellcheck disable=SC2029
+        ssh "${O2SWITCH_HOST}" "mkdir -p ${REMOTE_BASE}/run && touch ${REMOTE_BASE}/run/trajectory_paused"
+        echo "✓ Pause sentinel created (${REMOTE_BASE}/run/trajectory_paused)."
+        ;;
+
+      resume)
+        check_ssh
+        echo "=== Resuming trajectory batch worker on ${O2SWITCH_HOST} ==="
+        # shellcheck disable=SC2029
+        ssh "${O2SWITCH_HOST}" "rm -f ${REMOTE_BASE}/run/trajectory_paused"
+        echo "✓ Pause sentinel removed."
+        ;;
+
+      logs)
+        # shellcheck disable=SC2029
+        ssh -t "${O2SWITCH_HOST}" "tail -f ${REMOTE_BASE}/logs/trajectory.log"
+        ;;
+
+      pull)
+        mkdir -p data/reports/audit
+        echo "=== Pulling trajectory audit results from ${O2SWITCH_HOST} ==="
+        rsync -avz --progress "${O2SWITCH_HOST}:${REMOTE_BASE}/audit/" data/reports/audit/
+        echo "✓ Trajectory audit records synced into data/reports/audit/"
+        ;;
+
+      *)
+        TRAJ_ARGS=("${@:2}")
+        rsync -a --chmod=F755 "scripts/trajectory_bench_runner.py" "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/"
+        # shellcheck disable=SC2029
+        ssh "${O2SWITCH_HOST}" "cd $(printf '%q' "${REMOTE_BASE}") && ./bin/python3 -I scripts/trajectory_bench_runner.py $(printf '%q ' "${TRAJ_ARGS[@]}")"
+        ;;
+    esac
+    ;;
+
   *)
-    echo "Usage: $0 {build|test-local|sync|deploy|rollback|releases|start|stop|restart|status|logs|demo|setup-cron|remove-cron|rotate-key|rotate-readonly-key|monitoring|top|pull-catalog|backup-nas|batch-tvshow|batch-movies|batch-status|batch-summary|batch-sync|batch-workers|batch-stop|batch-logs|faultwatch|audit}"
+    echo "Usage: $0 {build|test-local|sync|deploy|rollback|releases|start|stop|restart|status|logs|demo|setup-cron|remove-cron|rotate-key|rotate-readonly-key|monitoring|top|pull-catalog|backup-nas|batch-tvshow|batch-movies|batch-status|batch-summary|batch-sync|batch-pause|batch-resume|batch-workers|batch-stop|batch-logs|faultwatch|audit|trajectory}"
     exit 1
     ;;
 esac

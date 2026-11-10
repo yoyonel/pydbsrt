@@ -11,4 +11,6 @@ pub mod media_inspection;
 pub mod media_sources;
 pub mod stats;
 pub mod system;
+pub mod trajectory;
+pub mod trajectory_inspection;
 pub mod widgets;

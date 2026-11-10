@@ -121,6 +121,16 @@ fn build_tab_bar_spans(current_view: ViewPage) -> Vec<Span<'static>> {
         Style::default().fg(Color::DarkGray)
     };
 
+    let tab_trajectory_style =
+        if current_view == ViewPage::Trajectory || current_view == ViewPage::TrajectoryInspection {
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Rgb(255, 140, 0))
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+
     vec![
         Span::raw(" "),
         Span::styled(" [1] Tâches ", tab_jobs_style),
@@ -134,7 +144,20 @@ fn build_tab_bar_spans(current_view: ViewPage) -> Vec<Span<'static>> {
         Span::styled(" [5/s] Sources ", tab_sources_style),
         Span::raw(" "),
         Span::styled(" [6/y] Système ", tab_system_style),
+        Span::raw(" "),
+        Span::styled(" [7/t] Trajectoires ", tab_trajectory_style),
     ]
+}
+
+/// Shortcuts for modal or inspection sub-views.
+fn build_inspection_shortcuts(view: ViewPage) -> &'static str {
+    match view {
+        ViewPage::CompletedInspection => "[Esc/Backspace/Enter] Retour Liste  [?] Aide  [q] Quitter",
+        ViewPage::TrajectoryInspection => "[Esc/Backspace/Enter] Retour Liste  [↑/k/↓/j] Défiler  [?] Aide  [q] Quitter",
+        ViewPage::MediaInspection => "[Esc/Backspace/Enter] Retour Catalogue  [Space] Cocher  [b] Batch  [q] Quitter",
+        ViewPage::JobInspection => "[Esc/Backspace] Retour Liste  [p] Pause  [c] Arrêter  [K] Kill  [x/X] Arrêter Batch  [q] Quitter",
+        _ => "[?] Aide  [q] Quitter",
+    }
 }
 
 /// Returns contextual keyboard shortcuts string based on the active tab and search query state.
@@ -143,9 +166,10 @@ fn build_shortcuts_text(ctx: &UiContext) -> &'static str {
         ViewPage::ActiveJobs => build_active_jobs_shortcuts(ctx),
         ViewPage::StatsHistory => "[↑/k] Défiler  [?] Aide  [q] Quitter",
         ViewPage::CompletedMedia => build_completed_media_shortcuts(ctx),
-        ViewPage::CompletedInspection => {
-            "[Esc/Backspace/Enter] Retour Liste  [?] Aide  [q] Quitter"
-        }
+        ViewPage::CompletedInspection
+        | ViewPage::TrajectoryInspection
+        | ViewPage::MediaInspection
+        | ViewPage::JobInspection => build_inspection_shortcuts(ctx.view),
         ViewPage::MediaBrowser => build_media_browser_shortcuts(ctx),
         ViewPage::MediaSources => {
             if ctx.telemetry.is_remote_streaming {
@@ -155,15 +179,19 @@ fn build_shortcuts_text(ctx: &UiContext) -> &'static str {
             }
         }
         ViewPage::System => "[↑/k] Défiler  [?] Aide  [q] Quitter",
-        ViewPage::MediaInspection => {
-            "[Esc/Backspace/Enter] Retour Catalogue  [Space] Cocher  [b] Batch  [q] Quitter"
-        }
-        ViewPage::JobInspection => {
-            "[Esc/Backspace] Retour Liste  [p] Pause  [c] Arrêter  [K] Kill  [x/X] Arrêter Batch  [q] Quitter"
-        }
+        ViewPage::Trajectory => build_trajectory_shortcuts(ctx),
         ViewPage::Help => {
-            "[0-6/Tab] Onglet Aide  [↑/↓/k/j] Défiler  [Esc/Backspace/?] Revenir  [q] Quitter"
+            "[0-7/Tab] Onglet Aide  [↑/↓/k/j] Défiler  [Esc/Backspace/?] Revenir  [q] Quitter"
         }
+    }
+}
+
+/// Builds shortcuts line for Trajectory view depending on search state.
+fn build_trajectory_shortcuts(ctx: &UiContext) -> &'static str {
+    if ctx.search_active {
+        "[Entrée] Valider recherche  [Échap] Annuler  [Texte] Filtrer  [?] Aide  [q] Quitter"
+    } else {
+        "[?] Aide  [q] Quitter"
     }
 }
 
@@ -172,9 +200,9 @@ fn build_active_jobs_shortcuts(ctx: &UiContext) -> &'static str {
     if ctx.search_active {
         "[Entrée] Valider recherche  [Échap] Annuler  [Texte] Filtrer  [?] Aide"
     } else if !ctx.search_query.is_empty() {
-        "[↑/k] Défiler  [/] Chercher  [Échap] Effacer recherche  [Enter/i] Inspecter  [p] Pause  [c] Stop  [x/X] Arrêter Batch  [?] Aide  [q] Quitter"
+        "[↑/k] Défiler  [/] Chercher  [Échap] Effacer  [Enter/i] Inspecter  [p] Pause job  [P] Pause batch  [+/-] Workers  [c] Stop  [x/X] Arrêter Batch  [?] Aide  [q] Quitter"
     } else {
-        "[↑/k] Défiler  [/] Chercher  [Enter/i] Inspecter  [p] Pause  [c] Stop  [x/X] Arrêter Batch  [?] Aide  [q] Quitter"
+        "[↑/k] Défiler  [/] Chercher  [Enter/i] Inspecter  [p] Pause job  [P] Pause batch  [+/-] Workers  [c] Stop  [x/X] Arrêter Batch  [?] Aide  [q] Quitter"
     }
 }
 

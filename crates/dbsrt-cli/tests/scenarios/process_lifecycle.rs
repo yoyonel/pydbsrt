@@ -96,6 +96,16 @@ fn test_scenario_batch_stop_graceful_and_emergency() {
             || msg_force.contains("tué")
             || msg_force.contains("Aucun batch")
     );
+
+    // Soft-pause batch 'P'
+    harness.send_key(KeyCode::Char('P'));
+    assert!(harness.feedback_text().is_some());
+
+    // Scale workers '+' and '-'
+    harness.send_key(KeyCode::Char('+'));
+    assert!(harness.feedback_text().is_some());
+    harness.send_key(KeyCode::Char('-'));
+    assert!(harness.feedback_text().is_some());
 }
 
 #[test]

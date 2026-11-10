@@ -159,6 +159,12 @@ pub const HELP_TAB_HEADER_HEIGHT: u16 = 3;
 /// Default directory storing precomputed pHash binary fingerprints.
 pub const DEFAULT_PHASH_DIR: &str = "data/__PHASH__";
 
+/// Primary directory holding spatiotemporal trajectory audit JSONL records.
+pub const DEFAULT_TRAJECTORY_AUDIT_DIR: &str = "data/reports/audit";
+
+/// Fallback secondary directory holding trajectory audit JSONL records.
+pub const FALLBACK_TRAJECTORY_AUDIT_DIR: &str = "audit";
+
 /// Cumulative width of all fixed non-stem columns and inter-column spacers in the media browser table.
 /// 3 (cursor) + 5 (sel) + 10 (size) + 9 (duration) + 18 (phash) + 15 (subs) + 10 (codec) + 14 (status) + 8 (spacers) = 92.
 pub const MEDIA_BROWSER_NON_STEM_COLUMNS_WIDTH: u16 = 92;
@@ -198,6 +204,12 @@ pub const SOURCE_MODAL_HEIGHT_LINES: u16 = 13;
 
 /// Default modal height lines for source deletion confirmation dialog.
 pub const DELETE_CONFIRM_MODAL_HEIGHT_LINES: u16 = 11;
+
+/// Default modal width percentage for trajectory audit file selection dialog.
+pub const TRAJECTORY_FILE_MODAL_WIDTH_PERCENT: u16 = 70;
+
+/// Default modal height lines for trajectory audit file selection dialog.
+pub const TRAJECTORY_FILE_MODAL_HEIGHT_LINES: u16 = 20;
 
 /// Process command line pattern identifying batch coordinator processes.
 pub const BATCH_COORDINATOR_PATTERN: &str = "batch_media_add";

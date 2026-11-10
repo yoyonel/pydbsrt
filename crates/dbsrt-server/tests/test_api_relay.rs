@@ -112,6 +112,15 @@ async fn test_dual_process_remote_relay_e2e() {
         elapsed, res_data.matched_media, res_data.total_candidates
     );
 
+    if res_data.matched_media.is_none() {
+        if let Ok(m_res) = client.get(format!("{}/v1/logs", local_url)).send().await {
+            eprintln!("Local logs:\n{}", m_res.text().await.unwrap_or_default());
+        }
+        if let Ok(m_res) = client.get(format!("{}/v1/logs", remote_url)).send().await {
+            eprintln!("Remote logs:\n{}", m_res.text().await.unwrap_or_default());
+        }
+    }
+
     // Assertions
     assert!(res_data.matched_media.is_some());
     let matched = res_data.matched_media.unwrap();

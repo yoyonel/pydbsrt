@@ -8,7 +8,7 @@ use dbsrt_cli::commands::top::model::{
     ActiveJobTelemetry, DiscoveredMediaItem, HistoricalRecord, IngestionStatus, MediaSourceConfig,
     MediaSubtrackInfo, PhashFingerprintInfo, SystemTelemetry,
 };
-use dbsrt_cli::commands::top::ui::{render_ui, UiContext};
+use dbsrt_cli::commands::top::ui::render_ui;
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 use std::path::PathBuf;
@@ -42,30 +42,8 @@ impl TestHarness {
 
     pub fn draw(&mut self) {
         let tel = self.shared_state.read().unwrap().clone();
-        let ctx = UiContext {
-            telemetry: &tel,
-            view: self.app.view,
-            selected_index: self.app.selected_index,
-            completed_scroll_index: self.app.completed_scroll_index,
-            media_scroll_index: self.app.media_scroll_index,
-            source_scroll_index: self.app.source_scroll_index,
-            source_modal: self.app.source_modal.as_ref(),
-            selected_media_paths: &self.app.selected_media_paths,
-            media_filter: self.app.media_filter,
-            media_sort: self.app.media_sort,
-            source_filter: &self.app.source_filter,
-            completed_filter: self.app.completed_filter,
-            completed_sort: self.app.completed_sort,
-            search_query: self.app.current_search_query(),
-            search_active: self.app.search_active,
-            help_tab: self.app.help_tab,
-            help_scroll_index: self.app.help_scroll_index,
-            feedback_msg: self
-                .app
-                .feedback_message
-                .as_ref()
-                .map(|(msg, _)| msg.as_str()),
-        };
+        self.app.clamp_indices(&tel);
+        let ctx = self.app.ui_context(&tel, self.app.current_feedback());
         self.terminal.draw(|f| render_ui(f, &ctx)).unwrap();
     }
 

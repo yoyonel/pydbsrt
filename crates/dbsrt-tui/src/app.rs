@@ -8,11 +8,12 @@ use std::path::PathBuf;
 
 use crate::constants::{FEEDBACK_DISPLAY_DURATION_SECS, PAGE_SCROLL_STEP};
 use crate::model::{
-    filter_active_jobs_with_search, filter_and_sort_completed_with_search,
-    filter_and_sort_media_with_source_and_search, ActiveJobTelemetry, CompletedFilter,
-    CompletedSort, DiscoveredMediaItem, HelpTab, HistoricalRecord, MediaFilter, MediaSort,
-    MediaSourceConfig, MediaSourceFilter, SourceInputModalState, SourceModalField, SourceModalMode,
-    SystemTelemetry, ViewPage,
+    compute_trajectory_indices, filter_active_jobs_with_search,
+    filter_and_sort_completed_with_search, filter_and_sort_media_with_source_and_search,
+    filter_and_sort_trajectories, ActiveJobTelemetry, CompletedFilter, CompletedSort,
+    DiscoveredMediaItem, HelpTab, HistoricalRecord, MediaFilter, MediaSort, MediaSourceConfig,
+    MediaSourceFilter, SourceInputModalState, SourceModalField, SourceModalMode, SystemTelemetry,
+    TrajectoryAuditItem, TrajectoryFileModalState, TrajectoryFilter, TrajectorySort, ViewPage,
 };
 use crate::ui::UiContext;
 
@@ -59,6 +60,10 @@ pub trait TopActions {
     fn kill_job(&mut self, pid: u32) -> String;
     /// Stops the whole batch (`[x]` graceful, `[X]` forced).
     fn stop_entire_batch(&mut self, force: bool, pids: &[u32]) -> String;
+    /// Toggles soft pause on the whole batch (`[P]`, touch/rm `run/batch_paused`).
+    fn toggle_soft_pause_batch(&mut self) -> String;
+    /// Scales desired worker concurrency (`[+]`/`[-]`, writes `run/desired_workers`).
+    fn adjust_desired_workers(&mut self, delta: i32) -> String;
     /// Launches a batch (`[b]`). `Ok` clears the selection and returns to Active Jobs.
     fn launch_selected_batch(&mut self, paths: &[PathBuf]) -> Result<String, String>;
     /// Removes media from the persistent catalog cache (`[d]`).
@@ -86,6 +91,11 @@ pub trait TopActions {
     fn rescan_media_sources(&mut self) -> String;
     /// Reloads remote streaming targets (`[r]` in Zero-NVMe mode).
     fn reload_remote_targets(&mut self, telemetry: &SystemTelemetry) -> String;
+    /// Switches the active trajectory audit file and hot-reloads its records (`[F]`).
+    fn switch_trajectory_file(&mut self, path: &str) -> Result<usize, String> {
+        let _ = path;
+        Ok(0)
+    }
 }
 
 /// State of the TUI interactive session and navigational cursor offsets.
@@ -121,12 +131,32 @@ pub struct AppState {
     pub completed_filter: CompletedFilter,
     /// Active sort criterion in Completed Media (`[o]`).
     pub completed_sort: CompletedSort,
+    /// Selected row index in Trajectory audit table (`[7/t]`).
+    pub trajectory_scroll_index: usize,
+    /// Viewport start offset in Trajectory audit table for windowed rendering.
+    pub trajectory_table_offset: usize,
+    /// Cached filtered and sorted indices for spatiotemporal trajectories.
+    pub trajectory_visible_indices: Vec<usize>,
+    /// Cache signature used to detect when trajectory indices need recomputing.
+    pub trajectory_cache_sig: (TrajectoryFilter, TrajectorySort, String, u64, usize),
+    /// Viewport data rows capacity captured during rendering.
+    pub last_viewport_height: usize,
+    /// Active filter criterion in Trajectory audit view (`[f]`).
+    pub trajectory_filter: TrajectoryFilter,
+    /// Active sort criterion in Trajectory audit view (`[o]`).
+    pub trajectory_sort: TrajectorySort,
+    /// Modal state when selecting or switching trajectory audit files.
+    pub trajectory_file_modal: Option<TrajectoryFileModalState>,
     /// Interactive fuzzy search query string for Active Jobs view.
     pub jobs_search: String,
     /// Interactive fuzzy search query string for Completed Media view.
     pub completed_search: String,
     /// Interactive fuzzy search query string for Media Browser view.
     pub media_search: String,
+    /// Interactive fuzzy search query string for Trajectory view.
+    pub trajectory_search: String,
+    /// Scroll line offset in Trajectory cut-by-cut inspection view.
+    pub trajectory_inspection_scroll: usize,
     /// Flag indicating whether the interactive search input bar is currently focused (`/`).
     pub search_active: bool,
     /// Active tab in fullframe contextual Help view (`[?]`).
@@ -162,6 +192,7 @@ impl AppState {
             ViewPage::ActiveJobs | ViewPage::JobInspection => &self.jobs_search,
             ViewPage::CompletedMedia | ViewPage::CompletedInspection => &self.completed_search,
             ViewPage::MediaBrowser | ViewPage::MediaInspection => &self.media_search,
+            ViewPage::Trajectory | ViewPage::TrajectoryInspection => &self.trajectory_search,
             _ => "",
         }
     }
@@ -172,7 +203,7 @@ impl AppState {
     /// None (operates on `&mut self`).
     ///
     /// # Returns
-    /// `Some(&mut String)` pointing to `jobs_search`, `completed_search`, or `media_search`.
+    /// `Some(&mut String)` pointing to `jobs_search`, `completed_search`, `media_search`, or `trajectory_search`.
     /// `None` if the active view is not searchable.
     pub fn current_search_query_mut(&mut self) -> Option<&mut String> {
         match self.view {
@@ -181,6 +212,9 @@ impl AppState {
                 Some(&mut self.completed_search)
             }
             ViewPage::MediaBrowser | ViewPage::MediaInspection => Some(&mut self.media_search),
+            ViewPage::Trajectory | ViewPage::TrajectoryInspection => {
+                Some(&mut self.trajectory_search)
+            }
             _ => None,
         }
     }
@@ -196,6 +230,10 @@ impl AppState {
             ViewPage::CompletedMedia => self.completed_scroll_index = 0,
             ViewPage::MediaBrowser => self.media_scroll_index = 0,
             ViewPage::System => self.system_scroll_index = 0,
+            ViewPage::Trajectory => {
+                self.trajectory_scroll_index = 0;
+                self.trajectory_table_offset = 0;
+            }
             _ => {}
         }
     }
@@ -265,6 +303,48 @@ impl AppState {
         )
     }
 
+    /// Ensures that the cached trajectory visible indices match active filter, sort, search, and revision.
+    pub fn ensure_trajectory_indices(&mut self, telemetry: &SystemTelemetry) -> &[usize] {
+        let sig = (
+            self.trajectory_filter,
+            self.trajectory_sort,
+            self.trajectory_search.clone(),
+            telemetry.trajectory_data_rev,
+            telemetry.trajectory_records.len(),
+        );
+        if sig != self.trajectory_cache_sig {
+            self.trajectory_visible_indices = compute_trajectory_indices(
+                &telemetry.trajectory_records,
+                self.trajectory_filter,
+                self.trajectory_sort,
+                if self.trajectory_search.is_empty() {
+                    None
+                } else {
+                    Some(&self.trajectory_search)
+                },
+            );
+            self.trajectory_cache_sig = sig;
+        }
+        &self.trajectory_visible_indices
+    }
+
+    /// Filters and sorts trajectory audit items according to active view settings.
+    pub fn visible_trajectories(
+        &self,
+        records: &[TrajectoryAuditItem],
+    ) -> Vec<TrajectoryAuditItem> {
+        filter_and_sort_trajectories(
+            records,
+            self.trajectory_filter,
+            self.trajectory_sort,
+            if self.trajectory_search.is_empty() {
+                None
+            } else {
+                Some(&self.trajectory_search)
+            },
+        )
+    }
+
     /// Sets an ephemeral status bar feedback toast message.
     ///
     /// # Arguments
@@ -298,13 +378,30 @@ impl AppState {
             .visible_media(&telemetry.discovered_media, &telemetry.media_sources)
             .len();
         let sources_len = telemetry.media_sources.len();
+        self.ensure_trajectory_indices(telemetry);
+        let trajectory_len = self.trajectory_visible_indices.len();
         for (index, len) in [
             (&mut self.selected_index, jobs_len),
             (&mut self.completed_scroll_index, completed_len),
             (&mut self.media_scroll_index, media_len),
             (&mut self.source_scroll_index, sources_len),
+            (&mut self.trajectory_scroll_index, trajectory_len),
         ] {
             *index = (*index).min(len.saturating_sub(1));
+        }
+
+        let vp = if self.last_viewport_height > 0 {
+            self.last_viewport_height
+        } else {
+            20
+        };
+        if self.trajectory_scroll_index < self.trajectory_table_offset {
+            self.trajectory_table_offset = self.trajectory_scroll_index;
+        } else if self.trajectory_scroll_index >= self.trajectory_table_offset + vp {
+            self.trajectory_table_offset = self.trajectory_scroll_index + 1 - vp;
+        }
+        if trajectory_len == 0 {
+            self.trajectory_table_offset = 0;
         }
     }
 
@@ -322,12 +419,19 @@ impl AppState {
             media_scroll_index: self.media_scroll_index,
             source_scroll_index: self.source_scroll_index,
             source_modal: self.source_modal.as_ref(),
+            trajectory_file_modal: self.trajectory_file_modal.as_ref(),
             selected_media_paths: &self.selected_media_paths,
             media_filter: self.media_filter,
             media_sort: self.media_sort,
             source_filter: &self.source_filter,
             completed_filter: self.completed_filter,
             completed_sort: self.completed_sort,
+            trajectory_scroll_index: self.trajectory_scroll_index,
+            trajectory_table_offset: self.trajectory_table_offset,
+            trajectory_filter: self.trajectory_filter,
+            trajectory_sort: self.trajectory_sort,
+            trajectory_inspection_scroll: self.trajectory_inspection_scroll,
+            trajectory_indices: &self.trajectory_visible_indices,
             search_query: self.current_search_query(),
             search_active: self.search_active,
             help_tab: self.help_tab,
@@ -522,14 +626,152 @@ fn handle_delete_confirm_modal_key_event(
 /// Guaranteed panic-free.
 ///
 /// # Data Flow & Invariants
-/// Dispatches directly to [`handle_delete_confirm_modal_key_event`] if mode is DeleteConfirm,
-/// or [`handle_source_input_modal_key_event`] for Add/Edit configuration forms.
+/// Handles keyboard events when the trajectory audit file selection modal is active.
+///
+/// # Arguments
+/// * `code` - Input keyboard event code.
+/// * `app` - Mutable reference to application state.
+/// * `telemetry` - Active system telemetry snapshot.
+/// * `actions` - Host side-effect executor (persistence, file switching).
+///
+/// # Returns
+/// Always returns `true` to signal modal key event consumption.
+///
+/// # Data Flow & Invariants
+/// Intercepts navigation (Up/Down/PageUp/PageDown/Home/End), typing for fuzzy filtering,
+/// Esc (close modal without change), and Enter (switches active file via [`TopActions::switch_trajectory_file`]).
+/// Handles navigation key events in the trajectory audit file modal.
+fn handle_trajectory_file_modal_nav(
+    code: KeyCode,
+    modal: &mut TrajectoryFileModalState,
+    total: usize,
+) {
+    match code {
+        KeyCode::Up if modal.selected_index > 0 => {
+            modal.selected_index -= 1;
+            if modal.selected_index < modal.scroll_offset {
+                modal.scroll_offset = modal.selected_index;
+            }
+        }
+        KeyCode::Down if total > 0 && modal.selected_index + 1 < total => {
+            modal.selected_index += 1;
+            if modal.selected_index >= modal.scroll_offset + 10 {
+                modal.scroll_offset = modal.selected_index + 1 - 10;
+            }
+        }
+        KeyCode::PageUp => {
+            modal.selected_index = modal.selected_index.saturating_sub(5);
+            modal.scroll_offset = modal.scroll_offset.saturating_sub(5);
+        }
+        KeyCode::PageDown if total > 0 => {
+            let max_idx = total.saturating_sub(1);
+            modal.selected_index = (modal.selected_index + 5).min(max_idx);
+            if modal.selected_index >= modal.scroll_offset + 10 {
+                modal.scroll_offset = (modal.selected_index + 1).saturating_sub(10);
+            }
+        }
+        KeyCode::Home => {
+            modal.selected_index = 0;
+            modal.scroll_offset = 0;
+        }
+        KeyCode::End if total > 0 => {
+            modal.selected_index = total - 1;
+            modal.scroll_offset = total.saturating_sub(10);
+        }
+        _ => {}
+    }
+}
+
+/// Applies selection of a file from the trajectory audit file modal.
+fn apply_trajectory_file_selection(
+    app: &mut AppState,
+    target_file: &str,
+    actions: &mut dyn TopActions,
+) {
+    match actions.switch_trajectory_file(target_file) {
+        Ok(count) => {
+            app.trajectory_scroll_index = 0;
+            app.trajectory_table_offset = 0;
+            app.set_feedback(format!(
+                "Campagne chargée ({count} trajectoires) : {target_file}"
+            ));
+        }
+        Err(e) => {
+            app.set_feedback(format!("Erreur chargement campagne : {e}"));
+        }
+    }
+}
+
+/// Handles key events when the trajectory audit file modal is opened.
+///
+/// # Arguments
+/// * `code` - Incoming key code from terminal event loop.
+/// * `app` - Mutable reference to application state.
+/// * `telemetry` - Reference to live system telemetry containing discovered files.
+/// * `actions` - Host side-effect executor (persistence, file switching).
+///
+/// # Returns
+/// Always returns `true` to signal modal key event consumption.
+///
+/// # Data Flow & Invariants
+/// Intercepts navigation (Up/Down/PageUp/PageDown/Home/End), typing for fuzzy filtering,
+/// Esc (close modal without change), and Enter (switches active file via [`TopActions::switch_trajectory_file`]).
+fn handle_trajectory_file_modal_key_event(
+    code: KeyCode,
+    app: &mut AppState,
+    telemetry: &SystemTelemetry,
+    actions: &mut dyn TopActions,
+) -> bool {
+    let Some(ref mut modal) = app.trajectory_file_modal else {
+        return false;
+    };
+
+    let filtered = modal.filter_files(&telemetry.trajectory_files);
+    let total = filtered.len();
+
+    match code {
+        KeyCode::Esc => {
+            app.trajectory_file_modal = None;
+        }
+        KeyCode::Enter => {
+            let target = if total > 0 && modal.selected_index < total {
+                Some(filtered[modal.selected_index].clone())
+            } else {
+                None
+            };
+            app.trajectory_file_modal = None;
+            if let Some(target_file) = target {
+                apply_trajectory_file_selection(app, &target_file, actions);
+            }
+        }
+        KeyCode::Backspace => {
+            modal.search_query.pop();
+            modal.selected_index = 0;
+            modal.scroll_offset = 0;
+        }
+        KeyCode::Char(c) => {
+            modal.search_query.push(c);
+            modal.selected_index = 0;
+            modal.scroll_offset = 0;
+        }
+        nav => handle_trajectory_file_modal_nav(nav, modal, total),
+    }
+    true
+}
+
+/// Routes keyboard events to either [`handle_delete_confirm_modal_key_event`] for delete dialogs,
+/// [`handle_source_input_modal_key_event`] for Add/Edit configuration forms, or
+/// [`handle_trajectory_file_modal_key_event`] for audit file selection dialogs.
 fn handle_modal_key_event(
     code: KeyCode,
     app: &mut AppState,
     telemetry: &SystemTelemetry,
     actions: &mut dyn TopActions,
 ) -> bool {
+    if app.trajectory_file_modal.is_some() {
+        return handle_trajectory_file_modal_key_event(code, app, telemetry, actions);
+    }
+
     let Some(ref modal) = app.source_modal else {
         return false;
     };
@@ -641,7 +883,10 @@ fn handle_global_navigation_key_event(code: KeyCode, app: &mut AppState) -> bool
         KeyCode::Char('/')
             if matches!(
                 app.view,
-                ViewPage::ActiveJobs | ViewPage::CompletedMedia | ViewPage::MediaBrowser
+                ViewPage::ActiveJobs
+                    | ViewPage::CompletedMedia
+                    | ViewPage::MediaBrowser
+                    | ViewPage::Trajectory
             ) =>
         {
             app.search_active = true;
@@ -687,6 +932,9 @@ fn handle_esc_key_navigation(app: &mut AppState) -> bool {
             ViewPage::CompletedInspection => {
                 app.view = ViewPage::CompletedMedia;
             }
+            ViewPage::TrajectoryInspection => {
+                app.view = ViewPage::Trajectory;
+            }
             ViewPage::Help => {
                 app.view = app.help_caller_view;
             }
@@ -695,7 +943,8 @@ fn handle_esc_key_navigation(app: &mut AppState) -> bool {
             | ViewPage::CompletedMedia
             | ViewPage::MediaBrowser
             | ViewPage::MediaSources
-            | ViewPage::System => {
+            | ViewPage::System
+            | ViewPage::Trajectory => {
                 app.view = ViewPage::ActiveJobs;
             }
         }
@@ -709,6 +958,8 @@ fn handle_backspace_navigation(app: &mut AppState) {
         app.view = ViewPage::MediaBrowser;
     } else if app.view == ViewPage::CompletedInspection {
         app.view = ViewPage::CompletedMedia;
+    } else if app.view == ViewPage::TrajectoryInspection {
+        app.view = ViewPage::Trajectory;
     } else if app.view == ViewPage::Help {
         app.view = app.help_caller_view;
     } else {
@@ -759,10 +1010,12 @@ fn cycle_view_forward(app: &mut AppState) {
             ViewPage::CompletedMedia => ViewPage::MediaBrowser,
             ViewPage::MediaBrowser => ViewPage::MediaSources,
             ViewPage::MediaSources => ViewPage::System,
-            ViewPage::System
+            ViewPage::System => ViewPage::Trajectory,
+            ViewPage::Trajectory
             | ViewPage::JobInspection
             | ViewPage::MediaInspection
             | ViewPage::CompletedInspection
+            | ViewPage::TrajectoryInspection
             | ViewPage::Help => ViewPage::ActiveJobs,
         };
     }
@@ -775,7 +1028,8 @@ fn cycle_view_backward(app: &mut AppState) {
         app.help_scroll_index = 0;
     } else {
         app.view = match app.view {
-            ViewPage::ActiveJobs => ViewPage::System,
+            ViewPage::ActiveJobs => ViewPage::Trajectory,
+            ViewPage::Trajectory => ViewPage::System,
             ViewPage::System => ViewPage::MediaSources,
             ViewPage::MediaSources => ViewPage::MediaBrowser,
             ViewPage::MediaBrowser => ViewPage::CompletedMedia,
@@ -784,6 +1038,7 @@ fn cycle_view_backward(app: &mut AppState) {
             ViewPage::JobInspection
             | ViewPage::MediaInspection
             | ViewPage::CompletedInspection
+            | ViewPage::TrajectoryInspection
             | ViewPage::Help => ViewPage::ActiveJobs,
         };
     }
@@ -830,6 +1085,9 @@ fn resolve_shortcut_target(code: KeyCode, current_view: ViewPage) -> Option<(Vie
         }
         KeyCode::Char('6') | KeyCode::Char('y') | KeyCode::Char('Y') => {
             Some((ViewPage::System, HelpTab::System))
+        }
+        KeyCode::Char('7') | KeyCode::Char('t') | KeyCode::Char('T') => {
+            Some((ViewPage::Trajectory, HelpTab::Trajectory))
         }
         _ => None,
     }
@@ -929,6 +1187,15 @@ fn scroll_up(app: &mut AppState) {
         ViewPage::System if app.system_scroll_index > 0 => {
             app.system_scroll_index -= 1;
         }
+        ViewPage::Trajectory if app.trajectory_scroll_index > 0 => {
+            app.trajectory_scroll_index -= 1;
+            if app.trajectory_scroll_index < app.trajectory_table_offset {
+                app.trajectory_table_offset = app.trajectory_scroll_index;
+            }
+        }
+        ViewPage::TrajectoryInspection if app.trajectory_inspection_scroll > 0 => {
+            app.trajectory_inspection_scroll -= 1;
+        }
         ViewPage::Help if app.help_scroll_index > 0 => {
             app.help_scroll_index -= 1;
         }
@@ -970,6 +1237,116 @@ fn handle_scroll_navigation_key_event(
     }
 }
 
+/// Scrolls one row downward in the spatiotemporal trajectory table.
+///
+/// # Arguments
+/// * `app` - Mutable reference to application state.
+/// * `telemetry` - Reference to active system telemetry snapshot.
+///
+/// # Returns
+/// None. Updates selection index and table offset.
+///
+/// # Errors
+/// Guarantee: Never errors.
+///
+/// # Panics
+/// Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// Ensures cached indices are current. Increments selection if below total count.
+/// Pushes table offset forward when selection exceeds visible viewport bottom.
+fn scroll_trajectory_down(app: &mut AppState, telemetry: &SystemTelemetry) {
+    app.ensure_trajectory_indices(telemetry);
+    let total = app.trajectory_visible_indices.len();
+    if total == 0 || app.trajectory_scroll_index + 1 >= total {
+        return;
+    }
+    app.trajectory_scroll_index += 1;
+    let vp = if app.last_viewport_height > 0 {
+        app.last_viewport_height
+    } else {
+        20
+    };
+    if app.trajectory_scroll_index >= app.trajectory_table_offset + vp {
+        app.trajectory_table_offset = app.trajectory_scroll_index + 1 - vp;
+    }
+}
+
+/// Scrolls one page downward in the spatiotemporal trajectory table.
+///
+/// # Arguments
+/// * `app` - Mutable reference to application state.
+/// * `telemetry` - Reference to active system telemetry snapshot.
+///
+/// # Returns
+/// None. Updates selection index and table offset.
+///
+/// # Errors
+/// Guarantee: Never errors.
+///
+/// # Panics
+/// Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// Ensures cached indices are current. Advances both selection and table offset
+/// by [`PAGE_SCROLL_STEP`], clamping selection within the visible viewport slice.
+fn scroll_trajectory_page_down(app: &mut AppState, telemetry: &SystemTelemetry) {
+    app.ensure_trajectory_indices(telemetry);
+    let total = app.trajectory_visible_indices.len();
+    if total == 0 {
+        return;
+    }
+    let max_idx = total.saturating_sub(1);
+    let vp = if app.last_viewport_height > 0 {
+        app.last_viewport_height
+    } else {
+        20
+    };
+    let max_top = total.saturating_sub(vp);
+    app.trajectory_scroll_index = (app.trajectory_scroll_index + PAGE_SCROLL_STEP).min(max_idx);
+    app.trajectory_table_offset = (app.trajectory_table_offset + PAGE_SCROLL_STEP).min(max_top);
+    if app.trajectory_scroll_index < app.trajectory_table_offset {
+        app.trajectory_scroll_index = app.trajectory_table_offset;
+    } else if app.trajectory_scroll_index >= app.trajectory_table_offset + vp {
+        app.trajectory_scroll_index = (app.trajectory_table_offset + vp - 1).min(max_idx);
+    }
+}
+
+/// Scrolls to the terminal row of the spatiotemporal trajectory table.
+///
+/// # Arguments
+/// * `app` - Mutable reference to application state.
+/// * `telemetry` - Reference to active system telemetry snapshot.
+///
+/// # Returns
+/// None. Updates selection index and table offset.
+///
+/// # Errors
+/// Guarantee: Never errors.
+///
+/// # Panics
+/// Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// Ensures cached indices are current. Sets selection to last item and computes
+/// maximum valid table offset respecting active viewport height.
+fn scroll_trajectory_end(app: &mut AppState, telemetry: &SystemTelemetry) {
+    app.ensure_trajectory_indices(telemetry);
+    let total = app.trajectory_visible_indices.len();
+    if total == 0 {
+        app.trajectory_scroll_index = 0;
+        app.trajectory_table_offset = 0;
+        return;
+    }
+    let vp = if app.last_viewport_height > 0 {
+        app.last_viewport_height
+    } else {
+        20
+    };
+    app.trajectory_scroll_index = total - 1;
+    app.trajectory_table_offset = total.saturating_sub(vp);
+}
+
 /// Scrolls one step downward across the active view.
 fn scroll_down(app: &mut AppState, telemetry: &SystemTelemetry) {
     match app.view {
@@ -1004,6 +1381,10 @@ fn scroll_down(app: &mut AppState, telemetry: &SystemTelemetry) {
         ViewPage::System => {
             app.system_scroll_index += 1;
         }
+        ViewPage::Trajectory => scroll_trajectory_down(app, telemetry),
+        ViewPage::TrajectoryInspection => {
+            app.trajectory_inspection_scroll += 1;
+        }
         ViewPage::Help => {
             app.help_scroll_index += 1;
         }
@@ -1029,6 +1410,27 @@ fn scroll_page_up(app: &mut AppState) {
         }
         ViewPage::System => {
             app.system_scroll_index = app.system_scroll_index.saturating_sub(PAGE_SCROLL_STEP);
+        }
+        ViewPage::Trajectory => {
+            app.trajectory_scroll_index =
+                app.trajectory_scroll_index.saturating_sub(PAGE_SCROLL_STEP);
+            app.trajectory_table_offset =
+                app.trajectory_table_offset.saturating_sub(PAGE_SCROLL_STEP);
+            let vp = if app.last_viewport_height > 0 {
+                app.last_viewport_height
+            } else {
+                20
+            };
+            if app.trajectory_scroll_index < app.trajectory_table_offset {
+                app.trajectory_table_offset = app.trajectory_scroll_index;
+            } else if app.trajectory_scroll_index >= app.trajectory_table_offset + vp {
+                app.trajectory_scroll_index = app.trajectory_table_offset + vp - 1;
+            }
+        }
+        ViewPage::TrajectoryInspection => {
+            app.trajectory_inspection_scroll = app
+                .trajectory_inspection_scroll
+                .saturating_sub(PAGE_SCROLL_STEP);
         }
         ViewPage::Help => {
             app.help_scroll_index = app.help_scroll_index.saturating_sub(PAGE_SCROLL_STEP);
@@ -1062,6 +1464,10 @@ fn scroll_page_down(app: &mut AppState, telemetry: &SystemTelemetry) {
         ViewPage::System => {
             app.system_scroll_index += PAGE_SCROLL_STEP;
         }
+        ViewPage::Trajectory => scroll_trajectory_page_down(app, telemetry),
+        ViewPage::TrajectoryInspection => {
+            app.trajectory_inspection_scroll += PAGE_SCROLL_STEP;
+        }
         ViewPage::Help => {
             app.help_scroll_index += PAGE_SCROLL_STEP;
         }
@@ -1086,6 +1492,13 @@ fn scroll_home(app: &mut AppState) {
         }
         ViewPage::System => {
             app.system_scroll_index = 0;
+        }
+        ViewPage::Trajectory => {
+            app.trajectory_scroll_index = 0;
+            app.trajectory_table_offset = 0;
+        }
+        ViewPage::TrajectoryInspection => {
+            app.trajectory_inspection_scroll = 0;
         }
         ViewPage::Help => {
             app.help_scroll_index = 0;
@@ -1113,6 +1526,10 @@ fn scroll_end(app: &mut AppState, telemetry: &SystemTelemetry) {
         }
         ViewPage::System => {
             app.system_scroll_index = 20;
+        }
+        ViewPage::Trajectory => scroll_trajectory_end(app, telemetry),
+        ViewPage::TrajectoryInspection => {
+            app.trajectory_inspection_scroll = 50;
         }
         ViewPage::Help => {
             app.help_scroll_index = 100;
@@ -1168,6 +1585,12 @@ fn handle_view_specific_key_event(
             handle_stats_history_view_keys(code, app);
         }
         ViewPage::System => {}
+        ViewPage::Trajectory => {
+            handle_trajectory_view_keys(code, app, telemetry);
+        }
+        ViewPage::TrajectoryInspection => {
+            handle_trajectory_inspection_view_keys(code, app, telemetry);
+        }
     }
 }
 
@@ -1232,13 +1655,25 @@ fn handle_active_jobs_view_keys(
     actions: &mut dyn TopActions,
 ) {
     match code {
-        KeyCode::Char('p') | KeyCode::Char('P') => {
+        KeyCode::Char('p') => {
             if !telemetry.active_jobs.is_empty() && app.selected_index < telemetry.active_jobs.len()
             {
                 let pid = telemetry.active_jobs[app.selected_index].pid;
                 let msg = actions.toggle_pause_job(pid);
                 app.set_feedback(msg);
             }
+        }
+        KeyCode::Char('P') => {
+            let msg = actions.toggle_soft_pause_batch();
+            app.set_feedback(msg);
+        }
+        KeyCode::Char('+') => {
+            let msg = actions.adjust_desired_workers(1);
+            app.set_feedback(msg);
+        }
+        KeyCode::Char('-') => {
+            let msg = actions.adjust_desired_workers(-1);
+            app.set_feedback(msg);
         }
         KeyCode::Char('c') | KeyCode::Char('C') => {
             if !telemetry.active_jobs.is_empty() && app.selected_index < telemetry.active_jobs.len()
@@ -1726,6 +2161,54 @@ fn handle_stats_history_view_keys(code: KeyCode, app: &mut AppState) {
         }
         KeyCode::Char('s') | KeyCode::Char('S') => {
             app.view = ViewPage::MediaSources;
+        }
+        _ => {}
+    }
+}
+
+/// Handles keypresses specific to the Trajectory view.
+fn handle_trajectory_view_keys(code: KeyCode, app: &mut AppState, telemetry: &SystemTelemetry) {
+    match code {
+        KeyCode::Enter | KeyCode::Char('i') | KeyCode::Char('I') => {
+            app.ensure_trajectory_indices(telemetry);
+            if !app.trajectory_visible_indices.is_empty() {
+                app.view = ViewPage::TrajectoryInspection;
+                app.trajectory_inspection_scroll = 0;
+            }
+        }
+        KeyCode::Char('f') => {
+            app.trajectory_filter = app.trajectory_filter.cycle();
+            app.trajectory_scroll_index = 0;
+            app.trajectory_table_offset = 0;
+            app.ensure_trajectory_indices(telemetry);
+            app.set_feedback(format!(
+                "Filtre trajectoire : {}",
+                app.trajectory_filter.label()
+            ));
+        }
+        KeyCode::Char('o') | KeyCode::Char('O') => {
+            app.trajectory_sort = app.trajectory_sort.cycle();
+            app.trajectory_scroll_index = 0;
+            app.trajectory_table_offset = 0;
+            app.ensure_trajectory_indices(telemetry);
+            app.set_feedback(format!("Tri trajectoire : {}", app.trajectory_sort.label()));
+        }
+        KeyCode::Char('F') => {
+            app.trajectory_file_modal = Some(TrajectoryFileModalState::new());
+        }
+        _ => {}
+    }
+}
+
+/// Handles keypresses specific to the Trajectory Inspection drill-down view.
+fn handle_trajectory_inspection_view_keys(
+    code: KeyCode,
+    app: &mut AppState,
+    _telemetry: &SystemTelemetry,
+) {
+    match code {
+        KeyCode::Esc | KeyCode::Backspace | KeyCode::Enter | KeyCode::Char('q') => {
+            app.view = ViewPage::Trajectory;
         }
         _ => {}
     }

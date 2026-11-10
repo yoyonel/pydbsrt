@@ -45,6 +45,47 @@ tasks:
     cmds:
       - python3 scripts/lint_migrations.py {{.CLI_ARGS}}
 
+  db:test:migration:
+    desc: Automated integration test of pending migrations and domain constraints on isolated sandbox DB
+    deps: [db:up]
+    cmds:
+      - uv run python scripts/test_db_migrations.py {{.CLI_ARGS}}
+
+  phash:quarantine:
+    desc: Move truncated/corrupted phashes (< 50KB or non-multiple of 8 bytes) to data/__QUARANTINE_PHASH__/
+    cmds:
+      - uv run python scripts/quarantine_truncated_phashes.py {{.CLI_ARGS}}
+
+  phash:reconcile:
+    desc: Reconcile release-named phashes into canonical <moviehash>.<fps>fps.phash + sidecar JSON
+    deps: [db:up]
+    cmds:
+      - uv run python scripts/reconcile_phash_filenames.py {{.CLI_ARGS}}
+
+  db:backfill:assets:
+    desc: Backfill media_sources, moviehash, expected_frames, and V6 lineage columns in PostgreSQL
+    deps: [db:up]
+    cmds:
+      - uv run python scripts/backfill_media_assets.py {{.CLI_ARGS}}
+
+  db:portal:
+    desc: Start pydbsrt Use-Case Web Portal on http://127.0.0.1:8780 (Sources Médias, Actifs)
+    deps: [db:up]
+    cmds:
+      - uv run python scripts/portal_server.py --port 8780
+
+  db:studio:
+    desc: Start CloudBeaver Web Studio on port 8978 with pre-configured Local and RPi4 databases
+    deps: [db:up]
+    cmds:
+      - docker compose -f docker/docker-compose.studio.yml up -d
+      - echo "🌐 CloudBeaver Studio ready on http://127.0.0.1:8978"
+
+  db:studio:down:
+    desc: Stop CloudBeaver Web Studio container
+    cmds:
+      - docker compose -f docker/docker-compose.studio.yml down
+
   build-db:
     desc: Build custom PostgreSQL 17 BK-tree Docker image
     internal: true

@@ -9,7 +9,7 @@ use dbsrt_index::{parse_fps_from_phash_stem, DbClient};
 use std::path::{Path, PathBuf};
 
 use crate::cli::PostgresArgs;
-use crate::constants::{DEFAULT_POSTGRES_HOST, KNOWN_VIDEO_EXTS, PHASH_DOT_EXT, PHASH_EXT};
+use crate::constants::{DEFAULT_POSTGRES_HOST, PHASH_DOT_EXT, PHASH_EXT};
 
 pub use dbsrt_core::{phash_file_name, PhashSidecar};
 
@@ -80,38 +80,6 @@ fn match_prefix_phash(entries: &[PathBuf], full_name: &str) -> Option<(PathBuf, 
     None
 }
 
-fn match_stem_phash(
-    entries: &[PathBuf],
-    stem: &str,
-    my_ext: Option<&str>,
-) -> Option<(PathBuf, Vec<u64>, f64)> {
-    if stem.is_empty() {
-        return None;
-    }
-    for p in entries {
-        let name = p.file_name().and_then(|n| n.to_str()).unwrap_or_default();
-        if !name.contains(stem) || !name.ends_with(PHASH_DOT_EXT) {
-            continue;
-        }
-        let name_lower = name.to_lowercase();
-        let has_conflicting = KNOWN_VIDEO_EXTS
-            .iter()
-            .any(|ext| name_lower.contains(ext) && my_ext != Some(*ext));
-        if has_conflicting {
-            continue;
-        }
-        let Ok(hashes) = read_phash_file(p) else {
-            continue;
-        };
-        if hashes.is_empty() {
-            continue;
-        }
-        let fps = parse_fps_from_phash_stem(name.trim_end_matches(PHASH_DOT_EXT));
-        return Some((p.clone(), hashes, fps));
-    }
-    None
-}
-
 fn scan_existing_phash(
     phash_dir: &Path,
     media_file: &Path,
@@ -126,26 +94,24 @@ fn scan_existing_phash(
     };
     let entries: Vec<_> = dir_entries.flatten().map(|e| e.path()).collect();
 
-    // The moviehash names the content whatever the media name; files named before it fall through
+    // 1. MovieHash exact prefix lookup is the primary identity: <moviehash>.<fps>fps.phash
     if let Some(res) = moviehash.and_then(|h| match_prefix_phash(&entries, &format!("{h}."))) {
         return Ok(Some(res));
     }
-    let name_of = |s: Option<&std::ffi::OsStr>| s.map(|s| s.to_string_lossy().to_string());
-    let full_name = name_of(media_file.file_name()).unwrap_or_default();
-    let stem = name_of(media_file.file_stem()).unwrap_or_default();
-    if let Some(res) = match_prefix_phash(&entries, &full_name) {
-        return Ok(Some(res));
+
+    // 2. Strict exact filename match (e.g. Media.mkv.24.0fps.phash)
+    let full_name = media_file
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
+    if !full_name.is_empty() {
+        if let Some(res) = match_prefix_phash(&entries, &full_name) {
+            return Ok(Some(res));
+        }
     }
 
-    let my_ext = media_file
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|e| format!(".{}.", e.to_lowercase()));
-
-    if let Some(res) = match_stem_phash(&entries, &stem, my_ext.as_deref()) {
-        return Ok(Some(res));
-    }
-
+    // NOTE: match_stem_phash fuzzy fallback was strictly REMOVED to prevent anti-shadowing bugs
+    // (e.g. short snippets like "Movie_mid15s.phash" masking full 2-hour master movies).
     Ok(None)
 }
 

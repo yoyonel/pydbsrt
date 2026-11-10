@@ -128,6 +128,17 @@ pub fn run_top_app(refresh_interval_ms: u64) -> Result<()> {
     let initial_is_scanning = has_local_sources;
     let is_remote_streaming =
         !has_local_sources && std::path::Path::new(DEFAULT_SELECTED_BATCH_TARGETS_PATH).exists();
+
+    let trajectory_files = sampler::discover_trajectory_audit_files();
+    let (initial_traj_file, initial_traj_records) = if let Some(first) = trajectory_files.first() {
+        (
+            Some(first.clone()),
+            sampler::load_trajectory_records(std::path::Path::new(first)),
+        )
+    } else {
+        (None, std::sync::Arc::from([]))
+    };
+
     let initial_telemetry = SystemTelemetry {
         host_info,
         host_cpu_pct: host_cpu,
@@ -140,6 +151,9 @@ pub fn run_top_app(refresh_interval_ms: u64) -> Result<()> {
         media_sources: initial_sources,
         is_scanning: initial_is_scanning,
         is_remote_streaming,
+        trajectory_records: initial_traj_records,
+        trajectory_files,
+        active_trajectory_file: initial_traj_file,
         ..Default::default()
     };
 
@@ -203,6 +217,11 @@ pub fn event_loop_step<B: ratatui::backend::Backend>(
         let lock = shared_state.read().unwrap();
         lock.clone()
     };
+
+    if let Ok(size) = terminal.size() {
+        let table_h = (size.height as usize).saturating_sub(13);
+        app.last_viewport_height = table_h.max(5);
+    }
 
     app.clamp_indices(&telemetry);
     terminal.draw(|f| render_ui(f, &app.ui_context(&telemetry, app.current_feedback())))?;
@@ -366,8 +385,59 @@ impl TopActions for NativeActions<'_> {
         process_ctl::stop_entire_batch(force, pids).1
     }
 
+    fn toggle_soft_pause_batch(&mut self) -> String {
+        let paused_path = std::path::Path::new("run/batch_paused");
+        if paused_path.is_file() {
+            let _ = std::fs::remove_file(paused_path);
+            "Reprise batch : sentinelle run/batch_paused supprimée".to_string()
+        } else {
+            if let Some(parent) = paused_path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            match std::fs::File::create(paused_path) {
+                Ok(_) => "Pause douce batch activée (attente fin jobs en vol)".to_string(),
+                Err(e) => format!("Erreur activation pause batch: {e}"),
+            }
+        }
+    }
+
+    fn adjust_desired_workers(&mut self, delta: i32) -> String {
+        let workers_path = std::path::Path::new("run/desired_workers");
+        let current = std::fs::read_to_string(workers_path)
+            .ok()
+            .and_then(|s| s.trim().parse::<i32>().ok())
+            .unwrap_or(4);
+        let next = (current + delta).clamp(1, 8);
+        if let Some(parent) = workers_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        match std::fs::write(workers_path, format!("{next}\n")) {
+            Ok(_) => format!("Workers souhaités ajustés : {next} (était {current})"),
+            Err(e) => format!("Erreur écriture desired_workers: {e}"),
+        }
+    }
+
     fn launch_selected_batch(&mut self, paths: &[PathBuf]) -> Result<String, String> {
         Ok(sampler::launch_selected_batch(paths).1)
+    }
+
+    fn switch_trajectory_file(&mut self, path: &str) -> Result<usize, String> {
+        let Some(shared) = self.shared_state else {
+            return Err("Shared state inaccessible".to_string());
+        };
+        let p = std::path::Path::new(path);
+        if !p.exists() {
+            return Err(format!("Fichier introuvable: {path}"));
+        }
+        let records = sampler::load_trajectory_records(p);
+        let count = records.len();
+        {
+            let mut state = shared.write().map_err(|e| e.to_string())?;
+            state.trajectory_records = records;
+            state.active_trajectory_file = Some(path.to_string());
+            state.trajectory_data_rev = state.trajectory_data_rev.wrapping_add(1);
+        }
+        Ok(count)
     }
 
     fn remove_discovered_media(&mut self, paths: &HashSet<PathBuf>) -> Result<(), String> {

@@ -33,6 +33,8 @@ tags:
 
 ### 🎛️ Ingestion, Indexation & Vérité Terrain
 * [Comment ajouter et indexer un média via la façade unifiée](ajouter-et-indexer-un-media.md) : Automatiser l'extraction pHash et l'appairage en 1 commande (`task media:add`).
+* [Comment diagnostiquer les sources médias et accès réseau multi-environnements](2026-11-09-diagnostiquer-sources-medias-multi-environnements.md) : Contrôler la connectivité physique CIFS/FTP/HTTP, explorer les conteneurs réels et basculer entre profils.
+* [Comment auditer les actifs médias et l'intégrité pHash dans PostgreSQL](2026-11-09-auditer-actifs-medias-et-integrite-phash-postgresql.md) : Auditer les KPIs, filtrer les médias sans empreinte et inspecter les caractéristiques techniques dans le portail web.
 * [Comment certifier un couplage vidéo-sous-titres](certifier-un-couplage.md) : Établir et valider la relation d'ancrage vérité terrain entre trames et pistes SRT.
 * [Comment invalider et purger des empreintes visuelles](invalider-donnees-phash.md) : Retirer proprement des médias corrompus ou renommés et forcer le rafraîchissement du cache en mémoire.
 * [Comment vérifier l'intégrité du catalogue et du stockage multipalier](2026-10-26-audit-integrite-catalogue-et-stockage.md) : Exécuter l'audit automatisé en 1 commande (`task catalog:verify`) sur 4 paliers physiques.
@@ -51,6 +53,7 @@ tags:
 * [Comment interconnecter un NAS Synology et le Cloud o2switch en FTP](interconnecter-nas-synology-et-o2switch-ftp.md) : Ouvrir un accès distant sécurisé par liste blanche IP, configurer le service FTP de DSM avec un compte en lecture seule, router le port 21 Freebox filtré sur l'IP o2switch et tester la liaison.
 * [Comment ingérer les médias de la Freebox sur o2switch via le RPi4](ingerer-medias-freebox-via-rpi4-et-o2switch.md) : Monter les disques Freebox en lecture seule sur le RPi4, les servir par le gateway HTTP Range, router le port 80 Freebox filtré sur l'IP o2switch et lancer le batch `freebox`.
 * [Comment orchestrer les batchs de calcul pHash distants, monitorer et synchroniser les catalogues avec o2switch](executer-batch-calcul-et-synchronisation-o2switch.md) : Déporter l'ingestion sur 8-9 workers (80% CPU), streamer en Zéro-NVMe, surveiller dans `dbsrt top` et rapatrier les catalogues.
+* [Comment exécuter un batch de tracking spatiotemporel sur o2switch](executer-batch-trajectory-tracking-o2switch.md) : Lancer, superviser, mettre en pause et rapatrier un audit d'empreintes spatiotemporelles multi-cuts en arrière-plan autonome.
 * [Comment superviser et auto-guérir les batchs o2switch en continu depuis un Raspberry Pi 4 (24/7)](superviser-batch-o2switch-depuis-rpi4.md) : Surveiller l'intégrité distante H24, auto-guérir les arrêts de daemon, adapter les workers selon l'horaire et synchroniser en continu les `.phash`.
 * [Comment compiler, tester, déployer et lancer le CLI dbsrt top sur Raspberry Pi 4](compiler-deployer-cli-top-sur-rpi4.md) : Maîtriser le pipeline complet cross-compilation Docker Debian Bullseye (GLIBC 2.31), test QEMU local, déploiement SSH et session interactive TUI.
 

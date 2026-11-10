@@ -136,21 +136,26 @@ nav:
       - Invalider et Purger des Données pHash: how-to/invalider-donnees-phash.md
       - Recette E2E du Moniteur TUI Rust (dbsrt top): how-to/2026-10-26-recette-e2e-tui-rust.md
       - Guide Tests Scénarios TUI Headless: how-to/2026-10-27-guide-tests-scenarios-tui.md
+      - Installation From Scratch & Recette Autonome (Sans IA): how-to/2026-11-08-installation-from-scratch-et-recette-autonome-sans-ia.md
+      - Studio Web Multi-Bases CloudBeaver: how-to/2026-11-08-studio-web-cloudbeaver.md
       - Audit d'Intégrité Catalogue & Stockage: how-to/2026-10-26-audit-integrite-catalogue-et-stockage.md
       - Déployer sur Hébergement Cloud o2switch: how-to/deployer-o2switch-cloud-cpanel.md
       - Déployer & Restaurer une Release o2switch: how-to/deployer-et-restaurer-une-release-o2switch.md
       - Interconnecter NAS Synology & o2switch FTP: how-to/interconnecter-nas-synology-et-o2switch-ftp.md
       - Ingérer les Médias Freebox via RPi4 & o2switch: how-to/ingerer-medias-freebox-via-rpi4-et-o2switch.md
       - Batch de Calcul & Synchronisation o2switch: how-to/executer-batch-calcul-et-synchronisation-o2switch.md
+      - Batch de Tracking Spatiotemporel o2switch: how-to/executer-batch-trajectory-tracking-o2switch.md
       - Superviser les Batchs o2switch depuis un RPi4: how-to/superviser-batch-o2switch-depuis-rpi4.md
       - Compiler, Déployer et Lancer le CLI dbsrt sur RPi4: how-to/compiler-deployer-cli-top-sur-rpi4.md
       - Exécuter les Recettes de Chaos Testing: how-to/executer-recettes-chaos-testing.md
       - Contribuer à la Documentation Diátaxis: how-to/contribuer-documentation-diataxis.md
       - Valider le Portail Monitoring avec Playwright: how-to/valider-le-portail-monitoring-avec-playwright.md
+      - Diagnostiquer Sources Médias Multi-Environnements: how-to/2026-11-09-diagnostiquer-sources-medias-multi-environnements.md
   - 📖 Référence Technique:
       - Index des Spécifications: reference/index.md
       - CLI Standalone Rust (dbsrt): reference/cli.md
       - API REST Axum (dbsrt-server): reference/api-rest.md
+      - API REST & CLI Portail Sources Médias: reference/2026-11-09-api-portail-sources-medias.md
       - Schéma PostgreSQL 17 & SP-GiST: reference/schema-postgresql.md
       - Formats de Fichiers & Spécifications: reference/formats-fichiers.md
       - Catalogue des Commandes Taskfile: reference/taskfile.md
@@ -195,6 +200,11 @@ nav:
       - Étude Backoffices & Refonte Portail: explanation/2026-11-03-etude-comparative-backoffices-et-refonte-portail-monitoring.md
       - Architecture des Flux & Relais WAN (Pipeline E2E): explanation/2026-11-03-architecture-flux-pipeline-matching-et-relais-wan.md
       - Audit de Performance Pipeline (2 758 Cuts): explanation/2026-11-04-audit-global-performance-pipeline-matching.md
+      - Extension Banc Matching & Cache Probes: explanation/2026-11-07-extension-banc-matching-cuts-vs-streaming-et-cache-probes.md
+      - Tracking Spatiotemporel Multi-Hypothèses: explanation/2026-11-07-trajectory-matching-multi-hypothesis-tracking.md
+      - Modèle Inputs-First (Sources & Assets): explanation/2026-11-08-modele-donnees-inputs-media-sources-et-assets.md
+      - Identité Binaire des Conteneurs & Anti-Shadowing: explanation/2026-11-08-etude-architecture-identite-binaire-conteneurs-et-anti-shadowing.md
+      - Architecture Portail Sources Médias Multi-Environnements: explanation/2026-11-09-architecture-portail-medias-et-sources-multi-environnements.md
   - 📊 Benchmarks & Preuves:
       - Campagnes Empiriques:
           - Rapport Batch TVShow Synology: history/2026-10-25-rapport-batch-import-tvshow-synology.md

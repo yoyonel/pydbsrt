@@ -23,6 +23,7 @@
 //! ```
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
@@ -741,6 +742,10 @@ pub enum ViewPage {
     MediaInspection,
     /// Full-frame inspection and diagnostic view of completed/failed media execution.
     CompletedInspection,
+    /// Full-frame spatiotemporal trajectory consensus evaluation view (`[7/t]`).
+    Trajectory,
+    /// Full-frame inspection and cut-by-cut diagnostics of selected trajectory audit.
+    TrajectoryInspection,
     /// Full-frame contextual keybinding and operational cheat sheet (`[?]`).
     Help,
 }
@@ -756,11 +761,12 @@ pub enum HelpTab {
     MediaBrowser,
     MediaSources,
     System,
+    Trajectory,
 }
 
 impl HelpTab {
     /// All help tabs in display order.
-    pub const ALL: [HelpTab; 7] = [
+    pub const ALL: [HelpTab; 8] = [
         HelpTab::General,
         HelpTab::ActiveJobs,
         HelpTab::StatsHistory,
@@ -768,6 +774,7 @@ impl HelpTab {
         HelpTab::MediaBrowser,
         HelpTab::MediaSources,
         HelpTab::System,
+        HelpTab::Trajectory,
     ];
 
     /// Returns the tab title badge string.
@@ -780,6 +787,7 @@ impl HelpTab {
             HelpTab::MediaBrowser => "[4/m] Médias",
             HelpTab::MediaSources => "[5/s] Sources",
             HelpTab::System => "[6/y] Système",
+            HelpTab::Trajectory => "[7/t] Trajectoires",
         }
     }
 
@@ -792,20 +800,22 @@ impl HelpTab {
             HelpTab::Completed => HelpTab::MediaBrowser,
             HelpTab::MediaBrowser => HelpTab::MediaSources,
             HelpTab::MediaSources => HelpTab::System,
-            HelpTab::System => HelpTab::General,
+            HelpTab::System => HelpTab::Trajectory,
+            HelpTab::Trajectory => HelpTab::General,
         }
     }
 
     /// Cycles to the previous contextual help tab.
     pub fn prev(&self) -> Self {
         match self {
-            HelpTab::General => HelpTab::System,
+            HelpTab::General => HelpTab::Trajectory,
             HelpTab::ActiveJobs => HelpTab::General,
             HelpTab::StatsHistory => HelpTab::ActiveJobs,
             HelpTab::Completed => HelpTab::StatsHistory,
             HelpTab::MediaBrowser => HelpTab::Completed,
             HelpTab::MediaSources => HelpTab::MediaBrowser,
             HelpTab::System => HelpTab::MediaSources,
+            HelpTab::Trajectory => HelpTab::System,
         }
     }
 
@@ -824,6 +834,7 @@ impl HelpTab {
             ViewPage::MediaBrowser | ViewPage::MediaInspection => HelpTab::MediaBrowser,
             ViewPage::MediaSources => HelpTab::MediaSources,
             ViewPage::System => HelpTab::System,
+            ViewPage::Trajectory | ViewPage::TrajectoryInspection => HelpTab::Trajectory,
             ViewPage::Help => HelpTab::General,
         }
     }
@@ -850,6 +861,12 @@ pub struct BatchQueueTelemetry {
     pub active_workers: usize,
     /// Flag indicating whether the batch queue is actively running.
     pub is_active: bool,
+    /// Flag indicating whether the batch worker is softly paused (via `run/batch_paused`).
+    #[serde(default)]
+    pub is_paused: bool,
+    /// Desired concurrent worker processes requested by operator (via `run/desired_workers`).
+    #[serde(default)]
+    pub desired_workers: Option<usize>,
     /// ISO 8601 UTC timestamp of last status update.
     pub updated_at: String,
 }
@@ -906,6 +923,18 @@ pub struct SystemTelemetry {
     /// Flag indicating whether the node operates in remote streaming mode (Zero-NVMe FTP).
     #[serde(default)]
     pub is_remote_streaming: bool,
+    /// Spatiotemporal trajectory tracking records loaded from audit JSONL files.
+    #[serde(default)]
+    pub trajectory_records: Arc<[TrajectoryAuditItem]>,
+    /// Incremental monotonic revision counter bumped on each trajectory dataset swap.
+    #[serde(default)]
+    pub trajectory_data_rev: u64,
+    /// List of available trajectory audit JSONL files discovered on storage.
+    #[serde(default)]
+    pub trajectory_files: Vec<String>,
+    /// Name of currently active/selected trajectory audit file.
+    #[serde(default)]
+    pub active_trajectory_file: Option<String>,
 }
 
 impl SystemTelemetry {
@@ -1012,6 +1041,37 @@ impl SourceInputModalState {
             active_field: SourceModalField::Path,
             is_active_source: is_active,
             error_msg: None,
+        }
+    }
+}
+
+/// State of the interactive modal dialog for selecting and switching trajectory audit files.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct TrajectoryFileModalState {
+    /// Interactive search/filter query buffer.
+    pub search_query: String,
+    /// Selected index within the filtered list of available audit files.
+    pub selected_index: usize,
+    /// Viewport scroll offset within the filtered list.
+    pub scroll_offset: usize,
+}
+
+impl TrajectoryFileModalState {
+    /// Instantiates initial modal state for audit file selection.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Filters the provided list of files according to active search tokens.
+    pub fn filter_files<'a>(&self, files: &'a [String]) -> Vec<&'a String> {
+        let trimmed = self.search_query.trim().to_lowercase();
+        if trimmed.is_empty() {
+            files.iter().collect()
+        } else {
+            files
+                .iter()
+                .filter(|f| f.to_lowercase().contains(&trimmed))
+                .collect()
         }
     }
 }
@@ -1607,4 +1667,248 @@ pub fn filter_and_sort_completed(
     sort: CompletedSort,
 ) -> Vec<HistoricalRecord> {
     filter_and_sort_completed_with_search(records, filter, sort, None)
+}
+
+/// Detailed evaluation record for an individual temporal cut window within a media trajectory.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TrajectoryCutItem {
+    pub target_path: String,
+    pub target_media: String,
+    pub start_sec: f64,
+    pub nb_frames: usize,
+    pub evaluated_frames_count: usize,
+    pub initial_candidates_count: usize,
+    pub surviving_trajectories_count: usize,
+    pub winner_media_id: Option<i64>,
+    pub winner_title: String,
+    pub winner_matched_frames: usize,
+    pub winner_coverage_ratio: f64,
+    pub winner_score: f64,
+    pub winner_initial_timestamp_ms: i64,
+    pub elapsed_seconds: f64,
+    pub success: bool,
+    #[serde(default)]
+    pub error_message: Option<String>,
+}
+
+/// Complete multi-cuts spatiotemporal trajectory evaluation record for a target media file.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TrajectoryAuditItem {
+    pub target_path: String,
+    pub target_media: String,
+    pub duration_sec: f64,
+    pub cuts_count: usize,
+    pub matched_cuts_count: usize,
+    pub consensus_media_id: Option<i64>,
+    pub consensus_title: String,
+    pub is_temporally_coherent: bool,
+    pub total_elapsed_seconds: f64,
+    pub success: bool,
+    #[serde(default)]
+    pub cuts: Vec<TrajectoryCutItem>,
+    #[serde(default)]
+    pub error_message: Option<String>,
+}
+
+impl TrajectoryAuditItem {
+    /// Checks whether the trajectory record matches a search query across media stem,
+    /// target path, and consensus title.
+    ///
+    /// # Arguments
+    /// - `query`: Search string containing space or delimiter-separated tokens.
+    ///
+    /// # Returns
+    /// - `true` if all search query tokens match across the media stem, target path, or consensus title.
+    /// - `true` if `query` is empty or only whitespace.
+    /// - `false` otherwise.
+    ///
+    /// # Data Flow & Invariants
+    /// Formats an aggregated candidate string and evaluates it against [`matches_fuzzy_search`].
+    pub fn matches_search(&self, query: &str) -> bool {
+        let trimmed = query.trim();
+        if trimmed.is_empty() {
+            return true;
+        }
+        let pool = format!(
+            "{} {} {}",
+            self.target_media, self.target_path, self.consensus_title
+        );
+        matches_fuzzy_search(&pool, trimmed)
+    }
+}
+
+/// Filter criterion for the spatiotemporal trajectory audit view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TrajectoryFilter {
+    /// Show all audited media records.
+    #[default]
+    All,
+    /// Show only media recognized with valid multi-cuts consensus.
+    Matched,
+    /// Show only media with verified monotonic temporal alignment.
+    Coherent,
+    /// Show only media with detected temporal drift / static loops.
+    Drift,
+    /// Show only media pruned below consensus threshold.
+    Pruned,
+}
+
+impl TrajectoryFilter {
+    /// Cycles to the next available filter criterion.
+    pub fn cycle(self) -> Self {
+        match self {
+            Self::All => Self::Matched,
+            Self::Matched => Self::Coherent,
+            Self::Coherent => Self::Drift,
+            Self::Drift => Self::Pruned,
+            Self::Pruned => Self::All,
+        }
+    }
+
+    /// User-facing label for the filter badge.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::All => "Tous",
+            Self::Matched => "Reconnus",
+            Self::Coherent => "Cohérents",
+            Self::Drift => "Drift",
+            Self::Pruned => "Élagués",
+        }
+    }
+
+    /// Evaluates if a given trajectory audit record satisfies this filter predicate.
+    pub fn matches(self, item: &TrajectoryAuditItem) -> bool {
+        match self {
+            Self::All => true,
+            Self::Matched => item.consensus_media_id.is_some(),
+            Self::Coherent => item.consensus_media_id.is_some() && item.is_temporally_coherent,
+            Self::Drift => item.consensus_media_id.is_some() && !item.is_temporally_coherent,
+            Self::Pruned => item.consensus_media_id.is_none(),
+        }
+    }
+}
+
+/// Sort criterion for the spatiotemporal trajectory audit view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TrajectorySort {
+    /// Sort alphabetically by target media filename stem.
+    #[default]
+    Name,
+    /// Sort descending by count of winning cuts.
+    Cuts,
+    /// Sort descending by average winner score.
+    Score,
+    /// Sort descending by total media duration.
+    Duration,
+}
+
+impl TrajectorySort {
+    /// Cycles to the next sort criterion.
+    pub fn cycle(self) -> Self {
+        match self {
+            Self::Name => Self::Cuts,
+            Self::Cuts => Self::Score,
+            Self::Score => Self::Duration,
+            Self::Duration => Self::Name,
+        }
+    }
+
+    /// User-facing label for the active sort criterion.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Name => "Nom (A-Z)",
+            Self::Cuts => "Cuts (Max)",
+            Self::Score => "Score (Max)",
+            Self::Duration => "Durée (Max)",
+        }
+    }
+}
+
+/// Computes matching indices into trajectory records without allocating or cloning items.
+///
+/// # Arguments
+/// * `items` - Slice of spatiotemporal trajectory records.
+/// * `filter` - Active trajectory filter predicate.
+/// * `sort` - Active trajectory sort criterion.
+/// * `search_query` - Optional whitespace-separated search query tokens.
+///
+/// # Returns
+/// Vector of indices pointing into `items` in sorted order.
+///
+/// # Panics
+/// Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// Filters indices according to predicate and search query tokens via [`TrajectoryAuditItem::matches_search`].
+/// Sorts indices in-place using item references without cloning underlying structs.
+pub fn compute_trajectory_indices(
+    items: &[TrajectoryAuditItem],
+    filter: TrajectoryFilter,
+    sort: TrajectorySort,
+    search_query: Option<&str>,
+) -> Vec<usize> {
+    let mut indices: Vec<usize> = (0..items.len())
+        .filter(|&idx| filter.matches(&items[idx]))
+        .filter(|&idx| {
+            if let Some(q) = search_query {
+                items[idx].matches_search(q)
+            } else {
+                true
+            }
+        })
+        .collect();
+
+    match sort {
+        TrajectorySort::Name => {
+            indices.sort_by_key(|&idx| items[idx].target_media.to_lowercase());
+        }
+        TrajectorySort::Cuts => {
+            indices.sort_by_key(|&idx| std::cmp::Reverse(items[idx].matched_cuts_count));
+        }
+        TrajectorySort::Score => {
+            indices.sort_by(|&a, &b| {
+                let a_score: f64 = items[a].cuts.iter().map(|c| c.winner_score).sum();
+                let b_score: f64 = items[b].cuts.iter().map(|c| c.winner_score).sum();
+                b_score
+                    .partial_cmp(&a_score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+        }
+        TrajectorySort::Duration => {
+            indices.sort_by(|&a, &b| {
+                items[b]
+                    .duration_sec
+                    .partial_cmp(&items[a].duration_sec)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+        }
+    }
+
+    indices
+}
+
+/// Filters and sorts trajectory audit items according to filter, sort, and optional search query.
+///
+/// # Arguments
+/// * `items` - Slice of trajectory audit items.
+/// * `filter` - Active filter predicate.
+/// * `sort` - Active sorting criterion.
+/// * `search_query` - Optional whitespace-separated search query tokens.
+///
+/// # Returns
+/// Filtered and sorted vector of items.
+///
+/// # Panics
+/// Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// Delegates index computation to [`compute_trajectory_indices`] and materializes cloned items.
+pub fn filter_and_sort_trajectories(
+    items: &[TrajectoryAuditItem],
+    filter: TrajectoryFilter,
+    sort: TrajectorySort,
+    search_query: Option<&str>,
+) -> Vec<TrajectoryAuditItem> {
+    let indices = compute_trajectory_indices(items, filter, sort, search_query);
+    indices.into_iter().map(|idx| items[idx].clone()).collect()
 }

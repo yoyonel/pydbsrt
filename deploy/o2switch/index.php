@@ -477,10 +477,118 @@ if ($path === '/' || $path === '') {
 
 // Read-only keys (web-top QR, shared dashboards) only reach monitoring GETs
 $isReadOnly = !check_key_match($matchedKey, $masterKeys);
-$readOnlyPathAllowed = in_array($path, ['/monitoring', '/top', '/health', '/v1/health'], true)
+$readOnlyPathAllowed = in_array($path, ['/monitoring', '/top', '/health', '/v1/health', '/sources', '/sources.html', '/api/sources', '/api/probe', '/api/files', '/api/file/details', '/api/assets', '/api/asset/details', '/api/phashes', '/api/phash/details'], true)
     || str_starts_with($path, '/v1/monitoring/');
 if ($isReadOnly && (!in_array($method, ['GET', 'HEAD'], true) || !$readOnlyPathAllowed)) {
     send_json_error(403, ['error' => 'Forbidden: read-only key']);
+}
+
+// 3.1 Favicon Handler
+if ($path === '/favicon.ico') {
+    header('Content-Type: image/svg+xml');
+    echo "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎬</text></svg>";
+    exit;
+}
+
+// 3.2 Sources Médias Portal & API Handlers (authenticated)
+if ($path === '/sources' || $path === '/sources.html') {
+    $sourcesFile = $homeDir . '/dbsrt/web/sources.html';
+    if (is_file($sourcesFile)) {
+        header('Content-Type: text/html; charset=utf-8');
+        readfile($sourcesFile);
+        exit;
+    }
+    send_json_error(404, ['error' => 'sources.html not deployed in ~/dbsrt/web/']);
+}
+
+if (in_array($path, ['/api/sources', '/api/probe', '/api/files', '/api/file/details', '/api/assets', '/api/asset/details', '/api/phashes', '/api/phash/details'], true)) {
+    $binDir = $homeDir . '/dbsrt/bin';
+    $pythonBin = $binDir . '/python3';
+    $script = $homeDir . '/dbsrt/scripts/portal_server.py';
+    if (!is_file($pythonBin) || !is_file($script)) {
+        send_json_error(500, ['error' => 'Portal backend not installed on host']);
+    }
+
+    // Ensure PATH includes local ~/dbsrt/bin for static ffprobe / ffmpeg
+    $currPath = getenv('PATH') ?: '/usr/local/bin:/usr/bin:/bin';
+    putenv('PATH=' . $binDir . ':' . $currPath);
+
+    if ($path === '/api/sources') {
+        $cmd = escapeshellcmd($pythonBin) . ' ' . escapeshellarg($script) . ' --metadata';
+    } elseif ($path === '/api/probe') {
+        $sourceId = preg_replace('/[^a-zA-Z0-9_-]/', '', (string)($_GET['source'] ?? ''));
+        $profileId = preg_replace('/[^a-zA-Z0-9_-]/', '', (string)($_GET['profile'] ?? ''));
+        $cmd = escapeshellcmd($pythonBin) . ' ' . escapeshellarg($script) . ' --probe ' . escapeshellarg($sourceId) . ' ' . escapeshellarg($profileId);
+    } elseif ($path === '/api/files') {
+        $sourceId = preg_replace('/[^a-zA-Z0-9_-]/', '', (string)($_GET['source'] ?? ''));
+        $profileId = preg_replace('/[^a-zA-Z0-9_-]/', '', (string)($_GET['profile'] ?? ''));
+        $subdir = (string)($_GET['subdir'] ?? '');
+        $page = (int)($_GET['page'] ?? 1);
+        $limit = (int)($_GET['limit'] ?? 25);
+        $search = (string)($_GET['q'] ?? '');
+        $sort = preg_replace('/[^a-zA-Z0-9_]/', '', (string)($_GET['sort'] ?? 'name_asc'));
+        $cmd = escapeshellcmd($pythonBin) . ' ' . escapeshellarg($script)
+            . ' --files ' . escapeshellarg($sourceId) . ' ' . escapeshellarg($profileId)
+            . ' --page ' . $page . ' --limit ' . $limit . ' --sort ' . escapeshellarg($sort);
+        if ($subdir !== '') {
+            $cmd .= ' --subdir ' . escapeshellarg($subdir);
+        }
+        if ($search !== '') {
+            $cmd .= ' --search ' . escapeshellarg($search);
+        }
+        $force = isset($_GET['force']) && in_array((string)$_GET['force'], ['1', 'true', 'yes'], true);
+        if ($force) {
+            $cmd .= ' --force';
+        }
+    } elseif ($path === '/api/assets') {
+        $page = (int)($_GET['page'] ?? 1);
+        $limit = (int)($_GET['limit'] ?? 25);
+        $status = preg_replace('/[^a-zA-Z0-9_]/', '', (string)($_GET['status'] ?? 'all'));
+        $source = preg_replace('/[^a-zA-Z0-9_-]/', '', (string)($_GET['source'] ?? ''));
+        $search = (string)($_GET['q'] ?? '');
+        $sort = preg_replace('/[^a-zA-Z0-9_]/', '', (string)($_GET['sort'] ?? 'title_asc'));
+        $cmd = escapeshellcmd($pythonBin) . ' ' . escapeshellarg($script)
+            . ' --assets --page ' . $page . ' --limit ' . $limit . ' --status ' . escapeshellarg($status)
+            . ' --sort ' . escapeshellarg($sort);
+        if ($source !== '') {
+            $cmd .= ' --source ' . escapeshellarg($source);
+        }
+        if ($search !== '') {
+            $cmd .= ' --search ' . escapeshellarg($search);
+        }
+    } elseif ($path === '/api/asset/details') {
+        $id = (int)($_GET['id'] ?? 0);
+        $cmd = escapeshellcmd($pythonBin) . ' ' . escapeshellarg($script) . ' --asset-id ' . $id;
+    } elseif ($path === '/api/phashes') {
+        $page = (int)($_GET['page'] ?? 1);
+        $limit = (int)($_GET['limit'] ?? 25);
+        $filter = preg_replace('/[^a-zA-Z0-9_]/', '', (string)($_GET['filter'] ?? 'all'));
+        $search = (string)($_GET['q'] ?? '');
+        $sort = preg_replace('/[^a-zA-Z0-9_]/', '', (string)($_GET['sort'] ?? 'id_asc'));
+        $cmd = escapeshellcmd($pythonBin) . ' ' . escapeshellarg($script)
+            . ' --phashes --page ' . $page . ' --limit ' . $limit . ' --phash-filter ' . escapeshellarg($filter)
+            . ' --sort ' . escapeshellarg($sort);
+        if ($search !== '') {
+            $cmd .= ' --search ' . escapeshellarg($search);
+        }
+    } elseif ($path === '/api/phash/details') {
+        $mhash = preg_replace('/[^a-zA-Z0-9_.-]/', '', (string)($_GET['moviehash'] ?? ($_GET['file'] ?? '')));
+        $cmd = escapeshellcmd($pythonBin) . ' ' . escapeshellarg($script) . ' --phash-moviehash ' . escapeshellarg($mhash);
+    } else {
+        $sourceId = preg_replace('/[^a-zA-Z0-9_-]/', '', (string)($_GET['source'] ?? ''));
+        $profileId = preg_replace('/[^a-zA-Z0-9_-]/', '', (string)($_GET['profile'] ?? ''));
+        $filePath = (string)($_GET['path'] ?? '');
+        $cmd = escapeshellcmd($pythonBin) . ' ' . escapeshellarg($script)
+            . ' --details ' . escapeshellarg($sourceId) . ' ' . escapeshellarg($profileId) . ' ' . escapeshellarg($filePath);
+        $force = isset($_GET['force']) && in_array((string)$_GET['force'], ['1', 'true', 'yes'], true);
+        if ($force) {
+            $cmd .= ' --force';
+        }
+    }
+    header('Content-Type: application/json; charset=utf-8');
+    header('Access-Control-Allow-Origin: *');
+    passthru($cmd);
+    exit;
 }
 
 $upstreamParams = $_GET;

@@ -3,6 +3,7 @@
 //! - Hardware-accelerated Hamming distance (`hamming_distance`)
 //! - Binary file format definitions
 
+pub mod assets;
 pub mod container;
 pub mod coupling;
 pub mod cuts;
@@ -11,11 +12,19 @@ pub mod job_progress;
 pub mod lang_status;
 pub mod media_pairing;
 pub mod metadata;
+pub mod multi_window;
 pub mod phash;
+pub mod probe_cache;
 pub mod providers;
 pub mod srt;
+pub mod trajectory;
 pub mod video;
 
+pub use assets::{
+    check_completeness, AssetKind, ContainerIdentity, MediaAsset, MediaSource,
+    PHashLifecycleStatus, ProbeSpecs, StorageKind, SyntheticQueryKind, DEFAULT_TOLERANCE_RATIO_CFR,
+    DEFAULT_TOLERANCE_RATIO_VFR, MIN_COMPLETENESS_MARGIN_FRAMES,
+};
 pub use container::{
     extract_embedded_subtitle, inspect_container, language_matches, ContainerInspection,
     SubtitleStreamInfo,
@@ -44,7 +53,16 @@ pub use media_pairing::{
     SUBTITLE_SUBDIRS, SUPPORTED_VIDEO_EXTENSIONS,
 };
 pub use metadata::{MediaMetadata, MediaType};
+pub use multi_window::{
+    aggregate_multi_window_matches, evaluate_multi_window_consensus, MultiWindowConsensus,
+    MultiWindowPlan, WindowMatchItem, DEFAULT_MULTI_WINDOW_RATIOS, MAX_SHIFT_DRIFT_TOLERANCE_MS,
+};
 pub use phash::{hamming_distance, phash_32x32};
+pub use probe_cache::{
+    compute_local_file_moviehash, compute_moviehash_from_head_tail, fetch_http_range_moviehash,
+    ProbeCache, ProbeEntry, CHUNK_SIZE_BYTES, DEFAULT_CUT_DURATION_SECONDS,
+    DEFAULT_PROBE_CACHE_FILE, MOVIEHASH_HEX_LENGTH, PROBE_CACHE_SCHEMA_VERSION,
+};
 pub use providers::{
     cache::SubtitleCache, mock::MockSubtitleProvider, opensubtitles::OpenSubtitlesProvider,
     score_candidate, RemoteSubtitleCandidate, SubtitleProvider,

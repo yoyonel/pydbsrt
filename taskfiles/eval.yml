@@ -13,6 +13,24 @@ tasks:
     cmds:
       - uv run --no-sync python scripts/eval_exhaustive_nas_snippets.py {{.CLI_ARGS}}
 
+  eval:matching:multi-offset:
+    desc: Benchmark Mono-Window vs Multi-Window Spatiotemporal Recognition on collision-prone snippets
+    deps: [rs:build]
+    cmds:
+      - uv run --no-sync python scripts/eval_multi_offset_matching.py {{.CLI_ARGS}}
+
+  eval:matching:runner:
+    desc: Autonomous probe-cached multi-offset matching benchmark runner with soft pause and dynamic workers
+    deps: [rs:build]
+    cmds:
+      - uv run --no-sync python scripts/matching_bench_runner.py {{.CLI_ARGS}}
+
+  eval:trajectory:batch:
+    desc: Autonomous spatiotemporal trajectory tracking batch runner with streaming JSONL and dynamic workers
+    deps: [rs:build]
+    cmds:
+      - uv run --no-sync python scripts/trajectory_bench_runner.py {{.CLI_ARGS}}
+
   eval:trailers:
     desc: Automated empirical verification of pHash matching on remote video streams (YouTube trailers/clips)
     deps: [rs:build]
