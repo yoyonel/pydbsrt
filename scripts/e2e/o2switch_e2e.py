@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """E2E recette of dbsrt-server on o2switch: lifecycle, respawn paths, cron and public gateway.
 
-Drives scripts/o2switch_ctl.sh against the live host and prints one PASS/FAIL line per check.
+Drives scripts/infra/o2switch/o2switch_ctl.sh against the live host and prints one PASS/FAIL line per check.
 Command outputs are captured, never printed: no media name, API key or remote path leaks.
 Always ends with the cron installed and the daemon started.
 """
@@ -21,10 +21,57 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-CTL = REPO_ROOT / "scripts" / "o2switch_ctl.sh"
-HOST = os.environ.get("O2SWITCH_HOST", "o2switch")
-REMOTE_BASE = os.environ.get("REMOTE_BASE", "dbsrt")
+
+def find_repo_root(start: Path | None = None) -> Path:
+    """Traverse parents dynamically to find repository root (no magic indices)."""
+    current = (start or Path(__file__)).resolve()
+    for candidate in [current, *current.parents]:
+        if (
+            (candidate / ".git").exists()
+            or (candidate / "Taskfile.yml").exists()
+            or (candidate / "pyproject.toml").exists()
+        ):
+            return candidate
+    return current.parent
+
+
+def find_ctl_script(root: Path) -> Path:
+    """Locate the o2switch controller script resiliently."""
+    env_override = os.environ.get("O2SWITCH_CTL")
+    if env_override and Path(env_override).is_file():
+        return Path(env_override).resolve()
+    standard_rel = root / "scripts" / "infra" / "o2switch" / "o2switch_ctl.sh"
+    if standard_rel.is_file():
+        return standard_rel
+    matches = list(root.glob("**/o2switch_ctl.sh"))
+    if matches:
+        return matches[0]
+    raise FileNotFoundError(f"Could not locate o2switch_ctl.sh under {root}")
+
+
+def load_env_values(root: Path) -> dict[str, str]:
+    """Load settings from cascading env files (.env, ~/.config/pydbsrt/env)."""
+    values: dict[str, str] = {}
+    candidates = [
+        root / ".env",
+        Path.home() / ".config" / "pydbsrt" / "env",
+    ]
+    for env_path in candidates:
+        if env_path.is_file():
+            for line in env_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    values.setdefault(k.strip(), v.strip().strip("'\""))
+    return values
+
+
+REPO_ROOT = find_repo_root()
+CTL = find_ctl_script(REPO_ROOT)
+ENV_SETTINGS = load_env_values(REPO_ROOT)
+
+HOST = os.environ.get("O2SWITCH_HOST", ENV_SETTINGS.get("O2SWITCH_HOST", "o2switch"))
+REMOTE_BASE = os.environ.get("REMOTE_BASE", ENV_SETTINGS.get("REMOTE_BASE", "dbsrt"))
 REMOTE_HELPER = f"{REMOTE_BASE}/bin/dbsrt_server_ctl.sh"
 RELEASE_HELPER = f"{REMOTE_BASE}/bin/dbsrt_release.sh"
 STOP_MARKER = f"{REMOTE_BASE}/run/dbsrt-server.stopped"
@@ -33,7 +80,10 @@ SPAWN_LOCK = f"{REMOTE_BASE}/run/gateway_spawn.lock"
 SPAWN_LOCK_WAIT_SEC = 30.0
 # The holder releases the lock on its own if this process dies before closing its stdin
 SPAWN_LOCK_HOLD_SEC = 60
-API_KEY_PASS_ENTRY = os.environ.get("API_KEY_PASS_ENTRY", "services/pydbsrt/o2switch_api_key")
+API_KEY_PASS_ENTRY = os.environ.get(
+    "API_KEY_PASS_ENTRY",
+    ENV_SETTINGS.get("API_KEY_PASS_ENTRY", "services/pydbsrt/o2switch_api_key"),
+)
 WATCHDOG_TAG = "# dbsrt-server watchdog"
 PACK_TAG = "# dbsrt-server catalog pack"
 # Never fires (31 February): only trips the legacy-watchdog guard of stop
@@ -382,12 +432,7 @@ class Recette:
 
 
 def read_url() -> str:
-    url = os.environ.get("O2SWITCH_URL", "")
-    env_file = REPO_ROOT / ".env"
-    if not url and env_file.is_file():
-        for line in env_file.read_text().splitlines():
-            if line.startswith("O2SWITCH_URL="):
-                url = line.split("=", 1)[1].strip().strip("'\"")
+    url = os.environ.get("O2SWITCH_URL", ENV_SETTINGS.get("O2SWITCH_URL", ""))
     return url.rstrip("/")
 
 

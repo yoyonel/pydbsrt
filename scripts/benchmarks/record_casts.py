@@ -17,7 +17,7 @@ KEYSTROKE_DELAY_SEC: float = 0.035
 COMMAND_START_DELAY_SEC: float = 0.4
 POST_EXECUTION_DELAY_SEC: float = 0.1
 LINE_DELAY_SEC: float = 0.015
-FINAL_PAUSE_SEC: float = 6.0
+FINAL_PAUSE_SEC: float = 2.0
 DEFAULT_TERMINAL_WIDTH: int = 92
 DEFAULT_TERMINAL_HEIGHT: int = 24
 
@@ -143,16 +143,17 @@ def generate_doc_check_cast() -> None:
     """
     lines = [
         # Synthetic output - do not replace with recursive subprocess call
-        "task: [doc:check] uv run --no-sync python scripts/validate_docs.py",
-        "🔍 [0/4] Checking file extensions and forbidden machine-local paths in docs/...",
+        "task: [doc:check] uv run --no-sync python scripts/tooling/validate_docs.py",
+        "🔍 [0/5] Checking file extensions and forbidden machine-local paths in docs/...",
         "✅ Zero unauthorized files & zero machine-local paths: OK",
-        "🔍 [1/4] Building documentation with mkdocs build --strict...",
+        "🔍 [1/5] Building documentation with mkdocs build --strict...",
         "✅ MkDocs strict build: OK",
-        "🔍 [2/4] Validating rendered HTML AST & integrity...",
+        "🔍 [2/5] Validating rendered HTML AST & integrity...",
         "✅ HTML AST & LaTeX validation: 0 errors",
-        "🔍 [3/4] Running Headless Chrome DOM & MathJax check...",
+        "🔍 [3/5] Validating Asciinema cast timing and instant playback...",
+        "✅ Asciinema casts timing (<1.0s start, <2.5s gaps): OK",
+        "🔍 [4/5] Running Headless Chrome DOM & MathJax check...",
         "✅ Headless Chrome vector math rendering: OK",
-        "",
         "🎉 Documentation 100% valid! Zero formatting, LaTeX, or rendering defects.",
     ]
     write_cast_file(

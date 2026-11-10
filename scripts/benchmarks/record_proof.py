@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Records a masked terminal proof (asciicast + animated SVG) to embed in a public PR.
 
-Usage: uv run python scripts/record_proof.py NAME COMMAND...
+Usage: uv run python scripts/benchmarks/record_proof.py NAME COMMAND...
        (task proof:record -- o2switch_status task o2switch:status)
 
 The command runs once for real; its output is masked (/home paths, URLs, emails, IPs, auth values,
@@ -21,11 +21,28 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-from scripts.benchmarks.record_casts import DEFAULT_TERMINAL_WIDTH, write_cast_file
 
-ROOT = Path(__file__).resolve().parents[2]
+def find_repo_root(start: Path | None = None) -> Path:
+    """Traverse parents dynamically to find repository root (no magic indices)."""
+    current = (start or Path(__file__)).resolve()
+    for candidate in [current, *current.parents]:
+        if (
+            (candidate / ".git").exists()
+            or (candidate / "Taskfile.yml").exists()
+            or (candidate / "pyproject.toml").exists()
+        ):
+            return candidate
+    return current.parent
+
+
+ROOT = find_repo_root()
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from scripts.benchmarks.record_casts import DEFAULT_TERMINAL_WIDTH, write_cast_file  # noqa: E402
+
 PROOFS_DIR = ROOT / ".github" / "proofs"
-# Same files as scripts/load_env.sh: they hold the NAS host/user and the public URL
+# Same files as scripts/infra/local/load_env.sh: they hold the NAS host/user and the public URL
 ENV_FILES = [ROOT / ".env", Path.home() / ".config" / "pydbsrt" / "env"]
 SVG_TERM = ["npx", "-y", "svg-term-cli@2.1.1"]
 COMMAND_TIMEOUT_SEC = 600

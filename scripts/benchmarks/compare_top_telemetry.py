@@ -6,15 +6,29 @@ import subprocess
 import sys
 from pathlib import Path
 
-# Add project root to sys.path
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from scripts.infra.local.dbsrt_top import scan_active_jobs
+def find_repo_root(start: Path | None = None) -> Path:
+    """Traverse parents dynamically to find repository root (no magic indices)."""
+    current = (start or Path(__file__)).resolve()
+    for candidate in [current, *current.parents]:
+        if (
+            (candidate / ".git").exists()
+            or (candidate / "Taskfile.yml").exists()
+            or (candidate / "pyproject.toml").exists()
+        ):
+            return candidate
+    return current.parent
+
+
+# Add project root to sys.path
+sys.path.insert(0, str(find_repo_root()))
+
+from scripts.infra.local.dbsrt_top import scan_active_jobs  # noqa: E402
 
 
 def run_comparison():
     print("=" * 80)
-    print("🔬 COMPARATIF TÉLÉMÉTRIE TEMPS RÉEL : PYTHON (scripts/dbsrt_top.py) vs RUST (dbsrt top)")
+    print("🔬 COMPARATIF TÉLÉMÉTRIE TEMPS RÉEL : PYTHON (scripts/infra/local/dbsrt_top.py) vs RUST (dbsrt top)")
     print("=" * 80)
 
     # 1. Run Python sampler
