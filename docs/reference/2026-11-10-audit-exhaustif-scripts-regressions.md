@@ -114,7 +114,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 | Script | Statut Réel | Type | KPI / Importance | Détail / Diagnostic Contradictoire |
 | :--- | :---: | :---: | :---: | :--- |
 | `scripts/infra/o2switch/nas_o2switch_sync.sh` | ⚪ **Statique Seul (Non Exécuté)** | Shell | À évaluer | Syntaxe `bash -n` & `shellcheck` OK. Zéro exécution runtime. |
-| `scripts/infra/o2switch/o2switch_audit_remote.py` | 🔴 **Régression** | Python | À évaluer | Contient des appels de scripts internes non réalignés (voir section 2). |
+| `scripts/infra/o2switch/o2switch_audit_remote.py` | 🟢 **Prouvé Live (o2switch)** | Python | Élevée (Recette Cloud) | Docstring réalignée (`scripts/ingestion/phash_names.py`), constantes de chemins avec surcharges `DBSRT_*`. 43/43 tests unitaires PASS. Exécuté et validé live sur o2switch (`status` et `report` sur 2827 fichiers). |
 | `scripts/infra/o2switch/o2switch_ctl.sh` | 🔴 **Régression** | Shell | À évaluer | Contient des appels de scripts internes non réalignés (voir section 2). |
 
 ### 3.5 Infra & Contrôleurs Appliance RPi4 (`scripts/infra/rpi4/`)
@@ -249,3 +249,10 @@ Pour sortir de cet état sans spéculation, chaque script des sections 1 et 2 do
 - **Diagnostic** : Double régression bloquante : `parents[1]` pointant vers `scripts/` (recherche de `.env` dans un répertoire inexistant) et chemin contrôleur codé en dur `scripts/o2switch_ctl.sh`.
 - **Remédiation** : Architecture résiliente sans constantes magiques : `find_repo_root()`, `find_ctl_script()` avec fallback glob et gestionnaire de variables d'environnement en cascade (`load_env_values`).
 - **Validation Live** : Exécution réelle contre `2026-pydbsrt.fr` (15/15 golden queries PASS, gateway 200/401 PASS, 100% fonctionnel). Découverte d'un bug Bash de précédence dans `o2switch_ctl.sh`.
+
+### Fiche 5 : `scripts/infra/o2switch/o2switch_audit_remote.py`
+- **Rôle** : Moteur d'audit distant de self-reconnaissance du catalogue déployé en prod sur o2switch (`task o2switch:audit`), avec découpage en fenêtres, détachement SSH (`fork` + `setsid`) et télémétrie portail.
+- **KPI / Importance** : `Élevée (Audit de Précision & Recette Cloud)`.
+- **Diagnostic** : Docstring obsolète mentionnant `scripts/phash_names.py` au lieu de `scripts/ingestion/phash_names.py`, et 10 constantes de chemins codées en dur sans surcharge possible par variables d'environnement.
+- **Remédiation** : Réalignement de la docstring et conversion de toutes les constantes de configuration avec `os.environ.get("DBSRT_...", default)` pour résilience locale et cloud.
+- **Validation Live** : Suite unitaire complète 43/43 tests PASS (`tests/tools/test_o2switch_audit.py`). Synchronisé par rsync et exécuté en conditions réelles sur le serveur de production o2switch via `task o2switch:audit:status` et `task o2switch:audit:report` (2827 fichiers qualifiés, 85.8% reconnaissance titres).

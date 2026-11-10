@@ -23,19 +23,19 @@ import subprocess
 import sys
 import time
 
-SOCK = "run/dbsrt-server.sock"
-PHASH_DIR = "data/__PHASH__"
-CATALOG = "data/catalog.dbphash"
-KEY_FILE = "etc/api_key.secret"
-AUDIT_DIR = "audit"
-LOCK = "run/audit.lock"
-STATE = "run/audit.json"
-STATUS = "run/audit_status.json"
-LAST_FINISHED = "run/audit_last_finished.json"
-LOG = "logs/audit.log"
-PROGRESS_EVERY = 50
+SOCK = os.environ.get("DBSRT_SOCK", "run/dbsrt-server.sock")
+PHASH_DIR = os.environ.get("DBSRT_PHASH_DIR", "data/__PHASH__")
+CATALOG = os.environ.get("DBSRT_CATALOG", "data/catalog.dbphash")
+KEY_FILE = os.environ.get("DBSRT_KEY_FILE", "etc/api_key.secret")
+AUDIT_DIR = os.environ.get("DBSRT_AUDIT_DIR", "audit")
+LOCK = os.environ.get("DBSRT_AUDIT_LOCK", "run/audit.lock")
+STATE = os.environ.get("DBSRT_AUDIT_STATE", "run/audit.json")
+STATUS = os.environ.get("DBSRT_AUDIT_STATUS", "run/audit_status.json")
+LAST_FINISHED = os.environ.get("DBSRT_AUDIT_LAST_FINISHED", "run/audit_last_finished.json")
+LOG = os.environ.get("DBSRT_AUDIT_LOG", "logs/audit.log")
+PROGRESS_EVERY = int(os.environ.get("DBSRT_PROGRESS_EVERY", "50"))
 # A stopped audit publishes `stopped` then exits: a resume clicked right after waits for its lock.
-STOPPING_GRACE_SECS = 3.0
+STOPPING_GRACE_SECS = float(os.environ.get("DBSRT_STOPPING_GRACE_SECS", "3.0"))
 PHASH_NAME = re.compile(r"^(.*)\.([0-9]+\.[0-9]+)fps\.phash$")
 SEASON_EPISODE = re.compile(r"[Ss]([0-9]{1,2})[ ._-]?[Ee]([0-9]{1,3})")
 RUN_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
@@ -44,7 +44,7 @@ MOVIEHASH = re.compile(r"[0-9a-fA-F]{16}")
 
 
 def logical_name(directory, name):
-    """Media name of a <moviehash>.<fps>fps.phash from its <moviehash>.json sidecar (scripts/phash_names.py rule)."""
+    """Media name of a <moviehash>.<fps>fps.phash from its <moviehash>.json sidecar (scripts/ingestion/phash_names.py rule)."""
     head, _, rest = name.partition(".")
     if len(head) != 16 or any(c not in "0123456789abcdefABCDEF" for c in head):
         return name
