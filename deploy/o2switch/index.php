@@ -512,6 +512,7 @@ if (in_array($path, ['/api/sources', '/api/probe', '/api/files', '/api/file/deta
     // Ensure PATH includes local ~/dbsrt/bin for static ffprobe / ffmpeg
     $currPath = getenv('PATH') ?: '/usr/local/bin:/usr/bin:/bin';
     putenv('PATH=' . $binDir . ':' . $currPath);
+    chdir($homeDir . '/dbsrt');
 
     if ($path === '/api/sources') {
         $cmd = escapeshellcmd($pythonBin) . ' ' . escapeshellarg($script) . ' --metadata';
