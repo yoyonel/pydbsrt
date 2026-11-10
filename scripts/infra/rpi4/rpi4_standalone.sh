@@ -9,12 +9,26 @@ DEFAULT_HEALTHCHECK_SLEEP_SEC=0.5
 DEFAULT_DEMO_SAMPLE_LINES=8
 
 ACTION="${1:-status}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if ! REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"; then
+  REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+fi
+
+# Load optional unversioned local environment file
+if [[ -f "${SCRIPT_DIR}/../local/load_env.sh" ]]; then
+  # shellcheck source=/dev/null
+  source "${SCRIPT_DIR}/../local/load_env.sh"
+elif [[ -f "${SCRIPT_DIR}/../o2switch/load_env.sh" ]]; then
+  # shellcheck source=/dev/null
+  source "${SCRIPT_DIR}/../o2switch/load_env.sh"
+fi
+
 RPI_HOST="${RPI_HOST:-rpi4}"
 SERVER_PORT="${SERVER_PORT:-${DEFAULT_SERVER_PORT}}"
 REMOTE_BIN_DIR="${REMOTE_BIN_DIR:-~/.local/bin}"
 REMOTE_SYSTEMD_DIR="${REMOTE_SYSTEMD_DIR:-~/.config/systemd/user}"
 SERVICE_NAME="dbsrt-server.service"
-TARGET_DIR="target/aarch64-unknown-linux-gnu/release"
+TARGET_DIR="${REPO_ROOT}/target/aarch64-unknown-linux-gnu/release"
 SERVER_BINARY="${TARGET_DIR}/dbsrt-server"
 
 RPI_IP=$(ssh -G "${RPI_HOST}" 2>/dev/null | awk '/^hostname / {print $2}' || true)
@@ -37,7 +51,7 @@ case "${ACTION}" in
   deploy)
     if [[ ! -f "${SERVER_BINARY}" ]]; then
       echo "Binary not found at ${SERVER_BINARY}. Triggering ARM64 build..."
-      ./scripts/rpi4_cli.sh build
+      "${REPO_ROOT}/scripts/infra/rpi4/rpi4_cli.sh" build
     fi
     echo "=== Deploying standalone dbsrt-server to ${RPI_HOST}:${REMOTE_BIN_DIR}/dbsrt-server ==="
     # shellcheck disable=SC2029
