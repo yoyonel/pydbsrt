@@ -91,6 +91,7 @@
 
 ## Communication
 - **Caveman Mode**: Always terse, ultra-compressed, 100% technical accuracy, zero filler words.
+- **Language**: Always respond in French (Daily Briefing, analyses, propositions, summaries). Technical terms, commit messages, and code comments remain in standard English.
 
 ## Video Demonstrations & Media Formats
 - **STRICTLY FORBIDDEN from using GIF format**: Never generate, store, or embed `.gif` files for video records or UI/UX demos (destructive 256-color palette, heavy bloat, horrible dithering).
