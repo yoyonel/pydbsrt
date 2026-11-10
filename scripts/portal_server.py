@@ -3287,7 +3287,7 @@ if __name__ == "__main__":
     elif args.phash_moviehash:
         print(json.dumps(inspect_phash_microscopic(args.phash_moviehash), indent=2, default=str))
     elif args.trajectory_files:
-        print(json.dumps(list_trajectory_audit_files(), indent=2, default=str))
+        print(json.dumps({"status": "ok", "files": list_trajectory_audit_files()}, indent=2, default=str))
     elif args.trajectories:
         traj_crit = TrajectoriesQueryCriteria(
             file_name=args.trajectory_file,

@@ -26,7 +26,12 @@ VIEWPORT_HEIGHT = 1080
 
 def test_all_trajectories_e2e(base_url: str) -> None:
     """Executes formal E2E checks on all trajectory reports."""
-    url = f"{base_url.rstrip('/')}/#view=trajectories"
+    if "#" in base_url:
+        url = base_url
+    elif "?" in base_url:
+        url = f"{base_url}#view=trajectories"
+    else:
+        url = f"{base_url.rstrip('/')}/#view=trajectories"
     print(f"[E2E] Launching headless browser on {url}...")
 
     with sync_playwright() as p:
@@ -36,13 +41,16 @@ def test_all_trajectories_e2e(base_url: str) -> None:
             headless=True,
             args=["--no-sandbox", "--disable-dev-shm-usage"],
         )
-        context = browser.new_context(viewport={"width": VIEWPORT_WIDTH, "height": VIEWPORT_HEIGHT})
+        context = browser.new_context(
+            viewport={"width": VIEWPORT_WIDTH, "height": VIEWPORT_HEIGHT},
+            user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        )
         page = context.new_page()
 
         console_errors: list[str] = []
         page.on("pageerror", lambda err: console_errors.append(str(err)))
 
-        page.goto(url, wait_until="networkidle")
+        page.goto(url, wait_until="domcontentloaded")
 
         # 1. Navigate to Trajectories tab
         tab_btn = page.locator("button:has-text('Trajectoires')").first
@@ -54,6 +62,9 @@ def test_all_trajectories_e2e(base_url: str) -> None:
         dropdown_btn = page.locator("button:has-text('Rapport :')")
         dropdown_btn.click()
         page.wait_for_selector("div[x-show='trajectoriesFileDropdownOpen']", timeout=DEFAULT_TIMEOUT_MS)
+        page.wait_for_selector(
+            "div[x-show='trajectoriesFileDropdownOpen'] div[class*='cursor-pointer']", timeout=DEFAULT_TIMEOUT_MS
+        )
 
         report_elements = page.locator("div[x-show='trajectoriesFileDropdownOpen'] div[class*='cursor-pointer']")
         report_count = report_elements.count()
@@ -86,7 +97,6 @@ def test_all_trajectories_e2e(base_url: str) -> None:
                 dropdown_btn.click()
                 continue
             target_item.click()
-            page.wait_for_load_state("networkidle")
 
             # Wait for table to load
             page.wait_for_selector("div[x-show*='trajectories'] table tbody tr", timeout=DEFAULT_TIMEOUT_MS)

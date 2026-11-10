@@ -3448,6 +3448,12 @@
               phashesLimit: this.phashesLimit || 25,
               phashesSort: this.phashesSort || 'id_asc',
               phashesSearchQuery: this.phashesSearchQuery || '',
+              trajectoriesActiveFile: this.trajectoriesActiveFile || '',
+              trajectoriesStatusFilter: this.trajectoriesStatusFilter || 'all',
+              trajectoriesPage: this.trajectoriesPage || 1,
+              trajectoriesLimit: this.trajectoriesLimit || 25,
+              trajectoriesSort: this.trajectoriesSort || 'title_asc',
+              trajectoriesSearchQuery: this.trajectoriesSearchQuery || '',
             };
             localStorage.setItem('pydbsrt_sources_state_v1', JSON.stringify(state));
           } catch (err) {
@@ -3586,6 +3592,17 @@
             return;
           }
 
+          if (view === 'trajectories') {
+            this.currentView = 'trajectories';
+            this.trajectoriesActiveFile = hashParams.get('file') || '';
+            this.trajectoriesStatusFilter = hashParams.get('status') || hashParams.get('filter') || 'all';
+            this.trajectoriesPage = parseInt(hashParams.get('page') || '1') || 1;
+            this.trajectoriesSearchQuery = hashParams.get('q') || '';
+            this.trajectoriesSort = hashParams.get('sort') || 'title_asc';
+            this.fetchTrajectories();
+            return;
+          }
+
           if (view === 'explorer') {
             const sourceId = hashParams.get('source');
             const profileId = hashParams.get('profile');
@@ -3643,6 +3660,17 @@
             this.phashesSearchQuery = hashParams?.get('q') || stored?.phashesSearchQuery || '';
             this.phashesSort = hashParams?.get('sort') || stored?.phashesSort || 'id_asc';
             this.fetchPhashes();
+            return;
+          }
+
+          if (view === 'trajectories') {
+            this.currentView = 'trajectories';
+            this.trajectoriesActiveFile = hashParams?.get('file') || stored?.trajectoriesActiveFile || '';
+            this.trajectoriesStatusFilter = hashParams?.get('status') || hashParams?.get('filter') || stored?.trajectoriesStatusFilter || 'all';
+            this.trajectoriesPage = parseInt(hashParams?.get('page') || (stored?.trajectoriesPage || 1)) || 1;
+            this.trajectoriesSearchQuery = hashParams?.get('q') || stored?.trajectoriesSearchQuery || '';
+            this.trajectoriesSort = hashParams?.get('sort') || stored?.trajectoriesSort || 'title_asc';
+            this.fetchTrajectories();
             return;
           }
 
@@ -4148,7 +4176,7 @@
             const resp = await fetch(this.getApiUrl('trajectory/files'));
             if (resp.ok) {
               const data = await resp.json();
-              this.trajectoriesFiles = data.files || [];
+              this.trajectoriesFiles = Array.isArray(data) ? data : (data.files || []);
               if (!this.trajectoriesActiveFile && this.trajectoriesFiles.length > 0) {
                 this.trajectoriesActiveFile = this.trajectoriesFiles[0].filename;
               }
