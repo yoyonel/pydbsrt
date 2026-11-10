@@ -1042,8 +1042,13 @@ def _fetch_freebox_http_gateway_items(profile_id: str, clean_sub: str) -> tuple[
                 )
         except Exception:
             pass
-    chan_name = "Passerelle HTTP LAN (RPi4)" if profile_id == "lan_http" else "Passerelle HTTP"
-    base_tgt = DEFAULT_GATEWAY_LAN_URL.replace("/health", "")
+    tgt_map = {
+        "wan_http": ("Passerelle HTTP WAN", DEFAULT_GATEWAY_WAN_URL.replace("/health", "")),
+        "lan_http": ("Passerelle HTTP LAN (RPi4)", DEFAULT_GATEWAY_LAN_URL.replace("/health", "")),
+    }
+    chan_name, base_tgt = tgt_map.get(
+        profile_id, ("Passerelle HTTP", f"http://127.0.0.1:{DEFAULT_FREEBOX_GATEWAY_PORT}")
+    )
     return chan_name, "http_gateway", base_tgt, items
 
 
@@ -1211,9 +1216,13 @@ def _resolve_freebox_endpoint(profile_id: str, clean_path: str) -> tuple[bool, b
         return True, False, str(Path(_user_media_path("Freebox", sub)) / clean_path), "", ""
     if profile_id == "lan_ftp":
         return False, True, "", f"ftp://{DEFAULT_FREEBOX_HOST}:21/{clean_path}", resolve_freebox_password()
-    if profile_id in ("lan_http", "wan_http", "rpi4_gateway"):
-        quoted_path = "/".join(urllib.parse.quote(seg) for seg in clean_path.split("/"))
+    quoted_path = "/".join(urllib.parse.quote(seg) for seg in clean_path.split("/"))
+    if profile_id == "wan_http":
+        return False, False, "", f"http://{DEFAULT_FREEBOX_WAN_HOST}:{DEFAULT_FREEBOX_WAN_PORT}/{quoted_path}", ""
+    if profile_id == "lan_http":
         return False, False, "", f"http://{DEFAULT_RPI_LAN_HOST}:{DEFAULT_FREEBOX_GATEWAY_PORT}/{quoted_path}", ""
+    if profile_id == "rpi4_gateway":
+        return False, False, "", f"http://127.0.0.1:{DEFAULT_FREEBOX_GATEWAY_PORT}/{quoted_path}", ""
     return False, False, "", "", ""
 
 

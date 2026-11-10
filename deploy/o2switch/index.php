@@ -470,9 +470,9 @@ if (!str_starts_with($path, '/')) {
     $path = '/' . $path;
 }
 
-// Default root or empty path to /monitoring
+// Default root or empty path to /sources
 if ($path === '/' || $path === '') {
-    $path = '/monitoring';
+    $path = '/sources';
 }
 
 // Read-only keys (web-top QR, shared dashboards) only reach monitoring GETs
@@ -573,7 +573,7 @@ if (in_array($path, ['/api/sources', '/api/probe', '/api/files', '/api/file/deta
             $cmd .= ' --search ' . escapeshellarg($search);
         }
     } elseif ($path === '/api/phash/details') {
-        $mhash = preg_replace('/[^a-zA-Z0-9_.-]/', '', (string)($_GET['moviehash'] ?? ($_GET['file'] ?? '')));
+        $mhash = preg_replace('/[^a-zA-Z0-9_.% -]/', '', (string)($_GET['moviehash'] ?? ($_GET['file'] ?? '')));
         $cmd = escapeshellcmd($pythonBin) . ' ' . escapeshellarg($script) . ' --phash-moviehash ' . escapeshellarg($mhash);
     } elseif ($path === '/api/trajectory/files') {
         $cmd = escapeshellcmd($pythonBin) . ' ' . escapeshellarg($script) . ' --trajectory-files';

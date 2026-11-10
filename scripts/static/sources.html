@@ -4574,6 +4574,13 @@
           return this.timelineZoom.startRatio > 0.005 || this.timelineZoom.endRatio < 0.995;
         },
 
+        getZoomLevelLabel() {
+          if (!this.timelineZoom) return '1.0x';
+          const span = (this.timelineZoom.endRatio - this.timelineZoom.startRatio) || 1.0;
+          const factor = Math.max(1.0, 1.0 / Math.max(0.001, span));
+          return `${factor.toFixed(1)}x`;
+        },
+
         getZoomedTimelinePoints(timeline) {
           if (!timeline || timeline.length === 0) return [];
           const N = timeline.length;
