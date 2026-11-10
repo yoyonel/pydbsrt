@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fails a PR whose description lacks business goals or a prod proof (or why there is none).
 
-Usage: printf '%s' "$PR_BODY" | python3 scripts/check_pr_body.py
+Usage: printf '%s' "$PR_BODY" | python3 scripts/tooling/check_pr_body.py
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ import unicodedata
 SECTION = "Objectif métier"
 PROOF_SECTION = "Validation Empirique"
 BENEFIT_RE = re.compile(r"^- \*\*[^*]+\*\*\s*\S")
-# Masked terminal proof recorded by `task proof:record` (scripts/record_proof.py)
+# Masked terminal proof recorded by `task proof:record` (scripts/benchmarks/record_proof.py)
 PROOF_RE = re.compile(r"\.github/proofs/[\w-]+\.svg")
 
 

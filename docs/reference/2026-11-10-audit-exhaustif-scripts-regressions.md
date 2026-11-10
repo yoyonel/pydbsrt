@@ -177,7 +177,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 | :--- | :---: | :---: | :---: | :--- |
 | `scripts/tooling/build_dashboard_html.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/tooling/build_inventory_doc.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
-| `scripts/tooling/check_pr_body.py` | 🔴 **Régression** | Python | À évaluer | Contient des appels de scripts internes non réalignés (voir section 2). |
+| `scripts/tooling/check_pr_body.py` | 🟢 **Prouvé Live** | Python | Critique (Garde-fou CI/CD & Qualité PRs) | Chemins docstring et commentaires réalignés (`scripts/tooling/check_pr_body.py` et `scripts/benchmarks/record_proof.py`). 16/16 tests unitaires PASS (`test_check_pr_body.py`). Prouvé live en CLI stdin (rejet corps vide exit 1, validation corps conforme avec preuve SVG exit 0). |
 | `scripts/tooling/code_quality.sh` | 🟢 **Prouvé Live** | Shell | À évaluer | Exécuté live (task lint, task fmt) |
 | `scripts/tooling/convert_dashboard_webp.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/tooling/disk_guard.sh` | 🟢 **Prouvé Live** | Shell | À évaluer | Exécuté live (task lint étape 10) |
@@ -312,3 +312,10 @@ Pour sortir de cet état sans spéculation, chaque script des sections 1 et 2 do
 - **Diagnostic** : Chemin binaire relatif au CWD (`target/release/dbsrt`) causant un crash immédiat `code 127` lors d'une exécution hors racine du dépôt. En-tête obsolète référençant `scripts/coupling_relabel.sh`. Absence d'ancrage `REPO_ROOT` et de repli vers le binaire debug.
 - **Remédiation** : Résolution dynamique de `REPO_ROOT`, sélection absolue de `DBSRT_BIN` (support variable d'environnement, binaire release puis debug, avec garde et message explicite d'aide à la compilation), et en-tête réaligné.
 - **Validation Live** : Validé live à 100% : exécution hors racine `(cd crates && ... --help)` sans erreur (code 0) et test E2E fonctionnel complet sur registre temporaire isolé `couplings.json` (re-qualification d'un sous-titre `und` vers `fr` avec statut `confirmed`, assert sur le payload JSON retourné et vérification du code 0). `shellcheck` et `shfmt` conformes.
+
+### Fiche 14 : `scripts/tooling/check_pr_body.py`
+- **Rôle** : Linter de conformité du corps de description des Pull Requests sur CI GitHub Actions (`.github/workflows/pr-body-lint.yml`). Vérifie obligatoirement la présence des sections `## 🎯 Objectif métier (en 30 secondes)` (avec bénéfices, hors périmètre, KPI) et `## 🧪 Validation Empirique` (avec preuve terminale SVG `.github/proofs/<nom>.svg` via `task proof:record` ou justification explicite `Non déployé : raison`).
+- **KPI / Importance** : `Critique (Garde-fou CI/CD & Qualité des PRs)`.
+- **Diagnostic** : Docstring CLI (`scripts/check_pr_body.py`) et commentaire interne (`scripts/record_proof.py`) référençant des chemins plats antérieurs à la réorganisation modulaire PR #70.
+- **Remédiation** : Réalignement de la docstring CLI vers `scripts/tooling/check_pr_body.py`, du commentaire interne vers `scripts/benchmarks/record_proof.py`, et de la docstring du test `tests/tools/test_check_pr_body.py`.
+- **Validation Live** : Validé live à 100% : 16/16 tests unitaires PASS (`uv run pytest tests/tools/test_check_pr_body.py`), vérifications statiques `ruff` et `pyright` (0 erreur), et validation live CLI via stdin (rejet immédiat d'un corps vide avec code 1 et messages d'erreur ciblés ; validation d'un corps conforme avec preuve terminale SVG et sortie code 0).

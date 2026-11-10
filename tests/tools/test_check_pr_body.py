@@ -1,4 +1,4 @@
-"""Tests for scripts/check_pr_body.py (mandatory business-goals section of a PR)."""
+"""Tests for scripts/tooling/check_pr_body.py (mandatory business-goals section of a PR)."""
 
 from __future__ import annotations
 
