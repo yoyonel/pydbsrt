@@ -195,3 +195,32 @@ fn render_consensus_row(row: &ConsensusRenderRow<'_>, output_format: OutputForma
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_render_consensus_row_csv_and_dataframe() {
+        let consensus = MultiWindowConsensus {
+            media_id: 42,
+            clean_title: "Test Movie".to_string(),
+            matching_windows: 3,
+            total_windows: 3,
+            is_temporally_coherent: true,
+            consensus_shift_ms: 100,
+            consensus_confidence: 98.5,
+            window_matches: vec![],
+        };
+
+        let row = ConsensusRenderRow {
+            consensus: &consensus,
+            media_name_search: "Test Movie 1080p",
+            timer_in_seconds: 0.123,
+        };
+
+        render_consensus_row(&row, OutputFormat::Csv);
+        render_consensus_row(&row, OutputFormat::DataFrame);
+        render_consensus_row(&row, OutputFormat::Json);
+    }
+}

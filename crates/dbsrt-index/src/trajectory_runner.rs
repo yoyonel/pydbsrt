@@ -222,3 +222,124 @@ pub fn execute_trajectory_matching(
         elapsed_seconds: elapsed,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dbphash::DbphashBuilder;
+    use dbsrt_core::metadata::{MediaMetadata, MediaType};
+
+    #[test]
+    fn test_trajectory_result_serde() {
+        let res = TrajectoryMatchResult {
+            target_media: "sample.mp4".to_string(),
+            evaluated_frames_count: 24,
+            initial_candidates_count: 5,
+            surviving_trajectories_count: 1,
+            winner_media_id: Some(1),
+            winner_title: "Test Film".to_string(),
+            winner_matched_frames: 20,
+            winner_coverage_ratio: 0.833,
+            winner_score: 95.5,
+            winner_initial_timestamp_ms: 1000,
+            elapsed_seconds: 0.05,
+        };
+        let json = serde_json::to_string(&res).expect("serialize");
+        let de: TrajectoryMatchResult = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(de.winner_media_id, Some(1));
+        assert_eq!(de.winner_title, "Test Film");
+    }
+
+    #[test]
+    fn test_extract_query_hashes_phash_direct() {
+        let dir = std::env::temp_dir();
+        let phash_path = dir.join(format!("test_query_{}.24.0fps.phash", std::process::id()));
+        let hashes = vec![0x1111_2222_3333_4444_u64; 48];
+        dbsrt_core::write_phash_file(&phash_path, &hashes).expect("write phash");
+
+        let dummy_catalog = dir.join(format!("dummy_{}.dbphash", std::process::id()));
+        let builder = DbphashBuilder::new();
+        let _ = builder.write_to_file(&dummy_catalog);
+        if let Ok(dbphash) = MmapDbphash::open(&dummy_catalog) {
+            let req = TrajectoryMatchRequest {
+                dbphash: &dbphash,
+                target_path: &phash_path,
+                start_sec: 0.0,
+                nb_frames: 2,
+            };
+            let extracted = extract_query_hashes(&req).expect("extract hashes");
+            assert_eq!(extracted.len(), 2);
+            assert_eq!(extracted[0], 0x1111_2222_3333_4444_u64);
+        }
+        let _ = std::fs::remove_file(&phash_path);
+        let _ = std::fs::remove_file(&dummy_catalog);
+    }
+
+    #[test]
+    fn test_execute_trajectory_matching_synthetic() {
+        let dir = std::env::temp_dir();
+        let catalog_path = dir.join(format!("test_traj_cat_{}.dbphash", std::process::id()));
+        let mut builder = DbphashBuilder::new();
+        let meta = MediaMetadata {
+            raw_title: "Test.Show.S01E01.mkv".to_string(),
+            clean_title: "Test Show".to_string(),
+            media_type: MediaType::TvEpisode,
+            year: Some(2023),
+            season: Some(1),
+            episode: Some(1),
+            resolution: None,
+            source: None,
+            release_group: None,
+            moviehash: None,
+        };
+        let sparse = [
+            (0x1234_5678_9abc_def0_u64, 0u32),
+            (0x1234_5678_9abc_def1_u64, 1000u32),
+            (0x1234_5678_9abc_def2_u64, 2000u32),
+            (0x1234_5678_9abc_def3_u64, 3000u32),
+        ];
+        let cuts = sparse;
+        builder.add_media(&meta, 10_000, 24.0, &cuts, &sparse);
+        builder.write_to_file(&catalog_path).expect("build catalog");
+
+        let dbphash = MmapDbphash::open(&catalog_path).expect("open mmap");
+        let query_path = dir.join(format!(
+            "test_query_traj_{}.1.0fps.phash",
+            std::process::id()
+        ));
+        let query_hashes = vec![
+            0x1234_5678_9abc_def0_u64,
+            0x1234_5678_9abc_def1_u64,
+            0x1234_5678_9abc_def2_u64,
+            0x1234_5678_9abc_def3_u64,
+        ];
+        dbsrt_core::write_phash_file(&query_path, &query_hashes).expect("write query");
+
+        let req = TrajectoryMatchRequest {
+            dbphash: &dbphash,
+            target_path: &query_path,
+            start_sec: 0.0,
+            nb_frames: 4,
+        };
+        let config = TrajectoryTrackerConfig {
+            seed_threshold: 5,
+            step_threshold: 5,
+            max_consecutive_misses: 2,
+            time_slack_ms: 1200,
+            step_interval_ms: 1000,
+            max_active_hypotheses: 100,
+            reject_blank_seed: true,
+            skip_blank_steps: true,
+            min_coverage_ratio: 0.5,
+            election_strategy: dbsrt_core::trajectory::ElectionStrategy::QualityScore,
+        };
+        let res = execute_trajectory_matching(&req, config).expect("run trajectory");
+        assert_eq!(res.winner_media_id, Some(1));
+        assert_eq!(res.winner_title, "Test Show");
+        assert_eq!(res.evaluated_frames_count, 4);
+        assert!(res.winner_matched_frames >= 3);
+
+        let _ = std::fs::remove_file(&catalog_path);
+        let _ = std::fs::remove_file(&query_path);
+    }
+}

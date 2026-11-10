@@ -455,4 +455,72 @@ mod tests {
             .to_string()
             .contains("Number of frames to extract must be greater than 0"));
     }
+
+    #[test]
+    fn test_maybe_run_multi_window_disabled() {
+        let meta = dbsrt_core::VideoMetadata {
+            duration: 100.0,
+            fps: 24.0,
+        };
+        let args = RecognizeArgs {
+            media: PathBuf::from("dummy.mp4"),
+            search_distance: crate::constants::DEFAULT_SEARCH_DISTANCE,
+            nb_seconds_to_extract: 1.0,
+            output_format: OutputFormat::DataFrame,
+            limit: 10,
+            dbphash: None,
+            no_db: true,
+            phash_dir: None,
+            db: PostgresArgs::default(),
+            multi_window: false,
+            offsets: None,
+            probe_cache: None,
+        };
+        let res = maybe_run_multi_window(&args, &meta).expect("check");
+        assert!(res.is_none());
+    }
+
+    #[test]
+    fn test_maybe_run_multi_window_invalid_offsets() {
+        let meta = dbsrt_core::VideoMetadata {
+            duration: 100.0,
+            fps: 24.0,
+        };
+        let args = RecognizeArgs {
+            media: PathBuf::from("dummy.mp4"),
+            search_distance: crate::constants::DEFAULT_SEARCH_DISTANCE,
+            nb_seconds_to_extract: 1.0,
+            output_format: OutputFormat::DataFrame,
+            limit: 10,
+            dbphash: Some(PathBuf::from("catalog.dbphash")),
+            no_db: true,
+            phash_dir: None,
+            db: PostgresArgs::default(),
+            multi_window: true,
+            offsets: Some("invalid,ratios".to_string()),
+            probe_cache: None,
+        };
+        let err = maybe_run_multi_window(&args, &meta).unwrap_err();
+        assert!(err.to_string().contains("Invalid offset ratio"));
+    }
+
+    #[test]
+    fn test_recognize_media_missing_file_bail() {
+        let args = RecognizeArgs {
+            media: PathBuf::from("definitely_non_existent_file_99999.mp4"),
+            search_distance: crate::constants::DEFAULT_SEARCH_DISTANCE,
+            nb_seconds_to_extract: 1.0,
+            output_format: OutputFormat::DataFrame,
+            limit: 10,
+            dbphash: None,
+            no_db: true,
+            phash_dir: None,
+            db: PostgresArgs::default(),
+            multi_window: false,
+            offsets: None,
+            probe_cache: None,
+        };
+        let err = run_recognize_media(&args);
+        assert!(err.is_err());
+    }
 }

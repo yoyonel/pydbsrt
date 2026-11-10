@@ -166,3 +166,59 @@ pub fn run_match_trajectory(args: MatchTrajectoryArgs) -> Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_match_trajectory_args_validation() {
+        let args = MatchTrajectoryArgs {
+            media: PathBuf::from("non_existent_video_12345.mp4"),
+            dbphash: PathBuf::from("non_existent_catalog_12345.dbphash"),
+            start: 0.0,
+            frames: 24,
+            seed_threshold: 10,
+            step_threshold: 8,
+            max_misses: 3,
+            min_coverage: 0.5,
+            time_slack_ms: 1200,
+            max_active: 1000,
+            allow_blank_seed: false,
+            output_format: crate::cli::OutputFormat::Json,
+        };
+        let res = run_match_trajectory(args);
+        assert!(res.is_err());
+        assert!(res
+            .unwrap_err()
+            .to_string()
+            .contains("Media file not found"));
+    }
+
+    #[test]
+    fn test_match_trajectory_catalog_not_found() {
+        let tmp = std::env::temp_dir().join(format!("dummy_media_{}.mp4", std::process::id()));
+        let _ = std::fs::write(&tmp, b"dummy");
+        let args = MatchTrajectoryArgs {
+            media: tmp.clone(),
+            dbphash: PathBuf::from("non_existent_catalog_99999.dbphash"),
+            start: 0.0,
+            frames: 24,
+            seed_threshold: 10,
+            step_threshold: 8,
+            max_misses: 3,
+            min_coverage: 0.5,
+            time_slack_ms: 1200,
+            max_active: 1000,
+            allow_blank_seed: false,
+            output_format: crate::cli::OutputFormat::DataFrame,
+        };
+        let res = run_match_trajectory(args);
+        let _ = std::fs::remove_file(&tmp);
+        assert!(res.is_err());
+        assert!(res
+            .unwrap_err()
+            .to_string()
+            .contains("Catalog file not found"));
+    }
+}
