@@ -59,7 +59,10 @@ def _test_sources_view(page: Any) -> None:
     page.wait_for_selector("text=Sources Médias : Accès Réseau & Disques", timeout=DEFAULT_TIMEOUT_MS)
     print("[E2E EXHAUSTIVE] Tab 1: Sources dashboard loaded.")
 
-    explorer_btn = page.locator("button:has-text('Explorer')").first
+    snippet_card = page.locator("div.bg-slate-900:has-text('local-snippets')")
+    explorer_btn = snippet_card.locator("button:has-text('Explorer')").first
+    if not explorer_btn.is_visible():
+        explorer_btn = page.locator("button:has-text('Explorer')").first
     if explorer_btn.is_visible():
         explorer_btn.click()
         page.wait_for_selector("input[placeholder*='Filtrer']", timeout=DEFAULT_TIMEOUT_MS)

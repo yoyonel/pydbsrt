@@ -32,38 +32,39 @@ def _test_sources_and_explorer(page: Any) -> None:
     page.wait_for_selector("text=Sources Médias : Accès Réseau & Disques", timeout=DEFAULT_TIMEOUT_MS)
     print("[E2E] Tab 1: Sources dashboard loaded.")
 
-    # 2. Wait for at least one accessible source with Explorer button
-    explorer_btn = page.wait_for_selector("button:has-text('Explorer')", timeout=DEFAULT_TIMEOUT_MS)
-    if explorer_btn:
-        explorer_btn.click()
-        page.wait_for_selector("text=Sources Médias", timeout=DEFAULT_TIMEOUT_MS)
-        page.wait_for_selector("input[placeholder*='Filtrer']", timeout=DEFAULT_TIMEOUT_MS)
-        print("[E2E] Entered Explorer view.")
+    # 2. Target local-snippets source card with Explorer button
+    snippet_card = page.locator("div.bg-slate-900:has-text('local-snippets')")
+    explorer_btn = snippet_card.locator("button:has-text('Explorer')").first
+    explorer_btn.wait_for(state="visible", timeout=DEFAULT_TIMEOUT_MS)
+    explorer_btn.click()
+    page.wait_for_selector("text=Sources Médias", timeout=DEFAULT_TIMEOUT_MS)
+    page.wait_for_selector("input[placeholder*='Filtrer']", timeout=DEFAULT_TIMEOUT_MS)
+    print("[E2E] Entered Explorer view.")
 
-        # Verify Master list items are rendered
-        page.wait_for_selector("[id^='item-']", timeout=DEFAULT_TIMEOUT_MS)
-        items_count = page.locator("[id^='item-']").count()
-        assert items_count > 0, "No items found in explorer master list"
+    # Verify Master list items are rendered
+    page.wait_for_selector("[id^='item-']", timeout=DEFAULT_TIMEOUT_MS)
+    items_count = page.locator("[id^='item-']").count()
+    assert items_count > 0, "No items found in explorer master list"
 
-        # Verify zero window scroll
-        window_scrollable = page.evaluate("() => document.documentElement.scrollHeight > window.innerHeight")
-        assert not window_scrollable, "Page window must not have an outer vertical scrollbar in Explorer view"
+    # Verify zero window scroll
+    window_scrollable = page.evaluate("() => document.documentElement.scrollHeight > window.innerHeight")
+    assert not window_scrollable, "Page window must not have an outer vertical scrollbar in Explorer view"
 
-        # Test search query
-        search_input = page.locator("input[x-model='explorerQuery']")
-        search_input.fill("Watchmen")
-        page.wait_for_selector("text=Watchmen", timeout=DEFAULT_TIMEOUT_MS)
+    # Test search query
+    search_input = page.locator("input[x-model='explorerQuery']")
+    search_input.fill("Watchmen")
+    page.wait_for_selector("text=Watchmen", timeout=DEFAULT_TIMEOUT_MS)
 
-        # Test detail card
-        file_item = page.locator("[id^='item-']:has-text('Watchmen')").first
-        file_item.click()
-        page.wait_for_selector("text=Caractéristiques Multimédia", timeout=DEFAULT_TIMEOUT_MS)
+    # Test detail card
+    file_item = page.locator("[id^='item-']:has-text('Watchmen')").first
+    file_item.click()
+    page.wait_for_selector("text=Caractéristiques Multimédia", timeout=DEFAULT_TIMEOUT_MS)
 
-        # Breadcrumb return
-        back_btn = page.locator("button:has-text('←')").first
-        back_btn.click()
-        page.wait_for_selector("text=Sources Médias : Accès Réseau & Disques", timeout=DEFAULT_TIMEOUT_MS)
-        print("[E2E] Tab 1: Sources and Explorer tests passed.")
+    # Breadcrumb return
+    back_btn = page.locator("button:has-text('←')").first
+    back_btn.click()
+    page.wait_for_selector("text=Sources Médias : Accès Réseau & Disques", timeout=DEFAULT_TIMEOUT_MS)
+    print("[E2E] Tab 1: Sources and Explorer tests passed.")
 
 
 def _test_assets_tab(page: Any) -> None:
