@@ -13,7 +13,24 @@
 - **Human Approval Before Commit/Push**: STRICTLY FORBIDDEN from executing `git commit` or `git push` automatically. Always present summary and proposed commit message, and wait for explicit human validation.
 - **Zero Diffs in Chat Responses**: STRICTLY FORBIDDEN from printing code diffs or `git diff` in chat responses (the user uses Git and IDE to inspect diffs). Provide concise summaries, modified file links, and proposed commit message only.
 - **Taskfile-First Execution**: All recurring commands, builds, tests, demos, benchmarks must be in `Taskfile.yml` and invoked via `task <name>`.
-- **Mandatory Git Worktree Data Seeding**: Whenever branching into or running from an isolated Git worktree, MUST systematically repatriate/symlink all unversioned binary datasets and test fixtures from the parent repository (`data/catalog.dbphash`, `data/snippets/`, `data/__PHASH__/`, `data/reports/batch_*.jsonl`, `data/SRT/couplings.json`) BEFORE starting dev daemons or running benchmarks, preventing zero-data illusions and cold start failures.
+- **Remote Branches Ceiling (Max 3 Active Dev Branches)**: At most 3 active remote development branches may exist simultaneously on GitHub in addition to `master` and `develop`.
+- **Strict Issue ↔ Pull Request ↔ Branch Coupling**:
+  - Every dev branch MUST follow `<type>/<issue-id>-<slug>` (e.g. `feat/22-unified-ingestion`).
+  - Every dev branch MUST be linked to an open Pull Request targeting `develop`.
+  - Every Pull Request MUST be explicitly tied to a tracked GitHub Issue / Ticket (`Closes #...` or `Relates to #...`).
+  - Issues and Tickets MUST be updated continuously if the technical scope or implementation plan evolves during development.
+- **3-Day Inactivity Boundary**: Any active dev branch MUST have commits within the last 3 days. If inactive for > 3 days, it must either be completed/merged or archived (via `archive/<date>/<name>` tag) and deleted from remotes.
+- **Local Dev Session & Worktree Governance**:
+  - **Session Start Alignment & Daily Briefing**:
+    - At the start of every AGY session (first user prompt), the assistant MUST automatically run a brief repository health check (`git status`, active branches, latest commits, pending open PRs/Issues).
+    - Assistant MUST systematically deliver a concise **Daily Briefing**:
+      1. Summary of recent work done (last commits on active dev branches / `develop`).
+      2. Status of active branches vs. 3-day inactivity threshold and 3-branch ceiling.
+      3. Actionable proposals for next steps calibrated for the session (1 hour, half-day, or full day roadmap).
+    - Explicitly confirm or switch to the target branch/issue before touching any code.
+  - **Concurrent Session Isolation**: If an AGY session is already running on the repository, developers/agents MUST spawn an isolated Git worktree for the specific branch/task.
+  - **Mandatory Git Worktree Data Seeding**: Whenever branching into or running from an isolated Git worktree, MUST systematically repatriate/symlink all unversioned binary datasets and test fixtures from the parent repository (`data/catalog.dbphash`, `data/snippets/`, `data/__PHASH__/`, `data/reports/batch_*.jsonl`, `data/SRT/couplings.json`) BEFORE starting dev daemons or running benchmarks, preventing zero-data illusions and cold start failures.
+  - **Worktree Post-Merge Cleanup**: Worktrees must be cleanly removed (`git worktree remove`) immediately upon PR merge.
 ## Continuous Documentation, Diátaxis & README Synchronization
 - **Mandatory Diátaxis 4-Quadrant Architecture**: All documentation in `docs/` MUST strictly comply with the Diátaxis framework (https://diataxis.fr/):
   1. **🎓 Tutorials (`docs/tutorials/`)**: Learning-oriented step-by-step lessons for beginners (linear, zero alternatives, guaranteed success).
@@ -79,6 +96,7 @@
 
 ## Communication
 - **Caveman Mode**: Always terse, ultra-compressed, 100% technical accuracy, zero filler words.
+- **Language**: Always respond in French (Daily Briefing, analyses, propositions, summaries). Technical terms, commit messages, and code comments remain in standard English.
 
 ## Video Demonstrations & Media Formats
 - **STRICTLY FORBIDDEN from using GIF format**: Never generate, store, or embed `.gif` files for video records or UI/UX demos (destructive 256-color palette, heavy bloat, horrible dithering).
