@@ -2,20 +2,26 @@
 # Controls the local dbsrt client relay agent connected to Cloud o2switch
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+if [[ ! -d "${REPO_ROOT}/.git" && -d "${HOME}/dbsrt" ]]; then
+  REPO_ROOT="${HOME}/dbsrt"
+fi
+
 # Load optional unversioned local environment file (O2SWITCH_URL)
 # shellcheck source=scripts/infra/local/load_env.sh
-source "$(dirname "${BASH_SOURCE[0]}")/load_env.sh"
-load_local_env "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+source "${SCRIPT_DIR}/load_env.sh"
+load_local_env "${REPO_ROOT}"
 
 # Named operational constants
 DEFAULT_AGENT_PORT=8765
 DEFAULT_HEALTHCHECK_MAX_RETRIES=15
 DEFAULT_HEALTHCHECK_SLEEP_SEC=0.5
 DEFAULT_SHUTDOWN_TIMEOUT_SEC=10
-DEFAULT_LOCAL_SNIPPET="data/snippets/Andor.S01E01.1080p.WEB.h264-KOGi_mid15s.mp4"
-PID_FILE="target/dbsrt-relay-agent.pid"
-LOG_FILE="target/dbsrt-relay-agent.log"
-SERVER_BIN="target/release/dbsrt-server"
+DEFAULT_LOCAL_SNIPPET="${REPO_ROOT}/data/snippets/Andor.S01E01.1080p.WEB.h264-KOGi_mid15s.mp4"
+PID_FILE="${REPO_ROOT}/target/dbsrt-relay-agent.pid"
+LOG_FILE="${REPO_ROOT}/target/dbsrt-relay-agent.log"
+SERVER_BIN="${REPO_ROOT}/target/release/dbsrt-server"
 
 ACTION="${1:-status}"
 PORT="${AGENT_PORT:-${DEFAULT_AGENT_PORT}}"
@@ -40,7 +46,7 @@ resolve_sample_video() {
 
 case "${ACTION}" in
   start)
-    mkdir -p target
+    mkdir -p "${REPO_ROOT}/target"
     if [[ -f "${PID_FILE}" ]]; then
       EXISTING_PID=$(cat "${PID_FILE}")
       if kill -0 "${EXISTING_PID}" 2>/dev/null; then
@@ -50,8 +56,12 @@ case "${ACTION}" in
     fi
 
     if [[ ! -f "${SERVER_BIN}" ]]; then
-      echo "=== Building release binary: dbsrt-server ==="
-      cargo build --release --bin dbsrt-server
+      if [[ -x "${REPO_ROOT}/target/debug/dbsrt-server" ]]; then
+        SERVER_BIN="${REPO_ROOT}/target/debug/dbsrt-server"
+      else
+        echo "=== Building release binary: dbsrt-server ==="
+        cargo build --release --manifest-path "${REPO_ROOT}/Cargo.toml" --bin dbsrt-server
+      fi
     fi
 
     if [[ -z "${REMOTE_API}" ]]; then
@@ -172,8 +182,23 @@ case "${ACTION}" in
     echo "${RESP}" | jq '{media: .media_path, matched_media, confidence: .timing.confidence_percent, tier: .timing.matching_tier, candidates_count: (.candidates | length), top_candidate: .candidates[0].title}'
     ;;
 
+  --help | -h | help)
+    echo "Usage: $(basename "$0") {start|stop|restart|status|logs|demo [media_path]}"
+    echo ""
+    echo "Controls local dbsrt client relay agent connected to Cloud o2switch."
+    echo ""
+    echo "Actions:"
+    echo "  start     Start background relay agent"
+    echo "  stop      Stop background relay agent"
+    echo "  restart   Restart relay agent"
+    echo "  status    Show agent process status and health (default)"
+    echo "  logs      Follow agent log output"
+    echo "  demo      Run end-to-end relay search query"
+    exit 0
+    ;;
+
   *)
-    echo "Usage: $0 {start|stop|restart|status|logs|demo [media_path]}"
+    echo "Usage: $(basename "$0") {start|stop|restart|status|logs|demo [media_path]}"
     exit 1
     ;;
 esac

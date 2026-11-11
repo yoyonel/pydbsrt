@@ -53,6 +53,9 @@ PROVEN_LIVE: dict[str, str] = {
     "scripts/tooling/disk_guard.sh": "Exécuté live (task lint étape 10)",
     "scripts/tooling/mkdocs_hooks.py": "Exécuté live (crochet mkdocs build)",
     "scripts/tooling/validate_web_assets.py": "Exécuté live (task lint étape 7)",
+    "scripts/infra/local/agent_relay.sh": (
+        "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus target/ et support --help. Validé hors racine (status code 0)."
+    ),
     "scripts/infra/o2switch/o2switch_audit_remote.py": (
         "Docstring réalignée, constantes de chemins avec surcharges DBSRT_*."
         " 43/43 tests unitaires PASS. Exécuté et validé live sur o2switch (status et report sur 2827 fichiers)."
@@ -123,6 +126,7 @@ SCRIPT_KPIS: dict[str, str] = {
     "scripts/benchmarks/record_proof.py": "Critique (Preuves Terminales PR)",
     "scripts/benchmarks/record_vlsub_demo.sh": "Élevée (Doc Diátaxis & Démo Vidéo VLSub)",
     "scripts/e2e/o2switch_e2e.py": "Critique (Recette E2E Cloud o2switch)",
+    "scripts/infra/local/agent_relay.sh": "Élevée (Architecture Hybride & Passerelle Locale-Cloud)",
     "scripts/infra/o2switch/o2switch_audit_remote.py": "Élevée (Audit de Précision & Recette Cloud)",
     "scripts/infra/o2switch/o2switch_ctl.sh": "Critique (Contrôleur Maître Cloud o2switch)",
     "scripts/infra/rpi4/freebox_batch_ctl.sh": "Élevée (Ingestion WAN Freebox / Portail Web)",
