@@ -24,6 +24,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+
+def find_repo_root() -> Path:
+    """Finds repository root dynamically from git or Taskfile markers."""
+    current = Path(__file__).resolve()
+    for parent in [current] + list(current.parents):
+        if (parent / ".git").is_dir() or (parent / "Taskfile.yml").is_file():
+            return parent
+    return current.parents[2]
+
+
 # ==============================================================================
 # Architectural Hard Thresholds
 # ==============================================================================
@@ -32,8 +42,9 @@ MAX_CYCLOMATIC_COMPLEXITY: int = 20
 MAX_FUNCTION_PARAMETERS: int = 4
 MAX_NESTING_DEPTH: int = 4
 
-DEFAULT_BASELINE_FILE: Path = Path("scripts/tooling/complexity_baseline.json")
-DEFAULT_CRATES_DIR: Path = Path("crates")
+REPO_ROOT: Path = find_repo_root()
+DEFAULT_BASELINE_FILE: Path = REPO_ROOT / "scripts/tooling/complexity_baseline.json"
+DEFAULT_CRATES_DIR: Path = REPO_ROOT / "crates"
 
 # Regex to match function declarations
 FN_DECL_REGEX: re.Pattern[str] = re.compile(
@@ -122,10 +133,17 @@ def find_char_literal_end(content: str, i: int) -> int | None:
     return None
 
 
+def _normalize_rel_path(file_path: Path) -> str:
+    repo_root = find_repo_root()
+    if repo_root in file_path.parents:
+        return str(file_path.relative_to(repo_root).as_posix())
+    return str(file_path.as_posix())
+
+
 def parse_function_metrics(file_path: Path) -> list[FunctionMetrics]:
     """Parses a Rust source file and computes metrics for each function with enclosing scope."""
     content = file_path.read_text(encoding="utf-8")
-    rel_path = str(file_path.as_posix())
+    rel_path = _normalize_rel_path(file_path)
     results: list[FunctionMetrics] = []
 
     # Map character indices to line numbers
@@ -761,7 +779,7 @@ def main() -> int:
     )
     if ratcheted_count > 0:
         print(
-            f"🎉 {ratcheted_count} grandfathered function(s) are now within thresholds! Run `python3 scripts/lint_complexity.py --ratchet` to lock gains."
+            f"🎉 {ratcheted_count} grandfathered function(s) are now within thresholds! Run `task complexity -- --ratchet` (or `python3 scripts/tooling/lint_complexity.py --ratchet`) to lock gains."
         )
     return 0
 
