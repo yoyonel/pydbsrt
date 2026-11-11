@@ -58,7 +58,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 | 27 | `scripts/tooling/generate_nightly_report_enhanced.py` | `scripts/batch_media_add_tvshow.py` | `scripts/ingestion/batch_media_add_tvshow.py` |
 | 28 | `scripts/tooling/lint_complexity.py` | `scripts/lint_complexity.py` | `scripts/tooling/lint_complexity.py` |
 | 29 | `scripts/tooling/mkdocs_hooks.py` | `scripts/mkdocs_hooks.py` | `scripts/tooling/mkdocs_hooks.py` |
-| 30 | `scripts/tooling/validate_docs.py` | `scripts/doc-portal.js` | `NON TROUVE` |
+| 30 | `scripts/tooling/validate_docs.py` | `scripts/doc-portal.js` | *(Résolu : faux positif regex `javascripts/` corrigé)* |
 
 ---
 
@@ -186,15 +186,15 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 | `scripts/tooling/generate_nightly_report_enhanced.py` | 🟢 **Prouvé Live** | Python | Moyenne (Métrologie & Profiling Diátaxis) | Résolution dynamique `REPO_ROOT` (`find_repo_root`), réalignement de la référence vers `scripts/ingestion/batch_media_add_tvshow.py`, refactoring sous le seuil `complexipy` (`main` 15 $\le$ 15) et support CLI (`--check`, `--input`, `--output`). Validé live sur exécution hors racine et génération nominale. |
 | `scripts/tooling/lint_complexity.py` | 🟢 **Prouvé Live** | Python | Critique (Garde-fou CI/CD & Architecture Rust) | Découverte dynamique `REPO_ROOT` (`find_repo_root`), normalisation relative des clés baseline (indépendante du CWD), réalignement du message de ratchet (`task complexity -- --ratchet`). Validé live sur exécution hors racine et nominale (1180 fonctions Rust scannées, 0 régression). |
 | `scripts/tooling/lint_migrations.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
-| `scripts/tooling/mkdocs_hooks.py` | 🟢 **Prouvé Live** | Python | À évaluer | Exécuté live (crochet mkdocs build) |
+| `scripts/tooling/mkdocs_hooks.py` | 🟢 **Prouvé Live** | Python | Élevée (Orchestration Diátaxis & Recherche Lunr) | Découverte dynamique `REPO_ROOT` (`find_repo_root`), ancrage absolu `DEFAULT_DOCS_DIR` et réalignement de l'en-tête généré dans `docs-dates.js`. Validé live via `task doc:check` (crochet mkdocs build). |
 | `scripts/tooling/pack_repo.sh` | ⚪ **Statique Seul (Non Exécuté)** | Shell | À évaluer | Syntaxe `bash -n` & `shellcheck` OK. Zéro exécution runtime. |
 | `scripts/tooling/pack_review.sh` | ⚪ **Statique Seul (Non Exécuté)** | Shell | À évaluer | Syntaxe `bash -n` & `shellcheck` OK. Zéro exécution runtime. |
 | `scripts/tooling/report_type_errors.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/tooling/serve_docs.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/tooling/test_db_migrations.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/tooling/test_recipe_debian.sh` | ⚪ **Statique Seul (Non Exécuté)** | Shell | À évaluer | Syntaxe `bash -n` & `shellcheck` OK. Zéro exécution runtime. |
-| `scripts/tooling/validate_docs.py` | 🟢 **Prouvé Live** | Python | À évaluer | Exécuté live (task doc:check, 5 étapes PASS) |
-| `scripts/tooling/validate_web_assets.py` | 🟢 **Prouvé Live** | Python | À évaluer | Exécuté live (task lint étape 7) |
+| `scripts/tooling/validate_docs.py` | 🟢 **Prouvé Live** | Python | Critique (Garde-fou CI/CD & Validation Diátaxis) | Exécuté live (task doc:check, 5 étapes PASS) |
+| `scripts/tooling/validate_web_assets.py` | 🟢 **Prouvé Live** | Python | Élevée (Garde-fou CI/CD Assets Web & Lint) | Exécuté live (task lint étape 7) |
 
 ### 3.9 Démons Asynchrones de Fond (`scripts/workers/`)
 
@@ -340,3 +340,10 @@ Pour sortir de cet état sans spéculation, chaque script des sections 1 et 2 do
 - **Diagnostic** : Message d'aide au cliquet obsolète (`scripts/lint_complexity.py --ratchet`), chemins relatifs au CWD (`DEFAULT_BASELINE_FILE`, `DEFAULT_CRATES_DIR`) provoquant un crash `FileNotFoundError` hors racine du dépôt, et absence d'ancrage `REPO_ROOT` dynamique.
 - **Remédiation** : Découverte dynamique de racine via `find_repo_root()`, normalisation relative systématique des chemins analysés (`_normalize_rel_path`), ancrage absolu des options par défaut et réalignement du message vers `task complexity -- --ratchet`.
 - **Validation Live** : Validé live à 100% : linters `ruff`, `pyright` et `complexipy` conformes, exécution hors racine `(cd crates && python3 ../scripts/tooling/lint_complexity.py)` scannant 1180 fonctions et sortant en code 0, et exécution nominale `task complexity` validant les 1180 fonctions de production et les 95 fonctions grandfathered avec 0 régression.
+
+### Fiche 18 : `scripts/tooling/mkdocs_hooks.py`
+- **Rôle** : Crochet officiel du cycle de vie MkDocs (`mkdocs.yml`), collectant les dates Git de révision (`git log`), enrichissant les métadonnées de recherche Lunr et générant dynamiquement le manifeste `docs/javascripts/docs-dates.js`.
+- **KPI / Importance** : `Élevée (Orchestration Diátaxis & Recherche Lunr)`.
+- **Diagnostic** : En-tête généré obsolète (`scripts/mkdocs_hooks.py`) au lieu du chemin modulaire `scripts/tooling/mkdocs_hooks.py`, variable `DEFAULT_DOCS_DIR` initialisée en relatif sans ancrage dynamique `REPO_ROOT`, et détection d'un faux positif adjacent (`javascripts/doc-portal.js` capturé par le préfixe `scripts/` dans l'outil d'audit `generate_audit_doc.py`).
+- **Remédiation** : Implémentation de `find_repo_root()` dynamique pour ancrer `DEFAULT_DOCS_DIR = REPO_ROOT / "docs"`, réalignement de l'en-tête du fichier généré `docs-dates.js` vers `scripts/tooling/mkdocs_hooks.py`, et ajout d'une frontière de mot `\b` sur le motif regex dans `generate_audit_doc.py` éliminant définitivement le faux positif.
+- **Validation Live** : Validé live à 100% : linters `ruff` et `pyright` (0 erreur), porte de complexité `complexipy` validée (11 fonctions conformes $\le$ 9), exécution nominale de `task doc:check` (5/5 étapes validées avec succès, 0 erreur de rendu LaTeX, AST ou liens), et vérification de la première ligne de `docs/javascripts/docs-dates.js` confirmant la provenance modulaire exacte.

@@ -137,7 +137,7 @@ def _scan_single_script(p: Path, root: Path, repo_root: Path) -> list[dict[str, 
     rel_source = str(p.relative_to(repo_root)) if repo_root in p.parents else str(p)
     broken = []
     content = p.read_text(encoding="utf-8", errors="ignore")
-    for m in re.finditer(r"scripts/([a-zA-Z0-9_\-\.]+\.(?:py|sh|js))", content):
+    for m in re.finditer(r"\bscripts/([a-zA-Z0-9_\-\.]+\.(?:py|sh|js))", content):
         ref = f"scripts/{m.group(1)}"
         if not (repo_root / ref).exists():
             broken.append(
