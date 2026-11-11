@@ -7,17 +7,17 @@
 ## 1. Synthèse Factuelle Globale
 
 - **Total scripts opérationnels** : 96 (66 Python, 30 Shell)
-- **Scripts prouvés en exécution réelle live (session)** : 71 / 96 (74.0%) — *Seuls scripts réellement testés de bout en bout.*
+- **Scripts prouvés en exécution réelle live (session)** : 72 / 96 (75.0%) — *Seuls scripts réellement testés de bout en bout.*
 - **Scripts en régression directe (appels internes cassés)** : 0 / 96 (0.0%) — *100% des régressions actives résolues.*
 - **Nombre total de références internes rompues actives** : 0 (13 références appliance distantes documentées)
-- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 25 / 96 (26.0%) — *Imports seuls, logique non exécutée.*
+- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 24 / 96 (25.0%) — *Imports seuls, logique non exécutée.*
 - **Scripts avec analyse statique seule (`bash -n`)** : 0 / 96 (0.0%) — *Zéro runtime.*
 
 ```mermaid
 pie title Statut Réel des 96 Scripts (Rigueur Fact-First)
-    "Prouvé Live de Bout en Bout" : 71
+    "Prouvé Live de Bout en Bout" : 72
     "Régression Interne Cassée" : 0
-    "Sanity Check CLI Seul (Non Validé)" : 25
+    "Sanity Check CLI Seul (Non Validé)" : 24
     "Statique / Syntaxe Seul (Non Exécuté)" : 0
 ```
 
@@ -58,7 +58,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 | `scripts/benchmarks/eval_exhaustive_nas_snippets.py` | 🟢 **Prouvé Live** | Python | Critique (Matrice Évaluation Exhaustive Dataset Snippets) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), préfixage absolu des dossiers d'extraits et de rapports, et option CLI --check. Validé hors racine (--check code 0, 2 758 snippets réels détectés sous data/snippets). |
 | `scripts/benchmarks/eval_media_batch.py` | 🟢 **Prouvé Live** | Python | Élevée (Évaluation par Lots des Conteneurs & Sous-Titres) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), réduction de complexité cognitive (toutes fonctions <= 13 vs 18 legacy) et option CLI --check. Validé hors racine (--check code 0, détection de ffprobe et du dossier snippets). |
 | `scripts/benchmarks/eval_multi_offset_matching.py` | 🟢 **Prouvé Live** | Python | Critique (Évaluation Reconnaissance Spatiotemporelle Multi-Fenêtres) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), sélection binaire robuste (release/debug), résolution des cibles et option CLI --check. Validé hors racine (--check code 0, catalogue 95MB et 9/9 cibles vidéo Demon Slayer confirmées). |
-| `scripts/benchmarks/eval_nas_reliability.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
+| `scripts/benchmarks/eval_nas_reliability.py` | 🟢 **Prouvé Live** | Python | Critique (Suite Complète Fiabilité NAS & PostgreSQL 17) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), ancrage de sys.path, sélection du binaire (release/debug) et option CLI --check. Validé hors racine (--check code 0, 2 779 pHashes réels, catalogue .dbphash et racine NAS confirmés). |
 | `scripts/benchmarks/eval_vlc_vlsub_batch.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/benchmarks/matching_bench_runner.py` | 🟢 **Prouvé Live** | Python | À évaluer | Exécuté live sur snippet réel (01_Cruauté_mid15s.mp4) |
 | `scripts/benchmarks/record_casts.py` | 🟢 **Prouvé Live** | Python | Élevée (Doc Diátaxis & Casts Asciinema) | Exécuté live avec succès. Chemin validate_docs.py réaligné vers scripts/tooling/, timing calé à 2.0s, 4 casts régénérés et validés via task doc:check. |
@@ -624,3 +624,10 @@ Pour sortir de cet état sans spéculation, chaque script des sections 1 et 2 do
 - **Diagnostic** : Chemins par défaut du catalogue (`data/catalog.dbphash`), des cibles de test et du binaire `dbsrt` relatifs au CWD courant, et absence de mode CLI d'inspection `--check` / `--dry-run`.
 - **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, sélection automatique du binaire (release/debug), résolution absolue de toutes les cibles de test et ajout de l'option CLI `--check` / `--dry-run`.
 - **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/benchmarks/eval_multi_offset_matching.py --check)` confirmant le catalogue de 95MB, le binaire release et 9/9 cibles vidéo valides (code 0), linters `ruff`, `complexipy` et `pyright` conformes.
+
+### Fiche 61 : `scripts/benchmarks/eval_nas_reliability.py`
+- **Rôle** : Suite quantitative massive de 5 batteries d'évaluation sur le corpus complet NAS et PostgreSQL 17 (rappel pHash, multi-encodages, spécificité True-Negative, isolation SxxExx et recette VLC headless).
+- **KPI / Importance** : `Critique (Suite Complète Fiabilité NAS & PostgreSQL 17)`.
+- **Diagnostic** : Chemins relatifs par défaut (`data/__PHASH__`, `data/catalog.dbphash`, `target/release/dbsrt`), injection fragile dans `sys.path` sans repli appliance, et absence de mode CLI d'inspection non-destructif `--check` / `--dry-run`.
+- **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, injection robuste dans `sys.path`, sélection dynamique du binaire (release/debug), et ajout de l'option CLI `--check` / `--dry-run`.
+- **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/benchmarks/eval_nas_reliability.py --check)` confirmant 2 779 pHashes réels, le catalogue de 95MB, le binaire release et la racine NAS active (code 0), linters `ruff`, `complexipy` et `pyright` conformes.

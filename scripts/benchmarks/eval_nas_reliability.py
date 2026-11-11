@@ -32,7 +32,22 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+def find_repo_root() -> Path:
+    """Dynamically locates repository root with fallback to ~/dbsrt."""
+    current = Path(__file__).resolve().parent
+    for p in [current, *current.parents]:
+        if (p / ".git").is_dir() or (p / "Taskfile.yml").is_file():
+            return p
+    appliance = Path.home() / "dbsrt"
+    if appliance.is_dir():
+        return appliance
+    return Path.cwd()
+
+
+REPO_ROOT: Path = find_repo_root()
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.ingestion.phash_names import phash_media_name  # noqa: E402
 
@@ -784,42 +799,72 @@ def run_suite_5_vlc_e2e() -> dict:
 
 
 def main() -> int:
+    default_dbsrt = (
+        REPO_ROOT / "target/release/dbsrt"
+        if (REPO_ROOT / "target/release/dbsrt").exists()
+        else REPO_ROOT / "target/debug/dbsrt"
+    )
+
     parser = argparse.ArgumentParser(description="Massive NAS & pHash Reliability Evaluation Suite.")
     parser.add_argument("--nas-root", type=Path, default=default_nas_root())
-    parser.add_argument("--phash-dir", type=Path, default=Path("data/__PHASH__"))
-    parser.add_argument("--dbphash-path", type=Path, default=Path("data/catalog.dbphash"))
-    parser.add_argument("--dbsrt-bin", type=Path, default=Path("./target/release/dbsrt"))
+    parser.add_argument("--phash-dir", type=Path, default=REPO_ROOT / "data/__PHASH__")
+    parser.add_argument("--dbphash-path", type=Path, default=REPO_ROOT / "data/catalog.dbphash")
+    parser.add_argument("--dbsrt-bin", type=Path, default=default_dbsrt)
     parser.add_argument("--server-url", type=str, default="http://127.0.0.1:8765")
     parser.add_argument("--db-host", type=str, default=os.environ.get("PSQL_IP", "127.0.0.1"))
     parser.add_argument("--db-port", type=int, default=int(os.environ.get("PSQL_PORT", "5432")))
     parser.add_argument("--output-json", type=Path, default=Path("/tmp/nas_eval_report.json"))
+    parser.add_argument(
+        "--check",
+        "--dry-run",
+        action="store_true",
+        help="Inspect paths, database connectivity and catalog without executing benchmark suites",
+    )
     args = parser.parse_args()
+
+    phash_dir = args.phash_dir if args.phash_dir.is_absolute() else (REPO_ROOT / args.phash_dir)
+    dbphash_path = args.dbphash_path if args.dbphash_path.is_absolute() else (REPO_ROOT / args.dbphash_path)
+    dbsrt_bin = args.dbsrt_bin if args.dbsrt_bin.is_absolute() else (REPO_ROOT / args.dbsrt_bin)
+
+    if args.check:
+        print("=== DBSrt NAS & pHash Reliability Evaluation Inspection ===")
+        print(f"✓ REPO_ROOT     : {REPO_ROOT}")
+        print(f"✓ NAS root      : {args.nas_root} (exists: {args.nas_root.exists()})")
+        print(f"✓ pHash dir     : {phash_dir} (exists: {phash_dir.is_dir()})")
+        phash_count = len(list(phash_dir.glob("*.phash"))) if phash_dir.is_dir() else 0
+        print(f"✓ pHash files   : {phash_count} files found")
+        print(f"✓ .dbphash      : {dbphash_path} (exists: {dbphash_path.is_file()})")
+        print(f"✓ dbsrt binary  : {dbsrt_bin} (exists: {dbsrt_bin.is_file()})")
+        print(f"✓ Server URL    : {args.server_url}")
+        print(f"✓ DB host / port: {args.db_host}:{args.db_port}")
+        print(f"✓ Output JSON   : {args.output_json}")
+        return 0
 
     t_all = time.monotonic()
     pg_stats = get_postgres_stats(args.db_host, args.db_port)
     server_status = http_get_json(f"{args.server_url}/v1/status")
 
     s1 = run_suite_1_phash_recall(
-        args.phash_dir,
-        args.dbsrt_bin,
-        args.dbphash_path,
+        phash_dir,
+        dbsrt_bin,
+        dbphash_path,
         args.db_host,
         args.db_port,
     )
     s2 = run_suite_2_real_video_recognition(
         args.nas_root,
-        args.phash_dir,
+        phash_dir,
         args.server_url,
     )
     s3 = run_suite_3_true_negatives(
         args.nas_root,
-        args.phash_dir,
+        phash_dir,
         args.server_url,
         target_count=80,
     )
     s4 = run_suite_4_catalog_and_download(
         args.nas_root,
-        args.phash_dir,
+        phash_dir,
         args.server_url,
         target_search_count=120,
         target_download_count=25,
