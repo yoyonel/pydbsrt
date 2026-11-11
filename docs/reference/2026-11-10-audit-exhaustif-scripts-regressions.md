@@ -7,17 +7,17 @@
 ## 1. Synthèse Factuelle Globale
 
 - **Total scripts opérationnels** : 96 (66 Python, 30 Shell)
-- **Scripts prouvés en exécution réelle live (session)** : 57 / 96 (59.4%) — *Seuls scripts réellement testés de bout en bout.*
+- **Scripts prouvés en exécution réelle live (session)** : 58 / 96 (60.4%) — *Seuls scripts réellement testés de bout en bout.*
 - **Scripts en régression directe (appels internes cassés)** : 0 / 96 (0.0%) — *100% des régressions actives résolues.*
 - **Nombre total de références internes rompues actives** : 0 (13 références appliance distantes documentées)
-- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 39 / 96 (40.6%) — *Imports seuls, logique non exécutée.*
+- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 38 / 96 (39.6%) — *Imports seuls, logique non exécutée.*
 - **Scripts avec analyse statique seule (`bash -n`)** : 0 / 96 (0.0%) — *Zéro runtime.*
 
 ```mermaid
 pie title Statut Réel des 96 Scripts (Rigueur Fact-First)
-    "Prouvé Live de Bout en Bout" : 57
+    "Prouvé Live de Bout en Bout" : 58
     "Régression Interne Cassée" : 0
-    "Sanity Check CLI Seul (Non Validé)" : 39
+    "Sanity Check CLI Seul (Non Validé)" : 38
     "Statique / Syntaxe Seul (Non Exécuté)" : 0
 ```
 
@@ -159,7 +159,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 | Script | Statut Réel | Type | KPI / Importance | Détail / Diagnostic Contradictoire |
 | :--- | :---: | :---: | :---: | :--- |
 | `scripts/tooling/build_dashboard_html.py` | 🟢 **Prouvé Live** | Python | Moyenne (Génération Dashboard E2E VLC) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), recherche robuste du manifeste et options CLI --manifest, --output, --check. Validé hors racine sur le manifeste réel (1 332 tests E2E inspectés, taux 99.8%, code 0). |
-| `scripts/tooling/build_inventory_doc.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
+| `scripts/tooling/build_inventory_doc.py` | 🟢 **Prouvé Live** | Python | Moyenne (Génération Documentation Inventaire Scripts) | Encapsulation modulaire, résolution dynamique REPO_ROOT (fallback ~/dbsrt), options CLI --input, --output, --check. Validé hors racine sur l'inventaire réel (94 scripts analysés, code 0). |
 | `scripts/tooling/check_pr_body.py` | 🟢 **Prouvé Live** | Python | Critique (Garde-fou CI/CD & Qualité des PRs) | Chemins docstring et commentaires réalignés. 16/16 tests unitaires PASS (test_check_pr_body.py). Prouvé live en CLI stdin (rejet corps vide exit 1, validation corps conforme avec preuve SVG exit 0). |
 | `scripts/tooling/code_quality.sh` | 🟢 **Prouvé Live** | Shell | À évaluer | Exécuté live (task lint, task fmt) |
 | `scripts/tooling/convert_dashboard_webp.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
@@ -526,3 +526,10 @@ Pour sortir de cet état sans spéculation, chaque script des sections 1 et 2 do
 - **Diagnostic** : Chemins de manifeste et de sortie relatifs au CWD (`data/benchmarks/...` et `docs/history/...`), absence d'options CLI et complexité d'entrée non découplée.
 - **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, résolution robuste des manifestes et ajout des options CLI `--manifest`, `--output` et `--check` / `--dry-run`.
 - **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/tooling/build_dashboard_html.py --check)` inspectant 1 332 tests réels (code 0), linters `ruff`, `complexipy` et `pyright` conformes.
+
+### Fiche 47 : `scripts/tooling/build_inventory_doc.py`
+- **Rôle** : Générateur de la documentation d'inventaire exhaustif des scripts (`docs/reference/scripts-inventory-2026-11-10.md`) à partir d'un export JSON structuré.
+- **KPI / Importance** : `Moyenne (Génération Documentation Inventaire Scripts)`.
+- **Diagnostic** : Code exécuté au niveau module sans fonction `main`, chemin JSON en dur `/tmp/scripts_inventory.json` causant un crash immédiat hors environnement spécifique, chemin de sortie relatif au CWD sans découverte de `REPO_ROOT`, et absence totale d'interface CLI.
+- **Remédiation** : Encapsulation modulaire avec fonctions dédiées, découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, tolérance sur les sources d'entrée et ajout des options CLI `--input`, `--output` et `--check` / `--dry-run`.
+- **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/tooling/build_inventory_doc.py --check)` inspectant 94 scripts (code 0), linters `ruff`, `complexipy` et `pyright` conformes.
