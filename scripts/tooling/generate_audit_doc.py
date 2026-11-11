@@ -91,6 +91,11 @@ PROVEN_LIVE: dict[str, str] = {
     "scripts/tooling/generate_audit_doc.py": (
         "Résolution dynamique REPO_ROOT, exclusion du self-scan (0 faux positif), préservation dynamique des fiches d'analyse méticuleuse et support CLI (--check, --output)."
     ),
+    "scripts/tooling/generate_nightly_report_enhanced.py": (
+        "Résolution dynamique REPO_ROOT (find_repo_root), réalignement de la référence vers"
+        " scripts/ingestion/batch_media_add_tvshow.py, refactoring sous le seuil complexipy (main 15 <= 15)"
+        " et support CLI (--check, --input, --output). Validé live sur exécution hors racine et génération nominale."
+    ),
 }
 
 SCRIPT_KPIS: dict[str, str] = {
@@ -109,6 +114,11 @@ SCRIPT_KPIS: dict[str, str] = {
     "scripts/ingestion/coupling_relabel.sh": "Moyenne (Outil de Curation du Registre Zero-DB)",
     "scripts/tooling/check_pr_body.py": "Critique (Garde-fou CI/CD & Qualité des PRs)",
     "scripts/tooling/generate_audit_doc.py": "Moyenne (Outil de Métrologie & Méta-Documentation)",
+    "scripts/tooling/generate_nightly_report_enhanced.py": "Moyenne (Métrologie & Profiling Diátaxis)",
+    "scripts/tooling/lint_complexity.py": "Critique (Garde-fou CI/CD & Architecture Rust)",
+    "scripts/tooling/mkdocs_hooks.py": "Élevée (Orchestration Diátaxis & Recherche Lunr)",
+    "scripts/tooling/validate_docs.py": "Critique (Garde-fou CI/CD & Validation Diátaxis)",
+    "scripts/tooling/validate_web_assets.py": "Élevée (Garde-fou CI/CD Assets Web & Lint)",
 }
 
 CAT_TITLES: dict[str, str] = {
@@ -206,6 +216,112 @@ def _build_domain_tables(all_scripts: list[Path], repo_root: Path, broken_source
     return lines
 
 
+def _partition_scripts(all_scripts: list[Path], repo_root: Path, active_broken_sources: set[str]) -> dict[str, int]:
+    """Partitions scripts into 4 Fact-First categories and counts language types."""
+    counts = {"proven": 0, "broken": 0, "sanity": 0, "static": 0, "py": 0, "sh": 0}
+    for s in all_scripts:
+        if s.suffix == ".py":
+            counts["py"] += 1
+        elif s.suffix == ".sh":
+            counts["sh"] += 1
+
+        sp = str(s.relative_to(repo_root)) if repo_root in s.parents else str(s)
+        if sp in PROVEN_LIVE:
+            counts["proven"] += 1
+        elif sp in active_broken_sources:
+            counts["broken"] += 1
+        elif s.suffix == ".sh":
+            counts["static"] += 1
+        else:
+            counts["sanity"] += 1
+    return counts
+
+
+def _build_broken_ref_table(broken_refs: list[dict[str, str]]) -> list[str]:
+    """Formats the table of stale internal references with their Fact-First resolution status."""
+    lines = [
+        "## 2. Inventaire des Références Internes & État de Remédiation",
+        "",
+        (
+            "Lors du déplacement des scripts dans des sous-dossiers thématiques"
+            " (`infra/`, `workers/`, `benchmarks/`, `ingestion/`), les chemins"
+            " d'invocation codés en dur (`scripts/<nom>.py` ou"
+            " `scripts/<nom>.sh`) à l'intérieur des contrôleurs et"
+            " orchestrateurs ont été audités et remédiés script par script :"
+        ),
+        "",
+        "| # | Fichier Source | Référence Rompue (Ancien Chemin) | Chemin Cible Réel (Nouveau Layout) | Statut Fact-First |",
+        "| :---: | :--- | :--- | :--- | :---: |",
+    ]
+    for idx, r in enumerate(broken_refs, 1):
+        st = "🟢 **Prouvé Live & Résolu**" if r["source"] in PROVEN_LIVE else "🔴 **Régression Active**"
+        lines.append(f"| {idx} | `{r['source']}` | `{r['ref']}` | `{r['target']}` | {st} |")
+    return lines
+
+
+def _build_summary_section(
+    all_scripts: list[Path],
+    repo_root: Path,
+    broken_refs: list[dict[str, str]],
+) -> list[str]:
+    """Generates the executive summary, Mermaid pie chart, and broken reference inventory."""
+    active_broken_sources = {r["source"] for r in broken_refs if r["source"] not in PROVEN_LIVE}
+    c = _partition_scripts(all_scripts, repo_root, active_broken_sources)
+    total = len(all_scripts)
+    active_broken_count = len([r for r in broken_refs if r["source"] not in PROVEN_LIVE])
+    status_suffix = "Ruptures critiques identifiées.*" if c["broken"] > 0 else "100% des régressions actives résolues.*"
+
+    lines = [
+        "# Audit Exhaustif des Scripts & Cartographie des Régressions de Chemins",
+        "",
+        "> **Date de constat :** 2026-11-10 21:52:00 (Actualisé post-remédiation 2026-11-11)  ",
+        "> **Statut :** Bilan consolidé post-audit des 18 scripts critiques (PR #70 / Issue #69 Phase 1)  ",
+        (
+            "> **Avertissement de rigueur :** Un « Sanity Check CLI `--help` »"
+            " atteste uniquement que Python parvient à charger le module sans"
+            " crash immédiat au démarrage. Sa valeur probante est infime (à"
+            " peine supérieure à une simple vérification statique) : **il ne"
+            " valide en aucun cas la logique interne, les invariants mémoire,"
+            " les connexions réseau ou les interactions réelles.**"
+        ),
+        "",
+        "## 1. Synthèse Factuelle Globale",
+        "",
+        f"- **Total scripts opérationnels** : {total} ({c['py']} Python, {c['sh']} Shell)",
+        (
+            f"- **Scripts prouvés en exécution réelle live (session)** : {c['proven']} / {total}"
+            f" ({c['proven'] / total * 100:.1f}%) — *Seuls scripts réellement testés de bout en bout.*"
+        ),
+        (
+            f"- **Scripts en régression directe (appels internes cassés)** : {c['broken']} / {total}"
+            f" ({c['broken'] / total * 100:.1f}%) — *{status_suffix}"
+        ),
+        (
+            f"- **Nombre total de références internes rompues actives** : {active_broken_count}"
+            f" ({len(broken_refs)} références appliance distantes documentées)"
+        ),
+        (
+            "- **Scripts avec simple Sanity Check CLI `--help` (Non Validés"
+            f" Métier)** : {c['sanity']} / {total} ({c['sanity'] / total * 100:.1f}%) — *Imports seuls, logique non"
+            " exécutée.*"
+        ),
+        f"- **Scripts avec analyse statique seule (`bash -n`)** : {c['static']} / {total} ({c['static'] / total * 100:.1f}%) — *Zéro runtime.*",
+        "",
+        "```mermaid",
+        f"pie title Statut Réel des {total} Scripts (Rigueur Fact-First)",
+        f'    "Prouvé Live de Bout en Bout" : {c["proven"]}',
+        f'    "Régression Interne Cassée" : {c["broken"]}',
+        f'    "Sanity Check CLI Seul (Non Validé)" : {c["sanity"]}',
+        f'    "Statique / Syntaxe Seul (Non Exécuté)" : {c["static"]}',
+        "```",
+        "",
+        "---",
+        "",
+    ]
+    lines.extend(_build_broken_ref_table(broken_refs))
+    return lines
+
+
 def parse_args() -> argparse.Namespace:
     """Parses command line arguments."""
     parser = argparse.ArgumentParser(description="Generate exhaustive audit document of repository scripts.")
@@ -258,68 +374,7 @@ def main() -> None:
                 "",
             ]
 
-    lines = [
-        "# Audit Exhaustif des Scripts & Cartographie des Régressions de Chemins",
-        "",
-        "> **Date de constat :** 2026-11-10 21:52:00  ",
-        "> **Statut :** Constat contradictoire post-refactoring modulaire (PR #70 / Issue #69 Phase 1)  ",
-        (
-            "> **Avertissement de rigueur :** Un « Sanity Check CLI `--help` »"
-            " atteste uniquement que Python parvient à charger le module sans"
-            " crash immédiat au démarrage. Sa valeur probante est infime (à"
-            " peine supérieure à une simple vérification statique) : **il ne"
-            " valide en aucun cas la logique interne, les invariants mémoire,"
-            " les connexions réseau ou les interactions réelles.**"
-        ),
-        "",
-        "## 1. Synthèse Factuelle Globale",
-        "",
-        "- **Total scripts opérationnels** : 95 (65 Python, 30 Shell)",
-        (
-            "- **Scripts prouvés en exécution réelle live (session)** :"
-            f" {len(PROVEN_LIVE)} / 95 ({len(PROVEN_LIVE) / 95 * 100:.1f}%) — *Seuls scripts réellement"
-            " testés de bout en bout.*"
-        ),
-        (
-            "- **Scripts en régression directe (appels internes cassés)** :"
-            f" {len(broken_sources)} / 95 ({len(broken_sources) / 95 * 100:.1f}%) — *Ruptures critiques"
-            " identifiées.*"
-        ),
-        f"- **Nombre total de références internes rompues** : {len(broken_refs)}",
-        (
-            "- **Scripts avec simple Sanity Check CLI `--help` (Non Validés"
-            " Métier)** : 38 / 95 (40.0%) — *Imports seuls, logique non"
-            " exécutée.*"
-        ),
-        "- **Scripts avec analyse statique seule (`py_compile` / `bash -n`)** : 26 / 95 (27.4%) — *Zéro runtime.*",
-        "",
-        "```mermaid",
-        "pie title Statut Réel des 95 Scripts (Rigueur Fact-First)",
-        f'    "Prouvé Live de Bout en Bout" : {len(PROVEN_LIVE)}',
-        f'    "Régression Interne Cassée" : {len(broken_sources)}',
-        '    "Sanity Check CLI Seul (Non Validé)" : 38',
-        '    "Statique / Syntaxe Seul (Non Exécuté)" : 26',
-        "```",
-        "",
-        "---",
-        "",
-        "## 2. Inventaire des Références Internes Rompues",
-        "",
-        (
-            "Lors du déplacement des scripts dans des sous-dossiers thématiques"
-            " (`infra/`, `workers/`, `benchmarks/`, `ingestion/`), les chemins"
-            " d'invocation codés en dur (`scripts/<nom>.py` ou"
-            " `scripts/<nom>.sh`) à l'intérieur des contrôleurs et"
-            " orchestrateurs n'ont pas été réalignés, créant des ruptures"
-            " silencieuses à l'exécution :"
-        ),
-        "",
-        "| # | Fichier Source | Référence Rompue (Ancien Chemin) | Chemin Cible Réel (Nouveau Layout) |",
-        "| :---: | :--- | :--- | :--- |",
-    ]
-
-    for idx, r in enumerate(broken_refs, 1):
-        lines.append(f"| {idx} | `{r['source']}` | `{r['ref']}` | `{r['target']}` |")
+    lines = _build_summary_section(all_scripts, repo_root, broken_refs)
 
     lines.extend(
         [

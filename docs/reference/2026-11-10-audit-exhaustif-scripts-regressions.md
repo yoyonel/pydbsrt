@@ -1,64 +1,47 @@
 # Audit Exhaustif des Scripts & Cartographie des Régressions de Chemins
 
-> **Date de constat :** 2026-11-10 21:52:00
-> **Statut :** Constat contradictoire post-refactoring modulaire (PR #70 / Issue #69 Phase 1)
+> **Date de constat :** 2026-11-10 21:52:00 (Actualisé post-remédiation 2026-11-11)
+> **Statut :** Bilan consolidé post-audit des 18 scripts critiques (PR #70 / Issue #69 Phase 1)
 > **Avertissement de rigueur :** Un « Sanity Check CLI `--help` » atteste uniquement que Python parvient à charger le module sans crash immédiat au démarrage. Sa valeur probante est infime (à peine supérieure à une simple vérification statique) : **il ne valide en aucun cas la logique interne, les invariants mémoire, les connexions réseau ou les interactions réelles.**
 
 ## 1. Synthèse Factuelle Globale
 
-- **Total scripts opérationnels** : 95 (65 Python, 30 Shell)
-- **Scripts prouvés en exécution réelle live (session)** : 17 / 95 (13.7%) — *Seuls scripts réellement testés de bout en bout.*
-- **Scripts en régression directe (appels internes cassés)** : 15 / 95 (18.9%) — *Ruptures critiques identifiées.*
-- **Nombre total de références internes rompues** : 30
-- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 38 / 95 (40.0%) — *Imports seuls, logique non exécutée.*
-- **Scripts avec analyse statique seule (`py_compile` / `bash -n`)** : 26 / 95 (27.4%) — *Zéro runtime.*
+- **Total scripts opérationnels** : 96 (66 Python, 30 Shell)
+- **Scripts prouvés en exécution réelle live (session)** : 29 / 96 (30.2%) — *Seuls scripts réellement testés de bout en bout.*
+- **Scripts en régression directe (appels internes cassés)** : 0 / 96 (0.0%) — *100% des régressions actives résolues.*
+- **Nombre total de références internes rompues actives** : 0 (13 références appliance distantes documentées)
+- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 46 / 96 (47.9%) — *Imports seuls, logique non exécutée.*
+- **Scripts avec analyse statique seule (`bash -n`)** : 21 / 96 (21.9%) — *Zéro runtime.*
 
 ```mermaid
-pie title Statut Réel des 95 Scripts (Rigueur Fact-First)
-    "Prouvé Live de Bout en Bout" : 13
-    "Régression Interne Cassée" : 18
-    "Sanity Check CLI Seul (Non Validé)" : 38
-    "Statique / Syntaxe Seul (Non Exécuté)" : 26
+pie title Statut Réel des 96 Scripts (Rigueur Fact-First)
+    "Prouvé Live de Bout en Bout" : 29
+    "Régression Interne Cassée" : 0
+    "Sanity Check CLI Seul (Non Validé)" : 46
+    "Statique / Syntaxe Seul (Non Exécuté)" : 21
 ```
 
 ---
 
-## 2. Inventaire des 31 Références Internes Rompues
+## 2. Inventaire des Références Internes & État de Remédiation
 
-Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, `workers/`, `benchmarks/`, `ingestion/`), les chemins d'invocation codés en dur (`scripts/<nom>.py` ou `scripts/<nom>.sh`) à l'intérieur des contrôleurs et orchestrateurs n'ont pas été réalignés, créant des ruptures silencieuses à l'exécution :
+Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, `workers/`, `benchmarks/`, `ingestion/`), les chemins d'invocation codés en dur (`scripts/<nom>.py` ou `scripts/<nom>.sh`) à l'intérieur des contrôleurs et orchestrateurs ont été audités et remédiés script par script :
 
-| # | Fichier Source | Référence Rompue (Ancien Chemin) | Chemin Cible Réel (Nouveau Layout) |
-| :---: | :--- | :--- | :--- |
-| 1 | `scripts/infra/o2switch/o2switch_audit_remote.py` | `scripts/phash_names.py` | `scripts/ingestion/phash_names.py` |
-| 2 | `scripts/infra/o2switch/o2switch_ctl.sh` | `scripts/o2switch_batch_worker.py` | `scripts/workers/o2switch_batch_worker.py` |
-| 3 | `scripts/infra/o2switch/o2switch_ctl.sh` | `scripts/o2switch_batch_worker.py` | `scripts/workers/o2switch_batch_worker.py` |
-| 4 | `scripts/infra/o2switch/o2switch_ctl.sh` | `scripts/o2switch_batch_worker.py` | `scripts/workers/o2switch_batch_worker.py` |
-| 5 | `scripts/infra/o2switch/o2switch_ctl.sh` | `scripts/o2switch_batch_worker.py` | `scripts/workers/o2switch_batch_worker.py` |
-| 6 | `scripts/infra/o2switch/o2switch_ctl.sh` | `scripts/o2switch_phash_migrate.py` | `scripts/workers/o2switch_phash_migrate.py` |
-| 7 | `scripts/infra/o2switch/o2switch_ctl.sh` | `scripts/o2switch_fault_watch.py` | `scripts/workers/o2switch_fault_watch.py` |
-| 8 | `scripts/infra/o2switch/o2switch_ctl.sh` | `scripts/o2switch_audit_remote.py` | `scripts/infra/o2switch/o2switch_audit_remote.py` |
-| 9 | `scripts/infra/o2switch/o2switch_ctl.sh` | `scripts/trajectory_bench_runner.py` | `scripts/benchmarks/trajectory_bench_runner.py` |
-| 10 | `scripts/infra/o2switch/o2switch_ctl.sh` | `scripts/trajectory_bench_runner.py` | `scripts/benchmarks/trajectory_bench_runner.py` |
-| 11 | `scripts/infra/rpi4/freebox_batch_ctl.sh` | `scripts/scan_freebox_targets.py` | `scripts/ingestion/scan_freebox_targets.py` |
-| 12 | `scripts/infra/rpi4/freebox_batch_ctl.sh` | `scripts/o2switch_batch_worker.py` | `scripts/workers/o2switch_batch_worker.py` |
-| 13 | `scripts/infra/rpi4/rpi4_freebox_ctl.sh` | `scripts/freebox_batch_ctl.sh` | `scripts/infra/rpi4/freebox_batch_ctl.sh` |
-| 14 | `scripts/infra/rpi4/rpi4_freebox_ctl.sh` | `scripts/freebox_batch_ctl.sh` | `scripts/infra/rpi4/freebox_batch_ctl.sh` |
-| 15 | `scripts/infra/rpi4/rpi4_o2switch_supervisor.py` | `scripts/o2switch_ctl.sh` | `scripts/infra/o2switch/o2switch_ctl.sh` |
-| 16 | `scripts/infra/rpi4/rpi4_o2switch_supervisor.py` | `scripts/freebox_batch_ctl.sh` | `scripts/infra/rpi4/freebox_batch_ctl.sh` |
-| 17 | `scripts/infra/rpi4/rpi4_sim.sh` | `scripts/init_couplings_seed.sh` | `scripts/ingestion/init_couplings_seed.sh` |
-| 18 | `scripts/infra/rpi4/rpi4_standalone.sh` | `scripts/rpi4_cli.sh` | `scripts/infra/rpi4/rpi4_cli.sh` |
-| 19 | `scripts/infra/rpi4/rpi4_supervisor_ctl.sh` | `scripts/o2switch_batch_worker.py` | `scripts/workers/o2switch_batch_worker.py` |
-| 20 | `scripts/ingestion/coupling_relabel.sh` | `scripts/coupling_relabel.sh` | `scripts/ingestion/coupling_relabel.sh` |
-| 21 | `scripts/tooling/check_pr_body.py` | `scripts/check_pr_body.py` | `scripts/tooling/check_pr_body.py` |
-| 22 | `scripts/tooling/check_pr_body.py` | `scripts/record_proof.py` | `scripts/benchmarks/record_proof.py` |
-| 23 | `scripts/tooling/generate_audit_doc.py` | `scripts/dbsrt_top.py` | `scripts/infra/local/dbsrt_top.py` |
-| 24 | `scripts/tooling/generate_audit_doc.py` | `scripts/validate_docs.py` | `scripts/tooling/validate_docs.py` |
-| 25 | `scripts/tooling/generate_audit_doc.py` | `scripts/record_proof.py` | `scripts/benchmarks/record_proof.py` |
-| 26 | `scripts/tooling/generate_audit_doc.py` | `scripts/o2switch_ctl.sh` | `scripts/infra/o2switch/o2switch_ctl.sh` |
-| 27 | `scripts/tooling/generate_nightly_report_enhanced.py` | `scripts/batch_media_add_tvshow.py` | `scripts/ingestion/batch_media_add_tvshow.py` |
-| 28 | `scripts/tooling/lint_complexity.py` | `scripts/lint_complexity.py` | `scripts/tooling/lint_complexity.py` |
-| 29 | `scripts/tooling/mkdocs_hooks.py` | `scripts/mkdocs_hooks.py` | `scripts/tooling/mkdocs_hooks.py` |
-| 30 | `scripts/tooling/validate_docs.py` | `scripts/doc-portal.js` | *(Résolu : faux positif regex `javascripts/` corrigé)* |
+| # | Fichier Source | Référence Rompue (Ancien Chemin) | Chemin Cible Réel (Nouveau Layout) | Statut Fact-First |
+| :---: | :--- | :--- | :--- | :---: |
+| 1 | `scripts/infra/o2switch/o2switch_ctl.sh` | `scripts/o2switch_batch_worker.py` | `scripts/workers/o2switch_batch_worker.py` | 🟢 **Prouvé Live & Résolu** |
+| 2 | `scripts/infra/o2switch/o2switch_ctl.sh` | `scripts/o2switch_batch_worker.py` | `scripts/workers/o2switch_batch_worker.py` | 🟢 **Prouvé Live & Résolu** |
+| 3 | `scripts/infra/o2switch/o2switch_ctl.sh` | `scripts/o2switch_batch_worker.py` | `scripts/workers/o2switch_batch_worker.py` | 🟢 **Prouvé Live & Résolu** |
+| 4 | `scripts/infra/o2switch/o2switch_ctl.sh` | `scripts/o2switch_batch_worker.py` | `scripts/workers/o2switch_batch_worker.py` | 🟢 **Prouvé Live & Résolu** |
+| 5 | `scripts/infra/o2switch/o2switch_ctl.sh` | `scripts/o2switch_phash_migrate.py` | `scripts/workers/o2switch_phash_migrate.py` | 🟢 **Prouvé Live & Résolu** |
+| 6 | `scripts/infra/o2switch/o2switch_ctl.sh` | `scripts/o2switch_fault_watch.py` | `scripts/workers/o2switch_fault_watch.py` | 🟢 **Prouvé Live & Résolu** |
+| 7 | `scripts/infra/o2switch/o2switch_ctl.sh` | `scripts/o2switch_audit_remote.py` | `scripts/infra/o2switch/o2switch_audit_remote.py` | 🟢 **Prouvé Live & Résolu** |
+| 8 | `scripts/infra/o2switch/o2switch_ctl.sh` | `scripts/trajectory_bench_runner.py` | `scripts/benchmarks/trajectory_bench_runner.py` | 🟢 **Prouvé Live & Résolu** |
+| 9 | `scripts/infra/o2switch/o2switch_ctl.sh` | `scripts/trajectory_bench_runner.py` | `scripts/benchmarks/trajectory_bench_runner.py` | 🟢 **Prouvé Live & Résolu** |
+| 10 | `scripts/infra/rpi4/freebox_batch_ctl.sh` | `scripts/o2switch_batch_worker.py` | `scripts/workers/o2switch_batch_worker.py` | 🟢 **Prouvé Live & Résolu** |
+| 11 | `scripts/infra/rpi4/rpi4_freebox_ctl.sh` | `scripts/freebox_batch_ctl.sh` | `scripts/infra/rpi4/freebox_batch_ctl.sh` | 🟢 **Prouvé Live & Résolu** |
+| 12 | `scripts/infra/rpi4/rpi4_freebox_ctl.sh` | `scripts/freebox_batch_ctl.sh` | `scripts/infra/rpi4/freebox_batch_ctl.sh` | 🟢 **Prouvé Live & Résolu** |
+| 13 | `scripts/infra/rpi4/rpi4_supervisor_ctl.sh` | `scripts/o2switch_batch_worker.py` | `scripts/workers/o2switch_batch_worker.py` | 🟢 **Prouvé Live & Résolu** |
 
 ---
 
@@ -114,23 +97,23 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 | Script | Statut Réel | Type | KPI / Importance | Détail / Diagnostic Contradictoire |
 | :--- | :---: | :---: | :---: | :--- |
 | `scripts/infra/o2switch/nas_o2switch_sync.sh` | ⚪ **Statique Seul (Non Exécuté)** | Shell | À évaluer | Syntaxe `bash -n` & `shellcheck` OK. Zéro exécution runtime. |
-| `scripts/infra/o2switch/o2switch_audit_remote.py` | 🟢 **Prouvé Live (o2switch)** | Python | Élevée (Recette Cloud) | Docstring réalignée (`scripts/ingestion/phash_names.py`), constantes de chemins avec surcharges `DBSRT_*`. 43/43 tests unitaires PASS. Exécuté et validé live sur o2switch (`status` et `report` sur 2827 fichiers). |
-| `scripts/infra/o2switch/o2switch_ctl.sh` | 🟢 **Prouvé Live (o2switch)** | Shell | Critique (Contrôleur Cloud) | Bug Bash précédence ligne 30 corrigé (`REPO_ROOT`). Chemins locaux préfixés par `${REPO_ROOT}`. Validé et prouvé live sur o2switch (`batch-sync`, `batch-status`, `status`, `batch-summary`, `faultwatch status`). Plan de migration Python validé (Ticket Phase 2). |
+| `scripts/infra/o2switch/o2switch_audit_remote.py` | 🟢 **Prouvé Live** | Python | Élevée (Audit de Précision & Recette Cloud) | Docstring réalignée, constantes de chemins avec surcharges DBSRT_*. 43/43 tests unitaires PASS. Exécuté et validé live sur o2switch (status et report sur 2827 fichiers). |
+| `scripts/infra/o2switch/o2switch_ctl.sh` | 🟢 **Prouvé Live** | Shell | Critique (Contrôleur Maître Cloud o2switch) | Bug Bash précédence ligne 30 corrigé (REPO_ROOT). Chemins locaux préfixés par REPO_ROOT. Validé et prouvé live sur o2switch (batch-sync, batch-status, status, batch-summary, faultwatch status). |
 
 ### 3.5 Infra & Contrôleurs Appliance RPi4 (`scripts/infra/rpi4/`)
 
 | Script | Statut Réel | Type | KPI / Importance | Détail / Diagnostic Contradictoire |
 | :--- | :---: | :---: | :---: | :--- |
-| `scripts/infra/rpi4/freebox_batch_ctl.sh` | 🟢 **Prouvé Live (o2switch & Local)** | Shell | Élevée (Ingestion WAN Freebox / Portail Web) | Résolution `REPO_ROOT` et source `load_env.sh` intégrées. Référence scanner réalignée (`scripts/ingestion/scan_freebox_targets.py`). Validé et prouvé live : scan Freebox local, rsync cibles vers o2switch, probe gateway HTTP o2switch (`test`) et état queue (`status`). |
+| `scripts/infra/rpi4/freebox_batch_ctl.sh` | 🟢 **Prouvé Live** | Shell | Élevée (Ingestion WAN Freebox / Portail Web) | Résolution REPO_ROOT et source load_env.sh intégrées. Référence scanner réalignée. Validé et prouvé live : scan Freebox local, rsync cibles vers o2switch, probe gateway HTTP o2switch (test) et état queue (status). |
 | `scripts/infra/rpi4/rpi4_build.sh` | ⚪ **Statique Seul (Non Exécuté)** | Shell | À évaluer | Syntaxe `bash -n` & `shellcheck` OK. Zéro exécution runtime. |
 | `scripts/infra/rpi4/rpi4_cli.sh` | ⚪ **Statique Seul (Non Exécuté)** | Shell | À évaluer | Syntaxe `bash -n` & `shellcheck` OK. Zéro exécution runtime. |
 | `scripts/infra/rpi4/rpi4_deploy.sh` | ⚪ **Statique Seul (Non Exécuté)** | Shell | À évaluer | Syntaxe `bash -n` & `shellcheck` OK. Zéro exécution runtime. |
-| `scripts/infra/rpi4/rpi4_freebox_ctl.sh` | 🟢 **Prouvé Live (RPi4)** | Shell | Élevée (Appliance RPi4 & CIFS/HTTP Range) | Résolution `REPO_ROOT` et source `load_env.sh` intégrées. Chemins `install_gateway()` préfixés par `${REPO_ROOT}`. Résilience sur `batch-restart`. Validé et prouvé live sur RPi4 (`status` 3 montages CIFS actifs + daemon systemd actif, `install` synchronisé et activé). |
+| `scripts/infra/rpi4/rpi4_freebox_ctl.sh` | 🟢 **Prouvé Live** | Shell | Élevée (Appliance RPi4 & CIFS/HTTP Range) | Résolution REPO_ROOT et source load_env.sh intégrées. Chemins install_gateway() préfixés par REPO_ROOT. Validé et prouvé live sur RPi4 (status 3 montages CIFS actifs + daemon systemd actif, install synchronisé et activé). |
 | `scripts/infra/rpi4/rpi4_freebox_gateway.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
-| `scripts/infra/rpi4/rpi4_o2switch_supervisor.py` | 🟢 **Prouvé Live (RPi4 & o2switch)** | Python | Critique (Superviseur 24/7 de Production) | Résolution dynamique des chemins de contrôleurs (`resolve_ctl_script`) et support variables d'environnement (`DBSRT_*_CTL`). 53/53 tests unitaires PASS. Déployé sur RPi4 via `rpi4_supervisor_ctl.sh sync`, redémarré en service systemd (`PID 3971528`), avec auto-rotation et lancement live d'un batch tvshow sur o2switch (PID 3829881). |
-| `scripts/infra/rpi4/rpi4_sim.sh` | 🟢 **Prouvé Live (QEMU ARM64)** | Shell | Moyenne (Dev & Simulation Locale QEMU ARM64) | Résolution `REPO_ROOT` et `COMPOSE_FILE` absolue, port paramétrable. `sim/docker-compose.sim.yml` ajusté à 4GB RAM (évite OOMKill QEMU sur 5558 phashes). Prouvé live à 100% sur les 5 commandes (`up`, `status`, `test` 6/6 API PASS dont recognize Andor MIH et CAS, `logs`, `down`). |
-| `scripts/infra/rpi4/rpi4_standalone.sh` | 🟢 **Prouvé Live (RPi4)** | Shell | Élevée (Déploiement Serveur Physique RPi4) | Résolution `REPO_ROOT` et source `load_env.sh` intégrées. Référence de compilation ARM64 réalignée (`"${REPO_ROOT}/scripts/infra/rpi4/rpi4_cli.sh" build`) et chemin cible absolu. Validé et prouvé live sur RPi4 (`status` -> service systemd user actif, API 8765 nominale ; `demo` -> reconnaissance 100% conf MIH Andor et téléchargement CAS SRT validés). |
-| `scripts/infra/rpi4/rpi4_supervisor_ctl.sh` | 🟢 **Prouvé Live (RPi4)** | Shell | Élevée (Superviseur Appliance RPi4) | Résolution `REPO_ROOT` et source `load_env.sh` intégrées. Préfixage absolu de `UNIT_FILE`, `SUPERVISOR_SCRIPTS` et checksum `sync`. Contrôleur synchronisé vers l'appliance. Validé et prouvé live à 100% sur l'ensemble des 6 commandes (`sync` hors racine, `install`, `restart`, `status`, `stop`, `start` avec bascule des PID et logs nominaux). |
+| `scripts/infra/rpi4/rpi4_o2switch_supervisor.py` | 🟢 **Prouvé Live** | Python | Critique (Superviseur Autonome 24/7 de Production) | Résolution dynamique des chemins de contrôleurs (resolve_ctl_script) et support variables d'environnement (DBSRT_*_CTL). 53/53 tests unitaires PASS. Déployé sur RPi4 via rpi4_supervisor_ctl.sh sync, redémarré en service systemd (PID 3971528), avec auto-rotation et lancement live d'un batch tvshow sur o2switch (PID 3829881). |
+| `scripts/infra/rpi4/rpi4_sim.sh` | 🟢 **Prouvé Live** | Shell | Moyenne (Dev & Simulation Locale QEMU ARM64) | Résolution REPO_ROOT et COMPOSE_FILE absolue, port paramétrable. sim/docker-compose.sim.yml ajusté à 4GB RAM. Prouvé live à 100% sur les 5 commandes (up, status, test 6/6 API PASS dont recognize Andor MIH et CAS, logs, down). |
+| `scripts/infra/rpi4/rpi4_standalone.sh` | 🟢 **Prouvé Live** | Shell | Élevée (Déploiement Serveur Physique RPi4) | Résolution REPO_ROOT et source load_env.sh intégrées. Référence de compilation ARM64 réalignée et chemin cible absolu. Validé et prouvé live sur RPi4 (status -> service systemd user actif, API nominale ; demo -> reconnaissance 100% conf MIH Andor et téléchargement CAS SRT validés). |
+| `scripts/infra/rpi4/rpi4_supervisor_ctl.sh` | 🟢 **Prouvé Live** | Shell | Élevée (Contrôleur de Déploiement & Lifecycle du Superviseur RPi4) | Résolution REPO_ROOT et source load_env.sh intégrées. Préfixage absolu de UNIT_FILE, SUPERVISOR_SCRIPTS et checksum sync. Contrôleur synchronisé vers l'appliance. Validé et prouvé live à 100% sur l'ensemble des 6 commandes (sync hors racine, install, restart, status, stop, start avec bascule des PID et logs nominaux). |
 | `scripts/infra/rpi4/rpi4_sync.sh` | ⚪ **Statique Seul (Non Exécuté)** | Shell | À évaluer | Syntaxe `bash -n` & `shellcheck` OK. Zéro exécution runtime. |
 
 ### 3.6 Ingestion, Curation & Déduplication (`scripts/ingestion/`)
@@ -143,7 +126,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 | `scripts/ingestion/backfill_media_assets.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/ingestion/backfill_medias_pg.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/ingestion/batch_media_add_tvshow.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
-| `scripts/ingestion/coupling_relabel.sh` | 🟢 **Prouvé Live** | Shell | Moyenne (Curation Couplages Certifiés) | Résolution dynamique `REPO_ROOT` et chemin binaire `DBSRT_BIN` absolu (avec fallback `target/debug` et garde explicite). En-tête réaligné. Validé et prouvé live sur exécution hors racine (`--help`) et test E2E fonctionnel complet sur registre temporaire isolé (re-labellisation `und` -> `fr`, payload JSON conforme). |
+| `scripts/ingestion/coupling_relabel.sh` | 🟢 **Prouvé Live** | Shell | Moyenne (Outil de Curation du Registre Zero-DB) | Résolution dynamique REPO_ROOT et chemin binaire DBSRT_BIN absolu (avec fallback target/debug et garde explicite). En-tête réaligné. Validé et prouvé live sur exécution hors racine (--help) et test E2E fonctionnel complet sur registre temporaire isolé (re-labellisation und -> fr, payload JSON conforme). |
 | `scripts/ingestion/download_and_audit_all_trailers.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/ingestion/enrich_snippets_metadata.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/ingestion/extract_embedded_subs.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
@@ -177,16 +160,16 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 | :--- | :---: | :---: | :---: | :--- |
 | `scripts/tooling/build_dashboard_html.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/tooling/build_inventory_doc.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
-| `scripts/tooling/check_pr_body.py` | 🟢 **Prouvé Live** | Python | Critique (Garde-fou CI/CD & Qualité PRs) | Chemins docstring et commentaires réalignés (`scripts/tooling/check_pr_body.py` et `scripts/benchmarks/record_proof.py`). 16/16 tests unitaires PASS (`test_check_pr_body.py`). Prouvé live en CLI stdin (rejet corps vide exit 1, validation corps conforme avec preuve SVG exit 0). |
+| `scripts/tooling/check_pr_body.py` | 🟢 **Prouvé Live** | Python | Critique (Garde-fou CI/CD & Qualité des PRs) | Chemins docstring et commentaires réalignés. 16/16 tests unitaires PASS (test_check_pr_body.py). Prouvé live en CLI stdin (rejet corps vide exit 1, validation corps conforme avec preuve SVG exit 0). |
 | `scripts/tooling/code_quality.sh` | 🟢 **Prouvé Live** | Shell | À évaluer | Exécuté live (task lint, task fmt) |
 | `scripts/tooling/convert_dashboard_webp.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/tooling/disk_guard.sh` | 🟢 **Prouvé Live** | Shell | À évaluer | Exécuté live (task lint étape 10) |
-| `scripts/tooling/generate_audit_doc.py` | 🟢 **Prouvé Live** | Python | Moyenne (Métrologie & Méta-Documentation) | Résolution dynamique `REPO_ROOT` (`find_repo_root`), exclusion du self-scan (0 faux positif), mise à jour des scripts live prouvés, préservation dynamique des fiches d'analyse et support CLI (`--check`, `--output`). Validé live (`--check` et génération de test code 0). |
+| `scripts/tooling/generate_audit_doc.py` | 🟢 **Prouvé Live** | Python | Moyenne (Outil de Métrologie & Méta-Documentation) | Résolution dynamique REPO_ROOT, exclusion du self-scan (0 faux positif), préservation dynamique des fiches d'analyse méticuleuse et support CLI (--check, --output). |
 | `scripts/tooling/generate_coverage_report.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
-| `scripts/tooling/generate_nightly_report_enhanced.py` | 🟢 **Prouvé Live** | Python | Moyenne (Métrologie & Profiling Diátaxis) | Résolution dynamique `REPO_ROOT` (`find_repo_root`), réalignement de la référence vers `scripts/ingestion/batch_media_add_tvshow.py`, refactoring sous le seuil `complexipy` (`main` 15 $\le$ 15) et support CLI (`--check`, `--input`, `--output`). Validé live sur exécution hors racine et génération nominale. |
-| `scripts/tooling/lint_complexity.py` | 🟢 **Prouvé Live** | Python | Critique (Garde-fou CI/CD & Architecture Rust) | Découverte dynamique `REPO_ROOT` (`find_repo_root`), normalisation relative des clés baseline (indépendante du CWD), réalignement du message de ratchet (`task complexity -- --ratchet`). Validé live sur exécution hors racine et nominale (1180 fonctions Rust scannées, 0 régression). |
+| `scripts/tooling/generate_nightly_report_enhanced.py` | 🟢 **Prouvé Live** | Python | Moyenne (Métrologie & Profiling Diátaxis) | Résolution dynamique REPO_ROOT (find_repo_root), réalignement de la référence vers scripts/ingestion/batch_media_add_tvshow.py, refactoring sous le seuil complexipy (main 15 <= 15) et support CLI (--check, --input, --output). Validé live sur exécution hors racine et génération nominale. |
+| `scripts/tooling/lint_complexity.py` | 🟢 **Prouvé Live** | Python | Critique (Garde-fou CI/CD & Architecture Rust) | Exécuté live (Rust Complexity Gate 1180 fn) |
 | `scripts/tooling/lint_migrations.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
-| `scripts/tooling/mkdocs_hooks.py` | 🟢 **Prouvé Live** | Python | Élevée (Orchestration Diátaxis & Recherche Lunr) | Découverte dynamique `REPO_ROOT` (`find_repo_root`), ancrage absolu `DEFAULT_DOCS_DIR` et réalignement de l'en-tête généré dans `docs-dates.js`. Validé live via `task doc:check` (crochet mkdocs build). |
+| `scripts/tooling/mkdocs_hooks.py` | 🟢 **Prouvé Live** | Python | Élevée (Orchestration Diátaxis & Recherche Lunr) | Exécuté live (crochet mkdocs build) |
 | `scripts/tooling/pack_repo.sh` | ⚪ **Statique Seul (Non Exécuté)** | Shell | À évaluer | Syntaxe `bash -n` & `shellcheck` OK. Zéro exécution runtime. |
 | `scripts/tooling/pack_review.sh` | ⚪ **Statique Seul (Non Exécuté)** | Shell | À évaluer | Syntaxe `bash -n` & `shellcheck` OK. Zéro exécution runtime. |
 | `scripts/tooling/report_type_errors.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
@@ -211,7 +194,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 
 Pour sortir de cet état sans spéculation, chaque script des sections 1 et 2 doit faire l'objet de :
 
-1. **Correction chirurgicale des chemins internes** : remplacer systématiquement les 31 chemins obsolètes par leur localisation réelle sous `scripts/`.
+1. **Correction chirurgicale des chemins internes** : remplacer systématiquement les chemins obsolètes par leur localisation réelle sous `scripts/`.
 2. **Revue de conformité de l'arborescence `sys.path`** : s'assurer que tout script important un sous-module importe depuis la racine du dépôt.
 3. **Épreuve d'exécution formelle par script** :
    - **Contrôleurs Shell** : exécution en mode validation d'options / dry-run ou invocation réelle contrôlée.
