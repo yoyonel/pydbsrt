@@ -17,11 +17,25 @@ import sys
 import unicodedata
 from pathlib import Path
 
-DEFAULT_SNIPPETS_DIR = Path("data/snippets")
-DEFAULT_CATALOG_FILE = Path("data/catalog.dbphash")
-DEFAULT_AUDIT_JSON = Path("data/snippets/audit_cuts_pipeline_results.json")
-DEFAULT_OUTPUT_JSON = Path("data/snippets/audit_rejected_cuts_analysis.json")
-DEFAULT_DOC_FILE = Path("docs/explanation/2026-11-04-audit-global-performance-pipeline-matching.md")
+
+def find_repo_root() -> Path:
+    """Finds repository root dynamically with appliance fallback."""
+    curr = Path(__file__).resolve().parent
+    for parent in [curr, *curr.parents]:
+        if (parent / ".git").is_dir():
+            return parent
+    appliance_path = Path.home() / "dbsrt"
+    if appliance_path.is_dir():
+        return appliance_path
+    return Path.cwd()
+
+
+REPO_ROOT = find_repo_root()
+DEFAULT_SNIPPETS_DIR = REPO_ROOT / "data/snippets"
+DEFAULT_CATALOG_FILE = REPO_ROOT / "data/catalog.dbphash"
+DEFAULT_AUDIT_JSON = REPO_ROOT / "data/snippets/audit_cuts_pipeline_results.json"
+DEFAULT_OUTPUT_JSON = REPO_ROOT / "data/snippets/audit_rejected_cuts_analysis.json"
+DEFAULT_DOC_FILE = REPO_ROOT / "docs/explanation/2026-11-04-audit-global-performance-pipeline-matching.md"
 
 SAMPLE_FRAME_COUNT = 5
 MIN_WORD_LENGTH = 2
@@ -56,7 +70,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--snippets-dir", type=Path, default=DEFAULT_SNIPPETS_DIR, help="Snippets directory")
     parser.add_argument("--output-json", type=Path, default=DEFAULT_OUTPUT_JSON, help="Output rejected analysis JSON")
     parser.add_argument("--doc-file", type=Path, default=DEFAULT_DOC_FILE, help="Explanation doc to update")
+    parser.add_argument(
+        "--check", "--dry-run", action="store_true", help="Perform sanity checks without writing outputs"
+    )
     return parser.parse_args()
+
+
+def perform_check(args: argparse.Namespace) -> None:
+    """Performs sanity check of catalog, snippets and audit json."""
+    print("[CHECK] Mode verification activé.")
+    print(f"[CHECK] REPO_ROOT : {REPO_ROOT}")
+    print(
+        f"[CHECK] catalog.dbphash : {args.catalog_file} (exists: {args.catalog_file.is_file()}, size: {args.catalog_file.stat().st_size if args.catalog_file.is_file() else 0} bytes)"
+    )
+    print(f"[CHECK] Snippets dir : {args.snippets_dir} (exists: {args.snippets_dir.is_dir()})")
+    print(f"[CHECK] Audit JSON : {args.audit_json} (exists: {args.audit_json.is_file()})")
+    print(f"[CHECK] Output JSON : {args.output_json}")
+    print(f"[CHECK] Doc file : {args.doc_file} (exists: {args.doc_file.is_file()})")
 
 
 def load_catalog_titles(catalog_file: Path) -> list[str]:
@@ -277,6 +307,10 @@ def build_markdown_report_section(records: list[dict]) -> list[str]:
 
 def main() -> int:
     args = parse_args()
+    if args.check:
+        perform_check(args)
+        return 0
+
     if not args.audit_json.exists():
         print(f"Error: Audit JSON file not found: {args.audit_json}", file=sys.stderr)
         return 1

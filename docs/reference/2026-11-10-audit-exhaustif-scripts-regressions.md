@@ -7,17 +7,17 @@
 ## 1. Synthèse Factuelle Globale
 
 - **Total scripts opérationnels** : 96 (66 Python, 30 Shell)
-- **Scripts prouvés en exécution réelle live (session)** : 77 / 96 (80.2%) — *Seuls scripts réellement testés de bout en bout.*
+- **Scripts prouvés en exécution réelle live (session)** : 78 / 96 (81.2%) — *Seuls scripts réellement testés de bout en bout.*
 - **Scripts en régression directe (appels internes cassés)** : 0 / 96 (0.0%) — *100% des régressions actives résolues.*
 - **Nombre total de références internes rompues actives** : 0 (13 références appliance distantes documentées)
-- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 19 / 96 (19.8%) — *Imports seuls, logique non exécutée.*
+- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 18 / 96 (18.8%) — *Imports seuls, logique non exécutée.*
 - **Scripts avec analyse statique seule (`bash -n`)** : 0 / 96 (0.0%) — *Zéro runtime.*
 
 ```mermaid
 pie title Statut Réel des 96 Scripts (Rigueur Fact-First)
-    "Prouvé Live de Bout en Bout" : 77
+    "Prouvé Live de Bout en Bout" : 78
     "Régression Interne Cassée" : 0
-    "Sanity Check CLI Seul (Non Validé)" : 19
+    "Sanity Check CLI Seul (Non Validé)" : 18
     "Statique / Syntaxe Seul (Non Exécuté)" : 0
 ```
 
@@ -122,7 +122,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 | :--- | :---: | :---: | :---: | :--- |
 | `scripts/ingestion/audit_cuts_pipeline.py` | 🟢 **Prouvé Live** | Python | Élevée (Audit de Performance Multi-Étapes Pipeline Matching) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des extraits/rapports et option CLI --check. Validé hors racine (--check code 0, 2 758 snippets détectés sous data/snippets). |
 | `scripts/ingestion/audit_phash_catalog.py` | 🟢 **Prouvé Live** | Python | Critique (Audit Empirique Exhaustif Reconnaissance pHash & Zero-DB) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), sélection robuste du binaire dbsrt (release/debug/PATH), chemins absolus et option CLI --check. Validé hors racine (--check code 0, 2 779 .phash et catalogue 231MB confirmés). |
-| `scripts/ingestion/audit_rejected_cuts.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
+| `scripts/ingestion/audit_rejected_cuts.py` | 🟢 **Prouvé Live** | Python | Élevée (Diagnostic Forensique Exhaustif des Rejets Matching) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des catalogues/rapports/docs et option CLI --check. Validé hors racine (--check code 0, catalogue 231MB, audit JSON et snippets confirmés). |
 | `scripts/ingestion/backfill_media_assets.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/ingestion/backfill_medias_pg.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/ingestion/batch_media_add_tvshow.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
@@ -666,3 +666,10 @@ Pour sortir de cet état sans spéculation, chaque script des sections 1 et 2 do
 - **Diagnostic** : Chemins relatifs par défaut (`data/__PHASH__`, `data/catalog.dbphash`, `target/release/dbsrt`), injection fragile dans `sys.path`, et absence de mode CLI d'inspection `--check` / `--dry-run`.
 - **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, sélection automatique du binaire `dbsrt` (release/debug/PATH), chemins absolus des catalogues et des assets, et ajout de l'option CLI `--check` / `--dry-run`.
 - **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/ingestion/audit_phash_catalog.py --check)` confirmant la détection de 2 779 fichiers `.phash`, du catalogue `.dbphash` (231 Mo) et du binaire `dbsrt` (code 0), linters `ruff`, `complexipy` et `pyright` conformes.
+
+### Fiche 67 : `scripts/ingestion/audit_rejected_cuts.py`
+- **Rôle** : Diagnostic forensique exhaustif des 849 rejets du pipeline de matching (taxonomie du contenu, présence de sous-titres locaux, recoupement catalogue, détection des séquences à faible entropie/écrans noirs et mise à jour de la documentation Diátaxis Explanation).
+- **KPI / Importance** : `Élevée (Diagnostic Forensique Exhaustif des Rejets Matching)`.
+- **Diagnostic** : Chemins relatifs par défaut (`data/snippets`, `data/catalog.dbphash`, `data/snippets/...`), et absence de mode CLI d'inspection `--check` / `--dry-run`.
+- **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, chemins absolus des fichiers de données et de documentation, et ajout de l'option CLI `--check` / `--dry-run`.
+- **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/ingestion/audit_rejected_cuts.py --check)` confirmant la détection du catalogue de 231 Mo, des snippets et du fichier d'audit JSON (code 0), linters `ruff`, `complexipy` et `pyright` conformes.

@@ -185,6 +185,10 @@ PROVEN_LIVE: dict[str, str] = {
         "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), sélection robuste du binaire dbsrt (release/debug/PATH), chemins absolus et option CLI --check."
         " Validé hors racine (--check code 0, 2 779 .phash et catalogue 231MB confirmés)."
     ),
+    "scripts/ingestion/audit_rejected_cuts.py": (
+        "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des catalogues/rapports/docs et option CLI --check."
+        " Validé hors racine (--check code 0, catalogue 231MB, audit JSON et snippets confirmés)."
+    ),
     "scripts/ingestion/init_couplings_seed.sh": (
         "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des fixtures et support --help / --check. Validé hors racine (code 0)."
     ),
@@ -307,6 +311,7 @@ SCRIPT_KPIS: dict[str, str] = {
     "scripts/ingestion/coupling_relabel.sh": "Moyenne (Outil de Curation du Registre Zero-DB)",
     "scripts/ingestion/audit_cuts_pipeline.py": "Élevée (Audit de Performance Multi-Étapes Pipeline Matching)",
     "scripts/ingestion/audit_phash_catalog.py": "Critique (Audit Empirique Exhaustif Reconnaissance pHash & Zero-DB)",
+    "scripts/ingestion/audit_rejected_cuts.py": "Élevée (Diagnostic Forensique Exhaustif des Rejets Matching)",
     "scripts/ingestion/init_couplings_seed.sh": "Moyenne (Amorçage CI/CD & Tests d'Intégration)",
     "scripts/ingestion/media_add.sh": "Élevée (Ingestion Unifiée & Invariants Multimédia)",
     "scripts/ingestion/recognize_medias.sh": "Moyenne (Outil d'Ingestion & Évaluation par Lots)",
