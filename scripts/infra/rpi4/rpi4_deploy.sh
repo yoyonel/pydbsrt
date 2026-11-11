@@ -2,6 +2,34 @@
 # Controls deployment and lifecycle of dbsrt-server on Raspberry Pi 4
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+if [[ ! -d "${REPO_ROOT}/.git" && -d "${HOME}/dbsrt" ]]; then
+  REPO_ROOT="${HOME}/dbsrt"
+fi
+
+# Print usage if requested
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" || "${1:-}" == "help" ]]; then
+  echo "Usage: $(basename "$0") {push|up|down|status|logs|demo|db-build|db-up|db-down|db-logs|db-status|db-migrate} [args...] [--help]"
+  echo ""
+  echo "Controls deployment and lifecycle of dbsrt-server and PostgreSQL 17 on Raspberry Pi 4."
+  echo ""
+  echo "Actions:"
+  echo "  push        Stream ARM64 image to RPi4 docker daemon"
+  echo "  up          Start dbsrt-server on RPi4 via docker compose"
+  echo "  down        Stop dbsrt-server on RPi4"
+  echo "  status      Check remote container and API status (default)"
+  echo "  logs        Follow remote container logs"
+  echo "  demo        Run remote recognition and CAS subtitle download test"
+  echo "  db-build    Build PostgreSQL 17 SP-GiST image on RPi4"
+  echo "  db-up       Start PostgreSQL 17 container on RPi4"
+  echo "  db-down     Stop PostgreSQL 17 container on RPi4"
+  echo "  db-logs     Follow PostgreSQL 17 logs"
+  echo "  db-status   Check remote PostgreSQL status and migrations"
+  echo "  db-migrate  Run migrations against remote PostgreSQL"
+  exit 0
+fi
+
 ACTION="${1:-status}"
 RPI_HOST="${RPI_HOST:-rpi4}"
 IMAGE_NAME="${IMAGE_NAME:-dbsrt-server:rpi4}"
@@ -13,6 +41,11 @@ DEFAULT_HEALTHCHECK_MAX_RETRIES=30
 DEFAULT_HEALTHCHECK_SLEEP_SEC=0.5
 LOG_TAIL_TIMEOUT_LINES=20
 DEMO_SAMPLE_LINES=8
+
+DBSRT_BIN="${REPO_ROOT}/target/release/dbsrt"
+if [[ ! -f "${DBSRT_BIN}" && -x "${REPO_ROOT}/target/debug/dbsrt" ]]; then
+  DBSRT_BIN="${REPO_ROOT}/target/debug/dbsrt"
+fi
 
 RPI_IP=$(ssh -G "${RPI_HOST}" 2>/dev/null | awk '/^hostname / {print $2}' || true)
 if [[ -z "${RPI_IP}" ]]; then
@@ -100,7 +133,7 @@ case "${ACTION}" in
     echo "=== Building PostgreSQL 17 BK-Tree image natively on ${RPI_HOST} ==="
     # shellcheck disable=SC2029
     ssh "${RPI_HOST}" "mkdir -p ${REMOTE_BASE}/docker/pg17"
-    scp docker/pg-spgist_hamming/17-develop/* "${RPI_HOST}:${REMOTE_BASE}/docker/pg17/"
+    scp "${REPO_ROOT}/docker/pg-spgist_hamming/17-develop/"* "${RPI_HOST}:${REMOTE_BASE}/docker/pg17/"
     # shellcheck disable=SC2029
     ssh "${RPI_HOST}" "cd ${REMOTE_BASE}/docker/pg17 && docker build -t pg-spgist_hamming:17-rpi4 ."
     echo "✓ Built pg-spgist_hamming:17-rpi4 successfully on ${RPI_HOST}."
@@ -141,7 +174,7 @@ case "${ACTION}" in
     ssh "${RPI_HOST}" "docker ps --filter name=dbsrt-pg17 --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'" || true
     echo ""
     echo "=== Remote PostgreSQL Migration Status (${RPI_HOST} -> ${RPI_IP}:${RPI_DB_PORT}) ==="
-    ./target/release/dbsrt migrate --status --host "${RPI_IP}" --port "${RPI_DB_PORT}" "${@:2}"
+    "${DBSRT_BIN}" migrate --status --host "${RPI_IP}" --port "${RPI_DB_PORT}" "${@:2}"
     ;;
 
   db-migrate)
@@ -150,11 +183,11 @@ case "${ACTION}" in
     ssh "${RPI_HOST}" "docker ps --filter name=dbsrt-pg17 --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'" || true
     echo ""
     echo "=== Running PostgreSQL Migrations on ${RPI_HOST} (${RPI_IP}:${RPI_DB_PORT}) ==="
-    ./target/release/dbsrt migrate --host "${RPI_IP}" --port "${RPI_DB_PORT}" "${@:2}"
+    "${DBSRT_BIN}" migrate --host "${RPI_IP}" --port "${RPI_DB_PORT}" "${@:2}"
     ;;
 
   *)
-    echo "Usage: $0 {push|up|down|status|logs|demo|db-build|db-up|db-down|db-logs|db-status|db-migrate}"
+    echo "Usage: $(basename "$0") {push|up|down|status|logs|demo|db-build|db-up|db-down|db-logs|db-status|db-migrate}"
     exit 1
     ;;
 esac

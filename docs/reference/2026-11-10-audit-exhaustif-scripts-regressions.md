@@ -7,18 +7,18 @@
 ## 1. Synthèse Factuelle Globale
 
 - **Total scripts opérationnels** : 96 (66 Python, 30 Shell)
-- **Scripts prouvés en exécution réelle live (session)** : 45 / 96 (46.9%) — *Seuls scripts réellement testés de bout en bout.*
+- **Scripts prouvés en exécution réelle live (session)** : 46 / 96 (47.9%) — *Seuls scripts réellement testés de bout en bout.*
 - **Scripts en régression directe (appels internes cassés)** : 0 / 96 (0.0%) — *100% des régressions actives résolues.*
 - **Nombre total de références internes rompues actives** : 0 (13 références appliance distantes documentées)
 - **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 46 / 96 (47.9%) — *Imports seuls, logique non exécutée.*
-- **Scripts avec analyse statique seule (`bash -n`)** : 5 / 96 (5.2%) — *Zéro runtime.*
+- **Scripts avec analyse statique seule (`bash -n`)** : 4 / 96 (4.2%) — *Zéro runtime.*
 
 ```mermaid
 pie title Statut Réel des 96 Scripts (Rigueur Fact-First)
-    "Prouvé Live de Bout en Bout" : 45
+    "Prouvé Live de Bout en Bout" : 46
     "Régression Interne Cassée" : 0
     "Sanity Check CLI Seul (Non Validé)" : 46
-    "Statique / Syntaxe Seul (Non Exécuté)" : 5
+    "Statique / Syntaxe Seul (Non Exécuté)" : 4
 ```
 
 ---
@@ -107,7 +107,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 | `scripts/infra/rpi4/freebox_batch_ctl.sh` | 🟢 **Prouvé Live** | Shell | Élevée (Ingestion WAN Freebox / Portail Web) | Résolution REPO_ROOT et source load_env.sh intégrées. Référence scanner réalignée. Validé et prouvé live : scan Freebox local, rsync cibles vers o2switch, probe gateway HTTP o2switch (test) et état queue (status). |
 | `scripts/infra/rpi4/rpi4_build.sh` | 🟢 **Prouvé Live** | Shell | Moyenne (Infrastructure de Conteneurisation ARM64) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus Dockerfile/contexte et options --help / --check. Validé hors racine (code 0). |
 | `scripts/infra/rpi4/rpi4_cli.sh` | 🟢 **Prouvé Live** | Shell | Élevée (Cross-Compilation ARM64 & Déploiement CLI RPi4) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus, montage Docker /app et support --help. Validé hors racine (code 0). |
-| `scripts/infra/rpi4/rpi4_deploy.sh` | ⚪ **Statique Seul (Non Exécuté)** | Shell | À évaluer | Syntaxe `bash -n` & `shellcheck` OK. Zéro exécution runtime. |
+| `scripts/infra/rpi4/rpi4_deploy.sh` | 🟢 **Prouvé Live** | Shell | Élevée (Déploiement Docker & Base de Données Appliance RPi4) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus, sélection binaire DBSRT_BIN et support --help. Validé live sur RPi4 (status container PG17 + API 3088 phash, code 0). |
 | `scripts/infra/rpi4/rpi4_freebox_ctl.sh` | 🟢 **Prouvé Live** | Shell | Élevée (Appliance RPi4 & CIFS/HTTP Range) | Résolution REPO_ROOT et source load_env.sh intégrées. Chemins install_gateway() préfixés par REPO_ROOT. Validé et prouvé live sur RPi4 (status 3 montages CIFS actifs + daemon systemd actif, install synchronisé et activé). |
 | `scripts/infra/rpi4/rpi4_freebox_gateway.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/infra/rpi4/rpi4_o2switch_supervisor.py` | 🟢 **Prouvé Live** | Python | Critique (Superviseur Autonome 24/7 de Production) | Résolution dynamique des chemins de contrôleurs (resolve_ctl_script) et support variables d'environnement (DBSRT_*_CTL). 53/53 tests unitaires PASS. Déployé sur RPi4 via rpi4_supervisor_ctl.sh sync, redémarré en service systemd (PID 3971528), avec auto-rotation et lancement live d'un batch tvshow sur o2switch (PID 3829881). |
@@ -442,3 +442,10 @@ Pour sortir de cet état sans spéculation, chaque script des sections 1 et 2 do
 - **Diagnostic** : Chemins relatifs au CWD (`TARGET_DIR`, `docker/Dockerfile.cli.rpi4`, contexte `.`, montage `$(pwd)` sous Docker), absence d'ancrage `REPO_ROOT` dynamique et absence d'aide CLI `--help`.
 - **Remédiation** : Découverte dynamique de `REPO_ROOT` avec fallback appliance `~/dbsrt`, préfixage absolu de `TARGET_DIR` et du Dockerfile, montage absolu de `${REPO_ROOT}:/app` sous QEMU, et ajout des options CLI `--help` / `-h`.
 - **Validation Live** : Validé live à 100% : exécution hors racine `(cd crates && bash ../scripts/infra/rpi4/rpi4_cli.sh --help)` sans erreur (code 0), linters `shellcheck` et `shfmt` conformes.
+
+### Fiche 35 : `scripts/infra/rpi4/rpi4_deploy.sh`
+- **Rôle** : Contrôleur de déploiement et de cycle de vie du serveur `dbsrt-server` et du conteneur PostgreSQL 17 SP-GiST sur l'appliance physique Raspberry Pi 4 (`task rpi4:deploy`, `task rpi4:db:*`).
+- **KPI / Importance** : `Élevée (Déploiement Docker & Base de Données Appliance RPi4)`.
+- **Diagnostic** : Chemins relatifs au CWD pour le build PG17 (`docker/pg-spgist_hamming/17-develop/*`), binaire de migration relatif (`./target/release/dbsrt migrate`), absence d'ancrage `REPO_ROOT` dynamique et absence d'aide CLI `--help`.
+- **Remédiation** : Découverte dynamique de `REPO_ROOT` avec fallback appliance `~/dbsrt`, préfixage absolu des fichiers Docker et sélection de `DBSRT_BIN` (release/debug), et ajout des options CLI `--help` / `-h`.
+- **Validation Live** : Validé live à 100% : exécution hors racine `(cd crates && bash ../scripts/infra/rpi4/rpi4_deploy.sh --help)` et `(status)` sans erreur (code 0, interrogation réelle du conteneur `dbsrt-pg17` sur l'appliance physique RPi4 et interrogation HTTP `/v1/status` sur 3088 pHashes et 2505 couplages), linters `shellcheck` et `shfmt` conformes.
