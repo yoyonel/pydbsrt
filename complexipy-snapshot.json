@@ -246,16 +246,6 @@
     ]
   },
   {
-    "path": "scripts/tooling/generate_nightly_report_enhanced.py",
-    "file_name": "generate_nightly_report_enhanced.py",
-    "functions": [
-      {
-        "name": "main",
-        "complexity": 30
-      }
-    ]
-  },
-  {
     "path": "scripts/tooling/lint_complexity.py",
     "file_name": "lint_complexity.py",
     "functions": [

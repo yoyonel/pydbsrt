@@ -7,6 +7,7 @@ Mermaid xychart-beta visual timelines, and exhaustive incident root-cause tracki
 
 from __future__ import annotations
 
+import argparse
 import datetime
 import json
 import os
@@ -14,8 +15,39 @@ import statistics
 from pathlib import Path
 from typing import Any, Dict, List
 
-REPORT_MD_PATH = Path("docs/history/2026-10-25-rapport-batch-import-tvshow-synology.md")
-EVENTS_JSONL_PATH = Path("data/reports/batch_tvshow_nightly.jsonl")
+
+def find_repo_root() -> Path:
+    """Finds repository root dynamically from git or Taskfile markers."""
+    current = Path(__file__).resolve()
+    for parent in [current] + list(current.parents):
+        if (parent / ".git").is_dir() or (parent / "Taskfile.yml").is_file():
+            return parent
+    return current.parents[2]
+
+
+def parse_args() -> argparse.Namespace:
+    """Parses command line arguments."""
+    parser = argparse.ArgumentParser(description="Generate enhanced Diátaxis TVShow batch report.")
+    parser.add_argument(
+        "--check",
+        "--dry-run",
+        action="store_true",
+        dest="check",
+        help="Analyze and print summary statistics without modifying markdown files.",
+    )
+    parser.add_argument(
+        "--input",
+        type=Path,
+        default=None,
+        help="Input JSONL events path (defaults to data/reports/batch_tvshow_nightly.jsonl).",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Output markdown report path (defaults to docs/history/2026-10-25-rapport-batch-import-tvshow-synology.md).",
+    )
+    return parser.parse_args()
 
 
 def calc_stats(values: List[float]) -> Dict[str, float]:
@@ -34,27 +66,61 @@ def calc_stats(values: List[float]) -> Dict[str, float]:
     }
 
 
-def main() -> int:
-    with open(EVENTS_JSONL_PATH, encoding="utf-8") as f:
+def _load_profiles(events_jsonl_path: Path) -> List[Dict[str, Any]]:
+    """Loads events, deduplicates by stem, and returns the top 46 profiles."""
+    with open(events_jsonl_path, encoding="utf-8") as f:
         all_records = [json.loads(line) for line in f if json.loads(line).get("video_stem")]
 
-    # Retain the 46 videos from the nightly run (dedup by video_stem keeping max wall time)
     by_stem: Dict[str, Dict[str, Any]] = {}
     for r in all_records:
         stem = r["video_stem"]
         if stem not in by_stem or r.get("wall_duration_secs", 0) > by_stem[stem].get("wall_duration_secs", 0):
             by_stem[stem] = r
 
-    # Filter to the nominal 46 media processed overnight
-    profiles = list(by_stem.values())
+    profiles = [p for p in by_stem.values() if p.get("wall_duration_secs", 0) > 0.1]
     profiles.sort(key=lambda x: x.get("start_iso", ""))
-    # Keep only those with wall duration > 0.1s
-    profiles = [p for p in profiles if p.get("wall_duration_secs", 0) > 0.1]
-    # Retain the exact set of 46 videos
-    if len(profiles) > 46:
-        # Sort by start_iso and take 46
-        profiles = profiles[:46]
+    return profiles[:46]
 
+
+def _aggregate_lang_stats(profiles: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """Aggregates extracted subtitle language statistics across profiles."""
+    lang_stats: Dict[str, Dict[str, Any]] = {}
+    for p in profiles:
+        for st in p.get("subtitle_tracks", []):
+            if st.get("extracted", False):
+                nlang = st.get("normalized_lang", "und")
+                entry = lang_stats.setdefault(nlang, {"count": 0, "cues": 0, "alphabets": set(), "codecs": set()})
+                entry["count"] += 1
+                entry["cues"] += st.get("cue_count", 0)
+                entry["alphabets"].add(st.get("alphabet_family", "Latin"))
+                entry["codecs"].add(st.get("codec", "subrip"))
+    return lang_stats
+
+
+def _build_media_journal_rows(profiles: List[Dict[str, Any]]) -> List[str]:
+    """Builds per-media detailed markdown rows."""
+    rows: List[str] = []
+    for p in profiles:
+        size_mb = p.get("file_size_bytes", 0) / (1024 * 1024)
+        wall_s = p.get("wall_duration_secs", 0.0)
+        cifs = p.get("cifs_read_rate_mib_s", 0.0)
+        stem = p.get("video_stem", "")[:45]
+        status = "✅ OK" if p.get("success", False) else "❌ FAIL"
+        rows.append(
+            f"| `{stem}` | {size_mb:.0f} MB | {wall_s:.1f}s | "
+            f"+{p.get('certified_couplings_count', 0)} | {p.get('cpu_percent_avg', 0):.0f}% / {p.get('cpu_percent_peak', 0):.0f}% | "
+            f"{p.get('ram_rss_peak_mib', 0):.0f} MB | {cifs:.1f} MB/s | {status} |"
+        )
+    return rows
+
+
+def main() -> int:
+    args = parse_args()
+    repo_root = find_repo_root()
+    events_jsonl_path = args.input or (repo_root / "data/reports/batch_tvshow_nightly.jsonl")
+    report_md_path = args.output or (repo_root / "docs/history/2026-10-25-rapport-batch-import-tvshow-synology.md")
+
+    profiles = _load_profiles(events_jsonl_path)
     total_videos = len(profiles)
     successful = sum(1 for p in profiles if p.get("success", False))
     failed = total_videos - successful
@@ -69,18 +135,14 @@ def main() -> int:
     rate_stats = calc_stats(cifs_rates)
     cpu_avg_stats = calc_stats(cpus_avg)
 
-    # Languages
-    lang_stats: Dict[str, Dict[str, Any]] = {}
-    for p in profiles:
-        for st in p.get("subtitle_tracks", []):
-            if st.get("extracted", False):
-                nlang = st.get("normalized_lang", "und")
-                entry = lang_stats.setdefault(nlang, {"count": 0, "cues": 0, "alphabets": set(), "codecs": set()})
-                entry["count"] += 1
-                entry["cues"] += st.get("cue_count", 0)
-                entry["alphabets"].add(st.get("alphabet_family", "Latin"))
-                entry["codecs"].add(st.get("codec", "subrip"))
+    if args.check:
+        print(f"Total videos processed: {total_videos} ({successful} OK / {failed} FAIL)")
+        print(f"Total certified couplings: {total_couplings}")
+        print(f"Total volume read: {total_size_gib:.2f} GiB")
+        print(f"Average CIFS rate: {rate_stats['mean']:.1f} MiB/s")
+        return 0
 
+    lang_stats = _aggregate_lang_stats(profiles)
     end_isos: List[str] = [str(r["end_iso"]) for r in profiles if r.get("end_iso")]
     execution_date = max(end_isos) if end_isos else datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     peak_ram_mib = max((r.get("ram_rss_peak_mib", 0.0) for r in profiles), default=0.0)
@@ -162,7 +224,7 @@ def main() -> int:
             "| :--- | :--- | :--- | :--- |",
             "| **Sous-titre ASS avec extension .srt** | *Miracle Workers* S02E01 (`0 cues`) | Fichier sidecar textuel au format SubStation Alpha (`[Script Info]`, timecodes centièmes, overrides `{\\an8}`). | ✅ **RÉSOLU & TESTÉ** : implémentation de `SubtitleFile::parse_ass` dans `crates/dbsrt-core/src/srt.rs` + test unitaire dédié (`test_parse_ass_subtitles_auto_fallback`). |",
             "| **Faux positifs d'extraction** | *Bojack*, *Cowboy Bebop*, *Silo* (`Extraction omitted`) | Les crochets `[...]` dans les noms de release (`[1080p]`, `[CBM]`, `[eztv.re]`) étaient interprétés comme des classes regex par `Path.glob()`. | ✅ **RÉSOLU & TESTÉ** : substitution par un parcours direct `iterdir()` filtré par préfixe exact sans interprétation regex. |",
-            "| **Pistes forcées ultra-courtes** | *The Boys* S03E01 piste #19 (44 octets) | Le seuil `SUBTITLE_MIN_VALID_BYTES = 64` éliminait les sous-titres d'une seule réplique courte. | ✅ **RÉSOLU & TESTÉ** : seuil abaissé à 12 octets dans `scripts/batch_media_add_tvshow.py`. |",
+            "| **Pistes forcées ultra-courtes** | *The Boys* S03E01 piste #19 (44 octets) | Le seuil `SUBTITLE_MIN_VALID_BYTES = 64` éliminait les sous-titres d'une seule réplique courte. | ✅ **RÉSOLU & TESTÉ** : seuil abaissé à 12 octets dans `scripts/ingestion/batch_media_add_tvshow.py`. |",
             "| **Dépassement horaire `--until 07:00`** | Arrêt non instantané à 07h00:00 | Délais bloquants dans `ThreadPoolExecutor.__exit__` et sous-processus FFmpeg orphelins non tués par groupe de processus. | ✅ **RÉSOLU & TESTÉ** : centralisation des PIDs dans `ACTIVE_PROCESS_GROUPS`, envoi de `SIGTERM` au PGID, test fonctionnel live validé à `+5s` (arrêt net en 5.2s, 0 processus orphelin). |\n",
             "## 7. Journal Détaillé par Média Traité\n",
             "| Média / Épisode Traité | Taille | Durée Job | Subs Certifiés | CPU Moy / Pic | RAM Peak | Débit CIFS | Statut |",
@@ -170,20 +232,10 @@ def main() -> int:
         ]
     )
 
-    for p in profiles:
-        size_mb = p.get("file_size_bytes", 0) / (1024 * 1024)
-        wall_s = p.get("wall_duration_secs", 0.0)
-        cifs = p.get("cifs_read_rate_mib_s", 0.0)
-        stem = p.get("video_stem", "")[:45]
-        status = "✅ OK" if p.get("success", False) else "❌ FAIL"
-        md.append(
-            f"| `{stem}` | {size_mb:.0f} MB | {wall_s:.1f}s | "
-            f"+{p.get('certified_couplings_count', 0)} | {p.get('cpu_percent_avg', 0):.0f}% / {p.get('cpu_percent_peak', 0):.0f}% | "
-            f"{p.get('ram_rss_peak_mib', 0):.0f} MB | {cifs:.1f} MB/s | {status} |"
-        )
+    md.extend(_build_media_journal_rows(profiles))
 
-    REPORT_MD_PATH.write_text("\n".join(md) + "\n", encoding="utf-8")
-    print(f"✅ Generated enhanced report at {REPORT_MD_PATH}")
+    report_md_path.write_text("\n".join(md) + "\n", encoding="utf-8")
+    print(f"✅ Generated enhanced report at {report_md_path}")
     return 0
 
 
