@@ -7,17 +7,17 @@
 ## 1. Synthèse Factuelle Globale
 
 - **Total scripts opérationnels** : 96 (66 Python, 30 Shell)
-- **Scripts prouvés en exécution réelle live (session)** : 65 / 96 (67.7%) — *Seuls scripts réellement testés de bout en bout.*
+- **Scripts prouvés en exécution réelle live (session)** : 66 / 96 (68.8%) — *Seuls scripts réellement testés de bout en bout.*
 - **Scripts en régression directe (appels internes cassés)** : 0 / 96 (0.0%) — *100% des régressions actives résolues.*
 - **Nombre total de références internes rompues actives** : 0 (13 références appliance distantes documentées)
-- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 31 / 96 (32.3%) — *Imports seuls, logique non exécutée.*
+- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 30 / 96 (31.2%) — *Imports seuls, logique non exécutée.*
 - **Scripts avec analyse statique seule (`bash -n`)** : 0 / 96 (0.0%) — *Zéro runtime.*
 
 ```mermaid
 pie title Statut Réel des 96 Scripts (Rigueur Fact-First)
-    "Prouvé Live de Bout en Bout" : 65
+    "Prouvé Live de Bout en Bout" : 66
     "Régression Interne Cassée" : 0
-    "Sanity Check CLI Seul (Non Validé)" : 31
+    "Sanity Check CLI Seul (Non Validé)" : 30
     "Statique / Syntaxe Seul (Non Exécuté)" : 0
 ```
 
@@ -77,7 +77,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 | `scripts/e2e/e2e_sources_explorer.py` | 🟢 **Prouvé Live** | Python | À évaluer | Exécuté Playwright Chromium live (4 onglets PASS) |
 | `scripts/e2e/e2e_trajectories_formal.py` | 🟢 **Prouvé Live** | Python | À évaluer | Exécuté Playwright Chromium live (7 batchs PASS) |
 | `scripts/e2e/o2switch_e2e.py` | 🟢 **Prouvé Live** | Python | Critique (Recette E2E Cloud o2switch) | Exécuté live contre o2switch (15/15 golden set PASS, gateway 200/401 PASS). Résolution racine et CTL résiliente sans index magique. |
-| `scripts/e2e/recette_top_e2e.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
+| `scripts/e2e/recette_top_e2e.py` | 🟢 **Prouvé Live** | Python | Critique (Recette E2E & Enregistreur ASCIInema Top TUI) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des binaires/rapports/casts et option CLI --check. Validé hors racine (binaire dbsrt release, montage NAS et artefacts de cast confirmés, code 0). |
 
 ### 3.3 Infra & Contrôleurs Locaux (`scripts/infra/local/`)
 
@@ -582,3 +582,10 @@ Pour sortir de cet état sans spéculation, chaque script des sections 1 et 2 do
 - **Diagnostic** : Chemins d'artefacts de sortie `OUTPUT_DIR` relatifs au CWD (`target/e2e_portal`), importation bloquante de `playwright` au niveau module empêchant l'usage de l'aide CLI ou du diagnostic hors environnement de test browser, et absence de mode `--check` / `--dry-run`.
 - **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, chargement paresseux de `playwright`, typage statique protégé par `TYPE_CHECKING`, et ajout de l'option CLI `--check` / `--dry-run`.
 - **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/e2e/e2e_portal_playwright.py --check)` et avec `--with playwright` sans erreur (code 0, 27 endpoints déclarés inspectés), linters `ruff`, `complexipy` et `pyright` conformes.
+
+### Fiche 55 : `scripts/e2e/recette_top_e2e.py`
+- **Rôle** : Automate de recette interactive et enregistreur de sessions ASCIInema pour le TUI natif Rust `dbsrt top` sous pseudo-terminal PTY pilotant le décodage réel de vidéos NAS (`task top:e2e`).
+- **KPI / Importance** : `Critique (Recette E2E & Enregistreur ASCIInema Top TUI)`.
+- **Diagnostic** : Chemins relatifs au CWD pour le binaire cible (`./target/release/dbsrt`), les enregistrements de casts (`data/reports/...`, `docs/assets/casts/...`), le rapport markdown et le sous-script d'ingestion par lots, et absence d'options CLI ou de mode d'inspection non-interactif.
+- **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, préfixage absolu de tous les chemins d'artefacts et du sous-processus d'ingestion, sélection automatique du binaire (release/debug), et ajout de l'option CLI `--check` / `--dry-run`.
+- **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/e2e/recette_top_e2e.py --check)` confirmant la présence du binaire release, du point de montage NAS et des chemins de cast (code 0), linters `ruff`, `complexipy` et `pyright` conformes.

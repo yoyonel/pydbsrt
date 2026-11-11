@@ -8,10 +8,12 @@ video decodes from the Synology NAS.
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import pty
 import select
+import shutil
 import subprocess
 import sys
 import time
@@ -59,6 +61,21 @@ KEY_MEDIA_TAB: bytes = b"4"
 KEY_MEDIA_TOGGLE: bytes = b"m"
 
 
+def find_repo_root() -> Path:
+    """Dynamically locates repository root with fallback to ~/dbsrt."""
+    current = Path(__file__).resolve().parent
+    for p in [current, *current.parents]:
+        if (p / ".git").is_dir() or (p / "Taskfile.yml").is_file():
+            return p
+    appliance = Path.home() / "dbsrt"
+    if appliance.is_dir():
+        return appliance
+    return Path.cwd()
+
+
+REPO_ROOT: Path = find_repo_root()
+
+
 def resolve_nas_tvshow_dir() -> Path:
     """Resolves default TVShow path using current user environment or override."""
     env_dir = os.environ.get("NAS_TVSHOW_DIR")
@@ -71,10 +88,14 @@ def resolve_nas_tvshow_dir() -> Path:
 
 # File Paths
 NAS_TVSHOW_DIR: Path = resolve_nas_tvshow_dir()
-TARGET_BINARY_PATH: Path = Path("./target/release/dbsrt")
-RECORDING_CAST_PATH: Path = Path("data/reports/dbsrt_top_e2e_recette.cast")
-DOCS_CAST_PATH: Path = Path("docs/assets/casts/term_top_recette.cast")
-E2E_REPORT_PATH: Path = Path("docs/how-to/2026-10-26-recette-e2e-tui-rust.md")
+TARGET_BINARY_PATH: Path = (
+    REPO_ROOT / "target/release/dbsrt"
+    if (REPO_ROOT / "target/release/dbsrt").exists()
+    else REPO_ROOT / "target/debug/dbsrt"
+)
+RECORDING_CAST_PATH: Path = REPO_ROOT / "data/reports/dbsrt_top_e2e_recette.cast"
+DOCS_CAST_PATH: Path = REPO_ROOT / "docs/assets/casts/term_top_recette.cast"
+E2E_REPORT_PATH: Path = REPO_ROOT / "docs/how-to/2026-10-26-recette-e2e-tui-rust.md"
 RECETTE_BATCH_REPORT_PATH: Path = Path("/tmp/recette_batch_report.md")
 RECETTE_BATCH_EVENTS_PATH: Path = Path("/tmp/recette_batch_events.jsonl")
 
@@ -95,11 +116,12 @@ def verify_prerequisites() -> None:
 def spawn_background_batch() -> subprocess.Popen:
     """Spawns real batch media ingestion in background to generate live decoding tasks."""
     print("🚀 [2/6] Démarrage du traitement de masse réel sur Synology NAS...")
+    batch_script = REPO_ROOT / "scripts/ingestion/batch_media_add_tvshow.py"
     cmd = [
         "uv",
         "run",
         "python",
-        "scripts/ingestion/batch_media_add_tvshow.py",
+        str(batch_script),
         "--workers",
         str(BATCH_WORKER_COUNT),
         "--limit",
@@ -539,12 +561,33 @@ uvx asciinema cat docs/assets/casts/term_top_recette.cast
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description="E2E Recette & ASCIInema Session Recorder for Native Rust top TUI.")
+    parser.add_argument(
+        "--check",
+        "--dry-run",
+        action="store_true",
+        help="Inspect environmental prerequisites and paths without executing interactive session",
+    )
+    args = parser.parse_args()
+
+    if args.check:
+        print("=== DBSrt Native Rust Top TUI Recette Inspection ===")
+        print(f"✓ REPO_ROOT     : {REPO_ROOT}")
+        print(f"✓ NAS mount     : {NAS_TVSHOW_DIR} (exists: {NAS_TVSHOW_DIR.exists()})")
+        print(f"✓ Target binary : {TARGET_BINARY_PATH} (exists: {TARGET_BINARY_PATH.exists()})")
+        print(f"✓ Cast path     : {RECORDING_CAST_PATH}")
+        print(f"✓ Docs cast     : {DOCS_CAST_PATH}")
+        print(f"✓ Report path   : {E2E_REPORT_PATH}")
+        asciinema_bin = shutil.which("asciinema")
+        print(f"✓ asciinema     : {asciinema_bin or 'not found in PATH (uvx fallback)'}")
+        return 0
+
     print("=" * 75)
     print("🎯 DÉMARRAGE DE LA RECETTE DE TESTS E2E : DBS-RT TOP (RUST NATIVE TUI)")
     print("=" * 75)
 
     verify_prerequisites()
-    targets_file = Path("data/reports/selected_batch_targets.json")
+    targets_file = REPO_ROOT / "data/reports/selected_batch_targets.json"
     targets_file.unlink(missing_ok=True)
     batch_proc = spawn_background_batch()
 
@@ -556,7 +599,7 @@ def main() -> int:
     finally:
         terminate_background_batch(batch_proc)
 
-    targets_file = Path("data/reports/selected_batch_targets.json")
+    targets_file = REPO_ROOT / "data/reports/selected_batch_targets.json"
     if targets_file.exists():
         selected_targets = json.loads(targets_file.read_text(encoding="utf-8"))
         print(
@@ -574,8 +617,6 @@ def main() -> int:
 
     # Copy recording to docs/assets/casts for MkDocs documentation server integration
     DOCS_CAST_PATH.parent.mkdir(parents=True, exist_ok=True)
-    import shutil
-
     shutil.copy2(RECORDING_CAST_PATH, DOCS_CAST_PATH)
     print(f"✅ Fichier cast copié pour le serveur de doc : {DOCS_CAST_PATH}")
 

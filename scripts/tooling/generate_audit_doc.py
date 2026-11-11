@@ -48,6 +48,10 @@ PROVEN_LIVE: dict[str, str] = {
         "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), imports paresseux de playwright/typing et option CLI --check."
         " Validé hors racine (--check code 0 avec et sans dépendance playwright, 27 endpoints déclarés détectés)."
     ),
+    "scripts/e2e/recette_top_e2e.py": (
+        "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des binaires/rapports/casts et option CLI --check."
+        " Validé hors racine (binaire dbsrt release, montage NAS et artefacts de cast confirmés, code 0)."
+    ),
     "scripts/benchmarks/matching_bench_runner.py": "Exécuté live sur snippet réel (01_Cruauté_mid15s.mp4)",
     "scripts/benchmarks/trajectory_bench_runner.py": "Exécuté live sur snippet réel (01_Cruauté_mid15s.mp4)",
     "scripts/ingestion/verify_catalog_integrity.py": "Exécuté live (task catalog:verify, 5 tiers PASS)",
@@ -224,6 +228,7 @@ SCRIPT_KPIS: dict[str, str] = {
     "scripts/benchmarks/record_vlsub_demo.sh": "Élevée (Doc Diátaxis & Démo Vidéo VLSub)",
     "scripts/e2e/o2switch_e2e.py": "Critique (Recette E2E Cloud o2switch)",
     "scripts/e2e/e2e_portal_playwright.py": "Critique (Recette E2E Playwright Portails Web)",
+    "scripts/e2e/recette_top_e2e.py": "Critique (Recette E2E & Enregistreur ASCIInema Top TUI)",
     "scripts/infra/local/agent_relay.sh": "Élevée (Architecture Hybride & Passerelle Locale-Cloud)",
     "scripts/infra/local/dbsrt_top.py": "Critique (TUI Python de Référence & Supervision Décisionnelle)",
     "scripts/infra/local/distributed_dev_stack.sh": "Moyenne (Dev & Simulation Topologie Hybride)",
