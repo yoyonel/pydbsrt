@@ -222,16 +222,6 @@
     ]
   },
   {
-    "path": "scripts/ingestion/repair_corrupted_couplings.py",
-    "file_name": "repair_corrupted_couplings.py",
-    "functions": [
-      {
-        "name": "repair_registry",
-        "complexity": 37
-      }
-    ]
-  },
-  {
     "path": "scripts/benchmarks/scale_up_nas_dataset.py",
     "file_name": "scale_up_nas_dataset.py",
     "functions": [

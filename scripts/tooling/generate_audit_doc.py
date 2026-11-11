@@ -249,6 +249,10 @@ PROVEN_LIVE: dict[str, str] = {
         "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des registres SRT/couplings, réduction de complexité et option CLI non-destructive --check."
         " Validé hors racine (--check code 0, détection de 251 couplages adjacents confirmée)."
     ),
+    "scripts/ingestion/repair_corrupted_couplings.py": (
+        "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus, refactoring de complexité (repair_registry 9 <= 15 vs 37 legacy) et mode CLI --check."
+        " Validé hors racine (--check code 0, audit de 157 044 répliques saines confirmé)."
+    ),
     "scripts/ingestion/init_couplings_seed.sh": (
         "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des fixtures et support --help / --check. Validé hors racine (code 0)."
     ),
@@ -387,6 +391,7 @@ SCRIPT_KPIS: dict[str, str] = {
     "scripts/ingestion/quarantine_truncated_phashes.py": "Élevée (Mise en Quarantaine & Audit des Empreintes Corrompues)",
     "scripts/ingestion/reconcile_phash_filenames.py": "Élevée (Réconciliation Canonique MovieHash des Noms d'Empreintes pHash)",
     "scripts/ingestion/register_adjacent_couplings.py": "Élevée (Enregistrement des Couplages Adjacents Extraits Vidéo & Sous-Titres)",
+    "scripts/ingestion/repair_corrupted_couplings.py": "Élevée (Réparation des Caractères Corrompus dans le Registre des Couplages)",
     "scripts/ingestion/init_couplings_seed.sh": "Moyenne (Amorçage CI/CD & Tests d'Intégration)",
     "scripts/ingestion/media_add.sh": "Élevée (Ingestion Unifiée & Invariants Multimédia)",
     "scripts/ingestion/recognize_medias.sh": "Moyenne (Outil d'Ingestion & Évaluation par Lots)",

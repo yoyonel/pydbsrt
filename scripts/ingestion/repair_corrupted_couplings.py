@@ -16,8 +16,22 @@ import sys
 import tempfile
 from pathlib import Path
 
-DEFAULT_COUPLINGS_PATH = "data/SRT/couplings.json"
-DEFAULT_SRT_DIR = "data/SRT"
+
+def find_repo_root() -> Path:
+    """Finds repository root dynamically with appliance fallback."""
+    curr = Path(__file__).resolve().parent
+    for parent in [curr, *curr.parents]:
+        if (parent / ".git").is_dir():
+            return parent
+    appliance_path = Path.home() / "dbsrt"
+    if appliance_path.is_dir():
+        return appliance_path
+    return Path.cwd()
+
+
+REPO_ROOT = find_repo_root()
+DEFAULT_COUPLINGS_PATH = REPO_ROOT / "data/SRT/couplings.json"
+DEFAULT_SRT_DIR = REPO_ROOT / "data/SRT"
 REPLACEMENT_CHAR = "\ufffd"
 ENCODING_CANDIDATES = ("utf-8-sig", "cp1252", "iso-8859-1", "iso-8859-15")
 
@@ -59,6 +73,46 @@ def parse_srt_cues(content: str) -> dict[int, str]:
     return cue_map
 
 
+def repair_sub_track(sub: dict, srt_dir: Path) -> tuple[int, int]:
+    """Repairs cues in a single subtitle track, returning (repaired_count, clean_count)."""
+    sub_frames = sub.get("sub_frames", [])
+    if not sub_frames:
+        return 0, 0
+
+    has_corruption = any(REPLACEMENT_CHAR in sf.get("text", "") for sf in sub_frames)
+    if not has_corruption:
+        return 0, len(sub_frames)
+
+    srt_rel = sub.get("srt_path", "")
+    srt_full = srt_dir / srt_rel
+    if not srt_full.exists():
+        logger.warning("Source SRT file missing on disk: %s", srt_full)
+        return 0, 0
+
+    content = decode_srt_file(srt_full)
+    if content is None:
+        logger.warning("Failed to decode SRT file: %s", srt_full)
+        return 0, 0
+
+    cue_map = parse_srt_cues(content)
+    track_fixed = 0
+    clean_count = 0
+
+    for sf in sub_frames:
+        if REPLACEMENT_CHAR in sf.get("text", ""):
+            cue_idx = sf.get("index")
+            if cue_idx in cue_map:
+                sf["text"] = cue_map[cue_idx]
+                track_fixed += 1
+        else:
+            clean_count += 1
+
+    if track_fixed > 0:
+        logger.info("Repaired %d cues in track '%s' (%s)", track_fixed, sub.get("name", "unnamed"), srt_rel)
+
+    return track_fixed, clean_count
+
+
 def repair_registry(
     couplings_path: Path,
     srt_dir: Path,
@@ -79,47 +133,11 @@ def repair_registry(
     couplings = registry.get("couplings", [])
     for coupling in couplings:
         for sub in coupling.get("subtitles", []):
-            sub_frames = sub.get("sub_frames", [])
-            if not sub_frames:
-                continue
-
-            has_corruption = any(REPLACEMENT_CHAR in sf.get("text", "") for sf in sub_frames)
-            if not has_corruption:
-                clean_cues_count += len(sub_frames)
-                continue
-
-            srt_rel = sub.get("srt_path", "")
-            srt_full = srt_dir / srt_rel
-            if not srt_full.exists():
-                logger.warning("Source SRT file missing on disk: %s", srt_full)
-                continue
-
-            content = decode_srt_file(srt_full)
-            if content is None:
-                logger.warning("Failed to decode SRT file: %s", srt_full)
-                continue
-
-            cue_map = parse_srt_cues(content)
-            track_fixed = 0
-
-            for sf in sub_frames:
-                if REPLACEMENT_CHAR in sf.get("text", ""):
-                    cue_idx = sf.get("index")
-                    if cue_idx in cue_map:
-                        sf["text"] = cue_map[cue_idx]
-                        repaired_cues_count += 1
-                        track_fixed += 1
-                else:
-                    clean_cues_count += 1
-
-            if track_fixed > 0:
+            fixed, clean = repair_sub_track(sub, srt_dir)
+            repaired_cues_count += fixed
+            clean_cues_count += clean
+            if fixed > 0:
                 repaired_tracks_count += 1
-                logger.info(
-                    "Repaired %d cues in track '%s' (%s)",
-                    track_fixed,
-                    sub.get("name", "unnamed"),
-                    srt_rel,
-                )
 
     logger.info(
         "Repaired %d corrupted cue entries across %d tracks, skipped %d already-clean entries",
@@ -140,28 +158,32 @@ def repair_registry(
     return repaired_cues_count, clean_cues_count
 
 
-def main() -> None:
+def main() -> int:
     parser = argparse.ArgumentParser(description="Repairs corrupted subtitle cue text (U+FFFD) in couplings.json")
     parser.add_argument(
         "--couplings-path",
         type=Path,
-        default=Path(DEFAULT_COUPLINGS_PATH),
+        default=DEFAULT_COUPLINGS_PATH,
         help=f"Path to couplings.json (default: {DEFAULT_COUPLINGS_PATH})",
     )
     parser.add_argument(
         "--srt-dir",
         type=Path,
-        default=Path(DEFAULT_SRT_DIR),
+        default=DEFAULT_SRT_DIR,
         help=f"Base directory containing .srt files (default: {DEFAULT_SRT_DIR})",
     )
     parser.add_argument(
+        "--check",
         "--dry-run",
+        dest="dry_run",
         action="store_true",
         help="Dry run without modifying couplings.json",
     )
     args = parser.parse_args()
 
-    repair_registry(args.couplings_path, args.srt_dir, args.dry_run)
+    repaired, clean = repair_registry(args.couplings_path, args.srt_dir, args.dry_run)
+    print(f"[REPAIR] Terminé : {repaired} corrigés, {clean} sains (dry_run={args.dry_run}).")
+    return 0
 
 
 if __name__ == "__main__":
