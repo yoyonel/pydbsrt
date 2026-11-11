@@ -7,17 +7,17 @@
 ## 1. Synthèse Factuelle Globale
 
 - **Total scripts opérationnels** : 96 (66 Python, 30 Shell)
-- **Scripts prouvés en exécution réelle live (session)** : 60 / 96 (62.5%) — *Seuls scripts réellement testés de bout en bout.*
+- **Scripts prouvés en exécution réelle live (session)** : 61 / 96 (63.5%) — *Seuls scripts réellement testés de bout en bout.*
 - **Scripts en régression directe (appels internes cassés)** : 0 / 96 (0.0%) — *100% des régressions actives résolues.*
 - **Nombre total de références internes rompues actives** : 0 (13 références appliance distantes documentées)
-- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 36 / 96 (37.5%) — *Imports seuls, logique non exécutée.*
+- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 35 / 96 (36.5%) — *Imports seuls, logique non exécutée.*
 - **Scripts avec analyse statique seule (`bash -n`)** : 0 / 96 (0.0%) — *Zéro runtime.*
 
 ```mermaid
 pie title Statut Réel des 96 Scripts (Rigueur Fact-First)
-    "Prouvé Live de Bout en Bout" : 60
+    "Prouvé Live de Bout en Bout" : 61
     "Régression Interne Cassée" : 0
-    "Sanity Check CLI Seul (Non Validé)" : 36
+    "Sanity Check CLI Seul (Non Validé)" : 35
     "Statique / Syntaxe Seul (Non Exécuté)" : 0
 ```
 
@@ -168,7 +168,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 | `scripts/tooling/generate_coverage_report.py` | 🟢 **Prouvé Live** | Python | Critique (Rapport Couverture Unifié & Gate CI/CD) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), refactoring sous seuil complexipy (parse_python_coverage 13 <= 15 vs 19 legacy, main 11 <= 15) et option CLI --check / --dry-run. Validé hors racine (--check code 0, 173 fichiers modifiés détectés par rapport à origin/develop). |
 | `scripts/tooling/generate_nightly_report_enhanced.py` | 🟢 **Prouvé Live** | Python | Moyenne (Métrologie & Profiling Diátaxis) | Résolution dynamique REPO_ROOT (find_repo_root), réalignement de la référence vers scripts/ingestion/batch_media_add_tvshow.py, refactoring sous le seuil complexipy (main 15 <= 15) et support CLI (--check, --input, --output). Validé live sur exécution hors racine et génération nominale. |
 | `scripts/tooling/lint_complexity.py` | 🟢 **Prouvé Live** | Python | Critique (Garde-fou CI/CD & Architecture Rust) | Exécuté live (Rust Complexity Gate 1180 fn) |
-| `scripts/tooling/lint_migrations.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
+| `scripts/tooling/lint_migrations.py` | 🟢 **Prouvé Live** | Python | Critique (Garde-fou CI/CD & Sécurité DDL Migrations PG) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), refactoring modulaire sous seuil complexipy (lint_migration_file 9 <= 15 vs 37 legacy), et options CLI --dir et --check. Validé hors racine sur les 6 migrations réelles PG 15/17 (code 0). |
 | `scripts/tooling/mkdocs_hooks.py` | 🟢 **Prouvé Live** | Python | Élevée (Orchestration Diátaxis & Recherche Lunr) | Exécuté live (crochet mkdocs build) |
 | `scripts/tooling/pack_repo.sh` | 🟢 **Prouvé Live** | Shell | Moyenne (Tooling & Contexte IA Repomix) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemin par défaut absolu de l'artefact de sortie et options --help / --check. Validé hors racine (442 fichiers détectés, npx installé, code 0). |
 | `scripts/tooling/pack_review.sh` | 🟢 **Prouvé Live** | Shell | Élevée (Tooling & Review IA Automatisée) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), résolution automatique de la branche de base, chemin de sortie absolu et options --help / --check. Validé hors racine (157 fichiers détectés, npx installé, code 0). |
@@ -547,3 +547,10 @@ Pour sortir de cet état sans spéculation, chaque script des sections 1 et 2 do
 - **Diagnostic** : Chemins par défaut de rapports de couverture relatifs au CWD (`coverage-*.json`), complexité cognitive de `parse_python_coverage` (19 > 15), et absence d'option CLI `--check` / `--dry-run` pour inspecter la présence des fichiers et le delta git sans lever d'erreur.
 - **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, résolution des fichiers par rapport à la racine, refactoring modulaire abaissant la complexité de `parse_python_coverage` à 13 $\le$ 15 et `main` à 11 $\le$ 15, et ajout de l'option CLI `--check` / `--dry-run`.
 - **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/tooling/generate_coverage_report.py --check)` inspectant 173 fichiers modifiés par rapport à `origin/develop` (code 0), linters `ruff`, `complexipy` et `pyright` conformes.
+
+### Fiche 50 : `scripts/tooling/lint_migrations.py`
+- **Rôle** : Linter statique de sécurité DDL et de compatibilité multi-version PostgreSQL 15/17 inspectant les fichiers de migration Refinery (`crates/dbsrt-index/migrations/V*__*.sql`).
+- **KPI / Importance** : `Critique (Garde-fou CI/CD & Sécurité DDL Migrations PG)`.
+- **Diagnostic** : Répertoire par défaut de migrations relatif au CWD (`crates/dbsrt-index/migrations`), complexité cognitive élevée de `lint_migration_file` (37 > 15), et absence de flag `--check` / `--dry-run` pour tests d'inspection.
+- **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, refactoring modulaire par découpage de sous-fonctions d'inspection ramenant la complexité à 9 $\le$ 15, et ajout de l'option CLI `--check` / `--dry-run`.
+- **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/tooling/lint_migrations.py --check)` validant les 6 migrations de production (code 0), linters `ruff`, `complexipy` et `pyright` conformes.

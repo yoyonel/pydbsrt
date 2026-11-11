@@ -254,16 +254,6 @@
     ]
   },
   {
-    "path": "scripts/tooling/lint_migrations.py",
-    "file_name": "lint_migrations.py",
-    "functions": [
-      {
-        "name": "lint_migration_file",
-        "complexity": 37
-      }
-    ]
-  },
-  {
     "path": "scripts/ingestion/repair_corrupted_couplings.py",
     "file_name": "repair_corrupted_couplings.py",
     "functions": [

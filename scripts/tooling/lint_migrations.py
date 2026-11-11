@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""
-Automated PostgreSQL Migration Safety & Compatibility Linter for pydbsrt.
+"""Automated PostgreSQL Migration Safety & Compatibility Linter for pydbsrt.
 
 Inspects versioned migrations (V*__*.sql) for:
 1. DDL Locking Safety (avoids ACCESS EXCLUSIVE locks, table rewrites, destructive DROPs).
@@ -15,7 +14,7 @@ import re
 import sys
 from pathlib import Path
 
-DEFAULT_MIGRATIONS_DIR: Path = Path("crates/dbsrt-index/migrations")
+DEFAULT_MIGRATIONS_DIR: str = "crates/dbsrt-index/migrations"
 MIGRATION_FILENAME_PATTERN: str = r"^V(\d+)__([a-z0-9_]+)\.sql$"
 
 # Destructive operations that cause data loss or breaking changes
@@ -53,17 +52,51 @@ PG16_PLUS_EXCLUSIVE_PATTERNS: tuple[tuple[str, str], ...] = (
     ),
 )
 
-
 SAFETY_ALLOW_PREFIX: str = "-- safety-allow:"
 NOQA_PREFIX: str = "-- noqa:"
 
 
+def find_repo_root() -> Path:
+    """Dynamically locates repository root with fallback to ~/dbsrt."""
+    current = Path(__file__).resolve().parent
+    for p in [current, *current.parents]:
+        if (p / ".git").is_dir() or (p / "Taskfile.yml").is_file():
+            return p
+    appliance = Path.home() / "dbsrt"
+    if appliance.is_dir():
+        return appliance
+    return Path.cwd()
+
+
+def _is_exempt(prev_line: str, stripped: str) -> bool:
+    """Check if preceding line or current line has an explicit safety exemption."""
+    return (
+        SAFETY_ALLOW_PREFIX in prev_line
+        or NOQA_PREFIX in prev_line
+        or SAFETY_ALLOW_PREFIX in stripped
+        or NOQA_PREFIX in stripped
+    )
+
+
+def _check_pattern_group(
+    patterns: tuple[tuple[str, str], ...],
+    stripped: str,
+    idx: int,
+    prefix_msg: str,
+) -> list[str]:
+    """Scan line against a tuple of regex patterns."""
+    errors: list[str] = []
+    for pattern, reason in patterns:
+        if re.search(pattern, stripped, re.IGNORECASE):
+            errors.append(f"Line {idx}: {prefix_msg}: {reason}")
+    return errors
+
+
 def lint_migration_file(path: Path) -> list[str]:
     """Lint a single migration file for DDL safety and cross-version compatibility."""
-    errors = []
+    errors: list[str] = []
     fname = path.name
 
-    # Check filename convention
     if not re.match(MIGRATION_FILENAME_PATTERN, fname):
         errors.append(
             f"Filename '{fname}' does not follow Refinery versioning convention 'V<number>__<description>.sql'"
@@ -77,34 +110,13 @@ def lint_migration_file(path: Path) -> list[str]:
         if stripped.startswith("--") or not stripped:
             continue
 
-        # Check if preceding line or current line has an explicit safety exemption
-        has_exemption = False
         prev_line = lines[idx - 2].strip() if idx >= 2 else ""
-        if (
-            SAFETY_ALLOW_PREFIX in prev_line
-            or NOQA_PREFIX in prev_line
-            or SAFETY_ALLOW_PREFIX in stripped
-            or NOQA_PREFIX in stripped
-        ):
-            has_exemption = True
+        if _is_exempt(prev_line, stripped):
+            continue
 
-        # 1. Dangerous operations check
-        for pattern, reason in DANGEROUS_PATTERNS:
-            if re.search(pattern, stripped, re.IGNORECASE):
-                if not has_exemption:
-                    errors.append(f"Line {idx}: Dangerous DDL detected: {reason}")
-
-        # 2. Table rewrite check
-        for pattern, reason in TABLE_REWRITE_PATTERNS:
-            if re.search(pattern, stripped, re.IGNORECASE):
-                if not has_exemption:
-                    errors.append(f"Line {idx}: Lock contention risk: {reason}")
-
-        # 3. PostgreSQL 15 compatibility check
-        for pattern, reason in PG16_PLUS_EXCLUSIVE_PATTERNS:
-            if re.search(pattern, stripped, re.IGNORECASE):
-                if not has_exemption:
-                    errors.append(f"Line {idx}: PG 15 compatibility issue: {reason}")
+        errors.extend(_check_pattern_group(DANGEROUS_PATTERNS, stripped, idx, "Dangerous DDL detected"))
+        errors.extend(_check_pattern_group(TABLE_REWRITE_PATTERNS, stripped, idx, "Lock contention risk"))
+        errors.extend(_check_pattern_group(PG16_PLUS_EXCLUSIVE_PATTERNS, stripped, idx, "PG 15 compatibility issue"))
 
     return errors
 
@@ -150,18 +162,31 @@ def lint_migrations_directory(migrations_dir: Path) -> tuple[int, int]:
 
 
 def main() -> int:
+    repo_root = find_repo_root()
+    default_dir = repo_root / DEFAULT_MIGRATIONS_DIR
+
     parser = argparse.ArgumentParser(
         description="Lint PostgreSQL migrations for DDL safety and PG 15/17 compatibility."
     )
     parser.add_argument(
         "--dir",
         type=Path,
-        default=DEFAULT_MIGRATIONS_DIR,
+        default=default_dir,
         help=f"Directory containing migration files (default: {DEFAULT_MIGRATIONS_DIR})",
+    )
+    parser.add_argument(
+        "--check",
+        "--dry-run",
+        action="store_true",
+        help="Check presence of migrations directory and validate schemas",
     )
     args = parser.parse_args()
 
-    total, failed = lint_migrations_directory(args.dir)
+    target_dir = args.dir
+    if not target_dir.is_absolute() and not target_dir.exists():
+        target_dir = repo_root / target_dir
+
+    total, failed = lint_migrations_directory(target_dir)
     return 1 if failed > 0 else 0
 
 

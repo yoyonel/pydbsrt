@@ -165,6 +165,10 @@ PROVEN_LIVE: dict[str, str] = {
         "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), refactoring sous seuil complexipy (parse_python_coverage 13 <= 15 vs 19 legacy, main 11 <= 15) et option CLI --check / --dry-run."
         " Validé hors racine (--check code 0, 173 fichiers modifiés détectés par rapport à origin/develop)."
     ),
+    "scripts/tooling/lint_migrations.py": (
+        "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), refactoring modulaire sous seuil complexipy (lint_migration_file 9 <= 15 vs 37 legacy), et options CLI --dir et --check."
+        " Validé hors racine sur les 6 migrations réelles PG 15/17 (code 0)."
+    ),
     "scripts/tooling/generate_audit_doc.py": (
         "Résolution dynamique REPO_ROOT, exclusion du self-scan (0 faux positif), préservation dynamique des fiches d'analyse méticuleuse et support CLI (--check, --output)."
     ),
@@ -234,6 +238,7 @@ SCRIPT_KPIS: dict[str, str] = {
     "scripts/tooling/build_inventory_doc.py": "Moyenne (Génération Documentation Inventaire Scripts)",
     "scripts/tooling/convert_dashboard_webp.py": "Moyenne (Optimisation Assets WebP Dashboard)",
     "scripts/tooling/generate_coverage_report.py": "Critique (Rapport Couverture Unifié & Gate CI/CD)",
+    "scripts/tooling/lint_migrations.py": "Critique (Garde-fou CI/CD & Sécurité DDL Migrations PG)",
     "scripts/tooling/check_pr_body.py": "Critique (Garde-fou CI/CD & Qualité des PRs)",
     "scripts/tooling/generate_audit_doc.py": "Moyenne (Outil de Métrologie & Méta-Documentation)",
     "scripts/tooling/generate_nightly_report_enhanced.py": "Moyenne (Métrologie & Profiling Diátaxis)",
