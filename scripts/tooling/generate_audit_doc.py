@@ -38,6 +38,10 @@ PROVEN_LIVE: dict[str, str] = {
         "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), réduction de complexité cognitive (toutes fonctions <= 13 vs 18 legacy) et option CLI --check."
         " Validé hors racine (--check code 0, détection de ffprobe et du dossier snippets)."
     ),
+    "scripts/benchmarks/eval_multi_offset_matching.py": (
+        "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), sélection binaire robuste (release/debug), résolution des cibles et option CLI --check."
+        " Validé hors racine (--check code 0, catalogue 95MB et 9/9 cibles vidéo Demon Slayer confirmées)."
+    ),
     "scripts/benchmarks/compare_top_telemetry.py": (
         "Exécuté live avec succès sur /proc Linux. Bandeau console corrigé vers scripts/infra/local/dbsrt_top.py."
     ),
@@ -242,6 +246,7 @@ SCRIPT_KPIS: dict[str, str] = {
     "scripts/benchmarks/benchmark_worker_scaling.py": "Élevée (Benchmark Scaling Workers & Saturation VA-API)",
     "scripts/benchmarks/eval_exhaustive_nas_snippets.py": "Critique (Matrice Évaluation Exhaustive Dataset Snippets)",
     "scripts/benchmarks/eval_media_batch.py": "Élevée (Évaluation par Lots des Conteneurs & Sous-Titres)",
+    "scripts/benchmarks/eval_multi_offset_matching.py": "Critique (Évaluation Reconnaissance Spatiotemporelle Multi-Fenêtres)",
     "scripts/benchmarks/compare_top_telemetry.py": "Moyenne (Dev / Parité Télémétrie)",
     "scripts/benchmarks/record_casts.py": "Élevée (Doc Diátaxis & Casts Asciinema)",
     "scripts/benchmarks/record_proof.py": "Critique (Preuves Terminales PR)",

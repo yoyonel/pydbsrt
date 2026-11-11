@@ -7,17 +7,17 @@
 ## 1. Synthèse Factuelle Globale
 
 - **Total scripts opérationnels** : 96 (66 Python, 30 Shell)
-- **Scripts prouvés en exécution réelle live (session)** : 70 / 96 (72.9%) — *Seuls scripts réellement testés de bout en bout.*
+- **Scripts prouvés en exécution réelle live (session)** : 71 / 96 (74.0%) — *Seuls scripts réellement testés de bout en bout.*
 - **Scripts en régression directe (appels internes cassés)** : 0 / 96 (0.0%) — *100% des régressions actives résolues.*
 - **Nombre total de références internes rompues actives** : 0 (13 références appliance distantes documentées)
-- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 26 / 96 (27.1%) — *Imports seuls, logique non exécutée.*
+- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 25 / 96 (26.0%) — *Imports seuls, logique non exécutée.*
 - **Scripts avec analyse statique seule (`bash -n`)** : 0 / 96 (0.0%) — *Zéro runtime.*
 
 ```mermaid
 pie title Statut Réel des 96 Scripts (Rigueur Fact-First)
-    "Prouvé Live de Bout en Bout" : 70
+    "Prouvé Live de Bout en Bout" : 71
     "Régression Interne Cassée" : 0
-    "Sanity Check CLI Seul (Non Validé)" : 26
+    "Sanity Check CLI Seul (Non Validé)" : 25
     "Statique / Syntaxe Seul (Non Exécuté)" : 0
 ```
 
@@ -57,7 +57,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 | `scripts/benchmarks/compare_top_telemetry.py` | 🟢 **Prouvé Live** | Python | Moyenne (Dev / Parité Télémétrie) | Exécuté live avec succès sur /proc Linux. Bandeau console corrigé vers scripts/infra/local/dbsrt_top.py. |
 | `scripts/benchmarks/eval_exhaustive_nas_snippets.py` | 🟢 **Prouvé Live** | Python | Critique (Matrice Évaluation Exhaustive Dataset Snippets) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), préfixage absolu des dossiers d'extraits et de rapports, et option CLI --check. Validé hors racine (--check code 0, 2 758 snippets réels détectés sous data/snippets). |
 | `scripts/benchmarks/eval_media_batch.py` | 🟢 **Prouvé Live** | Python | Élevée (Évaluation par Lots des Conteneurs & Sous-Titres) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), réduction de complexité cognitive (toutes fonctions <= 13 vs 18 legacy) et option CLI --check. Validé hors racine (--check code 0, détection de ffprobe et du dossier snippets). |
-| `scripts/benchmarks/eval_multi_offset_matching.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
+| `scripts/benchmarks/eval_multi_offset_matching.py` | 🟢 **Prouvé Live** | Python | Critique (Évaluation Reconnaissance Spatiotemporelle Multi-Fenêtres) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), sélection binaire robuste (release/debug), résolution des cibles et option CLI --check. Validé hors racine (--check code 0, catalogue 95MB et 9/9 cibles vidéo Demon Slayer confirmées). |
 | `scripts/benchmarks/eval_nas_reliability.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/benchmarks/eval_vlc_vlsub_batch.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/benchmarks/matching_bench_runner.py` | 🟢 **Prouvé Live** | Python | À évaluer | Exécuté live sur snippet réel (01_Cruauté_mid15s.mp4) |
@@ -617,3 +617,10 @@ Pour sortir de cet état sans spéculation, chaque script des sections 1 et 2 do
 - **Diagnostic** : Répertoire d'entrée par défaut relatif au CWD (`.`), complexité cognitive de `discover_sidecar_subtitles` (16 > 15) et `evaluate_media_batch` (18 > 15), et absence de mode `--check` / `--dry-run`.
 - **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, refactoring modulaire abaissant la complexité sous le seuil de 13 pour toutes les fonctions, et ajout de l'option CLI `--check` / `--dry-run`.
 - **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/benchmarks/eval_media_batch.py --check)` confirmant la détection de `ffprobe` et du dossier de snippets (code 0), linters `ruff`, `complexipy` et `pyright` conformes.
+
+### Fiche 60 : `scripts/benchmarks/eval_multi_offset_matching.py`
+- **Rôle** : Banc d'essai comparatif mesurant le taux de reconnaissance et l'élimination des faux positifs entre le matching mono-fenêtre ($t=50\%$) et le consensus spatiotemporel multi-fenêtres sur des épisodes d'animés complexes (Demon Slayer, intros partagées).
+- **KPI / Importance** : `Critique (Évaluation Reconnaissance Spatiotemporelle Multi-Fenêtres)`.
+- **Diagnostic** : Chemins par défaut du catalogue (`data/catalog.dbphash`), des cibles de test et du binaire `dbsrt` relatifs au CWD courant, et absence de mode CLI d'inspection `--check` / `--dry-run`.
+- **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, sélection automatique du binaire (release/debug), résolution absolue de toutes les cibles de test et ajout de l'option CLI `--check` / `--dry-run`.
+- **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/benchmarks/eval_multi_offset_matching.py --check)` confirmant le catalogue de 95MB, le binaire release et 9/9 cibles vidéo valides (code 0), linters `ruff`, `complexipy` et `pyright` conformes.

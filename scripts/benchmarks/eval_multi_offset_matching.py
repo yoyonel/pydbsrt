@@ -29,6 +29,18 @@ DEFAULT_BENCHMARK_TARGETS = [
 ]
 
 
+def find_repo_root() -> Path:
+    """Dynamically locates repository root with fallback to ~/dbsrt."""
+    current = Path(__file__).resolve().parent
+    for p in [current, *current.parents]:
+        if (p / ".git").is_dir() or (p / "Taskfile.yml").is_file():
+            return p
+    appliance = Path.home() / "dbsrt"
+    if appliance.is_dir():
+        return appliance
+    return Path.cwd()
+
+
 @dataclass
 class EvalRunResult:
     media_path: str
@@ -176,25 +188,36 @@ def _summarize_and_save(results: list[EvalRunResult], out_path: Path) -> None:
     print(f"💾 Report saved to {out_path}")
 
 
-def parse_cli_args() -> argparse.Namespace:
+def parse_cli_args(repo_root: Path) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Benchmark Mono-Window vs Multi-Window Spatiotemporal Recognition")
     parser.add_argument(
         "--dbphash",
         type=Path,
-        default=Path(DEFAULT_DBPHASH),
+        default=repo_root / DEFAULT_DBPHASH,
         help="Path to .dbphash catalog",
+    )
+    default_bin = (
+        repo_root / "target/release/dbsrt"
+        if (repo_root / "target/release/dbsrt").exists()
+        else repo_root / "target/debug/dbsrt"
     )
     parser.add_argument(
         "--bin",
         type=Path,
-        default=Path("target/release/dbsrt"),
+        default=default_bin,
         help="Path to dbsrt binary",
     )
     parser.add_argument(
         "--out",
         type=Path,
-        default=Path("data/reports/eval_multi_offset_matching.json"),
+        default=repo_root / "data/reports/eval_multi_offset_matching.json",
         help="Output evaluation report JSON file",
+    )
+    parser.add_argument(
+        "--check",
+        "--dry-run",
+        action="store_true",
+        help="Inspect catalog, binary, and target files without running evaluation",
     )
     parser.add_argument(
         "files",
@@ -204,20 +227,43 @@ def parse_cli_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _resolve_eval_targets(repo_root: Path, custom_files: list[str]) -> list[Path]:
+    """Resolves target video paths against repo root."""
+    if custom_files:
+        return [Path(f) if Path(f).is_absolute() else (repo_root / f) for f in custom_files]
+    return [repo_root / f for f in DEFAULT_BENCHMARK_TARGETS]
+
+
 def main() -> int:
-    args = parse_cli_args()
-    targets = [Path(f) for f in args.files] if args.files else [Path(f) for f in DEFAULT_BENCHMARK_TARGETS]
+    repo_root = find_repo_root()
+    args = parse_cli_args(repo_root)
+
+    dbphash_path = args.dbphash if args.dbphash.is_absolute() else (repo_root / args.dbphash)
+    bin_path = args.bin if args.bin.is_absolute() else (repo_root / args.bin)
+    out_path = args.out if args.out.is_absolute() else (repo_root / args.out)
+
+    targets = _resolve_eval_targets(repo_root, args.files)
     valid_targets = [p for p in targets if p.exists()]
+
+    if args.check:
+        print("=== DBSrt Multi-Offset Matching Evaluation Inspection ===")
+        print(f"✓ REPO_ROOT     : {repo_root}")
+        print(f"✓ Catalog       : {dbphash_path} (exists: {dbphash_path.exists()})")
+        print(f"✓ DBSrt binary  : {bin_path} (exists: {bin_path.exists()})")
+        print(f"✓ Target files  : {len(valid_targets)}/{len(targets)} exist")
+        print(f"✓ Output report : {out_path}")
+        return 0
+
     if not valid_targets:
         print("❌ No valid media targets found to evaluate.", file=sys.stderr)
         return 1
 
     print(f"🚀 Evaluating {len(valid_targets)} target media files...")
-    print(f"📦 Catalog: {args.dbphash} (size: {args.dbphash.stat().st_size / 1024 / 1024:.1f} MB)")
+    print(f"📦 Catalog: {dbphash_path} (size: {dbphash_path.stat().st_size / 1024 / 1024:.1f} MB)")
     print("=" * 80)
 
-    results = [_eval_single_media(args.bin, args.dbphash, p) for p in valid_targets]
-    _summarize_and_save(results, args.out)
+    results = [_eval_single_media(bin_path, dbphash_path, p) for p in valid_targets]
+    _summarize_and_save(results, out_path)
     return 0
 
 
