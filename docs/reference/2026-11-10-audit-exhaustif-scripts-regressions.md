@@ -7,17 +7,17 @@
 ## 1. Synthèse Factuelle Globale
 
 - **Total scripts opérationnels** : 96 (66 Python, 30 Shell)
-- **Scripts prouvés en exécution réelle live (session)** : 58 / 96 (60.4%) — *Seuls scripts réellement testés de bout en bout.*
+- **Scripts prouvés en exécution réelle live (session)** : 59 / 96 (61.5%) — *Seuls scripts réellement testés de bout en bout.*
 - **Scripts en régression directe (appels internes cassés)** : 0 / 96 (0.0%) — *100% des régressions actives résolues.*
 - **Nombre total de références internes rompues actives** : 0 (13 références appliance distantes documentées)
-- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 38 / 96 (39.6%) — *Imports seuls, logique non exécutée.*
+- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 37 / 96 (38.5%) — *Imports seuls, logique non exécutée.*
 - **Scripts avec analyse statique seule (`bash -n`)** : 0 / 96 (0.0%) — *Zéro runtime.*
 
 ```mermaid
 pie title Statut Réel des 96 Scripts (Rigueur Fact-First)
-    "Prouvé Live de Bout en Bout" : 58
+    "Prouvé Live de Bout en Bout" : 59
     "Régression Interne Cassée" : 0
-    "Sanity Check CLI Seul (Non Validé)" : 38
+    "Sanity Check CLI Seul (Non Validé)" : 37
     "Statique / Syntaxe Seul (Non Exécuté)" : 0
 ```
 
@@ -162,7 +162,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 | `scripts/tooling/build_inventory_doc.py` | 🟢 **Prouvé Live** | Python | Moyenne (Génération Documentation Inventaire Scripts) | Encapsulation modulaire, résolution dynamique REPO_ROOT (fallback ~/dbsrt), options CLI --input, --output, --check. Validé hors racine sur l'inventaire réel (94 scripts analysés, code 0). |
 | `scripts/tooling/check_pr_body.py` | 🟢 **Prouvé Live** | Python | Critique (Garde-fou CI/CD & Qualité des PRs) | Chemins docstring et commentaires réalignés. 16/16 tests unitaires PASS (test_check_pr_body.py). Prouvé live en CLI stdin (rejet corps vide exit 1, validation corps conforme avec preuve SVG exit 0). |
 | `scripts/tooling/code_quality.sh` | 🟢 **Prouvé Live** | Shell | À évaluer | Exécuté live (task lint, task fmt) |
-| `scripts/tooling/convert_dashboard_webp.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
+| `scripts/tooling/convert_dashboard_webp.py` | 🟢 **Prouvé Live** | Python | Moyenne (Optimisation Assets WebP Dashboard) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), constantes nommées, refactoring sous seuil complexipy (toutes fonctions <= 10 vs main 29 legacy) et options CLI --dir, --no-rebuild, --check. Validé hors racine (--check code 0, binaire cwebp et répertoire screenshots détectés). |
 | `scripts/tooling/disk_guard.sh` | 🟢 **Prouvé Live** | Shell | À évaluer | Exécuté live (task lint étape 10) |
 | `scripts/tooling/generate_audit_doc.py` | 🟢 **Prouvé Live** | Python | Moyenne (Outil de Métrologie & Méta-Documentation) | Résolution dynamique REPO_ROOT, exclusion du self-scan (0 faux positif), préservation dynamique des fiches d'analyse méticuleuse et support CLI (--check, --output). |
 | `scripts/tooling/generate_coverage_report.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
@@ -533,3 +533,10 @@ Pour sortir de cet état sans spéculation, chaque script des sections 1 et 2 do
 - **Diagnostic** : Code exécuté au niveau module sans fonction `main`, chemin JSON en dur `/tmp/scripts_inventory.json` causant un crash immédiat hors environnement spécifique, chemin de sortie relatif au CWD sans découverte de `REPO_ROOT`, et absence totale d'interface CLI.
 - **Remédiation** : Encapsulation modulaire avec fonctions dédiées, découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, tolérance sur les sources d'entrée et ajout des options CLI `--input`, `--output` et `--check` / `--dry-run`.
 - **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/tooling/build_inventory_doc.py --check)` inspectant 94 scripts (code 0), linters `ruff`, `complexipy` et `pyright` conformes.
+
+### Fiche 48 : `scripts/tooling/convert_dashboard_webp.py`
+- **Rôle** : Outil d'optimisation par lots convertissant les captures d'écran PNG du dashboard E2E VLC (`docs/screenshots/e2e_vlc_all/`) en format WebP 720p haute densité, mise à jour des manifestes JSON et régénération automatique du dashboard HTML.
+- **KPI / Importance** : `Moyenne (Optimisation Assets WebP Dashboard)`.
+- **Diagnostic** : Chemins relatifs au CWD (`docs/screenshots/...` et `scripts/tooling/build_dashboard_html.py`), complexité cognitive excessive (`main` 29 > 15), constantes magiques non nommées, et absence d'options CLI ou de mode `--check` / `--dry-run`.
+- **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, déclaration des constantes nommées (`WEBP_QUALITY`, `TARGET_WIDTH`, `TARGET_HEIGHT`, `BYTES_PER_MB`), refactoring modulaire abaissant la complexité sous le seuil maximal de 10, et ajout des options CLI `--dir`, `--no-rebuild` et `--check` / `--dry-run`.
+- **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/tooling/convert_dashboard_webp.py --check)` avec détection du binaire `cwebp` et validation des répertoires d'assets (code 0), linters `ruff`, `complexipy` et `pyright` conformes.

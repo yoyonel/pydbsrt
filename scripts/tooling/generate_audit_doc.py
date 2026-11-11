@@ -157,6 +157,10 @@ PROVEN_LIVE: dict[str, str] = {
         "Encapsulation modulaire, résolution dynamique REPO_ROOT (fallback ~/dbsrt), options CLI --input, --output, --check."
         " Validé hors racine sur l'inventaire réel (94 scripts analysés, code 0)."
     ),
+    "scripts/tooling/convert_dashboard_webp.py": (
+        "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), constantes nommées, refactoring sous seuil complexipy (toutes fonctions <= 10 vs main 29 legacy) et options CLI --dir, --no-rebuild, --check."
+        " Validé hors racine (--check code 0, binaire cwebp et répertoire screenshots détectés)."
+    ),
     "scripts/tooling/generate_audit_doc.py": (
         "Résolution dynamique REPO_ROOT, exclusion du self-scan (0 faux positif), préservation dynamique des fiches d'analyse méticuleuse et support CLI (--check, --output)."
     ),
@@ -224,6 +228,7 @@ SCRIPT_KPIS: dict[str, str] = {
     "scripts/ingestion/seed_couplings.sh": "Élevée (Vérité Terrain & Registre des Couplages)",
     "scripts/tooling/build_dashboard_html.py": "Moyenne (Génération Dashboard E2E VLC)",
     "scripts/tooling/build_inventory_doc.py": "Moyenne (Génération Documentation Inventaire Scripts)",
+    "scripts/tooling/convert_dashboard_webp.py": "Moyenne (Optimisation Assets WebP Dashboard)",
     "scripts/tooling/check_pr_body.py": "Critique (Garde-fou CI/CD & Qualité des PRs)",
     "scripts/tooling/generate_audit_doc.py": "Moyenne (Outil de Métrologie & Méta-Documentation)",
     "scripts/tooling/generate_nightly_report_enhanced.py": "Moyenne (Métrologie & Profiling Diátaxis)",

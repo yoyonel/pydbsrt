@@ -76,16 +76,6 @@
     ]
   },
   {
-    "path": "scripts/tooling/convert_dashboard_webp.py",
-    "file_name": "convert_dashboard_webp.py",
-    "functions": [
-      {
-        "name": "main",
-        "complexity": 29
-      }
-    ]
-  },
-  {
     "path": "scripts/infra/local/dbsrt_top.py",
     "file_name": "dbsrt_top.py",
     "functions": [
