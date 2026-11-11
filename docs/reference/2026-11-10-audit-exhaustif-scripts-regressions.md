@@ -7,17 +7,17 @@
 ## 1. Synthèse Factuelle Globale
 
 - **Total scripts opérationnels** : 96 (66 Python, 30 Shell)
-- **Scripts prouvés en exécution réelle live (session)** : 73 / 96 (76.0%) — *Seuls scripts réellement testés de bout en bout.*
+- **Scripts prouvés en exécution réelle live (session)** : 74 / 96 (77.1%) — *Seuls scripts réellement testés de bout en bout.*
 - **Scripts en régression directe (appels internes cassés)** : 0 / 96 (0.0%) — *100% des régressions actives résolues.*
 - **Nombre total de références internes rompues actives** : 0 (13 références appliance distantes documentées)
-- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 23 / 96 (24.0%) — *Imports seuls, logique non exécutée.*
+- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 22 / 96 (22.9%) — *Imports seuls, logique non exécutée.*
 - **Scripts avec analyse statique seule (`bash -n`)** : 0 / 96 (0.0%) — *Zéro runtime.*
 
 ```mermaid
 pie title Statut Réel des 96 Scripts (Rigueur Fact-First)
-    "Prouvé Live de Bout en Bout" : 73
+    "Prouvé Live de Bout en Bout" : 74
     "Régression Interne Cassée" : 0
-    "Sanity Check CLI Seul (Non Validé)" : 23
+    "Sanity Check CLI Seul (Non Validé)" : 22
     "Statique / Syntaxe Seul (Non Exécuté)" : 0
 ```
 
@@ -64,7 +64,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 | `scripts/benchmarks/record_casts.py` | 🟢 **Prouvé Live** | Python | Élevée (Doc Diátaxis & Casts Asciinema) | Exécuté live avec succès. Chemin validate_docs.py réaligné vers scripts/tooling/, timing calé à 2.0s, 4 casts régénérés et validés via task doc:check. |
 | `scripts/benchmarks/record_proof.py` | 🟢 **Prouvé Live** | Python | Critique (Preuves Terminales PR) | Exécuté live avec succès (génération .cast et .svg masqué sans fuite de secrets). Imports et docstring réalignés. |
 | `scripts/benchmarks/record_vlsub_demo.sh` | 🟢 **Prouvé Live** | Shell | Élevée (Doc Diátaxis & Démo Vidéo VLSub) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des assets, nettoyage résilient des processus et options --help / --check. Validé hors racine (code 0). |
-| `scripts/benchmarks/scale_up_nas_dataset.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
+| `scripts/benchmarks/scale_up_nas_dataset.py` | 🟢 **Prouvé Live** | Python | Critique (Pipeline Scale-Up & Certification Couplings NAS) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), sélection robuste du binaire dbsrt (release/debug/PATH), chemins absolus des catalogues et option CLI --check. Validé hors racine (--check code 0, 2 779 .phash et 2 851 .srt réels confirmés). |
 | `scripts/benchmarks/trajectory_bench_runner.py` | 🟢 **Prouvé Live** | Python | À évaluer | Exécuté live sur snippet réel (01_Cruauté_mid15s.mp4) |
 | `scripts/benchmarks/verify_terminal_rendering.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 
@@ -638,3 +638,10 @@ Pour sortir de cet état sans spéculation, chaque script des sections 1 et 2 do
 - **Diagnostic** : Chemins relatifs en dur (`docs/screenshots/e2e_vlc_all`, `data/snippets`, `docs/history/...`), complexité cognitive élevée de `main` (26 > 15), et absence de mode CLI d'inspection non-destructif `--check` / `--dry-run`.
 - **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, préfixage absolu des captures et des rapports Markdown, refactoring modulaire réduisant la complexité de `main` (22 vs 29), et ajout de l'option CLI `--check` / `--dry-run`.
 - **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/benchmarks/eval_vlc_vlsub_batch.py --check)` confirmant la détection des 2 758 snippets et de la chaîne d'outils graphique `Xvfb`, `marco`, `vlc`, `xdotool` et `ffmpeg` (code 0), linters `ruff`, `complexipy` et `pyright` conformes.
+
+### Fiche 63 : `scripts/benchmarks/scale_up_nas_dataset.py`
+- **Rôle** : Pipeline de passage à l'échelle massive et de certification sol-vérité découvrant un corpus diversifié de 108+ vidéos sur le NAS, extrayant les pHashes, important les métadonnées dans PostgreSQL 17 (`bktree_ops`), certifiant les couplages et compactant le catalogue `.dbphash`.
+- **KPI / Importance** : `Critique (Pipeline Scale-Up & Certification Couplings NAS)`.
+- **Diagnostic** : Chemins relatifs par défaut (`data/__PHASH__`, `data/SRT`, `target/release/dbsrt`, `data/catalog.dbphash`), injection fragile dans `sys.path`, et absence de mode CLI d'inspection `--check` / `--dry-run`.
+- **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, sélection automatique et résiliente du binaire `dbsrt` (release/debug/PATH), chemins absolus des répertoires de données, et ajout de l'option CLI `--check` / `--dry-run`.
+- **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/benchmarks/scale_up_nas_dataset.py --check)` confirmant la détection de 2 779 fichiers `.phash`, 2 851 fichiers `.srt`, du montage NAS et du binaire `dbsrt` (code 0), linters `ruff`, `complexipy` et `pyright` conformes.

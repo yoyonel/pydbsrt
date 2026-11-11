@@ -17,13 +17,44 @@ import argparse
 import getpass
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+def find_repo_root() -> Path:
+    """Finds repository root dynamically with appliance fallback."""
+    curr = Path(__file__).resolve().parent
+    for parent in [curr, *curr.parents]:
+        if (parent / ".git").is_dir():
+            return parent
+    appliance_path = Path.home() / "dbsrt"
+    if appliance_path.is_dir():
+        return appliance_path
+    return Path.cwd()
+
+
+REPO_ROOT = find_repo_root()
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+
+def resolve_dbsrt_bin(repo_root: Path) -> Path:
+    """Finds dbsrt binary in release, debug or PATH."""
+    release = repo_root / "target/release/dbsrt"
+    if release.exists():
+        return release
+    debug = repo_root / "target/debug/dbsrt"
+    if debug.exists():
+        return debug
+    system = shutil.which("dbsrt")
+    if system:
+        return Path(system)
+    return release
+
 
 from scripts.ingestion.phash_names import phash_media_name  # noqa: E402
 
@@ -451,18 +482,39 @@ def process_one_video(
     }
 
 
+def perform_check(args: argparse.Namespace) -> None:
+    """Performs sanity check of paths, databases and binaries."""
+    print("[CHECK] Mode verification activé.")
+    print(f"[CHECK] REPO_ROOT : {REPO_ROOT}")
+    print(f"[CHECK] NAS Root : {args.nas_root} (exists: {args.nas_root.is_dir()})")
+    print(f"[CHECK] pHash dir : {args.phash_dir} (exists: {args.phash_dir.is_dir()})")
+    phash_count = len(list(args.phash_dir.glob("*.phash"))) if args.phash_dir.is_dir() else 0
+    print(f"[CHECK] Existing .phash files : {phash_count}")
+    srt_count = len(list(args.subtitles_dir.glob("*.srt"))) if args.subtitles_dir.is_dir() else 0
+    print(f"[CHECK] Existing .srt files : {srt_count}")
+    print(f"[CHECK] dbsrt binary : {args.dbsrt_bin} (exists: {args.dbsrt_bin.is_file()})")
+    print(f"[CHECK] DB target : {args.db_host}:{args.db_port}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Scale up pydbsrt pHash & PostgreSQL dataset from NAS.")
     parser.add_argument("--nas-root", type=Path, default=default_nas_root())
-    parser.add_argument("--phash-dir", type=Path, default=Path("data/__PHASH__"))
-    parser.add_argument("--subtitles-dir", type=Path, default=Path("data/SRT"))
-    parser.add_argument("--dbsrt-bin", type=Path, default=Path("./target/release/dbsrt"))
+    parser.add_argument("--phash-dir", type=Path, default=REPO_ROOT / "data/__PHASH__")
+    parser.add_argument("--subtitles-dir", type=Path, default=REPO_ROOT / "data/SRT")
+    parser.add_argument("--dbsrt-bin", type=Path, default=resolve_dbsrt_bin(REPO_ROOT))
     parser.add_argument("--target-new-videos", type=int, default=108)
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--db-host", type=str, default=os.environ.get("PSQL_IP", "127.0.0.1"))
     parser.add_argument("--db-port", type=int, default=int(os.environ.get("PSQL_PORT", "5432")))
     parser.add_argument("--summary-out", type=Path, default=Path("/tmp/nas_scale_up_summary.json"))
+    parser.add_argument(
+        "--check", "--dry-run", action="store_true", help="Perform sanity checks without executing scale-up"
+    )
     args = parser.parse_args()
+
+    if args.check:
+        perform_check(args)
+        return 0
 
     if not args.dbsrt_bin.exists():
         print(f"Error: {args.dbsrt_bin} not found.", file=sys.stderr)
@@ -532,7 +584,7 @@ def main() -> int:
     new_certs = sum(len(r.get("certified_langs", [])) for r in succeeded)
 
     print("=== STEP 4: Packing unified .dbphash index across all .phash files ===", flush=True)
-    dbphash_out = Path("data/catalog.dbphash")
+    dbphash_out = REPO_ROOT / "data/catalog.dbphash"
     subprocess.run(
         [
             str(args.dbsrt_bin),
