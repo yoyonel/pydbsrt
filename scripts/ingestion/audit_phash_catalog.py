@@ -19,8 +19,10 @@ Evaluates 100% of the 233 indexed media fingerprints across:
 
 from __future__ import annotations
 
+import argparse
 import json
 import re
+import shutil
 import struct
 import subprocess
 import sys
@@ -28,7 +30,37 @@ import time
 import urllib.request
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+def find_repo_root() -> Path:
+    """Finds repository root dynamically with appliance fallback."""
+    curr = Path(__file__).resolve().parent
+    for parent in [curr, *curr.parents]:
+        if (parent / ".git").is_dir():
+            return parent
+    appliance_path = Path.home() / "dbsrt"
+    if appliance_path.is_dir():
+        return appliance_path
+    return Path.cwd()
+
+
+REPO_ROOT = find_repo_root()
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+
+def resolve_dbsrt_bin(repo_root: Path) -> Path:
+    """Finds dbsrt binary in release, debug or PATH."""
+    release = repo_root / "target/release/dbsrt"
+    if release.exists():
+        return release
+    debug = repo_root / "target/debug/dbsrt"
+    if debug.exists():
+        return debug
+    system = shutil.which("dbsrt")
+    if system:
+        return Path(system)
+    return release
+
 
 from scripts.ingestion.phash_names import phash_media_name  # noqa: E402
 
@@ -488,11 +520,39 @@ def run_http_server_audit(server_url: str) -> dict:
     return api_results
 
 
+def perform_check(phash_dir: Path, dbphash_path: Path, dbsrt_bin: Path, server_url: str) -> None:
+    """Performs sanity check of paths, databases and binaries."""
+    print("[CHECK] Mode verification activé.")
+    print(f"[CHECK] REPO_ROOT : {REPO_ROOT}")
+    print(f"[CHECK] pHash dir : {phash_dir} (exists: {phash_dir.is_dir()})")
+    count = len(list(phash_dir.glob("*.phash"))) if phash_dir.is_dir() else 0
+    print(f"[CHECK] Found .phash files : {count}")
+    print(
+        f"[CHECK] catalog.dbphash : {dbphash_path} (exists: {dbphash_path.is_file()}, size: {dbphash_path.stat().st_size if dbphash_path.is_file() else 0} bytes)"
+    )
+    print(f"[CHECK] dbsrt binary : {dbsrt_bin} (exists: {dbsrt_bin.is_file()})")
+    print(f"[CHECK] server URL : {server_url}")
+
+
 def main():
-    phash_dir = Path("data/__PHASH__")
-    dbphash_path = Path("data/catalog.dbphash")
-    dbsrt_bin = Path("./target/release/dbsrt")
-    assets_dir = Path("docs/assets/audit-matching")
+    parser = argparse.ArgumentParser(description="Audit pHash catalog recognition performance.")
+    parser.add_argument("--phash-dir", type=Path, default=REPO_ROOT / "data/__PHASH__")
+    parser.add_argument("--dbphash", type=Path, default=REPO_ROOT / "data/catalog.dbphash")
+    parser.add_argument("--dbsrt-bin", type=Path, default=resolve_dbsrt_bin(REPO_ROOT))
+    parser.add_argument("--server-url", type=str, default="http://127.0.0.1:8765")
+    parser.add_argument(
+        "--check", "--dry-run", action="store_true", help="Perform sanity checks without executing benchmarks"
+    )
+    args = parser.parse_args()
+
+    if args.check:
+        perform_check(args.phash_dir, args.dbphash, args.dbsrt_bin, args.server_url)
+        return 0
+
+    phash_dir = args.phash_dir
+    dbphash_path = args.dbphash
+    dbsrt_bin = args.dbsrt_bin
+    assets_dir = REPO_ROOT / "docs/assets/audit-matching"
     assets_dir.mkdir(parents=True, exist_ok=True)
 
     print("=====================================================================")
@@ -501,7 +561,7 @@ def main():
 
     cat_audit = run_full_catalog_audit(phash_dir, dbphash_path, dbsrt_bin)
     real_video_audit = run_real_video_tests(dbsrt_bin, phash_dir, dbphash_path, assets_dir)
-    api_audit = run_http_server_audit("http://127.0.0.1:8765")
+    api_audit = run_http_server_audit(args.server_url)
 
     full_report = {
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -513,6 +573,7 @@ def main():
     report_json_path = Path("/tmp/exhaustive_audit_summary.json")
     report_json_path.write_text(json.dumps(full_report, indent=2))
     print(f"\n[Audit 4/4] Completed successfully. Raw metrics saved to {report_json_path}")
+    return 0
 
 
 if __name__ == "__main__":
