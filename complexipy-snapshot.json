@@ -136,20 +136,6 @@
     ]
   },
   {
-    "path": "scripts/benchmarks/eval_media_batch.py",
-    "file_name": "eval_media_batch.py",
-    "functions": [
-      {
-        "name": "discover_sidecar_subtitles",
-        "complexity": 16
-      },
-      {
-        "name": "evaluate_media_batch",
-        "complexity": 18
-      }
-    ]
-  },
-  {
     "path": "scripts/benchmarks/eval_nas_reliability.py",
     "file_name": "eval_nas_reliability.py",
     "functions": [
