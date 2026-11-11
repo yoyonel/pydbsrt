@@ -226,10 +226,6 @@
     "file_name": "generate_coverage_report.py",
     "functions": [
       {
-        "name": "parse_python_coverage",
-        "complexity": 19
-      },
-      {
         "name": "generate_markdown",
         "complexity": 26
       }

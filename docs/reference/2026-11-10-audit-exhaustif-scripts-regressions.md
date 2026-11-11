@@ -7,17 +7,17 @@
 ## 1. Synthèse Factuelle Globale
 
 - **Total scripts opérationnels** : 96 (66 Python, 30 Shell)
-- **Scripts prouvés en exécution réelle live (session)** : 59 / 96 (61.5%) — *Seuls scripts réellement testés de bout en bout.*
+- **Scripts prouvés en exécution réelle live (session)** : 60 / 96 (62.5%) — *Seuls scripts réellement testés de bout en bout.*
 - **Scripts en régression directe (appels internes cassés)** : 0 / 96 (0.0%) — *100% des régressions actives résolues.*
 - **Nombre total de références internes rompues actives** : 0 (13 références appliance distantes documentées)
-- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 37 / 96 (38.5%) — *Imports seuls, logique non exécutée.*
+- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 36 / 96 (37.5%) — *Imports seuls, logique non exécutée.*
 - **Scripts avec analyse statique seule (`bash -n`)** : 0 / 96 (0.0%) — *Zéro runtime.*
 
 ```mermaid
 pie title Statut Réel des 96 Scripts (Rigueur Fact-First)
-    "Prouvé Live de Bout en Bout" : 59
+    "Prouvé Live de Bout en Bout" : 60
     "Régression Interne Cassée" : 0
-    "Sanity Check CLI Seul (Non Validé)" : 37
+    "Sanity Check CLI Seul (Non Validé)" : 36
     "Statique / Syntaxe Seul (Non Exécuté)" : 0
 ```
 
@@ -165,7 +165,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 | `scripts/tooling/convert_dashboard_webp.py` | 🟢 **Prouvé Live** | Python | Moyenne (Optimisation Assets WebP Dashboard) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), constantes nommées, refactoring sous seuil complexipy (toutes fonctions <= 10 vs main 29 legacy) et options CLI --dir, --no-rebuild, --check. Validé hors racine (--check code 0, binaire cwebp et répertoire screenshots détectés). |
 | `scripts/tooling/disk_guard.sh` | 🟢 **Prouvé Live** | Shell | À évaluer | Exécuté live (task lint étape 10) |
 | `scripts/tooling/generate_audit_doc.py` | 🟢 **Prouvé Live** | Python | Moyenne (Outil de Métrologie & Méta-Documentation) | Résolution dynamique REPO_ROOT, exclusion du self-scan (0 faux positif), préservation dynamique des fiches d'analyse méticuleuse et support CLI (--check, --output). |
-| `scripts/tooling/generate_coverage_report.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
+| `scripts/tooling/generate_coverage_report.py` | 🟢 **Prouvé Live** | Python | Critique (Rapport Couverture Unifié & Gate CI/CD) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), refactoring sous seuil complexipy (parse_python_coverage 13 <= 15 vs 19 legacy, main 11 <= 15) et option CLI --check / --dry-run. Validé hors racine (--check code 0, 173 fichiers modifiés détectés par rapport à origin/develop). |
 | `scripts/tooling/generate_nightly_report_enhanced.py` | 🟢 **Prouvé Live** | Python | Moyenne (Métrologie & Profiling Diátaxis) | Résolution dynamique REPO_ROOT (find_repo_root), réalignement de la référence vers scripts/ingestion/batch_media_add_tvshow.py, refactoring sous le seuil complexipy (main 15 <= 15) et support CLI (--check, --input, --output). Validé live sur exécution hors racine et génération nominale. |
 | `scripts/tooling/lint_complexity.py` | 🟢 **Prouvé Live** | Python | Critique (Garde-fou CI/CD & Architecture Rust) | Exécuté live (Rust Complexity Gate 1180 fn) |
 | `scripts/tooling/lint_migrations.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
@@ -540,3 +540,10 @@ Pour sortir de cet état sans spéculation, chaque script des sections 1 et 2 do
 - **Diagnostic** : Chemins relatifs au CWD (`docs/screenshots/...` et `scripts/tooling/build_dashboard_html.py`), complexité cognitive excessive (`main` 29 > 15), constantes magiques non nommées, et absence d'options CLI ou de mode `--check` / `--dry-run`.
 - **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, déclaration des constantes nommées (`WEBP_QUALITY`, `TARGET_WIDTH`, `TARGET_HEIGHT`, `BYTES_PER_MB`), refactoring modulaire abaissant la complexité sous le seuil maximal de 10, et ajout des options CLI `--dir`, `--no-rebuild` et `--check` / `--dry-run`.
 - **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/tooling/convert_dashboard_webp.py --check)` avec détection du binaire `cwebp` et validation des répertoires d'assets (code 0), linters `ruff`, `complexipy` et `pyright` conformes.
+
+### Fiche 49 : `scripts/tooling/generate_coverage_report.py`
+- **Rôle** : Agrégateur de couverture de code unifié (Rust LLVM cov + Python pytest cov) et garde-fou qualité CI/CD (`$GITHUB_STEP_SUMMARY`, PR comments, alertes migrations DB).
+- **KPI / Importance** : `Critique (Rapport Couverture Unifié & Gate CI/CD)`.
+- **Diagnostic** : Chemins par défaut de rapports de couverture relatifs au CWD (`coverage-*.json`), complexité cognitive de `parse_python_coverage` (19 > 15), et absence d'option CLI `--check` / `--dry-run` pour inspecter la présence des fichiers et le delta git sans lever d'erreur.
+- **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, résolution des fichiers par rapport à la racine, refactoring modulaire abaissant la complexité de `parse_python_coverage` à 13 $\le$ 15 et `main` à 11 $\le$ 15, et ajout de l'option CLI `--check` / `--dry-run`.
+- **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/tooling/generate_coverage_report.py --check)` inspectant 173 fichiers modifiés par rapport à `origin/develop` (code 0), linters `ruff`, `complexipy` et `pyright` conformes.

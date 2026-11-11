@@ -28,6 +28,18 @@ COVERAGE_GOOD_THRESHOLD: float = 60.0
 COVERAGE_MODERATE_THRESHOLD: float = 40.0
 
 
+def find_repo_root() -> Path:
+    """Dynamically locates repository root with fallback to ~/dbsrt."""
+    current = Path(__file__).resolve().parent
+    for p in [current, *current.parents]:
+        if (p / ".git").is_dir() or (p / "Taskfile.yml").is_file():
+            return p
+    appliance = Path.home() / "dbsrt"
+    if appliance.is_dir():
+        return appliance
+    return Path.cwd()
+
+
 def detect_db_migrations(modified_files: list[str]) -> list[str]:
     """Identify if any modified files are database schema migrations."""
     migrations = []
@@ -142,6 +154,27 @@ def parse_rust_coverage(rust_json_path: Path) -> dict:
     }
 
 
+def _merge_single_coverage_file(data: dict, merged_files: dict[str, dict]) -> None:
+    """Helper to merge coverage statements from a single file payload."""
+    for fname, f_info in data.get("files", {}).items():
+        summary = f_info.get("summary", {})
+        count = summary.get("num_statements", 0)
+        exec_lines = set(f_info.get("executed_lines", []))
+        if fname not in merged_files:
+            merged_files[fname] = {
+                "count": count,
+                "executed": exec_lines,
+                "max_covered": summary.get("covered_lines", 0),
+            }
+        else:
+            merged_files[fname]["count"] = max(merged_files[fname]["count"], count)
+            merged_files[fname]["executed"].update(exec_lines)
+            merged_files[fname]["max_covered"] = max(
+                merged_files[fname]["max_covered"],
+                summary.get("covered_lines", 0),
+            )
+
+
 def parse_python_coverage(python_json_paths: list[Path]) -> dict:
     """Parse and merge one or more pytest-cov json outputs by unioning executed_lines."""
     merged_files: dict[str, dict] = {}
@@ -150,23 +183,7 @@ def parse_python_coverage(python_json_paths: list[Path]) -> dict:
             continue
         with open(p, encoding="utf-8") as f:
             data = json.load(f)
-        for fname, f_info in data.get("files", {}).items():
-            summary = f_info.get("summary", {})
-            count = summary.get("num_statements", 0)
-            exec_lines = set(f_info.get("executed_lines", []))
-            if fname not in merged_files:
-                merged_files[fname] = {
-                    "count": count,
-                    "executed": exec_lines,
-                    "max_covered": summary.get("covered_lines", 0),
-                }
-            else:
-                merged_files[fname]["count"] = max(merged_files[fname]["count"], count)
-                merged_files[fname]["executed"].update(exec_lines)
-                merged_files[fname]["max_covered"] = max(
-                    merged_files[fname]["max_covered"],
-                    summary.get("covered_lines", 0),
-                )
+        _merge_single_coverage_file(data, merged_files)
 
     if not merged_files:
         return {}
@@ -349,6 +366,38 @@ def generate_markdown(
     return "\n".join(md)
 
 
+def _evaluate_quality_gate(
+    rust_cov: dict,
+    py_cov: dict,
+    modified: list[str],
+    min_threshold: float,
+) -> int:
+    """Evaluate coverage gate on modified files."""
+    all_files: dict[str, dict] = {}
+    if rust_cov:
+        all_files.update(rust_cov.get("files", {}))
+    if py_cov:
+        all_files.update(py_cov.get("files", {}))
+
+    matched_modified = get_matched_modified_files(modified, all_files)
+    failed_gate = check_modified_coverage_gate(matched_modified, min_threshold)
+
+    if failed_gate:
+        for fname, pct in failed_gate:
+            print(
+                f"::error file={fname},title=Coverage Quality Gate Failed::"
+                f"PR modified file coverage ({pct:.2f}%) is below required threshold of "
+                f"{min_threshold:.1f}% (must be at least Good >= 60.0%)."
+            )
+        print(
+            f"\n❌ Coverage Quality Gate Failed: {len(failed_gate)} PR modified file(s) below "
+            f"{min_threshold:.1f}% coverage.",
+            file=sys.stderr,
+        )
+        return 1
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Generate unified coverage report.")
     parser.add_argument("--rust-json", type=Path, default=Path("coverage-rust.json"))
@@ -362,11 +411,34 @@ def main() -> int:
         default=COVERAGE_GOOD_THRESHOLD,
         help="Minimum coverage percent required for modified files (default: 60.0%%)",
     )
+    parser.add_argument(
+        "--check",
+        "--dry-run",
+        action="store_true",
+        help="Check presence of input coverage files and modified files without failing exit codes",
+    )
     args = parser.parse_args()
 
-    rust_cov = parse_rust_coverage(args.rust_json)
-    py_cov = parse_python_coverage([args.python_json, args.python_db_json])
+    repo_root = find_repo_root()
+
+    def _resolve(p: Path) -> Path:
+        if not p.is_absolute() and not p.exists() and (repo_root / p).exists():
+            return repo_root / p
+        return p
+
+    rust_path = _resolve(args.rust_json)
+    py_paths = [_resolve(args.python_json), _resolve(args.python_db_json)]
+    rust_cov = parse_rust_coverage(rust_path)
+    py_cov = parse_python_coverage(py_paths)
     modified = get_modified_files(args.base_ref)
+
+    if args.check:
+        print(f"REPO_ROOT         : {repo_root}")
+        print(f"Rust coverage     : {rust_path} (exists: {rust_path.exists()})")
+        print(f"Python coverage 1 : {py_paths[0]} (exists: {py_paths[0].exists()})")
+        print(f"Python coverage 2 : {py_paths[1]} (exists: {py_paths[1].exists()})")
+        print(f"Modified files    : {len(modified)} files detected vs {args.base_ref}")
+        return 0
 
     report_md = generate_markdown(rust_cov, py_cov, modified, min_threshold=args.min_modified_coverage)
 
@@ -379,8 +451,10 @@ def main() -> int:
         )
 
     if args.output_md:
-        args.output_md.write_text(report_md, encoding="utf-8")
-        print(f"Coverage report written to {args.output_md}")
+        out_path = args.output_md if args.output_md.is_absolute() else repo_root / args.output_md
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(report_md, encoding="utf-8")
+        print(f"Coverage report written to {out_path}")
 
     # Output to stdout
     print(report_md)
@@ -391,31 +465,7 @@ def main() -> int:
         with open(step_summary, "a", encoding="utf-8") as f:
             f.write("\n" + report_md + "\n")
 
-    # Evaluate Quality Gate on PR modified files
-    all_files = {}
-    if rust_cov:
-        all_files.update(rust_cov.get("files", {}))
-    if py_cov:
-        all_files.update(py_cov.get("files", {}))
-
-    matched_modified = get_matched_modified_files(modified, all_files)
-    failed_gate = check_modified_coverage_gate(matched_modified, args.min_modified_coverage)
-
-    if failed_gate:
-        for fname, pct in failed_gate:
-            print(
-                f"::error file={fname},title=Coverage Quality Gate Failed::"
-                f"PR modified file coverage ({pct:.2f}%) is below required threshold of "
-                f"{args.min_modified_coverage:.1f}% (must be at least Good >= 60.0%)."
-            )
-        print(
-            f"\n❌ Coverage Quality Gate Failed: {len(failed_gate)} PR modified file(s) below "
-            f"{args.min_modified_coverage:.1f}% coverage.",
-            file=sys.stderr,
-        )
-        return 1
-
-    return 0
+    return _evaluate_quality_gate(rust_cov, py_cov, modified, args.min_modified_coverage)
 
 
 if __name__ == "__main__":
