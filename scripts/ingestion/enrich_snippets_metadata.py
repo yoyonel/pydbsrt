@@ -19,6 +19,21 @@ import sys
 from pathlib import Path
 
 
+def find_repo_root() -> Path:
+    """Finds repository root dynamically with appliance fallback."""
+    curr = Path(__file__).resolve().parent
+    for parent in [curr, *curr.parents]:
+        if (parent / ".git").is_dir():
+            return parent
+    appliance_path = Path.home() / "dbsrt"
+    if appliance_path.is_dir():
+        return appliance_path
+    return Path.cwd()
+
+
+REPO_ROOT = find_repo_root()
+
+
 def parse_video_metadata(filename: str, category: str = "", nas_path: str = "") -> dict:
     stem = Path(filename).stem
     if stem.endswith("_mid15s"):
@@ -115,6 +130,72 @@ def parse_video_metadata(filename: str, category: str = "", nas_path: str = "") 
     return meta
 
 
+def format_media_sql_insert(orig_video: str, meta: dict, phash_frames: int, phash_rel: str) -> str:
+    """Formats SQL statement for inserting or updating a media row."""
+    clean_title = (meta["title"] or orig_video).replace("'", "''")
+    db_name = orig_video.replace("'", "''")
+    year_val = str(meta["year"]) if meta["year"] else "NULL"
+    country_val = f"'{meta['country']}'" if meta["country"] else "NULL"
+    lang_val = f"'{meta['language']}'" if meta["language"] else "NULL"
+    season_val = str(meta["season"]) if meta["season"] else "NULL"
+    episode_val = str(meta["episode"]) if meta["episode"] else "NULL"
+    res_val = f"'{meta['resolution']}'" if meta["resolution"] else "NULL"
+    codec_val = f"'{meta['video_codec']}'" if meta["video_codec"] else "NULL"
+    meta_json = json.dumps(meta, ensure_ascii=False).replace("'", "''")
+
+    return (
+        f"INSERT INTO medias (name, title, year, country, language, season, episode, resolution, video_codec, frame_count, phash_path, metadata) "
+        f"VALUES ('{db_name}', '{clean_title}', {year_val}, {country_val}, {lang_val}, {season_val}, {episode_val}, {res_val}, {codec_val}, {phash_frames}, '{phash_rel}', '{meta_json}'::jsonb) "
+        f"ON CONFLICT (name) DO UPDATE SET "
+        f"title = EXCLUDED.title, year = EXCLUDED.year, country = EXCLUDED.country, language = EXCLUDED.language, "
+        f"season = EXCLUDED.season, episode = EXCLUDED.episode, resolution = EXCLUDED.resolution, video_codec = EXCLUDED.video_codec, "
+        f"frame_count = EXCLUDED.frame_count, phash_path = EXCLUDED.phash_path, metadata = EXCLUDED.metadata;"
+    )
+
+
+def process_snippet_item(mp4: Path, manifest: dict[str, dict], snippets_dir: Path) -> tuple[dict, str]:
+    """Extracts metadata and formats SQL for a single snippet item."""
+    stem = mp4.stem
+    phash_file = snippets_dir / f"{stem}.phash"
+    phash_frames = (phash_file.stat().st_size - 4) // 8 if phash_file.exists() else 0
+
+    matched_info = None
+    for _, info in manifest.items():
+        if info.get("mp4_file") == mp4.name:
+            matched_info = info
+            break
+
+    category = matched_info.get("category", "") if matched_info else ""
+    orig_video = matched_info.get("video", mp4.name) if matched_info else mp4.name
+    total_dur = matched_info.get("total_duration_s") if matched_info else None
+    start_time = matched_info.get("start_time_s") if matched_info else None
+
+    meta = parse_video_metadata(orig_video, category=category)
+    meta["snippet_mp4"] = mp4.name
+    meta["snippet_bytes"] = mp4.stat().st_size
+    meta["phash_file"] = phash_file.name if phash_file.exists() else None
+    meta["phash_frames"] = phash_frames
+    meta["total_duration_s"] = total_dur
+    meta["snippet_offset_s"] = start_time
+
+    phash_rel = f"data/snippets/{phash_file.name}" if phash_file.exists() else ""
+    sql_line = format_media_sql_insert(orig_video, meta, phash_frames, phash_rel)
+    return meta, sql_line
+
+
+def perform_check(snippets_dir: Path, output_json: Path, output_sql: Path) -> None:
+    """Performs sanity check of snippets directory and manifest."""
+    print("[CHECK] Mode verification activé.")
+    print(f"[CHECK] REPO_ROOT : {REPO_ROOT}")
+    print(f"[CHECK] Snippets dir : {snippets_dir} (exists: {snippets_dir.is_dir()})")
+    mp4_count = len(list(snippets_dir.glob("*_mid15s.mp4"))) if snippets_dir.is_dir() else 0
+    manifest_file = snippets_dir / "manifest.json"
+    print(f"[CHECK] Found snippets : {mp4_count} (*_mid15s.mp4)")
+    print(f"[CHECK] manifest.json : {manifest_file} (exists: {manifest_file.is_file()})")
+    print(f"[CHECK] Output JSON : {output_json}")
+    print(f"[CHECK] Output SQL : {output_sql}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Enrich extracted NAS video snippets with structured metadata for database insertion."
@@ -122,23 +203,30 @@ def main() -> int:
     parser.add_argument(
         "--snippets-dir",
         type=Path,
-        default=Path("data/snippets"),
+        default=REPO_ROOT / "data/snippets",
         help="Directory containing snippets and phash files (default: data/snippets)",
     )
     parser.add_argument(
         "--output-json",
         type=Path,
-        default=Path("data/snippets/metadata.json"),
+        default=REPO_ROOT / "data/snippets/metadata.json",
         help="Output JSON file path (default: data/snippets/metadata.json)",
     )
     parser.add_argument(
         "--output-sql",
         type=Path,
-        default=Path("data/snippets/medias_metadata.sql"),
+        default=REPO_ROOT / "data/snippets/medias_metadata.sql",
         help="Output SQL file path (default: data/snippets/medias_metadata.sql)",
+    )
+    parser.add_argument(
+        "--check", "--dry-run", action="store_true", help="Perform sanity checks without writing outputs"
     )
 
     args = parser.parse_args()
+
+    if args.check:
+        perform_check(args.snippets_dir, args.output_json, args.output_sql)
+        return 0
 
     if not args.snippets_dir.exists():
         print(f"❌ Snippets directory not found: {args.snippets_dir}", file=sys.stderr)
@@ -178,53 +266,8 @@ def main() -> int:
     ]
 
     for mp4 in mp4_files:
-        stem = mp4.stem
-        phash_file = args.snippets_dir / f"{stem}.phash"
-        phash_frames = (phash_file.stat().st_size - 4) // 8 if phash_file.exists() else 0
-
-        # Try to match manifest
-        matched_info = None
-        for orig_name, info in manifest.items():
-            if info.get("mp4_file") == mp4.name:
-                matched_info = info
-                break
-
-        category = matched_info.get("category", "") if matched_info else ""
-        orig_video = matched_info.get("video", mp4.name) if matched_info else mp4.name
-        total_dur = matched_info.get("total_duration_s") if matched_info else None
-        start_time = matched_info.get("start_time_s") if matched_info else None
-
-        meta = parse_video_metadata(orig_video, category=category)
-        meta["snippet_mp4"] = mp4.name
-        meta["snippet_bytes"] = mp4.stat().st_size
-        meta["phash_file"] = phash_file.name if phash_file.exists() else None
-        meta["phash_frames"] = phash_frames
-        meta["total_duration_s"] = total_dur
-        meta["snippet_offset_s"] = start_time
-
+        meta, sql_line = process_snippet_item(mp4, manifest, args.snippets_dir)
         enriched_catalog[mp4.stem] = meta
-
-        # Format SQL statement
-        clean_title = (meta["title"] or orig_video).replace("'", "''")
-        db_name = orig_video.replace("'", "''")
-        phash_rel = f"data/snippets/{phash_file.name}" if phash_file.exists() else ""
-        year_val = str(meta["year"]) if meta["year"] else "NULL"
-        country_val = f"'{meta['country']}'" if meta["country"] else "NULL"
-        lang_val = f"'{meta['language']}'" if meta["language"] else "NULL"
-        season_val = str(meta["season"]) if meta["season"] else "NULL"
-        episode_val = str(meta["episode"]) if meta["episode"] else "NULL"
-        res_val = f"'{meta['resolution']}'" if meta["resolution"] else "NULL"
-        codec_val = f"'{meta['video_codec']}'" if meta["video_codec"] else "NULL"
-        meta_json = json.dumps(meta, ensure_ascii=False).replace("'", "''")
-
-        sql_line = (
-            f"INSERT INTO medias (name, title, year, country, language, season, episode, resolution, video_codec, frame_count, phash_path, metadata) "
-            f"VALUES ('{db_name}', '{clean_title}', {year_val}, {country_val}, {lang_val}, {season_val}, {episode_val}, {res_val}, {codec_val}, {phash_frames}, '{phash_rel}', '{meta_json}'::jsonb) "
-            f"ON CONFLICT (name) DO UPDATE SET "
-            f"title = EXCLUDED.title, year = EXCLUDED.year, country = EXCLUDED.country, language = EXCLUDED.language, "
-            f"season = EXCLUDED.season, episode = EXCLUDED.episode, resolution = EXCLUDED.resolution, video_codec = EXCLUDED.video_codec, "
-            f"frame_count = EXCLUDED.frame_count, phash_path = EXCLUDED.phash_path, metadata = EXCLUDED.metadata;"
-        )
         sql_statements.append(sql_line)
 
     with open(args.output_json, "w", encoding="utf-8") as f:

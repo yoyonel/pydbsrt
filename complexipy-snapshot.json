@@ -118,10 +118,6 @@
       {
         "name": "parse_video_metadata",
         "complexity": 27
-      },
-      {
-        "name": "main",
-        "complexity": 41
       }
     ]
   },
