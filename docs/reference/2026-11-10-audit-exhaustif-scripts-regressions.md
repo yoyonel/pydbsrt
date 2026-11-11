@@ -7,18 +7,18 @@
 ## 1. Synthèse Factuelle Globale
 
 - **Total scripts opérationnels** : 96 (66 Python, 30 Shell)
-- **Scripts prouvés en exécution réelle live (session)** : 31 / 96 (32.3%) — *Seuls scripts réellement testés de bout en bout.*
+- **Scripts prouvés en exécution réelle live (session)** : 32 / 96 (33.3%) — *Seuls scripts réellement testés de bout en bout.*
 - **Scripts en régression directe (appels internes cassés)** : 0 / 96 (0.0%) — *100% des régressions actives résolues.*
 - **Nombre total de références internes rompues actives** : 0 (13 références appliance distantes documentées)
 - **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 46 / 96 (47.9%) — *Imports seuls, logique non exécutée.*
-- **Scripts avec analyse statique seule (`bash -n`)** : 19 / 96 (19.8%) — *Zéro runtime.*
+- **Scripts avec analyse statique seule (`bash -n`)** : 18 / 96 (18.8%) — *Zéro runtime.*
 
 ```mermaid
 pie title Statut Réel des 96 Scripts (Rigueur Fact-First)
-    "Prouvé Live de Bout en Bout" : 31
+    "Prouvé Live de Bout en Bout" : 32
     "Régression Interne Cassée" : 0
     "Sanity Check CLI Seul (Non Validé)" : 46
-    "Statique / Syntaxe Seul (Non Exécuté)" : 19
+    "Statique / Syntaxe Seul (Non Exécuté)" : 18
 ```
 
 ---
@@ -132,7 +132,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 | `scripts/ingestion/extract_embedded_subs.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/ingestion/extract_nas_snippets.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/ingestion/fill_nas_snippets_catalog.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
-| `scripts/ingestion/init_couplings_seed.sh` | ⚪ **Statique Seul (Non Exécuté)** | Shell | À évaluer | Syntaxe `bash -n` & `shellcheck` OK. Zéro exécution runtime. |
+| `scripts/ingestion/init_couplings_seed.sh` | 🟢 **Prouvé Live** | Shell | Moyenne (Amorçage CI/CD & Tests d'Intégration) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des fixtures et support --help / --check. Validé hors racine (code 0). |
 | `scripts/ingestion/media_add.sh` | ⚪ **Statique Seul (Non Exécuté)** | Shell | À évaluer | Syntaxe `bash -n` & `shellcheck` OK. Zéro exécution runtime. |
 | `scripts/ingestion/phash_dedupe.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/ingestion/phash_names.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
@@ -344,3 +344,10 @@ Pour sortir de cet état sans spéculation, chaque script des sections 1 et 2 do
 - **Diagnostic** : Chemins relatifs flottants (`ASSETS_DIR`, `MEDIA_FILE`), variables de PID non initialisées risquant un crash `set -u` dans `cleanup`, absence d'ancrage `REPO_ROOT` dynamique et absence de flags d'inspection `--help` ou `--check`.
 - **Remédiation** : Découverte dynamique de `REPO_ROOT` avec fallback appliance `~/dbsrt`, préfixage absolu de tous les répertoires et fichiers d'entrée (`${REPO_ROOT}/...`), initialisation sécurisée des PIDs avec extinction propre, et ajout des options CLI `--help` / `-h` et `--check` / `--dry-run` avec validation de la présence des 5 binaires système (`Xvfb`, `marco`, `ffmpeg`, `xdotool`, `vlc`).
 - **Validation Live** : Validé live à 100% : exécution hors racine `(cd crates && bash ../scripts/benchmarks/record_vlsub_demo.sh --help)` et `(--check)` sans erreur (code 0, validation des 5 binaires présents et détection exacte de `REPO_ROOT`), linters `shellcheck` et `shfmt` conformes.
+
+### Fiche 21 : `scripts/ingestion/init_couplings_seed.sh`
+- **Rôle** : Initialisateur ultra-léger sans dépendance binaire ni PostgreSQL, copiant la fixture CI `tests/fixtures/couplings.seed.json` vers `data/SRT/couplings.json` si absent.
+- **KPI / Importance** : `Moyenne (Amorçage CI/CD & Tests d'Intégration)`.
+- **Diagnostic** : Chemins relatifs dépendant strictement du CWD d'exécution (`data/SRT`, `tests/fixtures/...`), absence de découverte dynamique de `REPO_ROOT`, et absence d'options CLI `--help` / `--check`.
+- **Remédiation** : Découverte dynamique de `REPO_ROOT` avec fallback appliance `~/dbsrt`, préfixage absolu des chemins d'entrée/sortie (`${REPO_ROOT}/...`), et ajout des options CLI `--help` / `-h` et `--check` / `--dry-run`.
+- **Validation Live** : Validé live à 100% : exécution hors racine `(cd crates && bash ../scripts/ingestion/init_couplings_seed.sh --help)` et `(--check)` sans erreur (code 0, détection de la fixture source et de la cible existante), linters `shellcheck` et `shfmt` conformes.

@@ -90,6 +90,9 @@ PROVEN_LIVE: dict[str, str] = {
         "Résolution dynamique REPO_ROOT et chemin binaire DBSRT_BIN absolu (avec fallback target/debug et garde explicite). En-tête réaligné."
         " Validé et prouvé live sur exécution hors racine (--help) et test E2E fonctionnel complet sur registre temporaire isolé (re-labellisation und -> fr, payload JSON conforme)."
     ),
+    "scripts/ingestion/init_couplings_seed.sh": (
+        "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des fixtures et support --help / --check. Validé hors racine (code 0)."
+    ),
     "scripts/tooling/check_pr_body.py": (
         "Chemins docstring et commentaires réalignés. 16/16 tests unitaires PASS (test_check_pr_body.py)."
         " Prouvé live en CLI stdin (rejet corps vide exit 1, validation corps conforme avec preuve SVG exit 0)."
@@ -120,6 +123,7 @@ SCRIPT_KPIS: dict[str, str] = {
     "scripts/infra/rpi4/rpi4_standalone.sh": "Élevée (Déploiement Serveur Physique RPi4)",
     "scripts/infra/rpi4/rpi4_supervisor_ctl.sh": "Élevée (Contrôleur de Déploiement & Lifecycle du Superviseur RPi4)",
     "scripts/ingestion/coupling_relabel.sh": "Moyenne (Outil de Curation du Registre Zero-DB)",
+    "scripts/ingestion/init_couplings_seed.sh": "Moyenne (Amorçage CI/CD & Tests d'Intégration)",
     "scripts/tooling/check_pr_body.py": "Critique (Garde-fou CI/CD & Qualité des PRs)",
     "scripts/tooling/generate_audit_doc.py": "Moyenne (Outil de Métrologie & Méta-Documentation)",
     "scripts/tooling/generate_nightly_report_enhanced.py": "Moyenne (Métrologie & Profiling Diátaxis)",
