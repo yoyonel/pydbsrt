@@ -32,9 +32,24 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+
+def find_repo_root() -> Path:
+    """Finds git repository root with appliance fallback (~/dbsrt)."""
+    p = Path(__file__).resolve().parent
+    for parent in [p] + list(p.parents):
+        if (parent / ".git").is_dir():
+            return parent
+    home_dbsrt = Path.home() / "dbsrt"
+    if home_dbsrt.is_dir():
+        return home_dbsrt
+    return Path.cwd()
+
+
+REPO_ROOT: Path = find_repo_root()
+
 # Operational & Formatting Constants
 DEFAULT_REFRESH_INTERVAL_SECS: float = 1.0
-DEFAULT_EVENTS_FILE: Path = Path("data/reports/batch_tvshow_nightly.jsonl")
+DEFAULT_EVENTS_FILE: Path = REPO_ROOT / "data/reports/batch_tvshow_nightly.jsonl"
 BYTES_PER_KIB: int = 1024
 BYTES_PER_MIB: int = 1024 * 1024
 BYTES_PER_GIB: int = 1024 * 1024 * 1024
@@ -632,6 +647,59 @@ def load_historical_records(events_file: Path) -> List[Dict[str, Any]]:
     return items
 
 
+def _collect_recent_records(history_records: List[Dict[str, Any]], now_ts: float) -> List[Dict[str, Any]]:
+    """Filters history records to the last 2 hours."""
+    recent: List[Dict[str, Any]] = []
+    for r in history_records:
+        end_iso = r.get("end_iso")
+        if not end_iso:
+            continue
+        try:
+            if now_ts - datetime.datetime.fromisoformat(end_iso).timestamp() < 7200:
+                recent.append(r)
+        except (ValueError, TypeError):
+            pass
+    return recent
+
+
+def _collect_session_starts(
+    recent_records: List[Dict[str, Any]], active_jobs: List[ActiveJobTelemetry], now_ts: float
+) -> List[float]:
+    """Collects start timestamps for active and recent session jobs."""
+    starts: List[float] = []
+    for r in recent_records:
+        start_iso = r.get("start_iso")
+        if not start_iso:
+            continue
+        try:
+            starts.append(datetime.datetime.fromisoformat(start_iso).timestamp())
+        except (ValueError, TypeError):
+            pass
+    if active_jobs:
+        starts.append(min(now_ts - j.elapsed_secs for j in active_jobs))
+    return starts
+
+
+def _compute_session_throughput(
+    history_records: List[Dict[str, Any]], active_jobs: List[ActiveJobTelemetry]
+) -> tuple[float, float, int, float]:
+    """Computes session total GiB, rate in MiB/s, total media count and duration over the last 2 hours."""
+    now_ts = time.time()
+    recent_records = _collect_recent_records(history_records, now_ts)
+    session_bytes = sum(r.get("file_size_bytes", 0) for r in recent_records) + sum(j.read_bytes for j in active_jobs)
+    session_starts = _collect_session_starts(recent_records, active_jobs, now_ts)
+
+    session_rate_mib_s = 0.0
+    session_dur_secs = 0.0
+    if session_starts:
+        session_dur_secs = max(now_ts - min(session_starts), 1.0)
+        session_rate_mib_s = (session_bytes / BYTES_PER_MIB) / session_dur_secs
+
+    session_gib = session_bytes / BYTES_PER_GIB
+    session_count = len(recent_records) + len(active_jobs)
+    return session_gib, session_rate_mib_s, session_count, session_dur_secs
+
+
 def render_dashboard(
     active_jobs: List[ActiveJobTelemetry],
     history_records: List[Dict[str, Any]],
@@ -651,39 +719,9 @@ def render_dashboard(
     host_ram_total_gib = mem.total / BYTES_PER_GIB
 
     total_active_rate = sum(j.current_rate_mib_s for j in active_jobs)
-
-    # Compute global session throughput across recent batch entries + active jobs
-    now_dt = datetime.datetime.now()
-    recent_session_records = []
-    for r in history_records:
-        end_iso = r.get("end_iso")
-        if end_iso:
-            try:
-                end_dt = datetime.datetime.fromisoformat(end_iso)
-                if (now_dt - end_dt).total_seconds() < 7200:  # Last 2 hours
-                    recent_session_records.append(r)
-            except ValueError:
-                pass
-
-    session_bytes = sum(r.get("file_size_bytes", 0) for r in recent_session_records) + sum(
-        j.read_bytes for j in active_jobs
+    session_gib, session_rate_mib_s, session_count, session_dur_secs = _compute_session_throughput(
+        history_records, active_jobs
     )
-    session_starts = [
-        datetime.datetime.fromisoformat(r["start_iso"]) for r in recent_session_records if r.get("start_iso")
-    ]
-    if active_jobs:
-        active_earliest_start = min(now_dt - datetime.timedelta(seconds=j.elapsed_secs) for j in active_jobs)
-        session_starts.append(active_earliest_start)
-
-    session_rate_mib_s = 0.0
-    session_dur_secs = 0.0
-    if session_starts:
-        earliest_start = min(session_starts)
-        session_dur_secs = max((now_dt - earliest_start).total_seconds(), 1.0)
-        session_rate_mib_s = (session_bytes / BYTES_PER_MIB) / session_dur_secs
-
-    session_gib = session_bytes / BYTES_PER_GIB
-    session_count = len(recent_session_records) + len(active_jobs)
 
     # 1. Header Banner
     header_text = Text()
@@ -1027,6 +1065,39 @@ def render_dashboard(
     )
 
 
+def _update_selected_index(delta: int, current: int) -> int:
+    """Updates selected index clamped to active jobs length."""
+    with TELEMETRY_LOCK:
+        n_jobs = len(SHARED_ACTIVE_JOBS)
+    if n_jobs > 0:
+        return max(0, min(n_jobs - 1, current + delta))
+    return 0
+
+
+def _handle_check_mode(args: argparse.Namespace) -> int:
+    has_intel_gpu = Path("/usr/bin/intel_gpu_top").is_file()
+    records_count = len(load_historical_records(args.events_file)) if args.events_file.is_file() else 0
+    active_jobs = scan_active_jobs()
+    print("=== DBSrt Top Monitor Inspection ===")
+    print(f"✓ REPO_ROOT     : {REPO_ROOT}")
+    print(
+        f"✓ Events file   : {args.events_file} ({'found, ' + str(records_count) + ' records' if records_count else ('found empty' if args.events_file.is_file() else 'missing')})"
+    )
+    print(f"✓ Active jobs   : {len(active_jobs)} in-flight encoding/decoding processes")
+    print(f"✓ GPU tooling   : {'intel_gpu_top available' if has_intel_gpu else 'headless/CPU mode'}")
+    return 0
+
+
+def _handle_stats_mode(console: Console, events_file: Path) -> int:
+    time.sleep(0.35)  # Allow background monitor to catch initial snapshot
+    records = load_historical_records(events_file)
+    active = scan_active_jobs()
+    dashboard = render_dashboard(active, records, show_stats=True, show_recent=True)
+    console.print(dashboard)
+    stop_gpu_monitoring()
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="dbsrt top: Real-time TUI Process & Ingestion Monitor")
     parser.add_argument(
@@ -1046,19 +1117,23 @@ def main() -> int:
         action="store_true",
         help="Print statistical analysis snapshot and exit immediately",
     )
+    parser.add_argument(
+        "--check",
+        "--dry-run",
+        dest="check",
+        action="store_true",
+        help="Inspect telemetry paths, active processes and GPU tooling without opening TUI",
+    )
     args = parser.parse_args()
+
+    if args.check:
+        return _handle_check_mode(args)
 
     console = Console()
     start_gpu_monitoring_thread()
 
     if args.stats:
-        time.sleep(0.35)  # Allow background monitor to catch initial snapshot
-        records = load_historical_records(args.events_file)
-        active = scan_active_jobs()
-        dashboard = render_dashboard(active, records, show_stats=True, show_recent=True)
-        console.print(dashboard)
-        stop_gpu_monitoring()
-        return 0
+        return _handle_stats_mode(console, args.events_file)
 
     show_stats = False  # Collapsed by default
     show_recent = False  # Collapsed by default
@@ -1138,17 +1213,11 @@ def main() -> int:
                             show_recent = not show_recent
                             needs_redraw = True
                         elif key in ("UP", "k", "K"):
-                            with TELEMETRY_LOCK:
-                                n_jobs = len(SHARED_ACTIVE_JOBS)
-                            if n_jobs > 0:
-                                selected_index = max(0, selected_index - 1)
-                                needs_redraw = True
+                            selected_index = _update_selected_index(-1, selected_index)
+                            needs_redraw = True
                         elif key in ("DOWN", "j", "J"):
-                            with TELEMETRY_LOCK:
-                                n_jobs = len(SHARED_ACTIVE_JOBS)
-                            if n_jobs > 0:
-                                selected_index = min(n_jobs - 1, selected_index + 1)
-                                needs_redraw = True
+                            selected_index = _update_selected_index(1, selected_index)
+                            needs_redraw = True
                         elif key in ("ENTER", "SPACE", "m", "M"):
                             if is_log_modal_open:
                                 is_log_modal_open = False

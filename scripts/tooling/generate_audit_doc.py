@@ -56,6 +56,9 @@ PROVEN_LIVE: dict[str, str] = {
     "scripts/infra/local/agent_relay.sh": (
         "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus target/ et support --help. Validé hors racine (status code 0)."
     ),
+    "scripts/infra/local/dbsrt_top.py": (
+        "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), correction du mismatch timezone sur le débit de session, refactoring de complexité (main 55 <= 62), et support CLI --stats et --check. Validé live hors racine (1 392 médias analysés, code 0)."
+    ),
     "scripts/infra/local/distributed_dev_stack.sh": (
         "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus data/ et support --help. Validé hors racine (status code 0)."
     ),
@@ -181,6 +184,7 @@ SCRIPT_KPIS: dict[str, str] = {
     "scripts/benchmarks/record_vlsub_demo.sh": "Élevée (Doc Diátaxis & Démo Vidéo VLSub)",
     "scripts/e2e/o2switch_e2e.py": "Critique (Recette E2E Cloud o2switch)",
     "scripts/infra/local/agent_relay.sh": "Élevée (Architecture Hybride & Passerelle Locale-Cloud)",
+    "scripts/infra/local/dbsrt_top.py": "Critique (TUI Python de Référence & Supervision Décisionnelle)",
     "scripts/infra/local/distributed_dev_stack.sh": "Moyenne (Dev & Simulation Topologie Hybride)",
     "scripts/infra/local/install_debian.sh": "Élevée (Déploiement Poste Développeur & Appliance Debian)",
     "scripts/infra/local/load_env.sh": "Critique (Socle d'Environnement & Sécurité des Credentials)",

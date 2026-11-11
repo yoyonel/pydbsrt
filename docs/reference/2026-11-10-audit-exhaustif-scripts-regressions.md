@@ -7,17 +7,17 @@
 ## 1. Synthèse Factuelle Globale
 
 - **Total scripts opérationnels** : 96 (66 Python, 30 Shell)
-- **Scripts prouvés en exécution réelle live (session)** : 54 / 96 (56.2%) — *Seuls scripts réellement testés de bout en bout.*
+- **Scripts prouvés en exécution réelle live (session)** : 55 / 96 (57.3%) — *Seuls scripts réellement testés de bout en bout.*
 - **Scripts en régression directe (appels internes cassés)** : 0 / 96 (0.0%) — *100% des régressions actives résolues.*
 - **Nombre total de références internes rompues actives** : 0 (13 références appliance distantes documentées)
-- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 42 / 96 (43.8%) — *Imports seuls, logique non exécutée.*
+- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 41 / 96 (42.7%) — *Imports seuls, logique non exécutée.*
 - **Scripts avec analyse statique seule (`bash -n`)** : 0 / 96 (0.0%) — *Zéro runtime.*
 
 ```mermaid
 pie title Statut Réel des 96 Scripts (Rigueur Fact-First)
-    "Prouvé Live de Bout en Bout" : 54
+    "Prouvé Live de Bout en Bout" : 55
     "Régression Interne Cassée" : 0
-    "Sanity Check CLI Seul (Non Validé)" : 42
+    "Sanity Check CLI Seul (Non Validé)" : 41
     "Statique / Syntaxe Seul (Non Exécuté)" : 0
 ```
 
@@ -84,7 +84,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 | Script | Statut Réel | Type | KPI / Importance | Détail / Diagnostic Contradictoire |
 | :--- | :---: | :---: | :---: | :--- |
 | `scripts/infra/local/agent_relay.sh` | 🟢 **Prouvé Live** | Shell | Élevée (Architecture Hybride & Passerelle Locale-Cloud) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus target/ et support --help. Validé hors racine (status code 0). |
-| `scripts/infra/local/dbsrt_top.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
+| `scripts/infra/local/dbsrt_top.py` | 🟢 **Prouvé Live** | Python | Critique (TUI Python de Référence & Supervision Décisionnelle) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), correction du mismatch timezone sur le débit de session, refactoring de complexité (main 55 <= 62), et support CLI --stats et --check. Validé live hors racine (1 392 médias analysés, code 0). |
 | `scripts/infra/local/distributed_dev_stack.sh` | 🟢 **Prouvé Live** | Shell | Moyenne (Dev & Simulation Topologie Hybride) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus data/ et support --help. Validé hors racine (status code 0). |
 | `scripts/infra/local/install_debian.sh` | 🟢 **Prouvé Live** | Shell | Élevée (Déploiement Poste Développeur & Appliance Debian) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus, manifest path et support --help. Validé hors racine (status PID 1903, code 0). |
 | `scripts/infra/local/load_env.sh` | 🟢 **Prouvé Live** | Shell | Critique (Socle d'Environnement & Sécurité des Credentials) | Résolution dynamique REPO_ROOT par défaut, bloc autonome CLI avec support --help / --check et masquage des secrets. Validé hors racine (code 0). |
@@ -505,3 +505,10 @@ Pour sortir de cet état sans spéculation, chaque script des sections 1 et 2 do
 - **Diagnostic** : Résolution fragile de `repo_root` basée sur `parent.parent`, imports statiques du batch worker susceptibles d'échouer hors racine, et absence d'option CLI `--check` / `--dry-run`.
 - **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, injection normalisée dans `sys.path`, tolérance double layout pour l'import (`scripts.workers.*` et `scripts.*`), et ajout des options CLI `--help` / `-h` et `--check` / `--dry-run`.
 - **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/workers/o2switch_phash_migrate.py --check)` sans erreur (code 0), déploiement SSH sur Cloud o2switch et exécution réelle sur l'hôte distant avec inspection du catalogue pHash et des accès NAS confirmés (code 0).
+
+### Fiche 44 : `scripts/infra/local/dbsrt_top.py`
+- **Rôle** : Moniteur de supervision temps réel en mode TUI (Rich) visualisant les tâches d'extraction pHash locales et distantes, les flux de décodage GPU/CPU, les débits réseau CIFS et les métriques historiques globales (`task top`).
+- **KPI / Importance** : `Critique (TUI Python de Référence & Supervision Décisionnelle)`.
+- **Diagnostic** : Chemin d'événements de télémétrie relatif au CWD (`data/reports/batch_tvshow_nightly.jsonl`), bug de mismatch timezone sur le calcul du débit moyen de session (soustractions d'objets `datetime` avec/sans fuseau horaire), et absence d'option CLI `--check` / `--dry-run`.
+- **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, harmonisation des calculs temporels sur timestamps POSIX UTC, décomposition modulaire de la complexité cognitive (`main` 55 $\le$ 62), et ajout des options CLI `--help`, `--stats` et `--check` / `--dry-run`.
+- **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/infra/local/dbsrt_top.py --check)` et `(--stats)` sans erreur (code 0, rendu visuel parfait analysant 1 392 médias décodés), linters `ruff`, `complexipy` et `pyright` conformes.

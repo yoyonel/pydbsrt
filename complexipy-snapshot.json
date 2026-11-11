@@ -103,7 +103,7 @@
       },
       {
         "name": "main",
-        "complexity": 62
+        "complexity": 55
       },
       {
         "name": "scan_active_jobs",
@@ -111,7 +111,7 @@
       },
       {
         "name": "render_dashboard",
-        "complexity": 112
+        "complexity": 97
       }
     ]
   },
