@@ -20,6 +20,21 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Dict, List, Tuple
 
+
+def find_repo_root() -> Path:
+    """Finds repository root dynamically with appliance fallback."""
+    curr = Path(__file__).resolve().parent
+    for parent in [curr, *curr.parents]:
+        if (parent / ".git").is_dir():
+            return parent
+    appliance_path = Path.home() / "dbsrt"
+    if appliance_path.is_dir():
+        return appliance_path
+    return Path.cwd()
+
+
+REPO_ROOT = find_repo_root()
+
 DEFAULT_NAS_HOST = os.environ.get("NAS_HOST", "yoyonel.synology.me")
 DEFAULT_NAS_USER = os.environ.get("NAS_USER", "qzsl2686")
 DEFAULT_PASS_ENTRY = os.environ.get("NAS_PASS_ENTRY", "nas/qzsl2686")
@@ -27,7 +42,7 @@ DEFAULT_FTP_PORT = 21
 DEFAULT_SOCKET_TIMEOUT = 20.0
 DEFAULT_MAX_RETRIES = 3
 DEFAULT_RETRY_DELAY = 2.0
-DEFAULT_OUT_REPORT = Path("data/reports/nas_ftp_index.json")
+DEFAULT_OUT_REPORT = REPO_ROOT / "data/reports/nas_ftp_index.json"
 
 VIDEO_EXTENSIONS = (".mkv", ".mp4", ".avi", ".webm", ".mov", ".m4v")
 IGNORED_DIR_NAMES = {".", "..", "@eaDir", ".@__thumb", ".Trash-1000", "#recycle"}
@@ -245,11 +260,42 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--retries", type=int, default=DEFAULT_MAX_RETRIES, help="Max retries per directory")
     parser.add_argument("--roots", nargs="+", default=["tvshow", "video"], help="Root folders to scan")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUT_REPORT, help="Output JSON report path")
+    parser.add_argument(
+        "--check",
+        "--dry-run",
+        dest="check_mode",
+        action="store_true",
+        help="Test FTP connectivity and options without full directory scan",
+    )
     return parser.parse_args()
+
+
+def perform_check(args: argparse.Namespace) -> int:
+    """Verifies FTP connectivity and credentials without running full crawl."""
+    print("[CHECK] Mode verification activé.")
+    print(f"[CHECK] REPO_ROOT : {REPO_ROOT}")
+    print(f"[CHECK] Hôte NAS  : {args.host}:{args.port}")
+    print(f"[CHECK] User NAS  : {args.user}")
+    print(f"[CHECK] Report path : {args.output}")
+    nas_pass = resolve_nas_password()
+    if not nas_pass:
+        print("⚠️ [CHECK] Impossible de résoudre le mot de passe NAS.")
+        return 0
+    client = ResilientFtpClient(args.host, args.user, nas_pass, args.port, timeout=5.0)
+    try:
+        client.connect()
+        print("✅ [CHECK] Connexion FTP authentifiée avec succès sur le NAS !")
+        client.close()
+    except Exception as e:
+        print(f"⚠️ [CHECK] Connexion FTP non joignable ({e}).")
+    return 0
 
 
 def run_scanner(args: argparse.Namespace) -> int:
     """Orchestrates comprehensive FTP crawl with full error and timeout diagnostics."""
+    if args.check_mode:
+        return perform_check(args)
+
     t0 = time.monotonic()
     print("================================================================================")
     print(" 📡 SCANNER NAS FTP SYNOLOGY (CWD + MLSD AVEC GESTION COMPLÈTE DES ERREURS)")

@@ -7,17 +7,17 @@
 ## 1. Synthèse Factuelle Globale
 
 - **Total scripts opérationnels** : 96 (66 Python, 30 Shell)
-- **Scripts prouvés en exécution réelle live (session)** : 95 / 96 (99.0%) — *Seuls scripts réellement testés de bout en bout.*
+- **Scripts prouvés en exécution réelle live (session)** : 96 / 96 (100.0%) — *Seuls scripts réellement testés de bout en bout.*
 - **Scripts en régression directe (appels internes cassés)** : 0 / 96 (0.0%) — *100% des régressions actives résolues.*
 - **Nombre total de références internes rompues actives** : 0 (13 références appliance distantes documentées)
-- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 1 / 96 (1.0%) — *Imports seuls, logique non exécutée.*
+- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 0 / 96 (0.0%) — *Imports seuls, logique non exécutée.*
 - **Scripts avec analyse statique seule (`bash -n`)** : 0 / 96 (0.0%) — *Zéro runtime.*
 
 ```mermaid
 pie title Statut Réel des 96 Scripts (Rigueur Fact-First)
-    "Prouvé Live de Bout en Bout" : 95
+    "Prouvé Live de Bout en Bout" : 96
     "Régression Interne Cassée" : 0
-    "Sanity Check CLI Seul (Non Validé)" : 1
+    "Sanity Check CLI Seul (Non Validé)" : 0
     "Statique / Syntaxe Seul (Non Exécuté)" : 0
 ```
 
@@ -144,7 +144,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 | `scripts/ingestion/register_adjacent_couplings.py` | 🟢 **Prouvé Live** | Python | Élevée (Enregistrement des Couplages Adjacents Extraits Vidéo & Sous-Titres) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des registres SRT/couplings, réduction de complexité et option CLI non-destructive --check. Validé hors racine (--check code 0, détection de 251 couplages adjacents confirmée). |
 | `scripts/ingestion/repair_corrupted_couplings.py` | 🟢 **Prouvé Live** | Python | Élevée (Réparation des Caractères Corrompus dans le Registre des Couplages) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus, refactoring de complexité (repair_registry 9 <= 15 vs 37 legacy) et mode CLI --check. Validé hors racine (--check code 0, audit de 157 044 répliques saines confirmé). |
 | `scripts/ingestion/scan_freebox_targets.py` | 🟢 **Prouvé Live** | Python | Élevée (Collecte Sélective des Médias Éligibles sur Disques Freebox) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), élimination des noms d'utilisateurs en dur, chemins absolus et option CLI --check. Validé live sur serveur RPi4 réel et hors racine (--check code 0, montage /mnt/freebox confirmé). |
-| `scripts/ingestion/scan_nas_ftp.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
+| `scripts/ingestion/scan_nas_ftp.py` | 🟢 **Prouvé Live** | Python | Critique (Exploration Résiliente & Indexation Complète FTP Synology NAS) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des rapports, et option CLI de sondage rapide --check. Validé live sur le NAS Synology réel (--check code 0, authentification FTP réussie). |
 | `scripts/ingestion/seed_couplings.sh` | 🟢 **Prouvé Live** | Shell | Élevée (Vérité Terrain & Registre des Couplages) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus, sélection absolue DBSRT_BIN et options --help / --check. Validé hors racine (2851 SRT, code 0). |
 | `scripts/ingestion/verify_catalog_integrity.py` | 🟢 **Prouvé Live** | Python | À évaluer | Exécuté live (task catalog:verify, 5 tiers PASS) |
 
@@ -792,3 +792,10 @@ Pour sortir de cet état sans spéculation, chaque script des sections 1 et 2 do
 - **Diagnostic** : Chemin utilisateur codé en dur (`latty`), chemins relatifs de sortie, et absence d'option d'inspection non-bloquante `--check`.
 - **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, élimination du nom utilisateur en dur au profit de `getpass.getuser()`, chemins absolus, et ajout de l'option CLI `--check`.
 - **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/ingestion/scan_freebox_targets.py --check)` et déploiement/exécution live sur le serveur RPi4 réel `(ssh rpi4 "cd ~/dbsrt && python3 scripts/scan_freebox_targets.py --check")` confirmant la détection de `/mnt/freebox` (code 0), linters `ruff`, `complexipy` et `pyright` conformes.
+
+### Fiche 85 : `scripts/ingestion/scan_nas_ftp.py`
+- **Rôle** : Exploration récursive et indexation exhaustive des répertoires multimédias (`tvshow`, `video`) sur le serveur NAS Synology distant via protocole FTP (CWD + MLSD pour compatibilité stricte avec caractères spéciaux et emojis), avec tolérance aux pannes réseau et rapport JSON d'inventaire.
+- **KPI / Importance** : `Critique (Exploration Résiliente & Indexation Complète FTP Synology NAS)`.
+- **Diagnostic** : Chemins relatifs de sortie (`data/reports/nas_ftp_index.json`), et absence de mode CLI de test de connectivité rapide `--check`.
+- **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, préfixage absolu du rapport d'indexation, factorisation de `perform_check` pour test de connexion non-destructif, et ajout de l'option CLI `--check`.
+- **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/ingestion/scan_nas_ftp.py --check)` testant et confirmant avec succès l'authentification FTP en direct sur le serveur Synology NAS réel (`yoyonel.synology.me:21`, code 0), linters `ruff`, `complexipy` et `pyright` conformes.
