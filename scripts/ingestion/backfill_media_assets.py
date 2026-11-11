@@ -12,7 +12,9 @@ Zero speculation & reproducible execution:
 from __future__ import annotations
 
 import argparse
+import getpass
 import json
+import os
 import struct
 import sys
 import time
@@ -23,10 +25,31 @@ from typing import Any
 import psycopg2
 from psycopg2.extensions import connection as PgConn
 
+
+def find_repo_root() -> Path:
+    """Finds repository root dynamically with appliance fallback."""
+    curr = Path(__file__).resolve().parent
+    for parent in [curr, *curr.parents]:
+        if (parent / ".git").is_dir():
+            return parent
+    appliance_path = Path.home() / "dbsrt"
+    if appliance_path.is_dir():
+        return appliance_path
+    return Path.cwd()
+
+
+def default_nas_media_dir(sub: str) -> Path:
+    env_root = os.environ.get("MEDIA_ROOT") or os.environ.get("NAS_ROOT")
+    if env_root:
+        return Path(env_root) / sub
+    return Path("/media") / getpass.getuser() / "Synology" / sub
+
+
+REPO_ROOT = find_repo_root()
 DEFAULT_DB_URL: str = "postgresql://docker:docker@127.0.0.1:5433/bktreedb"
-DEFAULT_PHASH_DIR: Path = Path("data/__PHASH__")
-DEFAULT_SYNOLOGY_TVSHOW_DIR: Path = Path("/media") / "latty" / "Synology" / "tvshow"
-DEFAULT_SYNOLOGY_VIDEO_DIR: Path = Path("/media") / "latty" / "Synology" / "video"
+DEFAULT_PHASH_DIR: Path = REPO_ROOT / "data/__PHASH__"
+DEFAULT_SYNOLOGY_TVSHOW_DIR: Path = default_nas_media_dir("tvshow")
+DEFAULT_SYNOLOGY_VIDEO_DIR: Path = default_nas_media_dir("video")
 MIN_BYTES_FOR_MOVIEHASH: int = 131_072  # 128 KiB
 CHUNK_SIZE: int = 65_536  # 64 KiB
 MIN_FRAMES_MARGIN: int = 12
@@ -318,6 +341,19 @@ def sanitize_remaining_expected_frames(conn: PgConn, dry_run: bool = False) -> i
     return count
 
 
+def perform_check(args: argparse.Namespace) -> None:
+    """Performs sanity check without connecting to PostgreSQL."""
+    print("[CHECK] Mode verification activé.")
+    print(f"[CHECK] REPO_ROOT : {REPO_ROOT}")
+    print(f"[CHECK] Target DB : {args.db}")
+    print(f"[CHECK] Phash dir : {args.phash_dir} (exists: {args.phash_dir.is_dir()})")
+    count_phash = len(list(args.phash_dir.glob("*.phash"))) if args.phash_dir.is_dir() else 0
+    count_json = len(list(args.phash_dir.glob("*.json"))) if args.phash_dir.is_dir() else 0
+    print(f"[CHECK] Found files : {count_phash} .phash, {count_json} .json sidecars")
+    print(f"[CHECK] TV show mount : {args.tvshow_mount} (exists: {args.tvshow_mount.is_dir()})")
+    print(f"[CHECK] Video mount : {args.video_mount} (exists: {args.video_mount.is_dir()})")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Backfill media_sources and V6 asset lineage columns")
     parser.add_argument("--db", type=str, default=DEFAULT_DB_URL, help="Database connection URL")
@@ -329,7 +365,12 @@ def main() -> int:
         "--video-mount", type=Path, default=DEFAULT_SYNOLOGY_VIDEO_DIR, help="Path to Synology video mount"
     )
     parser.add_argument("--dry-run", action="store_true", help="Simulate without database writes")
+    parser.add_argument("--check", action="store_true", help="Perform sanity checks without connecting to PostgreSQL")
     args = parser.parse_args()
+
+    if args.check:
+        perform_check(args)
+        return 0
 
     print("======================================================================")
     print(" 🔄 PYDBSRT POSTGRESQL V6 ASSET LINEAGE & SOURCE BACKFILL")

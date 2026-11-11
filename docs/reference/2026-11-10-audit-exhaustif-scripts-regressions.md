@@ -7,17 +7,17 @@
 ## 1. Synthèse Factuelle Globale
 
 - **Total scripts opérationnels** : 96 (66 Python, 30 Shell)
-- **Scripts prouvés en exécution réelle live (session)** : 78 / 96 (81.2%) — *Seuls scripts réellement testés de bout en bout.*
+- **Scripts prouvés en exécution réelle live (session)** : 79 / 96 (82.3%) — *Seuls scripts réellement testés de bout en bout.*
 - **Scripts en régression directe (appels internes cassés)** : 0 / 96 (0.0%) — *100% des régressions actives résolues.*
 - **Nombre total de références internes rompues actives** : 0 (13 références appliance distantes documentées)
-- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 18 / 96 (18.8%) — *Imports seuls, logique non exécutée.*
+- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 17 / 96 (17.7%) — *Imports seuls, logique non exécutée.*
 - **Scripts avec analyse statique seule (`bash -n`)** : 0 / 96 (0.0%) — *Zéro runtime.*
 
 ```mermaid
 pie title Statut Réel des 96 Scripts (Rigueur Fact-First)
-    "Prouvé Live de Bout en Bout" : 78
+    "Prouvé Live de Bout en Bout" : 79
     "Régression Interne Cassée" : 0
-    "Sanity Check CLI Seul (Non Validé)" : 18
+    "Sanity Check CLI Seul (Non Validé)" : 17
     "Statique / Syntaxe Seul (Non Exécuté)" : 0
 ```
 
@@ -123,7 +123,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 | `scripts/ingestion/audit_cuts_pipeline.py` | 🟢 **Prouvé Live** | Python | Élevée (Audit de Performance Multi-Étapes Pipeline Matching) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des extraits/rapports et option CLI --check. Validé hors racine (--check code 0, 2 758 snippets détectés sous data/snippets). |
 | `scripts/ingestion/audit_phash_catalog.py` | 🟢 **Prouvé Live** | Python | Critique (Audit Empirique Exhaustif Reconnaissance pHash & Zero-DB) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), sélection robuste du binaire dbsrt (release/debug/PATH), chemins absolus et option CLI --check. Validé hors racine (--check code 0, 2 779 .phash et catalogue 231MB confirmés). |
 | `scripts/ingestion/audit_rejected_cuts.py` | 🟢 **Prouvé Live** | Python | Élevée (Diagnostic Forensique Exhaustif des Rejets Matching) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des catalogues/rapports/docs et option CLI --check. Validé hors racine (--check code 0, catalogue 231MB, audit JSON et snippets confirmés). |
-| `scripts/ingestion/backfill_media_assets.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
+| `scripts/ingestion/backfill_media_assets.py` | 🟢 **Prouvé Live** | Python | Élevée (Remplissage Lignage V6 & Métadonnées Actifs Multimédias) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), détection dynamique utilisateur NAS (getpass/env), chemins absolus et option CLI --check. Validé hors racine (--check code 0, 2 779 .phash, 2 130 sidecars JSON et montages CIFS confirmés). |
 | `scripts/ingestion/backfill_medias_pg.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/ingestion/batch_media_add_tvshow.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/ingestion/coupling_relabel.sh` | 🟢 **Prouvé Live** | Shell | Moyenne (Outil de Curation du Registre Zero-DB) | Résolution dynamique REPO_ROOT et chemin binaire DBSRT_BIN absolu (avec fallback target/debug et garde explicite). En-tête réaligné. Validé et prouvé live sur exécution hors racine (--help) et test E2E fonctionnel complet sur registre temporaire isolé (re-labellisation und -> fr, payload JSON conforme). |
@@ -673,3 +673,10 @@ Pour sortir de cet état sans spéculation, chaque script des sections 1 et 2 do
 - **Diagnostic** : Chemins relatifs par défaut (`data/snippets`, `data/catalog.dbphash`, `data/snippets/...`), et absence de mode CLI d'inspection `--check` / `--dry-run`.
 - **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, chemins absolus des fichiers de données et de documentation, et ajout de l'option CLI `--check` / `--dry-run`.
 - **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/ingestion/audit_rejected_cuts.py --check)` confirmant la détection du catalogue de 231 Mo, des snippets et du fichier d'audit JSON (code 0), linters `ruff`, `complexipy` et `pyright` conformes.
+
+### Fiche 68 : `scripts/ingestion/backfill_media_assets.py`
+- **Rôle** : Remplissage et assainissement des sources multimédias (`media_sources`) et des colonnes de lignage V6 de la table `medias` (enregistrement des sources racines, déduplication, enrichissement MovieHash O(1) via sidecars JSON et montages CIFS Synology).
+- **KPI / Importance** : `Élevée (Remplissage Lignage V6 & Métadonnées Actifs Multimédias)`.
+- **Diagnostic** : Chemin machine local `/media/<user>/Synology` codé en dur, chemins relatifs (`data/__PHASH__`), et absence de mode CLI d'inspection `--check` non-destructif.
+- **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, résolution dynamique de l'utilisateur et des montages NAS via `getpass`/`MEDIA_ROOT`, chemins absolus et ajout de l'option CLI `--check`.
+- **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/ingestion/backfill_media_assets.py --check)` confirmant la détection de 2 779 `.phash`, 2 130 sidecars JSON et des montages CIFS (code 0), linters `ruff`, `complexipy` et `pyright` conformes.
