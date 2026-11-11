@@ -7,18 +7,18 @@
 ## 1. Synthèse Factuelle Globale
 
 - **Total scripts opérationnels** : 96 (66 Python, 30 Shell)
-- **Scripts prouvés en exécution réelle live (session)** : 43 / 96 (44.8%) — *Seuls scripts réellement testés de bout en bout.*
+- **Scripts prouvés en exécution réelle live (session)** : 44 / 96 (45.8%) — *Seuls scripts réellement testés de bout en bout.*
 - **Scripts en régression directe (appels internes cassés)** : 0 / 96 (0.0%) — *100% des régressions actives résolues.*
 - **Nombre total de références internes rompues actives** : 0 (13 références appliance distantes documentées)
 - **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 46 / 96 (47.9%) — *Imports seuls, logique non exécutée.*
-- **Scripts avec analyse statique seule (`bash -n`)** : 7 / 96 (7.3%) — *Zéro runtime.*
+- **Scripts avec analyse statique seule (`bash -n`)** : 6 / 96 (6.2%) — *Zéro runtime.*
 
 ```mermaid
 pie title Statut Réel des 96 Scripts (Rigueur Fact-First)
-    "Prouvé Live de Bout en Bout" : 43
+    "Prouvé Live de Bout en Bout" : 44
     "Régression Interne Cassée" : 0
     "Sanity Check CLI Seul (Non Validé)" : 46
-    "Statique / Syntaxe Seul (Non Exécuté)" : 7
+    "Statique / Syntaxe Seul (Non Exécuté)" : 6
 ```
 
 ---
@@ -105,7 +105,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 | Script | Statut Réel | Type | KPI / Importance | Détail / Diagnostic Contradictoire |
 | :--- | :---: | :---: | :---: | :--- |
 | `scripts/infra/rpi4/freebox_batch_ctl.sh` | 🟢 **Prouvé Live** | Shell | Élevée (Ingestion WAN Freebox / Portail Web) | Résolution REPO_ROOT et source load_env.sh intégrées. Référence scanner réalignée. Validé et prouvé live : scan Freebox local, rsync cibles vers o2switch, probe gateway HTTP o2switch (test) et état queue (status). |
-| `scripts/infra/rpi4/rpi4_build.sh` | ⚪ **Statique Seul (Non Exécuté)** | Shell | À évaluer | Syntaxe `bash -n` & `shellcheck` OK. Zéro exécution runtime. |
+| `scripts/infra/rpi4/rpi4_build.sh` | 🟢 **Prouvé Live** | Shell | Moyenne (Infrastructure de Conteneurisation ARM64) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus Dockerfile/contexte et options --help / --check. Validé hors racine (code 0). |
 | `scripts/infra/rpi4/rpi4_cli.sh` | ⚪ **Statique Seul (Non Exécuté)** | Shell | À évaluer | Syntaxe `bash -n` & `shellcheck` OK. Zéro exécution runtime. |
 | `scripts/infra/rpi4/rpi4_deploy.sh` | ⚪ **Statique Seul (Non Exécuté)** | Shell | À évaluer | Syntaxe `bash -n` & `shellcheck` OK. Zéro exécution runtime. |
 | `scripts/infra/rpi4/rpi4_freebox_ctl.sh` | 🟢 **Prouvé Live** | Shell | Élevée (Appliance RPi4 & CIFS/HTTP Range) | Résolution REPO_ROOT et source load_env.sh intégrées. Chemins install_gateway() préfixés par REPO_ROOT. Validé et prouvé live sur RPi4 (status 3 montages CIFS actifs + daemon systemd actif, install synchronisé et activé). |
@@ -428,3 +428,10 @@ Pour sortir de cet état sans spéculation, chaque script des sections 1 et 2 do
 - **Diagnostic** : Chemins relatifs au CWD (`target/catalog_nas.dbphash`, `data/__PHASH__`, `data/SRT`), compilation cargo sans `--manifest-path`, appel relatif vers `o2switch_ctl.sh` et absence de mode inspection `--check`.
 - **Remédiation** : Découverte dynamique de `REPO_ROOT` avec fallback appliance `~/dbsrt`, préfixage absolu de tous les chemins d'artefacts (`${REPO_ROOT}/...`), sélection binaire (release/debug), appel absolu de `o2switch_ctl.sh`, et ajout des options CLI `--help` / `-h` et `--check` validant les points de montage Synology et la connectivité SSH o2switch en direct.
 - **Validation Live** : Validé live à 100% : exécution hors racine `(cd crates && bash ../scripts/infra/o2switch/nas_o2switch_sync.sh --help)` et `(--check)` sans erreur (code 0, détection des montages NAS Synology actifs et connectivité SSH o2switch vérifiée avec succès), linters `shellcheck` et `shfmt` conformes.
+
+### Fiche 33 : `scripts/infra/rpi4/rpi4_build.sh`
+- **Rôle** : Constructeur de l'image Docker ARM64 (`docker/Dockerfile.server`) avec parité glibc Debian Bookworm pour l'appliance physique Raspberry Pi 4.
+- **KPI / Importance** : `Moyenne (Infrastructure de Conteneurisation ARM64)`.
+- **Diagnostic** : Chemins relatifs au CWD (`docker/Dockerfile.server`, contexte `.`), absence d'ancrage `REPO_ROOT` dynamique, absence de garde sur la présence de Docker et absence d'aide CLI `--help`.
+- **Remédiation** : Découverte dynamique de `REPO_ROOT` avec fallback appliance `~/dbsrt`, préfixage absolu du Dockerfile et du contexte de build (`${REPO_ROOT}`), contrôle de présence du binaire `docker` et ajout des options CLI `--help` / `-h` et `--check` / `--dry-run`.
+- **Validation Live** : Validé live à 100% : exécution hors racine `(cd crates && bash ../scripts/infra/rpi4/rpi4_build.sh --help)` et `(--check)` sans erreur (code 0, détection du Dockerfile et du binaire docker), linters `shellcheck` et `shfmt` conformes.
