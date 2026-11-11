@@ -5,11 +5,43 @@ and evaluates pydbsrt visual pHash matching against the database.
 
 from __future__ import annotations
 
+import argparse
 import json
 import re
+import shutil
 import subprocess
 import time
 from pathlib import Path
+
+
+def find_repo_root() -> Path:
+    """Finds repository root dynamically with appliance fallback."""
+    curr = Path(__file__).resolve().parent
+    for parent in [curr, *curr.parents]:
+        if (parent / ".git").is_dir():
+            return parent
+    appliance_path = Path.home() / "dbsrt"
+    if appliance_path.is_dir():
+        return appliance_path
+    return Path.cwd()
+
+
+REPO_ROOT = find_repo_root()
+
+
+def resolve_dbsrt_bin(repo_root: Path) -> Path:
+    """Finds dbsrt binary in release, debug or PATH."""
+    release = repo_root / "target/release/dbsrt"
+    if release.exists():
+        return release
+    debug = repo_root / "target/debug/dbsrt"
+    if debug.exists():
+        return debug
+    system = shutil.which("dbsrt")
+    if system:
+        return Path(system)
+    return release
+
 
 WORKS_TO_AUDIT = [
     # --- Feature Films & Documentaires ---
@@ -232,16 +264,50 @@ def audit_work(
     }
 
 
+def perform_check(phash_dir: Path, dbphash_path: Path, dbsrt_bin: Path, works_count: int) -> None:
+    """Performs sanity check of catalog, binary and tools."""
+    print("[CHECK] Mode verification activé.")
+    print(f"[CHECK] REPO_ROOT : {REPO_ROOT}")
+    print(f"[CHECK] pHash dir : {phash_dir} (exists: {phash_dir.is_dir()})")
+    count = len(list(phash_dir.glob("*.phash"))) if phash_dir.is_dir() else 0
+    print(f"[CHECK] Existing .phash files : {count}")
+    print(
+        f"[CHECK] catalog.dbphash : {dbphash_path} (exists: {dbphash_path.is_file()}, size: {dbphash_path.stat().st_size if dbphash_path.is_file() else 0} bytes)"
+    )
+    print(f"[CHECK] dbsrt binary : {dbsrt_bin} (exists: {dbsrt_bin.is_file()})")
+    has_ytdlp = shutil.which("yt-dlp") is not None
+    has_ffmpeg = shutil.which("ffmpeg") is not None
+    print(f"[CHECK] Tools available : yt-dlp={has_ytdlp}, ffmpeg={has_ffmpeg}")
+    print(f"[CHECK] Works to audit : {works_count}")
+
+
 def main():
-    phash_dir = Path("data/__PHASH__")
-    dbphash_path = Path("data/catalog.dbphash")
-    dbsrt_bin = Path("./target/release/dbsrt")
-    scratch_dir = Path("/tmp/audit_remote_trailers")
+    parser = argparse.ArgumentParser(description="Audit remote trailers against catalog")
+    parser.add_argument("--phash-dir", type=Path, default=REPO_ROOT / "data/__PHASH__")
+    parser.add_argument("--dbphash", type=Path, default=REPO_ROOT / "data/catalog.dbphash")
+    parser.add_argument("--dbsrt-bin", type=Path, default=resolve_dbsrt_bin(REPO_ROOT))
+    parser.add_argument("--scratch-dir", type=Path, default=Path("/tmp/audit_remote_trailers"))
+    parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument(
+        "--check", "--dry-run", action="store_true", help="Perform sanity checks without downloading trailers"
+    )
+    args = parser.parse_args()
+
+    works = WORKS_TO_AUDIT[: args.limit] if args.limit else WORKS_TO_AUDIT
+
+    if args.check:
+        perform_check(args.phash_dir, args.dbphash, args.dbsrt_bin, len(works))
+        return 0
+
+    phash_dir = args.phash_dir
+    dbphash_path = args.dbphash
+    dbsrt_bin = args.dbsrt_bin
+    scratch_dir = args.scratch_dir
     scratch_dir.mkdir(parents=True, exist_ok=True)
 
     print("=========================================================================")
     print("=== EXHAUSTIVE REMOTE YOUTUBE TRAILERS & CLIPS AUDIT FOR PYDBSRT ===")
-    print(f"=== Auditing {len(WORKS_TO_AUDIT)} distinct works by live downloading YouTube clips ===")
+    print(f"=== Auditing {len(works)} distinct works by live downloading YouTube clips ===")
     print("=========================================================================")
 
     results = []
@@ -251,9 +317,9 @@ def main():
 
     t_start = time.monotonic()
 
-    for idx, work in enumerate(WORKS_TO_AUDIT):
+    for idx, work in enumerate(works):
         print(
-            f"[{idx + 1:02d}/{len(WORKS_TO_AUDIT):02d}] Auditing {work['name']} ({work['type']})...",
+            f"[{idx + 1:02d}/{len(works):02d}] Auditing {work['name']} ({work['type']})...",
             end=" ",
             flush=True,
         )
@@ -276,7 +342,7 @@ def main():
 
     total_time = round(time.monotonic() - t_start, 2)
     summary = {
-        "total_works_audited": len(WORKS_TO_AUDIT),
+        "total_works_audited": len(works),
         "matches_confirmed": matches_count,
         "montage_divergences_expected": divergence_count,
         "download_or_stream_errors": errors_count,
@@ -287,12 +353,13 @@ def main():
     out_file = Path("/tmp/remote_trailers_audit_results.json")
     out_file.write_text(json.dumps(summary, indent=2))
     print("\n=== AUDIT SUMMARY ===")
-    print(f"Total Works Audited : {len(WORKS_TO_AUDIT)}")
+    print(f"Total Works Audited : {len(works)}")
     print(f"Matches Confirmed    : {matches_count}")
     print(f"Montage Divergences  : {divergence_count} (Normal: montage de trailer multi-épisodes ou cartons promo)")
     print(f"Errors               : {errors_count}")
     print(f"Total Elapsed Time   : {total_time}s")
     print(f"Detailed JSON saved  : {out_file}")
+    return 0
 
 
 if __name__ == "__main__":

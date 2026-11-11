@@ -7,17 +7,17 @@
 ## 1. Synthèse Factuelle Globale
 
 - **Total scripts opérationnels** : 96 (66 Python, 30 Shell)
-- **Scripts prouvés en exécution réelle live (session)** : 81 / 96 (84.4%) — *Seuls scripts réellement testés de bout en bout.*
+- **Scripts prouvés en exécution réelle live (session)** : 82 / 96 (85.4%) — *Seuls scripts réellement testés de bout en bout.*
 - **Scripts en régression directe (appels internes cassés)** : 0 / 96 (0.0%) — *100% des régressions actives résolues.*
 - **Nombre total de références internes rompues actives** : 0 (13 références appliance distantes documentées)
-- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 15 / 96 (15.6%) — *Imports seuls, logique non exécutée.*
+- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 14 / 96 (14.6%) — *Imports seuls, logique non exécutée.*
 - **Scripts avec analyse statique seule (`bash -n`)** : 0 / 96 (0.0%) — *Zéro runtime.*
 
 ```mermaid
 pie title Statut Réel des 96 Scripts (Rigueur Fact-First)
-    "Prouvé Live de Bout en Bout" : 81
+    "Prouvé Live de Bout en Bout" : 82
     "Régression Interne Cassée" : 0
-    "Sanity Check CLI Seul (Non Validé)" : 15
+    "Sanity Check CLI Seul (Non Validé)" : 14
     "Statique / Syntaxe Seul (Non Exécuté)" : 0
 ```
 
@@ -127,7 +127,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 | `scripts/ingestion/backfill_medias_pg.py` | 🟢 **Prouvé Live** | Python | Critique (Synchronisation & Upsert Métadonnées Medias PostgreSQL 17) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des répertoires pHash/rapports et option CLI --check. Validé hors racine (--check code 0, 2 779 .phash et 3 rapports JSONL confirmés). |
 | `scripts/ingestion/batch_media_add_tvshow.py` | 🟢 **Prouvé Live** | Python | Critique (Ingestion Massive Directe NAS TVShow & Profiling) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), réduction de complexité cognitive (main 27 vs 32 legacy), chemins absolus des rapports/manifestes et option CLI --check. Validé hors racine (--check code 0, 2 779 .phash, 2 851 .srt, montage NAS et binaire dbsrt confirmés). |
 | `scripts/ingestion/coupling_relabel.sh` | 🟢 **Prouvé Live** | Shell | Moyenne (Outil de Curation du Registre Zero-DB) | Résolution dynamique REPO_ROOT et chemin binaire DBSRT_BIN absolu (avec fallback target/debug et garde explicite). En-tête réaligné. Validé et prouvé live sur exécution hors racine (--help) et test E2E fonctionnel complet sur registre temporaire isolé (re-labellisation und -> fr, payload JSON conforme). |
-| `scripts/ingestion/download_and_audit_all_trailers.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
+| `scripts/ingestion/download_and_audit_all_trailers.py` | 🟢 **Prouvé Live** | Python | Élevée (Audit Empirique Distant des Bandes-Annonces Vidéo) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), sélection robuste du binaire dbsrt (release/debug/PATH), chemins absolus des catalogues et option CLI --check. Validé hors racine (--check code 0, 57 œuvres cibles, catalogue 231MB, yt-dlp et ffmpeg confirmés). |
 | `scripts/ingestion/enrich_snippets_metadata.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/ingestion/extract_embedded_subs.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/ingestion/extract_nas_snippets.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
@@ -694,3 +694,10 @@ Pour sortir de cet état sans spéculation, chaque script des sections 1 et 2 do
 - **Diagnostic** : Chemins relatifs par défaut (`data/__PHASH__`, `data/SRT`, `data/reports/...`, `docs/history/...`), complexité cognitive élevée de `main` (31 > 15), et absence de mode CLI d'inspection `--check`.
 - **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, préfixage absolu des répertoires et artefacts, refactoring modulaire réduisant la complexité de `main` (27 vs 31), et ajout de l'option CLI `--check`.
 - **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/ingestion/batch_media_add_tvshow.py --check)` confirmant la détection de 2 779 `.phash`, 2 851 `.srt`, du montage NAS et du binaire `dbsrt` (code 0), linters `ruff`, `complexipy` et `pyright` conformes.
+
+### Fiche 71 : `scripts/ingestion/download_and_audit_all_trailers.py`
+- **Rôle** : Audit distant empirique téléchargeant les bandes-annonces publiques YouTube pour les œuvres du catalogue et évaluant le matching visuel pHash contre le catalogue `.dbphash` (mesure des correspondances confirmées, divergences de montage attendues et latence de reconnaissance).
+- **KPI / Importance** : `Élevée (Audit Empirique Distant des Bandes-Annonces Vidéo)`.
+- **Diagnostic** : Chemins relatifs par défaut (`data/__PHASH__`, `data/catalog.dbphash`, `target/release/dbsrt`), et absence de mode CLI d'inspection `--check` non-destructif.
+- **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, sélection automatique du binaire `dbsrt` (release/debug/PATH), chemins absolus des répertoires de données, et ajout de l'option CLI `--check`.
+- **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/ingestion/download_and_audit_all_trailers.py --check)` confirmant 57 œuvres cibles, le catalogue de 231 Mo, et la disponibilité de `yt-dlp` et `ffmpeg` (code 0), linters `ruff`, `complexipy` et `pyright` conformes.
