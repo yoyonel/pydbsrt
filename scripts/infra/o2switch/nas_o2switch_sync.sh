@@ -3,14 +3,20 @@
 # and SRT subtitles directly to Cloud o2switch hosting.
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+if [[ ! -d "${REPO_ROOT}/.git" && -d "${HOME}/dbsrt" ]]; then
+  REPO_ROOT="${HOME}/dbsrt"
+fi
+
 # Load optional unversioned local environment file (O2SWITCH_URL)
 # shellcheck source=scripts/infra/local/load_env.sh
-if [[ -f "$(dirname "${BASH_SOURCE[0]}")/load_env.sh" ]]; then
-  source "$(dirname "${BASH_SOURCE[0]}")/load_env.sh"
+if [[ -f "${SCRIPT_DIR}/load_env.sh" ]]; then
+  source "${SCRIPT_DIR}/load_env.sh"
 else
-  source "$(dirname "${BASH_SOURCE[0]}")/../local/load_env.sh"
+  source "${SCRIPT_DIR}/../local/load_env.sh"
 fi
-load_local_env "$(git rev-parse --show-toplevel 2>/dev/null || cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+load_local_env "${REPO_ROOT}"
 
 # Named operational constants
 DEFAULT_O2SWITCH_HOST="o2switch"
@@ -23,17 +29,26 @@ O2SWITCH_HOST="${O2SWITCH_HOST:-${DEFAULT_O2SWITCH_HOST}}"
 REMOTE_BASE="${REMOTE_BASE:-${DEFAULT_REMOTE_BASE}}"
 RSYNC_BWLIMIT="${RSYNC_BWLIMIT:-${DEFAULT_RSYNC_BWLIMIT_KBPS}}"
 DRY_RUN=false
+CHECK_ONLY=false
 
 for arg in "$@"; do
   case "${arg}" in
     --dry-run | -n)
       DRY_RUN=true
-      shift
+      ;;
+    --check)
+      CHECK_ONLY=true
       ;;
     --help | -h)
-      echo "Usage: $0 [--dry-run]"
+      echo "Usage: $(basename "$0") [--dry-run] [--check] [--help]"
+      echo ""
       echo "Synchronizes Synology NAS .phash fingerprints, compiled binary catalog,"
       echo "and subtitle store to Cloud o2switch under CloudLinux LVE bandwidth limits."
+      echo ""
+      echo "Options:"
+      echo "  --dry-run, -n  Run synchronization pipeline in dry-run mode (rsync --dry-run)"
+      echo "  --check        Inspect Synology mounts, local paths and SSH connectivity without transfer"
+      echo "  --help, -h     Show this help message and exit"
       exit 0
       ;;
     *) ;;
@@ -91,17 +106,24 @@ resolve_synology_dirs() {
 echo "=== DBS-RT SYNOLOGY -> O2SWITCH CLOUD SYNCHRONIZATION ==="
 resolve_synology_dirs
 
-if [[ -z "${RESOLVED_TVSHOW_DIR}" && -z "${RESOLVED_VIDEO_DIR}" ]]; then
-  echo "❌ Error: No accessible Synology NAS mount found."
-  echo "Checked candidates in /media/${USER:-synology}/Synology, \${HOME}/__SYNOLOGY__, /mnt/synology"
-  exit 1
-fi
-
 echo "✓ Active Synology TVShow : ${RESOLVED_TVSHOW_DIR:-<none>}"
 echo "✓ Active Synology Video  : ${RESOLVED_VIDEO_DIR:-<none>}"
 echo "✓ Target Cloud Host      : ${O2SWITCH_HOST}"
 echo "✓ Bandwidth Limit        : ${RSYNC_BWLIMIT} KB/s"
 echo "✓ Dry-run Mode           : ${DRY_RUN}"
+
+if [[ "${CHECK_ONLY}" == "true" ]]; then
+  echo "✓ REPO_ROOT              : ${REPO_ROOT}"
+  echo "✓ SSH reachable          : $(ssh -o BatchMode=yes -o ConnectTimeout=5 "${O2SWITCH_HOST}" true 2>/dev/null && echo "yes" || echo "no")"
+  echo "=== Check mode completed successfully ==="
+  exit 0
+fi
+
+if [[ -z "${RESOLVED_TVSHOW_DIR}" && -z "${RESOLVED_VIDEO_DIR}" ]]; then
+  echo "❌ Error: No accessible Synology NAS mount found."
+  echo "Checked candidates in /media/${USER:-synology}/Synology, \${HOME}/__SYNOLOGY__, /mnt/synology"
+  exit 1
+fi
 
 echo "--- 1. Checking SSH connectivity to ${O2SWITCH_HOST} ---"
 if ! ssh -o BatchMode=yes -o ConnectTimeout=5 "${O2SWITCH_HOST}" true 2>/dev/null; then
@@ -124,19 +146,24 @@ elif [[ -d "${VIDEO_PHASH}" ]]; then
   PRIMARY_PHASH_DIR="${VIDEO_PHASH}"
 else
   echo "⚠️ Warning: No __PHASH__ directory found on Synology mounts."
-  PRIMARY_PHASH_DIR="data/__PHASH__"
+  PRIMARY_PHASH_DIR="${REPO_ROOT}/data/__PHASH__"
 fi
 
-OUTPUT_DBPHASH="target/catalog_nas.dbphash"
-mkdir -p target
+OUTPUT_DBPHASH="${REPO_ROOT}/target/catalog_nas.dbphash"
+mkdir -p "${REPO_ROOT}/target"
+
+DBSRT_BIN="${REPO_ROOT}/target/release/dbsrt"
+if [[ ! -f "${DBSRT_BIN}" && -x "${REPO_ROOT}/target/debug/dbsrt" ]]; then
+  DBSRT_BIN="${REPO_ROOT}/target/debug/dbsrt"
+fi
 
 echo "--- 2. Compiling unified Multi-Index Hash (.dbphash) from NAS fingerprints ---"
-if [[ ! -f "target/release/dbsrt" ]]; then
+if [[ ! -f "${DBSRT_BIN}" ]]; then
   echo "Building release binary dbsrt..."
-  cargo build --release --bin dbsrt
+  cargo build --release --manifest-path "${REPO_ROOT}/Cargo.toml" --bin dbsrt
 fi
 
-./target/release/dbsrt pack \
+"${DBSRT_BIN}" pack \
   --phash-dir "${PRIMARY_PHASH_DIR}" \
   "${PACK_EXTRA_ARGS[@]}" \
   --output "${OUTPUT_DBPHASH}" \
@@ -155,8 +182,8 @@ rsync "${RSYNC_FLAGS[@]}" "${OUTPUT_DBPHASH}" "${O2SWITCH_HOST}:${REMOTE_BASE}/d
 echo "✓ Catalog synchronized to ${O2SWITCH_HOST}:${REMOTE_BASE}/data/catalog.dbphash"
 
 echo "--- 4. Synchronizing local SRT catalog to o2switch ---"
-if [[ -d "data/SRT" ]]; then
-  rsync "${RSYNC_FLAGS[@]}" "data/SRT/" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/SRT/"
+if [[ -d "${REPO_ROOT}/data/SRT" ]]; then
+  rsync "${RSYNC_FLAGS[@]}" "${REPO_ROOT}/data/SRT/" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/SRT/"
   echo "✓ SRT catalog synchronized to ${O2SWITCH_HOST}:${REMOTE_BASE}/data/SRT/"
 fi
 
@@ -166,7 +193,7 @@ if [[ "${DRY_RUN}" == "true" ]]; then
 fi
 
 echo "--- 5. Hot-restarting dbsrt-server on o2switch ---"
-"$(dirname "${BASH_SOURCE[0]}")/o2switch_ctl.sh" restart
+"${SCRIPT_DIR}/o2switch_ctl.sh" restart
 
 echo "--- 6. Verifying Remote Status & Ingested Catalog ---"
 API_KEY=$(resolve_api_key)

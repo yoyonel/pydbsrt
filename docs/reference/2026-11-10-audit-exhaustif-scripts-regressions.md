@@ -7,18 +7,18 @@
 ## 1. Synthèse Factuelle Globale
 
 - **Total scripts opérationnels** : 96 (66 Python, 30 Shell)
-- **Scripts prouvés en exécution réelle live (session)** : 42 / 96 (43.8%) — *Seuls scripts réellement testés de bout en bout.*
+- **Scripts prouvés en exécution réelle live (session)** : 43 / 96 (44.8%) — *Seuls scripts réellement testés de bout en bout.*
 - **Scripts en régression directe (appels internes cassés)** : 0 / 96 (0.0%) — *100% des régressions actives résolues.*
 - **Nombre total de références internes rompues actives** : 0 (13 références appliance distantes documentées)
 - **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 46 / 96 (47.9%) — *Imports seuls, logique non exécutée.*
-- **Scripts avec analyse statique seule (`bash -n`)** : 8 / 96 (8.3%) — *Zéro runtime.*
+- **Scripts avec analyse statique seule (`bash -n`)** : 7 / 96 (7.3%) — *Zéro runtime.*
 
 ```mermaid
 pie title Statut Réel des 96 Scripts (Rigueur Fact-First)
-    "Prouvé Live de Bout en Bout" : 42
+    "Prouvé Live de Bout en Bout" : 43
     "Régression Interne Cassée" : 0
     "Sanity Check CLI Seul (Non Validé)" : 46
-    "Statique / Syntaxe Seul (Non Exécuté)" : 8
+    "Statique / Syntaxe Seul (Non Exécuté)" : 7
 ```
 
 ---
@@ -96,7 +96,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 
 | Script | Statut Réel | Type | KPI / Importance | Détail / Diagnostic Contradictoire |
 | :--- | :---: | :---: | :---: | :--- |
-| `scripts/infra/o2switch/nas_o2switch_sync.sh` | ⚪ **Statique Seul (Non Exécuté)** | Shell | À évaluer | Syntaxe `bash -n` & `shellcheck` OK. Zéro exécution runtime. |
+| `scripts/infra/o2switch/nas_o2switch_sync.sh` | 🟢 **Prouvé Live** | Shell | Élevée (Synchronisation Hybride NAS -> Cloud o2switch) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus, appel ctl absolu et options --help / --check. Validé hors racine (--check SSH/Synology code 0). |
 | `scripts/infra/o2switch/o2switch_audit_remote.py` | 🟢 **Prouvé Live** | Python | Élevée (Audit de Précision & Recette Cloud) | Docstring réalignée, constantes de chemins avec surcharges DBSRT_*. 43/43 tests unitaires PASS. Exécuté et validé live sur o2switch (status et report sur 2827 fichiers). |
 | `scripts/infra/o2switch/o2switch_ctl.sh` | 🟢 **Prouvé Live** | Shell | Critique (Contrôleur Maître Cloud o2switch) | Bug Bash précédence ligne 30 corrigé (REPO_ROOT). Chemins locaux préfixés par REPO_ROOT. Validé et prouvé live sur o2switch (batch-sync, batch-status, status, batch-summary, faultwatch status). |
 
@@ -421,3 +421,10 @@ Pour sortir de cet état sans spéculation, chaque script des sections 1 et 2 do
 - **Diagnostic** : Chemins relatifs au CWD des plugins (`vlc-plugin/...`) et des vidéos de test (`tests/data/...`), absence d'ancrage `REPO_ROOT` dynamique et absence d'aide CLI `--help`.
 - **Remédiation** : Découverte dynamique de `REPO_ROOT` avec fallback appliance `~/dbsrt`, préfixage absolu de tous les chemins de plugins et fixtures vidéo (`${REPO_ROOT}/...`), et ajout des options CLI `--help` / `-h`.
 - **Validation Live** : Validé live à 100% : exécution hors racine `(cd crates && bash ../scripts/infra/local/vlc_ctl.sh --help)` et `(install)` sans erreur (code 0, déploiement des plugins Lua avec chemins absolus vérifiés), linters `shellcheck` et `shfmt` conformes.
+
+### Fiche 32 : `scripts/infra/o2switch/nas_o2switch_sync.sh`
+- **Rôle** : Synchronisateur des empreintes pHash du NAS Synology, compilateur du catalogue binaire MIH (`.dbphash`) et transfert rsync avec bridage LVE (`--bwlimit`) vers l'hébergement Cloud o2switch (`task o2switch:sync-nas`).
+- **KPI / Importance** : `Élevée (Synchronisation Hybride NAS -> Cloud o2switch)`.
+- **Diagnostic** : Chemins relatifs au CWD (`target/catalog_nas.dbphash`, `data/__PHASH__`, `data/SRT`), compilation cargo sans `--manifest-path`, appel relatif vers `o2switch_ctl.sh` et absence de mode inspection `--check`.
+- **Remédiation** : Découverte dynamique de `REPO_ROOT` avec fallback appliance `~/dbsrt`, préfixage absolu de tous les chemins d'artefacts (`${REPO_ROOT}/...`), sélection binaire (release/debug), appel absolu de `o2switch_ctl.sh`, et ajout des options CLI `--help` / `-h` et `--check` validant les points de montage Synology et la connectivité SSH o2switch en direct.
+- **Validation Live** : Validé live à 100% : exécution hors racine `(cd crates && bash ../scripts/infra/o2switch/nas_o2switch_sync.sh --help)` et `(--check)` sans erreur (code 0, détection des montages NAS Synology actifs et connectivité SSH o2switch vérifiée avec succès), linters `shellcheck` et `shfmt` conformes.

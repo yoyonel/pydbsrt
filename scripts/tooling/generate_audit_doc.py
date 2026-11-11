@@ -74,6 +74,9 @@ PROVEN_LIVE: dict[str, str] = {
     "scripts/infra/local/vlc_ctl.sh": (
         "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus plugins/fixtures et support --help. Validé hors racine (install code 0)."
     ),
+    "scripts/infra/o2switch/nas_o2switch_sync.sh": (
+        "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus, appel ctl absolu et options --help / --check. Validé hors racine (--check SSH/Synology code 0)."
+    ),
     "scripts/infra/o2switch/o2switch_audit_remote.py": (
         "Docstring réalignée, constantes de chemins avec surcharges DBSRT_*."
         " 43/43 tests unitaires PASS. Exécuté et validé live sur o2switch (status et report sur 2827 fichiers)."
@@ -151,6 +154,7 @@ SCRIPT_KPIS: dict[str, str] = {
     "scripts/infra/local/stack_ctl.sh": "Critique (Contrôleur Maître Stack Locale & Diagnostic 360°)",
     "scripts/infra/local/switch_target.sh": "Élevée (Orchestration Multi-Backend & Bascule Opérateur)",
     "scripts/infra/local/vlc_ctl.sh": "Élevée (Intégration VLC & Recette Utilisateur Final)",
+    "scripts/infra/o2switch/nas_o2switch_sync.sh": "Élevée (Synchronisation Hybride NAS -> Cloud o2switch)",
     "scripts/infra/o2switch/o2switch_audit_remote.py": "Élevée (Audit de Précision & Recette Cloud)",
     "scripts/infra/o2switch/o2switch_ctl.sh": "Critique (Contrôleur Maître Cloud o2switch)",
     "scripts/infra/rpi4/freebox_batch_ctl.sh": "Élevée (Ingestion WAN Freebox / Portail Web)",
