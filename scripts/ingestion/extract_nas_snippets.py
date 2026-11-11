@@ -14,6 +14,7 @@ import getpass
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -21,11 +22,55 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 
+def find_repo_root() -> Path:
+    """Finds repository root dynamically with appliance fallback."""
+    curr = Path(__file__).resolve().parent
+    for parent in [curr, *curr.parents]:
+        if (parent / ".git").is_dir():
+            return parent
+    appliance_path = Path.home() / "dbsrt"
+    if appliance_path.is_dir():
+        return appliance_path
+    return Path.cwd()
+
+
+REPO_ROOT = find_repo_root()
+
+
+def resolve_dbsrt_bin(repo_root: Path) -> Path:
+    """Finds dbsrt binary in release, debug or PATH."""
+    release = repo_root / "target/release/dbsrt"
+    if release.exists():
+        return release
+    debug = repo_root / "target/debug/dbsrt"
+    if debug.exists():
+        return debug
+    system = shutil.which("dbsrt")
+    if system:
+        return Path(system)
+    return release
+
+
+def load_manifest(manifest_path: Path) -> dict[str, dict]:
+    """Loads JSON manifest safely or returns empty dict."""
+    if not manifest_path.exists():
+        return {}
+    try:
+        with open(manifest_path, encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
 def default_nas_root() -> Path:
     env_root = os.environ.get("MEDIA_ROOT") or os.environ.get("NAS_ROOT")
     if env_root:
         return Path(env_root)
-    return Path("/media") / getpass.getuser() / "Synology"
+    user = os.environ.get("USER") or getpass.getuser()
+    candidate = Path("/media") / user / "Synology"
+    if candidate.exists():
+        return candidate
+    return Path.cwd()
 
 
 def get_dir_size(path: Path) -> int:
@@ -242,6 +287,21 @@ def process_video_snippet(
     }
 
 
+def perform_check(args: argparse.Namespace) -> int:
+    """Performs sanity check of paths, budget and tools."""
+    print("[CHECK] Mode verification activé.")
+    print(f"[CHECK] REPO_ROOT : {REPO_ROOT}")
+    print(f"[CHECK] NAS root : {args.nas_root} (exists: {args.nas_root.is_dir()})")
+    print(f"[CHECK] Output dir : {args.output_dir} (exists: {args.output_dir.is_dir()})")
+    current_size = get_dir_size(args.output_dir)
+    print(f"[CHECK] Current size : {current_size / (1024 * 1024):.1f} MB / {args.max_budget_mb} MB")
+    print(f"[CHECK] dbsrt binary : {args.dbsrt_bin} (exists: {args.dbsrt_bin.is_file()})")
+    has_ffprobe = shutil.which("ffprobe") is not None
+    has_ffmpeg = shutil.which("ffmpeg") is not None
+    print(f"[CHECK] Tools available : ffprobe={has_ffprobe}, ffmpeg={has_ffmpeg}")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Extract diverse 15-second video snippets and pHashes within a strict storage budget."
@@ -255,7 +315,7 @@ def main() -> int:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path("data/snippets"),
+        default=REPO_ROOT / "data/snippets",
         help="Output directory for snippets and phash files (default: data/snippets)",
     )
     parser.add_argument(
@@ -297,11 +357,17 @@ def main() -> int:
     parser.add_argument(
         "--dbsrt-bin",
         type=Path,
-        default=Path("target/release/dbsrt"),
+        default=resolve_dbsrt_bin(REPO_ROOT),
         help="Path to compiled dbsrt binary (default: target/release/dbsrt)",
+    )
+    parser.add_argument(
+        "--check", "--dry-run", action="store_true", help="Perform sanity checks without extracting snippets"
     )
 
     args = parser.parse_args()
+
+    if args.check:
+        return perform_check(args)
 
     if not args.nas_root.exists():
         print(f"❌ Error: NAS root directory not found: {args.nas_root}", file=sys.stderr)
@@ -340,13 +406,7 @@ def main() -> int:
     )
 
     manifest_path = args.output_dir / "manifest.json"
-    manifest: dict[str, dict] = {}
-    if manifest_path.exists():
-        try:
-            with open(manifest_path, encoding="utf-8") as f:
-                manifest = json.load(f)
-        except (json.JSONDecodeError, OSError):
-            pass
+    manifest = load_manifest(manifest_path)
 
     success_count = 0
     cached_count = 0
@@ -395,10 +455,8 @@ def main() -> int:
                     status = res.get("status")
                     vname = res.get("video", "unknown")
                     if status in ("success", "cached"):
-                        if status == "success":
-                            success_count += 1
-                        else:
-                            cached_count += 1
+                        success_count += int(status == "success")
+                        cached_count += int(status == "cached")
                         manifest[vname] = res
                     elif "skipped" in str(status):
                         skipped_count += 1
