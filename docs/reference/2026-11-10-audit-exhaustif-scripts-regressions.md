@@ -7,17 +7,17 @@
 ## 1. Synthèse Factuelle Globale
 
 - **Total scripts opérationnels** : 96 (66 Python, 30 Shell)
-- **Scripts prouvés en exécution réelle live (session)** : 67 / 96 (69.8%) — *Seuls scripts réellement testés de bout en bout.*
+- **Scripts prouvés en exécution réelle live (session)** : 68 / 96 (70.8%) — *Seuls scripts réellement testés de bout en bout.*
 - **Scripts en régression directe (appels internes cassés)** : 0 / 96 (0.0%) — *100% des régressions actives résolues.*
 - **Nombre total de références internes rompues actives** : 0 (13 références appliance distantes documentées)
-- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 29 / 96 (30.2%) — *Imports seuls, logique non exécutée.*
+- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 28 / 96 (29.2%) — *Imports seuls, logique non exécutée.*
 - **Scripts avec analyse statique seule (`bash -n`)** : 0 / 96 (0.0%) — *Zéro runtime.*
 
 ```mermaid
 pie title Statut Réel des 96 Scripts (Rigueur Fact-First)
-    "Prouvé Live de Bout en Bout" : 67
+    "Prouvé Live de Bout en Bout" : 68
     "Régression Interne Cassée" : 0
-    "Sanity Check CLI Seul (Non Validé)" : 29
+    "Sanity Check CLI Seul (Non Validé)" : 28
     "Statique / Syntaxe Seul (Non Exécuté)" : 0
 ```
 
@@ -53,7 +53,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 | :--- | :---: | :---: | :---: | :--- |
 | `scripts/benchmarks/bench_http_flood.sh` | 🟢 **Prouvé Live** | Shell | Moyenne (Dev & Banc de Charge HTTP) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des artefacts (catalogue, binaire, sous-titres) et support --help. Exécuté hors racine (--help code 0). |
 | `scripts/benchmarks/bench_server_comparison.py` | 🟢 **Prouvé Live** | Python | Élevée (Benchmark Comparatif Latence Serveur ArcSwap) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), passage de chemins absolus aux sous-processus et options CLI --bin-before, --bin-after, --samples, --check. Validé hors racine (--check code 0, détection des binaires comparatifs et répertoires de fixtures). |
-| `scripts/benchmarks/benchmark_worker_scaling.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
+| `scripts/benchmarks/benchmark_worker_scaling.py` | 🟢 **Prouvé Live** | Python | Élevée (Benchmark Scaling Workers & Saturation VA-API) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), réduction de complexité cognitive (find_distinct_synology_media 19 vs 35 legacy), détection dynamique de ffmpeg/intel_gpu_top et option CLI --check. Validé hors racine (--check code 0, détection des binaires et du périphérique DRI renderD128). |
 | `scripts/benchmarks/compare_top_telemetry.py` | 🟢 **Prouvé Live** | Python | Moyenne (Dev / Parité Télémétrie) | Exécuté live avec succès sur /proc Linux. Bandeau console corrigé vers scripts/infra/local/dbsrt_top.py. |
 | `scripts/benchmarks/eval_exhaustive_nas_snippets.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/benchmarks/eval_media_batch.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
@@ -596,3 +596,10 @@ Pour sortir de cet état sans spéculation, chaque script des sections 1 et 2 do
 - **Diagnostic** : Chemins relatifs au CWD passés aux options du serveur (`tests/data`, `data/SRT`), chemins de binaires en dur dans `/tmp` sans personnalisation possible, et absence d'interface CLI ou d'option `--check` / `--dry-run`.
 - **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, préfixage absolu des répertoires de fixtures, et ajout des options CLI `--bin-before`, `--bin-after`, `--samples`, `--phash-dir`, `--subtitles-dir` et `--check` / `--dry-run`.
 - **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/benchmarks/bench_server_comparison.py --check)` confirmant la présence des binaires comparatifs et des répertoires de fixtures (code 0), linters `ruff`, `complexipy` et `pyright` conformes.
+
+### Fiche 57 : `scripts/benchmarks/benchmark_worker_scaling.py`
+- **Rôle** : Banc de saturation mesurant le débit d'ingestion pHash et l'accélération matérielle GPU Intel Iris Xe (VA-API `/dev/dri/renderD128`) pour 1 à 10 workers concurrents via `intel_gpu_top`.
+- **KPI / Importance** : `Élevée (Benchmark Scaling Workers & Saturation VA-API)`.
+- **Diagnostic** : Chemins d'exécutables `/usr/bin/ffmpeg` et `/usr/bin/intel_gpu_top` en dur sans repli dynamique sur le PATH, complexité cognitive élevée (`find_distinct_synology_media` 35 > 15), et absence d'interface CLI ou d'option `--check` / `--dry-run`.
+- **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, résolution dynamique des exécutables via `shutil.which()`, découplage de la validation des médias abaissant la complexité sous les seuils du gate, et ajout des options CLI `--dir`, `--frames` et `--check` / `--dry-run`.
+- **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/benchmarks/benchmark_worker_scaling.py --check)` confirmant la disponibilité du binaire `ffmpeg`, d'`intel_gpu_top` et du périphérique `/dev/dri/renderD128` (code 0), linters `ruff`, `complexipy` et `pyright` conformes.

@@ -56,12 +56,8 @@
     "file_name": "benchmark_worker_scaling.py",
     "functions": [
       {
-        "name": "GpuSampler::stop",
-        "complexity": 20
-      },
-      {
         "name": "find_distinct_synology_media",
-        "complexity": 35
+        "complexity": 19
       }
     ]
   },
