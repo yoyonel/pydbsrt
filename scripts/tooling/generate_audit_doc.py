@@ -162,6 +162,9 @@ PROVEN_LIVE: dict[str, str] = {
     "scripts/workers/o2switch_batch_worker.py": (
         "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), réduction complexipy (main 9 <= 15), 64/64 tests unitaires PASS, et options CLI --help / --check. Déployé et validé live sur Cloud o2switch (SSH ~/dbsrt, code 0)."
     ),
+    "scripts/workers/o2switch_batch_summary.py": (
+        "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des rapports/logs et options CLI --help / --check. Déployé et prouvé live sur Cloud o2switch en production (10 880 événements réels et 3 872 logs analysés, code 0)."
+    ),
 }
 
 SCRIPT_KPIS: dict[str, str] = {
@@ -206,6 +209,7 @@ SCRIPT_KPIS: dict[str, str] = {
     "scripts/tooling/test_recipe_debian.sh": "Élevée (Tests d'Intégration Hermétiques Docker/systemd)",
     "scripts/tooling/validate_docs.py": "Critique (Garde-fou CI/CD & Validation Diátaxis)",
     "scripts/tooling/validate_web_assets.py": "Élevée (Garde-fou CI/CD Assets Web & Lint)",
+    "scripts/workers/o2switch_batch_summary.py": "Élevée (Métrologie Anonymisée & Télémétrie o2switch)",
     "scripts/workers/o2switch_batch_worker.py": "Critique (Worker Parallèle FTP Stream & Ingestion o2switch)",
 }
 

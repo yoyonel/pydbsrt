@@ -7,17 +7,17 @@
 ## 1. Synthèse Factuelle Globale
 
 - **Total scripts opérationnels** : 96 (66 Python, 30 Shell)
-- **Scripts prouvés en exécution réelle live (session)** : 51 / 96 (53.1%) — *Seuls scripts réellement testés de bout en bout.*
+- **Scripts prouvés en exécution réelle live (session)** : 52 / 96 (54.2%) — *Seuls scripts réellement testés de bout en bout.*
 - **Scripts en régression directe (appels internes cassés)** : 0 / 96 (0.0%) — *100% des régressions actives résolues.*
 - **Nombre total de références internes rompues actives** : 0 (13 références appliance distantes documentées)
-- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 45 / 96 (46.9%) — *Imports seuls, logique non exécutée.*
+- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 44 / 96 (45.8%) — *Imports seuls, logique non exécutée.*
 - **Scripts avec analyse statique seule (`bash -n`)** : 0 / 96 (0.0%) — *Zéro runtime.*
 
 ```mermaid
 pie title Statut Réel des 96 Scripts (Rigueur Fact-First)
-    "Prouvé Live de Bout en Bout" : 51
+    "Prouvé Live de Bout en Bout" : 52
     "Régression Interne Cassée" : 0
-    "Sanity Check CLI Seul (Non Validé)" : 45
+    "Sanity Check CLI Seul (Non Validé)" : 44
     "Statique / Syntaxe Seul (Non Exécuté)" : 0
 ```
 
@@ -183,7 +183,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 
 | Script | Statut Réel | Type | KPI / Importance | Détail / Diagnostic Contradictoire |
 | :--- | :---: | :---: | :---: | :--- |
-| `scripts/workers/o2switch_batch_summary.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
+| `scripts/workers/o2switch_batch_summary.py` | 🟢 **Prouvé Live** | Python | Élevée (Métrologie Anonymisée & Télémétrie o2switch) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des rapports/logs et options CLI --help / --check. Déployé et prouvé live sur Cloud o2switch en production (10 880 événements réels et 3 872 logs analysés, code 0). |
 | `scripts/workers/o2switch_batch_worker.py` | 🟢 **Prouvé Live** | Python | Critique (Worker Parallèle FTP Stream & Ingestion o2switch) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), réduction complexipy (main 9 <= 15), 64/64 tests unitaires PASS, et options CLI --help / --check. Déployé et validé live sur Cloud o2switch (SSH ~/dbsrt, code 0). |
 | `scripts/workers/o2switch_fault_watch.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/workers/o2switch_phash_migrate.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
@@ -484,3 +484,10 @@ Pour sortir de cet état sans spéculation, chaque script des sections 1 et 2 do
 - **Diagnostic** : Dépendance au layout plat ou au CWD pour les répertoires `run/`, `logs/`, `data/` et `etc/`, absence de résolution dynamique `REPO_ROOT` avec fallback appliance, et absence d'option CLI `--check` / `--dry-run` pour inspection préalable.
 - **Remédiation** : Implémentation de `find_repo_root()` avec fallback appliance `~/dbsrt`, décomposition de la fonction `main()` sous le seuil de complexité cognitive (score 9 $\le$ 15), préservation de la parité pytest hermétique (64/64 tests passants), synchronisation rsync vers o2switch, et ajout des options CLI `--help` et `--check` / `--dry-run`.
 - **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/workers/o2switch_batch_worker.py --check)` sans erreur (code 0), 64/64 tests unitaires PASS (`pytest tests/tools/ -k batch_worker`), déploiement effectif sur serveur Cloud o2switch via `o2switch_ctl.sh sync` et exécution distante SSH réussie `(cd ~/dbsrt && ./bin/python3 scripts/o2switch_batch_worker.py --check)` avec détection nominale du binaire `dbsrt`, du catalogue et des credentials NAS (code 0).
+
+### Fiche 41 : `scripts/workers/o2switch_batch_summary.py`
+- **Rôle** : Générateur de synthèse anonymisée et sécurisée (compteurs et durées seuls, sans chemin absolu ni identifiants sensibles) du batch d'ingestion distant sur o2switch (`task o2switch:batch:summary`).
+- **KPI / Importance** : `Élevée (Métrologie Anonymisée & Télémétrie o2switch)`.
+- **Diagnostic** : Chemins d'événements et de logs relatifs au CWD (`data/reports/batch_tvshow_nightly.jsonl`, `logs/workers`), absence d'ancrage `REPO_ROOT` dynamique et absence d'options CLI `--help` / `--check`.
+- **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, préfixage absolu des fichiers d'événements et répertoires de logs, et ajout des options CLI `--help` / `-h` et `--check` / `--dry-run`.
+- **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/workers/o2switch_batch_summary.py --check)` sans erreur (code 0), déploiement SSH sur o2switch et exécution réelle sur la production distante analysant 10 880 événements et 3 872 fichiers logs réels (code 0).
