@@ -13,7 +13,22 @@ import sys
 from pathlib import Path
 from typing import Dict
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+def find_repo_root() -> Path:
+    """Finds repository root dynamically with appliance fallback."""
+    curr = Path(__file__).resolve().parent
+    for parent in [curr, *curr.parents]:
+        if (parent / ".git").is_dir():
+            return parent
+    appliance_path = Path.home() / "dbsrt"
+    if appliance_path.is_dir():
+        return appliance_path
+    return Path.cwd()
+
+
+REPO_ROOT = find_repo_root()
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.ingestion.phash_names import phash_logical_name  # noqa: E402
 
@@ -25,30 +40,40 @@ def dedupe_legacy_twins(phash_dir: Path, apply: bool) -> Dict[str, int]:
         if logical == phash.name:
             continue
         counts["moviehash"] += 1
-        twin = phash.with_name(logical)
-        if not twin.is_file():
+        try:
+            twin = phash.with_name(logical)
+            if not twin.is_file():
+                continue
+            counts["legacy_twin"] += 1
+            if not filecmp.cmp(phash, twin, shallow=False):
+                counts["differs"] += 1
+                continue
+            counts["identical"] += 1
+            if apply:
+                twin.unlink()
+                counts["removed"] += 1
+        except OSError:
             continue
-        counts["legacy_twin"] += 1
-        if not filecmp.cmp(phash, twin, shallow=False):
-            counts["differs"] += 1
-            continue
-        counts["identical"] += 1
-        if apply:
-            twin.unlink()
-            counts["removed"] += 1
     return counts
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("phash_dir", type=Path)
+    parser.add_argument(
+        "phash_dir",
+        type=Path,
+        nargs="?",
+        default=REPO_ROOT / "data/__PHASH__",
+        help="Directory containing .phash files (default: data/__PHASH__)",
+    )
     parser.add_argument("--apply", action="store_true", help="remove the identical legacy twins")
+    parser.add_argument("--check", "--dry-run", action="store_true", help="dry-run verification mode")
     args = parser.parse_args()
     if not args.phash_dir.is_dir():
         print("phash_dir_missing=1")
         return 1
-    print(f"mode={'apply' if args.apply else 'dry-run'}")
-    for key, value in dedupe_legacy_twins(args.phash_dir, args.apply).items():
+    print(f"mode={'apply' if args.apply and not args.check else 'dry-run'}")
+    for key, value in dedupe_legacy_twins(args.phash_dir, args.apply and not args.check).items():
         print(f"{key}={value}")
     return 0
 

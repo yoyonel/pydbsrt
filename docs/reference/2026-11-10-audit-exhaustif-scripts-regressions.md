@@ -7,17 +7,17 @@
 ## 1. Synthèse Factuelle Globale
 
 - **Total scripts opérationnels** : 96 (66 Python, 30 Shell)
-- **Scripts prouvés en exécution réelle live (session)** : 86 / 96 (89.6%) — *Seuls scripts réellement testés de bout en bout.*
+- **Scripts prouvés en exécution réelle live (session)** : 87 / 96 (90.6%) — *Seuls scripts réellement testés de bout en bout.*
 - **Scripts en régression directe (appels internes cassés)** : 0 / 96 (0.0%) — *100% des régressions actives résolues.*
 - **Nombre total de références internes rompues actives** : 0 (13 références appliance distantes documentées)
-- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 10 / 96 (10.4%) — *Imports seuls, logique non exécutée.*
+- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 9 / 96 (9.4%) — *Imports seuls, logique non exécutée.*
 - **Scripts avec analyse statique seule (`bash -n`)** : 0 / 96 (0.0%) — *Zéro runtime.*
 
 ```mermaid
 pie title Statut Réel des 96 Scripts (Rigueur Fact-First)
-    "Prouvé Live de Bout en Bout" : 86
+    "Prouvé Live de Bout en Bout" : 87
     "Régression Interne Cassée" : 0
-    "Sanity Check CLI Seul (Non Validé)" : 10
+    "Sanity Check CLI Seul (Non Validé)" : 9
     "Statique / Syntaxe Seul (Non Exécuté)" : 0
 ```
 
@@ -134,7 +134,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 | `scripts/ingestion/fill_nas_snippets_catalog.py` | 🟢 **Prouvé Live** | Python | Critique (Comblement Exhaustif des Snippets Manquants NAS & Freebox) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des index de rapports et du catalogue .dbphash, binaire dbsrt résilient et support --check / --dry-run. Validé hors racine (--check code 0, inventaire de 2 779 médias, 2 218 snippets locaux et 2 542 cibles Synology confirmé). |
 | `scripts/ingestion/init_couplings_seed.sh` | 🟢 **Prouvé Live** | Shell | Moyenne (Amorçage CI/CD & Tests d'Intégration) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des fixtures et support --help / --check. Validé hors racine (code 0). |
 | `scripts/ingestion/media_add.sh` | 🟢 **Prouvé Live** | Shell | Élevée (Ingestion Unifiée & Invariants Multimédia) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), sélection absolue DBSRT_BIN (release/debug) et garde explicite. Validé hors racine (--help code 0). |
-| `scripts/ingestion/phash_dedupe.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
+| `scripts/ingestion/phash_dedupe.py` | 🟢 **Prouvé Live** | Python | Élevée (Déduplication des Empreintes Legacy vs MovieHash) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), gestion résiliente des noms de fichiers longs (ENAMETOOLONG), argument optionnel avec défaut absolu et support --check. Validé hors racine (--check code 0, 2 036 moviehashes et déduplication confirmés). |
 | `scripts/ingestion/phash_names.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/ingestion/probe_medias_metadata.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/ingestion/purge_media.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
@@ -729,3 +729,10 @@ Pour sortir de cet état sans spéculation, chaque script des sections 1 et 2 do
 - **Diagnostic** : Chemins relatifs par défaut (`data/catalog.dbphash`, `data/snippets`, `data/reports/...`, `data/__PHASH__`), et résolution fragile du binaire Rust `dbsrt`.
 - **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, préfixage absolu de tous les index et artefacts, résolution multi-chemins résiliente de `dbsrt`, et ajout de l'alias CLI `--check` / `--dry-run`.
 - **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/ingestion/fill_nas_snippets_catalog.py --check)` confirmant l'inventaire de 2 779 médias du catalogue, 2 218 snippets déjà présents en local (79.8%) et 2 542 localisés sur Synology (code 0), linters `ruff`, `complexipy` et `pyright` conformes.
+
+### Fiche 76 : `scripts/ingestion/phash_dedupe.py`
+- **Rôle** : Déduplication et purge sécurisée des empreintes `.phash` aux noms legacy (titres) au profit des empreintes canoniques par `moviehash` une fois vérifiée l'identité octet-par-octet.
+- **KPI / Importance** : `Élevée (Déduplication des Empreintes Legacy vs MovieHash)`.
+- **Diagnostic** : Injection fragile dans `sys.path`, absence de valeur par défaut pour `phash_dir`, vulnérabilité aux noms de fichiers longs (> 255 caractères) provoquant `OSError: [Errno 36] File name too long`, et absence de drapeau `--check`.
+- **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, argument optionnel pointant sur `data/__PHASH__`, capture résiliente d'`OSError` sur les chemins excédant `NAME_MAX`, et ajout de l'option CLI `--check`.
+- **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/ingestion/phash_dedupe.py --check)` confirmant l'analyse de 2 036 moviehashes et la détection d'1 jumeau identique sans erreur (code 0), linters `ruff`, `complexipy` et `pyright` conformes.
