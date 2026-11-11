@@ -167,7 +167,7 @@
     "functions": [
       {
         "name": "main",
-        "complexity": 26
+        "complexity": 22
       },
       {
         "name": "pick_sample_50",

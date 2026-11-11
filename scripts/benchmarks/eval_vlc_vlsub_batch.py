@@ -13,16 +13,31 @@ import datetime
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
 from pathlib import Path
 
+
+def find_repo_root() -> Path:
+    """Finds repository root dynamically with appliance fallback."""
+    curr = Path(__file__).resolve().parent
+    for parent in [curr, *curr.parents]:
+        if (parent / ".git").is_dir():
+            return parent
+    appliance_path = Path.home() / "dbsrt"
+    if appliance_path.is_dir():
+        return appliance_path
+    return Path.cwd()
+
+
+REPO_ROOT = find_repo_root()
 DISPLAY_NUM = "98"
-DEFAULT_OUT_DIR = Path("docs/screenshots/e2e_vlc_all")
-SNIPPETS_DIR = Path("data/snippets")
+DEFAULT_OUT_DIR = REPO_ROOT / "docs/screenshots/e2e_vlc_all"
+SNIPPETS_DIR = REPO_ROOT / "data/snippets"
 SERVER_URL = "http://127.0.0.1:8765"
-REPORT_MD_PATH = Path("docs/history/2026-10-19-validation-e2e-vlc-vlsub-corpus-nas-exhaustif.md")
+REPORT_MD_PATH = REPO_ROOT / "docs/history/2026-10-19-validation-e2e-vlc-vlsub-corpus-nas-exhaustif.md"
 
 
 def pick_sample_50() -> list[Path]:
@@ -293,6 +308,32 @@ def generate_markdown_report(results: list[dict], total_planned: int, out_report
     out_report.write_text("\n".join(lines), encoding="utf-8")
 
 
+def perform_check() -> None:
+    """Performs sanity check of paths and GUI capture tools."""
+    print("[CHECK] Mode verification activé.")
+    print(f"[CHECK] REPO_ROOT : {REPO_ROOT}")
+    print(f"[CHECK] SNIPPETS_DIR : {SNIPPETS_DIR} (exists: {SNIPPETS_DIR.is_dir()})")
+    tools = ["Xvfb", "marco", "vlc", "xdotool", "ffmpeg"]
+    tools_status = {t: shutil.which(t) is not None for t in tools}
+    print(f"[CHECK] GUI & Capture tools : {tools_status}")
+    count = len(list(SNIPPETS_DIR.glob("*.mp4")))
+    print(f"[CHECK] Available MP4 snippets : {count}")
+
+
+def select_target_videos(args: argparse.Namespace) -> list[Path]:
+    """Resolves target video paths based on CLI flags."""
+    if args.video:
+        target_video = Path(args.video).resolve()
+        if not target_video.exists():
+            print(f"Error: video not found: {target_video}")
+            sys.exit(1)
+        return [target_video]
+    if args.all:
+        return sorted(SNIPPETS_DIR.glob("*.mp4"))
+    all_samples = pick_sample_50()
+    return all_samples[: args.limit]
+
+
 def main():
     parser = argparse.ArgumentParser(description="E2E VLC + VLSub automated batch evaluator")
     parser.add_argument("--limit", type=int, default=50, help="Number of videos to evaluate (default: 50)")
@@ -303,7 +344,14 @@ def main():
     parser.add_argument(
         "--resume", action="store_true", help="Resume from existing manifest without re-evaluating existing items"
     )
+    parser.add_argument(
+        "--check", "--dry-run", action="store_true", help="Perform sanity checks without launching Xvfb or VLC"
+    )
     args = parser.parse_args()
+
+    if args.check:
+        perform_check()
+        return
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -311,17 +359,7 @@ def main():
         for f in out_dir.glob("*.png"):
             f.unlink()
 
-    if args.video:
-        target_video = Path(args.video).resolve()
-        if not target_video.exists():
-            print(f"Error: video not found: {target_video}")
-            sys.exit(1)
-        videos = [target_video]
-    elif args.all:
-        videos = sorted(SNIPPETS_DIR.glob("*.mp4"))
-    else:
-        all_samples = pick_sample_50()
-        videos = all_samples[: args.limit]
+    videos = select_target_videos(args)
 
     total_planned = len(videos)
     print(f"=== Starting E2E VLC GUI + VLSub Evaluation on {total_planned} video(s) ===")
@@ -361,7 +399,7 @@ def main():
 
             # Relative path from docs/ for markdown linking
             try:
-                rel_path = out_png.relative_to(Path("docs"))
+                rel_path = out_png.relative_to(REPO_ROOT / "docs")
                 res["screenshot_rel"] = str(rel_path)
             except Exception:
                 res["screenshot_rel"] = str(out_png)
