@@ -9,7 +9,7 @@ so only counters and durations ever leave this script. Python 3.6+ compatible.
 import json
 import sys
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 
 def find_repo_root() -> Path:
@@ -67,6 +67,20 @@ def count_notes(texts: List[str]) -> Dict[str, int]:
     return {label: sum(marker in text for text in texts) for label, marker in NOTES.items()}
 
 
+def resolve_paths() -> Tuple[Path, Path]:
+    """Resolves events file and logs directory based on CWD or REPO_ROOT fallback."""
+    cwd = Path.cwd()
+    events_file = cwd / "data" / "reports" / "batch_tvshow_nightly.jsonl"
+    logs_dir = cwd / "logs" / "workers"
+    if events_file.is_file() or logs_dir.is_dir():
+        return events_file, logs_dir
+    try:
+        cwd.relative_to(REPO_ROOT)
+        return DEFAULT_EVENTS_FILE, DEFAULT_WORKER_LOGS_DIR
+    except ValueError:
+        return events_file, logs_dir
+
+
 def print_help() -> None:
     print("Usage: o2switch_batch_summary.py [--check | --dry-run | <since_iso_date>] [--help]")
     print("")
@@ -83,8 +97,7 @@ def main(argv: List[str]) -> int:
         print_help()
         return 0
 
-    events_file = DEFAULT_EVENTS_FILE
-    logs_dir = DEFAULT_WORKER_LOGS_DIR
+    events_file, logs_dir = resolve_paths()
 
     if first_arg in ("--check", "--dry-run"):
         print("=== DBSrt o2switch Batch Summary Inspection ===")

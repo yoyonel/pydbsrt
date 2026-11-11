@@ -893,6 +893,17 @@ def resolve_batch_queue(args: argparse.Namespace) -> List[Tuple[Path, str]]:
     )
 
 
+def resolve_targets_out(args: argparse.Namespace) -> Path:
+    """Resolves output path for batch targets JSON."""
+    if args.targets_out:
+        return args.targets_out
+    try:
+        Path.cwd().relative_to(REPO_ROOT)
+        return REPO_ROOT / "data/reports/selected_batch_targets.json"
+    except ValueError:
+        return Path.cwd() / "data/reports/selected_batch_targets.json"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Direct NAS TVShow Batch Ingestion & Profiling (Zero Local Copy)")
     parser.add_argument("--nas-root", type=Path, default=default_nas_tvshow_path())
@@ -936,6 +947,12 @@ def main() -> int:
         help="Discovers and saves target manifests to JSON without executing batch processing",
     )
     parser.add_argument(
+        "--targets-out",
+        type=Path,
+        default=None,
+        help="Path to write selected batch targets JSON (defaults to data/reports/selected_batch_targets.json)",
+    )
+    parser.add_argument(
         "--check", action="store_true", help="Perform sanity checks without scanning NAS or starting workers"
     )
     args = parser.parse_args()
@@ -968,7 +985,7 @@ def main() -> int:
         return 0
 
     # Save selected batch targets for monitoring and remote worker orchestration
-    targets_out = REPO_ROOT / "data/reports/selected_batch_targets.json"
+    targets_out = resolve_targets_out(args)
     targets_out.parent.mkdir(parents=True, exist_ok=True)
     targets_out.write_text(
         json.dumps(
