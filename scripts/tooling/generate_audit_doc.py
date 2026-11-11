@@ -169,6 +169,10 @@ PROVEN_LIVE: dict[str, str] = {
         "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), refactoring modulaire sous seuil complexipy (lint_migration_file 9 <= 15 vs 37 legacy), et options CLI --dir et --check."
         " Validé hors racine sur les 6 migrations réelles PG 15/17 (code 0)."
     ),
+    "scripts/tooling/report_type_errors.py": (
+        "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), exécution pyright ancrée sur la racine du dépôt, et options CLI --top et --check."
+        " Validé hors racine (0 diagnostic d'erreur de typage, code 0)."
+    ),
     "scripts/tooling/generate_audit_doc.py": (
         "Résolution dynamique REPO_ROOT, exclusion du self-scan (0 faux positif), préservation dynamique des fiches d'analyse méticuleuse et support CLI (--check, --output)."
     ),
@@ -239,6 +243,7 @@ SCRIPT_KPIS: dict[str, str] = {
     "scripts/tooling/convert_dashboard_webp.py": "Moyenne (Optimisation Assets WebP Dashboard)",
     "scripts/tooling/generate_coverage_report.py": "Critique (Rapport Couverture Unifié & Gate CI/CD)",
     "scripts/tooling/lint_migrations.py": "Critique (Garde-fou CI/CD & Sécurité DDL Migrations PG)",
+    "scripts/tooling/report_type_errors.py": "Moyenne (Audit Typage Statique Pyright)",
     "scripts/tooling/check_pr_body.py": "Critique (Garde-fou CI/CD & Qualité des PRs)",
     "scripts/tooling/generate_audit_doc.py": "Moyenne (Outil de Métrologie & Méta-Documentation)",
     "scripts/tooling/generate_nightly_report_enhanced.py": "Moyenne (Métrologie & Profiling Diátaxis)",
