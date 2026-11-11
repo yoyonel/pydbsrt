@@ -68,6 +68,9 @@ PROVEN_LIVE: dict[str, str] = {
     "scripts/infra/local/stack_ctl.sh": (
         "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus data/, config mkdocs et support --help. Validé hors racine (status 360° code 0)."
     ),
+    "scripts/infra/local/switch_target.sh": (
+        "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemin absolu PID_RELAY et support --help. Validé hors racine (status mode CLOUD_O2SWITCH code 0)."
+    ),
     "scripts/infra/o2switch/o2switch_audit_remote.py": (
         "Docstring réalignée, constantes de chemins avec surcharges DBSRT_*."
         " 43/43 tests unitaires PASS. Exécuté et validé live sur o2switch (status et report sur 2827 fichiers)."
@@ -143,6 +146,7 @@ SCRIPT_KPIS: dict[str, str] = {
     "scripts/infra/local/install_debian.sh": "Élevée (Déploiement Poste Développeur & Appliance Debian)",
     "scripts/infra/local/load_env.sh": "Critique (Socle d'Environnement & Sécurité des Credentials)",
     "scripts/infra/local/stack_ctl.sh": "Critique (Contrôleur Maître Stack Locale & Diagnostic 360°)",
+    "scripts/infra/local/switch_target.sh": "Élevée (Orchestration Multi-Backend & Bascule Opérateur)",
     "scripts/infra/o2switch/o2switch_audit_remote.py": "Élevée (Audit de Précision & Recette Cloud)",
     "scripts/infra/o2switch/o2switch_ctl.sh": "Critique (Contrôleur Maître Cloud o2switch)",
     "scripts/infra/rpi4/freebox_batch_ctl.sh": "Élevée (Ingestion WAN Freebox / Portail Web)",

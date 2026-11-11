@@ -3,17 +3,37 @@
 # between: 1) Local Zero-DB server, 2) Cloud o2switch relay, 3) Raspberry Pi 4 appliance.
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+if [[ ! -d "${REPO_ROOT}/.git" && -d "${HOME}/dbsrt" ]]; then
+  REPO_ROOT="${HOME}/dbsrt"
+fi
+
 # Load optional unversioned local environment file (O2SWITCH_URL, cloud relay base URL)
 # shellcheck source=scripts/infra/local/load_env.sh
-source "$(dirname "${BASH_SOURCE[0]}")/load_env.sh"
-load_local_env "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+source "${SCRIPT_DIR}/load_env.sh"
+load_local_env "${REPO_ROOT}"
 
 # Named operational constants
 DEFAULT_TARGET_PORT=8765
 DEFAULT_RPI4_HOST="rpi4"
 DISCOVERY_FILE="/tmp/dbsrt-server.json"
-PID_RELAY="target/dbsrt-relay-agent.pid"
+PID_RELAY="${REPO_ROOT}/target/dbsrt-relay-agent.pid"
 PID_LOCAL="/tmp/dbsrt-server.pid"
+
+# Print usage if requested
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" || "${1:-}" == "help" ]]; then
+  echo "Usage: $(basename "$0") {status|local|o2switch|rpi4} [--help]"
+  echo ""
+  echo "Switches the active backend endpoint for the local VLC client."
+  echo ""
+  echo "Modes:"
+  echo "  status     Inspect active backend mode and discovery status (default)"
+  echo "  local      Switch to 100% local standalone Zero-DB / RAM server"
+  echo "  o2switch   Switch to Cloud o2switch relay agent"
+  echo "  rpi4       Switch to Raspberry Pi 4 appliance relay"
+  exit 0
+fi
 
 MODE="${1:-status}"
 PORT="${TARGET_PORT:-${DEFAULT_TARGET_PORT}}"
@@ -32,10 +52,10 @@ resolve_rpi_target() {
 
 stop_all_daemons() {
   if [[ -f "${PID_RELAY}" ]]; then
-    "$(dirname "${BASH_SOURCE[0]}")/agent_relay.sh" stop >/dev/null 2>&1 || true
+    "${SCRIPT_DIR}/agent_relay.sh" stop >/dev/null 2>&1 || true
   fi
   if [[ -f "${PID_LOCAL}" ]]; then
-    "$(dirname "${BASH_SOURCE[0]}")/stack_ctl.sh" server-stop >/dev/null 2>&1 || true
+    "${SCRIPT_DIR}/stack_ctl.sh" server-stop >/dev/null 2>&1 || true
   fi
   # Kill any stray process bound to PORT
   fuser -k "${PORT}/tcp" >/dev/null 2>&1 || true
@@ -91,7 +111,7 @@ case "${MODE}" in
   local)
     echo "=== Switching to 100% LOCAL STANDALONE Mode (Zero-DB / RAM) ==="
     stop_all_daemons
-    "$(dirname "${BASH_SOURCE[0]}")/stack_ctl.sh" server-start
+    "${SCRIPT_DIR}/stack_ctl.sh" server-start
     echo "✓ Active mode: LOCAL_STANDALONE"
     echo "  VLC communicates with local daemon on http://127.0.0.1:${PORT}"
     echo "  Subtitles and pHash resolved entirely from local disk & RAM."
@@ -100,7 +120,7 @@ case "${MODE}" in
   o2switch)
     echo "=== Switching to CLOUD O2SWITCH Mode (Remote Relay) ==="
     stop_all_daemons
-    "$(dirname "${BASH_SOURCE[0]}")/agent_relay.sh" start
+    "${SCRIPT_DIR}/agent_relay.sh" start
     echo "✓ Active mode: CLOUD_O2SWITCH"
     echo "  VLC communicates with local agent on http://127.0.0.1:${PORT}"
     echo "  Visual pHash fingerprints forwarded via HTTPS to ${O2SWITCH_URL:-<O2SWITCH_URL unset>}"
@@ -111,14 +131,14 @@ case "${MODE}" in
     stop_all_daemons
     target_ip=$(resolve_rpi_target "${RPI_HOST}")
     echo "Starting local agent relaying to RPi4 (http://${target_ip}:${PORT})..."
-    O2SWITCH_URL="http://${target_ip}:${PORT}" "$(dirname "${BASH_SOURCE[0]}")/agent_relay.sh" start
+    O2SWITCH_URL="http://${target_ip}:${PORT}" "${SCRIPT_DIR}/agent_relay.sh" start
     echo "✓ Active mode: RPI4_APPLIANCE"
     echo "  VLC communicates with local agent on http://127.0.0.1:${PORT}"
     echo "  Fingerprints relayed over LAN to http://${target_ip}:${PORT}"
     ;;
 
   *)
-    echo "Usage: $0 {status|local|o2switch|rpi4}"
+    echo "Usage: $(basename "$0") {status|local|o2switch|rpi4}"
     exit 1
     ;;
 esac
