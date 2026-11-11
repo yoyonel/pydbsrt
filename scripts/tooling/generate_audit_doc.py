@@ -165,6 +165,9 @@ PROVEN_LIVE: dict[str, str] = {
     "scripts/workers/o2switch_batch_summary.py": (
         "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des rapports/logs et options CLI --help / --check. Déployé et prouvé live sur Cloud o2switch en production (10 880 événements réels et 3 872 logs analysés, code 0)."
     ),
+    "scripts/workers/o2switch_fault_watch.py": (
+        "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), préfixage absolu des logs/rapports, et support CLI --help et --check. Déployé et prouvé live sur Cloud o2switch (SSH ~/dbsrt, 6 processus surveillés, code 0)."
+    ),
 }
 
 SCRIPT_KPIS: dict[str, str] = {
@@ -211,6 +214,7 @@ SCRIPT_KPIS: dict[str, str] = {
     "scripts/tooling/validate_web_assets.py": "Élevée (Garde-fou CI/CD Assets Web & Lint)",
     "scripts/workers/o2switch_batch_summary.py": "Élevée (Métrologie Anonymisée & Télémétrie o2switch)",
     "scripts/workers/o2switch_batch_worker.py": "Critique (Worker Parallèle FTP Stream & Ingestion o2switch)",
+    "scripts/workers/o2switch_fault_watch.py": "Élevée (Sonde & Diagnostic des Défauts CPU CloudLinux LVE)",
 }
 
 CAT_TITLES: dict[str, str] = {

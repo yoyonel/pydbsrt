@@ -24,6 +24,23 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Sequence, Tuple
 
+
+def find_repo_root() -> Path:
+    """Finds git repository root with appliance fallback (~/dbsrt)."""
+    p = Path(__file__).resolve().parent
+    for parent in [p] + list(p.parents):
+        if (parent / ".git").is_dir():
+            return parent
+    home_dbsrt = Path.home() / "dbsrt"
+    if home_dbsrt.is_dir():
+        return home_dbsrt
+    return Path.cwd()
+
+
+REPO_ROOT = find_repo_root()
+DEFAULT_OUT_DIR = REPO_ROOT / "logs/faultwatch"
+DEFAULT_WATCH_DIR = REPO_ROOT / "data/reports/faultwatch"
+
 LVE_VCPUS = 12
 CLK_TCK = os.sysconf("SC_CLK_TCK") if hasattr(os, "sysconf") else 100
 KEEP_DAYS = 14
@@ -230,20 +247,45 @@ def correlate(cpanel_file: Path, watch_dir: Path, year: int, utc_offset_h: int) 
         print(_feature_line(key, [float(w[key]) for _, w in pairs], faults))
 
 
+def _handle_check_mode() -> int:
+    sample = read_sample()
+    print("=== DBSrt o2switch Fault Watch Inspection ===")
+    print(f"✓ REPO_ROOT     : {REPO_ROOT}")
+    print(f"✓ Output dir    : {DEFAULT_OUT_DIR} ({'found' if DEFAULT_OUT_DIR.is_dir() else 'missing'})")
+    print(f"✓ Watch dir     : {DEFAULT_WATCH_DIR} ({'found' if DEFAULT_WATCH_DIR.is_dir() else 'missing'})")
+    print(f"✓ /proc status  : {len(sample)} current user processes monitored")
+    print(f"✓ CLK_TCK       : {CLK_TCK} ticks/s (LVE vCPUs: {LVE_VCPUS})")
+    return 0
+
+
 def main(argv: List[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=(__doc__ or "").split("\n")[0])
-    sub = parser.add_subparsers(dest="cmd", required=True)
+    parser.add_argument(
+        "--check",
+        "--dry-run",
+        dest="check",
+        action="store_true",
+        help="Inspect /proc and paths without starting continuous monitor",
+    )
+    sub = parser.add_subparsers(dest="cmd", required=False)
     w = sub.add_parser("watch")
-    w.add_argument("--out-dir", type=Path, default=Path("logs/faultwatch"))
+    w.add_argument("--out-dir", type=Path, default=DEFAULT_OUT_DIR)
     c = sub.add_parser("correlate")
     c.add_argument("cpanel_file", type=Path, help="cPanel Resource Usage table pasted as text")
-    c.add_argument("--watch-dir", type=Path, default=Path("data/reports/faultwatch"))
+    c.add_argument("--watch-dir", type=Path, default=DEFAULT_WATCH_DIR)
     c.add_argument("--year", type=int, default=datetime.now().year)
     c.add_argument("--utc-offset", type=int, default=DEFAULT_CPANEL_UTC_OFFSET_H)
+    sub.add_parser("check", help="Inspect /proc and paths without starting continuous monitor")
+
     args = parser.parse_args(argv)
+    if args.check or args.cmd == "check":
+        return _handle_check_mode()
+    if not args.cmd:
+        parser.print_help()
+        return 0
     if args.cmd == "watch":
         watch(args.out_dir)
-    else:
+    elif args.cmd == "correlate":
         correlate(args.cpanel_file, args.watch_dir, args.year, args.utc_offset)
     return 0
 
