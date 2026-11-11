@@ -7,17 +7,17 @@
 ## 1. Synthèse Factuelle Globale
 
 - **Total scripts opérationnels** : 96 (66 Python, 30 Shell)
-- **Scripts prouvés en exécution réelle live (session)** : 83 / 96 (86.5%) — *Seuls scripts réellement testés de bout en bout.*
+- **Scripts prouvés en exécution réelle live (session)** : 84 / 96 (87.5%) — *Seuls scripts réellement testés de bout en bout.*
 - **Scripts en régression directe (appels internes cassés)** : 0 / 96 (0.0%) — *100% des régressions actives résolues.*
 - **Nombre total de références internes rompues actives** : 0 (13 références appliance distantes documentées)
-- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 13 / 96 (13.5%) — *Imports seuls, logique non exécutée.*
+- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 12 / 96 (12.5%) — *Imports seuls, logique non exécutée.*
 - **Scripts avec analyse statique seule (`bash -n`)** : 0 / 96 (0.0%) — *Zéro runtime.*
 
 ```mermaid
 pie title Statut Réel des 96 Scripts (Rigueur Fact-First)
-    "Prouvé Live de Bout en Bout" : 83
+    "Prouvé Live de Bout en Bout" : 84
     "Régression Interne Cassée" : 0
-    "Sanity Check CLI Seul (Non Validé)" : 13
+    "Sanity Check CLI Seul (Non Validé)" : 12
     "Statique / Syntaxe Seul (Non Exécuté)" : 0
 ```
 
@@ -129,7 +129,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 | `scripts/ingestion/coupling_relabel.sh` | 🟢 **Prouvé Live** | Shell | Moyenne (Outil de Curation du Registre Zero-DB) | Résolution dynamique REPO_ROOT et chemin binaire DBSRT_BIN absolu (avec fallback target/debug et garde explicite). En-tête réaligné. Validé et prouvé live sur exécution hors racine (--help) et test E2E fonctionnel complet sur registre temporaire isolé (re-labellisation und -> fr, payload JSON conforme). |
 | `scripts/ingestion/download_and_audit_all_trailers.py` | 🟢 **Prouvé Live** | Python | Élevée (Audit Empirique Distant des Bandes-Annonces Vidéo) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), sélection robuste du binaire dbsrt (release/debug/PATH), chemins absolus des catalogues et option CLI --check. Validé hors racine (--check code 0, 57 œuvres cibles, catalogue 231MB, yt-dlp et ffmpeg confirmés). |
 | `scripts/ingestion/enrich_snippets_metadata.py` | 🟢 **Prouvé Live** | Python | Moyenne (Enrichissement Métadonnées Extraits Snippets) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), réduction drastique de complexité (main 9 <= 15 vs 41 legacy), chemins absolus des snippets/manifestes et option CLI --check. Validé hors racine (--check code 0, 2 758 snippets et manifest.json confirmés). |
-| `scripts/ingestion/extract_embedded_subs.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
+| `scripts/ingestion/extract_embedded_subs.py` | 🟢 **Prouvé Live** | Python | Élevée (Extraction Automatisée des Sous-Titres Intégrés) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), réduction de complexité cognitive (main 14 <= 15 vs 39 legacy), chemins absolus et option CLI --check. Validé hors racine (--check code 0, 2 851 .srt, montage NAS et outils ffprobe/ffmpeg confirmés). |
 | `scripts/ingestion/extract_nas_snippets.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/ingestion/fill_nas_snippets_catalog.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/ingestion/init_couplings_seed.sh` | 🟢 **Prouvé Live** | Shell | Moyenne (Amorçage CI/CD & Tests d'Intégration) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des fixtures et support --help / --check. Validé hors racine (code 0). |
@@ -708,3 +708,10 @@ Pour sortir de cet état sans spéculation, chaque script des sections 1 et 2 do
 - **Diagnostic** : Chemins relatifs en dur (`data/snippets`, `data/snippets/metadata.json`), complexité cognitive de `main` (41 > 15), et absence de mode CLI d'inspection `--check`.
 - **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, préfixage absolu des dossiers et fichiers de sortie, refactoring modulaire abaissant la complexité de `main` (9 vs 41), et ajout de l'option CLI `--check`.
 - **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/ingestion/enrich_snippets_metadata.py --check)` confirmant la détection de 2 758 snippets et du fichier `manifest.json` (code 0), linters `ruff`, `complexipy` et `pyright` conformes.
+
+### Fiche 73 : `scripts/ingestion/extract_embedded_subs.py`
+- **Rôle** : Extraction et vérification automatisées des sous-titres intégrés dans les conteneurs vidéo NAS correspondant aux snippets (sélection intelligente de piste FR puis EN, extraction FFmpeg sans transcodage).
+- **KPI / Importance** : `Élevée (Extraction Automatisée des Sous-Titres Intégrés)`.
+- **Diagnostic** : Chemins relatifs en dur (`data/SRT`, `data/snippets/metadata.json`), complexité cognitive de `main` (39 > 15), et absence de mode CLI d'inspection `--check`.
+- **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, préfixage absolu des dossiers, découplage modulaire réduisant la complexité de `main` (14 <= 15), et ajout de l'option CLI `--check`.
+- **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/ingestion/extract_embedded_subs.py --check)` confirmant la détection de 2 851 `.srt`, du montage NAS et des outils `ffprobe`/`ffmpeg` (code 0), linters `ruff`, `complexipy` et `pyright` conformes.

@@ -172,16 +172,6 @@
     ]
   },
   {
-    "path": "scripts/ingestion/extract_embedded_subs.py",
-    "file_name": "extract_embedded_subs.py",
-    "functions": [
-      {
-        "name": "main",
-        "complexity": 39
-      }
-    ]
-  },
-  {
     "path": "scripts/ingestion/extract_nas_snippets.py",
     "file_name": "extract_nas_snippets.py",
     "functions": [

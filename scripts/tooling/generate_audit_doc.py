@@ -209,6 +209,10 @@ PROVEN_LIVE: dict[str, str] = {
         "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), réduction drastique de complexité (main 9 <= 15 vs 41 legacy), chemins absolus des snippets/manifestes et option CLI --check."
         " Validé hors racine (--check code 0, 2 758 snippets et manifest.json confirmés)."
     ),
+    "scripts/ingestion/extract_embedded_subs.py": (
+        "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), réduction de complexité cognitive (main 14 <= 15 vs 39 legacy), chemins absolus et option CLI --check."
+        " Validé hors racine (--check code 0, 2 851 .srt, montage NAS et outils ffprobe/ffmpeg confirmés)."
+    ),
     "scripts/ingestion/init_couplings_seed.sh": (
         "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des fixtures et support --help / --check. Validé hors racine (code 0)."
     ),
@@ -337,6 +341,7 @@ SCRIPT_KPIS: dict[str, str] = {
     "scripts/ingestion/batch_media_add_tvshow.py": "Critique (Ingestion Massive Directe NAS TVShow & Profiling)",
     "scripts/ingestion/download_and_audit_all_trailers.py": "Élevée (Audit Empirique Distant des Bandes-Annonces Vidéo)",
     "scripts/ingestion/enrich_snippets_metadata.py": "Moyenne (Enrichissement Métadonnées Extraits Snippets)",
+    "scripts/ingestion/extract_embedded_subs.py": "Élevée (Extraction Automatisée des Sous-Titres Intégrés)",
     "scripts/ingestion/init_couplings_seed.sh": "Moyenne (Amorçage CI/CD & Tests d'Intégration)",
     "scripts/ingestion/media_add.sh": "Élevée (Ingestion Unifiée & Invariants Multimédia)",
     "scripts/ingestion/recognize_medias.sh": "Moyenne (Outil d'Ingestion & Évaluation par Lots)",
