@@ -7,18 +7,18 @@
 ## 1. Synthèse Factuelle Globale
 
 - **Total scripts opérationnels** : 96 (66 Python, 30 Shell)
-- **Scripts prouvés en exécution réelle live (session)** : 37 / 96 (38.5%) — *Seuls scripts réellement testés de bout en bout.*
+- **Scripts prouvés en exécution réelle live (session)** : 38 / 96 (39.6%) — *Seuls scripts réellement testés de bout en bout.*
 - **Scripts en régression directe (appels internes cassés)** : 0 / 96 (0.0%) — *100% des régressions actives résolues.*
 - **Nombre total de références internes rompues actives** : 0 (13 références appliance distantes documentées)
 - **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 46 / 96 (47.9%) — *Imports seuls, logique non exécutée.*
-- **Scripts avec analyse statique seule (`bash -n`)** : 13 / 96 (13.5%) — *Zéro runtime.*
+- **Scripts avec analyse statique seule (`bash -n`)** : 12 / 96 (12.5%) — *Zéro runtime.*
 
 ```mermaid
 pie title Statut Réel des 96 Scripts (Rigueur Fact-First)
-    "Prouvé Live de Bout en Bout" : 37
+    "Prouvé Live de Bout en Bout" : 38
     "Régression Interne Cassée" : 0
     "Sanity Check CLI Seul (Non Validé)" : 46
-    "Statique / Syntaxe Seul (Non Exécuté)" : 13
+    "Statique / Syntaxe Seul (Non Exécuté)" : 12
 ```
 
 ---
@@ -86,7 +86,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 | `scripts/infra/local/agent_relay.sh` | 🟢 **Prouvé Live** | Shell | Élevée (Architecture Hybride & Passerelle Locale-Cloud) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus target/ et support --help. Validé hors racine (status code 0). |
 | `scripts/infra/local/dbsrt_top.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/infra/local/distributed_dev_stack.sh` | 🟢 **Prouvé Live** | Shell | Moyenne (Dev & Simulation Topologie Hybride) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus data/ et support --help. Validé hors racine (status code 0). |
-| `scripts/infra/local/install_debian.sh` | ⚪ **Statique Seul (Non Exécuté)** | Shell | À évaluer | Syntaxe `bash -n` & `shellcheck` OK. Zéro exécution runtime. |
+| `scripts/infra/local/install_debian.sh` | 🟢 **Prouvé Live** | Shell | Élevée (Déploiement Poste Développeur & Appliance Debian) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus, manifest path et support --help. Validé hors racine (status PID 1903, code 0). |
 | `scripts/infra/local/load_env.sh` | ⚪ **Statique Seul (Non Exécuté)** | Shell | À évaluer | Syntaxe `bash -n` & `shellcheck` OK. Zéro exécution runtime. |
 | `scripts/infra/local/stack_ctl.sh` | ⚪ **Statique Seul (Non Exécuté)** | Shell | À évaluer | Syntaxe `bash -n` & `shellcheck` OK. Zéro exécution runtime. |
 | `scripts/infra/local/switch_target.sh` | ⚪ **Statique Seul (Non Exécuté)** | Shell | À évaluer | Syntaxe `bash -n` & `shellcheck` OK. Zéro exécution runtime. |
@@ -386,3 +386,10 @@ Pour sortir de cet état sans spéculation, chaque script des sections 1 et 2 do
 - **Diagnostic** : Chemins relatifs au CWD (`SERVER_BIN`, `data/catalog.dbphash`, `data/__PHASH__`, `data/snippets`, `data/SRT`), compilation sans `--manifest-path` et absence de flag `--help`.
 - **Remédiation** : Découverte dynamique de `REPO_ROOT` avec fallback appliance `~/dbsrt`, préfixage absolu de tous les chemins de données (`${REPO_ROOT}/data/...`), sélection de binaire (release/debug), et support de `--help` / `-h`.
 - **Validation Live** : Validé live à 100% : exécution hors racine `(cd crates && bash ../scripts/infra/local/distributed_dev_stack.sh --help)` et `(status)` sans erreur (code 0), linters `shellcheck` et `shfmt` conformes.
+
+### Fiche 27 : `scripts/infra/local/install_debian.sh`
+- **Rôle** : Installateur et gestionnaire de cycle de vie du démon dbsrt-agent sous Debian/Ubuntu (service systemd user `dbsrt-agent.service`, extension VLC Lua et clés privées).
+- **KPI / Importance** : `Élevée (Déploiement Poste Développeur & Appliance Debian)`.
+- **Diagnostic** : Chemins relatifs de compilation et de fichiers sources (`target/release/dbsrt-server`, `vlc-plugin/vlsub_dbsrt.lua`), absence d'ancrage `REPO_ROOT` dynamique et absence d'aide CLI `--help`.
+- **Remédiation** : Découverte dynamique de `REPO_ROOT` avec fallback appliance `~/dbsrt`, préfixage absolu des chemins de fichiers versionnés (`${REPO_ROOT}/...`), manifest path explicite pour cargo, et ajout des options CLI `--help` / `-h`.
+- **Validation Live** : Validé live à 100% : exécution hors racine `(cd crates && bash ../scripts/infra/local/install_debian.sh --help)` et `(status)` sans erreur (code 0, inspection active du service systemd user PID 1903 et requête HTTP `/v1/status` nominale), linters `shellcheck` et `shfmt` conformes.

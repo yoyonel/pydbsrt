@@ -3,10 +3,16 @@
 # Manages dbsrt-agent binary, VLC plugin, and systemd user service.
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+if [[ ! -d "${REPO_ROOT}/.git" && -d "${HOME}/dbsrt" ]]; then
+  REPO_ROOT="${HOME}/dbsrt"
+fi
+
 # Load optional unversioned local environment file (O2SWITCH_URL) and resolve_api_key
 # shellcheck source=scripts/infra/local/load_env.sh
-source "$(dirname "${BASH_SOURCE[0]}")/load_env.sh"
-load_local_env "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+source "${SCRIPT_DIR}/load_env.sh"
+load_local_env "${REPO_ROOT}"
 
 BIN_DIR="${HOME}/.local/bin"
 SYSTEMD_USER_DIR="${HOME}/.config/systemd/user"
@@ -18,7 +24,24 @@ AGENT_KEY_FILE="${HOME}/.config/pydbsrt/dbsrt-remote-api-key"
 LEGACY_ENV_FILE="${HOME}/.config/pydbsrt/dbsrt-agent.env"
 DEFAULT_PORT=8765
 
-ACTION="${1:-install}"
+# Print usage if requested
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" || "${1:-}" == "help" ]]; then
+  echo "Usage: $(basename "$0") {install [REMOTE_URL]|start|stop|restart|status|logs|uninstall} [--help]"
+  echo ""
+  echo "Manages dbsrt-agent binary, VLC plugin, and systemd user service on Debian/Ubuntu."
+  echo ""
+  echo "Actions:"
+  echo "  install [URL]  Install agent binary, VLC extension and systemd service"
+  echo "  start          Start systemd user service"
+  echo "  stop           Stop systemd user service"
+  echo "  restart        Restart systemd user service"
+  echo "  status         Show systemd unit and local agent health (default)"
+  echo "  logs           Follow journalctl logs"
+  echo "  uninstall      Stop service and remove all installed files"
+  exit 0
+fi
+
+ACTION="${1:-status}"
 if [[ "${ACTION}" =~ ^https?:// ]]; then
   REMOTE_API="${ACTION}"
   ACTION="install"
@@ -40,21 +63,29 @@ case "${ACTION}" in
     echo "Configuring Remote API Target: ${REMOTE_API}"
 
     # 1. Compile release binary if missing
-    if [[ ! -f "target/release/dbsrt-server" ]]; then
-      echo "Building release binary..."
-      cargo build --release --bin dbsrt-server
+    if [[ ! -f "${REPO_ROOT}/target/release/dbsrt-server" ]]; then
+      if [[ -x "${REPO_ROOT}/target/debug/dbsrt-server" ]]; then
+        echo "Using debug binary ${REPO_ROOT}/target/debug/dbsrt-server..."
+      else
+        echo "Building release binary..."
+        cargo build --release --manifest-path "${REPO_ROOT}/Cargo.toml" --bin dbsrt-server
+      fi
     fi
 
     # 2. Copy binary to ~/.local/bin/
     mkdir -p "${BIN_DIR}"
-    cp -f "target/release/dbsrt-server" "${BIN_DIR}/dbsrt-agent"
+    local_bin="${REPO_ROOT}/target/release/dbsrt-server"
+    if [[ ! -f "${local_bin}" && -f "${REPO_ROOT}/target/debug/dbsrt-server" ]]; then
+      local_bin="${REPO_ROOT}/target/debug/dbsrt-server"
+    fi
+    cp -f "${local_bin}" "${BIN_DIR}/dbsrt-agent"
     chmod +x "${BIN_DIR}/dbsrt-agent"
     echo "✓ Installed ${BIN_DIR}/dbsrt-agent"
 
     # 3. Copy VLC Lua plugin to user extension folder
     mkdir -p "${VLC_EXT_DIR}"
-    if [[ -f "vlc-plugin/vlsub_dbsrt.lua" ]]; then
-      cp -f "vlc-plugin/vlsub_dbsrt.lua" "${VLC_EXT_DIR}/vlsub_dbsrt.lua"
+    if [[ -f "${REPO_ROOT}/vlc-plugin/vlsub_dbsrt.lua" ]]; then
+      cp -f "${REPO_ROOT}/vlc-plugin/vlsub_dbsrt.lua" "${VLC_EXT_DIR}/vlsub_dbsrt.lua"
       echo "✓ Installed VLC extension ${VLC_EXT_DIR}/vlsub_dbsrt.lua"
     fi
 
@@ -132,8 +163,12 @@ UNIT
     ;;
 
   restart)
-    if [[ -f "target/release/dbsrt-server" ]]; then
-      cp -f "target/release/dbsrt-server" "${BIN_DIR}/dbsrt-agent"
+    local_bin="${REPO_ROOT}/target/release/dbsrt-server"
+    if [[ ! -f "${local_bin}" && -f "${REPO_ROOT}/target/debug/dbsrt-server" ]]; then
+      local_bin="${REPO_ROOT}/target/debug/dbsrt-server"
+    fi
+    if [[ -f "${local_bin}" ]]; then
+      cp -f "${local_bin}" "${BIN_DIR}/dbsrt-agent"
       chmod +x "${BIN_DIR}/dbsrt-agent"
     fi
     echo "Restarting ${SERVICE_NAME}..."
@@ -174,7 +209,7 @@ UNIT
     ;;
 
   *)
-    echo "Usage: $0 {install [REMOTE_URL]|start|stop|restart|status|logs|uninstall}"
+    echo "Usage: $(basename "$0") {install [REMOTE_URL]|start|stop|restart|status|logs|uninstall}"
     exit 1
     ;;
 esac
