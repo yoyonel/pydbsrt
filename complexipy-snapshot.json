@@ -1,6 +1,6 @@
 [
   {
-    "path": "scripts/audit_phash_catalog.py",
+    "path": "scripts/ingestion/audit_phash_catalog.py",
     "file_name": "audit_phash_catalog.py",
     "functions": [
       {
@@ -14,7 +14,7 @@
     ]
   },
   {
-    "path": "scripts/batch_media_add_tvshow.py",
+    "path": "scripts/ingestion/batch_media_add_tvshow.py",
     "file_name": "batch_media_add_tvshow.py",
     "functions": [
       {
@@ -38,12 +38,12 @@
         "complexity": 25
       },
       {
-        "name": "analyze_extracted_subtitles",
-        "complexity": 28
+        "name": "main",
+        "complexity": 27
       },
       {
-        "name": "main",
-        "complexity": 31
+        "name": "analyze_extracted_subtitles",
+        "complexity": 28
       },
       {
         "name": "discover_stratified_tvshows",
@@ -52,21 +52,17 @@
     ]
   },
   {
-    "path": "scripts/benchmark_worker_scaling.py",
+    "path": "scripts/benchmarks/benchmark_worker_scaling.py",
     "file_name": "benchmark_worker_scaling.py",
     "functions": [
       {
-        "name": "GpuSampler::stop",
-        "complexity": 20
-      },
-      {
         "name": "find_distinct_synology_media",
-        "complexity": 35
+        "complexity": 19
       }
     ]
   },
   {
-    "path": "scripts/compare_top_telemetry.py",
+    "path": "scripts/benchmarks/compare_top_telemetry.py",
     "file_name": "compare_top_telemetry.py",
     "functions": [
       {
@@ -76,17 +72,7 @@
     ]
   },
   {
-    "path": "scripts/convert_dashboard_webp.py",
-    "file_name": "convert_dashboard_webp.py",
-    "functions": [
-      {
-        "name": "main",
-        "complexity": 29
-      }
-    ]
-  },
-  {
-    "path": "scripts/dbsrt_top.py",
+    "path": "scripts/infra/local/dbsrt_top.py",
     "file_name": "dbsrt_top.py",
     "functions": [
       {
@@ -103,7 +89,7 @@
       },
       {
         "name": "main",
-        "complexity": 62
+        "complexity": 55
       },
       {
         "name": "scan_active_jobs",
@@ -111,12 +97,12 @@
       },
       {
         "name": "render_dashboard",
-        "complexity": 112
+        "complexity": 97
       }
     ]
   },
   {
-    "path": "scripts/download_and_audit_all_trailers.py",
+    "path": "scripts/ingestion/download_and_audit_all_trailers.py",
     "file_name": "download_and_audit_all_trailers.py",
     "functions": [
       {
@@ -126,21 +112,17 @@
     ]
   },
   {
-    "path": "scripts/enrich_snippets_metadata.py",
+    "path": "scripts/ingestion/enrich_snippets_metadata.py",
     "file_name": "enrich_snippets_metadata.py",
     "functions": [
       {
         "name": "parse_video_metadata",
         "complexity": 27
-      },
-      {
-        "name": "main",
-        "complexity": 41
       }
     ]
   },
   {
-    "path": "scripts/eval_exhaustive_nas_snippets.py",
+    "path": "scripts/benchmarks/eval_exhaustive_nas_snippets.py",
     "file_name": "eval_exhaustive_nas_snippets.py",
     "functions": [
       {
@@ -150,21 +132,7 @@
     ]
   },
   {
-    "path": "scripts/eval_media_batch.py",
-    "file_name": "eval_media_batch.py",
-    "functions": [
-      {
-        "name": "discover_sidecar_subtitles",
-        "complexity": 16
-      },
-      {
-        "name": "evaluate_media_batch",
-        "complexity": 18
-      }
-    ]
-  },
-  {
-    "path": "scripts/eval_nas_reliability.py",
+    "path": "scripts/benchmarks/eval_nas_reliability.py",
     "file_name": "eval_nas_reliability.py",
     "functions": [
       {
@@ -190,12 +158,12 @@
     ]
   },
   {
-    "path": "scripts/eval_vlc_vlsub_batch.py",
+    "path": "scripts/benchmarks/eval_vlc_vlsub_batch.py",
     "file_name": "eval_vlc_vlsub_batch.py",
     "functions": [
       {
         "name": "main",
-        "complexity": 26
+        "complexity": 22
       },
       {
         "name": "pick_sample_50",
@@ -204,17 +172,7 @@
     ]
   },
   {
-    "path": "scripts/extract_embedded_subs.py",
-    "file_name": "extract_embedded_subs.py",
-    "functions": [
-      {
-        "name": "main",
-        "complexity": 39
-      }
-    ]
-  },
-  {
-    "path": "scripts/extract_nas_snippets.py",
+    "path": "scripts/ingestion/extract_nas_snippets.py",
     "file_name": "extract_nas_snippets.py",
     "functions": [
       {
@@ -227,18 +185,14 @@
       },
       {
         "name": "main",
-        "complexity": 38
+        "complexity": 31
       }
     ]
   },
   {
-    "path": "scripts/generate_coverage_report.py",
+    "path": "scripts/tooling/generate_coverage_report.py",
     "file_name": "generate_coverage_report.py",
     "functions": [
-      {
-        "name": "parse_python_coverage",
-        "complexity": 19
-      },
       {
         "name": "generate_markdown",
         "complexity": 26
@@ -246,17 +200,7 @@
     ]
   },
   {
-    "path": "scripts/generate_nightly_report_enhanced.py",
-    "file_name": "generate_nightly_report_enhanced.py",
-    "functions": [
-      {
-        "name": "main",
-        "complexity": 30
-      }
-    ]
-  },
-  {
-    "path": "scripts/lint_complexity.py",
+    "path": "scripts/tooling/lint_complexity.py",
     "file_name": "lint_complexity.py",
     "functions": [
       {
@@ -278,27 +222,7 @@
     ]
   },
   {
-    "path": "scripts/lint_migrations.py",
-    "file_name": "lint_migrations.py",
-    "functions": [
-      {
-        "name": "lint_migration_file",
-        "complexity": 37
-      }
-    ]
-  },
-  {
-    "path": "scripts/repair_corrupted_couplings.py",
-    "file_name": "repair_corrupted_couplings.py",
-    "functions": [
-      {
-        "name": "repair_registry",
-        "complexity": 37
-      }
-    ]
-  },
-  {
-    "path": "scripts/scale_up_nas_dataset.py",
+    "path": "scripts/benchmarks/scale_up_nas_dataset.py",
     "file_name": "scale_up_nas_dataset.py",
     "functions": [
       {
@@ -324,7 +248,7 @@
     ]
   },
   {
-    "path": "scripts/validate_docs.py",
+    "path": "scripts/tooling/validate_docs.py",
     "file_name": "validate_docs.py",
     "functions": [
       {
@@ -342,22 +266,12 @@
     ]
   },
   {
-    "path": "scripts/verify_catalog_integrity.py",
+    "path": "scripts/ingestion/verify_catalog_integrity.py",
     "file_name": "verify_catalog_integrity.py",
     "functions": [
       {
         "name": "check_tier2_couplings",
         "complexity": 24
-      }
-    ]
-  },
-  {
-    "path": "scripts/verify_terminal_rendering.py",
-    "file_name": "verify_terminal_rendering.py",
-    "functions": [
-      {
-        "name": "main",
-        "complexity": 19
       }
     ]
   }

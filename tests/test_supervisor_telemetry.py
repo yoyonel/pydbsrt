@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from scripts.rpi4_o2switch_supervisor import (
+from scripts.infra.rpi4.rpi4_o2switch_supervisor import (
     _LoopState,
     push_supervisor_telemetry_to_remote,
     read_recent_supervisor_logs,

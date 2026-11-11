@@ -14,8 +14,8 @@ import threading
 import time
 from pathlib import Path
 
-import scripts.o2switch_batch_worker as worker
-from scripts.o2switch_batch_worker import VideoTarget
+import scripts.workers.o2switch_batch_worker as worker
+from scripts.workers.o2switch_batch_worker import VideoTarget
 
 
 def test_real_ffmpeg_batch_e2e_scale_and_pause_cycle(tmp_path: Path, monkeypatch):

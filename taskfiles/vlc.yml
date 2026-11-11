@@ -4,17 +4,17 @@ tasks:
   vlc:install-plugin:
     desc: Install dbsrt VLC Lua plugins (GUI extension and CLI interface)
     cmds:
-      - bash scripts/vlc_ctl.sh install
+      - bash scripts/infra/local/vlc_ctl.sh install
 
   vlc:run:
     desc: Launch VLC media player with dbsrt VLSub extension loaded
     cmds:
-      - bash scripts/vlc_ctl.sh run
+      - bash scripts/infra/local/vlc_ctl.sh run
 
   vlc:demo:
     desc: Interactive live demonstration of subtitle retargeting and OSD notification in VLC
     cmds:
-      - bash scripts/vlc_ctl.sh demo
+      - bash scripts/infra/local/vlc_ctl.sh demo
 
   vlc:test:
     desc: Run full testing pyramid for VLC plugins (Unit + Headless + GUI E2E)
@@ -26,7 +26,7 @@ tasks:
     desc: Record full HD 1080p MP4 demo of VLSub dbsrt plugin interaction on isolated Xvfb screen
     deps: [server:daemon, vlc:install-plugin]
     cmds:
-      - bash scripts/record_vlsub_demo.sh
+      - bash scripts/benchmarks/record_vlsub_demo.sh
 
   vlc:
     desc: Shortcut to run VLC Lua unit tests and headless cvlc E2E test
@@ -54,11 +54,11 @@ tasks:
     internal: true
     deps: [server:daemon, vlc:install-plugin]
     cmds:
-      - bash scripts/vlc_ctl.sh test-cvlc
+      - bash scripts/infra/local/vlc_ctl.sh test-cvlc
 
   vlc:eval-all:
     desc: Run exhaustive E2E VLC GUI + VLSub batch on all NAS snippets under Xvfb :98
     internal: true
     deps: [server:daemon, vlc:install-plugin]
     cmds:
-      - python3 scripts/eval_vlc_vlsub_batch.py --all --resume
+      - python3 scripts/benchmarks/eval_vlc_vlsub_batch.py --all --resume

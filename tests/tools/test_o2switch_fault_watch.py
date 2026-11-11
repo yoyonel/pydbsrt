@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.o2switch_fault_watch import (
+from scripts.workers.o2switch_fault_watch import (
     CLK_TCK,
     LVE_VCPUS,
     join,

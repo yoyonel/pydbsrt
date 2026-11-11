@@ -192,7 +192,7 @@ Ces fichiers légers orchestrent dynamiquement l'exécution des processus d'inge
   }
   ```
 - **Cycle de vie** :
-  - Produit en continu par le daemon de surveillance `scripts/o2switch_fault_watch.py` tournant sous `screen`.
+  - Produit en continu par le daemon de surveillance `scripts/workers/o2switch_fault_watch.py` tournant sous `screen`.
   - Échantillonne 60 fois par minute l'état des processus et de l'ordonnanceur.
   - Consommé par `task o2switch:faultwatch:status` et `task o2switch:faultwatch:correlate` pour prouver l'absence d'impact LVE CPU et I/O.
 

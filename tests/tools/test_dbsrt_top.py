@@ -6,7 +6,7 @@ from typing import Any, Dict, List
 
 from rich.console import Console
 
-from scripts.dbsrt_top import (
+from scripts.infra.local.dbsrt_top import (
     ActiveJobTelemetry,
     TerminalInput,
     calculate_stats,
@@ -172,7 +172,7 @@ def test_load_historical_records_couplings_fallback(tmp_path: Path, monkeypatch:
         encoding="utf-8",
     )
     monkeypatch.setattr(
-        "scripts.dbsrt_top.Path", lambda p: fake_couplings if p == "data/SRT/couplings.json" else Path(p)
+        "scripts.infra.local.dbsrt_top.Path", lambda p: fake_couplings if p == "data/SRT/couplings.json" else Path(p)
     )
 
     non_existent = tmp_path / "missing_events.jsonl"

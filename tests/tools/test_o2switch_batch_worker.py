@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pytest
 
-import scripts.o2switch_batch_worker as worker
-from scripts.o2switch_batch_worker import (
+import scripts.workers.o2switch_batch_worker as worker
+from scripts.workers.o2switch_batch_worker import (
     ACTIVE_CHILD_PGIDS,
     DEFAULT_TARGETS_PATH,
     VideoTarget,

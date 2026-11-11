@@ -5,8 +5,8 @@ services:
     image: dbsrt-server:rpi4
     container_name: dbsrt-sim-server
     platform: linux/arm64
-    mem_limit: 512m
-    memswap_limit: 1g
+    mem_limit: 4g
+    memswap_limit: 8g
     ports:
       - "127.0.0.1:8766:8765"
     volumes:

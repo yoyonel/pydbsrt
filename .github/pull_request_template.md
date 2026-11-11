@@ -1,6 +1,6 @@
 ## 🎯 Objectif métier (en 30 secondes)
 
-<!-- OBLIGATOIRE, vérifié par la CI (scripts/check_pr_body.py). À remplir dès l'ouverture de la PR,
+<!-- OBLIGATOIRE, vérifié par la CI (scripts/tooling/check_pr_body.py). À remplir dès l'ouverture de la PR,
      en brouillon (draft) dès la création de la branche.
      Lisible par quelqu'un qui ne lit pas le code : ce que ça change pour le produit, sans jargon.
      Une notion d'infra (WAF, worker, checkpoint...) : lien vers docs/explanation/glossaire-metier.md.

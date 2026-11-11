@@ -9,7 +9,9 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-_spec = importlib.util.spec_from_file_location("o2switch_batch_summary", ROOT / "scripts" / "o2switch_batch_summary.py")
+_spec = importlib.util.spec_from_file_location(
+    "o2switch_batch_summary", ROOT / "scripts" / "workers" / "o2switch_batch_summary.py"
+)
 assert _spec and _spec.loader
 summary = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(summary)

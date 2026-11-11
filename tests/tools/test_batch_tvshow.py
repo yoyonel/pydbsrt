@@ -5,7 +5,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from scripts.batch_media_add_tvshow import (
+from scripts.ingestion.batch_media_add_tvshow import (
     detect_alphabet_family,
     discover_stratified_tvshows,
     load_targets_from_file,
@@ -105,7 +105,7 @@ def test_cli_targets_file_dry_run_execution():
         # Run from tmp_path: the script writes data/reports/selected_batch_targets.json relative to cwd
         cmd = [
             sys.executable,
-            str(Path(__file__).resolve().parents[2] / "scripts" / "batch_media_add_tvshow.py"),
+            str(Path(__file__).resolve().parents[2] / "scripts" / "ingestion" / "batch_media_add_tvshow.py"),
             "--targets-file",
             str(targets_json),
             "--report-path",

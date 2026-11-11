@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from scripts.phash_dedupe import dedupe_legacy_twins
+from scripts.ingestion.phash_dedupe import dedupe_legacy_twins
 
 MOVIEHASH = "0123456789abcdef"
 OTHER_MOVIEHASH = "fedcba9876543210"

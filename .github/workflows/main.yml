@@ -43,7 +43,7 @@ jobs:
         run: uv sync
 
       - name: Run multi-language lint checks (.py, .sh, .lua, .yml, .html, .js, .json)
-        run: bash scripts/code_quality.sh lint-fast
+        run: bash scripts/tooling/code_quality.sh lint-fast
 
   python-unit:
     name: Python Unit Tests
@@ -135,7 +135,7 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Rust Architectural Complexity Gate (LOC <= 150, CCN <= 20)
-        run: uv run python scripts/lint_complexity.py
+        run: uv run python scripts/tooling/lint_complexity.py
 
       - name: Unit & Integration tests with coverage (cargo llvm-cov)
         run: cargo llvm-cov --workspace --json --output-path coverage-rust.json
@@ -196,7 +196,7 @@ jobs:
         run: uv sync
 
       - name: Initialize coupling registry from CI seed fixture
-        run: bash scripts/init_couplings_seed.sh
+        run: bash scripts/ingestion/init_couplings_seed.sh
 
       - name: Build dbsrt binary and integration tests
         run: cargo test -p dbsrt-cli --test integration_test --no-run
@@ -339,7 +339,7 @@ jobs:
 
       - name: Generate coverage report
         run: |
-          python3 scripts/generate_coverage_report.py \
+          python3 scripts/tooling/generate_coverage_report.py \
             --rust-json coverage-rust.json \
             --python-json coverage-python.json \
             --python-db-json coverage-python-db.json \

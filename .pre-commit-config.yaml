@@ -80,7 +80,7 @@ repos:
 
       - id: validate-web-assets
         name: validate HTML/JS/JSON assets (.html/.json)
-        entry: uv run python scripts/validate_web_assets.py
+        entry: uv run python scripts/tooling/validate_web_assets.py
         language: system
         files: \.(html|json)$
         pass_filenames: false
@@ -101,7 +101,7 @@ repos:
 
       - id: rust-complexity-gate
         name: rust architectural complexity & function size gate
-        entry: uv run python scripts/lint_complexity.py
+        entry: uv run python scripts/tooling/lint_complexity.py
         language: system
         types: [rust]
         pass_filenames: false

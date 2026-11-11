@@ -5,13 +5,13 @@ tasks:
     desc: Shortcut for documentation server (MkDocs Material on http://127.0.0.1:8000)
     aliases: [docs, doc:serve]
     cmds:
-      - uv run python scripts/serve_docs.py
+      - uv run python scripts/tooling/serve_docs.py
 
   doc:check:
     desc: Automated documentation validator (strict build, LaTeX rendering, squashed lists, images)
     aliases: [docs:check, doc:lint, docs:lint]
     cmds:
-      - uv run --no-sync python scripts/validate_docs.py
+      - uv run --no-sync python scripts/tooling/validate_docs.py
 
   doc:build:
     desc: Build static responsive documentation site to site/ directory
@@ -37,41 +37,41 @@ tasks:
     internal: true
     aliases: [docs:daemon]
     cmds:
-      - bash scripts/stack_ctl.sh doc-start
+      - bash scripts/infra/local/stack_ctl.sh doc-start
 
   doc:stop:
     desc: Stop background MkDocs documentation server
     internal: true
     aliases: [docs:stop]
     cmds:
-      - bash scripts/stack_ctl.sh doc-stop
+      - bash scripts/infra/local/stack_ctl.sh doc-stop
 
   doc:logs:
     desc: Tail background MkDocs documentation server logs
     internal: true
     aliases: [docs:logs]
     cmds:
-      - bash scripts/stack_ctl.sh doc-logs
+      - bash scripts/infra/local/stack_ctl.sh doc-logs
 
   doc:record-casts:
     desc: Record interactive Asciinema .cast terminal sessions for documentation
     deps: [build]
     cmds:
-      - uv run python scripts/record_casts.py
+      - uv run python scripts/benchmarks/record_casts.py
 
   proof:record:
     desc: Record a masked prod proof (.cast + animated .svg) under .github/proofs/ for a PR (task proof:record -- NAME COMMAND...)
     cmds:
-      - uv run --no-sync python scripts/record_proof.py {{.CLI_ARGS}}
+      - uv run --no-sync python scripts/benchmarks/record_proof.py {{.CLI_ARGS}}
 
   doc:verify-terminal:
     desc: Formally verify Asciinema terminal playback and DOM rendering with Headless Chrome
     deps: [doc:build]
     cmds:
-      - uv run python scripts/verify_terminal_rendering.py
+      - uv run python scripts/benchmarks/verify_terminal_rendering.py
 
   doc:optimize-images:
     desc: Batch convert heavy PNG screenshots in docs/ to lightweight 720p WebP
     internal: true
     cmds:
-      - uv run python scripts/convert_dashboard_webp.py
+      - uv run python scripts/tooling/convert_dashboard_webp.py

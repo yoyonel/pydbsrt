@@ -6,7 +6,7 @@ import threading
 import unicodedata
 import urllib.request
 
-from scripts.rpi4_freebox_gateway import FreeboxRangeHTTPHandler, is_served_path, parse_byte_range
+from scripts.infra.rpi4.rpi4_freebox_gateway import FreeboxRangeHTTPHandler, is_served_path, parse_byte_range
 
 
 def test_parse_byte_range_full_span():

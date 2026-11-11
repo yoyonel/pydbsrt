@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from scripts import o2switch_audit_remote as audit
-from scripts.o2switch_audit_remote import (
+from scripts.infra.o2switch import o2switch_audit_remote as audit
+from scripts.infra.o2switch.o2switch_audit_remote import (
     cut_positions,
     load,
     logical_name,

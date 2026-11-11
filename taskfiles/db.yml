@@ -43,30 +43,30 @@ tasks:
   db:lint:safety:
     desc: Lint PostgreSQL migrations for DDL safety, non-blocking locks, and PG 15/17 compatibility
     cmds:
-      - python3 scripts/lint_migrations.py {{.CLI_ARGS}}
+      - python3 scripts/tooling/lint_migrations.py {{.CLI_ARGS}}
 
   db:test:migration:
     desc: Automated integration test of pending migrations and domain constraints on isolated sandbox DB
     deps: [db:up]
     cmds:
-      - uv run python scripts/test_db_migrations.py {{.CLI_ARGS}}
+      - uv run python scripts/tooling/test_db_migrations.py {{.CLI_ARGS}}
 
   phash:quarantine:
     desc: Move truncated/corrupted phashes (< 50KB or non-multiple of 8 bytes) to data/__QUARANTINE_PHASH__/
     cmds:
-      - uv run python scripts/quarantine_truncated_phashes.py {{.CLI_ARGS}}
+      - uv run python scripts/ingestion/quarantine_truncated_phashes.py {{.CLI_ARGS}}
 
   phash:reconcile:
     desc: Reconcile release-named phashes into canonical <moviehash>.<fps>fps.phash + sidecar JSON
     deps: [db:up]
     cmds:
-      - uv run python scripts/reconcile_phash_filenames.py {{.CLI_ARGS}}
+      - uv run python scripts/ingestion/reconcile_phash_filenames.py {{.CLI_ARGS}}
 
   db:backfill:assets:
     desc: Backfill media_sources, moviehash, expected_frames, and V6 lineage columns in PostgreSQL
     deps: [db:up]
     cmds:
-      - uv run python scripts/backfill_media_assets.py {{.CLI_ARGS}}
+      - uv run python scripts/ingestion/backfill_media_assets.py {{.CLI_ARGS}}
 
   db:portal:
     desc: Start pydbsrt Use-Case Web Portal on http://127.0.0.1:8780 (Sources Médias, Actifs)
@@ -101,14 +101,14 @@ tasks:
   db:backfill:medias:
     desc: Backfill rich media metadata from .phash and telemetry into PostgreSQL 17 'medias' table
     cmds:
-      - uv run python scripts/backfill_medias_pg.py {{.CLI_ARGS}}
+      - uv run python scripts/ingestion/backfill_medias_pg.py {{.CLI_ARGS}}
 
   db:audit:
     desc: Audit NULL values and inspect v_productions view on local PostgreSQL 17
     cmds:
-      - uv run python scripts/probe_medias_metadata.py --target local --audit {{.CLI_ARGS}}
+      - uv run python scripts/ingestion/probe_medias_metadata.py --target local --audit {{.CLI_ARGS}}
 
   db:probe:
     desc: Probe video streams over NAS LAN FTP and populate real width, height, codec and resolution
     cmds:
-      - NAS_HOST="{{.NAS_HOST | default \"192.168.1.58\"}}" uv run python scripts/probe_medias_metadata.py --target local {{.CLI_ARGS}}
+      - NAS_HOST="{{.NAS_HOST | default \"192.168.1.58\"}}" uv run python scripts/ingestion/probe_medias_metadata.py --target local {{.CLI_ARGS}}

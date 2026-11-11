@@ -63,22 +63,22 @@ tasks:
   target:status:
     desc: Inspect active VLC backend target mode (Local, Cloud o2switch, or RPi4)
     cmds:
-      - ./scripts/switch_target.sh status
+      - ./scripts/infra/local/switch_target.sh status
 
   target:local:
     desc: Switch VLC backend to 100% Local Standalone server (Zero-DB / RAM MIH)
     cmds:
-      - ./scripts/switch_target.sh local
+      - ./scripts/infra/local/switch_target.sh local
 
   target:o2switch:
     desc: Switch VLC backend to Cloud o2switch relay (O2SWITCH_URL)
     cmds:
-      - ./scripts/switch_target.sh o2switch
+      - ./scripts/infra/local/switch_target.sh o2switch
 
   target:rpi4:
     desc: Switch VLC backend to Raspberry Pi 4 appliance relay
     cmds:
-      - ./scripts/switch_target.sh rpi4
+      - ./scripts/infra/local/switch_target.sh rpi4
 
   up:
     desc: Unified one-command stack startup (DB + PgWeb + Rust build + Certified Couplings + dbsrt-server + VLC plugins + MkDocs)
@@ -100,7 +100,7 @@ tasks:
   status:
     desc: Unified health & status dashboard for all running pydbsrt services and backoffices
     cmds:
-      - bash scripts/stack_ctl.sh status
+      - bash scripts/infra/local/stack_ctl.sh status
 
   # --- Primary Workspace Actions ---
 
@@ -119,14 +119,14 @@ tasks:
   portal:e2e:
     desc: Run Playwright E2E browser tests across all portal views and trajectory reports
     cmds:
-      - uv run --with playwright python scripts/e2e_sources_explorer.py
-      - uv run --with playwright python scripts/e2e_trajectories_formal.py
-      - uv run --with playwright python scripts/e2e_portal_exhaustive.py
+      - uv run --with playwright python scripts/e2e/e2e_sources_explorer.py
+      - uv run --with playwright python scripts/e2e/e2e_trajectories_formal.py
+      - uv run --with playwright python scripts/e2e/e2e_portal_exhaustive.py
 
   clean:
     desc: Unified purge of caches, coverage, and target/ build artifacts
     cmds:
-      - bash scripts/disk_guard.sh clean
+      - bash scripts/tooling/disk_guard.sh clean
 
   sync:
     desc: Synchronize local virtualenv with uv

@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from scripts.scan_freebox_targets import (
+from scripts.ingestion.scan_freebox_targets import (
     _extract_target_from_file,
     is_path_excluded,
     scan_freebox_targets,
