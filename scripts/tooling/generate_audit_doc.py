@@ -358,8 +358,8 @@ def _build_summary_section(
     lines = [
         "# Audit Exhaustif des Scripts & Cartographie des Régressions de Chemins",
         "",
-        "> **Date de constat :** 2026-11-10 21:52:00 (Actualisé post-remédiation 2026-11-11)  ",
-        "> **Statut :** Bilan consolidé post-audit des 18 scripts critiques (PR #70 / Issue #69 Phase 1)  ",
+        "> **Date de constat :** 2026-11-10 21:52:00 (Actualisé post-remédiation 2026-11-11)<br>",
+        "> **Statut :** Bilan consolidé post-audit des 39 scripts remédiés (18 critiques + 21 shell) (PR #70 / Issue #69 Phase 1 & 2)<br>",
         (
             "> **Avertissement de rigueur :** Un « Sanity Check CLI `--help` »"
             " atteste uniquement que Python parvient à charger le module sans"
