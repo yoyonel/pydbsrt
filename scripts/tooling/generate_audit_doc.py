@@ -62,6 +62,9 @@ PROVEN_LIVE: dict[str, str] = {
     "scripts/infra/local/install_debian.sh": (
         "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus, manifest path et support --help. Validé hors racine (status PID 1903, code 0)."
     ),
+    "scripts/infra/local/load_env.sh": (
+        "Résolution dynamique REPO_ROOT par défaut, bloc autonome CLI avec support --help / --check et masquage des secrets. Validé hors racine (code 0)."
+    ),
     "scripts/infra/o2switch/o2switch_audit_remote.py": (
         "Docstring réalignée, constantes de chemins avec surcharges DBSRT_*."
         " 43/43 tests unitaires PASS. Exécuté et validé live sur o2switch (status et report sur 2827 fichiers)."
@@ -135,6 +138,7 @@ SCRIPT_KPIS: dict[str, str] = {
     "scripts/infra/local/agent_relay.sh": "Élevée (Architecture Hybride & Passerelle Locale-Cloud)",
     "scripts/infra/local/distributed_dev_stack.sh": "Moyenne (Dev & Simulation Topologie Hybride)",
     "scripts/infra/local/install_debian.sh": "Élevée (Déploiement Poste Développeur & Appliance Debian)",
+    "scripts/infra/local/load_env.sh": "Critique (Socle d'Environnement & Sécurité des Credentials)",
     "scripts/infra/o2switch/o2switch_audit_remote.py": "Élevée (Audit de Précision & Recette Cloud)",
     "scripts/infra/o2switch/o2switch_ctl.sh": "Critique (Contrôleur Maître Cloud o2switch)",
     "scripts/infra/rpi4/freebox_batch_ctl.sh": "Élevée (Ingestion WAN Freebox / Portail Web)",
