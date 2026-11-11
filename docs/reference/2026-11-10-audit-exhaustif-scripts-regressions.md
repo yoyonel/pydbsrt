@@ -7,18 +7,18 @@
 ## 1. Synthèse Factuelle Globale
 
 - **Total scripts opérationnels** : 96 (66 Python, 30 Shell)
-- **Scripts prouvés en exécution réelle live (session)** : 33 / 96 (34.4%) — *Seuls scripts réellement testés de bout en bout.*
+- **Scripts prouvés en exécution réelle live (session)** : 34 / 96 (35.4%) — *Seuls scripts réellement testés de bout en bout.*
 - **Scripts en régression directe (appels internes cassés)** : 0 / 96 (0.0%) — *100% des régressions actives résolues.*
 - **Nombre total de références internes rompues actives** : 0 (13 références appliance distantes documentées)
 - **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 46 / 96 (47.9%) — *Imports seuls, logique non exécutée.*
-- **Scripts avec analyse statique seule (`bash -n`)** : 17 / 96 (17.7%) — *Zéro runtime.*
+- **Scripts avec analyse statique seule (`bash -n`)** : 16 / 96 (16.7%) — *Zéro runtime.*
 
 ```mermaid
 pie title Statut Réel des 96 Scripts (Rigueur Fact-First)
-    "Prouvé Live de Bout en Bout" : 33
+    "Prouvé Live de Bout en Bout" : 34
     "Régression Interne Cassée" : 0
     "Sanity Check CLI Seul (Non Validé)" : 46
-    "Statique / Syntaxe Seul (Non Exécuté)" : 17
+    "Statique / Syntaxe Seul (Non Exécuté)" : 16
 ```
 
 ---
@@ -139,7 +139,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 | `scripts/ingestion/probe_medias_metadata.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/ingestion/purge_media.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/ingestion/quarantine_truncated_phashes.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
-| `scripts/ingestion/recognize_medias.sh` | ⚪ **Statique Seul (Non Exécuté)** | Shell | À évaluer | Syntaxe `bash -n` & `shellcheck` OK. Zéro exécution runtime. |
+| `scripts/ingestion/recognize_medias.sh` | 🟢 **Prouvé Live** | Shell | Moyenne (Outil d'Ingestion & Évaluation par Lots) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), set -euo pipefail, détection conditionnelle de time/parallel et options --help / --check. Validé hors racine (code 0). |
 | `scripts/ingestion/reconcile_phash_filenames.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/ingestion/register_adjacent_couplings.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/ingestion/repair_corrupted_couplings.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
@@ -358,3 +358,10 @@ Pour sortir de cet état sans spéculation, chaque script des sections 1 et 2 do
 - **Diagnostic** : Appel binaire relatif au CWD (`./target/release/dbsrt`) provoquant un crash immédiat `code 127` hors racine, absence d'ancrage `REPO_ROOT` et absence de repli vers le binaire debug.
 - **Remédiation** : Découverte dynamique de `REPO_ROOT` avec fallback appliance `~/dbsrt`, sélection absolue de `DBSRT_BIN` (support variable d'environnement, binaire release puis debug, avec garde explicite), et conformité Pure Taskfile Orchestrator.
 - **Validation Live** : Validé live à 100% : exécution hors racine `(cd crates && bash ../scripts/ingestion/media_add.sh --help)` sans erreur (code 0, affichage nominal des options du binaire Rust), linters `shellcheck` et `shfmt` conformes.
+
+### Fiche 23 : `scripts/ingestion/recognize_medias.sh`
+- **Rôle** : Orchestrateur de reconnaissance par lots parallélisée (`parallel`) de fichiers vidéo `.mkv` via l'application Python CLI `src/pydbsrt/app_cli.py recognize-media`.
+- **KPI / Importance** : `Moyenne (Outil d'Ingestion & Évaluation par Lots)`.
+- **Diagnostic** : Absence de `set -euo pipefail`, résolution fragile de racine via `git rev-parse` sans fallback appliance, dépendance non gardée envers `/usr/bin/time` et `parallel`, et absence d'aide CLI `--help` ou `--check`.
+- **Remédiation** : Ajout du mode strict `set -euo pipefail`, découverte dynamique de `REPO_ROOT` avec repli `~/dbsrt`, détection conditionnelle de `/usr/bin/time`, et support des options `--help` / `-h` et `--check` / `--dry-run` avec rapport des dépendances.
+- **Validation Live** : Validé live à 100% : exécution hors racine `(cd crates && bash ../scripts/ingestion/recognize_medias.sh --help)` et `(--check)` sans erreur (code 0), linters `shellcheck` et `shfmt` conformes.
