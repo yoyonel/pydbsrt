@@ -9,6 +9,7 @@ Outputs a target list ready for o2switch HTTP stream batch ingestion.
 from __future__ import annotations
 
 import argparse
+import getpass
 import json
 import os
 import sys
@@ -16,10 +17,25 @@ import unicodedata
 from pathlib import Path
 from typing import Any, Dict, List, Set
 
+
+def find_repo_root() -> Path:
+    """Finds repository root dynamically with appliance fallback."""
+    curr = Path(__file__).resolve().parent
+    for parent in [curr, *curr.parents]:
+        if (parent / ".git").is_dir():
+            return parent
+    appliance_path = Path.home() / "dbsrt"
+    if appliance_path.is_dir():
+        return appliance_path
+    return Path.cwd()
+
+
+REPO_ROOT = find_repo_root()
+
 # Named Operational Constants
-DEFAULT_LOCAL_FREEBOX_ROOT: str = f"/media/{os.getenv('USER', 'latty')}/Freebox"
+DEFAULT_LOCAL_FREEBOX_ROOT: str = str(Path("/media") / (os.getenv("USER") or getpass.getuser()) / "Freebox")
 DEFAULT_RPI4_FREEBOX_ROOT: str = "/mnt/freebox"
-DEFAULT_OUTPUT_TARGETS_FILE: str = "data/reports/freebox_batch_targets.json"
+DEFAULT_OUTPUT_TARGETS_FILE: str = str(REPO_ROOT / "data/reports/freebox_batch_targets.json")
 
 SUPPORTED_VIDEO_EXTENSIONS: tuple[str, ...] = (
     ".mp4",
@@ -127,9 +143,24 @@ def main() -> int:
     parser.add_argument("--root", default=None, help="Root mount directory of Freebox (default: auto-detect)")
     parser.add_argument("--output", default=DEFAULT_OUTPUT_TARGETS_FILE, help="Output JSON path")
     parser.add_argument("--limit", type=int, default=None, help="Optional maximum number of targets to collect")
+    parser.add_argument(
+        "--check",
+        "--dry-run",
+        dest="check_mode",
+        action="store_true",
+        help="Perform sanity check of mounts without collecting/writing targets",
+    )
     args = parser.parse_args()
 
     root_path = resolve_freebox_root(args.root)
+
+    if args.check_mode:
+        print("[CHECK] Mode verification activé.")
+        print(f"[CHECK] REPO_ROOT : {REPO_ROOT}")
+        print(f"[CHECK] Resolved root : {root_path} (exists: {root_path.is_dir()})")
+        print(f"[CHECK] Output path : {args.output}")
+        return 0
+
     if not root_path.is_dir():
         print(f"❌ Error: Freebox root '{root_path}' does not exist or is not mounted.", file=sys.stderr)
         return 1

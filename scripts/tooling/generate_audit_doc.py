@@ -253,6 +253,10 @@ PROVEN_LIVE: dict[str, str] = {
         "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus, refactoring de complexité (repair_registry 9 <= 15 vs 37 legacy) et mode CLI --check."
         " Validé hors racine (--check code 0, audit de 157 044 répliques saines confirmé)."
     ),
+    "scripts/ingestion/scan_freebox_targets.py": (
+        "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), élimination des noms d'utilisateurs en dur, chemins absolus et option CLI --check."
+        " Validé live sur serveur RPi4 réel et hors racine (--check code 0, montage /mnt/freebox confirmé)."
+    ),
     "scripts/ingestion/init_couplings_seed.sh": (
         "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des fixtures et support --help / --check. Validé hors racine (code 0)."
     ),
@@ -392,6 +396,7 @@ SCRIPT_KPIS: dict[str, str] = {
     "scripts/ingestion/reconcile_phash_filenames.py": "Élevée (Réconciliation Canonique MovieHash des Noms d'Empreintes pHash)",
     "scripts/ingestion/register_adjacent_couplings.py": "Élevée (Enregistrement des Couplages Adjacents Extraits Vidéo & Sous-Titres)",
     "scripts/ingestion/repair_corrupted_couplings.py": "Élevée (Réparation des Caractères Corrompus dans le Registre des Couplages)",
+    "scripts/ingestion/scan_freebox_targets.py": "Élevée (Collecte Sélective des Médias Éligibles sur Disques Freebox)",
     "scripts/ingestion/init_couplings_seed.sh": "Moyenne (Amorçage CI/CD & Tests d'Intégration)",
     "scripts/ingestion/media_add.sh": "Élevée (Ingestion Unifiée & Invariants Multimédia)",
     "scripts/ingestion/recognize_medias.sh": "Moyenne (Outil d'Ingestion & Évaluation par Lots)",
