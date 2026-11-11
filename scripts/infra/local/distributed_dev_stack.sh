@@ -3,8 +3,27 @@
 # Simulates the distributed topology: Local Agent (8765) <-> Remote Server (8766, o2switch/NAS/RPi4+ simulator)
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+if [[ ! -d "${REPO_ROOT}/.git" && -d "${HOME}/dbsrt" ]]; then
+  REPO_ROOT="${HOME}/dbsrt"
+fi
+
+# Print usage if requested
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" || "${1:-}" == "help" ]]; then
+  echo "Usage: $(basename "$0") {start|stop|status} [--help]"
+  echo ""
+  echo "Controls dual-process distributed dev stack (Local Agent 8765 <-> Remote Server 8766)."
+  echo ""
+  echo "Actions:"
+  echo "  start, up     Start simulated remote server and local agent"
+  echo "  stop, down    Stop simulated remote server and local agent"
+  echo "  status        Check health and metrics of both services (default)"
+  exit 0
+fi
+
 ACTION="${1:-status}"
-SERVER_BIN="${SERVER_BIN:-./target/release/dbsrt-server}"
+SERVER_BIN="${SERVER_BIN:-${REPO_ROOT}/target/release/dbsrt-server}"
 
 AGENT_PID_FILE="/tmp/dbsrt-agent.pid"
 AGENT_LOG_FILE="/tmp/dbsrt-agent.log"
@@ -16,8 +35,12 @@ REMOTE_PORT=8766
 
 ensure_binary() {
   if [[ ! -x "$SERVER_BIN" ]]; then
-    echo "Building release binary $SERVER_BIN..."
-    cargo build --release --bin dbsrt-server
+    if [[ -x "${REPO_ROOT}/target/debug/dbsrt-server" ]]; then
+      SERVER_BIN="${REPO_ROOT}/target/debug/dbsrt-server"
+    else
+      echo "Building release binary $SERVER_BIN..."
+      cargo build --release --manifest-path "${REPO_ROOT}/Cargo.toml" --bin dbsrt-server
+    fi
   fi
 }
 
@@ -28,17 +51,17 @@ start_distributed() {
     echo "Simulated remote server already running (PID: $(cat "$REMOTE_PID_FILE")) on port $REMOTE_PORT"
   else
     local dbphash_args=()
-    if [[ -f "data/catalog.dbphash" ]]; then
-      dbphash_args=(--dbphash data/catalog.dbphash)
+    if [[ -f "${REPO_ROOT}/data/catalog.dbphash" ]]; then
+      dbphash_args=(--dbphash "${REPO_ROOT}/data/catalog.dbphash")
     fi
 
     echo "1. Starting Simulated Remote Server on http://127.0.0.1:$REMOTE_PORT..."
     setsid "$SERVER_BIN" \
       --host 127.0.0.1 \
       --port "$REMOTE_PORT" \
-      --phash-dir data/__PHASH__ \
-      --extra-phash-dir data/snippets \
-      --subtitles-dir data/SRT \
+      --phash-dir "${REPO_ROOT}/data/__PHASH__" \
+      --extra-phash-dir "${REPO_ROOT}/data/snippets" \
+      --subtitles-dir "${REPO_ROOT}/data/SRT" \
       "${dbphash_args[@]}" \
       </dev/null >"$REMOTE_LOG_FILE" 2>&1 &
     echo $! >"$REMOTE_PID_FILE"
@@ -150,7 +173,7 @@ case "$ACTION" in
   stop | down) stop_distributed ;;
   status) status_distributed ;;
   *)
-    echo "Usage: $0 {start|stop|status}"
+    echo "Usage: $(basename "$0") {start|stop|status}"
     exit 1
     ;;
 esac
