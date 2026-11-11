@@ -1,8 +1,22 @@
 #!/usr/bin/env python3
 """Generates a rock-solid, responsive HTML dashboard for the E2E VLC tests."""
 
+import argparse
 import json
+import sys
 from pathlib import Path
+
+
+def find_repo_root() -> Path:
+    """Dynamically locates repository root with fallback to ~/dbsrt."""
+    current = Path(__file__).resolve().parent
+    for p in [current, *current.parents]:
+        if (p / ".git").is_dir() or (p / "Taskfile.yml").is_file():
+            return p
+    appliance = Path.home() / "dbsrt"
+    if appliance.is_dir():
+        return appliance
+    return Path.cwd()
 
 
 def get_failure_reason(video: str, conf: float) -> str:
@@ -20,13 +34,52 @@ def get_failure_reason(video: str, conf: float) -> str:
     return "ÉCHEC (Écran statique / non indexé)"
 
 
-def main():
-    manifest_path = Path("data/benchmarks/e2e_vlc_manifest.json")
-    if not manifest_path.exists():
-        manifest_path = Path("docs/screenshots/e2e_vlc_all/manifest.json")
-    if not manifest_path.exists():
-        print("Manifest not found")
-        return
+def resolve_manifest_path(repo_root: Path, custom_path: str | None = None) -> Path | None:
+    """Locates manifest file with fallback candidates."""
+    if custom_path:
+        p = Path(custom_path)
+        if not p.is_absolute():
+            p = repo_root / p
+        return p if p.is_file() else None
+
+    candidates = [
+        repo_root / "data/benchmarks/e2e_vlc_manifest.json",
+        repo_root / "docs/screenshots/e2e_vlc_all/manifest.json",
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Generates an interactive HTML dashboard for E2E VLC tests.")
+    parser.add_argument(
+        "--manifest",
+        type=str,
+        default=None,
+        help="Path to manifest JSON file (default: autodetected).",
+    )
+    parser.add_argument(
+        "--output",
+        type=str,
+        default=None,
+        help="Destination markdown file (default: docs/history/2026-10-20-dashboard-interactif-e2e-vlc-corpus-nas.md).",
+    )
+    parser.add_argument(
+        "--check",
+        "--dry-run",
+        action="store_true",
+        help="Validate manifest presence and exit without writing.",
+    )
+    args = parser.parse_args()
+
+    repo_root = find_repo_root()
+    manifest_path = resolve_manifest_path(repo_root, args.manifest)
+
+    if not manifest_path:
+        print("Manifest not found", file=sys.stderr)
+        sys.exit(1)
 
     with open(manifest_path, encoding="utf-8") as f:
         items = json.load(f)
@@ -35,6 +88,10 @@ def main():
     success = sum(1 for x in items if x.get("confidence_percent", 0.0) >= 90.0)
     failed = total - success
     rate = (success / total * 100.0) if total else 0.0
+
+    if args.check:
+        print(f"Manifest OK: {manifest_path} ({total} items, {success} success, {rate:.1f}% rate)")
+        return
 
     table_data = []
     for idx, x in enumerate(items, 1):
@@ -515,7 +572,14 @@ $(document).ready(function() {{
 </script>
 """
 
-    out_file = Path("docs/history/2026-10-20-dashboard-interactif-e2e-vlc-corpus-nas.md")
+    if args.output:
+        out_file = Path(args.output)
+        if not out_file.is_absolute():
+            out_file = repo_root / out_file
+    else:
+        out_file = repo_root / "docs/history/2026-10-20-dashboard-interactif-e2e-vlc-corpus-nas.md"
+
+    out_file.parent.mkdir(parents=True, exist_ok=True)
     out_file.write_text(html_content, encoding="utf-8")
     print(f"Generated clean dashboard with diagnostics at {out_file}")
 

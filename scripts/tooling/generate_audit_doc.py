@@ -149,6 +149,10 @@ PROVEN_LIVE: dict[str, str] = {
         "Chemins docstring et commentaires réalignés. 16/16 tests unitaires PASS (test_check_pr_body.py)."
         " Prouvé live en CLI stdin (rejet corps vide exit 1, validation corps conforme avec preuve SVG exit 0)."
     ),
+    "scripts/tooling/build_dashboard_html.py": (
+        "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), recherche robuste du manifeste et options CLI --manifest, --output, --check."
+        " Validé hors racine sur le manifeste réel (1 332 tests E2E inspectés, taux 99.8%, code 0)."
+    ),
     "scripts/tooling/generate_audit_doc.py": (
         "Résolution dynamique REPO_ROOT, exclusion du self-scan (0 faux positif), préservation dynamique des fiches d'analyse méticuleuse et support CLI (--check, --output)."
     ),
@@ -214,6 +218,7 @@ SCRIPT_KPIS: dict[str, str] = {
     "scripts/ingestion/media_add.sh": "Élevée (Ingestion Unifiée & Invariants Multimédia)",
     "scripts/ingestion/recognize_medias.sh": "Moyenne (Outil d'Ingestion & Évaluation par Lots)",
     "scripts/ingestion/seed_couplings.sh": "Élevée (Vérité Terrain & Registre des Couplages)",
+    "scripts/tooling/build_dashboard_html.py": "Moyenne (Génération Dashboard E2E VLC)",
     "scripts/tooling/check_pr_body.py": "Critique (Garde-fou CI/CD & Qualité des PRs)",
     "scripts/tooling/generate_audit_doc.py": "Moyenne (Outil de Métrologie & Méta-Documentation)",
     "scripts/tooling/generate_nightly_report_enhanced.py": "Moyenne (Métrologie & Profiling Diátaxis)",

@@ -7,17 +7,17 @@
 ## 1. Synthèse Factuelle Globale
 
 - **Total scripts opérationnels** : 96 (66 Python, 30 Shell)
-- **Scripts prouvés en exécution réelle live (session)** : 56 / 96 (58.3%) — *Seuls scripts réellement testés de bout en bout.*
+- **Scripts prouvés en exécution réelle live (session)** : 57 / 96 (59.4%) — *Seuls scripts réellement testés de bout en bout.*
 - **Scripts en régression directe (appels internes cassés)** : 0 / 96 (0.0%) — *100% des régressions actives résolues.*
 - **Nombre total de références internes rompues actives** : 0 (13 références appliance distantes documentées)
-- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 40 / 96 (41.7%) — *Imports seuls, logique non exécutée.*
+- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 39 / 96 (40.6%) — *Imports seuls, logique non exécutée.*
 - **Scripts avec analyse statique seule (`bash -n`)** : 0 / 96 (0.0%) — *Zéro runtime.*
 
 ```mermaid
 pie title Statut Réel des 96 Scripts (Rigueur Fact-First)
-    "Prouvé Live de Bout en Bout" : 56
+    "Prouvé Live de Bout en Bout" : 57
     "Régression Interne Cassée" : 0
-    "Sanity Check CLI Seul (Non Validé)" : 40
+    "Sanity Check CLI Seul (Non Validé)" : 39
     "Statique / Syntaxe Seul (Non Exécuté)" : 0
 ```
 
@@ -158,7 +158,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 
 | Script | Statut Réel | Type | KPI / Importance | Détail / Diagnostic Contradictoire |
 | :--- | :---: | :---: | :---: | :--- |
-| `scripts/tooling/build_dashboard_html.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
+| `scripts/tooling/build_dashboard_html.py` | 🟢 **Prouvé Live** | Python | Moyenne (Génération Dashboard E2E VLC) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), recherche robuste du manifeste et options CLI --manifest, --output, --check. Validé hors racine sur le manifeste réel (1 332 tests E2E inspectés, taux 99.8%, code 0). |
 | `scripts/tooling/build_inventory_doc.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/tooling/check_pr_body.py` | 🟢 **Prouvé Live** | Python | Critique (Garde-fou CI/CD & Qualité des PRs) | Chemins docstring et commentaires réalignés. 16/16 tests unitaires PASS (test_check_pr_body.py). Prouvé live en CLI stdin (rejet corps vide exit 1, validation corps conforme avec preuve SVG exit 0). |
 | `scripts/tooling/code_quality.sh` | 🟢 **Prouvé Live** | Shell | À évaluer | Exécuté live (task lint, task fmt) |
@@ -519,3 +519,10 @@ Pour sortir de cet état sans spéculation, chaque script des sections 1 et 2 do
 - **Diagnostic** : Résolution statique du CWD sans repli appliance `~/dbsrt`, et absence de mode CLI d'inspection `--check` / `--dry-run` pour tester l'état du port d'écoute et la présence des points de montage CIFS sans bloquer dans une boucle infinie de serveur HTTP.
 - **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, découpage modulaire respectant le seuil `complexipy` (toutes les fonctions $\le$ 8), et ajout de l'option CLI `--check` / `--dry-run` inspectant la disponibilité du port (18089) et l'état des partages CIFS montés sous `/mnt/freebox`.
 - **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/infra/rpi4/rpi4_freebox_gateway.py --check)` sans erreur (code 0), déploiement SSH sur Raspberry Pi 4 réel (`rpi4`) et exécution réelle confirmant le service actif sur le port 18089 et les 3 partages CIFS Freebox montés (`Disque_1`, `Disque_1_1`, `Disque_2`, code 0).
+
+### Fiche 46 : `scripts/tooling/build_dashboard_html.py`
+- **Rôle** : Générateur de rapport HTML et DataTables interactif pour les 1 334 tests E2E GUI VLC (`docs/history/2026-10-20-dashboard-interactif-e2e-vlc-corpus-nas.md`).
+- **KPI / Importance** : `Moyenne (Génération Dashboard E2E VLC)`.
+- **Diagnostic** : Chemins de manifeste et de sortie relatifs au CWD (`data/benchmarks/...` et `docs/history/...`), absence d'options CLI et complexité d'entrée non découplée.
+- **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, résolution robuste des manifestes et ajout des options CLI `--manifest`, `--output` et `--check` / `--dry-run`.
+- **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/tooling/build_dashboard_html.py --check)` inspectant 1 332 tests réels (code 0), linters `ruff`, `complexipy` et `pyright` conformes.
