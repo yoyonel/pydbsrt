@@ -245,6 +245,10 @@ PROVEN_LIVE: dict[str, str] = {
         "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), repli résilient sur PostgreSQL RPi4, chemins absolus et option CLI --check."
         " Validé hors racine (--check code 0, réconciliation de 2 779 empreintes phash contre PostgreSQL confirmée)."
     ),
+    "scripts/ingestion/register_adjacent_couplings.py": (
+        "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des registres SRT/couplings, réduction de complexité et option CLI non-destructive --check."
+        " Validé hors racine (--check code 0, détection de 251 couplages adjacents confirmée)."
+    ),
     "scripts/ingestion/init_couplings_seed.sh": (
         "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des fixtures et support --help / --check. Validé hors racine (code 0)."
     ),
@@ -382,6 +386,7 @@ SCRIPT_KPIS: dict[str, str] = {
     "scripts/ingestion/purge_media.py": "Critique (Purge Globale Multi-Niveaux des Médias & Registres)",
     "scripts/ingestion/quarantine_truncated_phashes.py": "Élevée (Mise en Quarantaine & Audit des Empreintes Corrompues)",
     "scripts/ingestion/reconcile_phash_filenames.py": "Élevée (Réconciliation Canonique MovieHash des Noms d'Empreintes pHash)",
+    "scripts/ingestion/register_adjacent_couplings.py": "Élevée (Enregistrement des Couplages Adjacents Extraits Vidéo & Sous-Titres)",
     "scripts/ingestion/init_couplings_seed.sh": "Moyenne (Amorçage CI/CD & Tests d'Intégration)",
     "scripts/ingestion/media_add.sh": "Élevée (Ingestion Unifiée & Invariants Multimédia)",
     "scripts/ingestion/recognize_medias.sh": "Moyenne (Outil d'Ingestion & Évaluation par Lots)",

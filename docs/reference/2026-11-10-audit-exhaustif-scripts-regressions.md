@@ -7,17 +7,17 @@
 ## 1. Synthèse Factuelle Globale
 
 - **Total scripts opérationnels** : 96 (66 Python, 30 Shell)
-- **Scripts prouvés en exécution réelle live (session)** : 92 / 96 (95.8%) — *Seuls scripts réellement testés de bout en bout.*
+- **Scripts prouvés en exécution réelle live (session)** : 93 / 96 (96.9%) — *Seuls scripts réellement testés de bout en bout.*
 - **Scripts en régression directe (appels internes cassés)** : 0 / 96 (0.0%) — *100% des régressions actives résolues.*
 - **Nombre total de références internes rompues actives** : 0 (13 références appliance distantes documentées)
-- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 4 / 96 (4.2%) — *Imports seuls, logique non exécutée.*
+- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 3 / 96 (3.1%) — *Imports seuls, logique non exécutée.*
 - **Scripts avec analyse statique seule (`bash -n`)** : 0 / 96 (0.0%) — *Zéro runtime.*
 
 ```mermaid
 pie title Statut Réel des 96 Scripts (Rigueur Fact-First)
-    "Prouvé Live de Bout en Bout" : 92
+    "Prouvé Live de Bout en Bout" : 93
     "Régression Interne Cassée" : 0
-    "Sanity Check CLI Seul (Non Validé)" : 4
+    "Sanity Check CLI Seul (Non Validé)" : 3
     "Statique / Syntaxe Seul (Non Exécuté)" : 0
 ```
 
@@ -141,7 +141,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 | `scripts/ingestion/quarantine_truncated_phashes.py` | 🟢 **Prouvé Live** | Python | Élevée (Mise en Quarantaine & Audit des Empreintes Corrompues) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des dossiers phash et rapports, et option CLI d'audit --check. Validé hors racine (--check code 0, scan de 2 779 fichiers .phash sans corruption confirmé). |
 | `scripts/ingestion/recognize_medias.sh` | 🟢 **Prouvé Live** | Shell | Moyenne (Outil d'Ingestion & Évaluation par Lots) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), set -euo pipefail, détection conditionnelle de time/parallel et options --help / --check. Validé hors racine (code 0). |
 | `scripts/ingestion/reconcile_phash_filenames.py` | 🟢 **Prouvé Live** | Python | Élevée (Réconciliation Canonique MovieHash des Noms d'Empreintes pHash) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), repli résilient sur PostgreSQL RPi4, chemins absolus et option CLI --check. Validé hors racine (--check code 0, réconciliation de 2 779 empreintes phash contre PostgreSQL confirmée). |
-| `scripts/ingestion/register_adjacent_couplings.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
+| `scripts/ingestion/register_adjacent_couplings.py` | 🟢 **Prouvé Live** | Python | Élevée (Enregistrement des Couplages Adjacents Extraits Vidéo & Sous-Titres) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des registres SRT/couplings, réduction de complexité et option CLI non-destructive --check. Validé hors racine (--check code 0, détection de 251 couplages adjacents confirmée). |
 | `scripts/ingestion/repair_corrupted_couplings.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/ingestion/scan_freebox_targets.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/ingestion/scan_nas_ftp.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
@@ -771,3 +771,10 @@ Pour sortir de cet état sans spéculation, chaque script des sections 1 et 2 do
 - **Diagnostic** : Chemins relatifs par défaut (`data/__PHASH__`), fragilité en cas d'indisponibilité du conteneur local PostgreSQL, et absence d'alias d'inspection `--check`.
 - **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, repli automatique et résilient sur l'instance PostgreSQL du serveur RPi4 en cas de conteneur local éteint, et ajout de l'option CLI `--check`.
 - **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/ingestion/reconcile_phash_filenames.py --check)` interrogeant le PostgreSQL RPi4 et réconciliant 2 779 fichiers (2 036 déjà canoniques, code 0), linters `ruff`, `complexipy` et `pyright` conformes.
+
+### Fiche 82 : `scripts/ingestion/register_adjacent_couplings.py`
+- **Rôle** : Enregistrement des sous-titres `.srt` adjacents vérifiés (détection de langue FR/EN, comptage des répliques `cue_count`, empreintes MD5) dans le registre Zero-DB `data/SRT/couplings.json`.
+- **KPI / Importance** : `Élevée (Enregistrement des Couplages Adjacents Extraits Vidéo & Sous-Titres)`.
+- **Diagnostic** : Chemins relatifs par défaut (`data/SRT/couplings.json`, `data/SRT`, `data/snippets`), et absence de mode simulation `--dry-run` / `--check`.
+- **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, préfixage absolu des dossiers et registres, factorisation modulaire de `build_coupling_entry` (main 11 <= 15), et ajout de l'option CLI `--check` / `--dry-run`.
+- **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/ingestion/register_adjacent_couplings.py --check)` confirmant la détection de 251 couplages adjacents sans écriture disque (code 0), linters `ruff`, `complexipy` et `pyright` conformes.
