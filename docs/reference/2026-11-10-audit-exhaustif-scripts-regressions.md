@@ -7,17 +7,17 @@
 ## 1. Synthèse Factuelle Globale
 
 - **Total scripts opérationnels** : 96 (66 Python, 30 Shell)
-- **Scripts prouvés en exécution réelle live (session)** : 66 / 96 (68.8%) — *Seuls scripts réellement testés de bout en bout.*
+- **Scripts prouvés en exécution réelle live (session)** : 67 / 96 (69.8%) — *Seuls scripts réellement testés de bout en bout.*
 - **Scripts en régression directe (appels internes cassés)** : 0 / 96 (0.0%) — *100% des régressions actives résolues.*
 - **Nombre total de références internes rompues actives** : 0 (13 références appliance distantes documentées)
-- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 30 / 96 (31.2%) — *Imports seuls, logique non exécutée.*
+- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 29 / 96 (30.2%) — *Imports seuls, logique non exécutée.*
 - **Scripts avec analyse statique seule (`bash -n`)** : 0 / 96 (0.0%) — *Zéro runtime.*
 
 ```mermaid
 pie title Statut Réel des 96 Scripts (Rigueur Fact-First)
-    "Prouvé Live de Bout en Bout" : 66
+    "Prouvé Live de Bout en Bout" : 67
     "Régression Interne Cassée" : 0
-    "Sanity Check CLI Seul (Non Validé)" : 30
+    "Sanity Check CLI Seul (Non Validé)" : 29
     "Statique / Syntaxe Seul (Non Exécuté)" : 0
 ```
 
@@ -52,7 +52,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 | Script | Statut Réel | Type | KPI / Importance | Détail / Diagnostic Contradictoire |
 | :--- | :---: | :---: | :---: | :--- |
 | `scripts/benchmarks/bench_http_flood.sh` | 🟢 **Prouvé Live** | Shell | Moyenne (Dev & Banc de Charge HTTP) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des artefacts (catalogue, binaire, sous-titres) et support --help. Exécuté hors racine (--help code 0). |
-| `scripts/benchmarks/bench_server_comparison.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
+| `scripts/benchmarks/bench_server_comparison.py` | 🟢 **Prouvé Live** | Python | Élevée (Benchmark Comparatif Latence Serveur ArcSwap) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), passage de chemins absolus aux sous-processus et options CLI --bin-before, --bin-after, --samples, --check. Validé hors racine (--check code 0, détection des binaires comparatifs et répertoires de fixtures). |
 | `scripts/benchmarks/benchmark_worker_scaling.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/benchmarks/compare_top_telemetry.py` | 🟢 **Prouvé Live** | Python | Moyenne (Dev / Parité Télémétrie) | Exécuté live avec succès sur /proc Linux. Bandeau console corrigé vers scripts/infra/local/dbsrt_top.py. |
 | `scripts/benchmarks/eval_exhaustive_nas_snippets.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
@@ -589,3 +589,10 @@ Pour sortir de cet état sans spéculation, chaque script des sections 1 et 2 do
 - **Diagnostic** : Chemins relatifs au CWD pour le binaire cible (`./target/release/dbsrt`), les enregistrements de casts (`data/reports/...`, `docs/assets/casts/...`), le rapport markdown et le sous-script d'ingestion par lots, et absence d'options CLI ou de mode d'inspection non-interactif.
 - **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, préfixage absolu de tous les chemins d'artefacts et du sous-processus d'ingestion, sélection automatique du binaire (release/debug), et ajout de l'option CLI `--check` / `--dry-run`.
 - **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/e2e/recette_top_e2e.py --check)` confirmant la présence du binaire release, du point de montage NAS et des chemins de cast (code 0), linters `ruff`, `complexipy` et `pyright` conformes.
+
+### Fiche 56 : `scripts/benchmarks/bench_server_comparison.py`
+- **Rôle** : Banc d'essai comparatif de latence mesurant les temps de réponse de reconnaissance HTTP de `dbsrt-server` (pointeur direct legacy vs pointeur atomique `ArcSwap`).
+- **KPI / Importance** : `Élevée (Benchmark Comparatif Latence Serveur ArcSwap)`.
+- **Diagnostic** : Chemins relatifs au CWD passés aux options du serveur (`tests/data`, `data/SRT`), chemins de binaires en dur dans `/tmp` sans personnalisation possible, et absence d'interface CLI ou d'option `--check` / `--dry-run`.
+- **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, préfixage absolu des répertoires de fixtures, et ajout des options CLI `--bin-before`, `--bin-after`, `--samples`, `--phash-dir`, `--subtitles-dir` et `--check` / `--dry-run`.
+- **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/benchmarks/bench_server_comparison.py --check)` confirmant la présence des binaires comparatifs et des répertoires de fixtures (code 0), linters `ruff`, `complexipy` et `pyright` conformes.

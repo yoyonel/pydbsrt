@@ -22,6 +22,10 @@ PROVEN_LIVE: dict[str, str] = {
     "scripts/benchmarks/bench_http_flood.sh": (
         "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des artefacts (catalogue, binaire, sous-titres) et support --help. Exécuté hors racine (--help code 0)."
     ),
+    "scripts/benchmarks/bench_server_comparison.py": (
+        "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), passage de chemins absolus aux sous-processus et options CLI --bin-before, --bin-after, --samples, --check."
+        " Validé hors racine (--check code 0, détection des binaires comparatifs et répertoires de fixtures)."
+    ),
     "scripts/benchmarks/compare_top_telemetry.py": (
         "Exécuté live avec succès sur /proc Linux. Bandeau console corrigé vers scripts/infra/local/dbsrt_top.py."
     ),
@@ -222,6 +226,7 @@ PROVEN_LIVE: dict[str, str] = {
 
 SCRIPT_KPIS: dict[str, str] = {
     "scripts/benchmarks/bench_http_flood.sh": "Moyenne (Dev & Banc de Charge HTTP)",
+    "scripts/benchmarks/bench_server_comparison.py": "Élevée (Benchmark Comparatif Latence Serveur ArcSwap)",
     "scripts/benchmarks/compare_top_telemetry.py": "Moyenne (Dev / Parité Télémétrie)",
     "scripts/benchmarks/record_casts.py": "Élevée (Doc Diátaxis & Casts Asciinema)",
     "scripts/benchmarks/record_proof.py": "Critique (Preuves Terminales PR)",

@@ -5,6 +5,7 @@ Before refactoring (Direct pointer) vs After refactoring (ArcSwap atomic pointer
 
 from __future__ import annotations
 
+import argparse
 import json
 import statistics
 import subprocess
@@ -12,6 +13,26 @@ import sys
 import time
 import urllib.request
 from pathlib import Path
+
+DEFAULT_WARMUP_COUNT: int = 50
+DEFAULT_SAMPLE_COUNT: int = 1000
+DEFAULT_PORT_BEFORE: int = 8798
+DEFAULT_PORT_AFTER: int = 8799
+DEFAULT_PHASH_DIR: str = "tests/data"
+DEFAULT_SUBTITLES_DIR: str = "data/SRT"
+MICROSECONDS_PER_SECOND: float = 1_000_000.0
+
+
+def find_repo_root() -> Path:
+    """Dynamically locates repository root with fallback to ~/dbsrt."""
+    current = Path(__file__).resolve().parent
+    for p in [current, *current.parents]:
+        if (p / ".git").is_dir() or (p / "Taskfile.yml").is_file():
+            return p
+    appliance = Path.home() / "dbsrt"
+    if appliance.is_dir():
+        return appliance
+    return Path.cwd()
 
 
 def wait_for_server(url: str, timeout: float = 5.0) -> bool:
@@ -31,7 +52,9 @@ def run_benchmark_for_binary(
     binary_path: str,
     port: int,
     queries: list[dict],
-    n_warmup: int = 50,
+    phash_dir: Path,
+    subtitles_dir: Path,
+    n_warmup: int = DEFAULT_WARMUP_COUNT,
 ) -> list[float]:
     print(f"\n--- Testing binary: {binary_path} on port {port} ---", flush=True)
     cmd = [
@@ -41,9 +64,9 @@ def run_benchmark_for_binary(
         "--port",
         str(port),
         "--phash-dir",
-        "tests/data",
+        str(phash_dir),
         "--subtitles-dir",
-        "data/SRT",
+        str(subtitles_dir),
     ]
     proc = subprocess.Popen(
         cmd,
@@ -81,7 +104,7 @@ def run_benchmark_for_binary(
             t_start = time.perf_counter()
             with urllib.request.urlopen(req, timeout=5.0) as resp:
                 assert resp.status == 200
-            t_elapsed = (time.perf_counter() - t_start) * 1_000_000.0  # in microseconds
+            t_elapsed = (time.perf_counter() - t_start) * MICROSECONDS_PER_SECOND
             latencies_us.append(t_elapsed)
 
         return latencies_us
@@ -106,16 +129,74 @@ def compute_stats(latencies: list[float]) -> dict[str, float]:
     }
 
 
-def main():
-    bin_before = "/tmp/dbsrt-server-before"
-    bin_after = "/tmp/dbsrt-server-after"
+def main() -> None:
+    repo_root = find_repo_root()
 
-    if not Path(bin_before).exists() or not Path(bin_after).exists():
+    parser = argparse.ArgumentParser(description="Comparative benchmark measuring dbsrt-server matching latency.")
+    parser.add_argument(
+        "--bin-before",
+        type=str,
+        default="/tmp/dbsrt-server-before",
+        help="Path to 'before' binary (default: /tmp/dbsrt-server-before)",
+    )
+    parser.add_argument(
+        "--bin-after",
+        type=str,
+        default="/tmp/dbsrt-server-after",
+        help="Path to 'after' binary (default: /tmp/dbsrt-server-after)",
+    )
+    parser.add_argument(
+        "--samples",
+        type=int,
+        default=DEFAULT_SAMPLE_COUNT,
+        help=f"Number of test queries (default: {DEFAULT_SAMPLE_COUNT})",
+    )
+    parser.add_argument(
+        "--phash-dir",
+        type=str,
+        default=None,
+        help=f"Path to phash fixtures (default: {DEFAULT_PHASH_DIR})",
+    )
+    parser.add_argument(
+        "--subtitles-dir",
+        type=str,
+        default=None,
+        help=f"Path to subtitles directory (default: {DEFAULT_SUBTITLES_DIR})",
+    )
+    parser.add_argument(
+        "--check",
+        "--dry-run",
+        action="store_true",
+        help="Inspect binaries and datasets availability without running benchmark",
+    )
+    args = parser.parse_args()
+
+    phash_dir = Path(args.phash_dir) if args.phash_dir else (repo_root / DEFAULT_PHASH_DIR)
+    if not phash_dir.is_absolute():
+        phash_dir = repo_root / phash_dir
+
+    subtitles_dir = Path(args.subtitles_dir) if args.subtitles_dir else (repo_root / DEFAULT_SUBTITLES_DIR)
+    if not subtitles_dir.is_absolute():
+        subtitles_dir = repo_root / subtitles_dir
+
+    bin_before = Path(args.bin_before)
+    bin_after = Path(args.bin_after)
+
+    if args.check:
+        print("=== DBSrt Server Matching Benchmark Inspection ===")
+        print(f"✓ REPO_ROOT     : {repo_root}")
+        print(f"✓ Binary before : {bin_before} (exists: {bin_before.exists()})")
+        print(f"✓ Binary after  : {bin_after} (exists: {bin_after.exists()})")
+        print(f"✓ pHash dir     : {phash_dir} (exists: {phash_dir.is_dir()})")
+        print(f"✓ Subtitles dir : {subtitles_dir} (exists: {subtitles_dir.is_dir()})")
+        print(f"✓ Samples count : {args.samples}")
+        return
+
+    if not bin_before.exists() or not bin_after.exists():
         print(f"Error: missing binaries: {bin_before} or {bin_after}", file=sys.stderr)
         sys.exit(1)
 
     # Prepare realistic 15-frame query payload
-    # 15 hashes representing a 0.6s to 1s snippet
     test_hashes = [
         "0xbf6b0390611f6ccc",
         "0xbf6b0390611f6ccc",
@@ -134,7 +215,6 @@ def main():
         "0x9e3963c633a699c6",
     ]
 
-    n_samples = 1000
     queries = [
         {
             "media_path": "query_sample.mp4",
@@ -144,16 +224,16 @@ def main():
             "search_distance": 6,
             "nb_seconds": 1.0,
         }
-        for _ in range(n_samples)
+        for _ in range(args.samples)
     ]
 
     print("================================================================================")
     print(" 🔬 EMPIRICAL SERVER MATCHING COMPARISON: BEFORE vs AFTER REFACTORING")
-    print(f" Samples: {n_samples} HTTP POST /v1/recognize queries under identical conditions")
+    print(f" Samples: {args.samples} HTTP POST /v1/recognize queries under identical conditions")
     print("================================================================================")
 
-    lat_before = run_benchmark_for_binary(bin_before, 8798, queries)
-    lat_after = run_benchmark_for_binary(bin_after, 8799, queries)
+    lat_before = run_benchmark_for_binary(str(bin_before), DEFAULT_PORT_BEFORE, queries, phash_dir, subtitles_dir)
+    lat_after = run_benchmark_for_binary(str(bin_after), DEFAULT_PORT_AFTER, queries, phash_dir, subtitles_dir)
 
     s_before = compute_stats(lat_before)
     s_after = compute_stats(lat_after)
