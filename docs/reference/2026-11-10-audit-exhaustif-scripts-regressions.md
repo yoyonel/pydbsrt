@@ -7,17 +7,17 @@
 ## 1. Synthèse Factuelle Globale
 
 - **Total scripts opérationnels** : 96 (66 Python, 30 Shell)
-- **Scripts prouvés en exécution réelle live (session)** : 68 / 96 (70.8%) — *Seuls scripts réellement testés de bout en bout.*
+- **Scripts prouvés en exécution réelle live (session)** : 69 / 96 (71.9%) — *Seuls scripts réellement testés de bout en bout.*
 - **Scripts en régression directe (appels internes cassés)** : 0 / 96 (0.0%) — *100% des régressions actives résolues.*
 - **Nombre total de références internes rompues actives** : 0 (13 références appliance distantes documentées)
-- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 28 / 96 (29.2%) — *Imports seuls, logique non exécutée.*
+- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 27 / 96 (28.1%) — *Imports seuls, logique non exécutée.*
 - **Scripts avec analyse statique seule (`bash -n`)** : 0 / 96 (0.0%) — *Zéro runtime.*
 
 ```mermaid
 pie title Statut Réel des 96 Scripts (Rigueur Fact-First)
-    "Prouvé Live de Bout en Bout" : 68
+    "Prouvé Live de Bout en Bout" : 69
     "Régression Interne Cassée" : 0
-    "Sanity Check CLI Seul (Non Validé)" : 28
+    "Sanity Check CLI Seul (Non Validé)" : 27
     "Statique / Syntaxe Seul (Non Exécuté)" : 0
 ```
 
@@ -55,7 +55,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 | `scripts/benchmarks/bench_server_comparison.py` | 🟢 **Prouvé Live** | Python | Élevée (Benchmark Comparatif Latence Serveur ArcSwap) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), passage de chemins absolus aux sous-processus et options CLI --bin-before, --bin-after, --samples, --check. Validé hors racine (--check code 0, détection des binaires comparatifs et répertoires de fixtures). |
 | `scripts/benchmarks/benchmark_worker_scaling.py` | 🟢 **Prouvé Live** | Python | Élevée (Benchmark Scaling Workers & Saturation VA-API) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), réduction de complexité cognitive (find_distinct_synology_media 19 vs 35 legacy), détection dynamique de ffmpeg/intel_gpu_top et option CLI --check. Validé hors racine (--check code 0, détection des binaires et du périphérique DRI renderD128). |
 | `scripts/benchmarks/compare_top_telemetry.py` | 🟢 **Prouvé Live** | Python | Moyenne (Dev / Parité Télémétrie) | Exécuté live avec succès sur /proc Linux. Bandeau console corrigé vers scripts/infra/local/dbsrt_top.py. |
-| `scripts/benchmarks/eval_exhaustive_nas_snippets.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
+| `scripts/benchmarks/eval_exhaustive_nas_snippets.py` | 🟢 **Prouvé Live** | Python | Critique (Matrice Évaluation Exhaustive Dataset Snippets) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), préfixage absolu des dossiers d'extraits et de rapports, et option CLI --check. Validé hors racine (--check code 0, 2 758 snippets réels détectés sous data/snippets). |
 | `scripts/benchmarks/eval_media_batch.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/benchmarks/eval_multi_offset_matching.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/benchmarks/eval_nas_reliability.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
@@ -603,3 +603,10 @@ Pour sortir de cet état sans spéculation, chaque script des sections 1 et 2 do
 - **Diagnostic** : Chemins d'exécutables `/usr/bin/ffmpeg` et `/usr/bin/intel_gpu_top` en dur sans repli dynamique sur le PATH, complexité cognitive élevée (`find_distinct_synology_media` 35 > 15), et absence d'interface CLI ou d'option `--check` / `--dry-run`.
 - **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, résolution dynamique des exécutables via `shutil.which()`, découplage de la validation des médias abaissant la complexité sous les seuils du gate, et ajout des options CLI `--dir`, `--frames` et `--check` / `--dry-run`.
 - **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/benchmarks/benchmark_worker_scaling.py --check)` confirmant la disponibilité du binaire `ffmpeg`, d'`intel_gpu_top` et du périphérique `/dev/dri/renderD128` (code 0), linters `ruff`, `complexipy` et `pyright` conformes.
+
+### Fiche 58 : `scripts/benchmarks/eval_exhaustive_nas_snippets.py`
+- **Rôle** : Matrice d'évaluation quantitative exhaustive et validation E2E sur 100% du jeu d'extraits NAS réels (reconnaissance intégrale, isolation cross-épisodes SxxExx, spécificité True-Negative et tests VLC headless sous Xvfb).
+- **KPI / Importance** : `Critique (Matrice Évaluation Exhaustive Dataset Snippets)`.
+- **Diagnostic** : Chemins par défaut du corpus de snippets (`data/snippets`) et du rapport de sortie relatifs au CWD, et absence de mode CLI d'inspection non-destructif `--check` / `--dry-run`.
+- **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, préfixage absolu des répertoires de données et des rapports JSON, et ajout de l'option CLI `--check` / `--dry-run`.
+- **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/benchmarks/eval_exhaustive_nas_snippets.py --check)` inspectant 2 758 snippets réels découverts sous `data/snippets` (code 0), linters `ruff`, `complexipy` et `pyright` conformes.

@@ -23,6 +23,21 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+DEFAULT_SNIPPETS_REL: str = "data/snippets"
+DEFAULT_OUTPUT_REPORT_REL: str = "data/snippets/exhaustive_eval_report.json"
+
+
+def find_repo_root() -> Path:
+    """Dynamically locates repository root with fallback to ~/dbsrt."""
+    current = Path(__file__).resolve().parent
+    for p in [current, *current.parents]:
+        if (p / ".git").is_dir() or (p / "Taskfile.yml").is_file():
+            return p
+    appliance = Path.home() / "dbsrt"
+    if appliance.is_dir():
+        return appliance
+    return Path.cwd()
+
 
 def http_post_json(url: str, data: dict, timeout: float = 10.0) -> dict:
     req = urllib.request.Request(
@@ -466,47 +481,75 @@ def run_battery_4_vlc_xvfb(
 
 
 def main() -> int:
+    repo_root = find_repo_root()
+    default_snippets = repo_root / DEFAULT_SNIPPETS_REL
+    default_report = repo_root / DEFAULT_OUTPUT_REPORT_REL
+
     parser = argparse.ArgumentParser(description="Full Corpus Exhaustive NAS Snippets Evaluation Matrix.")
-    parser.add_argument("--snippets-dir", type=Path, default=Path("data/snippets"))
+    parser.add_argument("--snippets-dir", type=Path, default=default_snippets)
     parser.add_argument("--server-url", type=str, default="http://127.0.0.1:8765")
-    parser.add_argument("--output-report", type=Path, default=Path("data/snippets/exhaustive_eval_report.json"))
+    parser.add_argument("--output-report", type=Path, default=default_report)
     parser.add_argument("--workers", type=int, default=8, help="Number of concurrent query workers (default: 8)")
     parser.add_argument(
         "--vlc-samples", type=int, default=25, help="Number of sample videos for VLC Xvfb (default: 25)"
     )
     parser.add_argument("--skip-full-scan", action="store_true", help="Skip battery 1 & 2 full re-scan")
+    parser.add_argument(
+        "--check",
+        "--dry-run",
+        action="store_true",
+        help="Inspect datasets, server URL, and report paths without executing test batteries",
+    )
     args = parser.parse_args()
+
+    snippets_dir = args.snippets_dir
+    if not snippets_dir.is_absolute() and not snippets_dir.exists():
+        snippets_dir = repo_root / snippets_dir
+
+    output_report = args.output_report
+    if not output_report.is_absolute():
+        output_report = repo_root / output_report
+
+    mp4_files = list(snippets_dir.glob("*_mid15s.mp4")) if snippets_dir.is_dir() else []
+
+    if args.check:
+        print("=== DBSrt Exhaustive NAS Snippets Evaluation Matrix Inspection ===")
+        print(f"✓ REPO_ROOT     : {repo_root}")
+        print(f"✓ Snippets dir  : {snippets_dir} (exists: {snippets_dir.is_dir()})")
+        print(f"✓ Snippets count: {len(mp4_files)} *_mid15s.mp4 files found")
+        print(f"✓ Server URL    : {args.server_url}")
+        print(f"✓ Output report : {output_report}")
+        return 0
 
     print("================================================================================")
     print(" 🚀 MATRICE D'ÉVALUATION EXHAUSTIVE 100% CORPUS (DATASET RÉEL NAS)")
     print("================================================================================")
-    print(f"Répertoire extraits : {args.snippets_dir}")
+    print(f"Répertoire extraits : {snippets_dir}")
     print(f"URL Serveur daemon  : {args.server_url}")
 
-    if args.output_report.exists() and args.skip_full_scan:
-        with open(args.output_report, encoding="utf-8") as f:
+    if output_report.exists() and args.skip_full_scan:
+        with open(output_report, encoding="utf-8") as f:
             report = json.load(f)
     else:
         report = {
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "total_corpus_files": len(list(args.snippets_dir.glob("*_mid15s.mp4"))),
+            "total_corpus_files": len(mp4_files),
         }
 
     if not args.skip_full_scan:
-        report["battery_1_full_corpus"] = run_battery_1_full_corpus(
-            args.snippets_dir, args.server_url, workers=args.workers
-        )
+        report["battery_1_full_corpus"] = run_battery_1_full_corpus(snippets_dir, args.server_url, workers=args.workers)
         report["battery_2_all_series_isolation"] = run_battery_2_all_series_isolation(
-            args.snippets_dir, args.server_url, workers=args.workers
+            snippets_dir, args.server_url, workers=args.workers
         )
     report["battery_3_true_negatives"] = run_battery_3_true_negatives(args.server_url)
-    report["battery_4_vlc_xvfb"] = run_battery_4_vlc_xvfb(args.snippets_dir, sample_count=args.vlc_samples)
+    report["battery_4_vlc_xvfb"] = run_battery_4_vlc_xvfb(snippets_dir, sample_count=args.vlc_samples)
 
-    with open(args.output_report, "w", encoding="utf-8") as f:
+    output_report.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_report, "w", encoding="utf-8") as f:
         json.dump(report, f, indent=2, ensure_ascii=False)
 
     print("\n================================================================================")
-    print(f" 🎉 RAPPORT GLOBAL COMPLET ENREGISTRÉ : {args.output_report}")
+    print(f" 🎉 RAPPORT GLOBAL COMPLET ENREGISTRÉ : {output_report}")
     print("================================================================================")
     return 0
 

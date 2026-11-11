@@ -30,6 +30,10 @@ PROVEN_LIVE: dict[str, str] = {
         "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), réduction de complexité cognitive (find_distinct_synology_media 19 vs 35 legacy), détection dynamique de ffmpeg/intel_gpu_top et option CLI --check."
         " Validé hors racine (--check code 0, détection des binaires et du périphérique DRI renderD128)."
     ),
+    "scripts/benchmarks/eval_exhaustive_nas_snippets.py": (
+        "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), préfixage absolu des dossiers d'extraits et de rapports, et option CLI --check."
+        " Validé hors racine (--check code 0, 2 758 snippets réels détectés sous data/snippets)."
+    ),
     "scripts/benchmarks/compare_top_telemetry.py": (
         "Exécuté live avec succès sur /proc Linux. Bandeau console corrigé vers scripts/infra/local/dbsrt_top.py."
     ),
@@ -232,6 +236,7 @@ SCRIPT_KPIS: dict[str, str] = {
     "scripts/benchmarks/bench_http_flood.sh": "Moyenne (Dev & Banc de Charge HTTP)",
     "scripts/benchmarks/bench_server_comparison.py": "Élevée (Benchmark Comparatif Latence Serveur ArcSwap)",
     "scripts/benchmarks/benchmark_worker_scaling.py": "Élevée (Benchmark Scaling Workers & Saturation VA-API)",
+    "scripts/benchmarks/eval_exhaustive_nas_snippets.py": "Critique (Matrice Évaluation Exhaustive Dataset Snippets)",
     "scripts/benchmarks/compare_top_telemetry.py": "Moyenne (Dev / Parité Télémétrie)",
     "scripts/benchmarks/record_casts.py": "Élevée (Doc Diátaxis & Casts Asciinema)",
     "scripts/benchmarks/record_proof.py": "Critique (Preuves Terminales PR)",
