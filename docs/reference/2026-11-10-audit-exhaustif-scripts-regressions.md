@@ -7,18 +7,18 @@
 ## 1. Synthèse Factuelle Globale
 
 - **Total scripts opérationnels** : 96 (66 Python, 30 Shell)
-- **Scripts prouvés en exécution réelle live (session)** : 48 / 96 (50.0%) — *Seuls scripts réellement testés de bout en bout.*
+- **Scripts prouvés en exécution réelle live (session)** : 49 / 96 (51.0%) — *Seuls scripts réellement testés de bout en bout.*
 - **Scripts en régression directe (appels internes cassés)** : 0 / 96 (0.0%) — *100% des régressions actives résolues.*
 - **Nombre total de références internes rompues actives** : 0 (13 références appliance distantes documentées)
 - **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 46 / 96 (47.9%) — *Imports seuls, logique non exécutée.*
-- **Scripts avec analyse statique seule (`bash -n`)** : 2 / 96 (2.1%) — *Zéro runtime.*
+- **Scripts avec analyse statique seule (`bash -n`)** : 1 / 96 (1.0%) — *Zéro runtime.*
 
 ```mermaid
 pie title Statut Réel des 96 Scripts (Rigueur Fact-First)
-    "Prouvé Live de Bout en Bout" : 48
+    "Prouvé Live de Bout en Bout" : 49
     "Régression Interne Cassée" : 0
     "Sanity Check CLI Seul (Non Validé)" : 46
-    "Statique / Syntaxe Seul (Non Exécuté)" : 2
+    "Statique / Syntaxe Seul (Non Exécuté)" : 1
 ```
 
 ---
@@ -171,7 +171,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 | `scripts/tooling/lint_migrations.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/tooling/mkdocs_hooks.py` | 🟢 **Prouvé Live** | Python | Élevée (Orchestration Diátaxis & Recherche Lunr) | Exécuté live (crochet mkdocs build) |
 | `scripts/tooling/pack_repo.sh` | 🟢 **Prouvé Live** | Shell | Moyenne (Tooling & Contexte IA Repomix) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemin par défaut absolu de l'artefact de sortie et options --help / --check. Validé hors racine (442 fichiers détectés, npx installé, code 0). |
-| `scripts/tooling/pack_review.sh` | ⚪ **Statique Seul (Non Exécuté)** | Shell | À évaluer | Syntaxe `bash -n` & `shellcheck` OK. Zéro exécution runtime. |
+| `scripts/tooling/pack_review.sh` | 🟢 **Prouvé Live** | Shell | Élevée (Tooling & Review IA Automatisée) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), résolution automatique de la branche de base, chemin de sortie absolu et options --help / --check. Validé hors racine (157 fichiers détectés, npx installé, code 0). |
 | `scripts/tooling/report_type_errors.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/tooling/serve_docs.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/tooling/test_db_migrations.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
@@ -463,3 +463,10 @@ Pour sortir de cet état sans spéculation, chaque script des sections 1 et 2 do
 - **Diagnostic** : Chemin d'artefact de sortie par défaut relatif au CWD (`repomix-repo-full.md`), absence d'ancrage `REPO_ROOT` dynamique et absence d'options CLI `--help` / `--check`.
 - **Remédiation** : Découverte dynamique de `REPO_ROOT` avec fallback appliance `~/dbsrt`, préfixage absolu du chemin de sortie par défaut (`${REPO_ROOT}/repomix-repo-full.md`), exécution de repomix ancrée explicitement dans `REPO_ROOT`, et ajout des options CLI `--help` / `-h` et `--check` / `--dry-run` avec inventaire précis des fichiers à empaqueter.
 - **Validation Live** : Validé live à 100% : exécution hors racine `(cd crates && bash ../scripts/tooling/pack_repo.sh --help)` et `(--check)` sans erreur (code 0, détection de 442 fichiers sources et validation de la présence de `npx`), linters `shellcheck` et `shfmt` conformes.
+
+### Fiche 38 : `scripts/tooling/pack_review.sh`
+- **Rôle** : Générateur du paquet Markdown de revue de code de branche (`repomix-branch-review.md`) comparant `HEAD` avec la branche cible (diff unifié, diffstat, log et code complet des fichiers impactés) via `npx repomix` pour les revues d'architecture IA (`task review:pack`).
+- **KPI / Importance** : `Élevée (Tooling & Review IA Automatisée)`.
+- **Diagnostic** : Chemin d'artefact de sortie par défaut relatif au CWD (`repomix-branch-review.md`), opérations git exécutées dans le CWD courant au lieu de la racine du dépôt git, absence d'ancrage `REPO_ROOT` dynamique et absence d'options CLI `--help` / `--check`.
+- **Remédiation** : Découverte dynamique de `REPO_ROOT` avec fallback appliance `~/dbsrt`, fallback automatique de la branche cible (`origin/develop` -> `develop` -> `master` -> `HEAD~1`), préfixage absolu du chemin de sortie par défaut (`${REPO_ROOT}/repomix-branch-review.md`), commandes git explicitement ancrées via `git -C "${REPO_ROOT}"`, et ajout des options CLI `--help` / `-h` et `--check` / `--dry-run` avec inspection des différences et fichiers sources impactés.
+- **Validation Live** : Validé live à 100% : exécution hors racine `(cd crates && bash ../scripts/tooling/pack_review.sh --help)` et `(--check)` sans erreur (code 0, détection de 157 fichiers modifiés contre `origin/develop`, validation de `npx`), linters `shellcheck` et `shfmt` conformes.

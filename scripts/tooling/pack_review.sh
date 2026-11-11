@@ -2,22 +2,56 @@
 # Pack branch diffs and modified files into an AI-friendly markdown bundle using repomix
 set -euo pipefail
 
-TARGET_BRANCH="${1:-origin/develop}"
-OUTPUT_FILE="${2:-repomix-branch-review.md}"
-TMP_HEADER="$(mktemp /tmp/review-header-XXXXXX.md)"
-TMP_REPOMIX="$(mktemp /tmp/repomix-XXXXXX.md)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+if [[ ! -d "${REPO_ROOT}/.git" && -d "${HOME}/dbsrt" ]]; then
+  REPO_ROOT="${HOME}/dbsrt"
+fi
 
-trap 'rm -f "${TMP_HEADER}" "${TMP_REPOMIX}"' EXIT
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+  echo "Usage: $(basename "$0") [--check | --dry-run | <target_branch>] [<output_file>] [--help]"
+  echo ""
+  echo "Packs branch diffs and modified files into an AI-friendly markdown bundle via repomix."
+  echo ""
+  echo "Arguments:"
+  echo "  target_branch       Base branch to compare against (default: origin/develop)"
+  echo "  output_file         Output markdown path (default: \${REPO_ROOT}/repomix-branch-review.md)"
+  echo ""
+  echo "Options:"
+  echo "  --check, --dry-run  Inspect modified files and diff stat without generating bundle"
+  echo "  --help, -h          Show this help message and exit"
+  exit 0
+fi
 
-echo "Generating code review bundle comparing HEAD with ${TARGET_BRANCH}..."
+IS_CHECK=0
+if [[ "${1:-}" == "--check" || "${1:-}" == "--dry-run" ]]; then
+  IS_CHECK=1
+  TARGET_BRANCH="origin/develop"
+  DEFAULT_OUTPUT="${REPO_ROOT}/repomix-branch-review.md"
+  OUTPUT_FILE="${DEFAULT_OUTPUT}"
+else
+  TARGET_BRANCH="${1:-origin/develop}"
+  DEFAULT_OUTPUT="${REPO_ROOT}/repomix-branch-review.md"
+  OUTPUT_FILE="${2:-${DEFAULT_OUTPUT}}"
+fi
+
+# Ensure TARGET_BRANCH exists or fallback to HEAD~1
+if ! git -C "${REPO_ROOT}" rev-parse --verify "${TARGET_BRANCH}" >/dev/null 2>&1; then
+  if git -C "${REPO_ROOT}" rev-parse --verify "develop" >/dev/null 2>&1; then
+    TARGET_BRANCH="develop"
+  elif git -C "${REPO_ROOT}" rev-parse --verify "master" >/dev/null 2>&1; then
+    TARGET_BRANCH="master"
+  else
+    TARGET_BRANCH="HEAD~1"
+  fi
+fi
 
 # Collect all files to pack: committed differences + working tree changes + untracked files
-COMMITTED_FILES="$(git diff --name-only "${TARGET_BRANCH}...HEAD" 2>/dev/null || true)"
-WORKTREE_FILES="$(git diff --name-only "${TARGET_BRANCH}" 2>/dev/null || true)"
-UNTRACKED_FILES="$(git ls-files --others --exclude-standard 2>/dev/null || true)"
+COMMITTED_FILES="$(git -C "${REPO_ROOT}" diff --name-only "${TARGET_BRANCH}...HEAD" 2>/dev/null || true)"
+WORKTREE_FILES="$(git -C "${REPO_ROOT}" diff --name-only "${TARGET_BRANCH}" 2>/dev/null || true)"
+UNTRACKED_FILES="$(git -C "${REPO_ROOT}" ls-files --others --exclude-standard 2>/dev/null || true)"
 
 # Filter strictly to source implementations (Rust, Python, Shell, Lua, Taskfile/Cargo configs)
-# Exclude: data payloads (data/**, *.json, *.phash, *.srt), dependency locks (Cargo.lock), docs (*.md, docs/**, mkdocs.yml)
 FILES_TO_PACK="$(printf "%s\n%s\n%s" "${COMMITTED_FILES}" "${WORKTREE_FILES}" "${UNTRACKED_FILES}" |
   sed '/^$/d' |
   grep -E '\.(rs|py|sh|lua|toml|ya?ml)$' |
@@ -30,15 +64,34 @@ if [[ -z "${FILES_TO_PACK}" ]]; then
   exit 1
 fi
 
+TOTAL_FILES="$(echo "${FILES_TO_PACK}" | wc -l)"
+
+if [[ "${IS_CHECK}" -eq 1 ]]; then
+  echo "=== DBSrt Pack Review Inspection ==="
+  echo "✓ REPO_ROOT     : ${REPO_ROOT}"
+  echo "✓ Target Base   : ${TARGET_BRANCH}"
+  echo "✓ Files to pack : ${TOTAL_FILES}"
+  echo "✓ Output target : ${OUTPUT_FILE}"
+  echo "✓ npx tool      : $(command -v npx >/dev/null 2>&1 && echo "installed" || echo "missing")"
+  exit 0
+fi
+
+TMP_HEADER="$(mktemp /tmp/review-header-XXXXXX.md)"
+TMP_REPOMIX="$(mktemp /tmp/repomix-XXXXXX.md)"
+
+trap 'rm -f "${TMP_HEADER}" "${TMP_REPOMIX}"' EXIT
+
+echo "Generating code review bundle comparing HEAD with ${TARGET_BRANCH}..."
+
 mapfile -t SOURCE_FILES_ARRAY <<<"${FILES_TO_PACK}"
 
-COMMITS_LOG="$(git log --oneline "${TARGET_BRANCH}...HEAD" 2>/dev/null || true)"
+COMMITS_LOG="$(git -C "${REPO_ROOT}" log --oneline "${TARGET_BRANCH}...HEAD" 2>/dev/null || true)"
 if [[ -z "${COMMITS_LOG}" ]]; then
   COMMITS_LOG="(Working tree uncommitted changes against ${TARGET_BRANCH})"
 fi
 
-DIFF_STAT="$(git diff --stat "${TARGET_BRANCH}" -- "${SOURCE_FILES_ARRAY[@]}" 2>/dev/null || true)"
-UNIFIED_DIFF="$(git diff "${TARGET_BRANCH}" -- "${SOURCE_FILES_ARRAY[@]}" 2>/dev/null || true)"
+DIFF_STAT="$(git -C "${REPO_ROOT}" diff --stat "${TARGET_BRANCH}" -- "${SOURCE_FILES_ARRAY[@]}" 2>/dev/null || true)"
+UNIFIED_DIFF="$(git -C "${REPO_ROOT}" diff "${TARGET_BRANCH}" -- "${SOURCE_FILES_ARRAY[@]}" 2>/dev/null || true)"
 
 cat <<EOF >"${TMP_HEADER}"
 # Code Review Bundle: ${TARGET_BRANCH}...HEAD
@@ -89,7 +142,10 @@ ${UNIFIED_DIFF}
 EOF
 
 # Pack modified source files via repomix
-echo "${FILES_TO_PACK}" | npx repomix --stdin --style markdown --no-security-check -o "${TMP_REPOMIX}"
+(
+  cd "${REPO_ROOT}"
+  echo "${FILES_TO_PACK}" | npx repomix --stdin --style markdown --no-security-check -o "${TMP_REPOMIX}"
+)
 
 # Combine header and repomix output
 cat "${TMP_HEADER}" "${TMP_REPOMIX}" >"${OUTPUT_FILE}"

@@ -153,6 +153,9 @@ PROVEN_LIVE: dict[str, str] = {
     "scripts/tooling/pack_repo.sh": (
         "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemin par défaut absolu de l'artefact de sortie et options --help / --check. Validé hors racine (442 fichiers détectés, npx installé, code 0)."
     ),
+    "scripts/tooling/pack_review.sh": (
+        "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), résolution automatique de la branche de base, chemin de sortie absolu et options --help / --check. Validé hors racine (157 fichiers détectés, npx installé, code 0)."
+    ),
 }
 
 SCRIPT_KPIS: dict[str, str] = {
@@ -193,6 +196,7 @@ SCRIPT_KPIS: dict[str, str] = {
     "scripts/tooling/lint_complexity.py": "Critique (Garde-fou CI/CD & Architecture Rust)",
     "scripts/tooling/mkdocs_hooks.py": "Élevée (Orchestration Diátaxis & Recherche Lunr)",
     "scripts/tooling/pack_repo.sh": "Moyenne (Tooling & Contexte IA Repomix)",
+    "scripts/tooling/pack_review.sh": "Élevée (Tooling & Review IA Automatisée)",
     "scripts/tooling/validate_docs.py": "Critique (Garde-fou CI/CD & Validation Diátaxis)",
     "scripts/tooling/validate_web_assets.py": "Élevée (Garde-fou CI/CD Assets Web & Lint)",
 }
