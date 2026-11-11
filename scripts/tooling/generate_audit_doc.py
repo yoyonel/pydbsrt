@@ -233,6 +233,10 @@ PROVEN_LIVE: dict[str, str] = {
         "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), support multi-cibles Local et RPi4, et option CLI non-destructive --check."
         " Validé live sur RPi4 distant (--check --target rpi4 code 0, audit de 2 320 médias PostgreSQL confirmé)."
     ),
+    "scripts/ingestion/purge_media.py": (
+        "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des registres, et ajout du mode non-destructif --check / --dry-run."
+        " Validé hors racine (--check code 0, vérification des couplages et snippets confirmée sans altération)."
+    ),
     "scripts/ingestion/init_couplings_seed.sh": (
         "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des fixtures et support --help / --check. Validé hors racine (code 0)."
     ),
@@ -367,6 +371,7 @@ SCRIPT_KPIS: dict[str, str] = {
     "scripts/ingestion/phash_dedupe.py": "Élevée (Déduplication des Empreintes Legacy vs MovieHash)",
     "scripts/ingestion/phash_names.py": "Moyenne (Résolution Canonique & Noms Logiques des Empreintes pHash)",
     "scripts/ingestion/probe_medias_metadata.py": "Élevée (Sondage des Caractéristiques Flux Vidéo & Audit NULL PostgreSQL)",
+    "scripts/ingestion/purge_media.py": "Critique (Purge Globale Multi-Niveaux des Médias & Registres)",
     "scripts/ingestion/init_couplings_seed.sh": "Moyenne (Amorçage CI/CD & Tests d'Intégration)",
     "scripts/ingestion/media_add.sh": "Élevée (Ingestion Unifiée & Invariants Multimédia)",
     "scripts/ingestion/recognize_medias.sh": "Moyenne (Outil d'Ingestion & Évaluation par Lots)",
