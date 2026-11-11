@@ -92,6 +92,9 @@ PROVEN_LIVE: dict[str, str] = {
     "scripts/infra/rpi4/rpi4_build.sh": (
         "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus Dockerfile/contexte et options --help / --check. Validé hors racine (code 0)."
     ),
+    "scripts/infra/rpi4/rpi4_cli.sh": (
+        "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus, montage Docker /app et support --help. Validé hors racine (code 0)."
+    ),
     "scripts/infra/rpi4/rpi4_freebox_ctl.sh": (
         "Résolution REPO_ROOT et source load_env.sh intégrées. Chemins install_gateway() préfixés par REPO_ROOT."
         " Validé et prouvé live sur RPi4 (status 3 montages CIFS actifs + daemon systemd actif, install synchronisé et activé)."
@@ -162,6 +165,7 @@ SCRIPT_KPIS: dict[str, str] = {
     "scripts/infra/o2switch/o2switch_ctl.sh": "Critique (Contrôleur Maître Cloud o2switch)",
     "scripts/infra/rpi4/freebox_batch_ctl.sh": "Élevée (Ingestion WAN Freebox / Portail Web)",
     "scripts/infra/rpi4/rpi4_build.sh": "Moyenne (Infrastructure de Conteneurisation ARM64)",
+    "scripts/infra/rpi4/rpi4_cli.sh": "Élevée (Cross-Compilation ARM64 & Déploiement CLI RPi4)",
     "scripts/infra/rpi4/rpi4_freebox_ctl.sh": "Élevée (Appliance RPi4 & CIFS/HTTP Range)",
     "scripts/infra/rpi4/rpi4_o2switch_supervisor.py": "Critique (Superviseur Autonome 24/7 de Production)",
     "scripts/infra/rpi4/rpi4_sim.sh": "Moyenne (Dev & Simulation Locale QEMU ARM64)",
