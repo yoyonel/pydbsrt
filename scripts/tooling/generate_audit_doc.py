@@ -44,6 +44,10 @@ PROVEN_LIVE: dict[str, str] = {
     "scripts/e2e/e2e_sources_explorer.py": "Exécuté Playwright Chromium live (4 onglets PASS)",
     "scripts/e2e/e2e_trajectories_formal.py": "Exécuté Playwright Chromium live (7 batchs PASS)",
     "scripts/e2e/e2e_portal_exhaustive.py": "Exécuté Playwright Chromium live (0 console/page err)",
+    "scripts/e2e/e2e_portal_playwright.py": (
+        "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), imports paresseux de playwright/typing et option CLI --check."
+        " Validé hors racine (--check code 0 avec et sans dépendance playwright, 27 endpoints déclarés détectés)."
+    ),
     "scripts/benchmarks/matching_bench_runner.py": "Exécuté live sur snippet réel (01_Cruauté_mid15s.mp4)",
     "scripts/benchmarks/trajectory_bench_runner.py": "Exécuté live sur snippet réel (01_Cruauté_mid15s.mp4)",
     "scripts/ingestion/verify_catalog_integrity.py": "Exécuté live (task catalog:verify, 5 tiers PASS)",
@@ -219,6 +223,7 @@ SCRIPT_KPIS: dict[str, str] = {
     "scripts/benchmarks/record_proof.py": "Critique (Preuves Terminales PR)",
     "scripts/benchmarks/record_vlsub_demo.sh": "Élevée (Doc Diátaxis & Démo Vidéo VLSub)",
     "scripts/e2e/o2switch_e2e.py": "Critique (Recette E2E Cloud o2switch)",
+    "scripts/e2e/e2e_portal_playwright.py": "Critique (Recette E2E Playwright Portails Web)",
     "scripts/infra/local/agent_relay.sh": "Élevée (Architecture Hybride & Passerelle Locale-Cloud)",
     "scripts/infra/local/dbsrt_top.py": "Critique (TUI Python de Référence & Supervision Décisionnelle)",
     "scripts/infra/local/distributed_dev_stack.sh": "Moyenne (Dev & Simulation Topologie Hybride)",

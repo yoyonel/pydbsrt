@@ -20,6 +20,7 @@ Formal programmatic test suite with 100% web coverage:
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import re
@@ -28,16 +29,34 @@ import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
-from playwright.sync_api import CDPSession, Page, Response, sync_playwright
+if TYPE_CHECKING:
+    from playwright.sync_api import CDPSession, Page, Response
 
-OUTPUT_DIR = Path("target/e2e_portal")
-SCREENSHOTS_DIR = OUTPUT_DIR / "screenshots"
-SCREENCASTS_DIR = OUTPUT_DIR / "screencasts"
-COVERAGE_ENDPOINTS_PATH = OUTPUT_DIR / "coverage_endpoints.json"
-COVERAGE_V8_PATH = OUTPUT_DIR / "coverage_v8_js.json"
+
+DEFAULT_OUTPUT_REL: str = "target/e2e_portal"
+
+
+def find_repo_root() -> Path:
+    """Dynamically locates repository root with fallback to ~/dbsrt."""
+    current = Path(__file__).resolve().parent
+    for p in [current, *current.parents]:
+        if (p / ".git").is_dir() or (p / "Taskfile.yml").is_file():
+            return p
+    appliance = Path.home() / "dbsrt"
+    if appliance.is_dir():
+        return appliance
+    return Path.cwd()
+
+
+REPO_ROOT: Path = find_repo_root()
+OUTPUT_DIR: Path = REPO_ROOT / DEFAULT_OUTPUT_REL
+SCREENSHOTS_DIR: Path = OUTPUT_DIR / "screenshots"
+SCREENCASTS_DIR: Path = OUTPUT_DIR / "screencasts"
+COVERAGE_ENDPOINTS_PATH: Path = OUTPUT_DIR / "coverage_endpoints.json"
+COVERAGE_V8_PATH: Path = OUTPUT_DIR / "coverage_v8_js.json"
 
 
 @dataclass
@@ -567,10 +586,13 @@ def main() -> int:
     parser.add_argument("--cloud", action="store_true", help="Execute against deployed o2switch Cloud portal")
     parser.add_argument("--url", type=str, default="", help="Override target base URL")
     parser.add_argument("--key", type=str, default="", help="Override API secret key")
+    parser.add_argument(
+        "--check",
+        "--dry-run",
+        action="store_true",
+        help="Inspect browser availability, configuration and routes without running browser",
+    )
     args = parser.parse_args()
-
-    SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
-    SCREENCASTS_DIR.mkdir(parents=True, exist_ok=True)
 
     target_url, api_key = resolve_default_url_and_key(args.cloud)
     if args.url:
@@ -579,6 +601,35 @@ def main() -> int:
         api_key = args.key
 
     is_cloud = args.cloud or "o2switch" in target_url or "2026-pydbsrt.fr" in target_url
+    chrome_bin = shutil.which("google-chrome") or shutil.which("chromium")
+    has_playwright = importlib.util.find_spec("playwright") is not None
+
+    if args.check:
+        print("=== DBSrt E2E Playwright Portal Suite Inspection ===")
+        print(f"✓ REPO_ROOT   : {REPO_ROOT}")
+        print(f"✓ Output dir  : {OUTPUT_DIR}")
+        print(f"✓ Playwright  : {'installed' if has_playwright else 'missing (run with --with playwright)'}")
+        print(f"✓ Browser bin : {chrome_bin or 'not found'}")
+        print(f"✓ Target Mode : {'☁️ CLOUD o2switch' if is_cloud else '💻 LOCAL DAEMON'}")
+        print(f"✓ Target URL  : {target_url}")
+        print(f"✓ API Key     : {'[CONFIGURED]' if api_key else '[NONE]'}")
+        tracker = EndpointCoverageTracker()
+        print(f"✓ Declared routes: {len(tracker.specs)} endpoints tracked")
+        return 0
+
+    if not has_playwright:
+        print("Error: 'playwright' is required. Run with: uv run --with playwright python ...", file=sys.stderr)
+        return 1
+
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print("Error: 'playwright' import failed.", file=sys.stderr)
+        return 1
+
+    SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
+    SCREENCASTS_DIR.mkdir(parents=True, exist_ok=True)
+
     print("=== Starting DBSrt E2E Playwright Suite ===")
     print(f" Target Mode: {'☁️ CLOUD o2switch' if is_cloud else '💻 LOCAL DAEMON'}")
     print(f" Target URL : {target_url}")
@@ -587,7 +638,6 @@ def main() -> int:
     tracker = EndpointCoverageTracker()
 
     with sync_playwright() as p:
-        chrome_bin = shutil.which("google-chrome") or shutil.which("chromium")
         browser = p.chromium.launch(
             executable_path=chrome_bin,
             headless=True,

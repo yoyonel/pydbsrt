@@ -7,17 +7,17 @@
 ## 1. Synthèse Factuelle Globale
 
 - **Total scripts opérationnels** : 96 (66 Python, 30 Shell)
-- **Scripts prouvés en exécution réelle live (session)** : 64 / 96 (66.7%) — *Seuls scripts réellement testés de bout en bout.*
+- **Scripts prouvés en exécution réelle live (session)** : 65 / 96 (67.7%) — *Seuls scripts réellement testés de bout en bout.*
 - **Scripts en régression directe (appels internes cassés)** : 0 / 96 (0.0%) — *100% des régressions actives résolues.*
 - **Nombre total de références internes rompues actives** : 0 (13 références appliance distantes documentées)
-- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 32 / 96 (33.3%) — *Imports seuls, logique non exécutée.*
+- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 31 / 96 (32.3%) — *Imports seuls, logique non exécutée.*
 - **Scripts avec analyse statique seule (`bash -n`)** : 0 / 96 (0.0%) — *Zéro runtime.*
 
 ```mermaid
 pie title Statut Réel des 96 Scripts (Rigueur Fact-First)
-    "Prouvé Live de Bout en Bout" : 64
+    "Prouvé Live de Bout en Bout" : 65
     "Régression Interne Cassée" : 0
-    "Sanity Check CLI Seul (Non Validé)" : 32
+    "Sanity Check CLI Seul (Non Validé)" : 31
     "Statique / Syntaxe Seul (Non Exécuté)" : 0
 ```
 
@@ -73,7 +73,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 | Script | Statut Réel | Type | KPI / Importance | Détail / Diagnostic Contradictoire |
 | :--- | :---: | :---: | :---: | :--- |
 | `scripts/e2e/e2e_portal_exhaustive.py` | 🟢 **Prouvé Live** | Python | À évaluer | Exécuté Playwright Chromium live (0 console/page err) |
-| `scripts/e2e/e2e_portal_playwright.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
+| `scripts/e2e/e2e_portal_playwright.py` | 🟢 **Prouvé Live** | Python | Critique (Recette E2E Playwright Portails Web) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), imports paresseux de playwright/typing et option CLI --check. Validé hors racine (--check code 0 avec et sans dépendance playwright, 27 endpoints déclarés détectés). |
 | `scripts/e2e/e2e_sources_explorer.py` | 🟢 **Prouvé Live** | Python | À évaluer | Exécuté Playwright Chromium live (4 onglets PASS) |
 | `scripts/e2e/e2e_trajectories_formal.py` | 🟢 **Prouvé Live** | Python | À évaluer | Exécuté Playwright Chromium live (7 batchs PASS) |
 | `scripts/e2e/o2switch_e2e.py` | 🟢 **Prouvé Live** | Python | Critique (Recette E2E Cloud o2switch) | Exécuté live contre o2switch (15/15 golden set PASS, gateway 200/401 PASS). Résolution racine et CTL résiliente sans index magique. |
@@ -575,3 +575,10 @@ Pour sortir de cet état sans spéculation, chaque script des sections 1 et 2 do
 - **Diagnostic** : Chemin global des migrations `MIGRATIONS_DIR` relatif au CWD (`crates/dbsrt-index/migrations`), absence de passage paramétrique aux sous-fonctions de test et absence de mode CLI d'inspection `--check` / `--dry-run`.
 - **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, propagation de `migrations_dir` à l'ensemble des sous-fonctions (`test_blank_migration_lifecycle`, etc.), et ajout des options CLI `--migrations-dir` et `--check` / `--dry-run`.
 - **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/tooling/test_db_migrations.py --check)` vérifiant la présence des 6 scripts de migration et la sonde TCP réseau du cluster (code 0), linters `ruff`, `complexipy` et `pyright` conformes.
+
+### Fiche 54 : `scripts/e2e/e2e_portal_playwright.py`
+- **Rôle** : Suite de recette E2E Playwright de validation des portails web (Monitoring, DBSrt Studio, Web Top) avec profilage V8 CDP, métriques d'horloge Cristian et enregistrement vidéo MP4.
+- **KPI / Importance** : `Critique (Recette E2E Playwright Portails Web)`.
+- **Diagnostic** : Chemins d'artefacts de sortie `OUTPUT_DIR` relatifs au CWD (`target/e2e_portal`), importation bloquante de `playwright` au niveau module empêchant l'usage de l'aide CLI ou du diagnostic hors environnement de test browser, et absence de mode `--check` / `--dry-run`.
+- **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, chargement paresseux de `playwright`, typage statique protégé par `TYPE_CHECKING`, et ajout de l'option CLI `--check` / `--dry-run`.
+- **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/e2e/e2e_portal_playwright.py --check)` et avec `--with playwright` sans erreur (code 0, 27 endpoints déclarés inspectés), linters `ruff`, `complexipy` et `pyright` conformes.
