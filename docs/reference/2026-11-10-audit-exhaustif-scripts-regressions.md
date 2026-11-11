@@ -7,18 +7,18 @@
 ## 1. Synthèse Factuelle Globale
 
 - **Total scripts opérationnels** : 96 (66 Python, 30 Shell)
-- **Scripts prouvés en exécution réelle live (session)** : 39 / 96 (40.6%) — *Seuls scripts réellement testés de bout en bout.*
+- **Scripts prouvés en exécution réelle live (session)** : 40 / 96 (41.7%) — *Seuls scripts réellement testés de bout en bout.*
 - **Scripts en régression directe (appels internes cassés)** : 0 / 96 (0.0%) — *100% des régressions actives résolues.*
 - **Nombre total de références internes rompues actives** : 0 (13 références appliance distantes documentées)
 - **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 46 / 96 (47.9%) — *Imports seuls, logique non exécutée.*
-- **Scripts avec analyse statique seule (`bash -n`)** : 11 / 96 (11.5%) — *Zéro runtime.*
+- **Scripts avec analyse statique seule (`bash -n`)** : 10 / 96 (10.4%) — *Zéro runtime.*
 
 ```mermaid
 pie title Statut Réel des 96 Scripts (Rigueur Fact-First)
-    "Prouvé Live de Bout en Bout" : 39
+    "Prouvé Live de Bout en Bout" : 40
     "Régression Interne Cassée" : 0
     "Sanity Check CLI Seul (Non Validé)" : 46
-    "Statique / Syntaxe Seul (Non Exécuté)" : 11
+    "Statique / Syntaxe Seul (Non Exécuté)" : 10
 ```
 
 ---
@@ -88,7 +88,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 | `scripts/infra/local/distributed_dev_stack.sh` | 🟢 **Prouvé Live** | Shell | Moyenne (Dev & Simulation Topologie Hybride) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus data/ et support --help. Validé hors racine (status code 0). |
 | `scripts/infra/local/install_debian.sh` | 🟢 **Prouvé Live** | Shell | Élevée (Déploiement Poste Développeur & Appliance Debian) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus, manifest path et support --help. Validé hors racine (status PID 1903, code 0). |
 | `scripts/infra/local/load_env.sh` | 🟢 **Prouvé Live** | Shell | Critique (Socle d'Environnement & Sécurité des Credentials) | Résolution dynamique REPO_ROOT par défaut, bloc autonome CLI avec support --help / --check et masquage des secrets. Validé hors racine (code 0). |
-| `scripts/infra/local/stack_ctl.sh` | ⚪ **Statique Seul (Non Exécuté)** | Shell | À évaluer | Syntaxe `bash -n` & `shellcheck` OK. Zéro exécution runtime. |
+| `scripts/infra/local/stack_ctl.sh` | 🟢 **Prouvé Live** | Shell | Critique (Contrôleur Maître Stack Locale & Diagnostic 360°) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus data/, config mkdocs et support --help. Validé hors racine (status 360° code 0). |
 | `scripts/infra/local/switch_target.sh` | ⚪ **Statique Seul (Non Exécuté)** | Shell | À évaluer | Syntaxe `bash -n` & `shellcheck` OK. Zéro exécution runtime. |
 | `scripts/infra/local/vlc_ctl.sh` | ⚪ **Statique Seul (Non Exécuté)** | Shell | À évaluer | Syntaxe `bash -n` & `shellcheck` OK. Zéro exécution runtime. |
 
@@ -400,3 +400,10 @@ Pour sortir de cet état sans spéculation, chaque script des sections 1 et 2 do
 - **Diagnostic** : Aucune capacité d'exécution directe ou de diagnostic autonome (script muet hors sourçage), et dépendance stricte au passage explicite de `repo_root` en argument.
 - **Remédiation** : Fallback dynamique automatique de `REPO_ROOT` dans `load_local_env` en l'absence d'argument, et ajout d'un bloc d'exécution autonome (`BASH_SOURCE == $0`) avec support `--help` et `--check` affichant la configuration active sans fuite de secret.
 - **Validation Live** : Validé live à 100% : exécution hors racine `(cd crates && bash ../scripts/infra/local/load_env.sh --help)` et `(--check)` sans erreur (code 0, détection de `O2SWITCH_URL` et clé masquée `[CONFIGURED]`), linters `shellcheck` et `shfmt` conformes.
+
+### Fiche 29 : `scripts/infra/local/stack_ctl.sh`
+- **Rôle** : Contrôleur maître unifié de la stack locale (dbsrt-server, MkDocs, PgWeb, Prometheus, Grafana) pilotant démarrage, arrêt, rechargement à chaud du catalogue et cartographie de santé (`task status`, `task server:*`, `task doc:*`).
+- **KPI / Importance** : `Critique (Contrôleur Maître Stack Locale & Diagnostic 360°)`.
+- **Diagnostic** : Chemins relatifs au CWD (`SERVER_BIN`, `data/catalog.dbphash`, `data/__PHASH__`, `data/snippets`, `data/SRT`), commande `mkdocs serve` sans `--config-file` absolu hors racine et absence d'aide CLI `--help`.
+- **Remédiation** : Découverte dynamique de `REPO_ROOT` avec fallback appliance `~/dbsrt`, préfixage absolu de tous les chemins d'artefacts (`${REPO_ROOT}/data/...`), sélection binaire (release/debug), argument `--config-file "${REPO_ROOT}/mkdocs.yml"` et ajout des options CLI `--help` / `-h`.
+- **Validation Live** : Validé live à 100% : exécution hors racine `(cd crates && bash ../scripts/infra/local/stack_ctl.sh --help)` et `(status)` sans erreur (code 0, sonde HTTP 200 sur dbsrt-server et rapport 360° complet), linters `shellcheck` et `shfmt` conformes.

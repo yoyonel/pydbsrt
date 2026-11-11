@@ -2,8 +2,40 @@
 # Unified daemon and health controller for dbsrt-server, MkDocs, PgWeb, Prometheus, and Grafana.
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+if [[ ! -d "${REPO_ROOT}/.git" && -d "${HOME}/dbsrt" ]]; then
+  REPO_ROOT="${HOME}/dbsrt"
+fi
+
+# Print usage if requested
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" || "${1:-}" == "help" ]]; then
+  echo "Usage: $(basename "$0") {server-start|server-stop|server-status|server-logs|server-reload|catalog-status|catalog-compact|catalog-ingest|doc-start|doc-stop|doc-logs|status} [--help]"
+  echo ""
+  echo "Unified daemon and health controller for dbsrt stack services."
+  echo ""
+  echo "Commands:"
+  echo "  status            Check full stack health, services, and routes (default)"
+  echo "  server-start      Start dbsrt-server in background"
+  echo "  server-stop       Stop background dbsrt-server"
+  echo "  server-status     Check dbsrt-server HTTP status"
+  echo "  server-logs       Follow dbsrt-server logs"
+  echo "  server-reload     Trigger hot catalog reload"
+  echo "  catalog-status    Inspect dynamic catalog telemetry"
+  echo "  catalog-compact   Trigger catalog compaction"
+  echo "  catalog-ingest    Ingest a .phash fingerprint into RAM DeltaIndex"
+  echo "  doc-start         Start MkDocs server in background"
+  echo "  doc-stop          Stop background MkDocs server"
+  echo "  doc-logs          Follow MkDocs server logs"
+  exit 0
+fi
+
 ACTION="${1:-status}"
-SERVER_BIN="${SERVER_BIN:-./target/release/dbsrt-server}"
+SERVER_BIN="${SERVER_BIN:-${REPO_ROOT}/target/release/dbsrt-server}"
+if [[ ! -f "${SERVER_BIN}" && -x "${REPO_ROOT}/target/debug/dbsrt-server" ]]; then
+  SERVER_BIN="${REPO_ROOT}/target/debug/dbsrt-server"
+fi
+
 SERVER_PID_FILE="/tmp/dbsrt-server.pid"
 SERVER_LOG_FILE="/tmp/dbsrt-server.log"
 SERVER_DISCOVERY_FILE="/tmp/dbsrt-server.json"
@@ -88,22 +120,22 @@ check_vlc_plugins() {
 }
 
 server_start() {
-  if pgrep -f "target/release/dbsrt-server" >/dev/null 2>&1; then
-    echo "dbsrt-server is already running (PID: $(pgrep -f 'target/release/dbsrt-server' | head -n1))"
+  if pgrep -f "target/(release|debug)/dbsrt-server" >/dev/null 2>&1; then
+    echo "dbsrt-server is already running"
     exit 0
   fi
   local dbphash_args=()
-  if [[ -f "data/catalog.dbphash" ]]; then
-    dbphash_args=(--dbphash data/catalog.dbphash)
+  if [[ -f "${REPO_ROOT}/data/catalog.dbphash" ]]; then
+    dbphash_args=(--dbphash "${REPO_ROOT}/data/catalog.dbphash")
   fi
 
   setsid "$SERVER_BIN" \
     --host "$SERVER_HOST" \
     --port "$SERVER_PORT" \
     --phash-dir /tmp \
-    --extra-phash-dir data/__PHASH__ \
-    --extra-phash-dir data/snippets \
-    --subtitles-dir data/SRT \
+    --extra-phash-dir "${REPO_ROOT}/data/__PHASH__" \
+    --extra-phash-dir "${REPO_ROOT}/data/snippets" \
+    --subtitles-dir "${REPO_ROOT}/data/SRT" \
     --db-host "$SERVER_HOST" \
     --db-port "$POSTGRES_PORT" \
     "${dbphash_args[@]}" \
@@ -118,7 +150,7 @@ server_stop() {
     kill "$(cat "$SERVER_PID_FILE")" 2>/dev/null || true
     rm -f "$SERVER_PID_FILE"
   fi
-  pkill -f "target/release/dbsrt-server" 2>/dev/null || pkill -f "dbsrt-server" 2>/dev/null || true
+  pkill -f "target/(release|debug)/dbsrt-server" 2>/dev/null || pkill -f "dbsrt-server" 2>/dev/null || true
   rm -f "$SERVER_DISCOVERY_FILE"
   sleep "$DEFAULT_STOP_WAIT_SECONDS"
   echo "dbsrt-server stopped."
@@ -163,7 +195,7 @@ doc_start() {
     echo "MkDocs server is already running (PID: $(pgrep -f 'mkdocs serve' | head -n1))"
     exit 0
   fi
-  setsid uv run --no-sync mkdocs serve --dev-addr "${SERVER_HOST}:${DOCS_PORT}" </dev/null >"$DOCS_LOG_FILE" 2>&1 &
+  setsid uv run --no-sync mkdocs serve --config-file "${REPO_ROOT}/mkdocs.yml" --dev-addr "${SERVER_HOST}:${DOCS_PORT}" </dev/null >"$DOCS_LOG_FILE" 2>&1 &
   echo $! >"$DOCS_PID_FILE"
 
   # Wait for MkDocs to finish initial build and bind port
@@ -365,7 +397,7 @@ case "$ACTION" in
   doc-logs) doc_logs ;;
   status) stack_status ;;
   *)
-    echo "Usage: $0 {server-start|server-stop|server-status|server-logs|server-reload|catalog-status|catalog-compact|catalog-ingest|doc-start|doc-stop|doc-logs|status}" >&2
+    echo "Usage: $(basename "$0") {server-start|server-stop|server-status|server-logs|server-reload|catalog-status|catalog-compact|catalog-ingest|doc-start|doc-stop|doc-logs|status}" >&2
     exit 1
     ;;
 esac
