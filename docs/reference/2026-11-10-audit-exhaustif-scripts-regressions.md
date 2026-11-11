@@ -7,18 +7,18 @@
 ## 1. Synthèse Factuelle Globale
 
 - **Total scripts opérationnels** : 96 (66 Python, 30 Shell)
-- **Scripts prouvés en exécution réelle live (session)** : 46 / 96 (47.9%) — *Seuls scripts réellement testés de bout en bout.*
+- **Scripts prouvés en exécution réelle live (session)** : 47 / 96 (49.0%) — *Seuls scripts réellement testés de bout en bout.*
 - **Scripts en régression directe (appels internes cassés)** : 0 / 96 (0.0%) — *100% des régressions actives résolues.*
 - **Nombre total de références internes rompues actives** : 0 (13 références appliance distantes documentées)
 - **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 46 / 96 (47.9%) — *Imports seuls, logique non exécutée.*
-- **Scripts avec analyse statique seule (`bash -n`)** : 4 / 96 (4.2%) — *Zéro runtime.*
+- **Scripts avec analyse statique seule (`bash -n`)** : 3 / 96 (3.1%) — *Zéro runtime.*
 
 ```mermaid
 pie title Statut Réel des 96 Scripts (Rigueur Fact-First)
-    "Prouvé Live de Bout en Bout" : 46
+    "Prouvé Live de Bout en Bout" : 47
     "Régression Interne Cassée" : 0
     "Sanity Check CLI Seul (Non Validé)" : 46
-    "Statique / Syntaxe Seul (Non Exécuté)" : 4
+    "Statique / Syntaxe Seul (Non Exécuté)" : 3
 ```
 
 ---
@@ -114,7 +114,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 | `scripts/infra/rpi4/rpi4_sim.sh` | 🟢 **Prouvé Live** | Shell | Moyenne (Dev & Simulation Locale QEMU ARM64) | Résolution REPO_ROOT et COMPOSE_FILE absolue, port paramétrable. sim/docker-compose.sim.yml ajusté à 4GB RAM. Prouvé live à 100% sur les 5 commandes (up, status, test 6/6 API PASS dont recognize Andor MIH et CAS, logs, down). |
 | `scripts/infra/rpi4/rpi4_standalone.sh` | 🟢 **Prouvé Live** | Shell | Élevée (Déploiement Serveur Physique RPi4) | Résolution REPO_ROOT et source load_env.sh intégrées. Référence de compilation ARM64 réalignée et chemin cible absolu. Validé et prouvé live sur RPi4 (status -> service systemd user actif, API nominale ; demo -> reconnaissance 100% conf MIH Andor et téléchargement CAS SRT validés). |
 | `scripts/infra/rpi4/rpi4_supervisor_ctl.sh` | 🟢 **Prouvé Live** | Shell | Élevée (Contrôleur de Déploiement & Lifecycle du Superviseur RPi4) | Résolution REPO_ROOT et source load_env.sh intégrées. Préfixage absolu de UNIT_FILE, SUPERVISOR_SCRIPTS et checksum sync. Contrôleur synchronisé vers l'appliance. Validé et prouvé live à 100% sur l'ensemble des 6 commandes (sync hors racine, install, restart, status, stop, start avec bascule des PID et logs nominaux). |
-| `scripts/infra/rpi4/rpi4_sync.sh` | ⚪ **Statique Seul (Non Exécuté)** | Shell | À évaluer | Syntaxe `bash -n` & `shellcheck` OK. Zéro exécution runtime. |
+| `scripts/infra/rpi4/rpi4_sync.sh` | 🟢 **Prouvé Live** | Shell | Élevée (Synchronisation Données & Déploiement Appliance RPi4) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des artefacts locaux et options --help / --check. Validé hors racine (--check SSH/assets code 0). |
 
 ### 3.6 Ingestion, Curation & Déduplication (`scripts/ingestion/`)
 
@@ -449,3 +449,10 @@ Pour sortir de cet état sans spéculation, chaque script des sections 1 et 2 do
 - **Diagnostic** : Chemins relatifs au CWD pour le build PG17 (`docker/pg-spgist_hamming/17-develop/*`), binaire de migration relatif (`./target/release/dbsrt migrate`), absence d'ancrage `REPO_ROOT` dynamique et absence d'aide CLI `--help`.
 - **Remédiation** : Découverte dynamique de `REPO_ROOT` avec fallback appliance `~/dbsrt`, préfixage absolu des fichiers Docker et sélection de `DBSRT_BIN` (release/debug), et ajout des options CLI `--help` / `-h`.
 - **Validation Live** : Validé live à 100% : exécution hors racine `(cd crates && bash ../scripts/infra/rpi4/rpi4_deploy.sh --help)` et `(status)` sans erreur (code 0, interrogation réelle du conteneur `dbsrt-pg17` sur l'appliance physique RPi4 et interrogation HTTP `/v1/status` sur 3088 pHashes et 2505 couplages), linters `shellcheck` et `shfmt` conformes.
+
+### Fiche 36 : `scripts/infra/rpi4/rpi4_sync.sh`
+- **Rôle** : Synchronisateur des données du catalogue (`catalog.dbphash`), des sous-titres, du fichier `docker-compose.rpi4.yml` et des assets PostgreSQL 17 vers le Raspberry Pi 4 (`task rpi4:sync`).
+- **KPI / Importance** : `Élevée (Synchronisation Données & Déploiement Appliance RPi4)`.
+- **Diagnostic** : Chemins locaux d'artefacts relatifs au CWD (`data/catalog.dbphash`, `data/SRT`, `data/__PHASH__`, `docker/...`), absence d'ancrage `REPO_ROOT` dynamique et absence d'options CLI `--help` / `--check`.
+- **Remédiation** : Découverte dynamique de `REPO_ROOT` avec fallback appliance `~/dbsrt`, préfixage absolu de tous les chemins d'artefacts locaux (`${REPO_ROOT}/...`), et ajout des options CLI `--help` / `-h`, `--dry-run` et `--check` avec rapport d'état local et connectivité SSH RPi4.
+- **Validation Live** : Validé live à 100% : exécution hors racine `(cd crates && bash ../scripts/infra/rpi4/rpi4_sync.sh --help)` et `(--check)` sans erreur (code 0, validation des 4 sources locales et de l'accès SSH RPi4), linters `shellcheck` et `shfmt` conformes.

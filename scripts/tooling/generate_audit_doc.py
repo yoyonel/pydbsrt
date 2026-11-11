@@ -98,6 +98,9 @@ PROVEN_LIVE: dict[str, str] = {
     "scripts/infra/rpi4/rpi4_deploy.sh": (
         "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus, sélection binaire DBSRT_BIN et support --help. Validé live sur RPi4 (status container PG17 + API 3088 phash, code 0)."
     ),
+    "scripts/infra/rpi4/rpi4_sync.sh": (
+        "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des artefacts locaux et options --help / --check. Validé hors racine (--check SSH/assets code 0)."
+    ),
     "scripts/infra/rpi4/rpi4_freebox_ctl.sh": (
         "Résolution REPO_ROOT et source load_env.sh intégrées. Chemins install_gateway() préfixés par REPO_ROOT."
         " Validé et prouvé live sur RPi4 (status 3 montages CIFS actifs + daemon systemd actif, install synchronisé et activé)."
@@ -170,6 +173,7 @@ SCRIPT_KPIS: dict[str, str] = {
     "scripts/infra/rpi4/rpi4_build.sh": "Moyenne (Infrastructure de Conteneurisation ARM64)",
     "scripts/infra/rpi4/rpi4_cli.sh": "Élevée (Cross-Compilation ARM64 & Déploiement CLI RPi4)",
     "scripts/infra/rpi4/rpi4_deploy.sh": "Élevée (Déploiement Docker & Base de Données Appliance RPi4)",
+    "scripts/infra/rpi4/rpi4_sync.sh": "Élevée (Synchronisation Données & Déploiement Appliance RPi4)",
     "scripts/infra/rpi4/rpi4_freebox_ctl.sh": "Élevée (Appliance RPi4 & CIFS/HTTP Range)",
     "scripts/infra/rpi4/rpi4_o2switch_supervisor.py": "Critique (Superviseur Autonome 24/7 de Production)",
     "scripts/infra/rpi4/rpi4_sim.sh": "Moyenne (Dev & Simulation Locale QEMU ARM64)",
