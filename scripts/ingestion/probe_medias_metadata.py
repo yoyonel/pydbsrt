@@ -16,10 +16,26 @@ import sys
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict, List, Tuple
 
 import psycopg2
 from psycopg2.extras import execute_batch
+
+
+def find_repo_root() -> Path:
+    """Finds repository root dynamically with appliance fallback."""
+    curr = Path(__file__).resolve().parent
+    for parent in [curr, *curr.parents]:
+        if (parent / ".git").is_dir():
+            return parent
+    appliance_path = Path.home() / "dbsrt"
+    if appliance_path.is_dir():
+        return appliance_path
+    return Path.cwd()
+
+
+REPO_ROOT = find_repo_root()
 
 
 def _resolve_ssh_hostname(host_alias: str) -> str:
@@ -369,7 +385,14 @@ def parse_args() -> argparse.Namespace:
         default="local",
         help="Target database to inspect/update (default: local)",
     )
-    parser.add_argument("--audit", action="store_true", help="Print NULL audit report only")
+    parser.add_argument(
+        "--check",
+        "--dry-run",
+        "--audit",
+        dest="audit",
+        action="store_true",
+        help="Print NULL audit report only (non-destructive check)",
+    )
     parser.add_argument(
         "--sync-rpi4",
         action="store_true",

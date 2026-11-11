@@ -7,17 +7,17 @@
 ## 1. Synthèse Factuelle Globale
 
 - **Total scripts opérationnels** : 96 (66 Python, 30 Shell)
-- **Scripts prouvés en exécution réelle live (session)** : 88 / 96 (91.7%) — *Seuls scripts réellement testés de bout en bout.*
+- **Scripts prouvés en exécution réelle live (session)** : 89 / 96 (92.7%) — *Seuls scripts réellement testés de bout en bout.*
 - **Scripts en régression directe (appels internes cassés)** : 0 / 96 (0.0%) — *100% des régressions actives résolues.*
 - **Nombre total de références internes rompues actives** : 0 (13 références appliance distantes documentées)
-- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 8 / 96 (8.3%) — *Imports seuls, logique non exécutée.*
+- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 7 / 96 (7.3%) — *Imports seuls, logique non exécutée.*
 - **Scripts avec analyse statique seule (`bash -n`)** : 0 / 96 (0.0%) — *Zéro runtime.*
 
 ```mermaid
 pie title Statut Réel des 96 Scripts (Rigueur Fact-First)
-    "Prouvé Live de Bout en Bout" : 88
+    "Prouvé Live de Bout en Bout" : 89
     "Régression Interne Cassée" : 0
-    "Sanity Check CLI Seul (Non Validé)" : 8
+    "Sanity Check CLI Seul (Non Validé)" : 7
     "Statique / Syntaxe Seul (Non Exécuté)" : 0
 ```
 
@@ -136,7 +136,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 | `scripts/ingestion/media_add.sh` | 🟢 **Prouvé Live** | Shell | Élevée (Ingestion Unifiée & Invariants Multimédia) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), sélection absolue DBSRT_BIN (release/debug) et garde explicite. Validé hors racine (--help code 0). |
 | `scripts/ingestion/phash_dedupe.py` | 🟢 **Prouvé Live** | Python | Élevée (Déduplication des Empreintes Legacy vs MovieHash) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), gestion résiliente des noms de fichiers longs (ENAMETOOLONG), argument optionnel avec défaut absolu et support --check. Validé hors racine (--check code 0, 2 036 moviehashes et déduplication confirmés). |
 | `scripts/ingestion/phash_names.py` | 🟢 **Prouvé Live** | Python | Moyenne (Résolution Canonique & Noms Logiques des Empreintes pHash) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), ajout d'interface CLI dédiée avec options -h/--help et mode d'inspection --check. Validé hors racine (--check code 0, résolution de nom logique et dérivation media_name confirmées). |
-| `scripts/ingestion/probe_medias_metadata.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
+| `scripts/ingestion/probe_medias_metadata.py` | 🟢 **Prouvé Live** | Python | Élevée (Sondage des Caractéristiques Flux Vidéo & Audit NULL PostgreSQL) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), support multi-cibles Local et RPi4, et option CLI non-destructive --check. Validé live sur RPi4 distant (--check --target rpi4 code 0, audit de 2 320 médias PostgreSQL confirmé). |
 | `scripts/ingestion/purge_media.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/ingestion/quarantine_truncated_phashes.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/ingestion/recognize_medias.sh` | 🟢 **Prouvé Live** | Shell | Moyenne (Outil d'Ingestion & Évaluation par Lots) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), set -euo pipefail, détection conditionnelle de time/parallel et options --help / --check. Validé hors racine (code 0). |
@@ -743,3 +743,10 @@ Pour sortir de cet état sans spéculation, chaque script des sections 1 et 2 do
 - **Diagnostic** : Absence d'interface CLI exécutable (`__main__`), absence d'options d'aide ou de mode d'inspection `--check`.
 - **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, intégration d'un point d'entrée CLI avec options `-h/--help` et mode `--check` non-destructif.
 - **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/ingestion/phash_names.py --check)` confirmant la dérivation correcte des noms logiques et des stems (code 0), linters `ruff`, `complexipy` et `pyright` conformes.
+
+### Fiche 78 : `scripts/ingestion/probe_medias_metadata.py`
+- **Rôle** : Sondage distant des caractéristiques physiques des flux vidéo conteneurs (largeur, hauteur, codec vidéo, résolution normalisée) via `ffprobe` sur le NAS Synology et mise à jour de rattrapage des colonnes NULL dans PostgreSQL 17 (local ou RPi4), avec audit exhaustif NULL et statistiques SoC.
+- **KPI / Importance** : `Élevée (Sondage des Caractéristiques Flux Vidéo & Audit NULL PostgreSQL)`.
+- **Diagnostic** : Dépendance au CWD pour la découverte de l'environnement, et absence d'option explicite `--check` / `--dry-run`.
+- **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, support multi-cibles `local` et `rpi4`, et ajout des alias `--check` / `--dry-run` pour l'audit non-destructif.
+- **Validation Live** : Validé live à 100% : exécution locale hors racine ciblant le PostgreSQL distant du RPi4 réel `(cd crates && uv run python ../scripts/ingestion/probe_medias_metadata.py --check --target rpi4)` auditant 2 320 médias physiques et 2 265 productions (code 0), linters `ruff`, `complexipy` et `pyright` conformes.

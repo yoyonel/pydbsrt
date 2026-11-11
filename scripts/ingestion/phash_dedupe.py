@@ -30,7 +30,12 @@ REPO_ROOT = find_repo_root()
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts.ingestion.phash_names import phash_logical_name  # noqa: E402
+try:
+    from scripts.ingestion.phash_names import phash_logical_name  # noqa: E402
+except ImportError:
+    from phash_names import (
+        phash_logical_name,  # type: ignore[import-not-found] # pyright: ignore[reportMissingImports] # noqa: E402
+    )
 
 
 def dedupe_legacy_twins(phash_dir: Path, apply: bool) -> Dict[str, int]:
