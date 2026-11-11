@@ -7,18 +7,18 @@
 ## 1. Synthèse Factuelle Globale
 
 - **Total scripts opérationnels** : 96 (66 Python, 30 Shell)
-- **Scripts prouvés en exécution réelle live (session)** : 30 / 96 (31.2%) — *Seuls scripts réellement testés de bout en bout.*
+- **Scripts prouvés en exécution réelle live (session)** : 31 / 96 (32.3%) — *Seuls scripts réellement testés de bout en bout.*
 - **Scripts en régression directe (appels internes cassés)** : 0 / 96 (0.0%) — *100% des régressions actives résolues.*
 - **Nombre total de références internes rompues actives** : 0 (13 références appliance distantes documentées)
 - **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 46 / 96 (47.9%) — *Imports seuls, logique non exécutée.*
-- **Scripts avec analyse statique seule (`bash -n`)** : 20 / 96 (20.8%) — *Zéro runtime.*
+- **Scripts avec analyse statique seule (`bash -n`)** : 19 / 96 (19.8%) — *Zéro runtime.*
 
 ```mermaid
 pie title Statut Réel des 96 Scripts (Rigueur Fact-First)
-    "Prouvé Live de Bout en Bout" : 30
+    "Prouvé Live de Bout en Bout" : 31
     "Régression Interne Cassée" : 0
     "Sanity Check CLI Seul (Non Validé)" : 46
-    "Statique / Syntaxe Seul (Non Exécuté)" : 20
+    "Statique / Syntaxe Seul (Non Exécuté)" : 19
 ```
 
 ---
@@ -63,7 +63,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 | `scripts/benchmarks/matching_bench_runner.py` | 🟢 **Prouvé Live** | Python | À évaluer | Exécuté live sur snippet réel (01_Cruauté_mid15s.mp4) |
 | `scripts/benchmarks/record_casts.py` | 🟢 **Prouvé Live** | Python | Élevée (Doc Diátaxis & Casts Asciinema) | Exécuté live avec succès. Chemin validate_docs.py réaligné vers scripts/tooling/, timing calé à 2.0s, 4 casts régénérés et validés via task doc:check. |
 | `scripts/benchmarks/record_proof.py` | 🟢 **Prouvé Live** | Python | Critique (Preuves Terminales PR) | Exécuté live avec succès (génération .cast et .svg masqué sans fuite de secrets). Imports et docstring réalignés. |
-| `scripts/benchmarks/record_vlsub_demo.sh` | ⚪ **Statique Seul (Non Exécuté)** | Shell | À évaluer | Syntaxe `bash -n` & `shellcheck` OK. Zéro exécution runtime. |
+| `scripts/benchmarks/record_vlsub_demo.sh` | 🟢 **Prouvé Live** | Shell | Élevée (Doc Diátaxis & Démo Vidéo VLSub) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des assets, nettoyage résilient des processus et options --help / --check. Validé hors racine (code 0). |
 | `scripts/benchmarks/scale_up_nas_dataset.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/benchmarks/trajectory_bench_runner.py` | 🟢 **Prouvé Live** | Python | À évaluer | Exécuté live sur snippet réel (01_Cruauté_mid15s.mp4) |
 | `scripts/benchmarks/verify_terminal_rendering.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
@@ -337,3 +337,10 @@ Pour sortir de cet état sans spéculation, chaque script des sections 1 et 2 do
 - **Diagnostic** : `REPO_ROOT` tronqué à `../` (pointant sur `scripts/` au lieu de la racine du dépôt suite à la réorganisation modulaire), chemins relatifs d'artefacts (`CATALOG_PATH`, `SERVER_BIN`, `--subtitles-dir`), absence de support `--help` et dépendance au CWD d'exécution.
 - **Remédiation** : Découverte dynamique de `REPO_ROOT` avec fallback appliance `~/dbsrt`, support de l'option `--help` / `-h`, préfixage absolu de tous les chemins d'artefacts (`${REPO_ROOT}/...`), manifest path Cargo explicite, et conformité `shellcheck` / `shfmt`.
 - **Validation Live** : Validé live à 100% : exécution hors racine `(cd crates && bash ../scripts/benchmarks/bench_http_flood.sh --help)` sans erreur (code 0), linters `shellcheck` et `shfmt` conformes.
+
+### Fiche 20 : `scripts/benchmarks/record_vlsub_demo.sh`
+- **Rôle** : Enregistreur de démonstration vidéo HD 1080p et captures d'écran séquentielles de l'extension VLSub pydbsrt sous serveur Xvfb isolé, gestionnaire de fenêtres Marco et lecteur VLC.
+- **KPI / Importance** : `Élevée (Documentation & Démonstrations Multimédia Diátaxis)`.
+- **Diagnostic** : Chemins relatifs flottants (`ASSETS_DIR`, `MEDIA_FILE`), variables de PID non initialisées risquant un crash `set -u` dans `cleanup`, absence d'ancrage `REPO_ROOT` dynamique et absence de flags d'inspection `--help` ou `--check`.
+- **Remédiation** : Découverte dynamique de `REPO_ROOT` avec fallback appliance `~/dbsrt`, préfixage absolu de tous les répertoires et fichiers d'entrée (`${REPO_ROOT}/...`), initialisation sécurisée des PIDs avec extinction propre, et ajout des options CLI `--help` / `-h` et `--check` / `--dry-run` avec validation de la présence des 5 binaires système (`Xvfb`, `marco`, `ffmpeg`, `xdotool`, `vlc`).
+- **Validation Live** : Validé live à 100% : exécution hors racine `(cd crates && bash ../scripts/benchmarks/record_vlsub_demo.sh --help)` et `(--check)` sans erreur (code 0, validation des 5 binaires présents et détection exacte de `REPO_ROOT`), linters `shellcheck` et `shfmt` conformes.

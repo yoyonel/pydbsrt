@@ -1,9 +1,71 @@
 #!/usr/bin/env bash
+# Records 1080p HD screen capture and step-by-step images for VLSub pydbsrt extension demo
 set -euo pipefail
 
-DISPLAY_NUM=98
-ASSETS_DIR="docs/assets/vlsub-dbsrt"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+if [[ ! -d "${REPO_ROOT}/.git" && -d "${HOME}/dbsrt" ]]; then
+  REPO_ROOT="${HOME}/dbsrt"
+fi
+
+# Print usage if requested
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+  echo "Usage: $(basename "$0") [--check | --dry-run | <media_file>]"
+  echo ""
+  echo "Records 1080p video and screenshots of VLSub pydbsrt under Xvfb/Marco."
+  echo ""
+  echo "Options:"
+  echo "  --help, -h          Show this help message and exit"
+  echo "  --check, --dry-run  Verify presence of required tools and paths without recording"
+  echo ""
+  echo "Environment variables:"
+  echo "  START_TIME          Playback start time in seconds (default: 18)"
+  echo "  DISPLAY_NUM         Isolated Xvfb display number (default: 98)"
+  exit 0
+fi
+
+# Check required binaries
+REQUIRED_BINS=(Xvfb marco ffmpeg xdotool vlc)
+for bin in "${REQUIRED_BINS[@]}"; do
+  if ! command -v "$bin" >/dev/null 2>&1; then
+    echo "❌ Error: Required tool '$bin' not found in PATH." >&2
+    exit 1
+  fi
+done
+
+if [[ "${1:-}" == "--check" || "${1:-}" == "--dry-run" ]]; then
+  echo "✓ All required tools found: ${REQUIRED_BINS[*]}"
+  echo "✓ REPO_ROOT: ${REPO_ROOT}"
+  exit 0
+fi
+
+DISPLAY_NUM="${DISPLAY_NUM:-98}"
+ASSETS_DIR="${REPO_ROOT}/docs/assets/vlsub-dbsrt"
 mkdir -p "$ASSETS_DIR"
+
+XVFB_PID=""
+MARCO_PID=""
+FFMPEG_PID=""
+VLC_PID=""
+
+cleanup() {
+  echo "=== Stopping background demo processes ==="
+  if [[ -n "${VLC_PID}" ]] && kill -0 "${VLC_PID}" 2>/dev/null; then
+    kill "${VLC_PID}" 2>/dev/null || true
+  fi
+  if [[ -n "${FFMPEG_PID}" ]] && kill -0 "${FFMPEG_PID}" 2>/dev/null; then
+    # Send SIGINT to ffmpeg so it writes MP4 moov atom cleanly
+    kill -INT "${FFMPEG_PID}" 2>/dev/null || true
+    sleep 1.5
+  fi
+  if [[ -n "${MARCO_PID}" ]] && kill -0 "${MARCO_PID}" 2>/dev/null; then
+    kill "${MARCO_PID}" 2>/dev/null || true
+  fi
+  if [[ -n "${XVFB_PID}" ]] && kill -0 "${XVFB_PID}" 2>/dev/null; then
+    kill "${XVFB_PID}" 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT INT TERM
 
 echo "=== 1. Starting isolated Xvfb display :$DISPLAY_NUM (1920x1080x24) ==="
 Xvfb ":$DISPLAY_NUM" -screen 0 1920x1080x24 -ac +extension GLX +render -noreset >/dev/null 2>&1 &
@@ -23,20 +85,9 @@ ffmpeg -y -f x11grab -draw_mouse 1 -video_size 1920x1080 -i ":$DISPLAY_NUM.0" \
 FFMPEG_PID=$!
 sleep 0.5
 
-cleanup() {
-  echo "=== Stopping background demo processes ==="
-  kill "$VLC_PID" 2>/dev/null || true
-  # Send SIGINT to ffmpeg so it writes MP4 moov atom cleanly
-  kill -INT "$FFMPEG_PID" 2>/dev/null || true
-  sleep 1.5
-  kill "$MARCO_PID" 2>/dev/null || true
-  kill "$XVFB_PID" 2>/dev/null || true
-}
-trap cleanup EXIT
-
 echo "=== 4. Launching VLC Media Player ==="
 export DISPLAY=":$DISPLAY_NUM"
-MEDIA_FILE="${1:-tests/data/big_buck_bunny_trailer_480p.mp4}"
+MEDIA_FILE="${1:-${REPO_ROOT}/tests/data/big_buck_bunny_trailer_480p.mp4}"
 START_TIME="${START_TIME:-18}"
 vlc --no-audio --no-sub-autodetect-file --repeat --start-time="$START_TIME" --sub-language=fr "$MEDIA_FILE" >/tmp/vlc_demo.log 2>&1 &
 VLC_PID=$!

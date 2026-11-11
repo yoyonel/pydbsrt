@@ -34,6 +34,9 @@ PROVEN_LIVE: dict[str, str] = {
         "Exécuté live avec succès (génération .cast et .svg masqué sans fuite"
         " de secrets). Imports et docstring réalignés."
     ),
+    "scripts/benchmarks/record_vlsub_demo.sh": (
+        "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des assets, nettoyage résilient des processus et options --help / --check. Validé hors racine (code 0)."
+    ),
     "scripts/e2e/o2switch_e2e.py": (
         "Exécuté live contre o2switch (15/15 golden set PASS, gateway 200/401"
         " PASS). Résolution racine et CTL résiliente sans index magique."
@@ -106,6 +109,7 @@ SCRIPT_KPIS: dict[str, str] = {
     "scripts/benchmarks/compare_top_telemetry.py": "Moyenne (Dev / Parité Télémétrie)",
     "scripts/benchmarks/record_casts.py": "Élevée (Doc Diátaxis & Casts Asciinema)",
     "scripts/benchmarks/record_proof.py": "Critique (Preuves Terminales PR)",
+    "scripts/benchmarks/record_vlsub_demo.sh": "Élevée (Doc Diátaxis & Démo Vidéo VLSub)",
     "scripts/e2e/o2switch_e2e.py": "Critique (Recette E2E Cloud o2switch)",
     "scripts/infra/o2switch/o2switch_audit_remote.py": "Élevée (Audit de Précision & Recette Cloud)",
     "scripts/infra/o2switch/o2switch_ctl.sh": "Critique (Contrôleur Maître Cloud o2switch)",
