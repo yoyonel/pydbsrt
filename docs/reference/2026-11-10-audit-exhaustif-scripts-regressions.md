@@ -7,18 +7,18 @@
 ## 1. Synthèse Factuelle Globale
 
 - **Total scripts opérationnels** : 96 (66 Python, 30 Shell)
-- **Scripts prouvés en exécution réelle live (session)** : 49 / 96 (51.0%) — *Seuls scripts réellement testés de bout en bout.*
+- **Scripts prouvés en exécution réelle live (session)** : 50 / 96 (52.1%) — *Seuls scripts réellement testés de bout en bout.*
 - **Scripts en régression directe (appels internes cassés)** : 0 / 96 (0.0%) — *100% des régressions actives résolues.*
 - **Nombre total de références internes rompues actives** : 0 (13 références appliance distantes documentées)
 - **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 46 / 96 (47.9%) — *Imports seuls, logique non exécutée.*
-- **Scripts avec analyse statique seule (`bash -n`)** : 1 / 96 (1.0%) — *Zéro runtime.*
+- **Scripts avec analyse statique seule (`bash -n`)** : 0 / 96 (0.0%) — *Zéro runtime.*
 
 ```mermaid
 pie title Statut Réel des 96 Scripts (Rigueur Fact-First)
-    "Prouvé Live de Bout en Bout" : 49
+    "Prouvé Live de Bout en Bout" : 50
     "Régression Interne Cassée" : 0
     "Sanity Check CLI Seul (Non Validé)" : 46
-    "Statique / Syntaxe Seul (Non Exécuté)" : 1
+    "Statique / Syntaxe Seul (Non Exécuté)" : 0
 ```
 
 ---
@@ -175,7 +175,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 | `scripts/tooling/report_type_errors.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/tooling/serve_docs.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/tooling/test_db_migrations.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
-| `scripts/tooling/test_recipe_debian.sh` | ⚪ **Statique Seul (Non Exécuté)** | Shell | À évaluer | Syntaxe `bash -n` & `shellcheck` OK. Zéro exécution runtime. |
+| `scripts/tooling/test_recipe_debian.sh` | 🟢 **Prouvé Live** | Shell | Élevée (Tests d'Intégration Hermétiques Docker/systemd) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des fichiers Docker/artefacts, compilation cargo avec manifest-path et options --help / --check. Validé hors racine (docker/artefacts trouvés, code 0). |
 | `scripts/tooling/validate_docs.py` | 🟢 **Prouvé Live** | Python | Critique (Garde-fou CI/CD & Validation Diátaxis) | Exécuté live (task doc:check, 5 étapes PASS) |
 | `scripts/tooling/validate_web_assets.py` | 🟢 **Prouvé Live** | Python | Élevée (Garde-fou CI/CD Assets Web & Lint) | Exécuté live (task lint étape 7) |
 
@@ -470,3 +470,10 @@ Pour sortir de cet état sans spéculation, chaque script des sections 1 et 2 do
 - **Diagnostic** : Chemin d'artefact de sortie par défaut relatif au CWD (`repomix-branch-review.md`), opérations git exécutées dans le CWD courant au lieu de la racine du dépôt git, absence d'ancrage `REPO_ROOT` dynamique et absence d'options CLI `--help` / `--check`.
 - **Remédiation** : Découverte dynamique de `REPO_ROOT` avec fallback appliance `~/dbsrt`, fallback automatique de la branche cible (`origin/develop` -> `develop` -> `master` -> `HEAD~1`), préfixage absolu du chemin de sortie par défaut (`${REPO_ROOT}/repomix-branch-review.md`), commandes git explicitement ancrées via `git -C "${REPO_ROOT}"`, et ajout des options CLI `--help` / `-h` et `--check` / `--dry-run` avec inspection des différences et fichiers sources impactés.
 - **Validation Live** : Validé live à 100% : exécution hors racine `(cd crates && bash ../scripts/tooling/pack_review.sh --help)` et `(--check)` sans erreur (code 0, détection de 157 fichiers modifiés contre `origin/develop`, validation de `npx`), linters `shellcheck` et `shfmt` conformes.
+
+### Fiche 39 : `scripts/tooling/test_recipe_debian.sh`
+- **Rôle** : Banc de test d'intégration hermétique en conteneur Docker Debian avec systemd actif (PID 1), validant le cycle de vie du binaire `dbsrt-server` / `dbsrt-agent`, le service utilisateur systemd, le stockage sécurisé des credentials sans fuite sur `argv` ni dans l'environnement, la persistance post-reboot simulé et la désinstallation propre (`task recipe:test-debian`).
+- **KPI / Importance** : `Élevée (Tests d'Intégration Hermétiques Docker/systemd)`.
+- **Diagnostic** : Chemins relatifs au CWD pour le Dockerfile (`docker/Dockerfile.test-debian-systemd`), le binaire `target/release/dbsrt-server`, le plugin VLC `vlc-plugin/vlsub_dbsrt.lua` et les scripts d'installation, absence de `--manifest-path` pour cargo, absence d'ancrage `REPO_ROOT` dynamique et absence d'options CLI `--help` / `--check`.
+- **Remédiation** : Découverte dynamique de `REPO_ROOT` avec fallback appliance `~/dbsrt`, préfixage absolu de tous les chemins d'artefacts locaux copiés dans le conteneur (`${REPO_ROOT}/...`), invocation de cargo avec `--manifest-path "${REPO_ROOT}/Cargo.toml"`, et ajout des options CLI `--help` / `-h` et `--check` / `--dry-run` avec inspection locale préalable sans démarrage intempestif de conteneur privilégié.
+- **Validation Live** : Validé live à 100% : exécution hors racine `(cd crates && bash ../scripts/tooling/test_recipe_debian.sh --help)` et `(--check)` sans erreur (code 0, confirmation de la disponibilité de Docker, du Dockerfile, des scripts et du binaire `dbsrt-server`), linters `shellcheck` et `shfmt` conformes.

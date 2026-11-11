@@ -4,8 +4,14 @@
 # post-reboot persistence, and clean uninstallation in an isolated systemd container.
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+if [[ ! -d "${REPO_ROOT}/.git" && -d "${HOME}/dbsrt" ]]; then
+  REPO_ROOT="${HOME}/dbsrt"
+fi
+
 IMAGE_NAME="dbsrt-test-debian:latest"
-DOCKERFILE_PATH="docker/Dockerfile.test-debian-systemd"
+DOCKERFILE_PATH="${REPO_ROOT}/docker/Dockerfile.test-debian-systemd"
 CONTAINER_NAME="dbsrt-recipe-test-$$"
 
 TEST_USER_NAME="testuser"
@@ -34,10 +40,41 @@ else
   COLOR_RED=""
 fi
 
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+  echo "Usage: $(basename "$0") [--check | --dry-run] [--help]"
+  echo ""
+  echo "Runs automated hermetic integration tests for the Debian/Ubuntu systemd recipe in Docker."
+  echo ""
+  echo "Options:"
+  echo "  --check, --dry-run  Verify Docker availability and host artifacts without starting container"
+  echo "  --help, -h          Show this help message and exit"
+  exit 0
+fi
+
+if [[ "${1:-}" == "--check" || "${1:-}" == "--dry-run" ]]; then
+  server_bin_status="not built"
+  if [[ -f "${REPO_ROOT}/target/release/dbsrt-server" ]]; then
+    server_bin_status="release ready"
+  elif [[ -f "${REPO_ROOT}/target/debug/dbsrt-server" ]]; then
+    server_bin_status="debug ready"
+  fi
+
+  echo "=== DBSrt Debian Recipe Test Inspection ==="
+  echo "✓ REPO_ROOT     : ${REPO_ROOT}"
+  echo "✓ Docker binary : $(command -v docker >/dev/null 2>&1 && echo "installed" || echo "missing")"
+  echo "✓ Dockerfile    : $([[ -f "${DOCKERFILE_PATH}" ]] && echo "found" || echo "missing")"
+  echo "✓ Server binary : ${server_bin_status}"
+  echo "✓ Install script: $([[ -f "${REPO_ROOT}/scripts/infra/local/install_debian.sh" ]] && echo "found" || echo "missing")"
+  echo "✓ VLC plugin    : $([[ -f "${REPO_ROOT}/vlc-plugin/vlsub_dbsrt.lua" ]] && echo "found" || echo "missing")"
+  exit 0
+fi
+
 cleanup() {
-  if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
-    echo "Cleaning up ephemeral test container ${CONTAINER_NAME}..."
-    docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
+  if command -v docker >/dev/null 2>&1; then
+    if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+      echo "Cleaning up ephemeral test container ${CONTAINER_NAME}..."
+      docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
+    fi
   fi
 }
 trap cleanup EXIT INT TERM
@@ -45,15 +82,15 @@ trap cleanup EXIT INT TERM
 echo -e "${COLOR_BOLD}=== [Recipe Test] 1. Ensuring test image ${IMAGE_NAME} exists ===${COLOR_RESET}"
 if ! docker image inspect "${IMAGE_NAME}" >/dev/null 2>&1; then
   echo "Building systemd-enabled Debian test container..."
-  docker build -t "${IMAGE_NAME}" -f "${DOCKERFILE_PATH}" docker/
+  docker build -t "${IMAGE_NAME}" -f "${DOCKERFILE_PATH}" "${REPO_ROOT}/docker/"
 else
   echo "Using existing image ${IMAGE_NAME}"
 fi
 
 # Ensure release binary exists on host
-if [[ ! -f "target/release/dbsrt-server" ]]; then
+if [[ ! -f "${REPO_ROOT}/target/release/dbsrt-server" ]]; then
   echo "Building release binary dbsrt-server on host..."
-  cargo build --release --bin dbsrt-server
+  cargo build --manifest-path "${REPO_ROOT}/Cargo.toml" --release --bin dbsrt-server
 fi
 
 echo -e "${COLOR_BOLD}=== [Recipe Test] 2. Starting ephemeral systemd container ===${COLOR_RESET}"
@@ -82,10 +119,10 @@ docker exec -u "${TEST_USER_NAME}" "${CONTAINER_NAME}" mkdir -p \
   "/home/${TEST_USER_NAME}/pydbsrt/vlc-plugin" \
   "/home/${TEST_USER_NAME}/pydbsrt/scripts/infra/local"
 
-docker cp target/release/dbsrt-server "${CONTAINER_NAME}:/home/${TEST_USER_NAME}/pydbsrt/target/release/dbsrt-server"
-docker cp vlc-plugin/vlsub_dbsrt.lua "${CONTAINER_NAME}:/home/${TEST_USER_NAME}/pydbsrt/vlc-plugin/vlsub_dbsrt.lua"
-docker cp scripts/infra/local/install_debian.sh "${CONTAINER_NAME}:/home/${TEST_USER_NAME}/pydbsrt/scripts/infra/local/install_debian.sh"
-docker cp scripts/infra/local/load_env.sh "${CONTAINER_NAME}:/home/${TEST_USER_NAME}/pydbsrt/scripts/infra/local/load_env.sh"
+docker cp "${REPO_ROOT}/target/release/dbsrt-server" "${CONTAINER_NAME}:/home/${TEST_USER_NAME}/pydbsrt/target/release/dbsrt-server"
+docker cp "${REPO_ROOT}/vlc-plugin/vlsub_dbsrt.lua" "${CONTAINER_NAME}:/home/${TEST_USER_NAME}/pydbsrt/vlc-plugin/vlsub_dbsrt.lua"
+docker cp "${REPO_ROOT}/scripts/infra/local/install_debian.sh" "${CONTAINER_NAME}:/home/${TEST_USER_NAME}/pydbsrt/scripts/infra/local/install_debian.sh"
+docker cp "${REPO_ROOT}/scripts/infra/local/load_env.sh" "${CONTAINER_NAME}:/home/${TEST_USER_NAME}/pydbsrt/scripts/infra/local/load_env.sh"
 docker exec -u root "${CONTAINER_NAME}" chown -R "${TEST_USER_NAME}:${TEST_USER_NAME}" "/home/${TEST_USER_NAME}/pydbsrt"
 
 echo -e "${COLOR_BOLD}=== [Recipe Test] 4. Executing install recipe as unprivileged user ===${COLOR_RESET}"
