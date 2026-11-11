@@ -7,18 +7,18 @@
 ## 1. Synthèse Factuelle Globale
 
 - **Total scripts opérationnels** : 96 (66 Python, 30 Shell)
-- **Scripts prouvés en exécution réelle live (session)** : 47 / 96 (49.0%) — *Seuls scripts réellement testés de bout en bout.*
+- **Scripts prouvés en exécution réelle live (session)** : 48 / 96 (50.0%) — *Seuls scripts réellement testés de bout en bout.*
 - **Scripts en régression directe (appels internes cassés)** : 0 / 96 (0.0%) — *100% des régressions actives résolues.*
 - **Nombre total de références internes rompues actives** : 0 (13 références appliance distantes documentées)
 - **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 46 / 96 (47.9%) — *Imports seuls, logique non exécutée.*
-- **Scripts avec analyse statique seule (`bash -n`)** : 3 / 96 (3.1%) — *Zéro runtime.*
+- **Scripts avec analyse statique seule (`bash -n`)** : 2 / 96 (2.1%) — *Zéro runtime.*
 
 ```mermaid
 pie title Statut Réel des 96 Scripts (Rigueur Fact-First)
-    "Prouvé Live de Bout en Bout" : 47
+    "Prouvé Live de Bout en Bout" : 48
     "Régression Interne Cassée" : 0
     "Sanity Check CLI Seul (Non Validé)" : 46
-    "Statique / Syntaxe Seul (Non Exécuté)" : 3
+    "Statique / Syntaxe Seul (Non Exécuté)" : 2
 ```
 
 ---
@@ -170,7 +170,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 | `scripts/tooling/lint_complexity.py` | 🟢 **Prouvé Live** | Python | Critique (Garde-fou CI/CD & Architecture Rust) | Exécuté live (Rust Complexity Gate 1180 fn) |
 | `scripts/tooling/lint_migrations.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/tooling/mkdocs_hooks.py` | 🟢 **Prouvé Live** | Python | Élevée (Orchestration Diátaxis & Recherche Lunr) | Exécuté live (crochet mkdocs build) |
-| `scripts/tooling/pack_repo.sh` | ⚪ **Statique Seul (Non Exécuté)** | Shell | À évaluer | Syntaxe `bash -n` & `shellcheck` OK. Zéro exécution runtime. |
+| `scripts/tooling/pack_repo.sh` | 🟢 **Prouvé Live** | Shell | Moyenne (Tooling & Contexte IA Repomix) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemin par défaut absolu de l'artefact de sortie et options --help / --check. Validé hors racine (442 fichiers détectés, npx installé, code 0). |
 | `scripts/tooling/pack_review.sh` | ⚪ **Statique Seul (Non Exécuté)** | Shell | À évaluer | Syntaxe `bash -n` & `shellcheck` OK. Zéro exécution runtime. |
 | `scripts/tooling/report_type_errors.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/tooling/serve_docs.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
@@ -456,3 +456,10 @@ Pour sortir de cet état sans spéculation, chaque script des sections 1 et 2 do
 - **Diagnostic** : Chemins locaux d'artefacts relatifs au CWD (`data/catalog.dbphash`, `data/SRT`, `data/__PHASH__`, `docker/...`), absence d'ancrage `REPO_ROOT` dynamique et absence d'options CLI `--help` / `--check`.
 - **Remédiation** : Découverte dynamique de `REPO_ROOT` avec fallback appliance `~/dbsrt`, préfixage absolu de tous les chemins d'artefacts locaux (`${REPO_ROOT}/...`), et ajout des options CLI `--help` / `-h`, `--dry-run` et `--check` avec rapport d'état local et connectivité SSH RPi4.
 - **Validation Live** : Validé live à 100% : exécution hors racine `(cd crates && bash ../scripts/infra/rpi4/rpi4_sync.sh --help)` et `(--check)` sans erreur (code 0, validation des 4 sources locales et de l'accès SSH RPi4), linters `shellcheck` et `shfmt` conformes.
+
+### Fiche 37 : `scripts/tooling/pack_repo.sh`
+- **Rôle** : Générateur du paquet Markdown global du code source du dépôt (`repomix-repo-full.md`) via `npx repomix` pour l'ingestion par les modèles de raisonnement IA (`task repo:pack`).
+- **KPI / Importance** : `Moyenne (Tooling & Contexte IA Repomix)`.
+- **Diagnostic** : Chemin d'artefact de sortie par défaut relatif au CWD (`repomix-repo-full.md`), absence d'ancrage `REPO_ROOT` dynamique et absence d'options CLI `--help` / `--check`.
+- **Remédiation** : Découverte dynamique de `REPO_ROOT` avec fallback appliance `~/dbsrt`, préfixage absolu du chemin de sortie par défaut (`${REPO_ROOT}/repomix-repo-full.md`), exécution de repomix ancrée explicitement dans `REPO_ROOT`, et ajout des options CLI `--help` / `-h` et `--check` / `--dry-run` avec inventaire précis des fichiers à empaqueter.
+- **Validation Live** : Validé live à 100% : exécution hors racine `(cd crates && bash ../scripts/tooling/pack_repo.sh --help)` et `(--check)` sans erreur (code 0, détection de 442 fichiers sources et validation de la présence de `npx`), linters `shellcheck` et `shfmt` conformes.

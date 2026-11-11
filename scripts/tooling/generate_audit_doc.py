@@ -150,6 +150,9 @@ PROVEN_LIVE: dict[str, str] = {
         " scripts/ingestion/batch_media_add_tvshow.py, refactoring sous le seuil complexipy (main 15 <= 15)"
         " et support CLI (--check, --input, --output). Validé live sur exécution hors racine et génération nominale."
     ),
+    "scripts/tooling/pack_repo.sh": (
+        "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemin par défaut absolu de l'artefact de sortie et options --help / --check. Validé hors racine (442 fichiers détectés, npx installé, code 0)."
+    ),
 }
 
 SCRIPT_KPIS: dict[str, str] = {
@@ -189,6 +192,7 @@ SCRIPT_KPIS: dict[str, str] = {
     "scripts/tooling/generate_nightly_report_enhanced.py": "Moyenne (Métrologie & Profiling Diátaxis)",
     "scripts/tooling/lint_complexity.py": "Critique (Garde-fou CI/CD & Architecture Rust)",
     "scripts/tooling/mkdocs_hooks.py": "Élevée (Orchestration Diátaxis & Recherche Lunr)",
+    "scripts/tooling/pack_repo.sh": "Moyenne (Tooling & Contexte IA Repomix)",
     "scripts/tooling/validate_docs.py": "Critique (Garde-fou CI/CD & Validation Diátaxis)",
     "scripts/tooling/validate_web_assets.py": "Élevée (Garde-fou CI/CD Assets Web & Lint)",
 }
