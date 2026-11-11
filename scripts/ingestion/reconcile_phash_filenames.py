@@ -15,7 +15,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+import subprocess
 import sys
 import time
 import urllib.parse
@@ -25,11 +27,58 @@ from typing import Any
 import psycopg2
 from psycopg2.extensions import connection as PgConn
 
-DEFAULT_DB_URL: str = "postgresql://docker:docker@127.0.0.1:5433/bktreedb"
-DEFAULT_PHASH_DIR: Path = Path("data/__PHASH__")
+
+def find_repo_root() -> Path:
+    """Finds repository root dynamically with appliance fallback."""
+    curr = Path(__file__).resolve().parent
+    for parent in [curr, *curr.parents]:
+        if (parent / ".git").is_dir():
+            return parent
+    appliance_path = Path.home() / "dbsrt"
+    if appliance_path.is_dir():
+        return appliance_path
+    return Path.cwd()
+
+
+REPO_ROOT = find_repo_root()
+DEFAULT_DB_URL: str = os.getenv("DATABASE_URL", "postgresql://docker:docker@127.0.0.1:5433/bktreedb")
+DEFAULT_PHASH_DIR: Path = REPO_ROOT / "data/__PHASH__"
 BYTES_PER_FRAME: int = 8
 FPS_SUFFIX_RE: re.Pattern[str] = re.compile(r"\.(\d+\.\d+)fps\.phash$")
 CANONICAL_MOVIEHASH_RE: re.Pattern[str] = re.compile(r"^[0-9a-f]{16}\.\d+\.\d+fps\.phash$")
+
+
+def _resolve_ssh_hostname(host_alias: str) -> str:
+    """Extracts configured HostName for an SSH alias if present, else returns alias."""
+    try:
+        proc = subprocess.run(
+            ["ssh", "-G", host_alias],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+        for line in proc.stdout.splitlines():
+            if line.startswith("hostname "):
+                return line.split()[1]
+    except Exception:
+        pass
+    return host_alias
+
+
+def resolve_db_conn(url: str) -> PgConn | None:
+    """Connects to PG with fallback to RPi4 if local container is unreachable."""
+    try:
+        return psycopg2.connect(url, connect_timeout=3)
+    except Exception:
+        if "127.0.0.1" in url or "localhost" in url:
+            rpi4_host = os.getenv("RPI4_HOST") or _resolve_ssh_hostname("rpi4")
+            rpi4_url = url.replace("127.0.0.1", rpi4_host).replace("localhost", rpi4_host)
+            try:
+                return psycopg2.connect(rpi4_url, connect_timeout=3)
+            except Exception:
+                pass
+    return None
 
 
 def parse_release_phash_name(filename: str) -> tuple[str, float] | None:
@@ -152,7 +201,13 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Reconcile release-named phashes to canonical moviehashes")
     parser.add_argument("--db", type=str, default=DEFAULT_DB_URL, help="Database connection URL")
     parser.add_argument("--phash-dir", type=Path, default=DEFAULT_PHASH_DIR, help="Path to data/__PHASH__")
-    parser.add_argument("--dry-run", action="store_true", help="Simulate reconciliation without moving files")
+    parser.add_argument(
+        "--check",
+        "--dry-run",
+        dest="dry_run",
+        action="store_true",
+        help="Simulate reconciliation without moving files",
+    )
     args = parser.parse_args()
 
     print("======================================================================")
@@ -163,10 +218,15 @@ def main() -> int:
     print(f"Mode            : {'[DRY-RUN]' if args.dry_run else '[LIVE EXECUTION]'}")
 
     t0 = time.monotonic()
-    conn = psycopg2.connect(args.db)
+    conn = resolve_db_conn(args.db)
+    if conn is None:
+        print(f"❌ Could not connect to PostgreSQL ({args.db}).", file=sys.stderr)
+        return 1
 
-    stats = reconcile_all_phashes(conn, args.phash_dir, dry_run=args.dry_run)
-    conn.close()
+    try:
+        stats = reconcile_all_phashes(conn, args.phash_dir, dry_run=args.dry_run)
+    finally:
+        conn.close()
 
     elapsed = time.monotonic() - t0
     print("\n--- Reconciliation Summary ---")
