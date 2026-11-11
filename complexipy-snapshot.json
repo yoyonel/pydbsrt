@@ -38,12 +38,12 @@
         "complexity": 25
       },
       {
-        "name": "analyze_extracted_subtitles",
-        "complexity": 28
+        "name": "main",
+        "complexity": 27
       },
       {
-        "name": "main",
-        "complexity": 31
+        "name": "analyze_extracted_subtitles",
+        "complexity": 28
       },
       {
         "name": "discover_stratified_tvshows",

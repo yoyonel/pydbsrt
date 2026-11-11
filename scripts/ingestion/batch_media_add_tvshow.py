@@ -27,7 +27,22 @@ from typing import Any, Dict, List, Set, Tuple
 
 import psutil
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+def find_repo_root() -> Path:
+    """Finds repository root dynamically with appliance fallback."""
+    curr = Path(__file__).resolve().parent
+    for parent in [curr, *curr.parents]:
+        if (parent / ".git").is_dir():
+            return parent
+    appliance_path = Path.home() / "dbsrt"
+    if appliance_path.is_dir():
+        return appliance_path
+    return Path.cwd()
+
+
+REPO_ROOT = find_repo_root()
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.ingestion.phash_names import phash_logical_name  # noqa: E402
 
@@ -51,11 +66,11 @@ MAX_PREVIEW_CUE_LINES: int = 10
 SUBTITLE_MIN_VALID_BYTES: int = 12
 MAX_LOG_MESSAGE_CHARS: int = 500
 MAX_EPISODES_PER_SERIES: int = 4
-DEFAULT_DBSRT_CLI_BIN: Path = Path("target/release/dbsrt")
-DEFAULT_PHASH_DIR: Path = Path("data/__PHASH__")
-DEFAULT_SUBTITLES_DIR: Path = Path("data/SRT")
-DEFAULT_REPORT_PATH: Path = Path("docs/history/2026-10-25-rapport-batch-import-tvshow-synology.md")
-DEFAULT_EVENTS_LOG_PATH: Path = Path("data/reports/batch_tvshow_nightly.jsonl")
+DEFAULT_DBSRT_CLI_BIN: Path = REPO_ROOT / "target/release/dbsrt"
+DEFAULT_PHASH_DIR: Path = REPO_ROOT / "data/__PHASH__"
+DEFAULT_SUBTITLES_DIR: Path = REPO_ROOT / "data/SRT"
+DEFAULT_REPORT_PATH: Path = REPO_ROOT / "docs/history/2026-10-25-rapport-batch-import-tvshow-synology.md"
+DEFAULT_EVENTS_LOG_PATH: Path = REPO_ROOT / "data/reports/batch_tvshow_nightly.jsonl"
 
 ISO_639_2_TO_1: Dict[str, str] = {
     "fre": "fr",
@@ -842,6 +857,42 @@ def load_targets_from_file(targets_file: Path) -> List[Tuple[Path, str]]:
     return queue
 
 
+def perform_check(args: argparse.Namespace) -> None:
+    """Performs non-destructive sanity check of batch configuration."""
+    print("[CHECK] Mode verification activé.")
+    print(f"[CHECK] REPO_ROOT : {REPO_ROOT}")
+    print(f"[CHECK] NAS TVShow root : {args.nas_root} (exists: {args.nas_root.is_dir()})")
+    print(f"[CHECK] pHash dir : {args.phash_dir} (exists: {args.phash_dir.is_dir()})")
+    phash_count = len(list(args.phash_dir.glob("*.phash"))) if args.phash_dir.is_dir() else 0
+    print(f"[CHECK] Existing .phash files : {phash_count}")
+    print(f"[CHECK] Subtitles dir : {args.subtitles_dir} (exists: {args.subtitles_dir.is_dir()})")
+    srt_count = len(list(args.subtitles_dir.glob("*.srt"))) if args.subtitles_dir.is_dir() else 0
+    print(f"[CHECK] Existing .srt files : {srt_count}")
+    print(f"[CHECK] dbsrt CLI binary : {DEFAULT_DBSRT_CLI_BIN} (exists: {DEFAULT_DBSRT_CLI_BIN.is_file()})")
+    print(f"[CHECK] Events log target : {args.events_log}")
+    print(f"[CHECK] Report path target : {args.report_path}")
+
+
+def resolve_batch_queue(args: argparse.Namespace) -> List[Tuple[Path, str]]:
+    """Discovers or loads the candidate batch queue."""
+    if args.single_video:
+        return [(args.single_video, "SingleTest")]
+    if args.targets_file:
+        queue = load_targets_from_file(args.targets_file)
+        if args.max_videos is not None:
+            return queue[: args.max_videos]
+        return queue
+    print("🔍 Scanning NAS library for TVShow releases...")
+    return discover_stratified_tvshows(
+        args.nas_root,
+        args.phash_dir,
+        args.subtitles_dir,
+        limit=args.max_videos,
+        fresh_only=args.fresh_only,
+        max_episodes_per_series=args.max_episodes_per_series,
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Direct NAS TVShow Batch Ingestion & Profiling (Zero Local Copy)")
     parser.add_argument("--nas-root", type=Path, default=default_nas_tvshow_path())
@@ -884,7 +935,14 @@ def main() -> int:
         action="store_true",
         help="Discovers and saves target manifests to JSON without executing batch processing",
     )
+    parser.add_argument(
+        "--check", action="store_true", help="Perform sanity checks without scanning NAS or starting workers"
+    )
     args = parser.parse_args()
+
+    if args.check:
+        perform_check(args)
+        return 0
 
     args.phash_dir.mkdir(parents=True, exist_ok=True)
     args.subtitles_dir.mkdir(parents=True, exist_ok=True)
@@ -902,22 +960,7 @@ def main() -> int:
     print(f"   Cutoff Stop  : {args.until}")
     print(f"   Queue Mode   : {mode_label}")
 
-    if args.single_video:
-        queue: List[Tuple[Path, str]] = [(args.single_video, "SingleTest")]
-    elif args.targets_file:
-        queue = load_targets_from_file(args.targets_file)
-        if args.max_videos is not None:
-            queue = queue[: args.max_videos]
-    else:
-        print("🔍 Scanning NAS library for TVShow releases...")
-        queue = discover_stratified_tvshows(
-            args.nas_root,
-            args.phash_dir,
-            args.subtitles_dir,
-            limit=args.max_videos,
-            fresh_only=args.fresh_only,
-            max_episodes_per_series=args.max_episodes_per_series,
-        )
+    queue = resolve_batch_queue(args)
 
     print(f"📋 Discovered {len(queue)} candidate video(s) for direct processing.")
     if not queue:
@@ -925,7 +968,7 @@ def main() -> int:
         return 0
 
     # Save selected batch targets for monitoring and remote worker orchestration
-    targets_out = Path("data/reports/selected_batch_targets.json")
+    targets_out = REPO_ROOT / "data/reports/selected_batch_targets.json"
     targets_out.parent.mkdir(parents=True, exist_ok=True)
     targets_out.write_text(
         json.dumps(
