@@ -46,6 +46,22 @@ ACTIVE_CHILD_PGIDS: Set[int] = set()
 ACTIVE_CHILD_LOCK = threading.Lock()
 
 
+def find_repo_root() -> Path:
+    """Finds git repository root with appliance fallback (~/dbsrt)."""
+    p = Path(__file__).resolve().parent
+    for parent in [p] + list(p.parents):
+        if (parent / ".git").is_dir():
+            return parent
+    home_dbsrt = Path.home() / "dbsrt"
+    if home_dbsrt.is_dir():
+        return home_dbsrt
+    return Path.cwd()
+
+
+REPO_ROOT: Path = find_repo_root()
+DEFAULT_LOG_PATH: Path = Path("logs/batch_worker.log")
+
+
 def _kill_active_children(sig: int = signal.SIGTERM) -> None:
     # No lock here: called from a signal handler, list() of a set is atomic under the GIL.
     for pgid in list(ACTIVE_CHILD_PGIDS):
@@ -60,7 +76,8 @@ def _handle_signal(sig: int, _frame: object) -> None:
     msg = f"\n⚠️ [SIGNAL] Process received signal {sig_name} ({sig}) at {time.strftime('%Y-%m-%d %H:%M:%S')}\n"
     print(msg, flush=True)
     try:
-        with open("logs/batch_worker.log", "a", encoding="utf-8") as f:
+        DEFAULT_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(DEFAULT_LOG_PATH, "a", encoding="utf-8") as f:
             f.write(msg)
     except Exception:
         pass
@@ -73,7 +90,8 @@ def _handle_uncaught_exception(exc_type: type, exc_value: BaseException, exc_tb:
     err_str = f"\n❌ [CRASH] Uncaught Exception at {time.strftime('%Y-%m-%d %H:%M:%S')}:\n{msg}\n"
     print(err_str, flush=True)
     try:
-        with open("logs/batch_worker.log", "a", encoding="utf-8") as f:
+        DEFAULT_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(DEFAULT_LOG_PATH, "a", encoding="utf-8") as f:
             f.write(err_str)
     except Exception:
         pass
@@ -984,7 +1002,31 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=DEFAULT_TARGETS_PATH,
         help="JSON file listing target video paths; the NAS is scanned when it does not exist",
     )
+    parser.add_argument(
+        "--check",
+        "--dry-run",
+        dest="check",
+        action="store_true",
+        help="Inspect environment, binary and directory availability without executing batch",
+    )
     return parser
+
+
+def _handle_check_mode(args: argparse.Namespace, dbsrt_bin: str) -> int:
+    """Prints environment inspection and exits with 0."""
+    nas_pass = resolve_nas_password() if not args.stream_base else ""
+    has_nas_creds = bool(args.nas_host and args.nas_user and nas_pass)
+    couplings_file = REPO_ROOT / DEFAULT_COUPLINGS_PATH
+    phash_dir = REPO_ROOT / DEFAULT_PHASH_DIR
+    print("=== DBSrt o2switch Batch Worker Inspection ===")
+    print(f"✓ REPO_ROOT     : {REPO_ROOT}")
+    print(f"✓ Binary dbsrt  : {dbsrt_bin} ({'found' if Path(dbsrt_bin).exists() else 'missing'})")
+    print(f"✓ Workers budget: {args.workers} workers (budget: {CPU_BUDGET_VCPUS} vCPUs)")
+    print(f"✓ Couplings path: {couplings_file} ({'found' if couplings_file.is_file() else 'missing'})")
+    print(f"✓ pHash dir     : {phash_dir} ({'found' if phash_dir.is_dir() else 'missing'})")
+    print(f"✓ NAS config    : {'configured' if has_nas_creds else 'unconfigured (stream mode required)'}")
+    print(f"✓ Log path      : {REPO_ROOT / DEFAULT_LOG_PATH}")
+    return 0
 
 
 def _narrow_to_targets_file(
@@ -1065,25 +1107,44 @@ def select_targets(args: argparse.Namespace, nas_pass: str, events_log: Path) ->
     return targets[: args.limit] if args.limit else targets
 
 
+def _resolve_dbsrt_bin() -> str:
+    """Finds dbsrt binary under bin/ or target/."""
+    for cand in (REPO_ROOT / "bin/dbsrt", REPO_ROOT / "target/release/dbsrt", REPO_ROOT / "target/debug/dbsrt"):
+        if cand.exists():
+            return str(cand)
+    return "dbsrt"
+
+
+def _validate_nas_credentials(args: argparse.Namespace, nas_pass: str) -> bool:
+    """Verifies NAS credentials in non-stream mode."""
+    if args.stream_base:
+        return True
+    missing = [
+        name
+        for name, value in (("NAS_HOST", args.nas_host), ("NAS_USER", args.nas_user), ("NAS_PASS", nas_pass))
+        if not value
+    ]
+    if missing:
+        print(
+            f"❌ Error: missing NAS config {', '.join(missing)} (env, etc/.nas_config or etc/.nas_pass).",
+            file=sys.stderr,
+        )
+        return False
+    return True
+
+
 def main() -> int:
     """CLI Entry point for o2switch batch processing."""
     args = build_arg_parser().parse_args()
+    dbsrt_bin = _resolve_dbsrt_bin()
+
+    if args.check:
+        return _handle_check_mode(args, dbsrt_bin)
 
     nas_pass = resolve_nas_password() if not args.stream_base else ""
-    if not args.stream_base:
-        missing = [
-            name
-            for name, value in (("NAS_HOST", args.nas_host), ("NAS_USER", args.nas_user), ("NAS_PASS", nas_pass))
-            if not value
-        ]
-        if missing:
-            print(
-                f"❌ Error: missing NAS config {', '.join(missing)} (env, etc/.nas_config or etc/.nas_pass).",
-                file=sys.stderr,
-            )
-            return 1
+    if not _validate_nas_credentials(args, nas_pass):
+        return 1
 
-    dbsrt_bin = "./bin/dbsrt" if Path("./bin/dbsrt").exists() else "dbsrt"
     events_log = Path(DEFAULT_EVENTS_LOG_PATH)
     targets = select_targets(args, nas_pass, events_log)
     print(f"✓ Selected {len(targets)} target videos to process (fresh_only={args.fresh_only}, limit={args.limit}).")

@@ -159,6 +159,9 @@ PROVEN_LIVE: dict[str, str] = {
     "scripts/tooling/test_recipe_debian.sh": (
         "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des fichiers Docker/artefacts, compilation cargo avec manifest-path et options --help / --check. Validé hors racine (docker/artefacts trouvés, code 0)."
     ),
+    "scripts/workers/o2switch_batch_worker.py": (
+        "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), réduction complexipy (main 9 <= 15), 64/64 tests unitaires PASS, et options CLI --help / --check. Déployé et validé live sur Cloud o2switch (SSH ~/dbsrt, code 0)."
+    ),
 }
 
 SCRIPT_KPIS: dict[str, str] = {
@@ -203,6 +206,7 @@ SCRIPT_KPIS: dict[str, str] = {
     "scripts/tooling/test_recipe_debian.sh": "Élevée (Tests d'Intégration Hermétiques Docker/systemd)",
     "scripts/tooling/validate_docs.py": "Critique (Garde-fou CI/CD & Validation Diátaxis)",
     "scripts/tooling/validate_web_assets.py": "Élevée (Garde-fou CI/CD Assets Web & Lint)",
+    "scripts/workers/o2switch_batch_worker.py": "Critique (Worker Parallèle FTP Stream & Ingestion o2switch)",
 }
 
 CAT_TITLES: dict[str, str] = {

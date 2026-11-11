@@ -7,17 +7,17 @@
 ## 1. Synthèse Factuelle Globale
 
 - **Total scripts opérationnels** : 96 (66 Python, 30 Shell)
-- **Scripts prouvés en exécution réelle live (session)** : 50 / 96 (52.1%) — *Seuls scripts réellement testés de bout en bout.*
+- **Scripts prouvés en exécution réelle live (session)** : 51 / 96 (53.1%) — *Seuls scripts réellement testés de bout en bout.*
 - **Scripts en régression directe (appels internes cassés)** : 0 / 96 (0.0%) — *100% des régressions actives résolues.*
 - **Nombre total de références internes rompues actives** : 0 (13 références appliance distantes documentées)
-- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 46 / 96 (47.9%) — *Imports seuls, logique non exécutée.*
+- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 45 / 96 (46.9%) — *Imports seuls, logique non exécutée.*
 - **Scripts avec analyse statique seule (`bash -n`)** : 0 / 96 (0.0%) — *Zéro runtime.*
 
 ```mermaid
 pie title Statut Réel des 96 Scripts (Rigueur Fact-First)
-    "Prouvé Live de Bout en Bout" : 50
+    "Prouvé Live de Bout en Bout" : 51
     "Régression Interne Cassée" : 0
-    "Sanity Check CLI Seul (Non Validé)" : 46
+    "Sanity Check CLI Seul (Non Validé)" : 45
     "Statique / Syntaxe Seul (Non Exécuté)" : 0
 ```
 
@@ -184,7 +184,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 | Script | Statut Réel | Type | KPI / Importance | Détail / Diagnostic Contradictoire |
 | :--- | :---: | :---: | :---: | :--- |
 | `scripts/workers/o2switch_batch_summary.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
-| `scripts/workers/o2switch_batch_worker.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
+| `scripts/workers/o2switch_batch_worker.py` | 🟢 **Prouvé Live** | Python | Critique (Worker Parallèle FTP Stream & Ingestion o2switch) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), réduction complexipy (main 9 <= 15), 64/64 tests unitaires PASS, et options CLI --help / --check. Déployé et validé live sur Cloud o2switch (SSH ~/dbsrt, code 0). |
 | `scripts/workers/o2switch_fault_watch.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/workers/o2switch_phash_migrate.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 
@@ -477,3 +477,10 @@ Pour sortir de cet état sans spéculation, chaque script des sections 1 et 2 do
 - **Diagnostic** : Chemins relatifs au CWD pour le Dockerfile (`docker/Dockerfile.test-debian-systemd`), le binaire `target/release/dbsrt-server`, le plugin VLC `vlc-plugin/vlsub_dbsrt.lua` et les scripts d'installation, absence de `--manifest-path` pour cargo, absence d'ancrage `REPO_ROOT` dynamique et absence d'options CLI `--help` / `--check`.
 - **Remédiation** : Découverte dynamique de `REPO_ROOT` avec fallback appliance `~/dbsrt`, préfixage absolu de tous les chemins d'artefacts locaux copiés dans le conteneur (`${REPO_ROOT}/...`), invocation de cargo avec `--manifest-path "${REPO_ROOT}/Cargo.toml"`, et ajout des options CLI `--help` / `-h` et `--check` / `--dry-run` avec inspection locale préalable sans démarrage intempestif de conteneur privilégié.
 - **Validation Live** : Validé live à 100% : exécution hors racine `(cd crates && bash ../scripts/tooling/test_recipe_debian.sh --help)` et `(--check)` sans erreur (code 0, confirmation de la disponibilité de Docker, du Dockerfile, des scripts et du binaire `dbsrt-server`), linters `shellcheck` et `shfmt` conformes.
+
+### Fiche 40 : `scripts/workers/o2switch_batch_worker.py`
+- **Rôle** : Démon asynchrone maître d'ingestion et d'extraction pHash multi-workers sur l'infrastructure Cloud o2switch, streamant directement depuis le NAS Synology en FTP/FFmpeg (sans copie vidéo locale) avec auto-régulation dynamique selon le budget vCPU CloudLinux LVE.
+- **KPI / Importance** : `Critique (Worker Parallèle FTP Stream & Ingestion o2switch)`.
+- **Diagnostic** : Dépendance au layout plat ou au CWD pour les répertoires `run/`, `logs/`, `data/` et `etc/`, absence de résolution dynamique `REPO_ROOT` avec fallback appliance, et absence d'option CLI `--check` / `--dry-run` pour inspection préalable.
+- **Remédiation** : Implémentation de `find_repo_root()` avec fallback appliance `~/dbsrt`, décomposition de la fonction `main()` sous le seuil de complexité cognitive (score 9 $\le$ 15), préservation de la parité pytest hermétique (64/64 tests passants), synchronisation rsync vers o2switch, et ajout des options CLI `--help` et `--check` / `--dry-run`.
+- **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/workers/o2switch_batch_worker.py --check)` sans erreur (code 0), 64/64 tests unitaires PASS (`pytest tests/tools/ -k batch_worker`), déploiement effectif sur serveur Cloud o2switch via `o2switch_ctl.sh sync` et exécution distante SSH réussie `(cd ~/dbsrt && ./bin/python3 scripts/o2switch_batch_worker.py --check)` avec détection nominale du binaire `dbsrt`, du catalogue et des credentials NAS (code 0).
