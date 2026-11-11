@@ -217,6 +217,10 @@ PROVEN_LIVE: dict[str, str] = {
         "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), résolution résiliente du binaire dbsrt, réduction de complexité (main 31 <= 38 vs 38 legacy), fiabilisation du budget disque et option CLI --check."
         " Validé hors racine (--check code 0, binaire dbsrt, budget 2 000 Mo et NAS confirmés)."
     ),
+    "scripts/ingestion/fill_nas_snippets_catalog.py": (
+        "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des index de rapports et du catalogue .dbphash, binaire dbsrt résilient et support --check / --dry-run."
+        " Validé hors racine (--check code 0, inventaire de 2 779 médias, 2 218 snippets locaux et 2 542 cibles Synology confirmé)."
+    ),
     "scripts/ingestion/init_couplings_seed.sh": (
         "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des fixtures et support --help / --check. Validé hors racine (code 0)."
     ),
@@ -347,6 +351,7 @@ SCRIPT_KPIS: dict[str, str] = {
     "scripts/ingestion/enrich_snippets_metadata.py": "Moyenne (Enrichissement Métadonnées Extraits Snippets)",
     "scripts/ingestion/extract_embedded_subs.py": "Élevée (Extraction Automatisée des Sous-Titres Intégrés)",
     "scripts/ingestion/extract_nas_snippets.py": "Critique (Extraction Stratifiée des Extraits Vidéo NAS & Empreintes pHash)",
+    "scripts/ingestion/fill_nas_snippets_catalog.py": "Critique (Comblement Exhaustif des Snippets Manquants NAS & Freebox)",
     "scripts/ingestion/init_couplings_seed.sh": "Moyenne (Amorçage CI/CD & Tests d'Intégration)",
     "scripts/ingestion/media_add.sh": "Élevée (Ingestion Unifiée & Invariants Multimédia)",
     "scripts/ingestion/recognize_medias.sh": "Moyenne (Outil d'Ingestion & Évaluation par Lots)",

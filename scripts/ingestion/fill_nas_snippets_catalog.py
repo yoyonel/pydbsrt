@@ -15,6 +15,7 @@ import json
 import os
 import posixpath
 import re
+import shutil
 import struct
 import subprocess
 import time
@@ -25,13 +26,43 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Dict, List, Set, Tuple
 
+
+def find_repo_root() -> Path:
+    """Finds repository root dynamically with appliance fallback."""
+    curr = Path(__file__).resolve().parent
+    for parent in [curr, *curr.parents]:
+        if (parent / ".git").is_dir():
+            return parent
+    appliance_path = Path.home() / "dbsrt"
+    if appliance_path.is_dir():
+        return appliance_path
+    return Path.cwd()
+
+
+REPO_ROOT = find_repo_root()
+
+
+def resolve_dbsrt_bin(repo_root: Path) -> Path:
+    """Finds dbsrt binary in release, debug or PATH."""
+    release = repo_root / "target/release/dbsrt"
+    if release.exists():
+        return release
+    debug = repo_root / "target/debug/dbsrt"
+    if debug.exists():
+        return debug
+    system = shutil.which("dbsrt")
+    if system:
+        return Path(system)
+    return release
+
+
 DEFAULT_NAS_HOST = os.environ.get("NAS_HOST", "yoyonel.synology.me")
 DEFAULT_NAS_USER = os.environ.get("NAS_USER", "qzsl2686")
 DEFAULT_PASS_ENTRY = os.environ.get("NAS_PASS_ENTRY", "nas/qzsl2686")
-DEFAULT_CATALOG_PATH = Path("data/catalog.dbphash")
-DEFAULT_SNIPPETS_DIR = Path("data/snippets")
-DEFAULT_DBSRT_BIN = Path("target/release/dbsrt")
-DEFAULT_REPORT_PATH = Path("data/reports/snippets_fill_report.json")
+DEFAULT_CATALOG_PATH = REPO_ROOT / "data/catalog.dbphash"
+DEFAULT_SNIPPETS_DIR = REPO_ROOT / "data/snippets"
+DEFAULT_DBSRT_BIN = resolve_dbsrt_bin(REPO_ROOT)
+DEFAULT_REPORT_PATH = REPO_ROOT / "data/reports/snippets_fill_report.json"
 DEFAULT_FREEBOX_HTTP_PORT = 80
 
 
@@ -164,7 +195,7 @@ def load_phash_sidecars(phash_dir: Path) -> Dict[str, str]:
 
 def _load_tvshow_nightly_index() -> Dict[str, Tuple[str, str]]:
     index: Dict[str, Tuple[str, str]] = {}
-    rpath = Path("data/reports/batch_tvshow_nightly.jsonl")
+    rpath = REPO_ROOT / "data/reports/batch_tvshow_nightly.jsonl"
     if not rpath.is_file():
         return index
     with open(rpath, encoding="utf-8") as fh:
@@ -181,7 +212,7 @@ def _load_tvshow_nightly_index() -> Dict[str, Tuple[str, str]]:
 
 def _load_movies_targets_index() -> Dict[str, Tuple[str, str]]:
     index: Dict[str, Tuple[str, str]] = {}
-    rpath = Path("data/reports/selected_batch_targets.json")
+    rpath = REPO_ROOT / "data/reports/selected_batch_targets.json"
     if not rpath.is_file():
         return index
     with open(rpath, encoding="utf-8") as fh:
@@ -198,7 +229,7 @@ def _load_movies_targets_index() -> Dict[str, Tuple[str, str]]:
 
 def _load_freebox_targets_index() -> Dict[str, Tuple[str, str]]:
     index: Dict[str, Tuple[str, str]] = {}
-    rpath = Path("data/reports/freebox_batch_targets.json")
+    rpath = REPO_ROOT / "data/reports/freebox_batch_targets.json"
     if not rpath.is_file():
         return index
     with open(rpath, encoding="utf-8") as fh:
@@ -215,7 +246,7 @@ def _load_freebox_targets_index() -> Dict[str, Tuple[str, str]]:
 def _load_nas_ftp_index() -> Dict[str, Tuple[str, str]]:
     """Loads indexed Synology NAS files from nas_ftp_index.json."""
     index: Dict[str, Tuple[str, str]] = {}
-    cache = Path("data/reports/nas_ftp_index.json")
+    cache = REPO_ROOT / "data/reports/nas_ftp_index.json"
     if not cache.is_file():
         return index
     try:
@@ -468,11 +499,15 @@ def parse_cli_args() -> argparse.Namespace:
     """Parses command line arguments."""
     parser = argparse.ArgumentParser(description="Fill missing snippets from NAS/Freebox covering catalog.dbphash.")
     parser.add_argument("--catalog", type=Path, default=DEFAULT_CATALOG_PATH, help="Path to catalog.dbphash")
-    parser.add_argument("--phash-dir", type=Path, default=Path("data/__PHASH__"), help="Directory containing .phash")
+    parser.add_argument(
+        "--phash-dir", type=Path, default=REPO_ROOT / "data/__PHASH__", help="Directory containing .phash"
+    )
     parser.add_argument("--snippets-dir", type=Path, default=DEFAULT_SNIPPETS_DIR, help="Destination directory")
     parser.add_argument("--workers", type=int, default=4, help="Parallel extraction workers (default: 4)")
     parser.add_argument("--limit", type=int, default=None, help="Maximum number of snippets to extract")
-    parser.add_argument("--dry-run", action="store_true", help="Audit inventory without extraction")
+    parser.add_argument(
+        "--check", "--dry-run", dest="dry_run", action="store_true", help="Audit inventory without extraction"
+    )
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT_PATH, help="Output JSON report path")
     return parser.parse_args()
 

@@ -7,17 +7,17 @@
 ## 1. Synthèse Factuelle Globale
 
 - **Total scripts opérationnels** : 96 (66 Python, 30 Shell)
-- **Scripts prouvés en exécution réelle live (session)** : 85 / 96 (88.5%) — *Seuls scripts réellement testés de bout en bout.*
+- **Scripts prouvés en exécution réelle live (session)** : 86 / 96 (89.6%) — *Seuls scripts réellement testés de bout en bout.*
 - **Scripts en régression directe (appels internes cassés)** : 0 / 96 (0.0%) — *100% des régressions actives résolues.*
 - **Nombre total de références internes rompues actives** : 0 (13 références appliance distantes documentées)
-- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 11 / 96 (11.5%) — *Imports seuls, logique non exécutée.*
+- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 10 / 96 (10.4%) — *Imports seuls, logique non exécutée.*
 - **Scripts avec analyse statique seule (`bash -n`)** : 0 / 96 (0.0%) — *Zéro runtime.*
 
 ```mermaid
 pie title Statut Réel des 96 Scripts (Rigueur Fact-First)
-    "Prouvé Live de Bout en Bout" : 85
+    "Prouvé Live de Bout en Bout" : 86
     "Régression Interne Cassée" : 0
-    "Sanity Check CLI Seul (Non Validé)" : 11
+    "Sanity Check CLI Seul (Non Validé)" : 10
     "Statique / Syntaxe Seul (Non Exécuté)" : 0
 ```
 
@@ -131,7 +131,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 | `scripts/ingestion/enrich_snippets_metadata.py` | 🟢 **Prouvé Live** | Python | Moyenne (Enrichissement Métadonnées Extraits Snippets) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), réduction drastique de complexité (main 9 <= 15 vs 41 legacy), chemins absolus des snippets/manifestes et option CLI --check. Validé hors racine (--check code 0, 2 758 snippets et manifest.json confirmés). |
 | `scripts/ingestion/extract_embedded_subs.py` | 🟢 **Prouvé Live** | Python | Élevée (Extraction Automatisée des Sous-Titres Intégrés) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), réduction de complexité cognitive (main 14 <= 15 vs 39 legacy), chemins absolus et option CLI --check. Validé hors racine (--check code 0, 2 851 .srt, montage NAS et outils ffprobe/ffmpeg confirmés). |
 | `scripts/ingestion/extract_nas_snippets.py` | 🟢 **Prouvé Live** | Python | Critique (Extraction Stratifiée des Extraits Vidéo NAS & Empreintes pHash) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), résolution résiliente du binaire dbsrt, réduction de complexité (main 31 <= 38 vs 38 legacy), fiabilisation du budget disque et option CLI --check. Validé hors racine (--check code 0, binaire dbsrt, budget 2 000 Mo et NAS confirmés). |
-| `scripts/ingestion/fill_nas_snippets_catalog.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
+| `scripts/ingestion/fill_nas_snippets_catalog.py` | 🟢 **Prouvé Live** | Python | Critique (Comblement Exhaustif des Snippets Manquants NAS & Freebox) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des index de rapports et du catalogue .dbphash, binaire dbsrt résilient et support --check / --dry-run. Validé hors racine (--check code 0, inventaire de 2 779 médias, 2 218 snippets locaux et 2 542 cibles Synology confirmé). |
 | `scripts/ingestion/init_couplings_seed.sh` | 🟢 **Prouvé Live** | Shell | Moyenne (Amorçage CI/CD & Tests d'Intégration) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des fixtures et support --help / --check. Validé hors racine (code 0). |
 | `scripts/ingestion/media_add.sh` | 🟢 **Prouvé Live** | Shell | Élevée (Ingestion Unifiée & Invariants Multimédia) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), sélection absolue DBSRT_BIN (release/debug) et garde explicite. Validé hors racine (--help code 0). |
 | `scripts/ingestion/phash_dedupe.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
@@ -722,3 +722,10 @@ Pour sortir de cet état sans spéculation, chaque script des sections 1 et 2 do
 - **Diagnostic** : Chemins relatifs en dur (`data/snippets`, `target/release/dbsrt`), résolution fragile du binaire Rust, et absence de mode CLI d'inspection `--check`.
 - **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, résolution multi-chemins résiliente du binaire `dbsrt`, découplage de `load_manifest` réduisant la complexité de `main` (31 vs 38 baseline), et ajout de l'option CLI `--check`.
 - **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/ingestion/extract_nas_snippets.py --check)` confirmant le binaire `dbsrt`, le budget disque (2 000 Mo) et la disponibilité des outils `ffprobe`/`ffmpeg` (code 0), linters `ruff`, `complexipy` et `pyright` conformes.
+
+### Fiche 75 : `scripts/ingestion/fill_nas_snippets_catalog.py`
+- **Rôle** : Comblement exhaustif des extraits vidéo locaux manquants (15s à t=50%) directement via streaming distant FTP Synology et passerelle HTTP Byte-Range Freebox sans téléchargement intégral, avec extraction concurrente pHash et rapport JSON structuré.
+- **KPI / Importance** : `Critique (Comblement Exhaustif des Snippets Manquants NAS & Freebox)`.
+- **Diagnostic** : Chemins relatifs par défaut (`data/catalog.dbphash`, `data/snippets`, `data/reports/...`, `data/__PHASH__`), et résolution fragile du binaire Rust `dbsrt`.
+- **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, préfixage absolu de tous les index et artefacts, résolution multi-chemins résiliente de `dbsrt`, et ajout de l'alias CLI `--check` / `--dry-run`.
+- **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/ingestion/fill_nas_snippets_catalog.py --check)` confirmant l'inventaire de 2 779 médias du catalogue, 2 218 snippets déjà présents en local (79.8%) et 2 542 localisés sur Synology (code 0), linters `ruff`, `complexipy` et `pyright` conformes.
