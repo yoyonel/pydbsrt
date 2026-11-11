@@ -5,6 +5,8 @@ Runs on o2switch from the dbsrt directory, next to the batch worker whose FTP he
 Dry run unless --apply. Prints counts only: never a media name, a NAS host or a path.
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import os
@@ -17,10 +19,22 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Callable, Dict, List, Tuple
 
-repo_root = Path(__file__).resolve().parent.parent
-if repo_root.name == "scripts":
-    repo_root = repo_root.parent
-sys.path.insert(0, str(repo_root))
+
+def find_repo_root() -> Path:
+    """Finds git repository root with appliance fallback (~/dbsrt)."""
+    p = Path(__file__).resolve().parent
+    for parent in [p] + list(p.parents):
+        if (parent / ".git").is_dir():
+            return parent
+    home_dbsrt = Path.home() / "dbsrt"
+    if home_dbsrt.is_dir():
+        return home_dbsrt
+    return Path.cwd()
+
+
+REPO_ROOT = find_repo_root()
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 try:
     from scripts.workers.o2switch_batch_worker import (  # noqa: E402
@@ -132,15 +146,37 @@ def apply_moves(moves: List[Move]) -> int:
     return migrated
 
 
+def _handle_check_mode(phash_dir: Path) -> int:
+    """Inspects environment and paths without executing migration."""
+    print("=== DBSrt o2switch pHash Migrate Inspection ===")
+    print(f"✓ REPO_ROOT     : {REPO_ROOT}")
+    print(f"✓ pHash dir     : {phash_dir} ({'found' if phash_dir.is_dir() else 'missing'})")
+    print(f"✓ NAS host      : {DEFAULT_NAS_HOST or 'unconfigured'}")
+    print(f"✓ NAS user      : {DEFAULT_NAS_USER or 'unconfigured'}")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apply", action="store_true", help="Rename the files (default: dry run)")
-    parser.add_argument("--phash-dir", default=DEFAULT_PHASH_DIR)
+    parser.add_argument("--phash-dir", default=str(REPO_ROOT / DEFAULT_PHASH_DIR))
     parser.add_argument(
         "--nas-base", action="append", help="NAS base directory (repeatable, default /video and /tvshow)"
     )
     parser.add_argument("--jobs", type=int, default=16, help="Moviehash reads run at once (NAS took 64 sessions)")
+    parser.add_argument(
+        "--check",
+        "--dry-run",
+        dest="check",
+        action="store_true",
+        help="Inspect paths and configuration without executing network scan",
+    )
     args = parser.parse_args()
+
+    phash_dir = Path(args.phash_dir)
+    if args.check:
+        return _handle_check_mode(phash_dir)
+
     # The worker import installs handlers that log to the batch worker log and leave the pool running
     for sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGQUIT):
         signal.signal(sig, signal.SIG_DFL)
@@ -154,7 +190,7 @@ def main() -> int:
     stream_base = f"ftp://{DEFAULT_NAS_HOST}:{DEFAULT_FTP_PORT}"
 
     moves, counts = plan_migration(
-        Path(args.phash_dir), nas_videos, lambda video: target_moviehash(video, stream_base, ftp_env), args.jobs
+        phash_dir, nas_videos, lambda video: target_moviehash(video, stream_base, ftp_env), args.jobs
     )
     if args.apply:
         counts["migrated"] = apply_moves(moves)

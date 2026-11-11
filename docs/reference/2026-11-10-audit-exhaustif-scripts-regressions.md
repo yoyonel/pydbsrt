@@ -7,17 +7,17 @@
 ## 1. Synthèse Factuelle Globale
 
 - **Total scripts opérationnels** : 96 (66 Python, 30 Shell)
-- **Scripts prouvés en exécution réelle live (session)** : 53 / 96 (55.2%) — *Seuls scripts réellement testés de bout en bout.*
+- **Scripts prouvés en exécution réelle live (session)** : 54 / 96 (56.2%) — *Seuls scripts réellement testés de bout en bout.*
 - **Scripts en régression directe (appels internes cassés)** : 0 / 96 (0.0%) — *100% des régressions actives résolues.*
 - **Nombre total de références internes rompues actives** : 0 (13 références appliance distantes documentées)
-- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 43 / 96 (44.8%) — *Imports seuls, logique non exécutée.*
+- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 42 / 96 (43.8%) — *Imports seuls, logique non exécutée.*
 - **Scripts avec analyse statique seule (`bash -n`)** : 0 / 96 (0.0%) — *Zéro runtime.*
 
 ```mermaid
 pie title Statut Réel des 96 Scripts (Rigueur Fact-First)
-    "Prouvé Live de Bout en Bout" : 53
+    "Prouvé Live de Bout en Bout" : 54
     "Régression Interne Cassée" : 0
-    "Sanity Check CLI Seul (Non Validé)" : 43
+    "Sanity Check CLI Seul (Non Validé)" : 42
     "Statique / Syntaxe Seul (Non Exécuté)" : 0
 ```
 
@@ -186,7 +186,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 | `scripts/workers/o2switch_batch_summary.py` | 🟢 **Prouvé Live** | Python | Élevée (Métrologie Anonymisée & Télémétrie o2switch) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des rapports/logs et options CLI --help / --check. Déployé et prouvé live sur Cloud o2switch en production (10 880 événements réels et 3 872 logs analysés, code 0). |
 | `scripts/workers/o2switch_batch_worker.py` | 🟢 **Prouvé Live** | Python | Critique (Worker Parallèle FTP Stream & Ingestion o2switch) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), réduction complexipy (main 9 <= 15), 64/64 tests unitaires PASS, et options CLI --help / --check. Déployé et validé live sur Cloud o2switch (SSH ~/dbsrt, code 0). |
 | `scripts/workers/o2switch_fault_watch.py` | 🟢 **Prouvé Live** | Python | Élevée (Sonde & Diagnostic des Défauts CPU CloudLinux LVE) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), préfixage absolu des logs/rapports, et support CLI --help et --check. Déployé et prouvé live sur Cloud o2switch (SSH ~/dbsrt, 6 processus surveillés, code 0). |
-| `scripts/workers/o2switch_phash_migrate.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
+| `scripts/workers/o2switch_phash_migrate.py` | 🟢 **Prouvé Live** | Python | Élevée (Migration & Renommage Moviehash des pHashes) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), sys.path normalisé, et support CLI --help / --check. Déployé et prouvé live sur Cloud o2switch (SSH ~/dbsrt, pHash dir et credentials NAS validés, code 0). |
 
 ---
 
@@ -498,3 +498,10 @@ Pour sortir de cet état sans spéculation, chaque script des sections 1 et 2 do
 - **Diagnostic** : Chemins de logs et de rapports relatifs au CWD (`logs/faultwatch`, `data/reports/faultwatch`), absence de résolution dynamique `REPO_ROOT` avec fallback appliance, et obligation stricte d'une sous-commande provoquant une erreur sans argument.
 - **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, préfixage absolu des répertoires de logs et rapports de watch, et ajout de l'option CLI `--check` / `--dry-run` et sous-commande `check` inspectant `/proc` et l'environnement sans démarrer la boucle infinie.
 - **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/workers/o2switch_fault_watch.py --check)` sans erreur (code 0, 237 processus inspectés), déploiement SSH sur serveur Cloud o2switch et exécution réelle sur l'hôte distant inspectant les 6 processus utilisateur actifs en direct (code 0).
+
+### Fiche 43 : `scripts/workers/o2switch_phash_migrate.py`
+- **Rôle** : Outil de migration et de renommage atomique des empreintes pHash legacy (`<media>.<fps>fps.phash`) vers le format normalisé `moviehash` (`<moviehash>.<fps>fps.phash`) avec génération conjointe des métadonnées sidecar JSON (`<moviehash>.json`) sur Cloud o2switch ou en local.
+- **KPI / Importance** : `Élevée (Migration & Renommage Moviehash des pHashes)`.
+- **Diagnostic** : Résolution fragile de `repo_root` basée sur `parent.parent`, imports statiques du batch worker susceptibles d'échouer hors racine, et absence d'option CLI `--check` / `--dry-run`.
+- **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, injection normalisée dans `sys.path`, tolérance double layout pour l'import (`scripts.workers.*` et `scripts.*`), et ajout des options CLI `--help` / `-h` et `--check` / `--dry-run`.
+- **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/workers/o2switch_phash_migrate.py --check)` sans erreur (code 0), déploiement SSH sur Cloud o2switch et exécution réelle sur l'hôte distant avec inspection du catalogue pHash et des accès NAS confirmés (code 0).
