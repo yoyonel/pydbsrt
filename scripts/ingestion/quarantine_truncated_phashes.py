@@ -14,11 +14,26 @@ import sys
 import time
 from pathlib import Path
 
+
+def find_repo_root() -> Path:
+    """Finds repository root dynamically with appliance fallback."""
+    curr = Path(__file__).resolve().parent
+    for parent in [curr, *curr.parents]:
+        if (parent / ".git").is_dir():
+            return parent
+    appliance_path = Path.home() / "dbsrt"
+    if appliance_path.is_dir():
+        return appliance_path
+    return Path.cwd()
+
+
+REPO_ROOT = find_repo_root()
+
 MIN_FILE_SIZE_BYTES: int = 50_000  # ~6,250 frames @ 8B/frame
 BYTES_PER_FRAME: int = 8
-DEFAULT_SRC_DIR: Path = Path("data/__PHASH__")
-DEFAULT_DST_DIR: Path = Path("data/__QUARANTINE_PHASH__")
-DEFAULT_REPORT_PATH: Path = Path("data/reports/quarantine_report.json")
+DEFAULT_SRC_DIR: Path = REPO_ROOT / "data/__PHASH__"
+DEFAULT_DST_DIR: Path = REPO_ROOT / "data/__QUARANTINE_PHASH__"
+DEFAULT_REPORT_PATH: Path = REPO_ROOT / "data/reports/quarantine_report.json"
 
 
 def evaluate_file_quarantine(file_path: Path) -> tuple[str | None, int]:
@@ -104,7 +119,13 @@ def main() -> int:
     parser.add_argument("--src", type=Path, default=DEFAULT_SRC_DIR, help="Source phash directory")
     parser.add_argument("--dst", type=Path, default=DEFAULT_DST_DIR, help="Quarantine directory")
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT_PATH, help="Output JSON report")
-    parser.add_argument("--dry-run", action="store_true", help="Scan and report without moving files")
+    parser.add_argument(
+        "--check",
+        "--dry-run",
+        dest="dry_run",
+        action="store_true",
+        help="Scan and report without moving files (dry-run mode)",
+    )
     args = parser.parse_args()
 
     count = scan_and_quarantine(args.src, args.dst, args.report, dry_run=args.dry_run)
