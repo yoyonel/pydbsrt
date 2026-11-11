@@ -108,6 +108,10 @@ PROVEN_LIVE: dict[str, str] = {
         "Résolution REPO_ROOT et source load_env.sh intégrées. Chemins install_gateway() préfixés par REPO_ROOT."
         " Validé et prouvé live sur RPi4 (status 3 montages CIFS actifs + daemon systemd actif, install synchronisé et activé)."
     ),
+    "scripts/infra/rpi4/rpi4_freebox_gateway.py": (
+        "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), complexipy validé, et option CLI --check / --dry-run."
+        " Déployé et validé live sur Raspberry Pi 4 réel via SSH (serveur actif port 18089, racine /mnt/freebox et 3 partages CIFS détectés, code 0)."
+    ),
     "scripts/infra/rpi4/rpi4_o2switch_supervisor.py": (
         "Résolution dynamique des chemins de contrôleurs (resolve_ctl_script) et support variables d'environnement (DBSRT_*_CTL)."
         " 53/53 tests unitaires PASS. Déployé sur RPi4 via rpi4_supervisor_ctl.sh sync, redémarré en service systemd (PID 3971528),"
@@ -200,6 +204,7 @@ SCRIPT_KPIS: dict[str, str] = {
     "scripts/infra/rpi4/rpi4_deploy.sh": "Élevée (Déploiement Docker & Base de Données Appliance RPi4)",
     "scripts/infra/rpi4/rpi4_sync.sh": "Élevée (Synchronisation Données & Déploiement Appliance RPi4)",
     "scripts/infra/rpi4/rpi4_freebox_ctl.sh": "Élevée (Appliance RPi4 & CIFS/HTTP Range)",
+    "scripts/infra/rpi4/rpi4_freebox_gateway.py": "Critique (Passerelle HTTP Byte-Range Freebox RPi4)",
     "scripts/infra/rpi4/rpi4_o2switch_supervisor.py": "Critique (Superviseur Autonome 24/7 de Production)",
     "scripts/infra/rpi4/rpi4_sim.sh": "Moyenne (Dev & Simulation Locale QEMU ARM64)",
     "scripts/infra/rpi4/rpi4_standalone.sh": "Élevée (Déploiement Serveur Physique RPi4)",

@@ -7,17 +7,17 @@
 ## 1. Synthèse Factuelle Globale
 
 - **Total scripts opérationnels** : 96 (66 Python, 30 Shell)
-- **Scripts prouvés en exécution réelle live (session)** : 55 / 96 (57.3%) — *Seuls scripts réellement testés de bout en bout.*
+- **Scripts prouvés en exécution réelle live (session)** : 56 / 96 (58.3%) — *Seuls scripts réellement testés de bout en bout.*
 - **Scripts en régression directe (appels internes cassés)** : 0 / 96 (0.0%) — *100% des régressions actives résolues.*
 - **Nombre total de références internes rompues actives** : 0 (13 références appliance distantes documentées)
-- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 41 / 96 (42.7%) — *Imports seuls, logique non exécutée.*
+- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 40 / 96 (41.7%) — *Imports seuls, logique non exécutée.*
 - **Scripts avec analyse statique seule (`bash -n`)** : 0 / 96 (0.0%) — *Zéro runtime.*
 
 ```mermaid
 pie title Statut Réel des 96 Scripts (Rigueur Fact-First)
-    "Prouvé Live de Bout en Bout" : 55
+    "Prouvé Live de Bout en Bout" : 56
     "Régression Interne Cassée" : 0
-    "Sanity Check CLI Seul (Non Validé)" : 41
+    "Sanity Check CLI Seul (Non Validé)" : 40
     "Statique / Syntaxe Seul (Non Exécuté)" : 0
 ```
 
@@ -109,7 +109,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 | `scripts/infra/rpi4/rpi4_cli.sh` | 🟢 **Prouvé Live** | Shell | Élevée (Cross-Compilation ARM64 & Déploiement CLI RPi4) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus, montage Docker /app et support --help. Validé hors racine (code 0). |
 | `scripts/infra/rpi4/rpi4_deploy.sh` | 🟢 **Prouvé Live** | Shell | Élevée (Déploiement Docker & Base de Données Appliance RPi4) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus, sélection binaire DBSRT_BIN et support --help. Validé live sur RPi4 (status container PG17 + API 3088 phash, code 0). |
 | `scripts/infra/rpi4/rpi4_freebox_ctl.sh` | 🟢 **Prouvé Live** | Shell | Élevée (Appliance RPi4 & CIFS/HTTP Range) | Résolution REPO_ROOT et source load_env.sh intégrées. Chemins install_gateway() préfixés par REPO_ROOT. Validé et prouvé live sur RPi4 (status 3 montages CIFS actifs + daemon systemd actif, install synchronisé et activé). |
-| `scripts/infra/rpi4/rpi4_freebox_gateway.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
+| `scripts/infra/rpi4/rpi4_freebox_gateway.py` | 🟢 **Prouvé Live** | Python | Critique (Passerelle HTTP Byte-Range Freebox RPi4) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), complexipy validé, et option CLI --check / --dry-run. Déployé et validé live sur Raspberry Pi 4 réel via SSH (serveur actif port 18089, racine /mnt/freebox et 3 partages CIFS détectés, code 0). |
 | `scripts/infra/rpi4/rpi4_o2switch_supervisor.py` | 🟢 **Prouvé Live** | Python | Critique (Superviseur Autonome 24/7 de Production) | Résolution dynamique des chemins de contrôleurs (resolve_ctl_script) et support variables d'environnement (DBSRT_*_CTL). 53/53 tests unitaires PASS. Déployé sur RPi4 via rpi4_supervisor_ctl.sh sync, redémarré en service systemd (PID 3971528), avec auto-rotation et lancement live d'un batch tvshow sur o2switch (PID 3829881). |
 | `scripts/infra/rpi4/rpi4_sim.sh` | 🟢 **Prouvé Live** | Shell | Moyenne (Dev & Simulation Locale QEMU ARM64) | Résolution REPO_ROOT et COMPOSE_FILE absolue, port paramétrable. sim/docker-compose.sim.yml ajusté à 4GB RAM. Prouvé live à 100% sur les 5 commandes (up, status, test 6/6 API PASS dont recognize Andor MIH et CAS, logs, down). |
 | `scripts/infra/rpi4/rpi4_standalone.sh` | 🟢 **Prouvé Live** | Shell | Élevée (Déploiement Serveur Physique RPi4) | Résolution REPO_ROOT et source load_env.sh intégrées. Référence de compilation ARM64 réalignée et chemin cible absolu. Validé et prouvé live sur RPi4 (status -> service systemd user actif, API nominale ; demo -> reconnaissance 100% conf MIH Andor et téléchargement CAS SRT validés). |
@@ -512,3 +512,10 @@ Pour sortir de cet état sans spéculation, chaque script des sections 1 et 2 do
 - **Diagnostic** : Chemin d'événements de télémétrie relatif au CWD (`data/reports/batch_tvshow_nightly.jsonl`), bug de mismatch timezone sur le calcul du débit moyen de session (soustractions d'objets `datetime` avec/sans fuseau horaire), et absence d'option CLI `--check` / `--dry-run`.
 - **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, harmonisation des calculs temporels sur timestamps POSIX UTC, décomposition modulaire de la complexité cognitive (`main` 55 $\le$ 62), et ajout des options CLI `--help`, `--stats` et `--check` / `--dry-run`.
 - **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/infra/local/dbsrt_top.py --check)` et `(--stats)` sans erreur (code 0, rendu visuel parfait analysant 1 392 médias décodés), linters `ruff`, `complexipy` et `pyright` conformes.
+
+### Fiche 45 : `scripts/infra/rpi4/rpi4_freebox_gateway.py`
+- **Rôle** : Passerelle HTTP légère multi-threadée avec support natif RFC 7233 (`Range: bytes=...`) permettant à FFmpeg distant de streamer les vidéos hébergées sur les partages CIFS Freebox montés sur le Raspberry Pi 4.
+- **KPI / Importance** : `Critique (Passerelle HTTP Byte-Range Freebox RPi4)`.
+- **Diagnostic** : Résolution statique du CWD sans repli appliance `~/dbsrt`, et absence de mode CLI d'inspection `--check` / `--dry-run` pour tester l'état du port d'écoute et la présence des points de montage CIFS sans bloquer dans une boucle infinie de serveur HTTP.
+- **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, découpage modulaire respectant le seuil `complexipy` (toutes les fonctions $\le$ 8), et ajout de l'option CLI `--check` / `--dry-run` inspectant la disponibilité du port (18089) et l'état des partages CIFS montés sous `/mnt/freebox`.
+- **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/infra/rpi4/rpi4_freebox_gateway.py --check)` sans erreur (code 0), déploiement SSH sur Raspberry Pi 4 réel (`rpi4`) et exécution réelle confirmant le service actif sur le port 18089 et les 3 partages CIFS Freebox montés (`Disque_1`, `Disque_1_1`, `Disque_2`, code 0).

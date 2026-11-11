@@ -14,6 +14,7 @@ import argparse
 import json
 import mimetypes
 import re
+import socket
 import sys
 import unicodedata
 import urllib.parse
@@ -21,6 +22,21 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Tuple
+
+
+def find_repo_root() -> Path:
+    """Finds git repository root with appliance fallback (~/dbsrt)."""
+    p = Path(__file__).resolve().parent
+    for parent in [p] + list(p.parents):
+        if (parent / ".git").is_dir():
+            return parent
+    home_dbsrt = Path.home() / "dbsrt"
+    if home_dbsrt.is_dir():
+        return home_dbsrt
+    return Path.cwd()
+
+
+REPO_ROOT = find_repo_root()
 
 # Named Operational Constants
 DEFAULT_GATEWAY_HOST: str = "127.0.0.1"
@@ -191,6 +207,23 @@ class FreeboxRangeHTTPHandler(BaseHTTPRequestHandler):
             pass
 
 
+def _handle_check_mode(host: str, port: int, serve_root: Path) -> int:
+    """Inspects root mount and port availability without starting continuous server."""
+    mounted = [p.name for p in serve_root.glob("Disque_*") if p.is_dir()] if serve_root.is_dir() else []
+    port_available = True
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(0.5)
+        if s.connect_ex((host, port)) == 0:
+            port_available = False
+
+    print("=== DBSrt Freebox Range HTTP Gateway Inspection ===")
+    print(f"✓ REPO_ROOT     : {REPO_ROOT}")
+    print(f"✓ Host / Port   : {host}:{port} ({'listening active' if not port_available else 'port free'})")
+    print(f"✓ Serve root    : {serve_root} ({'found' if serve_root.is_dir() else 'missing'})")
+    print(f"✓ Mounted shares: {len(mounted)} Disque_* shares ({', '.join(mounted) if mounted else 'none'})")
+    return 0
+
+
 def main() -> int:
     """CLI entry point for running the Freebox Range HTTP Gateway."""
     parser = argparse.ArgumentParser(description="Freebox Range HTTP Gateway for Remote FFmpeg Streaming")
@@ -201,9 +234,19 @@ def main() -> int:
     parser.add_argument(
         "--root", default=DEFAULT_SERVE_ROOT, help=f"Directory to serve (default: {DEFAULT_SERVE_ROOT})"
     )
+    parser.add_argument(
+        "--check",
+        "--dry-run",
+        dest="check",
+        action="store_true",
+        help="Inspect serve root and network availability without serving continuously",
+    )
     args = parser.parse_args()
 
     serve_root = Path(args.root).resolve()
+    if args.check:
+        return _handle_check_mode(args.host, args.port, serve_root)
+
     if not serve_root.is_dir():
         print(f"❌ Error: serve root directory '{serve_root}' does not exist.", file=sys.stderr)
         return 1
