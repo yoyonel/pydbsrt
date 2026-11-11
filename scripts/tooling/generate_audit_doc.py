@@ -19,6 +19,9 @@ def find_repo_root() -> Path:
 
 PROVEN_LIVE: dict[str, str] = {
     "scripts/portal_server.py": "Exécuté daemon HTTP :8780 + requêté E2E (Playwright)",
+    "scripts/benchmarks/bench_http_flood.sh": (
+        "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des artefacts (catalogue, binaire, sous-titres) et support --help. Exécuté hors racine (--help code 0)."
+    ),
     "scripts/benchmarks/compare_top_telemetry.py": (
         "Exécuté live avec succès sur /proc Linux. Bandeau console corrigé vers scripts/infra/local/dbsrt_top.py."
     ),
@@ -99,6 +102,7 @@ PROVEN_LIVE: dict[str, str] = {
 }
 
 SCRIPT_KPIS: dict[str, str] = {
+    "scripts/benchmarks/bench_http_flood.sh": "Moyenne (Dev & Banc de Charge HTTP)",
     "scripts/benchmarks/compare_top_telemetry.py": "Moyenne (Dev / Parité Télémétrie)",
     "scripts/benchmarks/record_casts.py": "Élevée (Doc Diátaxis & Casts Asciinema)",
     "scripts/benchmarks/record_proof.py": "Critique (Preuves Terminales PR)",

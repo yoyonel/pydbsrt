@@ -7,18 +7,18 @@
 ## 1. Synthèse Factuelle Globale
 
 - **Total scripts opérationnels** : 96 (66 Python, 30 Shell)
-- **Scripts prouvés en exécution réelle live (session)** : 29 / 96 (30.2%) — *Seuls scripts réellement testés de bout en bout.*
+- **Scripts prouvés en exécution réelle live (session)** : 30 / 96 (31.2%) — *Seuls scripts réellement testés de bout en bout.*
 - **Scripts en régression directe (appels internes cassés)** : 0 / 96 (0.0%) — *100% des régressions actives résolues.*
 - **Nombre total de références internes rompues actives** : 0 (13 références appliance distantes documentées)
 - **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 46 / 96 (47.9%) — *Imports seuls, logique non exécutée.*
-- **Scripts avec analyse statique seule (`bash -n`)** : 21 / 96 (21.9%) — *Zéro runtime.*
+- **Scripts avec analyse statique seule (`bash -n`)** : 20 / 96 (20.8%) — *Zéro runtime.*
 
 ```mermaid
 pie title Statut Réel des 96 Scripts (Rigueur Fact-First)
-    "Prouvé Live de Bout en Bout" : 29
+    "Prouvé Live de Bout en Bout" : 30
     "Régression Interne Cassée" : 0
     "Sanity Check CLI Seul (Non Validé)" : 46
-    "Statique / Syntaxe Seul (Non Exécuté)" : 21
+    "Statique / Syntaxe Seul (Non Exécuté)" : 20
 ```
 
 ---
@@ -51,7 +51,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 
 | Script | Statut Réel | Type | KPI / Importance | Détail / Diagnostic Contradictoire |
 | :--- | :---: | :---: | :---: | :--- |
-| `scripts/benchmarks/bench_http_flood.sh` | ⚪ **Statique Seul (Non Exécuté)** | Shell | À évaluer | Syntaxe `bash -n` & `shellcheck` OK. Zéro exécution runtime. |
+| `scripts/benchmarks/bench_http_flood.sh` | 🟢 **Prouvé Live** | Shell | Moyenne (Dev & Banc de Charge HTTP) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des artefacts (catalogue, binaire, sous-titres) et support --help. Exécuté hors racine (--help code 0). |
 | `scripts/benchmarks/bench_server_comparison.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/benchmarks/benchmark_worker_scaling.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/benchmarks/compare_top_telemetry.py` | 🟢 **Prouvé Live** | Python | Moyenne (Dev / Parité Télémétrie) | Exécuté live avec succès sur /proc Linux. Bandeau console corrigé vers scripts/infra/local/dbsrt_top.py. |
@@ -330,3 +330,10 @@ Pour sortir de cet état sans spéculation, chaque script des sections 1 et 2 do
 - **Diagnostic** : En-tête généré obsolète (`scripts/mkdocs_hooks.py`) au lieu du chemin modulaire `scripts/tooling/mkdocs_hooks.py`, variable `DEFAULT_DOCS_DIR` initialisée en relatif sans ancrage dynamique `REPO_ROOT`, et détection d'un faux positif adjacent (`javascripts/doc-portal.js` capturé par le préfixe `scripts/` dans l'outil d'audit `generate_audit_doc.py`).
 - **Remédiation** : Implémentation de `find_repo_root()` dynamique pour ancrer `DEFAULT_DOCS_DIR = REPO_ROOT / "docs"`, réalignement de l'en-tête du fichier généré `docs-dates.js` vers `scripts/tooling/mkdocs_hooks.py`, et ajout d'une frontière de mot `\b` sur le motif regex dans `generate_audit_doc.py` éliminant définitivement le faux positif.
 - **Validation Live** : Validé live à 100% : linters `ruff` et `pyright` (0 erreur), porte de complexité `complexipy` validée (11 fonctions conformes $\le$ 9), exécution nominale de `task doc:check` (5/5 étapes validées avec succès, 0 erreur de rendu LaTeX, AST ou liens), et vérification de la première ligne de `docs/javascripts/docs-dates.js` confirmant la provenance modulaire exacte.
+
+### Fiche 19 : `scripts/benchmarks/bench_http_flood.sh`
+- **Rôle** : Orchestrateur de benchmark de charge HTTP flood contre le serveur local `dbsrt-server` (banc d'inondation de requêtes `/v1/recognize` via l'exemple Rust `bench_http_flood`).
+- **KPI / Importance** : `Moyenne (Dev & Banc de Charge HTTP)`.
+- **Diagnostic** : `REPO_ROOT` tronqué à `../` (pointant sur `scripts/` au lieu de la racine du dépôt suite à la réorganisation modulaire), chemins relatifs d'artefacts (`CATALOG_PATH`, `SERVER_BIN`, `--subtitles-dir`), absence de support `--help` et dépendance au CWD d'exécution.
+- **Remédiation** : Découverte dynamique de `REPO_ROOT` avec fallback appliance `~/dbsrt`, support de l'option `--help` / `-h`, préfixage absolu de tous les chemins d'artefacts (`${REPO_ROOT}/...`), manifest path Cargo explicite, et conformité `shellcheck` / `shfmt`.
+- **Validation Live** : Validé live à 100% : exécution hors racine `(cd crates && bash ../scripts/benchmarks/bench_http_flood.sh --help)` sans erreur (code 0), linters `shellcheck` et `shfmt` conformes.
