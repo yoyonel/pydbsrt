@@ -402,3 +402,32 @@ fn test_cli_pack_empty_dir_warning() {
     );
     let _ = std::fs::remove_dir_all(&temp_dir);
 }
+
+#[test]
+fn test_cli_export_ahash() {
+    let demo = match get_canonical_demo_media() {
+        Some(d) => d,
+        None => return,
+    };
+    let out_file =
+        std::env::temp_dir().join(format!("cli_test_ahash_{}.ahash", std::process::id()));
+
+    let out = Command::new(env!("CARGO_BIN_EXE_dbsrt"))
+        .args([
+            "export-ahash",
+            "--media",
+            demo.to_str().unwrap(),
+            "--duration",
+            "1.0",
+            "-o",
+            out_file.to_str().unwrap(),
+        ])
+        .output()
+        .expect("Failed to run dbsrt export-ahash");
+
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("Extracted") && stdout.contains("audio hashes"));
+    assert!(out_file.exists());
+    let _ = std::fs::remove_file(out_file);
+}

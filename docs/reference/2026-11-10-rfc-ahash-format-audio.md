@@ -13,7 +13,7 @@ tags:
 - **Statut** : Brouillon Spécifié & Validé (R&D)
 - **Auteur** : pydbsrt Architecture Team
 - **Date** : 2026-11-10
-- **Branche** : `feat/ahash-audio-fingerprint`
+- **Branche** : `feat/65-ahash-audio-fingerprint`
 
 ---
 

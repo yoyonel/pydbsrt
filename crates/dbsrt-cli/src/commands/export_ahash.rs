@@ -163,4 +163,79 @@ mod tests {
         let path = resolve_output_path(&args, 86.125);
         assert_eq!(path, explicit);
     }
+
+    #[test]
+    fn test_run_export_ahash_real_media() {
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let media = manifest_dir.join("../../tests/data/big_buck_bunny_trailer_480p.mp4");
+        if !media.exists() {
+            eprintln!("Skipping: media fixture not found at {:?}", media);
+            return;
+        }
+
+        let out_path =
+            std::env::temp_dir().join(format!("test_ahash_export_{}.ahash", std::process::id()));
+        let args = ExportAhashArgs {
+            media,
+            output: Some(out_path.clone()),
+            sample_rate: 5512,
+            hop_size: 64,
+            start_sec: 0.0,
+            duration: Some(1.0),
+        };
+
+        let res = run_export_ahash(&args);
+        assert!(res.is_ok(), "run_export_ahash should succeed: {:?}", res);
+        assert!(out_path.exists());
+
+        let ahash = AhashFile::read_from_path(&out_path).expect("valid ahash binary");
+        assert_eq!(ahash.header.version, 1);
+        assert!(ahash.header.frame_count > 0);
+        assert!(!ahash.hashes.is_empty());
+
+        let _ = std::fs::remove_file(out_path);
+    }
+
+    #[test]
+    fn test_run_export_ahash_default_hop_and_output() {
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let media = manifest_dir.join("../../tests/data/big_buck_bunny_trailer_480p.mp4");
+        if !media.exists() {
+            eprintln!("Skipping: media fixture not found at {:?}", media);
+            return;
+        }
+
+        let args = ExportAhashArgs {
+            media: media.clone(),
+            output: None,
+            sample_rate: 5512,
+            hop_size: 0,
+            start_sec: 0.0,
+            duration: Some(0.5),
+        };
+
+        let res = run_export_ahash(&args);
+        assert!(res.is_ok());
+
+        let fps = 5512.0 / 64.0;
+        let default_path = resolve_output_path(&args, fps);
+        if default_path.exists() {
+            let _ = std::fs::remove_file(default_path);
+        }
+    }
+
+    #[test]
+    fn test_run_export_ahash_non_existent_media_fails() {
+        let args = ExportAhashArgs {
+            media: PathBuf::from("this_file_does_not_exist_at_all.mp4"),
+            output: None,
+            sample_rate: 5512,
+            hop_size: 64,
+            start_sec: 0.0,
+            duration: Some(1.0),
+        };
+
+        let res = run_export_ahash(&args);
+        assert!(res.is_err(), "Non-existent media must return Err");
+    }
 }

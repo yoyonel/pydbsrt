@@ -13,7 +13,7 @@ tags:
 
 - **Statut** : Analyse d'Architecture & Étude Comparative
 - **Date** : 2026-11-10
-- **Branche** : `feat/ahash-audio-fingerprint`
+- **Branche** : `feat/65-ahash-audio-fingerprint`
 
 ---
 
