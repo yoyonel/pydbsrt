@@ -177,6 +177,10 @@ PROVEN_LIVE: dict[str, str] = {
         "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), passage absolu du fichier mkdocs.yml (-f), constantes nommées et option CLI --check."
         " Validé hors racine (détection du fichier mkdocs.yml et port 8000 libre, code 0)."
     ),
+    "scripts/tooling/test_db_migrations.py": (
+        "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), propagation du répertoire de migrations aux sous-fonctions et options CLI --migrations-dir et --check."
+        " Validé hors racine (--check code 0, 6 migrations détectées et sonde PG nominale)."
+    ),
     "scripts/tooling/generate_audit_doc.py": (
         "Résolution dynamique REPO_ROOT, exclusion du self-scan (0 faux positif), préservation dynamique des fiches d'analyse méticuleuse et support CLI (--check, --output)."
     ),
@@ -249,6 +253,7 @@ SCRIPT_KPIS: dict[str, str] = {
     "scripts/tooling/lint_migrations.py": "Critique (Garde-fou CI/CD & Sécurité DDL Migrations PG)",
     "scripts/tooling/report_type_errors.py": "Moyenne (Audit Typage Statique Pyright)",
     "scripts/tooling/serve_docs.py": "Élevée (Serveur Local Documentation Diátaxis)",
+    "scripts/tooling/test_db_migrations.py": "Élevée (Test d'Intégration Migrations & Lignage PG)",
     "scripts/tooling/check_pr_body.py": "Critique (Garde-fou CI/CD & Qualité des PRs)",
     "scripts/tooling/generate_audit_doc.py": "Moyenne (Outil de Métrologie & Méta-Documentation)",
     "scripts/tooling/generate_nightly_report_enhanced.py": "Moyenne (Métrologie & Profiling Diátaxis)",

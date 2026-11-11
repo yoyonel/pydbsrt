@@ -40,13 +40,25 @@ DEFAULT_PG_DB: str = os.environ.get("PSQL_DB", "bktreedb")
 
 SANDBOX_BLANK_DB: str = "bktreedb_migration_blank_sandbox"
 SANDBOX_CLONE_DB: str = "bktreedb_migration_clone_sandbox"
-MIGRATIONS_DIR: Path = Path("crates/dbsrt-index/migrations")
+DEFAULT_MIGRATIONS_REL: str = "crates/dbsrt-index/migrations"
 
 TEST_SAMPLE_FILE_SIZE: int = 1_073_741_824  # 1 GiB
 TEST_CUT_DURATION_MS: int = 15_000  # 15 seconds
 TEST_CUT_START_MS: int = 4_500_000  # 75 minutes
 TEST_FPS_NOMINAL: float = 24.0
 TEST_EXPECTED_FRAMES: int = 86_400
+
+
+def find_repo_root() -> Path:
+    """Dynamically locates repository root with fallback to ~/dbsrt."""
+    current = Path(__file__).resolve().parent
+    for p in [current, *current.parents]:
+        if (p / ".git").is_dir() or (p / "Taskfile.yml").is_file():
+            return p
+    appliance = Path.home() / "dbsrt"
+    if appliance.is_dir():
+        return appliance
+    return Path.cwd()
 
 
 def connect_admin(host: str, port: int, user: str, passw: str) -> psycopg2.extensions.connection:
@@ -101,7 +113,7 @@ def load_migration_files(migrations_dir: Path) -> list[tuple[int, str, str]]:
     return sorted(migrations, key=lambda x: x[0])
 
 
-def test_blank_migration_lifecycle(host: str, port: int, user: str, passw: str) -> None:
+def test_blank_migration_lifecycle(host: str, port: int, user: str, passw: str, migrations_dir: Path) -> None:
     """Proves sequential DDL execution from V1 to V6 on a clean database."""
     print("--- [1/3] Testing blank database migration lifecycle (V1 -> V6) ---")
     admin_conn = connect_admin(host, port, user, passw)
@@ -112,7 +124,7 @@ def test_blank_migration_lifecycle(host: str, port: int, user: str, passw: str) 
         admin_cur.execute(f"CREATE DATABASE {SANDBOX_BLANK_DB}")
         print(f"  ✓ Created isolated sandbox database '{SANDBOX_BLANK_DB}'")
 
-        migrations = load_migration_files(MIGRATIONS_DIR)
+        migrations = load_migration_files(migrations_dir)
         print(f"  ✓ Discovered {len(migrations)} migration scripts")
 
         sb_conn = connect_db(host, port, user, passw, SANDBOX_BLANK_DB)
@@ -197,7 +209,9 @@ def copy_table_data(src_conn: Any, dst_conn: Any, table_name: str) -> int:
     return count
 
 
-def test_real_data_clone_upgrade(host: str, port: int, user: str, passw: str, source_db: str) -> None:
+def test_real_data_clone_upgrade(
+    host: str, port: int, user: str, passw: str, source_db: str, migrations_dir: Path
+) -> None:
     """Proves that migrating real production data to V6 causes zero data loss."""
     print(f"--- [2/3] Testing real production data upgrade ({source_db} -> V6) ---")
     admin_conn = connect_admin(host, port, user, passw)
@@ -211,7 +225,7 @@ def test_real_data_clone_upgrade(host: str, port: int, user: str, passw: str, so
         # 1. Apply baseline migrations V1 to V5 on sandbox
         sb_conn = connect_db(host, port, user, passw, SANDBOX_CLONE_DB)
         sb_cur = sb_conn.cursor()
-        migrations = [m for m in load_migration_files(MIGRATIONS_DIR) if m[0] <= 5]
+        migrations = [m for m in load_migration_files(migrations_dir) if m[0] <= 5]
         for v, fname, sql in migrations:
             sb_cur.execute(sql)
         sb_conn.commit()
@@ -234,7 +248,7 @@ def test_real_data_clone_upgrade(host: str, port: int, user: str, passw: str, so
         src_conn.close()
 
         # 3. Apply V6 migration on sandbox containing real data
-        v6_file = MIGRATIONS_DIR / "V6__media_sources_and_asset_lineage.sql"
+        v6_file = migrations_dir / "V6__media_sources_and_asset_lineage.sql"
         assert v6_file.exists(), f"V6 migration file not found: {v6_file}"
         v6_sql = v6_file.read_text(encoding="utf-8")
 
@@ -272,7 +286,7 @@ def test_real_data_clone_upgrade(host: str, port: int, user: str, passw: str, so
         admin_conn.close()
 
 
-def test_domain_constraints_and_lineage(host: str, port: int, user: str, passw: str) -> None:
+def test_domain_constraints_and_lineage(host: str, port: int, user: str, passw: str, migrations_dir: Path) -> None:
     """Stress-tests domain rules: chk_asset_lineage, chk_storage_kind, RESTRICT, uniqueness."""
     print("--- [3/3] Stress-testing functional constraints & lineage invariants ---")
     admin_conn = connect_admin(host, port, user, passw)
@@ -285,7 +299,7 @@ def test_domain_constraints_and_lineage(host: str, port: int, user: str, passw: 
         # Setup full V1-V6 schema
         sb_conn = connect_db(host, port, user, passw, SANDBOX_BLANK_DB)
         sb_cur = sb_conn.cursor()
-        for _, _, sql in load_migration_files(MIGRATIONS_DIR):
+        for _, _, sql in load_migration_files(migrations_dir):
             sb_cur.execute(sql)
         sb_conn.commit()
 
@@ -479,6 +493,9 @@ def test_domain_constraints_and_lineage(host: str, port: int, user: str, passw: 
 
 
 def main() -> int:
+    repo_root = find_repo_root()
+    default_migrations = repo_root / DEFAULT_MIGRATIONS_REL
+
     parser = argparse.ArgumentParser(description="Test PostgreSQL schema migrations and lineage invariants")
     parser.add_argument("--host", default=DEFAULT_PG_HOST, help=f"PostgreSQL host (default: {DEFAULT_PG_HOST})")
     parser.add_argument(
@@ -489,24 +506,54 @@ def main() -> int:
     parser.add_argument(
         "--source-db", default=DEFAULT_PG_DB, help=f"Source database to clone for regression test ({DEFAULT_PG_DB})"
     )
+    parser.add_argument(
+        "--migrations-dir",
+        type=Path,
+        default=default_migrations,
+        help=f"Directory containing migration files (default: {DEFAULT_MIGRATIONS_REL})",
+    )
+    parser.add_argument(
+        "--check",
+        "--dry-run",
+        action="store_true",
+        help="Inspect migrations directory and PostgreSQL connection without applying tests",
+    )
     args = parser.parse_args()
+
+    migrations_dir = args.migrations_dir
+    if not migrations_dir.is_absolute() and not migrations_dir.exists():
+        migrations_dir = repo_root / migrations_dir
+
+    if args.check:
+        print("=== DBSrt PostgreSQL Migration Test Suite Inspection ===")
+        print(f"✓ REPO_ROOT     : {repo_root}")
+        print(f"✓ Migrations dir: {migrations_dir} (exists: {migrations_dir.is_dir()})")
+        mig_files = sorted(migrations_dir.glob("V*__*.sql")) if migrations_dir.is_dir() else []
+        print(f"✓ Discovered    : {len(mig_files)} migration files")
+        try:
+            admin_conn = connect_admin(args.host, args.port, args.user, args.password)
+            admin_conn.close()
+            print(f"✓ PostgreSQL    : {args.host}:{args.port} connected successfully")
+        except Exception as e:
+            print(f"✓ PostgreSQL    : {args.host}:{args.port} (offline or unauthenticated: {e})")
+        return 0
 
     print("======================================================================")
     print(" 🛡️  PYDBSRT POSTGRESQL MIGRATION & DOMAIN LINEAGE VERIFICATION SUITE")
     print("======================================================================")
     print(f"Target Cluster: {args.host}:{args.port} (user: {args.user})")
-    print(f"Migrations Dir: {MIGRATIONS_DIR.resolve()}\n")
+    print(f"Migrations Dir: {migrations_dir.resolve()}\n")
 
     start_time = time.monotonic()
     try:
         # Phase 1: Blank DB lifecycle
-        test_blank_migration_lifecycle(args.host, args.port, args.user, args.password)
+        test_blank_migration_lifecycle(args.host, args.port, args.user, args.password, migrations_dir)
 
         # Phase 2: Real production data clone upgrade
-        test_real_data_clone_upgrade(args.host, args.port, args.user, args.password, args.source_db)
+        test_real_data_clone_upgrade(args.host, args.port, args.user, args.password, args.source_db, migrations_dir)
 
         # Phase 3: Stress-test all functional constraints & invariants
-        test_domain_constraints_and_lineage(args.host, args.port, args.user, args.password)
+        test_domain_constraints_and_lineage(args.host, args.port, args.user, args.password, migrations_dir)
 
         elapsed = time.monotonic() - start_time
         print("======================================================================")

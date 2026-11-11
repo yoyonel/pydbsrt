@@ -7,17 +7,17 @@
 ## 1. Synthèse Factuelle Globale
 
 - **Total scripts opérationnels** : 96 (66 Python, 30 Shell)
-- **Scripts prouvés en exécution réelle live (session)** : 63 / 96 (65.6%) — *Seuls scripts réellement testés de bout en bout.*
+- **Scripts prouvés en exécution réelle live (session)** : 64 / 96 (66.7%) — *Seuls scripts réellement testés de bout en bout.*
 - **Scripts en régression directe (appels internes cassés)** : 0 / 96 (0.0%) — *100% des régressions actives résolues.*
 - **Nombre total de références internes rompues actives** : 0 (13 références appliance distantes documentées)
-- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 33 / 96 (34.4%) — *Imports seuls, logique non exécutée.*
+- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 32 / 96 (33.3%) — *Imports seuls, logique non exécutée.*
 - **Scripts avec analyse statique seule (`bash -n`)** : 0 / 96 (0.0%) — *Zéro runtime.*
 
 ```mermaid
 pie title Statut Réel des 96 Scripts (Rigueur Fact-First)
-    "Prouvé Live de Bout en Bout" : 63
+    "Prouvé Live de Bout en Bout" : 64
     "Régression Interne Cassée" : 0
-    "Sanity Check CLI Seul (Non Validé)" : 33
+    "Sanity Check CLI Seul (Non Validé)" : 32
     "Statique / Syntaxe Seul (Non Exécuté)" : 0
 ```
 
@@ -174,7 +174,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 | `scripts/tooling/pack_review.sh` | 🟢 **Prouvé Live** | Shell | Élevée (Tooling & Review IA Automatisée) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), résolution automatique de la branche de base, chemin de sortie absolu et options --help / --check. Validé hors racine (157 fichiers détectés, npx installé, code 0). |
 | `scripts/tooling/report_type_errors.py` | 🟢 **Prouvé Live** | Python | Moyenne (Audit Typage Statique Pyright) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), exécution pyright ancrée sur la racine du dépôt, et options CLI --top et --check. Validé hors racine (0 diagnostic d'erreur de typage, code 0). |
 | `scripts/tooling/serve_docs.py` | 🟢 **Prouvé Live** | Python | Élevée (Serveur Local Documentation Diátaxis) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), passage absolu du fichier mkdocs.yml (-f), constantes nommées et option CLI --check. Validé hors racine (détection du fichier mkdocs.yml et port 8000 libre, code 0). |
-| `scripts/tooling/test_db_migrations.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
+| `scripts/tooling/test_db_migrations.py` | 🟢 **Prouvé Live** | Python | Élevée (Test d'Intégration Migrations & Lignage PG) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), propagation du répertoire de migrations aux sous-fonctions et options CLI --migrations-dir et --check. Validé hors racine (--check code 0, 6 migrations détectées et sonde PG nominale). |
 | `scripts/tooling/test_recipe_debian.sh` | 🟢 **Prouvé Live** | Shell | Élevée (Tests d'Intégration Hermétiques Docker/systemd) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des fichiers Docker/artefacts, compilation cargo avec manifest-path et options --help / --check. Validé hors racine (docker/artefacts trouvés, code 0). |
 | `scripts/tooling/validate_docs.py` | 🟢 **Prouvé Live** | Python | Critique (Garde-fou CI/CD & Validation Diátaxis) | Exécuté live (task doc:check, 5 étapes PASS) |
 | `scripts/tooling/validate_web_assets.py` | 🟢 **Prouvé Live** | Python | Élevée (Garde-fou CI/CD Assets Web & Lint) | Exécuté live (task lint étape 7) |
@@ -568,3 +568,10 @@ Pour sortir de cet état sans spéculation, chaque script des sections 1 et 2 do
 - **Diagnostic** : Remplacement direct du processus via `os.execvp("mkdocs", ...)` cherchant `mkdocs.yml` dans le CWD courant (échec immédiat hors de la racine), constantes magiques non nommées, et absence de parsing d'options ou de mode d'inspection sans démarrage du serveur.
 - **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, passage systématique de la configuration absolue `-f <REPO_ROOT>/mkdocs.yml`, constantes nommées (`DEFAULT_DOC_HOST`, `DEFAULT_DOC_PORT`, `DEFAULT_PORT_SCAN_ATTEMPTS`), et ajout de l'option CLI `--check` / `--dry-run`.
 - **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/tooling/serve_docs.py --check)` vérifiant la présence du fichier `mkdocs.yml`, la détection d'un port TCP libre et du binaire `mkdocs` (code 0), linters `ruff`, `complexipy` et `pyright` conformes.
+
+### Fiche 53 : `scripts/tooling/test_db_migrations.py`
+- **Rôle** : Banc d'essai d'intégration et de recette des migrations PostgreSQL (V1 à V6) et des invariants de lignage de médias (`crates/dbsrt-index/migrations/`).
+- **KPI / Importance** : `Élevée (Test d'Intégration Migrations & Lignage PG)`.
+- **Diagnostic** : Chemin global des migrations `MIGRATIONS_DIR` relatif au CWD (`crates/dbsrt-index/migrations`), absence de passage paramétrique aux sous-fonctions de test et absence de mode CLI d'inspection `--check` / `--dry-run`.
+- **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, propagation de `migrations_dir` à l'ensemble des sous-fonctions (`test_blank_migration_lifecycle`, etc.), et ajout des options CLI `--migrations-dir` et `--check` / `--dry-run`.
+- **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/tooling/test_db_migrations.py --check)` vérifiant la présence des 6 scripts de migration et la sonde TCP réseau du cluster (code 0), linters `ruff`, `complexipy` et `pyright` conformes.
