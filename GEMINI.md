@@ -19,6 +19,13 @@
   - Every dev branch MUST be linked to an open Pull Request targeting `develop`.
   - Every Pull Request MUST be explicitly tied to a tracked GitHub Issue / Ticket (`Closes #...` or `Relates to #...`).
   - Issues and Tickets MUST be updated continuously if the technical scope or implementation plan evolves during development.
+- **Exhaustive GitHub Issue & Ticket Governance (Mandatory Metadata & Taxonomy)**:
+  - Every created or updated GitHub Issue and Pull Request MUST have its metadata completely and accurately filled:
+    1. **Assignee**: Systematically assign the author/owner (`@me`).
+    2. **Labels**: Systematically attach relevant labels covering scope (`scope:<area>`), nature (`refactor`, `bug`, `enhancement`), language (`rust`, `python`, `shell`), architecture (`arch:soc`, `tech-debt`) and quality (`quality:zero-regression`).
+    3. **Label Creation on Demand**: If existing repository labels do not precisely encompass the issue scope, the assistant/developer MUST proactively create new, consistent GitHub labels (e.g. `scope:portal`, `scope:workers`, `scope:ingestion`, `scope:tooling`, `scope:infra`, `scope:tui`, `python`, `shell`, `tech-debt`).
+    4. **Project**: Systematically link the issue to the active GitHub Project roadmap (e.g. `pydbsrt — Roadmap & Backlog v0.2+`).
+    5. **Milestone**: Attach to the active milestone when defined.
 - **3-Day Inactivity Boundary**: Any active dev branch MUST have commits within the last 3 days. If inactive for > 3 days, it must either be completed/merged or archived (via `archive/<date>/<name>` tag) and deleted from remotes.
 - **Local Dev Session & Worktree Governance**:
   - **Session Start Alignment & Daily Briefing**:
