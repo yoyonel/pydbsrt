@@ -26,7 +26,22 @@ from typing import Any, Dict, List, Tuple
 import psycopg2
 from psycopg2.extras import execute_batch
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+def find_repo_root() -> Path:
+    """Finds repository root dynamically with appliance fallback."""
+    curr = Path(__file__).resolve().parent
+    for parent in [curr, *curr.parents]:
+        if (parent / ".git").is_dir():
+            return parent
+    appliance_path = Path.home() / "dbsrt"
+    if appliance_path.is_dir():
+        return appliance_path
+    return Path.cwd()
+
+
+REPO_ROOT = find_repo_root()
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.ingestion.phash_names import phash_logical_name  # noqa: E402
 
@@ -267,18 +282,36 @@ def execute_pg_upsert(args: argparse.Namespace, rows: List[Tuple[Any, ...]]) -> 
     conn.close()
 
 
+def perform_check(args: argparse.Namespace) -> None:
+    """Performs sanity check without scanning entire dataset or connecting to DB."""
+    print("[CHECK] Mode verification activé.")
+    print(f"[CHECK] REPO_ROOT : {REPO_ROOT}")
+    print(f"[CHECK] pHash dir : {args.phash_dir} (exists: {args.phash_dir.is_dir()})")
+    count = len(list(args.phash_dir.glob("*.phash"))) if args.phash_dir.is_dir() else 0
+    print(f"[CHECK] Found .phash files : {count}")
+    print(f"[CHECK] Reports dir : {args.reports_dir} (exists: {args.reports_dir.is_dir()})")
+    jsonl_count = len(list(args.reports_dir.glob("*.jsonl"))) if args.reports_dir.is_dir() else 0
+    print(f"[CHECK] Found .jsonl reports : {jsonl_count}")
+    print(f"[CHECK] DB target : {args.user}@{args.host}:{args.port}/{args.dbname}")
+
+
 def main() -> None:
     """CLI Entry point parsing flags and driving the backfill pipeline."""
     parser = argparse.ArgumentParser(description="Backfill medias table in PostgreSQL 17")
-    parser.add_argument("--phash-dir", type=Path, default=Path("data/__PHASH__"))
-    parser.add_argument("--reports-dir", type=Path, default=Path("data/reports"))
+    parser.add_argument("--phash-dir", type=Path, default=REPO_ROOT / "data/__PHASH__")
+    parser.add_argument("--reports-dir", type=Path, default=REPO_ROOT / "data/reports")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=5433)
     parser.add_argument("--user", default="docker")
     parser.add_argument("--password", default="docker")
     parser.add_argument("--dbname", default="bktreedb")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--check", action="store_true", help="Perform sanity checks without connecting to PostgreSQL")
     args = parser.parse_args()
+
+    if args.check:
+        perform_check(args)
+        return
 
     telemetry = load_telemetry_index(args.reports_dir)
     print(f"Loaded {len(telemetry)} telemetry entries.")

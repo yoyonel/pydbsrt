@@ -193,6 +193,10 @@ PROVEN_LIVE: dict[str, str] = {
         "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), détection dynamique utilisateur NAS (getpass/env), chemins absolus et option CLI --check."
         " Validé hors racine (--check code 0, 2 779 .phash, 2 130 sidecars JSON et montages CIFS confirmés)."
     ),
+    "scripts/ingestion/backfill_medias_pg.py": (
+        "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des répertoires pHash/rapports et option CLI --check."
+        " Validé hors racine (--check code 0, 2 779 .phash et 3 rapports JSONL confirmés)."
+    ),
     "scripts/ingestion/init_couplings_seed.sh": (
         "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des fixtures et support --help / --check. Validé hors racine (code 0)."
     ),
@@ -317,6 +321,7 @@ SCRIPT_KPIS: dict[str, str] = {
     "scripts/ingestion/audit_phash_catalog.py": "Critique (Audit Empirique Exhaustif Reconnaissance pHash & Zero-DB)",
     "scripts/ingestion/audit_rejected_cuts.py": "Élevée (Diagnostic Forensique Exhaustif des Rejets Matching)",
     "scripts/ingestion/backfill_media_assets.py": "Élevée (Remplissage Lignage V6 & Métadonnées Actifs Multimédias)",
+    "scripts/ingestion/backfill_medias_pg.py": "Critique (Synchronisation & Upsert Métadonnées Medias PostgreSQL 17)",
     "scripts/ingestion/init_couplings_seed.sh": "Moyenne (Amorçage CI/CD & Tests d'Intégration)",
     "scripts/ingestion/media_add.sh": "Élevée (Ingestion Unifiée & Invariants Multimédia)",
     "scripts/ingestion/recognize_medias.sh": "Moyenne (Outil d'Ingestion & Évaluation par Lots)",
