@@ -8,6 +8,7 @@ and captures high-resolution screenshots for visual verification.
 
 from __future__ import annotations
 
+import argparse
 import shutil
 import socketserver
 import subprocess
@@ -19,7 +20,21 @@ from typing import List, Tuple
 
 from PIL import Image
 
-SITE_DIR: Path = Path("site")
+
+def find_repo_root() -> Path:
+    """Finds repository root dynamically with appliance fallback."""
+    curr = Path(__file__).resolve().parent
+    for parent in [curr, *curr.parents]:
+        if (parent / ".git").is_dir():
+            return parent
+    appliance_path = Path.home() / "dbsrt"
+    if appliance_path.is_dir():
+        return appliance_path
+    return Path.cwd()
+
+
+REPO_ROOT: Path = find_repo_root()
+SITE_DIR: Path = REPO_ROOT / "site"
 VERIFY_PORT: int = 8019
 CHROME_TIMEOUT_SEC: int = 25
 CHROME_WINDOW_WIDTH: int = 1920
@@ -121,9 +136,77 @@ def run_chrome_screenshot(url: str, out_png: Path) -> None:
     subprocess.run(cmd, capture_output=True, text=True, timeout=CHROME_TIMEOUT_SEC, check=True)
 
 
+def perform_check(site_dir: Path) -> None:
+    """Performs sanity checks of paths, tools and pages."""
+    print("[CHECK] Mode verification activé.")
+    print(f"[CHECK] REPO_ROOT : {REPO_ROOT}")
+    print(f"[CHECK] site/ dir : {site_dir} (exists: {site_dir.is_dir()})")
+    for cand in CHROME_CANDIDATES:
+        path = shutil.which(cand)
+        if path:
+            print(f"[CHECK] Chrome candidate '{cand}' found: {path}")
+            break
+    else:
+        print("[CHECK] No Chrome candidate currently on PATH.")
+    print(f"[CHECK] Pages to verify : {len(VERIFY_PAGES)}")
+
+
+def verify_page_dom(url: str) -> bool:
+    """Verifies that Asciinema DOM elements are present and hydrated."""
+    try:
+        dom = run_chrome_dom_check(url)
+    except Exception as e:
+        print(f"  ❌ Failed to fetch page DOM via Headless Chrome: {e}")
+        return False
+
+    has_wrapper = "asciinema-wrapper" in dom
+    has_player_dom = "ap-player" in dom
+    has_terminal = "ap-terminal" in dom
+
+    if not has_wrapper:
+        print("  ❌ Missing .asciinema-wrapper in page HTML")
+        return False
+    if not (has_player_dom and has_terminal):
+        print("  ❌ AsciinemaPlayer failed to mount in DOM (.ap-player / .ap-terminal missing)")
+        return False
+
+    print("  ✅ AsciinemaPlayer mounted & hydrated (.ap-player & .ap-terminal found in DOM)")
+    return True
+
+
+def verify_page_screenshot(url: str, out_webp: Path, tmp_png: Path) -> bool:
+    """Captures screenshot and converts to WEBP."""
+    try:
+        run_chrome_screenshot(url, tmp_png)
+        if tmp_png.exists() and tmp_png.stat().st_size > 50000:
+            out_webp.parent.mkdir(parents=True, exist_ok=True)
+            with Image.open(tmp_png) as im:
+                im.save(out_webp, "WEBP", quality=85)
+            tmp_png.unlink()
+            print(f"  📸 Screenshot verified: {out_webp} ({out_webp.stat().st_size // 1024} KB)")
+            return True
+        print("  ❌ Screenshot capture produced an empty or tiny file")
+        return False
+    except Exception as e:
+        print(f"  ❌ Screenshot capture failed: {e}")
+        return False
+
+
 def main() -> int:
-    if not SITE_DIR.exists():
-        print("❌ Error: site/ directory does not exist. Run task doc:build first.")
+    parser = argparse.ArgumentParser(description="Formal Browser Verification for Asciinema Terminal Recordings.")
+    parser.add_argument("--site-dir", type=Path, default=SITE_DIR)
+    parser.add_argument("--port", type=int, default=VERIFY_PORT)
+    parser.add_argument(
+        "--check", "--dry-run", action="store_true", help="Perform sanity checks without launching Chrome or server"
+    )
+    args = parser.parse_args()
+
+    if args.check:
+        perform_check(args.site_dir)
+        return 0
+
+    if not args.site_dir.exists():
+        print(f"❌ Error: {args.site_dir} directory does not exist. Run task doc:build first.")
         return 1
 
     try:
@@ -133,8 +216,8 @@ def main() -> int:
         print(f"❌ {e}")
         return 1
 
-    print(f"🚀 Starting static test server on http://127.0.0.1:{VERIFY_PORT}...")
-    server = start_test_server(VERIFY_PORT)
+    print(f"🚀 Starting static test server on http://127.0.0.1:{args.port}...")
+    server = start_test_server(args.port)
     time.sleep(0.5)
 
     all_passed = True
@@ -142,45 +225,15 @@ def main() -> int:
 
     try:
         for title, path, out_webp_rel in VERIFY_PAGES:
-            url = f"http://127.0.0.1:{VERIFY_PORT}{path}"
+            url = f"http://127.0.0.1:{args.port}{path}"
+            out_webp = REPO_ROOT / out_webp_rel
             print(f"\n🔍 Verifying page: {title} ({path})")
 
-            # 1. DOM Hydration Check
-            try:
-                dom = run_chrome_dom_check(url)
-            except Exception as e:
-                print(f"  ❌ Failed to fetch page DOM via Headless Chrome: {e}")
+            if not verify_page_dom(url):
                 all_passed = False
                 continue
 
-            has_wrapper = "asciinema-wrapper" in dom
-            has_player_dom = "ap-player" in dom
-            has_terminal = "ap-terminal" in dom
-
-            if not has_wrapper:
-                print("  ❌ Missing .asciinema-wrapper in page HTML")
-                all_passed = False
-            elif not (has_player_dom and has_terminal):
-                print("  ❌ AsciinemaPlayer failed to mount in DOM (.ap-player / .ap-terminal missing)")
-                all_passed = False
-            else:
-                print("  ✅ AsciinemaPlayer mounted & hydrated (.ap-player & .ap-terminal found in DOM)")
-
-            # 2. Screenshot Capture Check
-            try:
-                run_chrome_screenshot(url, tmp_png)
-                if tmp_png.exists() and tmp_png.stat().st_size > 50000:
-                    out_webp = Path(out_webp_rel)
-                    out_webp.parent.mkdir(parents=True, exist_ok=True)
-                    with Image.open(tmp_png) as im:
-                        im.save(out_webp, "WEBP", quality=85)
-                    tmp_png.unlink()
-                    print(f"  📸 Screenshot verified: {out_webp} ({out_webp.stat().st_size // 1024} KB)")
-                else:
-                    print("  ❌ Screenshot capture produced an empty or tiny file")
-                    all_passed = False
-            except Exception as e:
-                print(f"  ❌ Screenshot capture failed: {e}")
+            if not verify_page_screenshot(url, out_webp, tmp_png):
                 all_passed = False
 
     finally:

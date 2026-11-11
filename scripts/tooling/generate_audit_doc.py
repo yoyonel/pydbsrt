@@ -54,6 +54,10 @@ PROVEN_LIVE: dict[str, str] = {
         "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), sélection robuste du binaire dbsrt (release/debug/PATH), chemins absolus des catalogues et option CLI --check."
         " Validé hors racine (--check code 0, 2 779 .phash et 2 851 .srt réels confirmés)."
     ),
+    "scripts/benchmarks/verify_terminal_rendering.py": (
+        "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), réduction de complexité cognitive (toutes fonctions <= 11 vs main 19 legacy), chemins absolus des artefacts webp et option CLI --check."
+        " Validé hors racine (--check code 0, détection du dossier site/, de google-chrome et des 4 pages cibles)."
+    ),
     "scripts/benchmarks/compare_top_telemetry.py": (
         "Exécuté live avec succès sur /proc Linux. Bandeau console corrigé vers scripts/infra/local/dbsrt_top.py."
     ),
@@ -262,6 +266,7 @@ SCRIPT_KPIS: dict[str, str] = {
     "scripts/benchmarks/eval_nas_reliability.py": "Critique (Suite Complète Fiabilité NAS & PostgreSQL 17)",
     "scripts/benchmarks/eval_vlc_vlsub_batch.py": "Critique (Campagne d'Évaluation E2E GUI VLC & Extension VLSub)",
     "scripts/benchmarks/scale_up_nas_dataset.py": "Critique (Pipeline Scale-Up & Certification Couplings NAS)",
+    "scripts/benchmarks/verify_terminal_rendering.py": "Élevée (Vérification DOM & Screenshots Headless Chrome Asciinema)",
     "scripts/benchmarks/compare_top_telemetry.py": "Moyenne (Dev / Parité Télémétrie)",
     "scripts/benchmarks/record_casts.py": "Élevée (Doc Diátaxis & Casts Asciinema)",
     "scripts/benchmarks/record_proof.py": "Critique (Preuves Terminales PR)",

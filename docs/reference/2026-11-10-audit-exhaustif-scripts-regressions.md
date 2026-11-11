@@ -7,17 +7,17 @@
 ## 1. Synthèse Factuelle Globale
 
 - **Total scripts opérationnels** : 96 (66 Python, 30 Shell)
-- **Scripts prouvés en exécution réelle live (session)** : 74 / 96 (77.1%) — *Seuls scripts réellement testés de bout en bout.*
+- **Scripts prouvés en exécution réelle live (session)** : 75 / 96 (78.1%) — *Seuls scripts réellement testés de bout en bout.*
 - **Scripts en régression directe (appels internes cassés)** : 0 / 96 (0.0%) — *100% des régressions actives résolues.*
 - **Nombre total de références internes rompues actives** : 0 (13 références appliance distantes documentées)
-- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 22 / 96 (22.9%) — *Imports seuls, logique non exécutée.*
+- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 21 / 96 (21.9%) — *Imports seuls, logique non exécutée.*
 - **Scripts avec analyse statique seule (`bash -n`)** : 0 / 96 (0.0%) — *Zéro runtime.*
 
 ```mermaid
 pie title Statut Réel des 96 Scripts (Rigueur Fact-First)
-    "Prouvé Live de Bout en Bout" : 74
+    "Prouvé Live de Bout en Bout" : 75
     "Régression Interne Cassée" : 0
-    "Sanity Check CLI Seul (Non Validé)" : 22
+    "Sanity Check CLI Seul (Non Validé)" : 21
     "Statique / Syntaxe Seul (Non Exécuté)" : 0
 ```
 
@@ -66,7 +66,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 | `scripts/benchmarks/record_vlsub_demo.sh` | 🟢 **Prouvé Live** | Shell | Élevée (Doc Diátaxis & Démo Vidéo VLSub) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des assets, nettoyage résilient des processus et options --help / --check. Validé hors racine (code 0). |
 | `scripts/benchmarks/scale_up_nas_dataset.py` | 🟢 **Prouvé Live** | Python | Critique (Pipeline Scale-Up & Certification Couplings NAS) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), sélection robuste du binaire dbsrt (release/debug/PATH), chemins absolus des catalogues et option CLI --check. Validé hors racine (--check code 0, 2 779 .phash et 2 851 .srt réels confirmés). |
 | `scripts/benchmarks/trajectory_bench_runner.py` | 🟢 **Prouvé Live** | Python | À évaluer | Exécuté live sur snippet réel (01_Cruauté_mid15s.mp4) |
-| `scripts/benchmarks/verify_terminal_rendering.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
+| `scripts/benchmarks/verify_terminal_rendering.py` | 🟢 **Prouvé Live** | Python | Élevée (Vérification DOM & Screenshots Headless Chrome Asciinema) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), réduction de complexité cognitive (toutes fonctions <= 11 vs main 19 legacy), chemins absolus des artefacts webp et option CLI --check. Validé hors racine (--check code 0, détection du dossier site/, de google-chrome et des 4 pages cibles). |
 
 ### 3.2 Suites E2E Playwright (`scripts/e2e/`)
 
@@ -645,3 +645,10 @@ Pour sortir de cet état sans spéculation, chaque script des sections 1 et 2 do
 - **Diagnostic** : Chemins relatifs par défaut (`data/__PHASH__`, `data/SRT`, `target/release/dbsrt`, `data/catalog.dbphash`), injection fragile dans `sys.path`, et absence de mode CLI d'inspection `--check` / `--dry-run`.
 - **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, sélection automatique et résiliente du binaire `dbsrt` (release/debug/PATH), chemins absolus des répertoires de données, et ajout de l'option CLI `--check` / `--dry-run`.
 - **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/benchmarks/scale_up_nas_dataset.py --check)` confirmant la détection de 2 779 fichiers `.phash`, 2 851 fichiers `.srt`, du montage NAS et du binaire `dbsrt` (code 0), linters `ruff`, `complexipy` et `pyright` conformes.
+
+### Fiche 64 : `scripts/benchmarks/verify_terminal_rendering.py`
+- **Rôle** : Vérificateur automatisé navigateur pour enregistrements de terminaux Asciinema dans la documentation MkDocs (lance un serveur statique sur `site/`, pilote Google Chrome headless, valide l'hydratation DOM des conteneurs `.ap-player`/`.ap-terminal` et capture les vignettes WEBP).
+- **KPI / Importance** : `Élevée (Vérification DOM & Screenshots Headless Chrome Asciinema)`.
+- **Diagnostic** : Chemin relatif par défaut `site/` et chemins de sortie de captures dépendants du CWD, complexité cognitive de `main` (19 > 15), et absence de mode CLI d'inspection `--check` / `--dry-run`.
+- **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, préfixage absolu du répertoire `site/` et des captures WEBP, refactoring modulaire abaissant la complexité de toutes les fonctions sous le seuil <= 11, et ajout de l'option CLI `--check` / `--dry-run`.
+- **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/benchmarks/verify_terminal_rendering.py --check)` confirmant la détection du répertoire `site/`, du binaire `google-chrome` et des 4 pages cibles (code 0), linters `ruff`, `complexipy` et `pyright` conformes.

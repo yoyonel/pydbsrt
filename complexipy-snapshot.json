@@ -298,15 +298,5 @@
         "complexity": 24
       }
     ]
-  },
-  {
-    "path": "scripts/benchmarks/verify_terminal_rendering.py",
-    "file_name": "verify_terminal_rendering.py",
-    "functions": [
-      {
-        "name": "main",
-        "complexity": 19
-      }
-    ]
   }
 ]
