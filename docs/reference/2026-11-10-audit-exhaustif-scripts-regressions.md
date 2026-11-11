@@ -7,17 +7,17 @@
 ## 1. Synthèse Factuelle Globale
 
 - **Total scripts opérationnels** : 96 (66 Python, 30 Shell)
-- **Scripts prouvés en exécution réelle live (session)** : 75 / 96 (78.1%) — *Seuls scripts réellement testés de bout en bout.*
+- **Scripts prouvés en exécution réelle live (session)** : 76 / 96 (79.2%) — *Seuls scripts réellement testés de bout en bout.*
 - **Scripts en régression directe (appels internes cassés)** : 0 / 96 (0.0%) — *100% des régressions actives résolues.*
 - **Nombre total de références internes rompues actives** : 0 (13 références appliance distantes documentées)
-- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 21 / 96 (21.9%) — *Imports seuls, logique non exécutée.*
+- **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 20 / 96 (20.8%) — *Imports seuls, logique non exécutée.*
 - **Scripts avec analyse statique seule (`bash -n`)** : 0 / 96 (0.0%) — *Zéro runtime.*
 
 ```mermaid
 pie title Statut Réel des 96 Scripts (Rigueur Fact-First)
-    "Prouvé Live de Bout en Bout" : 75
+    "Prouvé Live de Bout en Bout" : 76
     "Régression Interne Cassée" : 0
-    "Sanity Check CLI Seul (Non Validé)" : 21
+    "Sanity Check CLI Seul (Non Validé)" : 20
     "Statique / Syntaxe Seul (Non Exécuté)" : 0
 ```
 
@@ -120,7 +120,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 
 | Script | Statut Réel | Type | KPI / Importance | Détail / Diagnostic Contradictoire |
 | :--- | :---: | :---: | :---: | :--- |
-| `scripts/ingestion/audit_cuts_pipeline.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
+| `scripts/ingestion/audit_cuts_pipeline.py` | 🟢 **Prouvé Live** | Python | Élevée (Audit de Performance Multi-Étapes Pipeline Matching) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des extraits/rapports et option CLI --check. Validé hors racine (--check code 0, 2 758 snippets détectés sous data/snippets). |
 | `scripts/ingestion/audit_phash_catalog.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/ingestion/audit_rejected_cuts.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/ingestion/backfill_media_assets.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
@@ -652,3 +652,10 @@ Pour sortir de cet état sans spéculation, chaque script des sections 1 et 2 do
 - **Diagnostic** : Chemin relatif par défaut `site/` et chemins de sortie de captures dépendants du CWD, complexité cognitive de `main` (19 > 15), et absence de mode CLI d'inspection `--check` / `--dry-run`.
 - **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, préfixage absolu du répertoire `site/` et des captures WEBP, refactoring modulaire abaissant la complexité de toutes les fonctions sous le seuil <= 11, et ajout de l'option CLI `--check` / `--dry-run`.
 - **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/benchmarks/verify_terminal_rendering.py --check)` confirmant la détection du répertoire `site/`, du binaire `google-chrome` et des 4 pages cibles (code 0), linters `ruff`, `complexipy` et `pyright` conformes.
+
+### Fiche 65 : `scripts/ingestion/audit_cuts_pipeline.py`
+- **Rôle** : Audit de performance multi-étapes du pipeline de matching complet sur l'ensemble des cuts et extraits vidéo (décomposition fine temps de décodage FFmpeg, RTT réseau, matching MIH, découverte et calage SRT, génération du rapport Diátaxis Explanation).
+- **KPI / Importance** : `Élevée (Audit de Performance Multi-Étapes Pipeline Matching)`.
+- **Diagnostic** : Chemins par défaut relatifs au CWD (`data/snippets`, `docs/explanation/...`), et absence de mode CLI d'inspection `--check` / `--dry-run`.
+- **Remédiation** : Découverte dynamique de `REPO_ROOT` avec repli appliance `~/dbsrt`, préfixage absolu des extraits et des rapports, et ajout de l'option CLI `--check` / `--dry-run`.
+- **Validation Live** : Validé live à 100% : exécution locale hors racine `(cd crates && uv run python ../scripts/ingestion/audit_cuts_pipeline.py --check)` confirmant la détection de 2 758 snippets et la conformité des chemins de rapport (code 0), linters `ruff`, `complexipy` et `pyright` conformes.

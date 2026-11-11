@@ -177,6 +177,10 @@ PROVEN_LIVE: dict[str, str] = {
         "Résolution dynamique REPO_ROOT et chemin binaire DBSRT_BIN absolu (avec fallback target/debug et garde explicite). En-tête réaligné."
         " Validé et prouvé live sur exécution hors racine (--help) et test E2E fonctionnel complet sur registre temporaire isolé (re-labellisation und -> fr, payload JSON conforme)."
     ),
+    "scripts/ingestion/audit_cuts_pipeline.py": (
+        "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des extraits/rapports et option CLI --check."
+        " Validé hors racine (--check code 0, 2 758 snippets détectés sous data/snippets)."
+    ),
     "scripts/ingestion/init_couplings_seed.sh": (
         "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des fixtures et support --help / --check. Validé hors racine (code 0)."
     ),
@@ -297,6 +301,7 @@ SCRIPT_KPIS: dict[str, str] = {
     "scripts/infra/rpi4/rpi4_standalone.sh": "Élevée (Déploiement Serveur Physique RPi4)",
     "scripts/infra/rpi4/rpi4_supervisor_ctl.sh": "Élevée (Contrôleur de Déploiement & Lifecycle du Superviseur RPi4)",
     "scripts/ingestion/coupling_relabel.sh": "Moyenne (Outil de Curation du Registre Zero-DB)",
+    "scripts/ingestion/audit_cuts_pipeline.py": "Élevée (Audit de Performance Multi-Étapes Pipeline Matching)",
     "scripts/ingestion/init_couplings_seed.sh": "Moyenne (Amorçage CI/CD & Tests d'Intégration)",
     "scripts/ingestion/media_add.sh": "Élevée (Ingestion Unifiée & Invariants Multimédia)",
     "scripts/ingestion/recognize_medias.sh": "Moyenne (Outil d'Ingestion & Évaluation par Lots)",

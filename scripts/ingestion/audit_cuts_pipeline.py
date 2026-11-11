@@ -26,10 +26,24 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+
+def find_repo_root() -> Path:
+    """Finds repository root dynamically with appliance fallback."""
+    curr = Path(__file__).resolve().parent
+    for parent in [curr, *curr.parents]:
+        if (parent / ".git").is_dir():
+            return parent
+    appliance_path = Path.home() / "dbsrt"
+    if appliance_path.is_dir():
+        return appliance_path
+    return Path.cwd()
+
+
+REPO_ROOT = find_repo_root()
 DEFAULT_API_URL = os.environ.get("DBSRT_API_URL", "http://127.0.0.1:8765/v1/search")
-DEFAULT_SNIPPETS_DIR = Path("data/snippets")
-DEFAULT_OUTPUT_DOC = Path("docs/explanation/2026-11-04-audit-global-performance-pipeline-matching.md")
-DEFAULT_OUTPUT_JSON = Path("data/snippets/audit_cuts_pipeline_results.json")
+DEFAULT_SNIPPETS_DIR = REPO_ROOT / "data/snippets"
+DEFAULT_OUTPUT_DOC = REPO_ROOT / "docs/explanation/2026-11-04-audit-global-performance-pipeline-matching.md"
+DEFAULT_OUTPUT_JSON = REPO_ROOT / "data/snippets/audit_cuts_pipeline_results.json"
 DEFAULT_CONCURRENCY = 4
 
 
@@ -41,6 +55,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--concurrency", type=int, default=DEFAULT_CONCURRENCY, help="Concurrent HTTP workers")
     parser.add_argument("--output-doc", type=Path, default=DEFAULT_OUTPUT_DOC, help="Path to generated markdown doc")
     parser.add_argument("--output-json", type=Path, default=DEFAULT_OUTPUT_JSON, help="Path to raw JSON results")
+    parser.add_argument(
+        "--check", "--dry-run", action="store_true", help="Perform sanity checks without executing queries"
+    )
     return parser.parse_args()
 
 
@@ -279,8 +296,24 @@ def generate_markdown_report(results: list[dict], output_doc: Path, elapsed_tota
     print(f"✓ Markdown report generated: {output_doc}")
 
 
+def perform_check(args: argparse.Namespace) -> None:
+    """Performs sanity check of paths and endpoints."""
+    print("[CHECK] Mode verification activé.")
+    print(f"[CHECK] REPO_ROOT : {REPO_ROOT}")
+    print(f"[CHECK] Snippets dir : {args.snippets_dir} (exists: {args.snippets_dir.is_dir()})")
+    count = len(list(args.snippets_dir.glob("*.mp4"))) if args.snippets_dir.is_dir() else 0
+    print(f"[CHECK] Found snippets : {count}")
+    print(f"[CHECK] Target API URL : {args.api_url}")
+    print(f"[CHECK] Output doc : {args.output_doc}")
+    print(f"[CHECK] Output json : {args.output_json}")
+
+
 def main() -> int:
     args = parse_args()
+    if args.check:
+        perform_check(args)
+        return 0
+
     pattern = str(args.snippets_dir / "*.mp4")
     files = sorted(glob.glob(pattern))
 
