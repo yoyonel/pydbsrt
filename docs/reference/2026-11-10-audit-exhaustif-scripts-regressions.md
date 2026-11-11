@@ -7,18 +7,18 @@
 ## 1. Synthèse Factuelle Globale
 
 - **Total scripts opérationnels** : 96 (66 Python, 30 Shell)
-- **Scripts prouvés en exécution réelle live (session)** : 41 / 96 (42.7%) — *Seuls scripts réellement testés de bout en bout.*
+- **Scripts prouvés en exécution réelle live (session)** : 42 / 96 (43.8%) — *Seuls scripts réellement testés de bout en bout.*
 - **Scripts en régression directe (appels internes cassés)** : 0 / 96 (0.0%) — *100% des régressions actives résolues.*
 - **Nombre total de références internes rompues actives** : 0 (13 références appliance distantes documentées)
 - **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 46 / 96 (47.9%) — *Imports seuls, logique non exécutée.*
-- **Scripts avec analyse statique seule (`bash -n`)** : 9 / 96 (9.4%) — *Zéro runtime.*
+- **Scripts avec analyse statique seule (`bash -n`)** : 8 / 96 (8.3%) — *Zéro runtime.*
 
 ```mermaid
 pie title Statut Réel des 96 Scripts (Rigueur Fact-First)
-    "Prouvé Live de Bout en Bout" : 41
+    "Prouvé Live de Bout en Bout" : 42
     "Régression Interne Cassée" : 0
     "Sanity Check CLI Seul (Non Validé)" : 46
-    "Statique / Syntaxe Seul (Non Exécuté)" : 9
+    "Statique / Syntaxe Seul (Non Exécuté)" : 8
 ```
 
 ---
@@ -90,7 +90,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 | `scripts/infra/local/load_env.sh` | 🟢 **Prouvé Live** | Shell | Critique (Socle d'Environnement & Sécurité des Credentials) | Résolution dynamique REPO_ROOT par défaut, bloc autonome CLI avec support --help / --check et masquage des secrets. Validé hors racine (code 0). |
 | `scripts/infra/local/stack_ctl.sh` | 🟢 **Prouvé Live** | Shell | Critique (Contrôleur Maître Stack Locale & Diagnostic 360°) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus data/, config mkdocs et support --help. Validé hors racine (status 360° code 0). |
 | `scripts/infra/local/switch_target.sh` | 🟢 **Prouvé Live** | Shell | Élevée (Orchestration Multi-Backend & Bascule Opérateur) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemin absolu PID_RELAY et support --help. Validé hors racine (status mode CLOUD_O2SWITCH code 0). |
-| `scripts/infra/local/vlc_ctl.sh` | ⚪ **Statique Seul (Non Exécuté)** | Shell | À évaluer | Syntaxe `bash -n` & `shellcheck` OK. Zéro exécution runtime. |
+| `scripts/infra/local/vlc_ctl.sh` | 🟢 **Prouvé Live** | Shell | Élevée (Intégration VLC & Recette Utilisateur Final) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus plugins/fixtures et support --help. Validé hors racine (install code 0). |
 
 ### 3.4 Infra & Déploiements Cloud o2switch (`scripts/infra/o2switch/`)
 
@@ -414,3 +414,10 @@ Pour sortir de cet état sans spéculation, chaque script des sections 1 et 2 do
 - **Diagnostic** : Chemin relatif au CWD (`PID_RELAY="target/dbsrt-relay-agent.pid"`), absence de découverte dynamique de `REPO_ROOT` et absence d'aide CLI `--help`.
 - **Remédiation** : Découverte dynamique de `REPO_ROOT` avec fallback appliance `~/dbsrt`, préfixage absolu de `PID_RELAY` sous `${REPO_ROOT}/target/`, invocations des sous-contrôleurs via `SCRIPT_DIR` absolu et ajout des options CLI `--help` / `-h`.
 - **Validation Live** : Validé live à 100% : exécution hors racine `(cd crates && bash ../scripts/infra/local/switch_target.sh --help)` et `(status)` sans erreur (code 0, détection live du mode `CLOUD_O2SWITCH` et lecture du fichier de découverte JSON PID 1903), linters `shellcheck` et `shfmt` conformes.
+
+### Fiche 31 : `scripts/infra/local/vlc_ctl.sh`
+- **Rôle** : Contrôleur d'installation des plugins VLC (extension Lua VLSub et interface `dbsrt_intf`), de test E2E sans tête `cvlc` et de lancement du lecteur interactif (`task vlc:*`).
+- **KPI / Importance** : `Élevée (Intégration VLC & Recette Utilisateur Final)`.
+- **Diagnostic** : Chemins relatifs au CWD des plugins (`vlc-plugin/...`) et des vidéos de test (`tests/data/...`), absence d'ancrage `REPO_ROOT` dynamique et absence d'aide CLI `--help`.
+- **Remédiation** : Découverte dynamique de `REPO_ROOT` avec fallback appliance `~/dbsrt`, préfixage absolu de tous les chemins de plugins et fixtures vidéo (`${REPO_ROOT}/...`), et ajout des options CLI `--help` / `-h`.
+- **Validation Live** : Validé live à 100% : exécution hors racine `(cd crates && bash ../scripts/infra/local/vlc_ctl.sh --help)` et `(install)` sans erreur (code 0, déploiement des plugins Lua avec chemins absolus vérifiés), linters `shellcheck` et `shfmt` conformes.
