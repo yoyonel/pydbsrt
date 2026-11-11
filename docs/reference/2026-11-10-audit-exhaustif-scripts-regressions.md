@@ -7,18 +7,18 @@
 ## 1. Synthèse Factuelle Globale
 
 - **Total scripts opérationnels** : 96 (66 Python, 30 Shell)
-- **Scripts prouvés en exécution réelle live (session)** : 32 / 96 (33.3%) — *Seuls scripts réellement testés de bout en bout.*
+- **Scripts prouvés en exécution réelle live (session)** : 33 / 96 (34.4%) — *Seuls scripts réellement testés de bout en bout.*
 - **Scripts en régression directe (appels internes cassés)** : 0 / 96 (0.0%) — *100% des régressions actives résolues.*
 - **Nombre total de références internes rompues actives** : 0 (13 références appliance distantes documentées)
 - **Scripts avec simple Sanity Check CLI `--help` (Non Validés Métier)** : 46 / 96 (47.9%) — *Imports seuls, logique non exécutée.*
-- **Scripts avec analyse statique seule (`bash -n`)** : 18 / 96 (18.8%) — *Zéro runtime.*
+- **Scripts avec analyse statique seule (`bash -n`)** : 17 / 96 (17.7%) — *Zéro runtime.*
 
 ```mermaid
 pie title Statut Réel des 96 Scripts (Rigueur Fact-First)
-    "Prouvé Live de Bout en Bout" : 32
+    "Prouvé Live de Bout en Bout" : 33
     "Régression Interne Cassée" : 0
     "Sanity Check CLI Seul (Non Validé)" : 46
-    "Statique / Syntaxe Seul (Non Exécuté)" : 18
+    "Statique / Syntaxe Seul (Non Exécuté)" : 17
 ```
 
 ---
@@ -133,7 +133,7 @@ Lors du déplacement des scripts dans des sous-dossiers thématiques (`infra/`, 
 | `scripts/ingestion/extract_nas_snippets.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/ingestion/fill_nas_snippets_catalog.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/ingestion/init_couplings_seed.sh` | 🟢 **Prouvé Live** | Shell | Moyenne (Amorçage CI/CD & Tests d'Intégration) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus des fixtures et support --help / --check. Validé hors racine (code 0). |
-| `scripts/ingestion/media_add.sh` | ⚪ **Statique Seul (Non Exécuté)** | Shell | À évaluer | Syntaxe `bash -n` & `shellcheck` OK. Zéro exécution runtime. |
+| `scripts/ingestion/media_add.sh` | 🟢 **Prouvé Live** | Shell | Élevée (Ingestion Unifiée & Invariants Multimédia) | Résolution dynamique REPO_ROOT (fallback ~/dbsrt), sélection absolue DBSRT_BIN (release/debug) et garde explicite. Validé hors racine (--help code 0). |
 | `scripts/ingestion/phash_dedupe.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/ingestion/phash_names.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
 | `scripts/ingestion/probe_medias_metadata.py` | 🟡 **Sanity Check CLI (Non Validé Métier)** | Python | À évaluer | Sanity check `--help` uniquement (arbre d'imports et parser CLI). Aucune logique métier ni invariant validé en mémoire. |
@@ -351,3 +351,10 @@ Pour sortir de cet état sans spéculation, chaque script des sections 1 et 2 do
 - **Diagnostic** : Chemins relatifs dépendant strictement du CWD d'exécution (`data/SRT`, `tests/fixtures/...`), absence de découverte dynamique de `REPO_ROOT`, et absence d'options CLI `--help` / `--check`.
 - **Remédiation** : Découverte dynamique de `REPO_ROOT` avec fallback appliance `~/dbsrt`, préfixage absolu des chemins d'entrée/sortie (`${REPO_ROOT}/...`), et ajout des options CLI `--help` / `-h` et `--check` / `--dry-run`.
 - **Validation Live** : Validé live à 100% : exécution hors racine `(cd crates && bash ../scripts/ingestion/init_couplings_seed.sh --help)` et `(--check)` sans erreur (code 0, détection de la fixture source et de la cible existante), linters `shellcheck` et `shfmt` conformes.
+
+### Fiche 22 : `scripts/ingestion/media_add.sh`
+- **Rôle** : Orchestrateur de la commande CLI `dbsrt media:add` (`task media:add`), assurant la façade d'ingestion unifiée (extraction pHash, certification de couplage et hot-ingest dans le serveur).
+- **KPI / Importance** : `Élevée (Ingestion Unifiée & Invariants Multimédia)`.
+- **Diagnostic** : Appel binaire relatif au CWD (`./target/release/dbsrt`) provoquant un crash immédiat `code 127` hors racine, absence d'ancrage `REPO_ROOT` et absence de repli vers le binaire debug.
+- **Remédiation** : Découverte dynamique de `REPO_ROOT` avec fallback appliance `~/dbsrt`, sélection absolue de `DBSRT_BIN` (support variable d'environnement, binaire release puis debug, avec garde explicite), et conformité Pure Taskfile Orchestrator.
+- **Validation Live** : Validé live à 100% : exécution hors racine `(cd crates && bash ../scripts/ingestion/media_add.sh --help)` sans erreur (code 0, affichage nominal des options du binaire Rust), linters `shellcheck` et `shfmt` conformes.
