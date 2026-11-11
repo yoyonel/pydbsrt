@@ -3,9 +3,47 @@
 # into data/SRT/couplings.json and PostgreSQL (if reachable).
 set -euo pipefail
 
-DBSRT_BIN="${DBSRT_BIN:-./target/release/dbsrt}"
-PHASH_DIR="${PHASH_DIR:-data/__PHASH__}"
-SUBTITLES_DIR="${SUBTITLES_DIR:-data/SRT}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if ! REPO_ROOT="$(git -C "${SCRIPT_DIR}" rev-parse --show-toplevel 2>/dev/null)"; then
+  REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+fi
+if [[ ! -d "${REPO_ROOT}/.git" && -d "${HOME}/dbsrt" ]]; then
+  REPO_ROOT="${HOME}/dbsrt"
+fi
+
+# Print usage if requested
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+  echo "Usage: $(basename "$0") [--help] [--check | --dry-run] [-v | --verbose] [-q | --quiet]"
+  echo ""
+  echo "Auto-discovers and certifies ground-truth couplings into couplings.json and PostgreSQL."
+  echo ""
+  echo "Options:"
+  echo "  --help, -h          Show this help message and exit"
+  echo "  --check, --dry-run  Verify tools, paths and discoverable pairs without certifying"
+  echo "  -v, --verbose       Print certification outputs"
+  echo "  -q, --quiet         Suppress non-essential messages (default)"
+  echo ""
+  echo "Environment variables:"
+  echo "  DBSRT_BIN           Path to dbsrt binary (default: target/release/dbsrt or debug)"
+  echo "  PHASH_DIR           Directory for pHash files (default: <repo_root>/data/__PHASH__)"
+  echo "  SUBTITLES_DIR       Directory for subtitles (default: <repo_root>/data/SRT)"
+  echo "  PSQL_IP             PostgreSQL host (default: 127.0.0.1)"
+  echo "  PSQL_PORT           PostgreSQL port (default: 5432)"
+  exit 0
+fi
+
+DBSRT_BIN="${DBSRT_BIN:-${REPO_ROOT}/target/release/dbsrt}"
+if [[ ! -x "${DBSRT_BIN}" ]]; then
+  if [[ -x "${REPO_ROOT}/target/debug/dbsrt" ]]; then
+    DBSRT_BIN="${REPO_ROOT}/target/debug/dbsrt"
+  else
+    echo "❌ Error: dbsrt binary not found at ${DBSRT_BIN} (run 'task cli:build' or 'task rs:build' first)." >&2
+    exit 1
+  fi
+fi
+
+PHASH_DIR="${PHASH_DIR:-${REPO_ROOT}/data/__PHASH__}"
+SUBTITLES_DIR="${SUBTITLES_DIR:-${REPO_ROOT}/data/SRT}"
 TMP_PHASH_DIR="${TMP_PHASH_DIR:-/tmp}"
 DB_HOST="${PSQL_IP:-127.0.0.1}"
 DEFAULT_DB_PORT=5432
@@ -14,6 +52,18 @@ DB_PORT="${PSQL_PORT:-$DEFAULT_DB_PORT}"
 MAX_DB_RETRIES=10
 DB_RETRY_INTERVAL_SECONDS="0.5"
 
+if [[ "${1:-}" == "--check" || "${1:-}" == "--dry-run" ]]; then
+  echo "REPO_ROOT: ${REPO_ROOT}"
+  echo "DBSRT_BIN: ${DBSRT_BIN} (executable: yes)"
+  echo "PHASH_DIR: ${PHASH_DIR} (exists: $(test -d "${PHASH_DIR}" && echo "yes" || echo "no"))"
+  echo "SUBTITLES_DIR: ${SUBTITLES_DIR} (exists: $(test -d "${SUBTITLES_DIR}" && echo "yes" || echo "no"))"
+  echo "DB target: ${DB_HOST}:${DB_PORT}"
+  shopt -s nullglob
+  srt_count=("${SUBTITLES_DIR}"/*.srt)
+  echo "Discovered SRT files: ${#srt_count[@]}"
+  exit 0
+fi
+
 QUIET=1
 for arg in "$@"; do
   case "$arg" in
@@ -21,11 +71,6 @@ for arg in "$@"; do
     -q | --quiet) QUIET=1 ;;
   esac
 done
-
-if [[ ! -x "$DBSRT_BIN" ]]; then
-  echo "Error: $DBSRT_BIN not found or not executable. Run 'task cli:build' or 'task rs:build' first." >&2
-  exit 1
-fi
 
 # Wait up to 5s for PostgreSQL to accept connections if container just started
 for ((i = 1; i <= MAX_DB_RETRIES; i++)); do
@@ -36,7 +81,7 @@ for ((i = 1; i <= MAX_DB_RETRIES; i++)); do
 done
 
 # Initialize with clean CI seed fixture if registry is absent
-SEED_FIXTURE="tests/fixtures/couplings.seed.json"
+SEED_FIXTURE="${REPO_ROOT}/tests/fixtures/couplings.seed.json"
 if [[ ! -f "${SUBTITLES_DIR}/couplings.json" && -f "$SEED_FIXTURE" ]]; then
   mkdir -p "${SUBTITLES_DIR}"
   cp "$SEED_FIXTURE" "${SUBTITLES_DIR}/couplings.json"
@@ -110,7 +155,7 @@ certify_phash_pair() {
 }
 
 # 1. Local video test fixtures (Big Buck Bunny WebM + MP4)
-for media in "data/big_buck_bunny_trailer_480p.webm" "tests/data/big_buck_bunny_trailer_480p.mp4"; do
+for media in "${REPO_ROOT}/data/big_buck_bunny_trailer_480p.webm" "${REPO_ROOT}/tests/data/big_buck_bunny_trailer_480p.mp4"; do
   if [[ -f "$media" ]]; then
     for lang in fr en; do
       srt="${SUBTITLES_DIR}/big_buck_bunny_trailer_480p.${lang}.srt"

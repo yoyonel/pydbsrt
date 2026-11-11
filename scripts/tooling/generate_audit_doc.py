@@ -99,6 +99,9 @@ PROVEN_LIVE: dict[str, str] = {
     "scripts/ingestion/recognize_medias.sh": (
         "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), set -euo pipefail, détection conditionnelle de time/parallel et options --help / --check. Validé hors racine (code 0)."
     ),
+    "scripts/ingestion/seed_couplings.sh": (
+        "Résolution dynamique REPO_ROOT (fallback ~/dbsrt), chemins absolus, sélection absolue DBSRT_BIN et options --help / --check. Validé hors racine (2851 SRT, code 0)."
+    ),
     "scripts/tooling/check_pr_body.py": (
         "Chemins docstring et commentaires réalignés. 16/16 tests unitaires PASS (test_check_pr_body.py)."
         " Prouvé live en CLI stdin (rejet corps vide exit 1, validation corps conforme avec preuve SVG exit 0)."
@@ -132,6 +135,7 @@ SCRIPT_KPIS: dict[str, str] = {
     "scripts/ingestion/init_couplings_seed.sh": "Moyenne (Amorçage CI/CD & Tests d'Intégration)",
     "scripts/ingestion/media_add.sh": "Élevée (Ingestion Unifiée & Invariants Multimédia)",
     "scripts/ingestion/recognize_medias.sh": "Moyenne (Outil d'Ingestion & Évaluation par Lots)",
+    "scripts/ingestion/seed_couplings.sh": "Élevée (Vérité Terrain & Registre des Couplages)",
     "scripts/tooling/check_pr_body.py": "Critique (Garde-fou CI/CD & Qualité des PRs)",
     "scripts/tooling/generate_audit_doc.py": "Moyenne (Outil de Métrologie & Méta-Documentation)",
     "scripts/tooling/generate_nightly_report_enhanced.py": "Moyenne (Métrologie & Profiling Diátaxis)",
