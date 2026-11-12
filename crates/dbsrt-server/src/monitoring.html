@@ -521,6 +521,7 @@
     <a href="#audit">Audit <span id="nav-audit" class="badge badge-blue" style="display: none;">●</span></a>
     <a href="#supervisor">Superviseur</a>
     <a href="#system">Système</a>
+    <a href="#incidents">Incidents &amp; SRE</a>
   </nav>
 
   <section class="view" id="view-overview">
@@ -995,6 +996,47 @@
         </div>
       </div>
       <div id="catalog-reload-feedback" style="margin-top:8px; font-size:0.8rem; font-family:var(--font-mono);"></div>
+    </div>
+  </section>
+
+  <section class="view" id="view-incidents">
+    <div class="tab-caption">HISTORIQUE DES INCIDENTS DE PRODUCTION &amp; POST-MORTEMS SRE</div>
+    <div class="hero-card" style="margin-bottom: 16px;">
+      <div class="hero-header">
+        <div class="hero-title"><span class="badge badge-online">P3 RÉSOLU</span> [INC-2026-11-12-01] Blocage de l'Auto-Heal du Batch o2switch</div>
+        <div style="font-family:var(--font-mono); font-size:0.8rem; color:var(--text-muted);">2026-11-12 05:58 CET</div>
+      </div>
+      <p style="color:var(--text-muted); font-size:0.88rem; line-height:1.5; margin:8px 0 14px;">
+        Arrêt du batch dual-hash (pHash + aHash) par CloudLinux LVE suite à un pic de charge (5 workers FFmpeg + cron compactage de 06:00). Le superviseur RPi4 a détecté le crash mais ses relances ont échoué en boucle (sous-commande batch-all manquante sur le script distant). Reprise nominale à 09:51 après synchronisation.
+      </p>
+      <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+        <a href="https://yoyonel.github.io/pydbsrt/explanation/2026-11-12-post-mortem-inc-2026-11-12-01-blocage-auto-heal-batch-o2switch/" target="_blank" rel="noopener" class="btn btn-accent">📖 Lire le Post-Mortem Complet (Diátaxis) ↗</a>
+      </div>
+    </div>
+
+    <div class="hero-card" style="margin-bottom: 16px;">
+      <div class="hero-header">
+        <div class="hero-title"><span class="badge badge-online">P2 RÉSOLU</span> [INC-2026-10-31-01] Enquête Kill Périodique de dbsrt-server (o2switch)</div>
+        <div style="font-family:var(--font-mono); font-size:0.8rem; color:var(--text-muted);">2026-10-31 06:00 CET</div>
+      </div>
+      <p style="color:var(--text-muted); font-size:0.88rem; line-height:1.5; margin:8px 0 14px;">
+        Enquête approfondie sur les signaux SIGKILL du kernel CloudLinux LVE reçus par le démon REST dbsrt-server et mise en place de la résilience / watchdog systemd/crontab.
+      </p>
+      <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+        <a href="https://yoyonel.github.io/pydbsrt/explanation/2026-10-31-enquete-kill-periodique-dbsrt-server-o2switch/" target="_blank" rel="noopener" class="btn btn-accent">📖 Lire l'Enquête Complète (Diátaxis) ↗</a>
+      </div>
+    </div>
+
+    <div class="hero-card">
+      <div class="hero-header">
+        <div class="hero-title">Standard de Gouvernance SRE &amp; Modèle Post-Mortem</div>
+      </div>
+      <p style="color:var(--text-muted); font-size:0.88rem; line-height:1.5; margin:8px 0 14px;">
+        Structure normée des rapports d'incidents, analyse 5 Whys, matrice de sévérité (P1 à P3) et boucle de rétroaction préventive.
+      </p>
+      <div>
+        <a href="https://yoyonel.github.io/pydbsrt/explanation/" target="_blank" rel="noopener" class="btn">📚 Portail Diátaxis (Explications) ↗</a>
+      </div>
     </div>
   </section>
 
@@ -1570,6 +1612,8 @@
           sup.is_online && sup.heartbeat_age_secs != null ? `${sup.heartbeat_age_secs}s` : '--', `battement · ${sup.desired_workers || '--'} workers`),
         tile('system', 'Système', '', sys.ram_total_gib ? `${fmt(sys.ram_used_gib, 1)} GiB` : '--',
           `RAM / ${fmt(sys.ram_total_gib, 1)} GiB · uptime ${formatDuration(sys.uptime_secs)}`),
+        tile('incidents', 'Incidents (SRE)', b('badge-online', 'RÉSOLU'), 'INC-2026-11-12-01',
+          '2 post-mortems archivés · voir détails'),
       ].join('');
     }
 
@@ -2423,7 +2467,7 @@
     }));
 
     // One view per URL hash, so a view can be bookmarked and the back button works
-    const VIEWS = ['overview', 'ingestion', 'audit', 'supervisor', 'system'];
+    const VIEWS = ['overview', 'ingestion', 'audit', 'supervisor', 'system', 'incidents'];
     function showView() {
       const view = location.hash.slice(1);
       // #catalogue (overview tile, old bookmarks) is now the Catalogue tab of Ingestion
@@ -2445,7 +2489,7 @@
       '1': 'jobs', '2': 'stats', 'h': 'stats', '3': 'completed', 'r': 'completed',
       '4': 'media', 'm': 'media', '5': 'sources', 's': 'sources',
     };
-    const VIEW_KEYS = { '6': 'system', 'y': 'system', 'a': 'audit', 'o': 'overview' };
+    const VIEW_KEYS = { '6': 'system', 'y': 'system', 'a': 'audit', 'o': 'overview', 'i': 'incidents' };
     document.addEventListener('keydown', e => {
       if (e.target.tagName === 'INPUT' || e.ctrlKey || e.metaKey || e.altKey) return;
       if (activeView === 'catalogue' && e.key === 'a') {
