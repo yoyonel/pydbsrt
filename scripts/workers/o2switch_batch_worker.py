@@ -193,6 +193,7 @@ DEFAULT_STALL_TIMEOUT_SECS: int = 60
 DEFAULT_MAX_EXTRACTION_SECS: int = 1800
 DEFAULT_COUPLINGS_PATH: str = "data/SRT/couplings.json"
 DEFAULT_PHASH_DIR: str = "data/__PHASH__"
+DEFAULT_AHASH_DIR: str = "data/__AHASH__"
 DEFAULT_SUBTITLES_DIR: str = "data/SRT"
 DEFAULT_EVENTS_LOG_PATH: str = "data/reports/batch_tvshow_nightly.jsonl"
 DEFAULT_TARGETS_PATH: str = "data/reports/selected_batch_targets.json"
@@ -245,8 +246,9 @@ def load_certified_stems(couplings_file: Path) -> Set[str]:
 
 
 def phash_media_stem(phash_name: str) -> str:
-    """Media stem of a .phash file name: URL-decoded, without the .phash, fps and video extension suffixes."""
-    raw_name = PHASH_FPS_SUFFIX_RE.sub("", urllib.parse.unquote(phash_name).removesuffix(".phash"))
+    """Media stem of a .phash or .ahash file name: URL-decoded, without the extension, fps and video extension suffixes."""
+    unquoted = urllib.parse.unquote(phash_name).removesuffix(".phash").removesuffix(".ahash")
+    raw_name = PHASH_FPS_SUFFIX_RE.sub("", unquoted)
     for ext in VIDEO_EXTENSIONS:
         if raw_name.lower().endswith(ext):
             return raw_name[: -len(ext)]
@@ -260,16 +262,23 @@ def _file_size(path: Path) -> int:
         return 0
 
 
-def _sidecar_media_name(phash: Path) -> str:
+def _sidecar_media_name(phash: Path, fallback_dir: Path | str | None = None) -> str:
     """media_name of the <moviehash>.json sidecar next to a <moviehash>.<fps>fps.phash, or ""."""
     head = phash.name.split(".", 1)[0]
     if not MOVIEHASH_RE.fullmatch(head):
         return ""
-    try:
-        media_name = json.loads(phash.with_name(f"{head}.json").read_text(encoding="utf-8")).get("media_name")
-    except (OSError, ValueError, AttributeError):
-        return ""
-    return media_name if isinstance(media_name, str) else ""
+    candidates = [phash.with_name(f"{head}.json")]
+    if fallback_dir:
+        candidates.append(Path(fallback_dir) / f"{head}.json")
+    for sidecar in candidates:
+        try:
+            if sidecar.is_file():
+                media_name = json.loads(sidecar.read_text(encoding="utf-8")).get("media_name")
+                if isinstance(media_name, str):
+                    return media_name
+        except (OSError, ValueError, AttributeError):
+            pass
+    return ""
 
 
 def load_existing_phash_stems(phash_dir: Path) -> Set[str]:
@@ -285,6 +294,47 @@ def load_existing_phash_stems(phash_dir: Path) -> Set[str]:
     return stems
 
 
+def load_existing_ahash_stems(ahash_dir: Path) -> Set[str]:
+    """Loads all media stems with existing non-empty .ahash files on disk."""
+    stems: Set[str] = set()
+    if ahash_dir.is_dir():
+        for p in ahash_dir.glob("*.ahash"):
+            if _file_size(p) > 0:
+                stems.update((phash_media_stem(p.name), p.stem))
+                media_name = _sidecar_media_name(p, fallback_dir=DEFAULT_PHASH_DIR)
+                if media_name:
+                    stems.add(phash_media_stem(media_name))
+    return stems
+
+
+def load_nas_ftp_index_targets(index_path: Path, base_dir: str) -> List[VideoTarget]:
+    """Loads video targets directly from cached nas_ftp_index.json if available."""
+    if not index_path.is_file():
+        return []
+    try:
+        with open(index_path, encoding="utf-8") as f:
+            raw = json.load(f)
+        entries = raw.get("index", raw)
+        clean_base = base_dir.strip("/")
+        targets = []
+        for filename, rel in entries.items():
+            clean_rel = rel.lstrip("/")
+            if clean_base and clean_base != "all":
+                if not (clean_rel.startswith(clean_base + "/") or clean_rel.startswith(clean_base)):
+                    continue
+            targets.append(
+                VideoTarget(
+                    rel_path="/" + clean_rel,
+                    filename=unicodedata.normalize("NFC", filename),
+                    size_bytes=0,
+                )
+            )
+        return targets
+    except Exception as err:
+        print(f"⚠️ Failed reading {index_path}: {err}", file=sys.stderr)
+        return []
+
+
 def list_nas_videos_ftp(
     nas_host: str,
     nas_user: str,
@@ -293,10 +343,16 @@ def list_nas_videos_ftp(
     ftp_port: int = DEFAULT_FTP_PORT,
     max_depth: int = 8,
 ) -> List[VideoTarget]:
-    """Discovers video files on Synology NAS using standard FTP MLSD protocol.
+    """Discovers video files on Synology NAS using cached index or FTP MLSD protocol.
 
     Transient FTP errors restart the whole walk, so a dropped connection never yields a partial list.
     """
+    index_path = REPO_ROOT / "data/reports/nas_ftp_index.json"
+    cached = load_nas_ftp_index_targets(index_path, base_dir)
+    if cached:
+        print(f"✓ Loaded {len(cached)} targets from cached {index_path.name} (base: {base_dir}).")
+        return cached
+
     for attempt in range(1, FTP_LIST_ATTEMPTS + 1):
         try:
             return _walk_nas_videos_ftp(nas_host, nas_user, nas_pass, base_dir, ftp_port, max_depth)
@@ -313,8 +369,11 @@ def _list_ftp_dir(ftp: ftplib.FTP, path: str) -> List[Tuple[str, Dict[str, str]]
     try:
         entries = list(ftp.mlsd(path))
     except ftplib.error_perm:
-        # 550 on a folder the account cannot read: skip it, the rest of the library stays usable
-        return []
+        try:
+            ftp.cwd(path if path.startswith("/") else "/" + path)
+            entries = list(ftp.mlsd())
+        except Exception:
+            return []
     return [(name, facts) for name, facts in entries if name not in FTP_SKIPPED_NAMES and not name.startswith(".")]
 
 
@@ -327,7 +386,8 @@ def _walk_nas_videos_ftp(
     ftp.encoding = "utf-8"
 
     results: List[VideoTarget] = []
-    stack: List[str] = [base_dir.lstrip("/")]
+    clean_base = base_dir.lstrip("/")
+    stack: List[str] = ["tvshow", "video"] if clean_base in ("", "all") else [clean_base]
     while stack:
         curr = stack.pop()
         for name, facts in _list_ftp_dir(ftp, curr):
@@ -715,6 +775,7 @@ def process_single_video(
     max_extraction_secs: int = DEFAULT_MAX_EXTRACTION_SECS,
     active_workers: int | None = None,
     desired_workers: int | None = None,
+    ahash_dir: str = DEFAULT_AHASH_DIR,
 ) -> Dict[str, object]:
     """Processes a single video by invoking dbsrt media:add directly over FTP."""
     base_cmd = [
@@ -727,6 +788,8 @@ def process_single_video(
         "disabled",
         "--phash-dir",
         DEFAULT_PHASH_DIR,
+        "--ahash-dir",
+        ahash_dir,
         "--subtitles-dir",
         DEFAULT_SUBTITLES_DIR,
         "--skip-certify",
@@ -927,6 +990,7 @@ def execute_dynamic_batch_ingestion(
     events_log: Path,
     max_extraction_secs: int,
     initial_workers: int,
+    ahash_dir: str = DEFAULT_AHASH_DIR,
 ) -> Tuple[int, int, float]:
     """Executes batch processing with dynamic concurrency scaling.
 
@@ -958,7 +1022,16 @@ def execute_dynamic_batch_ingestion(
 
     def run_video(target: VideoTarget) -> Dict[str, object]:
         return process_single_video(
-            target, stream_base, dbsrt_bin, child_env, log_lock, events_log, max_extraction_secs
+            target,
+            stream_base,
+            dbsrt_bin,
+            child_env,
+            log_lock,
+            events_log,
+            max_extraction_secs,
+            None,
+            None,
+            ahash_dir,
         )
 
     batch = _BatchRun(targets, run_video, initial_workers, max_workers)
@@ -1003,6 +1076,17 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="JSON file listing target video paths; the NAS is scanned when it does not exist",
     )
     parser.add_argument(
+        "--mode",
+        choices=["phash", "ahash", "both"],
+        default="both",
+        help="Batch processing mode: phash only, ahash only, or both",
+    )
+    parser.add_argument(
+        "--ahash-dir",
+        default=DEFAULT_AHASH_DIR,
+        help="Directory storing .ahash binary audio fingerprints",
+    )
+    parser.add_argument(
         "--check",
         "--dry-run",
         dest="check",
@@ -1018,12 +1102,15 @@ def _handle_check_mode(args: argparse.Namespace, dbsrt_bin: str) -> int:
     has_nas_creds = bool(args.nas_host and args.nas_user and nas_pass)
     couplings_file = REPO_ROOT / DEFAULT_COUPLINGS_PATH
     phash_dir = REPO_ROOT / DEFAULT_PHASH_DIR
+    ahash_dir = REPO_ROOT / args.ahash_dir
     print("=== DBSrt o2switch Batch Worker Inspection ===")
     print(f"✓ REPO_ROOT     : {REPO_ROOT}")
     print(f"✓ Binary dbsrt  : {dbsrt_bin} ({'found' if Path(dbsrt_bin).exists() else 'missing'})")
+    print(f"✓ Mode          : {args.mode}")
     print(f"✓ Workers budget: {args.workers} workers (budget: {CPU_BUDGET_VCPUS} vCPUs)")
     print(f"✓ Couplings path: {couplings_file} ({'found' if couplings_file.is_file() else 'missing'})")
     print(f"✓ pHash dir     : {phash_dir} ({'found' if phash_dir.is_dir() else 'missing'})")
+    print(f"✓ aHash dir     : {ahash_dir} ({'found' if ahash_dir.is_dir() else 'missing'})")
     print(f"✓ NAS config    : {'configured' if has_nas_creds else 'unconfigured (stream mode required)'}")
     print(f"✓ Log path      : {REPO_ROOT / DEFAULT_LOG_PATH}")
     return 0
@@ -1074,13 +1161,33 @@ def _initial_targets(
     return [video for video in all_videos if Path(video.filename).stem not in skip_stems]
 
 
+def resolve_done_stems(
+    mode: str,
+    certified_stems: Set[str],
+    existing_phash: Set[str],
+    existing_ahash: Set[str],
+) -> Set[str]:
+    """Filters completed stems according to the target mode (ahash, phash, or both)."""
+    if mode == "ahash":
+        print(f"✓ Found {len(existing_ahash)} .ahash files locally (mode: ahash).")
+        return {unicodedata.normalize("NFC", stem) for stem in existing_ahash}
+    if mode == "phash":
+        print(
+            f"✓ Found {len(certified_stems)} certified stems and {len(existing_phash)} .phash files locally (mode: phash)."
+        )
+        return {unicodedata.normalize("NFC", stem) for stem in certified_stems | existing_phash}
+    print(f"✓ Found {len(existing_phash)} .phash and {len(existing_ahash)} .ahash files locally (mode: both).")
+    return {unicodedata.normalize("NFC", stem) for stem in (certified_stems | existing_phash) & existing_ahash}
+
+
 def select_targets(args: argparse.Namespace, nas_pass: str, events_log: Path) -> List[VideoTarget]:
     """Steps 1-2: loads what is already done or blacklisted, lists the NAS and picks this run's videos."""
     print("=== [1/4] Scanning local catalogs and couplings ===")
     certified_stems = load_certified_stems(Path(DEFAULT_COUPLINGS_PATH))
     existing_phash = load_existing_phash_stems(Path(DEFAULT_PHASH_DIR))
-    print(f"✓ Found {len(certified_stems)} certified stems and {len(existing_phash)} .phash files locally.")
-    done_stems = {unicodedata.normalize("NFC", stem) for stem in certified_stems | existing_phash}
+    existing_ahash = load_existing_ahash_stems(Path(args.ahash_dir))
+    done_stems = resolve_done_stems(args.mode, certified_stems, existing_phash, existing_ahash)
+
     blacklisted = load_blacklisted_stems(events_log)
     print(f"✓ Skipping {len(blacklisted)} videos that failed {MAX_FAILED_ATTEMPTS} times in a row.")
     skip_stems = (done_stems if args.fresh_only else set()) | blacklisted
@@ -1173,6 +1280,7 @@ def main() -> int:
         events_log=events_log,
         max_extraction_secs=args.max_extraction_secs,
         initial_workers=args.workers,
+        ahash_dir=args.ahash_dir,
     )
 
     if RELOAD_REQUESTED.is_set():

@@ -300,6 +300,68 @@ def probe_video_container(video_path: Path) -> Tuple[float, float, List[Dict[str
     return duration, fps, subtitle_streams
 
 
+def load_certified_couplings_stems(couplings_path: Path) -> set[str]:
+    """Loads media_name entries from couplings.json."""
+    if not couplings_path.is_file():
+        return set()
+    try:
+        with open(couplings_path, encoding="utf-8") as f:
+            data = json.load(f)
+        return {c["media_name"] for c in data.get("couplings", []) if c.get("media_name")}
+    except Exception:
+        return set()
+
+
+def classify_video_file(
+    vpath: Path,
+    mode: str,
+    fresh_only: bool,
+    certified_stems: set[str],
+    existing_phash_names: List[str],
+    existing_ahash_names: List[str],
+) -> str | None:
+    """Returns 'fresh', 'unfinished', or None (to skip)."""
+    stem = vpath.stem
+    if mode == "ahash":
+        has_ahash = any(name.startswith(stem) for name in existing_ahash_names)
+        return "fresh" if not has_ahash else None
+
+    if any(name.startswith(stem) for name in certified_stems):
+        return None
+
+    has_phash = any(name.startswith(stem) for name in existing_phash_names)
+    if has_phash:
+        return "unfinished" if not fresh_only else None
+    return "fresh"
+
+
+def scan_show_directory(
+    show_entry: os.DirEntry,
+    mode: str,
+    fresh_only: bool,
+    certified_stems: set[str],
+    existing_phash_names: List[str],
+    existing_ahash_names: List[str],
+    unfinished_map: Dict[str, List[Path]],
+    fresh_map: Dict[str, List[Path]],
+) -> None:
+    """Scans and groups videos for a given TV show directory."""
+    show_name = show_entry.name
+    for root, _dirs, files in os.walk(show_entry.path):
+        sorted_files = sorted(files, key=lambda f: (0 if f.lower().endswith(".mkv") else 1, f))
+        for f in sorted_files:
+            if not f.lower().endswith(DEFAULT_VIDEO_EXTENSIONS):
+                continue
+            vpath = Path(root) / f
+            status = classify_video_file(
+                vpath, mode, fresh_only, certified_stems, existing_phash_names, existing_ahash_names
+            )
+            if status == "fresh":
+                fresh_map.setdefault(show_name, []).append(vpath)
+            elif status == "unfinished":
+                unfinished_map.setdefault(show_name, []).append(vpath)
+
+
 def discover_stratified_tvshows(
     nas_root: Path,
     phash_dir: Path,
@@ -307,6 +369,8 @@ def discover_stratified_tvshows(
     limit: int | None = None,
     fresh_only: bool = False,
     max_episodes_per_series: int = MAX_EPISODES_PER_SERIES,
+    mode: str = "phash",
+    ahash_dir: Path | None = None,
 ) -> List[Tuple[Path, str]]:
     """Discovers stratified TV show MKVs directly on NAS.
 
@@ -319,22 +383,11 @@ def discover_stratified_tvshows(
     if not nas_root.is_dir():
         return []
 
-    # 1. Load fully certified media names from couplings.json
-    couplings_path = subtitles_dir / "couplings.json"
-    certified_stems: set[str] = set()
-    if couplings_path.is_file():
-        try:
-            with open(couplings_path, encoding="utf-8") as f:
-                data = json.load(f)
-            for c in data.get("couplings", []):
-                m_name = c.get("media_name", "")
-                if m_name:
-                    certified_stems.add(m_name)
-        except Exception:
-            pass
-
-    # 2. Existing phash files on disk
+    certified_stems = load_certified_couplings_stems(subtitles_dir / "couplings.json")
     existing_phash_names: List[str] = [phash_logical_name(p) for p in phash_dir.glob("*.phash")]
+    existing_ahash_names: List[str] = (
+        [phash_logical_name(p) for p in ahash_dir.glob("*.ahash")] if ahash_dir and ahash_dir.is_dir() else []
+    )
 
     unfinished_map: Dict[str, List[Path]] = {}
     fresh_map: Dict[str, List[Path]] = {}
@@ -342,26 +395,16 @@ def discover_stratified_tvshows(
     for entry in os.scandir(nas_root):
         if not entry.is_dir() or entry.name in {"EMPTY_DIRS", "SRT"}:
             continue
-        show_name = entry.name
-        for root, _dirs, files in os.walk(entry.path):
-            sorted_files = sorted(files, key=lambda f: (0 if f.lower().endswith(".mkv") else 1, f))
-            for f in sorted_files:
-                if f.lower().endswith(DEFAULT_VIDEO_EXTENSIONS):
-                    vpath = Path(root) / f
-                    stem = vpath.stem
-
-                    # If already certified in couplings.json, completely done -> skip
-                    if any(name.startswith(stem) for name in certified_stems):
-                        continue
-
-                    # Check if .phash exists
-                    has_phash = any(name.startswith(stem) for name in existing_phash_names)
-
-                    if has_phash:
-                        if not fresh_only:
-                            unfinished_map.setdefault(show_name, []).append(vpath)
-                    else:
-                        fresh_map.setdefault(show_name, []).append(vpath)
+        scan_show_directory(
+            entry,
+            mode,
+            fresh_only,
+            certified_stems,
+            existing_phash_names,
+            existing_ahash_names,
+            unfinished_map,
+            fresh_map,
+        )
 
     selected: List[Tuple[Path, str]] = []
 
@@ -890,6 +933,8 @@ def resolve_batch_queue(args: argparse.Namespace) -> List[Tuple[Path, str]]:
         limit=args.max_videos,
         fresh_only=args.fresh_only,
         max_episodes_per_series=args.max_episodes_per_series,
+        mode=args.mode,
+        ahash_dir=args.ahash_dir,
     )
 
 
@@ -908,6 +953,18 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Direct NAS TVShow Batch Ingestion & Profiling (Zero Local Copy)")
     parser.add_argument("--nas-root", type=Path, default=default_nas_tvshow_path())
     parser.add_argument("--phash-dir", type=Path, default=DEFAULT_PHASH_DIR)
+    parser.add_argument(
+        "--ahash-dir",
+        type=Path,
+        default=Path("data/__AHASH__"),
+        help="Directory where .ahash files are stored (default: data/__AHASH__)",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=["phash", "ahash", "both"],
+        default="phash",
+        help="Target selection filter mode: phash (default), ahash, or both",
+    )
     parser.add_argument("--subtitles-dir", type=Path, default=DEFAULT_SUBTITLES_DIR)
     parser.add_argument("--report-path", type=Path, default=DEFAULT_REPORT_PATH)
     parser.add_argument("--events-log", type=Path, default=DEFAULT_EVENTS_LOG_PATH)

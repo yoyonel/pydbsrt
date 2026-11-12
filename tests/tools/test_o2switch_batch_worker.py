@@ -283,6 +283,7 @@ def test_list_nas_videos_ftp_retries_transient_errors(monkeypatch):
             raise ConnectionResetError("reset")
         return [VideoTarget("/video/a.mkv", "a.mkv", 1)]
 
+    monkeypatch.setattr(worker, "load_nas_ftp_index_targets", lambda *_a, **_kw: [])
     monkeypatch.setattr(worker, "_walk_nas_videos_ftp", flaky_walk)
     monkeypatch.setattr(worker.time, "sleep", lambda _s: None)
     assert worker.list_nas_videos_ftp("nas", "u", "p") == [VideoTarget("/video/a.mkv", "a.mkv", 1)]
@@ -651,3 +652,52 @@ def test_batch_exhaustive_simulation_all_snippets_dataset(tmp_path: Path, monkey
         simulated_records.append(rec)
 
     assert len(simulated_records) == 2758
+
+
+def test_load_existing_ahash_stems_and_mode_ahash(tmp_path: Path):
+    """Verifies that load_existing_ahash_stems scans .ahash files and mode ahash selects virgin targets."""
+    ahash_dir = tmp_path / "ahash"
+    ahash_dir.mkdir()
+    (ahash_dir / "done_video.mkv.86.1fps.ahash").write_bytes(b"dummy")
+    (ahash_dir / "empty.ahash").write_bytes(b"")
+
+    stems = worker.load_existing_ahash_stems(ahash_dir)
+    assert "done_video" in stems
+    assert "empty" not in stems
+
+    args = worker.build_arg_parser().parse_args(
+        [
+            "--mode",
+            "ahash",
+            "--ahash-dir",
+            str(ahash_dir),
+            "--fresh-only",
+            "--stream-base",
+            "http://127.0.0.1:18089",
+        ]
+    )
+    assert args.mode == "ahash"
+    assert args.ahash_dir == str(ahash_dir)
+
+
+def test_load_nas_ftp_index_targets(tmp_path: Path):
+    """Verifies that load_nas_ftp_index_targets parses JSON and filters by base directory."""
+    index_file = tmp_path / "nas_index.json"
+    assert worker.load_nas_ftp_index_targets(index_file, "/video") == []
+
+    index_data = {
+        "index": {
+            "movie1.mkv": "video/movie1.mkv",
+            "tv1.mkv": "tvshow/tv1.mkv",
+            "outside.mkv": "other/outside.mkv",
+        }
+    }
+    index_file.write_text(json.dumps(index_data), encoding="utf-8")
+
+    targets = worker.load_nas_ftp_index_targets(index_file, "/video")
+    assert len(targets) == 1
+    assert targets[0].filename == "movie1.mkv"
+    assert targets[0].rel_path == "/video/movie1.mkv"
+
+    all_targets = worker.load_nas_ftp_index_targets(index_file, "")
+    assert len(all_targets) == 3
