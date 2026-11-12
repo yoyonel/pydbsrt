@@ -24,6 +24,8 @@ anyhow = { workspace = true }
 clap = { workspace = true }
 reqwest = { workspace = true }
 arc-swap = "1.7"
+base64 = "0.22"
 futures-util = "0.3"
 
 [dev-dependencies]
+tempfile = "3.17"

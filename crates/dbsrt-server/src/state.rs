@@ -5,9 +5,9 @@ use crate::constants::{
 };
 use crate::dtos::{CatalogCompactResponse, CatalogReloadResponse, CatalogStatusResponse};
 use anyhow::Result;
-use arc_swap::ArcSwapOption;
+use arc_swap::{ArcSwap, ArcSwapOption};
 use dbsrt_core::{CouplingRegistry, SubtitleCache, SubtitleProvider};
-use dbsrt_index::{DbClient, DeltaIndex, MmapDbphash, PhashEngine};
+use dbsrt_index::{AHashCatalog, DbClient, DeltaIndex, MmapDbphash, PhashEngine};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
@@ -127,6 +127,7 @@ pub struct ServerMetrics {
     pub total_requests: std::sync::atomic::AtomicU64,
     pub recognize_requests: std::sync::atomic::AtomicU64,
     pub search_requests: std::sync::atomic::AtomicU64,
+    pub ahash_search_requests: std::sync::atomic::AtomicU64,
     pub cache_hits: std::sync::atomic::AtomicU64,
     pub remote_errors: std::sync::atomic::AtomicU64,
     pub total_latency_us: std::sync::atomic::AtomicU64,
@@ -153,6 +154,8 @@ pub struct AppState {
     pub dbphash_path: Arc<std::sync::RwLock<Option<PathBuf>>>,
     pub dbphash_reader: Arc<ArcSwapOption<MmapDbphash>>,
     pub engine: Arc<std::sync::RwLock<PhashEngine>>,
+    pub ahash_dir: PathBuf,
+    pub ahash_catalog: Arc<ArcSwap<AHashCatalog>>,
     pub db_config: Option<DbConnectionConfig>,
     pub subtitles_dir: PathBuf,
     pub coupling_registry: Arc<std::sync::RwLock<CouplingRegistry>>,
@@ -179,6 +182,8 @@ pub struct AppStateInitOptions {
     pub dbphash_path: Option<PathBuf>,
     /// Additional search directories for loose `.phash` files.
     pub extra_phash_dirs: Vec<PathBuf>,
+    /// Explicit target `.ahash` directory containing audio fingerprints.
+    pub ahash_dir: Option<PathBuf>,
 }
 
 impl AppState {
@@ -275,12 +280,26 @@ impl AppState {
 
         let dbphash_reader = Arc::new(ArcSwapOption::new(initial_engine.dbphash_arc()));
 
+        let default_ahash = if Path::new("data/__AHASH__").exists() {
+            PathBuf::from("data/__AHASH__")
+        } else if Path::new("../../data/__AHASH__").exists() {
+            PathBuf::from("../../data/__AHASH__")
+        } else {
+            PathBuf::from(crate::constants::DEFAULT_AHASH_DATA_DIR)
+        };
+        let ahash_dir = options.ahash_dir.unwrap_or(default_ahash);
+        let initial_ahash_catalog =
+            AHashCatalog::load_from_dir(&ahash_dir).unwrap_or_else(|_| AHashCatalog::empty());
+        let ahash_catalog = Arc::new(ArcSwap::from_pointee(initial_ahash_catalog));
+
         Self {
             phash_dir,
             extra_phash_dirs,
             dbphash_path: Arc::new(std::sync::RwLock::new(initial_catalog_path)),
             dbphash_reader,
             engine: Arc::new(std::sync::RwLock::new(initial_engine)),
+            ahash_dir,
+            ahash_catalog,
             db_config: None,
             subtitles_dir,
             coupling_registry,
@@ -464,13 +483,19 @@ impl AppState {
             }
         }
 
+        let new_ahash =
+            AHashCatalog::load_from_dir(&self.ahash_dir).unwrap_or_else(|_| AHashCatalog::empty());
+        let ahash_medias = new_ahash.entries.len();
+        let ahash_frames = new_ahash.total_frames;
+        self.ahash_catalog.store(Arc::new(new_ahash));
+
         let elapsed_ms = t0.elapsed().as_secs_f64() * 1000.0;
         self.push_log(
             "CATALOG",
             "INFO",
             format!(
-                "Reloaded in {:.2}ms: {} medias ({} cuts, {} sparse), {} loose files, {} certified couplings",
-                elapsed_ms, media_count, cuts_count, sparse_count, loose_file_count, coupling_count
+                "Reloaded in {:.2}ms: {} medias ({} cuts, {} sparse), {} loose files, {} certified couplings, {} ahash medias ({} frames)",
+                elapsed_ms, media_count, cuts_count, sparse_count, loose_file_count, coupling_count, ahash_medias, ahash_frames
             ),
         );
 
@@ -482,6 +507,8 @@ impl AppState {
             cuts_entries: cuts_count,
             sparse_entries: sparse_count,
             certified_couplings: coupling_count,
+            ahash_medias,
+            ahash_frames,
         })
     }
 
@@ -620,6 +647,10 @@ impl AppState {
             frame_counts.extend(delta.medias().iter().map(|m| m.frame_count));
         }
 
+        let ahash_cat = self.ahash_catalog.load();
+        let ahash_medias = ahash_cat.entries.len();
+        let ahash_frames = ahash_cat.total_frames;
+
         CatalogStatusResponse {
             base_medias,
             base_cuts,
@@ -631,6 +662,8 @@ impl AppState {
             total_medias: base_medias + delta_medias,
             total_frames: frame_counts.iter().flatten().sum(),
             medias_without_frame_count: frame_counts.iter().filter(|n| n.is_none()).count(),
+            ahash_medias,
+            ahash_frames,
         }
     }
 

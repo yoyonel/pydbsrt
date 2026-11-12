@@ -149,6 +149,60 @@ Recherche de correspondances par empreintes pHash.
   }
   ```
 
+### `POST /v1/search/ahash`
+Recherche acoustique par cross-corrélation temporelle d'empreintes sub-fingerprint Haitsma-Kalker (`.ahash` v1.0).
+Supporte nativement la fenêtre optimale empirique ($W = 5.0\text{ s}$, 430 trames) ainsi que 3 formats d'encodage du flux d'entrée (`hashes`, `fingerprint` hex ou `ahash_bytes` base64).
+
+**Corps de la requête** :
+  ```json
+  {
+    "hashes": [11649234873721389056, 11649234873721389057],
+    "audio_fps": 86.125,
+    "max_distance": 14.0,
+    "limit": 5,
+    "media_name": "Berserk.1997.EP01"
+  }
+  ```
+* `hashes` : tableau d'entiers 64 bits non signés (alternative : `fingerprint` avec chaînes hexadécimales `"0x..."`, ou `ahash_bytes` avec charge binaire little-endian encodée en base64).
+* `audio_fps` : cadence d'échantillonnage de l'empreinte requête (défaut : `86.125` fps).
+* `max_distance` : seuil moyen maximal de bits erronés par trame sur 64 bits (défaut : `14.0`).
+* `limit` : nombre maximal de candidats retournés (défaut : `5`).
+* `media_name` : filtrage optionnel pour cibler un média de référence précis.
+
+**Réponse** :
+  ```json
+  {
+    "success": true,
+    "best_match": {
+      "media_name": "Berserk.1997.EP01",
+      "file_path": "data/__AHASH__/Berserk.1997.EP01.86.1fps.ahash",
+      "ref_frame_offset": 60,
+      "offset_sec": 0.69666,
+      "offset_ms": 697,
+      "mean_distance": 2.45,
+      "score": 0.9617,
+      "snr_bits": 29.55,
+      "audio_fps": 86.125
+    },
+    "candidates": [
+      {
+        "media_name": "Berserk.1997.EP01",
+        "file_path": "data/__AHASH__/Berserk.1997.EP01.86.1fps.ahash",
+        "ref_frame_offset": 60,
+        "offset_sec": 0.69666,
+        "offset_ms": 697,
+        "mean_distance": 2.45,
+        "score": 0.9617,
+        "snr_bits": 29.55,
+        "audio_fps": 86.125
+      }
+    ],
+    "total_catalog_files": 583,
+    "total_catalog_frames": 106093804,
+    "elapsed_seconds": 0.0142
+  }
+  ```
+
 ### `POST /v1/autosync`
 Endpoint combiné utilisé par les plugins VLC : analyse les empreintes extraites de la lecture en cours, calcule le décalage consensus (\( \Delta t \)), et renvoie le sous-titre aligné en une seule passe.
 **Corps de la requête** :

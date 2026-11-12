@@ -120,3 +120,31 @@ Le rapport console et le fichier JSON de télémétrie (`data/reports/eval_ahash
 3. **Marge SNR** : Différence entre la distance de Hamming au pic d'alignement et la distance moyenne sur le bruit non corrélé (nominal : \(\ge 28\text{ bits}\)).
 4. **Faux Positifs Croisés (Axe 2)** : Nombre de correspondances erronées détectées sur des paires de médias distincts (nominal : \(0 / 500\) pour un seuil \(\le 12.5\text{ bits}\)).
 5. **Débit POPCNT (Axe 3)** : Vitesse brute de balayage exprimée en heures de média analysées par seconde par cœur CPU (nominal : \(> 10\,000\,000\text{ h/s/cœur}\)).
+
+---
+
+## 7. Interroger le Démon via l'API REST `/v1/search/ahash`
+
+Une fois le serveur démarré (`dbsrt-server`), les clients (lecteurs VLC, scripts d'ingestion ou workers) peuvent soumettre un extrait sub-fingerprint pour obtenir l'offset milliseconde exact $\Delta t$ :
+
+```bash
+# Exemple de requête HTTP avec charge JSON (hashes ou fingerprint hex)
+curl -s -X POST http://localhost:8080/v1/search/ahash \
+  -H "Content-Type: application/json" \
+  -d '{
+    "fingerprint": [
+      "0x123456789abcdef0",
+      "0x23456789abcdef01"
+    ],
+    "audio_fps": 86.125,
+    "max_distance": 14.0,
+    "limit": 3
+  }'
+```
+
+Le serveur répond avec le meilleur candidat reconnu, la marge SNR et le décalage calculé en millisecondes (`offset_ms`).
+Pour forcer la prise en compte de nouveaux fichiers `.ahash` sans redémarrer le démon :
+
+```bash
+curl -s -X POST http://localhost:8080/v1/catalog/reload
+```

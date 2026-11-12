@@ -158,3 +158,18 @@ pub const DEFAULT_SSE_INTERVAL_MS: u64 = 2_000;
 
 /// Keep-alive ping interval in seconds for SSE connections to prevent proxy timeouts.
 pub const DEFAULT_SSE_KEEPALIVE_SECS: u64 = 15;
+
+/// Default directory containing acoustic fingerprint `.ahash` files.
+pub const DEFAULT_AHASH_DATA_DIR: &str = "data/__AHASH__";
+
+/// Canonical sampling framerate for `.ahash` audio fingerprints (~86.125 fps).
+pub const DEFAULT_AHASH_FPS: f64 = 86.125;
+
+/// Default maximum allowed mean Hamming distance per frame for audio matching (out of 64 bits).
+pub const DEFAULT_AHASH_MAX_DISTANCE: f64 = 14.0;
+
+/// Default maximum number of acoustic match candidates returned.
+pub const DEFAULT_AHASH_SEARCH_LIMIT: usize = 5;
+
+/// Optimal empirical audio query window length in frames (~5.0 seconds at 86.125 fps).
+pub const OPTIMAL_AHASH_WINDOW_FRAMES: usize = 430;

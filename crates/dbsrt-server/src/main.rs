@@ -51,6 +51,10 @@ pub struct ServerCli {
     #[arg(long, env = "DBSRT_DBPHASH")]
     pub dbphash: Option<PathBuf>,
 
+    /// Optional directory storing .ahash acoustic fingerprint files (env: DBSRT_AHASH_DIR)
+    #[arg(long, env = "DBSRT_AHASH_DIR")]
+    pub ahash_dir: Option<PathBuf>,
+
     /// Optional PostgreSQL host (env: PSQL_IP). If omitted, runs in local Zero-DB mode.
     #[arg(long, env = "PSQL_IP")]
     pub db_host: Option<String>,
@@ -112,6 +116,7 @@ impl ServerCli {
             AppStateInitOptions {
                 dbphash_path: self.dbphash,
                 extra_phash_dirs: self.extra_phash_dirs,
+                ahash_dir: self.ahash_dir,
             },
         );
         state.db_config = db_config;

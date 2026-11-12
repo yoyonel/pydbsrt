@@ -1,5 +1,6 @@
 //! In-memory and memory-mapped search index for perceptual hashes.
 
+pub mod ahash;
 pub mod bktree;
 pub mod db;
 pub mod dbphash;
@@ -9,6 +10,10 @@ pub mod mih;
 pub mod mmap;
 pub mod trajectory_runner;
 
+pub use ahash::{
+    parse_ahash_media_name, AHashCatalog, AHashCatalogEntry, AHashCatalogMatch,
+    AHashSearchCriteria, DEFAULT_AHASH_SEARCH_LIMIT, MIN_QUERY_FRAMES,
+};
 pub use bktree::{BkItem, BkTree};
 pub use db::{
     parse_fps_from_phash_stem, validate_lang_code, DbClient, DbMatch, DbMediaRecord,
