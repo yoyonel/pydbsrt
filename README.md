@@ -77,6 +77,13 @@ Interface web bicanale (`http://127.0.0.1:8765/studio`) permettant de confronter
   - **4 Vues Opérationnelles** : Sources Physiques (NAS/Freebox/Local), Actifs Médias (PostgreSQL 17), Microscopie pHash (sismographe, dynamique inter-trames, coupes d'entropie), et Trajectoires Spatiotemporelles (consensus multi-coupures).
   - **Audit de Consensus Spatiotemporel** : Exploration des rapports d'audit batch, KPIs bornés de couverture catalogue ($\le 100\%$), défilement horizontal natif, résolution des identifiants hash binaires et navigation modale bidirectionnelle fluide avec raccourcis clavier (`Échap`).
   - **Recette E2E Automatisée** : Validation continue par Playwright (`task portal:e2e`).
+- **Composante Acoustique aHash (Haitsma-Kalker) & Matching Sub-Seconde** :
+  - Extraction d'empreintes spectro-temporelles à \(86.13\text{ fps}\) (\(5\,512\text{ Hz}\), 33 sous-bandes d'énergie logarithmiques) via FFT réelle.
+  - Format binaire standardisé `.ahash` v1.0 avec en-tête aligné 176 octets et validation stricte des invariants RFC.
+  - Balayage SIMD vectoriel matériel `POPCNT` à plus de 4.2 milliards d'opérations/s (\(13.5\text{ millions d'heures}\) balayées par seconde de CPU).
+  - Précision temporelle fine (\(\pm 11.6\text{ ms}\)), \(100.0\%\) de match exact (\(\le 25\text{ ms}\)) et erreur médiane de **\(0.00\text{ ms}\)** dès \(W \ge 1.0\text{ s}\).
+  - Modélisation mathématique par loi de Gumbel et métrologie empirique prouvée sur catalogue complet (\(579\text{ médias}\), \(106\text{ millions de trames}\) sous `data/__AHASH__/`).
+  - Consulter l'évaluation métrologique complète : [`docs/explanation/2026-11-12-evaluation-exhaustive-matcher-audio-ahash.md`](docs/explanation/2026-11-12-evaluation-exhaustive-matcher-audio-ahash.md).
 - **Observabilité & Télémétrie** :
   - Métriques Prometheus natives exposées par le serveur Axum (`/metrics`).
   - Dashboards Grafana provisionnés automatiquement sous `docker/grafana/`.

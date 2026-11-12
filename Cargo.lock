@@ -648,6 +648,7 @@ dependencies = [
  "chardetng",
  "criterion",
  "encoding_rs",
+ "rayon",
  "realfft",
  "reqwest",
  "rustix 1.1.5",
