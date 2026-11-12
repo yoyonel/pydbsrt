@@ -76,6 +76,18 @@ tags:
     </div>
   </div>
 
+  <div class="dbsrt-bento-card bento-teal">
+    <div class="bento-header">
+      <span class="bento-icon">🔬</span>
+      <span class="bento-badge">R&amp;D aHash vs pHash</span>
+    </div>
+    <h3>Analyse Comparative : MIH-16 vs MIH-32</h3>
+    <p>Étude approfondie de la divergence de comportement : pourquoi MIH-32 accélère aHash de 3 460x (2.1 ms) mais dégrade le recall pHash (30% d'échecs).</p>
+    <div class="bento-links">
+      <a href="2026-11-12-analyse-mih16-vs-mih32-ahash-phash/">→ Analyser le comportement MIH-16 vs MIH-32</a>
+    </div>
+  </div>
+
   <div class="dbsrt-bento-card bento-amber">
     <div class="bento-header">
       <span class="bento-icon">🔗</span>
