@@ -38,6 +38,7 @@ Cette page dresse le dictionnaire exhaustif de toutes les cibles d'orchestration
 | `task media:top:py` | `task media:top:py -- [--stats]` | Prototype historique Python Rich du moniteur TUI. |
 | `task coupling:certify` | `task coupling:certify` | Découvre et certifie en lot tous les fichiers `.phash` et `.srt` présents. |
 | `task coupling:relabel` | `task coupling:relabel -- --media <hash> [--sub <hash>] --lang <code>` | Modifie la langue ou la confiance d'un couplage existant. |
+| `task audio:export-ahash` | `task audio:export-ahash -- --media <input> --output <ahash>` | Extrait l'empreinte spectrale acoustique Haitsma-Kalker `.ahash` v1.0 via `dbsrt export-ahash`. |
 
 ---
 
@@ -108,6 +109,7 @@ Cette page dresse le dictionnaire exhaustif de toutes les cibles d'orchestration
 | `task test:infra` | Exécute le harnais de tests d'infrastructure et chaos testing. |
 | `task eval:nas-snippets` | Exécute la matrice d'évaluation quantitative sur l'ensemble des snippets NAS réels (`scripts/benchmarks/eval_exhaustive_nas_snippets.py`). |
 | `task eval:matching:multi-offset` | Benchmark de comparaison Mono-Fenêtre ($t=50\%$) vs Multi-Fenêtres Spatio-Temporel ($20\%, 50\%, 80\%$) sur corpus difficile (`scripts/benchmarks/eval_multi_offset_matching.py`). |
+| `task bench:ahash:matching` | Exécute l'évaluation métrologique exhaustive du matcher acoustique aHash (Axe 1 temporal, Axe 2 discrimination, Axe 3 débit) via `dbsrt bench-ahash`. (Alias : `task bench:ahash`). |
 | `task eval:cuts:audit` | Exécute l'audit complet de performance du pipeline sur l'ensemble des cuts vidéo (`scripts/ingestion/audit_cuts_pipeline.py`). |
 | `task eval:cuts:audit:rejected` | Exécute l'analyse forensique exhaustive des cuts rejetés et met à jour la documentation (`scripts/ingestion/audit_rejected_cuts.py`). |
 
@@ -163,6 +165,8 @@ Cette page dresse le dictionnaire exhaustif de toutes les cibles d'orchestration
 | `task o2switch:sync` | Synchronise les binaires statiques, la passerelle `index.php` + `.htaccess` et les sous-titres (`--update`) par rsync. Le catalogue `catalog.dbphash` local n'est envoyé que s'il manque sur o2switch : le catalogue distant est recompacté sur place. |
 | `task o2switch:batch:tvshow` | Exécute l'ingestion par batch distante sur les séries vierges (/tvshow, supporte `--daemon`, `--fresh-only`, `--retry-failed`, `--max-extraction-secs`). |
 | `task o2switch:batch:movies` | Exécute l'ingestion par batch distante sur les films vierges (/video, supporte `--daemon`, `--fresh-only`, `--retry-failed`, `--max-extraction-secs`). |
+| `task o2switch:batch:all` | Exécute l'ingestion batch unifiée sur l'intégralité du corpus distant (/tvshow + /video). |
+| `task o2switch:batch:ahash:all` | Exécute l'extraction batch audio pure (`--mode ahash`) en streaming sur l'ensemble de la bibliothèque. |
 | `task o2switch:batch:status` | Vérifie l'état d'exécution du démon batch (PID, CPU, mémoire, progression détaillée de la file). |
 | `task o2switch:batch:pause` | Met en pause douce le batch distant sur o2switch (`run/batch_paused` : les jobs en cours finissent, aucun nouveau job dépilé). |
 | `task o2switch:batch:resume` | Reprend l'exécution du batch distant sur o2switch en supprimant `run/batch_paused`. |
