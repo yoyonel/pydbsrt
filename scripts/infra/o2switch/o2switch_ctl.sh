@@ -613,9 +613,11 @@ REMOTE_SCRIPT
     echo "-> Pulling audit runs & logs..."
     rsync -avz --progress --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${O2SWITCH_HOST}:${REMOTE_BASE}/audit/" "audit/" || true
     if [[ "${WITH_PHASH}" == "true" ]]; then
-      mkdir -p data/__PHASH__
+      mkdir -p data/__PHASH__ data/__AHASH__
       echo "-> Pulling loose .phash fingerprints & metadata..."
       rsync -avz --progress --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/__PHASH__/" "data/__PHASH__/" || true
+      echo "-> Pulling loose .ahash fingerprints & metadata..."
+      rsync -avz --progress --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/__AHASH__/" "data/__AHASH__/" || true
       python3 "${REPO_ROOT}/scripts/ingestion/phash_dedupe.py" "data/__PHASH__" --apply || true
     fi
     if systemctl --user is-active --quiet dbsrt-agent 2>/dev/null; then
@@ -655,7 +657,7 @@ REMOTE_SCRIPT
     echo "✓ Backup of raw .phash fingerprints completed to ${TARGET_DIR}."
     ;;
 
-  batch-tvshow | batch-movies)
+  batch-tvshow | batch-movies | batch-all)
     check_ssh
     shift || true
     TARGET_TYPE="tvshow"
@@ -666,6 +668,10 @@ REMOTE_SCRIPT
       TARGET_TYPE="movies"
       LOCAL_SCAN_DIR="${NAS_VIDEO_DIR:-/media/${LOCAL_USER}/Synology/video}"
       REMOTE_NAS_BASE="/video"
+    elif [[ "${ACTION}" == "batch-all" ]]; then
+      TARGET_TYPE="all"
+      LOCAL_SCAN_DIR=""
+      REMOTE_NAS_BASE="all"
     fi
     TARGETS_FILE="data/reports/selected_batch_targets.json"
     DAEMON_MODE=false
@@ -679,6 +685,11 @@ REMOTE_SCRIPT
           WORKER_ARGS+=("$1")
           SCAN_ARGS+=("$1")
           ;;
+        --mode)
+          WORKER_ARGS+=("$1" "${2:?--mode needs a value}")
+          SCAN_ARGS+=("$1" "$2")
+          shift
+          ;;
         --limit)
           WORKER_ARGS+=("$1" "${2:?--limit needs a value}")
           SCAN_ARGS+=("$1" "$2")
@@ -690,13 +701,17 @@ REMOTE_SCRIPT
     done
 
     # shellcheck disable=SC2029
-    ssh "${O2SWITCH_HOST}" "cd $(printf '%q' "${REMOTE_BASE}") && mkdir -p scripts data/reports data/SRT data/__PHASH__ run logs etc"
+    ssh "${O2SWITCH_HOST}" "cd $(printf '%q' "${REMOTE_BASE}") && mkdir -p scripts data/reports data/SRT data/__PHASH__ data/__AHASH__ run logs etc"
     WORKER_SCRIPT="${REPO_ROOT}/scripts/workers/o2switch_batch_worker.py"
     [[ -f "${WORKER_SCRIPT}" ]] || WORKER_SCRIPT="${SCRIPT_DIR}/o2switch_batch_worker.py"
     rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" --chmod=F755 "${WORKER_SCRIPT}" "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/"
+    if [[ -f "${REPO_ROOT}/data/reports/nas_ftp_index.json" ]]; then
+      echo "-> Synchronizing cached NAS FTP index..."
+      rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${REPO_ROOT}/data/reports/nas_ftp_index.json" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/reports/"
+    fi
 
-    # With a local NAS mount, select targets locally; otherwise the worker scans the NAS over FTP
-    if [[ -d "${LOCAL_SCAN_DIR}" ]]; then
+    # With a local NAS mount with files, select targets locally; otherwise the worker scans the NAS over FTP
+    if [[ -d "${LOCAL_SCAN_DIR}" && -n "$(find "${LOCAL_SCAN_DIR}" -mindepth 1 -print -quit 2>/dev/null)" ]]; then
       echo "-> Resolving ${TARGET_TYPE} targets locally (${LOCAL_SCAN_DIR})..."
       rm -f "${TARGETS_FILE}"
       SCANNER_SCRIPT="${REPO_ROOT}/scripts/ingestion/batch_media_add_tvshow.py"
@@ -1091,7 +1106,7 @@ REMOTE_TRAJ_STATUS
     ;;
 
   *)
-    echo "Usage: $0 {build|test-local|sync|deploy|rollback|releases|start|stop|restart|status|logs|demo|setup-cron|remove-cron|rotate-key|rotate-readonly-key|monitoring|top|pull-catalog|backup-nas|batch-tvshow|batch-movies|batch-status|batch-summary|batch-sync|batch-pause|batch-resume|batch-workers|batch-stop|batch-logs|faultwatch|audit|trajectory}"
+    echo "Usage: $0 {build|test-local|sync|deploy|rollback|releases|start|stop|restart|status|logs|demo|setup-cron|remove-cron|rotate-key|rotate-readonly-key|monitoring|top|pull-catalog|backup-nas|batch-tvshow|batch-movies|batch-all|batch-status|batch-summary|batch-sync|batch-pause|batch-resume|batch-workers|batch-stop|batch-logs|faultwatch|audit|trajectory}"
     exit 1
     ;;
 esac

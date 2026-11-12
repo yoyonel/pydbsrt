@@ -58,6 +58,7 @@ dbsrt media:add <VIDEO_PATH> [SRT_PATH] [OPTIONS]
 - `--all-embedded` : Extraire et certifier tous les flux de sous-titres textuels intégrés au conteneur vidéo.
 - `--hwaccel <mode>` : Moteur d'accélération matérielle (`auto`, `vaapi`, `cuda`, `qsv`, `disabled`). Par défaut : `auto` (utilise le GPU matériel si présent, avec fallback CPU automatique).
 - `--force` : Forcer le recalcul et l'écrasement des empreintes existantes.
+- `--ahash-dir <DIR>` : Répertoire de destination pour l'extraction conjointe de l'empreinte acoustique `.ahash` (mode dual-hash). Si le média est muet ou dépourvu de flux audio, bascule automatiquement et silencieusement sur le calcul pHash visuel seul sans lever d'erreur.
 - `--no-reload` : Désactiver l'appel de hot-reload vers `dbsrt-server`.
 
 ---
@@ -95,6 +96,38 @@ dbsrt export-phash --input <VIDEO_PATH> --output <PHASH_PATH> [OPTIONS]
 
 - `--fps <FPS>` : Fréquence d'extraction (défaut : `25.0` ou framerate natif).
 - `--method <METHOD>` : Méthode d'échantillonnage : `fixed`, `cuts` ou `hybrid` (défaut : `hybrid`).
+
+---
+
+### `export-ahash`
+Extrait les empreintes acoustiques spectrales Haitsma-Kalker `.ahash` v1.0 (en-tête 32 octets, banc 33 filtres Bark, 5512 Hz mono, trames 64-bit à 86.13 fps).
+
+```text
+dbsrt export-ahash --media <MEDIA_PATH> --output <AHASH_PATH> [OPTIONS]
+```
+
+- `--media <MEDIA_PATH>` (ou `-m`) : Chemin vers le fichier multimédia local ou URI de flux réseau (`ftp://`, `http://`).
+- `--output <AHASH_PATH>` (ou `-o`) : Chemin de destination du fichier binaire `.ahash`.
+- `--sample-rate <HZ>` (ou `-r`) : Taux d'échantillonnage audio (défaut : `5512`).
+- `--hop-size <SAMPLES>` : Pas glissant en échantillons PCM (défaut : `64`, soit ~11.6 ms / 86.13 fps).
+- `--start-sec <SEC>` : Décalage de départ en secondes (défaut : `0.0`).
+- `--duration <SEC>` : Durée maximale à extraire en secondes (défaut : totalité du flux).
+- `--json` : Émet les métadonnées et statistiques d'extraction au format JSON structuré sur stdout.
+
+---
+
+### `bench-ahash`
+Moteur de benchmark et de qualification métrologique de la corrélation croisée acoustique Haitsma-Kalker sur catalogue réel (Axe 1 précision temporelle, Axe 2 rejet faux-positifs, Axe 3 débit brut POPCNT).
+
+```text
+dbsrt bench-ahash [OPTIONS]
+```
+
+- `--ahash-dir <DIR>` : Répertoire contenant les fichiers `.ahash` de référence (défaut : `data/__AHASH__`).
+- `--samples <N>` : Nombre d'échantillons aléatoires par fenêtre de test (défaut : `200`).
+- `--cross-media-trials <N>` : Nombre de paires inter-médias croisées pour mesurer le rejet de faux positifs (défaut : `500`).
+- `--max-distance <BITS>` : Seuil d'admissibilité de distance de Hamming maximale (défaut : `14.0`, optimal : `12.5`).
+- `--json-out <PATH>` : Chemin d'export télémétrique JSON complet des métriques (défaut : `data/reports/eval_ahash_matching.json`).
 
 ---
 

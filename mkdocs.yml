@@ -127,6 +127,7 @@ nav:
       - Basculer les Cibles de Backend VLC: how-to/basculer-cibles-vlc-local-cloud-rpi4.md
       - Exécuter un Matching E2E Réel & Relais Cloud: how-to/executer-matching-e2e-reel-et-relais-cloud.md
       - Ajouter et Indexer un Média (media:add): how-to/ajouter-et-indexer-un-media.md
+      - Extraire & Évaluer Empreintes Audio aHash: how-to/2026-11-12-extraire-et-evaluer-empreintes-audio-ahash.md
       - Guide Façade Unifiée media:add: how-to/2026-10-25-guide-media-add-facade.md
       - Certifier un Couplage Média-Sous-Titres: how-to/certifier-un-couplage.md
       - Guide Pratique Ingestion & Certification: how-to/2026-10-24-guide-pratique-ingestion-et-certification-media.md
@@ -151,6 +152,7 @@ nav:
       - Contribuer à la Documentation Diátaxis: how-to/contribuer-documentation-diataxis.md
       - Valider le Portail Monitoring avec Playwright: how-to/valider-le-portail-monitoring-avec-playwright.md
       - Diagnostiquer Sources Médias Multi-Environnements: how-to/2026-11-09-diagnostiquer-sources-medias-multi-environnements.md
+      - Auditer Actifs Médias & Intégrité pHash (PostgreSQL): how-to/2026-11-09-auditer-actifs-medias-et-integrite-phash-postgresql.md
   - 📖 Référence Technique:
       - Index des Spécifications: reference/index.md
       - CLI Standalone Rust (dbsrt): reference/cli.md
@@ -158,6 +160,7 @@ nav:
       - API REST & CLI Portail Sources Médias: reference/2026-11-09-api-portail-sources-medias.md
       - Schéma PostgreSQL 17 & SP-GiST: reference/schema-postgresql.md
       - Formats de Fichiers & Spécifications: reference/formats-fichiers.md
+      - RFC Format Binaire .ahash (Audio): reference/2026-11-10-rfc-ahash-format-audio.md
       - Catalogue des Commandes Taskfile: reference/taskfile.md
       - Inventaire Exhaustif des Scripts: reference/scripts-inventory-2026-11-10.md
       - Audit Régressions & Cartographie Scripts: reference/2026-11-10-audit-exhaustif-scripts-regressions.md
@@ -208,6 +211,12 @@ nav:
       - Modèle Inputs-First (Sources & Assets): explanation/2026-11-08-modele-donnees-inputs-media-sources-et-assets.md
       - Identité Binaire des Conteneurs & Anti-Shadowing: explanation/2026-11-08-etude-architecture-identite-binaire-conteneurs-et-anti-shadowing.md
       - Architecture Portail Sources Médias Multi-Environnements: explanation/2026-11-09-architecture-portail-medias-et-sources-multi-environnements.md
+      - Architecture Streams SSE & Polling Monitoring: explanation/2026-11-04-architecture-stream-sse-et-optimisation-polling-monitoring.md
+      - Réconciliation Actifs Médias & Empreintes pHash: explanation/2026-11-09-reconciliation-actifs-medias-et-empreintes-phash.md
+      - Étude R&D Empreinte Audio aHash (Haitsma-Kalker): explanation/2026-11-10-etude-rd-empreinte-audio-ahash-haitsma-kalker.md
+      - Validation Empirique Reconnaissance Audio & Scaling: explanation/2026-11-10-validation-empirique-reconnaissance-audio-ahash-et-scaling.md
+      - Évaluation Métrologique Matcher Audio aHash: explanation/2026-11-12-evaluation-exhaustive-matcher-audio-ahash.md
+      - Post-Mortem INC-2026-11-12-01 (Auto-Heal Batch o2switch): explanation/2026-11-12-post-mortem-inc-2026-11-12-01-blocage-auto-heal-batch-o2switch.md
   - 📊 Benchmarks & Preuves:
       - Campagnes Empiriques:
           - Rapport Batch TVShow Synology: history/2026-10-25-rapport-batch-import-tvshow-synology.md
@@ -236,6 +245,7 @@ nav:
           - ADR Cas Limites Façade Ingestion: decisions/2026-10-25-media-add-edge-cases.md
           - ADR Transport Freebox vers o2switch: decisions/2026-10-30-transport-freebox-nat-gateway-http.md
           - ADR dbsrt-server sur Socket Unix (o2switch): decisions/2026-10-31-dbsrt-server-unix-socket-o2switch.md
+          - ADR Moviehash comme Identifiant Canonique: decisions/2026-10-31-phash-identifiant-moviehash.md
           - ADR Banc Continu de Reconnaissance: decisions/2026-10-31-banc-continu-reconnaissance.md
       - Archives & Rapports Techniques:
           - Intégration Daemon Axum & VLC: history/2026-10-15-vlc-integration-daemon-and-plugins.md

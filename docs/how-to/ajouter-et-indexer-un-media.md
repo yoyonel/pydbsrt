@@ -70,6 +70,17 @@ find /data/video_corpus/ -name "*.mp4" -o -name "*.mkv" | while read -r video; d
 done
 ```
 
+### 5. Ingestion Conjointe Dual-Hash Visuel & Audio (`--ahash-dir`)
+
+Pour extraire simultanément l'empreinte visuelle pHash 64-bit et l'empreinte spectrale acoustique Haitsma-Kalker `.ahash` v1.0 :
+
+```bash
+task media:add -- /chemin/vers/mon_film.mkv --ahash-dir data/__AHASH__
+```
+
+- Le moteur extrait conjointement l'empreinte visuelle `.phash` et génère `data/__AHASH__/<media_stem>.ahash`.
+- **Résilience automatique** : Si le conteneur vidéo est muet ou ne comporte aucune piste audio valide, le processus ne plante pas et bascule silencieusement sur le calcul de l'empreinte vidéo seule avec avertissement de log.
+
 ---
 
 ## Validation Immédiate

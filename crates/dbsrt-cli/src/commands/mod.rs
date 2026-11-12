@@ -1,8 +1,10 @@
 //! Modular CLI command handlers implementing Separation of Concerns (SoC).
 
 pub mod bench;
+pub mod bench_ahash;
 pub mod certify;
 pub mod export;
+pub mod export_ahash;
 pub mod fetch;
 pub mod import;
 pub mod inspect;
@@ -19,12 +21,14 @@ pub mod shared;
 pub mod top;
 
 pub use bench::{run_bench_cuts, run_bench_phash, run_bench_video, BenchCutsArgs, BenchVideoArgs};
+pub use bench_ahash::{run_bench_ahash, BenchAhashArgs};
 #[allow(deprecated)]
 pub use certify::{
     detect_cli_subtitle_lang, detect_cli_subtitle_lang_status, run_certify_coupling,
     CertifyCouplingArgs,
 };
 pub use export::{run_export_phash, ExportPhashArgs};
+pub use export_ahash::{run_export_ahash, ExportAhashArgs};
 pub use fetch::{run_fetch_subtitles, FetchSubtitlesArgs};
 pub use import::{run_import_phash, ImportPhashArgs};
 pub use inspect::{run_inspect_media, InspectMediaArgs};
@@ -36,7 +40,7 @@ pub use recognize::{format_set, run_recognize_media, AggregatedMatch, RecognizeA
 pub use relabel::{run_relabel_coupling, RelabelCouplingArgs};
 pub use retarget::{run_retarget_subtitles, RetargetArgs};
 pub use scan::{run_scan_library, ScanLibraryArgs};
-pub use shared::{connect_db, find_or_build_phash, resolve_db_host};
+pub use shared::{connect_db, find_or_build_ahash, find_or_build_phash, resolve_db_host};
 pub use top::{run_top, TopArgs};
 
 #[cfg(test)]

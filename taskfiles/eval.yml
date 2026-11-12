@@ -132,3 +132,16 @@ tasks:
     deps: [rs:build]
     cmds:
       - uv run --no-sync python scripts/ingestion/fill_nas_snippets_catalog.py {{.CLI_ARGS}}
+
+  audio:export-ahash:
+    desc: Extract Haitsma-Kalker 64-bit audio spectral hash (.ahash v1.0) via dbsrt CLI
+    deps: [rs:build]
+    cmds:
+      - ./target/release/dbsrt export-ahash {{.CLI_ARGS}}
+
+  bench:ahash:matching:
+    desc: Run exhaustive acoustic cross-correlation benchmark on .ahash files (Axe 1 temporal, Axe 2 discrimination, Axe 3 throughput)
+    aliases: [bench:ahash]
+    deps: [rs:build]
+    cmds:
+      - ./target/release/dbsrt bench-ahash {{.CLI_ARGS}}

@@ -9,9 +9,12 @@ use dbsrt_index::{parse_fps_from_phash_stem, DbClient};
 use std::path::{Path, PathBuf};
 
 use crate::cli::PostgresArgs;
-use crate::constants::{DEFAULT_POSTGRES_HOST, PHASH_DOT_EXT, PHASH_EXT};
+use crate::constants::{
+    AHASH_DOT_EXT, DEFAULT_AHASH_HOP_SIZE, DEFAULT_AHASH_SAMPLE_RATE, DEFAULT_POSTGRES_HOST,
+    PHASH_DOT_EXT, PHASH_EXT,
+};
 
-pub use dbsrt_core::{phash_file_name, PhashSidecar};
+pub use dbsrt_core::{ahash_file_name, phash_file_name, PhashSidecar};
 
 /// Resolve target PostgreSQL host falling back to PSQL_IP env or DEFAULT_POSTGRES_HOST.
 pub fn resolve_db_host(db: &PostgresArgs) -> String {
@@ -113,6 +116,110 @@ fn scan_existing_phash(
     // NOTE: match_stem_phash fuzzy fallback was strictly REMOVED to prevent anti-shadowing bugs
     // (e.g. short snippets like "Movie_mid15s.phash" masking full 2-hour master movies).
     Ok(None)
+}
+
+fn match_prefix_ahash(entries: &[PathBuf], full_name: &str) -> Option<(PathBuf, Vec<u64>, f64)> {
+    if full_name.is_empty() {
+        return None;
+    }
+    for p in entries {
+        let name = p.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+        if !name.starts_with(full_name) || !name.ends_with(AHASH_DOT_EXT) {
+            continue;
+        }
+        let Ok(ahash_file) = dbsrt_core::AhashFile::read_from_path(p) else {
+            continue;
+        };
+        if ahash_file.hashes.is_empty() {
+            continue;
+        }
+        let fps = ahash_file.header.audio_fps();
+        return Some((p.clone(), ahash_file.hashes, fps));
+    }
+    None
+}
+
+fn scan_existing_ahash(
+    ahash_dir: &Path,
+    media_file: &Path,
+    moviehash: Option<&str>,
+) -> Result<Option<(PathBuf, Vec<u64>, f64)>> {
+    if !ahash_dir.exists() {
+        return Ok(None);
+    }
+    let dir_entries = match std::fs::read_dir(ahash_dir) {
+        Ok(entries) => entries,
+        Err(_) => return Ok(None),
+    };
+    let entries: Vec<_> = dir_entries.flatten().map(|e| e.path()).collect();
+
+    // 1. MovieHash exact prefix lookup: <moviehash>.<fps>fps.ahash
+    if let Some(res) = moviehash.and_then(|h| match_prefix_ahash(&entries, &format!("{h}."))) {
+        return Ok(Some(res));
+    }
+
+    // 2. Strict exact filename match (e.g. Media.mkv.86.1fps.ahash)
+    let full_name = media_file
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
+    if !full_name.is_empty() {
+        if let Some(res) = match_prefix_ahash(&entries, &full_name) {
+            return Ok(Some(res));
+        }
+    }
+
+    Ok(None)
+}
+
+/// Helper resolving an existing .ahash file or extracting a new one into `ahash_dir`.
+///
+/// # Arguments
+/// * `media_file` - Path or stream URI of the media file.
+/// * `ahash_dir` - Directory where .ahash files are stored.
+/// * `moviehash` - Optional 16-hex OpenSubtitles moviehash for canonical naming.
+///
+/// # Returns
+/// `(PathBuf, Vec<u64>, f64)` containing output path, audio hashes, and audio fps.
+///
+/// # Errors
+/// Returns `Err` if FFmpeg fails, audio cannot be decoded, or writing fails.
+pub fn find_or_build_ahash(
+    media_file: &Path,
+    ahash_dir: &Path,
+    moviehash: Option<&str>,
+) -> Result<(PathBuf, Vec<u64>, f64)> {
+    if let Some(res) = scan_existing_ahash(ahash_dir, media_file, moviehash)? {
+        eprintln!(
+            "Extraction: reused existing .ahash ({} frames), no decode",
+            res.1.len()
+        );
+        return Ok(res);
+    }
+
+    std::fs::create_dir_all(ahash_dir)?;
+    let options = dbsrt_core::AudioExtractionOptions {
+        sample_rate: DEFAULT_AHASH_SAMPLE_RATE,
+        hop_size: DEFAULT_AHASH_HOP_SIZE,
+        frame_size: dbsrt_core::DEFAULT_FRAME_SIZE,
+        start_sec: 0.0,
+        duration_sec: None,
+        custom_ffmpeg: None,
+    };
+
+    let ahash_file = dbsrt_core::extract_ahash(media_file, &options)?;
+    if ahash_file.hashes.is_empty() {
+        anyhow::bail!("No audio hashes could be extracted from {:?}", media_file);
+    }
+
+    let fps = ahash_file.header.audio_fps();
+    let file_name = resolve_media_path_filename(media_file)?;
+    let out_name = dbsrt_core::ahash_file_name(&file_name, moviehash, fps);
+    let out_path = ahash_dir.join(&out_name);
+
+    dbsrt_core::AhashFile::write_to_path(&out_path, &ahash_file.header, &ahash_file.hashes)?;
+
+    Ok((out_path, ahash_file.hashes, fps))
 }
 
 /// Discovers existing .phash file or extracts full perceptual hash fingerprint with hardware acceleration.

@@ -207,6 +207,26 @@ tasks:
     cmds:
       - ./scripts/infra/o2switch/o2switch_ctl.sh batch-movies {{.CLI_ARGS}}
 
+  o2switch:batch:all:
+    desc: Execute remote batch pHash extraction for all virgin NAS media (/tvshow + /video) on o2switch (supports --daemon)
+    cmds:
+      - ./scripts/infra/o2switch/o2switch_ctl.sh batch-all {{.CLI_ARGS}}
+
+  o2switch:batch:ahash:tvshow:
+    desc: Execute remote batch aHash audio extraction for virgin NAS episodes on o2switch (supports --daemon)
+    cmds:
+      - ./scripts/infra/o2switch/o2switch_ctl.sh batch-tvshow --mode ahash {{.CLI_ARGS}}
+
+  o2switch:batch:ahash:movies:
+    desc: Execute remote batch aHash audio extraction for virgin NAS movies (/video) on o2switch (supports --daemon)
+    cmds:
+      - ./scripts/infra/o2switch/o2switch_ctl.sh batch-movies --mode ahash {{.CLI_ARGS}}
+
+  o2switch:batch:ahash:all:
+    desc: Execute remote batch aHash audio extraction for all virgin NAS media (/tvshow + /video) on o2switch (supports --daemon)
+    cmds:
+      - ./scripts/infra/o2switch/o2switch_ctl.sh batch-all --mode ahash {{.CLI_ARGS}}
+
   o2switch:batch:status:
     desc: Check whether remote batch pHash worker is running on o2switch
     cmds:

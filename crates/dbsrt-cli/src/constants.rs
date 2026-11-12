@@ -69,6 +69,12 @@ pub const DEFAULT_PAL_FPS: f64 = 25.0;
 /// Standard NTSC film framerate (23.976 fps).
 pub const DEFAULT_NTSC_FILM_FPS: f64 = 23.976;
 
+/// Default audio sampling rate in Hz for .ahash extraction.
+pub const DEFAULT_AHASH_SAMPLE_RATE: u32 = 5512;
+
+/// Default hop size in samples for canonical .ahash extraction (~86.1 fps).
+pub const DEFAULT_AHASH_HOP_SIZE: usize = 64;
+
 /// Default sparse sampling framerate (1.0 fps).
 pub const DEFAULT_SPARSE_FPS: f64 = 1.0;
 
@@ -132,6 +138,9 @@ pub const FETCH_MAX_DOWNLOAD_ATTEMPTS: usize = 3;
 /// Dot-prefixed .phash binary fingerprint extension.
 pub const PHASH_DOT_EXT: &str = ".phash";
 
+/// Dot-prefixed .ahash binary audio fingerprint extension.
+pub const AHASH_DOT_EXT: &str = ".ahash";
+
 /// Divisor used to seek to the temporal midpoint of a media stream.
 pub const MIDPOINT_DURATION_DIVISOR: f64 = 2.0;
 
@@ -143,3 +152,21 @@ pub const DEFAULT_HTTP_TIMEOUT_SECS: u64 = 2;
 
 /// Known video extensions used for fingerprint stem conflict filtering.
 pub const KNOWN_VIDEO_EXTS: &[&str] = &[".mp4.", ".webm.", ".mkv.", ".avi.", ".mov."];
+
+/// Default evaluation query trial count per window size for ahash matching benchmark.
+pub const DEFAULT_BENCH_AHASH_SAMPLES: usize = 200;
+
+/// Default negative cross-media evaluation trial count for ahash matching benchmark.
+pub const DEFAULT_BENCH_AHASH_CROSS_TRIALS: usize = 500;
+
+/// Default maximum Hamming distance threshold for ahash matching (14.0 bits out of 32).
+pub const DEFAULT_BENCH_AHASH_MAX_DISTANCE: f64 = 14.0;
+
+/// Default directory containing acoustic fingerprint .ahash files.
+pub const DEFAULT_AHASH_DATA_DIR: &str = "data/__AHASH__";
+
+/// Default window sizes in seconds evaluated in ahash matching benchmark.
+pub const DEFAULT_BENCH_AHASH_WINDOWS: &str = "3,5,10,15,30";
+
+/// Maximum allowed time offset error in seconds to count as an exact match in benchmark.
+pub const BENCH_AHASH_EXACT_TOLERANCE_SEC: f64 = 0.025;

@@ -3,7 +3,9 @@
 //! - Hardware-accelerated Hamming distance (`hamming_distance`)
 //! - Binary file format definitions
 
+pub mod ahash;
 pub mod assets;
+pub mod audio;
 pub mod container;
 pub mod coupling;
 pub mod cuts;
@@ -20,10 +22,20 @@ pub mod srt;
 pub mod trajectory;
 pub mod video;
 
+pub use ahash::{
+    match_audio_sequence, AhashFile, AhashHeader, AudioMatchResult, HaitsmaKalkerExtractor,
+    HaitsmaScratchpad, AHASH_MAGIC, AHASH_VERSION, DEFAULT_FRAME_SIZE, DEFAULT_HOP_SIZE,
+    DEFAULT_MAX_AUDIO_MATCH_DISTANCE, DEFAULT_SAMPLE_RATE, DEFAULT_SPECTRAL_LAG, HEADER_SIZE_BYTES,
+    NUM_SPECTRAL_BANDS, NUM_SPECTRAL_BITS, VIDEO_SYNC_HOP_SIZE,
+};
 pub use assets::{
     check_completeness, AssetKind, ContainerIdentity, MediaAsset, MediaSource,
     PHashLifecycleStatus, ProbeSpecs, StorageKind, SyntheticQueryKind, DEFAULT_TOLERANCE_RATIO_CFR,
     DEFAULT_TOLERANCE_RATIO_VFR, MIN_COMPLETENESS_MARGIN_FRAMES,
+};
+pub use audio::{
+    build_ffmpeg_audio_command, extract_ahash, AudioExtractionOptions,
+    DEFAULT_AUDIO_FFMPEG_TIMEOUT_SECS,
 };
 pub use container::{
     extract_embedded_subtitle, inspect_container, language_matches, ContainerInspection,
@@ -35,11 +47,11 @@ pub use coupling::{
     RegistryLock, RelabelResult, SubFrameAnchor,
 };
 pub use cuts::{
-    detect_cuts, detect_cuts_timestamped, is_blank_phash, is_blank_sequence, is_static_sequence,
-    phash_file_name, phash_logical_name, phash_media_name, read_phash_file, write_phash_file,
-    CutItem, PhashCheckpoint, PhashSidecar, TimestampedCutItem, FLAT_BLACK_DITHERED_1,
-    FLAT_BLACK_DITHERED_2, FLAT_BLACK_DITHERED_3, FLAT_BLACK_PHASH, FLAT_WHITE_PHASH,
-    MIN_DYNAMIC_SEQUENCE_DISTINCT_COUNT, MIN_DYNAMIC_SEQUENCE_WINDOW_LEN,
+    ahash_file_name, detect_cuts, detect_cuts_timestamped, is_blank_phash, is_blank_sequence,
+    is_static_sequence, phash_file_name, phash_logical_name, phash_media_name, read_phash_file,
+    write_phash_file, CutItem, PhashCheckpoint, PhashSidecar, TimestampedCutItem,
+    FLAT_BLACK_DITHERED_1, FLAT_BLACK_DITHERED_2, FLAT_BLACK_DITHERED_3, FLAT_BLACK_PHASH,
+    FLAT_WHITE_PHASH, MIN_DYNAMIC_SEQUENCE_DISTINCT_COUNT, MIN_DYNAMIC_SEQUENCE_WINDOW_LEN,
     STATIC_FRAME_MAX_DISTANCE, STATIC_SEQUENCE_MAX_JITTER_DISTANCE,
 };
 pub use ffmpeg_input::{
