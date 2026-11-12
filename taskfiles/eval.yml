@@ -145,3 +145,8 @@ tasks:
     deps: [rs:build]
     cmds:
       - ./target/release/dbsrt bench-ahash {{.CLI_ARGS}}
+
+  bench:ahash:cuts:
+    desc: Benchmark acoustic aHash recognition and headless cvlc auto-sync on video cuts (100% offscreen)
+    cmds:
+      - uv run python scripts/benchmarks/bench_ahash_cuts.py {{.CLI_ARGS}}

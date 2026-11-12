@@ -56,6 +56,13 @@ tasks:
     cmds:
       - bash scripts/infra/local/vlc_ctl.sh test-cvlc
 
+  vlc:test-cvlc:ahash:
+    desc: Test headless cvlc subtitle auto-sync using acoustic aHash exclusively
+    internal: true
+    deps: [server:daemon, vlc:install-plugin]
+    cmds:
+      - bash scripts/infra/local/vlc_ctl.sh test-cvlc-ahash
+
   vlc:eval-all:
     desc: Run exhaustive E2E VLC GUI + VLSub batch on all NAS snippets under Xvfb :98
     internal: true

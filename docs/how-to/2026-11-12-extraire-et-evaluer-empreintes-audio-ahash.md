@@ -148,3 +148,15 @@ Pour forcer la prise en compte de nouveaux fichiers `.ahash` sans redémarrer le
 ```bash
 curl -s -X POST http://localhost:8080/v1/catalog/reload
 ```
+
+---
+
+## 8. Utilisation depuis l'Extension VLC (`Search by aHash`)
+
+L'extension VLC `vlsub_dbsrt.lua` intègre le bouton **Search by aHash** situé sur la 4ème ligne sous *Search by pHash* :
+
+1. Ouvrez votre vidéo dans VLC et lancez l'extension via **Vue > VLSub (dbsrt Enhanced)**.
+2. Cliquez sur le bouton **Search by aHash**.
+3. Le plugin soumet la requête de recherche au démon local (`POST /v1/search` avec `"search_mode": "ahash"`).
+4. Le serveur extrait 5.0 secondes d'audio non compressé via FFmpeg (`f32le`, 5512 Hz mono), génère l'empreinte aHash de la requête et effectue la cross-corrélation temporelle contre le catalogue audio en mémoire (`AHashCatalog`).
+5. Les sous-titres associés au média reconnu s'affichent instantanément dans la liste des résultats avec l'offset calculé en millisecondes.

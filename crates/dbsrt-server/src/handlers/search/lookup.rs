@@ -1,8 +1,9 @@
 //! Subtitle search and candidate ranking handler.
 
 use crate::constants::{
-    DEFAULT_BASELINE_FPS, DEFAULT_FALLBACK_FPS, DEFAULT_RECOGNITION_SEARCH_DISTANCE,
-    DEFAULT_SEARCH_DISTANCE, FINGERPRINT_PREVIEW_SAMPLE_COUNT, MILLIS_PER_SEC, SECONDS_PER_MINUTE,
+    DEFAULT_AHASH_QUERY_DURATION_SECONDS, DEFAULT_AHASH_START_OFFSET_SECONDS, DEFAULT_BASELINE_FPS,
+    DEFAULT_FALLBACK_FPS, DEFAULT_RECOGNITION_SEARCH_DISTANCE, DEFAULT_SEARCH_DISTANCE,
+    FINGERPRINT_PREVIEW_SAMPLE_COUNT, MILLIS_PER_SEC, SECONDS_PER_MINUTE,
     SIGNIFICANT_SHIFT_THRESHOLD_MS,
 };
 use crate::dtos::{
@@ -20,10 +21,58 @@ use crate::services::recognition::identify_media_by_phash_multi_routed;
 use crate::state::AppState;
 use axum::extract::State;
 use axum::Json;
-use dbsrt_core::{inspect_container, probe_video, MediaMetadata};
+use dbsrt_core::ahash::{AhashFile, DEFAULT_FRAME_SIZE, DEFAULT_HOP_SIZE, DEFAULT_SAMPLE_RATE};
+use dbsrt_core::{
+    extract_ahash, inspect_container, probe_video, AudioExtractionOptions, MediaMetadata,
+};
+use dbsrt_index::AHashSearchCriteria;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
+
+struct RecognitionRoutingContext<'a> {
+    state: &'a AppState,
+    payload: &'a SearchSubtitlesRequest,
+    media_path: &'a Path,
+    phash_dirs: &'a [PathBuf],
+}
+
+/// Routes media recognition across aHash and pHash pipelines based on search mode.
+async fn route_recognition_pipeline(
+    ctx: RecognitionRoutingContext<'_>,
+    candidates: &mut Vec<SubtitleCandidate>,
+    timing: &mut SearchTimingStats,
+) -> (
+    Option<String>,
+    f64,
+    f64,
+    Option<ExistingPhashData>,
+    Option<Vec<u64>>,
+) {
+    let mode = ctx.payload.search_mode.as_deref().unwrap_or("all");
+    let use_phash = mode == "phash" || mode == "all" || mode == "auto";
+    let use_ahash = mode == "ahash";
+
+    if use_ahash {
+        execute_ahash_recognition(ctx.state, ctx.payload, ctx.media_path, timing).await
+    } else {
+        let (m, conf, fps, ex, qs) = execute_phash_recognition(
+            ctx.state,
+            ctx.payload,
+            ctx.media_path,
+            ctx.phash_dirs,
+            use_phash,
+            candidates,
+            timing,
+        )
+        .await;
+        if m.is_none() && (mode == "all" || mode == "auto") && ctx.media_path.exists() {
+            execute_ahash_recognition(ctx.state, ctx.payload, ctx.media_path, timing).await
+        } else {
+            (m, conf, fps, ex, qs)
+        }
+    }
+}
 
 /// Axum handler for `POST /v1/search`: discovers, matches, and ranks subtitles for a video.
 ///
@@ -67,7 +116,6 @@ pub async fn search_handler(
     let mut candidates: Vec<SubtitleCandidate> = Vec::new();
 
     let mode = payload.search_mode.as_deref().unwrap_or("all");
-    let use_phash = mode == "phash" || mode == "all" || mode == "auto";
 
     state.push_log(
         "SEARCH",
@@ -86,12 +134,13 @@ pub async fn search_handler(
     let mut timing = SearchTimingStats::default();
 
     let (matched_media, phash_conf, target_fps, existing_phash, query_sample_opt) =
-        execute_phash_recognition(
-            &state,
-            &payload,
-            &media_path,
-            &phash_dirs,
-            use_phash,
+        route_recognition_pipeline(
+            RecognitionRoutingContext {
+                state: &state,
+                payload: &payload,
+                media_path: &media_path,
+                phash_dirs: &phash_dirs,
+            },
             &mut candidates,
             &mut timing,
         )
@@ -724,6 +773,126 @@ async fn execute_phash_recognition(
         (matched_media, phash_conf, target_fps, existing_phash, None)
     } else {
         (None, 0.0, DEFAULT_FALLBACK_FPS, None, None)
+    }
+}
+
+/// Extracts audio sub-fingerprints and performs acoustic recognition against the in-memory catalog.
+///
+/// # Arguments
+/// - `state`: Shared server state container (`AppState`).
+/// - `_payload`: Subtitle search request.
+/// - `media_path`: File path to the video file or audio stream.
+/// - `timing`: Mutable search timing statistics to record aHash matching duration.
+///
+/// # Returns
+/// Tuple containing `(matched_media, phash_confidence, target_fps, existing_phash, query_sample)`.
+///
+/// # Errors
+/// None. Extraction failures are logged and yield `(None, ...)`.
+///
+/// # Panics
+/// Guaranteed panic-free.
+///
+/// # Data Flow & Invariants
+/// 1. Reads `.ahash` directly if media_path has `.ahash` extension.
+/// 2. Spawns FFmpeg on blocking thread to extract 5.0s audio snippet at 60s (falling back to 0s).
+/// 3. Queries atomic in-memory `AHashCatalog` with empirical thresholds.
+/// 4. Records matching tier label and confidence score.
+async fn execute_ahash_recognition(
+    state: &AppState,
+    _payload: &SearchSubtitlesRequest,
+    media_path: &Path,
+    timing: &mut SearchTimingStats,
+) -> (
+    Option<String>,
+    f64,
+    f64,
+    Option<ExistingPhashData>,
+    Option<Vec<u64>>,
+) {
+    if !media_path.exists() {
+        return (None, 0.0, DEFAULT_BASELINE_FPS, None, None);
+    }
+
+    let t0 = Instant::now();
+    let is_ahash_file = media_path.extension().is_some_and(|e| e == "ahash");
+
+    let extracted = if is_ahash_file {
+        AhashFile::read_from_path(media_path).ok()
+    } else {
+        let p = media_path.to_path_buf();
+        let opts = AudioExtractionOptions {
+            sample_rate: DEFAULT_SAMPLE_RATE,
+            frame_size: DEFAULT_FRAME_SIZE,
+            hop_size: DEFAULT_HOP_SIZE,
+            start_sec: DEFAULT_AHASH_START_OFFSET_SECONDS,
+            duration_sec: Some(DEFAULT_AHASH_QUERY_DURATION_SECONDS),
+            custom_ffmpeg: None,
+        };
+        tokio::task::spawn_blocking(move || match extract_ahash(&p, &opts) {
+            Ok(f) if !f.hashes.is_empty() => Ok(f),
+            _ => {
+                let mut fallback_opts = opts.clone();
+                fallback_opts.start_sec = 0.0;
+                extract_ahash(&p, &fallback_opts)
+            }
+        })
+        .await
+        .ok()
+        .and_then(|res| res.ok())
+    };
+
+    timing.ffmpeg_ms = t0.elapsed().as_secs_f64() * MILLIS_PER_SEC;
+
+    let ahash_file = match extracted {
+        Some(f) if !f.hashes.is_empty() => f,
+        _ => {
+            state.push_log(
+                "AHASH",
+                "WARN",
+                format!(
+                    "Failed to extract audio fingerprint from {:?}",
+                    media_path.file_name()
+                ),
+            );
+            return (None, 0.0, DEFAULT_BASELINE_FPS, None, None);
+        }
+    };
+
+    let audio_fps = ahash_file.header.audio_fps();
+    let criteria = AHashSearchCriteria::new(&ahash_file.hashes, audio_fps);
+    let catalog = state.ahash_catalog.load();
+    let matches = catalog.search(&criteria);
+
+    if let Some(best) = matches.first() {
+        let conf = best.score * 100.0;
+        timing.matching_tier = format!("Tier aHash Catalog (SNR={:.1} bits)", best.snr_bits);
+        timing.phash_match_ms = t0.elapsed().as_secs_f64() * MILLIS_PER_SEC - timing.ffmpeg_ms;
+        state.push_log(
+            "AHASH",
+            "INFO",
+            format!(
+                "✓ aHash match: '{}' (conf={:.1}%, SNR={:.1} bits, offset={:.2}s)",
+                best.media_name, conf, best.snr_bits, best.offset_sec
+            ),
+        );
+        (
+            Some(best.media_name.clone()),
+            conf,
+            DEFAULT_BASELINE_FPS,
+            None,
+            None,
+        )
+    } else {
+        state.push_log(
+            "AHASH",
+            "INFO",
+            format!(
+                "aHash search: 0 matches found in catalog for {:?}",
+                media_path.file_name()
+            ),
+        );
+        (None, 0.0, DEFAULT_BASELINE_FPS, None, None)
     }
 }
 

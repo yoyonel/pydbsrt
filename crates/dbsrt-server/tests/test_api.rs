@@ -82,6 +82,7 @@ async fn test_server_health_retarget_and_autosync() {
             language: "en".to_string(),
             phash_dir: Some(tmp_dir.to_str().unwrap().to_string()),
             subtitles_dir: Some(srt_dir.to_str().unwrap().to_string()),
+            search_mode: None,
             search_distance: 0,
             nb_seconds: 1.0,
         };
@@ -176,6 +177,7 @@ async fn test_server_health_retarget_and_autosync() {
             language: "en".to_string(),
             phash_dir: None,
             subtitles_dir: None,
+            search_mode: None,
             search_distance: 0,
             nb_seconds: 1.0,
         };
@@ -198,6 +200,7 @@ async fn test_server_health_retarget_and_autosync() {
             language: "non_existent_lang_xyz".to_string(),
             phash_dir: Some(tmp_dir.to_str().unwrap().to_string()),
             subtitles_dir: Some(empty_srt_dir.to_str().unwrap().to_string()),
+            search_mode: None,
             search_distance: 0,
             nb_seconds: 1.0,
         };
@@ -306,6 +309,7 @@ async fn test_autosync_embedded_container_subtitle() {
         language: "fr".to_string(),
         phash_dir: Some(tmp_dir.to_str().unwrap().to_string()),
         subtitles_dir: Some(empty_subtitles_dir.to_str().unwrap().to_string()),
+        search_mode: None,
         search_distance: 0,
         nb_seconds: 1.0,
     };

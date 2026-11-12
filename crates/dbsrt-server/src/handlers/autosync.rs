@@ -1,6 +1,9 @@
 //! Subtitle auto-synchronization, retargeting, and certification endpoints.
 
-use crate::constants::{DEFAULT_CUT_THRESHOLD, MILLIS_PER_SEC};
+use crate::constants::{
+    DEFAULT_AHASH_QUERY_DURATION_SECONDS, DEFAULT_AHASH_START_OFFSET_SECONDS, DEFAULT_BASELINE_FPS,
+    DEFAULT_CUT_THRESHOLD, MILLIS_PER_SEC,
+};
 use crate::dtos::{
     AutoSyncRequest, AutoSyncResponse, CertifySyncRequest, CertifySyncResponse, RetargetRequest,
     RetargetResponse, SubtitleSource,
@@ -11,16 +14,20 @@ use crate::services::catalog::{
 };
 use crate::services::phash::{
     calculate_shift_consensus, compute_media_phash_shift_multi, resolve_or_extract_phash,
+    ExistingPhashData,
 };
 use crate::services::recognition::identify_media_by_phash_multi_with_reader;
 use crate::state::AppState;
 use axum::extract::State;
 use axum::Json;
+use dbsrt_core::ahash::{DEFAULT_FRAME_SIZE, DEFAULT_HOP_SIZE, DEFAULT_SAMPLE_RATE};
 use dbsrt_core::{
     build_and_validate_sub_frames, compute_bytes_digest_32, compute_media_phash_digest,
-    detect_cuts, extract_embedded_subtitle, inspect_container, CertifiedSubtitleRecord,
-    CouplingRegistry, LangStatus, MediaMetadata, SubtitleFile,
+    detect_cuts, extract_ahash, extract_embedded_subtitle, inspect_container,
+    AudioExtractionOptions, CertifiedSubtitleRecord, CouplingRegistry, LangStatus, MediaMetadata,
+    SubtitleFile,
 };
+use dbsrt_index::AHashSearchCriteria;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
@@ -37,7 +44,10 @@ async fn handle_remote_agent_autosync(
         language: payload.language.clone(),
         subtitles_dir: payload.subtitles_dir.clone(),
         phash_dir: payload.phash_dir.clone(),
-        search_mode: Some("phash".to_string()),
+        search_mode: payload
+            .search_mode
+            .clone()
+            .or_else(|| Some("phash".to_string())),
         index_engine: None,
         query_title: None,
         season: None,
@@ -270,6 +280,106 @@ pub async fn autosync_handler(
     Json(handle_remote_agent_autosync(state, payload, start).await)
 }
 
+/// Identifies media using acoustic spectral fingerprinting (aHash) against in-memory catalog.
+///
+/// # Arguments
+/// - `state`: Shared application state containing loaded aHash catalog.
+/// - `media_path`: File path to the media file to fingerprint.
+///
+/// # Returns
+/// `Option<(media_name, confidence_percent, offset_sec)>` if a match meets confidence threshold.
+///
+/// # Errors
+/// None. Extraction errors are handled with a fallback to offset 0.0s.
+///
+/// # Panics
+/// Guaranteed panic-free.
+///
+/// # Data Flow & Invariants
+/// 1. Extracts 5.0s PCM audio at 60s offset (or fallback to 0.0s).
+/// 2. Generates 64-bit sub-fingerprints using Haitsma-Kalker pipeline.
+/// 3. Executes temporal cross-correlation across all in-memory catalog entries.
+async fn identify_media_by_ahash_autosync(
+    state: &Arc<AppState>,
+    media_path: &Path,
+) -> Option<(String, f64, f64)> {
+    let p = media_path.to_path_buf();
+    let opts = AudioExtractionOptions {
+        sample_rate: DEFAULT_SAMPLE_RATE,
+        frame_size: DEFAULT_FRAME_SIZE,
+        hop_size: DEFAULT_HOP_SIZE,
+        start_sec: DEFAULT_AHASH_START_OFFSET_SECONDS,
+        duration_sec: Some(DEFAULT_AHASH_QUERY_DURATION_SECONDS),
+        custom_ffmpeg: None,
+    };
+    let extracted = tokio::task::spawn_blocking(move || match extract_ahash(&p, &opts) {
+        Ok(f) if !f.hashes.is_empty() => Ok(f),
+        _ => {
+            let mut fallback_opts = opts.clone();
+            fallback_opts.start_sec = 0.0;
+            extract_ahash(&p, &fallback_opts)
+        }
+    })
+    .await
+    .ok()
+    .and_then(|res| res.ok())?;
+
+    if extracted.hashes.is_empty() {
+        return None;
+    }
+
+    let audio_fps = extracted.header.audio_fps();
+    let criteria = AHashSearchCriteria::new(&extracted.hashes, audio_fps);
+    let catalog = state.ahash_catalog.load();
+    let matches = catalog.search(&criteria);
+
+    matches
+        .first()
+        .map(|best| (best.media_name.clone(), best.score * 100.0, best.offset_sec))
+}
+
+struct AutoSyncIdentificationContext<'a> {
+    state: &'a Arc<AppState>,
+    payload: &'a AutoSyncRequest,
+    media_path: &'a Path,
+    phash_dirs: &'a [PathBuf],
+    eff_search_distance: u32,
+}
+
+/// Dispatches media identification across aHash and pHash pipelines based on search mode.
+async fn identify_media_for_autosync(
+    ctx: AutoSyncIdentificationContext<'_>,
+) -> (
+    Option<(String, f64)>,
+    f64,
+    Option<ExistingPhashData>,
+    Option<f64>,
+) {
+    if ctx.payload.search_mode.as_deref() == Some("ahash") {
+        let ahash_match = identify_media_by_ahash_autosync(ctx.state, ctx.media_path).await;
+        match ahash_match {
+            Some((name, conf, offset_sec)) => (
+                Some((name, conf)),
+                DEFAULT_BASELINE_FPS,
+                None,
+                Some(offset_sec),
+            ),
+            None => (None, DEFAULT_BASELINE_FPS, None, None),
+        }
+    } else {
+        let reader_guard = ctx.state.dbphash_reader.load();
+        let (m, fps, ex) = identify_media_by_phash_multi_with_reader(
+            ctx.media_path,
+            ctx.phash_dirs,
+            reader_guard.as_deref(),
+            ctx.state.db_config.as_ref(),
+            ctx.payload.nb_seconds,
+            ctx.eff_search_distance,
+        );
+        (m, fps, ex, None)
+    }
+}
+
 /// Identifies the media against local indexes, resolves a subtitle from the local catalog,
 /// container tracks or providers, shifts it, and saves it next to the media.
 async fn run_local_autosync(
@@ -279,11 +389,12 @@ async fn run_local_autosync(
     start: Instant,
 ) -> AutoSyncResponse {
     let media_path = media_path.to_path_buf();
-    let override_phash_dir = payload.phash_dir.map(PathBuf::from);
+    let override_phash_dir = payload.phash_dir.as_ref().map(PathBuf::from);
     let phash_dirs = state.effective_phash_dirs(override_phash_dir.as_deref());
     let include_sidecars = payload.subtitles_dir.is_none();
     let subtitles_dir = payload
         .subtitles_dir
+        .as_ref()
         .map(PathBuf::from)
         .unwrap_or_else(|| state.subtitles_dir.clone());
     let media_stem = media_path
@@ -298,22 +409,22 @@ async fn run_local_autosync(
         crate::constants::DEFAULT_SEARCH_DISTANCE
     };
 
-    let reader_guard = state.dbphash_reader.load();
-    let (matched, target_fps, existing_phash) = identify_media_by_phash_multi_with_reader(
-        &media_path,
-        &phash_dirs,
-        reader_guard.as_deref(),
-        state.db_config.as_ref(),
-        payload.nb_seconds,
-        eff_search_distance,
-    );
+    let (matched, target_fps, existing_phash, ahash_offset_sec) =
+        identify_media_for_autosync(AutoSyncIdentificationContext {
+            state,
+            payload: &payload,
+            media_path: &media_path,
+            phash_dirs: &phash_dirs,
+            eff_search_distance,
+        })
+        .await;
 
     let (is_recognized, matched_stem_opt, match_conf) = match matched {
         Some((m_name, conf)) => (true, Some(m_name), conf),
         None => (false, None, 0.0),
     };
 
-    let search_stem = matched_stem_opt.as_deref().unwrap_or(&media_stem);
+    let search_stem = matched_stem_opt.as_deref().unwrap_or(media_stem.as_str());
     let resolve_criteria = AutoSyncResolveCriteria {
         media_path: &media_path,
         subtitles_dir: &subtitles_dir,
@@ -352,8 +463,13 @@ async fn run_local_autosync(
         }
     };
 
-    let (shift_frames, shift_ms, confidence_percent) = if let Some(ref ref_stem) = matched_stem_opt
-    {
+    let (shift_frames, shift_ms, confidence_percent) = if let Some(offset_sec) = ahash_offset_sec {
+        (
+            (offset_sec * target_fps).round() as i64,
+            offset_sec * 1000.0,
+            match_conf,
+        )
+    } else if let Some(ref ref_stem) = matched_stem_opt {
         compute_media_phash_shift_multi(
             &media_path,
             &phash_dirs,
@@ -745,6 +861,7 @@ mod tests {
             language: "en".to_string(),
             phash_dir: None,
             subtitles_dir: None,
+            search_mode: None,
             search_distance: 0,
             nb_seconds: 1.0,
         };

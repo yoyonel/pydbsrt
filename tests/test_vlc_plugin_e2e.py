@@ -63,6 +63,20 @@ def test_cvlc_headless_integration():
     assert "SUCCESS! Media matched" in res.stdout
 
 
+def test_cvlc_headless_ahash_integration():
+    """Tier 2: Test headless cvlc integration using aHash acoustic mode exclusively."""
+    cvlc_bin = shutil.which("cvlc")
+    if not cvlc_bin:
+        pytest.skip("cvlc executable not found on system")
+
+    res = subprocess.run(
+        ["bash", "scripts/infra/local/vlc_ctl.sh", "test-cvlc-ahash"], capture_output=True, text=True, check=False
+    )
+    assert res.returncode == 0, f"cvlc aHash test failed:\n{res.stdout}\n{res.stderr}"
+    assert "SUCCESS! Media matched" in res.stdout
+    assert "mode: ahash" in res.stdout
+
+
 def test_cvlc_chaos_special_characters_and_quotes(tmp_path: Path):
     """Tier 2 Chaos: Real cvlc execution on video with quotes, accents, ampersands and brackets."""
     cvlc_bin = shutil.which("cvlc")

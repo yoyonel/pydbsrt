@@ -13,9 +13,9 @@ function descriptor()
         version = app_version,
         author = "Lionel ATTY & Guillaume Le Maout",
         url = "https://github.com/yoyonel/pydbsrt",
-        shortdesc = "VLSub ISO + Search by pHash",
+        shortdesc = "VLSub ISO + Search by pHash/aHash",
         description = "<p>Standard VLSub interface with legacy hash, title/name search, "
-            .. "and visual frame-exact perceptual hash (pHash) search.</p>",
+            .. "visual perceptual hash (pHash), and acoustic fingerprint (aHash) search.</p>",
         capabilities = { "menu", "input-listener" }
     }
 end
@@ -112,14 +112,16 @@ local help_message = [[
   <h4><b>Usage:</b></h4>
   <p>1. Start your video in VLC.</p>
   <p>2. Select the desired subtitle language from the dropdown menu.</p>
-  <p>3. Choose one of the <b>three available search methods</b>:</p>
+  <p>3. Choose one of the <b>four available search methods</b>:</p>
   <ul>
     <li><b>Method 1: Search by hash</b><br/>
     Searches for subtitles using the standard 64-bit video file checksum (MovieHash). Recommended for exact file release matches.</li>
     <li><b>Method 2: Search by name</b><br/>
     Searches by video title, with optional Season and Episode numbers for TV shows.</li>
-    <li><b>Method 3: Search by pHash</b> <i>(Powered by dbsrt engine)</i><br/>
+    <li><b>Method 3: Search by pHash</b> <i>(Powered by dbsrt visual engine)</i><br/>
     Performs visual perceptual matching of the active video stream (DCT-II SIMD) against certified reference prints in the dbsrt catalog. Enables automatic frame-exact resynchronization across different releases (web-dl, bluray, hdtv).</li>
+    <li><b>Method 4: Search by aHash</b> <i>(Powered by dbsrt acoustic engine)</i><br/>
+    Performs acoustic spectral matching of the active audio stream (Haitsma-Kalker RFC v1.0) against certified reference prints in the dbsrt catalog. Robust against dark scenes, black intros, and releases with altered visuals.</li>
   </ul>
   <hr/>
   <h4><b>Downloading Subtitles:</b></h4>
@@ -477,9 +479,10 @@ function interface_main()
     input_table["seasonNumber"] = dlg:add_text_input(file_info.season or "", 2, 3, 2, 1)
     dlg:add_button("Search by pHash", search_by_phash, 4, 3, 1, 1)
 
-    -- Row 4: Episode input
+    -- Row 4: Episode input + Search by aHash button (4th choice)
     dlg:add_label("Episode (series):", 1, 4, 1, 1)
     input_table["episodeNumber"] = dlg:add_text_input(file_info.episode or "", 2, 4, 2, 1)
+    dlg:add_button("Search by aHash", search_by_ahash, 4, 4, 1, 1)
 
     -- Row 5: Results List (Full width across all 4 columns)
     input_table["mainlist"] = dlg:add_list(1, 5, 4, 1)
@@ -769,6 +772,10 @@ function search_by_phash()
     run_search("phash")
 end
 
+function search_by_ahash()
+    run_search("ahash")
+end
+
 function search_by_hash()
     run_search("hash")
 end
@@ -910,6 +917,7 @@ if _G and _G._VLSub_test_hook then
         send_http_request = send_http_request,
         run_search = run_search,
         search_by_phash = search_by_phash,
+        search_by_ahash = search_by_ahash,
         search_by_hash = search_by_hash,
         search_by_name = search_by_name,
         download_selection = download_selection,

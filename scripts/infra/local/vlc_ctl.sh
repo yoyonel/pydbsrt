@@ -36,15 +36,21 @@ install_plugin() {
 }
 
 test_cvlc() {
+  local mode="${DBSRT_SEARCH_MODE:-auto}"
+  local media="${1:-${DEFAULT_MEDIA}}"
   local output
-  output="$(DBSRT_AUTOKILL=1 cvlc --no-audio --avcodec-hw=none --extraintf luaintf --lua-intf dbsrt_intf "${DEFAULT_MEDIA}" 2>&1)"
+  output="$(DBSRT_AUTOKILL=1 DBSRT_SEARCH_MODE="${mode}" cvlc --vout=dummy --aout=dummy --no-audio --avcodec-hw=none --extraintf luaintf --lua-intf dbsrt_intf "${media}" 2>&1)"
   echo "$output"
   if echo "$output" | grep -q "SUCCESS! Media matched"; then
-    echo "✓ E2E VLC Integration Test Passed (Event-driven autokill)!"
+    echo "✓ E2E VLC Integration Test Passed (Event-driven autokill, mode: ${mode})!"
   else
     echo "✗ E2E VLC Integration Test Failed: Subtitle was not attached!" >&2
     exit 1
   fi
+}
+
+test_cvlc_ahash() {
+  DBSRT_SEARCH_MODE="ahash" test_cvlc "$@"
 }
 
 run_vlc() {
@@ -63,7 +69,14 @@ demo_vlc() {
 
 case "$ACTION" in
   install) install_plugin ;;
-  test-cvlc) test_cvlc ;;
+  test-cvlc)
+    shift
+    test_cvlc "$@"
+    ;;
+  test-cvlc-ahash)
+    shift
+    test_cvlc_ahash "$@"
+    ;;
   run) run_vlc "$@" ;;
   demo) demo_vlc "$@" ;;
   *)

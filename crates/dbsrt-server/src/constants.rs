@@ -173,3 +173,9 @@ pub const DEFAULT_AHASH_SEARCH_LIMIT: usize = 5;
 
 /// Optimal empirical audio query window length in frames (~5.0 seconds at 86.125 fps).
 pub const OPTIMAL_AHASH_WINDOW_FRAMES: usize = 430;
+
+/// Default sample extraction duration in seconds for acoustic fingerprinting.
+pub const DEFAULT_AHASH_QUERY_DURATION_SECONDS: f64 = 5.0;
+
+/// Default narrative start offset in seconds for acoustic query sampling.
+pub const DEFAULT_AHASH_START_OFFSET_SECONDS: f64 = 60.0;

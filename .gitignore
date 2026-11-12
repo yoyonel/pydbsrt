@@ -122,6 +122,7 @@ data/catalog.dbphash
 data/__PHASH__/
 data/__AHASH__/
 data/snippets/
+data/snippets_ahash/
 data/SRT/manifest.json
 data/SRT/metadata.json
 data/SRT/medias_metadata.sql

@@ -95,6 +95,7 @@ pub struct AutoSyncRequest {
     pub language: String,
     pub phash_dir: Option<String>,
     pub subtitles_dir: Option<String>,
+    pub search_mode: Option<String>,
     #[serde(default)]
     pub search_distance: u32,
     #[serde(default = "default_extract_duration")]

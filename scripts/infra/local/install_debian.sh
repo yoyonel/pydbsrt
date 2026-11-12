@@ -105,7 +105,26 @@ case "${ACTION}" in
       echo "⚠️ No remote API key in DBSRT_REMOTE_API_KEY or 'pass': protected remotes answer 401."
     fi
 
-    # 5. Create systemd user service unit
+    # 5. Build local dataset arguments if present in repository
+    LOCAL_DATA_ARGS=""
+    if [[ -d "${REPO_ROOT}/data/__AHASH__" ]]; then
+      LOCAL_DATA_ARGS="${LOCAL_DATA_ARGS} --ahash-dir ${REPO_ROOT}/data/__AHASH__"
+    fi
+    if [[ -d "${REPO_ROOT}/data/__PHASH__" ]]; then
+      LOCAL_DATA_ARGS="${LOCAL_DATA_ARGS} --phash-dir ${REPO_ROOT}/data/__PHASH__"
+    else
+      LOCAL_DATA_ARGS="${LOCAL_DATA_ARGS} --phash-dir /tmp"
+    fi
+    if [[ -f "${REPO_ROOT}/data/catalog.dbphash" ]]; then
+      LOCAL_DATA_ARGS="${LOCAL_DATA_ARGS} --dbphash ${REPO_ROOT}/data/catalog.dbphash"
+    fi
+    if [[ -d "${REPO_ROOT}/data/SRT" ]]; then
+      LOCAL_DATA_ARGS="${LOCAL_DATA_ARGS} --subtitles-dir ${REPO_ROOT}/data/SRT"
+    else
+      LOCAL_DATA_ARGS="${LOCAL_DATA_ARGS} --subtitles-dir /tmp"
+    fi
+
+    # 6. Create systemd user service unit
     mkdir -p "${SYSTEMD_USER_DIR}"
     cat <<UNIT >"${SYSTEMD_USER_DIR}/${SERVICE_NAME}"
 [Unit]
@@ -115,7 +134,7 @@ After=network.target
 [Service]
 Type=simple
 ${CREDENTIAL_LINE}
-ExecStart=${BIN_DIR}/dbsrt-agent --host 127.0.0.1 --port ${DEFAULT_PORT} --agent --remote-api ${REMOTE_API} --phash-dir /tmp --subtitles-dir /tmp
+ExecStart=${BIN_DIR}/dbsrt-agent --host 127.0.0.1 --port ${DEFAULT_PORT} --agent --remote-api ${REMOTE_API}${LOCAL_DATA_ARGS}
 Restart=always
 RestartSec=3
 KillMode=process
@@ -128,7 +147,7 @@ UNIT
 
     echo "✓ Created systemd unit: ${SYSTEMD_USER_DIR}/${SERVICE_NAME}"
 
-    # 6. Reload and start systemd user service
+    # 7. Reload and start systemd user service
     if command -v systemctl >/dev/null 2>&1; then
       systemctl --user daemon-reload
       systemctl --user enable "${SERVICE_NAME}"
