@@ -287,6 +287,11 @@ pub fn phash_file_name(file_name: &str, moviehash: Option<&str>, fps: f64) -> St
     format!("{}.{:.1}fps.phash", moviehash.unwrap_or(file_name), fps)
 }
 
+/// `.ahash` file name: the moviehash when known, else the media file name.
+pub fn ahash_file_name(file_name: &str, moviehash: Option<&str>, fps: f64) -> String {
+    format!("{}.{:.1}fps.ahash", moviehash.unwrap_or(file_name), fps)
+}
+
 /// `<moviehash>.json` next to the `.phash`: the media name its file name no longer carries.
 pub struct PhashSidecar<'a> {
     pub moviehash: &'a str,

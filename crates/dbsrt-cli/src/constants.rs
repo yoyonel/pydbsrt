@@ -138,6 +138,9 @@ pub const FETCH_MAX_DOWNLOAD_ATTEMPTS: usize = 3;
 /// Dot-prefixed .phash binary fingerprint extension.
 pub const PHASH_DOT_EXT: &str = ".phash";
 
+/// Dot-prefixed .ahash binary audio fingerprint extension.
+pub const AHASH_DOT_EXT: &str = ".ahash";
+
 /// Divisor used to seek to the temporal midpoint of a media stream.
 pub const MIDPOINT_DURATION_DIVISOR: f64 = 2.0;
 

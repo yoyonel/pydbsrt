@@ -111,6 +111,8 @@ venv.bak/
 # Dataset perceptual hashes & local reference SRTs
 data/__PHASH__
 data/__PHASH__/
+data/__AHASH__
+data/__AHASH__/
 data/SRT/*.srt
 # Runtime databases (NEVER track these)
 data/SRT/couplings.json
@@ -118,11 +120,13 @@ data/SRT/*.lock
 couplings.json
 data/catalog.dbphash
 data/__PHASH__/
+data/__AHASH__/
 data/snippets/
 data/SRT/manifest.json
 data/SRT/metadata.json
 data/SRT/medias_metadata.sql
 *.phash
+*.ahash
 *.dbphash
 data/*.dbphash
 *.auto.synced.srt

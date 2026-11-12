@@ -962,3 +962,81 @@ fn test_cli_media_add_all_embedded_multilingual_alphabets() {
     assert!(langs.contains(&"ru"));
     assert!(langs.contains(&"ar"));
 }
+
+#[test]
+fn test_cli_media_add_with_ahash_dir() {
+    let tmp = TempTestDir::new("media_add_ahash");
+    let phash_dir = tmp.path.join("phash");
+    let ahash_dir = tmp.path.join("ahash");
+    let subtitles_dir = tmp.path.join("subtitles");
+
+    let video = PathBuf::from("tests/data/big_buck_bunny_trailer_480p.mp4");
+    if !video.exists() {
+        return;
+    }
+
+    let out = Command::new(env!("CARGO_BIN_EXE_dbsrt"))
+        .args([
+            "media:add",
+            video.to_str().unwrap(),
+            "--phash-dir",
+            phash_dir.to_str().unwrap(),
+            "--ahash-dir",
+            ahash_dir.to_str().unwrap(),
+            "--subtitles-dir",
+            subtitles_dir.to_str().unwrap(),
+            "--skip-certify",
+            "--json",
+        ])
+        .output()
+        .expect("Failed to run media:add with --ahash-dir");
+
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "stderr: {}", stderr);
+
+    let json: serde_json::Value =
+        serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).expect("JSON parse");
+    assert_eq!(json["success"], true);
+    assert!(json["ahash_path"].is_string());
+
+    let ahash_path = PathBuf::from(json["ahash_path"].as_str().unwrap());
+    assert!(ahash_path.exists());
+    assert!(ahash_path.starts_with(&ahash_dir));
+}
+
+#[test]
+fn test_cli_media_add_with_ahash_dir_no_audio_skips_gracefully() {
+    let tmp = TempTestDir::new("media_add_ahash_silent");
+    let phash_dir = tmp.path.join("phash");
+    let ahash_dir = tmp.path.join("ahash");
+    let subtitles_dir = tmp.path.join("subtitles");
+
+    let video = PathBuf::from("data/snippets/01_Cruauté_mid15s.mp4");
+    if !video.exists() {
+        return;
+    }
+
+    let out = Command::new(env!("CARGO_BIN_EXE_dbsrt"))
+        .args([
+            "media:add",
+            video.to_str().unwrap(),
+            "--phash-dir",
+            phash_dir.to_str().unwrap(),
+            "--ahash-dir",
+            ahash_dir.to_str().unwrap(),
+            "--subtitles-dir",
+            subtitles_dir.to_str().unwrap(),
+            "--skip-certify",
+            "--json",
+        ])
+        .output()
+        .expect("Failed to run media:add with silent video");
+
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "stderr: {}", stderr);
+
+    let json: serde_json::Value =
+        serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).expect("JSON parse");
+    assert_eq!(json["success"], true);
+    assert!(json["ahash_path"].is_null());
+}

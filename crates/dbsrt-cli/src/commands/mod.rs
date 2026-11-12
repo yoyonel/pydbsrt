@@ -38,7 +38,7 @@ pub use recognize::{format_set, run_recognize_media, AggregatedMatch, RecognizeA
 pub use relabel::{run_relabel_coupling, RelabelCouplingArgs};
 pub use retarget::{run_retarget_subtitles, RetargetArgs};
 pub use scan::{run_scan_library, ScanLibraryArgs};
-pub use shared::{connect_db, find_or_build_phash, resolve_db_host};
+pub use shared::{connect_db, find_or_build_ahash, find_or_build_phash, resolve_db_host};
 pub use top::{run_top, TopArgs};
 
 #[cfg(test)]
