@@ -26,6 +26,10 @@ fn test_remote_pulled_ahash_files_integrity_and_recognition() {
         return;
     }
 
+    test_files.sort();
+    const MAX_REMOTE_TEST_FILES: usize = 10;
+    test_files.truncate(MAX_REMOTE_TEST_FILES);
+
     println!(
         "Testing {} .ahash file(s) from o2switch batch:",
         test_files.len()

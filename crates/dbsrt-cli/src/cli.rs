@@ -4,9 +4,10 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use dbsrt_core::HwAccel;
 
 use crate::commands::{
-    BenchCutsArgs, BenchVideoArgs, CertifyCouplingArgs, ExportAhashArgs, ExportPhashArgs,
-    FetchSubtitlesArgs, ImportPhashArgs, InspectMediaArgs, MediaAddArgs, MigrateArgs, PackArgs,
-    RecognizeArgs, RelabelCouplingArgs, RetargetArgs, ScanLibraryArgs, TopArgs,
+    BenchAhashArgs, BenchCutsArgs, BenchVideoArgs, CertifyCouplingArgs, ExportAhashArgs,
+    ExportPhashArgs, FetchSubtitlesArgs, ImportPhashArgs, InspectMediaArgs, MediaAddArgs,
+    MigrateArgs, PackArgs, RecognizeArgs, RelabelCouplingArgs, RetargetArgs, ScanLibraryArgs,
+    TopArgs,
 };
 use crate::constants::{
     DEFAULT_BENCH_PHASH_COUNT, DEFAULT_POSTGRES_DB, DEFAULT_POSTGRES_PASS, DEFAULT_POSTGRES_PORT,
@@ -133,6 +134,10 @@ pub enum Commands {
 
     /// Benchmark scene cuts detection throughput across .phash files
     BenchCuts(BenchCutsArgs),
+
+    /// Benchmark acoustic cross-correlation matching accuracy, discrimination and throughput across .ahash files
+    #[command(name = "bench-ahash", visible_aliases = ["bench:ahash", "bench:ahash:matching"])]
+    BenchAhash(BenchAhashArgs),
 
     /// Import .phash binary file(s) into PostgreSQL 17 BK-Tree
     ImportPhash(ImportPhashArgs),

@@ -152,3 +152,21 @@ pub const DEFAULT_HTTP_TIMEOUT_SECS: u64 = 2;
 
 /// Known video extensions used for fingerprint stem conflict filtering.
 pub const KNOWN_VIDEO_EXTS: &[&str] = &[".mp4.", ".webm.", ".mkv.", ".avi.", ".mov."];
+
+/// Default evaluation query trial count per window size for ahash matching benchmark.
+pub const DEFAULT_BENCH_AHASH_SAMPLES: usize = 200;
+
+/// Default negative cross-media evaluation trial count for ahash matching benchmark.
+pub const DEFAULT_BENCH_AHASH_CROSS_TRIALS: usize = 500;
+
+/// Default maximum Hamming distance threshold for ahash matching (14.0 bits out of 32).
+pub const DEFAULT_BENCH_AHASH_MAX_DISTANCE: f64 = 14.0;
+
+/// Default directory containing acoustic fingerprint .ahash files.
+pub const DEFAULT_AHASH_DATA_DIR: &str = "data/__AHASH__";
+
+/// Default window sizes in seconds evaluated in ahash matching benchmark.
+pub const DEFAULT_BENCH_AHASH_WINDOWS: &str = "3,5,10,15,30";
+
+/// Maximum allowed time offset error in seconds to count as an exact match in benchmark.
+pub const BENCH_AHASH_EXACT_TOLERANCE_SEC: f64 = 0.025;

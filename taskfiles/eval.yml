@@ -138,3 +138,10 @@ tasks:
     deps: [rs:build]
     cmds:
       - ./target/release/dbsrt export-ahash {{.CLI_ARGS}}
+
+  bench:ahash:matching:
+    desc: Run exhaustive acoustic cross-correlation benchmark on .ahash files (Axe 1 temporal, Axe 2 discrimination, Axe 3 throughput)
+    aliases: [bench:ahash]
+    deps: [rs:build]
+    cmds:
+      - ./target/release/dbsrt bench-ahash {{.CLI_ARGS}}

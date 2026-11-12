@@ -431,3 +431,58 @@ fn test_cli_export_ahash() {
     assert!(out_file.exists());
     let _ = std::fs::remove_file(out_file);
 }
+
+#[test]
+fn test_cli_bench_ahash() {
+    let demo = match get_canonical_demo_media() {
+        Some(d) => d,
+        None => return,
+    };
+    let temp_dir =
+        std::env::temp_dir().join(format!("cli_test_bench_ahash_{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&temp_dir);
+    let ahash_file = temp_dir.join("sample1.ahash");
+
+    // 1. Export sample ahash
+    let out_export = Command::new(env!("CARGO_BIN_EXE_dbsrt"))
+        .args([
+            "export-ahash",
+            "--media",
+            demo.to_str().unwrap(),
+            "--duration",
+            "2.0",
+            "-o",
+            ahash_file.to_str().unwrap(),
+        ])
+        .output()
+        .expect("Failed to export sample ahash");
+    assert!(out_export.status.success());
+
+    // 2. Run bench-ahash
+    let out_bench = Command::new(env!("CARGO_BIN_EXE_dbsrt"))
+        .args([
+            "bench-ahash",
+            "--ahash-dir",
+            temp_dir.to_str().unwrap(),
+            "--samples",
+            "5",
+            "--windows",
+            "0.5,1.0",
+            "--cross-media-trials",
+            "0",
+        ])
+        .output()
+        .expect("Failed to run bench-ahash");
+
+    assert!(
+        out_bench.status.success(),
+        "bench-ahash failed: {}",
+        String::from_utf8_lossy(&out_bench.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out_bench.stdout);
+    assert!(stdout.contains("Loading .ahash dataset"));
+    assert!(stdout.contains("Evaluating temporal offset accuracy"));
+    assert!(stdout.contains("Match Rate"));
+
+    let _ = std::fs::remove_dir_all(temp_dir);
+}
