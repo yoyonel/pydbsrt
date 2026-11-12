@@ -226,3 +226,69 @@ sequenceDiagram
 
 ### Synthèse Opérationnelle
 L'empreinte audio `.ahash` s'impose comme une modalité de premier plan pour `pydbsrt` : elle accélère la détection par un facteur 15 et quadruple la précision temporelle d'alignement lorsque les pistes partagent la même version sonore, tout en s'intégrant sans rupture dans les tables d'indexation existantes.
+
+---
+
+## 5. État d'Avancement au 2026-11-11 & Feuille de Route d'Intégration (Issue #65)
+
+- **Date de revue technique** : 2026-11-11 21:45
+- **Branche** : `feat/65-ahash-audio-fingerprint`
+- **Couverture de tests vérifiée** : **95.5%** sur `export_ahash.rs`, 100% fonctions, 490 tests Rust passants.
+
+### 5.1 Bilan Synthétique des Chantiers
+
+```mermaid
+flowchart TD
+    subgraph S1["Socle Bas-Niveau (100% Réalisé)"]
+        A1["Format RFC .ahash v1.0 (en-tête 176o, payload 64-bit mmap)"]
+        A2["Extracteur DSP Haitsma-Kalker (5512 Hz, 33 Bark, 300x temps réel)"]
+        A3["Matcher Temporel 1:1 match_audio_sequence (erreur 13.8 ms)"]
+        A4["CLI dbsrt export-ahash & tâche task audio:export-ahash"]
+    end
+
+    subgraph S2["Peuplement Massif & Ingestion Autonome (En cours)"]
+        B1["Ingestion unifiée dbsrt media:add --ahash-dir"]
+        B2["Worker Batch o2switch streaming NAS FTP pour extraction massive .ahash"]
+        B3["Peuplement exhaustif du répertoire data/__AHASH__/ (2 484 médias)"]
+    end
+
+    subgraph S3["Indexation 1:N & Consensus Hybride (Suivant)"]
+        C1["Index Multi-Médias In-Memory (AudioCatalog / catalog.dbahash)"]
+        C2["Sous-commande CLI dbsrt recognize-audio & endpoint REST"]
+        C3["Arbitrage Hybride Vidéo (pHash) + Audio (aHash)"]
+    end
+
+    S1 --> S2 --> S3
+```
+
+### 5.2 Socle Bas-Niveau (100% Réalisé & Prouvé)
+
+> [!NOTE] Statut : Validé Empiriquement
+> Le composant DSP et le moteur de calcul d'empreinte acoustique sont validés sur corpus réel et intégrés à l'outillage standard.
+
+- **Format conteneur `.ahash` v1.0** : En-tête auto-descriptif de 176 octets, alignement strict 64 bits (8 octets par trame).
+- **Extracteur DSP Haitsma-Kalker** : Échantillonnage mono 5 512 Hz $f_{32}\text{le}$ via FFmpeg, banc de 33 filtres de Bark et FFT `realfft` à plus de $300\times$ temps réel.
+- **Cross-corrélation temporelle 1D** : Algorithme `match_audio_sequence` avec détection de pic, scoring normalisé et marge SNR.
+- **Précision temporelle certifiée** : Erreur d'alignement mesurée à **13.79 ms** ($\le 1$ trame de 11.6 ms) sur `big_buck_bunny_trailer_480p.mp4`.
+- **Qualité de code & Couverture** : CLI `dbsrt export-ahash` couvert à **95.5%** par tests unitaires et d'intégration (`cargo llvm-cov`).
+
+### 5.3 Chantier Opérationnel : Ingestion Massive & Batch Autonome (Étape 3)
+
+> [!TIP] Déploiement Actif sur o2switch
+> Le worker batch distant exploite les 12 vCPUs du Cloud o2switch pour alimenter le registre d'empreintes acoustiques en continu.
+
+- **Extraction par streaming FTP (`-vn`)** : Aucun fichier vidéo n'est transféré sur disque ; seul le flux audio résolu est extrait et haché à la volée.
+- **Découplage bimodal** :
+  - *Mode interactif* : `dbsrt media:add --ahash-dir` extrait simultanément les empreintes `.phash` et `.ahash`.
+  - *Mode batch autonome* : `task o2switch:batch:ahash:all` cible l'ensemble de la bibliothèque NAS (2 484 cibles) sans ré-extraire les empreintes existantes.
+- **Inventaire consolidé** : Synchronisation de `nas_ftp_index.json` garantissant l'accès à tous les répertoires, y compris ceux comportant des caractères spéciaux ou emojis.
+
+### 5.4 Feuille de Route Suivante : Indexation 1:N & Arbitrage Hybride
+
+> [!IMPORTANT] Prochains Chantiers (Issue #65)
+> Dès complétion du peuplement massif, l'architecture accueillera le moteur multi-médias 1:N.
+
+- **Structure de catalogue global audio** : Fichier binaire `data/catalog.dbahash` (ou section intégrée dans `catalog.dbphash`).
+- **Moteur de recherche 1:N hiérarchique** : Index inversé d'ancres temporelles sous-échantillonnées suivi d'un recalage fin 1D.
+- **Interface CLI & REST API** : Commande `dbsrt recognize-audio` et endpoint `POST /v1/recognize-audio`.
+- **Arbitrage hybride pHash / aHash** : Consensus multi-modal garantissant la robustesse en environnement doublé (VO/VF) et l'immunité aux génériques sombres.
