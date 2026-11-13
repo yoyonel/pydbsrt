@@ -107,12 +107,13 @@ dbsrt export-ahash --media <MEDIA_PATH> --output <AHASH_PATH> [OPTIONS]
 ```
 
 - `--media <MEDIA_PATH>` (ou `-m`) : Chemin vers le fichier multimédia local ou URI de flux réseau (`ftp://`, `http://`).
-- `--output <AHASH_PATH>` (ou `-o`) : Chemin de destination du fichier binaire `.ahash`.
+- `--output <AHASH_PATH>` (ou `-o`) : Chemin de destination du fichier binaire `.ahash` (défaut : `/tmp/<moviehash>[.a<K>].<fps>fps.ahash` pour tout fichier local `>= 64 KiB` ou lorsque `--moviehash` est fourni, sinon repli sur `/tmp/<media>[.a<K>].<fps>fps.ahash`).
+- `--moviehash <HASH>` : MovieHash OpenSubtitles 16-hex optionnel (calculé automatiquement sur fichier local `>= 64 KiB` si omis).
 - `--sample-rate <HZ>` (ou `-r`) : Taux d'échantillonnage audio (défaut : `5512`).
 - `--hop-size <SAMPLES>` : Pas glissant en échantillons PCM (défaut : `64`, soit ~11.6 ms / 86.13 fps).
 - `--start-sec <SEC>` : Décalage de départ en secondes (défaut : `0.0`).
 - `--duration <SEC>` : Durée maximale à extraire en secondes (défaut : totalité du flux).
-- `--audio-track <K>` : Piste audio relative à décoder (`-map 0:a:<K>`). Omis : sélection automatique FFmpeg (identique bit-à-bit aux `.ahash` existants). Sans `--output` et si `K` diffère de la piste par défaut déduite, le nom par défaut devient `/tmp/<media>.a<K>.<fps>fps.ahash`.
+- `--audio-track <K>` : Piste audio relative à décoder (`-map 0:a:<K>`). Omis : sélection automatique FFmpeg (identique bit-à-bit aux `.ahash` existants). Sans `--output` et si `K` diffère de la piste par défaut déduite, le nom par défaut porte le suffixe `.a<K>`.
 - **Sidecar** : un `<stem>.json` (piste décodée + pistes du conteneur) est écrit à côté du `.ahash`, voir [Formats de Fichiers § 1ter](formats-fichiers.md).
 - `--json` : Émet les métadonnées et statistiques d'extraction au format JSON structuré sur stdout.
 

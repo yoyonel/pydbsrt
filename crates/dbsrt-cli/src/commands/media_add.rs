@@ -19,7 +19,8 @@ use std::time::Duration;
 use crate::cli::PostgresArgs;
 use crate::commands::certify::detect_cli_subtitle_lang_status;
 use crate::commands::shared::{
-    find_or_build_ahash, find_or_build_phash_with_hwaccel, phash_file_name, PhashSidecar,
+    find_or_build_ahash, find_or_build_phash_with_hwaccel, parse_moviehash, phash_file_name,
+    resolve_moviehash, PhashSidecar,
 };
 use crate::constants::{
     DEFAULT_HTTP_TIMEOUT_SECS, DEFAULT_SERVER_URL, DEFAULT_SUBTITLES_DIR, DEFAULT_TMP_DIR,
@@ -424,26 +425,6 @@ pub(crate) fn resolve_media_video_path(args: &MediaAddArgs) -> Result<&PathBuf> 
         bail!("Media video file not found: {:?}", video_path);
     }
     Ok(video_path)
-}
-
-/// Validates `--moviehash`: it becomes a file name, so 16 hexadecimal characters only.
-pub(crate) fn parse_moviehash(raw: &str) -> Result<String, String> {
-    if raw.len() == 16 && raw.bytes().all(|b| b.is_ascii_hexdigit()) {
-        Ok(raw.to_ascii_lowercase())
-    } else {
-        Err(format!("expected 16 hexadecimal characters, got {raw:?}"))
-    }
-}
-
-/// Moviehash naming the .phash: `--moviehash`, else computed on a local file; None for a stream without one.
-pub(crate) fn resolve_moviehash(explicit: Option<&str>, video_path: &Path) -> Option<String> {
-    if let Some(hash) = explicit {
-        return Some(hash.to_string());
-    }
-    if dbsrt_core::container::is_remote_stream_or_pipe(video_path) {
-        return None;
-    }
-    dbsrt_core::metadata::compute_opensubtitles_hash(video_path).ok()
 }
 
 /// Derives logical media stem name, respecting explicit `--media-name` overrides and remote stream URLs.
@@ -1319,10 +1300,11 @@ fn extract_optional_ahash(args: &MediaAddArgs, video_path: &Path) -> Result<Opti
     let json = args.json;
     let media_name = resolve_media_filename(args, video_path);
 
+    let resolved_moviehash = resolve_moviehash(args.moviehash.as_deref(), video_path);
     let (path, ahash_hashes, ahash_fps) = match find_or_build_ahash(
         video_path,
         ahash_dir,
-        args.moviehash.as_deref(),
+        resolved_moviehash.as_deref(),
         Some(&media_name),
     ) {
         Ok(data) => data,

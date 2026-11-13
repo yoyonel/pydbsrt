@@ -65,12 +65,19 @@ def test_plan_target_item_idempotence_and_upgrade(tmp_path: Path):
     p_missing.write_bytes(b"AHASH")
     (phash_dir / f"{h_missing}.json").write_text(json.dumps({"media_name": "MissingSidecar.mkv"}), encoding="utf-8")
 
-    # 2. Complete single_track sidecar -> skipped without --force
+    # 2. Complete single_track sidecar -> skipped without --force (preserves language & audio_index)
     h_done = "fedcba9876543210"
     p_done = ahash_dir / f"{h_done}.86.1fps.ahash"
     p_done.write_bytes(b"AHASH")
     (ahash_dir / f"{h_done}.json").write_text(
-        json.dumps({"media_name": "Done.mkv", "selection": "single_track", "container_audio_streams": [{}]}),
+        json.dumps(
+            {
+                "media_name": "Done.mkv",
+                "selection": "single_track",
+                "selected_audio_stream": {"audio_index": 0, "language": "jpn"},
+                "container_audio_streams": [{}],
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -110,6 +117,11 @@ def test_plan_target_item_idempotence_and_upgrade(tmp_path: Path):
 
     plan_done = bf.plan_target_item(p_done, phash_dir, idx)
     assert plan_done.skip_reason == "already_certain_or_verified"
+    assert plan_done.existing_language == "jpn"
+    assert plan_done.existing_audio_index == 0
+    skipped_rec = bf._make_record(plan_done, "skipped")
+    assert skipped_rec.language == "jpn"
+    assert skipped_rec.audio_index == 0
 
     plan_upgrade = bf.plan_target_item(p_upgrade, phash_dir, idx)
     assert plan_upgrade.skip_reason is None
@@ -247,3 +259,178 @@ def test_progress_line_and_summary_breakdowns(tmp_path: Path, capsys):
     assert "By language:" in out
     assert "jpn" in out
     assert "fre" in out
+
+
+def _sample_sidecar(
+    media_name: str,
+    ahash_file: str,
+    *,
+    selection: str = "single_track",
+    moviehash: str | None = None,
+    source_rel_path: str | None = None,
+) -> dict:
+    return {
+        "schema_version": 1,
+        "moviehash": moviehash,
+        "media_name": media_name,
+        "ahash_file": ahash_file,
+        "fps": 86.125,
+        "frames": 100,
+        "duration_sec": 1.16,
+        "header": {
+            "version": 1,
+            "sample_rate": 5512,
+            "frame_size": 2048,
+            "hop_size": 64,
+            "num_bands": 33,
+            "spectral_lag": 2,
+            "frame_count": 100,
+        },
+        "selection": selection,
+        "selected_audio_stream": {
+            "index": 1,
+            "audio_index": 0,
+            "codec_name": "aac",
+            "channels": 2,
+            "sample_rate": 48000,
+            "language": "fre",
+            "title": None,
+            "is_default": True,
+        },
+        "container_audio_streams": [{"index": 1, "audio_index": 0}],
+        "extracted_at": 1700000000,
+        "source_id": "synology_tvshow" if source_rel_path else None,
+        "source_rel_path": source_rel_path,
+    }
+
+
+def test_migrate_to_moviehash_phash_dedup_local_and_ftp_mocked(tmp_path: Path, monkeypatch):
+    ahash_dir = tmp_path / "ahash"
+    phash_dir = tmp_path / "phash"
+    reports_dir = tmp_path / "reports"
+    ahash_dir.mkdir()
+    phash_dir.mkdir()
+    reports_dir.mkdir()
+
+    # 1. Resolved via __PHASH__ reverse index -> renamed cleanly
+    h_ph = "1111222233334444"
+    (phash_dir / f"{h_ph}.json").write_text(
+        json.dumps({"moviehash": h_ph, "media_name": "Épisode [01].mkv"}), encoding="utf-8"
+    )
+    (ahash_dir / "Épisode [01].mkv.86.1fps.ahash").write_bytes(b"AHASH_PH")
+    (ahash_dir / "Épisode [01].mkv.json").write_text(
+        json.dumps(_sample_sidecar("Épisode [01].mkv", "Épisode [01].mkv.86.1fps.ahash")),
+        encoding="utf-8",
+    )
+
+    # 2. Binary twin collision with existing <16hex> -> dedup + sidecar merge keeping verified_backfill + source_rel_path
+    h_dup = "aaaa1111bbbb2222"
+    (phash_dir / f"{h_dup}.json").write_text(
+        json.dumps({"moviehash": h_dup, "media_name": "Twin.Show.mkv"}), encoding="utf-8"
+    )
+    (ahash_dir / f"{h_dup}.86.1fps.ahash").write_bytes(b"AHASH_IDENTICAL_TWIN")
+    (ahash_dir / f"{h_dup}.json").write_text(
+        json.dumps(
+            _sample_sidecar("Twin.Show.mkv", f"{h_dup}.86.1fps.ahash", selection="ffmpeg_default", moviehash=h_dup)
+        ),
+        encoding="utf-8",
+    )
+    (ahash_dir / "Twin.Show.mkv.86.1fps.ahash").write_bytes(b"AHASH_IDENTICAL_TWIN")
+    (ahash_dir / "Twin.Show.mkv.json").write_text(
+        json.dumps(
+            _sample_sidecar(
+                "Twin.Show.mkv",
+                "Twin.Show.mkv.86.1fps.ahash",
+                selection="verified_backfill",
+                source_rel_path="tvshow/Twin.Show.mkv",
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    # 3. Resolved via local file MovieHash (no __PHASH__ entry)
+    local_media = tmp_path / "Local.Sample.mkv"
+    local_bytes = bytes(i % 251 for i in range(200_000))
+    local_media.write_bytes(local_bytes)
+    h_local = "e19d5212c9812cd6"
+    (ahash_dir / "Local.Sample.mkv.86.1fps.ahash").write_bytes(b"AHASH_LOCAL")
+    local_sidecar = _sample_sidecar("Local.Sample.mkv", "Local.Sample.mkv.86.1fps.ahash")
+    local_sidecar["source_id"] = "local_fixture"
+    local_sidecar["source_rel_path"] = str(local_media)
+    (ahash_dir / "Local.Sample.mkv.json").write_text(json.dumps(local_sidecar), encoding="utf-8")
+
+    # 4. Resolved via mocked remote FTP MovieHash (no __PHASH__ entry)
+    h_ftp = "fedcba0987654321"
+    (ahash_dir / "Remote.Ftp.mkv.86.1fps.ahash").write_bytes(b"AHASH_FTP")
+    (ahash_dir / "Remote.Ftp.mkv.json").write_text(
+        json.dumps(
+            _sample_sidecar("Remote.Ftp.mkv", "Remote.Ftp.mkv.86.1fps.ahash", source_rel_path="tvshow/Remote.Ftp.mkv")
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("NAS_HOST", "nas.invalid")
+    monkeypatch.setenv("NAS_USER", "u")
+    monkeypatch.setenv("NAS_PASS", "p")
+    monkeypatch.setattr(bf._worker, "target_moviehash", lambda target, base, env: h_ftp)
+
+    dry_report = reports_dir / "mig_dry.jsonl"
+    rc_dry = bf.main(
+        [
+            "--ahash-dir",
+            str(ahash_dir),
+            "--phash-dir",
+            str(phash_dir),
+            "--reports-dir",
+            str(reports_dir),
+            "--report-out",
+            str(dry_report),
+            "--migrate-to-moviehash",
+            "--dry-run",
+        ]
+    )
+    assert rc_dry == 0
+    assert (ahash_dir / "Épisode [01].mkv.86.1fps.ahash").exists()
+
+    live_report = reports_dir / "mig_live.jsonl"
+    rc_live = bf.main(
+        [
+            "--ahash-dir",
+            str(ahash_dir),
+            "--phash-dir",
+            str(phash_dir),
+            "--reports-dir",
+            str(reports_dir),
+            "--report-out",
+            str(live_report),
+            "--migrate-to-moviehash",
+            "--workers",
+            "2",
+        ]
+    )
+    assert rc_live == 0
+
+    remaining = sorted(p.name for p in ahash_dir.iterdir())
+    assert remaining == sorted(
+        [
+            f"{h_ph}.86.1fps.ahash",
+            f"{h_ph}.json",
+            f"{h_dup}.86.1fps.ahash",
+            f"{h_dup}.json",
+            f"{h_local}.86.1fps.ahash",
+            f"{h_local}.json",
+            f"{h_ftp}.86.1fps.ahash",
+            f"{h_ftp}.json",
+        ]
+    )
+
+    merged_dup = json.loads((ahash_dir / f"{h_dup}.json").read_text(encoding="utf-8"))
+    assert merged_dup["moviehash"] == h_dup
+    assert merged_dup["ahash_file"] == f"{h_dup}.86.1fps.ahash"
+    assert merged_dup["selection"] == "verified_backfill"
+    assert merged_dup["source_rel_path"] == "tvshow/Twin.Show.mkv"
+
+    migrated_ph = json.loads((ahash_dir / f"{h_ph}.json").read_text(encoding="utf-8"))
+    assert migrated_ph["moviehash"] == h_ph
+    assert migrated_ph["ahash_file"] == f"{h_ph}.86.1fps.ahash"
+    assert migrated_ph["media_name"] == "Épisode [01].mkv"

@@ -40,6 +40,7 @@ Cette page dresse le dictionnaire exhaustif de toutes les cibles d'orchestration
 | `task coupling:relabel` | `task coupling:relabel -- --media <hash> [--sub <hash>] --lang <code>` | Modifie la langue ou la confiance d'un couplage existant. |
 | `task audio:export-ahash` | `task audio:export-ahash -- --media <input> --output <ahash>` | Extrait l'empreinte spectrale acoustique Haitsma-Kalker `.ahash` v1.0 via `dbsrt export-ahash`. |
 | `task ahash:backfill-sidecars` | `task ahash:backfill-sidecars -- [--dry-run] [--limit N] [--workers W]` | Rattrape et vérifie localement via flux WAN les sidecars JSON `<stem>.json` de `data/__AHASH__/`. |
+| `task ahash:migrate-moviehash` | `task ahash:migrate-moviehash -- [--dry-run] [--limit N] [--workers W]` | Migre sans perte (0 FFT) les `.ahash`/`.json` nommés en clair vers `<moviehash_16hex>` avec déduplication des doublons binaires. |
 
 ---
 

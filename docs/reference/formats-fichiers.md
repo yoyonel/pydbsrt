@@ -40,11 +40,11 @@ Le format unitaire `.ahash` stocke la séquence temporelle d'empreintes audio 64
 
 Chaque `.ahash` écrit par `dbsrt export-ahash`, `dbsrt media:add --ahash-dir` ou rattrapé par `dbsrt ahash:sidecar` est accompagné d'un sidecar JSON (struct `AhashSidecar`, modules `dbsrt-core/src/ahash_sidecar.rs` et `dbsrt-core/src/ahash_backfill.rs`). Il documente le média source **et** la piste audio réellement décodée.
 
-- **Nommage** : `<stem>.json` dans le même dossier que le `.ahash`, où `<stem>` est le nom de fichier sans `.ahash` ni `.<fps>fps` (symétrique à `__PHASH__/<moviehash>.json`) :
+- **Nommage** : `<stem>.json` dans le même dossier que le `.ahash`, où `<stem>` est le nom de fichier sans `.ahash` ni `.<fps>fps` (symétrique à `__PHASH__/<moviehash>.json`). Le nom de fichier sur disque utilise systématiquement le MovieHash 64-bit OpenSubtitles (`16-hex`) dès qu'il est connu ou calculable (évitant espaces, crochets et accents UTF-8) :
   - `05b6126884056c42.86.1fps.ahash` → `05b6126884056c42.json`
-  - `Show.mkv.86.1fps.ahash` → `Show.mkv.json`
-  - piste explicite non-défaut (`--audio-track 1`, chemin par défaut) : `Show.mkv.a1.86.1fps.ahash` → `Show.mkv.a1.json`
-- **Écriture atomique** : `<stem>.json.tmp` + `fsync` + `rename` (jamais de JSON tronqué si le process est tué, ex. limite LVE o2switch).
+  - piste explicite non-défaut (`--audio-track 1`, chemin par défaut) : `05b6126884056c42.a1.86.1fps.ahash` → `05b6126884056c42.a1.json`
+  - repli flux distant sans MovieHash connu ou fichier `< 64 KiB` : `Show.mkv.86.1fps.ahash` → `Show.mkv.json`
+- **Écriture atomique** : `<stem>.json.<pid>.tmp` + `fsync` + `rename` (zéro collision inter-processus et jamais de JSON tronqué si le process est tué, ex. limite LVE o2switch).
 - **Rattrapage** : quand `media:add` réutilise un `.ahash` existant sans sidecar, le sidecar est créé (lecture de l'en-tête 176 octets + un `ffprobe`, sans décodage audio ni FFT). Un sidecar existant n'est jamais écrasé par ce chemin.
 
 | Champ | Type | Description |

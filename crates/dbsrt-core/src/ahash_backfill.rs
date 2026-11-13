@@ -320,7 +320,7 @@ fn attach_source_metadata(sidecar: &mut AhashSidecar, req: &BackfillSidecarReque
 /// 4. Multi-track containers either infer (`inferred_backfill` when `no_verify`) or sample
 ///    `5.0s` at `t = 50%` per stream (`-map 0:a:k`) and accept `verified_backfill` only when
 ///    the lowest sliding Hamming distance in `+-2.0s` satisfies `<= 14.0` (otherwise `unknown`).
-/// 5. Writes `<stem>.json.tmp` -> `fsync` -> `rename` atomically.
+/// 5. Writes `<stem>.json.<pid>.tmp` -> `fsync` -> `rename` atomically.
 pub fn backfill_ahash_sidecar(req: &BackfillSidecarRequest<'_>) -> Result<BackfillSidecarOutcome> {
     let sidecar_path = ahash_sidecar_path(req.ahash_path);
     if let Some(existing) = check_skip_existing(&sidecar_path, req.force) {

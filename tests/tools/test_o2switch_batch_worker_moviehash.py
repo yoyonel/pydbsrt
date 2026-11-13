@@ -45,18 +45,35 @@ class FakeConn:
 
 
 class FakeFtp:
-    def __init__(self, data: bytes) -> None:
+    def __init__(self, data: bytes, paths: dict[str, bytes] | None = None) -> None:
         self.data = data
+        self.paths = paths
         self.commands: list[tuple[str, int | None]] = []
         self.conns: list[FakeConn] = []
         self.closed = False
+        self.type_cmds: list[str] = []
 
     def close(self) -> None:
         self.closed = True
 
+    def voidcmd(self, cmd: str) -> str:
+        self.type_cmds.append(cmd)
+        return "200 Type set to I."
+
+    def size(self, path: str) -> int:
+        if self.paths is not None:
+            if path not in self.paths:
+                raise ftplib.error_perm("550 No such file.")
+            return len(self.paths[path])
+        return len(self.data)
+
     def transfercmd(self, cmd: str, rest: int | None = None) -> FakeConn:
         self.commands.append((cmd, rest))
-        conn = FakeConn(self.data[rest or 0 :])
+        payload = self.data
+        if self.paths is not None:
+            req_path = cmd.removeprefix("RETR ")
+            payload = self.paths.get(req_path, b"")
+        conn = FakeConn(payload[rest or 0 :])
         self.conns.append(conn)
         return conn
 
@@ -209,3 +226,38 @@ def test_target_moviehash_is_none_when_the_nas_is_unreachable() -> None:
     # Port 1 on localhost refuses the connection: no hash, the worker falls back to the stem
     assert worker.target_moviehash(target, "ftp://127.0.0.1:1", {}) is None
     assert worker.target_moviehash(target, "http://127.0.0.1:1", {}) is None
+
+
+def test_ftp_moviehash_probes_size_when_zero_and_handles_nfd() -> None:
+    import unicodedata
+
+    data = pattern(200_000)
+    nfd_path = unicodedata.normalize("NFD", "/tvshow/Café/épisode.mkv")
+    nfc_path = unicodedata.normalize("NFC", "/tvshow/Café/épisode.mkv")
+    opened: list[FakeFtp] = []
+
+    def connect() -> ftplib.FTP:
+        opened.append(FakeFtp(data, paths={nfd_path: data}))
+        return cast(ftplib.FTP, opened[-1])
+
+    assert ftp_moviehash(connect, nfc_path, 0) == "e19d5212c9812cd6"
+    assert opened[0].type_cmds == ["TYPE I"]
+    assert [ftp.commands for ftp in opened[1:]] == [
+        [(f"RETR {nfd_path}", 0)],
+        [(f"RETR {nfd_path}", 200_000 - MOVIEHASH_CHUNK_BYTES)],
+    ]
+
+
+def test_target_moviehash_over_http_probes_size_when_zero(freebox_gateway: str) -> None:
+    target = FREEBOX_TARGET._replace(size_bytes=0)
+    assert worker.target_moviehash(target, freebox_gateway, {}) == "e19d5212c9812cd6"
+
+
+@pytest.mark.parametrize(("size", "expected"), VECTORS)
+def test_compute_local_moviehash_matches_vectors(tmp_path: Path, size: int, expected: str) -> None:
+    p = tmp_path / "sample.mkv"
+    p.write_bytes(pattern(size))
+    assert worker.compute_local_moviehash(p) == expected
+    small = tmp_path / "small.mkv"
+    small.write_bytes(pattern(MOVIEHASH_CHUNK_BYTES - 1))
+    assert worker.compute_local_moviehash(small) is None

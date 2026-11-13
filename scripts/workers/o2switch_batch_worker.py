@@ -97,19 +97,21 @@ def _handle_uncaught_exception(exc_type: type, exc_value: BaseException, exc_tb:
         pass
 
 
-@atexit.register
 def _on_exit() -> None:
     _kill_active_children()
     msg = f"\nℹ️ [EXIT] Batch worker exiting at {time.strftime('%Y-%m-%d %H:%M:%S')}\n"
     print(msg, flush=True)
 
 
-sys.excepthook = _handle_uncaught_exception
-for _sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT, signal.SIGQUIT):
-    try:
-        signal.signal(_sig, _handle_signal)
-    except Exception:
-        pass
+def _install_process_handlers() -> None:
+    """Installs process-wide exit/signal handlers only when running as CLI worker."""
+    atexit.register(_on_exit)
+    sys.excepthook = _handle_uncaught_exception
+    for _sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT, signal.SIGQUIT):
+        try:
+            signal.signal(_sig, _handle_signal)
+        except Exception:
+            pass
 
 
 DEFAULT_DESIRED_WORKERS_PATH: Path = Path("run/desired_workers")
@@ -439,16 +441,67 @@ def _walk_nas_videos_ftp(
 
 
 # OpenSubtitles moviehash: file size plus its 64 KiB head and tail summed as little-endian u64 words
-MOVIEHASH_CHUNK_BYTES = 65536
+MOVIEHASH_CHUNK_BYTES: int = 65536
+MOVIEHASH_WORD_BYTES: int = 8
+UINT64_MASK: int = 0xFFFFFFFFFFFFFFFF
+HTTP_RANGE_TIMEOUT_SECS: float = 15.0
+FTP_MOVIEHASH_TIMEOUT_SECS: float = 15.0
+HTTP_PARTIAL_CONTENT_STATUS: int = 206
 
 
 def moviehash_from_chunks(size: int, head: bytes, tail: bytes) -> str:
     """Same value as compute_opensubtitles_hash (dbsrt-core) for the same file."""
     total = size
     for block in (head, tail):
-        for i in range(0, len(block), 8):
-            total += int.from_bytes(block[i : i + 8], "little")
-    return f"{total & 0xFFFFFFFFFFFFFFFF:016x}"
+        for i in range(0, len(block), MOVIEHASH_WORD_BYTES):
+            total += int.from_bytes(block[i : i + MOVIEHASH_WORD_BYTES], "little")
+    return f"{total & UINT64_MASK:016x}"
+
+
+def compute_local_moviehash(path: Path) -> str | None:
+    """Computes OpenSubtitles 64-bit MovieHash from a local file without loading it in full."""
+    try:
+        size = path.stat().st_size
+        if size < MOVIEHASH_CHUNK_BYTES:
+            return None
+        with path.open("rb") as fh:
+            head = fh.read(MOVIEHASH_CHUNK_BYTES)
+            fh.seek(size - MOVIEHASH_CHUNK_BYTES)
+            tail = fh.read(MOVIEHASH_CHUNK_BYTES)
+    except OSError:
+        return None
+    if len(head) < MOVIEHASH_CHUNK_BYTES or len(tail) < MOVIEHASH_CHUNK_BYTES:
+        return None
+    return moviehash_from_chunks(size, head, tail)
+
+
+def _ftp_path_candidates(path: str) -> Tuple[str, ...]:
+    """Returns deduplicated raw/NFD/NFC FTP path candidates for Synology mixed encodings."""
+    candidates: List[str] = []
+    for variant in (path, unicodedata.normalize("NFD", path), unicodedata.normalize("NFC", path)):
+        if variant not in candidates:
+            candidates.append(variant)
+    return tuple(candidates)
+
+
+def _ftp_resolve_size_and_path(connect: Callable[[], ftplib.FTP], path: str) -> Tuple[str, int] | None:
+    """Queries remote file size in binary mode over FTP, handling NFC/NFD path normalization."""
+    ftp = connect()
+    try:
+        ftp.voidcmd("TYPE I")
+        for candidate in _ftp_path_candidates(path):
+            try:
+                size = ftp.size(candidate)
+            except ftplib.error_perm:
+                continue
+            if size is not None:
+                return candidate, int(size)
+        return None
+    except ftplib.all_errors:
+        return None
+    finally:
+        with contextlib.suppress(Exception):
+            ftp.close()
 
 
 def _ftp_read_at(connect: Callable[[], ftplib.FTP], path: str, offset: int) -> bytes:
@@ -475,12 +528,36 @@ def _ftp_read_at(connect: Callable[[], ftplib.FTP], path: str, offset: int) -> b
             ftp.close()
 
 
+def _http_file_size(url: str) -> int | None:
+    """Resolves remote HTTP file size via HEAD Content-Length or 1-byte Range Content-Range."""
+    try:
+        head_req = urllib.request.Request(url, method="HEAD")
+        with urllib.request.urlopen(head_req, timeout=HTTP_RANGE_TIMEOUT_SECS) as resp:
+            content_len = resp.headers.get("Content-Length", "").strip()
+            if content_len.isdigit():
+                return int(content_len)
+    except (OSError, http.client.HTTPException):
+        pass
+    try:
+        probe_req = urllib.request.Request(url, headers={"Range": "bytes=0-0"})
+        with urllib.request.urlopen(probe_req, timeout=HTTP_RANGE_TIMEOUT_SECS) as resp:
+            if resp.status != HTTP_PARTIAL_CONTENT_STATUS:
+                return None
+            content_range = resp.headers.get("Content-Range", "")
+            total = content_range.rsplit("/", 1)[-1].strip()
+            return int(total) if total.isdigit() else None
+    except (OSError, http.client.HTTPException):
+        return None
+
+
 def _http_read_at(url: str, offset: int) -> bytes:
     """Reads MOVIEHASH_CHUNK_BYTES at `offset` with a Range request; empty unless the server honours that range."""
     request = urllib.request.Request(url, headers={"Range": f"bytes={offset}-{offset + MOVIEHASH_CHUNK_BYTES - 1}"})
-    with urllib.request.urlopen(request, timeout=15) as resp:
+    with urllib.request.urlopen(request, timeout=HTTP_RANGE_TIMEOUT_SECS) as resp:
         # A 200 full body would hand the head back for the tail
-        if resp.status != 206 or not resp.headers.get("Content-Range", "").startswith(f"bytes {offset}-"):
+        if resp.status != HTTP_PARTIAL_CONTENT_STATUS or not resp.headers.get("Content-Range", "").startswith(
+            f"bytes {offset}-"
+        ):
             return b""
         return resp.read(MOVIEHASH_CHUNK_BYTES)
 
@@ -497,8 +574,14 @@ def ranged_moviehash(read_at: Callable[[int], bytes], size: int) -> str | None:
 
 
 def ftp_moviehash(connect: Callable[[], ftplib.FTP], path: str, size: int) -> str | None:
-    """Moviehash of a NAS file read over FTP."""
-    return ranged_moviehash(lambda offset: _ftp_read_at(connect, path, offset), size)
+    """Moviehash of a NAS file read over FTP; probes SIZE automatically when `size <= 0`."""
+    resolved_path = path
+    if size <= 0:
+        resolved = _ftp_resolve_size_and_path(connect, path)
+        if resolved is None:
+            return None
+        resolved_path, size = resolved
+    return ranged_moviehash(lambda offset: _ftp_read_at(connect, resolved_path, offset), size)
 
 
 def target_moviehash(target: VideoTarget, stream_base: str, child_env: Dict[str, str]) -> str | None:
@@ -507,7 +590,8 @@ def target_moviehash(target: VideoTarget, stream_base: str, child_env: Dict[str,
     if url.scheme in ("http", "https"):
         media_url = build_stream_url(stream_base, target.rel_path)
         try:
-            return ranged_moviehash(lambda offset: _http_read_at(media_url, offset), target.size_bytes)
+            size = target.size_bytes if target.size_bytes > 0 else (_http_file_size(media_url) or 0)
+            return ranged_moviehash(lambda offset: _http_read_at(media_url, offset), size)
         except (OSError, http.client.HTTPException):
             return None
     if url.scheme != "ftp" or not url.hostname:
@@ -517,7 +601,7 @@ def target_moviehash(target: VideoTarget, stream_base: str, child_env: Dict[str,
     def connect() -> ftplib.FTP:
         ftp = ftplib.FTP(encoding="utf-8")
         try:
-            ftp.connect(host, url.port or DEFAULT_FTP_PORT, timeout=15)
+            ftp.connect(host, url.port or DEFAULT_FTP_PORT, timeout=FTP_MOVIEHASH_TIMEOUT_SECS)
             ftp.login(child_env.get("DBSRT_FTP_USER", ""), child_env.get("DBSRT_FTP_PASSWORD", ""))
         except BaseException:
             ftp.close()
@@ -1273,6 +1357,7 @@ def _validate_nas_credentials(args: argparse.Namespace, nas_pass: str) -> bool:
 
 def main() -> int:
     """CLI Entry point for o2switch batch processing."""
+    _install_process_handlers()
     args = build_arg_parser().parse_args()
     dbsrt_bin = _resolve_dbsrt_bin()
 

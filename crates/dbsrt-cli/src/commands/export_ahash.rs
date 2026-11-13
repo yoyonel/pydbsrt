@@ -13,7 +13,9 @@ use dbsrt_core::{
 use std::path::PathBuf;
 use std::time::Instant;
 
-use crate::commands::shared::{probe_audio_topology, resolve_media_path_filename};
+use crate::commands::shared::{
+    parse_moviehash, probe_audio_topology, resolve_media_path_filename, resolve_moviehash,
+};
 use crate::constants::{
     DEFAULT_AHASH_HOP_SIZE, DEFAULT_AHASH_SAMPLE_RATE, DIVISION_BY_ZERO_FALLBACK_SEC,
 };
@@ -28,10 +30,16 @@ pub struct ExportAhashArgs {
     #[arg(short, long)]
     pub media: PathBuf,
 
-    /// Output .ahash file path (defaults to /tmp/<name>[.a<k>].<fps>fps.ahash).
+    /// Output .ahash file path (defaults to `/tmp/<moviehash>[.a<k>].<fps>fps.ahash`
+    /// when MovieHash is known or computed locally, else `/tmp/<name>[.a<k>].<fps>fps.ahash`).
     /// The `<stem>.json` sidecar is written next to it.
     #[arg(short, long)]
     pub output: Option<PathBuf>,
+
+    /// OpenSubtitles 16-hex MovieHash naming the default output and stored in the sidecar;
+    /// computed automatically on local files (`>= 64 KiB`) when omitted.
+    #[arg(long, value_name = "HASH", value_parser = parse_moviehash)]
+    pub moviehash: Option<String>,
 
     /// Audio sampling rate in Hz (default: 5512).
     #[arg(long, default_value_t = DEFAULT_AHASH_SAMPLE_RATE)]
@@ -72,11 +80,12 @@ pub struct ExportAhashArgs {
 ///
 /// # Data Flow & Invariants
 /// 1. Probes the container audio topology once (ffprobe, headers only; `None` on failure).
-/// 2. Configures `AudioExtractionOptions` (`audio_stream = --audio-track`).
-/// 3. Spawns FFmpeg and streams mono f32le audio into `extract_ahash`.
-/// 4. Resolves the output path (`.a<k>` stem tag for an explicit non-default track).
-/// 5. Writes the `.ahash` (176-byte header + LE payload), then the sidecar atomically.
-/// 6. Prints execution throughput and real-time speed factor.
+/// 2. Resolves `--moviehash` or computes it from `args.media` when local (`>= 64 KiB`).
+/// 3. Configures `AudioExtractionOptions` (`audio_stream = --audio-track`).
+/// 4. Spawns FFmpeg and streams mono f32le audio into `extract_ahash`.
+/// 5. Resolves the output path (`<moviehash>[.a<k>].<fps>fps.ahash` by default when known).
+/// 6. Writes the `.ahash` (176-byte header + LE payload), then the sidecar atomically.
+/// 7. Prints execution throughput and real-time speed factor.
 pub fn run_export_ahash(args: &ExportAhashArgs) -> Result<()> {
     let start_time = Instant::now();
     println!(
@@ -84,6 +93,7 @@ pub fn run_export_ahash(args: &ExportAhashArgs) -> Result<()> {
         args.media
     );
     let inspection = probe_audio_topology(&args.media);
+    let moviehash = resolve_moviehash(args.moviehash.as_deref(), &args.media);
 
     let opts = AudioExtractionOptions {
         sample_rate: args.sample_rate,
@@ -117,14 +127,14 @@ pub fn run_export_ahash(args: &ExportAhashArgs) -> Result<()> {
     );
 
     let track_tag = non_default_track(args.audio_track, inspection.as_ref());
-    let target_path = resolve_output_path(args, fps, track_tag);
+    let target_path = resolve_output_path(args, fps, track_tag, moviehash.as_deref());
     AhashFile::write_to_path(&target_path, &ahash_file.header, &ahash_file.hashes)?;
     let media_name = resolve_media_path_filename(&args.media)?;
     let sidecar_path = AhashSidecar::build(&AhashSidecarRequest {
         ahash_path: &target_path,
         header: &ahash_file.header,
         media_name: &media_name,
-        moviehash: None,
+        moviehash: moviehash.as_deref(),
         inspection: inspection.as_ref(),
         explicit_audio_stream: args.audio_track,
     })
@@ -171,6 +181,7 @@ fn non_default_track(
 /// * `args` - CLI extraction arguments.
 /// * `fps` - Effective audio framerate.
 /// * `track_tag` - Explicit non-default track index to tag in the default stem.
+/// * `moviehash` - Resolved 16-hex OpenSubtitles MovieHash, if available.
 ///
 /// # Returns
 /// Destination `PathBuf`.
@@ -179,19 +190,29 @@ fn non_default_track(
 /// Guarantee: Never panics.
 ///
 /// # Data Flow & Invariants
-/// Returns explicitly provided `--output` unchanged; otherwise
-/// `/tmp/<media_file_name>[.a<k>].<fps>fps.ahash`.
-fn resolve_output_path(args: &ExportAhashArgs, fps: f64, track_tag: Option<usize>) -> PathBuf {
+/// Returns explicitly provided `--output` unchanged; otherwise uses `<moviehash>` when
+/// available (preventing accents/spaces/brackets in filenames), falling back to the media
+/// filename only when MovieHash cannot be computed:
+/// `/tmp/<stem>[.a<k>].<fps>fps.ahash`.
+fn resolve_output_path(
+    args: &ExportAhashArgs,
+    fps: f64,
+    track_tag: Option<usize>,
+    moviehash: Option<&str>,
+) -> PathBuf {
     if let Some(ref path) = args.output {
         return path.clone();
     }
-    let name = args
-        .media
-        .file_name()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .into_owned();
-    let stem = track_tag.map_or(name.clone(), |k| audio_track_stem(&name, k));
+    let base_stem = moviehash.map(str::to_string).unwrap_or_else(|| {
+        resolve_media_path_filename(&args.media).unwrap_or_else(|_| {
+            args.media
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned()
+        })
+    });
+    let stem = track_tag.map_or(base_stem.clone(), |k| audio_track_stem(&base_stem, k));
     PathBuf::from(DEFAULT_AHASH_OUTPUT_DIR).join(format!("{}.{:.1}fps.ahash", stem, fps))
 }
 
@@ -212,6 +233,7 @@ mod tests {
         ExportAhashArgs {
             media,
             output,
+            moviehash: None,
             sample_rate: DEFAULT_SAMPLE_RATE,
             hop_size: DEFAULT_HOP_SIZE,
             start_sec: 0.0,
@@ -273,17 +295,25 @@ mod tests {
     #[test]
     fn test_resolve_output_path_default() {
         let args = base_args(PathBuf::from("movie.mkv"), None);
-        let path = resolve_output_path(&args, 86.125, None);
+        let path = resolve_output_path(&args, 86.125, None, None);
         assert_eq!(path, PathBuf::from("/tmp/movie.mkv.86.1fps.ahash"));
-        let tagged = resolve_output_path(&args, 86.125, Some(1));
-        assert_eq!(tagged, PathBuf::from("/tmp/movie.mkv.a1.86.1fps.ahash"));
+        let hashed = resolve_output_path(&args, 86.125, None, Some("e19d5212c9812cd6"));
+        assert_eq!(hashed, PathBuf::from("/tmp/e19d5212c9812cd6.86.1fps.ahash"));
+        let tagged = resolve_output_path(&args, 86.125, Some(1), Some("e19d5212c9812cd6"));
+        assert_eq!(
+            tagged,
+            PathBuf::from("/tmp/e19d5212c9812cd6.a1.86.1fps.ahash")
+        );
     }
 
     #[test]
     fn test_resolve_output_path_explicit() {
         let explicit = PathBuf::from("/data/custom.ahash");
         let args = base_args(PathBuf::from("movie.mkv"), Some(explicit.clone()));
-        assert_eq!(resolve_output_path(&args, 86.125, Some(1)), explicit);
+        assert_eq!(
+            resolve_output_path(&args, 86.125, Some(1), Some("e19d5212c9812cd6")),
+            explicit
+        );
     }
 
     #[test]
@@ -379,6 +409,7 @@ mod tests {
             eprintln!("Skipping: media fixture not found");
             return;
         };
+        let expected_hash = dbsrt_core::metadata::compute_opensubtitles_hash(&media).unwrap();
         let args = ExportAhashArgs {
             hop_size: 0,
             duration: Some(0.5),
@@ -389,9 +420,16 @@ mod tests {
         assert!(res.is_ok());
 
         let fps = f64::from(DEFAULT_SAMPLE_RATE) / DEFAULT_HOP_SIZE as f64;
-        let default_path = resolve_output_path(&args, fps, None);
+        let default_path = resolve_output_path(&args, fps, None, Some(&expected_hash));
+        assert_eq!(
+            default_path.file_name().unwrap().to_string_lossy(),
+            format!("{expected_hash}.86.1fps.ahash")
+        );
+        assert!(default_path.exists(), "default moviehash .ahash output");
         let sidecar = ahash_sidecar_path(&default_path);
         assert!(sidecar.exists(), "sidecar next to default output");
+        let parsed = AhashSidecar::read(&sidecar).unwrap();
+        assert_eq!(parsed.moviehash.as_deref(), Some(expected_hash.as_str()));
         let _ = std::fs::remove_file(default_path);
         let _ = std::fs::remove_file(sidecar);
     }

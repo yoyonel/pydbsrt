@@ -145,6 +145,11 @@ tasks:
     cmds:
       - uv run --no-sync python scripts/ingestion/backfill_ahash_sidecars.py {{.CLI_ARGS}}
 
+  ahash:migrate-moviehash:
+    desc: Losslessly migrate legacy plaintext .ahash/.json files to <moviehash_16hex> naming (--dry-run, --limit N, --workers W<=4)
+    cmds:
+      - uv run --no-sync python scripts/ingestion/backfill_ahash_sidecars.py --migrate-to-moviehash {{.CLI_ARGS}}
+
   bench:ahash:matching:
     desc: Run exhaustive acoustic cross-correlation benchmark on .ahash files (Axe 1 temporal, Axe 2 discrimination, Axe 3 throughput)
     aliases: [bench:ahash]

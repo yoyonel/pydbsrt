@@ -408,7 +408,7 @@ impl AhashSidecar {
         }
     }
 
-    /// Writes the sidecar atomically to `path` (`<path>.tmp` then `rename`).
+    /// Writes the sidecar atomically to `path` (`<path>.<pid>.tmp` then `rename`).
     ///
     /// # Arguments
     /// * `path` - Final sidecar path.
@@ -424,12 +424,13 @@ impl AhashSidecar {
     /// Guarantee: Never panics.
     ///
     /// # Data Flow & Invariants
-    /// The temporary file lives in the same directory, so `rename` is atomic on POSIX: a
-    /// process killed mid-write (e.g. LVE limit on o2switch) leaves either the previous
-    /// sidecar or a stray `.tmp`, never a truncated `<stem>.json`.
+    /// The temporary file lives in the same directory and embeds the current process ID, so
+    /// concurrent processes never clobber each other's temporary buffer and `rename` stays
+    /// atomic on POSIX: a process killed mid-write (e.g. LVE limit on o2switch) leaves either
+    /// the previous sidecar or a stray `.<pid>.tmp`, never a truncated `<stem>.json`.
     pub fn write_atomic(&self, path: &Path) -> Result<()> {
         let mut tmp_name = path.file_name().unwrap_or_default().to_os_string();
-        tmp_name.push(SIDECAR_TMP_SUFFIX);
+        tmp_name.push(format!(".{}{SIDECAR_TMP_SUFFIX}", std::process::id()));
         let tmp_path = path.with_file_name(tmp_name);
         let body = serde_json::to_string_pretty(self)?;
         let written = (|| -> Result<()> {
@@ -620,7 +621,10 @@ mod tests {
         assert_eq!(written, dir.path().join(format!("{HEX}.json")));
         assert!(!dir
             .path()
-            .join(format!("{HEX}.json{SIDECAR_TMP_SUFFIX}"))
+            .join(format!(
+                "{HEX}.json.{}{SIDECAR_TMP_SUFFIX}",
+                std::process::id()
+            ))
             .exists());
         let back = AhashSidecar::read(&written).unwrap();
         assert_eq!(back, sidecar);

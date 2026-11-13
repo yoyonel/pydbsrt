@@ -28,7 +28,7 @@ import urllib.parse
 from collections import Counter
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Tuple
+from typing import Any, Dict, Iterable, List, Tuple
 
 
 def _find_repo_root() -> Path:
@@ -41,6 +41,13 @@ def _find_repo_root() -> Path:
 
 
 REPO_ROOT: Path = _find_repo_root()
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+try:
+    from scripts.workers import o2switch_batch_worker as _worker
+except ImportError:
+    import o2switch_batch_worker as _worker  # type: ignore[import-not-found,no-redef]
 
 # Operational Constants (Zero Magic Numbers)
 DEFAULT_AHASH_DIR: Path = REPO_ROOT / "data/__AHASH__"
@@ -65,6 +72,29 @@ MOVIEHASH_RE = re.compile(r"[0-9a-fA-F]{16}")
 AHASH_FPS_SUFFIX_RE = re.compile(r"\.\d+(?:\.\d+)?fps$")
 AUDIO_TRACK_TAG_RE = re.compile(r"\.a\d+$")
 SIDECAR_KEYS_FILENAME: Tuple[str, ...] = ("media_name", "clean_title", "filename")
+SELECTION_COMPLETENESS_RANK: Dict[str, int] = {
+    "explicit": 4,
+    "verified_backfill": 3,
+    "single_track": 3,
+    "inferred_backfill": 2,
+    "ffmpeg_default": 2,
+    "unknown": 1,
+}
+SIDECAR_FILLABLE_KEYS: Tuple[str, ...] = (
+    "schema_version",
+    "media_name",
+    "fps",
+    "frames",
+    "duration_sec",
+    "header",
+    "selection",
+    "selected_audio_stream",
+    "container_audio_streams",
+    "extracted_at",
+    "source_id",
+    "source_rel_path",
+    "verified_distance",
+)
 
 
 @dataclass(frozen=True)
@@ -100,6 +130,24 @@ class AhashTargetItem:
     existing_track_count: int
     location: SourceLocation | None
     skip_reason: str | None
+    existing_language: str | None = None
+    existing_audio_index: int | None = None
+    existing_verified_distance: float | None = None
+
+
+@dataclass(frozen=True)
+class MigrationCandidate:
+    """Legacy non-16-hex `.ahash` file queued for lossless `<moviehash_16hex>` migration."""
+
+    ahash_path: Path
+    sidecar_path: Path
+    logical_stem: str
+    base_stem: str
+    track_tag: str
+    fps_suffix: str
+    media_name: str
+    typed_sidecar: Dict[str, Any] | None
+    location: SourceLocation | None
 
 
 @dataclass
@@ -451,7 +499,7 @@ def _lookup_source_location(
         sid = typed_sidecar.get("source_id")
         rel = typed_sidecar.get("source_rel_path")
         if isinstance(sid, str) and isinstance(rel, str) and sid and rel:
-            transport = "http" if sid == "freebox_disks" else ("local" if sid == "local" else "ftp")
+            transport = "http" if sid == "freebox_disks" else ("local" if sid.startswith("local") else "ftp")
             return SourceLocation(source_id=sid, rel_path=rel, transport=transport)
     for key in _normalize_lookup_keys(media_name):
         if key in source_index:
@@ -514,6 +562,29 @@ def _resolve_sha256_twin_name(
     return None
 
 
+def _read_sidecar_state(
+    typed_dict: Dict[str, Any] | None,
+) -> Tuple[str | None, int, str | None, int | None, float | None]:
+    """Extracts selection, track count, language, audio index, and distance from a typed sidecar."""
+    if not typed_dict:
+        return None, 0, None, None, None
+    raw_sel = typed_dict.get("selection")
+    selection = str(raw_sel) if isinstance(raw_sel, str) else None
+    tracks = typed_dict.get("container_audio_streams")
+    track_count = len(tracks) if isinstance(tracks, list) else 0
+    selected = typed_dict.get("selected_audio_stream")
+    language: str | None = None
+    audio_index: int | None = None
+    if isinstance(selected, dict):
+        raw_lang = selected.get("language")
+        language = str(raw_lang) if isinstance(raw_lang, str) and raw_lang.strip() else None
+        raw_idx = selected.get("audio_index")
+        audio_index = int(raw_idx) if isinstance(raw_idx, int) else None
+    raw_dist = typed_dict.get("verified_distance")
+    verified_distance = float(raw_dist) if isinstance(raw_dist, int | float) else None
+    return selection, track_count, language, audio_index, verified_distance
+
+
 def plan_target_item(
     ahash_path: Path,
     phash_dir: Path,
@@ -531,10 +602,7 @@ def plan_target_item(
 
     typed_payload = _load_json_safe(sidecar_path)
     typed_dict = typed_payload if isinstance(typed_payload, dict) else None
-    existing_sel = typed_dict.get("selection") if typed_dict else None
-    existing_sel_str = str(existing_sel) if isinstance(existing_sel, str) else None
-    tracks = typed_dict.get("container_audio_streams") if typed_dict else None
-    track_count = len(tracks) if isinstance(tracks, list) else 0
+    existing_sel_str, track_count, existing_lang, existing_idx, existing_dist = _read_sidecar_state(typed_dict)
 
     media_name = _read_sidecar_name_only(sidecar_path)
     if not media_name and moviehash:
@@ -556,6 +624,9 @@ def plan_target_item(
         existing_track_count=track_count,
         location=location,
         skip_reason=skip_reason,
+        existing_language=existing_lang,
+        existing_audio_index=existing_idx,
+        existing_verified_distance=existing_dist,
     )
 
 
@@ -649,7 +720,10 @@ def _make_record(item: AhashTargetItem, status: str, error: str | None = None) -
         source_rel_path=item.location.rel_path if item.location else None,
         status=status,
         selection=item.existing_selection,
+        audio_index=item.existing_audio_index,
+        language=item.existing_language,
         track_count=item.existing_track_count or None,
+        verified_distance=item.existing_verified_distance,
         error=error,
     )
 
@@ -724,6 +798,289 @@ def write_jsonl_report(records: Iterable[BackfillRecord], report_path: Path) -> 
     tmp_path.replace(report_path)
 
 
+def build_phash_moviehash_index(phash_dir: Path) -> Dict[str, str]:
+    """Builds an unambiguous reverse index `normalized_media_key -> moviehash_16hex` from `__PHASH__/*.json`."""
+    if not phash_dir.is_dir():
+        return {}
+    buckets: Dict[str, set[str]] = {}
+    for sidecar_path in sorted(phash_dir.glob("*.json")):
+        payload = _load_json_safe(sidecar_path)
+        if not isinstance(payload, dict):
+            continue
+        mh = payload.get("moviehash")
+        media_name = payload.get("media_name")
+        if not isinstance(mh, str) or not MOVIEHASH_RE.fullmatch(mh):
+            continue
+        if not isinstance(media_name, str) or not media_name.strip():
+            continue
+        norm_mh = mh.lower()
+        for key in _normalize_lookup_keys(media_name):
+            buckets.setdefault(key, set()).add(norm_mh)
+    return {k: next(iter(vals)) for k, vals in buckets.items() if len(vals) == 1}
+
+
+def _build_migration_candidate(
+    ahash_path: Path,
+    source_index: Dict[str, SourceLocation],
+) -> MigrationCandidate | None:
+    """Returns a `MigrationCandidate` for non-16-hex `.ahash` files, or `None` if already 16-hex."""
+    logical = ahash_logical_stem(ahash_path.name)
+    base_stem = _strip_audio_track_tag(logical)
+    if MOVIEHASH_RE.fullmatch(base_stem):
+        return None
+    track_tag = logical[len(base_stem) :]
+    without_ext = ahash_path.name.removesuffix(".ahash")
+    fps_match = AHASH_FPS_SUFFIX_RE.search(without_ext)
+    fps_suffix = fps_match.group(0) if fps_match else ""
+
+    sidecar_path = ahash_path.with_name(f"{logical}.json")
+    raw_sidecar = _load_json_safe(sidecar_path)
+    typed_sidecar = raw_sidecar if isinstance(raw_sidecar, dict) else None
+    media_name = _read_sidecar_name_only(sidecar_path) or urllib.parse.unquote(base_stem)
+    location = _lookup_source_location(media_name, typed_sidecar, source_index)
+    if location is None:
+        location = _lookup_source_location(urllib.parse.unquote(base_stem), typed_sidecar, source_index)
+    return MigrationCandidate(
+        ahash_path=ahash_path,
+        sidecar_path=sidecar_path,
+        logical_stem=logical,
+        base_stem=base_stem,
+        track_tag=track_tag,
+        fps_suffix=fps_suffix,
+        media_name=media_name,
+        typed_sidecar=typed_sidecar,
+        location=location,
+    )
+
+
+def _lookup_phash_index(cand: MigrationCandidate, phash_index: Dict[str, str]) -> str | None:
+    for probe in (cand.media_name, urllib.parse.unquote(cand.base_stem)):
+        for key in _normalize_lookup_keys(probe):
+            if key in phash_index:
+                return phash_index[key]
+    return None
+
+
+def _remote_stream_base(
+    transport: str,
+    cfg: SourceEnvConfig,
+    child_env: Dict[str, str],
+) -> Tuple[str | None, str | None]:
+    if transport == "ftp":
+        has_creds = bool(cfg.nas_host and cfg.nas_user and child_env.get("DBSRT_FTP_PASSWORD"))
+        return (f"ftp://{cfg.nas_host}:{DEFAULT_FTP_PORT}", None) if has_creds else (None, "unresolved_url")
+    if transport == "http":
+        return (cfg.freebox_base, None) if cfg.freebox_base else (None, "unresolved_url")
+    return None, "unresolved_source"
+
+
+def _compute_remote_or_local_moviehash(
+    cand: MigrationCandidate,
+    cfg: SourceEnvConfig,
+    child_env: Dict[str, str],
+) -> Tuple[str | None, str | None]:
+    """Resolves 64-bit OpenSubtitles MovieHash lightly without downloading the media file."""
+    loc = cand.location
+    if loc is None:
+        return None, "unresolved_source"
+    if loc.transport == "local":
+        rel = Path(loc.rel_path)
+        mh = _worker.compute_local_moviehash(rel if rel.is_absolute() else REPO_ROOT / rel)
+        return (mh, None) if mh else (None, "error")
+    stream_base, err_status = _remote_stream_base(loc.transport, cfg, child_env)
+    if not stream_base:
+        return None, err_status
+    target = _worker.VideoTarget("/" + loc.rel_path.lstrip("/"), cand.media_name, 0)
+    mh = _worker.target_moviehash(target, stream_base, child_env)
+    return (mh, None) if mh else (None, "error")
+
+
+def resolve_candidate_moviehash(
+    cand: MigrationCandidate,
+    phash_index: Dict[str, str],
+    cfg: SourceEnvConfig,
+    child_env: Dict[str, str],
+) -> Tuple[str | None, str | None]:
+    """Resolves `(moviehash, error_status)` via `__PHASH__` reverse index, else lightweight 128 KiB probe."""
+    existing_mh = cand.typed_sidecar.get("moviehash") if cand.typed_sidecar else None
+    if isinstance(existing_mh, str) and MOVIEHASH_RE.fullmatch(existing_mh):
+        return existing_mh.lower(), None
+    indexed = _lookup_phash_index(cand, phash_index)
+    if indexed:
+        return indexed, None
+    return _compute_remote_or_local_moviehash(cand, cfg, child_env)
+
+
+def _sidecar_completeness_score(payload: Dict[str, Any] | None) -> Tuple[int, int, int, int]:
+    if not payload:
+        return (0, 0, 0, 0)
+    sel = str(payload.get("selection") or "")
+    streams = payload.get("container_audio_streams")
+    stream_cnt = len(streams) if isinstance(streams, list) else 0
+    has_selected = 1 if isinstance(payload.get("selected_audio_stream"), dict) else 0
+    has_source = 1 if payload.get("source_rel_path") else 0
+    return (SELECTION_COMPLETENESS_RANK.get(sel, 0), stream_cnt, has_selected, has_source)
+
+
+def _should_fill_field(current: object, candidate: object) -> bool:
+    if candidate is None:
+        return False
+    if current is None:
+        return True
+    return current == [] and isinstance(candidate, list) and bool(candidate)
+
+
+def merge_ahash_sidecars(
+    target_dict: Dict[str, Any] | None,
+    legacy_dict: Dict[str, Any] | None,
+    moviehash: str,
+    target_ahash_name: str,
+    media_name: str,
+) -> Dict[str, Any] | None:
+    """Merges two sidecar payloads keeping the most complete track verification and filling gaps."""
+    if target_dict is None and legacy_dict is None:
+        return None
+    if _sidecar_completeness_score(target_dict) >= _sidecar_completeness_score(legacy_dict):
+        primary, secondary = target_dict, legacy_dict
+    else:
+        primary, secondary = legacy_dict, target_dict
+    merged: Dict[str, Any] = dict(primary or {})
+    if secondary:
+        for key in SIDECAR_FILLABLE_KEYS:
+            candidate = secondary.get(key)
+            if _should_fill_field(merged.get(key), candidate):
+                merged[key] = candidate
+    merged["moviehash"] = moviehash
+    merged["ahash_file"] = target_ahash_name
+    if not merged.get("media_name"):
+        merged["media_name"] = media_name
+    return merged
+
+
+def _write_json_atomic(path: Path, payload: Dict[str, Any]) -> None:
+    tmp_path = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    with tmp_path.open("w", encoding="utf-8") as fh:
+        fh.write(json.dumps(payload, indent=2, ensure_ascii=False))
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp_path, path)
+
+
+def _migration_record(
+    cand: MigrationCandidate,
+    moviehash: str | None,
+    target_sidecar_name: str,
+    status: str,
+    error: str | None = None,
+) -> BackfillRecord:
+    sel, tracks, lang, audio_idx, dist = _read_sidecar_state(cand.typed_sidecar)
+    return BackfillRecord(
+        ahash_file=cand.ahash_path.name,
+        sidecar_file=target_sidecar_name,
+        logical_stem=cand.logical_stem,
+        media_name=cand.media_name,
+        moviehash=moviehash,
+        source_id=cand.location.source_id if cand.location else None,
+        source_rel_path=cand.location.rel_path if cand.location else None,
+        status=status,
+        selection=sel,
+        audio_index=audio_idx,
+        language=lang,
+        track_count=tracks or None,
+        verified_distance=dist,
+        error=error,
+    )
+
+
+def _dedup_or_promote_binary(legacy_ahash: Path, target_ahash: Path) -> str | None:
+    """Keeps the larger/most complete `.ahash` binary and removes the duplicate; returns warning if hashes differ at equal size."""
+    legacy_size = legacy_ahash.stat().st_size
+    target_size = target_ahash.stat().st_size
+    if legacy_size > target_size:
+        os.replace(legacy_ahash, target_ahash)
+        return None
+    warning: str | None = None
+    if legacy_size == target_size and _sha256_file(legacy_ahash) != _sha256_file(target_ahash):
+        warning = "equal_size_sha256_mismatch_kept_existing"
+    legacy_ahash.unlink(missing_ok=True)
+    return warning
+
+
+def apply_migration_item(
+    cand: MigrationCandidate,
+    moviehash: str | None,
+    err_status: str | None,
+    dry_run: bool,
+) -> BackfillRecord:
+    """Applies or dry-runs lossless `<moviehash_16hex>` rename or binary deduplication."""
+    if not moviehash:
+        status = err_status or "error"
+        return _migration_record(cand, None, cand.sidecar_path.name, status, f"cannot resolve moviehash ({status})")
+
+    target_ahash = cand.ahash_path.with_name(f"{moviehash}{cand.track_tag}{cand.fps_suffix}.ahash")
+    target_sidecar = cand.ahash_path.with_name(f"{moviehash}{cand.track_tag}.json")
+    target_exists = target_ahash.exists()
+    if dry_run:
+        return _migration_record(
+            cand, moviehash, target_sidecar.name, "dry_run_dedup" if target_exists else "dry_run_migrate"
+        )
+
+    raw_target = _load_json_safe(target_sidecar)
+    target_dict = raw_target if isinstance(raw_target, dict) else None
+    merged = merge_ahash_sidecars(target_dict, cand.typed_sidecar, moviehash, target_ahash.name, cand.media_name)
+
+    warning: str | None = None
+    if target_exists:
+        warning = _dedup_or_promote_binary(cand.ahash_path, target_ahash)
+        if merged is not None:
+            _write_json_atomic(target_sidecar, merged)
+        if cand.sidecar_path != target_sidecar:
+            cand.sidecar_path.unlink(missing_ok=True)
+        return _migration_record(cand, moviehash, target_sidecar.name, "deduplicated", warning)
+
+    if merged is not None:
+        _write_json_atomic(target_sidecar, merged)
+    os.replace(cand.ahash_path, target_ahash)
+    if cand.sidecar_path != target_sidecar:
+        cand.sidecar_path.unlink(missing_ok=True)
+    return _migration_record(cand, moviehash, target_sidecar.name, "migrated")
+
+
+def _run_migration(
+    args: argparse.Namespace,
+    cfg: SourceEnvConfig,
+    child_env: Dict[str, str],
+    source_index: Dict[str, SourceLocation],
+    workers: int,
+) -> List[BackfillRecord]:
+    """Resolves MovieHashes in parallel and applies lossless migration sequentially."""
+    phash_index = build_phash_moviehash_index(args.phash_dir)
+    ahash_files = sorted(args.ahash_dir.glob("*.ahash")) if args.ahash_dir.is_dir() else []
+    candidates = [c for p in ahash_files if (c := _build_migration_candidate(p, source_index)) is not None]
+    if args.limit is not None and args.limit > 0:
+        candidates = candidates[: args.limit]
+    print(
+        f"Migrating {len(candidates)} legacy non-hex .ahash files (phash_index={len(phash_index)}, workers={workers})...",
+        flush=True,
+    )
+    if not candidates:
+        return []
+
+    if workers == 1:
+        resolved = [resolve_candidate_moviehash(c, phash_index, cfg, child_env) for c in candidates]
+    else:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+            resolved = list(pool.map(lambda c: resolve_candidate_moviehash(c, phash_index, cfg, child_env), candidates))
+
+    records: List[BackfillRecord] = []
+    total = len(candidates)
+    for idx, (cand, (mh, err_status)) in enumerate(zip(candidates, resolved), start=1):
+        rec = apply_migration_item(cand, mh, err_status, args.dry_run)
+        records.append(rec)
+        _emit_progress(idx, total, rec, args.dry_run)
+    return records
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ahash-dir", type=Path, default=DEFAULT_AHASH_DIR)
@@ -737,6 +1094,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-verify", action="store_true")
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--scan-ftp", action="store_true", help="Refresh FTP listing live from Synology")
+    parser.add_argument(
+        "--migrate-to-moviehash",
+        action="store_true",
+        help="Losslessly migrate legacy plaintext .ahash/.json pairs to <moviehash_16hex>",
+    )
     return parser
 
 
@@ -845,20 +1207,31 @@ def main(argv: List[str] | None = None) -> int:
     args = build_arg_parser().parse_args(argv)
     workers = clamp_workers(args.workers)
     cfg = build_source_env_config(REPO_ROOT, load_env_files(REPO_ROOT))
-    nas_pass = "" if (args.dry_run and not args.scan_ftp) else resolve_nas_password(cfg)
+    need_pass = args.scan_ftp or args.migrate_to_moviehash or not args.dry_run
+    nas_pass = resolve_nas_password(cfg) if need_pass else ""
 
     source_index = build_source_index(args.reports_dir, cfg, scan_ftp=args.scan_ftp, nas_password=nas_pass)
-    planned = _select_planned_targets(args, source_index)
-    print(f"Scanning {len(planned)} .ahash files (workers={workers})...", flush=True)
-    dbsrt_bin = resolve_dbsrt_binary(args.dbsrt_bin)
     child_env = build_child_env(cfg, nas_pass)
-    records = _run_planned_batch(planned, cfg, child_env, dbsrt_bin, args, workers)
+    if args.migrate_to_moviehash:
+        records = _run_migration(args, cfg, child_env, source_index, workers)
+        prefix = "ahash_moviehash_migration"
+    else:
+        planned = _select_planned_targets(args, source_index)
+        print(f"Scanning {len(planned)} .ahash files (workers={workers})...", flush=True)
+        dbsrt_bin = resolve_dbsrt_binary(args.dbsrt_bin)
+        records = _run_planned_batch(planned, cfg, child_env, dbsrt_bin, args, workers)
+        prefix = "ahash_sidecar_backfill"
 
     ts = datetime.datetime.now(datetime.UTC).strftime("%Y%m%d_%H%M%S")
-    report_path = args.report_out or (args.reports_dir / f"ahash_sidecar_backfill_{ts}.jsonl")
+    report_path = args.report_out or (args.reports_dir / f"{prefix}_{ts}.jsonl")
     write_jsonl_report(records, report_path)
     _print_summary(records, report_path, args.dry_run)
-    return 1 if any(r.status == "error" for r in records) else 0
+    failed = any(
+        r.status == "error"
+        or (args.migrate_to_moviehash and not args.dry_run and r.status in {"unresolved_source", "unresolved_url"})
+        for r in records
+    )
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use dbsrt_core::{
     ahash_sidecar_path, display_input, extract_frames_advanced, inspect_audio_streams, probe_video,
     read_ahash_header, read_phash_file, write_phash_file, AhashSidecar, AhashSidecarRequest,
-    AudioContainerInspection, PhashCheckpoint, VideoExtractionOptions,
+    AudioContainerInspection, PhashCheckpoint, VideoExtractionOptions, MOVIEHASH_HEX_LENGTH,
 };
 use dbsrt_index::{parse_fps_from_phash_stem, DbClient};
 use std::path::{Path, PathBuf};
@@ -47,6 +47,58 @@ pub fn find_or_build_phash(
     phash_dir: &Path,
 ) -> Result<(PathBuf, Vec<u64>, f64)> {
     find_or_build_phash_with_hwaccel(media_file, phash_dir, dbsrt_core::HwAccel::Auto, None)
+}
+
+/// Validates `--moviehash`: it becomes a file name, so 16 hexadecimal characters only.
+///
+/// # Arguments
+/// * `raw` - Raw CLI `--moviehash` value.
+///
+/// # Returns
+/// Lowercase 16-hex string when valid.
+///
+/// # Errors
+/// Returns `Err` if `raw` does not contain exactly 16 ASCII hexadecimal characters.
+///
+/// # Panics
+/// Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// Rejects path separators, dots, and arbitrary lengths so the validated hash is always
+/// safe as a filesystem stem.
+pub(crate) fn parse_moviehash(raw: &str) -> Result<String, String> {
+    if raw.len() == MOVIEHASH_HEX_LENGTH && raw.bytes().all(|b| b.is_ascii_hexdigit()) {
+        Ok(raw.to_ascii_lowercase())
+    } else {
+        Err(format!(
+            "expected {MOVIEHASH_HEX_LENGTH} hexadecimal characters, got {raw:?}"
+        ))
+    }
+}
+
+/// Resolves the OpenSubtitles 64-bit MovieHash for a media target.
+///
+/// # Arguments
+/// * `explicit` - Optional pre-resolved 16-hex MovieHash (`--moviehash`).
+/// * `media_file` - Local file path or remote stream URI.
+///
+/// # Returns
+/// `Some(hash)` from `explicit`, else computed on a local file (`>= 64 KiB`); `None` for
+/// remote streams without `--moviehash` or files smaller than 64 KiB.
+///
+/// # Panics
+/// Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// Normalizes any explicit hash to lowercase and never performs network I/O for remote URIs.
+pub(crate) fn resolve_moviehash(explicit: Option<&str>, media_file: &Path) -> Option<String> {
+    if let Some(hash) = explicit {
+        return Some(hash.to_ascii_lowercase());
+    }
+    if dbsrt_core::container::is_remote_stream_or_pipe(media_file) {
+        return None;
+    }
+    dbsrt_core::metadata::compute_opensubtitles_hash(media_file).ok()
 }
 
 pub(crate) fn resolve_media_path_filename(media_file: &Path) -> Result<String> {
@@ -274,23 +326,27 @@ pub fn ensure_ahash_sidecar(
 /// Guarantee: Never panics.
 ///
 /// # Data Flow & Invariants
-/// 1. Reuses an existing `.ahash` (MovieHash prefix, then file name) and creates its
+/// 1. Resolves MovieHash automatically when `moviehash` is `None` and `media_file` is local.
+/// 2. Reuses an existing `.ahash` (MovieHash prefix, then file name) and creates its
 ///    sidecar only if missing ([`ensure_ahash_sidecar`]).
-/// 2. Otherwise decodes with FFmpeg automatic track selection (`audio_stream: None`, no
-///    `-map`, bit-identical to legacy files), writes the `.ahash`, probes the topology and
-///    writes the sidecar (`single_track` / `ffmpeg_default` / `unknown`).
+/// 3. Otherwise decodes with FFmpeg automatic track selection (`audio_stream: None`, no
+///    `-map`, bit-identical to legacy files), writes `<moviehash_16hex>.<fps>fps.ahash`
+///    (falling back to media filename only when MovieHash is unavailable), probes the
+///    topology, and writes `<stem>.json` with `"moviehash"` populated.
 pub fn find_or_build_ahash(
     media_file: &Path,
     ahash_dir: &Path,
     moviehash: Option<&str>,
     media_name: Option<&str>,
 ) -> Result<(PathBuf, Vec<u64>, f64)> {
+    let resolved_hash = resolve_moviehash(moviehash, media_file);
+    let effective_hash = resolved_hash.as_deref();
     let fallback_name = resolve_media_path_filename(media_file).ok();
     let identity = AhashIdentity {
         media_name: media_name.or(fallback_name.as_deref()).unwrap_or_default(),
-        moviehash,
+        moviehash: effective_hash,
     };
-    if let Some(res) = scan_existing_ahash(ahash_dir, media_file, moviehash)? {
+    if let Some(res) = scan_existing_ahash(ahash_dir, media_file, effective_hash)? {
         eprintln!(
             "Extraction: reused existing .ahash ({} frames), no decode",
             res.1.len()
@@ -315,7 +371,7 @@ pub fn find_or_build_ahash(
 
     let fps = ahash_file.header.audio_fps();
     let file_name = resolve_media_path_filename(media_file)?;
-    let out_name = dbsrt_core::ahash_file_name(&file_name, moviehash, fps);
+    let out_name = dbsrt_core::ahash_file_name(&file_name, effective_hash, fps);
     let out_path = ahash_dir.join(&out_name);
 
     dbsrt_core::AhashFile::write_to_path(&out_path, &ahash_file.header, &ahash_file.hashes)?;
@@ -324,7 +380,7 @@ pub fn find_or_build_ahash(
         ahash_path: &out_path,
         header: &ahash_file.header,
         media_name: identity.media_name,
-        moviehash,
+        moviehash: effective_hash,
         inspection: inspection.as_ref(),
         explicit_audio_stream: None,
     })
@@ -761,6 +817,34 @@ mod tests {
         assert!(status.success());
         assert_resume_matches_full(&video);
         let _ = std::fs::remove_file(&video);
+    }
+
+    #[test]
+    fn test_find_or_build_ahash_names_local_file_by_moviehash() {
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/data/big_buck_bunny_trailer_480p.mp4");
+        if !fixture.exists() {
+            return;
+        }
+        let dir = scratch_dir("find_or_build_ahash_mh");
+        let media = dir.join("Accent é [Release] (2025).mp4");
+        std::fs::copy(&fixture, &media).unwrap();
+        let expected_hash = dbsrt_core::metadata::compute_opensubtitles_hash(&media).unwrap();
+        let ahash_dir = dir.join("ahash");
+
+        let (out_path, hashes, _fps) = find_or_build_ahash(&media, &ahash_dir, None, None).unwrap();
+        assert!(!hashes.is_empty());
+        let file_name = out_path.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(
+            file_name.starts_with(&format!("{expected_hash}.")),
+            "expected moviehash prefix {expected_hash}, got {file_name}"
+        );
+        let sidecar_path = ahash_dir.join(format!("{expected_hash}.json"));
+        let sidecar = AhashSidecar::read(&sidecar_path).unwrap();
+        assert_eq!(sidecar.moviehash.as_deref(), Some(expected_hash.as_str()));
+        assert_eq!(sidecar.media_name, "Accent é [Release] (2025).mp4");
+        assert_eq!(sidecar.ahash_file, file_name);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
