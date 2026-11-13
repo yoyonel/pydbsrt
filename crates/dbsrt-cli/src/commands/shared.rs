@@ -2,8 +2,9 @@
 
 use anyhow::{Context, Result};
 use dbsrt_core::{
-    extract_frames_advanced, probe_video, read_phash_file, write_phash_file, PhashCheckpoint,
-    VideoExtractionOptions,
+    ahash_sidecar_path, display_input, extract_frames_advanced, inspect_audio_streams, probe_video,
+    read_ahash_header, read_phash_file, write_phash_file, AhashSidecar, AhashSidecarRequest,
+    AudioContainerInspection, PhashCheckpoint, VideoExtractionOptions,
 };
 use dbsrt_index::{parse_fps_from_phash_stem, DbClient};
 use std::path::{Path, PathBuf};
@@ -48,7 +49,7 @@ pub fn find_or_build_phash(
     find_or_build_phash_with_hwaccel(media_file, phash_dir, dbsrt_core::HwAccel::Auto, None)
 }
 
-fn resolve_media_path_filename(media_file: &Path) -> Result<String> {
+pub(crate) fn resolve_media_path_filename(media_file: &Path) -> Result<String> {
     if dbsrt_core::container::is_remote_stream_or_pipe(media_file) {
         let raw = media_file.to_string_lossy();
         let unquoted = raw.split('?').next().unwrap_or(&raw);
@@ -172,28 +173,131 @@ fn scan_existing_ahash(
     Ok(None)
 }
 
+/// Probes the audio stream topology of a media container for the `.ahash` sidecar.
+///
+/// # Arguments
+/// * `media_file` - Local path or remote stream URI (FTP/HTTP).
+///
+/// # Returns
+/// `Some(inspection)` on success; `None` for pipe inputs (probing would consume stdin) or
+/// when ffprobe fails (warning printed on stderr, URL userinfo redacted).
+///
+/// # Panics
+/// Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// One ffprobe call (`-select_streams a`, headers only): no audio decode.
+pub fn probe_audio_topology(media_file: &Path) -> Option<AudioContainerInspection> {
+    if dbsrt_core::container::is_pipe_input(media_file) {
+        return None;
+    }
+    match inspect_audio_streams(media_file) {
+        Ok(inspection) => Some(inspection),
+        Err(err) => {
+            eprintln!(
+                "⚠ Audio topology unavailable for {}: {err:#}",
+                display_input(media_file)
+            );
+            None
+        }
+    }
+}
+
+/// Media identity stored in an `.ahash` sidecar.
+#[derive(Debug, Clone, Copy)]
+pub struct AhashIdentity<'a> {
+    /// Canonical media file name.
+    pub media_name: &'a str,
+    /// OpenSubtitles 16-hex MovieHash when known.
+    pub moviehash: Option<&'a str>,
+}
+
+/// Creates the `<stem>.json` sidecar of an existing `.ahash` when it is missing.
+///
+/// # Arguments
+/// * `ahash_path` - Existing `.ahash` binary.
+/// * `media_file` - Source media probed for its audio topology.
+/// * `identity` - Media name and MovieHash to record.
+///
+/// # Returns
+/// `Ok(Some(path))` when a sidecar was written, `Ok(None)` when one already existed.
+///
+/// # Errors
+/// Returns `Err` if the `.ahash` header is invalid or the sidecar cannot be written.
+///
+/// # Panics
+/// Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// Reads only the 176-byte header (no payload, no FFT), probes the container once
+/// (`selection = unknown` if the probe fails) and writes atomically. Never overwrites an
+/// existing sidecar.
+pub fn ensure_ahash_sidecar(
+    ahash_path: &Path,
+    media_file: &Path,
+    identity: AhashIdentity<'_>,
+) -> Result<Option<PathBuf>> {
+    if ahash_sidecar_path(ahash_path).exists() {
+        return Ok(None);
+    }
+    let header = read_ahash_header(ahash_path)?;
+    let inspection = probe_audio_topology(media_file);
+    let sidecar = AhashSidecar::build(&AhashSidecarRequest {
+        ahash_path,
+        header: &header,
+        media_name: identity.media_name,
+        moviehash: identity.moviehash,
+        inspection: inspection.as_ref(),
+        explicit_audio_stream: None,
+    });
+    sidecar.write_next_to(ahash_path).map(Some)
+}
+
 /// Helper resolving an existing .ahash file or extracting a new one into `ahash_dir`.
+///
+/// Rationale: shared by `media:add` (hence the o2switch batch worker), so every `.ahash`
+/// it produces or reuses ends up with its `<stem>.json` audio topology sidecar.
 ///
 /// # Arguments
 /// * `media_file` - Path or stream URI of the media file.
 /// * `ahash_dir` - Directory where .ahash files are stored.
 /// * `moviehash` - Optional 16-hex OpenSubtitles moviehash for canonical naming.
+/// * `media_name` - Canonical media name for the sidecar (defaults to the media file name).
 ///
 /// # Returns
 /// `(PathBuf, Vec<u64>, f64)` containing output path, audio hashes, and audio fps.
 ///
 /// # Errors
-/// Returns `Err` if FFmpeg fails, audio cannot be decoded, or writing fails.
+/// Returns `Err` if FFmpeg fails, audio cannot be decoded, or the `.ahash`/sidecar write fails.
+///
+/// # Panics
+/// Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// 1. Reuses an existing `.ahash` (MovieHash prefix, then file name) and creates its
+///    sidecar only if missing ([`ensure_ahash_sidecar`]).
+/// 2. Otherwise decodes with FFmpeg automatic track selection (`audio_stream: None`, no
+///    `-map`, bit-identical to legacy files), writes the `.ahash`, probes the topology and
+///    writes the sidecar (`single_track` / `ffmpeg_default` / `unknown`).
 pub fn find_or_build_ahash(
     media_file: &Path,
     ahash_dir: &Path,
     moviehash: Option<&str>,
+    media_name: Option<&str>,
 ) -> Result<(PathBuf, Vec<u64>, f64)> {
+    let fallback_name = resolve_media_path_filename(media_file).ok();
+    let identity = AhashIdentity {
+        media_name: media_name.or(fallback_name.as_deref()).unwrap_or_default(),
+        moviehash,
+    };
     if let Some(res) = scan_existing_ahash(ahash_dir, media_file, moviehash)? {
         eprintln!(
             "Extraction: reused existing .ahash ({} frames), no decode",
             res.1.len()
         );
+        if let Some(sidecar) = ensure_ahash_sidecar(&res.0, media_file, identity)? {
+            eprintln!("✓ Created missing aHash sidecar {:?}", sidecar);
+        }
         return Ok(res);
     }
 
@@ -201,10 +305,7 @@ pub fn find_or_build_ahash(
     let options = dbsrt_core::AudioExtractionOptions {
         sample_rate: DEFAULT_AHASH_SAMPLE_RATE,
         hop_size: DEFAULT_AHASH_HOP_SIZE,
-        frame_size: dbsrt_core::DEFAULT_FRAME_SIZE,
-        start_sec: 0.0,
-        duration_sec: None,
-        custom_ffmpeg: None,
+        ..Default::default()
     };
 
     let ahash_file = dbsrt_core::extract_ahash(media_file, &options)?;
@@ -218,6 +319,16 @@ pub fn find_or_build_ahash(
     let out_path = ahash_dir.join(&out_name);
 
     dbsrt_core::AhashFile::write_to_path(&out_path, &ahash_file.header, &ahash_file.hashes)?;
+    let inspection = probe_audio_topology(media_file);
+    AhashSidecar::build(&AhashSidecarRequest {
+        ahash_path: &out_path,
+        header: &ahash_file.header,
+        media_name: identity.media_name,
+        moviehash,
+        inspection: inspection.as_ref(),
+        explicit_audio_stream: None,
+    })
+    .write_next_to(&out_path)?;
 
     Ok((out_path, ahash_file.hashes, fps))
 }
@@ -391,6 +502,58 @@ fn load_checkpoint(partial: &Path) -> (Vec<u64>, String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const AHASH_FIXTURE: &str = "../../tests/data/big_buck_bunny_trailer_480p.mp4";
+    const FIXTURE_MOVIEHASH: &str = "0123456789abcdef";
+
+    #[test]
+    fn test_find_or_build_ahash_writes_and_backfills_sidecar() {
+        let media = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(AHASH_FIXTURE);
+        if !media.exists() {
+            eprintln!("Skipping: media fixture not found");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let (path, hashes, _) =
+            find_or_build_ahash(&media, dir.path(), Some(FIXTURE_MOVIEHASH), Some("BBB.mp4"))
+                .unwrap();
+        let sidecar_path = dir.path().join(format!("{FIXTURE_MOVIEHASH}.json"));
+        assert_eq!(ahash_sidecar_path(&path), sidecar_path);
+        let fresh = AhashSidecar::read(&sidecar_path).unwrap();
+        assert_eq!(fresh.media_name, "BBB.mp4");
+        assert_eq!(fresh.moviehash.as_deref(), Some(FIXTURE_MOVIEHASH));
+        assert_eq!(fresh.frames, hashes.len());
+        assert_eq!(
+            fresh.selection,
+            dbsrt_core::AudioTrackSelection::SingleTrack
+        );
+
+        // Reuse path (no decode) re-creates a missing sidecar from the header + ffprobe.
+        std::fs::remove_file(&sidecar_path).unwrap();
+        let (reused, _, _) =
+            find_or_build_ahash(&media, dir.path(), Some(FIXTURE_MOVIEHASH), Some("BBB.mp4"))
+                .unwrap();
+        assert_eq!(reused, path);
+        let backfilled = AhashSidecar::read(&sidecar_path).unwrap();
+        assert_eq!(backfilled.header, fresh.header);
+        assert_eq!(
+            backfilled.selected_audio_stream,
+            fresh.selected_audio_stream
+        );
+        assert_eq!(
+            ensure_ahash_sidecar(
+                &path,
+                &media,
+                AhashIdentity {
+                    media_name: "x",
+                    moviehash: None
+                }
+            )
+            .unwrap(),
+            None,
+            "existing sidecar must never be overwritten"
+        );
+    }
 
     fn scratch_dir(tag: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("dbsrt_shared_{tag}_{}", std::process::id()));

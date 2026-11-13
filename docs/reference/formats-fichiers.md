@@ -36,6 +36,42 @@ Le format unitaire `.ahash` stocke la séquence temporelle d'empreintes audio 64
 - **Magic** : `b"AHASH\0\1\0"`.
 - **Spécification détaillée** : Voir la spécification complète dans [RFC Format Binaire `.ahash`](2026-11-10-rfc-ahash-format-audio.md).
 
+### 1ter. Sidecar JSON d'un `.ahash` (`<stem>.json`, schéma v1)
+
+Chaque `.ahash` écrit par `dbsrt export-ahash` ou `dbsrt media:add --ahash-dir` est accompagné d'un sidecar JSON (struct `AhashSidecar`, module `dbsrt-core/src/ahash_sidecar.rs`). Il documente le média source **et** la piste audio réellement décodée.
+
+- **Nommage** : `<stem>.json` dans le même dossier que le `.ahash`, où `<stem>` est le nom de fichier sans `.ahash` ni `.<fps>fps` (symétrique à `__PHASH__/<moviehash>.json`) :
+  - `05b6126884056c42.86.1fps.ahash` → `05b6126884056c42.json`
+  - `Show.mkv.86.1fps.ahash` → `Show.mkv.json`
+  - piste explicite non-défaut (`--audio-track 1`, chemin par défaut) : `Show.mkv.a1.86.1fps.ahash` → `Show.mkv.a1.json`
+- **Écriture atomique** : `<stem>.json.tmp` + `fsync` + `rename` (jamais de JSON tronqué si le process est tué, ex. limite LVE o2switch).
+- **Rattrapage** : quand `media:add` réutilise un `.ahash` existant sans sidecar, le sidecar est créé (lecture de l'en-tête 176 octets + un `ffprobe`, sans décodage audio ni FFT). Un sidecar existant n'est jamais écrasé par ce chemin.
+
+| Champ | Type | Description |
+| :--- | :--- | :--- |
+| `schema_version` | `u32` | Version du schéma (`1`). |
+| `moviehash` | `string \| null` | MovieHash OpenSubtitles 16-hex si connu. |
+| `media_name` | `string` | Nom canonique du fichier média (clé partagée avec le sidecar pHash). |
+| `ahash_file` | `string` | Nom du binaire `.ahash` décrit. |
+| `fps` | `f64` | Cadence des sous-empreintes (`sample_rate / hop_size`, ~86.1). |
+| `frames` | `usize` | Nombre de sous-empreintes. |
+| `duration_sec` | `f64` | `frames / fps` (0 si `fps = 0`). |
+| `header` | objet | Copie de l'en-tête binaire : `version`, `sample_rate`, `frame_size`, `hop_size`, `num_bands`, `spectral_lag`, `frame_count`. |
+| `selection` | enum | Mode de sélection de la piste (tableau ci-dessous). |
+| `selected_audio_stream` | `AudioStreamInfo \| null` | Piste décodée : `index` (absolu, `0:<index>`), `audio_index` (relatif, `0:a:<k>`), `codec_name`, `channels`, `sample_rate`, `language` (ISO 639-2, ex. `fre`/`jpn`/`eng`), `title`, `is_default`. |
+| `container_audio_streams` | `AudioStreamInfo[]` | Toutes les pistes audio du conteneur (vide si inconnu). |
+| `extracted_at` | `u64` | Horodatage Unix (s) de génération du sidecar. |
+
+| `selection` | Condition | Certitude |
+| :--- | :--- | :--- |
+| `explicit` | `--audio-track <k>` → `-map 0:a:<k>` | Certaine. |
+| `single_track` | Pas de `-map`, une seule piste audio | Certaine. |
+| `ffmpeg_default` | Pas de `-map`, plusieurs pistes | **Déduite** : 1ʳᵉ piste `is_default`, sinon la 1ʳᵉ ayant le plus de `channels`, sinon `0:a:0`. |
+| `unknown` | Pas de `-map` et `ffprobe` en échec (ou entrée pipe) | Inconnue. |
+
+!!! note "Lecture par le catalogue"
+    `AHashCatalog::load_from_dir` lit le sidecar typé en priorité (`media_name`, `audio_language`, `audio_index`). À défaut, il garde l'ancien repli nom seul (`<moviehash>.json` dans `__AHASH__/` puis `../__PHASH__/`, clés `media_name` / `clean_title` / `filename`).
+
 
 ---
 

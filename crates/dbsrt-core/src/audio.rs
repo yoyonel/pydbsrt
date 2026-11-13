@@ -42,6 +42,12 @@ pub struct AudioExtractionOptions {
     pub duration_sec: Option<f64>,
     /// Optional path to custom FFmpeg binary.
     pub custom_ffmpeg: Option<PathBuf>,
+    /// Optional relative audio stream index (`k` in `0:a:k`) to decode.
+    ///
+    /// `None` keeps FFmpeg automatic stream selection (no `-map`), which preserves
+    /// bit-for-bit identity with every `.ahash` extracted before this option existed.
+    /// `Some(k)` injects `-map 0:a:<k>`.
+    pub audio_stream: Option<usize>,
 }
 
 impl Default for AudioExtractionOptions {
@@ -53,6 +59,7 @@ impl Default for AudioExtractionOptions {
             start_sec: 0.0,
             duration_sec: None,
             custom_ffmpeg: None,
+            audio_stream: None,
         }
     }
 }
@@ -73,7 +80,9 @@ impl Default for AudioExtractionOptions {
 /// 1. Resolves FFmpeg binary (custom or fallback CPU).
 /// 2. Injects quiet non-interactive flags (`-hide_banner`, `-nostats`, `-nostdin`).
 /// 3. Injects seeking flags (`-ss`) and duration limits (`-t`) if configured.
-/// 4. Configures audio downmix (`-vn`, `-ac 1`, `-ar <sample_rate>`, `-f f32le`, `-`).
+/// 4. Injects `-map 0:a:<k>` only when `options.audio_stream == Some(k)`; `None` keeps
+///    FFmpeg automatic audio selection (bit-identical with legacy `.ahash` files).
+/// 5. Configures audio downmix (`-vn`, `-ac 1`, `-ar <sample_rate>`, `-f f32le`, `-`).
 pub fn build_ffmpeg_audio_command(path: &Path, options: &AudioExtractionOptions) -> Command {
     let binary = options
         .custom_ffmpeg
@@ -95,6 +104,10 @@ pub fn build_ffmpeg_audio_command(path: &Path, options: &AudioExtractionOptions)
     }
 
     cmd.args(["-i", &input_str]);
+
+    if let Some(audio_index) = options.audio_stream {
+        cmd.args(["-map", &format!("0:a:{audio_index}")]);
+    }
 
     if let Some(duration) = options.duration_sec {
         if duration > 0.0 {
@@ -356,6 +369,32 @@ fn wait_for_child(child: &mut Child, path: &Path) -> Result<()> {
 mod tests {
     use super::*;
     use std::io::Cursor;
+
+    fn command_args(cmd: &Command) -> Vec<String> {
+        cmd.get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    #[test]
+    fn test_build_ffmpeg_audio_command_without_audio_stream_has_no_map() {
+        let opts = AudioExtractionOptions::default();
+        let args = command_args(&build_ffmpeg_audio_command(Path::new("in.mkv"), &opts));
+        assert!(!args.iter().any(|a| a == "-map"));
+    }
+
+    #[test]
+    fn test_build_ffmpeg_audio_command_with_audio_stream_maps_track() {
+        let opts = AudioExtractionOptions {
+            audio_stream: Some(2),
+            ..Default::default()
+        };
+        let args = command_args(&build_ffmpeg_audio_command(Path::new("in.mkv"), &opts));
+        let pos = args.iter().position(|a| a == "-map").expect("-map present");
+        assert_eq!(args[pos + 1], "0:a:2");
+        let input_pos = args.iter().position(|a| a == "-i").expect("-i present");
+        assert!(pos > input_pos, "-map must follow the input");
+    }
 
     #[test]
     fn test_run_audio_sliding_window_mock_data() {

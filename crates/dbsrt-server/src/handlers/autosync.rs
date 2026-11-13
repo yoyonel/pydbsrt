@@ -342,6 +342,7 @@ pub(crate) fn extract_ahash_query_window(media_path: &Path) -> Option<(AhashFile
         start_sec: DEFAULT_AHASH_START_OFFSET_SECONDS,
         duration_sec: Some(DEFAULT_AHASH_QUERY_DURATION_SECONDS),
         custom_ffmpeg: None,
+        audio_stream: None,
     };
     if let Ok(file) = extract_ahash(media_path, &primary) {
         if !file.hashes.is_empty() {
@@ -1069,6 +1070,7 @@ mod tests {
             start_sec: 0.0,
             duration_sec: None,
             custom_ffmpeg: None,
+            audio_stream: None,
         };
         let reference = extract_ahash(full_wav, &opts).unwrap();
         AhashFile::write_to_path(

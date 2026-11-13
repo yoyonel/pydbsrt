@@ -4,6 +4,7 @@
 //! - Binary file format definitions
 
 pub mod ahash;
+pub mod ahash_sidecar;
 pub mod assets;
 pub mod audio;
 pub mod container;
@@ -27,6 +28,11 @@ pub use ahash::{
     HaitsmaScratchpad, AHASH_MAGIC, AHASH_VERSION, DEFAULT_FRAME_SIZE, DEFAULT_HOP_SIZE,
     DEFAULT_MAX_AUDIO_MATCH_DISTANCE, DEFAULT_SAMPLE_RATE, DEFAULT_SPECTRAL_LAG, HEADER_SIZE_BYTES,
     NUM_SPECTRAL_BANDS, NUM_SPECTRAL_BITS, VIDEO_SYNC_HOP_SIZE,
+};
+pub use ahash_sidecar::{
+    ahash_logical_stem, ahash_sidecar_path, audio_track_stem, ffmpeg_default_audio_index,
+    read_ahash_header, resolve_audio_track, AhashSidecar, AhashSidecarHeader, AhashSidecarRequest,
+    AudioTrackSelection, ResolvedAudioTrack, AHASH_SIDECAR_SCHEMA_VERSION,
 };
 pub use assets::{
     check_completeness, AssetKind, ContainerIdentity, MediaAsset, MediaSource,

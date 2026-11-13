@@ -486,6 +486,7 @@ fn search_phash_mih32(
 // ----------------------------------------------------------------------------
 
 #[test]
+#[ignore = "heavy 106M-frame benchmark; run via task bench:ahash:mih:matrix with --ignored --release"]
 fn test_exhaustive_matrix_benchmark() {
     let ahash_dir = if Path::new("data/__AHASH__").exists() {
         Path::new("data/__AHASH__")
@@ -573,6 +574,7 @@ fn test_exhaustive_matrix_benchmark() {
             start_sec: 0.0,
             duration_sec: Some(5.0),
             custom_ffmpeg: None,
+            audio_stream: None,
         };
 
         let ahash_file = match extract_ahash(cut_path, &opts) {

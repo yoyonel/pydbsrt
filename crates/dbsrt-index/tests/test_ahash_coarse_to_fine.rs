@@ -11,6 +11,7 @@ use std::time::Instant;
 // ----------------------------------------------------------------------------
 
 #[test]
+#[ignore = "heavy 106M-frame benchmark; run via task bench:ahash:coarse-to-fine with --ignored --release"]
 fn test_exhaustive_coarse_to_fine_benchmark() {
     let ahash_dir = if Path::new("data/__AHASH__").exists() {
         Path::new("data/__AHASH__")
@@ -64,6 +65,7 @@ fn test_exhaustive_coarse_to_fine_benchmark() {
         start_sec: 0.0,
         duration_sec: Some(15.0),
         custom_ffmpeg: None,
+        audio_stream: None,
     };
 
     for path in &cut_paths {

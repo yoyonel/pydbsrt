@@ -930,6 +930,7 @@ fn evaluate_ahash_multi(
             start_sec,
             duration_sec: Some(DEFAULT_AUDIO_WINDOW_SEC),
             custom_ffmpeg: None,
+            audio_stream: None,
         };
         let ahash_file = match extract_ahash(media_path, &opts) {
             Ok(f) if !f.hashes.is_empty() => f,

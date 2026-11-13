@@ -175,6 +175,48 @@ pub struct AppState {
     pub latest_search: Arc<std::sync::RwLock<Option<crate::dtos::LatestSearchTelemetry>>>,
 }
 
+/// Sibling directory basename holding acoustic `.ahash` fingerprints next to `SRT/`.
+const AHASH_SIBLING_DIRNAME: &str = "__AHASH__";
+
+/// Canonical basename of the certified subtitles directory (`data/SRT`).
+const SRT_DIR_BASENAME: &str = "SRT";
+
+/// Ephemeral fallback path used when a caller passes `/tmp` as `subtitles_dir`.
+const TMP_EMPTY_AHASH_DIR: &str = "/tmp/__dbsrt_empty_ahash__";
+
+/// Derives the default `.ahash` directory relative to the caller-supplied `subtitles_dir`.
+///
+/// # Arguments
+/// * `caller_subtitles_dir` - Raw `subtitles_dir` passed by the caller before `/tmp` fallback.
+///
+/// # Returns
+/// Resolved `PathBuf` for `.ahash` fingerprints.
+///
+/// # Panics
+/// Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// * Production (`data/SRT`, `${DATA_DIR}/SRT`) resolves to sibling `data/__AHASH__` /
+///   `${DATA_DIR}/__AHASH__`.
+/// * Hermetic tests (`tmp_dir/SRT`, `work_dir`, `/tmp`) stay isolated inside their own
+///   scratch root instead of scanning the repository's 100M+ frame `data/__AHASH__` store.
+fn resolve_default_ahash_dir(caller_subtitles_dir: &Path) -> PathBuf {
+    if caller_subtitles_dir == Path::new("/tmp") {
+        return PathBuf::from(TMP_EMPTY_AHASH_DIR);
+    }
+    if caller_subtitles_dir
+        .file_name()
+        .is_some_and(|n| n == SRT_DIR_BASENAME)
+    {
+        return caller_subtitles_dir
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .map(|p| p.join(AHASH_SIBLING_DIRNAME))
+            .unwrap_or_else(|| PathBuf::from(crate::constants::DEFAULT_AHASH_DATA_DIR));
+    }
+    caller_subtitles_dir.join(AHASH_SIBLING_DIRNAME)
+}
+
 /// Optional configuration parameters for initializing [`AppState`].
 #[derive(Debug, Clone, Default)]
 pub struct AppStateInitOptions {
@@ -251,6 +293,7 @@ impl AppState {
             extra_phash_dirs.push(default_repo_phash);
         }
 
+        let caller_subtitles_dir = subtitles_dir.clone();
         let default_srt = if Path::new("data/SRT").exists() {
             PathBuf::from("data/SRT")
         } else {
@@ -280,14 +323,9 @@ impl AppState {
 
         let dbphash_reader = Arc::new(ArcSwapOption::new(initial_engine.dbphash_arc()));
 
-        let default_ahash = if Path::new("data/__AHASH__").exists() {
-            PathBuf::from("data/__AHASH__")
-        } else if Path::new("../../data/__AHASH__").exists() {
-            PathBuf::from("../../data/__AHASH__")
-        } else {
-            PathBuf::from(crate::constants::DEFAULT_AHASH_DATA_DIR)
-        };
-        let ahash_dir = options.ahash_dir.unwrap_or(default_ahash);
+        let ahash_dir = options
+            .ahash_dir
+            .unwrap_or_else(|| resolve_default_ahash_dir(&caller_subtitles_dir));
         let initial_ahash_catalog =
             AHashCatalog::load_from_dir(&ahash_dir).unwrap_or_else(|_| AHashCatalog::empty());
         let ahash_catalog = Arc::new(ArcSwap::from_pointee(initial_ahash_catalog));
@@ -815,5 +853,34 @@ impl AppState {
             delta_medias_flushed: flushed_count,
             message: format!("Successfully compacted into {}", target_path.display()),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_resolve_default_ahash_dir_production_and_isolation() {
+        assert_eq!(
+            resolve_default_ahash_dir(Path::new("data/SRT")),
+            PathBuf::from("data/__AHASH__")
+        );
+        assert_eq!(
+            resolve_default_ahash_dir(Path::new("/srv/dbsrt/data/SRT")),
+            PathBuf::from("/srv/dbsrt/data/__AHASH__")
+        );
+        assert_eq!(
+            resolve_default_ahash_dir(Path::new("/var/tmp/isolated_test/SRT")),
+            PathBuf::from("/var/tmp/isolated_test/__AHASH__")
+        );
+        assert_eq!(
+            resolve_default_ahash_dir(Path::new("/var/tmp/work_dir")),
+            PathBuf::from("/var/tmp/work_dir/__AHASH__")
+        );
+        assert_eq!(
+            resolve_default_ahash_dir(Path::new("/tmp")),
+            PathBuf::from(TMP_EMPTY_AHASH_DIR)
+        );
     }
 }

@@ -5,6 +5,7 @@
 
 use anyhow::{Context, Result};
 use dbsrt_core::ahash::{match_audio_sequence, AhashFile, DEFAULT_MAX_AUDIO_MATCH_DISTANCE};
+use dbsrt_core::{ahash_logical_stem, ahash_sidecar_path, AhashSidecar};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -73,44 +74,10 @@ pub const DEFAULT_AHASH_MIH32_MAX_BUCKET_SIZE: usize = 20_000;
 /// Guarantee: Never panics.
 ///
 /// # Data Flow & Invariants
-/// Strips trailing `.ahash` if present, then checks for `.<num>fps` suffix and removes it.
-/// Strips trailing framerate token (e.g. `.<rate>fps`) from a filename stem.
-fn strip_fps_token(stem: &str) -> &str {
-    let Some(before_fps) = stem.strip_suffix("fps") else {
-        return stem;
-    };
-    let Some((base, candidate)) = before_fps.rsplit_once('.') else {
-        return stem;
-    };
-    if candidate.parse::<f64>().is_err() {
-        return stem;
-    }
-    if let Some((sub_base, int_part)) = base.rsplit_once('.') {
-        if int_part.parse::<f64>().is_ok() {
-            return sub_base;
-        }
-    }
-    base
-}
-
-/// Parses the canonical media name from an .ahash filename.
-///
-/// Strips `.ahash` and optional trailing `.<rate>fps` tokens.
-///
-/// # Arguments
-/// * `filename` - Raw filename or file stem string.
-///
-/// # Returns
-/// Clean media stem or movie/episode name.
-///
-/// # Panics
-/// Guarantee: Never panics.
-///
-/// # Data Flow & Invariants
-/// Strips trailing `.ahash` if present, then invokes [`strip_fps_token`].
+/// Delegates to [`dbsrt_core::ahash_logical_stem`], the single naming rule shared with the
+/// `<stem>.json` sidecar writer.
 pub fn parse_ahash_media_name(filename: &str) -> String {
-    let without_ext = filename.strip_suffix(".ahash").unwrap_or(filename);
-    strip_fps_token(without_ext).to_string()
+    ahash_logical_stem(filename).to_string()
 }
 
 /// Length in hexadecimal characters of an OpenSubtitles 64-bit MovieHash stem.
@@ -155,6 +122,59 @@ fn resolve_sidecar_media_name(
         .find_map(|d| read_sidecar_name(&d.join(&file)))
 }
 
+/// Loads one `.ahash` file into a catalog entry, resolving its name and audio track.
+///
+/// # Arguments
+/// * `path` - `.ahash` binary path.
+/// * `dir` - Directory being scanned (holds `<stem>.json` aHash sidecars).
+/// * `phash_dir` - Sibling `__PHASH__` directory for legacy `<moviehash>.json` fallback.
+///
+/// # Returns
+/// `None` when the binary is unreadable or empty; otherwise the populated entry.
+///
+/// # Panics
+/// Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// 1. Typed [`AhashSidecar`] at [`ahash_sidecar_path`]: non-empty `media_name` and
+///    `selected_audio_stream` (`audio_language`, `audio_index`) win.
+/// 2. Otherwise legacy name-only lookup ([`resolve_sidecar_media_name`], 16-hex stems only).
+/// 3. Otherwise the parsed file stem. Audio fields stay `None` without a typed sidecar.
+fn load_catalog_entry(
+    path: PathBuf,
+    dir: &Path,
+    phash_dir: Option<&Path>,
+) -> Option<AHashCatalogEntry> {
+    let file = AhashFile::read_from_path(&path).ok()?;
+    if file.hashes.is_empty() {
+        return None;
+    }
+    let filename = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default();
+    let parsed_name = parse_ahash_media_name(filename);
+    let typed = AhashSidecar::read(&ahash_sidecar_path(&path)).ok();
+    let typed_name = typed
+        .as_ref()
+        .map(|s| s.media_name.trim())
+        .filter(|n| !n.is_empty())
+        .map(str::to_string);
+    let media_name = typed_name
+        .or_else(|| resolve_sidecar_media_name(&parsed_name, dir, phash_dir))
+        .unwrap_or(parsed_name);
+    let track = typed.and_then(|s| s.selected_audio_stream);
+    Some(AHashCatalogEntry {
+        media_name,
+        audio_fps: file.header.audio_fps(),
+        frame_count: file.hashes.len(),
+        hashes: Arc::new(file.hashes),
+        audio_language: track.as_ref().and_then(|t| t.language.clone()),
+        audio_index: track.map(|t| t.audio_index),
+        path,
+    })
+}
+
 /// Collapses binary twins (identical `frame_count` + `hashes`) into one entry.
 ///
 /// Preference: resolved (non raw-hex) name first, then lexicographic `path`.
@@ -167,8 +187,13 @@ fn dedup_twin_entries(entries: Vec<AHashCatalogEntry>) -> Vec<AHashCatalogEntry>
     let mut buckets: HashMap<u64, Vec<usize>> = HashMap::new();
     for entry in entries {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        entry.frame_count.hash(&mut hasher);
-        entry.hashes.hash(&mut hasher);
+        (
+            entry.frame_count,
+            entry.hashes.first(),
+            entry.hashes.get(entry.frame_count / 2),
+            entry.hashes.last(),
+        )
+            .hash(&mut hasher);
         let bucket = buckets.entry(hasher.finish()).or_default();
         let twin = bucket
             .iter()
@@ -199,6 +224,10 @@ pub struct AHashCatalogEntry {
     pub frame_count: usize,
     /// Complete sequence of 64-bit Haitsma-Kalker hashes.
     pub hashes: Arc<Vec<u64>>,
+    /// ISO language tag of the decoded audio track (from the typed `<stem>.json` sidecar).
+    pub audio_language: Option<String>,
+    /// Relative audio index (`k` in `0:a:k`) of the decoded track, when known.
+    pub audio_index: Option<usize>,
 }
 
 /// Search criteria parameters for querying an [`AHashCatalog`].
@@ -592,7 +621,8 @@ impl AHashCatalog {
     ///
     /// # Data Flow & Invariants
     /// Scans directory entries, filters by `.ahash` extension, and parses binary files
-    /// in parallel using Rayon before aggregating into the in-memory catalog.
+    /// in parallel using Rayon ([`load_catalog_entry`]: typed `<stem>.json` sidecar first,
+    /// legacy name-only sidecars as fallback) before twin dedup and aggregation.
     pub fn load_from_dir(dir: &Path) -> Result<Self> {
         if !dir.exists() {
             return Ok(Self::empty());
@@ -611,29 +641,7 @@ impl AHashCatalog {
         let sibling_phash_dir = dir.parent().map(|p| p.join(PHASH_SIDECAR_DIRNAME));
         let entries: Vec<AHashCatalogEntry> = paths
             .into_par_iter()
-            .filter_map(|p| match AhashFile::read_from_path(&p) {
-                Ok(file) if !file.hashes.is_empty() => {
-                    let filename = p
-                        .file_name()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or_default()
-                        .to_string();
-                    let parsed_name = parse_ahash_media_name(&filename);
-                    let media_name =
-                        resolve_sidecar_media_name(&parsed_name, dir, sibling_phash_dir.as_deref())
-                            .unwrap_or(parsed_name);
-                    let audio_fps = file.header.audio_fps();
-                    let frame_count = file.hashes.len();
-                    Some(AHashCatalogEntry {
-                        media_name,
-                        path: p,
-                        audio_fps,
-                        frame_count,
-                        hashes: Arc::new(file.hashes),
-                    })
-                }
-                _ => None,
-            })
+            .filter_map(|p| load_catalog_entry(p, dir, sibling_phash_dir.as_deref()))
             .collect();
 
         Ok(Self::new(dedup_twin_entries(entries)))
@@ -1192,6 +1200,70 @@ mod tests {
     }
 
     #[test]
+    fn test_typed_sidecar_takes_priority_over_legacy() {
+        use dbsrt_core::{AhashSidecarRequest, AudioContainerInspection, AudioStreamInfo};
+        const HEX: &str = "00112233445566aa";
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("__AHASH__");
+        let phash = root.path().join("__PHASH__");
+        fs::create_dir_all(&dir).unwrap();
+        fs::create_dir_all(&phash).unwrap();
+        let ahash_path = dir.join(format!("{HEX}.86.1fps.ahash"));
+        write_ahash(&ahash_path, &[5, 6, 7]);
+        fs::write(
+            phash.join(format!("{HEX}.json")),
+            r#"{"media_name": "Legacy.Name"}"#,
+        )
+        .unwrap();
+
+        // Legacy only: name from __PHASH__, no audio info.
+        let catalog = AHashCatalog::load_from_dir(&dir).unwrap();
+        assert_eq!(catalog.entries[0].media_name, "Legacy.Name");
+        assert_eq!(catalog.entries[0].audio_language, None);
+
+        let track = AudioStreamInfo {
+            index: 2,
+            audio_index: 1,
+            codec_name: "ac3".into(),
+            channels: Some(6),
+            sample_rate: Some(48_000),
+            language: Some("jpn".into()),
+            title: Some("VO".into()),
+            is_default: true,
+        };
+        let inspection = AudioContainerInspection {
+            path: PathBuf::from("m.mkv"),
+            audio_streams: vec![
+                AudioStreamInfo {
+                    index: 1,
+                    audio_index: 0,
+                    language: Some("fre".into()),
+                    is_default: false,
+                    ..track.clone()
+                },
+                track,
+            ],
+        };
+        let header = AhashFile::read_from_path(&ahash_path).unwrap().header;
+        AhashSidecar::build(&AhashSidecarRequest {
+            ahash_path: &ahash_path,
+            header: &header,
+            media_name: "Typed.Name.mkv",
+            moviehash: Some(HEX),
+            inspection: Some(&inspection),
+            explicit_audio_stream: None,
+        })
+        .write_next_to(&ahash_path)
+        .unwrap();
+
+        let catalog = AHashCatalog::load_from_dir(&dir).unwrap();
+        let entry = &catalog.entries[0];
+        assert_eq!(entry.media_name, "Typed.Name.mkv");
+        assert_eq!(entry.audio_language.as_deref(), Some("jpn"));
+        assert_eq!(entry.audio_index, Some(1));
+    }
+
+    #[test]
     fn test_parse_ahash_media_name() {
         assert_eq!(
             parse_ahash_media_name("04b46e246928e909.86.1fps.ahash"),
@@ -1231,6 +1303,8 @@ mod tests {
             audio_fps: 86.125,
             frame_count: hashes.len(),
             hashes: Arc::new(hashes.clone()),
+            audio_language: None,
+            audio_index: None,
         };
 
         let mut catalog = AHashCatalog::empty();
@@ -1256,6 +1330,8 @@ mod tests {
             audio_fps: 86.125,
             frame_count: 50,
             hashes: Arc::new(vec![0x1234; 50]),
+            audio_language: None,
+            audio_index: None,
         };
         let catalog = AHashCatalog::new(vec![entry]);
 
@@ -1282,6 +1358,8 @@ mod tests {
             audio_fps: 86.125,
             frame_count: n,
             hashes: Arc::new(hashes),
+            audio_language: None,
+            audio_index: None,
         };
         let catalog = AHashCatalog::new(vec![entry]);
         let query: Vec<u64> = (0..64).map(|_| next()).collect();

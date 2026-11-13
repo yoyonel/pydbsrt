@@ -154,12 +154,12 @@ tasks:
   bench:ahash:mih:matrix:
     desc: Benchmark matrix comparing Linear Scan vs MIH-16 vs MIH-32 (Mono & Rayon) on aHash (106M) and pHash (2.7M)
     cmds:
-      - cargo test --release --package dbsrt-index --test test_ahash_mih test_exhaustive_matrix_benchmark -- --nocapture
+      - cargo test --release --package dbsrt-index --test test_ahash_mih test_exhaustive_matrix_benchmark -- --ignored --nocapture
 
   bench:ahash:coarse-to-fine:
     desc: Benchmark coarse-to-fine aHash matching across downsampling factors K=1, 4, 8, 16, 31
     cmds:
-      - cargo test --release --package dbsrt-index --test test_ahash_coarse_to_fine test_exhaustive_coarse_to_fine_benchmark -- --nocapture
+      - cargo test --release --package dbsrt-index --test test_ahash_coarse_to_fine test_exhaustive_coarse_to_fine_benchmark -- --ignored --nocapture
 
   bench:multimodal:scale:
     desc: Run exhaustive overnight multimodal multi-window scale benchmark (pHash vs aHash) across NAS & Freebox

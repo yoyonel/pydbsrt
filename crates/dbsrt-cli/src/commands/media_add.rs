@@ -1295,10 +1295,8 @@ fn handle_ahash_extract_error(err: anyhow::Error, json: bool) -> Result<Option<S
 /// and returns `Ok(None)` so video-only ingestion continues without error.
 ///
 /// # Arguments
+/// * `args` - `media:add` arguments (`--ahash-dir`, `--moviehash`, `--media-name`, `--json`).
 /// * `video_path` - Path or URI to the media file being ingested.
-/// * `ahash_dir` - Optional destination directory for `.ahash` files.
-/// * `moviehash` - Optional OpenSubtitles 16-hex moviehash for canonical naming.
-/// * `json` - Suppresses terminal progress messages when true.
 ///
 /// # Returns
 /// `Ok(Some(path_str))` if audio was extracted, `Ok(None)` if `--ahash-dir` was omitted
@@ -1311,23 +1309,25 @@ fn handle_ahash_extract_error(err: anyhow::Error, json: bool) -> Result<Option<S
 /// Does not panic.
 ///
 /// # Data Flow & Invariants
-/// When `ahash_dir` is `Some`, calls `find_or_build_ahash`. Catches missing audio stream errors
-/// gracefully via `handle_ahash_extract_error`.
-fn extract_optional_ahash(
-    video_path: &Path,
-    ahash_dir: Option<&Path>,
-    moviehash: Option<&str>,
-    json: bool,
-) -> Result<Option<String>> {
-    let Some(ahash_dir) = ahash_dir else {
+/// When `--ahash-dir` is set, calls `find_or_build_ahash` with the canonical media name, which
+/// also writes (or back-fills) the `<stem>.json` audio topology sidecar. Catches missing audio
+/// stream errors gracefully via `handle_ahash_extract_error`.
+fn extract_optional_ahash(args: &MediaAddArgs, video_path: &Path) -> Result<Option<String>> {
+    let Some(ahash_dir) = args.ahash_dir.as_deref() else {
         return Ok(None);
     };
+    let json = args.json;
+    let media_name = resolve_media_filename(args, video_path);
 
-    let (path, ahash_hashes, ahash_fps) =
-        match find_or_build_ahash(video_path, ahash_dir, moviehash) {
-            Ok(data) => data,
-            Err(err) => return handle_ahash_extract_error(err, json),
-        };
+    let (path, ahash_hashes, ahash_fps) = match find_or_build_ahash(
+        video_path,
+        ahash_dir,
+        args.moviehash.as_deref(),
+        Some(&media_name),
+    ) {
+        Ok(data) => data,
+        Err(err) => return handle_ahash_extract_error(err, json),
+    };
 
     if !json {
         eprintln!(
@@ -1370,12 +1370,7 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
 
     let media_hash = compute_media_phash_digest(&hashes);
 
-    let ahash_path = extract_optional_ahash(
-        video_path,
-        args.ahash_dir.as_deref(),
-        args.moviehash.as_deref(),
-        args.json,
-    )?;
+    let ahash_path = extract_optional_ahash(args, video_path)?;
 
     if !args.json {
         eprintln!(

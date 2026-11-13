@@ -267,6 +267,8 @@ impl CoarseToFineAHashIndex {
                     audio_fps: coarse_fps,
                     frame_count,
                     hashes: Arc::new(coarse_hashes),
+                    audio_language: entry.audio_language.clone(),
+                    audio_index: entry.audio_index,
                 }
             })
             .collect();
@@ -550,6 +552,8 @@ mod tests {
             audio_fps: TEST_DENSE_FPS,
             frame_count: hashes.len(),
             hashes: Arc::new(hashes),
+            audio_language: None,
+            audio_index: None,
         }
     }
 
