@@ -615,9 +615,9 @@ REMOTE_SCRIPT
     if [[ "${WITH_PHASH}" == "true" ]]; then
       mkdir -p data/__PHASH__ data/__AHASH__
       echo "-> Pulling loose .phash fingerprints & metadata..."
-      rsync -avz --progress --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/__PHASH__/" "data/__PHASH__/" || true
+      rsync -avz --progress --exclude '*.tmp' --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/__PHASH__/" "data/__PHASH__/" || true
       echo "-> Pulling loose .ahash fingerprints & metadata..."
-      rsync -avz --progress --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/__AHASH__/" "data/__AHASH__/" || true
+      rsync -avz --progress --exclude '*.tmp' --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/__AHASH__/" "data/__AHASH__/" || true
       python3 "${REPO_ROOT}/scripts/ingestion/phash_dedupe.py" "data/__PHASH__" --apply || true
     fi
     if systemctl --user is-active --quiet dbsrt-agent 2>/dev/null; then

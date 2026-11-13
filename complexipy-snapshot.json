@@ -34,6 +34,10 @@
         "complexity": 18
       },
       {
+        "name": "discover_stratified_tvshows",
+        "complexity": 24
+      },
+      {
         "name": "generate_nightly_report",
         "complexity": 25
       },
@@ -43,10 +47,6 @@
       },
       {
         "name": "analyze_extracted_subtitles",
-        "complexity": 28
-      },
-      {
-        "name": "discover_stratified_tvshows",
         "complexity": 28
       }
     ]

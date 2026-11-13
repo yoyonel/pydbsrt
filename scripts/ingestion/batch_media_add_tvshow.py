@@ -15,6 +15,7 @@ import argparse
 import datetime
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -312,6 +313,57 @@ def load_certified_couplings_stems(couplings_path: Path) -> set[str]:
         return set()
 
 
+AHASH_FPS_SUFFIX_RE = re.compile(r"\.\d+(\.\d+)?fps$")
+
+
+def _ahash_has_valid_sidecar(ahash_path: Path) -> bool:
+    """Returns True when `<stem>.json` sits beside `.ahash` with typed AhashSidecar metadata."""
+    if not ahash_path.is_file() or ahash_path.stat().st_size <= 0:
+        return False
+    stem = AHASH_FPS_SUFFIX_RE.sub("", ahash_path.name.removesuffix(".ahash"))
+    sidecar = ahash_path.with_name(f"{stem}.json")
+    try:
+        if not sidecar.is_file() or sidecar.stat().st_size <= 0:
+            return False
+        payload = json.loads(sidecar.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return (
+        isinstance(payload, dict)
+        and isinstance(payload.get("media_name"), str)
+        and bool(payload["media_name"].strip())
+        and isinstance(payload.get("selection"), str)
+        and isinstance(payload.get("header"), dict)
+    )
+
+
+def _matches_stem_prefix(stem: str, names: Set[str] | List[str]) -> bool:
+    return any(name.startswith(stem) for name in names)
+
+
+def _load_complete_ahash_names(ahash_dir: Path | None) -> List[str]:
+    """Lists logical stems for `.ahash` files that already have a valid typed `<stem>.json` sidecar."""
+    if not ahash_dir or not ahash_dir.is_dir():
+        return []
+    return [phash_logical_name(p) for p in ahash_dir.glob("*.ahash") if _ahash_has_valid_sidecar(p)]
+
+
+def _classify_both_mode(
+    stem: str,
+    fresh_only: bool,
+    has_certified: bool,
+    existing_phash_names: List[str],
+    existing_ahash_names: List[str],
+) -> str | None:
+    has_ahash = _matches_stem_prefix(stem, existing_ahash_names)
+    has_phash = has_certified or _matches_stem_prefix(stem, existing_phash_names)
+    if has_phash and has_ahash:
+        return None
+    if not has_phash and not has_ahash:
+        return "fresh"
+    return None if fresh_only else "unfinished"
+
+
 def classify_video_file(
     vpath: Path,
     mode: str,
@@ -323,15 +375,15 @@ def classify_video_file(
     """Returns 'fresh', 'unfinished', or None (to skip)."""
     stem = vpath.stem
     if mode == "ahash":
-        has_ahash = any(name.startswith(stem) for name in existing_ahash_names)
-        return "fresh" if not has_ahash else None
+        return None if _matches_stem_prefix(stem, existing_ahash_names) else "fresh"
 
-    if any(name.startswith(stem) for name in certified_stems):
+    has_certified = _matches_stem_prefix(stem, certified_stems)
+    if mode == "both":
+        return _classify_both_mode(stem, fresh_only, has_certified, existing_phash_names, existing_ahash_names)
+    if has_certified:
         return None
-
-    has_phash = any(name.startswith(stem) for name in existing_phash_names)
-    if has_phash:
-        return "unfinished" if not fresh_only else None
+    if _matches_stem_prefix(stem, existing_phash_names):
+        return None if fresh_only else "unfinished"
     return "fresh"
 
 
@@ -385,9 +437,7 @@ def discover_stratified_tvshows(
 
     certified_stems = load_certified_couplings_stems(subtitles_dir / "couplings.json")
     existing_phash_names: List[str] = [phash_logical_name(p) for p in phash_dir.glob("*.phash")]
-    existing_ahash_names: List[str] = (
-        [phash_logical_name(p) for p in ahash_dir.glob("*.ahash")] if ahash_dir and ahash_dir.is_dir() else []
-    )
+    existing_ahash_names: List[str] = _load_complete_ahash_names(ahash_dir)
 
     unfinished_map: Dict[str, List[Path]] = {}
     fresh_map: Dict[str, List[Path]] = {}

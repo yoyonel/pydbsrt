@@ -245,6 +245,12 @@ def load_certified_stems(couplings_file: Path) -> Set[str]:
     return stems
 
 
+def ahash_logical_stem(ahash_name: str) -> str:
+    """Logical stem matching Rust `ahash_logical_stem`: strips `.ahash` and trailing `.<fps>fps`."""
+    without_ext = ahash_name.removesuffix(".ahash")
+    return PHASH_FPS_SUFFIX_RE.sub("", without_ext)
+
+
 def phash_media_stem(phash_name: str) -> str:
     """Media stem of a .phash or .ahash file name: URL-decoded, without the extension, fps and video extension suffixes."""
     unquoted = urllib.parse.unquote(phash_name).removesuffix(".phash").removesuffix(".ahash")
@@ -260,6 +266,30 @@ def _file_size(path: Path) -> int:
         return path.stat().st_size
     except OSError:
         return 0
+
+
+def _valid_ahash_sidecar_media_name(ahash: Path) -> str | None:
+    """Reads `<stem>.json` beside `<stem>.<fps>fps.ahash` and returns `media_name` only for valid typed AhashSidecar files."""
+    sidecar = ahash.with_name(f"{ahash_logical_stem(ahash.name)}.json")
+    if _file_size(sidecar) <= 0:
+        return None
+    try:
+        payload = json.loads(sidecar.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    media_name = payload.get("media_name")
+    selection = payload.get("selection")
+    header = payload.get("header")
+    if (
+        not isinstance(media_name, str)
+        or not media_name.strip()
+        or not isinstance(selection, str)
+        or not isinstance(header, dict)
+    ):
+        return None
+    return media_name
 
 
 def _sidecar_media_name(phash: Path, fallback_dir: Path | str | None = None) -> str:
@@ -295,15 +325,16 @@ def load_existing_phash_stems(phash_dir: Path) -> Set[str]:
 
 
 def load_existing_ahash_stems(ahash_dir: Path) -> Set[str]:
-    """Loads all media stems with existing non-empty .ahash files on disk."""
+    """Loads media stems having BOTH a non-empty .ahash file and a valid typed `<stem>.json` sidecar."""
     stems: Set[str] = set()
     if ahash_dir.is_dir():
         for p in ahash_dir.glob("*.ahash"):
-            if _file_size(p) > 0:
-                stems.update((phash_media_stem(p.name), p.stem))
-                media_name = _sidecar_media_name(p, fallback_dir=DEFAULT_PHASH_DIR)
-                if media_name:
-                    stems.add(phash_media_stem(media_name))
+            if _file_size(p) <= 0:
+                continue
+            media_name = _valid_ahash_sidecar_media_name(p)
+            if not media_name:
+                continue
+            stems.update((phash_media_stem(p.name), p.stem, phash_media_stem(media_name)))
     return stems
 
 

@@ -654,30 +654,88 @@ def test_batch_exhaustive_simulation_all_snippets_dataset(tmp_path: Path, monkey
     assert len(simulated_records) == 2758
 
 
-def test_load_existing_ahash_stems_and_mode_ahash(tmp_path: Path):
-    """Verifies that load_existing_ahash_stems scans .ahash files and mode ahash selects virgin targets."""
+def test_load_existing_ahash_stems_and_mode_ahash(tmp_path: Path, monkeypatch):
+    """Verifies ahash completeness requires a valid typed `<stem>.json` sidecar without `__PHASH__` fallback."""
+    phash_dir = tmp_path / "phash"
     ahash_dir = tmp_path / "ahash"
+    phash_dir.mkdir()
     ahash_dir.mkdir()
+
+    # 1. Valid filename-based .ahash + valid typed AhashSidecar -> complete
     (ahash_dir / "done_video.mkv.86.1fps.ahash").write_bytes(b"dummy")
+    (ahash_dir / "done_video.mkv.json").write_text(
+        json.dumps({"media_name": "done_video.mkv", "selection": "single_track", "header": {"fps": 86.13}}),
+        encoding="utf-8",
+    )
+
+    # 2. Valid moviehash-based .ahash + valid typed AhashSidecar -> complete
+    (ahash_dir / "0123456789abcdef.86.1fps.ahash").write_bytes(b"dummy")
+    (ahash_dir / "0123456789abcdef.json").write_text(
+        json.dumps({"media_name": "done_moviehash.mkv", "selection": "ffmpeg_default", "header": {"fps": 86.13}}),
+        encoding="utf-8",
+    )
+
+    # 3. MovieHash .ahash WITHOUT __AHASH__/<hash>.json, even with __PHASH__/<hash>.json -> incomplete
+    (ahash_dir / "fedcba9876543210.86.1fps.ahash").write_bytes(b"dummy")
+    (phash_dir / "fedcba9876543210.25.0fps.phash").write_bytes(b"phash")
+    (phash_dir / "fedcba9876543210.json").write_text(
+        json.dumps({"media_name": "missing_ahash_json.mkv"}), encoding="utf-8"
+    )
+
+    # 4. Legacy/untyped or malformed JSON in __AHASH__ -> incomplete
+    (ahash_dir / "legacy_untyped.mkv.86.1fps.ahash").write_bytes(b"dummy")
+    (ahash_dir / "legacy_untyped.mkv.json").write_text(
+        json.dumps({"media_name": "legacy_untyped.mkv"}), encoding="utf-8"
+    )
+    (ahash_dir / "bad_json.mkv.86.1fps.ahash").write_bytes(b"dummy")
+    (ahash_dir / "bad_json.mkv.json").write_text("{not json", encoding="utf-8")
     (ahash_dir / "empty.ahash").write_bytes(b"")
 
+    monkeypatch.setattr(worker, "DEFAULT_PHASH_DIR", str(phash_dir))
     stems = worker.load_existing_ahash_stems(ahash_dir)
+
     assert "done_video" in stems
+    assert "done_moviehash" in stems
+    assert "missing_ahash_json" not in stems
+    assert "fedcba9876543210.86.1fps" not in stems
+    assert "legacy_untyped" not in stems
+    assert "bad_json" not in stems
     assert "empty" not in stems
 
+    # Both mode='ahash' and mode='both' keep sidecar-less media pending
+    done_ahash = worker.resolve_done_stems("ahash", set(), {"missing_ahash_json"}, stems)
+    done_both = worker.resolve_done_stems("both", set(), {"done_video", "missing_ahash_json"}, stems)
+    assert "done_video" in done_ahash
+    assert "done_video" in done_both
+    assert "missing_ahash_json" not in done_ahash
+    assert "missing_ahash_json" not in done_both
+
+    # End-to-end select_targets queues only targets missing a valid .ahash+.json pair
+    monkeypatch.setattr(worker, "DEFAULT_COUPLINGS_PATH", str(tmp_path / "couplings.json"))
+    monkeypatch.setattr(worker, "DEFAULT_EXCLUDE_PATH", str(tmp_path / "exclude.txt"))
+    monkeypatch.setattr(
+        worker,
+        "list_nas_videos_ftp",
+        lambda **_kw: [
+            VideoTarget("/video/done_video.mkv", "done_video.mkv", 100),
+            VideoTarget("/video/done_moviehash.mkv", "done_moviehash.mkv", 100),
+            VideoTarget("/video/missing_ahash_json.mkv", "missing_ahash_json.mkv", 100),
+            VideoTarget("/video/legacy_untyped.mkv", "legacy_untyped.mkv", 100),
+        ],
+    )
     args = worker.build_arg_parser().parse_args(
         [
             "--mode",
             "ahash",
             "--ahash-dir",
             str(ahash_dir),
+            "--targets-file",
+            str(tmp_path / "no_targets.json"),
             "--fresh-only",
-            "--stream-base",
-            "http://127.0.0.1:18089",
         ]
     )
-    assert args.mode == "ahash"
-    assert args.ahash_dir == str(ahash_dir)
+    queued = worker.select_targets(args, nas_pass="", events_log=tmp_path / "events.jsonl")
+    assert [t.filename for t in queued] == ["missing_ahash_json.mkv", "legacy_untyped.mkv"]
 
 
 def test_load_nas_ftp_index_targets(tmp_path: Path):

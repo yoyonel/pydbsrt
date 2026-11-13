@@ -135,3 +135,49 @@ def test_discover_resumes_an_episode_whose_phash_is_named_by_moviehash(tmp_path:
 
     # Episode.1 already has its .phash: only Episode.2 is virgin
     assert [path.name for path, _ in fresh] == ["Episode.2.mkv"]
+
+
+def test_discover_ahash_requires_typed_sidecar_json(tmp_path: Path) -> None:
+    """A .ahash without its typed `<stem>.json` sidecar stays pending in mode='ahash' and mode='both'."""
+    show = tmp_path / "nas" / "Show"
+    show.mkdir(parents=True)
+    (show / "Episode.1.mkv").write_bytes(b"x")
+    (show / "Episode.2.mkv").write_bytes(b"x")
+    phash_dir = tmp_path / "phash"
+    ahash_dir = tmp_path / "ahash"
+    phash_dir.mkdir()
+    ahash_dir.mkdir()
+
+    # Episode.1 has moviehash .ahash + __PHASH__ sidecar, PLUS typed AhashSidecar in __AHASH__ -> done in ahash
+    (phash_dir / "e19d5212c9812cd6.25.0fps.phash").write_bytes(b"\x01" * 16)
+    (phash_dir / "e19d5212c9812cd6.json").write_text(json.dumps({"media_name": "Episode.1.mkv"}), encoding="utf-8")
+    (ahash_dir / "e19d5212c9812cd6.86.1fps.ahash").write_bytes(b"\x02" * 16)
+    (ahash_dir / "e19d5212c9812cd6.json").write_text(
+        json.dumps({"media_name": "Episode.1.mkv", "selection": "single_track", "header": {"fps": 86.13}}),
+        encoding="utf-8",
+    )
+
+    # Episode.2 has .phash and legacy .ahash WITHOUT __AHASH__/<hash>.json -> must still be selected
+    (phash_dir / "a1b2c3d4e5f60718.25.0fps.phash").write_bytes(b"\x01" * 16)
+    (phash_dir / "a1b2c3d4e5f60718.json").write_text(json.dumps({"media_name": "Episode.2.mkv"}), encoding="utf-8")
+    (ahash_dir / "a1b2c3d4e5f60718.86.1fps.ahash").write_bytes(b"\x02" * 16)
+
+    pending_ahash = discover_stratified_tvshows(
+        tmp_path / "nas",
+        phash_dir,
+        tmp_path / "srt",
+        fresh_only=False,
+        mode="ahash",
+        ahash_dir=ahash_dir,
+    )
+    assert [path.name for path, _ in pending_ahash] == ["Episode.2.mkv"]
+
+    pending_both = discover_stratified_tvshows(
+        tmp_path / "nas",
+        phash_dir,
+        tmp_path / "srt",
+        fresh_only=False,
+        mode="both",
+        ahash_dir=ahash_dir,
+    )
+    assert [path.name for path, _ in pending_both] == ["Episode.2.mkv"]
