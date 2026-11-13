@@ -359,6 +359,37 @@ mod tests {
     }
 
     #[test]
+    fn test_single_window_primary_shift_is_relative_to_window_start() {
+        const START_SEC: f64 = 100.0;
+        const POSITIVE_REF_MS: i64 = 102_500;
+        const NEGATIVE_REF_MS: i64 = 97_500;
+        const EXPECTED_SHIFT_MS: i64 = 2_500;
+        let ctx = ConsensusEvaluationContext {
+            media_id: 7,
+            clean_title: "Single Window Shift",
+            total_windows: 3,
+            tolerance_ms: MAX_SHIFT_DRIFT_TOLERANCE_MS,
+        };
+        for (ref_ms, expected) in [
+            (POSITIVE_REF_MS, EXPECTED_SHIFT_MS),
+            (NEGATIVE_REF_MS, -EXPECTED_SHIFT_MS),
+        ] {
+            let m = vec![WindowMatchItem {
+                window_idx: 0,
+                ratio: 0.5,
+                target_start_sec: START_SEC,
+                matching_cuts: 10,
+                matching_sparse: 10,
+                estimated_shift_ms: ref_ms,
+                confidence: 80.0,
+            }];
+            let c = evaluate_multi_window_consensus(&ctx, m);
+            assert_eq!(c.consensus_shift_ms, expected);
+            assert!(!c.is_temporally_coherent);
+        }
+    }
+
+    #[test]
     fn test_single_window_match_penalized() {
         let single_match = vec![WindowMatchItem {
             window_idx: 1,

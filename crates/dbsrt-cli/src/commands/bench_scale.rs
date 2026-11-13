@@ -6,6 +6,7 @@
 use anyhow::{Context, Result};
 use clap::Args;
 use dbsrt_core::ahash::{DEFAULT_FRAME_SIZE, DEFAULT_HOP_SIZE, DEFAULT_SAMPLE_RATE};
+use dbsrt_core::metadata::MediaMetadata;
 use dbsrt_core::multi_window::{
     aggregate_multi_window_matches, MultiWindowConsensus, MultiWindowPlan, PerWindowMatches,
     RawCandidateMatch, MAX_SHIFT_DRIFT_TOLERANCE_MS,
@@ -17,7 +18,7 @@ use dbsrt_core::{
 use dbsrt_index::coarse_to_fine::{CoarseToFineAHashIndex, FineSearchCriteria};
 use dbsrt_index::{AHashCatalog, MmapDbphash};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -25,6 +26,18 @@ use std::time::Instant;
 
 /// Default path to unified .dbphash index file.
 pub const DEFAULT_SCALE_DBPHASH_PATH: &str = "data/catalog.dbphash";
+
+/// Directory holding `<moviehash>.json` pHash sidecars used to resolve MovieHash aliases.
+pub const DEFAULT_PHASH_SIDECAR_DIR: &str = "data/__PHASH__";
+
+/// Length in hexadecimal characters of an OpenSubtitles 64-bit MovieHash.
+const MOVIEHASH_HEX_LEN: usize = 16;
+
+/// Diagnostic cause for containers physically lacking any audio stream.
+pub const CAUSE_NO_AUDIO_STREAM: &str = "NO_AUDIO_STREAM";
+
+/// Diagnostic cause for multi-track containers whose dub conflict is not measured.
+pub const CAUSE_MULTI_TRACK_UNVERIFIED: &str = "MULTI_TRACK_CANDIDATE_UNVERIFIED";
 
 /// Default directory containing acoustic .ahash fingerprints.
 pub const DEFAULT_SCALE_AHASH_DIR: &str = "data/__AHASH__";
@@ -178,6 +191,12 @@ pub struct AhashWindowDetail {
 pub struct PhashMatchSummary {
     pub media_match: Option<String>,
     pub media_id: Option<u32>,
+    /// Season of the matched reference entry (`None` when unknown / 0).
+    #[serde(default)]
+    pub season: Option<u32>,
+    /// Episode of the matched reference entry (`None` when unknown / 0).
+    #[serde(default)]
+    pub episode: Option<u32>,
     pub confidence: f64,
     pub consensus_shift_ms: i64,
     pub matching_windows: usize,
@@ -260,6 +279,8 @@ struct DiagnosticInput<'a> {
     pub ahash: &'a AhashMatchSummary,
     pub audio: &'a ContainerAudioMetadata,
     pub agreement: &'a MultimodalAgreement,
+    /// True only when the container probe succeeded and reported zero audio tracks.
+    pub no_audio_stream: bool,
 }
 
 /// Computes UTC civil date and time components from Unix epoch seconds using Hinnant algorithm.
@@ -360,6 +381,56 @@ struct LoadedCatalogs {
     pub indexed_ahash_titles: HashSet<String>,
 }
 
+/// Reads `<hex>.json` pHash sidecars and maps each MovieHash to its `media_name`.
+///
+/// Missing directory or malformed sidecars are skipped; returns an empty map if none readable.
+fn load_moviehash_aliases(dir: &Path) -> HashMap<String, String> {
+    let mut aliases = HashMap::new();
+    let Ok(read_dir) = std::fs::read_dir(dir) else {
+        return aliases;
+    };
+    for entry in read_dir.flatten() {
+        let path = entry.path();
+        let stem = path
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+        if path.extension().is_none_or(|e| e != "json") || !is_moviehash_hex(&stem) {
+            continue;
+        }
+        let name = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|txt| serde_json::from_str::<serde_json::Value>(&txt).ok())
+            .and_then(|v| v.get("media_name")?.as_str().map(str::to_string));
+        if let Some(name) = name {
+            aliases.insert(stem, name);
+        }
+    }
+    aliases
+}
+
+/// Returns true when `s` is a 16-character hexadecimal MovieHash.
+fn is_moviehash_hex(s: &str) -> bool {
+    s.len() == MOVIEHASH_HEX_LEN && s.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+/// Renames MovieHash-named aHash catalog entries to their sidecar media name.
+///
+/// Returns the number of entries resolved.
+fn resolve_catalog_moviehash_names(
+    catalog: &mut AHashCatalog,
+    aliases: &HashMap<String, String>,
+) -> usize {
+    let mut resolved = 0;
+    for e in catalog.entries.iter_mut() {
+        if let Some(name) = aliases.get(&e.media_name.to_lowercase()) {
+            e.media_name = name.clone();
+            resolved += 1;
+        }
+    }
+    resolved
+}
+
 /// Loads visual and acoustic catalogs and constructs the coarse-to-fine index.
 fn load_all_catalogs(
     dbphash_path: &Path,
@@ -375,7 +446,10 @@ fn load_all_catalogs(
 
     println!("Loading acoustic catalog from {:?}...", ahash_dir);
     let t_ahash = Instant::now();
-    let dense_catalog = AHashCatalog::load_from_dir(ahash_dir).context("Load ahash")?;
+    let mut dense_catalog = AHashCatalog::load_from_dir(ahash_dir).context("Load ahash")?;
+    let aliases = load_moviehash_aliases(Path::new(DEFAULT_PHASH_SIDECAR_DIR));
+    let resolved = resolve_catalog_moviehash_names(&mut dense_catalog, &aliases);
+    println!("✓ Resolved {resolved} MovieHash-named aHash entries via pHash sidecars");
     println!(
         "✓ Loaded {} aHash files ({} frames) in {:.2}s",
         dense_catalog.entries.len(),
@@ -628,11 +702,25 @@ fn is_media_indexed_in_ahash(ctx: &BenchContext<'_>, title: &str) -> bool {
         .any(|t| target_words.iter().all(|w| t.contains(w)))
 }
 
+/// Builds the diagnostic for containers with no physical audio stream.
+fn no_audio_diagnostic(input: &DiagnosticInput<'_>) -> (String, String) {
+    let note = if input.agreement.status == "PHASH_ONLY" {
+        "Container has 0 audio streams: acoustic matching impossible (not an acoustic false negative); visual match stands alone"
+    } else {
+        "Container has 0 audio streams: acoustic matching skipped; visual match also missed"
+    };
+    (CAUSE_NO_AUDIO_STREAM.to_string(), note.to_string())
+}
+
 /// Automatically classifies probable root-cause for diagnostic post-bench audits.
 fn determine_diagnostic_cause(
     ctx: &BenchContext<'_>,
     input: &DiagnosticInput<'_>,
 ) -> (String, String) {
+    if input.no_audio_stream && matches!(input.agreement.status.as_str(), "PHASH_ONLY" | "NO_MATCH")
+    {
+        return no_audio_diagnostic(input);
+    }
     match input.agreement.status.as_str() {
         "DUAL_MATCH_AGREED" => (
             "NOMINAL_MULTIMODAL_MATCH".to_string(),
@@ -667,18 +755,18 @@ fn determine_diagnostic_cause(
                         "Visual match '{p_match}' has no acoustic fingerprint in aHash catalog"
                     ),
                 )
-            } else if input.audio.is_multi_track {
-                (
-                    "MULTI_AUDIO_DUB_MISMATCH".to_string(),
-                    format!(
-                        "Container has {} audio tracks ({:?}); track 0 may differ from reference audio dub",
-                        input.audio.track_count, input.audio.all_langs
-                    ),
-                )
             } else if input.ahash.windows.iter().any(|w| w.is_low_energy) {
                 (
                     "LOW_ENERGY_SILENCE".to_string(),
                     "Sampled query windows contain low acoustic variance or silence".to_string(),
+                )
+            } else if input.audio.is_multi_track {
+                (
+                    CAUSE_MULTI_TRACK_UNVERIFIED.to_string(),
+                    format!(
+                        "Container has {} audio tracks ({:?}); dub conflict on track 0 NOT measured",
+                        input.audio.track_count, input.audio.all_langs
+                    ),
                 )
             } else {
                 (
@@ -712,7 +800,9 @@ fn evaluate_single_media(ctx: &BenchContext<'_>, media_path: &Path) -> MediaScal
         _ => return build_error_record(media_path, &media_stem, t_start.elapsed().as_secs_f64()),
     };
 
-    let audio_meta = match inspect_audio_streams(media_path) {
+    let audio_probe = inspect_audio_streams(media_path);
+    let no_audio_stream = matches!(&audio_probe, Ok(a) if a.track_count() == 0);
+    let audio_meta = match audio_probe {
         Ok(a) => ContainerAudioMetadata {
             track_count: a.track_count(),
             track0_lang: a.track0_lang(),
@@ -726,7 +816,11 @@ fn evaluate_single_media(ctx: &BenchContext<'_>, media_path: &Path) -> MediaScal
     };
 
     let phash_summary = evaluate_phash_multi(ctx, media_path, &meta);
-    let ahash_summary = evaluate_ahash_multi(ctx, media_path, &meta);
+    let ahash_summary = if no_audio_stream {
+        build_empty_ahash_summary(ctx.plan.ratios.len())
+    } else {
+        evaluate_ahash_multi(ctx, media_path, &meta)
+    };
     let agreement = classify_agreement(&phash_summary, &ahash_summary);
 
     let diag_input = DiagnosticInput {
@@ -734,6 +828,7 @@ fn evaluate_single_media(ctx: &BenchContext<'_>, media_path: &Path) -> MediaScal
         ahash: &ahash_summary,
         audio: &audio_meta,
         agreement: &agreement,
+        no_audio_stream,
     };
     let (probable_cause, diagnostic_note) = determine_diagnostic_cause(ctx, &diag_input);
 
@@ -854,12 +949,24 @@ fn evaluate_phash_multi(
         MAX_SHIFT_DRIFT_TOLERANCE_MS,
     );
 
-    summarize_phash_consensus(
+    let mut summary = summarize_phash_consensus(
         consensus.first(),
         window_details,
         t0.elapsed().as_secs_f64(),
         ctx.plan.ratios.len(),
-    )
+    );
+    if let Some(id) = summary.media_id {
+        if let Some(e) = ctx
+            .dbphash
+            .media_entries()
+            .iter()
+            .find(|e| e.media_id == id)
+        {
+            summary.season = Some(e.season).filter(|&v| v > 0);
+            summary.episode = Some(e.episode).filter(|&v| v > 0);
+        }
+    }
+    summary
 }
 
 /// Evaluates acoustic aHash across multiple temporal offset windows using C2F K=16.
@@ -969,6 +1076,8 @@ fn summarize_phash_consensus(
 ) -> PhashMatchSummary {
     if let Some(c) = best {
         PhashMatchSummary {
+            season: None,
+            episode: None,
             media_match: Some(c.clean_title.clone()),
             media_id: if c.media_id > 0 {
                 Some(c.media_id)
@@ -985,6 +1094,8 @@ fn summarize_phash_consensus(
         }
     } else {
         PhashMatchSummary {
+            season: None,
+            episode: None,
             media_match: None,
             media_id: None,
             confidence: 0.0,
@@ -1036,9 +1147,26 @@ fn summarize_ahash_consensus(
     }
 }
 
+/// Builds an empty aHash summary (no audio extraction performed).
+fn build_empty_ahash_summary(total_windows: usize) -> AhashMatchSummary {
+    AhashMatchSummary {
+        media_match: None,
+        media_id: None,
+        confidence: 0.0,
+        consensus_shift_ms: 0,
+        matching_windows: 0,
+        total_windows,
+        is_coherent: false,
+        timer_sec: 0.0,
+        windows: Vec::new(),
+    }
+}
+
 /// Builds an empty pHash summary when no frames were evaluated.
 fn build_empty_phash_summary(timer_sec: f64, total_windows: usize) -> PhashMatchSummary {
     PhashMatchSummary {
+        season: None,
+        episode: None,
         media_match: None,
         media_id: None,
         confidence: 0.0,
@@ -1087,8 +1215,24 @@ fn build_error_record(
     }
 }
 
-/// Checks fuzzy title matching across normalized whitespace tokens.
-fn are_titles_matching(p_title: &str, a_title: &str) -> bool {
+/// Extracts a detectable `(season, episode)` pair from a media name.
+fn detect_episode(name: &str) -> Option<(u32, u32)> {
+    let m = MediaMetadata::parse(name);
+    match (m.season, m.episode) {
+        (Some(s), Some(e)) => Some((s, e)),
+        _ => None,
+    }
+}
+
+/// Checks fuzzy title matching, rejecting differing `(season, episode)` pairs.
+///
+/// `p_episode` comes from the pHash catalog entry; the aHash episode is parsed from `a_title`.
+fn are_titles_matching(p_title: &str, p_episode: Option<(u32, u32)>, a_title: &str) -> bool {
+    if let (Some(p_ep), Some(a_ep)) = (p_episode, detect_episode(a_title)) {
+        if p_ep != a_ep {
+            return false;
+        }
+    }
     if p_title.eq_ignore_ascii_case(a_title) {
         return true;
     }
@@ -1105,13 +1249,14 @@ fn are_titles_matching(p_title: &str, a_title: &str) -> bool {
 
 /// Evaluates agreement when both modalities yielded candidate matches.
 fn classify_dual_match(
+    phash: &PhashMatchSummary,
     p_title: &str,
     a_title: &str,
-    p_shift: i64,
     a_shift: i64,
 ) -> MultimodalAgreement {
-    let agreed = are_titles_matching(p_title, a_title);
-    let shift_diff = (p_shift - a_shift).abs();
+    let p_episode = phash.season.zip(phash.episode);
+    let agreed = are_titles_matching(p_title, p_episode, a_title);
+    let shift_diff = (phash.consensus_shift_ms - a_shift).abs();
     let status = match (agreed, shift_diff <= MAX_MULTIMODAL_AGREEMENT_DRIFT_MS) {
         (true, true) => "DUAL_MATCH_AGREED",
         (true, false) => "DUAL_MATCH_SHIFT_DIVERGENCE",
@@ -1136,12 +1281,9 @@ fn build_single_agreement(status: &str) -> MultimodalAgreement {
 /// Compares pHash and aHash outcomes to classify multimodal agreement.
 fn classify_agreement(phash: &PhashMatchSummary, ahash: &AhashMatchSummary) -> MultimodalAgreement {
     match (&phash.media_match, &ahash.media_match) {
-        (Some(p_title), Some(a_title)) => classify_dual_match(
-            p_title,
-            a_title,
-            phash.consensus_shift_ms,
-            ahash.consensus_shift_ms,
-        ),
+        (Some(p_title), Some(a_title)) => {
+            classify_dual_match(phash, p_title, a_title, ahash.consensus_shift_ms)
+        }
         (Some(_), None) => build_single_agreement("PHASH_ONLY"),
         (None, Some(_)) => build_single_agreement("AHASH_ONLY"),
         (None, None) => build_single_agreement("NO_MATCH"),
@@ -1209,4 +1351,75 @@ fn write_status_summary(path: &Path, telemetry: &ScaleBenchmarkTelemetry) -> Res
     let data = serde_json::to_string_pretty(telemetry)?;
     std::fs::write(path, data)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn phash_summary(title: &str, season: u32, episode: u32) -> PhashMatchSummary {
+        let mut p = build_empty_phash_summary(0.0, 3);
+        p.media_match = Some(title.to_string());
+        p.season = Some(season);
+        p.episode = Some(episode);
+        p
+    }
+
+    #[test]
+    fn test_episode_mismatch_rejected() {
+        let p = phash_summary("Halt and Catch Fire", 4, 9);
+        let a = "Halt.and.Catch.Fire.S04E04.1080p.WEB-DL";
+        let agreement = classify_dual_match(&p, "Halt and Catch Fire", a, 0);
+        assert!(!agreement.match_agreed);
+        assert_eq!(agreement.status, "DUAL_MATCH_DISAGREED");
+        assert!(!are_titles_matching("Halt and Catch Fire", Some((4, 9)), a));
+    }
+
+    #[test]
+    fn test_same_episode_agrees() {
+        let p = phash_summary("Halt and Catch Fire", 4, 4);
+        let a = "Halt.and.Catch.Fire.S04E04.1080p.WEB-DL";
+        let agreement = classify_dual_match(&p, "Halt and Catch Fire", a, 0);
+        assert_eq!(agreement.status, "DUAL_MATCH_AGREED");
+    }
+
+    #[test]
+    fn test_moviehash_alias_resolution() {
+        const HASH: &str = "002835455e305309";
+        const NAME: &str = "Tre Piani (2021)[MULTi][1080p].mkv";
+        let dir = std::env::temp_dir().join(format!("dbsrt_bench_alias_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join(format!("{HASH}.json")),
+            format!("{{\"moviehash\": \"{HASH}\", \"media_name\": \"{NAME}\"}}"),
+        )
+        .unwrap();
+        std::fs::write(dir.join("not_a_hash.json"), "{}").unwrap();
+        let aliases = load_moviehash_aliases(&dir);
+        std::fs::remove_dir_all(&dir).ok();
+        assert_eq!(aliases.len(), 1);
+        assert_eq!(aliases.get(HASH).map(String::as_str), Some(NAME));
+        assert!(is_moviehash_hex(HASH));
+        assert!(!is_moviehash_hex("Tre Piani"));
+    }
+
+    #[test]
+    fn test_no_audio_track_diagnostic() {
+        let phash = phash_summary("Some Show", 1, 1);
+        let ahash = build_empty_ahash_summary(3);
+        let audio = ContainerAudioMetadata::default();
+        let agreement = classify_agreement(&phash, &ahash);
+        assert_eq!(agreement.status, "PHASH_ONLY");
+        let input = DiagnosticInput {
+            phash: &phash,
+            ahash: &ahash,
+            audio: &audio,
+            agreement: &agreement,
+            no_audio_stream: audio.track_count == 0,
+        };
+        let (cause, note) = no_audio_diagnostic(&input);
+        assert_eq!(cause, CAUSE_NO_AUDIO_STREAM);
+        assert!(note.contains("not an acoustic false negative"));
+        assert!(ahash.windows.is_empty() && ahash.media_match.is_none());
+    }
 }
