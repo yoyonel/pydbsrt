@@ -317,9 +317,10 @@ pub fn aggregate_multi_window_matches(
 
     results.sort_by(|a, b| {
         b.consensus_confidence
-            .partial_cmp(&a.consensus_confidence)
-            .unwrap_or(std::cmp::Ordering::Equal)
+            .total_cmp(&a.consensus_confidence)
             .then_with(|| b.matching_windows.cmp(&a.matching_windows))
+            .then_with(|| a.media_id.cmp(&b.media_id))
+            .then_with(|| a.clean_title.cmp(&b.clean_title))
     });
 
     results
@@ -491,5 +492,60 @@ mod tests {
         assert_eq!(consensus.matching_windows, 2);
         assert!(!consensus.is_temporally_coherent);
         assert!(consensus.consensus_confidence <= 25.0);
+    }
+
+    #[test]
+    fn test_aggregate_multi_window_matches_deterministic_tie_breaking() {
+        let windows_a = vec![(
+            0usize,
+            0.5f64,
+            50.0f64,
+            vec![
+                (
+                    20u32,
+                    "Beta".to_string(),
+                    10usize,
+                    10usize,
+                    50_000i64,
+                    80.0f64,
+                ),
+                (
+                    10u32,
+                    "Alpha".to_string(),
+                    10usize,
+                    10usize,
+                    50_000i64,
+                    80.0f64,
+                ),
+            ],
+        )];
+        let windows_b = vec![(
+            0usize,
+            0.5f64,
+            50.0f64,
+            vec![
+                (
+                    10u32,
+                    "Alpha".to_string(),
+                    10usize,
+                    10usize,
+                    50_000i64,
+                    80.0f64,
+                ),
+                (
+                    20u32,
+                    "Beta".to_string(),
+                    10usize,
+                    10usize,
+                    50_000i64,
+                    80.0f64,
+                ),
+            ],
+        )];
+        let res_a = aggregate_multi_window_matches(3, windows_a, MAX_SHIFT_DRIFT_TOLERANCE_MS);
+        let res_b = aggregate_multi_window_matches(3, windows_b, MAX_SHIFT_DRIFT_TOLERANCE_MS);
+        assert_eq!(res_a, res_b);
+        assert_eq!(res_a[0].media_id, 10);
+        assert_eq!(res_a[1].media_id, 20);
     }
 }

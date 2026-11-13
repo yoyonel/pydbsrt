@@ -6,8 +6,8 @@
 use anyhow::{bail, Context, Result};
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
-use std::time::Duration;
+use std::process::{Child, Command, ExitStatus, Stdio};
+use std::time::{Duration, Instant};
 
 use crate::ahash::{
     AhashFile, AhashHeader, HaitsmaKalkerExtractor, HaitsmaScratchpad, DEFAULT_FRAME_SIZE,
@@ -91,7 +91,7 @@ pub fn build_ffmpeg_audio_command(path: &Path, options: &AudioExtractionOptions)
         .unwrap_or_else(resolve_ffmpeg_cpu);
 
     let mut cmd = Command::new(binary);
-    cmd.args(["-hide_banner", "-nostats", "-nostdin"]);
+    cmd.args(["-hide_banner", "-loglevel", "error", "-nostats", "-nostdin"]);
 
     let input_str = path.to_string_lossy();
     if input_str.starts_with("http://") || input_str.starts_with("https://") {
@@ -169,14 +169,39 @@ pub fn extract_ahash(path: &Path, options: &AudioExtractionOptions) -> Result<Ah
         )
     })?;
 
-    let mut stdout = child
+    let stdout = child
         .stdout
         .take()
         .context("Failed to capture FFmpeg stdout pipe for audio stream")?;
+    let stderr = child.stderr.take();
 
-    let hashes = run_audio_sliding_window(&mut stdout, &extractor, &mut scratch, options)?;
+    let timeout = Duration::from_secs(DEFAULT_AUDIO_FFMPEG_TIMEOUT_SECS);
+    let hashes = std::thread::scope(|s| -> Result<Vec<u64>> {
+        let stderr_handle = s.spawn(move || {
+            let mut msg = String::new();
+            if let Some(mut err_pipe) = stderr {
+                let _ = err_pipe.read_to_string(&mut msg);
+            }
+            msg
+        });
 
-    wait_for_child(&mut child, path)?;
+        let mut stdout_pipe = stdout;
+        let window_res =
+            run_audio_sliding_window(&mut stdout_pipe, &extractor, &mut scratch, options);
+        drop(stdout_pipe);
+
+        if let Err(err) = window_res {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = stderr_handle.join();
+            return Err(err);
+        }
+
+        let status = poll_child_with_timeout(&mut child, path, timeout)?;
+        let stderr_msg = stderr_handle.join().unwrap_or_default();
+        validate_child_exit_status(status, path, &stderr_msg)?;
+        window_res
+    })?;
 
     let header = AhashHeader {
         version: 1,
@@ -328,7 +353,7 @@ fn read_f32_exact_or_eof<R: Read>(reader: &mut R, dest: &mut [f32]) -> Result<us
 ///    stream so downstream silent-media handlers classify it non-fatally.
 fn format_audio_child_error(code: i32, path: &Path, stderr_msg: &str) -> String {
     let redacted = redact_secrets(stderr_msg.trim());
-    if redacted.contains("Output file does not contain any stream") {
+    if redacted.contains("does not contain any stream") || redacted.contains("matches no streams") {
         return format!(
             "Media has no audio stream to extract: {:?}",
             display_input(path)
@@ -347,45 +372,80 @@ fn format_audio_child_error(code: i32, path: &Path, stderr_msg: &str) -> String 
     )
 }
 
-/// Waits for FFmpeg child process termination and handles exit status.
+/// Polls an FFmpeg child process until completion or kills and reaps it on timeout.
 ///
 /// # Arguments
-/// * `child` - Mutable reference to child process.
-/// * `path` - Path for diagnostic context.
+/// * `child` - Mutable reference to the spawned child process.
+/// * `path` - Media path or URI for redacted error reporting.
+/// * `timeout` - Maximum allowed wall-clock duration before termination.
 ///
 /// # Returns
-/// `Ok(())` if exit code is successful or acceptable.
+/// `Ok(ExitStatus)` once the child exits within `timeout`.
 ///
 /// # Errors
-/// Returns `Err` if FFmpeg failed with error status or if the media lacks an audio stream.
+/// Returns `Err` if `try_wait` fails or if `timeout` elapses before process exit.
 ///
 /// # Panics
 /// Guarantee: Never panics.
 ///
 /// # Data Flow & Invariants
-/// Reaps child process without leaving zombies and formats secret-redacted error messages via
-/// [`format_audio_child_error`].
-fn wait_for_child(child: &mut Child, path: &Path) -> Result<()> {
-    let mut stderr_msg = String::new();
-    if let Some(mut err_pipe) = child.stderr.take() {
-        let _ = err_pipe.read_to_string(&mut stderr_msg);
+/// Polls `child.try_wait()` at [`CHILD_POLL_INTERVAL`] steps; on timeout issues `kill()` followed
+/// by `wait()` so no zombie process or open pipe writer remains.
+fn poll_child_with_timeout(
+    child: &mut Child,
+    path: &Path,
+    timeout: Duration,
+) -> Result<ExitStatus> {
+    let start = Instant::now();
+    loop {
+        match child.try_wait().with_context(|| {
+            format!(
+                "Failed waiting for FFmpeg child process on {:?}",
+                display_input(path)
+            )
+        })? {
+            Some(status) => return Ok(status),
+            None if start.elapsed() >= timeout => {
+                let _ = child.kill();
+                let _ = child.wait();
+                bail!(
+                    "FFmpeg audio extraction timed out after {}s for {:?}",
+                    timeout.as_secs(),
+                    display_input(path)
+                );
+            }
+            None => std::thread::sleep(CHILD_POLL_INTERVAL),
+        }
     }
+}
 
-    let status = child.wait().with_context(|| {
-        format!(
-            "Failed waiting for FFmpeg child process on {:?}",
-            display_input(path)
-        )
-    })?;
-
+/// Validates FFmpeg child exit status and formats secret-redacted diagnostics on failure.
+///
+/// # Arguments
+/// * `status` - Completed child process [`ExitStatus`].
+/// * `path` - Media path or URI for diagnostic context.
+/// * `stderr_msg` - Captured `stderr` output from the child process.
+///
+/// # Returns
+/// `Ok(())` when `status.success()` or exit code is `255` (early pipe termination).
+///
+/// # Errors
+/// Returns `Err` formatted via [`format_audio_child_error`] on non-zero failure exit codes.
+///
+/// # Panics
+/// Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// Treats exit code `255` as acceptable early termination and delegates all other failures to
+/// [`format_audio_child_error`].
+fn validate_child_exit_status(status: ExitStatus, path: &Path, stderr_msg: &str) -> Result<()> {
     if !status.success() {
         let code = status.code().unwrap_or(-1);
         // Exit code 255 typically indicates SIGINT / early pipe termination
         if code != 255 {
-            bail!("{}", format_audio_child_error(code, path, &stderr_msg));
+            bail!("{}", format_audio_child_error(code, path, stderr_msg));
         }
     }
-
     Ok(())
 }
 
@@ -405,6 +465,12 @@ mod tests {
         let opts = AudioExtractionOptions::default();
         let args = command_args(&build_ffmpeg_audio_command(Path::new("in.mkv"), &opts));
         assert!(!args.iter().any(|a| a == "-map"));
+        let loglevel_pos = args
+            .iter()
+            .position(|a| a == "-loglevel")
+            .expect("-loglevel present");
+        assert_eq!(args[loglevel_pos + 1], "error");
+        assert!(args.iter().any(|a| a == "-nostats"));
     }
 
     #[test]
@@ -462,5 +528,22 @@ mod tests {
         let silent = format_audio_child_error(1, path, "Output file does not contain any stream\n");
         assert!(silent.contains("no audio stream"));
         assert!(!silent.contains("top_s3cret"));
+    }
+
+    #[test]
+    fn test_poll_child_with_timeout_kills_stalled_process() {
+        let mut child = Command::new("sleep")
+            .arg("5")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn sleep");
+        let path = Path::new("ftp://nas_user:secret_pw@nas.local:21/show/stalled.mkv");
+        let err = poll_child_with_timeout(&mut child, path, Duration::from_millis(120))
+            .expect_err("stalled child must time out");
+        let msg = err.to_string();
+        assert!(msg.contains("timed out"));
+        assert!(!msg.contains("secret_pw"));
+        assert!(msg.contains("ftp://nas_user:***@nas.local:21/show/stalled.mkv"));
     }
 }

@@ -67,6 +67,57 @@ pub const DEFAULT_MAX_AUDIO_MATCH_DISTANCE: f64 = 14.0;
 /// Background noise distance floor (random 64-bit uncorrelated hashes).
 pub const RANDOM_AUDIO_HASH_DISTANCE: f64 = 32.0;
 
+/// Minimum query frame length in sub-fingerprints for valid audio matching (a 1-frame query
+/// forces all 33 temporal derivative bits to 0, causing severe false-positive collisions).
+pub const MIN_AUDIO_QUERY_FRAMES: usize = 8;
+
+/// Denominator of the maximum zero-hash ratio (`1 / 2 = 50%`) tolerated before a query window
+/// is classified as digital silence (`0x0000_0000_0000_0000`).
+pub const SILENT_ZERO_FRAME_RATIO_DENOMINATOR: usize = 2;
+
+/// Minimum mean inter-frame Hamming bit transitions required across `hashes[1..]` to reject
+/// flat-energy / constant-hash windows that would otherwise match at `distance = 0.0`.
+pub const MIN_INTER_FRAME_HAMMING_BITS: f64 = 0.25;
+
+/// Returns `true` when `hashes` is too short (`< MIN_AUDIO_QUERY_FRAMES`), dominated by digital
+/// silence (`>= 50%` zero hashes `0x0000_0000_0000_0000`), or exhibits flat inter-frame energy
+/// (`mean_transition_bits < MIN_INTER_FRAME_HAMMING_BITS` across `hashes[1..]`).
+///
+/// # Arguments
+/// * `hashes` - Contiguous slice of 64-bit Haitsma-Kalker sub-fingerprints.
+///
+/// # Returns
+/// `true` if the window must be rejected as too short, silent, or flat-energy; `false` otherwise.
+///
+/// # Panics
+/// Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// 1. Enforces `hashes.len() >= MIN_AUDIO_QUERY_FRAMES` (prevents 1-frame queries where 33 temporal
+///    derivative bits are structurally forced to 0).
+/// 2. Rejects windows where `zero_count * 2 >= hashes.len()`.
+/// 3. Evaluates frame-to-frame Hamming transitions on `hashes[1..]` (excluding frame 0's boundary
+///    zero-temporal initialization) and rejects flat windows below [`MIN_INTER_FRAME_HAMMING_BITS`].
+pub fn is_silent_or_flat_audio_query(hashes: &[u64]) -> bool {
+    if hashes.len() < MIN_AUDIO_QUERY_FRAMES {
+        return true;
+    }
+    let zero_count = hashes.iter().filter(|&&h| h == 0).count();
+    if zero_count.saturating_mul(SILENT_ZERO_FRAME_RATIO_DENOMINATOR) >= hashes.len() {
+        return true;
+    }
+    let tail = &hashes[1..];
+    if tail.len() < 2 {
+        return true;
+    }
+    let transition_bits: u64 = tail
+        .windows(2)
+        .map(|w| (w[0] ^ w[1]).count_ones() as u64)
+        .sum();
+    let mean_transition_bits = transition_bits as f64 / (tail.len() - 1) as f64;
+    mean_transition_bits < MIN_INTER_FRAME_HAMMING_BITS
+}
+
 /// Result of matching a query audio fingerprint sequence against a reference sequence.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AudioMatchResult {

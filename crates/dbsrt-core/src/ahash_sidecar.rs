@@ -105,6 +105,7 @@ pub enum AudioTrackSelection {
     /// Multi-track backfill skipped verification (`--no-verify`), using inferred FFmpeg default.
     InferredBackfill,
     /// Audio topology unavailable, probe failed, or no multi-track candidate passed verification.
+    #[serde(other)]
     Unknown,
 }
 
@@ -566,27 +567,37 @@ impl AhashSidecar {
         Ok(path)
     }
 
-    /// Parses a typed aHash sidecar.
+    /// Parses a typed aHash sidecar and validates its `schema_version`.
     ///
     /// # Arguments
     /// * `path` - Sidecar JSON path.
     ///
     /// # Returns
-    /// Parsed sidecar.
+    /// Parsed [`AhashSidecar`] whose `schema_version` matches [`AHASH_SIDECAR_SCHEMA_VERSION`].
     ///
     /// # Errors
-    /// Returns `Err` if the file is unreadable or is not a typed aHash sidecar (e.g. a
-    /// legacy pHash sidecar lacking `header`/`selection`).
+    /// Returns `Err` if the file is unreadable, is not a typed aHash sidecar (e.g. a
+    /// legacy pHash sidecar lacking `header`/`selection`), or carries an unsupported `schema_version`.
     ///
     /// # Panics
     /// Guarantee: Never panics.
     ///
     /// # Data Flow & Invariants
-    /// Strict serde parse: callers fall back to name-only legacy parsing on `Err`.
+    /// Strict serde parse (`#[serde(other)]` maps unknown future `selection` strings to
+    /// [`AudioTrackSelection::Unknown`]) followed by an explicit [`AHASH_SIDECAR_SCHEMA_VERSION`] gate.
     pub fn read(path: &Path) -> Result<Self> {
         let txt =
             fs::read_to_string(path).with_context(|| format!("Cannot read sidecar {:?}", path))?;
-        serde_json::from_str(&txt).with_context(|| format!("Not an aHash sidecar {:?}", path))
+        let sidecar: Self = serde_json::from_str(&txt)
+            .with_context(|| format!("Not an aHash sidecar {:?}", path))?;
+        anyhow::ensure!(
+            sidecar.schema_version == AHASH_SIDECAR_SCHEMA_VERSION,
+            "Unsupported aHash sidecar schema_version {} in {:?} (expected {})",
+            sidecar.schema_version,
+            path,
+            AHASH_SIDECAR_SCHEMA_VERSION
+        );
+        Ok(sidecar)
     }
 }
 
@@ -814,5 +825,33 @@ mod tests {
         let bytes = fs::read(&path).unwrap();
         fs::write(&path, &bytes[..bytes.len() - 1]).unwrap();
         assert!(read_ahash_header(&path).is_err());
+    }
+
+    #[test]
+    fn test_sidecar_schema_version_and_serde_other_selection() {
+        let dir = tempfile::tempdir().unwrap();
+        let ahash_path = dir.path().join(format!("{HEX}.86.1fps.ahash"));
+        let hdr = header(4);
+        let sidecar = AhashSidecar::build(&AhashSidecarRequest {
+            ahash_path: &ahash_path,
+            header: &hdr,
+            media_name: "Film.mkv",
+            moviehash: Some(HEX),
+            inspection: None,
+            explicit_audio_stream: None,
+        });
+        let path = sidecar.write_next_to(&ahash_path).unwrap();
+
+        let mut raw: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        raw["selection"] = serde_json::Value::String("future_unknown_variant".to_string());
+        fs::write(&path, serde_json::to_string_pretty(&raw).unwrap()).unwrap();
+        let parsed = AhashSidecar::read(&path).unwrap();
+        assert_eq!(parsed.selection, AudioTrackSelection::Unknown);
+
+        raw["schema_version"] = serde_json::Value::from(AHASH_SIDECAR_SCHEMA_VERSION + 1);
+        fs::write(&path, serde_json::to_string_pretty(&raw).unwrap()).unwrap();
+        let err = AhashSidecar::read(&path).unwrap_err();
+        assert!(format!("{err:#}").contains("schema_version"));
     }
 }

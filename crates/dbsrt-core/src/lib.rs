@@ -25,21 +25,24 @@ pub mod trajectory;
 pub mod video;
 
 pub use ahash::{
-    match_audio_sequence, AhashFile, AhashHeader, AudioMatchResult, HaitsmaKalkerExtractor,
-    HaitsmaScratchpad, AHASH_MAGIC, AHASH_VERSION, DEFAULT_FRAME_SIZE, DEFAULT_HOP_SIZE,
-    DEFAULT_MAX_AUDIO_MATCH_DISTANCE, DEFAULT_SAMPLE_RATE, DEFAULT_SPECTRAL_LAG, HEADER_SIZE_BYTES,
-    NUM_SPECTRAL_BANDS, NUM_SPECTRAL_BITS, VIDEO_SYNC_HOP_SIZE,
+    is_silent_or_flat_audio_query, match_audio_sequence, AhashFile, AhashHeader, AudioMatchResult,
+    HaitsmaKalkerExtractor, HaitsmaScratchpad, AHASH_MAGIC, AHASH_VERSION, DEFAULT_FRAME_SIZE,
+    DEFAULT_HOP_SIZE, DEFAULT_MAX_AUDIO_MATCH_DISTANCE, DEFAULT_SAMPLE_RATE, DEFAULT_SPECTRAL_LAG,
+    HEADER_SIZE_BYTES, MIN_AUDIO_QUERY_FRAMES, MIN_INTER_FRAME_HAMMING_BITS, NUM_SPECTRAL_BANDS,
+    NUM_SPECTRAL_BITS, SILENT_ZERO_FRAME_RATIO_DENOMINATOR, VIDEO_SYNC_HOP_SIZE,
 };
 pub use ahash_backfill::{
-    backfill_ahash_sidecar, compute_verify_window, BackfillAction, BackfillSidecarOutcome,
-    BackfillSidecarRequest, TrackVerificationProbe, VerifyWindow, BACKFILL_MIDPOINT_RATIO,
+    backfill_ahash_sidecar, compute_verify_window, compute_verify_window_at_ratio, BackfillAction,
+    BackfillSidecarOutcome, BackfillSidecarRequest, TrackVerificationProbe, VerifyWindow,
+    BACKFILL_FALLBACK_EARLY_RATIO, BACKFILL_FALLBACK_LATE_RATIO, BACKFILL_MIDPOINT_RATIO,
     BACKFILL_MIN_FULL_CLIP_SEC, BACKFILL_MIN_QUERY_SEC, BACKFILL_SHORT_CLIP_WINDOW_RATIO,
-    BACKFILL_VERIFY_RADIUS_SEC, BACKFILL_VERIFY_WINDOW_SEC,
+    BACKFILL_VERIFY_ANCHOR_RATIOS, BACKFILL_VERIFY_RADIUS_SEC, BACKFILL_VERIFY_WINDOW_SEC,
+    MIN_TRACK_DISCRIMINATION_MARGIN_BITS,
 };
 pub use ahash_sidecar::{
     ahash_logical_stem, ahash_sidecar_path, audio_track_stem, ffmpeg_default_audio_index,
     read_ahash_header, resolve_audio_track, AhashSidecar, AhashSidecarHeader, AhashSidecarRequest,
-    AudioTrackSelection, ResolvedAudioTrack, AHASH_SIDECAR_SCHEMA_VERSION,
+    AudioTrackSelection, ResolvedAudioTrack, AHASH_SIDECAR_SCHEMA_VERSION, AUDIO_TRACK_STEM_TAG,
 };
 pub use assets::{
     check_completeness, AssetKind, ContainerIdentity, MediaAsset, MediaSource,

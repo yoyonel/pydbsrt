@@ -9,7 +9,8 @@ use serde::Serialize;
 use std::path::{Path, PathBuf};
 
 use crate::ahash::{
-    match_audio_sequence, AhashFile, AhashHeader, DEFAULT_MAX_AUDIO_MATCH_DISTANCE, HASH_TOTAL_BITS,
+    is_silent_or_flat_audio_query, match_audio_sequence, AhashFile, AhashHeader,
+    DEFAULT_MAX_AUDIO_MATCH_DISTANCE, HASH_TOTAL_BITS, MIN_AUDIO_QUERY_FRAMES,
 };
 use crate::ahash_sidecar::{
     ahash_sidecar_path, read_ahash_header, AhashSidecar, AhashSidecarRequest, AudioTrackSelection,
@@ -26,14 +27,35 @@ pub const BACKFILL_VERIFY_RADIUS_SEC: f64 = 2.0;
 /// Minimum `.ahash` duration above which full midpoint `5.0s` probing applies unscaled.
 pub const BACKFILL_MIN_FULL_CLIP_SEC: f64 = 12.0;
 
-/// Midpoint ratio of the `.ahash` timeline where track verification samples (`t = 50%`).
+/// Midpoint ratio of the `.ahash` timeline where track verification samples first (`t = 50%`).
 pub const BACKFILL_MIDPOINT_RATIO: f64 = 0.5;
+
+/// Early fallback timeline ratio probed when `t = 50%` is silent or M&E-ambiguous (`t = 25%`).
+pub const BACKFILL_FALLBACK_EARLY_RATIO: f64 = 0.25;
+
+/// Late fallback timeline ratio probed when `t = 50%` and `t = 25%` are silent or M&E-ambiguous (`t = 75%`).
+pub const BACKFILL_FALLBACK_LATE_RATIO: f64 = 0.75;
+
+/// Ordered timeline anchor ratios probed during multi-track verification (`50%`, then `25%`, `75%`).
+pub const BACKFILL_VERIFY_ANCHOR_RATIOS: [f64; 3] = [
+    BACKFILL_MIDPOINT_RATIO,
+    BACKFILL_FALLBACK_EARLY_RATIO,
+    BACKFILL_FALLBACK_LATE_RATIO,
+];
+
+/// Minimum Hamming distance margin (in bits) required between the best and second-best audio
+/// tracks to certify [`AudioTrackSelection::VerifiedBackfill`] (prevents false track election
+/// on shared M&E music/SFX passages).
+pub const MIN_TRACK_DISCRIMINATION_MARGIN_BITS: f64 = 4.0;
 
 /// Fraction of total duration sampled on short clips below [`BACKFILL_MIN_FULL_CLIP_SEC`].
 pub const BACKFILL_SHORT_CLIP_WINDOW_RATIO: f64 = 0.6;
 
 /// Lower clamp on probe duration (seconds) so tiny clips still yield enough FFT frames.
 pub const BACKFILL_MIN_QUERY_SEC: f64 = 0.8;
+
+/// Minimum start-time difference (seconds) between two anchor windows to avoid re-probing an identical slice.
+const MIN_ANCHOR_START_DELTA_SEC: f64 = 0.1;
 
 /// Permissive Hamming bound (`> 64.0`) passed to capture raw best distance for diagnostics.
 const DIAGNOSTIC_UNBOUNDED_DISTANCE: f64 = (HASH_TOTAL_BITS as f64) + 1.0;
@@ -115,17 +137,40 @@ pub struct BackfillSidecarOutcome {
 /// * `frame_count` - Number of 64-bit hashes available in the `.ahash` payload.
 ///
 /// # Returns
+/// [`VerifyWindow`] bounded inside `[0, frame_count]` at [`BACKFILL_MIDPOINT_RATIO`].
+///
+/// # Panics
+/// Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// Delegates to [`compute_verify_window_at_ratio`] with [`BACKFILL_MIDPOINT_RATIO`] (`0.50`).
+pub fn compute_verify_window(header: &AhashHeader, frame_count: usize) -> VerifyWindow {
+    compute_verify_window_at_ratio(header, frame_count, BACKFILL_MIDPOINT_RATIO)
+}
+
+/// Computes a probe window at `anchor_ratio` along the `.ahash` timeline and `+-2.0s` reference bounds.
+///
+/// # Arguments
+/// * `header` - Parsed `.ahash` header (`sample_rate`, `hop_size`).
+/// * `frame_count` - Number of 64-bit hashes available in the `.ahash` payload.
+/// * `anchor_ratio` - Fractional timeline anchor (e.g. `0.50`, `0.25`, `0.75`), clamped to `[0.0, 1.0]`.
+///
+/// # Returns
 /// [`VerifyWindow`] bounded inside `[0, frame_count]`.
 ///
 /// # Panics
 /// Guarantee: Never panics.
 ///
 /// # Data Flow & Invariants
-/// * For durations `>= 12.0s`, extracts `5.0s` starting at `t = 50%` (clamped inside timeline).
+/// * For durations `>= 12.0s`, extracts `5.0s` starting at `t = anchor_ratio * total_sec` (clamped).
 /// * For shorter clips (`< 12.0s`), scales duration to `60%` of the clip clamped to `[0.8s, 5.0s]`
-///   and centers it so `start_sec + duration_sec <= total_sec`.
+///   and positions it at `anchor_ratio * max_start`.
 /// * Reference bounds expand around `[start_sec, start_sec + duration_sec]` by `+-2.0s`.
-pub fn compute_verify_window(header: &AhashHeader, frame_count: usize) -> VerifyWindow {
+pub fn compute_verify_window_at_ratio(
+    header: &AhashHeader,
+    frame_count: usize,
+    anchor_ratio: f64,
+) -> VerifyWindow {
     let fps = header.audio_fps();
     if fps <= 0.0 || frame_count == 0 {
         return VerifyWindow {
@@ -136,6 +181,7 @@ pub fn compute_verify_window(header: &AhashHeader, frame_count: usize) -> Verify
         };
     }
 
+    let ratio = anchor_ratio.clamp(0.0, 1.0);
     let total_sec = (frame_count as f64) / fps;
     let duration_sec = if total_sec >= BACKFILL_MIN_FULL_CLIP_SEC {
         BACKFILL_VERIFY_WINDOW_SEC
@@ -146,9 +192,9 @@ pub fn compute_verify_window(header: &AhashHeader, frame_count: usize) -> Verify
 
     let max_start = (total_sec - duration_sec).max(0.0);
     let nominal_start = if total_sec >= BACKFILL_MIN_FULL_CLIP_SEC {
-        total_sec * BACKFILL_MIDPOINT_RATIO
+        total_sec * ratio
     } else {
-        max_start * BACKFILL_MIDPOINT_RATIO
+        max_start * ratio
     };
     let start_sec = nominal_start.clamp(0.0, max_start);
 
@@ -175,6 +221,62 @@ fn check_skip_existing(sidecar_path: &Path, force: bool) -> Option<AhashSidecar>
         .selection
         .is_certain_or_verified()
         .then_some(existing)
+}
+
+/// Evaluates an extracted candidate hash sequence against a reference `.ahash` window,
+/// rejecting short (`< MIN_AUDIO_QUERY_FRAMES`), silent (`0u64`), or flat-energy sequences.
+pub(crate) fn match_candidate_hashes_against_window(
+    query_hashes: &[u64],
+    ahash_file: &AhashFile,
+    window: VerifyWindow,
+    stream: &AudioStreamInfo,
+) -> TrackVerificationProbe {
+    if query_hashes.len() < MIN_AUDIO_QUERY_FRAMES {
+        return TrackVerificationProbe {
+            audio_index: stream.audio_index,
+            language: stream.language.clone(),
+            mean_distance: None,
+            error: Some(format!(
+                "query window too short ({} frames < {MIN_AUDIO_QUERY_FRAMES})",
+                query_hashes.len()
+            )),
+        };
+    }
+    if is_silent_or_flat_audio_query(query_hashes) {
+        return TrackVerificationProbe {
+            audio_index: stream.audio_index,
+            language: stream.language.clone(),
+            mean_distance: None,
+            error: Some("silent or flat-energy query window".to_string()),
+        };
+    }
+
+    let mut reference_slice = &ahash_file.hashes[window.ref_start_frame..window.ref_end_frame];
+    if reference_slice.len() < query_hashes.len() {
+        reference_slice = &ahash_file.hashes;
+    }
+    if is_silent_or_flat_audio_query(reference_slice) {
+        return TrackVerificationProbe {
+            audio_index: stream.audio_index,
+            language: stream.language.clone(),
+            mean_distance: None,
+            error: Some("silent or flat-energy reference window".to_string()),
+        };
+    }
+
+    let fps = ahash_file.header.audio_fps();
+    let matched = match_audio_sequence(
+        query_hashes,
+        reference_slice,
+        fps,
+        DIAGNOSTIC_UNBOUNDED_DISTANCE,
+    );
+    TrackVerificationProbe {
+        audio_index: stream.audio_index,
+        language: stream.language.clone(),
+        mean_distance: matched.map(|m| m.mean_distance),
+        error: None,
+    }
 }
 
 /// Probes one candidate audio stream and compares it locally against the reference `.ahash`.
@@ -213,22 +315,58 @@ fn probe_candidate_track(
         }
     };
 
-    let fps = ahash_file.header.audio_fps();
-    let mut reference_slice = &ahash_file.hashes[window.ref_start_frame..window.ref_end_frame];
-    if reference_slice.len() < extracted.hashes.len() {
-        reference_slice = &ahash_file.hashes;
+    match_candidate_hashes_against_window(&extracted.hashes, ahash_file, window, stream)
+}
+
+/// Classification of one anchor probe pass across all candidate tracks.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum AnchorProbeVerdict {
+    /// Unambiguous winning track `(audio_index, distance)` (`best_dist <= 14.0` and margin `>= 4.0` bits).
+    Verified(usize, f64),
+    /// Anchor was silent/flat or two tracks matched within `< 4.0` bits (e.g. shared M&E passage).
+    AmbiguousOrSilent(Option<f64>),
+    /// All tracks decoded non-silent audio above `DEFAULT_MAX_AUDIO_MATCH_DISTANCE`.
+    Unmatched(Option<f64>),
+}
+
+/// Evaluates per-track probe distances at a single temporal anchor, enforcing both
+/// [`DEFAULT_MAX_AUDIO_MATCH_DISTANCE`] and [`MIN_TRACK_DISCRIMINATION_MARGIN_BITS`].
+pub(crate) fn classify_anchor_probes(probes: &[TrackVerificationProbe]) -> AnchorProbeVerdict {
+    let mut ranked: Vec<(usize, f64)> = probes
+        .iter()
+        .filter_map(|p| p.mean_distance.map(|d| (p.audio_index, d)))
+        .collect();
+    ranked.sort_by(|a, b| a.1.total_cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
+
+    let Some(&(best_idx, best_dist)) = ranked.first() else {
+        return AnchorProbeVerdict::AmbiguousOrSilent(None);
+    };
+
+    if best_dist > DEFAULT_MAX_AUDIO_MATCH_DISTANCE {
+        return AnchorProbeVerdict::Unmatched(Some(best_dist));
     }
-    let matched = match_audio_sequence(
-        &extracted.hashes,
-        reference_slice,
-        fps,
-        DIAGNOSTIC_UNBOUNDED_DISTANCE,
-    );
-    TrackVerificationProbe {
-        audio_index: stream.audio_index,
-        language: stream.language.clone(),
-        mean_distance: matched.map(|m| m.mean_distance),
-        error: None,
+
+    if let Some(&(_, second_dist)) = ranked.get(1) {
+        if (second_dist - best_dist) < MIN_TRACK_DISCRIMINATION_MARGIN_BITS {
+            return AnchorProbeVerdict::AmbiguousOrSilent(Some(best_dist));
+        }
+        return AnchorProbeVerdict::Verified(best_idx, best_dist);
+    }
+
+    // Only one track produced a valid distance in a multi-track container: accept only if all other
+    // tracks were rejected as silent/flat (not because of a transient FFmpeg I/O failure).
+    let others_silent_only = probes
+        .iter()
+        .filter(|p| p.audio_index != best_idx)
+        .all(|p| {
+            p.error
+                .as_deref()
+                .is_some_and(|e| e.contains("silent or flat-energy"))
+        });
+    if others_silent_only {
+        AnchorProbeVerdict::Verified(best_idx, best_dist)
+    } else {
+        AnchorProbeVerdict::AmbiguousOrSilent(Some(best_dist))
     }
 }
 
@@ -240,52 +378,100 @@ struct MultiTrackVerification {
     probes: Vec<TrackVerificationProbe>,
 }
 
-/// Evaluates all container audio tracks against `ahash_path` and resolves verified selection.
+/// Updates `best_raw` with `candidate` when `candidate` is smaller than the current minimum.
+#[inline]
+fn update_min_distance(best_raw: &mut Option<f64>, candidate: Option<f64>) {
+    let Some(d) = candidate else {
+        return;
+    };
+    if best_raw.is_none_or(|prev| d < prev) {
+        *best_raw = Some(d);
+    }
+}
+
+/// Probes all candidate audio streams of a container at a single verification window.
+fn probe_all_tracks_at_window(
+    media: &Path,
+    ahash_file: &AhashFile,
+    window: VerifyWindow,
+    streams: &[AudioStreamInfo],
+) -> Vec<TrackVerificationProbe> {
+    streams
+        .iter()
+        .map(|stream| probe_candidate_track(media, ahash_file, window, stream))
+        .collect()
+}
+
+/// Builds a certified [`MultiTrackVerification`] result for a winning `(audio_index, distance)` pair.
+fn build_verified_outcome(
+    inspection: &AudioContainerInspection,
+    winner: (usize, f64),
+    probes: Vec<TrackVerificationProbe>,
+) -> MultiTrackVerification {
+    let (audio_index, distance) = winner;
+    let chosen = inspection
+        .audio_streams
+        .iter()
+        .find(|s| s.audio_index == audio_index)
+        .cloned();
+    MultiTrackVerification {
+        selection: AudioTrackSelection::VerifiedBackfill,
+        stream: chosen,
+        distance: Some(distance),
+        probes,
+    }
+}
+
+/// Evaluates all container audio tracks against `ahash_path`, falling back from `50%` to `25%` / `75%`
+/// when the midpoint anchor is silent or M&E-ambiguous.
 fn verify_multitrack_selection(
     req: &BackfillSidecarRequest<'_>,
     inspection: &AudioContainerInspection,
 ) -> Result<MultiTrackVerification> {
     let ahash_file = AhashFile::read_from_path(req.ahash_path)?;
-    let window = compute_verify_window(&ahash_file.header, ahash_file.hashes.len());
-    let mut probes = Vec::with_capacity(inspection.audio_streams.len());
-
-    let mut best_match: Option<(usize, f64)> = None;
+    let mut visited_starts: Vec<f64> = Vec::with_capacity(BACKFILL_VERIFY_ANCHOR_RATIOS.len());
     let mut best_raw: Option<f64> = None;
+    let mut last_probes: Vec<TrackVerificationProbe> = Vec::new();
 
-    for stream in &inspection.audio_streams {
-        let probe = probe_candidate_track(req.media, &ahash_file, window, stream);
-        if let Some(dist) = probe.mean_distance {
-            if best_raw.is_none_or(|prev| dist < prev) {
-                best_raw = Some(dist);
+    for &ratio in &BACKFILL_VERIFY_ANCHOR_RATIOS {
+        let window =
+            compute_verify_window_at_ratio(&ahash_file.header, ahash_file.hashes.len(), ratio);
+        let already_probed = visited_starts
+            .iter()
+            .any(|&prev| (prev - window.start_sec).abs() < MIN_ANCHOR_START_DELTA_SEC);
+        if already_probed {
+            continue;
+        }
+        visited_starts.push(window.start_sec);
+
+        let probes =
+            probe_all_tracks_at_window(req.media, &ahash_file, window, &inspection.audio_streams);
+
+        match classify_anchor_probes(&probes) {
+            AnchorProbeVerdict::Verified(audio_index, distance) => {
+                return Ok(build_verified_outcome(
+                    inspection,
+                    (audio_index, distance),
+                    probes,
+                ));
             }
-            if dist <= DEFAULT_MAX_AUDIO_MATCH_DISTANCE
-                && best_match.is_none_or(|(_, prev)| dist < prev)
-            {
-                best_match = Some((stream.audio_index, dist));
+            AnchorProbeVerdict::AmbiguousOrSilent(best_distance) => {
+                update_min_distance(&mut best_raw, best_distance);
+                last_probes = probes;
+            }
+            AnchorProbeVerdict::Unmatched(best_distance) => {
+                update_min_distance(&mut best_raw, best_distance);
+                last_probes = probes;
+                break;
             }
         }
-        probes.push(probe);
-    }
-
-    if let Some((best_idx, best_dist)) = best_match {
-        let chosen = inspection
-            .audio_streams
-            .iter()
-            .find(|s| s.audio_index == best_idx)
-            .cloned();
-        return Ok(MultiTrackVerification {
-            selection: AudioTrackSelection::VerifiedBackfill,
-            stream: chosen,
-            distance: Some(best_dist),
-            probes,
-        });
     }
 
     Ok(MultiTrackVerification {
         selection: AudioTrackSelection::Unknown,
         stream: None,
         distance: best_raw,
-        probes,
+        probes: last_probes,
     })
 }
 
@@ -619,5 +805,146 @@ mod tests {
         assert_eq!(res.action, BackfillAction::Written);
         assert_eq!(res.sidecar.selection, AudioTrackSelection::Unknown);
         assert!(res.sidecar.selected_audio_stream.is_none());
+    }
+
+    fn make_identical_me_two_track_mkv(dir: &Path) -> Option<PathBuf> {
+        let out = dir.join("identical_me.mkv");
+        let status = Command::new("ffmpeg")
+            .args([
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:duration=3",
+                "-map",
+                "0:a",
+                "-map",
+                "0:a",
+                "-metadata:s:a:0",
+                "language=fre",
+                "-metadata:s:a:1",
+                "language=eng",
+                "-c:a",
+                "aac",
+                "-t",
+                SYNTH_DURATION_SEC,
+                "-y",
+            ])
+            .arg(&out)
+            .status()
+            .ok()?;
+        (status.success() && out.exists()).then_some(out)
+    }
+
+    #[test]
+    fn test_backfill_rejects_silence_short_windows_and_ambiguous_me_tracks() {
+        let stream = AudioStreamInfo {
+            index: 1,
+            audio_index: 0,
+            codec_name: "aac".to_string(),
+            channels: Some(2),
+            sample_rate: Some(48_000),
+            language: Some("fre".to_string()),
+            title: None,
+            is_default: true,
+        };
+        let hdr = synth_header(64);
+        let ref_hashes: Vec<u64> = (0..64)
+            .map(|i| 0xA5A5_5A5A_0000_0000u64 ^ ((i as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)))
+            .collect();
+        let ahash_file = AhashFile {
+            header: hdr,
+            hashes: ref_hashes,
+        };
+        let win = VerifyWindow {
+            start_sec: 0.0,
+            duration_sec: 0.5,
+            ref_start_frame: 0,
+            ref_end_frame: 64,
+        };
+
+        // 1-frame query (< MIN_AUDIO_QUERY_FRAMES) rejected
+        let short_probe =
+            match_candidate_hashes_against_window(&[0x1234_5678], &ahash_file, win, &stream);
+        assert!(short_probe.mean_distance.is_none());
+        assert!(short_probe.error.as_deref().unwrap().contains("too short"));
+
+        // Digital silence (0u64) rejected even if reference were also 0u64
+        let silent_probe =
+            match_candidate_hashes_against_window(&[0u64; 16], &ahash_file, win, &stream);
+        assert!(silent_probe.mean_distance.is_none());
+        assert!(silent_probe
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("silent or flat-energy"));
+
+        // Flat constant energy rejected
+        let flat_probe = match_candidate_hashes_against_window(
+            &[0xDEAD_BEEF_CAFE_BABEu64; 16],
+            &ahash_file,
+            win,
+            &stream,
+        );
+        assert!(flat_probe.mean_distance.is_none());
+
+        // M&E ambiguity: VF (1.2 bits) vs VO (2.5 bits) -> margin 1.3 < 4.0 -> AmbiguousOrSilent
+        let me_probes = vec![
+            TrackVerificationProbe {
+                audio_index: 0,
+                language: Some("fre".to_string()),
+                mean_distance: Some(1.2),
+                error: None,
+            },
+            TrackVerificationProbe {
+                audio_index: 1,
+                language: Some("eng".to_string()),
+                mean_distance: Some(2.5),
+                error: None,
+            },
+        ];
+        assert_eq!(
+            classify_anchor_probes(&me_probes),
+            AnchorProbeVerdict::AmbiguousOrSilent(Some(1.2))
+        );
+
+        // Clear margin: VF (1.2 bits) vs VO (18.0 bits) -> margin 16.8 >= 4.0 -> Verified
+        let distinct_probes = vec![
+            me_probes[0].clone(),
+            TrackVerificationProbe {
+                audio_index: 1,
+                language: Some("eng".to_string()),
+                mean_distance: Some(18.0),
+                error: None,
+            },
+        ];
+        assert_eq!(
+            classify_anchor_probes(&distinct_probes),
+            AnchorProbeVerdict::Verified(0, 1.2)
+        );
+
+        // End-to-end M&E identical dual-track MKV must fall back to Unknown instead of certifying wrong track
+        let dir = tempfile::tempdir().unwrap();
+        let Some(me_media) = make_identical_me_two_track_mkv(dir.path()) else {
+            return;
+        };
+        let extracted = extract_ahash(&me_media, &AudioExtractionOptions::default()).unwrap();
+        let ahash_path = dir.path().join("identical_me.mkv.86.1fps.ahash");
+        AhashFile::write_to_path(&ahash_path, &extracted.header, &extracted.hashes).unwrap();
+        let outcome = backfill_ahash_sidecar(&BackfillSidecarRequest {
+            ahash_path: &ahash_path,
+            media: &me_media,
+            media_name: "identical_me.mkv",
+            moviehash: None,
+            source_id: None,
+            source_rel_path: None,
+            no_verify: false,
+            force: false,
+        })
+        .unwrap();
+        assert_eq!(outcome.sidecar.selection, AudioTrackSelection::Unknown);
+        assert!(outcome.sidecar.selected_audio_stream.is_none());
     }
 }

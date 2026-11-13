@@ -9,9 +9,10 @@
 //! coarse anchor $0, K, 2K, \dots$ (zero temporal delta).
 
 use crate::ahash::{
-    AHashCatalog, AHashCatalogEntry, AHashCatalogMatch, AHashMih32Index, Mih32Entry,
-    MILLIS_PER_SEC, MIN_QUERY_FRAMES,
+    AHashCatalog, AHashCatalogEntry, AHashCatalogMatch, AHashMih32Index, AHashSearchCriteria,
+    Mih32Entry, FPS_COMPATIBILITY_TOLERANCE, MILLIS_PER_SEC, MIN_QUERY_FRAMES,
 };
+use dbsrt_core::ahash::is_silent_or_flat_audio_query;
 use rayon::prelude::*;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -21,6 +22,10 @@ pub const DEFAULT_FINE_WINDOW_RADIUS_SEC: f64 = 2.0;
 
 /// Default downsampling factor $K$ for acoustic coarse-to-fine index.
 pub const DEFAULT_COARSE_FACTOR_K: usize = 16;
+
+/// Minimum multiplier of `factor_k` required for a query to span coarse anchors;
+/// shorter queries (`< 2 * factor_k`) bypass the coarse stage and query the dense catalog directly.
+pub const MIN_COARSE_ANCHOR_SPAN_MULTIPLIER: usize = 2;
 
 /// Default Hamming distance threshold for fine search validation.
 pub const DEFAULT_FINE_MAX_DISTANCE: f64 = 14.0;
@@ -300,20 +305,42 @@ impl CoarseToFineAHashIndex {
     /// Never panics.
     ///
     /// # Data Flow & Invariants
-    /// 1. Probes the coarse MIH-32 table with **every dense** query frame (stride 1),
+    /// 1. Rejects queries shorter than [`MIN_QUERY_FRAMES`], `NaN` thresholds, or non-positive framerates.
+    /// 2. If `dense_query.len() < 2 * factor_k`, delegates directly to [`AHashCatalog::search`] so short
+    ///    queries that could fall between modulo-$K$ coarse anchors never suffer blind spots.
+    /// 3. Probes the coarse MIH-32 table with **every dense** query frame (stride 1),
     ///    so ~`|Q|/K` probes align exactly with coarse anchors for any query phase.
-    /// 2. Each hit `(m_idx, ref_coarse_idx)` of query frame `q` votes for the dense
+    /// 4. Each hit `(m_idx, ref_coarse_idx)` of query frame `q` votes for the dense
     ///    start `ref_coarse_idx * K - q`.
-    /// 3. Votes are bucketed (jitter tolerant) and ranked deterministically.
-    /// 4. The top [`MAX_COARSE_CANDIDATES_TO_VERIFY`] clusters are verified by dense
-    ///    correlation in a narrow window; the lowest mean distance wins (ties: rank order).
+    /// 5. Votes are bucketed (jitter tolerant) and ranked deterministically.
+    /// 6. The top [`MAX_COARSE_CANDIDATES_TO_VERIFY`] clusters are verified by dense
+    ///    correlation against their bijective `dense_catalog.entries[m_idx]` entry.
     pub fn search(
         &self,
         dense_catalog: &AHashCatalog,
         criteria: &FineSearchCriteria<'_>,
     ) -> Option<AHashCatalogMatch> {
-        if criteria.dense_query.len() < MIN_QUERY_FRAMES {
+        if criteria.dense_query.len() < MIN_QUERY_FRAMES
+            || is_silent_or_flat_audio_query(criteria.dense_query)
+            || criteria.max_distance.is_nan()
+            || !criteria.dense_fps.is_finite()
+            || criteria.dense_fps <= 0.0
+        {
             return None;
+        }
+        if criteria.dense_query.len()
+            < self
+                .factor_k
+                .saturating_mul(MIN_COARSE_ANCHOR_SPAN_MULTIPLIER)
+        {
+            let dense_criteria = AHashSearchCriteria {
+                query: criteria.dense_query,
+                audio_fps: criteria.dense_fps,
+                max_distance: criteria.max_distance,
+                limit: 1,
+                target_media: None,
+            };
+            return dense_catalog.search(&dense_criteria).into_iter().next();
         }
         let hits = self.collect_dense_votes(criteria.dense_query);
         let clusters = rank_clusters(hits);
@@ -334,7 +361,11 @@ impl CoarseToFineAHashIndex {
     /// Never panics.
     ///
     /// # Data Flow & Invariants
-    /// Strict `<` comparison: on equal distance the better-ranked cluster is kept.
+    /// 1. Resolves the dense entry via direct bijective index `dense_catalog.entries.get(cluster.m_idx)`
+    ///    with `path == coarse_entry.path` verification (falling back to path lookup if mutated),
+    ///    guaranteeing secondary audio tracks (`.a1`, `.a2`) sharing the same `media_name` verify
+    ///    against their own dense track rather than track 0.
+    /// 2. Strict `<` comparison: on equal distance the better-ranked cluster is kept.
     fn best_verified_match(
         &self,
         dense_catalog: &AHashCatalog,
@@ -348,8 +379,14 @@ impl CoarseToFineAHashIndex {
             };
             let Some(dense_entry) = dense_catalog
                 .entries
-                .iter()
-                .find(|e| e.media_name == coarse_entry.media_name)
+                .get(cluster.m_idx)
+                .filter(|e| e.path == coarse_entry.path)
+                .or_else(|| {
+                    dense_catalog
+                        .entries
+                        .iter()
+                        .find(|e| e.path == coarse_entry.path)
+                })
             else {
                 continue;
             };
@@ -437,15 +474,41 @@ impl CoarseToFineAHashIndex {
     }
 
     /// Evaluates fine-grained cross correlation within a localized window.
+    ///
+    /// # Arguments
+    /// * `dense_entry` - Candidate dense catalog entry.
+    /// * `criteria` - Fine search criteria (`dense_query`, `dense_fps`, `max_distance`).
+    /// * `approx_offset` - Coarse-stage estimated frame offset in `dense_entry`.
+    ///
+    /// # Returns
+    /// `Some(AHashCatalogMatch)` if the local sliding minimum satisfies `mean_distance <= max_distance`,
+    /// or `None` on framerate incompatibility, invalid parameters, or distance above threshold.
+    ///
+    /// # Panics
+    /// Never panics.
+    ///
+    /// # Data Flow & Invariants
+    /// 1. Validates `max_distance` is not `NaN` and `dense_entry.audio_fps` is finite, positive, and
+    ///    within [`FPS_COMPATIBILITY_TOLERANCE`] of `criteria.dense_fps`.
+    /// 2. Slides `dense_query` across `[approx_offset - radius ..= approx_offset + radius]`.
+    /// 3. Computes `offset_sec = best_shift / dense_entry.audio_fps`.
     fn evaluate_fine_window(
         &self,
         dense_entry: &AHashCatalogEntry,
         criteria: &FineSearchCriteria<'_>,
         approx_offset: usize,
     ) -> Option<AHashCatalogMatch> {
+        if criteria.max_distance.is_nan()
+            || !dense_entry.audio_fps.is_finite()
+            || dense_entry.audio_fps <= 0.0
+            || (dense_entry.audio_fps - criteria.dense_fps).abs() > FPS_COMPATIBILITY_TOLERANCE
+        {
+            return None;
+        }
+
         let q_len = criteria.dense_query.len();
-        let window_radius =
-            ((DEFAULT_FINE_WINDOW_RADIUS_SEC * criteria.dense_fps) as usize).max(self.factor_k * 2);
+        let window_radius = ((DEFAULT_FINE_WINDOW_RADIUS_SEC * dense_entry.audio_fps) as usize)
+            .max(self.factor_k * MIN_COARSE_ANCHOR_SPAN_MULTIPLIER);
 
         let min_s = approx_offset.saturating_sub(window_radius);
         let max_s =
@@ -477,7 +540,7 @@ impl CoarseToFineAHashIndex {
 
         let score = (1.0 - (mean_dist / HASH_BITS)).clamp(0.0, 1.0);
         let snr_bits = (RANDOM_HASH_DISTANCE_BITS - mean_dist).max(0.0);
-        let offset_sec = best_shift as f64 / criteria.dense_fps;
+        let offset_sec = best_shift as f64 / dense_entry.audio_fps;
 
         Some(AHashCatalogMatch {
             media_name: dense_entry.media_name.clone(),
@@ -488,7 +551,7 @@ impl CoarseToFineAHashIndex {
             mean_distance: mean_dist,
             score,
             snr_bits,
-            audio_fps: criteria.dense_fps,
+            audio_fps: dense_entry.audio_fps,
         })
     }
 }
@@ -638,5 +701,87 @@ mod tests {
             .map(|i| (i, far))
             .collect();
         assert_eq!(rank_clusters(hits).len(), MAX_COARSE_CANDIDATES_TO_VERIFY);
+    }
+
+    /// Secondary track `.a1.86.1fps.ahash` sharing `media_name` with primary `.86.1fps.ahash`
+    /// must achieve 100% recall across all phases via bijective `m_idx` resolution (B-03),
+    /// plus short-query dense fallback (m-03) and FPS / NaN guards (M-06).
+    #[test]
+    fn test_coarse_to_fine_secondary_track_same_media_name_recall_and_guards() {
+        let mut primary = make_entry("Shared.Movie.mkv", TEST_CATALOG_SEED + 10);
+        primary.path = PathBuf::from("05b6126884056c42.86.1fps.ahash");
+        primary.audio_index = Some(0);
+        primary.audio_language = Some("fre".to_string());
+
+        let mut secondary = make_entry("Shared.Movie.mkv", TEST_CATALOG_SEED + 20);
+        secondary.path = PathBuf::from("05b6126884056c42.a1.86.1fps.ahash");
+        secondary.audio_index = Some(1);
+        secondary.audio_language = Some("jpn".to_string());
+
+        let dense = AHashCatalog::new(vec![primary, secondary]);
+        let index = CoarseToFineAHashIndex::build(&dense, TEST_FACTOR_K);
+        let sec_hashes = dense.entries[1].hashes.clone();
+        let mut noise_state = TEST_NOISE_SEED ^ 0x1234;
+
+        let mut hits = 0usize;
+        for phase in 0..TEST_FACTOR_K {
+            let start = TEST_BASE_OFFSET + phase;
+            let query = noisy_window(&sec_hashes, start, &mut noise_state);
+            let criteria = FineSearchCriteria {
+                dense_query: &query,
+                dense_fps: TEST_DENSE_FPS,
+                max_distance: DEFAULT_FINE_MAX_DISTANCE,
+            };
+            let found = index
+                .search(&dense, &criteria)
+                .expect("secondary track must match");
+            assert_eq!(found.media_name, "Shared.Movie.mkv");
+            assert_eq!(found.file_path, "05b6126884056c42.a1.86.1fps.ahash");
+            assert_eq!(found.ref_frame_offset, start);
+            hits += 1;
+        }
+        assert_eq!(
+            hits, TEST_FACTOR_K,
+            "100% recall required on secondary track .a1"
+        );
+
+        // m-03: short query (< 2 * factor_k) falls back to dense catalog search without blind spot
+        let short_start = TEST_BASE_OFFSET + 3; // non-zero phase with length 16 < 32
+        let short_query = &sec_hashes[short_start..short_start + TEST_FACTOR_K];
+        let short_match = index
+            .search(
+                &dense,
+                &FineSearchCriteria {
+                    dense_query: short_query,
+                    dense_fps: TEST_DENSE_FPS,
+                    max_distance: DEFAULT_FINE_MAX_DISTANCE,
+                },
+            )
+            .expect("short query must match via dense fallback");
+        assert_eq!(short_match.file_path, "05b6126884056c42.a1.86.1fps.ahash");
+        assert_eq!(short_match.ref_frame_offset, short_start);
+
+        // M-06: NaN max_distance and incompatible FPS are rejected
+        assert!(index
+            .search(
+                &dense,
+                &FineSearchCriteria {
+                    dense_query: short_query,
+                    dense_fps: TEST_DENSE_FPS,
+                    max_distance: f64::NAN,
+                },
+            )
+            .is_none());
+        assert!(index
+            .search(
+                &dense,
+                &FineSearchCriteria {
+                    dense_query: &sec_hashes
+                        [TEST_BASE_OFFSET..TEST_BASE_OFFSET + TEST_QUERY_FRAMES],
+                    dense_fps: 86.125, // incompatible with TEST_DENSE_FPS (31.25)
+                    max_distance: DEFAULT_FINE_MAX_DISTANCE,
+                },
+            )
+            .is_none());
     }
 }

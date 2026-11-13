@@ -4,8 +4,11 @@
 //! and candidate ranking for 64-bit Haitsma-Kalker audio fingerprints.
 
 use anyhow::{Context, Result};
-use dbsrt_core::ahash::{match_audio_sequence, AhashFile, DEFAULT_MAX_AUDIO_MATCH_DISTANCE};
-use dbsrt_core::{ahash_logical_stem, ahash_sidecar_path, AhashSidecar};
+use dbsrt_core::ahash::{
+    is_silent_or_flat_audio_query, match_audio_sequence, AhashFile,
+    DEFAULT_MAX_AUDIO_MATCH_DISTANCE, MIN_AUDIO_QUERY_FRAMES,
+};
+use dbsrt_core::{ahash_logical_stem, ahash_sidecar_path, AhashSidecar, AUDIO_TRACK_STEM_TAG};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -31,7 +34,7 @@ pub const MILLIS_PER_SEC: f64 = 1000.0;
 pub const AHASH_FILE_EXTENSION: &str = "ahash";
 
 /// Minimum query frame length in sub-fingerprints for valid matching.
-pub const MIN_QUERY_FRAMES: usize = 8;
+pub const MIN_QUERY_FRAMES: usize = MIN_AUDIO_QUERY_FRAMES;
 
 /// Floating-point framerate compatibility tolerance in FPS.
 pub const FPS_COMPATIBILITY_TOLERANCE: f64 = 1.0;
@@ -59,6 +62,18 @@ pub const DEFAULT_AHASH_MIH32_MIN_VOTES: u32 = 3;
 
 /// Maximum bucket size to consider in 32-bit MIH to filter background hum.
 pub const DEFAULT_AHASH_MIH32_MAX_BUCKET_SIZE: usize = 20_000;
+
+/// Maximum bucket size to consider in 16-bit MIH to filter background hum.
+pub const DEFAULT_AHASH_MIH_MAX_BUCKET_SIZE: usize = DEFAULT_AHASH_MIH32_MAX_BUCKET_SIZE;
+
+/// Initial capacity of per-worker scratch buffers used during Rayon MIH frame probing.
+const MIH_WORKER_SCRATCH_CAPACITY: usize = 64;
+
+/// Number of bits in a 64-bit acoustic sub-fingerprint.
+const AHASH_BITS_F64: f64 = 64.0;
+
+/// Expected random Hamming distance (in bits) between uncorrelated 64-bit hashes.
+const AHASH_RANDOM_NOISE_BITS: f64 = 32.0;
 
 /// Parses the canonical media name from an .ahash filename.
 ///
@@ -175,14 +190,48 @@ fn load_catalog_entry(
     })
 }
 
+/// Returns `true` when `path` has a canonical `<moviehash_16hex>[.a<k>]` logical file stem.
+fn has_moviehash_file_stem(path: &Path) -> bool {
+    let Some(file_name) = path.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    let stem = ahash_logical_stem(file_name);
+    let base = match stem.rsplit_once('.') {
+        Some((prefix, suffix))
+            if suffix.starts_with(AUDIO_TRACK_STEM_TAG)
+                && !suffix[AUDIO_TRACK_STEM_TAG.len()..].is_empty()
+                && suffix[AUDIO_TRACK_STEM_TAG.len()..]
+                    .chars()
+                    .all(|c| c.is_ascii_digit()) =>
+        {
+            prefix
+        }
+        _ => stem,
+    };
+    is_moviehash_hex(base)
+}
+
 /// Collapses binary twins (identical `frame_count` + `hashes`) into one entry.
 ///
-/// Preference: resolved (non raw-hex) name first, then lexicographic `path`.
+/// Preference order (lowest tuple wins):
+/// 1. Resolved (non raw-hex) `media_name` (`is_moviehash_hex == false`),
+/// 2. Presence of typed sidecar audio metadata (`audio_index.is_some() || audio_language.is_some()`),
+/// 3. Canonical `<moviehash_16hex>` filename stem (`has_moviehash_file_stem == true`),
+/// 4. Lexicographic `path`.
+///
 /// Output order follows the first-seen position of each twin group, so a
 /// path-sorted input yields a deterministic path-sorted output.
 fn dedup_twin_entries(entries: Vec<AHashCatalogEntry>) -> Vec<AHashCatalogEntry> {
     use std::hash::{Hash, Hasher};
-    let rank = |e: &AHashCatalogEntry| (is_moviehash_hex(&e.media_name), e.path.clone());
+    let rank = |e: &AHashCatalogEntry| {
+        let has_sidecar_audio = e.audio_index.is_some() || e.audio_language.is_some();
+        (
+            is_moviehash_hex(&e.media_name),
+            !has_sidecar_audio,
+            !has_moviehash_file_stem(&e.path),
+            e.path.clone(),
+        )
+    };
     let mut kept: Vec<AHashCatalogEntry> = Vec::with_capacity(entries.len());
     let mut buckets: HashMap<u64, Vec<usize>> = HashMap::new();
     for entry in entries {
@@ -292,6 +341,58 @@ pub struct AHashCatalogMatch {
     pub snr_bits: f64,
     /// Audio framerate of the reference media.
     pub audio_fps: f64,
+}
+
+/// Deterministically compares two [`AHashCatalogMatch`] results by ascending `mean_distance`
+/// (`f64::total_cmp`), breaking ties by `(media_name, file_path, ref_frame_offset)`.
+///
+/// # Arguments
+/// * `a` - First candidate match.
+/// * `b` - Second candidate match.
+///
+/// # Returns
+/// [`std::cmp::Ordering`] defining a strict total order across all matches.
+///
+/// # Panics
+/// Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// Eliminates thread-scheduling and `HashMap` seed non-determinism when multiple candidate tracks
+/// or media achieve identical Hamming distance.
+#[inline]
+fn cmp_catalog_matches(a: &AHashCatalogMatch, b: &AHashCatalogMatch) -> std::cmp::Ordering {
+    a.mean_distance
+        .total_cmp(&b.mean_distance)
+        .then_with(|| a.media_name.cmp(&b.media_name))
+        .then_with(|| a.file_path.cmp(&b.file_path))
+        .then_with(|| a.ref_frame_offset.cmp(&b.ref_frame_offset))
+}
+
+/// Merges two worker vote maps by summing counts into the larger map.
+///
+/// # Arguments
+/// * `left` - First worker `(media_idx, shift) -> votes` accumulator.
+/// * `right` - Second worker `(media_idx, shift) -> votes` accumulator.
+///
+/// # Returns
+/// Combined vote map containing summed counts for every `(media_idx, shift)` key.
+///
+/// # Panics
+/// Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// Swaps maps when `right.len() > left.len()` to minimize hash table insertions during Rayon reduction.
+fn merge_vote_maps(
+    mut left: HashMap<(usize, usize), u32>,
+    mut right: HashMap<(usize, usize), u32>,
+) -> HashMap<(usize, usize), u32> {
+    if right.len() > left.len() {
+        std::mem::swap(&mut left, &mut right);
+    }
+    for (pair, count) in right {
+        *left.entry(pair).or_default() += count;
+    }
+    left
 }
 
 /// Compact 32-bit chunk entry for sorted index lookups.
@@ -672,73 +773,82 @@ impl AHashCatalog {
         self.mih32 = Arc::new(OnceLock::new());
     }
 
-    /// Probes all MIH tables for a single query frame and returns valid shift candidates.
+    /// Probes all MIH tables for a single query frame and appends valid shift candidates into `hits`.
     ///
     /// # Arguments
     /// * `mih` - Multi-index hash structure containing bucket partitions.
-    /// * `k` - Query frame index offset within the query sequence.
-    /// * `q_hash` - 64-bit acoustic hash of the probe frame.
+    /// * `probe` - Tuple `(k, q_hash)` of query frame index offset and 64-bit acoustic hash.
+    /// * `hits` - Reusable pre-allocated output buffer of `(media_index, candidate_shift)`.
     ///
     /// # Returns
-    /// Vector of candidate tuples `(media_index, candidate_shift)`.
-    ///
-    /// # Errors
-    /// This function does not return `Result` and cannot error.
+    /// Nothing (`()`; appends directly into `hits` with zero per-frame heap allocation).
     ///
     /// # Panics
     /// Guarantee: Never panics.
     ///
     /// # Data Flow & Invariants
-    /// For each of the 4 chunk tables, retrieves matching bucket entries and converts
-    /// flat global indexes into `(media_idx, local_frame_offset)`.
+    /// For each of the 4 chunk tables, skips buckets exceeding [`DEFAULT_AHASH_MIH_MAX_BUCKET_SIZE`]
+    /// and converts flat global indexes into `(media_idx, local_frame_offset - k)`.
     fn probe_frame_hits(
         &self,
         mih: &MultiIndexHash64,
-        k: usize,
-        q_hash: u64,
-    ) -> Vec<(usize, usize)> {
-        let mut hits = Vec::new();
+        probe: (usize, u64),
+        hits: &mut Vec<(usize, usize)>,
+    ) {
+        let (k, q_hash) = probe;
         for (t, table) in mih.tables.iter().enumerate() {
             let chunk = extract_chunk(q_hash, t);
-            for &cand_idx in table.bucket_indices(chunk) {
+            let bucket = table.bucket_indices(chunk);
+            if bucket.len() > DEFAULT_AHASH_MIH_MAX_BUCKET_SIZE {
+                continue;
+            }
+            for &cand_idx in bucket {
                 let (media_idx, ref_offset) = self.resolve_global_index(cand_idx as usize);
                 if ref_offset >= k {
                     hits.push((media_idx, ref_offset - k));
                 }
             }
         }
-        hits
     }
 
-    /// Collects candidate shift votes in parallel via direct bucket index retrieval.
+    /// Collects candidate shift votes in parallel via direct bucket index retrieval
+    /// using per-worker pre-allocated scratch buffers.
     fn collect_mih_candidate_votes(
         &self,
         query: &[u64],
         stride: usize,
     ) -> HashMap<(usize, usize), u32> {
         let mih = self.mih();
-        let probe_frames: Vec<(usize, u64)> = query
-            .iter()
-            .enumerate()
-            .step_by(stride)
-            .map(|(k, &h)| (k, h))
-            .collect();
-
-        let partial_votes: Vec<Vec<(usize, usize)>> = probe_frames
+        let step = stride.max(1);
+        query
             .par_iter()
-            .map(|&(k, q_hash)| self.probe_frame_hits(mih, k, q_hash))
-            .collect();
-
-        let mut votes = HashMap::new();
-        for hits in partial_votes {
-            for pair in hits {
-                *votes.entry(pair).or_default() += 1;
-            }
-        }
-        votes
+            .enumerate()
+            .step_by(step)
+            .fold(
+                || {
+                    (
+                        Vec::with_capacity(MIH_WORKER_SCRATCH_CAPACITY),
+                        HashMap::new(),
+                    )
+                },
+                |mut state, (k, &q_hash)| {
+                    state.0.clear();
+                    self.probe_frame_hits(mih, (k, q_hash), &mut state.0);
+                    for &pair in &state.0 {
+                        *state.1.entry(pair).or_default() += 1;
+                    }
+                    state
+                },
+            )
+            .map(|(_, local_votes)| local_votes)
+            .reduce(HashMap::new, merge_vote_maps)
     }
 
     /// Filters and ranks candidate clusters by temporal vote density with jitter aggregation.
+    ///
+    /// # Data Flow & Invariants
+    /// Sorts deterministically by `(Reverse(total_v), media_idx, shift)` before greedy jitter
+    /// deduplication and truncation to `max_candidates`, eliminating `HashMap` seed non-determinism.
     fn rank_candidate_clusters(
         votes: &HashMap<(usize, usize), u32>,
         min_votes: u32,
@@ -762,7 +872,9 @@ impl AHashCatalog {
             })
             .collect();
 
-        clusters.sort_by_key(|a| std::cmp::Reverse(a.2));
+        clusters.sort_unstable_by_key(|&(media_idx, shift, total_v)| {
+            (std::cmp::Reverse(total_v), media_idx, shift)
+        });
 
         let mut deduplicated: Vec<(usize, usize, u32)> = Vec::new();
         for (m_idx, s, score) in clusters {
@@ -820,8 +932,8 @@ impl AHashCatalog {
 
             let mean_dist = best_dist as f64 / q_len as f64;
             if mean_dist <= criteria.max_distance {
-                let score = (1.0 - (mean_dist / 64.0)).clamp(0.0, 1.0);
-                let snr_bits = (32.0 - mean_dist).max(0.0);
+                let score = (1.0 - (mean_dist / AHASH_BITS_F64)).clamp(0.0, 1.0);
+                let snr_bits = (AHASH_RANDOM_NOISE_BITS - mean_dist).max(0.0);
                 let offset_sec = best_shift as f64 / entry.audio_fps;
                 matches.push(AHashCatalogMatch {
                     media_name: entry.media_name.clone(),
@@ -837,11 +949,7 @@ impl AHashCatalog {
             }
         }
 
-        matches.sort_by(|a, b| {
-            a.mean_distance
-                .partial_cmp(&b.mean_distance)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        matches.sort_by(cmp_catalog_matches);
 
         let mut dedup_matches: Vec<AHashCatalogMatch> = Vec::new();
         for m in matches {
@@ -872,11 +980,12 @@ impl AHashCatalog {
     /// Guarantee: Never panics.
     ///
     /// # Data Flow & Invariants
-    /// 1. Probes MIH tables at step intervals for candidate cluster voting.
-    /// 2. Verifies top candidate clusters with local jitter refinement.
-    /// 3. Falls back seamlessly to exhaustive linear scan if no cluster reaches vote threshold.
+    /// 1. Rejects short, silent (`0u64`), or flat-energy queries via [`is_silent_or_flat_audio_query`].
+    /// 2. Probes MIH tables at step intervals for candidate cluster voting.
+    /// 3. Verifies top candidate clusters with local jitter refinement.
+    /// 4. Falls back seamlessly to exhaustive linear scan if no cluster reaches vote threshold.
     pub fn search_mih(&self, criteria: &AHashSearchCriteria) -> Vec<AHashCatalogMatch> {
-        if criteria.query.len() < MIN_QUERY_FRAMES || self.total_frames == 0 {
+        if self.total_frames == 0 || is_silent_or_flat_audio_query(criteria.query) {
             return Vec::new();
         }
 
@@ -917,9 +1026,10 @@ impl AHashCatalog {
     /// Guarantee: Never panics.
     ///
     /// # Data Flow & Invariants
-    /// Iterates over all catalog entries in parallel via Rayon using [`match_audio_sequence`].
+    /// Rejects short, silent, or flat-energy queries, then iterates over all catalog entries in
+    /// parallel via Rayon using [`match_audio_sequence`] and sorts deterministically.
     pub fn search_linear(&self, criteria: &AHashSearchCriteria) -> Vec<AHashCatalogMatch> {
-        if criteria.query.len() < MIN_QUERY_FRAMES {
+        if is_silent_or_flat_audio_query(criteria.query) {
             return Vec::new();
         }
 
@@ -955,11 +1065,7 @@ impl AHashCatalog {
             })
             .collect();
 
-        matches.sort_by(|a, b| {
-            a.mean_distance
-                .partial_cmp(&b.mean_distance)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        matches.sort_by(cmp_catalog_matches);
 
         let mut dedup_matches: Vec<AHashCatalogMatch> = Vec::new();
         for m in matches {
@@ -982,11 +1088,11 @@ impl AHashCatalog {
     ///
     /// # Arguments
     /// * `index` - Compiled [`AHashMih32Index`].
-    /// * `k` - Query frame index offset.
-    /// * `q_hash` - 64-bit query acoustic hash.
+    /// * `probe` - Tuple `(k, q_hash)` of query frame index offset and 64-bit acoustic hash.
+    /// * `hits` - Reusable pre-allocated output buffer of `(media_index, candidate_shift)`.
     ///
     /// # Returns
-    /// Vector of candidate tuples `(media_index, candidate_shift)`.
+    /// Nothing (`()`; appends directly into `hits` with zero per-frame heap allocation).
     ///
     /// # Panics
     /// Guarantee: Never panics.
@@ -996,10 +1102,10 @@ impl AHashCatalog {
     fn probe_frame_hits_mih32(
         &self,
         index: &AHashMih32Index,
-        k: usize,
-        q_hash: u64,
-    ) -> Vec<(usize, usize)> {
-        let mut hits = Vec::new();
+        probe: (usize, u64),
+        hits: &mut Vec<(usize, usize)>,
+    ) {
+        let (k, q_hash) = probe;
         let u = (q_hash >> 32) as u32;
         let upper_slice = index.lookup_upper(u);
         if upper_slice.len() <= DEFAULT_AHASH_MIH32_MAX_BUCKET_SIZE {
@@ -1020,35 +1126,39 @@ impl AHashCatalog {
                 }
             }
         }
-        hits
     }
 
-    /// Collects candidate shift votes in parallel via 32-bit Multi-Index Hashing.
+    /// Collects candidate shift votes in parallel via 32-bit Multi-Index Hashing
+    /// using per-worker pre-allocated scratch buffers.
     fn collect_mih32_candidate_votes(
         &self,
         query: &[u64],
         stride: usize,
     ) -> HashMap<(usize, usize), u32> {
         let index = self.mih32();
-        let probe_frames: Vec<(usize, u64)> = query
-            .iter()
-            .enumerate()
-            .step_by(stride)
-            .map(|(k, &h)| (k, h))
-            .collect();
-
-        let partial_votes: Vec<Vec<(usize, usize)>> = probe_frames
+        let step = stride.max(1);
+        query
             .par_iter()
-            .map(|&(k, q_hash)| self.probe_frame_hits_mih32(index, k, q_hash))
-            .collect();
-
-        let mut votes = HashMap::new();
-        for hits in partial_votes {
-            for pair in hits {
-                *votes.entry(pair).or_default() += 1;
-            }
-        }
-        votes
+            .enumerate()
+            .step_by(step)
+            .fold(
+                || {
+                    (
+                        Vec::with_capacity(MIH_WORKER_SCRATCH_CAPACITY),
+                        HashMap::new(),
+                    )
+                },
+                |mut state, (k, &q_hash)| {
+                    state.0.clear();
+                    self.probe_frame_hits_mih32(index, (k, q_hash), &mut state.0);
+                    for &pair in &state.0 {
+                        *state.1.entry(pair).or_default() += 1;
+                    }
+                    state
+                },
+            )
+            .map(|(_, local_votes)| local_votes)
+            .reduce(HashMap::new, merge_vote_maps)
     }
 
     /// Searches the catalog using high-selectivity 32-bit Multi-Index Hashing (~2ms).
@@ -1063,10 +1173,10 @@ impl AHashCatalog {
     /// Guarantee: Never panics.
     ///
     /// # Data Flow & Invariants
-    /// Uses 32-bit chunk tables to isolate candidate clusters with near-zero false collisions,
-    /// then performs fine jitter verification on candidate windows.
+    /// Rejects short, silent, or flat-energy queries, then uses 32-bit chunk tables to isolate
+    /// candidate clusters with near-zero false collisions and performs fine jitter verification.
     pub fn search_mih32(&self, criteria: &AHashSearchCriteria) -> Vec<AHashCatalogMatch> {
-        if criteria.query.len() < MIN_QUERY_FRAMES || self.total_frames == 0 {
+        if self.total_frames == 0 || is_silent_or_flat_audio_query(criteria.query) {
             return Vec::new();
         }
 
@@ -1367,5 +1477,129 @@ mod tests {
         let results = catalog.search(&criteria);
         assert!(results.is_empty());
         assert!(catalog.mih.get().is_none());
+    }
+
+    #[test]
+    fn test_dedup_twin_entries_preserves_migrated_sidecar_twin_over_legacy() {
+        let hashes = Arc::new(vec![0x1111_2222_3333_4444u64; 16]);
+        // Legacy file has a path ("AAA_Legacy...") that sorts lexicographically BEFORE
+        // the migrated moviehash file ("fedcba9876543210..."), and lacks sidecar audio metadata.
+        let legacy = AHashCatalogEntry {
+            media_name: "Avatar.mkv".to_string(),
+            path: PathBuf::from("/tmp/__AHASH__/AAA_Legacy.86.1fps.ahash"),
+            audio_fps: 86.125,
+            frame_count: hashes.len(),
+            hashes: Arc::clone(&hashes),
+            audio_language: None,
+            audio_index: None,
+        };
+        let migrated = AHashCatalogEntry {
+            media_name: "Avatar.mkv".to_string(),
+            path: PathBuf::from("/tmp/__AHASH__/fedcba9876543210.86.1fps.ahash"),
+            audio_fps: 86.125,
+            frame_count: hashes.len(),
+            hashes: Arc::clone(&hashes),
+            audio_language: Some("fre".to_string()),
+            audio_index: Some(0),
+        };
+
+        // Regardless of insertion order, the migrated twin with sidecar metadata must win.
+        let dedup_a = dedup_twin_entries(vec![legacy.clone(), migrated.clone()]);
+        assert_eq!(dedup_a.len(), 1);
+        assert_eq!(dedup_a[0].audio_language.as_deref(), Some("fre"));
+        assert_eq!(dedup_a[0].audio_index, Some(0));
+        assert!(dedup_a[0]
+            .path
+            .to_string_lossy()
+            .contains("fedcba9876543210"));
+
+        let dedup_b = dedup_twin_entries(vec![migrated, legacy]);
+        assert_eq!(dedup_b.len(), 1);
+        assert_eq!(dedup_b[0].audio_language.as_deref(), Some("fre"));
+        assert_eq!(dedup_b[0].audio_index, Some(0));
+    }
+
+    #[test]
+    fn test_mih_top_n_deterministic_on_equal_votes_and_distances() {
+        let base_hashes: Vec<u64> = (0..64)
+            .map(|i| {
+                0xA5A5_5A5A_0F0F_F0F0u64
+                    .wrapping_add((i as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15))
+            })
+            .collect();
+
+        // Build 10 distinct media entries (exceeding DEFAULT_AHASH_MIH_MAX_CANDIDATES = 5)
+        // with identical fingerprints so every entry ties on MIH votes and Hamming distance.
+        let entries: Vec<AHashCatalogEntry> = (0..10)
+            .map(|idx| AHashCatalogEntry {
+                media_name: format!("Media_{idx:02}.mkv"),
+                path: PathBuf::from(format!("/tmp/Media_{idx:02}.86.1fps.ahash")),
+                audio_fps: 86.125,
+                frame_count: base_hashes.len(),
+                hashes: Arc::new(base_hashes.clone()),
+                audio_language: Some("eng".to_string()),
+                audio_index: Some(0),
+            })
+            .collect();
+        let catalog = AHashCatalog::new(entries);
+
+        let query = &base_hashes[8..40];
+        let mut criteria = AHashSearchCriteria::new(query, 86.125);
+        criteria.limit = 5;
+
+        let baseline = catalog.search_mih32(&criteria);
+        assert_eq!(baseline.len(), 5);
+        let expected_names: Vec<&str> = baseline.iter().map(|m| m.media_name.as_str()).collect();
+        assert_eq!(
+            expected_names,
+            vec![
+                "Media_00.mkv",
+                "Media_01.mkv",
+                "Media_02.mkv",
+                "Media_03.mkv",
+                "Media_04.mkv",
+            ]
+        );
+
+        // Repeated runs must produce identical ordering.
+        for _ in 0..8 {
+            assert_eq!(catalog.search_mih32(&criteria), baseline);
+            assert_eq!(catalog.search_mih(&criteria), baseline);
+        }
+    }
+
+    #[test]
+    fn test_catalog_rejects_digital_silence_and_flat_queries() {
+        let silent_ref = AHashCatalogEntry {
+            media_name: "Silent_Ref.mkv".to_string(),
+            path: PathBuf::from("Silent_Ref.86.1fps.ahash"),
+            audio_fps: 86.125,
+            frame_count: 64,
+            hashes: Arc::new(vec![0u64; 64]),
+            audio_language: None,
+            audio_index: None,
+        };
+        let flat_ref = AHashCatalogEntry {
+            media_name: "Flat_Ref.mkv".to_string(),
+            path: PathBuf::from("Flat_Ref.86.1fps.ahash"),
+            audio_fps: 86.125,
+            frame_count: 64,
+            hashes: Arc::new(vec![0xDEAD_BEEF_CAFE_BABEu64; 64]),
+            audio_language: None,
+            audio_index: None,
+        };
+        let catalog = AHashCatalog::new(vec![silent_ref, flat_ref]);
+
+        let silent_query = vec![0u64; 24];
+        let criteria_silent = AHashSearchCriteria::new(&silent_query, 86.125);
+        assert!(catalog.search(&criteria_silent).is_empty());
+        assert!(catalog.search_mih(&criteria_silent).is_empty());
+        assert!(catalog.search_linear(&criteria_silent).is_empty());
+
+        let flat_query = vec![0xDEAD_BEEF_CAFE_BABEu64; 24];
+        let criteria_flat = AHashSearchCriteria::new(&flat_query, 86.125);
+        assert!(catalog.search(&criteria_flat).is_empty());
+        assert!(catalog.search_mih(&criteria_flat).is_empty());
+        assert!(catalog.search_linear(&criteria_flat).is_empty());
     }
 }

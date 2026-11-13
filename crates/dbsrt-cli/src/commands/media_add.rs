@@ -1242,32 +1242,37 @@ pub(crate) fn render_media_add_output(args: &MediaAddArgs, result: &MediaAddResu
 /// # Returns
 /// * `Result<MediaAddResult>` - Execution metrics and outcomes.
 ///
-/// Handles errors during .ahash extraction, treating missing audio streams as non-fatal.
+/// Handles errors during `.ahash` extraction, treating missing or ultra-short audio streams
+/// as non-fatal warnings so video ingestion can proceed.
 ///
 /// # Arguments
 /// * `err` - The underlying extraction error.
 /// * `json` - Suppresses terminal warnings when true.
 ///
 /// # Returns
-/// `Ok(None)` if the error indicates a missing audio stream, or `Err(err)` otherwise.
+/// `Ok(None)` if the error indicates a missing or empty audio stream, or `Err(err)` otherwise.
 ///
 /// # Errors
-/// Returns `Err` if the error was not a missing audio stream.
+/// Returns `Err` if the error was not caused by an absent or empty audio stream.
 ///
 /// # Panics
 /// Does not panic.
 ///
 /// # Data Flow & Invariants
-/// Inspects the error message for `"no audio stream"`. Logs a warning and returns `Ok(None)`
-/// if matched; propagates the original error otherwise.
+/// Inspects the formatted error chain (`{err:#}`) for `"no audio stream"`,
+/// `"No audio hashes could be extracted"`, or `"does not contain any stream"`.
+/// Logs a warning and returns `Ok(None)` if matched; propagates the original error otherwise.
 fn handle_ahash_extract_error(err: anyhow::Error, json: bool) -> Result<Option<String>> {
-    let msg = err.to_string();
-    if !msg.contains("no audio stream") {
+    let msg = format!("{err:#}");
+    let is_non_fatal_audio = msg.contains("no audio stream")
+        || msg.contains("No audio hashes could be extracted")
+        || msg.contains("does not contain any stream");
+    if !is_non_fatal_audio {
         return Err(err);
     }
     if !json {
         eprintln!(
-            "⚠️ Media has no audio stream, skipping .ahash generation: {}",
+            "⚠️ Media has no usable audio stream, skipping .ahash generation: {}",
             msg
         );
     }
@@ -1755,5 +1760,27 @@ mod tests {
                 .contains("--skip-phash requires --ahash-dir"),
             "Unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn test_handle_ahash_extract_error_tolerates_short_and_streamless_audio() {
+        let short_err = anyhow::anyhow!("No audio hashes could be extracted from \"clip.mkv\"");
+        assert_eq!(handle_ahash_extract_error(short_err, true).unwrap(), None);
+
+        let streamless_err =
+            anyhow::anyhow!("FFmpeg failed: Output file does not contain any stream");
+        assert_eq!(
+            handle_ahash_extract_error(streamless_err, true).unwrap(),
+            None
+        );
+
+        let no_audio_err = anyhow::anyhow!("Media has no audio stream to extract: \"silent.mkv\"");
+        assert_eq!(
+            handle_ahash_extract_error(no_audio_err, true).unwrap(),
+            None
+        );
+
+        let fatal_err = anyhow::anyhow!("Permission denied writing .ahash file");
+        assert!(handle_ahash_extract_error(fatal_err, true).is_err());
     }
 }
