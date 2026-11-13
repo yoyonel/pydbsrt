@@ -171,4 +171,16 @@ tags:
       <a href="2026-11-09-reconciliation-actifs-medias-et-empreintes-phash/">→ Comprendre la réconciliation des actifs</a>
     </div>
   </div>
+
+  <div class="dbsrt-bento-card bento-teal">
+    <div class="bento-header">
+      <span class="bento-icon">🎯</span>
+      <span class="bento-badge">AUDIT MULTIMODAL</span>
+    </div>
+    <h3>Audit Forensique Benchmark Multimodal (5 346 Médias)</h3>
+    <p>Réconciliation au fichier près des 5 346 médias et 584 .ahash, réfutation VO/VF, preuve de l'angle mort modulo-16 Coarse-to-Fine et précision binaire.</p>
+    <div class="bento-links">
+      <a href="2026-11-13-audit-benchmark-multimodal-scale/">→ Consulter l'audit forensique multimodal</a>
+    </div>
+  </div>
 </div>
