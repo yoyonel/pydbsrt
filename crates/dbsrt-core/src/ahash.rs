@@ -10,7 +10,11 @@ use std::f32::consts::PI;
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+
+/// Monotonic intra-process sequence counter disambiguating concurrent atomic `.ahash` writes.
+static AHASH_TMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Magic header bytes identifying an .ahash v1.0 file.
 pub const AHASH_MAGIC: [u8; 8] = *b"AHASH\0\x01\0";
@@ -433,7 +437,8 @@ impl AhashFile {
     /// Guarantee: Never panics.
     ///
     /// # Data Flow & Invariants
-    /// Writes header then little-endian u64 payload to `<path>.tmp.<pid>`, syncs, and renames atomically.
+    /// Writes header then little-endian u64 payload to `<path>.<pid>.<seq>.tmp`, syncs, and
+    /// renames atomically, cleaning up the temporary file best-effort on any failure.
     pub fn write_to_path(path: &Path, header: &AhashHeader, hashes: &[u64]) -> Result<()> {
         ensure!(
             header.frame_count as usize == hashes.len(),
@@ -442,24 +447,35 @@ impl AhashFile {
             hashes.len()
         );
 
-        let tmp_path = path.with_extension(format!("ahash.tmp.{}", std::process::id()));
-        let mut file = File::create(&tmp_path)
-            .with_context(|| format!("Failed to create temporary file {:?}", tmp_path))?;
+        let seq = AHASH_TMP_FILE_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let mut tmp_name = path.file_name().unwrap_or_default().to_os_string();
+        tmp_name.push(format!(".{}.{}.tmp", std::process::id(), seq));
+        let tmp_path = path.with_file_name(tmp_name);
 
-        let header_bytes = header.to_bytes();
-        file.write_all(&header_bytes)?;
+        let written = (|| -> Result<()> {
+            let mut file = File::create(&tmp_path)
+                .with_context(|| format!("Failed to create temporary file {:?}", tmp_path))?;
 
-        for &h in hashes {
-            file.write_all(&h.to_le_bytes())?;
+            let header_bytes = header.to_bytes();
+            file.write_all(&header_bytes)?;
+
+            for &h in hashes {
+                file.write_all(&h.to_le_bytes())?;
+            }
+
+            file.sync_all()?;
+            drop(file);
+
+            fs::rename(&tmp_path, path)
+                .with_context(|| format!("Failed to rename {:?} to {:?}", tmp_path, path))?;
+
+            Ok(())
+        })();
+
+        if written.is_err() {
+            let _ = fs::remove_file(&tmp_path);
         }
-
-        file.sync_all()?;
-        drop(file);
-
-        fs::rename(&tmp_path, path)
-            .with_context(|| format!("Failed to rename {:?} to {:?}", tmp_path, path))?;
-
-        Ok(())
+        written
     }
 }
 
@@ -863,5 +879,55 @@ mod tests {
         assert_eq!(loaded.hashes, hashes);
 
         let _ = fs::remove_file(tmp_file);
+    }
+
+    fn write_ahash_burst(path: &Path, header: &AhashHeader, hashes: &[u64]) {
+        for _ in 0..8 {
+            AhashFile::write_to_path(path, header, hashes).unwrap();
+        }
+    }
+
+    #[test]
+    fn test_ahash_file_concurrent_write_and_tmp_cleanup_on_failure() {
+        let (_bins, band_bounds) = HaitsmaKalkerExtractor::compute_band_layout(5512, 2048);
+        let header = AhashHeader {
+            version: 1,
+            sample_rate: 5512,
+            frame_size: 2048,
+            hop_size: 64,
+            num_bands: 33,
+            spectral_lag: 2,
+            frame_count: 2,
+            band_bounds,
+        };
+        let hashes = [0x1111_2222_3333_4444u64, 0x5555_6666_7777_8888u64];
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("concurrent.86.1fps.ahash");
+
+        let handles: Vec<_> = (0..8)
+            .map(|_| {
+                let p = target.clone();
+                let h = header.clone();
+                std::thread::spawn(move || write_ahash_burst(&p, &h, &hashes))
+            })
+            .collect();
+        for handle in handles {
+            handle.join().unwrap();
+        }
+        assert_eq!(
+            AhashFile::read_from_path(&target).unwrap().hashes,
+            hashes.to_vec()
+        );
+
+        let blocked = dir.path().join("blocked.86.1fps.ahash");
+        fs::create_dir(&blocked).unwrap();
+        assert!(AhashFile::write_to_path(&blocked, &header, &hashes).is_err());
+        assert!(fs::read_dir(dir.path()).unwrap().all(|entry| {
+            !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .contains(".tmp")
+        }));
     }
 }

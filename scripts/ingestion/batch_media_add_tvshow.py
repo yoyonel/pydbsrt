@@ -15,7 +15,6 @@ import argparse
 import datetime
 import json
 import os
-import re
 import signal
 import subprocess
 import sys
@@ -46,6 +45,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.ingestion.phash_names import phash_logical_name  # noqa: E402
+from scripts.workers.o2switch_batch_worker import strip_fps_token  # noqa: E402
 
 # Operational & System Constants
 BYTES_PER_KIB: int = 1024
@@ -313,14 +313,11 @@ def load_certified_couplings_stems(couplings_path: Path) -> set[str]:
         return set()
 
 
-AHASH_FPS_SUFFIX_RE = re.compile(r"\.\d+(\.\d+)?fps$")
-
-
 def _ahash_has_valid_sidecar(ahash_path: Path) -> bool:
     """Returns True when `<stem>.json` sits beside `.ahash` with typed AhashSidecar metadata."""
     if not ahash_path.is_file() or ahash_path.stat().st_size <= 0:
         return False
-    stem = AHASH_FPS_SUFFIX_RE.sub("", ahash_path.name.removesuffix(".ahash"))
+    stem = strip_fps_token(ahash_path.name.removesuffix(".ahash"))
     sidecar = ahash_path.with_name(f"{stem}.json")
     try:
         if not sidecar.is_file() or sidecar.stat().st_size <= 0:
@@ -338,7 +335,7 @@ def _ahash_has_valid_sidecar(ahash_path: Path) -> bool:
 
 
 def _matches_stem_prefix(stem: str, names: Set[str] | List[str]) -> bool:
-    return any(name.startswith(stem) for name in names)
+    return any(name == stem or name.startswith(f"{stem}.") for name in names)
 
 
 def _load_complete_ahash_names(ahash_dir: Path | None) -> List[str]:
@@ -542,14 +539,15 @@ def parse_target_stop_time(until_str: str, now: datetime.datetime) -> datetime.d
     return target
 
 
-def execute_media_add(
+def build_media_add_cmd(
     dbsrt_bin: Path,
     video_path: Path,
     phash_dir: Path,
     subtitles_dir: Path,
-    target_stop_time: datetime.datetime | None = None,
-) -> Tuple[bool, int, int, str, float, float, float]:
-    """Executes `dbsrt media:add --all-embedded` directly on NAS file with hard cutoff check."""
+    mode: str = "phash",
+    ahash_dir: Path | None = None,
+) -> List[str]:
+    """Builds `dbsrt media:add` CLI arguments tailored to `phash`, `ahash`, or `both` mode."""
     cmd = [
         str(dbsrt_bin),
         "media:add",
@@ -561,6 +559,24 @@ def execute_media_add(
         str(subtitles_dir),
         "--json",
     ]
+    if mode in ("ahash", "both") and ahash_dir is not None:
+        cmd.extend(["--ahash-dir", str(ahash_dir)])
+    if mode == "ahash":
+        cmd.append("--skip-phash")
+    return cmd
+
+
+def execute_media_add(
+    dbsrt_bin: Path,
+    video_path: Path,
+    phash_dir: Path,
+    subtitles_dir: Path,
+    target_stop_time: datetime.datetime | None = None,
+    mode: str = "phash",
+    ahash_dir: Path | None = None,
+) -> Tuple[bool, int, int, str, float, float, float]:
+    """Executes `dbsrt media:add` directly on NAS file with hard cutoff check."""
+    cmd = build_media_add_cmd(dbsrt_bin, video_path, phash_dir, subtitles_dir, mode=mode, ahash_dir=ahash_dir)
 
     t_start = time.monotonic()
     proc = subprocess.Popen(
@@ -619,14 +635,22 @@ def execute_media_add(
     return success, certified_count, skipped_count, error_msg, avg_cpu, peak_cpu, peak_rss
 
 
+def _is_matching_srt_candidate(path: Path, video_stem: str) -> bool:
+    if not path.name.endswith(".srt"):
+        return False
+    return path.name == f"{video_stem}.srt" or path.name.startswith(f"{video_stem}.")
+
+
 def analyze_extracted_subtitles(
     subtitles_dir: Path,
     video_stem: str,
     raw_sub_streams: List[Dict[str, Any]],
 ) -> List[SubtitleTrackTelemetry]:
     """Analyzes extracted .srt files for language, cues, and alphabet classification."""
+    if not subtitles_dir.is_dir():
+        return []
     telemetries: List[SubtitleTrackTelemetry] = []
-    candidates = [p for p in subtitles_dir.iterdir() if p.name.startswith(video_stem) and p.name.endswith(".srt")]
+    candidates = [p for p in subtitles_dir.iterdir() if _is_matching_srt_candidate(p, video_stem)]
 
     for s_info in raw_sub_streams:
         sub_idx = s_info["sub_idx"]
@@ -842,6 +866,8 @@ def process_single_video(
     phash_dir: Path,
     subtitles_dir: Path,
     target_stop_time: datetime.datetime | None = None,
+    mode: str = "phash",
+    ahash_dir: Path | None = None,
 ) -> MediaProcessingProfile | None:
     """Worker task processing a single video directly from NAS."""
     if target_stop_time and datetime.datetime.now() >= target_stop_time:
@@ -888,6 +914,8 @@ def process_single_video(
             phash_dir,
             subtitles_dir,
             target_stop_time,
+            mode=mode,
+            ahash_dir=ahash_dir,
         )
 
     wall_secs = max(time.monotonic() - t0_mono, 0.01)
@@ -999,6 +1027,14 @@ def resolve_targets_out(args: argparse.Namespace) -> Path:
         return Path.cwd() / "data/reports/selected_batch_targets.json"
 
 
+def _ensure_batch_directories(args: argparse.Namespace) -> None:
+    args.phash_dir.mkdir(parents=True, exist_ok=True)
+    if args.mode in ("ahash", "both"):
+        args.ahash_dir.mkdir(parents=True, exist_ok=True)
+    args.subtitles_dir.mkdir(parents=True, exist_ok=True)
+    args.events_log.parent.mkdir(parents=True, exist_ok=True)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Direct NAS TVShow Batch Ingestion & Profiling (Zero Local Copy)")
     parser.add_argument("--nas-root", type=Path, default=default_nas_tvshow_path())
@@ -1068,9 +1104,7 @@ def main() -> int:
         perform_check(args)
         return 0
 
-    args.phash_dir.mkdir(parents=True, exist_ok=True)
-    args.subtitles_dir.mkdir(parents=True, exist_ok=True)
-    args.events_log.parent.mkdir(parents=True, exist_ok=True)
+    _ensure_batch_directories(args)
 
     mode_label = (
         "Virgin/Fresh GPU Max Load Mode (--fresh-only)"
@@ -1150,6 +1184,8 @@ def main() -> int:
                     args.phash_dir,
                     args.subtitles_dir,
                     target_stop_time,
+                    args.mode,
+                    args.ahash_dir,
                 )
                 active_futures.add(fut)
 
@@ -1196,6 +1232,8 @@ def main() -> int:
                         args.phash_dir,
                         args.subtitles_dir,
                         target_stop_time,
+                        args.mode,
+                        args.ahash_dir,
                     )
                     active_futures.add(fut)
 

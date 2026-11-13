@@ -15,6 +15,7 @@ use crate::ahash::{
 };
 use crate::ffmpeg_input::{
     apply_ftp_credentials, display_input, ffmpeg_decode_threads, http_reconnect_args,
+    redact_secrets,
 };
 use crate::video::resolve_ffmpeg_cpu;
 
@@ -308,6 +309,44 @@ fn read_f32_exact_or_eof<R: Read>(reader: &mut R, dest: &mut [f32]) -> Result<us
     Ok(samples_read)
 }
 
+/// Formats a secret-redacted diagnostic message for a failed FFmpeg audio process.
+///
+/// # Arguments
+/// * `code` - Process exit status code (or `-1` if terminated by signal).
+/// * `path` - Input media path or URI.
+/// * `stderr_msg` - Raw captured `stderr` payload from FFmpeg.
+///
+/// # Returns
+/// Sanitized human-readable failure string with URL userinfo and `-ftp-password` secrets masked.
+///
+/// # Panics
+/// Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// 1. Applies [`redact_secrets`] to `stderr_msg.trim()` before inspecting or formatting.
+/// 2. Preserves the `"Media has no audio stream to extract"` prefix when FFmpeg reports no output
+///    stream so downstream silent-media handlers classify it non-fatally.
+fn format_audio_child_error(code: i32, path: &Path, stderr_msg: &str) -> String {
+    let redacted = redact_secrets(stderr_msg.trim());
+    if redacted.contains("Output file does not contain any stream") {
+        return format!(
+            "Media has no audio stream to extract: {:?}",
+            display_input(path)
+        );
+    }
+    let detail = if redacted.is_empty() {
+        "unknown error"
+    } else {
+        redacted.as_str()
+    };
+    format!(
+        "FFmpeg audio extraction exited with status {} for {:?}: {}",
+        code,
+        display_input(path),
+        detail
+    )
+}
+
 /// Waits for FFmpeg child process termination and handles exit status.
 ///
 /// # Arguments
@@ -324,7 +363,8 @@ fn read_f32_exact_or_eof<R: Read>(reader: &mut R, dest: &mut [f32]) -> Result<us
 /// Guarantee: Never panics.
 ///
 /// # Data Flow & Invariants
-/// Reaps child process without leaving zombies and formats informative error messages.
+/// Reaps child process without leaving zombies and formats secret-redacted error messages via
+/// [`format_audio_child_error`].
 fn wait_for_child(child: &mut Child, path: &Path) -> Result<()> {
     let mut stderr_msg = String::new();
     if let Some(mut err_pipe) = child.stderr.take() {
@@ -342,23 +382,7 @@ fn wait_for_child(child: &mut Child, path: &Path) -> Result<()> {
         let code = status.code().unwrap_or(-1);
         // Exit code 255 typically indicates SIGINT / early pipe termination
         if code != 255 {
-            let detail = stderr_msg.trim();
-            if detail.contains("Output file does not contain any stream") {
-                bail!(
-                    "Media has no audio stream to extract: {:?}",
-                    display_input(path)
-                );
-            }
-            bail!(
-                "FFmpeg audio extraction exited with status {} for {:?}: {}",
-                code,
-                display_input(path),
-                if detail.is_empty() {
-                    "unknown error"
-                } else {
-                    detail
-                }
-            );
+            bail!("{}", format_audio_child_error(code, path, &stderr_msg));
         }
     }
 
@@ -422,5 +446,21 @@ mod tests {
         for &h in &hashes {
             assert_ne!(h, 0);
         }
+    }
+
+    #[test]
+    fn test_format_audio_child_error_redacts_secrets_and_userinfo() {
+        let path = Path::new("ftp://nas_user:top_s3cret@nas.local:21/show/ep01.mkv");
+        let stderr = "ffmpeg -ftp-password flag_s3cret -i ftp://nas_user:url_s3cret@nas.local:21/show/ep01.mkv: I/O error\n";
+        let msg = format_audio_child_error(1, path, stderr);
+        assert!(!msg.contains("top_s3cret"));
+        assert!(!msg.contains("flag_s3cret"));
+        assert!(!msg.contains("url_s3cret"));
+        assert!(msg.contains("ftp://nas_user:***@nas.local:21/show/ep01.mkv"));
+        assert!(msg.contains("-ftp-password ***"));
+
+        let silent = format_audio_child_error(1, path, "Output file does not contain any stream\n");
+        assert!(silent.contains("no audio stream"));
+        assert!(!silent.contains("top_s3cret"));
     }
 }

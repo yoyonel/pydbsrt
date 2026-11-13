@@ -362,6 +362,10 @@ pub struct MediaAddArgs {
     #[arg(long, alias = "dry-run")]
     pub skip_certify: bool,
 
+    /// Audio-only mode: extract .ahash fingerprint (requires --ahash-dir) and skip pHash, subtitle certification, and server ingest
+    #[arg(long)]
+    pub skip_phash: bool,
+
     /// Output execution summary in JSON format
     #[arg(long)]
     pub json: bool,
@@ -1322,16 +1326,72 @@ fn extract_optional_ahash(args: &MediaAddArgs, video_path: &Path) -> Result<Opti
     Ok(Some(path.to_string_lossy().to_string()))
 }
 
+/// Executes audio-only ingestion (`--skip-phash`), bypassing video pHash decoding and SRT certification.
+///
+/// # Arguments
+/// * `args` - Parsed `media:add` CLI options (`--ahash-dir` required).
+/// * `video_path` - Validated local media path or remote stream URI.
+/// * `cleanup` - Shared SIGINT cleanup state to reset prior to returning.
+///
+/// # Returns
+/// `Ok(MediaAddResult)` populated with the extracted `ahash_path` (or `None` on silent video).
+///
 /// # Errors
-/// * Returns `Err` if input validation, pHash extraction, or certification fails.
+/// Returns `Err` when `--ahash-dir` is omitted or when FFmpeg audio extraction fails unexpectedly.
+///
+/// # Panics
+/// Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// 1. Enforces `--ahash-dir` presence so `--skip-phash` cannot silently turn into a no-op.
+/// 2. Delegates `.ahash` + `.json` sidecar generation to [`extract_optional_ahash`].
+/// 3. Clears `cleanup` trackers and renders structured JSON or human summary output.
+fn run_ahash_only_media_add(
+    args: &MediaAddArgs,
+    video_path: &Path,
+    cleanup: &CleanupState,
+) -> Result<MediaAddResult> {
+    if args.ahash_dir.is_none() {
+        bail!("--skip-phash requires --ahash-dir <DIR> to store extracted .ahash fingerprints");
+    }
+    let ahash_path = extract_optional_ahash(args, video_path)?;
+    cleanup.srts.lock().unwrap().clear();
+    *cleanup.phash.lock().unwrap() = None;
+
+    let result = MediaAddResult {
+        success: true,
+        video_path: dbsrt_core::display_input(video_path),
+        phash_path: String::new(),
+        ahash_path,
+        fps: args.fps.unwrap_or(0.0),
+        media_hash: String::new(),
+        certified_couplings: 0,
+        skipped_idempotent: 0,
+        server_ingested: false,
+        message: "aHash audio-only extraction completed (--skip-phash)".to_string(),
+    };
+    render_media_add_output(args, &result)?;
+    Ok(result)
+}
+
+/// Executes unified media addition: pHash extraction -> certification -> dynamic ingest.
+///
+/// # Arguments
+/// * `args` - Parsed CLI options and arguments.
+///
+/// # Returns
+/// * `Result<MediaAddResult>` - Execution metrics and outcomes.
+///
+/// # Errors
+/// * Returns `Err` if input validation, pHash/aHash extraction, or certification fails.
 ///
 /// # Panics
 /// * Guarantee: Never panics.
 ///
 /// # Data Flow & Invariants
 /// 1. Cleans up any existing global partial state.
-/// 2. Resolves media video path and plans subtitle pairing.
-/// 3. Extracts pHash frames and subtitles (concurrently if needed).
+/// 2. Resolves media video path; when `--skip-phash` is set, delegates to [`run_ahash_only_media_add`].
+/// 3. Plans subtitle pairing and extracts pHash frames and subtitles.
 /// 4. Extracts optional `.ahash` audio fingerprint if `--ahash-dir` is provided.
 /// 5. Handles early exit if `skip_certify` is active.
 /// 6. Certifies couplings in `couplings.json` registry with CAS idempotence.
@@ -1344,6 +1404,9 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
     cleanup.phash_done.store(false, Ordering::SeqCst);
 
     let video_path = resolve_media_video_path(args)?;
+    if args.skip_phash {
+        return run_ahash_only_media_add(args, video_path, &cleanup);
+    }
     let sub_job = plan_subtitle_job(args, video_path)?;
     let fps = detect_media_fps(video_path, args.fps);
 
@@ -1471,6 +1534,7 @@ mod tests {
             subtitles_dir: PathBuf::from("/tmp"),
             all_embedded: false,
             skip_certify: false,
+            skip_phash: false,
             hwaccel: "auto".to_string(),
             json: false,
             server_url: DEFAULT_SERVER_URL.to_string(),
@@ -1501,6 +1565,7 @@ mod tests {
             subtitles_dir: temp.path.join("subtitles"),
             all_embedded: false,
             skip_certify: false,
+            skip_phash: false,
             hwaccel: "auto".to_string(),
             json: false,
             server_url: DEFAULT_SERVER_URL.to_string(),
@@ -1537,6 +1602,7 @@ mod tests {
             subtitles_dir: temp.path.join("subtitles"),
             all_embedded: false,
             skip_certify: false,
+            skip_phash: false,
             hwaccel: "auto".to_string(),
             json: false,
             server_url: DEFAULT_SERVER_URL.to_string(),
@@ -1568,6 +1634,7 @@ mod tests {
             subtitles_dir: PathBuf::from("/tmp"),
             all_embedded: false,
             skip_certify: false,
+            skip_phash: false,
             hwaccel: "auto".to_string(),
             json: false,
             server_url: DEFAULT_SERVER_URL.to_string(),
@@ -1652,6 +1719,41 @@ mod tests {
         assert_eq!(
             resolve_moviehash(None, &local).as_deref(),
             Some("e19d5212c9812cd6")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_media_add_skip_phash_requires_ahash_dir() {
+        let temp = TempTestDir::new("skip_phash_missing_dir");
+        let video = temp.path.join("sample.mp4");
+        File::create(&video).unwrap();
+
+        let args = MediaAddArgs {
+            video: Some(video),
+            video_pos: None,
+            media_name: None,
+            moviehash: None,
+            srt: None,
+            srt_pos: None,
+            lang: None,
+            fps: None,
+            phash_dir: temp.path.join("phash"),
+            ahash_dir: None,
+            subtitles_dir: temp.path.join("subtitles"),
+            all_embedded: false,
+            skip_certify: false,
+            skip_phash: true,
+            hwaccel: "auto".to_string(),
+            json: true,
+            server_url: DEFAULT_SERVER_URL.to_string(),
+            db: PostgresArgs::default(),
+        };
+
+        let err = run_media_add(&args).await.unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("--skip-phash requires --ahash-dir"),
+            "Unexpected error: {err}"
         );
     }
 }

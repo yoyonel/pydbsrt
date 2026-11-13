@@ -6,8 +6,11 @@ import tempfile
 from pathlib import Path
 
 from scripts.ingestion.batch_media_add_tvshow import (
+    _matches_stem_prefix,
+    build_media_add_cmd,
     detect_alphabet_family,
     discover_stratified_tvshows,
+    execute_media_add,
     load_targets_from_file,
     normalize_lang_code,
 )
@@ -181,3 +184,54 @@ def test_discover_ahash_requires_typed_sidecar_json(tmp_path: Path) -> None:
         ahash_dir=ahash_dir,
     )
     assert [path.name for path, _ in pending_both] == ["Episode.2.mkv"]
+
+
+def test_matches_stem_prefix_requires_dot_delimiter(tmp_path: Path) -> None:
+    """Episode.10 must never mark Episode.1 as already processed."""
+    assert not _matches_stem_prefix("Episode.1", ["Episode.10.mkv.25.0fps.phash", "Episode.11"])
+    assert _matches_stem_prefix("Episode.1", ["Episode.1.mkv.25.0fps.phash"])
+    assert _matches_stem_prefix("Episode.1", ["Episode.1"])
+
+    show = tmp_path / "nas" / "Show"
+    show.mkdir(parents=True)
+    (show / "Episode.1.mkv").write_bytes(b"x")
+    (show / "Episode.10.mkv").write_bytes(b"x")
+    phash_dir = tmp_path / "phash"
+    phash_dir.mkdir()
+    (phash_dir / "Episode.10.mkv.25.0fps.phash").write_bytes(b"\x01" * 16)
+
+    fresh = discover_stratified_tvshows(tmp_path / "nas", phash_dir, tmp_path / "srt", fresh_only=True)
+    assert [path.name for path, _ in fresh] == ["Episode.1.mkv"]
+
+
+def test_execute_media_add_passes_ahash_dir_and_skip_phash_by_mode(tmp_path: Path) -> None:
+    fake_dbsrt = tmp_path / "fake_dbsrt.sh"
+    argv_log = tmp_path / "argv.txt"
+    fake_dbsrt.write_text(
+        f'#!/bin/sh\nprintf "%s\\n" "$@" > "{argv_log}"\n'
+        'printf \'{"certified_couplings": 0, "skipped_idempotent": 0}\\n\'\n',
+        encoding="utf-8",
+    )
+    fake_dbsrt.chmod(0o755)
+
+    video = tmp_path / "Show.2049.mkv"
+    video.write_bytes(b"x")
+    phash_dir = tmp_path / "phash"
+    ahash_dir = tmp_path / "ahash"
+    srt_dir = tmp_path / "srt"
+
+    phash_cmd = build_media_add_cmd(fake_dbsrt, video, phash_dir, srt_dir, mode="phash", ahash_dir=ahash_dir)
+    assert "--ahash-dir" not in phash_cmd
+    assert "--skip-phash" not in phash_cmd
+
+    both_cmd = build_media_add_cmd(fake_dbsrt, video, phash_dir, srt_dir, mode="both", ahash_dir=ahash_dir)
+    assert both_cmd[both_cmd.index("--ahash-dir") + 1] == str(ahash_dir)
+    assert "--skip-phash" not in both_cmd
+
+    ok, cert, skip, err, *_ = execute_media_add(
+        fake_dbsrt, video, phash_dir, srt_dir, mode="ahash", ahash_dir=ahash_dir
+    )
+    assert ok and cert == 0 and skip == 0 and err == ""
+    recorded = argv_log.read_text(encoding="utf-8").splitlines()
+    assert recorded[recorded.index("--ahash-dir") + 1] == str(ahash_dir)
+    assert "--skip-phash" in recorded

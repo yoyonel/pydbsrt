@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::ffmpeg_input::{
-    apply_ftp_credentials, display_input, ffmpeg_decode_threads, redact_url_userinfo,
+    apply_ftp_credentials, display_input, ffmpeg_decode_threads, redact_secrets,
 };
 use crate::media_pairing::parse_language_code;
 
@@ -228,7 +228,7 @@ pub fn inspect_container<P: AsRef<Path>>(path: P) -> Result<ContainerInspection>
     if !output.status.success() {
         return Err(anyhow!(
             "ffprobe inspection failed: {}",
-            redact_url_userinfo(&String::from_utf8_lossy(&output.stderr))
+            redact_secrets(&String::from_utf8_lossy(&output.stderr))
         ));
     }
 
@@ -319,7 +319,7 @@ pub fn inspect_audio_streams<P: AsRef<Path>>(path: P) -> Result<AudioContainerIn
     if !output.status.success() {
         return Err(anyhow!(
             "ffprobe audio inspection failed: {}",
-            redact_url_userinfo(&String::from_utf8_lossy(&output.stderr))
+            redact_secrets(&String::from_utf8_lossy(&output.stderr))
         ));
     }
 
@@ -400,7 +400,7 @@ pub fn extract_embedded_subtitle<P: AsRef<Path>>(
         return Err(anyhow!(
             "ffmpeg extraction failed for stream {}: {}",
             subtitle_index,
-            redact_url_userinfo(&String::from_utf8_lossy(&output.stderr))
+            redact_secrets(&String::from_utf8_lossy(&output.stderr))
         ));
     }
 

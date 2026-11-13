@@ -434,3 +434,143 @@ def test_migrate_to_moviehash_phash_dedup_local_and_ftp_mocked(tmp_path: Path, m
     assert migrated_ph["moviehash"] == h_ph
     assert migrated_ph["ahash_file"] == f"{h_ph}.86.1fps.ahash"
     assert migrated_ph["media_name"] == "Épisode [01].mkv"
+
+
+def test_migration_sha256_mismatch_forbids_unlink_and_replace_and_generates_minimal_sidecar(
+    tmp_path: Path, monkeypatch
+) -> None:
+    ahash_dir = tmp_path / "ahash"
+    phash_dir = tmp_path / "phash"
+    reports_dir = tmp_path / "reports"
+    ahash_dir.mkdir()
+    phash_dir.mkdir()
+    reports_dir.mkdir()
+
+    # 1. Collision with DIFFERENT SHA-256 (even if legacy is larger!): neither file may be deleted or replaced
+    h_conflict = "9999888877776666"
+    (phash_dir / f"{h_conflict}.json").write_text(
+        json.dumps({"moviehash": h_conflict, "media_name": "Conflict.Show.mkv"}), encoding="utf-8"
+    )
+    target_conflict = ahash_dir / f"{h_conflict}.86.1fps.ahash"
+    legacy_conflict = ahash_dir / "Conflict.Show.mkv.86.1fps.ahash"
+    legacy_conflict_json = ahash_dir / "Conflict.Show.mkv.json"
+    target_conflict.write_bytes(b"TARGET_SMALL")
+    legacy_conflict.write_bytes(b"LEGACY_DIFFERENT_AND_LARGER_PAYLOAD")
+    legacy_conflict_json.write_text(
+        json.dumps(_sample_sidecar("Conflict.Show.mkv", legacy_conflict.name)),
+        encoding="utf-8",
+    )
+
+    # 2. Legacy .ahash WITHOUT any existing .json sidecar (and trailing year 2049): must generate minimal typed .json
+    h_nojson = "1234abcd5678ef90"
+    (phash_dir / f"{h_nojson}.json").write_text(
+        json.dumps({"moviehash": h_nojson, "media_name": "Blade.Runner.2049.mkv"}), encoding="utf-8"
+    )
+    (ahash_dir / "Blade.Runner.2049.24fps.ahash").write_bytes(b"AHASH_NO_SIDECAR")
+
+    monkeypatch.setenv("NAS_HOST", "nas.invalid")
+    report_out = reports_dir / "conflict.jsonl"
+    rc = bf.main(
+        [
+            "--ahash-dir",
+            str(ahash_dir),
+            "--phash-dir",
+            str(phash_dir),
+            "--reports-dir",
+            str(reports_dir),
+            "--report-out",
+            str(report_out),
+            "--migrate-to-moviehash",
+        ]
+    )
+    assert rc == 1
+
+    # Conflict files untouched byte-for-byte
+    assert target_conflict.read_bytes() == b"TARGET_SMALL"
+    assert legacy_conflict.read_bytes() == b"LEGACY_DIFFERENT_AND_LARGER_PAYLOAD"
+    assert legacy_conflict_json.is_file()
+
+    # Non-conflicting Blade.Runner.2049 migrated with `.24fps` preserved and mandatory minimal .json created
+    assert (ahash_dir / f"{h_nojson}.24fps.ahash").read_bytes() == b"AHASH_NO_SIDECAR"
+    min_sidecar = json.loads((ahash_dir / f"{h_nojson}.json").read_text(encoding="utf-8"))
+    assert min_sidecar["schema_version"] == 1
+    assert min_sidecar["moviehash"] == h_nojson
+    assert min_sidecar["media_name"] == "Blade.Runner.2049.mkv"
+    assert min_sidecar["ahash_file"] == f"{h_nojson}.24fps.ahash"
+    assert min_sidecar["selection"] == "unknown"
+    assert isinstance(min_sidecar["header"], dict)
+
+    rows = {
+        r["ahash_file"]: r for r in (json.loads(line) for line in report_out.read_text(encoding="utf-8").splitlines())
+    }
+    assert rows["Conflict.Show.mkv.86.1fps.ahash"]["status"] == "conflict_sha256_mismatch"
+    assert rows["Blade.Runner.2049.24fps.ahash"]["status"] == "migrated"
+
+
+def test_ambiguous_basename_and_opsec_redaction_and_dry_run_sort(tmp_path: Path, monkeypatch) -> None:
+    import subprocess
+
+    reports_dir = tmp_path / "reports"
+    ahash_dir = tmp_path / "ahash"
+    phash_dir = tmp_path / "phash"
+    reports_dir.mkdir()
+    ahash_dir.mkdir()
+    phash_dir.mkdir()
+
+    # Two distinct TV shows sharing `Pilot.mkv` basename -> marked ambiguous, never silently overwritten
+    (reports_dir / "selected_batch_targets.json").write_text(
+        json.dumps(
+            [
+                {"path": "/media/cifs/Synology/tvshow/ShowA/Pilot.mkv", "filename": "Pilot.mkv"},
+                {"path": "/media/cifs/Synology/tvshow/ShowB/Pilot.mkv", "filename": "Pilot.mkv"},
+                {"path": "/media/cifs/Synology/tvshow/ShowC/Unique.mkv", "filename": "Unique.mkv"},
+            ]
+        ),
+        encoding="utf-8",
+    )
+    # Repeating the exact same physical path in nas_ftp_index must NOT mark Unique.mkv ambiguous
+    (reports_dir / "nas_ftp_index.json").write_text(
+        json.dumps({"index": {"Unique.mkv": "tvshow/ShowC/Unique.mkv"}}),
+        encoding="utf-8",
+    )
+
+    cfg = bf.SourceEnvConfig(
+        nas_host="10.99.88.77",
+        nas_user="nas_op",
+        nas_pass_entry="",
+        explicit_nas_pass="top_secret_pw",
+        freebox_base="http://198.51.100.42:18089",
+    )
+    assert "top_secret_pw" not in repr(cfg)
+
+    idx = bf.build_source_index(reports_dir, cfg)
+    assert bf._is_ambiguous_location(idx["Pilot.mkv"])
+    assert bf._lookup_source_location("Pilot.mkv", None, idx) is None
+    assert bf._lookup_source_location("Unique.mkv", None, idx) == bf.SourceLocation(
+        "synology_tvshow", "tvshow/ShowC/Unique.mkv", "ftp"
+    )
+
+    # `--dry-run --limit 1` must sort resolved targets ahead of unresolved `A_Unresolved` just like live mode
+    (ahash_dir / "A_Unresolved.mkv.86.1fps.ahash").write_bytes(b"AHASH")
+    (ahash_dir / "Z_Unique.mkv.86.1fps.ahash").write_bytes(b"AHASH")
+    (ahash_dir / "Z_Unique.mkv.json").write_text(json.dumps({"media_name": "Unique.mkv"}), encoding="utf-8")
+    args = bf.build_arg_parser().parse_args(
+        ["--ahash-dir", str(ahash_dir), "--phash-dir", str(phash_dir), "--dry-run", "--limit", "1"]
+    )
+    planned = bf._select_planned_targets(args, idx)
+    assert [p.ahash_path.name for p in planned] == ["Z_Unique.mkv.86.1fps.ahash"]
+
+    # TimeoutExpired error must redact NAS host, Freebox URL, and FTP password
+    def raise_timeout(*_a, **_kw):
+        raise subprocess.TimeoutExpired(
+            cmd=["dbsrt", "--media", "ftp://10.99.88.77/tvshow/ShowC/Unique.mkv", "-ftp-password", "top_secret_pw"],
+            timeout=5,
+        )
+
+    monkeypatch.setattr(subprocess, "run", raise_timeout)
+    live_args = bf.build_arg_parser().parse_args(["--ahash-dir", str(ahash_dir), "--phash-dir", str(phash_dir)])
+    child_env = bf.build_child_env(cfg, "top_secret_pw")
+    rec = bf.execute_backfill_item(planned[0], cfg, child_env, Path("dbsrt"), live_args)
+    assert rec.status == "error" and rec.error is not None
+    assert "10.99.88.77" not in rec.error
+    assert "top_secret_pw" not in rec.error

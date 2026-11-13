@@ -366,7 +366,10 @@ pub fn find_or_build_ahash(
 
     let ahash_file = dbsrt_core::extract_ahash(media_file, &options)?;
     if ahash_file.hashes.is_empty() {
-        anyhow::bail!("No audio hashes could be extracted from {:?}", media_file);
+        anyhow::bail!(
+            "No audio hashes could be extracted from {:?}",
+            dbsrt_core::display_input(media_file)
+        );
     }
 
     let fps = ahash_file.header.audio_fps();

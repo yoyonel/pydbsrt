@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::ahash::{AhashHeader, HEADER_SIZE_BYTES};
 use crate::container::{AudioContainerInspection, AudioStreamInfo};
@@ -32,6 +33,25 @@ pub const SIDECAR_TMP_SUFFIX: &str = ".tmp";
 
 /// Trailing token of the framerate component in `.ahash` file names (`.86.1fps`).
 const FPS_TOKEN_SUFFIX: &str = "fps";
+
+/// Maximum digit count in the integer part of a valid framerate token (`1`..`200`).
+const MAX_FPS_INTEGER_DIGITS: usize = 3;
+
+/// Maximum digit count in the fractional part of a decimal framerate token (e.g. `.976`, `.125`).
+const MAX_FPS_FRACTION_DIGITS: usize = 3;
+
+/// Minimum plausible sampling framerate accepted in a `.<rate>fps` filename suffix.
+const MIN_FPS_TOKEN_VALUE: f64 = 1.0;
+
+/// Maximum plausible sampling framerate accepted in a `.<rate>fps` filename suffix.
+const MAX_FPS_TOKEN_VALUE: f64 = 200.0;
+
+/// Canonical 2-digit integer framerates that must never be absorbed as a decimal fraction
+/// after a trailing numeric title/episode token (e.g. `Episode.1.24fps` or `Show.S01.02.25fps`).
+const AMBIGUOUS_INTEGER_FPS_TOKENS: [&str; 6] = ["24", "25", "30", "48", "50", "60"];
+
+/// Monotonic intra-process sequence counter disambiguating concurrent atomic sidecar writes.
+static SIDECAR_TMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Relative audio index FFmpeg falls back to when neither the default disposition nor the
 /// channel count discriminates between tracks (first audio stream, `0:a:0`).
@@ -208,7 +228,73 @@ pub struct AhashSidecar {
     pub verified_distance: Option<f64>,
 }
 
+/// Validates an integer framerate token (`1..=3` ASCII digits, no multi-digit leading zero).
+///
+/// # Arguments
+/// * `token` - Candidate integer part before `fps` or before `.`.
+///
+/// # Returns
+/// `true` if `token` is canonical ASCII digits without leading-zero padding.
+///
+/// # Panics
+/// Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// Rejects 4-digit years (`2049`) and zero-padded episode numbers (`02`).
+fn is_valid_fps_int_part(token: &str) -> bool {
+    !token.is_empty()
+        && token.len() <= MAX_FPS_INTEGER_DIGITS
+        && token.chars().all(|c| c.is_ascii_digit())
+        && !(token.len() > 1 && token.starts_with('0'))
+}
+
+/// Checks whether `int_part.frac_part` forms an unambiguous decimal framerate (`86.1`, `23.976`).
+///
+/// # Arguments
+/// * `int_part` - Segment preceding the decimal dot.
+/// * `frac_part` - Segment following the decimal dot and preceding `fps`.
+///
+/// # Returns
+/// `true` if the pair denotes a valid decimal framerate in `[1.0, 200.0]`.
+///
+/// # Panics
+/// Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// Excludes canonical integer framerates (`24`, `25`, `30`, `48`, `50`, `60`) in `frac_part`
+/// so titles ending with a bare episode/part number (`Episode.1.24fps`) keep their final number.
+fn is_decimal_fps_pair(int_part: &str, frac_part: &str) -> bool {
+    if !is_valid_fps_int_part(int_part) {
+        return false;
+    }
+    if frac_part.is_empty()
+        || frac_part.len() > MAX_FPS_FRACTION_DIGITS
+        || !frac_part.chars().all(|c| c.is_ascii_digit())
+        || AMBIGUOUS_INTEGER_FPS_TOKENS.contains(&frac_part)
+    {
+        return false;
+    }
+    format!("{int_part}.{frac_part}")
+        .parse::<f64>()
+        .is_ok_and(|fps| (MIN_FPS_TOKEN_VALUE..=MAX_FPS_TOKEN_VALUE).contains(&fps))
+}
+
 /// Strips the trailing `.<rate>fps` token (`.86.1fps`, `.24fps`) from a file stem.
+///
+/// # Arguments
+/// * `stem` - File stem after `.ahash` removal.
+///
+/// # Returns
+/// Stem without its trailing framerate suffix, preserving trailing release years (`2049`)
+/// and episode numbers (`S01.02`, `Episode.1`).
+///
+/// # Panics
+/// Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// 1. Strips trailing `fps` and splits on the rightmost `.`.
+/// 2. Checks for a decimal `<int>.<frac>fps` pair first via [`is_decimal_fps_pair`].
+/// 3. Falls back to an integer `<int>fps` suffix bounded in `[1.0, 200.0]`.
 fn strip_fps_token(stem: &str) -> &str {
     let Some(before_fps) = stem.strip_suffix(FPS_TOKEN_SUFFIX) else {
         return stem;
@@ -216,13 +302,19 @@ fn strip_fps_token(stem: &str) -> &str {
     let Some((base, candidate)) = before_fps.rsplit_once('.') else {
         return stem;
     };
-    if candidate.parse::<f64>().is_err() {
-        return stem;
+    if let Some((sub_base, int_part)) = base.rsplit_once('.') {
+        if is_decimal_fps_pair(int_part, candidate) {
+            return sub_base;
+        }
     }
-    match base.rsplit_once('.') {
-        Some((sub_base, int_part)) if int_part.parse::<f64>().is_ok() => sub_base,
-        _ => base,
+    if is_valid_fps_int_part(candidate)
+        && candidate
+            .parse::<f64>()
+            .is_ok_and(|fps| (MIN_FPS_TOKEN_VALUE..=MAX_FPS_TOKEN_VALUE).contains(&fps))
+    {
+        return base;
     }
+    stem
 }
 
 /// Logical stem of an `.ahash` file name: without `.ahash` and without `.<fps>fps`.
@@ -408,7 +500,7 @@ impl AhashSidecar {
         }
     }
 
-    /// Writes the sidecar atomically to `path` (`<path>.<pid>.tmp` then `rename`).
+    /// Writes the sidecar atomically to `path` (`<path>.<pid>.<seq>.tmp` then `rename`).
     ///
     /// # Arguments
     /// * `path` - Final sidecar path.
@@ -424,13 +516,19 @@ impl AhashSidecar {
     /// Guarantee: Never panics.
     ///
     /// # Data Flow & Invariants
-    /// The temporary file lives in the same directory and embeds the current process ID, so
-    /// concurrent processes never clobber each other's temporary buffer and `rename` stays
+    /// The temporary file lives in the same directory and embeds both the current process ID
+    /// and a monotonic atomic sequence counter, so concurrent processes and concurrent threads
+    /// within the same process never clobber each other's temporary buffer and `rename` stays
     /// atomic on POSIX: a process killed mid-write (e.g. LVE limit on o2switch) leaves either
-    /// the previous sidecar or a stray `.<pid>.tmp`, never a truncated `<stem>.json`.
+    /// the previous sidecar or a stray `.<pid>.<seq>.tmp`, never a truncated `<stem>.json`.
     pub fn write_atomic(&self, path: &Path) -> Result<()> {
+        let seq = SIDECAR_TMP_FILE_COUNTER.fetch_add(1, Ordering::Relaxed);
         let mut tmp_name = path.file_name().unwrap_or_default().to_os_string();
-        tmp_name.push(format!(".{}{SIDECAR_TMP_SUFFIX}", std::process::id()));
+        tmp_name.push(format!(
+            ".{}.{}{SIDECAR_TMP_SUFFIX}",
+            std::process::id(),
+            seq
+        ));
         let tmp_path = path.with_file_name(tmp_name);
         let body = serde_json::to_string_pretty(self)?;
         let written = (|| -> Result<()> {
@@ -540,6 +638,21 @@ mod tests {
         );
         assert_eq!(audio_track_stem("Show.mkv", 1), "Show.mkv.a1");
         assert_eq!(ahash_logical_stem("x.24fps.ahash"), "x");
+        assert_eq!(
+            ahash_logical_stem("Blade.Runner.2049.24fps.ahash"),
+            "Blade.Runner.2049"
+        );
+        assert_eq!(
+            ahash_logical_stem("Blade.Runner.2049.86.1fps.ahash"),
+            "Blade.Runner.2049"
+        );
+        assert_eq!(ahash_logical_stem("Show.S01.02.24fps.ahash"), "Show.S01.02");
+        assert_eq!(ahash_logical_stem("Episode.1.24fps.ahash"), "Episode.1");
+        assert_eq!(ahash_logical_stem("Show.23.976fps.ahash"), "Show");
+        assert_eq!(ahash_logical_stem("Show.29.97fps.ahash"), "Show");
+        assert_eq!(ahash_logical_stem("Show.86.125fps.ahash"), "Show");
+        assert_eq!(ahash_logical_stem("weird.0fps.ahash"), "weird.0fps");
+        assert_eq!(ahash_logical_stem("weird.NaNfps.ahash"), "weird.NaNfps");
         assert_eq!(ahash_logical_stem("plain.ahash"), "plain");
         assert_eq!(ahash_logical_stem("no_ext"), "no_ext");
         assert_eq!(
@@ -619,19 +732,65 @@ mod tests {
 
         let written = sidecar.write_next_to(&ahash_path).unwrap();
         assert_eq!(written, dir.path().join(format!("{HEX}.json")));
-        assert!(!dir
-            .path()
-            .join(format!(
-                "{HEX}.json.{}{SIDECAR_TMP_SUFFIX}",
-                std::process::id()
-            ))
-            .exists());
+        assert!(fs::read_dir(dir.path()).unwrap().all(|entry| {
+            !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .contains(".tmp")
+        }));
         let back = AhashSidecar::read(&written).unwrap();
         assert_eq!(back, sidecar);
         let raw: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(&written).unwrap()).unwrap();
         assert_eq!(raw["selection"], "ffmpeg_default");
         assert_eq!(raw["media_name"], "Film (2021).mkv");
+    }
+
+    fn write_sidecar_burst(sidecar: &AhashSidecar, path: &Path) {
+        for _ in 0..8 {
+            sidecar.write_atomic(path).unwrap();
+        }
+    }
+
+    #[test]
+    fn test_sidecar_concurrent_write_atomic_and_tmp_cleanup() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join(format!("{HEX}.json"));
+        let hdr = header(2);
+        let ahash_path = dir.path().join(format!("{HEX}.86.1fps.ahash"));
+        let base = AhashSidecar::build(&AhashSidecarRequest {
+            ahash_path: &ahash_path,
+            header: &hdr,
+            media_name: "Concurrent.mkv",
+            moviehash: Some(HEX),
+            inspection: None,
+            explicit_audio_stream: None,
+        });
+
+        let handles: Vec<_> = (0..8)
+            .map(|_| {
+                let s = base.clone();
+                let p = target.clone();
+                std::thread::spawn(move || write_sidecar_burst(&s, &p))
+            })
+            .collect();
+        for handle in handles {
+            handle.join().unwrap();
+        }
+        assert_eq!(AhashSidecar::read(&target).unwrap(), base);
+
+        // Rename onto an existing directory fails on POSIX and must clean up the .tmp file
+        let blocked_dir = dir.path().join("blocked.json");
+        fs::create_dir(&blocked_dir).unwrap();
+        assert!(base.write_atomic(&blocked_dir).is_err());
+        assert!(fs::read_dir(dir.path()).unwrap().all(|entry| {
+            !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .contains(".tmp")
+        }));
     }
 
     #[test]

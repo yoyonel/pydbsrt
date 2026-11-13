@@ -30,7 +30,7 @@ pub const NTSC_FILM_FPS: f64 = 23.976;
 pub use crate::ffmpeg_input::DEFAULT_FFMPEG_DECODE_THREADS;
 use crate::ffmpeg_input::{
     apply_ftp_credentials, display_input, ffmpeg_decode_threads, http_reconnect_args,
-    redact_url_userinfo,
+    redact_secrets, redact_url_userinfo,
 };
 use crate::job_progress::{create_job_guard, maybe_update_progress};
 
@@ -375,7 +375,7 @@ fn finish_ffprobe_child(
     let (stdout, stderr) = read_child_output(child)
         .with_context(|| format!("Failed to read '{}' output", ffprobe_bin))?;
     if !status.success() {
-        anyhow::bail!("{} failed: {}", ffprobe_bin, redact_url_userinfo(&stderr));
+        anyhow::bail!("{} failed: {}", ffprobe_bin, redact_secrets(&stderr));
     }
     parse_ffprobe_json_output(&stdout)
 }
@@ -670,7 +670,7 @@ fn extract_with_cpu_fallback(
     eprintln!(
         "⚠️  HWAccel {:?} decoding {} on {:?}, falling back to CPU software decoding.",
         hwaccel,
-        redact_url_userinfo(&err_detail),
+        redact_secrets(&err_detail),
         shown
     );
     let fallback = ResolvedFfmpeg {

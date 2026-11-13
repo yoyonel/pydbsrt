@@ -211,6 +211,11 @@ MAX_FAILED_ATTEMPTS: int = 3
 VIDEO_EXTENSIONS: Tuple[str, ...] = (".mkv", ".mp4", ".webm", ".avi")
 # MLSD entries that never hold library videos (Synology metadata, subtitle and placeholder folders)
 FTP_SKIPPED_NAMES: Tuple[str, ...] = (".", "..", "EMPTY_DIRS", "SRT", "@eaDir")
+MAX_FPS_INTEGER_DIGITS: int = 3
+MAX_FPS_FRACTION_DIGITS: int = 3
+MIN_FPS_TOKEN_VALUE: float = 1.0
+MAX_FPS_TOKEN_VALUE: float = 200.0
+AMBIGUOUS_INTEGER_FPS_TOKENS: frozenset[str] = frozenset({"24", "25", "30", "48", "50", "60"})
 PHASH_FPS_SUFFIX_RE = re.compile(r"\.\d+(\.\d+)?fps$")
 MOVIEHASH_RE = re.compile(r"[0-9a-f]{16}")
 
@@ -247,16 +252,49 @@ def load_certified_stems(couplings_file: Path) -> Set[str]:
     return stems
 
 
+def _is_valid_fps_int_part(token: str) -> bool:
+    return (
+        1 <= len(token) <= MAX_FPS_INTEGER_DIGITS and token.isdigit() and not (len(token) > 1 and token.startswith("0"))
+    )
+
+
+def strip_fps_token(without_ext: str) -> str:
+    """Strips a trailing `.<fps>fps` suffix without amputating release years or episode numbers."""
+    if not without_ext.endswith("fps"):
+        return without_ext
+    before_fps = without_ext[:-3]
+    last_dot = before_fps.rfind(".")
+    if last_dot < 0:
+        return without_ext
+    tail = before_fps[last_dot + 1 :]
+    prev_dot = before_fps.rfind(".", 0, last_dot)
+    if prev_dot >= 0:
+        int_part = before_fps[prev_dot + 1 : last_dot]
+        if (
+            _is_valid_fps_int_part(int_part)
+            and 1 <= len(tail) <= MAX_FPS_FRACTION_DIGITS
+            and tail.isdigit()
+            and tail not in AMBIGUOUS_INTEGER_FPS_TOKENS
+        ):
+            val = float(f"{int_part}.{tail}")
+            if MIN_FPS_TOKEN_VALUE <= val <= MAX_FPS_TOKEN_VALUE:
+                return before_fps[:prev_dot]
+    if _is_valid_fps_int_part(tail):
+        val = float(tail)
+        if MIN_FPS_TOKEN_VALUE <= val <= MAX_FPS_TOKEN_VALUE:
+            return before_fps[:last_dot]
+    return without_ext
+
+
 def ahash_logical_stem(ahash_name: str) -> str:
     """Logical stem matching Rust `ahash_logical_stem`: strips `.ahash` and trailing `.<fps>fps`."""
-    without_ext = ahash_name.removesuffix(".ahash")
-    return PHASH_FPS_SUFFIX_RE.sub("", without_ext)
+    return strip_fps_token(ahash_name.removesuffix(".ahash"))
 
 
 def phash_media_stem(phash_name: str) -> str:
     """Media stem of a .phash or .ahash file name: URL-decoded, without the extension, fps and video extension suffixes."""
     unquoted = urllib.parse.unquote(phash_name).removesuffix(".phash").removesuffix(".ahash")
-    raw_name = PHASH_FPS_SUFFIX_RE.sub("", unquoted)
+    raw_name = strip_fps_token(unquoted)
     for ext in VIDEO_EXTENSIONS:
         if raw_name.lower().endswith(ext):
             return raw_name[: -len(ext)]
@@ -353,7 +391,7 @@ def load_nas_ftp_index_targets(index_path: Path, base_dir: str) -> List[VideoTar
         for filename, rel in entries.items():
             clean_rel = rel.lstrip("/")
             if clean_base and clean_base != "all":
-                if not (clean_rel.startswith(clean_base + "/") or clean_rel.startswith(clean_base)):
+                if not (clean_rel.startswith(clean_base + "/") or clean_rel == clean_base):
                     continue
             targets.append(
                 VideoTarget(
@@ -505,9 +543,10 @@ def _ftp_resolve_size_and_path(connect: Callable[[], ftplib.FTP], path: str) -> 
 
 
 def _ftp_read_at(connect: Callable[[], ftplib.FTP], path: str, offset: int) -> bytes:
-    """Reads MOVIEHASH_CHUNK_BYTES at `offset` in its own FTP session, then drops the rest of the transfer."""
+    """Reads MOVIEHASH_CHUNK_BYTES at `offset` in binary mode in its own FTP session, then drops the rest."""
     ftp = connect()
     try:
+        ftp.voidcmd("TYPE I")
         conn = ftp.transfercmd(f"RETR {path}", rest=offset)
         data = bytearray()
         try:
@@ -550,13 +589,24 @@ def _http_file_size(url: str) -> int | None:
         return None
 
 
-def _http_read_at(url: str, offset: int) -> bytes:
-    """Reads MOVIEHASH_CHUNK_BYTES at `offset` with a Range request; empty unless the server honours that range."""
+def _http_content_range_matches(content_range: str, offset: int, expected_total: int | None) -> bool:
+    """Validates `bytes <offset>-<end>/<total>` against requested offset and expected total file size."""
+    range_spec, sep, total_str = content_range.rpartition("/")
+    if sep != "/" or not range_spec.startswith(f"bytes {offset}-"):
+        return False
+    clean_total = total_str.strip()
+    if not clean_total.isdigit():
+        return False
+    return expected_total is None or int(clean_total) == expected_total
+
+
+def _http_read_at(url: str, offset: int, expected_total: int | None = None) -> bytes:
+    """Reads MOVIEHASH_CHUNK_BYTES at `offset` with a Range request; empty unless offset and `/total` match."""
     request = urllib.request.Request(url, headers={"Range": f"bytes={offset}-{offset + MOVIEHASH_CHUNK_BYTES - 1}"})
     with urllib.request.urlopen(request, timeout=HTTP_RANGE_TIMEOUT_SECS) as resp:
-        # A 200 full body would hand the head back for the tail
-        if resp.status != HTTP_PARTIAL_CONTENT_STATUS or not resp.headers.get("Content-Range", "").startswith(
-            f"bytes {offset}-"
+        # Reject full-body 200 responses and stale inventory sizes disagreeing with `/total`
+        if resp.status != HTTP_PARTIAL_CONTENT_STATUS or not _http_content_range_matches(
+            resp.headers.get("Content-Range", ""), offset, expected_total
         ):
             return b""
         return resp.read(MOVIEHASH_CHUNK_BYTES)
@@ -573,15 +623,14 @@ def ranged_moviehash(read_at: Callable[[int], bytes], size: int) -> str | None:
     return moviehash_from_chunks(size, head, tail)
 
 
-def ftp_moviehash(connect: Callable[[], ftplib.FTP], path: str, size: int) -> str | None:
-    """Moviehash of a NAS file read over FTP; probes SIZE automatically when `size <= 0`."""
-    resolved_path = path
-    if size <= 0:
-        resolved = _ftp_resolve_size_and_path(connect, path)
-        if resolved is None:
-            return None
-        resolved_path, size = resolved
-    return ranged_moviehash(lambda offset: _ftp_read_at(connect, resolved_path, offset), size)
+def ftp_moviehash(connect: Callable[[], ftplib.FTP], path: str, size: int = 0) -> str | None:
+    """Moviehash of a NAS file read over FTP; always resolves authoritative binary SIZE and NFD/NFC path."""
+    _ = size
+    resolved = _ftp_resolve_size_and_path(connect, path)
+    if resolved is None:
+        return None
+    resolved_path, actual_size = resolved
+    return ranged_moviehash(lambda offset: _ftp_read_at(connect, resolved_path, offset), actual_size)
 
 
 def target_moviehash(target: VideoTarget, stream_base: str, child_env: Dict[str, str]) -> str | None:
@@ -591,7 +640,7 @@ def target_moviehash(target: VideoTarget, stream_base: str, child_env: Dict[str,
         media_url = build_stream_url(stream_base, target.rel_path)
         try:
             size = target.size_bytes if target.size_bytes > 0 else (_http_file_size(media_url) or 0)
-            return ranged_moviehash(lambda offset: _http_read_at(media_url, offset), size)
+            return ranged_moviehash(lambda offset: _http_read_at(media_url, offset, expected_total=size), size)
         except (OSError, http.client.HTTPException):
             return None
     if url.scheme != "ftp" or not url.hostname:
@@ -897,8 +946,7 @@ def process_single_video(
         dbsrt_bin,
         "media:add",
         build_stream_url(stream_base, target.rel_path),
-        "--media-name",
-        target.filename,
+        f"--media-name={target.filename}",
         "--hwaccel",
         "disabled",
         "--phash-dir",

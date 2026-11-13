@@ -612,17 +612,17 @@ REMOTE_SCRIPT
       echo "✓ catalog.dbphash updated."
     fi
     echo "-> Pulling CAS SRT subtitles..."
-    rsync -avz --progress --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/SRT/" "data/SRT/" || true
+    rsync -avz --progress --exclude '*.tmp' --exclude '*.tmp.*' --exclude '*.partial' --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/SRT/" "data/SRT/" || true
     echo "-> Pulling telemetry reports..."
-    rsync -avz --progress --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/reports/" "data/reports/" || true
+    rsync -avz --progress --exclude '*.tmp' --exclude '*.tmp.*' --exclude '*.partial' --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/reports/" "data/reports/" || true
     echo "-> Pulling audit runs & logs..."
-    rsync -avz --progress --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${O2SWITCH_HOST}:${REMOTE_BASE}/audit/" "audit/" || true
+    rsync -avz --progress --exclude '*.tmp' --exclude '*.tmp.*' --exclude '*.partial' --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${O2SWITCH_HOST}:${REMOTE_BASE}/audit/" "audit/" || true
     if [[ "${WITH_PHASH}" == "true" ]]; then
       mkdir -p data/__PHASH__ data/__AHASH__
       echo "-> Pulling loose .phash fingerprints & metadata..."
-      rsync -avz --progress --exclude '*.tmp' --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/__PHASH__/" "data/__PHASH__/" || true
+      rsync -avz --progress --exclude '*.tmp' --exclude '*.tmp.*' --exclude '*.partial' --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/__PHASH__/" "data/__PHASH__/" || true
       echo "-> Pulling loose .ahash fingerprints & metadata..."
-      rsync -avz --progress --exclude '*.tmp' --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/__AHASH__/" "data/__AHASH__/" || true
+      rsync -avz --progress --exclude '*.tmp' --exclude '*.tmp.*' --exclude '*.partial' --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/__AHASH__/" "data/__AHASH__/" || true
       python3 "${REPO_ROOT}/scripts/ingestion/phash_dedupe.py" "data/__PHASH__" --apply || true
     fi
     if systemctl --user is-active --quiet dbsrt-agent 2>/dev/null; then
@@ -657,7 +657,7 @@ REMOTE_SCRIPT
     fi
     mkdir -p "${TARGET_DIR}"
     echo "-> Backing up to ${TARGET_DIR}..."
-    rsync -avz --progress --ignore-existing --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/__PHASH__/" "${TARGET_DIR}/" || true
+    rsync -avz --progress --ignore-existing --exclude '*.tmp' --exclude '*.tmp.*' --exclude '*.partial' --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/__PHASH__/" "${TARGET_DIR}/" || true
     python3 "${REPO_ROOT}/scripts/ingestion/phash_dedupe.py" "${TARGET_DIR}" --apply || true
     echo "✓ Backup of raw .phash fingerprints completed to ${TARGET_DIR}."
     ;;
@@ -1113,10 +1113,13 @@ REMOTE_TRAJ_STATUS
   ahash-backfill)
     check_ssh
     BACKFILL_ARGS=("${@:2}")
-    rsync -a --chmod=F755 "${REPO_ROOT}/scripts/ingestion/backfill_ahash_sidecars.py" "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/"
+    rsync -a --chmod=F755 \
+      "${REPO_ROOT}/scripts/ingestion/backfill_ahash_sidecars.py" \
+      "${REPO_ROOT}/scripts/workers/o2switch_batch_worker.py" \
+      "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/"
     echo "=== Running aHash sidecar backfill on ${O2SWITCH_HOST} ==="
     # shellcheck disable=SC2029
-    ssh -o ServerAliveInterval=15 -o ServerAliveCountMax=3 "${O2SWITCH_HOST}" "cd $(printf '%q' "${REMOTE_BASE}") && PATH=$(printf '%q' "${REMOTE_BASE}/bin"):$PATH RAYON_NUM_THREADS=2 ./bin/python3 -u scripts/backfill_ahash_sidecars.py $(printf '%q ' "${BACKFILL_ARGS[@]}")"
+    ssh -o ServerAliveInterval=15 -o ServerAliveCountMax=3 "${O2SWITCH_HOST}" "cd $(printf '%q' "${REMOTE_BASE}") && PATH=\"\$HOME/${REMOTE_BASE}/bin:\$PATH\" RAYON_NUM_THREADS=2 ./bin/python3 -u scripts/backfill_ahash_sidecars.py $(printf '%q ' "${BACKFILL_ARGS[@]}")"
     ;;
 
   *)

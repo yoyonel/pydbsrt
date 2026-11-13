@@ -59,6 +59,7 @@ dbsrt media:add <VIDEO_PATH> [SRT_PATH] [OPTIONS]
 - `--hwaccel <mode>` : Moteur d'accélération matérielle (`auto`, `vaapi`, `cuda`, `qsv`, `disabled`). Par défaut : `auto` (utilise le GPU matériel si présent, avec fallback CPU automatique).
 - `--force` : Forcer le recalcul et l'écrasement des empreintes existantes.
 - `--ahash-dir <DIR>` : Répertoire de destination pour l'extraction conjointe de l'empreinte acoustique `.ahash` (mode dual-hash). Si le média est muet ou dépourvu de flux audio, bascule automatiquement et silencieusement sur le calcul pHash visuel seul sans lever d'erreur.
+- `--skip-phash` : Mode audio seul (requiert `--ahash-dir <DIR>`) : extrait uniquement l'empreinte `.ahash` et son sidecar `.json` en ignorant le décodage vidéo pHash, la certification SRT et le rechargement serveur.
 - `--no-reload` : Désactiver l'appel de hot-reload vers `dbsrt-server`.
 
 ---
