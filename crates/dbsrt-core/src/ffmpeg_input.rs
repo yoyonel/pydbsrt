@@ -21,6 +21,10 @@ pub const FFMPEG_THREADS_ENV: &str = "DBSRT_FFMPEG_THREADS";
 pub const FTP_USER_ENV: &str = "DBSRT_FTP_USER";
 /// Env var holding the FTP password for `ftp://` inputs without userinfo.
 pub const FTP_PASSWORD_ENV: &str = "DBSRT_FTP_PASSWORD";
+/// Standard fallback env var for FTP user when `DBSRT_FTP_USER` is unset.
+pub const FALLBACK_FTP_USER_ENV: &str = "FTP_USER";
+/// Standard fallback env var for FTP password when `DBSRT_FTP_PASSWORD` is unset.
+pub const FALLBACK_FTP_PASSWORD_ENV: &str = "FTP_PASSWORD";
 
 const FTP_SCHEME_PREFIX: &str = "ftp://";
 /// Reconnect (resuming with a Range request) when an `http(s)://` input drops mid-read, e.g.
@@ -67,8 +71,14 @@ pub fn ftp_credential_args(input: &str, user: Option<&str>, password: Option<&st
 /// Appends FTP credential input options from `DBSRT_FTP_USER` / `DBSRT_FTP_PASSWORD`
 /// when `input` is an `ftp://` URL without userinfo. Must be called before the input argument.
 pub fn apply_ftp_credentials(cmd: &mut Command, input: &Path) {
-    let user = std::env::var(FTP_USER_ENV).ok();
-    let password = std::env::var(FTP_PASSWORD_ENV).ok();
+    let user = std::env::var(FTP_USER_ENV)
+        .ok()
+        .filter(|v| !v.is_empty())
+        .or_else(|| std::env::var(FALLBACK_FTP_USER_ENV).ok());
+    let password = std::env::var(FTP_PASSWORD_ENV)
+        .ok()
+        .filter(|v| !v.is_empty())
+        .or_else(|| std::env::var(FALLBACK_FTP_PASSWORD_ENV).ok());
     cmd.args(ftp_credential_args(
         &input.to_string_lossy(),
         user.as_deref(),

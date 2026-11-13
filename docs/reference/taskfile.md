@@ -39,6 +39,7 @@ Cette page dresse le dictionnaire exhaustif de toutes les cibles d'orchestration
 | `task coupling:certify` | `task coupling:certify` | Découvre et certifie en lot tous les fichiers `.phash` et `.srt` présents. |
 | `task coupling:relabel` | `task coupling:relabel -- --media <hash> [--sub <hash>] --lang <code>` | Modifie la langue ou la confiance d'un couplage existant. |
 | `task audio:export-ahash` | `task audio:export-ahash -- --media <input> --output <ahash>` | Extrait l'empreinte spectrale acoustique Haitsma-Kalker `.ahash` v1.0 via `dbsrt export-ahash`. |
+| `task ahash:backfill-sidecars` | `task ahash:backfill-sidecars -- [--dry-run] [--limit N] [--workers W]` | Rattrape et vérifie localement via flux WAN les sidecars JSON `<stem>.json` de `data/__AHASH__/`. |
 
 ---
 
@@ -167,6 +168,7 @@ Cette page dresse le dictionnaire exhaustif de toutes les cibles d'orchestration
 | `task o2switch:batch:movies` | Exécute l'ingestion par batch distante sur les films vierges (/video, supporte `--daemon`, `--fresh-only`, `--retry-failed`, `--max-extraction-secs`). |
 | `task o2switch:batch:all` | Exécute l'ingestion batch unifiée sur l'intégralité du corpus distant (/tvshow + /video). |
 | `task o2switch:batch:ahash:all` | Exécute l'extraction batch audio pure (`--mode ahash`) en streaming sur l'ensemble de la bibliothèque. |
+| `task o2switch:ahash:backfill` | Exécute `backfill_ahash_sidecars.py` sur `o2switch` (`--dry-run`, `--limit`, `--workers <= 4`) pour peupler/vérifier `~/dbsrt/data/__AHASH__/*.json`. |
 | `task o2switch:batch:status` | Vérifie l'état d'exécution du démon batch (PID, CPU, mémoire, progression détaillée de la file). |
 | `task o2switch:batch:pause` | Met en pause douce le batch distant sur o2switch (`run/batch_paused` : les jobs en cours finissent, aucun nouveau job dépilé). |
 | `task o2switch:batch:resume` | Reprend l'exécution du batch distant sur o2switch en supprimant `run/batch_paused`. |

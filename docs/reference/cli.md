@@ -118,6 +118,25 @@ dbsrt export-ahash --media <MEDIA_PATH> --output <AHASH_PATH> [OPTIONS]
 
 ---
 
+### `ahash:sidecar` (alias `ahash-sidecar`)
+Génère, vérifie ou met à niveau le sidecar JSON `<stem>.json` d'un fichier `.ahash` existant.
+
+```text
+dbsrt ahash:sidecar --ahash <AHASH_PATH> --media <MEDIA_PATH_OR_URL> [OPTIONS]
+```
+
+- `--ahash <AHASH_PATH>` : Fichier binaire `.ahash` existant.
+- `--media <MEDIA_PATH_OR_URL>` : Chemin local ou URI réseau (`ftp://`, `http(s)://`) ; identifiants FTP transmis exclusivement via variables d'environnement (`DBSRT_FTP_USER`/`DBSRT_FTP_PASSWORD`, repli `FTP_USER`/`FTP_PASSWORD`).
+- `--moviehash <HEX>` : MovieHash OpenSubtitles 16-hex (déduit automatiquement depuis `<hash>.<fps>fps.ahash` si omis).
+- `--media-name <STR>` : Nom canonique du média enregistré dans `<stem>.json` (défaut : nom issu de `--media`).
+- `--source-id <STR>` / `--source-rel-path <STR>` : Métadonnées optionnelles de provenance source.
+- `--no-verify` : Sur conteneur multi-pistes, utilise la règle par défaut FFmpeg sans sondage audio (`selection = inferred_backfill`).
+- `--force` : Force la réécriture même si `selection` vaut déjà `explicit`, `single_track` ou `verified_backfill`.
+- `--json` : Émet le compte-rendu structuré JSON sur stdout.
+- **Vérification multi-pistes** : si le conteneur comporte plusieurs pistes audio (sauf `--no-verify`), échantillonne `5.0s` à `t = 50%` (avec bornage sûr sous `12.0s`) par piste (`-map 0:a:<k>`) et sélectionne celle minimisant la distance de Hamming glissante dans un rayon local `±2.0s` (`<= 14.0` bits → `verified_backfill`, sinon `unknown`).
+
+---
+
 ### `bench-ahash`
 Moteur de benchmark et de qualification métrologique de la corrélation croisée acoustique Haitsma-Kalker sur catalogue réel (Axe 1 précision temporelle, Axe 2 rejet faux-positifs, Axe 3 débit brut POPCNT).
 

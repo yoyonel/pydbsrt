@@ -38,7 +38,7 @@ Le format unitaire `.ahash` stocke la séquence temporelle d'empreintes audio 64
 
 ### 1ter. Sidecar JSON d'un `.ahash` (`<stem>.json`, schéma v1)
 
-Chaque `.ahash` écrit par `dbsrt export-ahash` ou `dbsrt media:add --ahash-dir` est accompagné d'un sidecar JSON (struct `AhashSidecar`, module `dbsrt-core/src/ahash_sidecar.rs`). Il documente le média source **et** la piste audio réellement décodée.
+Chaque `.ahash` écrit par `dbsrt export-ahash`, `dbsrt media:add --ahash-dir` ou rattrapé par `dbsrt ahash:sidecar` est accompagné d'un sidecar JSON (struct `AhashSidecar`, modules `dbsrt-core/src/ahash_sidecar.rs` et `dbsrt-core/src/ahash_backfill.rs`). Il documente le média source **et** la piste audio réellement décodée.
 
 - **Nommage** : `<stem>.json` dans le même dossier que le `.ahash`, où `<stem>` est le nom de fichier sans `.ahash` ni `.<fps>fps` (symétrique à `__PHASH__/<moviehash>.json`) :
   - `05b6126884056c42.86.1fps.ahash` → `05b6126884056c42.json`
@@ -61,13 +61,18 @@ Chaque `.ahash` écrit par `dbsrt export-ahash` ou `dbsrt media:add --ahash-dir`
 | `selected_audio_stream` | `AudioStreamInfo \| null` | Piste décodée : `index` (absolu, `0:<index>`), `audio_index` (relatif, `0:a:<k>`), `codec_name`, `channels`, `sample_rate`, `language` (ISO 639-2, ex. `fre`/`jpn`/`eng`), `title`, `is_default`. |
 | `container_audio_streams` | `AudioStreamInfo[]` | Toutes les pistes audio du conteneur (vide si inconnu). |
 | `extracted_at` | `u64` | Horodatage Unix (s) de génération du sidecar. |
+| `source_id` | `string` (opt.) | Identifiant logique de source média lors du backfill (jamais de secrets). |
+| `source_rel_path` | `string` (opt.) | Chemin relatif dans la source média lors du backfill. |
+| `verified_distance` | `f64` (opt.) | Distance de Hamming moyenne mesurée lors de la vérification multi-pistes. |
 
 | `selection` | Condition | Certitude |
 | :--- | :--- | :--- |
 | `explicit` | `--audio-track <k>` → `-map 0:a:<k>` | Certaine. |
 | `single_track` | Pas de `-map`, une seule piste audio | Certaine. |
+| `verified_backfill` | Backfill multi-pistes confirmé par sondage 5s à 50% (`±2s`, distance `<= 14.0` bits) | Certaine (vérifiée). |
 | `ffmpeg_default` | Pas de `-map`, plusieurs pistes | **Déduite** : 1ʳᵉ piste `is_default`, sinon la 1ʳᵉ ayant le plus de `channels`, sinon `0:a:0`. |
-| `unknown` | Pas de `-map` et `ffprobe` en échec (ou entrée pipe) | Inconnue. |
+| `inferred_backfill` | Backfill multi-pistes avec `--no-verify` (règle par défaut FFmpeg) | **Déduite**. |
+| `unknown` | `ffprobe` indisponible, aucune piste ou aucune piste `<= 14.0` bits lors du sondage | Inconnue. |
 
 !!! note "Lecture par le catalogue"
     `AHashCatalog::load_from_dir` lit le sidecar typé en priorité (`media_name`, `audio_language`, `audio_index`). À défaut, il garde l'ancien repli nom seul (`<moviehash>.json` dans `__AHASH__/` puis `../__PHASH__/`, clés `media_name` / `clean_title` / `filename`).

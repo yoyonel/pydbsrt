@@ -64,9 +64,13 @@ pub fn audio_track_stem(stem: &str, audio_index: usize) -> String {
 /// # Data Flow & Invariants
 /// * `Explicit`: `-map 0:a:<k>` was passed (`--audio-track`): certain.
 /// * `SingleTrack`: no `-map`, container has exactly one audio stream: certain.
+/// * `VerifiedBackfill`: multi-track backfill verified empirically via Hamming sliding
+///   matching (`mean_distance <= DEFAULT_MAX_AUDIO_MATCH_DISTANCE`): certain.
 /// * `FfmpegDefault`: no `-map`, several audio streams: the selected stream is *inferred*
 ///   with [`ffmpeg_default_audio_index`] (not observed from FFmpeg itself).
-/// * `Unknown`: no `-map` and the container audio streams could not be probed.
+/// * `InferredBackfill`: multi-track backfill with `--no-verify` using FFmpeg default
+///   inference without acoustic matching.
+/// * `Unknown`: audio topology unavailable, probe failed, or no multi-track candidate matched.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AudioTrackSelection {
@@ -74,10 +78,34 @@ pub enum AudioTrackSelection {
     Explicit,
     /// Container holds exactly one audio stream.
     SingleTrack,
+    /// Multi-track backfill confirmed via sliding Hamming verification against `.ahash`.
+    VerifiedBackfill,
     /// FFmpeg automatic selection among several streams (inferred track).
     FfmpegDefault,
-    /// Audio topology unavailable (probe failed or pipe input).
+    /// Multi-track backfill skipped verification (`--no-verify`), using inferred FFmpeg default.
+    InferredBackfill,
+    /// Audio topology unavailable, probe failed, or no multi-track candidate passed verification.
     Unknown,
+}
+
+impl AudioTrackSelection {
+    /// Returns `true` when the selected audio track identity is empirically certain or verified.
+    ///
+    /// # Returns
+    /// `true` for [`Self::Explicit`], [`Self::SingleTrack`], and [`Self::VerifiedBackfill`].
+    ///
+    /// # Panics
+    /// Guarantee: Never panics.
+    ///
+    /// # Data Flow & Invariants
+    /// Used by idempotent backfill (`ahash:sidecar`): only uncertain selections (`FfmpegDefault`,
+    /// `InferredBackfill`, `Unknown`) may be upgraded automatically without `--force`.
+    pub fn is_certain_or_verified(self) -> bool {
+        matches!(
+            self,
+            Self::Explicit | Self::SingleTrack | Self::VerifiedBackfill
+        )
+    }
 }
 
 /// Selection mode plus the resolved stream metadata (when known).
@@ -169,6 +197,15 @@ pub struct AhashSidecar {
     pub container_audio_streams: Vec<AudioStreamInfo>,
     /// Unix timestamp (seconds) of sidecar generation.
     pub extracted_at: u64,
+    /// Optional logical media source identifier recorded by backfill orchestration (never credentials).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_id: Option<String>,
+    /// Optional relative path within the source repository recorded by backfill orchestration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_rel_path: Option<String>,
+    /// Mean Hamming distance measured when `selection == VerifiedBackfill` (or best candidate distance).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verified_distance: Option<f64>,
 }
 
 /// Strips the trailing `.<rate>fps` token (`.86.1fps`, `.24fps`) from a file stem.
@@ -365,6 +402,9 @@ impl AhashSidecar {
             selected_audio_stream: track.stream,
             container_audio_streams: streams.to_vec(),
             extracted_at,
+            source_id: None,
+            source_rel_path: None,
+            verified_distance: None,
         }
     }
 
@@ -539,6 +579,12 @@ mod tests {
             resolve_audio_track(&[], None).selection,
             AudioTrackSelection::Unknown
         );
+        assert!(AudioTrackSelection::Explicit.is_certain_or_verified());
+        assert!(AudioTrackSelection::SingleTrack.is_certain_or_verified());
+        assert!(AudioTrackSelection::VerifiedBackfill.is_certain_or_verified());
+        assert!(!AudioTrackSelection::FfmpegDefault.is_certain_or_verified());
+        assert!(!AudioTrackSelection::InferredBackfill.is_certain_or_verified());
+        assert!(!AudioTrackSelection::Unknown.is_certain_or_verified());
         let r = resolve_audio_track(&[], Some(3));
         assert_eq!(r.selection, AudioTrackSelection::Explicit);
         assert!(r.stream.is_none());

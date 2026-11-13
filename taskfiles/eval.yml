@@ -139,6 +139,12 @@ tasks:
     cmds:
       - ./target/release/dbsrt export-ahash {{.CLI_ARGS}}
 
+  ahash:backfill-sidecars:
+    desc: Backfill missing/multi-track .ahash JSON sidecars locally using remote WAN streams (--dry-run, --limit N, --workers W<=4)
+    deps: [rs:build]
+    cmds:
+      - uv run --no-sync python scripts/ingestion/backfill_ahash_sidecars.py {{.CLI_ARGS}}
+
   bench:ahash:matching:
     desc: Run exhaustive acoustic cross-correlation benchmark on .ahash files (Axe 1 temporal, Axe 2 discrimination, Axe 3 throughput)
     aliases: [bench:ahash]
