@@ -1,7 +1,61 @@
-use dbsrt_index::dbphash::MmapDbphash;
+use dbsrt_core::metadata::MediaMetadata;
+use dbsrt_index::dbphash::{DbphashBuilder, MmapDbphash};
 use dbsrt_index::mih::MultiIndexHash64;
 use std::path::Path;
 use std::time::Instant;
+
+const MAX_DEBUG_SAMPLE_MEDIAS: usize = 5;
+
+#[allow(unexpected_cfgs)]
+fn open_benchmark_catalog(catalog_path: &Path) -> (Option<tempfile::TempDir>, MmapDbphash) {
+    let full_mmap = MmapDbphash::open(catalog_path).expect("Failed to open catalog.dbphash");
+    let use_bounded_sample =
+        cfg!(coverage) || cfg!(debug_assertions) || std::env::var_os("LLVM_PROFILE_FILE").is_some();
+
+    if !use_bounded_sample || full_mmap.media_entries().len() <= MAX_DEBUG_SAMPLE_MEDIAS {
+        return (None, full_mmap);
+    }
+
+    let tmp = tempfile::tempdir().expect("tempdir for bounded catalog sample");
+    let sample_path = tmp.path().join("sample_catalog.dbphash");
+    let mut builder = DbphashBuilder::new();
+    let all_cuts = full_mmap.cuts_entries();
+    let all_sparse = full_mmap.sparse_entries();
+
+    for entry in full_mmap
+        .media_entries()
+        .iter()
+        .take(MAX_DEBUG_SAMPLE_MEDIAS)
+    {
+        let title = full_mmap.get_title(entry);
+        let meta = MediaMetadata::parse(title);
+        let c_start = entry.cuts_start_idx as usize;
+        let c_end = (c_start + entry.cuts_count as usize).min(all_cuts.len());
+        let cuts: Vec<(u64, u32)> = all_cuts[c_start..c_end]
+            .iter()
+            .map(|c| (c.phash, c.timestamp_ms))
+            .collect();
+
+        let s_start = entry.sparse_start_idx as usize;
+        let s_end = (s_start + entry.sparse_count as usize).min(all_sparse.len());
+        let sparse: Vec<(u64, u32)> = all_sparse[s_start..s_end]
+            .iter()
+            .map(|s| (s.phash, s.timestamp_ms))
+            .collect();
+
+        let fps = (entry.fps_x1000 as f64 / 1000.0).max(1.0);
+        let id = builder.add_media(&meta, entry.duration_ms, fps, &cuts, &sparse);
+        if let Some(fc) = entry.known_frame_count() {
+            builder.set_frame_count(id, fc);
+        }
+    }
+
+    builder
+        .write_to_file(&sample_path)
+        .expect("write bounded sample_catalog.dbphash");
+    let sample_mmap = MmapDbphash::open(&sample_path).expect("open sample_catalog.dbphash");
+    (Some(tmp), sample_mmap)
+}
 
 #[test]
 fn test_mih_vs_linear_on_real_catalog() {
@@ -14,7 +68,7 @@ fn test_mih_vs_linear_on_real_catalog() {
         return;
     };
 
-    let mmap = MmapDbphash::open(catalog_path).expect("Failed to open catalog.dbphash");
+    let (_tmp_guard, mmap) = open_benchmark_catalog(catalog_path);
     let sparse_entries = mmap.sparse_entries();
     let cuts_entries = mmap.cuts_entries();
 
@@ -40,7 +94,12 @@ fn test_mih_vs_linear_on_real_catalog() {
     );
 
     // Pick 25 query frames from a known media
-    let query_frames: Vec<u64> = sparse_entries[1000..1025].iter().map(|e| e.phash).collect();
+    let q_start = 1000.min(sparse_entries.len().saturating_sub(25));
+    let q_end = (q_start + 25).min(sparse_entries.len());
+    let query_frames: Vec<u64> = sparse_entries[q_start..q_end]
+        .iter()
+        .map(|e| e.phash)
+        .collect();
     let max_dist = 6;
 
     // 2. Measure Sparse: Linear Scan vs MIH

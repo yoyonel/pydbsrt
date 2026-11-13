@@ -5,6 +5,7 @@ use dbsrt_core::{match_audio_sequence, DEFAULT_MAX_AUDIO_MATCH_DISTANCE};
 use std::path::PathBuf;
 
 #[test]
+#[allow(unexpected_cfgs)]
 fn test_remote_pulled_ahash_files_integrity_and_recognition() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let ahash_dir = manifest_dir.join("../../data/__AHASH__");
@@ -27,8 +28,20 @@ fn test_remote_pulled_ahash_files_integrity_and_recognition() {
     }
 
     test_files.sort();
-    const MAX_REMOTE_TEST_FILES: usize = 10;
-    test_files.truncate(MAX_REMOTE_TEST_FILES);
+    let use_bounded_sample =
+        cfg!(coverage) || cfg!(debug_assertions) || std::env::var_os("LLVM_PROFILE_FILE").is_some();
+    const MAX_RELEASE_REMOTE_TEST_FILES: usize = 10;
+    const MAX_DEBUG_REMOTE_TEST_FILES: usize = 3;
+    const MAX_DEBUG_REF_WINDOW_FRAMES: usize = 4_096;
+    const DEBUG_QUERY_FRAMES: usize = 256;
+    const RELEASE_QUERY_FRAMES: usize = 861;
+
+    let max_files = if use_bounded_sample {
+        MAX_DEBUG_REMOTE_TEST_FILES
+    } else {
+        MAX_RELEASE_REMOTE_TEST_FILES
+    };
+    test_files.truncate(max_files);
 
     println!(
         "Testing {} .ahash file(s) from o2switch batch:",
@@ -62,14 +75,24 @@ fn test_remote_pulled_ahash_files_integrity_and_recognition() {
             fps
         );
 
-        // Self-recognition test on a 10-second slice (861 frames) extracted from the middle
-        let query_len = 861.min(ahash_file.hashes.len() / 2);
-        let start_offset = ahash_file.hashes.len() / 4;
-        let query_slice = &ahash_file.hashes[start_offset..start_offset + query_len];
+        let ref_hashes =
+            if use_bounded_sample && ahash_file.hashes.len() > MAX_DEBUG_REF_WINDOW_FRAMES {
+                &ahash_file.hashes[..MAX_DEBUG_REF_WINDOW_FRAMES]
+            } else {
+                &ahash_file.hashes[..]
+            };
+        let target_query_frames = if use_bounded_sample {
+            DEBUG_QUERY_FRAMES
+        } else {
+            RELEASE_QUERY_FRAMES
+        };
+        let query_len = target_query_frames.min(ref_hashes.len() / 2);
+        let start_offset = ref_hashes.len() / 4;
+        let query_slice = &ref_hashes[start_offset..start_offset + query_len];
 
         let match_res = match_audio_sequence(
             query_slice,
-            &ahash_file.hashes,
+            ref_hashes,
             fps,
             DEFAULT_MAX_AUDIO_MATCH_DISTANCE,
         )
@@ -93,12 +116,22 @@ fn test_remote_pulled_ahash_files_integrity_and_recognition() {
         let (name1, f1) = &loaded_files[0];
         let (name2, f2) = &loaded_files[1];
 
-        let query_len = 861.min(f1.hashes.len());
+        let ref2_hashes = if use_bounded_sample && f2.hashes.len() > MAX_DEBUG_REF_WINDOW_FRAMES {
+            &f2.hashes[..MAX_DEBUG_REF_WINDOW_FRAMES]
+        } else {
+            &f2.hashes[..]
+        };
+        let target_query_frames = if use_bounded_sample {
+            DEBUG_QUERY_FRAMES
+        } else {
+            RELEASE_QUERY_FRAMES
+        };
+        let query_len = target_query_frames.min(f1.hashes.len());
         let query_slice = &f1.hashes[0..query_len];
 
         let cross_match = match_audio_sequence(
             query_slice,
-            &f2.hashes,
+            ref2_hashes,
             f2.header.audio_fps(),
             DEFAULT_MAX_AUDIO_MATCH_DISTANCE,
         );

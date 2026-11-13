@@ -751,7 +751,7 @@ fn default_ahash_limit() -> usize {
 }
 
 /// Request payload for acoustic fingerprint search (`POST /v1/search/ahash`).
-#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct AHashSearchRequest {
     /// Raw sequence of 64-bit integer hashes.
     pub hashes: Option<Vec<u64>>,
@@ -768,6 +768,20 @@ pub struct AHashSearchRequest {
     pub limit: usize,
     /// Optional specific target media name to filter/match.
     pub media_name: Option<String>,
+}
+
+impl Default for AHashSearchRequest {
+    fn default() -> Self {
+        Self {
+            hashes: None,
+            fingerprint: None,
+            ahash_bytes: None,
+            audio_fps: None,
+            max_distance: None,
+            limit: default_ahash_limit(),
+            media_name: None,
+        }
+    }
 }
 
 /// Alias for `AHashSearchRequest` matching RFC specification nomenclature.

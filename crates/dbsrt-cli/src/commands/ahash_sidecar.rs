@@ -5,12 +5,12 @@ use anyhow::Result;
 use clap::Args;
 use dbsrt_core::{
     ahash_logical_stem, backfill_ahash_sidecar, BackfillAction, BackfillSidecarOutcome,
-    BackfillSidecarRequest, TrackVerificationProbe, MOVIEHASH_HEX_LENGTH,
+    BackfillSidecarRequest, TrackVerificationProbe,
 };
 use serde::Serialize;
 use std::path::PathBuf;
 
-use crate::commands::shared::resolve_media_path_filename;
+use crate::commands::shared::{parse_moviehash, resolve_media_path_filename};
 
 /// Command-line arguments for `dbsrt ahash:sidecar`.
 #[derive(Args, Debug, Clone)]
@@ -24,7 +24,7 @@ pub struct AhashSidecarArgs {
     pub media: PathBuf,
 
     /// Optional 16-hex OpenSubtitles MovieHash (inferred automatically from `<hash>.<fps>fps.ahash`).
-    #[arg(long)]
+    #[arg(long, value_parser = parse_moviehash)]
     pub moviehash: Option<String>,
 
     /// Canonical media file name stored in `<stem>.json` (defaults to filename of `--media`).
@@ -72,11 +72,7 @@ struct AhashSidecarCliReport {
 fn infer_moviehash_from_ahash_path(ahash_path: &std::path::Path) -> Option<String> {
     let file_name = ahash_path.file_name()?.to_str()?;
     let stem = ahash_logical_stem(file_name);
-    if stem.len() == MOVIEHASH_HEX_LENGTH && stem.bytes().all(|b| b.is_ascii_hexdigit()) {
-        Some(stem.to_ascii_lowercase())
-    } else {
-        None
-    }
+    parse_moviehash(stem).ok()
 }
 
 /// Prints a human-readable or `--json` summary of [`BackfillSidecarOutcome`].
@@ -228,6 +224,10 @@ mod tests {
         );
         assert_eq!(
             infer_moviehash_from_ahash_path(Path::new("Episode.1.mkv.86.1fps.ahash")),
+            None
+        );
+        assert_eq!(
+            infer_moviehash_from_ahash_path(Path::new("0000000000000000.86.1fps.ahash")),
             None
         );
     }

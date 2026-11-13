@@ -53,6 +53,7 @@ local file_info = {
 local candidates_store = {}
 local last_matching_tier = nil
 local last_matched_ref = nil
+local last_recognition_method = "pHash"
 local input_table = {}
 local selected_lang_code = "fre"
 
@@ -408,7 +409,7 @@ function update_file_info()
         return false
     end
 
-    file_info.path = vlc.strings.decode_uri(file_info.uri):gsub("^file://", "")
+    file_info.path = vlc.strings.decode_uri(file_info.uri):gsub("^file:///([A-Za-z]:)", "%1"):gsub("^file://", "")
     file_info.filename = file_info.path:match("([^/\\]+)$") or file_info.path
 
     -- Strip extension from filename using last dot: ^(.+)%.([^%.]+)$
@@ -684,8 +685,11 @@ function run_search(mode)
     end
 
     local is_relay = matching_tier and (string.find(matching_tier, "Remote Relay") ~= nil)
+    local is_ahash = (mode == "ahash") or (matching_tier ~= nil and string.find(matching_tier, "aHash") ~= nil)
+    local recognition_method = is_ahash and "aHash" or "pHash"
     last_matching_tier = matching_tier
     last_matched_ref = matched_media
+    last_recognition_method = recognition_method
 
     local origin_banner = is_relay and "CLOUD o2switch relay" or "LOCAL DAEMON"
     log_info("================================================================================")
@@ -694,8 +698,8 @@ function run_search(mode)
         matched_media or "none", confidence_str or "0.0", req_elapsed_ms)
     log_info("================================================================================")
 
-    log_info("[Search] Server response in %.2fms: matched_ref='%s', confidence=%s%%, visual shift=%sframes / %sms",
-        req_elapsed_ms, matched_media or "none", confidence_str or "0.0", shift_frames or "0", shift_ms_str or "0.0")
+    log_info("[Search] Server response in %.2fms: matched_ref='%s', confidence=%s%%, %s shift=%sframes / %sms",
+        req_elapsed_ms, matched_media or "none", confidence_str or "0.0", recognition_method, shift_frames or "0", shift_ms_str or "0.0")
 
     -- Extract & log fingerprints (MovieHash & pHash frames) in DEBUG mode
     local moviehash = string.match(body, '"moviehash":%s*"([^"]+)"')
@@ -794,10 +798,12 @@ function display_subtitles()
     end
 
     local is_relay = last_matching_tier and (string.find(last_matching_tier, "Remote Relay") ~= nil)
+    local is_ahash = (last_recognition_method == "aHash") or (last_matching_tier ~= nil and string.find(last_matching_tier, "aHash") ~= nil)
+    local cert_badge = is_ahash and "aHash certified" or "pHash certified"
     for idx, c in ipairs(candidates_store) do
         local source_tag = c.source:upper()
         if c.source == "certified" or c.source == "certified_synced" then
-            source_tag = is_relay and "[CLOUD o2switch] pHash certified" or "pHash certified"
+            source_tag = is_relay and ("[CLOUD o2switch] " .. cert_badge) or cert_badge
         elseif c.source == "container" then
             source_tag = "container"
         elseif c.source == "catalog" then
@@ -839,8 +845,8 @@ function download_selection()
     if candidate.shift_ms and math.abs(candidate.shift_ms) > 1.0 then
         is_resync = true
         shift_param = string.format("%.2f", candidate.shift_ms)
-        log_info("[Download] Visual resynchronization active: shift_ms=%+.2fms (%.2fs)",
-            candidate.shift_ms, candidate.shift_ms / MILLIS_PER_SEC)
+        log_info("[Download] %s resynchronization active: shift_ms=%+.2fms (%.2fs)",
+            last_recognition_method or "pHash", candidate.shift_ms, candidate.shift_ms / MILLIS_PER_SEC)
     else
         log_info("[Download] Standard 1:1 injection without shift (shift_ms=0.0)")
     end

@@ -189,6 +189,26 @@ def test_process_single_video_without_moviehash_keeps_the_stem(tmp_path: Path, m
     assert "--moviehash" not in (tmp_path / "logs" / "workers" / "Raw Name.log").read_text(encoding="utf-8")
 
 
+def test_process_single_video_truncates_and_hashes_overlong_stem_without_moviehash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(worker, "target_moviehash", lambda target, stream_base, env: None)
+    fake_dbsrt = tmp_path / "dbsrt"
+    fake_dbsrt.write_text('#!/bin/sh\nprintf "%s\\n" "$@"\n', encoding="utf-8")
+    fake_dbsrt.chmod(0o755)
+    overlong_name = ("Épisode_Très_Long_" * 20) + ".mkv"
+    target = VideoTarget(f"/tv/{overlong_name}", overlong_name, 200_000)
+    env = {"PATH": os.environ["PATH"]}
+    rec = worker.process_single_video(
+        target, "ftp://nas:21", str(fake_dbsrt), env, threading.Lock(), tmp_path / "ev.jsonl"
+    )
+    assert rec["success"] is True
+    logs = sorted(p.name for p in (tmp_path / "logs" / "workers").iterdir())
+    assert len(logs) == 1
+    assert len(logs[0].encode("utf-8")) < 200
+
+
 FREEBOX_TARGET = VideoTarget("/Disque_1_1/Vidéos/Raw Name.mkv", "Raw Name.mkv", 200_000)
 
 

@@ -13,6 +13,7 @@ import argparse
 import atexit
 import contextlib
 import ftplib
+import hashlib
 import http.client
 import json
 import mmap
@@ -218,6 +219,22 @@ MAX_FPS_TOKEN_VALUE: float = 200.0
 AMBIGUOUS_INTEGER_FPS_TOKENS: frozenset[str] = frozenset({"24", "25", "30", "48", "50", "60"})
 PHASH_FPS_SUFFIX_RE = re.compile(r"\.\d+(\.\d+)?fps$")
 MOVIEHASH_RE = re.compile(r"[0-9a-f]{16}")
+MAX_LOG_STEM_BYTES: int = 120
+LOG_STEM_HASH_HEX_LEN: int = 12
+
+
+def safe_worker_log_stem(filename: str, moviehash: str | None = None) -> str:
+    """Returns a filesystem-safe, length-bounded log stem preventing ENAMETOOLONG (os error 36)."""
+    if moviehash and MOVIEHASH_RE.fullmatch(moviehash):
+        return moviehash
+    raw_stem = Path(filename).stem
+    safe_stem = raw_stem.replace("/", "_").replace("\x00", "") or "target"
+    encoded = safe_stem.encode("utf-8", errors="surrogateescape")
+    if len(encoded) <= MAX_LOG_STEM_BYTES:
+        return safe_stem
+    digest = hashlib.sha256(encoded).hexdigest()[:LOG_STEM_HASH_HEX_LEN]
+    prefix = encoded[:MAX_LOG_STEM_BYTES].decode("utf-8", errors="ignore").rstrip(" ._-")
+    return f"{prefix}_{digest}"
 
 
 def resolve_nas_password() -> str:
@@ -964,8 +981,9 @@ def process_single_video(
     start_time = time.time()
     print(f"--> [DEBUG] Launching dbsrt for {target.filename}...", flush=True)
 
-    # The moviehash names the log: a 250+ byte media name cannot (os error 36)
-    log_path = Path("logs") / "workers" / f"{moviehash or Path(target.filename).stem}.log"
+    # The moviehash or truncated/hashed safe_stem names the log: a 250+ byte media name cannot (os error 36)
+    safe_stem = safe_worker_log_stem(target.filename, moviehash)
+    log_path = Path("logs") / "workers" / f"{safe_stem}.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     status = "ERROR"
     returncode: int | None = None

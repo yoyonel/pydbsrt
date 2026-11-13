@@ -1,7 +1,8 @@
 //! Application state, database connection pooling, and telemetry metrics.
 
 use crate::constants::{
-    LOG_BUFFER_CAPACITY, SECONDS_PER_DAY, SECONDS_PER_HOUR, SECONDS_PER_MINUTE,
+    DEFAULT_HEAVY_TASK_PERMITS, LOG_BUFFER_CAPACITY, SECONDS_PER_DAY, SECONDS_PER_HOUR,
+    SECONDS_PER_MINUTE,
 };
 use crate::dtos::{CatalogCompactResponse, CatalogReloadResponse, CatalogStatusResponse};
 use anyhow::Result;
@@ -173,6 +174,8 @@ pub struct AppState {
     pub compact_in_progress: Arc<std::sync::atomic::AtomicBool>,
     pub delta_index: Arc<std::sync::RwLock<DeltaIndex>>,
     pub latest_search: Arc<std::sync::RwLock<Option<crate::dtos::LatestSearchTelemetry>>>,
+    /// Concurrency semaphore bounding simultaneous heavy FFmpeg/catalog search tasks.
+    pub heavy_task_semaphore: Arc<tokio::sync::Semaphore>,
 }
 
 /// Sibling directory basename holding acoustic `.ahash` fingerprints next to `SRT/`.
@@ -200,7 +203,7 @@ const TMP_EMPTY_AHASH_DIR: &str = "/tmp/__dbsrt_empty_ahash__";
 ///   `${DATA_DIR}/__AHASH__`.
 /// * Hermetic tests (`tmp_dir/SRT`, `work_dir`, `/tmp`) stay isolated inside their own
 ///   scratch root instead of scanning the repository's 100M+ frame `data/__AHASH__` store.
-fn resolve_default_ahash_dir(caller_subtitles_dir: &Path) -> PathBuf {
+pub fn resolve_default_ahash_dir(caller_subtitles_dir: &Path) -> PathBuf {
     if caller_subtitles_dir == Path::new("/tmp") {
         return PathBuf::from(TMP_EMPTY_AHASH_DIR);
     }
@@ -268,44 +271,8 @@ impl AppState {
         provider: Arc<dyn SubtitleProvider>,
         options: AppStateInitOptions,
     ) -> Self {
-        let default_catalog = if Path::new("data/catalog.dbphash").exists() {
-            PathBuf::from("data/catalog.dbphash")
-        } else {
-            PathBuf::from("../../data/catalog.dbphash")
-        };
-        let initial_catalog_path = match options.dbphash_path {
-            Some(p) => Some(p),
-            None if default_catalog.exists() => Some(default_catalog),
-            None => None,
-        };
-
-        let mut extra_phash_dirs = options.extra_phash_dirs;
-        let default_repo_phash = if Path::new("data/__PHASH__").exists() {
-            PathBuf::from("data/__PHASH__")
-        } else {
-            PathBuf::from("../../data/__PHASH__")
-        };
-        if initial_catalog_path.is_none()
-            && default_repo_phash != phash_dir
-            && !extra_phash_dirs.contains(&default_repo_phash)
-            && default_repo_phash.exists()
-        {
-            extra_phash_dirs.push(default_repo_phash);
-        }
-
-        let caller_subtitles_dir = subtitles_dir.clone();
-        let default_srt = if Path::new("data/SRT").exists() {
-            PathBuf::from("data/SRT")
-        } else {
-            PathBuf::from("../../data/SRT")
-        };
-        let subtitles_dir = if (!subtitles_dir.exists() || subtitles_dir == Path::new("/tmp"))
-            && default_srt.exists()
-        {
-            default_srt
-        } else {
-            subtitles_dir
-        };
+        let initial_catalog_path = options.dbphash_path;
+        let extra_phash_dirs = options.extra_phash_dirs;
 
         let reg_path = CouplingRegistry::default_path(&subtitles_dir);
         let coupling_registry = Arc::new(std::sync::RwLock::new(
@@ -313,21 +280,26 @@ impl AppState {
         ));
 
         let mut all_dirs = Vec::new();
-        if phash_dir.exists() && phash_dir != Path::new("/tmp") {
-            all_dirs.push(phash_dir.clone());
+        if initial_catalog_path.is_none() {
+            if phash_dir.exists() && phash_dir != Path::new("/tmp") {
+                all_dirs.push(phash_dir.clone());
+            }
+            all_dirs.extend_from_slice(&extra_phash_dirs);
         }
-        all_dirs.extend_from_slice(&extra_phash_dirs);
 
         let initial_engine =
             PhashEngine::open(initial_catalog_path.as_deref(), &all_dirs).unwrap_or_default();
 
         let dbphash_reader = Arc::new(ArcSwapOption::new(initial_engine.dbphash_arc()));
 
-        let ahash_dir = options
-            .ahash_dir
-            .unwrap_or_else(|| resolve_default_ahash_dir(&caller_subtitles_dir));
-        let initial_ahash_catalog =
-            AHashCatalog::load_from_dir(&ahash_dir).unwrap_or_else(|_| AHashCatalog::empty());
+        let (ahash_dir, initial_ahash_catalog) = match options.ahash_dir {
+            Some(dir) => {
+                let cat =
+                    AHashCatalog::load_from_dir(&dir).unwrap_or_else(|_| AHashCatalog::empty());
+                (dir, cat)
+            }
+            None => (PathBuf::from(TMP_EMPTY_AHASH_DIR), AHashCatalog::empty()),
+        };
         let ahash_catalog = Arc::new(ArcSwap::from_pointee(initial_ahash_catalog));
 
         Self {
@@ -356,6 +328,7 @@ impl AppState {
             compact_in_progress: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             delta_index: Arc::new(std::sync::RwLock::new(DeltaIndex::new())),
             latest_search: Arc::new(std::sync::RwLock::new(None)),
+            heavy_task_semaphore: Arc::new(tokio::sync::Semaphore::new(DEFAULT_HEAVY_TASK_PERMITS)),
         }
     }
 
@@ -417,6 +390,37 @@ impl AppState {
         if let Ok(reg) = CouplingRegistry::load_or_default(&reg_path) {
             if let Ok(mut lock) = self.coupling_registry.write() {
                 *lock = reg;
+            }
+        }
+    }
+
+    /// Loads and pre-warms the `.ahash` catalog during Phase 1 of [`Self::reload_catalog`].
+    ///
+    /// # Arguments
+    /// None (operates on `&self`).
+    ///
+    /// # Returns
+    /// `Some(Arc<AHashCatalog>)` with `mih32` pre-warmed when `load_from_dir` succeeds, or `None`
+    /// on I/O failure so the caller preserves the existing atomic catalog snapshot.
+    ///
+    /// # Panics
+    /// Guaranteed panic-free.
+    ///
+    /// # Data Flow & Invariants
+    /// Executes completely outside runtime locks before Phase 2 pointer swap.
+    fn prepare_ahash_reload(&self) -> Option<Arc<AHashCatalog>> {
+        match AHashCatalog::load_from_dir(&self.ahash_dir) {
+            Ok(cat) => Some(Arc::new(cat)),
+            Err(e) => {
+                self.push_log(
+                    "CATALOG",
+                    "WARN",
+                    format!(
+                        "Failed to reload aHash catalog from {:?}: {:#}; keeping existing snapshot",
+                        self.ahash_dir, e
+                    ),
+                );
+                None
             }
         }
     }
@@ -501,6 +505,8 @@ impl AppState {
             None
         };
 
+        let new_ahash_opt = self.prepare_ahash_reload();
+
         // --- Phase 2: Commit Atomically (cannot fail) ---
         let coupling_count = new_couplings
             .couplings
@@ -521,11 +527,12 @@ impl AppState {
             }
         }
 
-        let new_ahash =
-            AHashCatalog::load_from_dir(&self.ahash_dir).unwrap_or_else(|_| AHashCatalog::empty());
-        let ahash_medias = new_ahash.entries.len();
-        let ahash_frames = new_ahash.total_frames;
-        self.ahash_catalog.store(Arc::new(new_ahash));
+        if let Some(new_ahash) = new_ahash_opt {
+            self.ahash_catalog.store(new_ahash);
+        }
+        let current_ahash = self.ahash_catalog.load();
+        let ahash_medias = current_ahash.entries.len();
+        let ahash_frames = current_ahash.total_frames;
 
         let elapsed_ms = t0.elapsed().as_secs_f64() * 1000.0;
         self.push_log(

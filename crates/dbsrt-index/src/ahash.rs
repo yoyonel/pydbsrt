@@ -817,6 +817,7 @@ impl AHashCatalog {
         &self,
         query: &[u64],
         stride: usize,
+        target_media: Option<&str>,
     ) -> HashMap<(usize, usize), u32> {
         let mih = self.mih();
         let step = stride.max(1);
@@ -835,13 +836,30 @@ impl AHashCatalog {
                     state.0.clear();
                     self.probe_frame_hits(mih, (k, q_hash), &mut state.0);
                     for &pair in &state.0 {
-                        *state.1.entry(pair).or_default() += 1;
+                        if target_media
+                            .is_none_or(|t| self.entries[pair.0].media_name.eq_ignore_ascii_case(t))
+                        {
+                            *state.1.entry(pair).or_default() += 1;
+                        }
                     }
                     state
                 },
             )
             .map(|(_, local_votes)| local_votes)
             .reduce(HashMap::new, merge_vote_maps)
+    }
+
+    /// Computes total indexed frames across all catalog entries or only those matching `target_media`.
+    fn target_frames_count(&self, target_media: Option<&str>) -> usize {
+        match target_media {
+            Some(target) => self
+                .entries
+                .iter()
+                .filter(|e| e.media_name.eq_ignore_ascii_case(target))
+                .map(|e| e.frame_count)
+                .sum(),
+            None => self.total_frames,
+        }
     }
 
     /// Filters and ranks candidate clusters by temporal vote density with jitter aggregation.
@@ -968,6 +986,17 @@ impl AHashCatalog {
         dedup_matches
     }
 
+    /// Returns `true` when `criteria` carries finite positive `audio_fps`, valid `max_distance`,
+    /// and a non-silent, non-flat query sequence.
+    #[inline]
+    fn is_valid_search_criteria(criteria: &AHashSearchCriteria) -> bool {
+        criteria.audio_fps.is_finite()
+            && criteria.audio_fps > 0.0
+            && criteria.max_distance.is_finite()
+            && (0.0..=AHASH_BITS_F64).contains(&criteria.max_distance)
+            && !is_silent_or_flat_audio_query(criteria.query)
+    }
+
     /// Searches the catalog using accelerated Multi-Index Hashing (MIH) with fallback.
     ///
     /// # Arguments
@@ -980,21 +1009,25 @@ impl AHashCatalog {
     /// Guarantee: Never panics.
     ///
     /// # Data Flow & Invariants
-    /// 1. Rejects short, silent (`0u64`), or flat-energy queries via [`is_silent_or_flat_audio_query`].
-    /// 2. Probes MIH tables at step intervals for candidate cluster voting.
+    /// 1. Rejects short, silent (`0u64`), flat-energy, or invalid-parameter queries.
+    /// 2. Probes MIH tables at step intervals for candidate cluster voting (filtered by `target_media` if set).
     /// 3. Verifies top candidate clusters with local jitter refinement.
-    /// 4. Falls back seamlessly to exhaustive linear scan if no cluster reaches vote threshold.
+    /// 4. Falls back to exhaustive linear scan only when matching candidate frames do not exceed [`MAX_LINEAR_FALLBACK_FRAMES`].
     pub fn search_mih(&self, criteria: &AHashSearchCriteria) -> Vec<AHashCatalogMatch> {
-        if self.total_frames == 0 || is_silent_or_flat_audio_query(criteria.query) {
+        if self.total_frames == 0 || !Self::is_valid_search_criteria(criteria) {
             return Vec::new();
         }
 
-        if criteria.target_media.is_some() {
-            return self.search_linear(criteria);
+        let target_frames = self.target_frames_count(criteria.target_media);
+        if target_frames == 0 {
+            return Vec::new();
         }
 
-        let votes =
-            self.collect_mih_candidate_votes(criteria.query, DEFAULT_AHASH_MIH_PROBE_STRIDE);
+        let votes = self.collect_mih_candidate_votes(
+            criteria.query,
+            DEFAULT_AHASH_MIH_PROBE_STRIDE,
+            criteria.target_media,
+        );
 
         let candidates = Self::rank_candidate_clusters(
             &votes,
@@ -1003,11 +1036,15 @@ impl AHashCatalog {
         );
 
         if candidates.is_empty() {
-            return self.search_linear(criteria);
+            return if target_frames <= MAX_LINEAR_FALLBACK_FRAMES {
+                self.search_linear(criteria)
+            } else {
+                Vec::new()
+            };
         }
 
         let verified = self.verify_candidate_clusters(&candidates, criteria);
-        if verified.is_empty() {
+        if verified.is_empty() && target_frames <= MAX_LINEAR_FALLBACK_FRAMES {
             self.search_linear(criteria)
         } else {
             verified
@@ -1029,7 +1066,7 @@ impl AHashCatalog {
     /// Rejects short, silent, or flat-energy queries, then iterates over all catalog entries in
     /// parallel via Rayon using [`match_audio_sequence`] and sorts deterministically.
     pub fn search_linear(&self, criteria: &AHashSearchCriteria) -> Vec<AHashCatalogMatch> {
-        if is_silent_or_flat_audio_query(criteria.query) {
+        if !Self::is_valid_search_criteria(criteria) {
             return Vec::new();
         }
 
@@ -1134,6 +1171,7 @@ impl AHashCatalog {
         &self,
         query: &[u64],
         stride: usize,
+        target_media: Option<&str>,
     ) -> HashMap<(usize, usize), u32> {
         let index = self.mih32();
         let step = stride.max(1);
@@ -1152,7 +1190,11 @@ impl AHashCatalog {
                     state.0.clear();
                     self.probe_frame_hits_mih32(index, (k, q_hash), &mut state.0);
                     for &pair in &state.0 {
-                        *state.1.entry(pair).or_default() += 1;
+                        if target_media
+                            .is_none_or(|t| self.entries[pair.0].media_name.eq_ignore_ascii_case(t))
+                        {
+                            *state.1.entry(pair).or_default() += 1;
+                        }
                     }
                     state
                 },
@@ -1173,19 +1215,19 @@ impl AHashCatalog {
     /// Guarantee: Never panics.
     ///
     /// # Data Flow & Invariants
-    /// Rejects short, silent, or flat-energy queries, then uses 32-bit chunk tables to isolate
-    /// candidate clusters with near-zero false collisions and performs fine jitter verification.
+    /// Rejects short, silent, flat-energy, or invalid-parameter queries, then uses 32-bit chunk
+    /// tables (filtered by `target_media` when set) to isolate candidate clusters with near-zero
+    /// false collisions and performs fine jitter verification.
     pub fn search_mih32(&self, criteria: &AHashSearchCriteria) -> Vec<AHashCatalogMatch> {
-        if self.total_frames == 0 || is_silent_or_flat_audio_query(criteria.query) {
+        if self.total_frames == 0 || !Self::is_valid_search_criteria(criteria) {
             return Vec::new();
         }
 
-        if criteria.target_media.is_some() {
-            return self.search_linear(criteria);
-        }
-
-        let votes =
-            self.collect_mih32_candidate_votes(criteria.query, DEFAULT_AHASH_MIH32_PROBE_STRIDE);
+        let votes = self.collect_mih32_candidate_votes(
+            criteria.query,
+            DEFAULT_AHASH_MIH32_PROBE_STRIDE,
+            criteria.target_media,
+        );
 
         let candidates = Self::rank_candidate_clusters(
             &votes,
@@ -1200,15 +1242,15 @@ impl AHashCatalog {
         self.verify_candidate_clusters(&candidates, criteria)
     }
 
-    /// Primary search router: targeted media -> linear; otherwise 32-bit MIH (~2ms), with a
-    /// linear fallback only for small catalogs (`total_frames <= MAX_LINEAR_FALLBACK_FRAMES`).
+    /// Primary search router: 32-bit MIH (~2ms, filtered by `target_media` when specified), with a
+    /// linear fallback only when the candidate frame pool is within [`MAX_LINEAR_FALLBACK_FRAMES`].
     ///
     /// # Arguments
     /// * `criteria` - Search parameters, query slice, thresholds and limits.
     ///
     /// # Returns
     /// Vector of [`AHashCatalogMatch`] items ranked by Hamming distance. Empty on non-match
-    /// in large catalogs.
+    /// in large catalogs or when `target_media` exceeds [`MAX_LINEAR_FALLBACK_FRAMES`].
     ///
     /// # Panics
     /// Guarantee: Never panics.
@@ -1217,11 +1259,15 @@ impl AHashCatalog {
     /// Never calls [`search_mih`] (16-bit MIH), so the large `mih` table is never allocated by
     /// this router. [`search_mih`] and [`search_linear`] remain public for explicit benchmarks.
     pub fn search(&self, criteria: &AHashSearchCriteria) -> Vec<AHashCatalogMatch> {
-        if criteria.target_media.is_some() {
-            return self.search_linear(criteria);
+        if self.total_frames == 0 || !Self::is_valid_search_criteria(criteria) {
+            return Vec::new();
+        }
+        let target_frames = self.target_frames_count(criteria.target_media);
+        if target_frames == 0 {
+            return Vec::new();
         }
         let results = self.search_mih32(criteria);
-        if !results.is_empty() || self.total_frames > MAX_LINEAR_FALLBACK_FRAMES {
+        if !results.is_empty() || target_frames > MAX_LINEAR_FALLBACK_FRAMES {
             return results;
         }
         self.search_linear(criteria)
@@ -1601,5 +1647,56 @@ mod tests {
         assert!(catalog.search(&criteria_flat).is_empty());
         assert!(catalog.search_mih(&criteria_flat).is_empty());
         assert!(catalog.search_linear(&criteria_flat).is_empty());
+    }
+
+    #[test]
+    fn test_target_media_routes_via_mih32_and_enforces_linear_fallback_cap() {
+        let hashes_a: Vec<u64> = (0..64)
+            .map(|i| {
+                0x1122_3344_5566_7788u64
+                    .wrapping_add((i as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15))
+            })
+            .collect();
+        let entry_a = AHashCatalogEntry {
+            media_name: "Alpha.mkv".to_string(),
+            path: PathBuf::from("/tmp/Alpha.86.1fps.ahash"),
+            audio_fps: 86.125,
+            frame_count: hashes_a.len(),
+            hashes: Arc::new(hashes_a.clone()),
+            audio_language: None,
+            audio_index: None,
+        };
+        // Large entry exceeding MAX_LINEAR_FALLBACK_FRAMES
+        let large_len = MAX_LINEAR_FALLBACK_FRAMES + 10;
+        let hashes_b: Vec<u64> = (0..large_len)
+            .map(|i| {
+                0x8877_6655_4433_2211u64
+                    .wrapping_add((i as u64).wrapping_mul(0xBF58_476D_1CE4_E5B9))
+            })
+            .collect();
+        let entry_b = AHashCatalogEntry {
+            media_name: "HugeBeta.mkv".to_string(),
+            path: PathBuf::from("/tmp/HugeBeta.86.1fps.ahash"),
+            audio_fps: 86.125,
+            frame_count: hashes_b.len(),
+            hashes: Arc::new(hashes_b),
+            audio_language: None,
+            audio_index: None,
+        };
+        let catalog = AHashCatalog::new(vec![entry_a, entry_b]);
+
+        // 1. Exact query against Alpha with target_media = Some("Alpha.mkv") succeeds via MIH-32
+        let mut crit_alpha = AHashSearchCriteria::new(&hashes_a[10..34], 86.125);
+        crit_alpha.target_media = Some("Alpha.mkv");
+        let res_alpha = catalog.search(&crit_alpha);
+        assert_eq!(res_alpha.len(), 1);
+        assert_eq!(res_alpha[0].media_name, "Alpha.mkv");
+
+        // 2. Non-matching query with target_media = Some("HugeBeta.mkv") does NOT fall back to linear scan
+        // because HugeBeta.mkv exceeds MAX_LINEAR_FALLBACK_FRAMES.
+        let mut crit_beta = AHashSearchCriteria::new(&hashes_a[10..34], 86.125);
+        crit_beta.target_media = Some("HugeBeta.mkv");
+        let res_beta = catalog.search(&crit_beta);
+        assert!(res_beta.is_empty());
     }
 }

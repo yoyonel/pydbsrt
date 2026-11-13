@@ -2,14 +2,13 @@ use dbsrt_server::{
     create_router, format_unix_to_iso, MonitoringTelemetryResponse, SupervisorHeartbeatPayload,
 };
 use std::net::SocketAddr;
-use std::path::PathBuf;
 
 #[tokio::test]
 async fn test_server_monitoring_endpoints() {
     let tmp_dir = std::env::temp_dir();
     let test_phash_dir = tmp_dir.join(format!("test_phash_mon_{}", std::process::id()));
     let _ = std::fs::create_dir_all(&test_phash_dir);
-    let srt_dir = PathBuf::from("../../data/SRT");
+    let srt_dir = test_phash_dir.clone();
     let app = create_router(test_phash_dir.clone(), srt_dir.clone());
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")

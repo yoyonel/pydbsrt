@@ -10,7 +10,7 @@ async fn test_server_health_retarget_and_autosync() {
     let tmp_dir = std::env::temp_dir();
     let test_phash_dir = tmp_dir.join(format!("test_phash_health_{}", std::process::id()));
     let _ = std::fs::create_dir_all(&test_phash_dir);
-    let srt_dir = PathBuf::from("../../data/SRT");
+    let srt_dir = PathBuf::from("../../tests/data");
     let app = create_router(test_phash_dir.clone(), srt_dir.clone());
 
     // Bind on ephemeral port
@@ -344,7 +344,7 @@ async fn test_server_status_and_search_endpoints() {
     let tmp_dir = std::env::temp_dir();
     let test_phash_dir = tmp_dir.join(format!("test_phash_status_{}", std::process::id()));
     let _ = std::fs::create_dir_all(&test_phash_dir);
-    let srt_dir = PathBuf::from("../../data/SRT");
+    let srt_dir = PathBuf::from("../../tests/data");
     let app = create_router(test_phash_dir.clone(), srt_dir.clone());
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")

@@ -66,7 +66,7 @@ local function run_sync()
         return
     end
     local uri = item:uri()
-    local path = vlc.strings.decode_uri(uri):gsub("^file://", "")
+    local path = vlc.strings.decode_uri(uri):gsub("^file:///([A-Za-z]:)", "%1"):gsub("^file://", "")
     vlc.msg.info("[dbsrt-intf] Active video: " .. path)
 
     -- Cas 1: Zero-subtitle client. Let server identify media & fetch catalog subtitle.

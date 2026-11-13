@@ -47,7 +47,7 @@ async fn handle_remote_agent_autosync(
         search_mode: payload
             .search_mode
             .clone()
-            .or_else(|| Some("phash".to_string())),
+            .or_else(|| Some("auto".to_string())),
         index_engine: None,
         query_title: None,
         season: None,
@@ -111,6 +111,37 @@ struct AutoSyncResolveCriteria<'a> {
     include_sidecars: bool,
 }
 
+/// Synchronously checks local disk catalogs and embedded container subtitle streams.
+fn resolve_local_or_container_subtitle(
+    media_path: &Path,
+    subtitles_dir: &Path,
+    search_stem: &str,
+    language_and_sidecars: (&str, bool),
+) -> Result<Option<(SubtitleFile, String)>, String> {
+    let (language, include_sidecars) = language_and_sidecars;
+    let search_dirs = collect_subtitle_search_dirs(subtitles_dir, media_path, include_sidecars);
+    if let Some(p) = search_dirs
+        .iter()
+        .find_map(|d| find_subtitle_in_catalog(d, search_stem, language))
+    {
+        return SubtitleFile::open(&p)
+            .map(|s| Some((s, SubtitleSource::Catalog.as_str().to_string())))
+            .map_err(|e| format!("Failed to parse catalog subtitle {:?}: {:#}", p, e));
+    }
+
+    if let Ok(insp) = inspect_container(media_path) {
+        if let Some(stream) = insp.find_by_language(language) {
+            let raw_srt = extract_embedded_subtitle(media_path, stream.subtitle_index)
+                .map_err(|e| format!("Failed to extract embedded subtitle track: {:#}", e))?;
+            let srt = SubtitleFile::parse(&raw_srt)
+                .map_err(|e| format!("Failed to parse embedded subtitle track: {:#}", e))?;
+            return Ok(Some((srt, SubtitleSource::Container.as_str().to_string())));
+        }
+    }
+
+    Ok(None)
+}
+
 /// Resolves candidate subtitle files across local catalog, embedded container streams, and remote providers.
 ///
 /// # Arguments
@@ -127,35 +158,31 @@ struct AutoSyncResolveCriteria<'a> {
 /// Guaranteed panic-free.
 ///
 /// # Data Flow & Invariants
-/// First queries local filesystem sidecars and directory catalogs.
-/// Falls back to embedded video tracks via `inspect_container`.
+/// First queries local filesystem sidecars and directory catalogs and embedded tracks inside `spawn_blocking`.
 /// Finally attempts remote download via `state.provider.search`.
 async fn resolve_autosync_subtitle(
     state: &AppState,
     criteria: &AutoSyncResolveCriteria<'_>,
 ) -> Result<(SubtitleFile, String), String> {
-    let search_dirs = collect_subtitle_search_dirs(
-        criteria.subtitles_dir,
-        criteria.media_path,
-        criteria.include_sidecars,
-    );
-    if let Some(p) = search_dirs
-        .iter()
-        .find_map(|d| find_subtitle_in_catalog(d, criteria.search_stem, criteria.language))
-    {
-        return SubtitleFile::open(&p)
-            .map(|s| (s, SubtitleSource::Catalog.as_str().to_string()))
-            .map_err(|e| format!("Failed to parse catalog subtitle {:?}: {:#}", p, e));
-    }
+    let media_path = criteria.media_path.to_path_buf();
+    let subtitles_dir = criteria.subtitles_dir.to_path_buf();
+    let search_stem = criteria.search_stem.to_string();
+    let language = criteria.language.to_string();
+    let include_sidecars = criteria.include_sidecars;
 
-    if let Ok(insp) = inspect_container(criteria.media_path) {
-        if let Some(stream) = insp.find_by_language(criteria.language) {
-            let raw_srt = extract_embedded_subtitle(criteria.media_path, stream.subtitle_index)
-                .map_err(|e| format!("Failed to extract embedded subtitle track: {:#}", e))?;
-            let srt = SubtitleFile::parse(&raw_srt)
-                .map_err(|e| format!("Failed to parse embedded subtitle track: {:#}", e))?;
-            return Ok((srt, SubtitleSource::Container.as_str().to_string()));
-        }
+    let local_or_container = tokio::task::spawn_blocking(move || {
+        resolve_local_or_container_subtitle(
+            &media_path,
+            &subtitles_dir,
+            &search_stem,
+            (&language, include_sidecars),
+        )
+    })
+    .await
+    .map_err(|e| format!("Subtitle resolution task join error: {e}"))??;
+
+    if let Some(found) = local_or_container {
+        return Ok(found);
     }
 
     let meta = MediaMetadata::parse_from_path(criteria.media_path);
@@ -321,9 +348,9 @@ impl AcousticAlignment {
 ///
 /// # Returns
 /// `Some((ahash, query_start_sec))` where `query_start_sec` is
-/// [`DEFAULT_AHASH_START_OFFSET_SECONDS`] when the primary window yielded hashes, or
-/// [`AHASH_FALLBACK_QUERY_START_SECONDS`] when the fallback window was used; `None` if both
-/// extractions fail.
+/// [`DEFAULT_AHASH_START_OFFSET_SECONDS`] when the primary window yielded at least
+/// [`dbsrt_index::MIN_QUERY_FRAMES`] hashes, or [`AHASH_FALLBACK_QUERY_START_SECONDS`] when
+/// the fallback window was used; `None` if both extractions fail or produce too few frames.
 ///
 /// # Errors
 /// None. Extraction errors are mapped to `None`.
@@ -345,7 +372,7 @@ pub(crate) fn extract_ahash_query_window(media_path: &Path) -> Option<(AhashFile
         audio_stream: None,
     };
     if let Ok(file) = extract_ahash(media_path, &primary) {
-        if !file.hashes.is_empty() {
+        if file.hashes.len() >= dbsrt_index::MIN_QUERY_FRAMES {
             return Some((file, primary.start_sec));
         }
     }
@@ -355,34 +382,43 @@ pub(crate) fn extract_ahash_query_window(media_path: &Path) -> Option<(AhashFile
     };
     extract_ahash(media_path, &fallback)
         .ok()
+        .filter(|file| file.hashes.len() >= dbsrt_index::MIN_QUERY_FRAMES)
         .map(|file| (file, fallback.start_sec))
 }
 
-/// Identifies media using acoustic spectral fingerprinting (aHash) against in-memory catalog.
-///
-/// # Arguments
-/// - `state`: Shared application state containing loaded aHash catalog.
-/// - `media_path`: File path to the media file to fingerprint.
-///
-/// # Returns
-/// `Option<(media_name, confidence_percent, alignment)>` if a match meets confidence threshold.
-/// `alignment` carries the query start actually extracted and the reference offset, so the
-/// exact subtitle shift is `alignment.shift_ms()`.
-///
-/// # Errors
-/// None. Extraction errors are handled with a fallback to offset 0.0s.
-///
-/// # Panics
-/// Guaranteed panic-free.
-///
-/// # Data Flow & Invariants
-/// 1. Extracts 5.0s PCM audio at 60s offset (or fallback to 0.0s) and records which one was used.
-/// 2. Generates 64-bit sub-fingerprints using Haitsma-Kalker pipeline.
-/// 3. Executes temporal cross-correlation across all in-memory catalog entries.
+/// Relays extracted audio hashes to `POST {remote_api}/v1/search/ahash` for autosync.
+async fn relay_ahash_autosync(
+    state: &AppState,
+    hashes: &[u64],
+    audio_fps: f64,
+    query_start_sec: f64,
+) -> Option<(String, f64, AcousticAlignment)> {
+    let remote_url = state.remote_api.as_deref()?;
+    let (resp, _) = crate::handlers::search::ahash::relay_remote_ahash_search(
+        state, remote_url, hashes, audio_fps,
+    )
+    .await?;
+    let best = resp
+        .best_match
+        .or_else(|| resp.candidates.into_iter().next())?;
+    Some((
+        best.media_name,
+        best.score * 100.0,
+        AcousticAlignment {
+            query_start_sec,
+            ref_offset_sec: best.offset_sec,
+        },
+    ))
+}
+
 async fn identify_media_by_ahash_autosync(
     state: &Arc<AppState>,
     media_path: &Path,
 ) -> Option<(String, f64, AcousticAlignment)> {
+    if state.ahash_catalog.load().entries.is_empty() && state.remote_api.is_none() {
+        return None;
+    }
+    let _permit = state.heavy_task_semaphore.acquire().await.ok();
     let p = media_path.to_path_buf();
     let (extracted, query_start_sec) =
         tokio::task::spawn_blocking(move || extract_ahash_query_window(&p))
@@ -390,31 +426,33 @@ async fn identify_media_by_ahash_autosync(
             .ok()
             .flatten()?;
 
-    if extracted.hashes.is_empty() {
+    if extracted.hashes.len() < dbsrt_index::MIN_QUERY_FRAMES {
         return None;
     }
 
     let audio_fps = extracted.header.audio_fps();
     let catalog = state.ahash_catalog.load_full();
-    let matches = {
+    if !catalog.entries.is_empty() && (!state.is_agent || state.remote_api.is_none()) {
         let hashes = extracted.hashes.clone();
-        tokio::task::spawn_blocking(move || {
+        let matches = tokio::task::spawn_blocking(move || {
             catalog.search(&AHashSearchCriteria::new(&hashes, audio_fps))
         })
         .await
-        .unwrap_or_default()
-    };
+        .unwrap_or_default();
 
-    matches.first().map(|best| {
-        (
-            best.media_name.clone(),
-            best.score * 100.0,
-            AcousticAlignment {
-                query_start_sec,
-                ref_offset_sec: best.offset_sec,
-            },
-        )
-    })
+        if let Some(best) = matches.first() {
+            return Some((
+                best.media_name.clone(),
+                best.score * 100.0,
+                AcousticAlignment {
+                    query_start_sec,
+                    ref_offset_sec: best.offset_sec,
+                },
+            ));
+        }
+    }
+
+    relay_ahash_autosync(state, &extracted.hashes, audio_fps, query_start_sec).await
 }
 
 struct AutoSyncIdentificationContext<'a> {
@@ -437,9 +475,10 @@ async fn identify_media_for_autosync(
     Option<ExistingPhashData>,
     Option<f64>,
 ) {
-    if ctx.payload.search_mode.as_deref() == Some("ahash") {
+    let mode = ctx.payload.search_mode.as_deref().unwrap_or("auto");
+    if mode == "ahash" {
         let ahash_match = identify_media_by_ahash_autosync(ctx.state, ctx.media_path).await;
-        match ahash_match {
+        return match ahash_match {
             Some((name, conf, alignment)) => (
                 Some((name, conf)),
                 DEFAULT_BASELINE_FPS,
@@ -447,18 +486,104 @@ async fn identify_media_for_autosync(
                 Some(alignment.shift_ms()),
             ),
             None => (None, DEFAULT_BASELINE_FPS, None, None),
+        };
+    }
+
+    let reader_guard = ctx.state.dbphash_reader.load_full();
+    let media_path = ctx.media_path.to_path_buf();
+    let phash_dirs = ctx.phash_dirs.to_vec();
+    let db_config = ctx.state.db_config.clone();
+    let nb_seconds = ctx.payload.nb_seconds;
+    let eff_search_distance = ctx.eff_search_distance;
+    let (m, fps, ex) = tokio::task::spawn_blocking(move || {
+        let reader_ref = reader_guard.as_ref().map(|arc| arc.as_ref());
+        identify_media_by_phash_multi_with_reader(
+            &media_path,
+            &phash_dirs,
+            reader_ref,
+            db_config.as_ref(),
+            nb_seconds,
+            eff_search_distance,
+        )
+    })
+    .await
+    .unwrap_or((None, DEFAULT_BASELINE_FPS, None));
+
+    if m.is_none() && mode != "phash" {
+        if let Some((name, conf, alignment)) =
+            identify_media_by_ahash_autosync(ctx.state, ctx.media_path).await
+        {
+            return (Some((name, conf)), fps, ex, Some(alignment.shift_ms()));
         }
+    }
+
+    (m, fps, ex, None)
+}
+
+/// Enforces the architectural subtitle shift policy by source (`Catalog` vs `Container` / `OpenSubtitles`).
+///
+/// # Arguments
+/// * `subtitle_source` - Resolved source identifier (`"catalog"`, `"container"`, or `"opensubtitles"`).
+/// * `candidate_shift` - Computed `(shift_frames, shift_ms, confidence_percent)` from reference media alignment.
+/// * `match_conf` - Recognition confidence percentage (`0.0..=100.0`).
+///
+/// # Returns
+/// `(shift_frames, shift_ms, confidence_percent)` where `shift_frames == 0` and `shift_ms == 0.0`
+/// whenever `subtitle_source != SubtitleSource::Catalog.as_str()`.
+///
+/// # Panics
+/// Guaranteed panic-free.
+///
+/// # Data Flow & Invariants
+/// Per GEMINI.md Axe 5 and B-06:
+/// - `SubtitleSource::Catalog`: Reference subtitle coupled to reference timeline -> apply `candidate_shift`.
+/// - `SubtitleSource::Container`: Embedded track already synchronized to target container -> force `0.0 ms`.
+/// - `SubtitleSource::OpenSubtitles`: Uncertified external subtitle -> force `0.0 ms`.
+pub(crate) fn enforce_subtitle_source_shift_policy(
+    subtitle_source: &str,
+    candidate_shift: (i64, f64, f64),
+    match_conf: f64,
+) -> (i64, f64, f64) {
+    if subtitle_source == SubtitleSource::Catalog.as_str() {
+        candidate_shift
     } else {
-        let reader_guard = ctx.state.dbphash_reader.load();
-        let (m, fps, ex) = identify_media_by_phash_multi_with_reader(
-            ctx.media_path,
-            ctx.phash_dirs,
-            reader_guard.as_deref(),
-            ctx.state.db_config.as_ref(),
-            ctx.payload.nb_seconds,
-            ctx.eff_search_distance,
-        );
-        (m, fps, ex, None)
+        (0, 0.0, match_conf)
+    }
+}
+
+/// Saves a synchronized subtitle file on the blocking thread pool.
+async fn save_autosync_srt_off_runtime(
+    srt: SubtitleFile,
+    media_path: &Path,
+    language: &str,
+    cache_dir: &Path,
+) -> Result<PathBuf, String> {
+    let mp = media_path.to_path_buf();
+    let lang = language.to_string();
+    let cdir = cache_dir.to_path_buf();
+    tokio::task::spawn_blocking(move || save_synced_subtitle(&srt, &mp, &lang, &cdir))
+        .await
+        .map_err(|e| format!("Save subtitle task join error: {e}"))
+        .and_then(|r| r)
+}
+
+fn format_autosync_resolve_error(
+    is_recognized: bool,
+    matched_stem_opt: Option<&str>,
+    phash_dirs: &[PathBuf],
+    err_msg: &str,
+) -> String {
+    if is_recognized {
+        format!(
+            "Media recognized as '{}' but {}",
+            matched_stem_opt.unwrap_or(""),
+            err_msg
+        )
+    } else {
+        format!(
+            "Media not recognized by perceptual hash fingerprint in indexed libraries ({:?}) and {}",
+            phash_dirs, err_msg
+        )
     }
 }
 
@@ -484,7 +609,6 @@ async fn run_local_autosync(
         .and_then(|s| s.to_str())
         .unwrap_or("")
         .to_string();
-
     let eff_search_distance = if payload.search_distance > 0 {
         payload.search_distance
     } else {
@@ -518,18 +642,12 @@ async fn run_local_autosync(
     {
         Ok(res) => res,
         Err(err_msg) => {
-            let formatted_err = if is_recognized {
-                format!(
-                    "Media recognized as '{}' but {}",
-                    matched_stem_opt.as_deref().unwrap_or(""),
-                    err_msg
-                )
-            } else {
-                format!(
-                        "Media not recognized by perceptual hash fingerprint in indexed libraries ({:?}) and {}",
-                        phash_dirs, err_msg
-                    )
-            };
+            let formatted_err = format_autosync_resolve_error(
+                is_recognized,
+                matched_stem_opt.as_deref(),
+                &phash_dirs,
+                &err_msg,
+            );
             return AutoSyncResponse {
                 success: false,
                 matched_media: matched_stem_opt,
@@ -545,48 +663,63 @@ async fn run_local_autosync(
         }
     };
 
-    let (shift_frames, shift_ms, confidence_percent) = if let Some(shift_ms) = ahash_shift_ms {
+    let raw_shift = if subtitle_source != SubtitleSource::Catalog.as_str() {
+        (0, 0.0, match_conf)
+    } else if let Some(shift_ms) = ahash_shift_ms {
         (
             (shift_ms / MILLIS_PER_SEC * target_fps).round() as i64,
             shift_ms,
             match_conf,
         )
     } else if let Some(ref ref_stem) = matched_stem_opt {
-        compute_media_phash_shift_multi(
-            &media_path,
-            &phash_dirs,
-            ref_stem,
-            match_conf,
-            target_fps,
-            &existing_phash,
-            eff_search_distance,
-        )
+        let (mp, pdirs, rstem) = (media_path.clone(), phash_dirs.clone(), ref_stem.clone());
+        tokio::task::spawn_blocking(move || {
+            compute_media_phash_shift_multi(
+                &mp,
+                &pdirs,
+                &rstem,
+                match_conf,
+                target_fps,
+                &existing_phash,
+                eff_search_distance,
+            )
+        })
+        .await
+        .unwrap_or((0, 0.0, match_conf))
     } else {
         (0, 0.0, 0.0)
     };
+    let (shift_frames, shift_ms, confidence_percent) =
+        enforce_subtitle_source_shift_policy(&subtitle_source, raw_shift, match_conf);
 
     if shift_ms != 0.0 {
         srt.shift(shift_ms);
     }
 
-    let final_path =
-        match save_synced_subtitle(&srt, &media_path, &payload.language, state.cache.base_dir()) {
-            Ok(p) => p,
-            Err(err_msg) => {
-                return AutoSyncResponse {
-                    success: false,
-                    matched_media: matched_stem_opt,
-                    language: payload.language,
-                    shift_frames: 0,
-                    shift_ms: 0.0,
-                    output_srt_path: String::new(),
-                    confidence_percent,
-                    elapsed_seconds: start.elapsed().as_secs_f64(),
-                    source: Some(subtitle_source),
-                    error: Some(err_msg),
-                };
-            }
-        };
+    let final_path = match save_autosync_srt_off_runtime(
+        srt,
+        &media_path,
+        &payload.language,
+        state.cache.base_dir(),
+    )
+    .await
+    {
+        Ok(p) => p,
+        Err(err_msg) => {
+            return AutoSyncResponse {
+                success: false,
+                matched_media: matched_stem_opt,
+                language: payload.language,
+                shift_frames: 0,
+                shift_ms: 0.0,
+                output_srt_path: String::new(),
+                confidence_percent,
+                elapsed_seconds: start.elapsed().as_secs_f64(),
+                source: Some(subtitle_source),
+                error: Some(err_msg),
+            };
+        }
+    };
 
     AutoSyncResponse {
         success: true,
@@ -1149,5 +1282,52 @@ mod tests {
         let mut srt = SubtitleFile::parse(REF_SRT).unwrap();
         srt.shift(cut.shift_ms());
         assert!((srt.cues[0].start_ms - 2_000).abs() <= ONE_AUDIO_FRAME_MS.ceil() as i64);
+    }
+
+    #[test]
+    fn test_enforce_subtitle_source_shift_policy_zero_for_container_and_opensubtitles() {
+        let candidate = (-1440, -60_000.0, 96.5);
+
+        let catalog_res =
+            enforce_subtitle_source_shift_policy(SubtitleSource::Catalog.as_str(), candidate, 96.5);
+        assert_eq!(catalog_res, (-1440, -60_000.0, 96.5));
+
+        let container_res = enforce_subtitle_source_shift_policy(
+            SubtitleSource::Container.as_str(),
+            candidate,
+            96.5,
+        );
+        assert_eq!(container_res, (0, 0.0, 96.5));
+
+        let opensub_res = enforce_subtitle_source_shift_policy(
+            SubtitleSource::OpenSubtitles.as_str(),
+            candidate,
+            96.5,
+        );
+        assert_eq!(opensub_res, (0, 0.0, 96.5));
+    }
+
+    #[test]
+    fn test_extract_ahash_query_window_falls_back_when_60s_tail_shorter_than_min_frames() {
+        if !ffmpeg_available() {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let full_wav = dir.path().join("film.wav");
+        let clip_60_05s = dir.path().join("clip_60_05s.wav");
+        write_noise_wav(&full_wav, FULL_AUDIO_SECONDS);
+        let status = std::process::Command::new("ffmpeg")
+            .args(["-v", "error", "-y", "-ss", "0", "-t", "60.05", "-i"])
+            .arg(&full_wav)
+            .args(["-c", "copy"])
+            .arg(&clip_60_05s)
+            .status()
+            .unwrap();
+        assert!(status.success());
+
+        let (extracted, query_start_sec) =
+            extract_ahash_query_window(&clip_60_05s).expect("must fall back to 0.0s window");
+        assert_eq!(query_start_sec, AHASH_FALLBACK_QUERY_START_SECONDS);
+        assert!(extracted.hashes.len() >= dbsrt_index::MIN_QUERY_FRAMES);
     }
 }

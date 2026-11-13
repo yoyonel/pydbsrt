@@ -1027,6 +1027,41 @@ pub async fn monitoring_top_handler(
     Ok((headers, body))
 }
 
+/// Returns the cached `dbsrt top --json` summary without blocking on cold-start subprocess execution.
+///
+/// # Arguments
+/// None.
+///
+/// # Returns
+/// `Some(serde_json::Value)` when a cached or stale snapshot exists, or `None` while the initial
+/// background probe is still running.
+///
+/// # Panics
+/// Never panics.
+///
+/// # Data Flow & Invariants
+/// Reads [`TOP_SNAPSHOT_CACHE`] under async mutex lock; triggers [`spawn_top_probe_background`]
+/// when the cache is empty or expired.
+async fn peek_top_snapshot_nonblocking() -> Option<serde_json::Value> {
+    let exe = std::env::current_exe().ok()?;
+    let cached = {
+        let guard = TOP_SNAPSHOT_CACHE.lock().await;
+        match guard.as_ref() {
+            Some((at, body)) if at.elapsed() < TOP_SNAPSHOT_TTL => Some(body.clone()),
+            Some((_, stale)) => {
+                spawn_top_probe_background(exe);
+                Some(stale.clone())
+            }
+            None => {
+                spawn_top_probe_background(exe);
+                None
+            }
+        }
+    }?;
+    let bytes = paginate_top_snapshot(&cached, 0, 0).ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
 /// Gathers a unified snapshot for real-time SSE streaming without heavy lists.
 ///
 /// # Arguments
@@ -1050,16 +1085,7 @@ pub async fn sample_monitoring_stream_state(state: &AppState) -> MonitoringStrea
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0);
     let telemetry = sample_monitoring_telemetry();
-    let top = match std::env::current_exe() {
-        Ok(exe) => match top_snapshot(&exe, &TOP_SNAPSHOT_CACHE).await {
-            Ok(body) => match paginate_top_snapshot(&body, 0, 0) {
-                Ok(bytes) => serde_json::from_slice(&bytes).ok(),
-                Err(_) => None,
-            },
-            Err(_) => None,
-        },
-        Err(_) => None,
-    };
+    let top = peek_top_snapshot_nonblocking().await;
     let pipeline = state.latest_search.read().ok().and_then(|g| g.clone());
 
     let total = state
@@ -1137,12 +1163,14 @@ pub async fn sample_monitoring_stream_state(state: &AppState) -> MonitoringStrea
 pub async fn monitoring_events_handler(
     State(state): State<Arc<AppState>>,
 ) -> Sse<impl futures_util::stream::Stream<Item = Result<Event, Infallible>>> {
-    let stream = futures_util::stream::unfold(state, |state| async move {
-        tokio::time::sleep(std::time::Duration::from_millis(DEFAULT_SSE_INTERVAL_MS)).await;
+    let stream = futures_util::stream::unfold((state, true), |(state, is_first)| async move {
+        if !is_first {
+            tokio::time::sleep(std::time::Duration::from_millis(DEFAULT_SSE_INTERVAL_MS)).await;
+        }
         let payload = sample_monitoring_stream_state(&state).await;
         let json_str = serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string());
         let event = Event::default().event("state").data(json_str);
-        Some((Ok(event), state))
+        Some((Ok(event), (state, false)))
     });
 
     Sse::new(stream).keep_alive(

@@ -690,6 +690,7 @@ dependencies = [
  "dbsrt-core",
  "dbsrt-index",
  "futures-util",
+ "rayon",
  "reqwest",
  "serde",
  "serde_json",

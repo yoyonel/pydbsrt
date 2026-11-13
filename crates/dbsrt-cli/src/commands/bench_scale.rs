@@ -332,19 +332,31 @@ fn update_latest_symlink(target_path: &Path, latest_path: &Path) {
 }
 
 /// Resolves output JSONL and status JSON paths with automatic timestamp slugs.
+///
+/// When `resume` is enabled and `output_arg` is omitted, reuses the existing target of
+/// [`DEFAULT_SCALE_OUTPUT_LATEST`] if present and non-empty so the `latest` symlink is never
+/// overwritten by an empty file.
 fn resolve_report_destinations(
     output_arg: Option<PathBuf>,
     status_arg: Option<PathBuf>,
+    resume: bool,
 ) -> Result<(PathBuf, PathBuf)> {
     let timestamp_slug = current_utc_slug();
     let reports_dir = PathBuf::from(DEFAULT_REPORTS_DIR);
-    std::fs::create_dir_all(&reports_dir)?;
+    if output_arg.is_none() || status_arg.is_none() {
+        std::fs::create_dir_all(&reports_dir)?;
+    }
 
-    let out = output_arg.unwrap_or_else(|| {
-        reports_dir.join(format!(
+    let out = match output_arg {
+        Some(explicit) => explicit,
+        None if resume && Path::new(DEFAULT_SCALE_OUTPUT_LATEST).exists() => {
+            std::fs::canonicalize(DEFAULT_SCALE_OUTPUT_LATEST)
+                .unwrap_or_else(|_| PathBuf::from(DEFAULT_SCALE_OUTPUT_LATEST))
+        }
+        None => reports_dir.join(format!(
             "eval_scale_multimodal_multiwindow_{timestamp_slug}.jsonl"
-        ))
-    });
+        )),
+    };
     let status = status_arg
         .unwrap_or_else(|| reports_dir.join(format!("eval_scale_status_{timestamp_slug}.json")));
 
@@ -445,7 +457,10 @@ pub fn run_bench_scale_multimodal(args: BenchScaleMultimodalArgs) -> Result<()> 
     let t_init = Instant::now();
     println!("=== DBS-RT MULTIMODAL SCALE BENCHMARK (pHash + aHash) ===");
 
-    let (output_path, status_path) = resolve_report_destinations(args.output, args.status_json)?;
+    let update_default_out_symlink = args.output.is_none();
+    let update_default_status_symlink = args.status_json.is_none();
+    let (output_path, status_path) =
+        resolve_report_destinations(args.output, args.status_json, args.resume)?;
 
     let ratios: Vec<f64> = args
         .offsets
@@ -473,9 +488,6 @@ pub fn run_bench_scale_multimodal(args: BenchScaleMultimodalArgs) -> Result<()> 
         .open(&output_path)
         .context("Open output JSONL")?;
 
-    update_latest_symlink(&output_path, Path::new(DEFAULT_SCALE_OUTPUT_LATEST));
-    update_latest_symlink(&status_path, Path::new(DEFAULT_SCALE_STATUS_LATEST));
-
     let ctx = BenchContext {
         dbphash: &catalogs.dbphash,
         dense_catalog: &catalogs.dense_catalog,
@@ -501,6 +513,15 @@ pub fn run_bench_scale_multimodal(args: BenchScaleMultimodalArgs) -> Result<()> 
         files_to_run.len()
     };
 
+    if update_default_out_symlink
+        && (max_run > 0 || output_path.metadata().map(|m| m.len() > 0).unwrap_or(false))
+    {
+        update_latest_symlink(&output_path, Path::new(DEFAULT_SCALE_OUTPUT_LATEST));
+    }
+    if update_default_status_symlink {
+        update_latest_symlink(&status_path, Path::new(DEFAULT_SCALE_STATUS_LATEST));
+    }
+
     println!(
         "\nStarting execution on {} files (init took {:.1}s)...\n",
         max_run,
@@ -516,8 +537,14 @@ pub fn run_bench_scale_multimodal(args: BenchScaleMultimodalArgs) -> Result<()> 
     execute_benchmark_sweep(&ctx, &mut sweep, &mut telemetry)?;
 
     write_status_summary(&status_path, &telemetry)?;
-    update_latest_symlink(&status_path, Path::new(DEFAULT_SCALE_STATUS_LATEST));
-    update_latest_symlink(&output_path, Path::new(DEFAULT_SCALE_OUTPUT_LATEST));
+    if update_default_status_symlink {
+        update_latest_symlink(&status_path, Path::new(DEFAULT_SCALE_STATUS_LATEST));
+    }
+    if update_default_out_symlink
+        && (max_run > 0 || output_path.metadata().map(|m| m.len() > 0).unwrap_or(false))
+    {
+        update_latest_symlink(&output_path, Path::new(DEFAULT_SCALE_OUTPUT_LATEST));
+    }
     Ok(())
 }
 
@@ -560,24 +587,16 @@ fn execute_benchmark_sweep(
     Ok(())
 }
 
-/// Resolves search directories with automatic fallback to standard mount points.
+/// Resolves search directories with safe local fallback (`data/snippets`), never probing `/media/$USER/...` implicitly.
 fn resolve_target_directories(cli_dirs: &[PathBuf]) -> Vec<PathBuf> {
     if !cli_dirs.is_empty() {
         return cli_dirs.to_vec();
     }
-    let user = std::env::var("USER").unwrap_or_default();
-    let media_base = PathBuf::from("/media").join(user);
-    let candidates = [
-        media_base.join("Synology").join("tvshow"),
-        media_base.join("Synology").join("video"),
-        media_base.join("Freebox").join("Disque 1"),
-        PathBuf::from("data/snippets"),
-    ];
-    let existing: Vec<PathBuf> = candidates.into_iter().filter(|p| p.is_dir()).collect();
-    if existing.is_empty() {
-        vec![PathBuf::from(".")]
+    let snippets = PathBuf::from("data/snippets");
+    if snippets.is_dir() {
+        vec![snippets]
     } else {
-        existing
+        vec![PathBuf::from(".")]
     }
 }
 
@@ -616,7 +635,7 @@ fn collect_videos_recursive(dir: &Path, valid_exts: &[&str], out: &mut Vec<PathB
     }
 }
 
-/// Reads previously written JSONL report to populate resume skip set.
+/// Reads previously written JSONL report to populate resume skip set, skipping `"ERROR"` records.
 fn load_resumed_paths(output_path: &Path) -> Result<HashSet<PathBuf>> {
     let file = File::open(output_path)?;
     let reader = BufReader::new(file);
@@ -624,6 +643,14 @@ fn load_resumed_paths(output_path: &Path) -> Result<HashSet<PathBuf>> {
 
     for line in reader.lines().map_while(Result::ok) {
         if let Ok(record) = serde_json::from_str::<serde_json::Value>(&line) {
+            let status_top = record.get("status").and_then(|v| v.as_str());
+            let status_agreement = record
+                .get("agreement")
+                .and_then(|a| a.get("status"))
+                .and_then(|v| v.as_str());
+            if status_top == Some("ERROR") || status_agreement == Some("ERROR") {
+                continue;
+            }
             if let Some(path_str) = record.get("media_path").and_then(|v| v.as_str()) {
                 completed.insert(PathBuf::from(path_str));
             }
@@ -632,16 +659,17 @@ fn load_resumed_paths(output_path: &Path) -> Result<HashSet<PathBuf>> {
     Ok(completed)
 }
 
-/// Checks whether reference title exists in the acoustic catalog.
+/// Checks whether reference title exists in the acoustic catalog using normalized token sets.
 fn is_media_indexed_in_ahash(ctx: &BenchContext<'_>, title: &str) -> bool {
     let clean_target = title.to_lowercase().replace(['.', '_', '-'], " ");
     let target_words: Vec<&str> = clean_target.split_whitespace().collect();
     if target_words.is_empty() {
         return false;
     }
-    ctx.indexed_ahash_titles
-        .iter()
-        .any(|t| target_words.iter().all(|w| t.contains(w)))
+    ctx.indexed_ahash_titles.iter().any(|t| {
+        let t_tokens: HashSet<&str> = t.split_whitespace().collect();
+        target_words.iter().all(|w| t_tokens.contains(w))
+    })
 }
 
 /// Builds the diagnostic for containers with no physical audio stream.
@@ -739,7 +767,14 @@ fn evaluate_single_media(ctx: &BenchContext<'_>, media_path: &Path) -> MediaScal
 
     let meta = match probe_video(media_path) {
         Ok(m) if m.duration >= MIN_VIDEO_DURATION_SEC => m,
-        _ => return build_error_record(media_path, &media_stem, t_start.elapsed().as_secs_f64()),
+        _ => {
+            return build_error_record(
+                media_path,
+                &media_stem,
+                t_start.elapsed().as_secs_f64(),
+                ctx.plan.ratios.len(),
+            )
+        }
     };
 
     let audio_probe = inspect_audio_streams(media_path);
@@ -911,6 +946,34 @@ fn evaluate_phash_multi(
     summary
 }
 
+/// Resolves a unique, deterministic non-zero `media_id` for an aHash candidate so
+/// [`aggregate_multi_window_matches`] never merges distinct candidates into bucket `0`.
+pub(crate) fn resolve_ahash_candidate_id(
+    dense_catalog: &AHashCatalog,
+    file_path: &str,
+    media_name: &str,
+) -> u32 {
+    if let Some(pos) = dense_catalog
+        .entries
+        .iter()
+        .position(|e| e.path.to_string_lossy() == file_path)
+        .or_else(|| {
+            dense_catalog
+                .entries
+                .iter()
+                .position(|e| e.media_name == media_name)
+        })
+    {
+        return (pos as u32).saturating_add(1);
+    }
+    let mut hash: u32 = 0x811c_9dc5;
+    for &b in media_name.as_bytes() {
+        hash ^= u32::from(b);
+        hash = hash.wrapping_mul(0x0100_0193);
+    }
+    hash.max(1)
+}
+
 /// Evaluates acoustic aHash across multiple temporal offset windows using C2F K=16.
 fn evaluate_ahash_multi(
     ctx: &BenchContext<'_>,
@@ -965,10 +1028,12 @@ fn evaluate_ahash_multi(
         let search_match = ctx.coarse_index.search(ctx.dense_catalog, &criteria);
 
         if let Some(ref m) = search_match {
+            let cand_id =
+                resolve_ahash_candidate_id(ctx.dense_catalog, &m.file_path, &m.media_name);
             let ref_time_ms = (m.offset_sec * MILLIS_PER_SEC).round() as i64;
             let conf = m.score * 100.0;
             let sparse = (m.snr_bits * 10.0) as usize;
-            win_matches.push((0, m.media_name.clone(), 0, sparse, ref_time_ms, conf));
+            win_matches.push((cand_id, m.media_name.clone(), 0, sparse, ref_time_ms, conf));
         }
 
         let estimated_shift = search_match
@@ -1127,6 +1192,7 @@ fn build_error_record(
     media_path: &Path,
     media_stem: &str,
     timer_sec: f64,
+    total_windows: usize,
 ) -> MediaScaleBenchmarkRecord {
     MediaScaleBenchmarkRecord {
         timestamp: current_iso_timestamp(),
@@ -1135,14 +1201,14 @@ fn build_error_record(
         duration_sec: 0.0,
         fps: 0.0,
         audio: ContainerAudioMetadata::default(),
-        phash: build_empty_phash_summary(0.0, 3),
+        phash: build_empty_phash_summary(0.0, total_windows),
         ahash: AhashMatchSummary {
             media_match: None,
             media_id: None,
             confidence: 0.0,
             consensus_shift_ms: 0,
             matching_windows: 0,
-            total_windows: 3,
+            total_windows,
             is_coherent: false,
             timer_sec: 0.0,
             windows: Vec::new(),
@@ -1158,22 +1224,64 @@ fn build_error_record(
     }
 }
 
-/// Extracts a detectable `(season, episode)` pair from a media name.
-fn detect_episode(name: &str) -> Option<(u32, u32)> {
-    let m = MediaMetadata::parse(name);
-    match (m.season, m.episode) {
-        (Some(s), Some(e)) => Some((s, e)),
-        _ => None,
-    }
+/// Extracts a 16-character hexadecimal MovieHash token from a media name if present.
+fn extract_moviehash_token(name: &str) -> Option<String> {
+    name.split(['.', '_', '-', ' ', '(', ')', '[', ']'])
+        .find(|tok| {
+            tok.len() == 16
+                && *tok != "0000000000000000"
+                && tok.bytes().all(|b| b.is_ascii_hexdigit())
+        })
+        .map(|s| s.to_ascii_lowercase())
 }
 
-/// Checks fuzzy title matching, rejecting differing `(season, episode)` pairs.
+/// Extracts a standalone episode number (`E04`, `EP04`) when no season prefix (`S01`) is present.
+fn extract_episode_fallback(name: &str) -> Option<u32> {
+    name.split(['.', '_', '-', ' ', '(', ')', '[', ']'])
+        .find_map(|tok| {
+            let lower = tok.to_ascii_lowercase();
+            let digits = lower
+                .strip_prefix("ep")
+                .or_else(|| lower.strip_prefix('e'))?;
+            (!digits.is_empty() && digits.len() <= 4 && digits.bytes().all(|b| b.is_ascii_digit()))
+                .then(|| digits.parse::<u32>().ok())
+                .flatten()
+        })
+}
+
+/// Checks fuzzy title matching using MovieHash and normalized token sets, rejecting differing seasons or episodes.
 ///
-/// `p_episode` comes from the pHash catalog entry; the aHash episode is parsed from `a_title`.
-fn are_titles_matching(p_title: &str, p_episode: Option<(u32, u32)>, a_title: &str) -> bool {
-    if let (Some(p_ep), Some(a_ep)) = (p_episode, detect_episode(a_title)) {
-        if p_ep != a_ep {
+/// Verifies `episode` even when `season` is `None`.
+fn are_titles_matching(
+    p_title: &str,
+    p_season_episode: (Option<u32>, Option<u32>),
+    a_title: &str,
+) -> bool {
+    let p_meta = MediaMetadata::parse(p_title);
+    let a_meta = MediaMetadata::parse(a_title);
+    let eff_p_season = p_season_episode.0.or(p_meta.season);
+    let eff_p_episode = p_season_episode
+        .1
+        .or(p_meta.episode)
+        .or_else(|| extract_episode_fallback(p_title));
+    let eff_a_episode = a_meta.episode.or_else(|| extract_episode_fallback(a_title));
+
+    if let (Some(ps), Some(as_)) = (eff_p_season, a_meta.season) {
+        if ps != as_ {
             return false;
+        }
+    }
+    if let (Some(pe), Some(ae)) = (eff_p_episode, eff_a_episode) {
+        if pe != ae {
+            return false;
+        }
+    }
+    if let (Some(mh_p), Some(mh_a)) = (
+        extract_moviehash_token(p_title),
+        extract_moviehash_token(a_title),
+    ) {
+        if mh_p == mh_a {
+            return true;
         }
     }
     if p_title.eq_ignore_ascii_case(a_title) {
@@ -1182,12 +1290,11 @@ fn are_titles_matching(p_title: &str, p_episode: Option<(u32, u32)>, a_title: &s
     let clean_p = p_title.to_lowercase().replace(['.', '_', '-'], " ");
     let clean_a = a_title.to_lowercase().replace(['.', '_', '-'], " ");
     let p_words: Vec<&str> = clean_p.split_whitespace().collect();
-    let p_matches = !p_words.is_empty() && p_words.iter().all(|w| clean_a.contains(w));
-    if p_matches {
-        return true;
-    }
     let a_words: Vec<&str> = clean_a.split_whitespace().collect();
-    !a_words.is_empty() && a_words.iter().all(|w| clean_p.contains(w))
+    let p_set: HashSet<&str> = p_words.iter().copied().collect();
+    let a_set: HashSet<&str> = a_words.iter().copied().collect();
+    (!p_words.is_empty() && p_words.iter().all(|w| a_set.contains(w)))
+        || (!a_words.is_empty() && a_words.iter().all(|w| p_set.contains(w)))
 }
 
 /// Evaluates agreement when both modalities yielded candidate matches.
@@ -1197,8 +1304,7 @@ fn classify_dual_match(
     a_title: &str,
     a_shift: i64,
 ) -> MultimodalAgreement {
-    let p_episode = phash.season.zip(phash.episode);
-    let agreed = are_titles_matching(p_title, p_episode, a_title);
+    let agreed = are_titles_matching(p_title, (phash.season, phash.episode), a_title);
     let shift_diff = (phash.consensus_shift_ms - a_shift).abs();
     let status = match (agreed, shift_diff <= MAX_MULTIMODAL_AGREEMENT_DRIFT_MS) {
         (true, true) => "DUAL_MATCH_AGREED",
@@ -1315,7 +1421,101 @@ mod tests {
         let agreement = classify_dual_match(&p, "Halt and Catch Fire", a, 0);
         assert!(!agreement.match_agreed);
         assert_eq!(agreement.status, "DUAL_MATCH_DISAGREED");
-        assert!(!are_titles_matching("Halt and Catch Fire", Some((4, 9)), a));
+        assert!(!are_titles_matching(
+            "Halt and Catch Fire",
+            (Some(4), Some(9)),
+            a
+        ));
+    }
+
+    #[test]
+    fn test_episode_mismatch_rejected_even_when_season_is_none_and_token_boundary_enforced() {
+        // Season is None, episode differs (9 vs 4) -> must reject
+        assert!(!are_titles_matching(
+            "One Piece",
+            (None, Some(9)),
+            "One.Piece.E04.1080p"
+        ));
+        // Short token "it" must not substring-match inside "white"
+        assert!(!are_titles_matching("It", (None, None), "White.Lotus"));
+        // Matching MovieHash tokens must agree
+        assert!(are_titles_matching(
+            "Movie.A.8e245d9679d31e12",
+            (None, None),
+            "Autre.Titre.8e245d9679d31e12"
+        ));
+    }
+
+    #[test]
+    fn test_resolve_ahash_candidate_id_separates_distinct_candidates_in_multi_window() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_, band_bounds) =
+            dbsrt_core::ahash::HaitsmaKalkerExtractor::compute_band_layout(5512, 2048);
+        let header = dbsrt_core::AhashHeader {
+            version: 1,
+            sample_rate: 5512,
+            frame_size: 2048,
+            hop_size: 64,
+            num_bands: 33,
+            spectral_lag: 2,
+            frame_count: 16,
+            band_bounds,
+        };
+        let alpha_path = dir.path().join("Alpha.Movie.86.1fps.ahash");
+        let beta_path = dir.path().join("Beta.Movie.86.1fps.ahash");
+        dbsrt_core::AhashFile::write_to_path(&alpha_path, &header, &[0x1111_u64; 16]).unwrap();
+        dbsrt_core::AhashFile::write_to_path(&beta_path, &header, &[0x2222_u64; 16]).unwrap();
+        let catalog = AHashCatalog::load_from_dir(dir.path()).unwrap();
+
+        let id_alpha =
+            resolve_ahash_candidate_id(&catalog, &alpha_path.to_string_lossy(), "Alpha.Movie");
+        let id_beta =
+            resolve_ahash_candidate_id(&catalog, &beta_path.to_string_lossy(), "Beta.Movie");
+        assert_ne!(id_alpha, 0);
+        assert_ne!(id_beta, 0);
+        assert_ne!(id_alpha, id_beta);
+
+        // Verify aggregate_multi_window_matches keeps Alpha and Beta in separate buckets
+        let per_window = vec![
+            (
+                0,
+                0.2,
+                20.0,
+                vec![(id_alpha, "Alpha.Movie".to_string(), 0, 150, 20_000, 90.0)],
+            ),
+            (
+                1,
+                0.5,
+                50.0,
+                vec![(id_beta, "Beta.Movie".to_string(), 0, 160, 50_000, 92.0)],
+            ),
+        ];
+        let consensus = aggregate_multi_window_matches(2, per_window, MAX_SHIFT_DRIFT_TOLERANCE_MS);
+        assert_eq!(consensus.len(), 2);
+        assert!(consensus.iter().all(|c| c.matching_windows == 1));
+    }
+
+    #[test]
+    fn test_load_resumed_paths_skips_error_records() {
+        let tmp = tempfile::tempdir().unwrap();
+        let report = tmp.path().join("report.jsonl");
+        std::fs::write(
+            &report,
+            concat!(
+                r#"{"media_path":"/tmp/ok.mkv","agreement":{"status":"DUAL_MATCH_AGREED"}}"#,
+                "\n",
+                r#"{"media_path":"/tmp/err1.mkv","agreement":{"status":"ERROR"}}"#,
+                "\n",
+                r#"{"media_path":"/tmp/err2.mkv","status":"ERROR"}"#,
+                "\n"
+            ),
+        )
+        .unwrap();
+
+        let completed = load_resumed_paths(&report).unwrap();
+        assert!(completed.contains(Path::new("/tmp/ok.mkv")));
+        assert!(!completed.contains(Path::new("/tmp/err1.mkv")));
+        assert!(!completed.contains(Path::new("/tmp/err2.mkv")));
     }
 
     #[test]
@@ -1344,5 +1544,308 @@ mod tests {
         assert_eq!(cause, CAUSE_NO_AUDIO_STREAM);
         assert!(note.contains("not an acoustic false negative"));
         assert!(ahash.windows.is_empty() && ahash.media_match.is_none());
+    }
+
+    #[test]
+    fn test_diagnostic_causes_summaries_and_telemetry() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dbphash_path = tmp.path().join("catalog.dbphash");
+        let ahash_dir = tmp.path().join("ahash");
+        std::fs::create_dir_all(&ahash_dir).unwrap();
+
+        let mut builder = dbsrt_index::DbphashBuilder::new();
+        let meta = MediaMetadata::parse("Indexed.Show.S01E01");
+        builder.add_media(&meta, 30_000, 24.0, &[(0x1111, 1000)], &[(0x2222, 1000)]);
+        builder.write_to_file(&dbphash_path).unwrap();
+
+        let (_, band_bounds) =
+            dbsrt_core::ahash::HaitsmaKalkerExtractor::compute_band_layout(5512, 2048);
+        let header = dbsrt_core::AhashHeader {
+            version: 1,
+            sample_rate: 5512,
+            frame_size: 2048,
+            hop_size: 64,
+            num_bands: 33,
+            spectral_lag: 2,
+            frame_count: 64,
+            band_bounds,
+        };
+        let hashes: Vec<u64> = (0..64)
+            .map(|i| 0x0123_4567_89ab_cdef_u64.wrapping_mul(i + 1))
+            .collect();
+        let ahash_path = ahash_dir.join("Indexed.Show.S01E01.86.1fps.ahash");
+        dbsrt_core::AhashFile::write_to_path(&ahash_path, &header, &hashes).unwrap();
+
+        let catalogs = load_all_catalogs(&dbphash_path, &ahash_dir, 16).unwrap();
+        let plan = MultiWindowPlan::new(vec![0.5], 1.0).unwrap();
+        let ctx = BenchContext {
+            dbphash: &catalogs.dbphash,
+            dense_catalog: &catalogs.dense_catalog,
+            coarse_index: &catalogs.coarse_index,
+            plan: &plan,
+            indexed_ahash_titles: &catalogs.indexed_ahash_titles,
+        };
+
+        assert!(is_media_indexed_in_ahash(&ctx, "Indexed.Show.S01E01"));
+        assert!(!is_media_indexed_in_ahash(&ctx, "Unindexed.Movie.2026"));
+        assert!(!is_media_indexed_in_ahash(&ctx, "   "));
+
+        let consensus_item = MultiWindowConsensus {
+            media_id: 1,
+            clean_title: "Indexed Show".to_string(),
+            matching_windows: 1,
+            total_windows: 1,
+            consensus_shift_ms: 100,
+            is_temporally_coherent: true,
+            consensus_confidence: 95.0,
+            window_matches: Vec::new(),
+        };
+        let p_some = summarize_phash_consensus(
+            Some(&consensus_item),
+            vec![build_empty_phash_window(0, 0.5, 10.0)],
+            0.05,
+            1,
+        );
+        assert_eq!(p_some.media_id, Some(1));
+        let p_none = summarize_phash_consensus(None, Vec::new(), 0.01, 1);
+        assert!(p_none.media_match.is_none());
+
+        let a_some = summarize_ahash_consensus(
+            Some(&consensus_item),
+            vec![build_empty_ahash_window(0, 0.5, 10.0)],
+            0.05,
+            1,
+        );
+        assert_eq!(a_some.media_id, Some(1));
+        let a_none = summarize_ahash_consensus(None, Vec::new(), 0.01, 1);
+        assert!(a_none.media_match.is_none());
+
+        let mut a_shifted = a_some.clone();
+        a_shifted.consensus_shift_ms = 5_000;
+        let ag_div = classify_agreement(&p_some, &a_shifted);
+        assert_eq!(ag_div.status, "DUAL_MATCH_SHIFT_DIVERGENCE");
+
+        let audio_single = ContainerAudioMetadata {
+            track_count: 1,
+            is_multi_track: false,
+            ..Default::default()
+        };
+
+        for (status, p_ref, a_ref, no_aud, expected_cause) in [
+            (
+                "DUAL_MATCH_AGREED",
+                &p_some,
+                &a_some,
+                false,
+                "NOMINAL_MULTIMODAL_MATCH",
+            ),
+            (
+                "DUAL_MATCH_SHIFT_DIVERGENCE",
+                &p_some,
+                &a_shifted,
+                false,
+                "TIMELINE_SHIFT_DIVERGENCE",
+            ),
+            (
+                "DUAL_MATCH_DISAGREED",
+                &p_some,
+                &a_some,
+                false,
+                "CROSS_MODAL_TITLE_DISCORD",
+            ),
+            (
+                "AHASH_ONLY",
+                &p_none,
+                &a_some,
+                false,
+                "VISUAL_MISS_ACOUSTIC_MATCH",
+            ),
+            ("NO_MATCH", &p_none, &a_none, false, "UNINDEXED_MEDIA"),
+            ("NO_MATCH", &p_none, &a_none, true, CAUSE_NO_AUDIO_STREAM),
+            (
+                "ERROR",
+                &p_none,
+                &a_none,
+                false,
+                "PROBE_OR_EXTRACTION_ERROR",
+            ),
+        ] {
+            let ag = MultimodalAgreement {
+                match_agreed: status == "DUAL_MATCH_AGREED",
+                shift_diff_ms: Some(0),
+                status: status.to_string(),
+            };
+            let (cause, _) = determine_diagnostic_cause(
+                &ctx,
+                &DiagnosticInput {
+                    phash: p_ref,
+                    ahash: a_ref,
+                    audio: &audio_single,
+                    agreement: &ag,
+                    no_audio_stream: no_aud,
+                },
+            );
+            assert_eq!(cause, expected_cause);
+        }
+    }
+
+    #[test]
+    fn test_phash_only_diagnostic_subcauses() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dbphash_path = tmp.path().join("catalog.dbphash");
+        let ahash_dir = tmp.path().join("ahash");
+        std::fs::create_dir_all(&ahash_dir).unwrap();
+        let mut builder = dbsrt_index::DbphashBuilder::new();
+        let meta = MediaMetadata::parse("Indexed.Show.S01E01");
+        builder.add_media(&meta, 30_000, 24.0, &[(0x1111, 1000)], &[(0x2222, 1000)]);
+        builder.write_to_file(&dbphash_path).unwrap();
+        let catalogs = load_all_catalogs(&dbphash_path, &ahash_dir, 16).unwrap();
+        let plan = MultiWindowPlan::new(vec![0.5], 1.0).unwrap();
+        let titles: HashSet<String> = ["indexed show s01e01".to_string()].into_iter().collect();
+        let ctx = BenchContext {
+            dbphash: &catalogs.dbphash,
+            dense_catalog: &catalogs.dense_catalog,
+            coarse_index: &catalogs.coarse_index,
+            plan: &plan,
+            indexed_ahash_titles: &titles,
+        };
+        let p_some = phash_summary("Indexed Show", 1, 1);
+        let a_none = build_empty_ahash_summary(1);
+        let audio_single = ContainerAudioMetadata {
+            track_count: 1,
+            is_multi_track: false,
+            ..Default::default()
+        };
+        let audio_multi = ContainerAudioMetadata {
+            track_count: 2,
+            all_langs: vec!["fre".to_string(), "eng".to_string()],
+            is_multi_track: true,
+            ..Default::default()
+        };
+
+        let mut p_unindexed = p_some.clone();
+        p_unindexed.media_match = Some("Unindexed Movie".to_string());
+        let ag_phash = build_single_agreement("PHASH_ONLY");
+        let (c1, _) = determine_diagnostic_cause(
+            &ctx,
+            &DiagnosticInput {
+                phash: &p_unindexed,
+                ahash: &a_none,
+                audio: &audio_single,
+                agreement: &ag_phash,
+                no_audio_stream: false,
+            },
+        );
+        assert_eq!(c1, "UNINDEXED_IN_AHASH");
+
+        let mut a_low = a_none.clone();
+        a_low.windows = vec![build_empty_ahash_window(0, 0.5, 10.0)];
+        let (c2, _) = determine_diagnostic_cause(
+            &ctx,
+            &DiagnosticInput {
+                phash: &p_some,
+                ahash: &a_low,
+                audio: &audio_single,
+                agreement: &ag_phash,
+                no_audio_stream: false,
+            },
+        );
+        assert_eq!(c2, "LOW_ENERGY_SILENCE");
+
+        let mut a_active = a_none.clone();
+        let mut w_active = build_empty_ahash_window(0, 0.5, 10.0);
+        w_active.is_low_energy = false;
+        a_active.windows = vec![w_active];
+        let (c3, _) = determine_diagnostic_cause(
+            &ctx,
+            &DiagnosticInput {
+                phash: &p_some,
+                ahash: &a_active,
+                audio: &audio_multi,
+                agreement: &ag_phash,
+                no_audio_stream: false,
+            },
+        );
+        assert_eq!(c3, CAUSE_MULTI_TRACK_UNVERIFIED);
+
+        let (c4, _) = determine_diagnostic_cause(
+            &ctx,
+            &DiagnosticInput {
+                phash: &p_some,
+                ahash: &a_active,
+                audio: &audio_single,
+                agreement: &ag_phash,
+                no_audio_stream: false,
+            },
+        );
+        assert_eq!(c4, "VOTE_STARVATION_SHORT_WINDOW");
+    }
+
+    #[test]
+    fn test_run_bench_scale_multimodal_on_tempdir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let media_dir = tmp.path().join("medias");
+        let nested_dir = media_dir.join("sub");
+        let ahash_dir = tmp.path().join("ahash");
+        std::fs::create_dir_all(&nested_dir).unwrap();
+        std::fs::create_dir_all(&ahash_dir).unwrap();
+
+        // Create a dummy invalid video and a real video fixture if present
+        let broken_mkv = nested_dir.join("broken_sample.mkv");
+        std::fs::write(&broken_mkv, b"not a valid video container").unwrap();
+        std::fs::write(nested_dir.join("ignored.txt"), b"ignored").unwrap();
+
+        let real_mp4 = Path::new("../../tests/data/big_buck_bunny_trailer_480p.mp4");
+        if real_mp4.exists() {
+            let _ = std::fs::copy(real_mp4, media_dir.join("big_buck_bunny_trailer_480p.mp4"));
+        }
+
+        let dbphash_path = tmp.path().join("catalog.dbphash");
+        let mut builder = dbsrt_index::DbphashBuilder::new();
+        let meta = MediaMetadata::parse("big_buck_bunny_trailer_480p");
+        builder.add_media(&meta, 33_000, 25.0, &[(0x1111, 1000)], &[(0x2222, 1000)]);
+        builder.write_to_file(&dbphash_path).unwrap();
+
+        let (_, band_bounds) =
+            dbsrt_core::ahash::HaitsmaKalkerExtractor::compute_band_layout(5512, 2048);
+        let header = dbsrt_core::AhashHeader {
+            version: 1,
+            sample_rate: 5512,
+            frame_size: 2048,
+            hop_size: 64,
+            num_bands: 33,
+            spectral_lag: 2,
+            frame_count: 64,
+            band_bounds,
+        };
+        let ahash_path = ahash_dir.join("big_buck_bunny_trailer_480p.86.1fps.ahash");
+        let ahash_frames: Vec<u64> = (0..64)
+            .map(|i| 0x55aa_55aa_1234_5678_u64.wrapping_add(i * 97))
+            .collect();
+        dbsrt_core::AhashFile::write_to_path(&ahash_path, &header, &ahash_frames).unwrap();
+
+        let out_jsonl = tmp.path().join("bench_out.jsonl");
+        let status_json = tmp.path().join("bench_status.json");
+
+        let args = BenchScaleMultimodalArgs {
+            dirs: vec![media_dir],
+            dbphash: dbphash_path,
+            ahash_dir,
+            output: Some(out_jsonl.clone()),
+            status_json: Some(status_json.clone()),
+            factor_k: 16,
+            offsets: "0.5".to_string(),
+            limit: 2,
+            resume: true,
+        };
+
+        run_bench_scale_multimodal(args).unwrap();
+        assert!(out_jsonl.exists());
+        assert!(status_json.exists());
+        let lines: Vec<String> = BufReader::new(File::open(&out_jsonl).unwrap())
+            .lines()
+            .map_while(Result::ok)
+            .collect();
+        assert!(!lines.is_empty());
     }
 }

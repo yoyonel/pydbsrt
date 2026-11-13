@@ -22,6 +22,7 @@ import json
 import os
 import struct
 import subprocess
+import tempfile
 import time
 import urllib.parse
 from dataclasses import asdict, dataclass, field
@@ -45,6 +46,11 @@ SILENCE_UPPER_RATIO = 0.80
 SLIDING_RADIUS_SEC = 30.0
 DEFAULT_AUDIO_FPS = 86.125
 HEADER_SIZE_BYTES = 176
+SUBPROCESS_TIMEOUT_SECS = 30
+HASH_WORD_BYTES = 8
+HASH_BIT_WIDTH = 64
+MAX_HAMMING_BITS = 64.0
+MIDPOINT_RATIO = 0.5
 
 
 def _first_env(*names: str) -> str:
@@ -119,42 +125,37 @@ def load_ahash_file(path: Path) -> Tuple[float, List[int]]:
 
 
 def extract_audio_hashes(media_path: str, start_sec: float, duration_sec: float) -> List[int]:
-    """Invokes dbsrt export-ahash over local or remote stream and parses generated hashes."""
+    """Invokes dbsrt export-ahash over local or remote stream inside an isolated TemporaryDirectory."""
     target_url = resolve_stream_url(media_path)
     run_env: Dict[str, str] | None = None
     if target_url.startswith("ftp://"):
         run_env = {**os.environ, **resolve_ftp_credentials()}
-    tmp_out = f"/tmp/audit_{os.getpid()}_{int(time.time() * 1000) % 100000}_{int(start_sec)}.ahash"
     dbsrt_bin = REPO_ROOT / "target/release/dbsrt"
     if not dbsrt_bin.exists():
         dbsrt_bin = Path("dbsrt")
 
-    cmd = [
-        str(dbsrt_bin),
-        "export-ahash",
-        "--media",
-        target_url,
-        "--start-sec",
-        f"{start_sec:.3f}",
-        "--duration",
-        f"{duration_sec:.3f}",
-        "--output",
-        tmp_out,
-    ]
-    try:
-        res = subprocess.run(cmd, capture_output=True, timeout=30, env=run_env)
-        if res.returncode != 0:
-            if os.path.exists(tmp_out):
-                os.remove(tmp_out)
+    with tempfile.TemporaryDirectory(prefix="dbsrt_audit_") as tmp_dir:
+        tmp_out = Path(tmp_dir) / f"window_{int(start_sec)}.ahash"
+        cmd = [
+            str(dbsrt_bin),
+            "export-ahash",
+            "--media",
+            target_url,
+            "--start-sec",
+            f"{start_sec:.3f}",
+            "--duration",
+            f"{duration_sec:.3f}",
+            "--output",
+            str(tmp_out),
+        ]
+        try:
+            res = subprocess.run(cmd, capture_output=True, timeout=SUBPROCESS_TIMEOUT_SECS, env=run_env)
+            if res.returncode != 0:
+                return []
+            _, hashes = load_ahash_file(tmp_out)
+            return hashes
+        except Exception:
             return []
-        _, hashes = load_ahash_file(Path(tmp_out))
-        if os.path.exists(tmp_out):
-            os.remove(tmp_out)
-        return hashes
-    except Exception:
-        if os.path.exists(tmp_out):
-            os.remove(tmp_out)
-        return []
 
 
 def min_sliding_distance(

@@ -13,6 +13,7 @@ import json
 import os
 import re
 import subprocess
+import tempfile
 import time
 import urllib.request
 from dataclasses import asdict, dataclass
@@ -27,6 +28,8 @@ GROUND_TRUTH_CUT_OFFSET_SECONDS: float = 60.0
 MILLIS_PER_SEC: float = 1000.0
 CERTIFIED_SYNCED_SOURCE: str = "certified_synced"
 MAX_PERMISSIBLE_OFFSET_ERROR_MS: float = 25.0
+MOVIEHASH_HEX_RE = re.compile(r"^[0-9a-f]{16}$")
+CUT_OFFSET_STEM_RE = re.compile(r"_(?:at|start|offset)(\d+(?:\.\d+)?)s", re.IGNORECASE)
 
 
 @dataclass
@@ -76,56 +79,121 @@ def parse_snr_from_tier(tier_string: str) -> float:
     return float(m.group(1)) if m else 0.0
 
 
-def check_media_title_match(expected_stem: str, matched: str | None) -> bool:
-    """Checks whether matched identifier aligns with expected media stem or known moviehash."""
+def resolve_sidecar_media_name(matched: str, repo_root: Path | None = None) -> str | None:
+    """Resolves a 16-hex moviehash identifier dynamically against catalog `<moviehash>.json` sidecars."""
+    candidate_hex = matched.strip().lower()
+    if not MOVIEHASH_HEX_RE.fullmatch(candidate_hex):
+        return None
+    root = repo_root or find_repo_root()
+    for subdir in ("data/__AHASH__", "data/__PHASH__"):
+        sidecar_path = root / subdir / f"{candidate_hex}.json"
+        if not sidecar_path.is_file():
+            continue
+        try:
+            payload = json.loads(sidecar_path.read_text(encoding="utf-8"))
+            media_name = payload.get("media_name")
+            if isinstance(media_name, str) and media_name.strip():
+                return media_name.strip()
+        except (OSError, ValueError):
+            continue
+    return None
+
+
+def _shift_from_sidecar_json(sidecar: Path) -> float | None:
+    """Reads ground-truth shift (ms) from a cut sidecar JSON file if present."""
+    if not sidecar.is_file():
+        return None
+    try:
+        meta = json.loads(sidecar.read_text(encoding="utf-8"))
+        if "ground_truth_shift_ms" in meta:
+            return float(meta["ground_truth_shift_ms"])
+        for key in ("start_sec", "offset_sec", "cut_offset_sec"):
+            if key in meta:
+                return -float(meta[key]) * MILLIS_PER_SEC
+    except (OSError, ValueError, TypeError):
+        return None
+    return None
+
+
+def derive_ground_truth_shift_ms(
+    cut_path: Path,
+    default_offset_sec: float = GROUND_TRUTH_CUT_OFFSET_SECONDS,
+) -> float:
+    """Derives ground-truth shift (ms) from cut sidecar JSON, filename offset token, or default offset."""
+    for sidecar in (cut_path.with_suffix(".json"), Path(f"{cut_path}.json")):
+        shift = _shift_from_sidecar_json(sidecar)
+        if shift is not None:
+            return shift
+    m = CUT_OFFSET_STEM_RE.search(cut_path.stem)
+    if m:
+        return -float(m.group(1)) * MILLIS_PER_SEC
+    return -default_offset_sec * MILLIS_PER_SEC
+
+
+def check_media_title_match(expected_stem: str, matched: str | None, repo_root: Path | None = None) -> bool:
+    """Checks whether matched identifier aligns with expected media stem or its dynamic sidecar media_name."""
     if not matched:
         return False
     clean_exp = re.sub(r"[\._\-\s]+", "", expected_stem.lower())
     clean_mat = re.sub(r"[\._\-\s]+", "", matched.lower())
     if clean_exp in clean_mat or clean_mat in clean_exp:
         return True
-    # Known moviehash alias for Halt and Catch Fire S04E01
-    return matched == "4ba3e3f2c751f6f4" and "halt" in expected_stem.lower()
+    resolved_name = resolve_sidecar_media_name(matched, repo_root)
+    if resolved_name:
+        clean_resolved = re.sub(r"[\._\-\s]+", "", resolved_name.lower())
+        return clean_exp in clean_resolved or clean_resolved in clean_exp
+    return False
 
 
 def run_cvlc_single_test(cut_path: Path) -> tuple[bool, float]:
-    """Executes single offscreen headless cvlc test using aHash auto-sync."""
-    cmd = [
-        "cvlc",
-        "--vout=dummy",
-        "--aout=dummy",
-        "--no-audio",
-        "--avcodec-hw=none",
-        "--extraintf",
-        "luaintf",
-        "--lua-intf",
-        "dbsrt_intf",
-        str(cut_path.resolve()),
-    ]
-    env = os.environ.copy()
-    env["DBSRT_AUTOKILL"] = "1"
-    env["DBSRT_SEARCH_MODE"] = "ahash"
-    env["DISPLAY"] = ""
+    """Executes single offscreen headless cvlc test using aHash auto-sync inside an isolated TemporaryDirectory."""
+    with tempfile.TemporaryDirectory(prefix="dbsrt_cvlc_cut_") as tmp_dir:
+        staged_cut = Path(tmp_dir) / cut_path.name
+        try:
+            staged_cut.symlink_to(cut_path.resolve())
+        except OSError:
+            staged_cut = cut_path.resolve()
 
-    t0 = time.monotonic()
-    try:
-        res = subprocess.run(
-            cmd,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=MAX_SUBPROCESS_TIMEOUT_SECONDS,
-            check=False,
-        )
-        elapsed = time.monotonic() - t0
-        output = res.stderr + "\n" + res.stdout
-        success = "SUCCESS! Media matched" in output or "VIDEO MATCHED" in output
-        return success, round(elapsed, 3)
-    except subprocess.TimeoutExpired:
-        return False, MAX_SUBPROCESS_TIMEOUT_SECONDS
+        cmd = [
+            "cvlc",
+            "--vout=dummy",
+            "--aout=dummy",
+            "--no-audio",
+            "--avcodec-hw=none",
+            "--extraintf",
+            "luaintf",
+            "--lua-intf",
+            "dbsrt_intf",
+            str(staged_cut),
+        ]
+        env = os.environ.copy()
+        env["DBSRT_AUTOKILL"] = "1"
+        env["DBSRT_SEARCH_MODE"] = "ahash"
+        env["DISPLAY"] = ""
+
+        t0 = time.monotonic()
+        try:
+            res = subprocess.run(
+                cmd,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=MAX_SUBPROCESS_TIMEOUT_SECONDS,
+                check=False,
+            )
+            elapsed = time.monotonic() - t0
+            output = res.stderr + "\n" + res.stdout
+            success = "SUCCESS! Media matched" in output or "VIDEO MATCHED" in output
+            return success, round(elapsed, 3)
+        except subprocess.TimeoutExpired:
+            return False, MAX_SUBPROCESS_TIMEOUT_SECONDS
 
 
-def evaluate_single_cut(cut_path: Path, server_url: str) -> CutBenchmarkResult | None:
+def evaluate_single_cut(
+    cut_path: Path,
+    server_url: str,
+    default_offset_sec: float = GROUND_TRUTH_CUT_OFFSET_SECONDS,
+) -> CutBenchmarkResult | None:
     """Runs aHash REST API query and offscreen cvlc execution on a single video cut."""
     expected_stem = cut_path.name.replace("_cut15s.mp4", "").replace("_mid15s.mp4", "")
     req_payload = {
@@ -151,7 +219,7 @@ def evaluate_single_cut(cut_path: Path, server_url: str) -> CutBenchmarkResult |
         (c for c in resp.get("candidates", []) if c.get("source") == CERTIFIED_SYNCED_SOURCE),
         None,
     )
-    gt_shift_ms = -GROUND_TRUTH_CUT_OFFSET_SECONDS * MILLIS_PER_SEC
+    gt_shift_ms = derive_ground_truth_shift_ms(cut_path, default_offset_sec)
     if synced_candidate is None or synced_candidate.get("shift_ms") is None:
         # No certified_synced candidate: no shift was computed, never count it as exact.
         calc_shift_ms = 0.0

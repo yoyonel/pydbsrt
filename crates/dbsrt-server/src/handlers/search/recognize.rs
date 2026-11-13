@@ -487,16 +487,32 @@ pub async fn recognize_handler(
         .recognize_requests
         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
+    let _permit = state.heavy_task_semaphore.acquire().await.ok();
     let override_phash_dir = payload.phash_dir.as_deref().map(PathBuf::from);
     let phash_dirs = state.effective_phash_dirs(override_phash_dir.as_deref());
 
-    let mut response = if let Some(ref fp) = payload.query_fingerprint {
-        let hashes = parse_fingerprint_hashes(fp);
-        recognize_from_fingerprint(&state, &hashes, &payload, &phash_dirs)
-    } else {
-        let media_path = PathBuf::from(&payload.media_path);
-        recognize_from_media_file(&media_path, &payload, &phash_dirs)?
-    };
+    let state_bg = Arc::clone(&state);
+    let mut response = tokio::task::spawn_blocking(move || {
+        if let Some(ref fp) = payload.query_fingerprint {
+            let hashes = parse_fingerprint_hashes(fp);
+            Ok(recognize_from_fingerprint(
+                &state_bg,
+                &hashes,
+                &payload,
+                &phash_dirs,
+            ))
+        } else {
+            let media_path = PathBuf::from(&payload.media_path);
+            recognize_from_media_file(&media_path, &payload, &phash_dirs)
+        }
+    })
+    .await
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Recognition worker task panicked: {e}"),
+        )
+    })??;
     // Measured after matching/extraction so the reported latency covers the real work.
     response.timer_seconds = t_start.elapsed().as_secs_f64();
 
@@ -511,16 +527,20 @@ pub async fn recognize_handler(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dbsrt_core::{OpenSubtitlesProvider, SubtitleCache};
+    use dbsrt_core::OpenSubtitlesProvider;
 
     fn test_app_state() -> Arc<AppState> {
         let phash_dir = PathBuf::from("tests/data");
-        let srt_dir = PathBuf::from("data/SRT");
-        Arc::new(AppState::new(
+        let srt_dir = PathBuf::from("tests/data");
+        Arc::new(AppState::with_options(
             phash_dir,
             srt_dir,
             Arc::new(OpenSubtitlesProvider::new(None)),
-            SubtitleCache::default(),
+            crate::state::AppStateInitOptions {
+                dbphash_path: Some(PathBuf::from("/nonexistent_test_catalog.dbphash")),
+                extra_phash_dirs: Vec::new(),
+                ahash_dir: None,
+            },
         ))
     }
 

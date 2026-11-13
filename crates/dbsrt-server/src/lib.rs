@@ -166,7 +166,11 @@ pub fn create_router_with_state(state: AppState) -> Router {
         .route("/v1/couplings", get(couplings_handler))
         .route("/v1/couplings/sub_frames", get(sub_frames_handler))
         .route("/v1/search", post(search_handler))
-        .route("/v1/search/ahash", post(search_ahash_handler))
+        .route(
+            "/v1/search/ahash",
+            post(search_ahash_handler)
+                .layer(axum::extract::DefaultBodyLimit::max(MAX_AHASH_BODY_BYTES)),
+        )
         .route("/v1/search/latest", get(latest_search_handler))
         .route("/v1/snippets", get(list_snippets_handler))
         .route("/v1/download", post(download_handler))

@@ -38,13 +38,14 @@ install_plugin() {
 test_cvlc() {
   local mode="${DBSRT_SEARCH_MODE:-auto}"
   local media="${1:-${DEFAULT_MEDIA}}"
-  local output
-  output="$(DBSRT_AUTOKILL=1 DBSRT_SEARCH_MODE="${mode}" cvlc --vout=dummy --aout=dummy --no-audio --avcodec-hw=none --extraintf luaintf --lua-intf dbsrt_intf "${media}" 2>&1)"
+  local output=""
+  local rc=0
+  output="$(DBSRT_AUTOKILL=1 DBSRT_SEARCH_MODE="${mode}" cvlc --vout=dummy --aout=dummy --no-audio --avcodec-hw=none --extraintf luaintf --lua-intf dbsrt_intf "${media}" 2>&1)" || rc=$?
   echo "$output"
   if echo "$output" | grep -q "SUCCESS! Media matched"; then
-    echo "✓ E2E VLC Integration Test Passed (Event-driven autokill, mode: ${mode})!"
+    echo "✓ E2E VLC Integration Test Passed (Event-driven autokill, mode: ${mode}, rc: ${rc})!"
   else
-    echo "✗ E2E VLC Integration Test Failed: Subtitle was not attached!" >&2
+    echo "✗ E2E VLC Integration Test Failed (rc: ${rc}): Subtitle was not attached!" >&2
     exit 1
   fi
 }

@@ -105,11 +105,8 @@ case "${ACTION}" in
       echo "⚠️ No remote API key in DBSRT_REMOTE_API_KEY or 'pass': protected remotes answer 401."
     fi
 
-    # 5. Build local dataset arguments if present in repository
+    # 5. Build local dataset arguments if present in repository (omit --ahash-dir on lightweight --agent)
     LOCAL_DATA_ARGS=""
-    if [[ -d "${REPO_ROOT}/data/__AHASH__" ]]; then
-      LOCAL_DATA_ARGS="${LOCAL_DATA_ARGS} --ahash-dir ${REPO_ROOT}/data/__AHASH__"
-    fi
     if [[ -d "${REPO_ROOT}/data/__PHASH__" ]]; then
       LOCAL_DATA_ARGS="${LOCAL_DATA_ARGS} --phash-dir ${REPO_ROOT}/data/__PHASH__"
     else

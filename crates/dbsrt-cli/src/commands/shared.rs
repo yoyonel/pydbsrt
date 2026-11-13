@@ -49,29 +49,37 @@ pub fn find_or_build_phash(
     find_or_build_phash_with_hwaccel(media_file, phash_dir, dbsrt_core::HwAccel::Auto, None)
 }
 
-/// Validates `--moviehash`: it becomes a file name, so 16 hexadecimal characters only.
+/// Degenerate all-zero OpenSubtitles 64-bit MovieHash rejected across CLI arguments and inference.
+pub(crate) const NULL_MOVIEHASH_HEX: &str = "0000000000000000";
+
+/// Validates `--moviehash`: it becomes a file name, so 16 non-zero hexadecimal characters only.
 ///
 /// # Arguments
 /// * `raw` - Raw CLI `--moviehash` value.
 ///
 /// # Returns
-/// Lowercase 16-hex string when valid.
+/// Lowercase 16-hex string when valid and non-zero.
 ///
 /// # Errors
-/// Returns `Err` if `raw` does not contain exactly 16 ASCII hexadecimal characters.
+/// Returns `Err` if `raw` does not contain exactly 16 ASCII hexadecimal characters or equals
+/// [`NULL_MOVIEHASH_HEX`].
 ///
 /// # Panics
 /// Guarantee: Never panics.
 ///
 /// # Data Flow & Invariants
-/// Rejects path separators, dots, and arbitrary lengths so the validated hash is always
-/// safe as a filesystem stem.
+/// Rejects path separators, dots, arbitrary lengths, and the degenerate all-zero hash so the
+/// validated hash is always safe and non-colliding as a filesystem stem.
 pub(crate) fn parse_moviehash(raw: &str) -> Result<String, String> {
-    if raw.len() == MOVIEHASH_HEX_LENGTH && raw.bytes().all(|b| b.is_ascii_hexdigit()) {
-        Ok(raw.to_ascii_lowercase())
+    let lower = raw.to_ascii_lowercase();
+    if lower.len() == MOVIEHASH_HEX_LENGTH
+        && lower.bytes().all(|b| b.is_ascii_hexdigit())
+        && lower != NULL_MOVIEHASH_HEX
+    {
+        Ok(lower)
     } else {
         Err(format!(
-            "expected {MOVIEHASH_HEX_LENGTH} hexadecimal characters, got {raw:?}"
+            "expected {MOVIEHASH_HEX_LENGTH} non-zero hexadecimal characters, got {raw:?}"
         ))
     }
 }
@@ -84,21 +92,24 @@ pub(crate) fn parse_moviehash(raw: &str) -> Result<String, String> {
 ///
 /// # Returns
 /// `Some(hash)` from `explicit`, else computed on a local file (`>= 64 KiB`); `None` for
-/// remote streams without `--moviehash` or files smaller than 64 KiB.
+/// remote streams without `--moviehash`, files smaller than 64 KiB, or degenerate all-zero hashes.
 ///
 /// # Panics
 /// Guarantee: Never panics.
 ///
 /// # Data Flow & Invariants
-/// Normalizes any explicit hash to lowercase and never performs network I/O for remote URIs.
+/// Normalizes any explicit hash to lowercase, rejects [`NULL_MOVIEHASH_HEX`], and never performs
+/// network I/O for remote URIs.
 pub(crate) fn resolve_moviehash(explicit: Option<&str>, media_file: &Path) -> Option<String> {
     if let Some(hash) = explicit {
-        return Some(hash.to_ascii_lowercase());
+        return parse_moviehash(hash).ok();
     }
     if dbsrt_core::container::is_remote_stream_or_pipe(media_file) {
         return None;
     }
-    dbsrt_core::metadata::compute_opensubtitles_hash(media_file).ok()
+    dbsrt_core::metadata::compute_opensubtitles_hash(media_file)
+        .ok()
+        .and_then(|h| parse_moviehash(&h).ok())
 }
 
 pub(crate) fn resolve_media_path_filename(media_file: &Path) -> Result<String> {
@@ -115,14 +126,18 @@ pub(crate) fn resolve_media_path_filename(media_file: &Path) -> Result<String> {
 }
 
 fn match_prefix_phash(entries: &[PathBuf], full_name: &str) -> Option<(PathBuf, Vec<u64>, f64)> {
-    if full_name.is_empty() {
+    let prefix = full_name.strip_suffix('.').unwrap_or(full_name);
+    if prefix.is_empty() {
         return None;
     }
     for p in entries {
         let name = p.file_name().and_then(|n| n.to_str()).unwrap_or_default();
-        if !name.starts_with(full_name) || !name.ends_with(PHASH_DOT_EXT) {
+        if !name.ends_with(PHASH_DOT_EXT) {
             continue;
         }
+        let Some(_) = name.strip_prefix(prefix).and_then(|s| s.strip_prefix('.')) else {
+            continue;
+        };
         let Ok(hashes) = read_phash_file(p) else {
             continue;
         };
@@ -148,10 +163,11 @@ fn scan_existing_phash(
         Ok(entries) => entries,
         Err(_) => return Ok(None),
     };
-    let entries: Vec<_> = dir_entries.flatten().map(|e| e.path()).collect();
+    let mut entries: Vec<_> = dir_entries.flatten().map(|e| e.path()).collect();
+    entries.sort();
 
     // 1. MovieHash exact prefix lookup is the primary identity: <moviehash>.<fps>fps.phash
-    if let Some(res) = moviehash.and_then(|h| match_prefix_phash(&entries, &format!("{h}."))) {
+    if let Some(res) = moviehash.and_then(|h| match_prefix_phash(&entries, h)) {
         return Ok(Some(res));
     }
 
@@ -171,13 +187,44 @@ fn scan_existing_phash(
     Ok(None)
 }
 
+/// Returns `true` when `after_prefix` starts with an explicit secondary audio track tag (`a<digits>.`).
+///
+/// # Arguments
+/// * `after_prefix` - Suffix of an `.ahash` file name immediately following `<stem>.`.
+///
+/// # Returns
+/// `true` when the leading dot-delimited token is `a<digits>` (e.g. `a1.86.1fps.ahash`).
+///
+/// # Panics
+/// Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// Prevents default-track reuse (`scan_existing_ahash`) from picking up non-default secondary
+/// audio tracks (`<stem>.a1.<fps>fps.ahash`).
+fn has_secondary_audio_track_tag(after_prefix: &str) -> bool {
+    let Some((first_seg, _)) = after_prefix.split_once('.') else {
+        return false;
+    };
+    let Some(digits) = first_seg.strip_prefix(dbsrt_core::AUDIO_TRACK_STEM_TAG) else {
+        return false;
+    };
+    !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit())
+}
+
 fn match_prefix_ahash(entries: &[PathBuf], full_name: &str) -> Option<(PathBuf, Vec<u64>, f64)> {
-    if full_name.is_empty() {
+    let prefix = full_name.strip_suffix('.').unwrap_or(full_name);
+    if prefix.is_empty() {
         return None;
     }
     for p in entries {
         let name = p.file_name().and_then(|n| n.to_str()).unwrap_or_default();
-        if !name.starts_with(full_name) || !name.ends_with(AHASH_DOT_EXT) {
+        if !name.ends_with(AHASH_DOT_EXT) {
+            continue;
+        }
+        let Some(after_prefix) = name.strip_prefix(prefix).and_then(|s| s.strip_prefix('.')) else {
+            continue;
+        };
+        if has_secondary_audio_track_tag(after_prefix) {
             continue;
         }
         let Ok(ahash_file) = dbsrt_core::AhashFile::read_from_path(p) else {
@@ -204,10 +251,11 @@ fn scan_existing_ahash(
         Ok(entries) => entries,
         Err(_) => return Ok(None),
     };
-    let entries: Vec<_> = dir_entries.flatten().map(|e| e.path()).collect();
+    let mut entries: Vec<_> = dir_entries.flatten().map(|e| e.path()).collect();
+    entries.sort();
 
     // 1. MovieHash exact prefix lookup: <moviehash>.<fps>fps.ahash
-    if let Some(res) = moviehash.and_then(|h| match_prefix_ahash(&entries, &format!("{h}."))) {
+    if let Some(res) = moviehash.and_then(|h| match_prefix_ahash(&entries, h)) {
         return Ok(Some(res));
     }
 
@@ -869,5 +917,57 @@ mod tests {
         let expected =
             std::env::var("PSQL_IP").unwrap_or_else(|_| DEFAULT_POSTGRES_HOST.to_string());
         assert_eq!(resolve_db_host(&args), expected);
+    }
+
+    #[test]
+    fn test_scan_existing_ahash_sorts_deterministically_and_filters_secondary_tracks_and_prefix_collisions(
+    ) {
+        let dir = tempfile::tempdir().unwrap();
+        let (_, band_bounds) =
+            dbsrt_core::ahash::HaitsmaKalkerExtractor::compute_band_layout(5512, 2048);
+        let header = dbsrt_core::AhashHeader {
+            version: 1,
+            sample_rate: 5512,
+            frame_size: 2048,
+            hop_size: 64,
+            num_bands: 33,
+            spectral_lag: 2,
+            frame_count: 16,
+            band_bounds,
+        };
+        // 1. Secondary track `.a1.` must NOT be picked when default track is requested
+        let secondary_path = dir.path().join("Movie.mkv.a1.86.1fps.ahash");
+        dbsrt_core::AhashFile::write_to_path(&secondary_path, &header, &[0xAA_u64; 16]).unwrap();
+
+        // 2. Prefix collision without `.` delimiter (`Movie.mkv2.86.1fps.ahash`) must NOT match `Movie.mkv`
+        let collision_path = dir.path().join("Movie.mkv2.86.1fps.ahash");
+        dbsrt_core::AhashFile::write_to_path(&collision_path, &header, &[0xBB_u64; 16]).unwrap();
+
+        let media = Path::new("/nonexistent/Movie.mkv");
+        assert!(
+            scan_existing_ahash(dir.path(), media, None)
+                .unwrap()
+                .is_none(),
+            "secondary .a1. track and non-dot prefix collision must be ignored"
+        );
+
+        // 3. When multiple default-track files exist, sorted order is deterministic
+        let z_path = dir.path().join("Movie.mkv.90.0fps.ahash");
+        let a_path = dir.path().join("Movie.mkv.86.1fps.ahash");
+        dbsrt_core::AhashFile::write_to_path(&z_path, &header, &[0xCC_u64; 16]).unwrap();
+        dbsrt_core::AhashFile::write_to_path(&a_path, &header, &[0xDD_u64; 16]).unwrap();
+
+        let (matched_path, matched_hashes, _) = scan_existing_ahash(dir.path(), media, None)
+            .unwrap()
+            .expect("must match default-track ahash");
+        assert_eq!(matched_path, a_path);
+        assert_eq!(matched_hashes[0], 0xDD_u64);
+
+        // 4. Degenerate all-zero moviehash is rejected by parse_moviehash
+        assert!(parse_moviehash("0000000000000000").is_err());
+        assert_eq!(
+            parse_moviehash("0123456789ABCDEF").unwrap(),
+            "0123456789abcdef"
+        );
     }
 }
