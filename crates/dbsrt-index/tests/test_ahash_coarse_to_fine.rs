@@ -1,218 +1,10 @@
 use dbsrt_core::ahash::{DEFAULT_FRAME_SIZE, DEFAULT_HOP_SIZE, DEFAULT_SAMPLE_RATE};
 use dbsrt_core::{extract_ahash, AudioExtractionOptions};
-use dbsrt_index::ahash::{
-    AHashCatalog, AHashCatalogEntry, AHashCatalogMatch, AHashMih32Index, AHashSearchCriteria,
-    MILLIS_PER_SEC, MIN_QUERY_FRAMES,
-};
-use rayon::prelude::*;
+use dbsrt_index::ahash::AHashCatalog;
+use dbsrt_index::coarse_to_fine::{CoarseToFineAHashIndex, FineSearchCriteria};
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::Arc;
 use std::time::Instant;
-
-const DEFAULT_FINE_WINDOW_SECONDS: f64 = 2.0;
-
-/// Hierarchical Coarse-to-Fine index for acoustic fingerprints.
-pub struct CoarseToFineAHashIndex {
-    pub factor_k: usize,
-    pub coarse_catalog: AHashCatalog,
-    pub coarse_mih32: AHashMih32Index,
-}
-
-impl CoarseToFineAHashIndex {
-    /// Builds a coarse-to-fine index from a dense catalog by sub-sampling every K-th frame.
-    pub fn build(dense_catalog: &AHashCatalog, factor_k: usize) -> Self {
-        assert!(factor_k >= 1, "Downsample factor must be >= 1");
-
-        let coarse_entries: Vec<AHashCatalogEntry> = dense_catalog
-            .entries
-            .par_iter()
-            .map(|entry| {
-                let coarse_hashes: Vec<u64> =
-                    entry.hashes.iter().step_by(factor_k).copied().collect();
-                let coarse_fps = entry.audio_fps / factor_k as f64;
-                let frame_count = coarse_hashes.len();
-                AHashCatalogEntry {
-                    media_name: entry.media_name.clone(),
-                    path: entry.path.clone(),
-                    audio_fps: coarse_fps,
-                    frame_count,
-                    hashes: Arc::new(coarse_hashes),
-                }
-            })
-            .collect();
-
-        let coarse_catalog = AHashCatalog::new(coarse_entries);
-        let coarse_mih32 = AHashMih32Index::build(&coarse_catalog.flat_hashes);
-
-        Self {
-            factor_k,
-            coarse_catalog,
-            coarse_mih32,
-        }
-    }
-
-    /// Performs two-tier coarse-to-fine search:
-    /// 1. Coarse Stage: Identifies candidate media and rough temporal offset using sub-sampled frames.
-    /// 2. Fine Stage: Evaluates dense 31.25 fps cross-correlation strictly within a narrow window around coarse offset.
-    pub fn search(
-        &self,
-        dense_catalog: &AHashCatalog,
-        dense_query: &[u64],
-        dense_fps: f64,
-        use_mih: bool,
-    ) -> Option<AHashCatalogMatch> {
-        let q_len = dense_query.len();
-        if q_len < MIN_QUERY_FRAMES {
-            return None;
-        }
-
-        // --- Tier 1: Coarse Stage ---
-        let coarse_query: Vec<u64> = dense_query.iter().step_by(self.factor_k).copied().collect();
-        let coarse_fps = dense_fps / self.factor_k as f64;
-        let coarse_criteria = AHashSearchCriteria::new(&coarse_query, coarse_fps);
-
-        let coarse_match = if use_mih {
-            let res = self.search_coarse_mih32(&coarse_criteria);
-            res.into_iter().next()
-        } else {
-            let res = self.coarse_catalog.search_linear(&coarse_criteria);
-            res.into_iter().next()
-        }?;
-
-        // --- Tier 2: Fine Stage ---
-        let dense_entry = dense_catalog
-            .entries
-            .iter()
-            .find(|e| e.media_name == coarse_match.media_name)?;
-
-        let approx_dense_offset = coarse_match.ref_frame_offset * self.factor_k;
-        let window_radius =
-            ((DEFAULT_FINE_WINDOW_SECONDS * dense_fps) as usize).max(self.factor_k * 2);
-
-        let min_s = approx_dense_offset.saturating_sub(window_radius);
-        let max_s = (approx_dense_offset + window_radius)
-            .min(dense_entry.hashes.len().saturating_sub(q_len));
-
-        if min_s > max_s || dense_entry.hashes.len() < q_len {
-            return None;
-        }
-
-        let mut best_shift = min_s;
-        let mut best_dist = u64::MAX;
-
-        for s in min_s..=max_s {
-            let ref_slice = &dense_entry.hashes[s..s + q_len];
-            let mut dist = 0u64;
-            for (&q, &r) in dense_query.iter().zip(ref_slice) {
-                dist += (q ^ r).count_ones() as u64;
-            }
-            if dist < best_dist {
-                best_dist = dist;
-                best_shift = s;
-            }
-        }
-
-        let mean_dist = best_dist as f64 / q_len as f64;
-        let score = (1.0 - (mean_dist / 64.0)).clamp(0.0, 1.0);
-        let snr_bits = (32.0 - mean_dist).max(0.0);
-        let offset_sec = best_shift as f64 / dense_fps;
-
-        Some(AHashCatalogMatch {
-            media_name: dense_entry.media_name.clone(),
-            file_path: dense_entry.path.to_string_lossy().to_string(),
-            ref_frame_offset: best_shift,
-            offset_sec,
-            offset_ms: (offset_sec * MILLIS_PER_SEC).round() as i64,
-            mean_distance: mean_dist,
-            score,
-            snr_bits,
-            audio_fps: dense_fps,
-        })
-    }
-
-    /// Fast coarse probe using MIH-32 on downsampled tables.
-    fn search_coarse_mih32(&self, criteria: &AHashSearchCriteria) -> Vec<AHashCatalogMatch> {
-        let q_len = criteria.query.len();
-        if q_len < 4 {
-            return Vec::new();
-        }
-
-        let probe_stride = 1.max(4 / self.factor_k.min(4));
-        let probe_frames: Vec<(usize, u64)> = criteria
-            .query
-            .iter()
-            .enumerate()
-            .step_by(probe_stride)
-            .map(|(k, &h)| (k, h))
-            .collect();
-
-        let partial_votes: Vec<Vec<(usize, usize)>> = probe_frames
-            .par_iter()
-            .map(|&(k, q_hash)| {
-                let mut hits = Vec::new();
-                let u = (q_hash >> 32) as u32;
-                let upper_slice = self.coarse_mih32.lookup_upper(u);
-                if upper_slice.len() <= 20_000 {
-                    for entry in upper_slice {
-                        let (m_idx, ref_off) = self
-                            .coarse_catalog
-                            .resolve_global_index(entry.frame_idx as usize);
-                        if ref_off >= k {
-                            hits.push((m_idx, ref_off - k));
-                        }
-                    }
-                }
-                let l = (q_hash & 0xFFFF_FFFF) as u32;
-                let lower_slice = self.coarse_mih32.lookup_lower(l);
-                if lower_slice.len() <= 20_000 {
-                    for entry in lower_slice {
-                        let (m_idx, ref_off) = self
-                            .coarse_catalog
-                            .resolve_global_index(entry.frame_idx as usize);
-                        if ref_off >= k {
-                            hits.push((m_idx, ref_off - k));
-                        }
-                    }
-                }
-                hits
-            })
-            .collect();
-
-        let mut votes = HashMap::new();
-        for hits in partial_votes {
-            for pair in hits {
-                *votes.entry(pair).or_default() += 1;
-            }
-        }
-
-        let min_votes = 1.max(3 / self.factor_k.min(3) as u32);
-        let mut clusters: Vec<(usize, usize, u32)> = votes
-            .into_iter()
-            .filter(|&(_, v)| v >= min_votes)
-            .map(|((m_idx, shift), v)| (m_idx, shift, v))
-            .collect();
-
-        clusters.sort_by_key(|a| std::cmp::Reverse(a.2));
-
-        let mut matches = Vec::new();
-        for (m_idx, coarse_shift, _v) in clusters.into_iter().take(3) {
-            let entry = &self.coarse_catalog.entries[m_idx];
-            matches.push(AHashCatalogMatch {
-                media_name: entry.media_name.clone(),
-                file_path: entry.path.to_string_lossy().to_string(),
-                ref_frame_offset: coarse_shift,
-                offset_sec: coarse_shift as f64 / entry.audio_fps,
-                offset_ms: (coarse_shift as f64 / entry.audio_fps * MILLIS_PER_SEC).round() as i64,
-                mean_distance: 0.0,
-                score: 1.0,
-                snr_bits: 32.0,
-                audio_fps: entry.audio_fps,
-            });
-        }
-        matches
-    }
-}
 
 // ----------------------------------------------------------------------------
 // Comprehensive Coarse-to-Fine Benchmark Matrix
@@ -320,7 +112,12 @@ fn test_exhaustive_coarse_to_fine_benchmark() {
 
         for (path, q_hashes, q_fps) in &queries {
             let t_search = Instant::now();
-            let res = c2f.search(&dense_catalog, q_hashes, *q_fps, true);
+            let criteria = FineSearchCriteria {
+                dense_query: q_hashes,
+                dense_fps: *q_fps,
+                max_distance: 14.0,
+            };
+            let res = c2f.search(&dense_catalog, &criteria);
             let search_ms = t_search.elapsed().as_secs_f64() * 1000.0;
             total_search_ms += search_ms;
 

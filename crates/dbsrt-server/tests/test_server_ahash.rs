@@ -1,9 +1,13 @@
 use base64::prelude::*;
 use dbsrt_core::ahash::{AhashFile, AhashHeader, HaitsmaKalkerExtractor};
-use dbsrt_core::OpenSubtitlesProvider;
+use dbsrt_core::{
+    CertifiedSubtitleRecord, CouplingRegistry, LangStatus, MockSubtitleProvider,
+    OpenSubtitlesProvider,
+};
 use dbsrt_server::{
     create_router_with_state, AHashSearchRequest, AHashSearchResponse, AppState,
     AppStateInitOptions, CatalogReloadResponse, CatalogStatusResponse, MetricsResponse,
+    SearchSubtitlesRequest, SearchSubtitlesResponse,
 };
 use std::net::SocketAddr;
 use std::path::Path;
@@ -267,4 +271,142 @@ async fn test_server_ahash_catalog_status_and_reload() {
         .unwrap();
     let metrics: MetricsResponse = metrics_resp.json().await.unwrap();
     assert_eq!(metrics.status, "ok");
+}
+
+/// Frames of the synthetic reference media (> offset + query window).
+const SYNC_REF_FRAMES: usize = 6_000;
+/// Dense frame where the query window matches in the reference (~60.006 s at 86.125 fps).
+const SYNC_REF_OFFSET_FRAMES: usize = 5_168;
+/// Query window length in frames (5.0 s).
+const SYNC_QUERY_FRAMES: usize = 430;
+/// Frame rate of the mock `.ahash` files (5512 Hz / hop 64).
+const SYNC_AUDIO_FPS: f64 = 5_512.0 / 64.0;
+/// Milliseconds per second.
+const SYNC_MILLIS_PER_SEC: f64 = 1_000.0;
+/// Absolute tolerance on the exact floating point shift, ms.
+const SYNC_SHIFT_EPSILON_MS: f64 = 1e-6;
+/// Number of cues / digest placeholders of the certified subtitle record.
+const SYNC_CERT_CUE_COUNT: usize = 1;
+const SYNC_CERT_SUBTITLES_HASH: &str = "00112233445566778899aabbccddeeff";
+
+/// Writes an arbitrary hash sequence as a `.ahash` sidecar (same layout as the catalog files).
+fn write_ahash_sidecar(path: &Path, hashes: &[u64]) {
+    let (_band_bins, band_bounds) = HaitsmaKalkerExtractor::compute_band_layout(5512, 2048);
+    let header = AhashHeader {
+        version: 1,
+        sample_rate: 5512,
+        frame_size: 2048,
+        hop_size: 64,
+        num_bands: 33,
+        spectral_lag: 2,
+        frame_count: hashes.len() as u64,
+        band_bounds,
+    };
+    AhashFile::write_to_path(path, &header, hashes).expect("write query .ahash");
+}
+
+/// `POST /v1/search` in `ahash` mode must expose the acoustic shift
+/// (`query_start_sec - ref_offset_sec`) on the `certified_synced` candidate instead of
+/// re-running the visual pHash consensus (which yields 0 ms here: no pHash data at all).
+#[tokio::test]
+async fn test_search_ahash_mode_propagates_acoustic_shift_to_certified_synced() {
+    let catalog_dir = tempdir().expect("catalog dir");
+    let query_dir = tempdir().expect("query dir");
+    let request_subs_dir = tempdir().expect("request subtitles dir");
+    let state_subs_dir = tempdir().expect("state subtitles dir");
+
+    let reference = write_mock_ahash(
+        catalog_dir.path(),
+        "media_one",
+        SYNC_REF_FRAMES,
+        0x1357_9BDF,
+    );
+    let query_path = query_dir.path().join("query_cut.86.1fps.ahash");
+    write_ahash_sidecar(
+        &query_path,
+        &reference[SYNC_REF_OFFSET_FRAMES..SYNC_REF_OFFSET_FRAMES + SYNC_QUERY_FRAMES],
+    );
+
+    let mut registry = CouplingRegistry::default();
+    registry.upsert_coupling(
+        "ffeeddccbbaa99887766554433221100".to_string(),
+        "media_one".to_string(),
+        "media_one.25.0fps.phash".to_string(),
+        25.0,
+        SYNC_REF_FRAMES,
+        CertifiedSubtitleRecord {
+            subtitles_hash: SYNC_CERT_SUBTITLES_HASH.to_string(),
+            name: "media_one.en.srt".to_string(),
+            lang: "en".to_string(),
+            lang_status: LangStatus::Detected("en".to_string()),
+            srt_path: "media_one.en.srt".to_string(),
+            certified: true,
+            cue_count: SYNC_CERT_CUE_COUNT,
+            sub_frames: Vec::new(),
+        },
+    );
+    registry
+        .save(&CouplingRegistry::default_path(request_subs_dir.path()))
+        .expect("save couplings.json");
+
+    let state = AppState::with_options(
+        catalog_dir.path().to_path_buf(),
+        state_subs_dir.path().to_path_buf(),
+        Arc::new(MockSubtitleProvider::new()),
+        AppStateInitOptions {
+            dbphash_path: None,
+            extra_phash_dirs: Vec::new(),
+            ahash_dir: Some(catalog_dir.path().to_path_buf()),
+        },
+    );
+    let app = create_router_with_state(state);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind ephemeral");
+    let addr: SocketAddr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    let req = SearchSubtitlesRequest {
+        media_path: query_path.to_string_lossy().to_string(),
+        language: "auto".to_string(),
+        subtitles_dir: Some(request_subs_dir.path().to_string_lossy().to_string()),
+        phash_dir: None,
+        search_mode: Some("ahash".to_string()),
+        index_engine: None,
+        query_title: None,
+        season: None,
+        episode: None,
+    };
+    let resp = reqwest::Client::new()
+        .post(format!("http://{}/v1/search", addr))
+        .json(&req)
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+    let data: SearchSubtitlesResponse = resp.json().await.unwrap();
+
+    assert_eq!(data.matched_media.as_deref(), Some("media_one"));
+    let baseline = data
+        .candidates
+        .iter()
+        .find(|c| c.source == "certified")
+        .expect("baseline certified candidate");
+    assert_eq!(baseline.shift_ms, Some(0.0));
+
+    // `.ahash` sidecar => query_start_sec = 0.0; shift = 0.0 - ref_offset_sec.
+    let expected_shift_ms = -(SYNC_REF_OFFSET_FRAMES as f64 / SYNC_AUDIO_FPS) * SYNC_MILLIS_PER_SEC;
+    let synced = data
+        .candidates
+        .iter()
+        .find(|c| c.source == "certified_synced")
+        .expect("certified_synced candidate must carry the acoustic shift");
+    let got = synced.shift_ms.expect("shift_ms present");
+    println!("certified_synced shift_ms = {got} (expected {expected_shift_ms})");
+    assert!(
+        (got - expected_shift_ms).abs() < SYNC_SHIFT_EPSILON_MS,
+        "acoustic shift lost: got {got}, expected {expected_shift_ms}"
+    );
 }

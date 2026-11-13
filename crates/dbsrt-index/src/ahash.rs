@@ -17,6 +17,12 @@ use crate::mih::{extract_chunk, HashProvider, MihTable, MultiIndexHash64, NUM_TA
 /// Default maximum number of match candidates to return.
 pub const DEFAULT_AHASH_SEARCH_LIMIT: usize = 5;
 
+/// Maximum catalog size (in cumulative sub-fingerprint frames) for which [`AHashCatalog::search`]
+/// still allows an exhaustive linear fallback after an empty 32-bit MIH result.
+/// 500 000 frames at ~86.1 fps is about 96 minutes of cumulated audio; above this threshold a
+/// non-match returns immediately instead of scanning (or building the 16-bit MIH over) the catalog.
+pub const MAX_LINEAR_FALLBACK_FRAMES: usize = 500_000;
+
 /// Milliseconds per second conversion factor.
 pub const MILLIS_PER_SEC: f64 = 1000.0;
 
@@ -999,28 +1005,29 @@ impl AHashCatalog {
         self.verify_candidate_clusters(&candidates, criteria)
     }
 
-    /// Primary search router: invokes 32-bit MIH (~2ms), with fallback to 16-bit MIH and linear scan.
+    /// Primary search router: targeted media -> linear; otherwise 32-bit MIH (~2ms), with a
+    /// linear fallback only for small catalogs (`total_frames <= MAX_LINEAR_FALLBACK_FRAMES`).
     ///
     /// # Arguments
     /// * `criteria` - Search parameters, query slice, thresholds and limits.
     ///
     /// # Returns
-    /// Vector of [`AHashCatalogMatch`] items ranked by Hamming distance.
+    /// Vector of [`AHashCatalogMatch`] items ranked by Hamming distance. Empty on non-match
+    /// in large catalogs.
     ///
     /// # Panics
     /// Guarantee: Never panics.
     ///
     /// # Data Flow & Invariants
-    /// Executes fast-path [`search_mih32`], falls back to [`search_mih`] (16-bit) if unconfident,
-    /// and lastly falls back to [`search_linear`] (exhaustive).
+    /// Never calls [`search_mih`] (16-bit MIH), so the large `mih` table is never allocated by
+    /// this router. [`search_mih`] and [`search_linear`] remain public for explicit benchmarks.
     pub fn search(&self, criteria: &AHashSearchCriteria) -> Vec<AHashCatalogMatch> {
-        let results = self.search_mih32(criteria);
-        if !results.is_empty() {
-            return results;
+        if criteria.target_media.is_some() {
+            return self.search_linear(criteria);
         }
-        let fallback_16 = self.search_mih(criteria);
-        if !fallback_16.is_empty() {
-            return fallback_16;
+        let results = self.search_mih32(criteria);
+        if !results.is_empty() || self.total_frames > MAX_LINEAR_FALLBACK_FRAMES {
+            return results;
         }
         self.search_linear(criteria)
     }
@@ -1102,5 +1109,31 @@ mod tests {
         let criteria = AHashSearchCriteria::new(&query, 86.125);
         let results = catalog.search(&criteria);
         assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_large_catalog_non_match_skips_fallbacks() {
+        let mut state = 0x9E37_79B9_7F4A_7C15_u64;
+        let mut next = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        let n = MAX_LINEAR_FALLBACK_FRAMES + 1;
+        let hashes: Vec<u64> = (0..n).map(|_| next()).collect();
+        let entry = AHashCatalogEntry {
+            media_name: "big".to_string(),
+            path: PathBuf::from("big.ahash"),
+            audio_fps: 86.125,
+            frame_count: n,
+            hashes: Arc::new(hashes),
+        };
+        let catalog = AHashCatalog::new(vec![entry]);
+        let query: Vec<u64> = (0..64).map(|_| next()).collect();
+        let criteria = AHashSearchCriteria::new(&query, 86.125);
+        let results = catalog.search(&criteria);
+        assert!(results.is_empty());
+        assert!(catalog.mih.get().is_none());
     }
 }

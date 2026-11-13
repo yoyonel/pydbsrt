@@ -1,15 +1,15 @@
 //! Subtitle search and candidate ranking handler.
 
 use crate::constants::{
-    DEFAULT_AHASH_QUERY_DURATION_SECONDS, DEFAULT_AHASH_START_OFFSET_SECONDS, DEFAULT_BASELINE_FPS,
-    DEFAULT_FALLBACK_FPS, DEFAULT_RECOGNITION_SEARCH_DISTANCE, DEFAULT_SEARCH_DISTANCE,
-    FINGERPRINT_PREVIEW_SAMPLE_COUNT, MILLIS_PER_SEC, SECONDS_PER_MINUTE,
+    DEFAULT_BASELINE_FPS, DEFAULT_FALLBACK_FPS, DEFAULT_RECOGNITION_SEARCH_DISTANCE,
+    DEFAULT_SEARCH_DISTANCE, FINGERPRINT_PREVIEW_SAMPLE_COUNT, MILLIS_PER_SEC, SECONDS_PER_MINUTE,
     SIGNIFICANT_SHIFT_THRESHOLD_MS,
 };
 use crate::dtos::{
     RecognizeRequest, RecognizeResponse, SearchSubtitlesRequest, SearchSubtitlesResponse,
     SearchTimingStats, SubtitleCandidate, SubtitleSource,
 };
+use crate::handlers::autosync::{extract_ahash_query_window, AcousticAlignment};
 use crate::services::catalog::{
     collect_subtitle_search_dirs, lookup_certified_couplings, normalize_lang_code,
     search_subtitles_in_catalog,
@@ -21,14 +21,15 @@ use crate::services::recognition::identify_media_by_phash_multi_routed;
 use crate::state::AppState;
 use axum::extract::State;
 use axum::Json;
-use dbsrt_core::ahash::{AhashFile, DEFAULT_FRAME_SIZE, DEFAULT_HOP_SIZE, DEFAULT_SAMPLE_RATE};
-use dbsrt_core::{
-    extract_ahash, inspect_container, probe_video, AudioExtractionOptions, MediaMetadata,
-};
+use dbsrt_core::ahash::AhashFile;
+use dbsrt_core::{inspect_container, probe_video, MediaMetadata};
 use dbsrt_index::AHashSearchCriteria;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
+
+/// Query start (seconds) of an `.ahash` sidecar: it fingerprints the media from its beginning.
+const AHASH_SIDECAR_QUERY_START_SECONDS: f64 = 0.0;
 
 struct RecognitionRoutingContext<'a> {
     state: &'a AppState,
@@ -37,41 +38,109 @@ struct RecognitionRoutingContext<'a> {
     phash_dirs: &'a [PathBuf],
 }
 
+/// Outcome of the recognition routing stage.
+struct RoutedRecognition {
+    /// Recognized reference media, if any.
+    matched_media: Option<String>,
+    /// Recognition confidence (0.0 to 100.0).
+    phash_conf: f64,
+    /// Framerate of the target stream.
+    target_fps: f64,
+    /// Pre-existing pHash dataset of the target, if loaded.
+    existing_phash: Option<ExistingPhashData>,
+    /// Visual query sample extracted during relay, if any.
+    query_sample: Option<Vec<u64>>,
+    /// Exact acoustic subtitle shift (ms) `query_start_sec - ref_offset_sec`; set only when
+    /// the match came from the aHash catalog, `None` for pHash matches.
+    acoustic_shift_ms: Option<f64>,
+}
+
 /// Routes media recognition across aHash and pHash pipelines based on search mode.
+///
+/// # Arguments
+/// - `ctx`: Routing context (state, payload, media path, pHash directories).
+/// - `candidates`: Mutable candidate list (relay results).
+/// - `timing`: Mutable timing statistics.
+///
+/// # Returns
+/// [`RoutedRecognition`]; `acoustic_shift_ms` is populated for `ahash` mode and for the
+/// `ahash` fallback taken when pHash recognition failed.
+///
+/// # Panics
+/// Guaranteed panic-free.
+///
+/// # Data Flow & Invariants
+/// pHash results never carry an acoustic shift: their shift is computed later visually.
 async fn route_recognition_pipeline(
     ctx: RecognitionRoutingContext<'_>,
     candidates: &mut Vec<SubtitleCandidate>,
     timing: &mut SearchTimingStats,
-) -> (
-    Option<String>,
-    f64,
-    f64,
-    Option<ExistingPhashData>,
-    Option<Vec<u64>>,
-) {
+) -> RoutedRecognition {
     let mode = ctx.payload.search_mode.as_deref().unwrap_or("all");
     let use_phash = mode == "phash" || mode == "all" || mode == "auto";
     let use_ahash = mode == "ahash";
 
     if use_ahash {
-        execute_ahash_recognition(ctx.state, ctx.payload, ctx.media_path, timing).await
-    } else {
-        let (m, conf, fps, ex, qs) = execute_phash_recognition(
-            ctx.state,
-            ctx.payload,
-            ctx.media_path,
-            ctx.phash_dirs,
-            use_phash,
-            candidates,
-            timing,
-        )
-        .await;
-        if m.is_none() && (mode == "all" || mode == "auto") && ctx.media_path.exists() {
-            execute_ahash_recognition(ctx.state, ctx.payload, ctx.media_path, timing).await
-        } else {
-            (m, conf, fps, ex, qs)
-        }
+        return execute_ahash_recognition(ctx.state, ctx.payload, ctx.media_path, timing)
+            .await
+            .into_routed();
     }
+
+    let (m, conf, fps, ex, qs) = execute_phash_recognition(
+        ctx.state,
+        ctx.payload,
+        ctx.media_path,
+        ctx.phash_dirs,
+        use_phash,
+        candidates,
+        timing,
+    )
+    .await;
+    if m.is_none() && (mode == "all" || mode == "auto") && ctx.media_path.exists() {
+        return execute_ahash_recognition(ctx.state, ctx.payload, ctx.media_path, timing)
+            .await
+            .into_routed();
+    }
+    RoutedRecognition {
+        matched_media: m,
+        phash_conf: conf,
+        target_fps: fps,
+        existing_phash: ex,
+        query_sample: qs,
+        acoustic_shift_ms: None,
+    }
+}
+
+/// Logs the incoming search request (mode, language, media file name).
+///
+/// # Arguments
+/// - `state`: Application state owning the log ring buffer.
+/// - `mode`: Effective search mode.
+/// - `language`: Requested subtitle language code.
+/// - `media_path`: Target media path (only the file name is logged).
+///
+/// # Returns
+/// None.
+///
+/// # Panics
+/// Guaranteed panic-free.
+///
+/// # Data Flow & Invariants
+/// Pure side effect on the log buffer; no behavior depends on it.
+fn log_search_request(state: &AppState, mode: &str, language: &str, media_path: &Path) {
+    state.push_log(
+        "SEARCH",
+        "INFO",
+        format!(
+            "Request: mode='{}', lang='{}', media='{}'",
+            mode,
+            language,
+            media_path
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+        ),
+    );
 }
 
 /// Axum handler for `POST /v1/search`: discovers, matches, and ranks subtitles for a video.
@@ -117,34 +186,28 @@ pub async fn search_handler(
 
     let mode = payload.search_mode.as_deref().unwrap_or("all");
 
-    state.push_log(
-        "SEARCH",
-        "INFO",
-        format!(
-            "Request: mode='{}', lang='{}', media='{}'",
-            mode,
-            payload.language,
-            media_path
-                .file_name()
-                .and_then(|s| s.to_str())
-                .unwrap_or("")
-        ),
-    );
+    log_search_request(&state, mode, &payload.language, &media_path);
 
     let mut timing = SearchTimingStats::default();
 
-    let (matched_media, phash_conf, target_fps, existing_phash, query_sample_opt) =
-        route_recognition_pipeline(
-            RecognitionRoutingContext {
-                state: &state,
-                payload: &payload,
-                media_path: &media_path,
-                phash_dirs: &phash_dirs,
-            },
-            &mut candidates,
-            &mut timing,
-        )
-        .await;
+    let RoutedRecognition {
+        matched_media,
+        phash_conf,
+        target_fps,
+        existing_phash,
+        query_sample: query_sample_opt,
+        acoustic_shift_ms,
+    } = route_recognition_pipeline(
+        RecognitionRoutingContext {
+            state: &state,
+            payload: &payload,
+            media_path: &media_path,
+            phash_dirs: &phash_dirs,
+        },
+        &mut candidates,
+        &mut timing,
+    )
+    .await;
 
     let (mut meta, moviehash, fingerprint_preview) = extract_target_metadata_and_preview(
         &media_path,
@@ -161,17 +224,20 @@ pub async fn search_handler(
 
     if let Some(ref m_name) = matched_media {
         match_certified_couplings_and_shifts(
-            &state,
-            &media_path,
-            &subtitles_dir,
-            &phash_dirs,
-            m_name,
-            phash_conf,
-            target_fps,
-            &existing_phash,
-            effective_season,
-            effective_episode,
-            &payload.language,
+            &CertifiedMatchContext {
+                state: &state,
+                media_path: &media_path,
+                subtitles_dir: &subtitles_dir,
+                phash_dirs: &phash_dirs,
+                matched_media: m_name,
+                phash_conf,
+                target_fps,
+                existing_phash: &existing_phash,
+                acoustic_shift_ms,
+                effective_season,
+                effective_episode,
+                language: &payload.language,
+            },
             &mut candidates,
             &mut seen_catalog_paths,
             &mut seen_filenames,
@@ -776,6 +842,39 @@ async fn execute_phash_recognition(
     }
 }
 
+/// Outcome of the acoustic recognition stage.
+struct AhashRecognition {
+    /// Recognized reference media, if any.
+    matched_media: Option<String>,
+    /// Recognition confidence (0.0 to 100.0).
+    confidence: f64,
+    /// Probe position versus reference match offset, if a match was found.
+    alignment: Option<AcousticAlignment>,
+}
+
+impl AhashRecognition {
+    /// A recognition attempt that produced no match.
+    fn none() -> Self {
+        Self {
+            matched_media: None,
+            confidence: 0.0,
+            alignment: None,
+        }
+    }
+
+    /// Converts into the routing outcome (aHash has no pHash dataset nor visual sample).
+    fn into_routed(self) -> RoutedRecognition {
+        RoutedRecognition {
+            matched_media: self.matched_media,
+            phash_conf: self.confidence,
+            target_fps: DEFAULT_BASELINE_FPS,
+            existing_phash: None,
+            query_sample: None,
+            acoustic_shift_ms: self.alignment.map(|a| a.shift_ms()),
+        }
+    }
+}
+
 /// Extracts audio sub-fingerprints and performs acoustic recognition against the in-memory catalog.
 ///
 /// # Arguments
@@ -785,67 +884,52 @@ async fn execute_phash_recognition(
 /// - `timing`: Mutable search timing statistics to record aHash matching duration.
 ///
 /// # Returns
-/// Tuple containing `(matched_media, phash_confidence, target_fps, existing_phash, query_sample)`.
+/// [`AhashRecognition`] with the matched media, its confidence and the
+/// [`AcousticAlignment`] (`query_start_sec`, `ref_offset_sec`) of the best match.
 ///
 /// # Errors
-/// None. Extraction failures are logged and yield `(None, ...)`.
+/// None. Extraction failures are logged and yield an empty recognition.
 ///
 /// # Panics
 /// Guaranteed panic-free.
 ///
 /// # Data Flow & Invariants
-/// 1. Reads `.ahash` directly if media_path has `.ahash` extension.
-/// 2. Spawns FFmpeg on blocking thread to extract 5.0s audio snippet at 60s (falling back to 0s).
+/// 1. Reads `.ahash` directly if media_path has `.ahash` extension (query start is then
+///    [`AHASH_SIDECAR_QUERY_START_SECONDS`]: a sidecar fingerprints the media from its start).
+/// 2. Otherwise spawns FFmpeg on blocking thread to extract 5.0s audio at 60s (falling back to
+///    0s) and records the start actually used.
 /// 3. Queries atomic in-memory `AHashCatalog` with empirical thresholds.
-/// 4. Records matching tier label and confidence score.
+/// 4. Records matching tier label and confidence score; the best match offset is kept in the
+///    alignment instead of being discarded.
 async fn execute_ahash_recognition(
     state: &AppState,
     _payload: &SearchSubtitlesRequest,
     media_path: &Path,
     timing: &mut SearchTimingStats,
-) -> (
-    Option<String>,
-    f64,
-    f64,
-    Option<ExistingPhashData>,
-    Option<Vec<u64>>,
-) {
+) -> AhashRecognition {
     if !media_path.exists() {
-        return (None, 0.0, DEFAULT_BASELINE_FPS, None, None);
+        return AhashRecognition::none();
     }
 
     let t0 = Instant::now();
     let is_ahash_file = media_path.extension().is_some_and(|e| e == "ahash");
 
-    let extracted = if is_ahash_file {
-        AhashFile::read_from_path(media_path).ok()
+    let extracted: Option<(AhashFile, f64)> = if is_ahash_file {
+        AhashFile::read_from_path(media_path)
+            .ok()
+            .map(|f| (f, AHASH_SIDECAR_QUERY_START_SECONDS))
     } else {
         let p = media_path.to_path_buf();
-        let opts = AudioExtractionOptions {
-            sample_rate: DEFAULT_SAMPLE_RATE,
-            frame_size: DEFAULT_FRAME_SIZE,
-            hop_size: DEFAULT_HOP_SIZE,
-            start_sec: DEFAULT_AHASH_START_OFFSET_SECONDS,
-            duration_sec: Some(DEFAULT_AHASH_QUERY_DURATION_SECONDS),
-            custom_ffmpeg: None,
-        };
-        tokio::task::spawn_blocking(move || match extract_ahash(&p, &opts) {
-            Ok(f) if !f.hashes.is_empty() => Ok(f),
-            _ => {
-                let mut fallback_opts = opts.clone();
-                fallback_opts.start_sec = 0.0;
-                extract_ahash(&p, &fallback_opts)
-            }
-        })
-        .await
-        .ok()
-        .and_then(|res| res.ok())
+        tokio::task::spawn_blocking(move || extract_ahash_query_window(&p))
+            .await
+            .ok()
+            .flatten()
     };
 
     timing.ffmpeg_ms = t0.elapsed().as_secs_f64() * MILLIS_PER_SEC;
 
-    let ahash_file = match extracted {
-        Some(f) if !f.hashes.is_empty() => f,
+    let (ahash_file, query_start_sec) = match extracted {
+        Some((f, start)) if !f.hashes.is_empty() => (f, start),
         _ => {
             state.push_log(
                 "AHASH",
@@ -855,14 +939,20 @@ async fn execute_ahash_recognition(
                     media_path.file_name()
                 ),
             );
-            return (None, 0.0, DEFAULT_BASELINE_FPS, None, None);
+            return AhashRecognition::none();
         }
     };
 
     let audio_fps = ahash_file.header.audio_fps();
-    let criteria = AHashSearchCriteria::new(&ahash_file.hashes, audio_fps);
-    let catalog = state.ahash_catalog.load();
-    let matches = catalog.search(&criteria);
+    let catalog = state.ahash_catalog.load_full();
+    let matches = {
+        let hashes = ahash_file.hashes.clone();
+        tokio::task::spawn_blocking(move || {
+            catalog.search(&AHashSearchCriteria::new(&hashes, audio_fps))
+        })
+        .await
+        .unwrap_or_default()
+    };
 
     if let Some(best) = matches.first() {
         let conf = best.score * 100.0;
@@ -872,17 +962,18 @@ async fn execute_ahash_recognition(
             "AHASH",
             "INFO",
             format!(
-                "✓ aHash match: '{}' (conf={:.1}%, SNR={:.1} bits, offset={:.2}s)",
-                best.media_name, conf, best.snr_bits, best.offset_sec
+                "✓ aHash match: '{}' (conf={:.1}%, SNR={:.1} bits, offset={:.2}s, query_start={:.2}s)",
+                best.media_name, conf, best.snr_bits, best.offset_sec, query_start_sec
             ),
         );
-        (
-            Some(best.media_name.clone()),
-            conf,
-            DEFAULT_BASELINE_FPS,
-            None,
-            None,
-        )
+        AhashRecognition {
+            matched_media: Some(best.media_name.clone()),
+            confidence: conf,
+            alignment: Some(AcousticAlignment {
+                query_start_sec,
+                ref_offset_sec: best.offset_sec,
+            }),
+        }
     } else {
         state.push_log(
             "AHASH",
@@ -892,7 +983,7 @@ async fn execute_ahash_recognition(
                 media_path.file_name()
             ),
         );
-        (None, 0.0, DEFAULT_BASELINE_FPS, None, None)
+        AhashRecognition::none()
     }
 }
 
@@ -971,20 +1062,97 @@ fn extract_target_metadata_and_preview(
     (meta, moviehash, fingerprint_preview)
 }
 
+/// Immutable inputs of [`match_certified_couplings_and_shifts`].
+struct CertifiedMatchContext<'a> {
+    /// Shared server state container.
+    state: &'a AppState,
+    /// File path to the video stream being queried.
+    media_path: &'a Path,
+    /// Base directory holding local subtitle storage.
+    subtitles_dir: &'a Path,
+    /// Search directories holding cached pHash fingerprints.
+    phash_dirs: &'a [PathBuf],
+    /// Reference release stem identified by recognition.
+    matched_media: &'a str,
+    /// Recognition confidence score (0.0 to 100.0).
+    phash_conf: f64,
+    /// Framerate of the target video stream.
+    target_fps: f64,
+    /// Optional pre-existing pHash dataset of the target video.
+    existing_phash: &'a Option<ExistingPhashData>,
+    /// Exact acoustic shift (`query_start_sec - ref_offset_sec`) when recognized by aHash;
+    /// used directly instead of re-running visual pHash consensus.
+    acoustic_shift_ms: Option<f64>,
+    /// Target season filter constraint.
+    effective_season: Option<u32>,
+    /// Target episode filter constraint.
+    effective_episode: Option<u32>,
+    /// Target subtitle language code.
+    language: &'a str,
+}
+
+/// Builds the auto-synchronized (`certified_synced`) variant of a certified candidate.
+///
+/// # Arguments
+/// - `c`: Baseline certified candidate (shift 0 ms).
+/// - `shift_ms`: Computed shift in milliseconds.
+///
+/// # Returns
+/// Cloned candidate with `source = "certified_synced"`, the shift, and annotated title/details.
+///
+/// # Panics
+/// Guaranteed panic-free.
+///
+/// # Data Flow & Invariants
+/// Pure function; `c` is left untouched.
+fn build_synced_variant(c: &SubtitleCandidate, shift_ms: f64) -> SubtitleCandidate {
+    let mut c_synced = c.clone();
+    c_synced.source = "certified_synced".to_string();
+    c_synced.shift_ms = Some(shift_ms);
+    c_synced.title = format!("{} [Synced {:+.1}s]", c.title, shift_ms / MILLIS_PER_SEC);
+    if let Some(ref d) = c.details {
+        c_synced.details = Some(format!(
+            "{} (Synchronized: {:+.2}s visual shift)",
+            d,
+            shift_ms / MILLIS_PER_SEC
+        ));
+    }
+    c_synced
+}
+
+/// Records a certified candidate in the deduplication sets (raw and canonical catalog path).
+///
+/// # Arguments
+/// - `c`: Certified candidate.
+/// - `seen_catalog_paths`: Deduplication set tracking catalog paths.
+/// - `seen_filenames`: Deduplication set tracking lowercase subtitle filenames.
+///
+/// # Returns
+/// None.
+///
+/// # Panics
+/// Guaranteed panic-free.
+///
+/// # Data Flow & Invariants
+/// Inserts the candidate id, its canonicalized form when resolvable, and the lowercase title.
+fn register_certified_as_seen(
+    c: &SubtitleCandidate,
+    seen_catalog_paths: &mut std::collections::HashSet<String>,
+    seen_filenames: &mut std::collections::HashSet<String>,
+) {
+    if let Some(ref cid) = c.candidate_id {
+        seen_catalog_paths.insert(cid.clone());
+        if let Ok(canon) = Path::new(cid).canonicalize() {
+            seen_catalog_paths.insert(canon.to_string_lossy().to_string());
+        }
+    }
+    seen_filenames.insert(c.title.to_lowercase());
+}
+
 /// Queries certified ground-truth subtitle couplings and computes visual shifts.
 ///
 /// # Arguments
-/// - `state`: Shared server state container (`AppState`).
-/// - `media_path`: File path to the video stream being queried.
-/// - `subtitles_dir`: Base directory holding local subtitle storage.
-/// - `phash_dirs`: Search directories holding cached pHash fingerprints.
-/// - `matched_media`: Reference release stem identified by visual recognition.
-/// - `phash_conf`: Recognition confidence score (0.0 to 100.0).
-/// - `target_fps`: Framerate of the target video stream.
-/// - `existing_phash`: Optional pre-existing pHash dataset of the target video.
-/// - `effective_season`: Target season filter constraint.
-/// - `effective_episode`: Target episode filter constraint.
-/// - `language`: Target subtitle language code.
+/// - `ctx`: Immutable inputs ([`CertifiedMatchContext`]).
 /// - `candidates`: Mutable vector to receive certified and retargeted candidates.
 /// - `seen_catalog_paths`: Deduplication set tracking catalog paths.
 /// - `seen_filenames`: Deduplication set tracking lowercase subtitle filenames.
@@ -1001,89 +1169,65 @@ fn extract_target_metadata_and_preview(
 ///
 /// # Data Flow & Invariants
 /// Queries PostgreSQL and couplings registry for certified pairings matching the reference release.
-/// For each certified subtitle, runs perceptual visual consensus (`compute_media_phash_shift_multi`)
-/// against target video frames. Emits baseline cue (shift 0ms) and, if shift exceeds threshold,
+/// For each certified subtitle, uses `acoustic_shift_ms` when present; otherwise runs perceptual
+/// visual consensus (`compute_media_phash_shift_multi`) against target video frames.
+/// Emits baseline cue (shift 0ms) and, if shift exceeds threshold,
 /// an auto-synchronized candidate variant (`certified_synced`).
-#[allow(clippy::too_many_arguments)]
 fn match_certified_couplings_and_shifts(
-    state: &AppState,
-    media_path: &Path,
-    subtitles_dir: &Path,
-    phash_dirs: &[PathBuf],
-    matched_media: &str,
-    phash_conf: f64,
-    target_fps: f64,
-    existing_phash: &Option<ExistingPhashData>,
-    effective_season: Option<u32>,
-    effective_episode: Option<u32>,
-    language: &str,
+    ctx: &CertifiedMatchContext<'_>,
     candidates: &mut Vec<SubtitleCandidate>,
     seen_catalog_paths: &mut std::collections::HashSet<String>,
     seen_filenames: &mut std::collections::HashSet<String>,
     timing: &mut SearchTimingStats,
 ) {
-    if candidates.is_empty() && !state.is_agent {
-        let (cert_cands, pg_ms, json_ms, pg_cached) = lookup_certified_couplings(
-            state,
-            subtitles_dir,
-            matched_media,
-            effective_season,
-            effective_episode,
-            language,
-            phash_conf,
-        );
-        timing.pg_lookup_ms = pg_ms;
-        timing.json_lookup_ms = json_ms;
-        timing.pg_cached = pg_cached;
-
-        for mut c in cert_cands {
-            if let Some(ref cid) = c.candidate_id {
-                seen_catalog_paths.insert(cid.clone());
-                if let Ok(canon) = Path::new(cid).canonicalize() {
-                    seen_catalog_paths.insert(canon.to_string_lossy().to_string());
-                }
-            }
-            seen_filenames.insert(c.title.to_lowercase());
-
-            let ref_stem = c.release.as_deref().unwrap_or(matched_media);
-            let (_sf, computed_shift_ms, _sconf) = compute_media_phash_shift_multi(
-                media_path,
-                phash_dirs,
-                ref_stem,
-                phash_conf,
-                target_fps,
-                existing_phash,
-                DEFAULT_SEARCH_DISTANCE,
-            );
-
-            c.shift_ms = Some(0.0);
-            candidates.push(c.clone());
-
-            if computed_shift_ms.abs() > SIGNIFICANT_SHIFT_THRESHOLD_MS {
-                let mut c_synced = c.clone();
-                c_synced.source = "certified_synced".to_string();
-                c_synced.shift_ms = Some(computed_shift_ms);
-                c_synced.title = format!(
-                    "{} [Synced {:+.1}s]",
-                    c.title,
-                    computed_shift_ms / MILLIS_PER_SEC
-                );
-                if let Some(ref d) = c.details {
-                    c_synced.details = Some(format!(
-                        "{} (Synchronized: {:+.2}s visual shift)",
-                        d,
-                        computed_shift_ms / MILLIS_PER_SEC
-                    ));
-                }
-                candidates.push(c_synced);
-            }
-        }
-    } else {
+    if !(candidates.is_empty() && !ctx.state.is_agent) {
         for c in candidates.iter() {
             if let Some(ref cid) = c.candidate_id {
                 seen_catalog_paths.insert(cid.clone());
             }
             seen_filenames.insert(c.title.to_lowercase());
+        }
+        return;
+    }
+
+    let (cert_cands, pg_ms, json_ms, pg_cached) = lookup_certified_couplings(
+        ctx.state,
+        ctx.subtitles_dir,
+        ctx.matched_media,
+        ctx.effective_season,
+        ctx.effective_episode,
+        ctx.language,
+        ctx.phash_conf,
+    );
+    timing.pg_lookup_ms = pg_ms;
+    timing.json_lookup_ms = json_ms;
+    timing.pg_cached = pg_cached;
+
+    for mut c in cert_cands {
+        register_certified_as_seen(&c, seen_catalog_paths, seen_filenames);
+
+        let ref_stem = c.release.as_deref().unwrap_or(ctx.matched_media);
+        let computed_shift_ms = match ctx.acoustic_shift_ms {
+            Some(shift_ms) => shift_ms,
+            None => {
+                compute_media_phash_shift_multi(
+                    ctx.media_path,
+                    ctx.phash_dirs,
+                    ref_stem,
+                    ctx.phash_conf,
+                    ctx.target_fps,
+                    ctx.existing_phash,
+                    DEFAULT_SEARCH_DISTANCE,
+                )
+                .1
+            }
+        };
+
+        c.shift_ms = Some(0.0);
+        candidates.push(c.clone());
+
+        if computed_shift_ms.abs() > SIGNIFICANT_SHIFT_THRESHOLD_MS {
+            candidates.push(build_synced_variant(&c, computed_shift_ms));
         }
     }
 }

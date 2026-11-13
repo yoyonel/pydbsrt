@@ -24,6 +24,8 @@ DEFAULT_CUTS_DIR: str = "data/snippets_ahash"
 DEFAULT_REPORT_PATH: str = "data/reports/eval_ahash_cuts.json"
 MAX_SUBPROCESS_TIMEOUT_SECONDS: float = 15.0
 GROUND_TRUTH_CUT_OFFSET_SECONDS: float = 60.0
+MILLIS_PER_SEC: float = 1000.0
+CERTIFIED_SYNCED_SOURCE: str = "certified_synced"
 MAX_PERMISSIBLE_OFFSET_ERROR_MS: float = 25.0
 
 
@@ -143,13 +145,22 @@ def evaluate_single_cut(cut_path: Path, server_url: str) -> CutBenchmarkResult |
     timing = resp.get("timing", {})
     snr_bits = parse_snr_from_tier(timing.get("matching_tier", ""))
 
-    candidates = resp.get("candidates", [])
-    first_candidate = candidates[0] if candidates else {}
-    calc_shift_ms = float(first_candidate.get("shift_ms") or 0.0)
-
-    gt_shift_ms = GROUND_TRUTH_CUT_OFFSET_SECONDS * 1000.0
-    shift_err = abs(calc_shift_ms - gt_shift_ms) if calc_shift_ms > 0 else 0.0
-    is_shift_exact = shift_err <= MAX_PERMISSIBLE_OFFSET_ERROR_MS
+    # Convention: shift = target_ts - ref_ts. A cut extracted at +60s of the reference
+    # (probed from its own 0.0s) must move the reference subtitle by -60_000 ms.
+    synced_candidate = next(
+        (c for c in resp.get("candidates", []) if c.get("source") == CERTIFIED_SYNCED_SOURCE),
+        None,
+    )
+    gt_shift_ms = -GROUND_TRUTH_CUT_OFFSET_SECONDS * MILLIS_PER_SEC
+    if synced_candidate is None or synced_candidate.get("shift_ms") is None:
+        # No certified_synced candidate: no shift was computed, never count it as exact.
+        calc_shift_ms = 0.0
+        shift_err = abs(calc_shift_ms - gt_shift_ms)
+        is_shift_exact = False
+    else:
+        calc_shift_ms = float(synced_candidate["shift_ms"])
+        shift_err = abs(calc_shift_ms - gt_shift_ms)
+        is_shift_exact = shift_err <= MAX_PERMISSIBLE_OFFSET_ERROR_MS
     is_correct = check_media_title_match(expected_stem, matched)
 
     cvlc_ok, cvlc_time = run_cvlc_single_test(cut_path)

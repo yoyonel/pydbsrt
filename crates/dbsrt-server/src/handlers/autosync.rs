@@ -20,7 +20,7 @@ use crate::services::recognition::identify_media_by_phash_multi_with_reader;
 use crate::state::AppState;
 use axum::extract::State;
 use axum::Json;
-use dbsrt_core::ahash::{DEFAULT_FRAME_SIZE, DEFAULT_HOP_SIZE, DEFAULT_SAMPLE_RATE};
+use dbsrt_core::ahash::{AhashFile, DEFAULT_FRAME_SIZE, DEFAULT_HOP_SIZE, DEFAULT_SAMPLE_RATE};
 use dbsrt_core::{
     build_and_validate_sub_frames, compute_bytes_digest_32, compute_media_phash_digest,
     detect_cuts, extract_ahash, extract_embedded_subtitle, inspect_container,
@@ -280,6 +280,83 @@ pub async fn autosync_handler(
     Json(handle_remote_agent_autosync(state, payload, start).await)
 }
 
+/// Query start (seconds) used when the primary aHash probe window cannot be extracted
+/// (e.g. a short cut shorter than [`DEFAULT_AHASH_START_OFFSET_SECONDS`]).
+pub(crate) const AHASH_FALLBACK_QUERY_START_SECONDS: f64 = 0.0;
+
+/// Position of a probed audio window in the target media versus its match in the reference.
+///
+/// # Data Flow & Invariants
+/// Sign convention (same as `calculate_shift_consensus` and `SubtitleFile::shift`):
+/// `shift = target_ts - ref_ts`. A reference cue at `ref_ts` is moved to
+/// `ref_ts + shift` on the target timeline. A target window extracted at
+/// `query_start_sec` that matches the reference at `ref_offset_sec` therefore yields
+/// `shift_ms = (query_start_sec - ref_offset_sec) * 1000`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct AcousticAlignment {
+    /// Start (seconds, target timeline) of the window that was actually extracted.
+    pub query_start_sec: f64,
+    /// Offset (seconds, reference timeline) where that window matched in the catalog.
+    pub ref_offset_sec: f64,
+}
+
+impl AcousticAlignment {
+    /// Subtitle shift (ms) to apply to the reference subtitle to fit the target media.
+    ///
+    /// # Returns
+    /// `(query_start_sec - ref_offset_sec) * 1000.0`: `0.0` for an already aligned media
+    /// probed at the offset where it matches, negative for a cut taken later in the reference.
+    ///
+    /// # Panics
+    /// Guaranteed panic-free.
+    pub(crate) fn shift_ms(&self) -> f64 {
+        (self.query_start_sec - self.ref_offset_sec) * MILLIS_PER_SEC
+    }
+}
+
+/// Extracts the aHash probe window, reporting the start offset that was really used.
+///
+/// # Arguments
+/// - `media_path`: Media file (or stream URL) to fingerprint.
+///
+/// # Returns
+/// `Some((ahash, query_start_sec))` where `query_start_sec` is
+/// [`DEFAULT_AHASH_START_OFFSET_SECONDS`] when the primary window yielded hashes, or
+/// [`AHASH_FALLBACK_QUERY_START_SECONDS`] when the fallback window was used; `None` if both
+/// extractions fail.
+///
+/// # Errors
+/// None. Extraction errors are mapped to `None`.
+///
+/// # Panics
+/// Guaranteed panic-free.
+///
+/// # Data Flow & Invariants
+/// Blocking (spawns FFmpeg). The returned start is always the one passed to FFmpeg, so a
+/// caller can compute an exact `target_ts - ref_ts` shift.
+pub(crate) fn extract_ahash_query_window(media_path: &Path) -> Option<(AhashFile, f64)> {
+    let primary = AudioExtractionOptions {
+        sample_rate: DEFAULT_SAMPLE_RATE,
+        frame_size: DEFAULT_FRAME_SIZE,
+        hop_size: DEFAULT_HOP_SIZE,
+        start_sec: DEFAULT_AHASH_START_OFFSET_SECONDS,
+        duration_sec: Some(DEFAULT_AHASH_QUERY_DURATION_SECONDS),
+        custom_ffmpeg: None,
+    };
+    if let Ok(file) = extract_ahash(media_path, &primary) {
+        if !file.hashes.is_empty() {
+            return Some((file, primary.start_sec));
+        }
+    }
+    let fallback = AudioExtractionOptions {
+        start_sec: AHASH_FALLBACK_QUERY_START_SECONDS,
+        ..primary
+    };
+    extract_ahash(media_path, &fallback)
+        .ok()
+        .map(|file| (file, fallback.start_sec))
+}
+
 /// Identifies media using acoustic spectral fingerprinting (aHash) against in-memory catalog.
 ///
 /// # Arguments
@@ -287,7 +364,9 @@ pub async fn autosync_handler(
 /// - `media_path`: File path to the media file to fingerprint.
 ///
 /// # Returns
-/// `Option<(media_name, confidence_percent, offset_sec)>` if a match meets confidence threshold.
+/// `Option<(media_name, confidence_percent, alignment)>` if a match meets confidence threshold.
+/// `alignment` carries the query start actually extracted and the reference offset, so the
+/// exact subtitle shift is `alignment.shift_ms()`.
 ///
 /// # Errors
 /// None. Extraction errors are handled with a fallback to offset 0.0s.
@@ -296,46 +375,45 @@ pub async fn autosync_handler(
 /// Guaranteed panic-free.
 ///
 /// # Data Flow & Invariants
-/// 1. Extracts 5.0s PCM audio at 60s offset (or fallback to 0.0s).
+/// 1. Extracts 5.0s PCM audio at 60s offset (or fallback to 0.0s) and records which one was used.
 /// 2. Generates 64-bit sub-fingerprints using Haitsma-Kalker pipeline.
 /// 3. Executes temporal cross-correlation across all in-memory catalog entries.
 async fn identify_media_by_ahash_autosync(
     state: &Arc<AppState>,
     media_path: &Path,
-) -> Option<(String, f64, f64)> {
+) -> Option<(String, f64, AcousticAlignment)> {
     let p = media_path.to_path_buf();
-    let opts = AudioExtractionOptions {
-        sample_rate: DEFAULT_SAMPLE_RATE,
-        frame_size: DEFAULT_FRAME_SIZE,
-        hop_size: DEFAULT_HOP_SIZE,
-        start_sec: DEFAULT_AHASH_START_OFFSET_SECONDS,
-        duration_sec: Some(DEFAULT_AHASH_QUERY_DURATION_SECONDS),
-        custom_ffmpeg: None,
-    };
-    let extracted = tokio::task::spawn_blocking(move || match extract_ahash(&p, &opts) {
-        Ok(f) if !f.hashes.is_empty() => Ok(f),
-        _ => {
-            let mut fallback_opts = opts.clone();
-            fallback_opts.start_sec = 0.0;
-            extract_ahash(&p, &fallback_opts)
-        }
-    })
-    .await
-    .ok()
-    .and_then(|res| res.ok())?;
+    let (extracted, query_start_sec) =
+        tokio::task::spawn_blocking(move || extract_ahash_query_window(&p))
+            .await
+            .ok()
+            .flatten()?;
 
     if extracted.hashes.is_empty() {
         return None;
     }
 
     let audio_fps = extracted.header.audio_fps();
-    let criteria = AHashSearchCriteria::new(&extracted.hashes, audio_fps);
-    let catalog = state.ahash_catalog.load();
-    let matches = catalog.search(&criteria);
+    let catalog = state.ahash_catalog.load_full();
+    let matches = {
+        let hashes = extracted.hashes.clone();
+        tokio::task::spawn_blocking(move || {
+            catalog.search(&AHashSearchCriteria::new(&hashes, audio_fps))
+        })
+        .await
+        .unwrap_or_default()
+    };
 
-    matches
-        .first()
-        .map(|best| (best.media_name.clone(), best.score * 100.0, best.offset_sec))
+    matches.first().map(|best| {
+        (
+            best.media_name.clone(),
+            best.score * 100.0,
+            AcousticAlignment {
+                query_start_sec,
+                ref_offset_sec: best.offset_sec,
+            },
+        )
+    })
 }
 
 struct AutoSyncIdentificationContext<'a> {
@@ -347,6 +425,9 @@ struct AutoSyncIdentificationContext<'a> {
 }
 
 /// Dispatches media identification across aHash and pHash pipelines based on search mode.
+///
+/// The fourth tuple element is the exact acoustic subtitle shift in ms
+/// (`query_start_sec - ref_offset_sec`), `None` for the pHash pipeline.
 async fn identify_media_for_autosync(
     ctx: AutoSyncIdentificationContext<'_>,
 ) -> (
@@ -358,11 +439,11 @@ async fn identify_media_for_autosync(
     if ctx.payload.search_mode.as_deref() == Some("ahash") {
         let ahash_match = identify_media_by_ahash_autosync(ctx.state, ctx.media_path).await;
         match ahash_match {
-            Some((name, conf, offset_sec)) => (
+            Some((name, conf, alignment)) => (
                 Some((name, conf)),
                 DEFAULT_BASELINE_FPS,
                 None,
-                Some(offset_sec),
+                Some(alignment.shift_ms()),
             ),
             None => (None, DEFAULT_BASELINE_FPS, None, None),
         }
@@ -409,7 +490,7 @@ async fn run_local_autosync(
         crate::constants::DEFAULT_SEARCH_DISTANCE
     };
 
-    let (matched, target_fps, existing_phash, ahash_offset_sec) =
+    let (matched, target_fps, existing_phash, ahash_shift_ms) =
         identify_media_for_autosync(AutoSyncIdentificationContext {
             state,
             payload: &payload,
@@ -463,10 +544,10 @@ async fn run_local_autosync(
         }
     };
 
-    let (shift_frames, shift_ms, confidence_percent) = if let Some(offset_sec) = ahash_offset_sec {
+    let (shift_frames, shift_ms, confidence_percent) = if let Some(shift_ms) = ahash_shift_ms {
         (
-            (offset_sec * target_fps).round() as i64,
-            offset_sec * 1000.0,
+            (shift_ms / MILLIS_PER_SEC * target_fps).round() as i64,
+            shift_ms,
             match_conf,
         )
     } else if let Some(ref ref_stem) = matched_stem_opt {
@@ -876,5 +957,195 @@ mod tests {
             res.source.as_deref(),
             Some(SubtitleSource::Catalog.as_str())
         );
+    }
+
+    // ------------------------------------------------------------------
+    // Acoustic shift sign convention: shift = target_ts - ref_ts
+    // ------------------------------------------------------------------
+
+    /// Tolerance of one acoustic frame (hop 64 @ 5512 Hz => ~11.6 ms), ms.
+    const ONE_AUDIO_FRAME_MS: f64 = 1_000.0 * 64.0 / 5_512.0;
+    /// Probe start of a full, already aligned film (= `DEFAULT_AHASH_START_OFFSET_SECONDS`).
+    const ALIGNED_QUERY_START_SEC: f64 = 60.0;
+    /// Reference offset where the cut / the aligned probe matches.
+    const REF_OFFSET_SEC: f64 = 60.0;
+    /// Expected shift of a cut probed from its beginning and matching 60 s into the reference.
+    const EXPECTED_CUT_SHIFT_MS: f64 = -60_000.0;
+    /// Cue straddling the 60 s mark of the reference subtitle.
+    const REF_SRT: &str = "1\n00:01:02,000 --> 00:01:04,000\nHello\n\n";
+
+    #[test]
+    fn test_aligned_media_probed_at_60s_matching_at_60s_has_zero_shift() {
+        let alignment = AcousticAlignment {
+            query_start_sec: ALIGNED_QUERY_START_SEC,
+            ref_offset_sec: REF_OFFSET_SEC,
+        };
+        assert_eq!(alignment.shift_ms(), 0.0);
+    }
+
+    #[test]
+    fn test_cut_probed_at_fallback_0s_matching_at_60s_shifts_cue_back_by_60s() {
+        let alignment = AcousticAlignment {
+            query_start_sec: AHASH_FALLBACK_QUERY_START_SECONDS,
+            ref_offset_sec: REF_OFFSET_SEC,
+        };
+        assert_eq!(alignment.shift_ms(), EXPECTED_CUT_SHIFT_MS);
+
+        let mut srt = SubtitleFile::parse(REF_SRT).unwrap();
+        assert_eq!(srt.cues[0].start_ms, 62_000);
+        srt.shift(alignment.shift_ms());
+        assert_eq!(srt.cues[0].start_ms, 2_000);
+        assert_eq!(srt.cues[0].end_ms, 4_000);
+        assert!(srt.to_string().contains("00:00:02,000 --> 00:00:04,000"));
+    }
+
+    // ------------------------------------------------------------------
+    // End-to-end (real FFmpeg + real aHash extraction + real catalog search)
+    // ------------------------------------------------------------------
+
+    /// Mono 16-bit PCM WAV sample rate (equals the aHash rate: no resampling noise).
+    const WAV_SAMPLE_RATE: u32 = 5_512;
+    /// Duration of the synthetic full-length "film", seconds.
+    const FULL_AUDIO_SECONDS: usize = 90;
+    /// Start and length of the short cut extracted from the film, seconds.
+    const CUT_START_SECONDS: &str = "60";
+    const CUT_LENGTH_SECONDS: &str = "15";
+    /// xorshift64 seed and shifts for the deterministic noise track.
+    const NOISE_SEED: u64 = 0x2545_F491_4F6C_DD1D;
+    const XORSHIFT_A: u32 = 13;
+    const XORSHIFT_B: u32 = 7;
+    const XORSHIFT_C: u32 = 17;
+    /// Right shift mapping the top bits of the PRNG to a signed 16-bit sample.
+    const SAMPLE_SHIFT: u32 = 48;
+    /// Size of a canonical PCM WAV header, bytes.
+    const WAV_HEADER_BYTES: u32 = 44;
+    const WAV_BITS_PER_SAMPLE: u16 = 16;
+    const WAV_BYTES_PER_SAMPLE: u32 = 2;
+
+    fn ffmpeg_available() -> bool {
+        std::process::Command::new("ffmpeg")
+            .arg("-version")
+            .output()
+            .is_ok_and(|o| o.status.success())
+    }
+
+    /// Writes deterministic white noise as mono 16-bit PCM WAV.
+    fn write_noise_wav(path: &Path, seconds: usize) {
+        let mut state = NOISE_SEED;
+        let sample_count = WAV_SAMPLE_RATE as usize * seconds;
+        let mut pcm = Vec::with_capacity(sample_count * WAV_BYTES_PER_SAMPLE as usize);
+        for _ in 0..sample_count {
+            state ^= state << XORSHIFT_A;
+            state ^= state >> XORSHIFT_B;
+            state ^= state << XORSHIFT_C;
+            pcm.extend_from_slice(&((state >> SAMPLE_SHIFT) as i16).to_le_bytes());
+        }
+        let data_len = pcm.len() as u32;
+        let mut wav = Vec::with_capacity(pcm.len() + WAV_HEADER_BYTES as usize);
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&(data_len + WAV_HEADER_BYTES - 8).to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt ");
+        wav.extend_from_slice(&16u32.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&WAV_SAMPLE_RATE.to_le_bytes());
+        wav.extend_from_slice(&(WAV_SAMPLE_RATE * WAV_BYTES_PER_SAMPLE).to_le_bytes());
+        wav.extend_from_slice(&(WAV_BYTES_PER_SAMPLE as u16).to_le_bytes());
+        wav.extend_from_slice(&WAV_BITS_PER_SAMPLE.to_le_bytes());
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&data_len.to_le_bytes());
+        wav.extend_from_slice(&pcm);
+        std::fs::write(path, wav).unwrap();
+    }
+
+    /// Builds a state whose aHash catalog holds the dense fingerprint of `full_wav`.
+    fn state_with_reference_catalog(root: &Path, full_wav: &Path) -> Arc<AppState> {
+        let cat_dir = root.join("ahash_catalog");
+        std::fs::create_dir_all(&cat_dir).unwrap();
+        let opts = AudioExtractionOptions {
+            sample_rate: DEFAULT_SAMPLE_RATE,
+            frame_size: DEFAULT_FRAME_SIZE,
+            hop_size: DEFAULT_HOP_SIZE,
+            start_sec: 0.0,
+            duration_sec: None,
+            custom_ffmpeg: None,
+        };
+        let reference = extract_ahash(full_wav, &opts).unwrap();
+        AhashFile::write_to_path(
+            &cat_dir.join("ref_full.86.1fps.ahash"),
+            &reference.header,
+            &reference.hashes,
+        )
+        .unwrap();
+        Arc::new(AppState::with_options(
+            root.to_path_buf(),
+            root.to_path_buf(),
+            Arc::new(OpenSubtitlesProvider::new(None)),
+            crate::state::AppStateInitOptions {
+                dbphash_path: None,
+                extra_phash_dirs: Vec::new(),
+                ahash_dir: Some(cat_dir),
+            },
+        ))
+    }
+
+    #[tokio::test]
+    async fn test_e2e_identify_aligned_film_and_short_cut_propagate_real_query_start() {
+        if !ffmpeg_available() {
+            eprintln!("SKIPPED: ffmpeg not available (end-to-end aHash autosync test)");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let full_wav = dir.path().join("film.wav");
+        let cut_wav = dir.path().join("cut.wav");
+        write_noise_wav(&full_wav, FULL_AUDIO_SECONDS);
+        let status = std::process::Command::new("ffmpeg")
+            .args([
+                "-v",
+                "error",
+                "-y",
+                "-ss",
+                CUT_START_SECONDS,
+                "-t",
+                CUT_LENGTH_SECONDS,
+                "-i",
+            ])
+            .arg(&full_wav)
+            .args(["-c", "copy"])
+            .arg(&cut_wav)
+            .status()
+            .unwrap();
+        assert!(status.success(), "ffmpeg cut failed");
+        let state = state_with_reference_catalog(dir.path(), &full_wav);
+
+        // Full film: the 60 s probe window exists -> query_start 60.0, match at ~60 s -> ~0 ms.
+        let (name, _, aligned) = identify_media_by_ahash_autosync(&state, &full_wav)
+            .await
+            .expect("aligned film must be recognized");
+        println!("aligned film: {aligned:?} shift_ms={}", aligned.shift_ms());
+        assert_eq!(name, "ref_full");
+        assert_eq!(aligned.query_start_sec, ALIGNED_QUERY_START_SEC);
+        assert!(
+            aligned.shift_ms().abs() <= ONE_AUDIO_FRAME_MS,
+            "aligned film must not be shifted by +60 s: {}",
+            aligned.shift_ms()
+        );
+
+        // 15 s cut: the 60 s probe is past EOF -> fallback 0.0 s, match at ~60 s -> ~ -60 000 ms.
+        let (name, _, cut) = identify_media_by_ahash_autosync(&state, &cut_wav)
+            .await
+            .expect("cut must be recognized");
+        println!("cut: {cut:?} shift_ms={}", cut.shift_ms());
+        assert_eq!(name, "ref_full");
+        assert_eq!(cut.query_start_sec, AHASH_FALLBACK_QUERY_START_SECONDS);
+        assert!(
+            (cut.shift_ms() - EXPECTED_CUT_SHIFT_MS).abs() <= ONE_AUDIO_FRAME_MS,
+            "cut shift must be ~ -60 000 ms: {}",
+            cut.shift_ms()
+        );
+
+        let mut srt = SubtitleFile::parse(REF_SRT).unwrap();
+        srt.shift(cut.shift_ms());
+        assert!((srt.cues[0].start_ms - 2_000).abs() <= ONE_AUDIO_FRAME_MS.ceil() as i64);
     }
 }

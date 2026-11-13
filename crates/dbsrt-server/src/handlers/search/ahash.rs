@@ -96,18 +96,28 @@ pub async fn search_ahash_handler(
 
     let audio_fps = payload.audio_fps.unwrap_or(DEFAULT_AHASH_FPS);
     let max_distance = payload.max_distance.unwrap_or(DEFAULT_AHASH_MAX_DISTANCE);
-    let criteria = AHashSearchCriteria {
-        query: &query_hashes,
-        audio_fps,
-        max_distance,
-        limit: payload.limit,
-        target_media: payload.media_name.as_deref(),
-    };
 
-    let catalog = state.ahash_catalog.load();
+    let catalog = state.ahash_catalog.load_full();
     let total_catalog_files = catalog.entries.len();
     let total_catalog_frames = catalog.total_frames;
-    let matches = catalog.search(&criteria);
+    let matches = {
+        let cat = Arc::clone(&catalog);
+        let owned_query = query_hashes.clone();
+        let owned_media = payload.media_name.clone();
+        let (limit, fps, dist) = (payload.limit, audio_fps, max_distance);
+        tokio::task::spawn_blocking(move || {
+            let c = AHashSearchCriteria {
+                query: &owned_query,
+                audio_fps: fps,
+                max_distance: dist,
+                limit,
+                target_media: owned_media.as_deref(),
+            };
+            cat.search(&c)
+        })
+        .await
+        .unwrap_or_default()
+    };
 
     let candidates: Vec<AHashMatchCandidate> = matches
         .into_iter()

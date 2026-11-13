@@ -2,6 +2,7 @@
 
 pub mod ahash;
 pub mod bktree;
+pub mod coarse_to_fine;
 pub mod db;
 pub mod dbphash;
 pub mod delta;
@@ -15,6 +16,10 @@ pub use ahash::{
     AHashSearchCriteria, DEFAULT_AHASH_SEARCH_LIMIT, MIN_QUERY_FRAMES,
 };
 pub use bktree::{BkItem, BkTree};
+pub use coarse_to_fine::{
+    CoarseToFineAHashIndex, FineSearchCriteria, DEFAULT_COARSE_FACTOR_K, DEFAULT_FINE_MAX_DISTANCE,
+    DEFAULT_FINE_WINDOW_RADIUS_SEC,
+};
 pub use db::{
     parse_fps_from_phash_stem, validate_lang_code, DbClient, DbMatch, DbMediaRecord,
     DbSubtitleCoupling, COPY_BUFFER_FLUSH_THRESHOLD, COPY_BUFFER_INITIAL_CAPACITY,

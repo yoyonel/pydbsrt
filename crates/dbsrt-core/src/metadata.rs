@@ -457,10 +457,7 @@ fn is_resolution_or_codec(s: &str) -> bool {
     let codecs = [
         "x264", "x265", "h264", "h265", "hevc", "avc", "av1", "xvid", "divx",
     ];
-    if codecs.iter().any(|c| s.starts_with(c)) {
-        return true;
-    }
-    false
+    codecs.iter().any(|c| s.starts_with(c))
 }
 
 /// Parses Season & Episode from tokens like:

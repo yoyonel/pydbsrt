@@ -7,6 +7,9 @@ use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+/// Milliseconds per second (target start conversion).
+const MILLIS_PER_SEC: f64 = 1000.0;
+
 /// Default multi-window temporal ratios (20%, 50%, 80% along the media timeline).
 pub const DEFAULT_MULTI_WINDOW_RATIOS: [f64; 3] = [0.20, 0.50, 0.80];
 
@@ -191,7 +194,8 @@ pub fn evaluate_multi_window_consensus(
 
     let avg_confidence: f64 =
         matches.iter().map(|m| m.confidence).sum::<f64>() / matching_windows as f64;
-    let primary_shift = matches[0].estimated_shift_ms;
+    let primary_shift = matches[0].estimated_shift_ms
+        - (matches[0].target_start_sec * MILLIS_PER_SEC).round() as i64;
 
     if matching_windows == 1 {
         // Single window match: cannot rule out shared intro/eyecatch/jingle
