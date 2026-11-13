@@ -25,6 +25,7 @@ import sys
 import time
 import unicodedata
 import urllib.parse
+from collections import Counter
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Tuple
@@ -739,20 +740,52 @@ def build_arg_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _print_counter_section(title: str, counter: Counter[str]) -> None:
+    if not counter:
+        return
+    print(f"  {title}:")
+    for key in sorted(counter):
+        print(f"    - {key:<20}: {counter[key]}")
+
+
 def _print_summary(records: List[BackfillRecord], report_path: Path, dry_run: bool) -> None:
-    counts: Dict[str, int] = {}
-    for rec in records:
-        counts[rec.status] = counts.get(rec.status, 0) + 1
+    status_counts = Counter(rec.status for rec in records)
+    selection_counts = Counter(rec.selection or "none" for rec in records)
+    language_counts = Counter((rec.language or "unknown") for rec in records if rec.selection or rec.language)
     total = len(records)
-    resolved = sum(v for k, v in counts.items() if k not in {"unresolved_source", "unresolved_url"})
+    resolved = sum(v for k, v in status_counts.items() if k not in {"unresolved_source", "unresolved_url"})
     pct = (resolved / total * 100.0) if total else 0.0
     mode_tag = "DRY-RUN" if dry_run else "LIVE"
     print(f"=== aHash Sidecar Backfill Summary ({mode_tag}) ===")
     print(f"  Total evaluated : {total}")
     print(f"  Path/URL active : {resolved}/{total} ({pct:.1f}%)")
-    for key in sorted(counts):
-        print(f"  - {key:<22}: {counts[key]}")
-    print(f"  Audit report    : {report_path}")
+    for key in sorted(status_counts):
+        print(f"  - {key:<22}: {status_counts[key]}")
+    _print_counter_section("By selection", selection_counts)
+    _print_counter_section("By language", language_counts)
+    print(f"  Audit report    : {report_path}", flush=True)
+
+
+def _format_progress_line(index: int, total: int, rec: BackfillRecord) -> str:
+    """Formats one single-line progress status for live backfill runs."""
+    details: List[str] = []
+    if rec.selection:
+        details.append(rec.selection)
+    if rec.language:
+        details.append(rec.language)
+    if rec.verified_distance is not None:
+        details.append(f"d={rec.verified_distance:.2f}")
+    if rec.elapsed_sec > 0.0:
+        details.append(f"{rec.elapsed_sec:.2f}s")
+    if rec.error:
+        details.append(rec.error)
+    suffix = f" ({', '.join(details)})" if details else ""
+    return f"[{index}/{total}] {rec.status}{suffix} -> {rec.sidecar_file}"
+
+
+def _emit_progress(index: int, total: int, rec: BackfillRecord, dry_run: bool) -> None:
+    if not dry_run:
+        print(_format_progress_line(index, total, rec), flush=True)
 
 
 def _select_planned_targets(
@@ -790,13 +823,21 @@ def _run_planned_batch(
     args: argparse.Namespace,
     workers: int,
 ) -> List[BackfillRecord]:
-    if args.dry_run or workers == 1:
-        return [execute_backfill_item(item, cfg, child_env, dbsrt_bin, args) for item in planned]
+    total = len(planned)
     records: List[BackfillRecord] = []
+    if args.dry_run or workers == 1:
+        for idx, item in enumerate(planned, start=1):
+            rec = execute_backfill_item(item, cfg, child_env, dbsrt_bin, args)
+            records.append(rec)
+            _emit_progress(idx, total, rec, args.dry_run)
+        return records
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
         futures = [pool.submit(execute_backfill_item, item, cfg, child_env, dbsrt_bin, args) for item in planned]
-        for fut in concurrent.futures.as_completed(futures):
-            records.append(fut.result())
+        for idx, fut in enumerate(concurrent.futures.as_completed(futures), start=1):
+            rec = fut.result()
+            records.append(rec)
+            _emit_progress(idx, total, rec, args.dry_run)
     return records
 
 
@@ -808,6 +849,7 @@ def main(argv: List[str] | None = None) -> int:
 
     source_index = build_source_index(args.reports_dir, cfg, scan_ftp=args.scan_ftp, nas_password=nas_pass)
     planned = _select_planned_targets(args, source_index)
+    print(f"Scanning {len(planned)} .ahash files (workers={workers})...", flush=True)
     dbsrt_bin = resolve_dbsrt_binary(args.dbsrt_bin)
     child_env = build_child_env(cfg, nas_pass)
     records = _run_planned_batch(planned, cfg, child_env, dbsrt_bin, args, workers)

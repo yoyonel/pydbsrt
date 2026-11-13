@@ -199,3 +199,51 @@ def test_sha256_twin_inheritance_without_phash_sidecar(tmp_path: Path, monkeypat
     assert hex_row["media_name"] == "Exact.Twin.Show.mkv"
     assert hex_row["source_id"] == "synology_tvshow"
     assert hex_row["source_rel_path"] == "tvshow/Exact.Twin.Show.mkv"
+
+
+def test_progress_line_and_summary_breakdowns(tmp_path: Path, capsys):
+    records = [
+        bf.BackfillRecord(
+            ahash_file="a.86.1fps.ahash",
+            sidecar_file="a.json",
+            logical_stem="a",
+            media_name="a.mkv",
+            moviehash=None,
+            source_id="synology_tvshow",
+            source_rel_path="tvshow/a.mkv",
+            status="written",
+            selection="single_track",
+            audio_index=0,
+            language="jpn",
+            track_count=1,
+            elapsed_sec=0.91,
+        ),
+        bf.BackfillRecord(
+            ahash_file="b.86.1fps.ahash",
+            sidecar_file="b.json",
+            logical_stem="b",
+            media_name="b.mkv",
+            moviehash=None,
+            source_id="synology_tvshow",
+            source_rel_path="tvshow/b.mkv",
+            status="written",
+            selection="verified_backfill",
+            audio_index=0,
+            language="fre",
+            track_count=2,
+            verified_distance=0.4425,
+            elapsed_sec=3.39,
+        ),
+    ]
+    assert bf._format_progress_line(1, 2, records[0]) == "[1/2] written (single_track, jpn, 0.91s) -> a.json"
+    assert (
+        bf._format_progress_line(2, 2, records[1]) == "[2/2] written (verified_backfill, fre, d=0.44, 3.39s) -> b.json"
+    )
+    bf._print_summary(records, tmp_path / "r.jsonl", dry_run=False)
+    out = capsys.readouterr().out
+    assert "By selection:" in out
+    assert "single_track" in out
+    assert "verified_backfill" in out
+    assert "By language:" in out
+    assert "jpn" in out
+    assert "fre" in out
