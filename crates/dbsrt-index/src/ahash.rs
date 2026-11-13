@@ -42,9 +42,6 @@ pub const FPS_COMPATIBILITY_TOLERANCE: f64 = 1.0;
 /// Default probe stride in frames for MIH acoustic candidate generation (sample every 4 frames ~21.5 Hz).
 pub const DEFAULT_AHASH_MIH_PROBE_STRIDE: usize = 4;
 
-/// Default maximum Hamming distance for candidate generation in MIH acoustic search (radius 0 on 16-bit blocks).
-pub const DEFAULT_AHASH_MIH_SEARCH_DISTANCE: u32 = 3;
-
 /// Minimum coherent votes required to consider an acoustic candidate cluster valid.
 pub const DEFAULT_AHASH_MIH_MIN_VOTES: u32 = 3;
 
@@ -424,11 +421,17 @@ impl AHashMih32Index {
     /// Compiled [`AHashMih32Index`] with upper and lower sorted tables.
     ///
     /// # Panics
-    /// Guarantee: Never panics.
+    /// Panics if `flat_hashes.len()` exceeds `u32::MAX as usize`.
     ///
     /// # Data Flow & Invariants
-    /// Uses `rayon::join` to sort upper 32-bit and lower 32-bit halves in parallel.
+    /// Asserts `flat_hashes.len() <= u32::MAX as usize` before casting frame indices to `u32`,
+    /// then uses `rayon::join` to sort upper 32-bit and lower 32-bit halves in parallel.
     pub fn build(flat_hashes: &[u64]) -> Self {
+        assert!(
+            flat_hashes.len() <= u32::MAX as usize,
+            "flat_hashes length ({}) exceeds u32::MAX",
+            flat_hashes.len()
+        );
         let (upper, lower) = rayon::join(
             || {
                 let mut v: Vec<Mih32Entry> = flat_hashes

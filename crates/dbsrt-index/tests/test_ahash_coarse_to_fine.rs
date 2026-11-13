@@ -30,7 +30,7 @@ fn test_exhaustive_coarse_to_fine_benchmark() {
     }
 
     println!("\n====================================================================================================");
-    println!(" 🚀 CHARGEMENT DU CATALOGUE DENSE aHash (31.25 fps, 106M frames)");
+    println!(" 🚀 CHARGEMENT DU CATALOGUE DENSE aHash (86.125 fps, 106M frames)");
     println!("====================================================================================================");
 
     let t0 = Instant::now();
@@ -105,7 +105,7 @@ fn test_exhaustive_coarse_to_fine_benchmark() {
 
         let coarse_frames = c2f.coarse_catalog.total_frames;
         let coarse_ram_mb = (coarse_frames * 8) as f64 / (1024.0 * 1024.0);
-        let coarse_fps = 31.25 / k as f64;
+        let coarse_fps = 86.125 / k as f64;
 
         let mut total_search_ms = 0.0;
         let mut hits = 0;

@@ -2404,8 +2404,8 @@ mod tests {
             PathBuf::from("d:/Media/Show.mp4")
         );
         assert_eq!(
-            normalize_media_path_uri("file:///home/user/Videos/clip.mkv"),
-            PathBuf::from("/home/user/Videos/clip.mkv")
+            normalize_media_path_uri("file:///var/media/Videos/clip.mkv"),
+            PathBuf::from("/var/media/Videos/clip.mkv")
         );
     }
 

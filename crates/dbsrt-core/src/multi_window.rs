@@ -8,7 +8,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Milliseconds per second (target start conversion).
-const MILLIS_PER_SEC: f64 = 1000.0;
+const MILLIS_PER_SECOND: f64 = 1000.0;
+
+/// Scale factor converting ratios (`0.0..=1.0`) into percentages (`0.0..=100.0`).
+pub const PERCENT_SCALE: f64 = 100.0;
 
 /// Default multi-window temporal ratios (20%, 50%, 80% along the media timeline).
 pub const DEFAULT_MULTI_WINDOW_RATIOS: [f64; 3] = [0.20, 0.50, 0.80];
@@ -195,7 +198,7 @@ pub fn evaluate_multi_window_consensus(
     let avg_confidence: f64 =
         matches.iter().map(|m| m.confidence).sum::<f64>() / matching_windows as f64;
     let primary_shift = matches[0].estimated_shift_ms
-        - (matches[0].target_start_sec * MILLIS_PER_SEC).round() as i64;
+        - (matches[0].target_start_sec * MILLIS_PER_SECOND).round() as i64;
 
     if matching_windows == 1 {
         // Single window match: cannot rule out shared intro/eyecatch/jingle
@@ -215,10 +218,10 @@ pub fn evaluate_multi_window_consensus(
 
     // Check shift coherence across all pairs of matching windows
     // Note: each window match carries its estimated_shift_ms (reference ts) and target_start_sec.
-    // The relative alignment shift is: relative_shift_ms = estimated_shift_ms - (target_start_sec * 1000).
+    // The relative alignment shift is: relative_shift_ms = estimated_shift_ms - (target_start_sec * MILLIS_PER_SECOND).
     let relative_shifts: Vec<i64> = matches
         .iter()
-        .map(|m| m.estimated_shift_ms - (m.target_start_sec * 1000.0).round() as i64)
+        .map(|m| m.estimated_shift_ms - (m.target_start_sec * MILLIS_PER_SECOND).round() as i64)
         .collect();
 
     let min_shift = relative_shifts.iter().copied().min().unwrap_or(0);
@@ -230,7 +233,7 @@ pub fn evaluate_multi_window_consensus(
         // Multi-window verified consensus
         let window_coverage = matching_windows as f64 / ctx.total_windows.max(1) as f64;
         let boost = if window_coverage >= 0.99 { 1.15 } else { 1.05 };
-        let conf = (avg_confidence * boost).clamp(0.0, 100.0);
+        let conf = (avg_confidence * boost).clamp(0.0, PERCENT_SCALE);
         let median_shift = relative_shifts[matching_windows / 2];
         (conf, median_shift)
     } else {

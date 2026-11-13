@@ -519,7 +519,9 @@ fn test_exhaustive_matrix_benchmark() {
     let ahash_index32 = ahash_catalog.mih32();
     let _ = ahash_catalog.mih(); // warm up MIH-16
     println!(
-        "✓ aHash Catalog : 584 médias, 106 096 618 frames (chargé + indexé en {:.2?})",
+        "✓ aHash Catalog : {} médias, {} frames (chargé + indexé en {:.2?})",
+        ahash_catalog.entries.len(),
+        ahash_catalog.total_frames,
         t_a0.elapsed()
     );
 
@@ -537,7 +539,9 @@ fn test_exhaustive_matrix_benchmark() {
     let _ = phash_mmap.sparse_mih(); // warm up MIH-16
     let _ = phash_mmap.cuts_mih();
     println!(
-        "✓ pHash Catalog : 2 758 médias, 2 708 720 frames (chargé + indexé en {:.2?})",
+        "✓ pHash Catalog : {} médias, {} frames (chargé + indexé en {:.2?})",
+        phash_mmap.media_entries().len(),
+        sparse_hashes.len() + cuts_hashes.len(),
         t_p0.elapsed()
     );
 

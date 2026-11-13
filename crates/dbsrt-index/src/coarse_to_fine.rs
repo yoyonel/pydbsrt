@@ -1,6 +1,6 @@
 //! Hierarchical Coarse-to-Fine index for acoustic fingerprints.
 //!
-//! Sub-samples 31.25 fps acoustic streams by factor $K$ to create a compact,
+//! Sub-samples 86.125 fps (5512.5 / 64) acoustic streams by factor $K$ to create a compact,
 //! low-RAM primary filter, followed by localized fine dense correlation.
 //!
 //! The catalog side is decimated by $K$ (RAM footprint $1/K$) while the query side
@@ -73,7 +73,7 @@ pub struct FineSearchCriteria<'a> {
 
 /// Hierarchical Coarse-to-Fine index for acoustic fingerprints.
 pub struct CoarseToFineAHashIndex {
-    /// Downsample factor K (e.g. 16 for 1.95 fps coarse tier).
+    /// Downsample factor K (e.g. 16 for 5.38 fps coarse tier from 86.125 fps dense).
     pub factor_k: usize,
     /// Sub-sampled coarse catalog holding 1/K-th of the frames.
     pub coarse_catalog: AHashCatalog,
@@ -566,10 +566,12 @@ mod tests {
 
     /// Decimation factor under test.
     const TEST_FACTOR_K: usize = 16;
-    /// Dense query window: 5 s at 86.125 fps.
+    /// Dense query window: 5.0 s at 86.125 fps (5512.5 / 64).
     const TEST_QUERY_FRAMES: usize = 430;
-    /// Dense frame rate used by the synthetic catalog.
-    const TEST_DENSE_FPS: f64 = 31.25;
+    /// Dense frame rate used by the synthetic catalog (5512.5 / 64 = 86.125 fps).
+    const TEST_DENSE_FPS: f64 = 86.125;
+    /// Incompatible frame rate used to verify FPS tolerance rejection.
+    const TEST_INCOMPATIBLE_FPS: f64 = 48.0;
     /// Frames per synthetic reference media.
     const TEST_MEDIA_FRAMES: usize = 20_000;
     /// Number of synthetic reference media.
@@ -778,7 +780,7 @@ mod tests {
                 &FineSearchCriteria {
                     dense_query: &sec_hashes
                         [TEST_BASE_OFFSET..TEST_BASE_OFFSET + TEST_QUERY_FRAMES],
-                    dense_fps: 86.125, // incompatible with TEST_DENSE_FPS (31.25)
+                    dense_fps: TEST_INCOMPATIBLE_FPS,
                     max_distance: DEFAULT_FINE_MAX_DISTANCE,
                 },
             )

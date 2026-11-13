@@ -77,7 +77,13 @@ pub const SECONDS_PER_MINUTE: u64 = 60;
 pub const HOURS_PER_DAY: u64 = 24;
 
 /// Milliseconds per second conversion factor.
-pub const MILLIS_PER_SEC: f64 = 1000.0;
+pub const MILLIS_PER_SECOND: f64 = 1000.0;
+
+/// Alias for milliseconds per second conversion factor.
+pub const MILLIS_PER_SEC: f64 = MILLIS_PER_SECOND;
+
+/// Scale factor converting ratios (`0.0..=1.0`) into percentages (`0.0..=100.0`).
+pub const PERCENT_SCALE: f64 = 100.0;
 
 /// Low energy lower ratio threshold for aHash spectral frames.
 pub const LOW_ENERGY_MIN_RATIO: f64 = 0.20;
@@ -1030,15 +1036,15 @@ fn evaluate_ahash_multi(
         if let Some(ref m) = search_match {
             let cand_id =
                 resolve_ahash_candidate_id(ctx.dense_catalog, &m.file_path, &m.media_name);
-            let ref_time_ms = (m.offset_sec * MILLIS_PER_SEC).round() as i64;
-            let conf = m.score * 100.0;
+            let ref_time_ms = (m.offset_sec * MILLIS_PER_SECOND).round() as i64;
+            let conf = m.score * PERCENT_SCALE;
             let sparse = (m.snr_bits * 10.0) as usize;
             win_matches.push((cand_id, m.media_name.clone(), 0, sparse, ref_time_ms, conf));
         }
 
         let estimated_shift = search_match
             .as_ref()
-            .map(|m| ((m.offset_sec - start_sec) * MILLIS_PER_SEC).round() as i64);
+            .map(|m| ((m.offset_sec - start_sec) * MILLIS_PER_SECOND).round() as i64);
 
         window_details.push(AhashWindowDetail {
             window_idx: w_idx,
@@ -1054,7 +1060,7 @@ fn evaluate_ahash_multi(
             estimated_shift_ms: estimated_shift,
             confidence: search_match
                 .as_ref()
-                .map(|m| m.score * 100.0)
+                .map(|m| m.score * PERCENT_SCALE)
                 .unwrap_or(0.0),
         });
 
@@ -1383,8 +1389,8 @@ fn print_live_progress(
         .map(|m| format!("'{}' ({:.0}%)", m, record.ahash.confidence))
         .unwrap_or_else(|| "none".to_string());
 
-    let eta_min = (t.eta_sec / 60.0).round() as u64;
-    let pct = (done as f64 / total as f64) * 100.0;
+    let eta_min = (t.eta_sec / SECONDS_PER_MINUTE as f64).round() as u64;
+    let pct = (done as f64 / total as f64) * PERCENT_SCALE;
 
     println!(
         "[{:>4}/{:<4}] ({:>5.1}%) | {:>4.1}s | pHash: {:<20} | aHash: {:<20} | {:<16} | ETA: {:>3}m",
