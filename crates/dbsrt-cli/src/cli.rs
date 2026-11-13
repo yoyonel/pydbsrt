@@ -169,6 +169,10 @@ pub enum Commands {
     /// Real-time full-frame TUI process monitor and media studio
     #[command(name = "top", visible_aliases = ["studio", "ops"])]
     Top(TopArgs),
+
+    /// Benchmark multimodal multi-window matching (pHash vs aHash) at massive scale
+    #[command(name = "bench-scale-multimodal", visible_aliases = ["bench:scale", "bench:multimodal:scale"])]
+    BenchScaleMultimodal(crate::commands::BenchScaleMultimodalArgs),
 }
 
 #[cfg(test)]

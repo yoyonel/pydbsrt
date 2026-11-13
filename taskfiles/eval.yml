@@ -160,3 +160,15 @@ tasks:
     desc: Benchmark coarse-to-fine aHash matching across downsampling factors K=1, 4, 8, 16, 31
     cmds:
       - cargo test --release --package dbsrt-index --test test_ahash_coarse_to_fine test_exhaustive_coarse_to_fine_benchmark -- --nocapture
+
+  bench:multimodal:scale:
+    desc: Run exhaustive overnight multimodal multi-window scale benchmark (pHash vs aHash) across NAS & Freebox
+    deps: [rs:build]
+    cmds:
+      - ./target/release/dbsrt bench-scale-multimodal {{.CLI_ARGS}}
+
+  eval:multimodal:audit:
+    desc: Parametric root-cause audit on missed modalities in scale benchmark (resolving failure taxonomies via local or remote streams)
+    deps: [rs:build]
+    cmds:
+      - uv run python scripts/benchmarks/audit_missed_modalities.py {{.CLI_ARGS}}

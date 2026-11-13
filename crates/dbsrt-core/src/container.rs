@@ -14,6 +14,78 @@ use crate::ffmpeg_input::{
 };
 use crate::media_pairing::parse_language_code;
 
+/// Metadata describing an embedded audio track within a container.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AudioStreamInfo {
+    /// Absolute stream index within the container (e.g. 1 for 0:1).
+    pub index: usize,
+    /// Relative 0-based audio stream index (e.g. 0 for 0:a:0).
+    pub audio_index: usize,
+    /// Audio codec name (e.g. "aac", "ac3", "flac", "mp3").
+    pub codec_name: String,
+    /// Number of audio channels (e.g. 2 for stereo, 6 for 5.1).
+    pub channels: Option<usize>,
+    /// Audio sample rate in Hz (e.g. 48000).
+    pub sample_rate: Option<u32>,
+    /// ISO language tag if specified (e.g. "fra", "fre", "eng", "jpn").
+    pub language: Option<String>,
+    /// Stream title or description if present in metadata.
+    pub title: Option<String>,
+    /// True if the stream is marked as default in container disposition.
+    pub is_default: bool,
+}
+
+/// Inspection summary for audio streams in a multimedia container.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AudioContainerInspection {
+    /// File path of the inspected media.
+    pub path: PathBuf,
+    /// List of detected audio streams.
+    pub audio_streams: Vec<AudioStreamInfo>,
+}
+
+impl AudioContainerInspection {
+    /// Returns total count of audio streams.
+    #[inline]
+    pub fn track_count(&self) -> usize {
+        self.audio_streams.len()
+    }
+
+    /// Returns language code of the first audio stream if present.
+    pub fn track0_lang(&self) -> Option<String> {
+        self.audio_streams.first().and_then(|s| s.language.clone())
+    }
+
+    /// Returns title of the first audio stream if present.
+    pub fn track0_title(&self) -> Option<String> {
+        self.audio_streams.first().and_then(|s| s.title.clone())
+    }
+
+    /// Returns codec name of the first audio stream if present.
+    pub fn track0_codec(&self) -> Option<String> {
+        self.audio_streams.first().map(|s| s.codec_name.clone())
+    }
+
+    /// Returns channel count of the first audio stream if present.
+    pub fn track0_channels(&self) -> Option<usize> {
+        self.audio_streams.first().and_then(|s| s.channels)
+    }
+
+    /// Returns all declared stream language tags.
+    pub fn all_languages(&self) -> Vec<String> {
+        self.audio_streams
+            .iter()
+            .filter_map(|s| s.language.clone())
+            .collect()
+    }
+
+    /// True if container contains more than 1 audio track.
+    #[inline]
+    pub fn is_multi_track(&self) -> bool {
+        self.audio_streams.len() > 1
+    }
+}
+
 /// Metadata describing an embedded subtitle track within a container.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SubtitleStreamInfo {
@@ -63,6 +135,21 @@ impl ContainerInspection {
 #[derive(Deserialize)]
 struct FfprobeSubOutput {
     streams: Option<Vec<FfprobeSubStream>>,
+}
+
+#[derive(Deserialize)]
+struct FfprobeAudioOutput {
+    streams: Option<Vec<FfprobeAudioStream>>,
+}
+
+#[derive(Deserialize)]
+struct FfprobeAudioStream {
+    index: Option<usize>,
+    codec_name: Option<String>,
+    channels: Option<usize>,
+    sample_rate: Option<String>,
+    tags: Option<FfprobeSubTags>,
+    disposition: Option<FfprobeSubDisposition>,
 }
 
 #[derive(Deserialize)]
@@ -183,6 +270,94 @@ pub fn inspect_container<P: AsRef<Path>>(path: P) -> Result<ContainerInspection>
     Ok(ContainerInspection {
         path: p.to_path_buf(),
         subtitle_streams,
+    })
+}
+
+/// Inspects a multimedia container file using ffprobe to detect embedded audio tracks.
+///
+/// # Arguments
+/// * `path` - Input filesystem path or stream URL.
+///
+/// # Returns
+/// An [`AudioContainerInspection`] containing detected audio streams.
+///
+/// # Errors
+/// Returns error if ffprobe fails to execute or input file does not exist.
+///
+/// # Panics
+/// Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// 1. Queries ffprobe for `-select_streams a` with audio stream metadata.
+/// 2. Parses audio codec, channels, sample rate, language tags, and disposition flags.
+/// 3. Normalizes missing fields to defaults (0-based stream indexing).
+pub fn inspect_audio_streams<P: AsRef<Path>>(path: P) -> Result<AudioContainerInspection> {
+    let p = path.as_ref();
+    if !is_remote_stream_or_pipe(p) && !p.exists() {
+        return Err(anyhow!("Media container not found: {:?}", display_input(p)));
+    }
+
+    let ffprobe_bin = crate::video::resolve_ffprobe();
+    let mut cmd = Command::new(ffprobe_bin);
+    cmd.args(["-threads", &ffmpeg_decode_threads()]);
+    apply_ftp_credentials(&mut cmd, p);
+    let output = cmd
+        .args([
+            "-v",
+            "error",
+            "-select_streams",
+            "a",
+            "-show_entries",
+            "stream=index,codec_name,channels,sample_rate:stream_disposition=default:stream_tags=language,title",
+            "-of",
+            "json",
+        ])
+        .arg(p)
+        .output()
+        .with_context(|| format!("Failed to execute ffprobe on {:?}", display_input(p)))?;
+
+    if !output.status.success() {
+        return Err(anyhow!(
+            "ffprobe audio inspection failed: {}",
+            redact_url_userinfo(&String::from_utf8_lossy(&output.stderr))
+        ));
+    }
+
+    let parsed: FfprobeAudioOutput = serde_json::from_slice(&output.stdout)
+        .with_context(|| "Failed to parse ffprobe json output")?;
+
+    let mut audio_streams = Vec::new();
+    if let Some(streams) = parsed.streams {
+        for (a_idx, stream) in streams.into_iter().enumerate() {
+            let codec_name = stream.codec_name.unwrap_or_else(|| "unknown".to_string());
+            let (language, title) = if let Some(tags) = stream.tags {
+                (tags.language, tags.title)
+            } else {
+                (None, None)
+            };
+            let is_default = stream
+                .disposition
+                .and_then(|d| d.default)
+                .map(|val| val == 1)
+                .unwrap_or(false);
+            let sample_rate = stream.sample_rate.and_then(|s| s.parse::<u32>().ok());
+
+            audio_streams.push(AudioStreamInfo {
+                index: stream.index.unwrap_or(a_idx),
+                audio_index: a_idx,
+                codec_name,
+                channels: stream.channels,
+                sample_rate,
+                language,
+                title,
+                is_default,
+            });
+        }
+    }
+
+    Ok(AudioContainerInspection {
+        path: p.to_path_buf(),
+        audio_streams,
     })
 }
 
@@ -316,5 +491,45 @@ mod tests {
         assert!(is_pipe_input(Path::new("-")));
         assert!(!is_pipe_input(Path::new("http://host/movie.mkv")));
         assert!(!is_pipe_input(Path::new("/var/media/video.mkv")));
+    }
+
+    #[test]
+    fn test_audio_container_inspection_helpers() {
+        let inspection = AudioContainerInspection {
+            path: PathBuf::from("test.mkv"),
+            audio_streams: vec![
+                AudioStreamInfo {
+                    index: 1,
+                    audio_index: 0,
+                    codec_name: "aac".to_string(),
+                    channels: Some(6),
+                    sample_rate: Some(48000),
+                    language: Some("fre".to_string()),
+                    title: Some("VF".to_string()),
+                    is_default: true,
+                },
+                AudioStreamInfo {
+                    index: 2,
+                    audio_index: 1,
+                    codec_name: "ac3".to_string(),
+                    channels: Some(2),
+                    sample_rate: Some(48000),
+                    language: Some("jpn".to_string()),
+                    title: Some("VO".to_string()),
+                    is_default: false,
+                },
+            ],
+        };
+
+        assert_eq!(inspection.track_count(), 2);
+        assert!(inspection.is_multi_track());
+        assert_eq!(inspection.track0_lang().as_deref(), Some("fre"));
+        assert_eq!(inspection.track0_title().as_deref(), Some("VF"));
+        assert_eq!(inspection.track0_codec().as_deref(), Some("aac"));
+        assert_eq!(inspection.track0_channels(), Some(6));
+        assert_eq!(
+            inspection.all_languages(),
+            vec!["fre".to_string(), "jpn".to_string()]
+        );
     }
 }

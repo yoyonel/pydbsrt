@@ -38,8 +38,8 @@ pub use audio::{
     DEFAULT_AUDIO_FFMPEG_TIMEOUT_SECS,
 };
 pub use container::{
-    extract_embedded_subtitle, inspect_container, language_matches, ContainerInspection,
-    SubtitleStreamInfo,
+    extract_embedded_subtitle, inspect_audio_streams, inspect_container, language_matches,
+    AudioContainerInspection, AudioStreamInfo, ContainerInspection, SubtitleStreamInfo,
 };
 pub use coupling::{
     build_and_validate_sub_frames, build_and_validate_sub_frames_opts, compute_bytes_digest_32,

@@ -36,6 +36,10 @@ fn dispatch_benchmarks(cmd: Commands) -> Result<Option<Commands>> {
             run_bench_ahash(&args)?;
             Ok(None)
         }
+        Commands::BenchScaleMultimodal(args) => {
+            dbsrt_cli::commands::run_bench_scale_multimodal(args)?;
+            Ok(None)
+        }
         other => Ok(Some(other)),
     }
 }
