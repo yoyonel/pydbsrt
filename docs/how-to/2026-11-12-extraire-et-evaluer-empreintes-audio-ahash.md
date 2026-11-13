@@ -11,43 +11,39 @@ tags:
 
 # 🛠️ Guide Pratique : Extraire et Évaluer les Empreintes Acoustiques aHash
 
-Ce guide opérationnel décrit comment générer des empreintes acoustiques spectrales Haitsma-Kalker (`.ahash` v1.0), ingérer des médias en mode dual-hash et exécuter le banc métrologique de corrélation croisée.
+Ce guide opérationnel décrit comment générer des empreintes acoustiques spectrales Haitsma-Kalker (`.ahash` v1.0), maintenir la convention canonique `<moviehash_16hex>[.a<k>].86.1fps.ahash` + sidecar `.json`, ingérer des médias en mode dual-hash et exécuter les bancs métrologiques.
 
 ---
 
-## 1. Contexte & Problématique
+## 1. Contexte & Convention de Nommage
 
-L'empreinte visuelle pHash présente des limites sur les séquences visuellement statiques (écrans noirs, cartons de titre identiques, génériques récurrents). L'empreinte acoustique `.ahash` résout cette ambiguïté en échantillonnant le spectre audio à \(86.13\text{ fps}\) avec un pas de \(11.6\text{ ms}\), assurant un calage temporel sub-secondebit-exact.
+L'empreinte visuelle pHash présente des limites sur les séquences visuellement statiques (écrans noirs, cartons de titre identiques, génériques récurrents). L'empreinte acoustique `.ahash` résout cette ambiguïté en échantillonnant le spectre audio à \(86.125\text{ fps}\) (\(5\,512.5\text{ Hz} / 64\), pas de \(11.6\text{ ms}\)), assurant un calage temporel sub-seconde exact.
+
+Chaque empreinte acoustique produite dans `data/__AHASH__/` respecte la convention canonique :
+
+- **Fichier binaire** : `<moviehash_16hex>[.a<k>].86.1fps.ahash` (ex. `8e245d9679d31e12.86.1fps.ahash` pour la piste par défaut, ou `8e245d9679d31e12.a1.86.1fps.ahash` pour la piste relative `0:a:1`).
+- **Sidecar typé (`AhashSidecar` v1)** : `<moviehash_16hex>[.a<k>].json` stockant `media_name`, `moviehash`, la piste décodée (`selected_audio_stream`) et l'inventaire complet des pistes audio du conteneur (`container_audio_streams`).
 
 ---
 
 ## 2. Extraire une Empreinte Acoustique Unitaire
 
-### Via la commande Taskfile
-Pour extraire l'empreinte `.ahash` d'un fichier vidéo ou audio local :
+### Via la commande Taskfile (recommandé)
+Pour extraire l'empreinte `.ahash` et son sidecar `.json` d'un fichier vidéo ou audio :
 
 ```bash
-task audio:export-ahash -- --media /data/video.mkv --output data/__AHASH__/video.ahash
-```
+# Extraction vers le chemin canonique <moviehash_16hex>.86.1fps.ahash
+task audio:export-ahash -- \
+    --media /data/video.mkv \
+    --output data/__AHASH__/8e245d9679d31e12.86.1fps.ahash
 
-### Via la CLI Standalone `dbsrt`
-La commande supporte les fichiers locaux et les flux de streaming réseau distants :
-
-```bash
-# Extraction locale complète
-dbsrt export-ahash --media /chemin/vers/film.mkv --output data/__AHASH__/film.ahash
-
-# Extraction sur extrait temporel (ex: 30 secondes à partir de 1 minute 30)
-dbsrt export-ahash \
-    --media /chemin/vers/film.mkv \
-    --output data/__AHASH__/extrait.ahash \
+# Extraction d'une piste audio spécifique (-map 0:a:1) sur une fenêtre de 30s
+task audio:export-ahash -- \
+    --media /data/video.mkv \
+    --audio-track 1 \
     --start-sec 90.0 \
-    --duration 30.0
-
-# Extraction directe depuis un flux FTP NAS en streaming (zéro stockage vidéo local)
-dbsrt export-ahash \
-    --media "ftp://user:pass@nas.local:21/tvshow/ep01.mkv" \
-    --output data/__AHASH__/ep01.ahash
+    --duration 30.0 \
+    --output data/__AHASH__/8e245d9679d31e12.a1.86.1fps.ahash
 ```
 
 ---
@@ -63,50 +59,54 @@ task media:add -- /data/medias/film.mkv --ahash-dir data/__AHASH__
 Le processus exécute :
 
 1. L'extraction du pHash 64-bit et l'enregistrement du couplage SRT.
-2. L'extraction de l'empreinte `.ahash` dans `data/__AHASH__/film.ahash`.
-3. Le rechargement atomique à chaud du démon `dbsrt-server`.
+2. L'extraction de l'empreinte `data/__AHASH__/<moviehash_16hex>.86.1fps.ahash` et de son sidecar `<moviehash_16hex>.json`.
+3. Le rechargement atomique à chaud du démon `dbsrt-server` (`POST /v1/catalog/reload`).
 
-> [!NOTE]
-> Si la vidéo ne comporte aucune piste audio (vidéo muette), le calcul aHash est ignoré sans interrompre l'ingestion du pHash visuel.
+!!! note "Conteneurs sans piste audio"
+    Si la vidéo ne comporte aucune piste audio (vidéo muette), le calcul aHash est ignoré sans interrompre l'ingestion du pHash visuel.
 
 ---
 
-## 4. Moisson Massive en Streaming sur o2switch
+## 4. Moisson Massive en Streaming & Backfill Sidecars
 
-Sur le serveur cloud mutualisé o2switch, le worker autonome peut être lancé pour extraire les empreintes `.ahash` sur toute la bibliothèque du NAS sans transiter par le disque local :
+Sur le serveur cloud mutualisé o2switch ou depuis le poste local, les tâches dédiées orchestrent l'extraction en streaming et la mise à niveau sans perte des sidecars :
 
 ```bash
-# Lancer l'extraction audio batch sur toutes les cibles (séries + films)
+# Lancer l'extraction audio batch sur toutes les cibles (séries + films) sur o2switch
 task o2switch:batch:ahash:all
 
-# Surveiller la progression et la charge CPU du worker
-task o2switch:batch:status
+# Rattraper et vérifier par sondage Hamming les sidecars JSON (<stem>.json)
+task ahash:backfill-sidecars -- --limit 100 --workers 4
 
-# Suivre les journaux d'extraction en direct
-task o2switch:batch:logs
+# Migrer sans perte (0 recalcul FFT) d'anciens fichiers nommés en clair vers <moviehash_16hex>
+task ahash:migrate-moviehash -- --dry-run
 ```
 
 ---
 
-## 5. Exécuter le Banc d'Évaluation Métrologique
+## 5. Exécuter les Bancs d'Évaluation Métrologique & Multimodale
 
-Pour évaluer la précision temporelle, la discrimination inter-médias et le débit d'exécution POPCNT sur l'ensemble du corpus d'empreintes :
+Pour évaluer la précision temporelle, la discrimination inter-médias, l'indexation Coarse-to-Fine et le consensus multimodal :
 
 ```bash
-# Exécution du benchmark complet avec export télémétrique
+# 1. Benchmark métrologique complet (Axe 1 temporel, Axe 2 faux-positifs, Axe 3 débit POPCNT)
 task bench:ahash:matching
-```
 
-### Paramètres Avancés
-Pour affiner l'évaluation ou tester un sous-ensemble d'échantillons :
-
-```bash
-target/release/dbsrt bench-ahash \
+# 2. Personnaliser les paramètres du benchmark métrologique
+task bench:ahash:matching -- \
     --ahash-dir data/__AHASH__ \
     --samples 200 \
     --cross-media-trials 500 \
     --max-distance 12.5 \
     --json-out data/reports/eval_ahash_matching.json
+
+# 3. Matrice comparative Linear O(N) vs MIH-16 vs MIH-32 et Coarse-to-Fine (K=1..31)
+task bench:ahash:mih:matrix
+task bench:ahash:coarse-to-fine
+
+# 4. Benchmark multimodal multi-fenêtres à l'échelle (pHash vs aHash C2F K=16) et audit
+task bench:multimodal:scale -- --limit 50
+task eval:multimodal:audit
 ```
 
 ---
@@ -125,16 +125,22 @@ Le rapport console et le fichier JSON de télémétrie (`data/reports/eval_ahash
 
 ## 7. Interroger le Démon via l'API REST `/v1/search/ahash`
 
-Une fois le serveur démarré (`dbsrt-server`), les clients (lecteurs VLC, scripts d'ingestion ou workers) peuvent soumettre un extrait sub-fingerprint pour obtenir l'offset milliseconde exact $\Delta t$ :
+Une fois le serveur démarré (`task server:daemon` sur le port `8765`), les clients (lecteurs VLC, agents relais ou scripts) peuvent soumettre un extrait sub-fingerprint (`8..=8192` trames, corps max `256 KiB`, `limit` dans `1..=50`) pour obtenir l'offset milliseconde exact $\Delta t$ :
 
 ```bash
-# Exemple de requête HTTP avec charge JSON (hashes ou fingerprint hex)
-curl -s -X POST http://localhost:8080/v1/search/ahash \
+# Exemple de requête HTTP sur le port 8765 (hashes u64, fingerprint hex ou ahash_bytes base64)
+curl -s -X POST http://127.0.0.1:8765/v1/search/ahash \
   -H "Content-Type: application/json" \
   -d '{
     "fingerprint": [
       "0x123456789abcdef0",
-      "0x23456789abcdef01"
+      "0x23456789abcdef01",
+      "0x3456789abcdef012",
+      "0x456789abcdef0123",
+      "0x56789abcdef01234",
+      "0x6789abcdef012345",
+      "0x789abcdef0123456",
+      "0x89abcdef01234567"
     ],
     "audio_fps": 86.125,
     "max_distance": 14.0,
@@ -142,21 +148,22 @@ curl -s -X POST http://localhost:8080/v1/search/ahash \
   }'
 ```
 
-Le serveur répond avec le meilleur candidat reconnu, la marge SNR et le décalage calculé en millisecondes (`offset_ms`).
-Pour forcer la prise en compte de nouveaux fichiers `.ahash` sans redémarrer le démon :
+Le serveur répond avec le meilleur candidat reconnu (`file_path: "data/__AHASH__/<moviehash_16hex>.86.1fps.ahash"`), la marge SNR et le décalage calculé en millisecondes (`offset_ms`).
+Pour recharger à chaud de nouveaux fichiers `.ahash` sans redémarrer le démon :
 
 ```bash
-curl -s -X POST http://localhost:8080/v1/catalog/reload
+task server:reload
+# ou directement : curl -s -X POST http://127.0.0.1:8765/v1/catalog/reload
 ```
 
 ---
 
 ## 8. Utilisation depuis l'Extension VLC (`Search by aHash`)
 
-L'extension VLC `vlsub_dbsrt.lua` intègre le bouton **Search by aHash** situé sur la 4ème ligne sous *Search by pHash* :
+L'extension VLC `vlsub_dbsrt.lua` intègre le bouton **Search by aHash** situé sous *Search by pHash* :
 
 1. Ouvrez votre vidéo dans VLC et lancez l'extension via **Vue > VLSub (dbsrt Enhanced)**.
 2. Cliquez sur le bouton **Search by aHash**.
-3. Le plugin soumet la requête de recherche au démon local (`POST /v1/search` avec `"search_mode": "ahash"`).
-4. Le serveur extrait 5.0 secondes d'audio non compressé via FFmpeg (`f32le`, 5512 Hz mono), génère l'empreinte aHash de la requête et effectue la cross-corrélation temporelle contre le catalogue audio en mémoire (`AHashCatalog`).
-5. Les sous-titres associés au média reconnu s'affichent instantanément dans la liste des résultats avec l'offset calculé en millisecondes.
+3. Le plugin soumet la requête au démon local (`POST /v1/search` avec `"search_mode": "ahash"`).
+4. Le serveur extrait 5.0 secondes d'audio (430 trames à `86.125 fps`, 5512 Hz mono), génère l'empreinte aHash de la requête et interroge le catalogue audio en mémoire (`AHashCatalog`) ou relaie `ahash_bytes` vers le serveur maître en mode `--agent`.
+5. Les sous-titres certifiés associés au média reconnu s'affichent dans la liste des résultats avec l'offset calculé en millisecondes.

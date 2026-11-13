@@ -78,12 +78,13 @@ Interface web bicanale (`http://127.0.0.1:8765/studio`) permettant de confronter
   - **Audit de Consensus Spatiotemporel** : Exploration des rapports d'audit batch, KPIs bornés de couverture catalogue ($\le 100\%$), défilement horizontal natif, résolution des identifiants hash binaires et navigation modale bidirectionnelle fluide avec raccourcis clavier (`Échap`).
   - **Recette E2E Automatisée** : Validation continue par Playwright (`task portal:e2e`).
 - **Composante Acoustique aHash (Haitsma-Kalker) & Matching Sub-Seconde** :
-  - Extraction d'empreintes spectro-temporelles à \(86.13\text{ fps}\) (\(5\,512\text{ Hz}\), 33 sous-bandes d'énergie logarithmiques) via FFT réelle.
-  - Format binaire standardisé `.ahash` v1.0 avec en-tête aligné 176 octets et validation stricte des invariants RFC.
+  - Extraction d'empreintes spectro-temporelles à \(86.125\text{ fps}\) (\(5\,512.5\text{ Hz} / 64\), 33 sous-bandes d'énergie logarithmiques) via FFT réelle.
+  - Format binaire standardisé `.ahash` v1.0 avec en-tête aligné 176 octets, nommage canonique OpenSubtitles `<moviehash_16hex>[.a<k>].86.1fps.ahash` et sidecar typé `<moviehash_16hex>[.a<k>].json` (`AhashSidecar` v1 : titre canonique, piste audio décodée et topologie multi-pistes du conteneur).
+  - Indexation mémoire **MIH-32** (~2.1 ms sur 106M trames) et **Coarse-to-Fine $K=16$** (\(5.38\text{ fps}\), empreinte RAM divisée par 16 à 152 MB, dérive 0 ms), exposée via `POST /v1/search/ahash` et le bouton VLC **Search by aHash**.
   - Balayage SIMD vectoriel matériel `POPCNT` à plus de 4.2 milliards d'opérations/s (\(13.5\text{ millions d'heures}\) balayées par seconde de CPU).
   - Précision temporelle fine (\(\pm 11.6\text{ ms}\)), \(100.0\%\) de match exact (\(\le 25\text{ ms}\)) et erreur médiane de **\(0.00\text{ ms}\)** dès \(W \ge 1.0\text{ s}\).
-  - Modélisation mathématique par loi de Gumbel et métrologie empirique prouvée sur catalogue complet (\(579\text{ médias}\), \(106\text{ millions de trames}\) sous `data/__AHASH__/`).
-  - Consulter l'évaluation métrologique complète : [`docs/explanation/2026-11-12-evaluation-exhaustive-matcher-audio-ahash.md`](docs/explanation/2026-11-12-evaluation-exhaustive-matcher-audio-ahash.md).
+  - Modélisation mathématique par loi de Gumbel et métrologie empirique prouvée sur catalogue complet (\(584\text{ médias}\), \(106\text{ millions de trames}\) sous `data/__AHASH__/`).
+  - Consulter l'évaluation métrologique et l'analyse d'indexation : [`docs/explanation/2026-11-12-evaluation-exhaustive-matcher-audio-ahash.md`](docs/explanation/2026-11-12-evaluation-exhaustive-matcher-audio-ahash.md) et [`docs/explanation/2026-11-12-analyse-mih16-vs-mih32-ahash-phash.md`](docs/explanation/2026-11-12-analyse-mih16-vs-mih32-ahash-phash.md).
 - **Observabilité & Télémétrie** :
   - Métriques Prometheus natives exposées par le serveur Axum (`/metrics`).
   - Dashboards Grafana provisionnés automatiquement sous `docker/grafana/`.
@@ -281,6 +282,11 @@ flowchart TD
 | `task status` | Tableau de bord de santé et compteurs relationnels PostgreSQL 17 | `Taskfile.yml` |
 | `task build` | Compile l'ensemble des binaires Rust en release | `Taskfile.yml` |
 | `task media:add` | Façade unifiée d'ingestion média (pHash, sidecar, certification, reload) | `taskfiles/stack.yml` |
+| `task audio:export-ahash` | Extrait une empreinte `.ahash` (`<moviehash_16hex>[.a<k>].86.1fps.ahash` + sidecar `.json`) | `taskfiles/eval.yml` |
+| `task ahash:backfill-sidecars` | Rattrape et vérifie par sondage Hamming les sidecars `<stem>.json` (`AhashSidecar` v1) | `taskfiles/eval.yml` |
+| `task ahash:migrate-moviehash` | Migre sans perte (0 FFT) les `.ahash`/`.json` vers `<moviehash_16hex>` | `taskfiles/eval.yml` |
+| `task bench:ahash:matching` | Qualification métrologique du matcher acoustique aHash (`dbsrt bench-ahash`) | `taskfiles/eval.yml` |
+| `task bench:multimodal:scale` | Benchmark multimodal multi-fenêtres à l'échelle (pHash vs aHash C2F $K=16$) | `taskfiles/eval.yml` |
 | `task coupling:certify` | Certifie les couples vidéo/sous-titres dans la base et dans JSON | `taskfiles/stack.yml` |
 | `task catalog:verify` | Audit programmatique d'intégrité du catalogue (dbphash, couplings, PostgreSQL, phash) | `taskfiles/stack.yml` |
 | `task demo:vlc` | Démonstration interactive VLC avec extension VLSub bonifiée | `taskfiles/demo.yml` |

@@ -101,22 +101,21 @@ dbsrt export-phash --input <VIDEO_PATH> --output <PHASH_PATH> [OPTIONS]
 ---
 
 ### `export-ahash`
-Extrait les empreintes acoustiques spectrales Haitsma-Kalker `.ahash` v1.0 (en-tête 32 octets, banc 33 filtres Bark, 5512 Hz mono, trames 64-bit à 86.13 fps).
+Extrait les empreintes acoustiques spectrales Haitsma-Kalker `.ahash` v1.0 (en-tête 176 octets, banc 33 filtres logarithmiques, 5512 Hz mono, trames 64-bit à 86.125 fps).
 
 ```text
-dbsrt export-ahash --media <MEDIA_PATH> --output <AHASH_PATH> [OPTIONS]
+dbsrt export-ahash --media <MEDIA_PATH> [--output <AHASH_PATH>] [OPTIONS]
 ```
 
 - `--media <MEDIA_PATH>` (ou `-m`) : Chemin vers le fichier multimédia local ou URI de flux réseau (`ftp://`, `http://`).
-- `--output <AHASH_PATH>` (ou `-o`) : Chemin de destination du fichier binaire `.ahash` (défaut : `/tmp/<moviehash>[.a<K>].<fps>fps.ahash` pour tout fichier local `>= 64 KiB` ou lorsque `--moviehash` est fourni, sinon repli sur `/tmp/<media>[.a<K>].<fps>fps.ahash`).
+- `--output <AHASH_PATH>` (ou `-o`) : Chemin de destination du fichier binaire `.ahash` (défaut : `/tmp/<moviehash_16hex>[.a<K>].<fps>fps.ahash` pour tout fichier local `>= 64 KiB` ou lorsque `--moviehash` est fourni, sinon repli sur `/tmp/<media>[.a<K>].<fps>fps.ahash`).
 - `--moviehash <HASH>` : MovieHash OpenSubtitles 16-hex optionnel (calculé automatiquement sur fichier local `>= 64 KiB` si omis).
 - `--sample-rate <HZ>` (ou `-r`) : Taux d'échantillonnage audio (défaut : `5512`).
-- `--hop-size <SAMPLES>` : Pas glissant en échantillons PCM (défaut : `64`, soit ~11.6 ms / 86.13 fps).
+- `--hop-size <SAMPLES>` : Pas glissant en échantillons PCM (défaut : `64`, soit ~11.6 ms / 86.125 fps).
 - `--start-sec <SEC>` : Décalage de départ en secondes (défaut : `0.0`).
 - `--duration <SEC>` : Durée maximale à extraire en secondes (défaut : totalité du flux).
 - `--audio-track <K>` : Piste audio relative à décoder (`-map 0:a:<K>`). Omis : sélection automatique FFmpeg (identique bit-à-bit aux `.ahash` existants). Sans `--output` et si `K` diffère de la piste par défaut déduite, le nom par défaut porte le suffixe `.a<K>`.
-- **Sidecar** : un `<stem>.json` (piste décodée + pistes du conteneur) est écrit à côté du `.ahash`, voir [Formats de Fichiers § 1ter](formats-fichiers.md).
-- `--json` : Émet les métadonnées et statistiques d'extraction au format JSON structuré sur stdout.
+- **Sidecar** : un `<stem>.json` (`AhashSidecar` v1 : `media_name`, `moviehash`, piste décodée `selected_audio_stream` + inventaire `container_audio_streams`) est écrit atomiquement à côté du `.ahash`, voir [Formats de Fichiers § 1ter](formats-fichiers.md).
 
 ---
 
@@ -151,6 +150,25 @@ dbsrt bench-ahash [OPTIONS]
 - `--cross-media-trials <N>` : Nombre de paires inter-médias croisées pour mesurer le rejet de faux positifs (défaut : `500`).
 - `--max-distance <BITS>` : Seuil d'admissibilité de distance de Hamming maximale (défaut : `14.0`, optimal : `12.5`).
 - `--json-out <PATH>` : Chemin d'export télémétrique JSON complet des métriques (défaut : `data/reports/eval_ahash_matching.json`).
+
+---
+
+### `bench-scale-multimodal`
+Runner de benchmark multimodal à l'échelle (pHash Coarse + MIH-16 vs aHash Coarse-to-Fine $K=16$ + MIH-32) évaluant le consensus multi-fenêtres ($20\%, 50\%, 80\%$) et la concordance inter-modalités avec reprise sur crash JSONL.
+
+```text
+dbsrt bench-scale-multimodal [OPTIONS]
+```
+
+- `--dirs <DIR1,DIR2,...>` (ou `-d`) : Répertoires contenant les vidéos à scanner (repli local sûr sur `data/snippets` si omis).
+- `--dbphash <PATH>` : Catalogue visuel `.dbphash` (défaut : `data/catalog.dbphash`).
+- `--ahash-dir <DIR>` : Répertoire contenant les empreintes `.ahash` et sidecars `.json` (défaut : `data/__AHASH__`).
+- `--output <PATH>` (ou `-o`) : Fichier rapport JSONL en streaming (défaut : fichier horodaté sous `data/reports/` avec symlink `eval_scale_multimodal_multiwindow_latest.jsonl`).
+- `--status-json <PATH>` : Fichier JSON de télémétrie en direct (défaut : fichier horodaté sous `data/reports/` avec symlink `eval_scale_status_latest.json`).
+- `--factor-k <K>` : Facteur de décimation Coarse-to-Fine aHash (défaut : `16`, soit `5.38 fps`).
+- `--offsets <RATIOS>` : Ratios temporels des fenêtres d'évaluation séparés par virgule (défaut : `"0.2,0.5,0.8"`).
+- `--limit <N>` : Nombre maximal de médias à évaluer (`0` = illimité).
+- `--resume` : Reprend automatiquement en sautant les médias déjà traités hors statut `ERROR` (défaut : `true`).
 
 ---
 

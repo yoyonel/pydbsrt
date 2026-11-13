@@ -216,6 +216,7 @@ nav:
       - Étude R&D Empreinte Audio aHash (Haitsma-Kalker): explanation/2026-11-10-etude-rd-empreinte-audio-ahash-haitsma-kalker.md
       - Validation Empirique Reconnaissance Audio & Scaling: explanation/2026-11-10-validation-empirique-reconnaissance-audio-ahash-et-scaling.md
       - Évaluation Métrologique Matcher Audio aHash: explanation/2026-11-12-evaluation-exhaustive-matcher-audio-ahash.md
+      - Analyse MIH-16 vs MIH-32 & Coarse-to-Fine (aHash/pHash): explanation/2026-11-12-analyse-mih16-vs-mih32-ahash-phash.md
       - Audit Forensique Benchmark Multimodal (5 346 Médias): explanation/2026-11-13-audit-benchmark-multimodal-scale.md
       - Post-Mortem INC-2026-11-12-01 (Auto-Heal Batch o2switch): explanation/2026-11-12-post-mortem-inc-2026-11-12-01-blocage-auto-heal-batch-o2switch.md
   - 📊 Benchmarks & Preuves:

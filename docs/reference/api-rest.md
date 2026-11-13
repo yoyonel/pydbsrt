@@ -125,33 +125,53 @@ Réceptionne et persiste de manière atomique la pulsation et les logs de l'agen
 ## 3. Endpoints de Recherche & Synchronisation
 
 ### `POST /v1/search`
-Recherche de correspondances par empreintes pHash.
+Recherche de sous-titres et reconnaissance multimodale (pHash visuel et/ou aHash acoustique selon `search_mode`: `"all"` / `"auto"`, `"phash"`, `"ahash"`). En mode agent relais (`--agent <REMOTE_URL>`), lorsque `search_mode = "ahash"` ou en repli automatique `"all"`/`"auto"`, le démon local extrait l'empreinte audio, relaie la charge utile binaire Base64 (`ahash_bytes`) vers `POST {remote_url}/v1/search/ahash` et résout les sous-titres correspondants.
+
 **Corps de la requête** :
   ```json
   {
-    "hashes": ["0x1234567890abcdef", "0xfedcba0987654321"],
-    "max_distance": 10,
-    "limit": 5
+    "media_path": "/data/videos/film.mkv",
+    "language": "fr",
+    "search_mode": "ahash"
   }
   ```
 **Réponse** :
   ```json
   {
-    "matches": [
+    "media_path": "/data/videos/film.mkv",
+    "language": "fr",
+    "matched_media": "Berserk.1997.EP01",
+    "moviehash": "8e245d9679d31e12",
+    "total_candidates": 1,
+    "candidates": [
       {
-        "media_hash": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
-        "media_name": "Berserk.1997.EP01",
-        "distance": 2,
-        "offset_seconds": 15.0,
-        "confidence": 98.5
+        "source": "catalog",
+        "language": "fr",
+        "title": "Berserk.1997.EP01 [FR]",
+        "candidate_id": "Berserk.1997.EP01.fr.srt",
+        "shift_ms": 697.0
       }
-    ]
+    ],
+    "timing": {
+      "matching_tier": "Tier 1 (RAM .ahash Cross-Correlation)",
+      "confidence_percent": 96.2
+    }
   }
   ```
 
 ### `POST /v1/search/ahash`
-Recherche acoustique par cross-corrélation temporelle d'empreintes sub-fingerprint Haitsma-Kalker (`.ahash` v1.0).
-Supporte nativement la fenêtre optimale empirique ($W = 5.0\text{ s}$, 430 trames) ainsi que 3 formats d'encodage du flux d'entrée (`hashes`, `fingerprint` hex ou `ahash_bytes` base64).
+Recherche acoustique par cross-corrélation temporelle d'empreintes sub-fingerprint Haitsma-Kalker (`.ahash` v1.0) indexées en mémoire (`MIH-32` + repli linéaire borné à `MAX_LINEAR_FALLBACK_FRAMES = 500_000` trames, exécuté dans `tokio::task::spawn_blocking` sous sémaphore de tâches lourdes).
+Supporte nativement la fenêtre optimale empirique ($W = 5.0\text{ s}$, 430 trames à `86.125 fps`) ainsi que 3 formats d'encodage du flux d'entrée (`hashes`, `fingerprint` hex ou `ahash_bytes` base64).
+
+**Garde-fous et validation d'entrée (`400 Bad Request` / `413 Payload Too Large`)** :
+
+* **Taille maximale du corps HTTP** : `256 KiB` (`MAX_AHASH_BODY_BYTES = 262_144` octets via `DefaultBodyLimit::max`).
+* **Nombre de trames de requête** : borné dans `8..=8192` trames (`MIN_QUERY_FRAMES = 8`, `MAX_AHASH_QUERY_FRAMES = 8_192`, soit ~95 s à `86.125 fps`).
+* **Alignement Base64 (`ahash_bytes`)** : la charge décodée doit être non vide et multiple exact de `8` octets (`u64` little-endian).
+* **`audio_fps`** : flottant fini strictement positif (`> 0.0`, défaut : `86.125`).
+* **`max_distance`** : flottant fini compris dans `0.0..=64.0` (défaut : `14.0`).
+* **`limit`** : entier compris dans `1..=50` (`MAX_AHASH_SEARCH_LIMIT = 50`, défaut : `5`).
+* **Garde anti-silence / plat** : les requêtes composées de trames nulles (`0x0000000000000000`), saturées (`0xFFFFFFFFFFFFFFFF`) ou à entropie spectrale plate sont rejetées sans faux positif.
 
 **Corps de la requête** :
   ```json
@@ -163,10 +183,10 @@ Supporte nativement la fenêtre optimale empirique ($W = 5.0\text{ s}$, 430 tram
     "media_name": "Berserk.1997.EP01"
   }
   ```
-* `hashes` : tableau d'entiers 64 bits non signés (alternative : `fingerprint` avec chaînes hexadécimales `"0x..."`, ou `ahash_bytes` avec charge binaire little-endian encodée en base64).
+* `hashes` : tableau de `8..=8192` entiers 64 bits non signés (alternative : `fingerprint` avec chaînes hexadécimales `"0x..."`, ou `ahash_bytes` avec charge binaire little-endian encodée en base64).
 * `audio_fps` : cadence d'échantillonnage de l'empreinte requête (défaut : `86.125` fps).
-* `max_distance` : seuil moyen maximal de bits erronés par trame sur 64 bits (défaut : `14.0`).
-* `limit` : nombre maximal de candidats retournés (défaut : `5`).
+* `max_distance` : seuil moyen maximal de bits erronés par trame sur 64 bits dans `0.0..=64.0` (défaut : `14.0`).
+* `limit` : nombre maximal de candidats retournés dans `1..=50` (défaut : `5`).
 * `media_name` : filtrage optionnel pour cibler un média de référence précis.
 
 **Réponse** :
@@ -175,7 +195,7 @@ Supporte nativement la fenêtre optimale empirique ($W = 5.0\text{ s}$, 430 tram
     "success": true,
     "best_match": {
       "media_name": "Berserk.1997.EP01",
-      "file_path": "data/__AHASH__/Berserk.1997.EP01.86.1fps.ahash",
+      "file_path": "data/__AHASH__/8e245d9679d31e12.86.1fps.ahash",
       "ref_frame_offset": 60,
       "offset_sec": 0.69666,
       "offset_ms": 697,
@@ -187,7 +207,7 @@ Supporte nativement la fenêtre optimale empirique ($W = 5.0\text{ s}$, 430 tram
     "candidates": [
       {
         "media_name": "Berserk.1997.EP01",
-        "file_path": "data/__AHASH__/Berserk.1997.EP01.86.1fps.ahash",
+        "file_path": "data/__AHASH__/8e245d9679d31e12.86.1fps.ahash",
         "ref_frame_offset": 60,
         "offset_sec": 0.69666,
         "offset_ms": 697,
@@ -204,24 +224,32 @@ Supporte nativement la fenêtre optimale empirique ($W = 5.0\text{ s}$, 430 tram
   ```
 
 ### `POST /v1/autosync`
-Endpoint combiné utilisé par les plugins VLC : analyse les empreintes extraites de la lecture en cours, calcule le décalage consensus (\( \Delta t \)), et renvoie le sous-titre aligné en une seule passe.
+Endpoint combiné utilisé par les plugins VLC (`vlsub_dbsrt.lua` / `dbsrt_intf.lua`) : analyse les empreintes extraites du média en cours (`search_mode`: `"phash"`, `"ahash"` ou `"auto"`), calcule le décalage consensus (\( \Delta t \)), et écrit le sous-titre recalé en une seule passe.
+
+* En mode acoustique (`search_mode = "ahash"` ou repli `"auto"`), extrait `5.0 s` d'audio (ou lit le sidecar `.ahash`), interroge `AHashCatalog` (ou relaie `ahash_bytes` vers le serveur maître en mode `--agent`), et calcule `shift_ms = (query_start_sec - ref_offset_sec) * 1000.0`.
+* **Garde d'intégrité de source** : `shift_ms` n'est appliqué que lorsque le sous-titre provient du catalogue certifié (`source == "catalog"` / `"certified"`). Si le sous-titre est extrait du conteneur cible (`source == "container"`) ou téléchargé depuis un provider tiers non certifié (`source == "opensubtitles"`), le décalage acoustique/visuel du média de référence est forcé à `0.0 ms` pour empêcher toute désynchronisation d'une piste déjà alignée.
+
 **Corps de la requête** :
   ```json
   {
-    "sample_phash": "base64_encoded_binary_sample...",
-    "target_fps": 25.0,
-    "preferred_lang": "fr"
+    "media_path": "/data/videos/film.mkv",
+    "language": "fr",
+    "search_mode": "ahash"
   }
   ```
 **Réponse** :
   ```json
   {
-    "matched": true,
-    "media_name": "Apprendre_CakePHP_-_SessionHelper",
-    "shift_ms": 1250,
-    "confidence": 99.2,
-    "subtitles_hash": "e3b0c44298fc1c149afbf4c8996fb924",
-    "download_url": "/v1/subtitles/e3b0c44298fc1c149afbf4c8996fb924?shift_ms=1250"
+    "success": true,
+    "matched_media": "Apprendre_CakePHP_-_SessionHelper",
+    "language": "fr",
+    "shift_frames": 30,
+    "shift_ms": 1250.0,
+    "output_srt_path": "/data/videos/film.fr.dbsrt.srt",
+    "confidence_percent": 99.2,
+    "elapsed_seconds": 0.14,
+    "source": "catalog",
+    "error": null
   }
   ```
 
@@ -275,18 +303,24 @@ Retourne les intervalles d'ancrage temporels trames clés \( \leftrightarrow \) 
 Enregistre un nouveau couplage certifié dans la base de données.
 
 ### `POST /v1/catalog/reload` (alias `/v1/reload`)
-Déclenche le rechargement à chaud atomique (zéro coupure de service) des index en mémoire vive.
+Déclenche le rechargement à chaud atomique (zéro coupure de service) des index visuels (`.dbphash` + Delta) et du catalogue acoustique (`AHashCatalog` sous `data/__AHASH__/`) en mémoire vive.
 **Réponse** :
   ```json
   {
-    "status": "ok",
-    "reloaded_medias": 21,
-    "elapsed_ms": 3
+    "success": true,
+    "elapsed_ms": 3.4,
+    "indexed_medias": 21,
+    "catalog_medias": 2758,
+    "cuts_entries": 612040,
+    "sparse_entries": 2096680,
+    "certified_couplings": 21,
+    "ahash_medias": 584,
+    "ahash_frames": 106096618
   }
   ```
 
 ### `GET /v1/catalog/status`
-Retourne l'état des tables de mémoire MIH et les métriques de segmentation du catalogue.
+Retourne l'état des tables de mémoire MIH et les métriques de segmentation du catalogue (incluant `ahash_medias` et `ahash_frames` pour l'index acoustique).
 
 - `total_frames` : nombre exact de frames pHash indexées (Base + Delta, même périmètre que
   `total_medias`), somme des comptes stockés par média à l'empaquetage (`dbsrt pack`) ou à
