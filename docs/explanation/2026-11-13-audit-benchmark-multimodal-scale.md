@@ -227,3 +227,18 @@ Cet audit forensique verrouille la feuille de route corrective (sans aucune modi
    - Attribuer un `media_id` propre à chaque entrée du catalogue `aHash` dans `evaluate_ahash_multi` au lieu de `0`.
    - Exiger une porte de validation (`matching_windows >= 2 && is_coherent`) avant de déclarer un match positif en production.
 3. **Préserver la cadence exacte NTSC \(23.976\text{ fps}\) lors du packing `catalog.dbphash`** : utiliser `fps_x1000 = 23976` (et non le `24.0fps` arrondi du nom de fichier `.phash`) afin d'éliminer la dérive linéaire de \(-1\text{ ms/s}\) face à l'horloge acoustique PCM.
+
+---
+
+## 7. Validation Post-Correctifs
+
+Mesures en `--release` sur le catalogue `aHash` complet (**106 096 618 trames**), après correctifs de `CoarseToFineAHashIndex` (K=16, invariant à la phase) et résolution native des sidecars JSON / déduplication des jumeaux binaires dans `AHashCatalog::load_from_dir` :
+
+| Indicateur | Résultat mesuré |
+| :--- | :---: |
+| **Construction de l'index** (K=16) | **~110–130 ms** |
+| **Latence `search`** | p50 = **22.8 ms** / moyenne = **24.9 ms** |
+| **Snippets `snippets_ahash`** | **10 / 10** |
+| **Invariance de phase** (phases hors-grille `p ∈ {0, 1, 3, 7, 10, 13, 15}`, 90 cas manqués, jumeaux MovieHash résolus) | **100 %** |
+
+> **Limite** : mesures reportées telles que fournies (non rejouées dans cette session). La validation sur ré-extraction FFmpeg complète n'est **pas** réalisée et attendra le retour sur le LAN.

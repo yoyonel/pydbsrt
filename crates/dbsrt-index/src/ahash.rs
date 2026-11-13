@@ -113,6 +113,79 @@ pub fn parse_ahash_media_name(filename: &str) -> String {
     strip_fps_token(without_ext).to_string()
 }
 
+/// Length in hexadecimal characters of an OpenSubtitles 64-bit MovieHash stem.
+const MOVIEHASH_HEX_LEN: usize = 16;
+
+/// Name of the sibling pHash directory holding `<moviehash>.json` sidecars.
+const PHASH_SIDECAR_DIRNAME: &str = "__PHASH__";
+
+/// JSON sidecar keys probed (in priority order) for the canonical media name.
+const SIDECAR_NAME_KEYS: [&str; 3] = ["media_name", "clean_title", "filename"];
+
+/// Returns true when `s` is a raw 16-character hexadecimal MovieHash.
+pub fn is_moviehash_hex(s: &str) -> bool {
+    s.len() == MOVIEHASH_HEX_LEN && s.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+/// Reads the first non-empty name key from a JSON sidecar file.
+fn read_sidecar_name(path: &Path) -> Option<String> {
+    let txt = fs::read_to_string(path).ok()?;
+    let value = serde_json::from_str::<serde_json::Value>(&txt).ok()?;
+    SIDECAR_NAME_KEYS.iter().find_map(|key| {
+        let name = value.get(key)?.as_str()?.trim();
+        (!name.is_empty()).then(|| name.to_string())
+    })
+}
+
+/// Resolves a canonical media name from `<stem>.json` for MovieHash-named files.
+///
+/// Searches `dir` first (aHash sidecars), then `fallback_dir` (`../__PHASH__`).
+/// Returns `None` when `stem` is not a 16-hex hash or no sidecar yields a name.
+fn resolve_sidecar_media_name(
+    stem: &str,
+    dir: &Path,
+    fallback_dir: Option<&Path>,
+) -> Option<String> {
+    if !is_moviehash_hex(stem) {
+        return None;
+    }
+    let file = format!("{stem}.json");
+    std::iter::once(dir)
+        .chain(fallback_dir)
+        .find_map(|d| read_sidecar_name(&d.join(&file)))
+}
+
+/// Collapses binary twins (identical `frame_count` + `hashes`) into one entry.
+///
+/// Preference: resolved (non raw-hex) name first, then lexicographic `path`.
+/// Output order follows the first-seen position of each twin group, so a
+/// path-sorted input yields a deterministic path-sorted output.
+fn dedup_twin_entries(entries: Vec<AHashCatalogEntry>) -> Vec<AHashCatalogEntry> {
+    use std::hash::{Hash, Hasher};
+    let rank = |e: &AHashCatalogEntry| (is_moviehash_hex(&e.media_name), e.path.clone());
+    let mut kept: Vec<AHashCatalogEntry> = Vec::with_capacity(entries.len());
+    let mut buckets: HashMap<u64, Vec<usize>> = HashMap::new();
+    for entry in entries {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        entry.frame_count.hash(&mut hasher);
+        entry.hashes.hash(&mut hasher);
+        let bucket = buckets.entry(hasher.finish()).or_default();
+        let twin = bucket
+            .iter()
+            .copied()
+            .find(|&i| kept[i].frame_count == entry.frame_count && kept[i].hashes == entry.hashes);
+        match twin {
+            Some(i) if rank(&entry) < rank(&kept[i]) => kept[i] = entry,
+            Some(_) => {}
+            None => {
+                bucket.push(kept.len());
+                kept.push(entry);
+            }
+        }
+    }
+    kept
+}
+
 /// Single indexed reference media entry in the acoustic catalog.
 #[derive(Debug, Clone)]
 pub struct AHashCatalogEntry {
@@ -535,6 +608,7 @@ impl AHashCatalog {
         }
         paths.sort();
 
+        let sibling_phash_dir = dir.parent().map(|p| p.join(PHASH_SIDECAR_DIRNAME));
         let entries: Vec<AHashCatalogEntry> = paths
             .into_par_iter()
             .filter_map(|p| match AhashFile::read_from_path(&p) {
@@ -544,7 +618,10 @@ impl AHashCatalog {
                         .and_then(|s| s.to_str())
                         .unwrap_or_default()
                         .to_string();
-                    let media_name = parse_ahash_media_name(&filename);
+                    let parsed_name = parse_ahash_media_name(&filename);
+                    let media_name =
+                        resolve_sidecar_media_name(&parsed_name, dir, sibling_phash_dir.as_deref())
+                            .unwrap_or(parsed_name);
                     let audio_fps = file.header.audio_fps();
                     let frame_count = file.hashes.len();
                     Some(AHashCatalogEntry {
@@ -559,7 +636,7 @@ impl AHashCatalog {
             })
             .collect();
 
-        Ok(Self::new(entries))
+        Ok(Self::new(dedup_twin_entries(entries)))
     }
 
     /// Adds a single entry to the catalog in place.
@@ -1036,6 +1113,83 @@ impl AHashCatalog {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dbsrt_core::ahash::{AhashHeader, HaitsmaKalkerExtractor};
+
+    fn write_ahash(path: &Path, hashes: &[u64]) {
+        let (_bins, band_bounds) = HaitsmaKalkerExtractor::compute_band_layout(5512, 2048);
+        let header = AhashHeader {
+            version: 1,
+            sample_rate: 5512,
+            frame_size: 2048,
+            hop_size: 64,
+            num_bands: 33,
+            spectral_lag: 2,
+            frame_count: hashes.len() as u64,
+            band_bounds,
+        };
+        AhashFile::write_to_path(path, &header, hashes).unwrap();
+    }
+
+    #[test]
+    fn test_sidecar_resolution_and_twin_dedup() {
+        const HEX_TWIN: &str = "05b6126884056c42";
+        const HEX_LOCAL: &str = "0123456789abcdef";
+        const HEX_FALLBACK: &str = "fedcba9876543210";
+        const CLEAN: &str = "Titre.Clair";
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("__AHASH__");
+        let phash = root.path().join("__PHASH__");
+        fs::create_dir_all(&dir).unwrap();
+        fs::create_dir_all(&phash).unwrap();
+
+        let twin_hashes = [1u64, 2, 3, 4];
+        write_ahash(&dir.join(format!("{HEX_TWIN}.86.1fps.ahash")), &twin_hashes);
+        write_ahash(&dir.join(format!("{CLEAN}.86.1fps.ahash")), &twin_hashes);
+        write_ahash(
+            &dir.join(format!("{HEX_LOCAL}.86.1fps.ahash")),
+            &[10, 11, 12],
+        );
+        write_ahash(
+            &dir.join(format!("{HEX_FALLBACK}.86.1fps.ahash")),
+            &[20, 21, 22],
+        );
+        fs::write(
+            dir.join(format!("{HEX_LOCAL}.json")),
+            r#"{"media_name": "Local.Name"}"#,
+        )
+        .unwrap();
+        fs::write(
+            phash.join(format!("{HEX_FALLBACK}.json")),
+            r#"{"media_name": "", "clean_title": "Fallback.Name"}"#,
+        )
+        .unwrap();
+
+        let catalog = AHashCatalog::load_from_dir(&dir).unwrap();
+        let mut names: Vec<&str> = catalog
+            .entries
+            .iter()
+            .map(|e| e.media_name.as_str())
+            .collect();
+        names.sort_unstable();
+        assert_eq!(names, vec!["Fallback.Name", "Local.Name", CLEAN]);
+        assert_eq!(catalog.total_frames, 4 + 3 + 3);
+
+        // Twin whose raw-hex file resolves via sidecar to the same name stays single.
+        fs::write(
+            phash.join(format!("{HEX_TWIN}.json")),
+            r#"{"media_name": "Titre.Clair"}"#,
+        )
+        .unwrap();
+        let catalog = AHashCatalog::load_from_dir(&dir).unwrap();
+        assert_eq!(catalog.entries.len(), 3);
+        let twin = catalog
+            .entries
+            .iter()
+            .find(|e| e.media_name == CLEAN)
+            .unwrap();
+        // Equal resolved names: deterministic lexicographic path tiebreak ('0' < 'T').
+        assert!(twin.path.to_string_lossy().contains(HEX_TWIN));
+    }
 
     #[test]
     fn test_parse_ahash_media_name() {

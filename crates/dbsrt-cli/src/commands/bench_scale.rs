@@ -18,7 +18,7 @@ use dbsrt_core::{
 use dbsrt_index::coarse_to_fine::{CoarseToFineAHashIndex, FineSearchCriteria};
 use dbsrt_index::{AHashCatalog, MmapDbphash};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -26,12 +26,6 @@ use std::time::Instant;
 
 /// Default path to unified .dbphash index file.
 pub const DEFAULT_SCALE_DBPHASH_PATH: &str = "data/catalog.dbphash";
-
-/// Directory holding `<moviehash>.json` pHash sidecars used to resolve MovieHash aliases.
-pub const DEFAULT_PHASH_SIDECAR_DIR: &str = "data/__PHASH__";
-
-/// Length in hexadecimal characters of an OpenSubtitles 64-bit MovieHash.
-const MOVIEHASH_HEX_LEN: usize = 16;
 
 /// Diagnostic cause for containers physically lacking any audio stream.
 pub const CAUSE_NO_AUDIO_STREAM: &str = "NO_AUDIO_STREAM";
@@ -381,56 +375,6 @@ struct LoadedCatalogs {
     pub indexed_ahash_titles: HashSet<String>,
 }
 
-/// Reads `<hex>.json` pHash sidecars and maps each MovieHash to its `media_name`.
-///
-/// Missing directory or malformed sidecars are skipped; returns an empty map if none readable.
-fn load_moviehash_aliases(dir: &Path) -> HashMap<String, String> {
-    let mut aliases = HashMap::new();
-    let Ok(read_dir) = std::fs::read_dir(dir) else {
-        return aliases;
-    };
-    for entry in read_dir.flatten() {
-        let path = entry.path();
-        let stem = path
-            .file_stem()
-            .map(|s| s.to_string_lossy().to_lowercase())
-            .unwrap_or_default();
-        if path.extension().is_none_or(|e| e != "json") || !is_moviehash_hex(&stem) {
-            continue;
-        }
-        let name = std::fs::read_to_string(&path)
-            .ok()
-            .and_then(|txt| serde_json::from_str::<serde_json::Value>(&txt).ok())
-            .and_then(|v| v.get("media_name")?.as_str().map(str::to_string));
-        if let Some(name) = name {
-            aliases.insert(stem, name);
-        }
-    }
-    aliases
-}
-
-/// Returns true when `s` is a 16-character hexadecimal MovieHash.
-fn is_moviehash_hex(s: &str) -> bool {
-    s.len() == MOVIEHASH_HEX_LEN && s.chars().all(|c| c.is_ascii_hexdigit())
-}
-
-/// Renames MovieHash-named aHash catalog entries to their sidecar media name.
-///
-/// Returns the number of entries resolved.
-fn resolve_catalog_moviehash_names(
-    catalog: &mut AHashCatalog,
-    aliases: &HashMap<String, String>,
-) -> usize {
-    let mut resolved = 0;
-    for e in catalog.entries.iter_mut() {
-        if let Some(name) = aliases.get(&e.media_name.to_lowercase()) {
-            e.media_name = name.clone();
-            resolved += 1;
-        }
-    }
-    resolved
-}
-
 /// Loads visual and acoustic catalogs and constructs the coarse-to-fine index.
 fn load_all_catalogs(
     dbphash_path: &Path,
@@ -446,10 +390,8 @@ fn load_all_catalogs(
 
     println!("Loading acoustic catalog from {:?}...", ahash_dir);
     let t_ahash = Instant::now();
-    let mut dense_catalog = AHashCatalog::load_from_dir(ahash_dir).context("Load ahash")?;
-    let aliases = load_moviehash_aliases(Path::new(DEFAULT_PHASH_SIDECAR_DIR));
-    let resolved = resolve_catalog_moviehash_names(&mut dense_catalog, &aliases);
-    println!("✓ Resolved {resolved} MovieHash-named aHash entries via pHash sidecars");
+    // Sidecar name resolution + twin dedup are native to `load_from_dir`.
+    let dense_catalog = AHashCatalog::load_from_dir(ahash_dir).context("Load ahash")?;
     println!(
         "✓ Loaded {} aHash files ({} frames) in {:.2}s",
         dense_catalog.entries.len(),
@@ -1381,26 +1323,6 @@ mod tests {
         let a = "Halt.and.Catch.Fire.S04E04.1080p.WEB-DL";
         let agreement = classify_dual_match(&p, "Halt and Catch Fire", a, 0);
         assert_eq!(agreement.status, "DUAL_MATCH_AGREED");
-    }
-
-    #[test]
-    fn test_moviehash_alias_resolution() {
-        const HASH: &str = "002835455e305309";
-        const NAME: &str = "Tre Piani (2021)[MULTi][1080p].mkv";
-        let dir = std::env::temp_dir().join(format!("dbsrt_bench_alias_{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(
-            dir.join(format!("{HASH}.json")),
-            format!("{{\"moviehash\": \"{HASH}\", \"media_name\": \"{NAME}\"}}"),
-        )
-        .unwrap();
-        std::fs::write(dir.join("not_a_hash.json"), "{}").unwrap();
-        let aliases = load_moviehash_aliases(&dir);
-        std::fs::remove_dir_all(&dir).ok();
-        assert_eq!(aliases.len(), 1);
-        assert_eq!(aliases.get(HASH).map(String::as_str), Some(NAME));
-        assert!(is_moviehash_hex(HASH));
-        assert!(!is_moviehash_hex("Tre Piani"));
     }
 
     #[test]
