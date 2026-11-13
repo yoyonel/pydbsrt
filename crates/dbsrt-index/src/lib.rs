@@ -12,8 +12,8 @@ pub mod mmap;
 pub mod trajectory_runner;
 
 pub use ahash::{
-    parse_ahash_media_name, AHashCatalog, AHashCatalogEntry, AHashCatalogMatch,
-    AHashSearchCriteria, DEFAULT_AHASH_SEARCH_LIMIT, MIN_QUERY_FRAMES,
+    parse_ahash_media_name, AHashCatalog, AHashCatalogEntry, AHashCatalogMatch, AHashMih32Index,
+    AHashSearchCriteria, Mih32Entry, DEFAULT_AHASH_SEARCH_LIMIT, MIN_QUERY_FRAMES,
 };
 pub use bktree::{BkItem, BkTree};
 pub use coarse_to_fine::{

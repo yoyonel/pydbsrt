@@ -6,79 +6,11 @@ use dbsrt_index::ahash::{
     FPS_COMPATIBILITY_TOLERANCE, MILLIS_PER_SEC, MIN_QUERY_FRAMES,
 };
 use dbsrt_index::dbphash::{DbphashMediaMatch, MmapDbphash};
+use dbsrt_index::AHashMih32Index;
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::path::Path;
 use std::time::Instant;
-
-#[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Mih32Entry {
-    pub chunk: u32,
-    pub frame_idx: u32,
-}
-
-pub struct Mih32Table {
-    pub upper_table: Vec<Mih32Entry>,
-    pub lower_table: Vec<Mih32Entry>,
-}
-
-impl Mih32Table {
-    pub fn build(flat_hashes: &[u64]) -> Self {
-        let (upper, lower) = rayon::join(
-            || {
-                let mut v: Vec<Mih32Entry> = flat_hashes
-                    .par_iter()
-                    .enumerate()
-                    .map(|(i, &h)| Mih32Entry {
-                        chunk: (h >> 32) as u32,
-                        frame_idx: i as u32,
-                    })
-                    .collect();
-                v.par_sort_unstable_by_key(|e| e.chunk);
-                v
-            },
-            || {
-                let mut v: Vec<Mih32Entry> = flat_hashes
-                    .par_iter()
-                    .enumerate()
-                    .map(|(i, &h)| Mih32Entry {
-                        chunk: (h & 0xFFFF_FFFF) as u32,
-                        frame_idx: i as u32,
-                    })
-                    .collect();
-                v.par_sort_unstable_by_key(|e| e.chunk);
-                v
-            },
-        );
-
-        Self {
-            upper_table: upper,
-            lower_table: lower,
-        }
-    }
-
-    #[inline(always)]
-    pub fn lookup_upper(&self, chunk: u32) -> &[Mih32Entry] {
-        Self::lookup_slice(&self.upper_table, chunk)
-    }
-
-    #[inline(always)]
-    pub fn lookup_lower(&self, chunk: u32) -> &[Mih32Entry] {
-        Self::lookup_slice(&self.lower_table, chunk)
-    }
-
-    #[inline(always)]
-    fn lookup_slice(table: &[Mih32Entry], chunk: u32) -> &[Mih32Entry] {
-        let start = table.partition_point(|e| e.chunk < chunk);
-        if start < table.len() && table[start].chunk == chunk {
-            let end = table[start..].partition_point(|e| e.chunk <= chunk) + start;
-            &table[start..end]
-        } else {
-            &[]
-        }
-    }
-}
 
 // ----------------------------------------------------------------------------
 // aHash Search Methods
@@ -86,7 +18,7 @@ impl Mih32Table {
 
 fn search_ahash_mih32(
     catalog: &AHashCatalog,
-    index: &Mih32Table,
+    index: &AHashMih32Index,
     criteria: &AHashSearchCriteria,
     stride: usize,
     min_votes: u32,
@@ -408,8 +340,8 @@ fn search_phash_mih16_mono(
 
 fn search_phash_mih32(
     mmap: &MmapDbphash,
-    sparse_index32: &Mih32Table,
-    cuts_index32: &Mih32Table,
+    sparse_index32: &AHashMih32Index,
+    cuts_index32: &AHashMih32Index,
     query_hashes: &[u64],
     parallel: bool,
 ) -> Vec<DbphashMediaMatch> {
@@ -583,7 +515,7 @@ fn test_exhaustive_matrix_benchmark() {
     // 1. aHash Catalog
     let t_a0 = Instant::now();
     let ahash_catalog = AHashCatalog::load_from_dir(ahash_dir).expect("Load ahash");
-    let ahash_index32 = Mih32Table::build(&ahash_catalog.flat_hashes);
+    let ahash_index32 = ahash_catalog.mih32();
     let _ = ahash_catalog.mih(); // warm up MIH-16
     println!(
         "✓ aHash Catalog : 584 médias, 106 096 618 frames (chargé + indexé en {:.2?})",
@@ -599,8 +531,8 @@ fn test_exhaustive_matrix_benchmark() {
         .map(|e| e.phash)
         .collect();
     let cuts_hashes: Vec<u64> = phash_mmap.cuts_entries().iter().map(|e| e.phash).collect();
-    let phash_sparse32 = Mih32Table::build(&sparse_hashes);
-    let phash_cuts32 = Mih32Table::build(&cuts_hashes);
+    let phash_sparse32 = AHashMih32Index::build(&sparse_hashes);
+    let phash_cuts32 = AHashMih32Index::build(&cuts_hashes);
     let _ = phash_mmap.sparse_mih(); // warm up MIH-16
     let _ = phash_mmap.cuts_mih();
     println!(
@@ -667,12 +599,12 @@ fn test_exhaustive_matrix_benchmark() {
 
         // 4. MIH-32 Mono
         let t_m32_m = Instant::now();
-        let _ = search_ahash_mih32(&ahash_catalog, &ahash_index32, &criteria, 4, 3, false);
+        let _ = search_ahash_mih32(&ahash_catalog, ahash_index32, &criteria, 4, 3, false);
         let ms_m32_m = t_m32_m.elapsed().as_secs_f64() * 1000.0;
 
         // 5. MIH-32 Rayon
         let t_m32_p = Instant::now();
-        let _m32_res = search_ahash_mih32(&ahash_catalog, &ahash_index32, &criteria, 4, 3, true);
+        let _m32_res = search_ahash_mih32(&ahash_catalog, ahash_index32, &criteria, 4, 3, true);
         let ms_m32_p = t_m32_p.elapsed().as_secs_f64() * 1000.0;
 
         a_tot_lin += ms_lin;
