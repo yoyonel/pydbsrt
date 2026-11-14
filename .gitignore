@@ -120,7 +120,11 @@ data/SRT/*.lock
 couplings.json
 data/catalog.dbphash
 data/catalog.dbahash
+data/reports
+data/reports/
+data/snippets
 data/snippets/
+data/snippets_ahash
 data/snippets_ahash/
 data/SRT/manifest.json
 data/SRT/metadata.json

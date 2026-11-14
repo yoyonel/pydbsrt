@@ -238,3 +238,22 @@ Voir [Ingérer les médias de la Freebox sur o2switch via le RPi4](../how-to/ing
 | `task freebox:batch:restart` | Arrête puis relance le batch Freebox depuis le RPi4, où le scan lit `/mnt/freebox` (mêmes options que `freebox:batch:start`). |
 | `task freebox:batch:status` | Affiche l'état et la progression du worker batch Freebox sur o2switch. |
 | `task freebox:batch:stop` | Arrête le worker batch Freebox sur o2switch (pose `run/batch_stopped`). |
+
+---
+
+## 10. Accès aux Données SSOT & Agent Skills (`data:*` & `skills:*`)
+
+Voir [Comment résoudre instantanément les accès aux données multi-réseaux](../how-to/2026-11-14-resoudre-acces-donnees-multi-reseaux-agent-skill.md).
+
+| Commande | Description |
+| :--- | :--- |
+| `task data:status` | Inspecte en `<2 ms` (cache chaud SWR) le profil réseau actif, la sûreté CIFS et la fraîcheur inter-nœuds (`local`, `rpi4`, `o2switch`). |
+| `task data:resolve` | Résout le canal optimal pour l'une des 12 familles de données (ou `all`) et croise optionnellement les requêtes avec `couplings.json`. |
+| `task data:query` | Résout plusieurs cibles `family[:search]` et la fraîcheur globale en un unique appel JSON dédupliqué. |
+| `task data:fetch` | Rapatrie un catalogue binaire ou un corpus d'empreintes depuis le nœud autoritaire joignable (supporte `--dry-run`). |
+| `task data:seed-worktree` | Crée dans un `git worktree` isolé les liens symboliques vers les datasets non versionnés du dépôt parent. |
+| `task skills:list` | Liste tous les Agent Skills découverts sous `.agents/skills/`. |
+| `task skills:validate` | Valide tous les Agent Skills (`agentskills validate`, liens relatifs, zéro chemin local, `trigger_evals.json`, `--check`). |
+| `task skills:test` | Exécute la validation complète des skills et la suite `pytest` du résolveur SSOT (`tests/tools/test_data_access.py`). |
+| `task skills:eval-benchmark` | Évalue de façon 100 % déterministe (zéro LLM) la justesse (`16/16`) et le découpage temporel des transcriptions JSONL de benchmark. |
+| `task skills:profile` | Profile seconde par seconde toute transcription JSONL d'Agent Skill et signale automatiquement les anomalies (`OUTPUT_TXT_SPILL_10KB`, `RTK_TEE_TRUNCATION`, `THINKING_LOOP_SPIKE`, `PARALLEL_TOOL_STAMPEDE`). |

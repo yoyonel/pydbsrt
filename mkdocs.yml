@@ -153,6 +153,7 @@ nav:
       - Valider le Portail Monitoring avec Playwright: how-to/valider-le-portail-monitoring-avec-playwright.md
       - Diagnostiquer Sources Médias Multi-Environnements: how-to/2026-11-09-diagnostiquer-sources-medias-multi-environnements.md
       - Auditer Actifs Médias & Intégrité pHash (PostgreSQL): how-to/2026-11-09-auditer-actifs-medias-et-integrite-phash-postgresql.md
+      - Résoudre Accès Données Multi-Réseaux (SSOT & Skill): how-to/2026-11-14-resoudre-acces-donnees-multi-reseaux-agent-skill.md
   - 📖 Référence Technique:
       - Index des Spécifications: reference/index.md
       - CLI Standalone Rust (dbsrt): reference/cli.md
@@ -222,6 +223,7 @@ nav:
       - Architecture .dbahash v1 mmap, Folios Linux & C2F Zéro-Alloc: explanation/2026-11-14-architecture-dbahash-mmap-folios-linux-et-c2f-zero-alloc.md
       - Synthèse aHash vs pHash & Loi d'Échelle (5k -> 1M Pistes): explanation/2026-11-14-synthese-comparative-ahash-vs-phash-et-loi-echelle-millions-pistes.md
       - Post-Mortem INC-2026-11-12-01 (Auto-Heal Batch o2switch): explanation/2026-11-12-post-mortem-inc-2026-11-12-01-blocage-auto-heal-batch-o2switch.md
+      - Ingénierie, Profiling & Optimisation des Agent Skills: explanation/2026-11-14-methodologie-ingenierie-profiling-et-optimisation-agent-skills.md
   - 📊 Benchmarks & Preuves:
       - Campagnes Empiriques:
           - Rapport Batch TVShow Synology: history/2026-10-25-rapport-batch-import-tvshow-synology.md

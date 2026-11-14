@@ -231,4 +231,16 @@ tags:
       <a href="../decisions/">→ Consulter le registre des ADR</a>
     </div>
   </div>
+
+  <div class="dbsrt-bento-card bento-purple">
+    <div class="bento-header">
+      <span class="bento-icon">🧠</span>
+      <span class="bento-badge">SKILLS &amp; PROFILING IA</span>
+    </div>
+    <h3>Ingénierie, Profiling &amp; Optimisation des Agent Skills</h3>
+    <p>Protocole d'évaluation A/B sans biais, profilage temporel seconde par seconde (451 s → 61 s, ÷15 tokens), pièges cognitifs et routage de modèles pro/flash.</p>
+    <div class="bento-links">
+      <a href="2026-11-14-methodologie-ingenierie-profiling-et-optimisation-agent-skills/">→ Explorer la méthodologie Agent Skills</a>
+    </div>
+  </div>
 </div>

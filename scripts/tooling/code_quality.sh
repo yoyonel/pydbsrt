@@ -47,8 +47,11 @@ run_lint_fast() {
   echo "=== [7/8] HTML / Embedded JS / JSON Assets ==="
   uv run python scripts/tooling/validate_web_assets.py
 
-  echo "=== [8/8] Rust Architectural Complexity Gate (LOC <= 150, CCN <= 20) ==="
+  echo "=== [8/9] Rust Architectural Complexity Gate (LOC <= 150, CCN <= 20) ==="
   uv run python scripts/tooling/lint_complexity.py
+
+  echo "=== [9/9] Workspace Agent Skills Validation (.agents/skills/*) ==="
+  uv run python scripts/tooling/validate_skills.py
 }
 
 run_lint() {

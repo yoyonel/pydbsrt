@@ -300,6 +300,8 @@ flowchart TD
 | `task coverage` | Rapport unifié de couverture de code (Rust + Python) | `taskfiles/quality.yml` |
 | `task doc` | Serveur de documentation MkDocs Material avec rechargement en direct | `taskfiles/doc.yml` |
 | `task doc:check` | Validateur strict de documentation (liens, LaTeX, AST, Headless Chrome) | `taskfiles/doc.yml` |
+| `task data:status` | Diagnostic instantané SSOT topologie réseau, sûreté CIFS et fraîcheur inter-nœuds | `taskfiles/skills.yml` |
+| `task skills:validate` | Validation formelle des Agent Skills du workspace (`.agents/skills/*`) | `taskfiles/skills.yml` |
 
 ---
 
