@@ -17,11 +17,13 @@ use dbsrt_core::{
 };
 use dbsrt_index::coarse_to_fine::{CoarseToFineAHashIndex, FineSearchCriteria};
 use dbsrt_index::{AHashCatalog, MmapDbphash};
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::Instant;
 
 /// Default path to unified .dbphash index file.
@@ -103,6 +105,64 @@ pub const FINE_SEARCH_MAX_DISTANCE: f64 = 14.0;
 /// Minimum visual confidence threshold for raw candidate detection.
 pub const PHASH_MIN_CONFIDENCE: f64 = 20.0;
 
+/// Default number of parallel worker threads for media extraction.
+pub const DEFAULT_BENCH_WORKERS: usize = 8;
+
+/// Maximum number of top candidate matches retained per window for multi-window consensus.
+pub const MAX_WINDOW_CANDIDATES: usize = 10;
+
+/// Default baseline framerate used when packing `.phash` files lacking explicit FPS tags.
+pub const DEFAULT_PACK_FPS: f64 = 24.0;
+
+/// Maximum framerate difference tolerated to compensate `.1f` NTSC rounding (`23.976` vs `24.0`).
+pub const NTSC_ROUNDING_FPS_TOLERANCE: f64 = 0.05;
+
+/// Maximum framerate difference tolerated between implied `frame_count / duration` and container FPS.
+pub const IMPLIED_FPS_MATCH_TOLERANCE: f64 = 0.60;
+
+/// Floating-point epsilon for checking default pack FPS equality.
+pub const FPS_EQUALITY_EPSILON: f64 = 0.01;
+
+/// Minimum valid framerate bound for timescale ratio normalization.
+pub const MIN_FPS_FOR_SCALE: f64 = 1.0;
+
+/// Sparse score multiplier converting acoustic SNR bits into integer sparse weight.
+pub const AHASH_SNR_SPARSE_FACTOR: f64 = 10.0;
+
+/// Minimum majority cluster size required to prune single-window shift outliers.
+pub const MIN_MAJORITY_CLUSTER_WINDOWS: usize = 2;
+
+/// Minimum total window matches before outlier pruning applies.
+pub const MIN_WINDOWS_FOR_OUTLIER_PRUNING: usize = 3;
+
+/// Bitmask isolating the lower 32 AC DCT spatial frequency bits of a 64-bit visual `pHash`.
+pub const PHASH_LOWER_AC_DCT_MASK: u64 = 0x0000_0000_FFFF_FFFF;
+
+/// Maximum active AC DCT bits in lower 32 bits for a degenerate solid/fade frame.
+pub const MAX_SOLID_FRAME_AC_BITS: u32 = 2;
+
+/// Maximum Hamming spread from frame 0 across a window to classify it as static/frozen.
+pub const MAX_STATIC_WINDOW_HAMMING_SPREAD: u32 = 4;
+
+/// Minimum word count required for fuzzy subset fallback when normalized clean titles differ.
+pub const MIN_SUBSET_TITLE_WORDS: usize = 2;
+
+/// Minimum window count defining a multi-window candidate tier during consensus selection.
+pub const MULTI_WINDOW_MIN_COUNT: usize = 2;
+
+/// Consensus ranking tier for temporally coherent multi-window matches.
+pub const CONSENSUS_TIER_COHERENT: u8 = 2;
+
+/// Consensus ranking tier for multi-window matches (`>= 2` windows) with non-uniform timestamps.
+pub const CONSENSUS_TIER_MULTI_WINDOW: u8 = 1;
+
+/// Consensus ranking tier for isolated single-window matches.
+pub const CONSENSUS_TIER_SINGLE_WINDOW: u8 = 0;
+
+/// Default legacy report path checked for pre-probed container metadata reuse.
+pub const DEFAULT_LEGACY_SCALE_REPORT: &str =
+    "data/reports/eval_scale_multimodal_multiwindow.jsonl";
+
 /// CLI arguments for the multimodal scale benchmark.
 #[derive(Args, Debug, Clone)]
 pub struct BenchScaleMultimodalArgs {
@@ -134,6 +194,14 @@ pub struct BenchScaleMultimodalArgs {
     #[arg(long, default_value = DEFAULT_SCALE_OFFSETS)]
     pub offsets: String,
 
+    /// Duration in seconds extracted for each visual pHash window.
+    #[arg(long, default_value_t = DEFAULT_VIDEO_WINDOW_SEC)]
+    pub video_window_sec: f64,
+
+    /// Number of parallel worker threads for media probing and window extraction.
+    #[arg(short = 'j', long, default_value_t = DEFAULT_BENCH_WORKERS)]
+    pub workers: usize,
+
     /// Maximum number of media files to benchmark (0 for unlimited).
     #[arg(long, default_value_t = 0)]
     pub limit: usize,
@@ -141,6 +209,14 @@ pub struct BenchScaleMultimodalArgs {
     /// Automatically resume by skipping files already present in output JSONL.
     #[arg(long, default_value_t = true)]
     pub resume: bool,
+
+    /// Optional destination path for the multi-technique matrix benchmark JSON report.
+    #[arg(long)]
+    pub matrix_json: Option<PathBuf>,
+
+    /// Skip media extraction and run only the multi-technique matrix evaluation on existing JSONL.
+    #[arg(long, default_value_t = false)]
+    pub matrix_only: bool,
 }
 
 /// Container audio metadata captured during benchmark probing.
@@ -155,6 +231,14 @@ pub struct ContainerAudioMetadata {
     pub is_multi_track: bool,
 }
 
+/// Cached container metadata reused across benchmark runs to bypass redundant `ffprobe` network calls.
+#[derive(Debug, Clone)]
+pub struct CachedMediaMeta {
+    pub duration_sec: f64,
+    pub fps: f64,
+    pub audio: Option<ContainerAudioMetadata>,
+}
+
 /// Detailed telemetry for a single temporal window in visual pHash matching.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PhashWindowDetail {
@@ -167,6 +251,8 @@ pub struct PhashWindowDetail {
     pub matching_sparse: usize,
     pub estimated_shift_ms: i64,
     pub confidence: f64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub query_hashes: Vec<u64>,
 }
 
 /// Detailed telemetry for a single temporal window in acoustic aHash matching.
@@ -184,6 +270,10 @@ pub struct AhashWindowDetail {
     pub ref_offset_sec: Option<f64>,
     pub estimated_shift_ms: Option<i64>,
     pub confidence: f64,
+    #[serde(default)]
+    pub audio_fps: f64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub query_hashes: Vec<u64>,
 }
 
 /// Evaluation record for visual pHash across multiple temporal windows.
@@ -271,6 +361,7 @@ pub struct BenchContext<'a> {
     pub coarse_index: &'a CoarseToFineAHashIndex,
     pub plan: &'a MultiWindowPlan,
     pub indexed_ahash_titles: &'a HashSet<String>,
+    pub cached_meta: Option<&'a HashMap<PathBuf, CachedMediaMeta>>,
 }
 
 /// Context bundling inputs for root cause diagnostic classification.
@@ -371,18 +462,12 @@ fn resolve_report_destinations(
     Ok((out, status))
 }
 
-/// Resolves set of already completed paths from current or latest report.
+/// Resolves set of already completed paths from `output_path` when resuming.
 fn load_resumed_completed_paths(output_path: &Path, resume: bool) -> HashSet<PathBuf> {
-    if !resume {
+    if !resume || !output_path.exists() {
         return HashSet::new();
     }
-    if output_path.exists() {
-        load_resumed_paths(output_path).unwrap_or_default()
-    } else if Path::new(DEFAULT_SCALE_OUTPUT_LATEST).exists() {
-        load_resumed_paths(Path::new(DEFAULT_SCALE_OUTPUT_LATEST)).unwrap_or_default()
-    } else {
-        HashSet::new()
-    }
+    load_resumed_paths(output_path).unwrap_or_default()
 }
 
 /// Loaded catalog bundle returned by catalog initialization helper.
@@ -417,11 +502,16 @@ fn load_all_catalogs(
         t_ahash.elapsed().as_secs_f64()
     );
 
-    let indexed_ahash_titles = dense_catalog
-        .entries
-        .iter()
-        .map(|e| e.media_name.to_lowercase().replace(['.', '_', '-'], " "))
-        .collect();
+    let mut indexed_ahash_titles = HashSet::new();
+    for entry in &dense_catalog.entries {
+        let (primary, secondary) = format_catalog_membership_keys(&entry.media_name, (None, None));
+        if !primary.is_empty() {
+            indexed_ahash_titles.insert(primary);
+        }
+        if let Some(sec) = secondary {
+            indexed_ahash_titles.insert(sec);
+        }
+    }
 
     println!("Building Coarse-to-Fine index (K={})...", factor_k);
     let t_c2f = Instant::now();
@@ -437,6 +527,135 @@ fn load_all_catalogs(
         coarse_index,
         indexed_ahash_titles,
     })
+}
+
+/// Invokes the optional multi-technique matrix evaluation phase when requested.
+///
+/// # Arguments
+/// * `args` - CLI benchmark arguments controlling `--matrix-only` and `--matrix-json`.
+/// * `catalogs` - Loaded `.dbphash` and dense `.ahash` catalogs.
+/// * `output_path` - Path to JSONL file containing persisted multi-window `query_hashes`.
+///
+/// # Returns
+/// `Result<()>` after skipping or completing the matrix evaluation.
+///
+/// # Errors
+/// Returns an error if the JSONL probes cannot be read or the matrix JSON cannot be written.
+///
+/// # Panics
+/// Never panics.
+///
+/// # Data Flow & Invariants
+/// Short-circuits immediately unless `--matrix-only` or `--matrix-json` is set.
+fn maybe_run_matrix_phase(
+    args: &BenchScaleMultimodalArgs,
+    catalogs: &LoadedCatalogs,
+    output_path: &Path,
+) -> Result<()> {
+    if !args.matrix_only && args.matrix_json.is_none() {
+        return Ok(());
+    }
+    let matrix_dest = args.matrix_json.clone().unwrap_or_else(|| {
+        PathBuf::from(DEFAULT_REPORTS_DIR)
+            .join(format!("eval_matrix_real_{}.json", current_utc_slug()))
+    });
+    crate::commands::bench_matrix::run_matrix_benchmark(
+        &catalogs.dbphash,
+        &catalogs.dense_catalog,
+        output_path,
+        &matrix_dest,
+    )?;
+    Ok(())
+}
+
+/// Extracts cached `(PathBuf, CachedMediaMeta)` from a single JSON line (legacy or current schema).
+///
+/// # Arguments
+/// * `line` - Raw JSONL record string.
+///
+/// # Returns
+/// `Some((path, meta))` when `media_path`, `duration_sec >= MIN_VIDEO_DURATION_SEC`, and `fps > 0` are present.
+///
+/// # Errors
+/// Infallible; returns `None` on malformed or incomplete JSON lines.
+///
+/// # Panics
+/// Never panics.
+///
+/// # Data Flow & Invariants
+/// Tolerates legacy records lacking an `audio` object so `ffprobe` duration/FPS still hit cache.
+fn parse_cached_meta_line(line: &str) -> Option<(PathBuf, CachedMediaMeta)> {
+    let val = serde_json::from_str::<serde_json::Value>(line).ok()?;
+    let path_str = val.get("media_path").and_then(|v| v.as_str())?;
+    let duration_sec = val.get("duration_sec").and_then(|v| v.as_f64())?;
+    let fps = val.get("fps").and_then(|v| v.as_f64())?;
+    if duration_sec < MIN_VIDEO_DURATION_SEC || fps <= 0.0 {
+        return None;
+    }
+    let audio = val
+        .get("audio")
+        .and_then(|a| serde_json::from_value::<ContainerAudioMetadata>(a.clone()).ok());
+    Some((
+        PathBuf::from(path_str),
+        CachedMediaMeta {
+            duration_sec,
+            fps,
+            audio,
+        },
+    ))
+}
+
+/// Reads a single JSONL report file and inserts valid container metadata into `cache`.
+///
+/// # Arguments
+/// * `candidate` - Path to an existing JSONL benchmark report.
+/// * `cache` - Mutable map updated with valid `(PathBuf, CachedMediaMeta)` entries.
+///
+/// # Returns
+/// `()`.
+///
+/// # Errors
+/// Infallible; missing files are silently ignored.
+///
+/// # Panics
+/// Never panics.
+///
+/// # Data Flow & Invariants
+/// Streams `candidate` line-by-line via [`BufReader`] without loading the whole file in memory.
+fn insert_cached_meta_from_file(candidate: &Path, cache: &mut HashMap<PathBuf, CachedMediaMeta>) {
+    let Ok(file) = File::open(candidate) else {
+        return;
+    };
+    for line in BufReader::new(file).lines().map_while(Result::ok) {
+        let Some((path, meta)) = parse_cached_meta_line(&line) else {
+            continue;
+        };
+        cache.insert(path, meta);
+    }
+}
+
+/// Loads cached container metadata from legacy and active JSONL reports to skip redundant `ffprobe` runs.
+///
+/// # Arguments
+/// * `output_path` - Active target JSONL report path.
+///
+/// # Returns
+/// `HashMap<PathBuf, CachedMediaMeta>` indexed by canonical media path.
+///
+/// # Errors
+/// Infallible.
+///
+/// # Panics
+/// Never panics.
+///
+/// # Data Flow & Invariants
+/// Loads `DEFAULT_LEGACY_SCALE_REPORT` first and overlays `output_path` so fresher entries win.
+fn load_cached_media_metadata(output_path: &Path) -> HashMap<PathBuf, CachedMediaMeta> {
+    let mut cache = HashMap::new();
+    for candidate in [Path::new(DEFAULT_LEGACY_SCALE_REPORT), output_path] {
+        insert_cached_meta_from_file(candidate, &mut cache);
+    }
+    cache
 }
 
 /// Main entry point for the multimodal scale benchmark command.
@@ -459,6 +678,7 @@ fn load_all_catalogs(
 /// 3. Memory-maps `catalog.dbphash` and builds `CoarseToFineAHashIndex` in memory once.
 /// 4. Reads existing JSONL records to support instant crash recovery and resume.
 /// 5. Iterates through media files, streaming records with audio layouts and per-window diagnostics.
+/// 6. Optionally runs the 24-technique matrix evaluation phase.
 pub fn run_bench_scale_multimodal(args: BenchScaleMultimodalArgs) -> Result<()> {
     let t_init = Instant::now();
     println!("=== DBS-RT MULTIMODAL SCALE BENCHMARK (pHash + aHash) ===");
@@ -466,14 +686,19 @@ pub fn run_bench_scale_multimodal(args: BenchScaleMultimodalArgs) -> Result<()> 
     let update_default_out_symlink = args.output.is_none();
     let update_default_status_symlink = args.status_json.is_none();
     let (output_path, status_path) =
-        resolve_report_destinations(args.output, args.status_json, args.resume)?;
+        resolve_report_destinations(args.output.clone(), args.status_json.clone(), args.resume)?;
+
+    let catalogs = load_all_catalogs(&args.dbphash, &args.ahash_dir, args.factor_k)?;
+    if args.matrix_only {
+        return maybe_run_matrix_phase(&args, &catalogs, &output_path);
+    }
 
     let ratios: Vec<f64> = args
         .offsets
         .split(',')
         .filter_map(|s| s.trim().parse::<f64>().ok())
         .collect();
-    let plan = MultiWindowPlan::new(ratios, DEFAULT_VIDEO_WINDOW_SEC)?;
+    let plan = MultiWindowPlan::new(ratios, args.video_window_sec)?;
 
     let target_dirs = resolve_target_directories(&args.dirs);
     println!("Scanning target directories: {:?}", target_dirs);
@@ -481,12 +706,12 @@ pub fn run_bench_scale_multimodal(args: BenchScaleMultimodalArgs) -> Result<()> 
     println!("✓ Discovered {} video files on mounts", all_files.len());
 
     let completed_paths = load_resumed_completed_paths(&output_path, args.resume);
+    let cached_meta = load_cached_media_metadata(&output_path);
     println!(
-        "✓ Found {} already-completed records in JSONL",
-        completed_paths.len()
+        "✓ Found {} completed records in JSONL ({} cached ffprobe metadata entries)",
+        completed_paths.len(),
+        cached_meta.len()
     );
-
-    let catalogs = load_all_catalogs(&args.dbphash, &args.ahash_dir, args.factor_k)?;
 
     let mut out_file = OpenOptions::new()
         .create(true)
@@ -500,6 +725,7 @@ pub fn run_bench_scale_multimodal(args: BenchScaleMultimodalArgs) -> Result<()> 
         coarse_index: &catalogs.coarse_index,
         plan: &plan,
         indexed_ahash_titles: &catalogs.indexed_ahash_titles,
+        cached_meta: Some(&cached_meta),
     };
 
     let mut telemetry = ScaleBenchmarkTelemetry {
@@ -512,7 +738,6 @@ pub fn run_bench_scale_multimodal(args: BenchScaleMultimodalArgs) -> Result<()> 
         .into_iter()
         .filter(|p| !completed_paths.contains(p))
         .collect();
-
     let max_run = if args.limit > 0 {
         files_to_run.len().min(args.limit)
     } else {
@@ -529,8 +754,9 @@ pub fn run_bench_scale_multimodal(args: BenchScaleMultimodalArgs) -> Result<()> 
     }
 
     println!(
-        "\nStarting execution on {} files (init took {:.1}s)...\n",
+        "\nStarting execution on {} files with {} workers (init took {:.1}s)...\n",
         max_run,
+        args.workers.max(1),
         t_init.elapsed().as_secs_f64()
     );
 
@@ -538,8 +764,8 @@ pub fn run_bench_scale_multimodal(args: BenchScaleMultimodalArgs) -> Result<()> 
         files: &files_to_run[..max_run],
         out_file: &mut out_file,
         status_json: &status_path,
+        workers: args.workers.max(1),
     };
-
     execute_benchmark_sweep(&ctx, &mut sweep, &mut telemetry)?;
 
     write_status_summary(&status_path, &telemetry)?;
@@ -551,7 +777,7 @@ pub fn run_bench_scale_multimodal(args: BenchScaleMultimodalArgs) -> Result<()> 
     {
         update_latest_symlink(&output_path, Path::new(DEFAULT_SCALE_OUTPUT_LATEST));
     }
-    Ok(())
+    maybe_run_matrix_phase(&args, &catalogs, &output_path)
 }
 
 /// Context bundling output destinations and target file slice for benchmark sweep.
@@ -559,32 +785,68 @@ struct SweepContext<'a> {
     pub files: &'a [PathBuf],
     pub out_file: &'a mut File,
     pub status_json: &'a Path,
+    pub workers: usize,
 }
 
-/// Iterates sequentially through files, streaming results and telemetry.
+/// Thread-safe progress and file writer state shared across parallel benchmark workers.
+struct SharedSweepWriter<'a> {
+    pub done: usize,
+    pub out_file: &'a mut File,
+    pub telemetry: &'a mut ScaleBenchmarkTelemetry,
+}
+
+/// Iterates in parallel through files, streaming JSONL records and telemetry in real time.
 fn execute_benchmark_sweep(
     ctx: &BenchContext<'_>,
     sweep: &mut SweepContext<'_>,
     telemetry: &mut ScaleBenchmarkTelemetry,
 ) -> Result<()> {
     let total = sweep.files.len();
-    let run_start = Instant::now();
-
-    for (idx, media_path) in sweep.files.iter().enumerate() {
-        let record = evaluate_single_media(ctx, media_path);
-        let elapsed = run_start.elapsed().as_secs_f64();
-        update_telemetry(telemetry, &record, elapsed, total - idx - 1);
-
-        let json_line = serde_json::to_string(&record)?;
-        writeln!(sweep.out_file, "{}", json_line)?;
-        sweep.out_file.flush()?;
-
-        print_live_progress(idx + 1, total, &record, telemetry);
-
-        if (idx + 1) % STATUS_FLUSH_INTERVAL == 0 || idx + 1 == total {
-            write_status_summary(sweep.status_json, telemetry)?;
-        }
+    if total == 0 {
+        return Ok(());
     }
+    let run_start = Instant::now();
+    let status_path = sweep.status_json;
+    let shared = Mutex::new(SharedSweepWriter {
+        done: 0,
+        out_file: sweep.out_file,
+        telemetry,
+    });
+
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(sweep.workers.max(1))
+        .build()
+        .context("Build benchmark worker pool")?;
+
+    pool.install(|| -> Result<()> {
+        sweep
+            .files
+            .par_iter()
+            .try_for_each(|media_path| -> Result<()> {
+                let record = evaluate_single_media(ctx, media_path);
+                let json_line = serde_json::to_string(&record)?;
+                let mut guard = shared
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("Benchmark writer mutex poisoned"))?;
+                guard.done += 1;
+                let done = guard.done;
+                let elapsed = run_start.elapsed().as_secs_f64();
+                let remaining = total.saturating_sub(done);
+                update_telemetry(
+                    guard.telemetry,
+                    &record,
+                    elapsed,
+                    (remaining, sweep.workers.max(1)),
+                );
+                writeln!(guard.out_file, "{}", json_line)?;
+                guard.out_file.flush()?;
+                print_live_progress(done, total, &record, guard.telemetry);
+                if done.is_multiple_of(STATUS_FLUSH_INTERVAL) || done == total {
+                    write_status_summary(status_path, guard.telemetry)?;
+                }
+                Ok(())
+            })
+    })?;
 
     println!(
         "\n=== BENCHMARK COMPLETED IN {:.1}s ===",
@@ -614,16 +876,43 @@ fn has_valid_video_ext(path: &Path, valid_exts: &[&str]) -> bool {
         .unwrap_or(false)
 }
 
-/// Recursively scans directories to collect video media file paths.
-fn discover_video_files(dirs: &[PathBuf]) -> Vec<PathBuf> {
-    let mut files = Vec::new();
-    let valid_exts = ["mkv", "mp4", "avi", "webm", "ts", "m4v"];
-
-    for d in dirs {
-        collect_videos_recursive(d, &valid_exts, &mut files);
+/// Appends one round-robin index across directory buckets into `out`, deduplicating via `seen`.
+fn push_interleaved_round(
+    per_dir: &[Vec<PathBuf>],
+    idx: usize,
+    seen: &mut HashSet<PathBuf>,
+    out: &mut Vec<PathBuf>,
+) {
+    for bucket in per_dir {
+        let Some(p) = bucket.get(idx) else {
+            continue;
+        };
+        if seen.insert(p.clone()) {
+            out.push(p.clone());
+        }
     }
-    files.sort();
-    files
+}
+
+/// Recursively scans directories and interleaves discovered files round-robin across roots to balance multi-mount I/O.
+fn discover_video_files(dirs: &[PathBuf]) -> Vec<PathBuf> {
+    let valid_exts = ["mkv", "mp4", "avi", "webm", "ts", "m4v"];
+    let mut per_dir: Vec<Vec<PathBuf>> = Vec::with_capacity(dirs.len());
+    for d in dirs {
+        let mut bucket = Vec::new();
+        collect_videos_recursive(d, &valid_exts, &mut bucket);
+        bucket.sort();
+        if !bucket.is_empty() {
+            per_dir.push(bucket);
+        }
+    }
+    let max_len = per_dir.iter().map(Vec::len).max().unwrap_or(0);
+    let total_cap: usize = per_dir.iter().map(Vec::len).sum();
+    let mut interleaved = Vec::with_capacity(total_cap);
+    let mut seen = HashSet::with_capacity(total_cap);
+    for idx in 0..max_len {
+        push_interleaved_round(&per_dir, idx, &mut seen, &mut interleaved);
+    }
+    interleaved
 }
 
 /// Helper function traversing directory hierarchy.
@@ -665,17 +954,60 @@ fn load_resumed_paths(output_path: &Path) -> Result<HashSet<PathBuf>> {
     Ok(completed)
 }
 
-/// Checks whether reference title exists in the acoustic catalog using normalized token sets.
-fn is_media_indexed_in_ahash(ctx: &BenchContext<'_>, title: &str) -> bool {
-    let clean_target = title.to_lowercase().replace(['.', '_', '-'], " ");
-    let target_words: Vec<&str> = clean_target.split_whitespace().collect();
-    if target_words.is_empty() {
-        return false;
+/// Normalizes a clean media title into a lowercase whitespace-collapsed key.
+pub(crate) fn normalize_clean_title_key(title: &str) -> String {
+    title
+        .to_lowercase()
+        .replace(['.', '_', '-', ':', '\'', ','], " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Builds primary `(title|sX|eY)` and optional episode-only `(title|s0|eY)` catalog membership keys.
+pub(crate) fn format_catalog_membership_keys(
+    raw_title: &str,
+    season_episode: (Option<u32>, Option<u32>),
+) -> (String, Option<String>) {
+    let meta = MediaMetadata::parse(raw_title);
+    let base = if meta.clean_title.is_empty() {
+        raw_title
+    } else {
+        &meta.clean_title
+    };
+    let norm = normalize_clean_title_key(base);
+    if norm.is_empty() {
+        return (String::new(), None);
     }
-    ctx.indexed_ahash_titles.iter().any(|t| {
-        let t_tokens: HashSet<&str> = t.split_whitespace().collect();
-        target_words.iter().all(|w| t_tokens.contains(w))
-    })
+    let s = season_episode.0.or(meta.season).unwrap_or(0);
+    let e = season_episode
+        .1
+        .or(meta.episode)
+        .or_else(|| extract_episode_fallback(raw_title))
+        .unwrap_or(0);
+    let primary = format!("{norm}|s{s}|e{e}");
+    let secondary = (s > 0 && e > 0).then(|| format!("{norm}|s0|e{e}"));
+    (primary, secondary)
+}
+
+/// Checks exact normalized `(clean_title, season, episode)` membership against a pre-indexed key set.
+pub(crate) fn is_catalog_member(
+    key_set: &HashSet<String>,
+    raw_title: &str,
+    season_episode: (Option<u32>, Option<u32>),
+) -> bool {
+    let (primary, secondary) = format_catalog_membership_keys(raw_title, season_episode);
+    !primary.is_empty()
+        && (key_set.contains(&primary) || secondary.is_some_and(|k| key_set.contains(&k)))
+}
+
+/// Checks whether reference `(title, season, episode)` exists in the acoustic catalog.
+fn is_media_indexed_in_ahash(
+    ctx: &BenchContext<'_>,
+    title: &str,
+    season_episode: (Option<u32>, Option<u32>),
+) -> bool {
+    is_catalog_member(ctx.indexed_ahash_titles, title, season_episode)
 }
 
 /// Builds the diagnostic for containers with no physical audio stream.
@@ -724,7 +1056,8 @@ fn determine_diagnostic_cause(
         ),
         "PHASH_ONLY" => {
             let p_match = input.phash.media_match.as_deref().unwrap_or_default();
-            if !is_media_indexed_in_ahash(ctx, p_match) {
+            let p_se = (input.phash.season, input.phash.episode);
+            if !is_media_indexed_in_ahash(ctx, p_match, p_se) {
                 (
                     "UNINDEXED_IN_AHASH".to_string(),
                     format!(
@@ -763,26 +1096,8 @@ fn determine_diagnostic_cause(
     }
 }
 
-/// Evaluates a single media against both pHash and aHash multi-window consensus.
-fn evaluate_single_media(ctx: &BenchContext<'_>, media_path: &Path) -> MediaScaleBenchmarkRecord {
-    let t_start = Instant::now();
-    let media_stem = media_path
-        .file_stem()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_default();
-
-    let meta = match probe_video(media_path) {
-        Ok(m) if m.duration >= MIN_VIDEO_DURATION_SEC => m,
-        _ => {
-            return build_error_record(
-                media_path,
-                &media_stem,
-                t_start.elapsed().as_secs_f64(),
-                ctx.plan.ratios.len(),
-            )
-        }
-    };
-
+/// Probes audio stream layout for `media_path`, returning `(audio_meta, no_audio_stream)`.
+fn probe_audio_metadata(media_path: &Path) -> (ContainerAudioMetadata, bool) {
     let audio_probe = inspect_audio_streams(media_path);
     let no_audio_stream = matches!(&audio_probe, Ok(a) if a.track_count() == 0);
     let audio_meta = match audio_probe {
@@ -796,6 +1111,85 @@ fn evaluate_single_media(ctx: &BenchContext<'_>, media_path: &Path) -> MediaScal
             is_multi_track: a.is_multi_track(),
         },
         Err(_) => ContainerAudioMetadata::default(),
+    };
+    (audio_meta, no_audio_stream)
+}
+
+/// Resolves video and audio container metadata from cache when available, falling back to `ffprobe`.
+///
+/// # Arguments
+/// * `ctx` - Shared benchmark context with optional pre-probed metadata cache.
+/// * `media_path` - Path to the video container on disk or LAN mount.
+///
+/// # Returns
+/// `Some((video_meta, audio_meta, no_audio_stream))` if duration meets [`MIN_VIDEO_DURATION_SEC`], else `None`.
+///
+/// # Errors
+/// Infallible; probe failures map to `None`.
+///
+/// # Panics
+/// Never panics.
+///
+/// # Data Flow & Invariants
+/// Reuses cached `(duration_sec, fps)` and optional `audio` to skip redundant `ffprobe` calls over SMB.
+fn resolve_media_and_audio_meta(
+    ctx: &BenchContext<'_>,
+    media_path: &Path,
+) -> Option<(VideoMetadata, ContainerAudioMetadata, bool)> {
+    if let Some(cached) = ctx.cached_meta.and_then(|m| m.get(media_path)) {
+        if cached.duration_sec >= MIN_VIDEO_DURATION_SEC && cached.fps > 0.0 {
+            let video = VideoMetadata {
+                duration: cached.duration_sec,
+                fps: cached.fps,
+            };
+            if let Some(ref audio) = cached.audio {
+                return Some((video, audio.clone(), audio.track_count == 0));
+            }
+            let (audio_meta, no_audio) = probe_audio_metadata(media_path);
+            return Some((video, audio_meta, no_audio));
+        }
+    }
+
+    let meta = match probe_video(media_path) {
+        Ok(m) if m.duration >= MIN_VIDEO_DURATION_SEC => m,
+        _ => return None,
+    };
+    let (audio_meta, no_audio_stream) = probe_audio_metadata(media_path);
+    Some((meta, audio_meta, no_audio_stream))
+}
+
+/// Evaluates a single media against both pHash and aHash multi-window consensus.
+///
+/// # Arguments
+/// * `ctx` - Shared benchmark context containing loaded visual and acoustic catalogs.
+/// * `media_path` - Target media file path.
+///
+/// # Returns
+/// Complete [`MediaScaleBenchmarkRecord`] with per-window hashes, consensus, and root-cause taxonomy.
+///
+/// # Errors
+/// Infallible; container errors produce `"ERROR"` records.
+///
+/// # Panics
+/// Never panics.
+///
+/// # Data Flow & Invariants
+/// Probes metadata (or reuses cache), runs multi-window `pHash` and `aHash` recognition, and classifies agreement.
+fn evaluate_single_media(ctx: &BenchContext<'_>, media_path: &Path) -> MediaScaleBenchmarkRecord {
+    let t_start = Instant::now();
+    let media_stem = media_path
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
+
+    let Some((meta, audio_meta, no_audio_stream)) = resolve_media_and_audio_meta(ctx, media_path)
+    else {
+        return build_error_record(
+            media_path,
+            &media_stem,
+            t_start.elapsed().as_secs_f64(),
+            ctx.plan.ratios.len(),
+        );
     };
 
     let phash_summary = evaluate_phash_multi(ctx, media_path, &meta);
@@ -843,6 +1237,7 @@ fn build_empty_phash_window(window_idx: usize, ratio: f64, start_sec: f64) -> Ph
         matching_sparse: 0,
         estimated_shift_ms: 0,
         confidence: 0.0,
+        query_hashes: Vec::new(),
     }
 }
 
@@ -861,10 +1256,277 @@ fn build_empty_ahash_window(window_idx: usize, ratio: f64, start_sec: f64) -> Ah
         ref_offset_sec: None,
         estimated_shift_ms: None,
         confidence: 0.0,
+        audio_fps: 0.0,
+        query_hashes: Vec::new(),
     }
 }
 
+/// Normalizes a raw `.dbphash` reference timestamp (`ms`) against `.1f` NTSC FPS rounding
+/// (`23.976` packed as `24.0`) or default `24.0 fps` packing on untagged `.phash` files.
+///
+/// # Arguments
+/// * `dbphash` - Memory-mapped `.dbphash` catalog.
+/// * `media_id` - Candidate reference media identifier.
+/// * `raw_shift_ms` - Raw reference timestamp (`ms`) reported by `.dbphash` matching.
+/// * `meta` - Probed container duration and exact framerate.
+///
+/// # Returns
+/// Timescale-normalized reference timestamp in milliseconds.
+///
+/// # Errors
+/// Infallible.
+///
+/// # Panics
+/// Never panics.
+///
+/// # Data Flow & Invariants
+/// Multiplies `raw_shift_ms` by `db_fps / meta.fps` when `(db_fps - meta.fps)` lies within
+/// [`NTSC_ROUNDING_FPS_TOLERANCE`] or when `db_fps == 24.0` and `frame_count / duration` matches `meta.fps`.
+pub(crate) fn normalize_phash_shift_ms(
+    dbphash: &MmapDbphash,
+    media_id: u32,
+    raw_shift_ms: i64,
+    meta: &VideoMetadata,
+) -> i64 {
+    if meta.fps < MIN_FPS_FOR_SCALE {
+        return raw_shift_ms;
+    }
+    let Some(entry) = dbphash.find_media_by_id(media_id) else {
+        return raw_shift_ms;
+    };
+    let db_fps = entry.fps_x1000 as f64 / MILLIS_PER_SECOND;
+    if db_fps < MIN_FPS_FOR_SCALE {
+        return raw_shift_ms;
+    }
+    let fps_diff = (db_fps - meta.fps).abs();
+    let is_ntsc_rounding = fps_diff > 0.0 && fps_diff <= NTSC_ROUNDING_FPS_TOLERANCE;
+    let approx_frames = entry
+        .known_frame_count()
+        .map(|fc| fc as f64)
+        .unwrap_or_else(|| (entry.duration_ms as f64 / MILLIS_PER_SECOND) * db_fps);
+    let implied_fps = if meta.duration > 0.0 {
+        approx_frames / meta.duration
+    } else {
+        0.0
+    };
+    let is_default_pack_mismatch = (db_fps - DEFAULT_PACK_FPS).abs() <= FPS_EQUALITY_EPSILON
+        && (implied_fps - meta.fps).abs() <= IMPLIED_FPS_MATCH_TOLERANCE
+        && fps_diff > NTSC_ROUNDING_FPS_TOLERANCE;
+
+    if is_ntsc_rounding || is_default_pack_mismatch {
+        ((raw_shift_ms as f64) * (db_fps / meta.fps)).round() as i64
+    } else {
+        raw_shift_ms
+    }
+}
+
+/// Marks outlier `(media_id, window_idx)` pairs for one candidate's window observations.
+fn mark_media_outliers(
+    media_id: u32,
+    obs: &[(usize, i64)],
+    tolerance_ms: i64,
+    outliers: &mut HashSet<(u32, usize)>,
+) {
+    if obs.len() < MIN_WINDOWS_FOR_OUTLIER_PRUNING {
+        return;
+    }
+    let min_s = obs.iter().map(|x| x.1).min().unwrap_or(0);
+    let max_s = obs.iter().map(|x| x.1).max().unwrap_or(0);
+    if (max_s - min_s).abs() <= tolerance_ms {
+        return;
+    }
+    let best_anchor = obs
+        .iter()
+        .map(|&(_, anchor)| {
+            let count = obs
+                .iter()
+                .filter(|&&(_, s)| s >= anchor && s - anchor <= tolerance_ms)
+                .count();
+            (count, anchor)
+        })
+        .max_by_key(|x| x.0);
+    let Some((count, anchor)) = best_anchor else {
+        return;
+    };
+    if count < MIN_MAJORITY_CLUSTER_WINDOWS {
+        return;
+    }
+    for &(w_idx, s) in obs {
+        if s < anchor || s - anchor > tolerance_ms {
+            outliers.insert((media_id, w_idx));
+        }
+    }
+}
+
+/// Identifies `(media_id, window_idx)` pairs that deviate from a coherent majority cluster (`>= 2` of `>= 3` windows).
+///
+/// # Arguments
+/// * `per_window` - Raw candidate matches grouped per temporal window.
+/// * `tolerance_ms` - Maximum allowed shift spread (`ms`) within a coherent cluster.
+///
+/// # Returns
+/// Set of `(media_id, window_idx)` outlier pairs to prune prior to consensus scoring.
+///
+/// # Errors
+/// Infallible.
+///
+/// # Panics
+/// Never panics.
+///
+/// # Data Flow & Invariants
+/// Only prunes outliers when at least [`MIN_WINDOWS_FOR_OUTLIER_PRUNING`] windows matched a `media_id`
+/// and at least [`MIN_MAJORITY_CLUSTER_WINDOWS`] windows agree within `tolerance_ms`.
+fn collect_outlier_window_pairs(
+    per_window: &[PerWindowMatches],
+    tolerance_ms: i64,
+) -> HashSet<(u32, usize)> {
+    let mut by_media: HashMap<u32, Vec<(usize, i64)>> = HashMap::new();
+    for (w_idx, _ratio, start_sec, cands) in per_window {
+        let start_ms = (*start_sec * MILLIS_PER_SECOND).round() as i64;
+        for (media_id, _, _, _, ref_shift_ms, _) in cands {
+            by_media
+                .entry(*media_id)
+                .or_default()
+                .push((*w_idx, *ref_shift_ms - start_ms));
+        }
+    }
+    let mut outliers = HashSet::new();
+    for (media_id, obs) in by_media {
+        mark_media_outliers(media_id, &obs, tolerance_ms, &mut outliers);
+    }
+    outliers
+}
+
+/// Filters single-window shift outliers when a majority (`>= 2` of `>= 3`) of windows form a coherent cluster.
+///
+/// # Arguments
+/// * `per_window` - Raw candidate matches grouped per temporal window.
+/// * `tolerance_ms` - Maximum shift drift (`ms`) defining temporal coherence.
+///
+/// # Returns
+/// Filtered `Vec<PerWindowMatches>` ready for [`aggregate_multi_window_matches`].
+///
+/// # Errors
+/// Infallible.
+///
+/// # Panics
+/// Never panics.
+///
+/// # Data Flow & Invariants
+/// Preserves all candidates when no majority cluster exists, ensuring genuinely incoherent collisions remain penalized.
+pub(crate) fn filter_coherent_majority_windows(
+    per_window: Vec<PerWindowMatches>,
+    tolerance_ms: i64,
+) -> Vec<PerWindowMatches> {
+    let outliers = collect_outlier_window_pairs(&per_window, tolerance_ms);
+    if outliers.is_empty() {
+        return per_window;
+    }
+    per_window
+        .into_iter()
+        .map(|(w_idx, ratio, start_sec, cands)| {
+            let kept = cands
+                .into_iter()
+                .filter(|c| !outliers.contains(&(c.0, w_idx)))
+                .collect();
+            (w_idx, ratio, start_sec, kept)
+        })
+        .collect()
+}
+
+/// Returns `true` when every frame in `hashes` is a featureless solid/fade DC screen (`<= 2` AC bits).
+pub(crate) fn is_solid_dc_phash_window(hashes: &[u64]) -> bool {
+    hashes.is_empty()
+        || hashes
+            .iter()
+            .all(|&h| (h & PHASH_LOWER_AC_DCT_MASK).count_ones() <= MAX_SOLID_FRAME_AC_BITS)
+}
+
+/// Detects degenerate solid/fade/static visual windows lacking discriminative spatial content.
+///
+/// # Arguments
+/// * `hashes` - Extracted 64-bit `pHash` sequence for one window.
+///
+/// # Returns
+/// `true` if `hashes` is empty, has zero AC DCT energy across all frames, or stays within
+/// [`MAX_STATIC_WINDOW_HAMMING_SPREAD`] of frame 0.
+///
+/// # Errors
+/// Infallible.
+///
+/// # Panics
+/// Never panics.
+///
+/// # Data Flow & Invariants
+/// Prevents solid black fades and letterbox headers from generating `matching_cuts == 0` sparse collisions.
+pub(crate) fn is_degenerate_static_phash_window(hashes: &[u64]) -> bool {
+    if is_solid_dc_phash_window(hashes) {
+        return true;
+    }
+    let first = hashes[0];
+    hashes
+        .iter()
+        .all(|&h| dbsrt_core::phash::hamming_distance(h, first) <= MAX_STATIC_WINDOW_HAMMING_SPREAD)
+}
+
+/// Selects the strongest multi-window consensus candidate, prioritizing temporal coherence and multi-window support.
+///
+/// # Arguments
+/// * `consensus` - Candidate list returned by [`aggregate_multi_window_matches`].
+///
+/// # Returns
+/// `Option<&MultiWindowConsensus>` ranking coherent multi-window first, then multi-window (`>= 2`), then single-window.
+///
+/// # Errors
+/// Infallible.
+///
+/// # Panics
+/// Never panics.
+///
+/// # Data Flow & Invariants
+/// Prevents an isolated 1-window `35%` accidental hit from outranking an authentic `3/3` multi-window match (`25%`).
+pub(crate) fn select_best_consensus(
+    consensus: &[MultiWindowConsensus],
+) -> Option<&MultiWindowConsensus> {
+    consensus
+        .iter()
+        .filter(|c| c.matching_windows > 0)
+        .max_by(|a, b| {
+            let tier_of = |c: &MultiWindowConsensus| -> u8 {
+                if c.is_temporally_coherent {
+                    CONSENSUS_TIER_COHERENT
+                } else if c.matching_windows >= MULTI_WINDOW_MIN_COUNT {
+                    CONSENSUS_TIER_MULTI_WINDOW
+                } else {
+                    CONSENSUS_TIER_SINGLE_WINDOW
+                }
+            };
+            tier_of(a)
+                .cmp(&tier_of(b))
+                .then_with(|| a.matching_windows.cmp(&b.matching_windows))
+                .then_with(|| a.consensus_confidence.total_cmp(&b.consensus_confidence))
+        })
+}
+
 /// Evaluates visual pHash across multiple temporal offset windows.
+///
+/// # Arguments
+/// * `ctx` - Benchmark context containing `.dbphash` catalog and window plan.
+/// * `media_path` - Path to target video container.
+/// * `meta` - Probed container duration and framerate.
+///
+/// # Returns
+/// [`PhashMatchSummary`] containing persisted per-window `query_hashes` and multi-window consensus.
+///
+/// # Errors
+/// Infallible; failed window extractions push empty window details.
+///
+/// # Panics
+/// Never panics.
+///
+/// # Data Flow & Invariants
+/// Rejects `matching_cuts == 0` collisions on degenerate solid/black windows, normalizes FPS rounding drift,
+/// prunes isolated single-window shift outliers, and selects the highest-tier consensus match.
 fn evaluate_phash_multi(
     ctx: &BenchContext<'_>,
     media_path: &Path,
@@ -889,62 +1551,71 @@ fn evaluate_phash_multi(
                 continue;
             }
         };
-        let matches = ctx
-            .dbphash
-            .recognize(&hashes, DEFAULT_PHASH_SCALE_MAX_DISTANCE);
-        let top_match = matches
-            .into_iter()
-            .find(|m| m.confidence >= PHASH_MIN_CONFIDENCE);
-
-        let win_matches: Vec<RawCandidateMatch> = match &top_match {
-            Some(m) => vec![(
-                m.media_id,
-                m.clean_title.clone(),
-                m.matching_cuts,
-                m.matching_sparse,
-                m.estimated_shift_ms,
-                m.confidence,
-            )],
-            None => Vec::new(),
+        let is_solid_dc = is_solid_dc_phash_window(&hashes);
+        let is_degenerate = is_degenerate_static_phash_window(&hashes);
+        let filtered: Vec<_> = if is_solid_dc {
+            Vec::new()
+        } else {
+            ctx.dbphash
+                .recognize(&hashes, DEFAULT_PHASH_SCALE_MAX_DISTANCE)
+                .into_iter()
+                .filter(|m| {
+                    m.confidence >= PHASH_MIN_CONFIDENCE && (!is_degenerate || m.matching_cuts > 0)
+                })
+                .take(MAX_WINDOW_CANDIDATES)
+                .collect()
         };
+        let top_match = filtered.first();
+        let top_norm_shift = top_match
+            .map(|m| normalize_phash_shift_ms(ctx.dbphash, m.media_id, m.estimated_shift_ms, meta))
+            .unwrap_or(0);
 
         window_details.push(PhashWindowDetail {
             window_idx: w_idx,
             ratio,
             start_sec,
-            matched_media: top_match.as_ref().map(|m| m.clean_title.clone()),
-            matched_media_id: top_match.as_ref().map(|m| m.media_id),
-            matching_cuts: top_match.as_ref().map(|m| m.matching_cuts).unwrap_or(0),
-            matching_sparse: top_match.as_ref().map(|m| m.matching_sparse).unwrap_or(0),
-            estimated_shift_ms: top_match
-                .as_ref()
-                .map(|m| m.estimated_shift_ms)
-                .unwrap_or(0),
-            confidence: top_match.as_ref().map(|m| m.confidence).unwrap_or(0.0),
+            matched_media: top_match.map(|m| m.clean_title.clone()),
+            matched_media_id: top_match.map(|m| m.media_id),
+            matching_cuts: top_match.map(|m| m.matching_cuts).unwrap_or(0),
+            matching_sparse: top_match.map(|m| m.matching_sparse).unwrap_or(0),
+            estimated_shift_ms: top_norm_shift,
+            confidence: top_match.map(|m| m.confidence).unwrap_or(0.0),
+            query_hashes: hashes,
         });
 
+        let win_matches: Vec<RawCandidateMatch> = filtered
+            .into_iter()
+            .map(|m| {
+                let norm_shift =
+                    normalize_phash_shift_ms(ctx.dbphash, m.media_id, m.estimated_shift_ms, meta);
+                (
+                    m.media_id,
+                    m.clean_title,
+                    m.matching_cuts,
+                    m.matching_sparse,
+                    norm_shift,
+                    m.confidence,
+                )
+            })
+            .collect();
         per_window.push((w_idx, ratio, start_sec, win_matches));
     }
 
+    let cleaned = filter_coherent_majority_windows(per_window, MAX_SHIFT_DRIFT_TOLERANCE_MS);
     let consensus = aggregate_multi_window_matches(
         ctx.plan.ratios.len(),
-        per_window,
+        cleaned,
         MAX_SHIFT_DRIFT_TOLERANCE_MS,
     );
 
     let mut summary = summarize_phash_consensus(
-        consensus.first(),
+        select_best_consensus(&consensus),
         window_details,
         t0.elapsed().as_secs_f64(),
         ctx.plan.ratios.len(),
     );
     if let Some(id) = summary.media_id {
-        if let Some(e) = ctx
-            .dbphash
-            .media_entries()
-            .iter()
-            .find(|e| e.media_id == id)
-        {
+        if let Some(e) = ctx.dbphash.find_media_by_id(id) {
             summary.season = Some(e.season).filter(|&v| v > 0);
             summary.episode = Some(e.episode).filter(|&v| v > 0);
         }
@@ -981,6 +1652,23 @@ pub(crate) fn resolve_ahash_candidate_id(
 }
 
 /// Evaluates acoustic aHash across multiple temporal offset windows using C2F K=16.
+///
+/// # Arguments
+/// * `ctx` - Shared benchmark context with `CoarseToFineAHashIndex` and dense `AHashCatalog`.
+/// * `media_path` - Target video container path.
+/// * `meta` - Probed container duration and framerate.
+///
+/// # Returns
+/// [`AhashMatchSummary`] containing persisted per-window `query_hashes` and consensus telemetry.
+///
+/// # Errors
+/// Infallible; failed window extractions push empty window details.
+///
+/// # Panics
+/// Never panics.
+///
+/// # Data Flow & Invariants
+/// Extracts 5s Haitsma-Kalker spectral windows via FFmpeg, runs Coarse-to-Fine search, and aggregates consensus.
 fn evaluate_ahash_multi(
     ctx: &BenchContext<'_>,
     media_path: &Path,
@@ -1038,7 +1726,7 @@ fn evaluate_ahash_multi(
                 resolve_ahash_candidate_id(ctx.dense_catalog, &m.file_path, &m.media_name);
             let ref_time_ms = (m.offset_sec * MILLIS_PER_SECOND).round() as i64;
             let conf = m.score * PERCENT_SCALE;
-            let sparse = (m.snr_bits * 10.0) as usize;
+            let sparse = (m.snr_bits * AHASH_SNR_SPARSE_FACTOR) as usize;
             win_matches.push((cand_id, m.media_name.clone(), 0, sparse, ref_time_ms, conf));
         }
 
@@ -1062,6 +1750,8 @@ fn evaluate_ahash_multi(
                 .as_ref()
                 .map(|m| m.score * PERCENT_SCALE)
                 .unwrap_or(0.0),
+            audio_fps: fps,
+            query_hashes: ahash_file.hashes,
         });
 
         per_window.push((w_idx, ratio, start_sec, win_matches));
@@ -1074,7 +1764,7 @@ fn evaluate_ahash_multi(
     );
 
     summarize_ahash_consensus(
-        consensus.first(),
+        select_best_consensus(&consensus),
         window_details,
         t0.elapsed().as_secs_f64(),
         ctx.plan.ratios.len(),
@@ -1257,8 +1947,23 @@ fn extract_episode_fallback(name: &str) -> Option<u32> {
 
 /// Checks fuzzy title matching using MovieHash and normalized token sets, rejecting differing seasons or episodes.
 ///
-/// Verifies `episode` even when `season` is `None`.
-fn are_titles_matching(
+/// # Arguments
+/// * `p_title` - Visual candidate or ground-truth title string.
+/// * `p_season_episode` - Explicit `(season, episode)` pair when known.
+/// * `a_title` - Acoustic candidate or ground-truth title string.
+///
+/// # Returns
+/// `true` if titles match and neither season nor episode conflicts.
+///
+/// # Errors
+/// Infallible.
+///
+/// # Panics
+/// Never panics.
+///
+/// # Data Flow & Invariants
+/// Enforces episode parity even when `season` is `None`, checks 16-hex MovieHash identity, and compares token sets.
+pub(crate) fn are_titles_matching(
     p_title: &str,
     p_season_episode: (Option<u32>, Option<u32>),
     a_title: &str,
@@ -1293,14 +1998,31 @@ fn are_titles_matching(
     if p_title.eq_ignore_ascii_case(a_title) {
         return true;
     }
-    let clean_p = p_title.to_lowercase().replace(['.', '_', '-'], " ");
-    let clean_a = a_title.to_lowercase().replace(['.', '_', '-'], " ");
-    let p_words: Vec<&str> = clean_p.split_whitespace().collect();
-    let a_words: Vec<&str> = clean_a.split_whitespace().collect();
-    let p_set: HashSet<&str> = p_words.iter().copied().collect();
-    let a_set: HashSet<&str> = a_words.iter().copied().collect();
-    (!p_words.is_empty() && p_words.iter().all(|w| a_set.contains(w)))
-        || (!a_words.is_empty() && a_words.iter().all(|w| p_set.contains(w)))
+    let key_p = normalize_clean_title_key(if p_meta.clean_title.is_empty() {
+        p_title
+    } else {
+        &p_meta.clean_title
+    });
+    let key_a = normalize_clean_title_key(if a_meta.clean_title.is_empty() {
+        a_title
+    } else {
+        &a_meta.clean_title
+    });
+    if !key_p.is_empty() && key_p == key_a {
+        return true;
+    }
+    let p_words: Vec<&str> = key_p.split_whitespace().collect();
+    let a_words: Vec<&str> = key_a.split_whitespace().collect();
+    let (shorter, longer) = if p_words.len() <= a_words.len() {
+        (&p_words, &a_words)
+    } else {
+        (&a_words, &p_words)
+    };
+    if shorter.len() < MIN_SUBSET_TITLE_WORDS || shorter.len() * 2 < longer.len() {
+        return false;
+    }
+    let longer_set: HashSet<&str> = longer.iter().copied().collect();
+    shorter.iter().all(|w| longer_set.contains(w))
 }
 
 /// Evaluates agreement when both modalities yielded candidate matches.
@@ -1345,13 +2067,32 @@ fn classify_agreement(phash: &PhashMatchSummary, ahash: &AhashMatchSummary) -> M
     }
 }
 
-/// Updates running benchmark telemetry counters.
+/// Updates running benchmark telemetry counters and worker-adjusted ETA.
+///
+/// # Arguments
+/// * `t` - Mutable telemetry accumulator.
+/// * `record` - Newly evaluated media benchmark record.
+/// * `elapsed_sec` - Total wall-clock elapsed seconds since sweep start.
+/// * `remaining_and_workers` - Tuple `(remaining_files, active_workers)`.
+///
+/// # Returns
+/// `()`.
+///
+/// # Errors
+/// Infallible.
+///
+/// # Panics
+/// Never panics.
+///
+/// # Data Flow & Invariants
+/// Updates cumulative status counts, rolling timer means, and scales `eta_sec` by `active_workers`.
 fn update_telemetry(
     t: &mut ScaleBenchmarkTelemetry,
     record: &MediaScaleBenchmarkRecord,
     elapsed_sec: f64,
-    remaining: usize,
+    remaining_and_workers: (usize, usize),
 ) {
+    let (remaining, workers) = remaining_and_workers;
     t.processed_this_run += 1;
     match record.agreement.status.as_str() {
         "DUAL_MATCH_AGREED" => t.dual_match_agreed += 1,
@@ -1366,7 +2107,7 @@ fn update_telemetry(
     t.avg_phash_sec = (t.avg_phash_sec * (n - 1.0) + record.phash.timer_sec) / n;
     t.avg_ahash_sec = (t.avg_ahash_sec * (n - 1.0) + record.ahash.timer_sec) / n;
     t.avg_total_sec = (t.avg_total_sec * (n - 1.0) + record.total_timer_sec) / n;
-    t.eta_sec = t.avg_total_sec * remaining as f64;
+    t.eta_sec = (t.avg_total_sec * remaining as f64) / (workers.max(1) as f64);
 }
 
 /// Prints a concise live terminal update for the current video.
@@ -1552,11 +2293,22 @@ mod tests {
         assert!(ahash.windows.is_empty() && ahash.media_match.is_none());
     }
 
-    #[test]
-    fn test_diagnostic_causes_summaries_and_telemetry() {
-        let tmp = tempfile::tempdir().unwrap();
-        let dbphash_path = tmp.path().join("catalog.dbphash");
-        let ahash_dir = tmp.path().join("ahash");
+    /// Build a minimal synthetic multimodal catalog bundle inside `tmp` for unit tests.
+    ///
+    /// # Arguments
+    /// * `tmp` - Temporary directory path holding synthetic `.dbphash` and `.ahash` fixtures.
+    ///
+    /// # Returns
+    /// Loaded multimodal catalog bundle indexing `Indexed.Show.S01E01`.
+    ///
+    /// # Panics
+    /// Panics if synthetic fixture creation or catalog loading fails.
+    ///
+    /// # Data Flow & Invariants
+    /// Writes a 1-media `.dbphash` and a 64-frame `.ahash` file, then invokes `load_all_catalogs`.
+    fn build_minimal_test_catalogs(tmp: &Path) -> LoadedCatalogs {
+        let dbphash_path = tmp.join("catalog.dbphash");
+        let ahash_dir = tmp.join("ahash");
         std::fs::create_dir_all(&ahash_dir).unwrap();
 
         let mut builder = dbsrt_index::DbphashBuilder::new();
@@ -1582,7 +2334,13 @@ mod tests {
         let ahash_path = ahash_dir.join("Indexed.Show.S01E01.86.1fps.ahash");
         dbsrt_core::AhashFile::write_to_path(&ahash_path, &header, &hashes).unwrap();
 
-        let catalogs = load_all_catalogs(&dbphash_path, &ahash_dir, 16).unwrap();
+        load_all_catalogs(&dbphash_path, &ahash_dir, 16).unwrap()
+    }
+
+    #[test]
+    fn test_episode_exact_ahash_catalog_membership() {
+        let tmp = tempfile::tempdir().unwrap();
+        let catalogs = build_minimal_test_catalogs(tmp.path());
         let plan = MultiWindowPlan::new(vec![0.5], 1.0).unwrap();
         let ctx = BenchContext {
             dbphash: &catalogs.dbphash,
@@ -1590,11 +2348,46 @@ mod tests {
             coarse_index: &catalogs.coarse_index,
             plan: &plan,
             indexed_ahash_titles: &catalogs.indexed_ahash_titles,
+            cached_meta: None,
         };
 
-        assert!(is_media_indexed_in_ahash(&ctx, "Indexed.Show.S01E01"));
-        assert!(!is_media_indexed_in_ahash(&ctx, "Unindexed.Movie.2026"));
-        assert!(!is_media_indexed_in_ahash(&ctx, "   "));
+        let none_se = (None, None);
+        assert!(is_media_indexed_in_ahash(
+            &ctx,
+            "Indexed.Show.S01E01",
+            none_se
+        ));
+        assert!(is_media_indexed_in_ahash(
+            &ctx,
+            "Indexed Show",
+            (Some(1), Some(1))
+        ));
+        assert!(!is_media_indexed_in_ahash(
+            &ctx,
+            "Indexed Show",
+            (Some(1), Some(2))
+        ));
+        assert!(!is_media_indexed_in_ahash(
+            &ctx,
+            "Unindexed.Movie.2026",
+            none_se
+        ));
+        assert!(!is_media_indexed_in_ahash(&ctx, "   ", none_se));
+    }
+
+    #[test]
+    fn test_diagnostic_causes_summaries_and_telemetry() {
+        let tmp = tempfile::tempdir().unwrap();
+        let catalogs = build_minimal_test_catalogs(tmp.path());
+        let plan = MultiWindowPlan::new(vec![0.5], 1.0).unwrap();
+        let ctx = BenchContext {
+            dbphash: &catalogs.dbphash,
+            dense_catalog: &catalogs.dense_catalog,
+            coarse_index: &catalogs.coarse_index,
+            plan: &plan,
+            indexed_ahash_titles: &catalogs.indexed_ahash_titles,
+            cached_meta: None,
+        };
 
         let consensus_item = MultiWindowConsensus {
             media_id: 1,
@@ -1707,13 +2500,15 @@ mod tests {
         builder.write_to_file(&dbphash_path).unwrap();
         let catalogs = load_all_catalogs(&dbphash_path, &ahash_dir, 16).unwrap();
         let plan = MultiWindowPlan::new(vec![0.5], 1.0).unwrap();
-        let titles: HashSet<String> = ["indexed show s01e01".to_string()].into_iter().collect();
+        let (k1, _) = format_catalog_membership_keys("Indexed.Show.S01E01", (None, None));
+        let titles: HashSet<String> = [k1].into_iter().collect();
         let ctx = BenchContext {
             dbphash: &catalogs.dbphash,
             dense_catalog: &catalogs.dense_catalog,
             coarse_index: &catalogs.coarse_index,
             plan: &plan,
             indexed_ahash_titles: &titles,
+            cached_meta: None,
         };
         let p_some = phash_summary("Indexed Show", 1, 1);
         let a_none = build_empty_ahash_summary(1);
@@ -1841,17 +2636,131 @@ mod tests {
             status_json: Some(status_json.clone()),
             factor_k: 16,
             offsets: "0.5".to_string(),
+            video_window_sec: 1.0,
+            workers: 2,
             limit: 2,
             resume: true,
+            matrix_json: Some(tmp.path().join("matrix.json")),
+            matrix_only: false,
         };
 
         run_bench_scale_multimodal(args).unwrap();
         assert!(out_jsonl.exists());
         assert!(status_json.exists());
+        assert!(tmp.path().join("matrix.json").exists());
         let lines: Vec<String> = BufReader::new(File::open(&out_jsonl).unwrap())
             .lines()
             .map_while(Result::ok)
             .collect();
         assert!(!lines.is_empty());
+    }
+
+    #[test]
+    fn test_normalize_phash_shift_and_majority_outlier_pruning() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dbphash_path = tmp.path().join("catalog.dbphash");
+        let mut builder = dbsrt_index::DbphashBuilder::new();
+        let meta_ntsc = MediaMetadata::parse("Westworld.S04E01");
+        builder.add_media(
+            &meta_ntsc,
+            3_000_000,
+            24.0,
+            &[(0x1111, 1000)],
+            &[(0x2222, 1000)],
+        );
+        let meta_pal = MediaMetadata::parse("Arte.Docu.2026");
+        let pal_id = builder.add_media(
+            &meta_pal,
+            1_041_667,
+            24.0,
+            &[(0x3333, 1000)],
+            &[(0x4444, 1000)],
+        );
+        builder.set_frame_count(pal_id, 25_000);
+        builder.write_to_file(&dbphash_path).unwrap();
+        let mmap = MmapDbphash::open(&dbphash_path).unwrap();
+
+        let ntsc_video = VideoMetadata {
+            duration: 3000.0,
+            fps: 24_000.0 / 1001.0,
+        };
+        let norm_ntsc = normalize_phash_shift_ms(&mmap, 1, 2_603_500, &ntsc_video);
+        assert_eq!(norm_ntsc, 2_606_103);
+
+        let pal_video = VideoMetadata {
+            duration: 1000.0,
+            fps: 25.0,
+        };
+        let norm_pal = normalize_phash_shift_ms(&mmap, pal_id, 1_041_667, &pal_video);
+        assert_eq!(norm_pal, 1_000_000);
+
+        let per_win = vec![
+            (
+                0,
+                0.2,
+                100.0,
+                vec![(1, "Show".to_string(), 2, 10, 102_600, 95.0)],
+            ),
+            (
+                1,
+                0.5,
+                500.0,
+                vec![(1, "Show".to_string(), 0, 3, 498_900, 80.0)],
+            ),
+            (
+                2,
+                0.8,
+                800.0,
+                vec![(1, "Show".to_string(), 3, 12, 802_550, 98.0)],
+            ),
+        ];
+        let pruned = filter_coherent_majority_windows(per_win, MAX_SHIFT_DRIFT_TOLERANCE_MS);
+        assert_eq!(pruned[0].3.len(), 1);
+        assert!(pruned[1].3.is_empty());
+        assert_eq!(pruned[2].3.len(), 1);
+    }
+
+    #[test]
+    fn test_static_window_guard_consensus_tier_and_legacy_meta_cache() {
+        let solid_fade = [0xFFFF_FC00_0000_0000_u64, 0xFFFF_FE00_0000_0000_u64];
+        assert!(is_degenerate_static_phash_window(&solid_fade));
+        let diverse = [0x9D6C_A55A_3C3C_1234_u64, 0xC66C_5AA5_C3C3_EDCB_u64];
+        assert!(!is_degenerate_static_phash_window(&diverse));
+
+        let single_win = MultiWindowConsensus {
+            media_id: 282,
+            clean_title: "Single Window Hit".to_string(),
+            matching_windows: 1,
+            total_windows: 3,
+            consensus_shift_ms: 1000,
+            is_temporally_coherent: false,
+            consensus_confidence: 35.0,
+            window_matches: Vec::new(),
+        };
+        let multi_win = MultiWindowConsensus {
+            media_id: 811,
+            clean_title: "Three Window Match".to_string(),
+            matching_windows: 3,
+            total_windows: 3,
+            consensus_shift_ms: 500,
+            is_temporally_coherent: false,
+            consensus_confidence: 25.0,
+            window_matches: Vec::new(),
+        };
+        let items = [single_win, multi_win];
+        let best = select_best_consensus(&items).unwrap();
+        assert_eq!(best.media_id, 811);
+
+        let legacy_line =
+            r#"{"media_path":"/mnt/nas/movie.mkv","duration_sec":5400.0,"fps":23.976024}"#;
+        let (p, m) = parse_cached_meta_line(legacy_line).unwrap();
+        assert_eq!(p, Path::new("/mnt/nas/movie.mkv"));
+        assert!(m.audio.is_none());
+
+        assert!(!are_titles_matching(
+            "Atlantique (2019)[MULTi.1080p]",
+            (None, None),
+            "L'énigme de l'Atlantique"
+        ));
     }
 }

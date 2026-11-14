@@ -624,7 +624,7 @@
     "scope": "mod",
     "function_name": "execute_phash_recognition",
     "start_line": 620,
-    "max_loc": 47,
+    "max_loc": 43,
     "max_ccn": 7,
     "max_parameters": 7,
     "max_nesting": 2
@@ -664,19 +664,9 @@
     "scope": "mod",
     "function_name": "match_certified_couplings_and_shifts",
     "start_line": 777,
-    "max_loc": 82,
-    "max_ccn": 10,
-    "max_parameters": 15,
-    "max_nesting": 5
-  },
-  "crates/dbsrt-server/src/handlers/search/lookup.rs::mod::search_disk_catalog_subtitles": {
-    "file_path": "crates/dbsrt-server/src/handlers/search/lookup.rs",
-    "scope": "mod",
-    "function_name": "search_disk_catalog_subtitles",
-    "start_line": 1039,
-    "max_loc": 80,
-    "max_ccn": 9,
-    "max_parameters": 13,
+    "max_loc": 35,
+    "max_ccn": 6,
+    "max_parameters": 5,
     "max_nesting": 4
   },
   "crates/dbsrt-server/src/handlers/search/recognize.rs::mod::calculate_best_sequence_shift": {

@@ -3,6 +3,7 @@
 pub mod ahash_sidecar;
 pub mod bench;
 pub mod bench_ahash;
+pub mod bench_matrix;
 pub mod bench_scale;
 pub mod certify;
 pub mod export;

@@ -173,10 +173,16 @@ tasks:
       - cargo test --release --package dbsrt-index --test test_ahash_coarse_to_fine test_exhaustive_coarse_to_fine_benchmark -- --ignored --nocapture
 
   bench:multimodal:scale:
-    desc: Run exhaustive overnight multimodal multi-window scale benchmark (pHash vs aHash) across NAS & Freebox
+    desc: Run parallel multimodal multi-window scale & matrix benchmark (pHash + aHash) across local/LAN video libraries
     deps: [rs:build]
     cmds:
       - ./target/release/dbsrt bench-scale-multimodal {{.CLI_ARGS}}
+
+  bench:multimodal:matrix:
+    desc: Evaluate full 24-technique matching matrix (pHash MIH-16/32/Linear + aHash C2F K=[1..32] + Dense MIH-16/32/Linear) on extracted JSONL probes
+    deps: [rs:build]
+    cmds:
+      - ./target/release/dbsrt bench-scale-multimodal --matrix-only {{.CLI_ARGS}}
 
   eval:multimodal:audit:
     desc: Parametric root-cause audit on missed modalities in scale benchmark (resolving failure taxonomies via local or remote streams)
