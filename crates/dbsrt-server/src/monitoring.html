@@ -621,30 +621,7 @@
     <div class="pager" data-list="completed"></div>
   </section>
 
-  <section class="tab-pane" id="tab-sources">
-    <div class="tab-caption" id="sources-caption">SOURCES DE MÉDIAS</div>
-    <div class="table-wrap">
-      <table class="top-table">
-        <thead id="sources-thead"></thead>
-        <tbody id="sources-tbody"></tbody>
-      </table>
-    </div>
-    <div class="sys-tree" id="sources-specs" style="margin-top: 10px; display: none;"></div>
-  </section>
-
-  <!-- Section: Recent Completed Batch Events -->
-  <div class="section-title">
-    <span>📜 Dernières Extractions Terminées</span>
-  </div>
-  <div id="events-list" class="events-list">
-    <div style="padding: 12px; text-align: center; color: var(--text-muted);">
-      Chargement de l'historique...
-    </div>
-  </div>
-
-  </section>
-
-  <section class="view" id="view-catalogue">
+  <section class="tab-pane" id="tab-media">
     <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:8px;">
       <div class="tab-caption" id="media-caption" style="margin:0;">EXPLORATEUR DE MÉDIAS MULTI-SOURCES</div>
       <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
@@ -919,6 +896,29 @@
         </div>
       </div>
     </div>
+  </section>
+
+  <section class="tab-pane" id="tab-sources">
+    <div class="tab-caption" id="sources-caption">SOURCES DE MÉDIAS</div>
+    <div class="table-wrap">
+      <table class="top-table">
+        <thead id="sources-thead"></thead>
+        <tbody id="sources-tbody"></tbody>
+      </table>
+    </div>
+    <div class="sys-tree" id="sources-specs" style="margin-top: 10px; display: none;"></div>
+  </section>
+
+  <!-- Section: Recent Completed Batch Events -->
+  <div class="section-title">
+    <span>📜 Dernières Extractions Terminées</span>
+  </div>
+  <div id="events-list" class="events-list">
+    <div style="padding: 12px; text-align: center; color: var(--text-muted);">
+      Chargement de l'historique...
+    </div>
+  </div>
+
   </section>
 
   <section class="view" id="view-audit">
@@ -2344,7 +2344,7 @@
             ['Sous-titres', subs.length === 0 ? span('top-dim', 'Aucun') : escapeHtml(subs.map(s =>
               `#${s.index} ${s.lang} ${s.codec}${s.title ? ` "${s.title}"` : ''}`).join(' │ '))],
             ['Statut Actuel', span(cls, label)],
-            ['Actions', `<button class="btn btn-accent" style="display:inline-block;padding:3px 10px;font-size:11px;" onclick="event.stopPropagation(); setPipelineSnippet('${escapeHtml(m.path)}'); triggerPipelineEvaluation();">⚡ Lancer le Matching &amp; Diagramme</button> <a class="btn" style="display:inline-block;padding:3px 10px;font-size:11px;text-decoration:none;" href="/studio?match=${encodeURIComponent(m.path)}#tab-observability" target="_blank">Ouvrir dans Studio ↗</a>`],
+            ['Actions', `<button class="btn btn-accent" style="display:inline-block;padding:3px 10px;font-size:11px;" onclick="event.stopPropagation(); setPipelineSnippet('${escapeHtml(m.path)}'); triggerPipelineEvaluation();">⚡ Lancer le Matching &amp; Diagramme</button> <a class="btn" style="display:inline-block;padding:3px 10px;font-size:11px;text-decoration:none;" href="${apiEndpoint('studio')}?match=${encodeURIComponent(m.path)}#tab-observability" target="_blank">Ouvrir dans Studio ↗</a>`],
           ]);
         }
         return html;
@@ -2462,6 +2462,15 @@
             tbody.style.opacity = '0.4';
           }
         }
+      } else if (activeTab === 'media') {
+        const tbody = document.getElementById('media-tbody');
+        if (tbody) {
+          if (!lastTop || !lastTop.discovered_media || lastTop.discovered_media.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="8" class="top-dim" style="text-align: center; padding: 24px;">⏳ Chargement du catalogue média...</td></tr>';
+          } else {
+            tbody.style.opacity = '0.4';
+          }
+        }
       }
       fetchTop(true);
     }));
@@ -2472,8 +2481,11 @@
       const view = location.hash.slice(1);
       // #catalogue (overview tile, old bookmarks) is now the Catalogue tab of Ingestion
       if (view === 'catalogue') {
+        activeView = 'ingestion';
+        document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === 'view-ingestion'));
+        document.querySelectorAll('#views-nav a').forEach(a => a.classList.toggle('active', a.getAttribute('href') === '#ingestion'));
         document.querySelector('.tab-btn[data-tab="media"]').click();
-        location.replace('#ingestion');
+        history.replaceState(null, '', '#ingestion');
         return;
       }
       activeView = VIEWS.includes(view) ? view : 'overview';
@@ -2492,7 +2504,7 @@
     const VIEW_KEYS = { '6': 'system', 'y': 'system', 'a': 'audit', 'o': 'overview', 'i': 'incidents' };
     document.addEventListener('keydown', e => {
       if (e.target.tagName === 'INPUT' || e.ctrlKey || e.metaKey || e.altKey) return;
-      if (activeView === 'catalogue' && e.key === 'a') {
+      if (activeView === 'ingestion' && activeTab === 'media' && e.key === 'a') {
         e.preventDefault();
         toggleSelectAllMedia();
         return;

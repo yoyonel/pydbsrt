@@ -21,6 +21,7 @@ import socket
 import socketserver
 import struct
 import subprocess
+import sys
 import threading
 import time
 import unicodedata
@@ -30,10 +31,19 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict
 
+REPO_ROOT: Path = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.data_access.resolver import load_raw_registry, resolve_local_artifact_download  # noqa: E402
+from scripts.data_access.topology import inspect_network_topology  # noqa: E402
+
 DEFAULT_PORT: int = 8780
 PROBE_FS_TIMEOUT_SECS: float = 0.3
 PROBE_FTP_TIMEOUT_SECS: float = 6.0
 PROBE_HTTP_TIMEOUT_SECS: float = 2.5
+CIFS_SAFETY_CACHE_TTL_SECS: float = 5.0
+ARTIFACT_STREAM_CHUNK_BYTES: int = 65536
 HTTP_OK: int = 200
 HTTP_NOT_FOUND: int = 404
 HTTP_BAD_REQUEST: int = 400
@@ -108,6 +118,42 @@ DEFAULT_GATEWAY_URL: str = DEFAULT_GATEWAY_LAN_URL
 DEFAULT_FREEBOX_HOST: str = "mafreebox.freebox.fr"
 DEFAULT_FREEBOX_USER: str = "freebox"
 DEFAULT_FREEBOX_PASS_ENTRY: str = "services/freebox/ftp_pass"
+GATEWAY_CATALOG_TIMEOUT_SECS: float = 5.0
+MAX_FILENAME_UTF8_BYTES: int = 255
+MOVIEHASH_HEX_LENGTH: int = 16
+MIN_SIDECAR_STEM_LENGTH: int = 4
+HEX_ALPHABET: frozenset[str] = frozenset("0123456789abcdefABCDEF")
+RE_TRAILING_FPS_TAG: re.Pattern[str] = re.compile(r"\.\d+(?:\.\d+)?fps$", re.IGNORECASE)
+
+EXCLUDED_FREEBOX_DIR_NAMES: frozenset[str] = frozenset(
+    {
+        "photos",
+        "backup",
+        "enregistrements",
+        ".cameras",
+        ".fbxgrabberd",
+        ".fbxtimeshifting",
+        "lost+found",
+        ".trash-1000",
+        "@eadir",
+        "#recycle",
+        "__phash__",
+        "__ahash__",
+    }
+)
+
+
+def _is_excluded_portal_entry(name: str) -> bool:
+    """Checks whether a directory or file entry is a hidden, recycle, or non-video system folder."""
+    stripped = name.strip("/")
+    return stripped in ("", ".", "..") or stripped.startswith(".") or stripped.lower() in EXCLUDED_FREEBOX_DIR_NAMES
+
+
+FREEBOX_FTP_ELIGIBLE_DIRS: tuple[str, ...] = (
+    "Disque 1/Téléchargements",
+    "Disque 2/Téléchargements",
+    "Disque 1 1/Vidéos",
+)
 
 DEFAULT_TRAJECTORY_DIR: Path = Path("data/reports/audit")
 DEFAULT_TRAJECTORY_ROOT_DIR: Path = Path("data/reports")
@@ -115,6 +161,15 @@ DEFAULT_TRAJECTORY_PAGE_SIZE: int = 25
 TRAJECTORY_SAMPLE_CUTS: int = 5
 TRAJECTORY_DEFAULT_FRAMES: int = 20
 TRAJECTORY_CACHE_TTL_SECS: float = 10.0
+
+
+def _resolve_data_path(rel_path: str) -> Path:
+    """Resolves a relative repository data path preferring CWD override (tests) else REPO_ROOT."""
+    cwd_candidate = Path(rel_path)
+    if cwd_candidate.exists():
+        return cwd_candidate
+    return REPO_ROOT / rel_path
+
 
 AVAILABLE_ENVIRONMENTS: list[dict[str, str]] = [
     {
@@ -383,27 +438,139 @@ def _is_video(entry: os.DirEntry[str]) -> bool:
 
 
 def _count_directory_videos(path: Path) -> int:
-    """Counts video files in directory up to 1 level deep."""
+    """Recursively counts eligible video files while pruning excluded personal/system folders."""
     total = 0
+    if not path.is_dir():
+        return 0
     try:
-        for entry in os.scandir(path):
-            if _is_video(entry):
-                total += 1
-            elif entry.is_dir():
-                try:
-                    for sub in os.scandir(entry.path):
-                        if _is_video(sub):
-                            total += 1
-                except OSError:
-                    pass
+        for _dirpath, dirnames, filenames in os.walk(path):
+            dirnames[:] = [d for d in dirnames if not d.startswith(".") and d.lower() not in EXCLUDED_FREEBOX_DIR_NAMES]
+            for fname in filenames:
+                if not fname.startswith(".") and Path(fname).suffix.lower() in VIDEO_EXTENSIONS:
+                    total += 1
     except OSError:
         pass
     return total
 
 
-def probe_local_fs_profile(name: str, path_str: str) -> Dict[str, Any]:
+_CIFS_SAFETY_CACHE: tuple[float, bool] | None = None
+_CIFS_SAFETY_LOCK: threading.Lock = threading.Lock()
+
+
+def _is_cifs_safe_to_stat() -> bool:
+    """Checks kernel network topology to prevent SMB D-state hangs off Home LAN."""
+    global _CIFS_SAFETY_CACHE
+    now = time.monotonic()
+    with _CIFS_SAFETY_LOCK:
+        if _CIFS_SAFETY_CACHE is not None and (now - _CIFS_SAFETY_CACHE[0]) < CIFS_SAFETY_CACHE_TTL_SECS:
+            return _CIFS_SAFETY_CACHE[1]
+    safe = bool(inspect_network_topology().get("cifs_safe_to_stat", False))
+    with _CIFS_SAFETY_LOCK:
+        _CIFS_SAFETY_CACHE = (now, safe)
+    return safe
+
+
+def _get_freebox_disk_specs() -> list[dict[str, Any]]:
+    """Loads the 3 Freebox Server disk definitions from the SSOT registry."""
+    try:
+        disks = load_raw_registry().get("freebox_disks", [])
+        if isinstance(disks, list) and disks:
+            return disks
+    except OSError:
+        pass
+    return [
+        {
+            "id": "disque1",
+            "smb_share": "Disque 1",
+            "mount_folder": "Disque_1",
+            "indexed_subdir": "Téléchargements",
+            "rpi4_cifs_path": "/mnt/freebox/Disque_1",
+        },
+        {
+            "id": "disque2",
+            "smb_share": "Disque 2",
+            "mount_folder": "Disque_2",
+            "indexed_subdir": "Téléchargements",
+            "rpi4_cifs_path": "/mnt/freebox/Disque_2",
+        },
+        {
+            "id": "disque1_1",
+            "smb_share": "Disque 1 1",
+            "mount_folder": "Disque_1_1",
+            "indexed_subdir": "Vidéos",
+            "rpi4_cifs_path": "/mnt/freebox/Disque_1_1",
+        },
+    ]
+
+
+def _freebox_local_library_path(disk: dict[str, Any]) -> str:
+    """Returns local CIFS path scoped strictly to the disk's eligible media subdirectory."""
+    sub = str(disk.get("indexed_subdir") or "").strip("/")
+    base = _user_media_path("Freebox", disk["mount_folder"])
+    return str(Path(base) / sub) if sub else base
+
+
+def _freebox_rpi4_library_path(disk: dict[str, Any]) -> str:
+    """Returns RPi4 CIFS path scoped strictly to the disk's eligible media subdirectory."""
+    sub = str(disk.get("indexed_subdir") or "").strip("/")
+    base = str(disk["rpi4_cifs_path"])
+    return str(Path(base) / sub) if sub else base
+
+
+def _build_freebox_cifs_profiles() -> list[dict[str, Any]]:
+    """Builds local and RPi4 CIFS profile descriptors scoped to official media libraries."""
+    specs = _get_freebox_disk_specs()
+    local_profiles = [
+        {
+            "id": d["id"],
+            "name": f"Montage CIFS {d['smb_share']}",
+            "protocol": "local_fs",
+            "target": _freebox_local_library_path(d),
+            "envs": ["local"],
+            "status": "pending",
+        }
+        for d in specs
+    ]
+    rpi4_profiles = [
+        {
+            "id": f"rpi4_{d['id']}",
+            "name": f"Montage CIFS RPi4 {d['smb_share']}",
+            "protocol": "local_fs",
+            "target": _freebox_rpi4_library_path(d),
+            "envs": ["rpi4"],
+            "status": "pending",
+        }
+        for d in specs
+    ]
+    return local_profiles + rpi4_profiles
+
+
+def _resolve_freebox_cifs_mount(profile_id: str) -> tuple[str, str] | None:
+    """Maps a Freebox local or RPi4 CIFS profile ID to (display_name, scoped_library_path)."""
+    for disk in _get_freebox_disk_specs():
+        if profile_id == disk["id"]:
+            return f"Montage CIFS {disk['smb_share']}", _freebox_local_library_path(disk)
+        if profile_id == f"rpi4_{disk['id']}":
+            return f"Montage CIFS RPi4 {disk['smb_share']}", _freebox_rpi4_library_path(disk)
+    return None
+
+
+def probe_local_fs_profile(name: str, path_str: str, is_cifs: bool = False) -> Dict[str, Any]:
     """Tests existence of a local or mounted directory and counts real video files."""
     t0 = time.perf_counter()
+    if is_cifs and not _is_cifs_safe_to_stat():
+        dt_ms = (time.perf_counter() - t0) * MILLIS_PER_SEC
+        return {
+            "name": name,
+            "protocol": "local_fs",
+            "target": path_str,
+            "accessible": False,
+            "status": "offline",
+            "latency_ms": round(dt_ms, 2),
+            "files_count": 0,
+            "reason": "Montage CIFS bloqué hors LAN domestique (protection anti-gel SMB VPN/4G)",
+        }
+
     p = Path(path_str)
     if not p.is_dir():
         dt_ms = (time.perf_counter() - t0) * 1000.0
@@ -468,15 +635,17 @@ def probe_ftp_profile(name: str, host: str, user: str, passwd: str, path_str: st
         ftp = ftplib.FTP(timeout=PROBE_FTP_TIMEOUT_SECS)
         ftp.connect(host, 21, timeout=PROBE_FTP_TIMEOUT_SECS)
         ftp.login(user, passwd)
-        files = ftp.nlst(path_str)
+        raw_files = ftp.nlst(path_str)
         ftp.quit()
+        files = [f for f in raw_files if not _is_excluded_portal_entry(Path(f).name)]
         dt_ms = (time.perf_counter() - t0) * 1000.0
+        accessible = len(files) > 0
         return {
             "name": name,
             "protocol": "ftp",
             "target": f"ftp://{user}@{host}:21{path_str}",
-            "accessible": True,
-            "status": "online",
+            "accessible": accessible,
+            "status": "online" if accessible else "empty",
             "latency_ms": round(dt_ms, 1),
             "files_count": len(files),
             "reason": f"{len(files)} éléments listés via FTP",
@@ -498,33 +667,66 @@ def probe_ftp_profile(name: str, host: str, user: str, passwd: str, path_str: st
         }
 
 
+def _parse_gateway_health_json(resp: Any) -> tuple[bool, dict[str, Any], str]:
+    """Validates that an HTTP gateway response is genuine JSON health payload (not WAN HTML)."""
+    ctype = resp.headers.get_content_type()
+    if ctype != "application/json":
+        return False, {}, ctype
+    try:
+        data = json.loads(resp.read().decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        return False, {}, ctype
+    if not isinstance(data, dict):
+        return False, {}, ctype
+    is_valid = data.get("status") == "ok" or isinstance(data.get("mounted_shares"), list)
+    return is_valid, data, ctype
+
+
+def _count_cached_freebox_targets() -> int:
+    """Returns cached media count from freebox_batch_targets.json if present."""
+    targets_file = _resolve_data_path("data/reports/freebox_batch_targets.json")
+    if not targets_file.is_file():
+        return 0
+    try:
+        return len(json.loads(targets_file.read_text(encoding="utf-8")))
+    except (OSError, ValueError, TypeError):
+        return 0
+
+
 def probe_http_gateway_profile(name: str, url: str) -> Dict[str, Any]:
-    """Tests HTTP streaming gateway reachability and mounted shares."""
+    """Tests HTTP streaming gateway reachability and verifies non-zero eligible media count."""
     t0 = time.perf_counter()
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "dbsrt-portal/1.0"})
         with urllib.request.urlopen(req, timeout=PROBE_HTTP_TIMEOUT_SECS) as resp:
-            dt_ms = (time.perf_counter() - t0) * 1000.0
-            data = {}
-            if resp.headers.get_content_type() == "application/json":
-                try:
-                    data = json.loads(resp.read().decode("utf-8"))
-                except Exception:
-                    pass
+            dt_ms = (time.perf_counter() - t0) * MILLIS_PER_SEC
+            valid_json, data, ctype = _parse_gateway_health_json(resp)
+            if not valid_json:
+                return {
+                    "name": name,
+                    "protocol": "http_gateway",
+                    "target": url,
+                    "accessible": False,
+                    "status": "offline",
+                    "latency_ms": round(dt_ms, 1),
+                    "files_count": 0,
+                    "reason": f"Réponse non-JSON ({ctype}) — port WAN :80 filtré par IP ou passerelle inactive",
+                }
             mounted = data.get("mounted_shares", [])
-            targets_file = Path("data/reports/freebox_batch_targets.json")
-            media_count = 0
-            if targets_file.is_file():
-                try:
-                    targets_data = json.loads(targets_file.read_text(encoding="utf-8"))
-                    media_count = len(targets_data)
-                except Exception:
-                    pass
-            files_count = media_count if media_count > 0 else len(mounted)
+            live_count = data.get("media_count")
+            media_count = int(live_count) if isinstance(live_count, int) else _count_cached_freebox_targets()
             shares_str = f" ({', '.join(mounted)})" if mounted else ""
-            reason_str = f"Passerelle HTTP active{shares_str}"
-            if media_count > 0:
-                reason_str += f" • {media_count} médias indexés"
+            if media_count <= 0:
+                return {
+                    "name": name,
+                    "protocol": "http_gateway",
+                    "target": url,
+                    "accessible": False,
+                    "status": "empty",
+                    "latency_ms": round(dt_ms, 1),
+                    "files_count": 0,
+                    "reason": f"Passerelle HTTP jointe{shares_str} mais aucun conteneur vidéo éligible exposé",
+                }
             return {
                 "name": name,
                 "protocol": "http_gateway",
@@ -532,11 +734,11 @@ def probe_http_gateway_profile(name: str, url: str) -> Dict[str, Any]:
                 "accessible": True,
                 "status": "online",
                 "latency_ms": round(dt_ms, 1),
-                "files_count": files_count,
-                "reason": reason_str,
+                "files_count": media_count,
+                "reason": f"Passerelle HTTP active{shares_str} • {media_count} médias indexés",
             }
     except Exception as err:
-        dt_ms = (time.perf_counter() - t0) * 1000.0
+        dt_ms = (time.perf_counter() - t0) * MILLIS_PER_SEC
         return {
             "name": name,
             "protocol": "http_gateway",
@@ -620,40 +822,9 @@ def get_sources_metadata() -> Dict[str, Any]:
         {
             "id": "freebox-disks",
             "name": "Freebox Server Disks",
-            "description": "Disques durs internes/USB de la Freebox (enregistrements TV, partages locaux).",
+            "description": "Disques durs internes/USB de la Freebox (Disque_1, Disque_2, Disque_1_1).",
             "profiles": [
-                {
-                    "id": "disque1",
-                    "name": "Montage CIFS Disque 1",
-                    "protocol": "local_fs",
-                    "target": _user_media_path("Freebox", "Disque_1"),
-                    "envs": ["local"],
-                    "status": "pending",
-                },
-                {
-                    "id": "disque2",
-                    "name": "Montage CIFS Disque 2",
-                    "protocol": "local_fs",
-                    "target": _user_media_path("Freebox", "Disque_2"),
-                    "envs": ["local"],
-                    "status": "pending",
-                },
-                {
-                    "id": "rpi4_disque1",
-                    "name": "Montage CIFS RPi4 Disque 1",
-                    "protocol": "local_fs",
-                    "target": "/mnt/freebox/Disque_1",
-                    "envs": ["rpi4"],
-                    "status": "pending",
-                },
-                {
-                    "id": "rpi4_disque2",
-                    "name": "Montage CIFS RPi4 Disque 2",
-                    "protocol": "local_fs",
-                    "target": "/mnt/freebox/Disque_2",
-                    "envs": ["rpi4"],
-                    "status": "pending",
-                },
+                *_build_freebox_cifs_profiles(),
                 {
                     "id": "lan_ftp",
                     "name": "FTP LAN Freebox",
@@ -720,7 +891,7 @@ def _probe_synology(source_id: str, profile_id: str, passwd: str) -> Dict[str, A
     mount_dir = _user_media_path("Synology", path_key.lstrip("/"))
 
     if profile_id == "cifs":
-        return probe_local_fs_profile("Montage CIFS Local", mount_dir)
+        return probe_local_fs_profile("Montage CIFS Local", mount_dir, is_cifs=True)
     if profile_id == "lan_ftp":
         return probe_ftp_profile("Streaming LAN FTP", DEFAULT_NAS_LAN_HOST, DEFAULT_NAS_USER, passwd, path_key)
     if profile_id == "wan_ftp":
@@ -728,19 +899,64 @@ def _probe_synology(source_id: str, profile_id: str, passwd: str) -> Dict[str, A
     return None
 
 
+def probe_freebox_ftp_profile(name: str, host: str, user: str, passwd: str) -> Dict[str, Any]:
+    """Probes Freebox FTP strictly inside the 3 eligible media directories, excluding personal folders."""
+    t0 = time.perf_counter()
+    target_uri = f"ftp://{user}@{host}:21"
+    try:
+        ftp = ftplib.FTP(timeout=PROBE_FTP_TIMEOUT_SECS)
+        ftp.connect(host, 21, timeout=PROBE_FTP_TIMEOUT_SECS)
+        ftp.login(user, passwd)
+        eligible_items = 0
+        for rel_dir in FREEBOX_FTP_ELIGIBLE_DIRS:
+            try:
+                ftp.cwd(f"/{rel_dir}")
+                parsed = _parse_ftp_directory_items(ftp, rel_dir)
+                eligible_items += len(
+                    [it for it in parsed if str(it.get("name", "")).lower() not in EXCLUDED_FREEBOX_DIR_NAMES]
+                )
+            except Exception:
+                continue
+        ftp.quit()
+        dt_ms = (time.perf_counter() - t0) * MILLIS_PER_SEC
+        has_items = eligible_items > 0
+        return {
+            "name": name,
+            "protocol": "ftp",
+            "target": target_uri,
+            "accessible": has_items,
+            "status": "online" if has_items else "empty",
+            "latency_ms": round(dt_ms, 1),
+            "files_count": eligible_items,
+            "reason": (
+                f"{eligible_items} éléments éligibles listés via FTP"
+                if has_items
+                else "Aucun média éligible listé via FTP"
+            ),
+        }
+    except Exception as err:
+        dt_ms = (time.perf_counter() - t0) * MILLIS_PER_SEC
+        err_msg = "Hôte LAN inaccessible (hors réseau domestique)" if "mafreebox" in host else str(err)
+        return {
+            "name": name,
+            "protocol": "ftp",
+            "target": target_uri,
+            "accessible": False,
+            "status": "offline",
+            "latency_ms": round(dt_ms, 1),
+            "files_count": 0,
+            "reason": err_msg,
+        }
+
+
 def _probe_freebox(profile_id: str) -> Dict[str, Any] | None:
-    """Dispatches probes for Freebox sources."""
-    if profile_id == "disque1":
-        return probe_local_fs_profile("Montage CIFS Disque 1", _user_media_path("Freebox", "Disque_1"))
-    if profile_id == "disque2":
-        return probe_local_fs_profile("Montage CIFS Disque 2", _user_media_path("Freebox", "Disque_2"))
-    if profile_id == "rpi4_disque1":
-        return probe_local_fs_profile("Montage CIFS RPi4 Disque 1", "/mnt/freebox/Disque_1")
-    if profile_id == "rpi4_disque2":
-        return probe_local_fs_profile("Montage CIFS RPi4 Disque 2", "/mnt/freebox/Disque_2")
+    """Dispatches probes for Freebox sources across all 3 SSOT disks and gateways."""
+    cifs_hit = _resolve_freebox_cifs_mount(profile_id)
+    if cifs_hit is not None:
+        return probe_local_fs_profile(cifs_hit[0], cifs_hit[1], is_cifs=True)
     if profile_id == "lan_ftp":
         passwd = resolve_freebox_password()
-        return probe_ftp_profile("FTP LAN Freebox", DEFAULT_FREEBOX_HOST, DEFAULT_FREEBOX_USER, passwd, "/")
+        return probe_freebox_ftp_profile("FTP LAN Freebox", DEFAULT_FREEBOX_HOST, DEFAULT_FREEBOX_USER, passwd)
     if profile_id == "lan_http":
         return probe_http_gateway_profile("Passerelle HTTP LAN (RPi4)", DEFAULT_GATEWAY_LAN_URL)
     if profile_id == "wan_http":
@@ -767,7 +983,7 @@ def execute_single_probe(source_id: str, profile_id: str) -> Dict[str, Any]:
             return res
 
     if source_id == "local-snippets" and profile_id == "local":
-        return probe_local_fs_profile("Système de Fichiers Local", "data/snippets")
+        return probe_local_fs_profile("Système de Fichiers Local", str(_resolve_data_path("data/snippets")))
 
     return {
         "accessible": False,
@@ -784,6 +1000,8 @@ def _scan_local_directory(target_dir: Path, clean_sub: str) -> list[dict[str, An
         return items
     try:
         for entry in os.scandir(target_dir):
+            if entry.name.startswith(".") or entry.name.lower() in EXCLUDED_FREEBOX_DIR_NAMES:
+                continue
             rel = entry.name if not clean_sub else f"{clean_sub}/{entry.name}"
             stat = entry.stat()
             mtime_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stat.st_mtime))
@@ -821,7 +1039,7 @@ def _scan_local_directory(target_dir: Path, clean_sub: str) -> list[dict[str, An
 
 def _parse_mlsd_item(name: str, facts: dict[str, Any], clean_sub: str) -> dict[str, Any] | None:
     """Parses a single MLSD item into an entry dict or None if filtered out."""
-    if name in (".", "..", ".Trash-1000", "@eaDir"):
+    if _is_excluded_portal_entry(name):
         return None
     rel = name if not clean_sub else f"{clean_sub}/{name}"
     ftype = facts.get("type", "file")
@@ -858,7 +1076,7 @@ def _parse_mlsd_item(name: str, facts: dict[str, Any], clean_sub: str) -> dict[s
 
 def _parse_nlst_item(name: str, clean_sub: str) -> dict[str, Any] | None:
     """Parses a fallback NLST item into an entry dict or None if filtered out."""
-    if name in (".", "..", ".Trash-1000", "@eaDir"):
+    if _is_excluded_portal_entry(name):
         return None
     rel = name if not clean_sub else f"{clean_sub}/{name}"
     ext = Path(name).suffix.lower()
@@ -884,7 +1102,7 @@ def _parse_ftp_list_line(line: str, clean_sub: str) -> dict[str, Any] | None:
     if not m:
         return None
     perms, size_str, name = m.groups()
-    if name in (".", "..", ".Trash-1000", "@eaDir"):
+    if _is_excluded_portal_entry(name):
         return None
     rel = name if not clean_sub else f"{clean_sub}/{name}"
     is_dir = perms.startswith("d")
@@ -951,19 +1169,19 @@ def _parse_ftp_directory_items(ftp: ftplib.FTP, clean_sub: str) -> list[dict[str
 
 
 def _fetch_cifs_items(source_id: str, profile_id: str, clean_sub: str) -> tuple[str, str, str, list[dict[str, Any]]]:
-    """Resolves CIFS mount directory and scans files."""
+    """Resolves CIFS mount directory and scans files safely."""
     if source_id == "synology-video":
-        mount_path = _user_media_path("Synology", "video")
-        chan_name = "Montage CIFS Local"
+        chan_name, mount_path = "Montage CIFS Local", _user_media_path("Synology", "video")
     elif source_id == "synology-tvshow":
-        mount_path = _user_media_path("Synology", "tvshow")
-        chan_name = "Montage CIFS Local"
-    elif profile_id == "disque1":
-        mount_path = _user_media_path("Freebox", "Disque_1")
-        chan_name = "Montage CIFS Disque 1"
+        chan_name, mount_path = "Montage CIFS Local", _user_media_path("Synology", "tvshow")
     else:
-        mount_path = _user_media_path("Freebox", "Disque_2")
-        chan_name = "Montage CIFS Disque 2"
+        cifs_hit = _resolve_freebox_cifs_mount(profile_id)
+        if cifs_hit is None:
+            return "Inconnu", "unknown", "", []
+        chan_name, mount_path = cifs_hit
+
+    if not _is_cifs_safe_to_stat():
+        return chan_name, "local_fs", mount_path, []
 
     base_dir = Path(mount_path)
     target_dir = base_dir if not clean_sub else base_dir / clean_sub
@@ -995,60 +1213,128 @@ def _fetch_synology_ftp_items(
     return chan_name, "ftp", base_target, items
 
 
+def _is_eligible_freebox_ftp_subpath(clean_sub: str) -> bool:
+    """Checks that a Freebox FTP subpath lies inside an official library and avoids excluded folders."""
+    norm_sub = unicodedata.normalize("NFC", clean_sub.strip("/"))
+    if not any(norm_sub == p or norm_sub.startswith(f"{p}/") for p in FREEBOX_FTP_ELIGIBLE_DIRS):
+        return False
+    return not any(part.lower() in EXCLUDED_FREEBOX_DIR_NAMES for part in norm_sub.split("/"))
+
+
 def _fetch_freebox_ftp_items(clean_sub: str) -> tuple[str, str, str, list[dict[str, Any]]]:
-    """Retrieves items via FTP from Freebox root or subfolder."""
-    passwd = resolve_freebox_password()
+    """Retrieves items via FTP from Freebox strictly scoped to official media libraries."""
     chan_name = "FTP LAN Freebox"
     base_target = f"ftp://{DEFAULT_FREEBOX_USER}@{DEFAULT_FREEBOX_HOST}:21"
+    if not clean_sub:
+        root_dirs = [
+            {
+                "name": rel_dir,
+                "path": rel_dir,
+                "size_bytes": 0,
+                "size_human": "-",
+                "is_dir": True,
+                "modify": "",
+                "extension": "",
+                "parsed": {"title": rel_dir},
+            }
+            for rel_dir in FREEBOX_FTP_ELIGIBLE_DIRS
+        ]
+        return chan_name, "ftp", base_target, root_dirs
+
+    if not _is_eligible_freebox_ftp_subpath(clean_sub):
+        return chan_name, "ftp", base_target, []
+
+    passwd = resolve_freebox_password()
     items: list[dict[str, Any]] = []
     try:
         ftp = ftplib.FTP(timeout=PROBE_FTP_TIMEOUT_SECS * 2)
         ftp.connect(DEFAULT_FREEBOX_HOST, 21, timeout=PROBE_FTP_TIMEOUT_SECS * 2)
         ftp.login(DEFAULT_FREEBOX_USER, passwd)
-        if clean_sub:
-            ftp.cwd(clean_sub)
-        items = _parse_ftp_directory_items(ftp, clean_sub)
+        ftp.cwd(f"/{clean_sub.strip('/')}")
+        raw_items = _parse_ftp_directory_items(ftp, clean_sub)
+        items = [it for it in raw_items if str(it.get("name", "")).lower() not in EXCLUDED_FREEBOX_DIR_NAMES]
         ftp.quit()
     except Exception:
         pass
     return chan_name, "ftp", base_target, items
 
 
+def _fetch_gateway_catalog_http(base_target: str) -> list[dict[str, Any]]:
+    """Queries live GET /catalog from the Freebox HTTP Range Gateway."""
+    catalog_url = f"{base_target.rstrip('/')}/catalog"
+    try:
+        req = urllib.request.Request(catalog_url, headers={"User-Agent": "dbsrt-portal/1.0"})
+        with urllib.request.urlopen(req, timeout=GATEWAY_CATALOG_TIMEOUT_SECS) as resp:
+            if resp.headers.get_content_type() != "application/json":
+                return []
+            payload = json.loads(resp.read().decode("utf-8"))
+            raw_items = payload.get("items", []) if isinstance(payload, dict) else []
+            return raw_items if isinstance(raw_items, list) else []
+    except Exception:
+        return []
+
+
+def _load_cached_freebox_targets_list() -> list[dict[str, Any]]:
+    """Loads fallback target descriptors from freebox_batch_targets.json when non-empty."""
+    targets_file = _resolve_data_path("data/reports/freebox_batch_targets.json")
+    if not targets_file.is_file():
+        return []
+    try:
+        parsed = json.loads(targets_file.read_text(encoding="utf-8"))
+        return parsed if isinstance(parsed, list) else []
+    except (OSError, ValueError, TypeError):
+        return []
+
+
+def _has_isolated_cwd_targets_override() -> bool:
+    """True when running in an isolated test CWD containing a non-empty freebox_batch_targets.json."""
+    try:
+        if Path.cwd().resolve() == REPO_ROOT.resolve():
+            return False
+    except OSError:
+        return False
+    cwd_targets = Path("data/reports/freebox_batch_targets.json")
+    return cwd_targets.is_file() and _count_cached_freebox_targets() > 0
+
+
+def _format_gateway_target_item(t: dict[str, Any], norm_sub: str) -> dict[str, Any] | None:
+    """Formats a single Freebox gateway /catalog item when matching subdir filter."""
+    rel_p = str(t.get("path", ""))
+    if not rel_p or (norm_sub and not unicodedata.normalize("NFC", rel_p).startswith(norm_sub)):
+        return None
+    fname = str(t.get("filename") or Path(rel_p).name)
+    sb = int(t.get("size_bytes", 0) or 0)
+    mtime_raw = int(t.get("mtime", 0) or 0)
+    mod_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(mtime_raw)) if mtime_raw > 0 else "-"
+    return {
+        "name": fname,
+        "path": rel_p,
+        "size_bytes": sb,
+        "size_human": format_human_size(sb) if sb > 0 else "-",
+        "is_dir": False,
+        "modify": mod_str,
+        "extension": Path(fname).suffix.lower(),
+        "parsed": parse_media_filename(fname),
+    }
+
+
 def _fetch_freebox_http_gateway_items(profile_id: str, clean_sub: str) -> tuple[str, str, str, list[dict[str, Any]]]:
-    """Retrieves items from local cached catalog of Freebox files for HTTP gateway."""
-    targets_file = Path("data/reports/freebox_batch_targets.json")
-    items: list[dict[str, Any]] = []
-    if targets_file.is_file():
-        try:
-            targets = json.loads(targets_file.read_text(encoding="utf-8"))
-            for t in targets:
-                rel_p = t.get("path", "")
-                if clean_sub and not rel_p.startswith(clean_sub):
-                    continue
-                fname = t.get("filename", Path(rel_p).name)
-                ext = Path(fname).suffix.lower()
-                sb = t.get("size_bytes", 0)
-                items.append(
-                    {
-                        "name": fname,
-                        "path": rel_p,
-                        "size_bytes": sb,
-                        "size_human": format_human_size(sb) if sb > 0 else "-",
-                        "is_dir": False,
-                        "modify": "-",
-                        "extension": ext,
-                        "parsed": parse_media_filename(fname),
-                    }
-                )
-        except Exception:
-            pass
+    """Retrieves eligible Freebox media items from live gateway /catalog with local JSON fallback."""
     tgt_map = {
         "wan_http": ("Passerelle HTTP WAN", DEFAULT_GATEWAY_WAN_URL.replace("/health", "")),
         "lan_http": ("Passerelle HTTP LAN (RPi4)", DEFAULT_GATEWAY_LAN_URL.replace("/health", "")),
     }
     chan_name, base_tgt = tgt_map.get(
-        profile_id, ("Passerelle HTTP", f"http://127.0.0.1:{DEFAULT_FREEBOX_GATEWAY_PORT}")
+        profile_id, ("Passerelle HTTP Locale (RPi4)", f"http://127.0.0.1:{DEFAULT_FREEBOX_GATEWAY_PORT}")
     )
+
+    if _has_isolated_cwd_targets_override():
+        targets = _load_cached_freebox_targets_list()
+    else:
+        targets = _fetch_gateway_catalog_http(base_tgt) or _load_cached_freebox_targets_list()
+
+    norm_sub = unicodedata.normalize("NFC", clean_sub)
+    items = [fmt for t in targets if (fmt := _format_gateway_target_item(t, norm_sub)) is not None]
     return chan_name, "http_gateway", base_tgt, items
 
 
@@ -1064,13 +1350,13 @@ def _fetch_raw_file_list(
 
     # 1. Local snippets
     if source_id == "local-snippets" and profile_id == "local":
-        base_dir = Path("data/snippets")
+        base_dir = _resolve_data_path("data/snippets")
         target_dir = base_dir if not clean_sub else base_dir / clean_sub
         items = _scan_local_directory(target_dir, clean_sub)
         return "Système de Fichiers Local", "local_fs", str(base_dir), items
 
-    # 2. Local CIFS mounts
-    if profile_id in ("cifs", "disque1", "disque2"):
+    # 2. Local or RPi4 CIFS mounts (Synology & all 3 Freebox disks)
+    if profile_id == "cifs" or _resolve_freebox_cifs_mount(profile_id) is not None:
         return _fetch_cifs_items(source_id, profile_id, clean_sub)
 
     # 3. FTP (Synology LAN/WAN)
@@ -1210,10 +1496,15 @@ def _resolve_synology_endpoint(source_id: str, profile_id: str, clean_path: str)
 
 
 def _resolve_freebox_endpoint(profile_id: str, clean_path: str) -> tuple[bool, bool, str, str, str]:
-    """Resolves local CIFS, LAN FTP, or HTTP range gateway for Freebox media."""
-    if profile_id in ("disque1", "disque2"):
-        sub = "Disque_1" if profile_id == "disque1" else "Disque_2"
-        return True, False, str(Path(_user_media_path("Freebox", sub)) / clean_path), "", ""
+    """Resolves local/RPi4 CIFS, LAN FTP, or HTTP range gateway for Freebox media."""
+    cifs_hit = _resolve_freebox_cifs_mount(profile_id)
+    if cifs_hit is not None:
+        mount_dir = Path(cifs_hit[1])
+        leaf_prefix = f"{mount_dir.name}/"
+        norm_clean = unicodedata.normalize("NFC", clean_path)
+        norm_prefix = unicodedata.normalize("NFC", leaf_prefix)
+        rel_sub = clean_path[len(leaf_prefix) :] if norm_clean.startswith(norm_prefix) else clean_path
+        return True, False, str(mount_dir / rel_sub), "", ""
     if profile_id == "lan_ftp":
         return False, True, "", f"ftp://{DEFAULT_FREEBOX_HOST}:21/{clean_path}", resolve_freebox_password()
     quoted_path = "/".join(urllib.parse.quote(seg) for seg in clean_path.split("/"))
@@ -1229,7 +1520,7 @@ def _resolve_freebox_endpoint(profile_id: str, clean_path: str) -> tuple[bool, b
 def _resolve_target_endpoint(source_id: str, profile_id: str, clean_path: str) -> tuple[bool, bool, str, str, str]:
     """Resolves local vs remote target path, ftp url, and credentials."""
     if source_id == "local-snippets" and profile_id == "local":
-        return True, False, str(Path("data/snippets") / clean_path), "", ""
+        return True, False, str(_resolve_data_path("data/snippets") / clean_path), "", ""
     if source_id in ("synology-video", "synology-tvshow"):
         return _resolve_synology_endpoint(source_id, profile_id, clean_path)
     if source_id == "freebox-disks":
@@ -1973,6 +2264,7 @@ class PhashReconciliationContext:
     """Context holding sidecars and PostgreSQL lookups for fast tripartite alignment."""
 
     sidecars: dict[str, dict[str, Any]] = field(default_factory=dict)
+    sidecar_name_index: dict[str, str] = field(default_factory=dict)
     pg_medias: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
@@ -2146,16 +2438,52 @@ def _query_pg_medias_lookup() -> tuple[dict[str, dict[str, Any]], int, int]:
     return _query_pg_medias_cli()
 
 
-def _resolve_phash_moviehash(filename: str, sidecars: dict[str, dict[str, Any]]) -> str | None:
-    """Extracts 16-hex moviehash from filename or sidecars."""
+def _is_valid_moviehash_hex(candidate: str) -> bool:
+    """Returns True when candidate is an exact 16-char hexadecimal OpenSubtitles moviehash."""
+    return len(candidate) == MOVIEHASH_HEX_LENGTH and all(c in HEX_ALPHABET for c in candidate)
+
+
+def _normalize_phash_media_stem(raw_name: str) -> str:
+    """Normalizes a .phash or media filename to an NFC lowercased stem without .phash or .fps tags."""
+    decoded = unicodedata.normalize("NFC", urllib.parse.unquote(raw_name)).strip().lower()
+    if decoded.endswith(".phash"):
+        decoded = decoded[: -len(".phash")]
+    return RE_TRAILING_FPS_TAG.sub("", decoded)
+
+
+def _build_sidecar_name_index(sidecars: dict[str, dict[str, Any]]) -> dict[str, str]:
+    """Builds an O(1) exact stem -> moviehash lookup table without substring false-positives."""
+    index: dict[str, str] = {}
+    for key_stem, sc in sidecars.items():
+        mhash_raw = str(sc.get("moviehash") or key_stem).strip().lower()
+        if not _is_valid_moviehash_hex(mhash_raw):
+            continue
+        mname = str(sc.get("media_name") or "").strip()
+        if not mname:
+            continue
+        norm_full = _normalize_phash_media_stem(mname)
+        if norm_full:
+            index.setdefault(norm_full, mhash_raw)
+            bare_stem = Path(norm_full).stem
+            if len(bare_stem) >= MIN_SIDECAR_STEM_LENGTH:
+                index.setdefault(bare_stem, mhash_raw)
+    return index
+
+
+def _resolve_phash_moviehash(
+    filename: str,
+    sidecars: dict[str, dict[str, Any]],
+    sidecar_name_index: dict[str, str] | None = None,
+) -> str | None:
+    """Extracts 16-hex moviehash from filename or exact normalized sidecar match."""
     stem = filename.split(".")[0]
-    if len(stem) == 16 and all(c in "0123456789abcdefABCDEF" for c in stem):
+    if _is_valid_moviehash_hex(stem):
         return stem.lower()
-    for mhash, sc in sidecars.items():
-        mname = sc.get("media_name", "")
-        if mname and (mname in filename or filename in mname):
-            return mhash.lower()
-    return None
+    lookup = sidecar_name_index if sidecar_name_index is not None else _build_sidecar_name_index(sidecars)
+    norm_name = _normalize_phash_media_stem(filename)
+    if not norm_name:
+        return None
+    return lookup.get(norm_name) or lookup.get(Path(norm_name).stem)
 
 
 def _lookup_pg_record(mhash: str | None, raw_fname: str, pg_medias: dict[str, dict[str, Any]]) -> dict[str, Any] | None:
@@ -2214,7 +2542,7 @@ def _build_reconciled_phash_item(
 ) -> dict[str, Any]:
     """Builds a single reconciled tripartite item descriptor from raw file, catalog entry, and PG context."""
     raw_fname, raw_size, raw_fc = _extract_raw_file_specs(raw_p)
-    mhash = _resolve_phash_moviehash(raw_fname, ctx.sidecars) if raw_fname else None
+    mhash = _resolve_phash_moviehash(raw_fname, ctx.sidecars, ctx.sidecar_name_index) if raw_fname else None
     pg_record = _lookup_pg_record(mhash, raw_fname, ctx.pg_medias)
 
     title, fps, fc, dur_ms, cuts_c, sparse_c = _compute_catalog_specs(cat_e, raw_fc, raw_fname)
@@ -2256,31 +2584,43 @@ def get_phash_tripartite_summary() -> tuple[list[dict[str, Any]], dict[str, Any]
         if _PHASHES_AUDIT_CACHE and (now - _PHASHES_AUDIT_CACHE[0]) < PHASHES_CACHE_TTL_SECONDS:
             return _PHASHES_AUDIT_CACHE[1], _PHASHES_AUDIT_CACHE[2]
 
-    phash_dir = Path(__file__).resolve().parents[1] / "data" / "__PHASH__"
-    cat_path = Path(__file__).resolve().parents[1] / "data" / "catalog.dbphash"
+    phash_dir = _resolve_data_path("data/__PHASH__")
+    cat_path = _resolve_data_path("data/catalog.dbphash")
 
     raw_files = sorted(list(phash_dir.glob("*.phash")), key=lambda p: p.name) if phash_dir.is_dir() else []
     sidecars = _load_phash_sidecars(phash_dir)
+    sidecar_name_index = _build_sidecar_name_index(sidecars)
     hdr, cat_items = _read_catalog_dbphash(cat_path)
     pg_medias, total_pg_medias, frames_table_count = _query_pg_medias_lookup()
 
-    ctx = PhashReconciliationContext(sidecars=sidecars, pg_medias=pg_medias)
+    ctx = PhashReconciliationContext(
+        sidecars=sidecars,
+        sidecar_name_index=sidecar_name_index,
+        pg_medias=pg_medias,
+    )
     total_raw_bytes = sum(p.stat().st_size for p in raw_files)
     catalog_bytes = hdr.get("file_size", 0)
 
     reconciled: list[dict[str, Any]] = []
     aligned_3_3_count = 0
     missing_pg_count = 0
+    uncompiled_count = 0
+    orphan_catalog_count = 0
 
     max_len = max(len(raw_files), len(cat_items))
     for idx in range(max_len):
         raw_p = raw_files[idx] if idx < len(raw_files) else None
         cat_e = cat_items[idx] if idx < len(cat_items) else None
         item = _build_reconciled_phash_item(raw_p, cat_e, idx, ctx)
-        if item["integrity_status"] == "aligned_3_3":
+        status_val = item["integrity_status"]
+        if status_val == "aligned_3_3":
             aligned_3_3_count += 1
-        elif item["integrity_status"] == "missing_pg":
+        elif status_val == "missing_pg":
             missing_pg_count += 1
+        elif status_val == "uncompiled":
+            uncompiled_count += 1
+        elif status_val == "orphan_catalog":
+            orphan_catalog_count += 1
         reconciled.append(item)
 
     summary = {
@@ -2296,8 +2636,8 @@ def get_phash_tripartite_summary() -> tuple[list[dict[str, Any]], dict[str, Any]
         "pg_frames_total": frames_table_count,
         "aligned_3_3": aligned_3_3_count,
         "missing_pg": missing_pg_count,
-        "uncompiled": 0,
-        "orphan_catalog": 0,
+        "uncompiled": uncompiled_count,
+        "orphan_catalog": orphan_catalog_count,
     }
 
     with _CACHE_LOCK:
@@ -2358,32 +2698,71 @@ def query_phashes_list(criteria: PhashesQueryCriteria) -> dict[str, Any]:
     }
 
 
+def _resolve_phash_via_sidecar_json(phash_dir: Path, safe_prefix: str, raw_base: str) -> Path | None:
+    """Resolves a legacy-named .phash file referenced inside <moviehash>.json sidecar."""
+    if not _is_valid_moviehash_hex(safe_prefix):
+        return None
+    sc_path = phash_dir / f"{safe_prefix.lower()}.json"
+    if not sc_path.is_file():
+        return None
+    try:
+        sc_data = json.loads(sc_path.read_text(encoding="utf-8"))
+        ref_name = str(sc_data.get("phash_file") or sc_data.get("media_name") or "").strip()
+        if ref_name and ref_name != raw_base:
+            return _resolve_target_phash_file(ref_name)
+    except Exception:
+        return None
+    return None
+
+
+def _resolve_phash_by_moviehash_prefix(phash_dir: Path, raw_base: str) -> Path | None:
+    """Resolves a .phash file by 16-hex moviehash prefix or sidecar JSON reference."""
+    stem_head = raw_base.split(".")[0].strip()
+    safe_prefix = re.sub(r"[^a-zA-Z0-9_-]", "", stem_head)
+    if not safe_prefix:
+        return None
+    phash_root = phash_dir.resolve()
+    try:
+        matches = sorted(phash_dir.glob(f"{safe_prefix}*.phash"), key=lambda p: p.name)
+    except OSError:
+        matches = []
+    for match in matches:
+        try:
+            resolved = match.resolve()
+            if phash_root in resolved.parents and resolved.is_file():
+                return resolved
+        except OSError:
+            continue
+    return _resolve_phash_via_sidecar_json(phash_dir, safe_prefix, raw_base)
+
+
 def _resolve_target_phash_file(identifier: str) -> Path | None:
-    """Locates a .phash file in __PHASH__ directory by exact filename, decoded name, or moviehash prefix."""
+    """Locates a .phash file safely across Unicode NFC/NFD, percent-encoded names, or moviehash."""
     if not identifier:
         return None
-    phash_dir = (Path(__file__).resolve().parents[1] / "data" / "__PHASH__").resolve()
-    base = Path(identifier).name
-    candidates_names = [
-        base,
-        urllib.parse.unquote(base),
-        urllib.parse.quote(base),
-        urllib.parse.quote(urllib.parse.unquote(base)),
-    ]
-    for cname in candidates_names:
-        clean = re.sub(r"[^a-zA-Z0-9_.% -]", "", cname)
-        if not clean or ".." in clean:
-            continue
-        candidate = (phash_dir / clean).resolve()
-        if phash_dir in candidate.parents and candidate.is_file():
-            return candidate
+    cleaned_ident = identifier.strip()
+    if cleaned_ident.startswith("data/__PHASH__/"):
+        cleaned_ident = cleaned_ident[len("data/__PHASH__/") :]
+    if "/" in cleaned_ident or "\\" in cleaned_ident or cleaned_ident in (".", ".."):
+        return None
 
-    prefix = re.sub(r"[^a-zA-Z0-9_-]", "", base.split(".")[0])
-    if prefix:
-        matches = list(phash_dir.glob(f"{prefix}*.phash"))
-        if matches and phash_dir in matches[0].resolve().parents and matches[0].is_file():
-            return matches[0]
-    return None
+    phash_dir_raw = _resolve_data_path("data/__PHASH__")
+    if not phash_dir_raw.is_dir():
+        return None
+    data_root = phash_dir_raw.parent
+    phash_dir = phash_dir_raw.resolve()
+
+    name_variants = [cleaned_ident]
+    if not cleaned_ident.lower().endswith(".phash"):
+        name_variants.append(f"{cleaned_ident}.phash")
+
+    for variant in name_variants:
+        if len(variant.encode("utf-8")) <= MAX_FILENAME_UTF8_BYTES:
+            hit, _reason, _code = resolve_local_artifact_download(data_root, "phash", variant)
+            if hit is not None and hit.is_file():
+                return hit
+
+    return _resolve_phash_by_moviehash_prefix(phash_dir, cleaned_ident)
 
 
 def _compute_entropy_and_mobility(
@@ -2493,14 +2872,31 @@ def _detect_phash_cuts_and_entropy(
     return mean_pop, entropy_pct, distribution, sampled_cuts, total_cuts_count, timeline, delta_dist, mean_delta
 
 
-def inspect_phash_microscopic(identifier: str) -> dict[str, Any]:
+def _parse_phash_filename_fps(filename: str) -> float:
+    """Extracts FPS from a .phash filename or falls back to DEFAULT_BASELINE_FPS."""
+    fps_m = RE_FPS.search(filename)
+    if not fps_m:
+        return DEFAULT_BASELINE_FPS
+    try:
+        fps_val = float(fps_m.group(1))
+        return fps_val if fps_val > 0.0 else DEFAULT_BASELINE_FPS
+    except ValueError:
+        return DEFAULT_BASELINE_FPS
+
+
+def inspect_phash_microscopic(identifier: str, fallback_identifier: str = "") -> dict[str, Any]:
     """Performs deep microscopic frame-by-frame inspection of a single .phash file."""
-    if not identifier:
+    primary = identifier.strip()
+    secondary = fallback_identifier.strip()
+    if not primary and not secondary:
         return {"status": "error", "message": "Identifiant moviehash ou nom de fichier requis"}
 
-    target_file = _resolve_target_phash_file(identifier)
+    target_file = _resolve_target_phash_file(primary) if primary else None
+    if (not target_file or not target_file.is_file()) and secondary and secondary != primary:
+        target_file = _resolve_target_phash_file(secondary)
     if not target_file or not target_file.is_file():
-        return {"status": "not_found", "message": f"Fichier .phash pour '{identifier}' introuvable sur disque"}
+        label = primary or secondary
+        return {"status": "not_found", "message": f"Fichier .phash pour '{label}' introuvable sur disque"}
 
     raw_bytes = target_file.read_bytes()
     fc = len(raw_bytes) // PHASH_FRAME_BYTES
@@ -2508,15 +2904,7 @@ def inspect_phash_microscopic(identifier: str) -> dict[str, Any]:
         return {"status": "error", "message": "Fichier .phash vide"}
 
     hashes = struct.unpack(f">{fc}Q", raw_bytes)
-    fps = DEFAULT_BASELINE_FPS
-    fps_m = RE_FPS.search(target_file.name)
-    if fps_m:
-        try:
-            fps_val = float(fps_m.group(1))
-            if fps_val > 0.0:
-                fps = fps_val
-        except ValueError:
-            pass
+    fps = _parse_phash_filename_fps(target_file.name)
 
     mean_pop, entropy_pct, distribution, cuts, total_cuts_count, timeline, delta_dist, mean_delta = (
         _detect_phash_cuts_and_entropy(hashes, fps)
@@ -2605,6 +2993,7 @@ def _resolve_phash_target_title(target_media: str, target_path: str) -> str:
         cand_p = Path(target_path)
         candidates.append(cand_p.with_suffix(".json"))
         candidates.append(cand_p.parent / f"{moviehash}.json")
+    candidates.append(_resolve_data_path("data/__PHASH__") / f"{moviehash}.json")
     candidates.append(DEFAULT_TRAJECTORY_ROOT_DIR / "__PHASH__" / f"{moviehash}.json")
     candidates.append(DEFAULT_TRAJECTORY_ROOT_DIR / f"{moviehash}.json")
 
@@ -2645,13 +3034,23 @@ def _is_valid_trajectory_file(path: Path) -> bool:
     return False
 
 
+def _active_trajectory_dirs() -> tuple[Path, Path]:
+    """Resolves trajectory audit and root report directories across CWD overrides and REPO_ROOT."""
+    traj_dir = DEFAULT_TRAJECTORY_DIR if DEFAULT_TRAJECTORY_DIR.is_dir() else _resolve_data_path("data/reports/audit")
+    root_dir = (
+        DEFAULT_TRAJECTORY_ROOT_DIR if DEFAULT_TRAJECTORY_ROOT_DIR.is_dir() else _resolve_data_path("data/reports")
+    )
+    return traj_dir, root_dir
+
+
 def list_trajectory_audit_files() -> list[dict[str, Any]]:
     """Scans and lists available trajectory tracking audit JSONL files."""
+    traj_dir, root_dir = _active_trajectory_dirs()
     candidates: list[Path] = []
-    if DEFAULT_TRAJECTORY_DIR.is_dir():
-        candidates.extend(DEFAULT_TRAJECTORY_DIR.glob("*.jsonl"))
-    if DEFAULT_TRAJECTORY_ROOT_DIR.is_dir():
-        candidates.extend(DEFAULT_TRAJECTORY_ROOT_DIR.glob("*trajectory*.jsonl"))
+    if traj_dir.is_dir():
+        candidates.extend(traj_dir.glob("*.jsonl"))
+    if root_dir.is_dir():
+        candidates.extend(root_dir.glob("*trajectory*.jsonl"))
 
     results: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -2684,11 +3083,12 @@ def list_trajectory_audit_files() -> list[dict[str, Any]]:
 
 
 def _resolve_trajectory_file(file_name: str) -> Path | None:
+    traj_dir, root_dir = _active_trajectory_dirs()
     if file_name:
-        cand1 = DEFAULT_TRAJECTORY_DIR / file_name
+        cand1 = traj_dir / file_name
         if cand1.is_file():
             return cand1
-        cand2 = DEFAULT_TRAJECTORY_ROOT_DIR / file_name
+        cand2 = root_dir / file_name
         if cand2.is_file():
             return cand2
     files = list_trajectory_audit_files()
@@ -3055,7 +3455,48 @@ class PortalRequestHandler(http.server.SimpleHTTPRequestHandler):
             return True
         return False
 
+    def _stream_artifact_download(self, query: dict[str, list[str]]) -> None:
+        """Streams a validated .phash, .ahash, sidecar .json, or couplings.json artifact."""
+        kind = query.get("kind", [""])[0]
+        filename = query.get("file", [""])[0]
+        artifact_path, reason, status_code = resolve_local_artifact_download(REPO_ROOT / "data", kind, filename)
+        if artifact_path is None:
+            self._send_json({"error": reason, "kind": kind, "file": filename}, status=status_code)
+            return
+
+        hasher = hashlib.sha256()
+        with artifact_path.open("rb") as fh_hash:
+            while True:
+                blk = fh_hash.read(ARTIFACT_STREAM_CHUNK_BYTES)
+                if not blk:
+                    break
+                hasher.update(blk)
+        file_size = artifact_path.stat().st_size
+
+        ascii_fallback = re.sub(r"[^A-Za-z0-9._-]", "_", artifact_path.name)
+        utf8_quoted = urllib.parse.quote(artifact_path.name, safe="")
+        self.send_response(HTTP_OK)
+        self.send_header("Content-Type", "application/octet-stream")
+        self.send_header("Content-Length", str(file_size))
+        self.send_header(
+            "Content-Disposition",
+            f"attachment; filename=\"{ascii_fallback}\"; filename*=UTF-8''{utf8_quoted}",
+        )
+        self.send_header("X-Checksum-SHA256", hasher.hexdigest())
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+
+        with artifact_path.open("rb") as fh_out:
+            while True:
+                chunk = fh_out.read(ARTIFACT_STREAM_CHUNK_BYTES)
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
+
     def _handle_api_phash_routes(self, path: str, query: dict[str, list[str]]) -> bool:
+        if path == "/api/artifact/download":
+            self._stream_artifact_download(query)
+            return True
         if path == "/api/phashes":
             p = int(query.get("page", ["1"])[0]) if query.get("page", ["1"])[0].isdigit() else 1
             l_val = (
@@ -3077,8 +3518,11 @@ class PortalRequestHandler(http.server.SimpleHTTPRequestHandler):
             self._send_json(result)
             return True
         if path == "/api/phash/details":
-            identifier = query.get("moviehash", [""])[0] or query.get("file", [""])[0]
-            result = inspect_phash_microscopic(identifier)
+            file_ident = query.get("file", [""])[0]
+            hash_ident = query.get("moviehash", [""])[0]
+            primary = file_ident or hash_ident
+            fallback = hash_ident if file_ident else ""
+            result = inspect_phash_microscopic(primary, fallback_identifier=fallback)
             status_code = HTTP_OK if result.get("status") == "ok" else HTTP_NOT_FOUND
             self._send_json(result, status=status_code)
             return True
@@ -3209,6 +3653,7 @@ if __name__ == "__main__":
     parser.add_argument("--force", action="store_true", help="Bypass cache and force fresh live probe")
     parser.add_argument("--phashes", action="store_true", help="List tripartite pHash fingerprints (JSON)")
     parser.add_argument("--phash-moviehash", default="", help="Inspect microscopic details of single phash")
+    parser.add_argument("--phash-fallback", default="", help="Secondary fallback moviehash for microscopic inspection")
     parser.add_argument(
         "--phash-filter",
         default="all",
@@ -3294,7 +3739,13 @@ if __name__ == "__main__":
         )
         print(json.dumps(query_phashes_list(phash_criteria), indent=2, default=str))
     elif args.phash_moviehash:
-        print(json.dumps(inspect_phash_microscopic(args.phash_moviehash), indent=2, default=str))
+        print(
+            json.dumps(
+                inspect_phash_microscopic(args.phash_moviehash, fallback_identifier=args.phash_fallback),
+                indent=2,
+                default=str,
+            )
+        )
     elif args.trajectory_files:
         print(json.dumps({"status": "ok", "files": list_trajectory_audit_files()}, indent=2, default=str))
     elif args.trajectories:

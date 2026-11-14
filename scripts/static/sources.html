@@ -4187,11 +4187,11 @@
         },
 
         async fetchTrajectories() {
+          this.trajectoriesLoading = true;
+          this.trajectoriesError = null;
           if (!this.trajectoriesActiveFile && this.trajectoriesFiles.length === 0) {
             await this.fetchTrajectoryFiles();
           }
-          this.trajectoriesLoading = true;
-          this.trajectoriesError = null;
           try {
             const params = new URLSearchParams({
               file: this.trajectoriesActiveFile,
@@ -4537,10 +4537,14 @@
           };
 
           try {
-            const queryParam = (item.moviehash && item.moviehash !== '—')
-              ? `moviehash=${item.moviehash}`
-              : `file=${encodeURIComponent(item.raw_filename)}`;
-            const url = this.getApiUrl('phash/details', queryParam);
+            const params = new URLSearchParams();
+            if (item.raw_filename) {
+              params.set('file', item.raw_filename);
+            }
+            if (item.moviehash && item.moviehash !== '—') {
+              params.set('moviehash', item.moviehash);
+            }
+            const url = this.getApiUrl('phash/details', params.toString());
             const res = await fetch(url);
             const data = await res.json();
             if (data.status === 'ok') {

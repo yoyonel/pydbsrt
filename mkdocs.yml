@@ -153,7 +153,7 @@ nav:
       - Valider le Portail Monitoring avec Playwright: how-to/valider-le-portail-monitoring-avec-playwright.md
       - Diagnostiquer Sources Médias Multi-Environnements: how-to/2026-11-09-diagnostiquer-sources-medias-multi-environnements.md
       - Auditer Actifs Médias & Intégrité pHash (PostgreSQL): how-to/2026-11-09-auditer-actifs-medias-et-integrite-phash-postgresql.md
-      - Résoudre Accès Données Multi-Réseaux (SSOT & Skill): how-to/2026-11-14-resoudre-acces-donnees-multi-reseaux-agent-skill.md
+      - Utiliser les Agent Skills par l'Exemple & Preuves Flash: how-to/2026-11-14-resoudre-acces-donnees-multi-reseaux-agent-skill.md
   - 📖 Référence Technique:
       - Index des Spécifications: reference/index.md
       - CLI Standalone Rust (dbsrt): reference/cli.md
@@ -226,6 +226,7 @@ nav:
       - Ingénierie, Profiling & Optimisation des Agent Skills: explanation/2026-11-14-methodologie-ingenierie-profiling-et-optimisation-agent-skills.md
   - 📊 Benchmarks & Preuves:
       - Campagnes Empiriques:
+          - Recette E2E Exhaustive Portails o2switch (44 Routes / 39 Captures): history/2026-11-14-recette-exhaustive-portails-o2switch.md
           - Rapport Batch TVShow Synology: history/2026-10-25-rapport-batch-import-tvshow-synology.md
           - Analyse Performance Décodage CPU vs Réseau (o2switch): history/2026-10-28-analyse-performance-decodage-cpu-vs-reseau-o2switch.md
           - Dashboard Interactif E2E VLC (1 336 Tests): history/2026-10-20-dashboard-interactif-e2e-vlc-corpus-nas.md

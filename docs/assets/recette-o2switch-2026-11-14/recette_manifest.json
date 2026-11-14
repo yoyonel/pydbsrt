@@ -1,0 +1,924 @@
+{
+  "target_url": "https://2026-pydbsrt.fr/dbsrt",
+  "started_at": "2026-11-14T19:49:26.089284+00:00",
+  "finished_at": "2026-11-14T19:50:48.669519+00:00",
+  "total_duration_sec": 82.58,
+  "viewport": "1920x1080",
+  "total_steps": 16,
+  "passed_steps": 16,
+  "console_errors_count": 0,
+  "console_errors": [],
+  "console_warnings_count": 6,
+  "endpoint_coverage": {
+    "total_declared": 44,
+    "covered_count": 44,
+    "coverage_pct": 100.0,
+    "uncovered": [],
+    "endpoints": [
+      {
+        "method": "OPTIONS",
+        "pattern": "/v1/health",
+        "portal": "Gateway",
+        "description": "CORS preflight 204 handler",
+        "hits": 1,
+        "statuses": [
+          204
+        ],
+        "covered": true
+      },
+      {
+        "method": "GET",
+        "pattern": "/sources",
+        "portal": "Sources",
+        "description": "Sources Médias & Observatoire SPA",
+        "hits": 2,
+        "statuses": [
+          200,
+          302
+        ],
+        "covered": true
+      },
+      {
+        "method": "GET",
+        "pattern": "/sources.html",
+        "portal": "Sources",
+        "description": "Sources SPA direct HTML alias",
+        "hits": 1,
+        "statuses": [
+          200
+        ],
+        "covered": true
+      },
+      {
+        "method": "GET",
+        "pattern": "/monitoring",
+        "portal": "Monitoring",
+        "description": "Monitoring & Web Top dashboard",
+        "hits": 4,
+        "statuses": [
+          200,
+          401
+        ],
+        "covered": true
+      },
+      {
+        "method": "POST",
+        "pattern": "/monitoring",
+        "portal": "Gateway",
+        "description": "HTML form API key login POST",
+        "hits": 2,
+        "statuses": [
+          302,
+          401
+        ],
+        "covered": true
+      },
+      {
+        "method": "GET",
+        "pattern": "/studio",
+        "portal": "Studio",
+        "description": "DBSrt Studio relational backoffice",
+        "hits": 1,
+        "statuses": [
+          200
+        ],
+        "covered": true
+      },
+      {
+        "method": "GET",
+        "pattern": "/top",
+        "portal": "Monitoring",
+        "description": "Web TUI Top alias route",
+        "hits": 1,
+        "statuses": [
+          200
+        ],
+        "covered": true
+      },
+      {
+        "method": "GET",
+        "pattern": "/logout",
+        "portal": "Gateway",
+        "description": "Session cookie revocation & redirect",
+        "hits": 1,
+        "statuses": [
+          302
+        ],
+        "covered": true
+      },
+      {
+        "method": "GET",
+        "pattern": "/favicon.ico",
+        "portal": "Gateway",
+        "description": "Inline SVG favicon handler",
+        "hits": 1,
+        "statuses": [
+          200
+        ],
+        "covered": true
+      },
+      {
+        "method": "GET",
+        "pattern": "/api/artifact/download",
+        "portal": "Gateway",
+        "description": "Zero-spawn binary artifact download",
+        "hits": 5,
+        "statuses": [
+          200,
+          400,
+          404,
+          406
+        ],
+        "covered": true
+      },
+      {
+        "method": "HEAD",
+        "pattern": "/api/artifact/download",
+        "portal": "Gateway",
+        "description": "Zero-spawn artifact SHA256 HEAD check",
+        "hits": 1,
+        "statuses": [
+          200
+        ],
+        "covered": true
+      },
+      {
+        "method": "GET",
+        "pattern": "/api/sources",
+        "portal": "Sources",
+        "description": "Host & storage channels metadata",
+        "hits": 1,
+        "statuses": [
+          200
+        ],
+        "covered": true
+      },
+      {
+        "method": "GET",
+        "pattern": "/api/probe",
+        "portal": "Sources",
+        "description": "Live channel accessibility probe",
+        "hits": 46,
+        "statuses": [
+          200
+        ],
+        "covered": true
+      },
+      {
+        "method": "GET",
+        "pattern": "/api/files",
+        "portal": "Sources",
+        "description": "Paginated container & directory listing",
+        "hits": 24,
+        "statuses": [
+          200
+        ],
+        "covered": true
+      },
+      {
+        "method": "GET",
+        "pattern": "/api/file/details",
+        "portal": "Sources",
+        "description": "Live remote ffprobe stream inspection",
+        "hits": 5,
+        "statuses": [
+          200
+        ],
+        "covered": true
+      },
+      {
+        "method": "GET",
+        "pattern": "/api/assets",
+        "portal": "Sources",
+        "description": "PostgreSQL media assets audit list",
+        "hits": 21,
+        "statuses": [
+          200
+        ],
+        "covered": true
+      },
+      {
+        "method": "GET",
+        "pattern": "/api/asset/details",
+        "portal": "Sources",
+        "description": "Single PostgreSQL asset deep inspection",
+        "hits": 1,
+        "statuses": [
+          200
+        ],
+        "covered": true
+      },
+      {
+        "method": "GET",
+        "pattern": "/api/phashes",
+        "portal": "Sources",
+        "description": "Tripartite RAW/Zero-DB/PG reconciliation",
+        "hits": 22,
+        "statuses": [
+          200
+        ],
+        "covered": true
+      },
+      {
+        "method": "GET",
+        "pattern": "/api/phash/details",
+        "portal": "Sources",
+        "description": "Microscopic pHash popcount & Δ(t) curve",
+        "hits": 4,
+        "statuses": [
+          200
+        ],
+        "covered": true
+      },
+      {
+        "method": "GET",
+        "pattern": "/api/trajectory/files",
+        "portal": "Sources",
+        "description": "Available JSONL trajectory audit reports",
+        "hits": 1,
+        "statuses": [
+          200
+        ],
+        "covered": true
+      },
+      {
+        "method": "GET",
+        "pattern": "/api/trajectories",
+        "portal": "Sources",
+        "description": "Paginated spatiotemporal trajectory KPIs & rows",
+        "hits": 17,
+        "statuses": [
+          200
+        ],
+        "covered": true
+      },
+      {
+        "method": "GET",
+        "pattern": "/api/trajectory/details",
+        "portal": "Sources",
+        "description": "Per-cut trajectory consensus breakdown",
+        "hits": 1,
+        "statuses": [
+          200
+        ],
+        "covered": true
+      },
+      {
+        "method": "GET",
+        "pattern": "/health",
+        "portal": "Daemon",
+        "description": "Root daemon healthcheck",
+        "hits": 1,
+        "statuses": [
+          200
+        ],
+        "covered": true
+      },
+      {
+        "method": "GET",
+        "pattern": "/v1/health",
+        "portal": "Daemon",
+        "description": "API v1 healthcheck",
+        "hits": 1,
+        "statuses": [
+          200
+        ],
+        "covered": true
+      },
+      {
+        "method": "GET",
+        "pattern": "/v1/status",
+        "portal": "Daemon",
+        "description": "Daemon index & sanitized status summary",
+        "hits": 1,
+        "statuses": [
+          200
+        ],
+        "covered": true
+      },
+      {
+        "method": "GET",
+        "pattern": "/v1/metrics",
+        "portal": "Daemon",
+        "description": "Daemon request & latency counters",
+        "hits": 2,
+        "statuses": [
+          200
+        ],
+        "covered": true
+      },
+      {
+        "method": "GET",
+        "pattern": "/v1/logs",
+        "portal": "Daemon",
+        "description": "Daemon ring-buffer logs",
+        "hits": 2,
+        "statuses": [
+          200
+        ],
+        "covered": true
+      },
+      {
+        "method": "GET",
+        "pattern": "/v1/monitoring/telemetry",
+        "portal": "Monitoring",
+        "description": "Batch, audit & supervisor telemetry",
+        "hits": 6,
+        "statuses": [
+          200
+        ],
+        "covered": true
+      },
+      {
+        "method": "GET",
+        "pattern": "/v1/monitoring/top",
+        "portal": "Monitoring",
+        "description": "SWR top process & catalog snapshot",
+        "hits": 18,
+        "statuses": [
+          200
+        ],
+        "covered": true
+      },
+      {
+        "method": "GET",
+        "pattern": "/v1/monitoring/events",
+        "portal": "Monitoring",
+        "description": "Persistent Server-Sent Events stream",
+        "hits": 6,
+        "statuses": [
+          200
+        ],
+        "covered": true
+      },
+      {
+        "method": "POST",
+        "pattern": "/v1/monitoring/audit/stop",
+        "portal": "Monitoring",
+        "description": "Idempotent catalog audit stop order",
+        "hits": 1,
+        "statuses": [
+          200
+        ],
+        "covered": true
+      },
+      {
+        "method": "GET",
+        "pattern": "/v1/couplings",
+        "portal": "Studio",
+        "description": "Certified ground-truth couplings registry",
+        "hits": 3,
+        "statuses": [
+          200
+        ],
+        "covered": true
+      },
+      {
+        "method": "GET",
+        "pattern": "/v1/couplings/sub_frames",
+        "portal": "Studio",
+        "description": "Paginated subtitle cues & pHash anchors",
+        "hits": 7,
+        "statuses": [
+          200
+        ],
+        "covered": true
+      },
+      {
+        "method": "GET",
+        "pattern": "/v1/snippets",
+        "portal": "Studio",
+        "description": "Available video snippets datalist",
+        "hits": 6,
+        "statuses": [
+          200
+        ],
+        "covered": true
+      },
+      {
+        "method": "GET",
+        "pattern": "/v1/subtitles/{hash}",
+        "portal": "Studio",
+        "description": "CAS raw SRT content by digest",
+        "hits": 1,
+        "statuses": [
+          200
+        ],
+        "covered": true
+      },
+      {
+        "method": "POST",
+        "pattern": "/v1/search",
+        "portal": "Studio",
+        "description": "Multi-tier pHash/MovieHash/Name search",
+        "hits": 7,
+        "statuses": [
+          200
+        ],
+        "covered": true
+      },
+      {
+        "method": "GET",
+        "pattern": "/v1/search/latest",
+        "portal": "Studio",
+        "description": "Latest search 6-stage pipeline telemetry",
+        "hits": 3,
+        "statuses": [
+          200
+        ],
+        "covered": true
+      },
+      {
+        "method": "POST",
+        "pattern": "/v1/recognize",
+        "portal": "Studio",
+        "description": "Direct RAM MIH visual recognition",
+        "hits": 1,
+        "statuses": [
+          200
+        ],
+        "covered": true
+      },
+      {
+        "method": "POST",
+        "pattern": "/v1/certify",
+        "portal": "Studio",
+        "description": "Ground-truth coupling certification handler",
+        "hits": 1,
+        "statuses": [
+          200
+        ],
+        "covered": true
+      },
+      {
+        "method": "POST",
+        "pattern": "/v1/download",
+        "portal": "Studio",
+        "description": "Subtitle retrieval handler",
+        "hits": 1,
+        "statuses": [
+          200
+        ],
+        "covered": true
+      },
+      {
+        "method": "POST",
+        "pattern": "/v1/retarget",
+        "portal": "Studio",
+        "description": "Visual pHash subtitle retargeting handler",
+        "hits": 1,
+        "statuses": [
+          200
+        ],
+        "covered": true
+      },
+      {
+        "method": "POST",
+        "pattern": "/v1/autosync",
+        "portal": "Studio",
+        "description": "End-to-end AutoSync pipeline handler",
+        "hits": 1,
+        "statuses": [
+          200
+        ],
+        "covered": true
+      },
+      {
+        "method": "GET",
+        "pattern": "/v1/catalog/status",
+        "portal": "Daemon",
+        "description": "In-memory .dbphash catalog index status",
+        "hits": 4,
+        "statuses": [
+          200
+        ],
+        "covered": true
+      },
+      {
+        "method": "POST",
+        "pattern": "/v1/catalog/reload",
+        "portal": "Daemon",
+        "description": "Atomic hot-reload of .dbphash & couplings",
+        "hits": 2,
+        "statuses": [
+          200
+        ],
+        "covered": true
+      }
+    ]
+  },
+  "v8_js_coverage": {
+    "first_party_urls": [
+      "https://2026-pydbsrt.fr/dbsrt/monitoring",
+      "https://2026-pydbsrt.fr/dbsrt/sources",
+      "https://2026-pydbsrt.fr/dbsrt/studio",
+      "https://2026-pydbsrt.fr/dbsrt/top"
+    ],
+    "profiled_script_Snapshots": 761,
+    "total_functions": 401,
+    "covered_functions": 308,
+    "function_coverage_pct": 76.81,
+    "total_byte_spans": 550972,
+    "covered_byte_spans": 478698,
+    "byte_coverage_pct": 86.88
+  },
+  "videos": [
+    {
+      "filename": "01_auth_gateway_and_sources_observatory.mp4",
+      "path": "screencasts/01_auth_gateway_and_sources_observatory.mp4",
+      "size_bytes": 5272741,
+      "encode_ms": 8379.3
+    },
+    {
+      "filename": "02_monitoring_and_web_top.mp4",
+      "path": "screencasts/02_monitoring_and_web_top.mp4",
+      "size_bytes": 1676404,
+      "encode_ms": 1914.3
+    },
+    {
+      "filename": "03_studio_relational_backoffice.mp4",
+      "path": "screencasts/03_studio_relational_backoffice.mp4",
+      "size_bytes": 2233560,
+      "encode_ms": 2190.9
+    }
+  ],
+  "steps": [
+    {
+      "step_id": "A1",
+      "portal": "Gateway",
+      "feature": "Authentification HTML (401 Anonyme -> Clé Invalide -> Login Cookie POST)",
+      "status": "PASS",
+      "elapsed_ms": 767.4,
+      "assertions": [
+        "Formulaire HTML 401 affiché sans clé",
+        "Rejet clé invalide avec bandeau .err-box (Clé secrète invalide. Tentative enregistrée.)",
+        "POST valide établit le cookie HttpOnly dbsrt_session et ouvre dbsrt Monitor"
+      ],
+      "metrics": {
+        "login_shot": "01_gateway_login_anonymous_401.png",
+        "invalid_shot": "02_gateway_login_invalid_key.png"
+      },
+      "screenshot": "03_gateway_login_form_authenticated.png"
+    },
+    {
+      "step_id": "A2",
+      "portal": "Gateway",
+      "feature": "CORS 204, Favicon, Sanitization /v1/status, Zero-Spawn /api/artifact/download SHA256 & /logout",
+      "status": "PASS",
+      "elapsed_ms": 5819.4,
+      "assertions": [
+        "OPTIONS /v1/health -> HTTP 204 + CORS *",
+        "/v1/status masque phash_dir et subtitles_dir côté public",
+        "HEAD & GET /api/artifact/download (%5B%20OxTorrent.cc%20%5D%20Les.101.Dalmatiens.1961.Multi.1080p-mHDgz.mkv.24.0fps.phash) SHA256 vérifié (a0945ceffc4910ed...)",
+        "Path traversal ../etc/passwd rejeté HTTP 400 et fichier absent HTTP 404",
+        "/logout révoque dbsrt_session puis ?token= ré-authentifie vers /sources"
+      ],
+      "metrics": {
+        "sample_phash": "%5B%20OxTorrent.cc%20%5D%20Les.101.Dalmatiens.1961.Multi.1080p-mHDgz.mkv.24.0fps.phash",
+        "phash_bytes": 5384,
+        "couplings_bytes": 41263950
+      },
+      "screenshot": "04_gateway_logout_revoked.png"
+    },
+    {
+      "step_id": "B1",
+      "portal": "Sources",
+      "feature": "Dashboard Sources Médias, Probes WAN Réels, Accordéons & Sélecteur d'Environnement",
+      "status": "PASS",
+      "elapsed_ms": 2622.1,
+      "assertions": [
+        "Hôte détecté = sapin.o2switch.net, profil actif = o2switch",
+        "Freebox wan_http Accessible 🟢 avec exactement 595 conteneurs éligibles (0 faux-positif)",
+        "Synology Video wan_ftp Accessible 🟢 (539 entrées) & TV Shows wan_ftp (72 séries)",
+        "Tout Replier / Tout Déplier, sélecteur #env-select (5 profils) et Tester Accessibilité vérifiés"
+      ],
+      "metrics": {
+        "freebox_wan_http": {
+          "status": "online",
+          "accessible": true,
+          "files_count": 595,
+          "latency_ms": 274.9
+        },
+        "synology_video_wan_ftp": {
+          "status": "online",
+          "accessible": true,
+          "files_count": 539,
+          "latency_ms": 297.9
+        },
+        "synology_tvshow_wan_ftp": {
+          "status": "online",
+          "accessible": true,
+          "files_count": 72,
+          "latency_ms": 273.4
+        },
+        "collapsed_shot": "06_sources_dashboard_all_collapsed.png"
+      },
+      "screenshot": "05_sources_dashboard_o2switch_live_probes.png"
+    },
+    {
+      "step_id": "B2",
+      "portal": "Sources",
+      "feature": "Explorateur Master-Detail Freebox HTTP WAN (Drill-down, Tags, Tris, Pagination & ffprobe HTTP 206)",
+      "status": "PASS",
+      "elapsed_ms": 6774.2,
+      "assertions": [
+        "Racine Freebox wan_http non vide (25 disques éligibles), sous-dossier peuplé",
+        "Inspection ffprobe HTTP Range 206 réussie : h264 1920x802",
+        "Relancer ffprobe, Copier URI, recherche floue, 5 tags, 5 tris, 3 limites, pagination et remontée parent validés"
+      ],
+      "metrics": {
+        "probed_file": "14 Jours 12 Nuits (2020) [1080p](Vietnam, Drame).mkv",
+        "resolution": "1920x802",
+        "codec": "h264",
+        "audio_tracks": 1,
+        "subtitle_tracks": 1,
+        "root_shot": "07_explorer_freebox_wan_http_root.png",
+        "subfolder_shot": "08_explorer_freebox_subfolder_containers.png"
+      },
+      "screenshot": "09_explorer_freebox_wan_ffprobe_card.png"
+    },
+    {
+      "step_id": "B3",
+      "portal": "Sources",
+      "feature": "Explorateur Master-Detail Synology WAN FTP & ffprobe Streaming Direct",
+      "status": "PASS",
+      "elapsed_ms": 1965.5,
+      "assertions": [
+        "Navigation arborescente série Synology WAN FTP fonctionnelle",
+        "ffprobe streaming FTP distant réussi : h264 39m 11s",
+        "Retour dashboard via clic logo PYDBSRT STUDIO vérifié"
+      ],
+      "metrics": {
+        "probed_file": "Andor.S01E01.1080p.WEB.h264-KOGi.mkv",
+        "duration": "39m 11s",
+        "codec": "h264"
+      },
+      "screenshot": "10_explorer_synology_wan_ftp_ffprobe.png"
+    },
+    {
+      "step_id": "B4",
+      "portal": "Sources",
+      "feature": "Actifs Médias DB (PostgreSQL Live, 4 KPIs, Recherche Accents, Tris, Pagination & Tiroir Technique)",
+      "status": "PASS",
+      "elapsed_ms": 4804.0,
+      "assertions": [
+        "Connexion PostgreSQL 9.6 active : 2321 actifs (1782 nominaux)",
+        "Recherche insensible aux accents ('Cruaute' -> 2321 résultat(s))",
+        "4 cartes KPI, 4 filtres source, 5 tris, 3 limites, pagination, aide ⓘ et tiroir Inspecter validés"
+      ],
+      "metrics": {
+        "pg_version": "PostgreSQL 9.6",
+        "summary": {
+          "total": 2321,
+          "nominal": 1782,
+          "missing_phash": 398,
+          "unmapped_path": 505
+        },
+        "overview_shot": "11_assets_db_postgresql_overview.png"
+      },
+      "screenshot": "12_assets_db_slideover_drawer.png"
+    },
+    {
+      "step_id": "B5",
+      "portal": "Sources",
+      "feature": "Observatoire Tripartite Empreintes pHash, Sismographe Δ(t) & Cas Limites UTF-8 / %5B%20",
+      "status": "PASS",
+      "elapsed_ms": 12129.9,
+      "assertions": [
+        "Trinité réconciliée : RAW=4974, Zero-DB=4974, Alignés 3/3=3809, À compiler=0",
+        "Zoom/Pan sismographe Δ(t) (1.7x), 4 infobulles '?' et compression Zero-DB vérifiés",
+        "Cas limites non-ASCII & URL-encodés inspectés sans erreur : Cruauté -> %5B%20OxTorrent.cc%20%5D%20Les.101.Dalmatiens.1961.Multi.1080p-mHDgz.mkv.24.0fps.phash (pop=30.05); OxTorrent -> 01 Cruauté.mp4.24.0fps.phash (pop=32)"
+      ],
+      "metrics": {
+        "summary": {
+          "raw_count": 4974,
+          "raw_size_bytes": 2829611168,
+          "raw_size_human": "2.64 GB",
+          "catalog_count": 4974,
+          "catalog_size_bytes": 395529096,
+          "catalog_size_human": "377.21 MB",
+          "catalog_cuts_total": 10292346,
+          "catalog_sparse_total": 14398820,
+          "pg_count": 2321,
+          "pg_frames_total": 0,
+          "aligned_3_3": 3809,
+          "missing_pg": 1165,
+          "uncompiled": 0,
+          "orphan_catalog": 0
+        },
+        "edge_cases": [
+          "Cruauté -> %5B%20OxTorrent.cc%20%5D%20Les.101.Dalmatiens.1961.Multi.1080p-mHDgz.mkv.24.0fps.phash (pop=30.05)",
+          "OxTorrent -> 01 Cruauté.mp4.24.0fps.phash (pop=32)"
+        ],
+        "overview_shot": "13_phashes_tripartite_observatory.png"
+      },
+      "screenshot": "14_phashes_microscopic_seismograph_zoomed.png"
+    },
+    {
+      "step_id": "B6",
+      "portal": "Sources",
+      "feature": "Trajectoires Spatiotemporelles, Combobox .jsonl, Aller-Retour Trajectoire↔pHash & Glossaire",
+      "status": "PASS",
+      "elapsed_ms": 13584.1,
+      "assertions": [
+        "6 rapports .jsonl détectés sur o2switch (actif: trajectory_cuts20_ratio30.jsonl)",
+        "KPIs bornés [0, 100%] : consensus=97.3%, cohérence=84.3%",
+        "5 filtres statut, 8 tris, modale séquences coupures, aller-retour 🔬 Empreinte pHash -> 🎯 Retour Trajectoire et Glossaire validés"
+      ],
+      "metrics": {
+        "jsonl_files_count": 6,
+        "kpi": {
+          "total_audits": 3081,
+          "total_matched": 2997,
+          "total_coherent": 2527,
+          "total_consensus_won": 470,
+          "total_divergent": 470,
+          "total_unmatched": 84,
+          "unique_catalog_covered": 2907,
+          "catalog_total": 4974,
+          "catalog_coverage_pct": 58.4,
+          "coherence_rate_pct": 84.3,
+          "match_rate_pct": 97.3,
+          "avg_elapsed_sec": 7.455,
+          "total_cuts": 61620
+        },
+        "dashboard_shot": "15_trajectories_dashboard_kpis.png",
+        "combobox_shot": "16_trajectories_jsonl_combobox_open.png",
+        "traj_modal_shot": "17_trajectories_detail_modal_cuts.png",
+        "glossary_shot": "19_portal_contextual_glossary_modal.png"
+      },
+      "screenshot": "18_trajectories_to_phash_roundtrip.png"
+    },
+    {
+      "step_id": "C1",
+      "portal": "Monitoring",
+      "feature": "Vue d'ensemble (6 Tuiles), Flux SSE /v1/monitoring/events, Cristian ClockSync & Tuile Catalogue -> #tab-media",
+      "status": "PASS",
+      "elapsed_ms": 2570.2,
+      "assertions": [
+        "SSE actif & Cristian ClockSync calibré sur sapin.o2switch.net (RTT=3390 ms)",
+        "6 tuiles rendues ; clic tuile Catalogue active #view-ingestion + onglet [4] #tab-media",
+        "0 requête legacy de polling détectée (0)"
+      ],
+      "metrics": {
+        "sync": {
+          "sseActive": true,
+          "calibrated": true,
+          "rttMs": 3390,
+          "offsetMs": -815,
+          "hostname": "sapin.o2switch.net",
+          "discoveredTotal": 0
+        },
+        "overview_shot": "20_monitoring_overview_sse_calibrated.png"
+      },
+      "screenshot": "21_monitoring_catalogue_tile_routed_to_tab_media.png"
+    },
+    {
+      "step_id": "C2",
+      "portal": "Monitoring",
+      "feature": "Web Top Ingestion 5 Onglets ([1]..[5]), Fiches Détails, Filtres/Tris & Pipeline ISO 6-Étapes",
+      "status": "PASS",
+      "elapsed_ms": 2237.0,
+      "assertions": [
+        "Onglets [1] Tâches, [2] Stats (4 dimensions), [3] Récents (50 lignes), [4] Catalogue (0 lignes), [5] Sources (SOURCES DE MÉDIAS) validés",
+        "Lien Studio préfixé vérifié (n/a (0 discovered_media rows))",
+        "Pipeline ISO 6-boîtes exécuté en réel sur data/__PHASH__/%5B%20OxTorrent.cc%20%5D%20Les.101.Dalmatiens.1961.Multi.1080p-mHDgz.mkv.24.0fps.phash (MIH=10.20 ms)"
+      ],
+      "metrics": {
+        "completed_rows": 50,
+        "media_rows": 0,
+        "mih_latency": "10.20 ms",
+        "shots": [
+          "22_monitoring_ingestion_tab1_jobs.png",
+          "23_monitoring_ingestion_tab2_stats.png",
+          "24_monitoring_ingestion_tab3_completed_drawer.png",
+          "26_monitoring_ingestion_tab5_sources.png"
+        ]
+      },
+      "screenshot": "25_monitoring_tab4_iso_pipeline_matched.png"
+    },
+    {
+      "step_id": "C3",
+      "portal": "Monitoring",
+      "feature": "Vues Audit (Stop Idempotent), Superviseur RPi4, Système Fastfetch (Hot-Reload RAM) & Incidents SRE",
+      "status": "PASS",
+      "elapsed_ms": 1045.8,
+      "assertions": [
+        "Vue Audit (TERMINÉ) & POST /v1/monitoring/audit/stop idempotent (HTTP 200)",
+        "Vue Superviseur RPi4 (ONLINE (RPI4)) et journal d'activité rendus",
+        "Vue Système (5 groupes Fastfetch) + ✓ Index rechargé en 302.5 ms (4974 médias, 10 292 346 cuts, 2505 couplages certifiés).",
+        "Vue Incidents & SRE : post-mortems INC-2026-11-12-01 et INC-2026-10-31-01 présents"
+      ],
+      "metrics": {
+        "audit_state": "TERMINÉ",
+        "audit_stop_http": 200,
+        "supervisor_badge": "ONLINE (RPI4)",
+        "shots": [
+          "27_monitoring_view_audit.png",
+          "28_monitoring_view_supervisor_rpi4.png",
+          "30_monitoring_view_incidents_sre.png"
+        ]
+      },
+      "screenshot": "29_monitoring_view_system_ram_reload.png"
+    },
+    {
+      "step_id": "C4",
+      "portal": "Monitoring",
+      "feature": "Contrôles Header (↻, Pause/Reprise SSE, Modale Clé 🔑), Invariant Zéro-Polling & Route /top",
+      "status": "PASS",
+      "elapsed_ms": 4728.4,
+      "assertions": [
+        "Pause ferme proprement EventSource (sseActive=false) et Reprise rétablit le flux SSE",
+        "Modale 🔑 Authentification met à jour localStorage et reconnecte SSE sans erreur",
+        "Invariant Zéro-Polling respecté : 0 requête vers /v1/metrics, /v1/logs ou /v1/monitoring/latest",
+        "Route alias /dbsrt/top opérationnelle et hydratée en temps réel"
+      ],
+      "metrics": {
+        "legacy_polls_count": 0
+      },
+      "screenshot": "31_monitoring_top_alias_route.png"
+    },
+    {
+      "step_id": "D1",
+      "portal": "Studio",
+      "feature": "Schéma ER Relationnel, Couplages Certifiés, Timeline/Minimap sub_frames, Loupe DCT 8×8 & CAS Raw SRT",
+      "status": "PASS",
+      "elapsed_ms": 3404.6,
+      "assertions": [
+        "Index Studio chargé : 4974 .phash, 2505 pistes certifiées (342 médias)",
+        "Lien View Raw SRT (/dbsrt/v1/subtitles/113857facc79dbbe33b61c437f320116) sert un SRT valide HTTP 200 (74639 octets)",
+        "Recherche sub_frames, Go to Cue #, Minimap et loupe canvas 8×8 (0xa6c0d59f1f955800) vérifiés"
+      ],
+      "metrics": {
+        "studio_meta": {
+          "indexed": 4974,
+          "coupledMedias": 342,
+          "certSubs": 2505,
+          "pgConnected": false,
+          "firstCertPhash": "1-Pegasus Fantasy.mkv.24.0fps.phash",
+          "cntMedias": "342 (JSON)",
+          "cntSubFrames": "1 388 389 (JSON)"
+        },
+        "srt_bytes": 74639,
+        "overview_shot": "32_studio_tab1_couplings_overview.png"
+      },
+      "screenshot": "33_studio_tab1_cue_phash_loupe_inspector.png"
+    },
+    {
+      "step_id": "D2",
+      "portal": "Studio",
+      "feature": "Catalogue .phash Indexé (Filtres Statut/FPS, Tris, Sélection Page & Batch Matching Temps Réel)",
+      "status": "PASS",
+      "elapsed_ms": 1896.9,
+      "assertions": [
+        "Filtres Certified/Uncoupled, FPS (24/25/30), 4 tris et Reset opérationnels",
+        "Sélection page (50 vidéos) / Clear Selection et exécution Batch Matching unitaire FINISHED"
+      ],
+      "metrics": {
+        "catalog_shot": "34_studio_tab2_phash_catalog_selected.png"
+      },
+      "screenshot": "35_studio_tab2_batch_match_finished.png"
+    },
+    {
+      "step_id": "D3",
+      "portal": "Studio",
+      "feature": "Playground API (/v1/search Multi-Moteurs, /v1/recognize, /v1/catalog/* & Gardes Non-Mutantes /v1/{certify,autosync,retarget,download})",
+      "status": "PASS",
+      "elapsed_ms": 2597.5,
+      "assertions": [
+        "6 Presets & POST /v1/search (phash/auto, phash/mih, hash, name) validés sur data/__PHASH__/1-Pegasus Fantasy.mkv.24.0fps.phash",
+        "POST /v1/recognize : ✓ Média Reconnu en 0.039s !",
+        "GET /v1/catalog/status & POST /v1/catalog/reload exécutés avec succès",
+        "Gardes sentinelles POST /v1/{certify,autosync,retarget,download} vérifiées sans mutation de couplings.json"
+      ],
+      "metrics": {
+        "recognize_headline": "✓ Média Reconnu en 0.039s !",
+        "search_shot": "36_studio_tab3_playground_live_search.png"
+      },
+      "screenshot": "37_studio_tab3_playground_recognize_and_guards.png"
+    },
+    {
+      "step_id": "D4",
+      "portal": "Studio",
+      "feature": "Observability & Live Logs (/v1/metrics, /v1/logs, Pipeline ISO 6-Boîtes, Filtre, Pause/Resume & Clear)",
+      "status": "PASS",
+      "elapsed_ms": 1516.3,
+      "assertions": [
+        "GET /v1/metrics (29 requêtes) & GET /v1/logs (46 entrées) HTTP 200",
+        "Pipeline ISO Studio exécuté sur data/__PHASH__/1-Pegasus Fantasy.mkv.24.0fps.phash (MIH=667.59 ms)",
+        "Filtre logs, Pause/Resume (sans ReferenceError), Clear et Header ↻ Refresh validés"
+      ],
+      "metrics": {
+        "rest_telemetry": {
+          "mStatus": 200,
+          "lStatus": 200,
+          "totalReq": 29,
+          "logsCount": 46
+        },
+        "mih_latency": "667.59 ms",
+        "logs_shot": "39_studio_tab4_live_logs_controls.png"
+      },
+      "screenshot": "38_studio_tab4_observability_iso_pipeline.png"
+    }
+  ]
+}

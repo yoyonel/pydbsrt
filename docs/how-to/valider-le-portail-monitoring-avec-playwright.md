@@ -47,6 +47,16 @@ task test:portal:e2e
 task test:portal:e2e:cloud
 ```
 
+### Cible 3 : Recette E2E Exhaustive 4 Portails en Production (`https://2026-pydbsrt.fr/dbsrt`)
+
+Pour exécuter la recette intégrale couvrant **44 / 44 routes HTTP** (Gateway Auth/Sécurité, Sources Médias WAN Freebox HTTP 206 & Synology FTP, PostgreSQL, Observatoire `.phash`, Trajectoires, Monitoring SSE Temps Réel et DBSrt Studio) avec génération de **39 captures `1920×1080` PNG** et **3 vidéos H.264 `.mp4`** :
+
+```bash
+task o2switch:recette:web
+```
+
+Consultez le rapport formel versionné et sa galerie interactive de preuves dans [Recette E2E Exhaustive Portails Cloud o2switch](../history/2026-11-14-recette-exhaustive-portails-o2switch.md).
+
 Cette commande orchestre les étapes suivantes :
 
 1. Lancement de Chromium en mode Headless (résolution 1440×920).

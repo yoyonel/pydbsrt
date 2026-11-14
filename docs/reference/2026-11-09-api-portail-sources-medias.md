@@ -26,6 +26,9 @@ Cette référence technique décrit les spécifications formelles des points d'a
 | `GET` | `/api/file/details` | Inspection multimédia approfondie (`ffprobe`) et statut couplage Zero-DB. | $50\text{ ms}$ (FS) à $1.5\text{ s}$ (FTP) |
 | `GET` | `/api/assets` | Audit paginé, filtré et trié des actifs vidéos répertoriés en base PostgreSQL. | $< 15\text{ ms}$ |
 | `GET` | `/api/asset/details` | Fiche d'inspection technique unitaire d'un actif média en base PostgreSQL. | $< 10\text{ ms}$ |
+| `GET` | `/api/phashes` | Réconciliation tripartite paginée des empreintes `.phash` (RAW, `.dbphash`, PostgreSQL). | $< 15\text{ ms}$ |
+| `GET` | `/api/phash/details` | Inspection microscopique trame par trame d'une empreinte `.phash` (support NFC/NFD et noms encodés `%XX`). | $< 25\text{ ms}$ |
+| `GET` / `HEAD` | `/api/artifact/download` | Téléchargement binaire unitaire authentifié zéro-spawn (`.phash`, `.ahash`, `.json`, `couplings.json`) + `X-Checksum-SHA256`. | $< 10\text{ ms}$ |
 | `GET` | `/api/trajectory/files` | Inventaire des fichiers de rapports de trajectoires JSONL disponibles. | $< 1\text{ ms}$ |
 | `GET` | `/api/trajectories` | Listing paginé et filtré des trajectoires de consensus avec KPIs agrégés. | $< 5\text{ ms}$ |
 | `GET` | `/api/trajectory/details` | Décomposition microscopique d'une trajectoire avec suivi des coupures. | $< 5\text{ ms}$ |
@@ -114,12 +117,16 @@ Déclenche le test en direct d'un canal d'accès spécifique et renvoie la mesur
 | Paramètre | Type | Requis | Valeurs admises | Description |
 | :--- | :--- | :--- | :--- | :--- |
 | `source` | `string` | **Oui** | `synology-video`, `synology-tvshow`, `freebox-disks`, `local-snippets` | Identifiant du gisement parent. |
-| `profile` | `string` | **Oui** | `cifs`, `wan_ftp`, `disque1`, `disque2`, `lan_ftp`, `wan_http`, `local` | Identifiant du canal d'accès à tester. |
+| `profile` | `string` | **Oui** | `cifs`, `lan_ftp`, `wan_ftp`, `disque1`, `disque2`, `disque1_1`, `rpi4_disque1`, `rpi4_disque2`, `rpi4_disque1_1`, `lan_http`, `wan_http`, `rpi4_gateway`, `local` | Identifiant du canal d'accès à tester (les 3 disques Freebox sont pilotés par le registre SSOT `scripts/data_access/sources_registry.json`). |
 | `token` | `string` | Non | Clé secrète hexadécimale | Jeton d'authentification sur passerelle o2switch. |
 
 #### Réponses Possibles
 
 **Cas nominal : Canal Accessible (`200 OK`)**
+
+> [!IMPORTANT]
+> **Invariant Zéro Faux-Positif (`freebox-disks` & `http_gateway`)** : Un canal n'expose `"accessible": true` et `"status": "online"` que s'il liste effectivement au moins un conteneur vidéo éligible (`files_count > 0`). Sur la passerelle HTTP Range Freebox (`rpi4_freebox_gateway.py`, endpoint `GET /catalog`), seuls les répertoires cinéma/séries autorisés (`Disque_1/Téléchargements`, `Disque_2/Téléchargements`, `Disque_1_1/Vidéos`) sont indexés et exposés à `/api/files` et `/api/file/details` (via requêtes partielles HTTP `Range: bytes=...` `206 Partial Content`), excluant strictement les dossiers personnels (`Photos/`, `Backup/`).
+
 ```json
 {
   "name": "Streaming WAN FTP",
@@ -565,6 +572,33 @@ Exécute l'inspection microscopique trame par trame d'un fichier d'empreinte `.p
   }
 }
 ```
+
+---
+
+### `GET /api/artifact/download`
+
+Télécharge en flux binaire (`application/octet-stream`) un fichier unitaire `.phash`, `.ahash`, un sidecar `.json` ou le registre `couplings.json` avec en-tête d'intégrité `X-Checksum-SHA256`. Cet endpoint permet notamment au résolveur SSOT (`scripts/data_access/resolver.py`) de rapatrier des empreintes en mobilité **4G/5G (`nomad_wan`)** via `HTTPS :443` lorsque le port `SSH :22` est filtré par liste blanche IP.
+
+#### Paramètres Query String
+
+| Paramètre | Type | Requis | Valeurs admises | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `kind` | `string` | **Oui** | `phash`, `ahash`, `couplings` | Famille d'artefact (`data/__PHASH__/`, `data/__AHASH__/` ou `data/SRT/couplings.json`). |
+| `file` | `string` | Conditionnel | Nom de base strict sans `/` ni `..` | Requis pour `phash` (`.phash`/`.json`) et `ahash` (`.ahash`/`.json`) ; optionnel pour `couplings` (`couplings.json`). |
+| `token` | `string` | Non | Clé secrète API | Jeton d'authentification alternatif à l'en-tête `X-API-Key` sur `o2switch`. |
+
+#### En-têtes de Réponse (`200 OK`)
+
+- `Content-Type: application/octet-stream`
+- `Content-Disposition: attachment; filename="<basename>"`
+- `Content-Length: <octets>`
+- `X-Checksum-SHA256: <sha256_hex>`
+
+#### Codes d'Erreur
+
+- `400 Bad Request` (`invalid_kind`, `invalid_filename`, `path_traversal_blocked`) : paramètre manquant, extension interdite ou tentative de traversée de chemin.
+- `401 Unauthorized` : clé `X-API-Key` absente ou invalide sur la passerelle cloud `o2switch`.
+- `404 Not Found` (`artifact_not_found`) : fichier inexistant dans le répertoire cible.
 
 ---
 

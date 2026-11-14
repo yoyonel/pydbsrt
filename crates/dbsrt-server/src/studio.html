@@ -2085,7 +2085,7 @@
 
         <div class="meta-grid">
           <div class="meta-kv"><label>Media Digest (CHAR(32))</label><span>${media.media_hash}</span></div>
-          <div class="meta-kv"><label>Subtitles Digest (CHAR(32))</label><span>${sub.subtitles_hash} <a href="v1/subtitles/${sub.subtitles_hash}" target="_blank" class="btn" style="padding:1px 6px;font-size:10px;margin-left:6px;text-decoration:none;">📄 View Raw SRT</a></span></div>
+          <div class="meta-kv"><label>Subtitles Digest (CHAR(32))</label><span>${sub.subtitles_hash} <a href="${apiEndpoint('v1/subtitles/' + sub.subtitles_hash)}" target="_blank" class="btn" style="padding:1px 6px;font-size:10px;margin-left:6px;text-decoration:none;">📄 View Raw SRT</a></span></div>
           <div class="meta-kv"><label>pHash Binary File</label><span>${media.phash_filename}</span></div>
           <div class="meta-kv"><label>Certified SRT Path</label><span>${sub.srt_path}</span></div>
         </div>
@@ -2803,6 +2803,11 @@
             language: document.getElementById('recognize-lang').value
           })
         });
+        if (!res.ok) {
+          const errText = await res.text();
+          box.innerHTML = `<span style="color:var(--accent-rose);">✗ Erreur HTTP ${res.status} : ${escapeHtml(errText)}</span>`;
+          return;
+        }
         const data = await res.json();
         if (data.found) {
           box.innerHTML = `
@@ -2868,7 +2873,7 @@
       } else {
         btn.textContent = '⏸ Pause';
         btn.className = 'btn';
-        pollLogsAndMetrics();
+        pollLogsAndMetricsFallback();
       }
     }
 

@@ -71,6 +71,7 @@ hide:
     <p>Guides directs orientés résolution de problème pour les utilisateurs et développeurs autonomes en situation réelle.</p>
     <div class="bento-links">
       <a href="how-to/synchroniser-sous-titres-vlc/">→ Synchroniser des Sous-Titres dans VLC</a>
+      <a href="how-to/2026-11-14-resoudre-acces-donnees-multi-reseaux-agent-skill/">→ 🤖 Utiliser les Agent Skills par l'Exemple &amp; Preuves Flash</a>
       <a href="how-to/ajouter-et-indexer-un-media/">→ Façade Unifiée (task media:add)</a>
       <a href="how-to/certifier-un-couplage/">→ Certifier un Couplage Vérité Terrain</a>
       <a href="how-to/migrer-schema-postgresql/">→ Migrer PostgreSQL avec Refinery</a>
@@ -124,6 +125,8 @@ hide:
     <h3>Benchmarks E2E &amp; Dataset Réel (5M Frames)</h3>
     <p>Campagnes de mesures sur 125 épisodes (5,08M frames), comparatifs Rust vs Python et validation E2E sur NAS Synology.</p>
     <div class="bento-links">
+      <a href="history/2026-11-14-recette-exhaustive-portails-o2switch/">→ 🛡️ Recette Exhaustive Cloud o2switch (44 Routes / 39 Captures)</a>
+      <a href="how-to/2026-11-14-resoudre-acces-donnees-multi-reseaux-agent-skill/">→ 🤖 Preuve Empirique Agent Skills sur Flash &amp; Flash-Lite (16/16)</a>
       <a href="history/2026-10-20-dashboard-interactif-e2e-vlc-corpus-nas/">→ ⚡ Dashboard E2E VLC GUI (1 336 Tests)</a>
       <a href="history/2026-10-15-rust-e2e-benchmarks-and-tradeoffs/">→ Benchmarks E2E Rust vs Python</a>
       <a href="history/2026-10-16-phash-dataset-scale-and-benchmarks/">→ Passage à l'Échelle (5,08M frames)</a>
@@ -168,6 +171,7 @@ hide:
 
 | Document | Date | Pôle | Statut | Tags Clés | Résumé Synthétique |
 | :--- | :---: | :---: | :---: | :--- | :--- |
+| [🛡️ Recette E2E Exhaustive Portails Cloud o2switch (44 Routes / 39 Captures)](history/2026-11-14-recette-exhaustive-portails-o2switch.md) | `2026-11-14` | **Benchmarks** | :octicons-star-fill-16: **ESSENTIEL** | `e2e`, `playwright`, `o2switch`, `studio`, `benchmarks`, `essential` | Recette Playwright 1080p sur `https://2026-pydbsrt.fr/dbsrt` : 16/16 suites PASS, 44/44 routes HTTP (100%), 39 captures zoomables et 3 vidéos H.264. |
 | [⚡ Dashboard Interactif E2E VLC (1 334 Tests)](history/2026-10-20-dashboard-interactif-e2e-vlc-corpus-nas.md) | `2026-10-20` | **Benchmarks** | :octicons-star-fill-16: **ESSENTIEL** | `dashboard`, `e2e`, `vlc`, `benchmarks`, `essential` | Dashboard interactif haute performance sur 1 334 vidéos réelles (99.8% succès) avec captures 720p WebP, navigation clavier flèches et synchronisation curseur. |
 | [Architecture de Retrait & Invalidation Globale](explanation/2026-10-20-architecture-retrait-invalidation-donnees-globales.md) | `2026-10-20` | **Studio** | :octicons-check-circle-fill-16: **CURRENT** | `purge`, `invalidation`, `postgres`, `zero-db`, `studio` | Procédure d'invalidation et retrait de médias corrompus sur 5 paliers synchronisés (FS, Zero-DB JSON, PostgreSQL 17 ON DELETE CASCADE, catalog.dbphash). |
 | [⚡ Indexation Métrique : cBKTree Plat vs MIH](history/2026-10-19-indexing-metric-trees-and-multi-index-hashing.md) | `2026-10-19` | **pHash** | :octicons-star-fill-16: **ESSENTIEL** | `phash`, `bktree`, `cbktree`, `mih`, `indexing`, `scaling`, `essential` | Limite d'échelle du scan linéaire brut $O(N)$, conception du cBKTree plat zéro-copie et spécification du Multi-Index Hashing (MIH) sous les 5 ms. |
