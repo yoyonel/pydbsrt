@@ -624,6 +624,7 @@ REMOTE_SCRIPT
       echo "-> Pulling loose .ahash fingerprints & metadata..."
       rsync -avz --progress --exclude '*.tmp' --exclude '*.tmp.*' --exclude '*.partial' --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/__AHASH__/" "data/__AHASH__/" || true
       python3 "${REPO_ROOT}/scripts/ingestion/phash_dedupe.py" "data/__PHASH__" --apply || true
+      python3 "${REPO_ROOT}/scripts/ingestion/phash_dedupe.py" "data/__AHASH__" --apply || true
     fi
     if systemctl --user is-active --quiet dbsrt-agent 2>/dev/null; then
       echo "-> Reloading local dbsrt-agent daemon with synchronized catalog..."

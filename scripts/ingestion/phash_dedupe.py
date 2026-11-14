@@ -9,9 +9,12 @@ from __future__ import annotations
 
 import argparse
 import filecmp
+import re
 import sys
 from pathlib import Path
 from typing import Dict
+
+LEGACY_AHASH_FPS_SUFFIX_RE = re.compile(r"\.[0-9]+(?:\.[0-9]+)?fps\.ahash$")
 
 
 def find_repo_root() -> Path:
@@ -38,9 +41,22 @@ except ImportError:
     )
 
 
+def _remove_orphan_legacy_ahash_sidecar(twin: Path, logical_name: str) -> None:
+    """Removes `<media_name>[.a<k>].json` once its byte-identical legacy `.ahash` twin is unlinked."""
+    if twin.suffix != ".ahash":
+        return
+    json_name, replaced = LEGACY_AHASH_FPS_SUFFIX_RE.subn(".json", logical_name, count=1)
+    if replaced != 1:
+        return
+    legacy_json = twin.with_name(json_name)
+    if legacy_json.is_file():
+        legacy_json.unlink(missing_ok=True)
+
+
 def dedupe_legacy_twins(phash_dir: Path, apply: bool) -> Dict[str, int]:
     counts = {"moviehash": 0, "legacy_twin": 0, "identical": 0, "differs": 0, "removed": 0}
-    for phash in sorted(phash_dir.glob("*.phash")):
+    candidates = [*sorted(phash_dir.glob("*.phash")), *sorted(phash_dir.glob("*.ahash"))]
+    for phash in candidates:
         logical = phash_logical_name(phash)
         if logical == phash.name:
             continue
@@ -56,6 +72,7 @@ def dedupe_legacy_twins(phash_dir: Path, apply: bool) -> Dict[str, int]:
             counts["identical"] += 1
             if apply:
                 twin.unlink()
+                _remove_orphan_legacy_ahash_sidecar(twin, logical)
                 counts["removed"] += 1
         except OSError:
             continue
