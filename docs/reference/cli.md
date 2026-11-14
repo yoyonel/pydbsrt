@@ -167,8 +167,12 @@ dbsrt bench-scale-multimodal [OPTIONS]
 - `--status-json <PATH>` : Fichier JSON de télémétrie en direct (défaut : fichier horodaté sous `data/reports/` avec symlink `eval_scale_status_latest.json`).
 - `--factor-k <K>` : Facteur de décimation Coarse-to-Fine aHash (défaut : `16`, soit `5.38 fps`).
 - `--offsets <RATIOS>` : Ratios temporels des fenêtres d'évaluation séparés par virgule (défaut : `"0.2,0.5,0.8"`).
+- `--video-window-sec <SEC>` : Durée en secondes extraite par fenêtre visuelle `pHash` (défaut : `1.0`, ex: `2.0` pour ~48 trames permettant d'évaluer simultanément tranches `2.0s` et `1.0s`).
+- `--workers <N>` (ou `-j`) : Nombre de threads workers parallèles pour l'extraction multi-montages entrelacée en Phase 1 (défaut : `8`).
 - `--limit <N>` : Nombre maximal de médias à évaluer (`0` = illimité).
-- `--resume` : Reprend automatiquement en sautant les médias déjà traités hors statut `ERROR` (défaut : `true`).
+- `--resume` : Reprend automatiquement en sautant les médias déjà présents dans `--output` hors statut `ERROR` (défaut : `true`).
+- `--matrix-json <PATH>` : Génère en Phase 2 le rapport JSON consolidé des 24 techniques (`pHash` MIH-16/MIH-32/Linear + `aHash` Coarse-to-Fine $K \in [1, 32]$ + `aHash Dense` MIH-16/MIH-32/Linear).
+- `--matrix-only` : Court-circuite l'extraction vidéo FFmpeg et rejoue uniquement la matrice comparative sur les `query_hashes` déjà persistés dans `--output`.
 
 ---
 

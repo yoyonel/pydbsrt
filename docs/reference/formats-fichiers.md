@@ -74,8 +74,8 @@ Chaque `.ahash` écrit par `dbsrt export-ahash`, `dbsrt media:add --ahash-dir` o
 | `inferred_backfill` | Backfill multi-pistes avec `--no-verify` (règle par défaut FFmpeg) | **Déduite**. |
 | `unknown` | `ffprobe` indisponible, aucune piste ou aucune piste `<= 14.0` bits lors du sondage | Inconnue. |
 
-!!! note "Lecture par le catalogue"
-    `AHashCatalog::load_from_dir` lit le sidecar typé en priorité (`media_name`, `audio_language`, `audio_index`). À défaut, il garde l'ancien repli nom seul (`<moviehash>.json` dans `__AHASH__/` puis `../__PHASH__/`, clés `media_name` / `clean_title` / `filename`).
+!!! note "Lecture par le catalogue et Empreinte Mémoire Actuelle"
+    `AHashCatalog::load_from_dir` lit le sidecar typé en priorité (`media_name`, `audio_language`, `audio_index`). À défaut, il garde l'ancien repli nom seul (`<moviehash>.json` dans `__AHASH__/` puis `../__PHASH__/`, clés `media_name` / `clean_title` / `filename`). Contrairement à `.dbphash` v2 projeté par `mmap` (`0 MiB` d'allocation tas), `AHashCatalog` charge aujourd'hui les séquences `u64` denses en RAM tas (`~727 MiB` pour `537` médias / `95.34 M` trames, en sus des `68–136 MiB` de l'index `CoarseToFineAHashIndex`). Le passage à une archive unique `catalog.dbahash` projetée par `mmap` est détaillé dans [Benchmark Exhaustif Multimodal & Diagnostic `.dbahash`](../explanation/2026-11-14-benchmark-exhaustif-multimodal-3180-videos-reelles-phash-ahash-c2f-mih.md).
 
 
 ---

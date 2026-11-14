@@ -183,4 +183,16 @@ tags:
       <a href="2026-11-13-audit-benchmark-multimodal-scale/">→ Consulter l'audit forensique multimodal</a>
     </div>
   </div>
+
+  <div class="dbsrt-bento-card bento-emerald">
+    <div class="bento-header">
+      <span class="bento-icon">📊</span>
+      <span class="bento-badge">MATRICE 3 180 VIDÉOS RÉELLES</span>
+    </div>
+    <h3>Benchmark Exhaustif : pHash, aHash C2F K=[1..32] &amp; MIH-16/32</h3>
+    <p>9 534 cuts sur 3 180 vraies vidéos (NAS + Freebox) : invariance C2F K=1..32 (90.8 % rappel, 68 MiB RAM, 100 % précision multi-fenêtres) et MIH-32 à 55 µs.</p>
+    <div class="bento-links">
+      <a href="2026-11-14-benchmark-exhaustif-multimodal-3180-videos-reelles-phash-ahash-c2f-mih/">→ Explorer la matrice 24 techniques</a>
+    </div>
+  </div>
 </div>

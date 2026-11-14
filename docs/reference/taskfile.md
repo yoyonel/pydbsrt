@@ -115,7 +115,8 @@ Cette page dresse le dictionnaire exhaustif de toutes les cibles d'orchestration
 | `task bench:ahash:cuts` | Exécute le benchmark de reconnaissance acoustique aHash et d'auto-synchronisation headless `cvlc` sur les extraits vidéo (`scripts/benchmarks/bench_ahash_cuts.py`). |
 | `task bench:ahash:mih:matrix` | Exécute la matrice comparative `Linear Scan` vs `MIH-16` vs `MIH-32` (Mono & Rayon) sur les catalogues aHash (106M trames à 86.125 fps) et pHash (2.7M trames). |
 | `task bench:ahash:coarse-to-fine` | Évalue l'index hiérarchique Coarse-to-Fine aHash à travers les facteurs de décimation $K \in \{1, 4, 8, 16, 31\}$. |
-| `task bench:multimodal:scale` | Exécute le benchmark multimodal multi-fenêtres à grande échelle (pHash vs aHash C2F $K=16$) via `dbsrt bench-scale-multimodal`. |
+| `task bench:multimodal:scale` | Exécute en parallèle (`--workers`) le benchmark multimodal multi-fenêtres et la matrice 24 techniques (pHash + aHash) sur les bibliothèques vidéo via `dbsrt bench-scale-multimodal`. |
+| `task bench:multimodal:matrix` | Rejoue hors-ligne la matrice comparative complète des 24 techniques (`pHash` MIH-16/32/Linear + `aHash` C2F $K \in [1, 32]$ + Dense MIH-16/32/Linear) à partir d'un journal JSONL existant (`--matrix-only`). |
 | `task eval:multimodal:audit` | Exécute l'audit forensique paramétrique des modalités manquées sur le rapport JSONL du benchmark multimodal (`scripts/benchmarks/audit_missed_modalities.py`). |
 | `task eval:cuts:audit` | Exécute l'audit complet de performance du pipeline sur l'ensemble des cuts vidéo (`scripts/ingestion/audit_cuts_pipeline.py`). |
 | `task eval:cuts:audit:rejected` | Exécute l'analyse forensique exhaustive des cuts rejetés et met à jour la documentation (`scripts/ingestion/audit_rejected_cuts.py`). |
