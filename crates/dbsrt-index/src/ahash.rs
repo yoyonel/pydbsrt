@@ -4,6 +4,7 @@
 //! and candidate ranking for 64-bit Haitsma-Kalker audio fingerprints.
 
 use anyhow::{Context, Result};
+use bytemuck::{Pod, Zeroable};
 use dbsrt_core::ahash::{
     is_silent_or_flat_audio_query, match_audio_sequence, AhashFile,
     DEFAULT_MAX_AUDIO_MATCH_DISTANCE, MIN_AUDIO_QUERY_FRAMES,
@@ -134,6 +135,79 @@ fn resolve_sidecar_media_name(
         .find_map(|d| read_sidecar_name(&d.join(&file)))
 }
 
+/// Resolved sidecar and stem metadata for a single `.ahash` file on disk.
+#[derive(Debug, Clone)]
+pub(crate) struct ResolvedAhashFileMeta {
+    /// Canonical media name (from sidecar `media_name`, legacy sidecar, or file stem).
+    pub media_name: String,
+    /// OpenSubtitles 64-bit MovieHash when known from sidecar or `<moviehash_16hex>` stem.
+    pub moviehash: Option<u64>,
+    /// ISO 639-2 / BCP-47 language tag of the decoded audio stream, when known.
+    pub audio_language: Option<String>,
+    /// Relative audio stream index (`k` in `0:a:k`), when known.
+    pub audio_index: Option<usize>,
+    /// `true` when the filename stem follows canonical `<moviehash_16hex>[.a<k>]` naming.
+    pub has_moviehash_stem: bool,
+}
+
+/// Extracts the 64-bit OpenSubtitles MovieHash from a canonical `<moviehash_16hex>[.a<k>]` path stem.
+pub(crate) fn extract_stem_moviehash(path: &Path) -> Option<u64> {
+    let file_name = path.file_name().and_then(|n| n.to_str())?;
+    let stem = ahash_logical_stem(file_name);
+    let base = match stem.rsplit_once('.') {
+        Some((prefix, suffix))
+            if suffix.starts_with(AUDIO_TRACK_STEM_TAG)
+                && !suffix[AUDIO_TRACK_STEM_TAG.len()..].is_empty()
+                && suffix[AUDIO_TRACK_STEM_TAG.len()..]
+                    .chars()
+                    .all(|c| c.is_ascii_digit()) =>
+        {
+            prefix
+        }
+        _ => stem,
+    };
+    is_moviehash_hex(base)
+        .then(|| u64::from_str_radix(base, 16).ok())
+        .flatten()
+}
+
+/// Resolves canonical media name, MovieHash, and audio stream metadata for an `.ahash` file.
+pub(crate) fn resolve_ahash_file_metadata(
+    path: &Path,
+    dir: &Path,
+    phash_dir: Option<&Path>,
+) -> ResolvedAhashFileMeta {
+    let filename = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default();
+    let parsed_name = parse_ahash_media_name(filename);
+    let typed = AhashSidecar::read(&ahash_sidecar_path(path)).ok();
+    let typed_name = typed
+        .as_ref()
+        .map(|s| s.media_name.trim())
+        .filter(|n| !n.is_empty())
+        .map(str::to_string);
+    let stem_moviehash = extract_stem_moviehash(path);
+    let sidecar_moviehash = typed
+        .as_ref()
+        .and_then(|s| s.moviehash.as_deref())
+        .map(str::trim)
+        .filter(|h| is_moviehash_hex(h))
+        .and_then(|h| u64::from_str_radix(h, 16).ok());
+    let media_name = typed_name
+        .or_else(|| resolve_sidecar_media_name(&parsed_name, dir, phash_dir))
+        .unwrap_or(parsed_name);
+    let track = typed.and_then(|s| s.selected_audio_stream);
+    ResolvedAhashFileMeta {
+        media_name,
+        moviehash: sidecar_moviehash.or(stem_moviehash),
+        audio_language: track.as_ref().and_then(|t| t.language.clone()),
+        audio_index: track.map(|t| t.audio_index),
+        has_moviehash_stem: stem_moviehash.is_some(),
+    }
+}
+
 /// Loads one `.ahash` file into a catalog entry, resolving its name and audio track.
 ///
 /// # Arguments
@@ -152,7 +226,7 @@ fn resolve_sidecar_media_name(
 ///    `selected_audio_stream` (`audio_language`, `audio_index`) win.
 /// 2. Otherwise legacy name-only lookup ([`resolve_sidecar_media_name`], 16-hex stems only).
 /// 3. Otherwise the parsed file stem. Audio fields stay `None` without a typed sidecar.
-fn load_catalog_entry(
+pub(crate) fn load_catalog_entry(
     path: PathBuf,
     dir: &Path,
     phash_dir: Option<&Path>,
@@ -161,51 +235,26 @@ fn load_catalog_entry(
     if file.hashes.is_empty() {
         return None;
     }
-    let filename = path
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or_default();
-    let parsed_name = parse_ahash_media_name(filename);
-    let typed = AhashSidecar::read(&ahash_sidecar_path(&path)).ok();
-    let typed_name = typed
-        .as_ref()
-        .map(|s| s.media_name.trim())
-        .filter(|n| !n.is_empty())
-        .map(str::to_string);
-    let media_name = typed_name
-        .or_else(|| resolve_sidecar_media_name(&parsed_name, dir, phash_dir))
-        .unwrap_or(parsed_name);
-    let track = typed.and_then(|s| s.selected_audio_stream);
+    let meta = resolve_ahash_file_metadata(&path, dir, phash_dir);
     Some(AHashCatalogEntry {
-        media_name,
+        media_name: meta.media_name,
         audio_fps: file.header.audio_fps(),
         frame_count: file.hashes.len(),
         hashes: Arc::new(file.hashes),
-        audio_language: track.as_ref().and_then(|t| t.language.clone()),
-        audio_index: track.map(|t| t.audio_index),
+        audio_language: meta.audio_language,
+        audio_index: meta.audio_index,
         path,
     })
 }
 
 /// Returns `true` when `path` has a canonical `<moviehash_16hex>[.a<k>]` logical file stem.
-fn has_moviehash_file_stem(path: &Path) -> bool {
-    let Some(file_name) = path.file_name().and_then(|n| n.to_str()) else {
-        return false;
-    };
-    let stem = ahash_logical_stem(file_name);
-    let base = match stem.rsplit_once('.') {
-        Some((prefix, suffix))
-            if suffix.starts_with(AUDIO_TRACK_STEM_TAG)
-                && !suffix[AUDIO_TRACK_STEM_TAG.len()..].is_empty()
-                && suffix[AUDIO_TRACK_STEM_TAG.len()..]
-                    .chars()
-                    .all(|c| c.is_ascii_digit()) =>
-        {
-            prefix
-        }
-        _ => stem,
-    };
-    is_moviehash_hex(base)
+pub(crate) fn has_moviehash_file_stem(path: &Path) -> bool {
+    extract_stem_moviehash(path).is_some()
+}
+
+/// Sibling `__PHASH__` directory name used for legacy sidecar fallback.
+pub(crate) fn sibling_phash_dir_for(dir: &Path) -> Option<PathBuf> {
+    dir.parent().map(|p| p.join(PHASH_SIDECAR_DIRNAME))
 }
 
 /// Collapses binary twins (identical `frame_count` + `hashes`) into one entry.
@@ -218,7 +267,7 @@ fn has_moviehash_file_stem(path: &Path) -> bool {
 ///
 /// Output order follows the first-seen position of each twin group, so a
 /// path-sorted input yields a deterministic path-sorted output.
-fn dedup_twin_entries(entries: Vec<AHashCatalogEntry>) -> Vec<AHashCatalogEntry> {
+pub(crate) fn dedup_twin_entries(entries: Vec<AHashCatalogEntry>) -> Vec<AHashCatalogEntry> {
     use std::hash::{Hash, Hasher};
     let rank = |e: &AHashCatalogEntry| {
         let has_sidecar_audio = e.audio_index.is_some() || e.audio_language.is_some();
@@ -357,12 +406,46 @@ pub struct AHashCatalogMatch {
 /// Eliminates thread-scheduling and `HashMap` seed non-determinism when multiple candidate tracks
 /// or media achieve identical Hamming distance.
 #[inline]
-fn cmp_catalog_matches(a: &AHashCatalogMatch, b: &AHashCatalogMatch) -> std::cmp::Ordering {
+pub(crate) fn cmp_catalog_matches(
+    a: &AHashCatalogMatch,
+    b: &AHashCatalogMatch,
+) -> std::cmp::Ordering {
     a.mean_distance
         .total_cmp(&b.mean_distance)
         .then_with(|| a.media_name.cmp(&b.media_name))
         .then_with(|| a.file_path.cmp(&b.file_path))
         .then_with(|| a.ref_frame_offset.cmp(&b.ref_frame_offset))
+}
+
+/// Sorts, deduplicates by `media_name`, and truncates `matches` to `limit` (when `limit > 0`).
+pub(crate) fn dedup_and_truncate_matches(
+    mut matches: Vec<AHashCatalogMatch>,
+    limit: usize,
+) -> Vec<AHashCatalogMatch> {
+    matches.sort_by(cmp_catalog_matches);
+    let mut dedup_matches: Vec<AHashCatalogMatch> = Vec::with_capacity(matches.len());
+    for m in matches {
+        if !dedup_matches
+            .iter()
+            .any(|existing| existing.media_name == m.media_name)
+        {
+            dedup_matches.push(m);
+        }
+    }
+    if limit > 0 && dedup_matches.len() > limit {
+        dedup_matches.truncate(limit);
+    }
+    dedup_matches
+}
+
+/// Validates numeric search parameters and rejects silent or flat-energy query slices.
+#[inline]
+pub(crate) fn is_valid_ahash_search_criteria(criteria: &AHashSearchCriteria) -> bool {
+    criteria.audio_fps.is_finite()
+        && criteria.audio_fps > 0.0
+        && criteria.max_distance.is_finite()
+        && (0.0..=AHASH_BITS_F64).contains(&criteria.max_distance)
+        && !is_silent_or_flat_audio_query(criteria.query)
 }
 
 /// Merges two worker vote maps by summing counts into the larger map.
@@ -394,12 +477,37 @@ fn merge_vote_maps(
 
 /// Compact 32-bit chunk entry for sorted index lookups.
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Pod, Zeroable)]
 pub struct Mih32Entry {
     /// 32-bit chunk prefix or suffix.
     pub chunk: u32,
     /// Flat global frame index in catalog.
     pub frame_idx: u32,
+}
+
+/// Performs binary search lookup on any sorted `[Mih32Entry]` slice (heap or `mmap`).
+///
+/// # Arguments
+/// * `table` - Sorted slice of [`Mih32Entry`] records ordered ascending by `chunk`.
+/// * `chunk` - 32-bit chunk key to query.
+///
+/// # Returns
+/// Contiguous sub-slice of matching [`Mih32Entry`] items (empty if absent).
+///
+/// # Panics
+/// Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// Uses `partition_point` for $\mathcal{O}(\log N)$ range bounds without heap allocation.
+#[inline(always)]
+pub fn lookup_mih32_slice(table: &[Mih32Entry], chunk: u32) -> &[Mih32Entry] {
+    let start = table.partition_point(|e| e.chunk < chunk);
+    if start < table.len() && table[start].chunk == chunk {
+        let end = table[start..].partition_point(|e| e.chunk <= chunk) + start;
+        &table[start..end]
+    } else {
+        &[]
+    }
 }
 
 /// Dual-table 32-bit Multi-Index Hash index for acoustic fingerprints.
@@ -503,13 +611,7 @@ impl AHashMih32Index {
 
     #[inline(always)]
     fn lookup_slice(table: &[Mih32Entry], chunk: u32) -> &[Mih32Entry] {
-        let start = table.partition_point(|e| e.chunk < chunk);
-        if start < table.len() && table[start].chunk == chunk {
-            let end = table[start..].partition_point(|e| e.chunk <= chunk) + start;
-            &table[start..end]
-        } else {
-            &[]
-        }
+        lookup_mih32_slice(table, chunk)
     }
 }
 
