@@ -2,29 +2,49 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
+import unicodedata
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
 from typing import Any
 
 from scripts.data_access.constants import (
-    CACHE_DIR_MODE,
-    CACHE_DIR_REL,
+    AGENT_HTTP_USER_AGENT,
+    ARTIFACT_DOWNLOAD_READ_CHUNK_BYTES,
     CONTAINER_FPS_SUFFIXES,
-    COUPLINGS_INDEX_CACHE_FILENAME,
+    CONTROL_CHAR_PATTERN,
     FETCH_CMD_TIMEOUT_SECS,
+    HTTP_STATUS_OK,
+    HTTPS_FETCH_TIMEOUT_SECS,
     MAX_RESOLVE_MATCHES,
     SNIPPET_STEM_SUFFIXES,
+    VALID_ARTIFACT_KINDS,
+)
+from scripts.data_access.media_search import inspect_media_container, search_media_containers
+from scripts.data_access.sidecar_index import (
+    load_couplings_index as _load_couplings_index,
+)
+from scripts.data_access.sidecar_index import (
+    search_ahash_corpus,
+    search_phash_corpus,
 )
 from scripts.data_access.topology import (
     RuntimeEndpoints,
     WorkspaceContext,
+    resolve_o2switch_api_key,
     resolve_runtime_endpoints,
     run_bounded_cmd,
 )
 
 REGISTRY_PATH: Path = Path(__file__).resolve().parent / "sources_registry.json"
+CONTROL_CHAR_RE = re.compile(CONTROL_CHAR_PATTERN)
+HTTP_BAD_REQUEST_CODE: int = 400
+HTTP_NOT_FOUND_CODE: int = 404
 
 FAMILY_ALIASES: dict[str, str] = {
     "video": "synology-video",
@@ -159,8 +179,8 @@ def _collect_family_warnings(family_id: str, status_payload: dict[str, Any]) -> 
         )
     if family_id == "freebox-disks":
         warnings.append(
-            "FREEBOX_3_DISKS: 3 shares exist (Disque_1, Disque_2, Disque_1_1); "
-            "legacy portal_server.py omits Disque_1_1 and direct WAN :80 is IP-restricted to o2switch."
+            "FREEBOX_3_DISKS: 3 shares exist (Disque_1, Disque_2, Disque_1_1) declared in SSOT & portal_server.py; "
+            "direct WAN :80 is IP-restricted to o2switch."
         )
     return warnings
 
@@ -178,71 +198,6 @@ def normalize_release_stem(raw_name: str) -> str:
         if stem.lower().endswith(snip_suf):
             stem = stem[: -len(snip_suf)]
     return stem.lower()
-
-
-def _couplings_index_cache_path() -> Path:
-    """Returns user-scoped mtime-keyed cache path for the 41 MB couplings.json index."""
-    return Path.home().joinpath(*CACHE_DIR_REL, COUPLINGS_INDEX_CACHE_FILENAME)
-
-
-def _try_read_couplings_cache(cache_path: Path, source_key: str) -> tuple[dict[str, dict[str, Any]], int] | None:
-    """Loads pre-indexed couplings summary in ~1.5ms when couplings.json mtime+size match."""
-    if not cache_path.is_file():
-        return None
-    try:
-        cached = json.loads(cache_path.read_text(encoding="utf-8"))
-        if cached.get("source_key") == source_key and isinstance(cached.get("by_norm"), dict):
-            return cached["by_norm"], int(cached.get("total_entries", 0))
-    except (OSError, ValueError, TypeError):
-        return None
-    return None
-
-
-def _write_couplings_cache(cache_path: Path, source_key: str, by_norm: dict[str, Any], total: int) -> None:
-    """Persists lightweight couplings summary index (~80 KB vs 41 MB raw cues)."""
-    try:
-        cache_path.parent.mkdir(parents=True, exist_ok=True, mode=CACHE_DIR_MODE)
-        cache_path.write_text(
-            json.dumps({"source_key": source_key, "total_entries": total, "by_norm": by_norm}, ensure_ascii=False),
-            encoding="utf-8",
-        )
-    except OSError:
-        pass
-
-
-def _load_couplings_index(data_dir: Path) -> tuple[dict[str, dict[str, Any]], int]:
-    """Indexes certified couplings by normalized release stem with O(1) mtime cache."""
-    coup_path = data_dir / "SRT" / "couplings.json"
-    if not coup_path.is_file():
-        return {}, 0
-    st = coup_path.stat()
-    source_key = f"{coup_path.resolve()}:{st.st_size}:{st.st_mtime_ns}"
-    idx_cache = _couplings_index_cache_path()
-    hit = _try_read_couplings_cache(idx_cache, source_key)
-    if hit is not None:
-        return hit
-
-    payload = json.loads(coup_path.read_text(encoding="utf-8"))
-    entries = payload.get("couplings", []) if isinstance(payload, dict) else []
-    by_norm: dict[str, dict[str, Any]] = {}
-    for idx, entry in enumerate(entries):
-        media_name = str(entry.get("media_name", ""))
-        if not media_name:
-            continue
-        subs = entry.get("subtitles", [])
-        langs = sorted({str(s.get("lang", "")) for s in subs if isinstance(s, dict) and s.get("lang")})
-        summary = {
-            "coupling_index": idx,
-            "media_name": media_name,
-            "media_hash": entry.get("media_hash"),
-            "phash_filename": entry.get("phash_filename"),
-            "certified_subtitles_count": len(subs),
-            "languages": langs,
-        }
-        by_norm[media_name.lower()] = summary
-        by_norm[normalize_release_stem(media_name)] = summary
-    _write_couplings_cache(idx_cache, source_key, by_norm, len(entries))
-    return by_norm, len(entries)
 
 
 def _matches_release_token(filename: str, query_low: str) -> bool:
@@ -331,19 +286,40 @@ def _search_couplings_only(data_dir: Path, query: str) -> dict[str, Any]:
     }
 
 
-def _run_family_query(family_id: str, data_dir: Path, query: str) -> dict[str, Any] | None:
-    """Executes family-specific local lookup when an optional query filter is supplied."""
+def _run_family_query(
+    ws: WorkspaceContext,
+    status_payload: dict[str, Any],
+    family_id: str,
+    query: str,
+) -> dict[str, Any] | None:
+    """Executes family-specific local or multi-network lookup when a query filter is supplied."""
     if not query:
         return None
+    data_dir = ws.effective_data_dir
     if family_id == "local-snippets":
         return _search_local_snippets_with_couplings(data_dir, query)
     if family_id == "certified-couplings":
         return _search_couplings_only(data_dir, query)
     if family_id == "phash-files":
-        return _search_generic_directory(data_dir / "__PHASH__", query, ".phash")
+        return search_phash_corpus(ws, status_payload, query)
     if family_id == "ahash-files":
-        return _search_generic_directory(data_dir / "__AHASH__", query, ".ahash")
-    return {"query": query, "note": "Live substring search is supported locally for snippets, couplings, phash, ahash."}
+        return search_ahash_corpus(ws, status_payload, query)
+    if family_id == "snippets-ahash":
+        return _search_generic_directory(data_dir / "snippets_ahash", query, ".ahash")
+    if family_id in ("freebox-disks", "synology-video", "synology-tvshow"):
+        return search_media_containers(ws, status_payload, family_id, query)
+    return {"query": query, "note": f"Item search is not applicable to family '{family_id}'."}
+
+
+def inspect_family_container(
+    ws: WorkspaceContext,
+    status_payload: dict[str, Any],
+    raw_family: str,
+    path_or_query: str,
+) -> dict[str, Any]:
+    """Resolves family alias and runs local/remote ffprobe container inspection."""
+    canonical = normalize_family_id(raw_family)
+    return inspect_media_container(ws, status_payload, canonical, path_or_query)
 
 
 def resolve_data_family(
@@ -407,7 +383,7 @@ def resolve_data_family(
     if canonical in ("packed-catalog", "phash-files", "ahash-files", "certified-couplings"):
         result["cross_node_freshness"] = status_payload["freshness"]
 
-    query_res = _run_family_query(canonical, ws.effective_data_dir, query)
+    query_res = _run_family_query(ws, status_payload, canonical, query)
     if query_res is not None:
         result["query_result"] = query_res
     return result
@@ -423,6 +399,22 @@ def _compact_query_languages(query_res: dict[str, Any]) -> None:
             pc["languages"] = ",".join(pc["languages"])
 
 
+def _compact_resolved_batch_entry(resolved: dict[str, Any], has_query: bool) -> dict[str, Any]:
+    """Prunes redundant verbose fields from a single resolved family entry inside a batch response."""
+    drop_keys = ["cross_node_freshness", "description", "channels", "category", "name", "active_profile"]
+    if has_query and resolved.get("id") == "freebox-disks":
+        drop_keys.append("freebox_disks")
+    for drop_key in drop_keys:
+        resolved.pop(drop_key, None)
+    if "query_result" in resolved:
+        _compact_query_languages(resolved["query_result"])
+    if "warnings" in resolved:
+        resolved["warnings"] = [w for w in resolved["warnings"] if not w.startswith("WORKTREE_UNSEEDED:")]
+        if not resolved["warnings"]:
+            resolved.pop("warnings", None)
+    return resolved
+
+
 def resolve_batch_specs(
     ws: WorkspaceContext,
     status_payload: dict[str, Any],
@@ -433,15 +425,7 @@ def resolve_batch_specs(
     for spec in specs:
         fam_part, _, q_part = spec.partition(":")
         resolved = resolve_data_family(ws, status_payload, fam_part, query=q_part)
-        for drop_key in ("cross_node_freshness", "description", "channels", "category", "name", "active_profile"):
-            resolved.pop(drop_key, None)
-        if "query_result" in resolved:
-            _compact_query_languages(resolved["query_result"])
-        if "warnings" in resolved:
-            resolved["warnings"] = [w for w in resolved["warnings"] if not w.startswith("WORKTREE_UNSEEDED:")]
-            if not resolved["warnings"]:
-                resolved.pop("warnings", None)
-        results[spec] = resolved
+        results[spec] = _compact_resolved_batch_entry(resolved, bool(q_part))
 
     return {
         "cache": status_payload["cache"],
@@ -454,6 +438,136 @@ def resolve_batch_specs(
         "freshness": status_payload["freshness"],
         "results": results,
     }
+
+
+def _is_safe_artifact_basename(filename: str, allowed_exts: tuple[str, ...]) -> bool:
+    """Validates Unicode basename-only artifact filenames while blocking separators and control chars."""
+    if not filename or filename in (".", "..") or "/" in filename or "\\" in filename:
+        return False
+    if CONTROL_CHAR_RE.search(filename) or Path(filename).name != filename:
+        return False
+    return filename.lower().endswith(allowed_exts)
+
+
+def _locate_unicode_variant(base_dir: Path, filename: str) -> Path | None:
+    """Resolves exact, NFC, or NFD filename inside base_dir while enforcing parent containment."""
+    variants = dict.fromkeys((filename, unicodedata.normalize("NFC", filename), unicodedata.normalize("NFD", filename)))
+    for variant in variants:
+        candidate = (base_dir / variant).resolve()
+        if candidate.parent == base_dir and candidate.is_file():
+            return candidate
+    return None
+
+
+def resolve_local_artifact_download(data_dir: Path, kind: str, filename: str) -> tuple[Path | None, str, int]:
+    """Resolves and validates a traversal-proof artifact file path (supporting NFC/NFD Unicode)."""
+    clean_kind = kind.strip().lower()
+    if clean_kind not in VALID_ARTIFACT_KINDS:
+        return None, "invalid_kind", HTTP_BAD_REQUEST_CODE
+
+    if clean_kind == "couplings":
+        eff_name = filename.strip() or "couplings.json"
+        if eff_name != "couplings.json":
+            return None, "invalid_filename", HTTP_BAD_REQUEST_CODE
+        base_dir = (data_dir / "SRT").resolve()
+    else:
+        eff_name = filename.strip()
+        exts = (".phash", ".json") if clean_kind == "phash" else (".ahash", ".json")
+        if not _is_safe_artifact_basename(eff_name, exts):
+            return None, "invalid_filename", HTTP_BAD_REQUEST_CODE
+        folder = "__PHASH__" if clean_kind == "phash" else "__AHASH__"
+        base_dir = (data_dir / folder).resolve()
+
+    if not base_dir.is_dir():
+        return None, "artifact_not_found", HTTP_NOT_FOUND_CODE
+    hit = _locate_unicode_variant(base_dir, eff_name)
+    if hit is None:
+        return None, "artifact_not_found", HTTP_NOT_FOUND_CODE
+    return hit, "ok", HTTP_STATUS_OK
+
+
+def _download_https_stream(url: str, api_key: str, target_path: Path) -> dict[str, Any]:
+    """Streams an authenticated HTTPS binary artifact to disk with SHA-256 verification."""
+    headers = {"User-Agent": AGENT_HTTP_USER_AGENT}
+    if api_key:
+        headers["X-API-Key"] = api_key
+    req = urllib.request.Request(url, headers=headers)
+    tmp_path = target_path.with_name(f".{target_path.name}.part")
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        with urllib.request.urlopen(req, timeout=HTTPS_FETCH_TIMEOUT_SECS) as resp:
+            expected_sha = (resp.headers.get("X-Checksum-SHA256") or "").strip().lower()
+            hasher = hashlib.sha256()
+            total_bytes = 0
+            with tmp_path.open("wb") as out_fh:
+                while True:
+                    chunk = resp.read(ARTIFACT_DOWNLOAD_READ_CHUNK_BYTES)
+                    if not chunk:
+                        break
+                    out_fh.write(chunk)
+                    hasher.update(chunk)
+                    total_bytes += len(chunk)
+        actual_sha = hasher.hexdigest()
+        if expected_sha and actual_sha != expected_sha:
+            tmp_path.unlink(missing_ok=True)
+            return {"ok": False, "error": f"sha256_mismatch:{actual_sha}!={expected_sha}", "url": url}
+        tmp_path.replace(target_path)
+        return {
+            "ok": True,
+            "dry_run": False,
+            "source_node": "o2switch_https",
+            "protocol": "https_api",
+            "url": url,
+            "destination": str(target_path),
+            "bytes_written": total_bytes,
+            "sha256": actual_sha,
+        }
+    except (urllib.error.URLError, OSError) as exc:
+        tmp_path.unlink(missing_ok=True)
+        return {"ok": False, "error": f"https_download_failed:{exc}", "url": url}
+
+
+def _try_https_artifact_fallback(
+    ws: WorkspaceContext,
+    status_payload: dict[str, Any],
+    canonical: str,
+    item: str,
+    target_path: Path,
+    dry_run: bool,
+) -> dict[str, Any] | None:
+    """Falls back to authenticated HTTPS :443 download on 4G/5G when SSH :22 is filtered."""
+    if not status_payload["channels"].get("https_o2switch", {}).get("accessible"):
+        return None
+    kind_map = {"phash-files": "phash", "ahash-files": "ahash", "certified-couplings": "couplings"}
+    kind = kind_map.get(canonical)
+    if not kind:
+        return None
+
+    eff_item = "couplings.json" if kind == "couplings" and not item else item
+    if not eff_item:
+        return {
+            "ok": False,
+            "family": canonical,
+            "error": "https_fallback_requires_item",
+            "hint": "SSH :22 is filtered on 4G/5G; pass an explicit filename (`fetch ahash <file.ahash>`) to download over HTTPS :443.",
+        }
+
+    endpoints = resolve_runtime_endpoints(ws)
+    url = f"{endpoints.o2switch_url}/api/artifact/download?kind={kind}&file={urllib.parse.quote(eff_item, safe='')}"
+    if dry_run:
+        return {
+            "ok": True,
+            "dry_run": True,
+            "source_node": "o2switch_https",
+            "protocol": "https_api",
+            "url": url,
+            "destination": str(target_path),
+        }
+    api_key = resolve_o2switch_api_key(ws)
+    if not api_key:
+        return {"ok": False, "family": canonical, "error": "missing_o2switch_api_key", "url": url}
+    return _download_https_stream(url, api_key, target_path)
 
 
 def _select_rsync_source_node(canonical: str, status_payload: dict[str, Any]) -> str | None:
@@ -472,6 +586,15 @@ def _select_rsync_source_node(canonical: str, status_payload: dict[str, Any]) ->
     return None
 
 
+def _compute_fetch_target_path(ws: WorkspaceContext, fam: dict[str, Any], item: str, dest_override: str) -> Path:
+    """Computes local destination path for an rsync or HTTPS fetch."""
+    local_rel = str(fam["local_rel_path"])
+    base_dest = Path(dest_override) if dest_override else (ws.effective_data_dir.parent / local_rel)
+    if item and not dest_override and fam["id"] != "certified-couplings":
+        return base_dest / item
+    return base_dest
+
+
 def build_or_run_fetch(
     ws: WorkspaceContext,
     status_payload: dict[str, Any],
@@ -480,7 +603,7 @@ def build_or_run_fetch(
     dest_override: str = "",
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    """Synthesizes and optionally executes a safe rsync transfer from rpi4 or o2switch."""
+    """Synthesizes and optionally executes a safe rsync or HTTPS fallback transfer."""
     canonical = normalize_family_id(raw_family)
     raw_reg = load_raw_registry()
     families_by_id = {f["id"]: f for f in raw_reg["families"]}
@@ -488,8 +611,12 @@ def build_or_run_fetch(
     if not fam or "remote_rel_path" not in fam:
         return {"ok": False, "error": f"fetch_unsupported_for_family:{canonical}"}
 
+    target_path = _compute_fetch_target_path(ws, fam, item, dest_override)
     node = _select_rsync_source_node(canonical, status_payload)
     if not node:
+        https_res = _try_https_artifact_fallback(ws, status_payload, canonical, item, target_path, dry_run)
+        if https_res is not None:
+            return https_res
         return {
             "ok": False,
             "family": canonical,
@@ -498,18 +625,12 @@ def build_or_run_fetch(
         }
 
     remote_rel = str(fam["remote_rel_path"])
-    local_rel = str(fam["local_rel_path"])
-    base_dest = Path(dest_override) if dest_override else (ws.effective_data_dir.parent / local_rel)
-
-    if item:
+    if item and canonical != "certified-couplings":
         remote_spec = f"{node}:~/{remote_rel}/{item}"
-        target_path = base_dest if dest_override else (base_dest / item)
     elif canonical in ("phash-files", "ahash-files", "reports-and-inventories"):
         remote_spec = f"{node}:~/{remote_rel}/"
-        target_path = base_dest
     else:
         remote_spec = f"{node}:~/{remote_rel}"
-        target_path = base_dest
 
     cmd = ["rsync", "-az", "--partial", remote_spec, str(target_path)]
     if dry_run:

@@ -266,6 +266,22 @@ def inspect_network_topology(simulated_profile: str | None = None) -> dict[str, 
             "vpn_192_168_hijack": simulated_profile in (NET_WORK_VPN, NET_NOMAD_WAN),
         }
 
+    forced_live = os.environ.get("DBSRT_FORCE_LIVE_PROFILE", "").strip()
+    if forced_live in (NET_NOMAD_WAN, NET_WORK_VPN):
+        return {
+            "host_env": host_env,
+            "profile": forced_live,
+            "simulated": False,
+            "forced_live_profile": forced_live,
+            "fingerprint": f"forced_live:{forced_live}",
+            "detect_ms": round((time.perf_counter() - t0) * MILLIS_PER_SEC, 2),
+            "active_connections": [],
+            "cifs_mounts": cifs_mounts,
+            "cifs_mounts_count": len(cifs_mounts),
+            "cifs_safe_to_stat": False,
+            "vpn_192_168_hijack": True,
+        }
+
     if host_env in (NET_O2SWITCH, NET_RPI4):
         return {
             "host_env": host_env,

@@ -301,6 +301,8 @@ flowchart TD
 | `task doc` | Serveur de documentation MkDocs Material avec rechargement en direct | `taskfiles/doc.yml` |
 | `task doc:check` | Validateur strict de documentation (liens, LaTeX, AST, Headless Chrome) | `taskfiles/doc.yml` |
 | `task data:status` | Diagnostic instantané SSOT topologie réseau, sûreté CIFS et fraîcheur inter-nœuds | `taskfiles/skills.yml` |
+| `task data:query` | Recherche groupée multi-sources (`freebox`, `video`, `tvshow`, `ahash`, `phash`, `snippets`) | `taskfiles/skills.yml` |
+| `task data:inspect` | Inspection `ffprobe` multi-réseaux (LAN direct ou rebond HTTPS `o2switch` en 4G/VPN) | `taskfiles/skills.yml` |
 | `task skills:validate` | Validation formelle des Agent Skills du workspace (`.agents/skills/*`) | `taskfiles/skills.yml` |
 
 ---

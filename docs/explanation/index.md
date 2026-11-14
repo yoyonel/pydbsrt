@@ -238,9 +238,10 @@ tags:
       <span class="bento-badge">SKILLS &amp; PROFILING IA</span>
     </div>
     <h3>Ingénierie, Profiling &amp; Optimisation des Agent Skills</h3>
-    <p>Protocole d'évaluation A/B sans biais, profilage temporel seconde par seconde (451 s → 61 s, ÷15 tokens), pièges cognitifs et routage de modèles pro/flash.</p>
+    <p>Protocole d'évaluation A/B sans biais (zéro juge LLM), profilage seconde par seconde (451 s → 37 s sur flash, 16/16 en LAN et 4G/5G) et arbitrage pro / flash / flash_lite.</p>
     <div class="bento-links">
       <a href="2026-11-14-methodologie-ingenierie-profiling-et-optimisation-agent-skills/">→ Explorer la méthodologie Agent Skills</a>
+      <a href="../how-to/2026-11-14-resoudre-acces-donnees-multi-reseaux-agent-skill/">→ Guide par l'exemple &amp; preuves flash</a>
     </div>
   </div>
 </div>

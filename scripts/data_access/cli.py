@@ -23,6 +23,7 @@ from scripts.data_access.constants import (  # noqa: E402
 from scripts.data_access.prober import collect_data_access_status  # noqa: E402
 from scripts.data_access.resolver import (  # noqa: E402
     build_or_run_fetch,
+    inspect_family_container,
     load_raw_registry,
     resolve_batch_specs,
     resolve_data_family,
@@ -63,16 +64,28 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_res = sub.add_parser("resolve", parents=[common], help="Resolve optimal access channel and query items.")
     p_res.add_argument(
-        "family", help="Family ID or alias (all, ahash, phash, catalog, freebox, snippets, couplings...)."
+        "family", help="Family ID or alias (all, ahash, phash, catalog, freebox, video, tvshow, snippets...)."
     )
-    p_res.add_argument("query", nargs="?", default="", help="Optional filename/release substring query.")
+    p_res.add_argument("query", nargs="*", default=[], help="Optional filename/title/moviehash query.")
 
     p_batch = sub.add_parser(
         "query",
         parents=[common],
         help="Resolve multiple 'family[:search]' targets + global freshness in ONE deduplicated call.",
     )
-    p_batch.add_argument("specs", nargs="+", help="One or more specs, e.g.: phash video snippets:Matrix")
+    p_batch.add_argument(
+        "specs",
+        nargs="+",
+        help="One or more specs, e.g.: freebox:Matrix tvshow:'Andor S01E01' ahash:Hopital",
+    )
+
+    p_insp = sub.add_parser(
+        "inspect",
+        parents=[common],
+        help="Inspect ffprobe streams (codec, resolution, duration, tracks) of a local/NAS/Freebox container.",
+    )
+    p_insp.add_argument("family", help="Media source family (freebox, video, tvshow, snippets).")
+    p_insp.add_argument("target", nargs="+", help="Relative container path or search query.")
 
     p_fetch = sub.add_parser("fetch", parents=[common], help="Fetch dataset or unit file from authoritative node.")
     p_fetch.add_argument("family", help="Target family (catalog, ahash, phash, couplings, reports).")
@@ -122,23 +135,42 @@ def _run_self_check(start_dir: Path | None, compact: bool) -> int:
     return EXIT_OK if ok else EXIT_UNAVAILABLE
 
 
+def _handle_resolve_cmd(args: argparse.Namespace, ws: Any, status_payload: dict[str, Any]) -> int:
+    """Executes single-family resolve subcommand."""
+    q_str = " ".join(args.query) if isinstance(args.query, list) else str(args.query)
+    resolved = resolve_data_family(ws, status_payload, args.family, query=q_str)
+    _emit_json(resolved, args.compact)
+    return EXIT_USAGE_ERROR if "error" in resolved else EXIT_OK
+
+
+def _handle_inspect_cmd(args: argparse.Namespace, ws: Any, status_payload: dict[str, Any]) -> int:
+    """Executes container ffprobe inspect subcommand."""
+    tgt_str = " ".join(args.target) if isinstance(args.target, list) else str(args.target)
+    inspected = inspect_family_container(ws, status_payload, args.family, tgt_str)
+    if args.compact:
+        _emit_json(inspected, True)
+    else:
+        _emit_compact_lines_json(inspected)
+    return EXIT_OK if inspected.get("ok") else EXIT_UNAVAILABLE
+
+
 def _dispatch_probed_command(
     args: argparse.Namespace,
     ws: Any,
     status_payload: dict[str, Any],
 ) -> int:
-    """Dispatches status, resolve, query, or fetch subcommands."""
+    """Dispatches status, resolve, query, inspect, or fetch subcommands."""
     if args.command == "status":
         _emit_json(status_payload, args.compact)
         return EXIT_OK
     if args.command == "resolve":
-        resolved = resolve_data_family(ws, status_payload, args.family, query=args.query)
-        _emit_json(resolved, args.compact)
-        return EXIT_USAGE_ERROR if "error" in resolved else EXIT_OK
+        return _handle_resolve_cmd(args, ws, status_payload)
     if args.command == "query":
         batched = resolve_batch_specs(ws, status_payload, args.specs)
         _emit_compact_lines_json(batched)
         return EXIT_USAGE_ERROR if any("error" in v for v in batched["results"].values()) else EXIT_OK
+    if args.command == "inspect":
+        return _handle_inspect_cmd(args, ws, status_payload)
     if args.command == "fetch":
         fetched = build_or_run_fetch(
             ws,

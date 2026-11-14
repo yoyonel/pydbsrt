@@ -33,8 +33,8 @@
       "rpi4_cifs_path": "/mnt/freebox/Disque_1_1",
       "lan_gateway_url": "http://{rpi4_lan_host}:18089/Disque_1_1/Vidéos/",
       "wan_gateway_url": "http://{nas_wan_host}:80/Disque_1_1/Vidéos/",
-      "portal_ui_declared": false,
-      "note": "Mounted on local workstation and RPi4 (/mnt/freebox/Disque_1_1) and served by rpi4_freebox_gateway.py, but omitted in legacy portal_server.py UI list."
+      "portal_ui_declared": true,
+      "note": "Mounted on local workstation and RPi4 (/mnt/freebox/Disque_1_1), served by rpi4_freebox_gateway.py, and declared via SSOT in portal_server.py."
     }
   ],
   "families": [
@@ -230,6 +230,13 @@
           "target": "{o2switch_url}/api/phashes",
           "probe_key": "https_o2switch",
           "profiles": ["nomad_wan", "work_vpn", "home_lan"]
+        },
+        {
+          "id": "https_o2switch_download",
+          "protocol": "https_api",
+          "target": "{o2switch_url}/api/artifact/download?kind=phash&file=<filename>",
+          "probe_key": "https_o2switch",
+          "profiles": ["nomad_wan", "work_vpn", "home_lan"]
         }
       ]
     },
@@ -256,6 +263,13 @@
           "target": "{effective_data_dir}/__AHASH__",
           "probe_key": "local_fs",
           "profiles": ["home_lan", "nomad_wan", "work_vpn"]
+        },
+        {
+          "id": "https_o2switch_download",
+          "protocol": "https_api",
+          "target": "{o2switch_url}/api/artifact/download?kind=ahash&file=<filename>",
+          "probe_key": "https_o2switch",
+          "profiles": ["nomad_wan", "work_vpn", "home_lan"]
         },
         {
           "id": "https_o2switch_search",
@@ -334,6 +348,13 @@
           "target": "o2switch:~/dbsrt/data/SRT/couplings.json",
           "probe_key": "ssh_o2switch",
           "profiles": ["home_lan", "work_vpn"]
+        },
+        {
+          "id": "https_o2switch_download",
+          "protocol": "https_api",
+          "target": "{o2switch_url}/api/artifact/download?kind=couplings&file=couplings.json",
+          "probe_key": "https_o2switch",
+          "profiles": ["nomad_wan", "work_vpn", "home_lan"]
         }
       ]
     },

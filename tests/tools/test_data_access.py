@@ -28,6 +28,7 @@ from scripts.data_access.prober import (
     _atomic_write_cache,
     _evaluate_catalog_freshness,
     _evaluate_corpus_counts,
+    _fetch_o2switch_https_snapshot,
     _parse_remote_snapshot,
     _read_dbphash_media_count,
     _try_load_valid_cache,
@@ -36,10 +37,12 @@ from scripts.data_access.prober import (
 )
 from scripts.data_access.resolver import (
     build_or_run_fetch,
+    inspect_family_container,
     normalize_family_id,
     normalize_release_stem,
     resolve_batch_specs,
     resolve_data_family,
+    resolve_local_artifact_download,
 )
 from scripts.data_access.topology import (
     RuntimeEndpoints,
@@ -242,9 +245,18 @@ def test_resolve_freebox_three_disks_and_snippet_couplings(tmp_path: Path) -> No
     assert matches[0]["parent_coupling"]["certified_subtitles_count"] == 2
     assert matches[0]["parent_coupling"]["languages"] == ["en", "fr"]
 
-    fetch_blocked = build_or_run_fetch(ws, fake_status, "ahash", dry_run=True)
-    assert fetch_blocked["ok"] is False
-    assert fetch_blocked["error"] == "no_ssh_channel_reachable"
+    fetch_no_item = build_or_run_fetch(ws, fake_status, "ahash", dry_run=True)
+    assert fetch_no_item["ok"] is False
+    assert fetch_no_item["error"] == "https_fallback_requires_item"
+
+    fetch_https_dry = build_or_run_fetch(ws, fake_status, "ahash", item="002835455e305309.ahash", dry_run=True)
+    assert fetch_https_dry["ok"] is True
+    assert fetch_https_dry["source_node"] == "o2switch_https"
+    assert "/api/artifact/download?kind=ahash&file=002835455e305309.ahash" in fetch_https_dry["url"]
+
+    fetch_cat_blocked = build_or_run_fetch(ws, fake_status, "catalog", dry_run=True)
+    assert fetch_cat_blocked["ok"] is False
+    assert fetch_cat_blocked["error"] == "no_ssh_channel_reachable"
 
 
 def test_seed_worktree_and_cache_invalidation(tmp_path: Path) -> None:
@@ -371,3 +383,280 @@ def test_profile_skill_transcript_detects_anomalies_and_clean_run(tmp_path: Path
     assert "OUTPUT_TXT_SPILL_10KB" in prof["detected_anomalies"]
     assert "RTK_TEE_TRUNCATION" in prof["detected_anomalies"]
     assert any(a.startswith("THINKING_LOOP_SPIKE:") for a in prof["detected_anomalies"])
+
+
+def test_https_artifact_fallback_and_traversal_guard(tmp_path: Path) -> None:
+    """Verifies traversal-proof artifact resolution (including NFC/NFD & ellipsis) and HTTPS fallback."""
+    import hashlib
+    import unicodedata
+
+    data_root = tmp_path / "srv_data"
+    (data_root / "__AHASH__").mkdir(parents=True)
+    (data_root / "__PHASH__").mkdir(parents=True)
+    (data_root / "SRT").mkdir(parents=True)
+    raw_bytes = b"DBSRTAH1" + b"\xab\xcd" * 64
+    expected_sha = hashlib.sha256(raw_bytes).hexdigest()
+    (data_root / "__AHASH__" / "sample_ep01.ahash").write_bytes(raw_bytes)
+    nfd_name = unicodedata.normalize("NFD", "01 Cruauté.mp4.86.1fps.ahash")
+    nfc_query = unicodedata.normalize("NFC", "01 Cruauté.mp4.86.1fps.ahash")
+    (data_root / "__AHASH__" / nfd_name).write_bytes(raw_bytes)
+    ellipsis_name = "Live #28  - On fait le Bilan, calmement....mp4.30.0fps.phash"
+    (data_root / "__PHASH__" / ellipsis_name).write_bytes(raw_bytes)
+    (data_root / "SRT" / "couplings.json").write_text('{"couplings":[]}', encoding="utf-8")
+
+    ok_path, reason, code = resolve_local_artifact_download(data_root, "ahash", "sample_ep01.ahash")
+    assert code == 200 and reason == "ok" and ok_path is not None
+    nfc_hit, _, nfc_code = resolve_local_artifact_download(data_root, "ahash", nfc_query)
+    assert nfc_code == 200 and nfc_hit is not None and nfc_hit.name == nfd_name
+    ell_hit, _, ell_code = resolve_local_artifact_download(data_root, "phash", ellipsis_name)
+    assert ell_code == 200 and ell_hit is not None
+    assert resolve_local_artifact_download(data_root, "ahash", "../SRT/couplings.json")[2] == 400
+    assert resolve_local_artifact_download(data_root, "ahash", "..")[2] == 400
+    assert resolve_local_artifact_download(data_root, "ahash", "bad\x00name.ahash")[2] == 400
+    assert resolve_local_artifact_download(data_root, "phash", "sample_ep01.ahash")[2] == 400
+    assert resolve_local_artifact_download(data_root, "unknown", "sample_ep01.ahash")[2] == 400
+    assert resolve_local_artifact_download(data_root, "ahash", "missing.ahash")[2] == 404
+    assert resolve_local_artifact_download(data_root, "couplings", "")[2] == 200
+
+    ws = _make_fake_workspace(tmp_path / "client", is_worktree=False)
+    ws.env_vars["DBSRT_API_KEY"] = "unit-test-key"
+    nomad_status = {
+        "channels": {
+            "ssh_rpi4": {"accessible": False},
+            "ssh_o2switch": {"accessible": False},
+            "https_o2switch": {"accessible": True},
+        }
+    }
+
+    good_resp = MagicMock()
+    good_resp.headers = {"X-Checksum-SHA256": expected_sha}
+    good_resp.read.side_effect = [raw_bytes, b""]
+    good_resp.__enter__.return_value = good_resp
+    dest_file = tmp_path / "downloaded" / "sample_ep01.ahash"
+
+    with patch("urllib.request.urlopen", return_value=good_resp):
+        res = build_or_run_fetch(ws, nomad_status, "ahash", item="sample_ep01.ahash", dest_override=str(dest_file))
+    assert res["ok"] is True
+    assert res["source_node"] == "o2switch_https"
+    assert res["sha256"] == expected_sha
+    assert dest_file.read_bytes() == raw_bytes
+
+    bad_resp = MagicMock()
+    bad_resp.headers = {"X-Checksum-SHA256": "0" * 64}
+    bad_resp.read.side_effect = [raw_bytes, b""]
+    bad_resp.__enter__.return_value = bad_resp
+    bad_dest = tmp_path / "downloaded" / "tampered.ahash"
+
+    with patch("urllib.request.urlopen", return_value=bad_resp):
+        bad_res = build_or_run_fetch(ws, nomad_status, "ahash", item="sample_ep01.ahash", dest_override=str(bad_dest))
+    assert bad_res["ok"] is False
+    assert "sha256_mismatch" in bad_res["error"]
+    assert not bad_dest.exists()
+
+
+def test_ahash_and_phash_human_title_sidecar_search(tmp_path: Path, monkeypatch: object) -> None:
+    """Verifies accent-folded human-title sidecar lookup (.ahash/.phash) and canonical moviehash priority."""
+    monkeypatch.setenv("DBSRT_DATA_ACCESS_CACHE", str(tmp_path / "cache" / "status.json"))  # type: ignore[attr-defined]
+    ws = _make_fake_workspace(tmp_path, is_worktree=False)
+    ah_dir = ws.effective_data_dir / "__AHASH__"
+    ph_dir = ws.effective_data_dir / "__PHASH__"
+    ah_dir.mkdir(parents=True, exist_ok=True)
+    ph_dir.mkdir(parents=True, exist_ok=True)
+
+    (ah_dir / "01f6f860fd5d63ed.86.1fps.ahash").write_bytes(b"ahash_bytes")
+    (ah_dir / "01f6f860fd5d63ed.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "moviehash": "01f6f860fd5d63ed",
+                "media_name": "Ep.04 | Hôpital, la république en panne.mp4",
+                "ahash_file": "01f6f860fd5d63ed.86.1fps.ahash",
+                "fps": 86.125,
+                "frames": 212099,
+                "duration_sec": 2462.688,
+                "selected_audio_stream": {"codec_name": "aac", "language": "fre"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    (ph_dir / "01f6f860fd5d63ed.24.0fps.phash").write_bytes(b"phash_hex")
+    (ph_dir / "01f6f860fd5d63ed.json").write_text(
+        json.dumps(
+            {
+                "moviehash": "01f6f860fd5d63ed",
+                "media_name": "Ep.04 | Hôpital, la république en panne.mp4",
+                "fps": 24.0,
+                "frames": 59104,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (ph_dir / "%5B%20OxTorrent.cc%20%5D%20Les.101.Dalmatiens.1961.mkv.24.0fps.phash").write_bytes(b"ph_url")
+    (ws.effective_data_dir / "SRT" / "couplings.json").write_text('{"couplings": []}', encoding="utf-8")
+
+    fake_status = {
+        "cache": {"hit": True},
+        "workspace": {"effective_data_dir": str(ws.effective_data_dir), "unseeded_items": []},
+        "network": {"host_env": "workstation", "profile": NET_HOME_LAN, "cifs_safe_to_stat": True},
+        "channels": {"local_fs": {"accessible": True, "latency_ms": 0.1}},
+        "freshness": {"packed_catalog": {"status": "UP_TO_DATE"}, "ahash_corpus": {"status": "UP_TO_DATE"}},
+    }
+
+    batched = resolve_batch_specs(ws, fake_status, ["ahash:Hopital panne", "phash:101 Dalmatiens"])
+    ah_matches = batched["results"]["ahash:Hopital panne"]["query_result"]["matches"]
+    assert len(ah_matches) == 1
+    assert ah_matches[0]["ahash_file"] == "01f6f860fd5d63ed.86.1fps.ahash"
+    assert ah_matches[0]["moviehash"] == "01f6f860fd5d63ed"
+    assert ah_matches[0]["duration_sec"] == 2462.69
+    assert ah_matches[0]["phash_file"] == "01f6f860fd5d63ed.24.0fps.phash"
+
+    ph_matches = batched["results"]["phash:101 Dalmatiens"]["query_result"]["matches"]
+    assert len(ph_matches) == 1
+    assert "Dalmatiens" in ph_matches[0]["media_name"]
+
+
+def _mock_json_response(payload: dict[str, object]) -> MagicMock:
+    """Creates a context-manager HTTP 200 application/json mock response."""
+    resp = MagicMock()
+    resp.status = 200
+    resp.headers.get_content_type.return_value = "application/json"
+    resp.read.return_value = json.dumps(payload).encode("utf-8")
+    resp.__enter__.return_value = resp
+    return resp
+
+
+def test_multi_network_media_search_and_inspect_zero_cifs_on_nomad_and_vpn(tmp_path: Path, monkeypatch: object) -> None:
+    """Proves zero CIFS scandir on nomad_wan/work_vpn while resolving nested TV episodes & remote ffprobe."""
+    monkeypatch.setenv("DBSRT_DATA_ACCESS_CACHE", str(tmp_path / "cache" / "status.json"))  # type: ignore[attr-defined]
+    ws = _make_fake_workspace(tmp_path, is_worktree=False)
+    ws.env_vars["DBSRT_API_KEY"] = "test-api-key"
+    (ws.effective_data_dir / "SRT" / "couplings.json").write_text('{"couplings": []}', encoding="utf-8")
+
+    for profile in (NET_NOMAD_WAN, NET_WORK_VPN):
+        status = {
+            "cache": {"hit": True},
+            "workspace": {"effective_data_dir": str(ws.effective_data_dir), "unseeded_items": []},
+            "network": {"host_env": "workstation", "profile": profile, "cifs_safe_to_stat": False},
+            "channels": {
+                "local_fs": {"accessible": True},
+                "local_cifs": {"accessible": False},
+                "https_o2switch": {"accessible": True, "latency_ms": 110.0},
+                "wan_ftp_synology": {"accessible": True, "latency_ms": 300.0},
+            },
+            "freshness": {"packed_catalog": {"status": "UP_TO_DATE"}, "ahash_corpus": {"status": "UP_TO_DATE"}},
+        }
+
+        def fake_urlopen(req: object, timeout: float = 5.0) -> MagicMock:
+            url = getattr(req, "full_url", str(req))
+            if "source=freebox-disks" in url and "/api/files" in url:
+                return _mock_json_response(
+                    {
+                        "status": "ok",
+                        "total_pages": 1,
+                        "items": [
+                            {
+                                "name": "Boite Noire (2021)[1080p].mkv",
+                                "path": "Disque_1_1/Vidéos/Boite Noire (2021)[1080p].mkv",
+                                "is_dir": False,
+                                "size_bytes": 9387647743,
+                            }
+                        ],
+                    }
+                )
+            if "source=synology-tvshow" in url and "subdir=" in url:
+                if "subdir=Locke" in url and "S01" not in url:
+                    return _mock_json_response(
+                        {
+                            "status": "ok",
+                            "total_pages": 1,
+                            "items": [{"name": "S01", "path": "Locke & Key/S01", "is_dir": True, "size_bytes": 0}],
+                        }
+                    )
+                if "S01" in url:
+                    return _mock_json_response(
+                        {
+                            "status": "ok",
+                            "total_pages": 1,
+                            "items": [
+                                {
+                                    "name": "Locke.and.Key.S01E01.1080p.mkv",
+                                    "path": "Locke & Key/S01/Locke.and.Key.S01E01.1080p.mkv",
+                                    "is_dir": False,
+                                    "size_bytes": 2455763846,
+                                }
+                            ],
+                        }
+                    )
+                return _mock_json_response(
+                    {
+                        "status": "ok",
+                        "total_pages": 1,
+                        "items": [{"name": "Locke & Key", "path": "Locke & Key", "is_dir": True, "size_bytes": 0}],
+                    }
+                )
+            if "/api/file/details" in url:
+                many_subs = [
+                    {"index": idx + 2, "codec": "subrip", "language": "fre" if idx == 12 else f"l{idx:02d}"}
+                    for idx in range(20)
+                ]
+                return _mock_json_response(
+                    {
+                        "status": "ok",
+                        "probed": True,
+                        "size_bytes": 9387647743,
+                        "duration_seconds": 7783.79,
+                        "format_name": "matroska,webm",
+                        "bit_rate": 9648405,
+                        "video": {"codec": "h264", "width": 1920, "height": 800, "fps": "24/1"},
+                        "audio_streams": [{"index": 1, "codec": "dts", "channels": 6, "language": "fre"}],
+                        "subtitle_streams": many_subs,
+                    }
+                )
+            raise AssertionError(f"Unexpected URL: {url}")
+
+        real_scandir = __import__("os").scandir
+
+        def guarded_scandir(
+            target_dir: str | Path,
+            prof: str = profile,
+            scan_fn: object = real_scandir,
+        ) -> object:
+            if str(target_dir).startswith(str(tmp_path / "mnt")):
+                raise AssertionError(f"Forbidden CIFS scandir on {target_dir} under {prof}!")
+            return scan_fn(target_dir)  # type: ignore[operator]
+
+        with (
+            patch("os.scandir", side_effect=guarded_scandir),
+            patch("urllib.request.urlopen", side_effect=fake_urlopen),
+        ):
+            batched = resolve_batch_specs(ws, status, ["freebox:Boite Noire", "tvshow:Locke and Key S01E01"])
+            fb_hits = batched["results"]["freebox:Boite Noire"]["query_result"]["matches"]
+            assert len(fb_hits) == 1
+            assert fb_hits[0]["disk"] == "Disque_1_1"
+            assert "local_cifs_path" not in fb_hits[0]
+
+            tv_hits = batched["results"]["tvshow:Locke and Key S01E01"]["query_result"]["matches"]
+            assert len(tv_hits) == 1
+            assert tv_hits[0]["path"] == "Locke & Key/S01/Locke.and.Key.S01E01.1080p.mkv"
+
+            insp = inspect_family_container(ws, status, "freebox", "Boite Noire")
+            assert insp["ok"] is True
+            assert insp["via"] == "o2switch_https_api"
+            assert insp["video"]["width"] == 1920
+            assert insp["subtitle_streams_count"] == 20
+            assert insp["subtitle_streams_truncated"] is True
+            assert insp["subtitle_streams"][0]["language"] == "fre"
+
+
+def test_o2switch_https_freshness_snapshot_when_ssh_blocked() -> None:
+    """Verifies HTTPS :443 /api/phashes?limit=1 fallback populates remote catalog & phash counts."""
+    resp = _mock_json_response(
+        {"status": "ok", "summary": {"raw_count": 4974, "catalog_count": 4974, "catalog_size_bytes": 395529096}}
+    )
+    with patch("urllib.request.urlopen", return_value=resp):
+        snap = _fetch_o2switch_https_snapshot("https://portal.example.test/dbsrt", "secret-key")
+    assert snap is not None
+    assert snap["transport"] == "https_api"
+    assert snap["catalog_dbphash"]["media_count"] == 4974
+    assert snap["phash_files"]["count"] == 4974

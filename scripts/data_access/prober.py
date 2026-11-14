@@ -82,9 +82,11 @@ REMOTE_SNAPSHOT_POSIX_SH: str = (
 
 def compute_kernel_route_digest(route_path: Path = PROC_NET_ROUTE_PATH) -> str:
     """Computes a sub-millisecond SHA-256 digest of /proc/net/route for cache invalidation."""
+    forced_live = os.environ.get("DBSRT_FORCE_LIVE_PROFILE", "").strip()
     if not route_path.is_file():
-        return "no-proc-route"
-    return hashlib.sha256(route_path.read_bytes()).hexdigest()[:16]
+        return f"no-proc-route:{forced_live}" if forced_live else "no-proc-route"
+    raw = route_path.read_bytes() + (f"|{forced_live}".encode() if forced_live else b"")
+    return hashlib.sha256(raw).hexdigest()[:16]
 
 
 def get_cache_file_path() -> Path:
@@ -270,6 +272,46 @@ def probe_o2switch_https(base_url: str, api_key: str) -> dict[str, Any]:
         }
 
 
+def _fetch_o2switch_https_snapshot(base_url: str, api_key: str) -> dict[str, Any] | None:
+    """Fetches catalog and pHash counts over HTTPS :443 when SSH :22 is filtered (4G/5G CGNAT)."""
+    if not base_url or not api_key:
+        return None
+    req = urllib.request.Request(
+        f"{base_url}/api/phashes?limit=1",
+        headers={"X-API-Key": api_key, "Accept": "application/json", "User-Agent": AGENT_HTTP_USER_AGENT},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=HTTPS_API_TIMEOUT_SECS) as resp:
+            if resp.status != HTTP_STATUS_OK or resp.headers.get_content_type() != "application/json":
+                return None
+            payload = json.loads(resp.read(HTTP_READ_MAX_BYTES * 4).decode("utf-8", errors="replace"))
+            summary = payload.get("summary") if isinstance(payload, dict) else None
+            if not isinstance(summary, dict):
+                return None
+            cat_size = int(summary.get("catalog_size_bytes") or 0)
+            cat_cnt = int(summary.get("catalog_count") or 0)
+            raw_cnt = int(summary.get("raw_count") or 0)
+            return {
+                "node": SSH_ALIAS_O2SWITCH,
+                "transport": "https_api",
+                "catalog_dbphash": {
+                    "exists": cat_size > 0,
+                    "path": f"{SSH_ALIAS_O2SWITCH}:~/dbsrt/data/catalog.dbphash",
+                    "size_bytes": cat_size,
+                    "mtime_epoch": 0,
+                    "mtime_iso": None,
+                    "media_count": cat_cnt,
+                },
+                "phash_files": {
+                    "count": raw_cnt,
+                    "sidecar_json_count": 0,
+                    "path": f"{SSH_ALIAS_O2SWITCH}:~/dbsrt/data/__PHASH__",
+                },
+            }
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def probe_local_cifs_safe(net: dict[str, Any], endpoints: RuntimeEndpoints) -> dict[str, Any]:
     """Checks local CIFS mounts ONLY when kernel routing proves direct Home LAN safety."""
     if not net.get("cifs_safe_to_stat", False):
@@ -423,17 +465,21 @@ def _evaluate_catalog_freshness(nodes: dict[str, dict[str, Any]], channels: dict
     is_stale = (
         best_cat["media_count"] > local_cat["media_count"]
         or best_cat["size_bytes"] > local_cat["size_bytes"]
-        or best_cat["mtime_epoch"] > local_cat["mtime_epoch"] + STALE_MTIME_TOLERANCE_SECONDS
+        or (
+            best_cat["mtime_epoch"] > 0
+            and best_cat["mtime_epoch"] > local_cat["mtime_epoch"] + STALE_MTIME_TOLERANCE_SECONDS
+        )
     )
     status = "MISSING_LOCAL" if not local_cat["exists"] else ("STALE_LOCAL" if is_stale else "UP_TO_DATE")
     sync_cmd = _build_catalog_sync_command(channels, nodes, local_cat["path"]) if status != "UP_TO_DATE" else None
+    delta_secs = (best_cat["mtime_epoch"] - local_cat["mtime_epoch"]) if best_cat["mtime_epoch"] > 0 else 0
 
     return {
         "status": status,
         "authoritative_node": best_node,
         "delta_bytes": best_cat["size_bytes"] - local_cat["size_bytes"],
         "delta_medias": best_cat["media_count"] - local_cat["media_count"],
-        "delta_seconds": best_cat["mtime_epoch"] - local_cat["mtime_epoch"],
+        "delta_seconds": delta_secs,
         "sync_cmd": sync_cmd,
     }
 
@@ -472,6 +518,48 @@ def _probe_https_with_lazy_key(ws: WorkspaceContext, endpoints: RuntimeEndpoints
     return probe_o2switch_https(endpoints.o2switch_url, api_key)
 
 
+def _record_o2switch_probe_results(
+    ws: WorkspaceContext,
+    endpoints: RuntimeEndpoints,
+    f_ssh_o2: concurrent.futures.Future[Any] | None,
+    state: tuple[dict[str, Any], dict[str, dict[str, Any]]],
+) -> None:
+    """Populates o2switch SSH/HTTPS channel results and remote snapshot fallback."""
+    channels, remote_nodes = state
+    if f_ssh_o2 is not None:
+        ssh_o2_res, snap_o2 = f_ssh_o2.result()
+        channels["ssh_o2switch"] = ssh_o2_res
+        if snap_o2:
+            remote_nodes["o2switch"] = snap_o2
+    else:
+        channels["ssh_o2switch"] = {
+            "label": f"SSH {SSH_ALIAS_O2SWITCH}",
+            "accessible": False,
+            "latency_ms": 0.0,
+            "error": "ssh_timeout_port_22_filtered",
+        }
+    if SSH_ALIAS_O2SWITCH not in remote_nodes and channels["https_o2switch"].get("accessible"):
+        https_snap = _fetch_o2switch_https_snapshot(endpoints.o2switch_url, resolve_o2switch_api_key(ws))
+        if https_snap is not None:
+            remote_nodes[SSH_ALIAS_O2SWITCH] = https_snap
+
+
+def _record_rpi4_probe_results(
+    f_ssh_rpi4: concurrent.futures.Future[Any] | None,
+    skipped_lan: dict[str, Any],
+    state: tuple[dict[str, Any], dict[str, dict[str, Any]]],
+) -> None:
+    """Populates rpi4 SSH channel result and remote snapshot when Home LAN is active."""
+    channels, remote_nodes = state
+    if f_ssh_rpi4 is None:
+        channels["ssh_rpi4"] = dict(skipped_lan, label="SSH rpi4")
+        return
+    ssh_rpi_res, snap_rpi = f_ssh_rpi4.result()
+    channels["ssh_rpi4"] = ssh_rpi_res
+    if snap_rpi:
+        remote_nodes["rpi4"] = snap_rpi
+
+
 def _run_all_probes(
     ws: WorkspaceContext,
     net: dict[str, Any],
@@ -488,9 +576,10 @@ def _run_all_probes(
     if net.get("simulated"):
         return _populate_simulated_channels(net["profile"], channels), remote_nodes
 
+    block_ssh_22 = net.get("forced_live_profile") == "nomad_wan"
     with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_PROBE_WORKERS) as pool:
         f_https_o2 = pool.submit(_probe_https_with_lazy_key, ws, endpoints)
-        f_ssh_o2 = pool.submit(probe_ssh_snapshot, SSH_ALIAS_O2SWITCH)
+        f_ssh_o2 = None if block_ssh_22 else pool.submit(probe_ssh_snapshot, SSH_ALIAS_O2SWITCH)
         f_pg_local = pool.submit(probe_tcp_port, DEFAULT_LOCALHOST_IP, PG_LOCAL_PORT, "PostgreSQL Local (:5433)")
         f_wan_ftp = None if lan_ok else pool.submit(_probe_ftp_with_lazy_pass, ws, endpoints, False)
         f_lan_ftp = pool.submit(_probe_ftp_with_lazy_pass, ws, endpoints, True) if lan_ok else None
@@ -518,10 +607,7 @@ def _run_all_probes(
             "latency_ms": 0.0,
             "error": "ip_restricted_to_o2switch_egress",
         }
-        ssh_o2_res, snap_o2 = f_ssh_o2.result()
-        channels["ssh_o2switch"] = ssh_o2_res
-        if snap_o2:
-            remote_nodes["o2switch"] = snap_o2
+        _record_o2switch_probe_results(ws, endpoints, f_ssh_o2, (channels, remote_nodes))
 
         skipped_lan = {"accessible": False, "latency_ms": 0.0, "error": "skipped_no_direct_home_lan_route"}
         channels["lan_ftp_synology"] = f_lan_ftp.result() if f_lan_ftp else dict(skipped_lan, label="LAN FTP Synology")
@@ -534,13 +620,7 @@ def _run_all_probes(
             f_lan_http.result() if f_lan_http else dict(skipped_lan, label="LAN HTTP Freebox Gateway (:18089)")
         )
         channels["pg_rpi4"] = f_pg_rpi4.result() if f_pg_rpi4 else dict(skipped_lan, label="PostgreSQL RPi4 (:5432)")
-        if f_ssh_rpi4:
-            ssh_rpi_res, snap_rpi = f_ssh_rpi4.result()
-            channels["ssh_rpi4"] = ssh_rpi_res
-            if snap_rpi:
-                remote_nodes["rpi4"] = snap_rpi
-        else:
-            channels["ssh_rpi4"] = dict(skipped_lan, label="SSH rpi4")
+        _record_rpi4_probe_results(f_ssh_rpi4, skipped_lan, (channels, remote_nodes))
 
     return channels, remote_nodes
 

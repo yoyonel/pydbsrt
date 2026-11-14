@@ -74,6 +74,10 @@ FTP_PROBE_TIMEOUT_SECS: float = 4.0
 SSH_CONNECT_TIMEOUT_SECS: int = 3
 SSH_PROBE_TIMEOUT_SECS: float = 4.5
 FETCH_CMD_TIMEOUT_SECS: float = 120.0
+HTTPS_FETCH_TIMEOUT_SECS: float = 60.0
+ARTIFACT_DOWNLOAD_READ_CHUNK_BYTES: int = 65536
+VALID_ARTIFACT_KINDS: tuple[str, ...] = ("phash", "ahash", "couplings")
+CONTROL_CHAR_PATTERN: str = r"[\x00-\x1f\x7f]"
 
 # --- Cache & Freshness Thresholds ---
 CACHE_SCHEMA_VERSION: int = 2
@@ -84,12 +88,27 @@ CACHE_DIR_REL: tuple[str, ...] = (".cache", "dbsrt")
 CACHE_FILENAME: str = "data_access_cache.json"
 CACHE_LOCK_FILENAME: str = "data_access.lock"
 COUPLINGS_INDEX_CACHE_FILENAME: str = "couplings_index_v1.json"
+AHASH_SIDECAR_CACHE_FILENAME: str = "ahash_sidecar_index_v1.json"
+PHASH_SIDECAR_CACHE_FILENAME: str = "phash_sidecar_index_v1.json"
+MEDIA_LISTING_CACHE_FILENAME: str = "media_listing_cache_v1.json"
+MEDIA_LISTING_TTL_SECONDS: float = 600.0
 SSH_CONTROL_PERSIST_SECS: int = 600
 CACHE_DIR_MODE: int = 0o700
 CACHE_FILE_MODE: int = 0o600
 MAX_PROBE_WORKERS: int = 8
 HTTP_READ_MAX_BYTES: int = 8192
+HTTPS_JSON_MAX_BYTES: int = 2 * 1024 * 1024
+HTTPS_INSPECT_TIMEOUT_SECS: float = 18.0
+LOCAL_FFPROBE_TIMEOUT_SECS: float = 12.0
+PORTAL_MAX_PAGE_SIZE: int = 100
+PORTAL_MAX_SCAN_PAGES: int = 8
+MAX_SERIES_SUBDIR_SCANS: int = 3
+MAX_REMOTE_SIDECAR_FETCHES: int = 5
 MAX_RESOLVE_MATCHES: int = 25
+MAX_MEDIA_QUERY_MATCHES: int = 10
+MAX_INSPECT_SUBTITLE_STREAMS: int = 10
+DURATION_ROUND_DECIMALS: int = 2
+MOVIEHASH_HEX_LEN: int = 16
 
 # --- Unit Conversion Factors ---
 MILLIS_PER_SEC: float = 1000.0
@@ -139,4 +158,40 @@ CONTAINER_FPS_SUFFIXES: tuple[str, ...] = (
     ".mp4.24.0fps",
     ".mp4.25.0fps",
     ".avi.25.0fps",
+)
+
+# --- Supported Video Containers, Freebox Roots, and Series Token Filters ---
+SUPPORTED_VIDEO_EXTS: tuple[str, ...] = (
+    ".mkv",
+    ".mp4",
+    ".avi",
+    ".mov",
+    ".m4v",
+    ".webm",
+    ".ts",
+    ".wmv",
+)
+EXCLUDED_MEDIA_DIRS: tuple[str, ...] = (
+    "photos",
+    "backup",
+    "enregistrements",
+    ".cameras",
+    ".fbxgrabberd",
+    ".fbxtimeshifting",
+    "lost+found",
+    ".trash-1000",
+    "@eadir",
+    "#recycle",
+    "__phash__",
+    "__ahash__",
+)
+FREEBOX_INDEXED_PREFIXES: tuple[tuple[str, str], ...] = (
+    ("Disque_1", "Téléchargements"),
+    ("Disque_2", "Téléchargements"),
+    ("Disque_1_1", "Vidéos"),
+)
+EPISODE_NOISE_TOKEN_PATTERN: str = (
+    r"^(?:s\d{1,2}e\d{1,3}|s\d{1,2}|ep?\d{1,3}|season|saison|"
+    r"\d{3,4}p|4k|uhd|multi|vf\d*|vostfr|french|truefrench|"
+    r"web|webrip|webdl|bluray|bdrip|remux|x264|x265|h264|h265|hevc|hdr|dv|10bit)$"
 )

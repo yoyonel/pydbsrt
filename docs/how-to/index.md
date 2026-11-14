@@ -34,7 +34,7 @@ tags:
 ### 🎛️ Ingestion, Indexation & Vérité Terrain
 * [Comment ajouter et indexer un média via la façade unifiée](ajouter-et-indexer-un-media.md) : Automatiser l'extraction pHash et l'appairage en 1 commande (`task media:add`).
 * [Comment diagnostiquer les sources médias et accès réseau multi-environnements](2026-11-09-diagnostiquer-sources-medias-multi-environnements.md) : Contrôler la connectivité physique CIFS/FTP/HTTP, explorer les conteneurs réels et basculer entre profils.
-* [Comment résoudre instantanément les accès aux données multi-réseaux (SSOT & Agent Skill)](2026-11-14-resoudre-acces-donnees-multi-reseaux-agent-skill.md) : Détecter le profil réseau sans blocage CIFS, vérifier la fraîcheur `local`/`rpi4`/`o2switch` et initialiser les `git worktree` (`task data:*`, `task skills:*`).
+* [Utiliser les Agent Skills par l'Exemple (`pydbsrt-data-access`) & Preuves Empiriques (`flash` / `flash_lite`)](2026-11-14-resoudre-acces-donnees-multi-reseaux-agent-skill.md) : Prompts IA prêts à l'emploi, délégation aux sous-agents légers `flash`, recettes CLI `task data:*` multi-réseaux (LAN, 4G/5G, VPN) et preuve formelle `16/16` à l'aveugle.
 * [Comment auditer les actifs médias et l'intégrité pHash dans PostgreSQL](2026-11-09-auditer-actifs-medias-et-integrite-phash-postgresql.md) : Auditer les KPIs, filtrer les médias sans empreinte et inspecter les caractéristiques techniques dans le portail web.
 * [Comment certifier un couplage vidéo-sous-titres](certifier-un-couplage.md) : Établir et valider la relation d'ancrage vérité terrain entre trames et pistes SRT.
 * [Comment invalider et purger des empreintes visuelles](invalider-donnees-phash.md) : Retirer proprement des médias corrompus ou renommés et forcer le rafraîchissement du cache en mémoire.

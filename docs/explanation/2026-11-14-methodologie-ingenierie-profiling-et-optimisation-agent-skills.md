@@ -120,11 +120,27 @@ Chaque itération du benchmark a révélé un piège concret que `task skills:pr
 L'enseignement architectural majeur de cette étude est le **transfert d'intelligence du modèle vers le code déterministe du skill** :
 
 - **Sans skill**, seul un modèle lourd (`pro`) survit à l'exploration de 20 fichiers hétérogènes, au prix de `7 min 31 s` et `1,08 M` tokens.
-- **Avec un skill SSOT bien borné (`< 8,5 Ko`)**, toute l'ambiguïté métier (routage réseau, sécurité CIFS, worktrees Git, en-têtes binaires `.dbphash`, croisement `couplings.json`) est résolue en `0,17 s` par du code Python testé unitairement. Dès lors, **un modèle léger (`flash`) obtient la même exactitude factuelle que `pro`, descend à `1 min 01 s` (`58 s` à chaud) et divise la consommation de tokens par 15**.
+- **Avec un skill SSOT bien borné (`< 8,5 Ko`)**, toute l'ambiguïté métier (routage réseau, sécurité CIFS, worktrees Git, en-têtes binaires `.dbphash`, sidecars JSON `.ahash`/`.phash`, inspection `ffprobe` locale/distante, croisement `couplings.json`) est résolue de manière déterministe par du code Python testé unitairement. Dès lors, **les modèles légers (`flash` et `flash_lite`) obtiennent `100 %` d'exactitude factuelle (`16/16`)**.
+
+### 5.1 Campagne v3 Multi-Réseaux (`flash` & `flash_lite`, Recherche Média + Sidecars + `ffprobe`)
+
+Une seconde campagne à l'aveugle (cache froid, skills leurres, zéro indice CLI) a validé l'extension fonctionnelle du skill sur des requêtes combinant simultanément : (1) recherche de titres humains accentués dans les sidecars JSON `.ahash`, (2) recherche physique multi-disques Freebox et arborescence `Series/Season` Synology `tvshow`/`video`, (3) inspection `ffprobe` (`inspect`), et (4) bascule forcée en mobilité 4G/5G (`nomad_wan` : CIFS interdit, LAN coupé, SSH `:22` bloqué, rebond intégral via `HTTPS :443` `o2switch`) :
+
+| Scénario à l'aveugle (Cache froid) | Modèle | Score déterministe | Temps total | Temps outils | Temps IA | Appels d'outil | Tokens totaux | Anomalies (`task skills:profile`) |
+| :--- | :--- | ---: | ---: | ---: | ---: | ---: | ---: | :--- |
+| **`flash_lan_v2` (LAN domestique + `ffprobe`)** | **`flash`** | **`16 / 16` (`100 %`)** | **`37 s`** | `9 s` | `28 s` | **`4` (minimum physique)** | `90 646` | **`[]` (Zéro anomalie)** |
+| **`flash_nomad_v2` (4G/5G `nomad_wan` + `ffprobe` HTTPS)** | **`flash`** | **`16 / 16` (`100 %`)** | **`46 s`** | `11 s` | `35 s` | **`4` (minimum physique)** | `91 527` | **`[]` (Zéro anomalie, `0` appel CIFS/SSH)** |
+| **`flash_lan_v2` (Ultra-léger sans `thinking`)** | **`flash_lite`** | **`16 / 16` (`100 %`)** | **`29 s`** | `18 s` | `11 s` | `11` | `227 537` | `RTK_TEE_TRUNCATION` (saut de lecture initiale de `SKILL.md`, rattrapé via `--help`) |
+
+> [!TIP]
+> **Arbitrage empirique `flash` vs `flash_lite`** :
+>
+> - **`flash` est le point d'équilibre optimal** : il lit systématiquement `SKILL.md` dès le tour 1, atteint le minimum théorique absolu de **4 appels** (`read_file SKILL.md` → `query` groupé → `inspect` → réponse) avec **zéro anomalie** en `37 s` (LAN) et `46 s` (4G/5G), pour `2,5×` moins de tokens que `flash_lite`.
+> - **`flash_lite` (`thinking = 0`)** descend à `29 s` grâce à une synthèse quasi instantanée (`11 s` IA), mais tend à deviner le chemin du script avant d'ouvrir `SKILL.md` si la consigne système n'impose pas `MUST call read_file on SKILL.md first`. L'auto-descriptivité de `--help` lui garantit néanmoins `16/16`.
 
 ### Pistes concrètes à explorer lors de la construction des prochains Skills
 
-1. **Banc d'essai `flash_lite` sur les skills purement extractifs** : tester systématiquement chaque nouveau skill sur le trio `(pro, flash, flash_lite)` via `task skills:profile` pour identifier le modèle le plus léger atteignant `100 %` à l'évaluateur déterministe (cible potentielle `< 30 s` sur `flash_lite`).
-2. **Pattern Orchestrateur `pro` → Sous-agents spécialisés `flash`** : lorsqu'une session principale tourne sur `pro` (architecture, refactoring Rust complexe), déléguer les phases d'inventaire, de vérification d'état ou de diagnostic outillées par un skill à un sous-agent `Model: "flash"` plutôt que `inherit`.
+1. **Standardisation du duo `(flash, flash_lite)` par évaluateur déterministe** : valider chaque nouveau skill sur `flash` (cible zéro anomalie au nombre minimal d'appels) et `flash_lite` via `task skills:eval-benchmark -- --suite <nom>` et `task skills:profile`.
+2. **Pattern Orchestrateur `pro` → Sous-agents spécialisés `flash`** : lorsqu'une session principale tourne sur `pro` (architecture, refactoring Rust complexe), déléguer systématiquement les phases d'inventaire, d'inspection média ou de diagnostic outillées par un skill à un sous-agent `Model: "flash"` plutôt que `inherit`.
 3. **Préchauffage événementiel réseau (`0 s` de froid après bascule Wi-Fi / 4G)** : brancher un script léger sur le dispatcher NetworkManager local (ou le démon `dbsrt-server`) pour rafraîchir automatiquement `~/.cache/dbsrt/data_access_cache.json` à chaque changement d'interface réseau.
-4. **Matrice systématique « 1 Douleur = 1 Skill SSOT + 1 Évaluateur déterministe »** : appliquer ce même cycle (Vérité terrain validée par l'humain → Baseline à l'aveugle → Résolveur SSOT `< 8,5 Ko` → Profiling `task skills:profile` zéro anomalie → Sélection du modèle minimal `flash`/`flash_lite`) aux prochains points de douleur du projet.
+4. **Matrice systématique « 1 Douleur = 1 Skill SSOT + 1 Évaluateur déterministe »** : appliquer ce même cycle (Vérité terrain validée par l'humain → Baseline à l'aveugle → Résolveur SSOT `< 8,5 Ko` → Profiling `task skills:profile` zéro anomalie → Validation multi-réseaux sur `flash`) aux prochains points de douleur du projet.

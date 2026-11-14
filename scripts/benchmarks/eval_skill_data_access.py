@@ -35,6 +35,59 @@ GROUND_TRUTH_CHECKS: tuple[tuple[str, str], ...] = (
     ("q4_s01e05_s01e06_uncoupled", r"s01e05.*s01e06"),
 )
 
+FLASH_LAN_V2_CHECKS: tuple[tuple[str, str], ...] = (
+    ("q1_ahash_file", r"01f6f860fd5d63ed\.86\.1fps\.ahash"),
+    ("q1_moviehash", r"01f6f860fd5d63ed"),
+    ("q1_duration_2462", r"2462[.,]69"),
+    ("q1_frames_212099", r"\b212099\b"),
+    ("q2_disk_1_1", r"disque_1_1"),
+    ("q2_boite_noire_mkv", r"boite noire \(2021\)\[1080p\]\(thriller , drame, pierre niney\)\.mkv"),
+    ("q2_size_9387647743", r"\b9387647743\b"),
+    ("q2_video_h264_1920x800", r"(h264|h\.264).*1920\s*[x×]\s*800|1920\s*[x×]\s*800.*(h264|h\.264)"),
+    ("q2_audio_dts_6ch", r"dts.*(\b6\b|5\.1)|(\b6\b|5\.1).*dts"),
+    (
+        "q3_tvshow_subpath",
+        r"locke and key \[1080p\]/s01/locke\.and\.key\.s01e01\.welcome\.to\.matheson\.1080p\.nf\.web-dl\.ddp5\.1\.x264-ntg\.mkv",
+    ),
+    ("q3_size_2455763846", r"\b2455763846\b"),
+    ("q3_moviehash_or_phash", r"ffb6fed130ab99c8"),
+    ("q3_coupled_26_subs", r"\b26\b"),
+    ("q4_local_ahash_2503", r"\b2503\b"),
+    ("q4_o2switch_ahash_2548", r"\b2548\b"),
+    ("q4_catalog_4974_up_to_date", r"(up_to_date|à jour).*\b4974\b|\b4974\b.*(up_to_date|à jour)"),
+)
+
+FLASH_NOMAD_V2_CHECKS: tuple[tuple[str, str], ...] = (
+    (
+        "q1_ahash_tre_piani",
+        r"tre piani \(2021\)\[multi\]\[1080p\]\(comédie dramatique italienne\)\.mkv\.86\.1fps\.ahash",
+    ),
+    ("q1_size_4760912", r"\b4760912\b"),
+    ("q1_duration_6909", r"6909[.,]63"),
+    ("q1_phash_002835455e305309", r"002835455e305309\.24\.0fps\.phash"),
+    ("q2_disk_1", r"disque_1\b"),
+    ("q2_arcane_mkv", r"arcane \(2021\) - s01e01 - welcome to the playground \(1080p nf web-dl x265 t3nzin\)\.mkv"),
+    ("q2_size_1188423670", r"\b1188423670\b"),
+    ("q2_video_hevc_1920x816", r"(hevc|h\.265|x265).*1920\s*[x×]\s*816|1920\s*[x×]\s*816.*(hevc|h\.265|x265)"),
+    ("q2_audio_eac3_6ch", r"eac3"),
+    ("q2_subs_33", r"\b33\b"),
+    (
+        "q3_belfast_path",
+        r"belfast \(2021\)\[1080p\]\(fr srt, mkv\)/belfast\.2021\.1080p\.amzn\.webrip\.ddp5\.1\.atmos\.x264-nogrp\.mkv",
+    ),
+    ("q3_size_5505707453", r"\b5505707453\b"),
+    ("q3_phash_9f4a607676fe9342", r"9f4a607676fe9342\.24\.0fps\.phash"),
+    ("q3_ahash_9f4a607676fe9342", r"9f4a607676fe9342\.86\.1fps\.ahash"),
+    ("q4_o2switch_https_channel", r"o2switch_https_(bounce|api)|https_o2switch|https_api"),
+    ("q4_o2switch_4974_medias", r"\b4974\b"),
+)
+
+BENCHMARK_SUITES: dict[str, tuple[tuple[str, str], ...]] = {
+    "v1": GROUND_TRUTH_CHECKS,
+    "flash_lan_v2": FLASH_LAN_V2_CHECKS,
+    "flash_nomad_v2": FLASH_NOMAD_V2_CHECKS,
+}
+
 
 def _parse_iso(ts: str) -> datetime:
     """Parses ISO-8601 timestamp into timezone-aware datetime."""
@@ -88,18 +141,20 @@ def _measure_tool_window_seconds(steps: list[dict[str, Any]]) -> float:
     return round(sum(end - start for start, end in merged), ROUND_DECIMALS)
 
 
-def grade_response_text(report: str) -> dict[str, Any]:
-    """Evaluates an agent answer deterministically against the 16 validated assertions."""
+def grade_response_text(report: str, suite: str = "v1") -> dict[str, Any]:
+    """Evaluates an agent answer deterministically against the selected benchmark suite."""
+    checks = BENCHMARK_SUITES[suite]
     normalized = DIGIT_SPACE_RE.sub("", report).lower()
     passed: list[str] = []
     failed: list[str] = []
-    for check_id, pattern in GROUND_TRUTH_CHECKS:
+    for check_id, pattern in checks:
         if re.search(pattern, normalized, flags=re.DOTALL):
             passed.append(check_id)
         else:
             failed.append(check_id)
-    total = len(GROUND_TRUTH_CHECKS)
+    total = len(checks)
     return {
+        "suite": suite,
         "score": f"{len(passed)}/{total}",
         "passed_count": len(passed),
         "total_checks": total,
@@ -108,7 +163,7 @@ def grade_response_text(report: str) -> dict[str, Any]:
     }
 
 
-def evaluate_transcript(path: Path) -> dict[str, Any]:
+def evaluate_transcript(path: Path, suite: str = "v1") -> dict[str, Any]:
     """Computes exact timing, token telemetry, and deterministic accuracy score."""
     steps = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
     timestamps = [_parse_iso(s["created_at"]) for s in steps if isinstance(s.get("created_at"), str)]
@@ -125,7 +180,7 @@ def evaluate_transcript(path: Path) -> dict[str, Any]:
     tool_calls = sum(len(s.get("tool_calls") or []) for s in steps)
 
     report = _extract_final_report(steps)
-    grading = grade_response_text(report)
+    grading = grade_response_text(report, suite=suite)
 
     return {
         "conversation_id": path.parent.parent.parent.name,
@@ -148,10 +203,16 @@ def evaluate_transcript(path: Path) -> dict[str, Any]:
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point evaluating one or more subagent transcript JSONL files."""
     parser = argparse.ArgumentParser(description="Deterministic evaluator for pydbsrt-data-access benchmarks.")
+    parser.add_argument(
+        "--suite",
+        choices=sorted(BENCHMARK_SUITES.keys()),
+        default="v1",
+        help="Deterministic assertion suite to evaluate against (default: v1).",
+    )
     parser.add_argument("transcripts", nargs="+", help="Paths to transcript_full.jsonl files.")
     args = parser.parse_args(argv)
 
-    results = [evaluate_transcript(Path(p)) for p in args.transcripts]
+    results = [evaluate_transcript(Path(p), suite=args.suite) for p in args.transcripts]
     print(json.dumps({"evaluations": results}, indent=2, ensure_ascii=False))
     return 0 if all(r["grading"]["all_passed"] for r in results) else 1
 

@@ -43,6 +43,11 @@ tasks:
     cmds:
       - uv run --no-sync python scripts/data_access/cli.py query {{.CLI_ARGS}}
 
+  data:inspect:
+    desc: Inspect ffprobe streams and cross-referenced hashes/couplings for a local, Synology, or Freebox container
+    cmds:
+      - uv run --no-sync python scripts/data_access/cli.py inspect {{.CLI_ARGS}}
+
   data:fetch:
     desc: Fetch or synchronize a stale dataset or unit file from the authoritative reachable node
     cmds:

@@ -19,15 +19,15 @@
 1. **Corporate VPN `ppp0` Subnet Hijack**:
    Corporate PPP VPN injects a `/16` private route on `dev ppp0`. On Home Wi-Fi, the more specific `/24` LAN route on the Wi-Fi device wins. Off Home Wi-Fi, `/24` disappears while all 5 CIFS shares stay mounted in `/proc/mounts`; any `stat()` on `$MEDIA_MOUNT_ROOT/$USER/...` sends SMB packets into `ppp0` and freezes the calling process.
 2. **o2switch SSH Port 22 Whitelist on Mobile CGNAT**:
-   cPanel *"Autorisation SSH"* allows only static whitelisted IPs (up to 5 slots or a DynDNS hostname refreshed every 3-5 minutes). Mobile 4G/5G CGNAT IPs time out on port `22`, whereas `HTTPS :443` with `X-API-Key` (`pass show services/pydbsrt/o2switch_api_key`) and `User-Agent: dbsrt-agent/0.1.0` works everywhere without tripping Tiger Protect WAF.
+   cPanel *"Autorisation SSH"* allows only static whitelisted IPs (up to 5 slots or a DynDNS hostname refreshed every 3-5 minutes). Mobile 4G/5G CGNAT IPs time out on port `22`, whereas `HTTPS :443` with `X-API-Key` (`pass show services/pydbsrt/o2switch_api_key`) and `User-Agent: dbsrt-agent/0.1.0` works everywhere without tripping Tiger Protect WAF, including unit binary downloads via `GET /api/artifact/download?kind=phash|ahash|couplings&file=<basename>` (used automatically by `dbsrt_data.py fetch` when SSH is unreachable).
 3. **Three Freebox Disks (`Disque_1`, `Disque_2`, `Disque_1_1`)**:
    - `Disque 1` (`Disque_1/Téléchargements`)
    - `Disque 2` (`Disque_2/Téléchargements`)
-   - `Disque 1 1` (`Disque_1_1/Vidéos`) — mounted on workstation and RPi4 (`/mnt/freebox/Disque_1_1`) and served by `scripts/infra/rpi4/rpi4_freebox_gateway.py`, even when omitted from legacy UI cards.
-4. **Asymmetric Corpus Distribution (`local` vs `rpi4` vs `o2switch`)**:
-   - `data/__AHASH__/`: Cloud `o2switch` (`~/dbsrt/data/__AHASH__/`) is the primary batch extraction target (`rpi4` does **not** sync `__AHASH__/` and holds `0` `.ahash` files).
-   - `data/catalog.dbphash`: Compiled on `o2switch` and synced to `rpi4`; workstation `data/catalog.dbphash` frequently lags unless explicitly pulled (`fetch catalog` or `task o2switch:pull-catalog`).
-   - `data/SRT/couplings.json`: Indexes full reference episodes/movies (e.g. `Andor.S01E01.1080p.WEB.h264-KOGi`), NOT `*_mid15s.mp4` snippet filenames directly; `dbsrt_data.py resolve snippets <query>` strips snippet/FPS suffixes automatically to verify parent couplings.
+   - `Disque 1 1` (`Disque_1_1/Vidéos`) — mounted on workstation and RPi4 (`/mnt/freebox/Disque_1_1`), served by `scripts/infra/rpi4/rpi4_freebox_gateway.py`, and unified on SSOT in `scripts/portal_server.py`.
+4. **Asymmetric Corpus Distribution & Hex Moviehash Sidecars (`local` vs `rpi4` vs `o2switch`)**:
+   - `data/__AHASH__/` & `data/__PHASH__/`: Canonical fingerprints use 16-hex OpenSubtitles moviehash filenames (`<moviehash>.86.1fps.ahash`, `<moviehash>.24.0fps.phash`) paired with `<moviehash>.json` sidecars holding the human `media_name`. `dbsrt_data.py query ahash:<title>` and `phash:<title>` index all sidecars (accent-folded) with O(1) mtime caching and fall back to `o2switch` HTTPS `/api/assets` when missing locally. Cloud `o2switch` is the primary `.ahash` store (`rpi4` holds `0` `.ahash` files).
+   - `data/catalog.dbphash`: Compiled on `o2switch` and synced to `rpi4`; workstation `data/catalog.dbphash` lags unless pulled (`fetch catalog` or `task o2switch:pull-catalog`). Even on 4G/5G where SSH `:22` is filtered, `dbsrt_data.py` checks `o2switch` catalog freshness over HTTPS `:443` (`/api/phashes?limit=1`).
+   - `data/SRT/couplings.json`: Indexes full reference episodes/movies, NOT `*_mid15s.mp4` snippet filenames directly; `dbsrt_data.py` strips snippet/FPS suffixes automatically and cross-references `.phash`, `.ahash`, and `couplings.json` on every container search (`freebox:<q>`, `video:<q>`, `tvshow:<q>`) and `inspect`.
 5. **Unseeded Isolated `git worktree`**:
    Binary datasets under `data/` and `.env` are `.gitignore`d. A fresh `git worktree` has an almost empty `data/` folder. `dbsrt_data.py` automatically resolves `git rev-parse --git-common-dir` to read the parent checkout's `.env` and `data/`, and provides `seed-worktree` to create all 7 dataset symlinks before starting daemons.
 

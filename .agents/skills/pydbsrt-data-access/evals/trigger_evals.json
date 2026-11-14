@@ -51,6 +51,16 @@
       "id": "pos-10-reports-location",
       "prompt": "Où sont stockés les rapports batch_*.jsonl et les audits de trajectoires entre mon poste et o2switch ?",
       "should_trigger": true
+    },
+    {
+      "id": "pos-11-ahash-human-title",
+      "prompt": "Trouve le fichier .ahash (et son moviehash hexadécimal + durée) correspondant au documentaire 'Hôpital, la république en panne'.",
+      "should_trigger": true
+    },
+    {
+      "id": "pos-12-remote-ffprobe-inspect",
+      "prompt": "Donne la résolution vidéo, le codec audio et les sous-titres intégrés du film Boîte Noire stocké sur les disques Freebox.",
+      "should_trigger": true
     }
   ],
   "negative_triggers": [
