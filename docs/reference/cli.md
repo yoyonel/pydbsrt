@@ -224,6 +224,22 @@ dbsrt pack --input-dir <DIR> --output <CATALOG.dbphash>
 
 ---
 
+### `pack-ahash` (alias `ahash:pack`, `pack:ahash`)
+Compile de manière déterministe en 2 passes streaming un ensemble de fichiers `.ahash` et leurs sidecars `<stem>.json` dans une archive binaire projetable par `mmap` (`data/catalog.dbahash`, format `.dbahash` v1 aligné 64 octets), en dédupliquant les jumeaux binaires tout en préservant les pistes audio secondaires (`.a1`, `.a2`, …).
+
+```text
+dbsrt pack-ahash [OPTIONS]
+```
+
+- `--ahash-dir <DIR>` (ou `-i`) : Répertoire primaire contenant les fichiers `.ahash` et `<stem>.json` (défaut : `data/__AHASH__`).
+- `--extra-dir <DIR>` : Répertoire(s) additionnel(s) contenant des fichiers `.ahash` (répétable).
+- `--output <PATH>` (ou `-o`) : Chemin de l'archive `.dbahash` générée atomiquement via `<tmp>` + `sync_all` + `rename` (défaut : `data/catalog.dbahash`).
+- `--factor-k <K>` (ou `-k`) : Facteur de décimation Coarse-to-Fine $K \ge 1$ pour l'index `MIH-32` intégré (défaut : `32`, soit `2.69 fps`).
+- `--no-mih32` : Omet les tables `MIH-32` pré-triées dans l'archive (reconstruction paresseuse en mémoire à l'ouverture).
+- Voir la spécification binaire complète dans [Formats de Fichiers § 2bis](formats-fichiers.md).
+
+---
+
 ### `migrate`
 Pilote les migrations de schéma de base de données PostgreSQL via le moteur Refinery.
 

@@ -195,4 +195,40 @@ tags:
       <a href="2026-11-14-benchmark-exhaustif-multimodal-3180-videos-reelles-phash-ahash-c2f-mih/">→ Explorer la matrice 24 techniques</a>
     </div>
   </div>
+
+  <div class="dbsrt-bento-card bento-cyan">
+    <div class="bento-header">
+      <span class="bento-icon">💿</span>
+      <span class="bento-badge">MMAP &amp; NOYAU LINUX 6.6+</span>
+    </div>
+    <h3>Archive .dbahash v1 mmap, Multi-Order Folios &amp; C2F Zéro-Alloc</h3>
+    <p>2 490 pistes (5.13 GiB) ouvertes en 1.43 ms, RssAnon 4.6 MiB (-99.95 %), rappel 99.41 %, remorque \0TWINS1\0 et MADV_RANDOM ciblé par VMA.</p>
+    <div class="bento-links">
+      <a href="2026-11-14-architecture-dbahash-mmap-folios-linux-et-c2f-zero-alloc/">→ Lire le journal d'ingénierie .dbahash v1</a>
+    </div>
+  </div>
+
+  <div class="dbsrt-bento-card bento-emerald">
+    <div class="bento-header">
+      <span class="bento-icon">📈</span>
+      <span class="bento-badge">SYNTHÈSE &amp; LOI D'ÉCHELLE 1M</span>
+    </div>
+    <h3>Comparatif aHash vs pHash &amp; Projection 5k → 1 000 000 Pistes</h3>
+    <p>Face-à-face vitesse/précision/RAM sur 5 757 vidéos, équations prédictives RAM/NVMe/latence et 4 architectures Hyper-Scale (Shards Radix-24, io_uring SSD-Native, Scatter-Gather).</p>
+    <div class="bento-links">
+      <a href="2026-11-14-synthese-comparative-ahash-vs-phash-et-loi-echelle-millions-pistes/">→ Explorer le comparatif &amp; la loi d'échelle</a>
+    </div>
+  </div>
+
+  <div class="dbsrt-bento-card bento-amber">
+    <div class="bento-header">
+      <span class="bento-icon">🏛️</span>
+      <span class="bento-badge">GOUVERNANCE &amp; ADR</span>
+    </div>
+    <h3>Registre des Décisions d'Architecture (ADR-0001 à ADR-0007)</h3>
+    <p>Catalogue chronologique des contrats structurants retenus, alternatives rejetées et invariants bidirectionnels ancrés dans les docstrings Rust.</p>
+    <div class="bento-links">
+      <a href="../decisions/">→ Consulter le registre des ADR</a>
+    </div>
+  </div>
 </div>

@@ -41,6 +41,7 @@ Cette page dresse le dictionnaire exhaustif de toutes les cibles d'orchestration
 | `task audio:export-ahash` | `task audio:export-ahash -- --media <input> [--output <ahash>]` | Extrait l'empreinte spectrale acoustique Haitsma-Kalker `.ahash` v1.0 (`<moviehash_16hex>[.a<k>].86.1fps.ahash` + sidecar `<moviehash_16hex>[.a<k>].json`) via `dbsrt export-ahash`. |
 | `task ahash:backfill-sidecars` | `task ahash:backfill-sidecars -- [--dry-run] [--limit N] [--workers W]` | Rattrape et vérifie localement via flux WAN les sidecars JSON `<stem>.json` (`AhashSidecar` v1) de `data/__AHASH__/`. |
 | `task ahash:migrate-moviehash` | `task ahash:migrate-moviehash -- [--dry-run] [--limit N] [--workers W]` | Migre sans perte (0 FFT) les `.ahash`/`.json` nommés en clair vers la convention canonique `<moviehash_16hex>[.a<k>].86.1fps.ahash` + `<moviehash_16hex>[.a<k>].json` avec déduplication des doublons binaires. |
+| `task ahash:pack` | `task ahash:pack -- [--ahash-dir <dir>] [--output <path>] [--factor-k <K>] [--no-mih32]` | Compile en 2 passes streaming `data/__AHASH__/*.ahash` + `<stem>.json` dans l'archive binaire `mmap` `data/catalog.dbahash` (`.dbahash` v1, `MIH-32` $K=32$ pré-trié, écriture atomique). (Alias : `task pack:ahash`, `task pack-ahash`). |
 
 ---
 
@@ -115,6 +116,7 @@ Cette page dresse le dictionnaire exhaustif de toutes les cibles d'orchestration
 | `task bench:ahash:cuts` | Exécute le benchmark de reconnaissance acoustique aHash et d'auto-synchronisation headless `cvlc` sur les extraits vidéo (`scripts/benchmarks/bench_ahash_cuts.py`). |
 | `task bench:ahash:mih:matrix` | Exécute la matrice comparative `Linear Scan` vs `MIH-16` vs `MIH-32` (Mono & Rayon) sur les catalogues aHash (106M trames à 86.125 fps) et pHash (2.7M trames). |
 | `task bench:ahash:coarse-to-fine` | Évalue l'index hiérarchique Coarse-to-Fine aHash à travers les facteurs de décimation $K \in \{1, 4, 8, 16, 31\}$. |
+| `task bench:dbahash:rss` | Vérifie empiriquement sur `data/catalog.dbahash` la latence `MmapDbahash::open` (`< 50 ms`), les bornes `RssAnon`/`RssFile` invariantes d'échelle, le delta nul (`AhashEngine`) et la précision sur 200 requêtes réelles. |
 | `task bench:multimodal:scale` | Exécute en parallèle (`--workers`) le benchmark multimodal multi-fenêtres et la matrice 24 techniques (pHash + aHash) sur les bibliothèques vidéo via `dbsrt bench-scale-multimodal`. |
 | `task bench:multimodal:matrix` | Rejoue hors-ligne la matrice comparative complète des 24 techniques (`pHash` MIH-16/32/Linear + `aHash` C2F $K \in [1, 32]$ + Dense MIH-16/32/Linear) à partir d'un journal JSONL existant (`--matrix-only`). |
 | `task eval:multimodal:audit` | Exécute l'audit forensique paramétrique des modalités manquées sur le rapport JSONL du benchmark multimodal (`scripts/benchmarks/audit_missed_modalities.py`). |

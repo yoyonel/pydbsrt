@@ -6,6 +6,7 @@ tags:
   - formats
   - binaire
   - dbphash
+  - dbahash
   - json
 ---
 
@@ -74,8 +75,8 @@ Chaque `.ahash` écrit par `dbsrt export-ahash`, `dbsrt media:add --ahash-dir` o
 | `inferred_backfill` | Backfill multi-pistes avec `--no-verify` (règle par défaut FFmpeg) | **Déduite**. |
 | `unknown` | `ffprobe` indisponible, aucune piste ou aucune piste `<= 14.0` bits lors du sondage | Inconnue. |
 
-!!! note "Lecture par le catalogue et Empreinte Mémoire Actuelle"
-    `AHashCatalog::load_from_dir` lit le sidecar typé en priorité (`media_name`, `audio_language`, `audio_index`). À défaut, il garde l'ancien repli nom seul (`<moviehash>.json` dans `__AHASH__/` puis `../__PHASH__/`, clés `media_name` / `clean_title` / `filename`). Contrairement à `.dbphash` v2 projeté par `mmap` (`0 MiB` d'allocation tas), `AHashCatalog` charge aujourd'hui les séquences `u64` denses en RAM tas (`~727 MiB` pour `537` médias / `95.34 M` trames, en sus des `68–136 MiB` de l'index `CoarseToFineAHashIndex`). Le passage à une archive unique `catalog.dbahash` projetée par `mmap` est détaillé dans [Benchmark Exhaustif Multimodal & Diagnostic `.dbahash`](../explanation/2026-11-14-benchmark-exhaustif-multimodal-3180-videos-reelles-phash-ahash-c2f-mih.md).
+!!! note "Lecture par le catalogue (`AhashEngine` = `MmapDbahash` + Delta incrémental)"
+    `dbsrt-server` charge en priorité l'archive compilée `data/catalog.dbahash` via `MmapDbahash` (`0 MiB` d'allocation tas pour les trames denses, ouverture `< 50 ms`), complétée par un delta incrémental `AHashCatalog` ne chargeant en RAM que les nouveaux fichiers `.ahash` non encore empaquetés (filtrage $\mathcal{O}(1)$ par `stat()` + déduplication binaire des doublons). Lors de la compilation (`dbsrt pack-ahash`) comme du chargement delta, le sidecar typé `<stem>.json` est lu en priorité (`media_name`, `audio_language`, `audio_index`), avec repli sur `<moviehash>.json` dans `__AHASH__/` puis `../__PHASH__/`. Voir § 2bis ci-dessous et [Benchmark Exhaustif Multimodal & Diagnostic `.dbahash`](../explanation/2026-11-14-benchmark-exhaustif-multimodal-3180-videos-reelles-phash-ahash-c2f-mih.md).
 
 
 ---
@@ -113,6 +114,59 @@ Le format `.dbphash` regroupe plusieurs millions d'empreintes dans un fichier co
    - `fps` : `float32`.
    - Longueur du titre (uint16) suivi de la chaîne UTF-8 du titre.
 3. **Index MIH (Multi-Index Hashing)** : Découpage des 64 bits en 4 chunks de 16 bits pour un routage direct dans les tables de hachage inversées.
+
+---
+
+## 2bis. Spécification de l'Archive Audio Haute Densité (`.dbahash` v1)
+
+L'archive binaire `.dbahash` v1 (`crates/dbsrt-index/src/dbahash/`, produite par `dbsrt pack-ahash` / `task ahash:pack`) consolide l'ensemble des fichiers `.ahash` et leurs sidecars `<stem>.json` dans un fichier unique projeté par `mmap` (`MmapDbahash`, little-endian, sections alignées sur **64 octets** — une ligne de cache L1 CPU).
+
+### En-Tête Binaire (`DbahashHeader`) — 128 octets (`#[repr(C)]`)
+
+| Offset | Champ | Type | Description |
+| :---: | :--- | :--- | :--- |
+| `0x00` | `magic` | `[u8; 8]` | Signature fixe `b"DBAHASH\0"`. |
+| `0x08` | `version` | `u16` | Version du schéma binaire (`1`). |
+| `0x0A` | `flags` | `u16` | Bit `0` (`0x0001`, `DBAHASH_FLAG_HAS_COARSE_MIH32`) : tables `MIH-32` grossières pré-triées incluses. |
+| `0x0C` | `factor_k` | `u32` | Facteur de décimation Coarse-to-Fine $K \ge 1$ (défaut : `32`, soit `2.69 fps`). |
+| `0x10` | `media_count` | `u32` | Nombre de pistes audio uniques indexées (préserve `.a1`, `.a2`, déduplique les jumeaux binaires). |
+| `0x14` | `reserved_u32` | `u32` | Remplissage d'alignement nul (`0`). |
+| `0x18` | `total_dense_frames` | `u64` | Nombre total de sous-empreintes denses `u64` à `86.125 fps`. |
+| `0x20` | `total_coarse_frames` | `u64` | Nombre total de sous-empreintes grossières décimées (`1/K`). |
+| `0x28` | `offset_media_table` | `u64` | Offset aligné 64 octets de la table `DbahashMediaEntry[media_count]`. |
+| `0x30` | `offset_strings_table` | `u64` | Offset aligné 64 octets du pool contigu de chaînes UTF-8 (`media_name`, `file_path` + remorque `\0TWINS1\0`). |
+| `0x38` | `strings_len` | `u64` | Longueur exacte non paddée des octets utiles dans le pool de chaînes. |
+| `0x40` | `offset_dense_hashes` | `u64` | Offset aligné 64 octets de la section froide finale `u64[total_dense_frames]`. |
+| `0x48` | `offset_coarse_hashes` | `u64` | Offset aligné 64 octets des empreintes grossières `u64[total_coarse_frames]` (`0` si absent). |
+| `0x50` | `offset_coarse_mih_upper` | `u64` | Offset aligné 64 octets de la table triée `Mih32Entry[total_coarse_frames]` (32 bits hauts). |
+| `0x58` | `offset_coarse_mih_lower` | `u64` | Offset aligné 64 octets de la table triée `Mih32Entry[total_coarse_frames]` (32 bits bas). |
+| `0x60` | `checksum` | `u64` | Somme de contrôle 64-bit FNV-1a sur l'en-tête (`checksum=0`), `media_table` et `strings_table[..strings_len]`. |
+| `0x68` | `_reserved` | `[u8; 24]` | Réservé pour extensions futures (`0`). |
+
+### Entrée de Table Média (`DbahashMediaEntry`) — 64 octets (`#[repr(C)]`)
+
+Chaque piste occupe exactement une ligne de cache CPU :
+
+- `moviehash` (`u64`) + `audio_fps_bits` (`u64`, représentation IEEE-754 de `audio_fps`).
+- `dense_start_idx` (`u64`) + `coarse_start_idx` (`u64`) : indices de départ dans les sections denses et grossières.
+- `dense_frame_count` (`u32`) + `coarse_frame_count` (`u32`).
+- `name_offset` (`u32`), `name_len` (`u32`), `path_offset` (`u32`), `path_len` (`u16`) : tranches UTF-8 dans `strings_table`.
+- `audio_index` (`u16`), `flags` (`u8` : `HAS_MOVIEHASH = 0x01`, `HAS_AUDIO_INDEX = 0x02`, `HAS_LANGUAGE = 0x04`), `language` (`[u8; 7]` UTF-8 inline terminé par `\0`, ex. `"fre\0..."`).
+
+### Remorque Rétrocompatible des Jumeaux Binaires (`\0TWINS1\0`)
+
+Lorsque plusieurs fichiers `.ahash` sur disque partagent exactement le même payload binaire (ex. deux encodages vidéo `1080p`/`720p` à piste audio identique), `dbsrt pack-ahash` n'émet qu'une seule entrée `DbahashMediaEntry` et annexe les noms des jumeaux absorbés à la fin de `strings_table` (couverts par `strings_len` et `checksum`, jamais référencés par `name_offset`/`path_offset`) :
+
+- `magic` : `b"\0TWINS1\0"` (`8` octets, `DBAHASH_TWIN_TRAILER_MAGIC`).
+- `count` : `u32` little-endian.
+- `records[count]` : répétition de `(dense_frame_count: u32, filename_len: u16, filename_utf8: [u8; filename_len])`.
+- **Rôle** : permet à `AhashEngine::open` d'ignorer ces fichiers en $\mathcal{O}(1)$ par simple `stat()` sans relire le disque ni effleurer la section `dense_hashes`.
+
+### Ordonnancement Chaud/Froid & Isolation VMA du Page-Cache OS
+
+1. **Préfixe chaud en tête (`~300 MiB` actifs à $K=32$ pour `2 490` pistes / `628.95 M` trames)** : `Header` → `Media Table` → `Strings Pool` → `Coarse Hashes` (évincé dès l'écriture quand `MIH-32` est présent) → `Coarse MIH-32 Upper` → `Coarse MIH-32 Lower`. La recherche dichotomique sur `Mih32Entry` (`8` octets : `chunk: u32`, `frame_idx: u32`) s'exécute avec `fault_around_bytes = 64 KiB` actif et zéro allocation tas (`RssAnon < 5 MiB`).
+2. **Section froide en fin d'archive (`offset_dense_hashes`, `4.69 GiB` pour `628.95 M` trames)** : isolée par `Mmap::advise_range(Advice::Random, offset_dense_hashes, ...)` (`MADV_RANDOM` scopé à la VMA dense) et purgée en fin d'écriture (`POSIX_FADV_DONTNEED`). Seules `1` à `2` pages `4 KiB` (`±16` trames = `3.69 KiB`) sont paginées par candidat retenu (`< 3 MiB` de pages denses résidentes après `200` requêtes).
+3. **Écriture atomique en 2 passes streaming** : `.<output>.<pid>.<seq>.tmp` + `sync_all` + purge folios + `rename` (consommation mémoire bornée pendant le pack, zéro troncature visible par `dbsrt-server`).
 
 ---
 
