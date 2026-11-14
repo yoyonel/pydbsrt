@@ -150,6 +150,18 @@ tasks:
     cmds:
       - uv run --no-sync python scripts/ingestion/backfill_ahash_sidecars.py --migrate-to-moviehash {{.CLI_ARGS}}
 
+  ahash:pack:
+    desc: Pack .ahash files and sidecars into zero-copy mmap archive data/catalog.dbahash (--ahash-dir, --output, --factor-k, --no-mih32)
+    aliases: [pack:ahash, pack-ahash]
+    deps: [rs:build]
+    cmds:
+      - ./target/release/dbsrt pack-ahash {{.CLI_ARGS}}
+
+  bench:dbahash:rss:
+    desc: Empirical verification of MmapDbahash::open (<50ms), scale-invariant RssAnon/RssFile bounds, and zero-delta AhashEngine on data/catalog.dbahash
+    cmds:
+      - cargo test --release --package dbsrt-index --test test_dbahash test_empirical_real_catalog_dbahash_open_rss_and_latency -- --ignored --nocapture
+
   bench:ahash:matching:
     desc: Run exhaustive acoustic cross-correlation benchmark on .ahash files (Axe 1 temporal, Axe 2 discrimination, Axe 3 throughput)
     aliases: [bench:ahash]

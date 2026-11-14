@@ -5,8 +5,8 @@ use dbsrt_cli::commands::{
     run_ahash_sidecar, run_bench_ahash, run_bench_cuts, run_bench_phash, run_bench_video,
     run_certify_coupling, run_export_ahash, run_export_phash, run_fetch_subtitles,
     run_import_phash, run_inspect_media, run_match_trajectory, run_media_add, run_migrate,
-    run_pack, run_recognize_media, run_relabel_coupling, run_retarget_subtitles, run_scan_library,
-    run_top,
+    run_pack, run_pack_ahash, run_recognize_media, run_relabel_coupling, run_retarget_subtitles,
+    run_scan_library, run_top,
 };
 
 fn run_single_thread<F, R>(future: F) -> Result<R>
@@ -79,16 +79,26 @@ fn dispatch_media(cmd: Commands) -> Result<Option<Commands>> {
     }
 }
 
-fn dispatch_ops(cmd: Commands) -> Result<()> {
+fn dispatch_catalog(cmd: Commands) -> Result<Option<Commands>> {
     match cmd {
         Commands::ImportPhash(args) => run_import_phash(&args)?,
         Commands::CertifyCoupling(args) => run_certify_coupling(&args)?,
-        Commands::InspectMedia(args) => run_inspect_media(&args)?,
         Commands::Pack(args) => run_pack(&args)?,
+        Commands::PackAhash(args) => {
+            let _ = run_pack_ahash(&args)?;
+        }
+        Commands::RelabelCoupling(args) => run_relabel_coupling(args)?,
+        other => return Ok(Some(other)),
+    }
+    Ok(None)
+}
+
+fn dispatch_ops(cmd: Commands) -> Result<()> {
+    match cmd {
+        Commands::InspectMedia(args) => run_inspect_media(&args)?,
         Commands::FetchSubtitles(args) => run_single_thread(run_fetch_subtitles(&args))?,
         Commands::Migrate(args) => run_migrate(args)?,
         Commands::MediaAdd(args) => drop(run_single_thread(run_media_add(&args))?),
-        Commands::RelabelCoupling(args) => run_relabel_coupling(args)?,
         Commands::Top(args) => run_top(&args)?,
         _ => unreachable!(),
     }
@@ -103,8 +113,10 @@ fn main() -> Result<()> {
 
     let cli = Cli::parse();
     if let Some(cmd) = dispatch_benchmarks(cli.command)? {
-        if let Some(remaining) = dispatch_media(cmd)? {
-            dispatch_ops(remaining)?;
+        if let Some(cmd) = dispatch_media(cmd)? {
+            if let Some(remaining) = dispatch_catalog(cmd)? {
+                dispatch_ops(remaining)?;
+            }
         }
     }
     Ok(())

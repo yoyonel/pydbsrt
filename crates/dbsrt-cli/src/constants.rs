@@ -165,6 +165,9 @@ pub const DEFAULT_BENCH_AHASH_MAX_DISTANCE: f64 = 14.0;
 /// Default directory containing acoustic fingerprint .ahash files.
 pub const DEFAULT_AHASH_DATA_DIR: &str = "data/__AHASH__";
 
+/// Default output path for compiled memory-mapped acoustic archive (.dbahash v1).
+pub const DEFAULT_DBAHASH_OUTPUT_PATH: &str = "data/catalog.dbahash";
+
 /// Default window sizes in seconds evaluated in ahash matching benchmark.
 pub const DEFAULT_BENCH_AHASH_WINDOWS: &str = "3,5,10,15,30";
 

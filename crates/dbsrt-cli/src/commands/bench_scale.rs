@@ -54,6 +54,10 @@ pub const DEFAULT_PHASH_SCALE_MAX_DISTANCE: u32 = 6;
 /// Default coarse downsampling factor K for hierarchical aHash index.
 pub const DEFAULT_SCALE_FACTOR_K: usize = 16;
 
+/// Maximum cumulative dense `aHash` frames (`~1.12 GiB`) loaded into anonymous heap before switching
+/// `bench-scale-multimodal` automatically to zero-copy [`dbsrt_index::AhashEngine`] (`catalog.dbahash`).
+pub const MAX_IN_RAM_DENSE_BENCH_FRAMES: usize = 150_000_000;
+
 /// Default temporal offset window ratios along media duration.
 pub const DEFAULT_SCALE_OFFSETS: &str = "0.2,0.5,0.8";
 
@@ -359,6 +363,7 @@ pub struct BenchContext<'a> {
     pub dbphash: &'a MmapDbphash,
     pub dense_catalog: &'a AHashCatalog,
     pub coarse_index: &'a CoarseToFineAHashIndex,
+    pub ahash_engine: Option<&'a dbsrt_index::AhashEngine>,
     pub plan: &'a MultiWindowPlan,
     pub indexed_ahash_titles: &'a HashSet<String>,
     pub cached_meta: Option<&'a HashMap<PathBuf, CachedMediaMeta>>,
@@ -475,7 +480,46 @@ struct LoadedCatalogs {
     pub dbphash: MmapDbphash,
     pub dense_catalog: AHashCatalog,
     pub coarse_index: CoarseToFineAHashIndex,
+    pub ahash_engine: Option<dbsrt_index::AhashEngine>,
     pub indexed_ahash_titles: HashSet<String>,
+}
+
+/// Inserts primary and optional secondary normalized membership keys for `media_name`.
+fn insert_ahash_title_keys(titles: &mut HashSet<String>, media_name: &str) {
+    let (primary, secondary) = format_catalog_membership_keys(media_name, (None, None));
+    if !primary.is_empty() {
+        titles.insert(primary);
+    }
+    if let Some(sec) = secondary {
+        titles.insert(sec);
+    }
+}
+
+/// Opens zero-copy [`dbsrt_index::AhashEngine`] when `<parent>/catalog.dbahash` exceeds the in-RAM ceiling.
+fn try_load_large_mmap_ahash_engine(
+    ahash_dir: &Path,
+) -> Option<(dbsrt_index::AhashEngine, HashSet<String>)> {
+    if !ahash_dir.file_name().is_some_and(|n| n == "__AHASH__") {
+        return None;
+    }
+    let dbahash_path = ahash_dir
+        .parent()
+        .map(|p| p.join("catalog.dbahash"))
+        .filter(|p| p.exists())?;
+    let engine = dbsrt_index::AhashEngine::open(Some(&dbahash_path), Some(ahash_dir)).ok()?;
+    if engine.total_frames() <= MAX_IN_RAM_DENSE_BENCH_FRAMES {
+        return None;
+    }
+    let mut titles = HashSet::new();
+    if let Some(reader) = engine.dbahash() {
+        for entry in reader.media_entries() {
+            insert_ahash_title_keys(&mut titles, reader.media_name(entry));
+        }
+    }
+    for entry in &engine.delta_catalog().entries {
+        insert_ahash_title_keys(&mut titles, &entry.media_name);
+    }
+    Some((engine, titles))
 }
 
 /// Loads visual and acoustic catalogs and constructs the coarse-to-fine index.
@@ -491,6 +535,23 @@ fn load_all_catalogs(
         dbphash.media_entries().len()
     );
 
+    if let Some((engine, indexed_ahash_titles)) = try_load_large_mmap_ahash_engine(ahash_dir) {
+        println!(
+            "✓ Memory-mapped .dbahash via AhashEngine ({} medias, {} frames, 0 MiB dense heap)",
+            engine.media_count(),
+            engine.total_frames()
+        );
+        let dense_catalog = AHashCatalog::empty();
+        let coarse_index = CoarseToFineAHashIndex::build(&dense_catalog, factor_k);
+        return Ok(LoadedCatalogs {
+            dbphash,
+            dense_catalog,
+            coarse_index,
+            ahash_engine: Some(engine),
+            indexed_ahash_titles,
+        });
+    }
+
     println!("Loading acoustic catalog from {:?}...", ahash_dir);
     let t_ahash = Instant::now();
     // Sidecar name resolution + twin dedup are native to `load_from_dir`.
@@ -504,13 +565,7 @@ fn load_all_catalogs(
 
     let mut indexed_ahash_titles = HashSet::new();
     for entry in &dense_catalog.entries {
-        let (primary, secondary) = format_catalog_membership_keys(&entry.media_name, (None, None));
-        if !primary.is_empty() {
-            indexed_ahash_titles.insert(primary);
-        }
-        if let Some(sec) = secondary {
-            indexed_ahash_titles.insert(sec);
-        }
+        insert_ahash_title_keys(&mut indexed_ahash_titles, &entry.media_name);
     }
 
     println!("Building Coarse-to-Fine index (K={})...", factor_k);
@@ -525,6 +580,7 @@ fn load_all_catalogs(
         dbphash,
         dense_catalog,
         coarse_index,
+        ahash_engine: None,
         indexed_ahash_titles,
     })
 }
@@ -559,9 +615,12 @@ fn maybe_run_matrix_phase(
         PathBuf::from(DEFAULT_REPORTS_DIR)
             .join(format!("eval_matrix_real_{}.json", current_utc_slug()))
     });
-    crate::commands::bench_matrix::run_matrix_benchmark(
-        &catalogs.dbphash,
-        &catalogs.dense_catalog,
+    crate::commands::bench_matrix::run_matrix_benchmark_with_engine(
+        &crate::commands::bench_matrix::MatrixCatalogRefs {
+            dbphash: &catalogs.dbphash,
+            dense_catalog: &catalogs.dense_catalog,
+            ahash_engine: catalogs.ahash_engine.as_ref(),
+        },
         output_path,
         &matrix_dest,
     )?;
@@ -723,6 +782,7 @@ pub fn run_bench_scale_multimodal(args: BenchScaleMultimodalArgs) -> Result<()> 
         dbphash: &catalogs.dbphash,
         dense_catalog: &catalogs.dense_catalog,
         coarse_index: &catalogs.coarse_index,
+        ahash_engine: catalogs.ahash_engine.as_ref(),
         plan: &plan,
         indexed_ahash_titles: &catalogs.indexed_ahash_titles,
         cached_meta: Some(&cached_meta),
@@ -1719,7 +1779,20 @@ fn evaluate_ahash_multi(
         };
 
         let mut win_matches: Vec<RawCandidateMatch> = Vec::new();
-        let search_match = ctx.coarse_index.search(ctx.dense_catalog, &criteria);
+        let search_match = if let Some(engine) = ctx.ahash_engine {
+            engine
+                .search(&dbsrt_index::AHashSearchCriteria {
+                    query: criteria.dense_query,
+                    audio_fps: criteria.dense_fps,
+                    max_distance: criteria.max_distance,
+                    limit: 1,
+                    target_media: None,
+                })
+                .into_iter()
+                .next()
+        } else {
+            ctx.coarse_index.search(ctx.dense_catalog, &criteria)
+        };
 
         if let Some(ref m) = search_match {
             let cand_id =
@@ -2346,6 +2419,7 @@ mod tests {
             dbphash: &catalogs.dbphash,
             dense_catalog: &catalogs.dense_catalog,
             coarse_index: &catalogs.coarse_index,
+            ahash_engine: None,
             plan: &plan,
             indexed_ahash_titles: &catalogs.indexed_ahash_titles,
             cached_meta: None,
@@ -2384,6 +2458,7 @@ mod tests {
             dbphash: &catalogs.dbphash,
             dense_catalog: &catalogs.dense_catalog,
             coarse_index: &catalogs.coarse_index,
+            ahash_engine: None,
             plan: &plan,
             indexed_ahash_titles: &catalogs.indexed_ahash_titles,
             cached_meta: None,
@@ -2506,6 +2581,7 @@ mod tests {
             dbphash: &catalogs.dbphash,
             dense_catalog: &catalogs.dense_catalog,
             coarse_index: &catalogs.coarse_index,
+            ahash_engine: None,
             plan: &plan,
             indexed_ahash_titles: &titles,
             cached_meta: None,

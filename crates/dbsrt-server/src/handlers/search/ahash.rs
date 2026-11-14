@@ -179,11 +179,11 @@ pub async fn search_ahash_handler(
     validate_ahash_search_params(query_hashes.len(), audio_fps, max_distance, payload.limit)?;
 
     let _permit = state.heavy_task_semaphore.acquire().await.ok();
-    let catalog = state.ahash_catalog.load_full();
-    let total_catalog_files = catalog.entries.len();
-    let total_catalog_frames = catalog.total_frames;
+    let engine = state.ahash_engine.load_full();
+    let total_catalog_files = engine.media_count();
+    let total_catalog_frames = engine.total_frames();
     let matches = {
-        let cat = Arc::clone(&catalog);
+        let eng = Arc::clone(&engine);
         let owned_query = query_hashes.clone();
         let owned_media = payload.media_name.clone();
         let (limit, fps, dist) = (payload.limit, audio_fps, max_distance);
@@ -195,7 +195,7 @@ pub async fn search_ahash_handler(
                 limit,
                 target_media: owned_media.as_deref(),
             };
-            cat.search(&c)
+            eng.search(&c)
         })
         .await
         .unwrap_or_default()

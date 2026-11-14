@@ -6,8 +6,8 @@ use dbsrt_core::HwAccel;
 use crate::commands::{
     AhashSidecarArgs, BenchAhashArgs, BenchCutsArgs, BenchVideoArgs, CertifyCouplingArgs,
     ExportAhashArgs, ExportPhashArgs, FetchSubtitlesArgs, ImportPhashArgs, InspectMediaArgs,
-    MediaAddArgs, MigrateArgs, PackArgs, RecognizeArgs, RelabelCouplingArgs, RetargetArgs,
-    ScanLibraryArgs, TopArgs,
+    MediaAddArgs, MigrateArgs, PackAhashArgs, PackArgs, RecognizeArgs, RelabelCouplingArgs,
+    RetargetArgs, ScanLibraryArgs, TopArgs,
 };
 use crate::constants::{
     DEFAULT_BENCH_PHASH_COUNT, DEFAULT_POSTGRES_DB, DEFAULT_POSTGRES_PASS, DEFAULT_POSTGRES_PORT,
@@ -155,6 +155,10 @@ pub enum Commands {
 
     /// Pack a directory of .phash files into a unified high-density .dbphash index
     Pack(PackArgs),
+
+    /// Pack a directory of .ahash files and sidecars into a memory-mapped .dbahash v1 archive
+    #[command(name = "pack-ahash", visible_aliases = ["ahash:pack", "pack:ahash"])]
+    PackAhash(PackAhashArgs),
 
     /// Fetch subtitles from remote providers (OpenSubtitles REST) with local cache fallback
     FetchSubtitles(FetchSubtitlesArgs),
@@ -309,5 +313,28 @@ mod tests {
 
         let cli_ops = Cli::parse_from(["dbsrt", "ops"]);
         assert!(matches!(cli_ops.command, Commands::Top(_)));
+    }
+
+    #[test]
+    fn test_cli_parse_pack_ahash_defaults_and_aliases() {
+        let cli = Cli::parse_from(["dbsrt", "pack-ahash"]);
+        match cli.command {
+            Commands::PackAhash(args) => {
+                assert_eq!(args.ahash_dir, PathBuf::from("data/__AHASH__"));
+                assert_eq!(args.output, PathBuf::from("data/catalog.dbahash"));
+                assert_eq!(args.factor_k, 32);
+                assert!(!args.no_mih32);
+            }
+            _ => panic!("Expected PackAhash command"),
+        }
+
+        let cli_alias = Cli::parse_from(["dbsrt", "ahash:pack", "-k", "16", "--no-mih32"]);
+        match cli_alias.command {
+            Commands::PackAhash(args) => {
+                assert_eq!(args.factor_k, 16);
+                assert!(args.no_mih32);
+            }
+            _ => panic!("Expected PackAhash command via alias"),
+        }
     }
 }

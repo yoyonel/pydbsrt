@@ -17,6 +17,7 @@ use dbsrt_index::ahash::{
     FPS_COMPATIBILITY_TOLERANCE, MIN_QUERY_FRAMES,
 };
 use dbsrt_index::coarse_to_fine::{CoarseToFineAHashIndex, FineSearchCriteria};
+use dbsrt_index::dbahash::{DbahashBuilder, MmapDbahash, DEFAULT_DBAHASH_FACTOR_K};
 use dbsrt_index::dbphash::{DbphashCutMatch, DbphashMediaMatch, MmapDbphash};
 use dbsrt_index::AHashMih32Index;
 use rayon::prelude::*;
@@ -32,8 +33,11 @@ use crate::commands::bench_scale::{
     is_catalog_member, is_degenerate_static_phash_window, is_solid_dc_phash_window,
     normalize_phash_shift_ms, resolve_ahash_candidate_id, select_best_consensus,
     MediaScaleBenchmarkRecord, DEFAULT_PHASH_SCALE_MAX_DISTANCE, FINE_SEARCH_MAX_DISTANCE,
-    MILLIS_PER_SECOND, PERCENT_SCALE, PHASH_MIN_CONFIDENCE,
+    MAX_IN_RAM_DENSE_BENCH_FRAMES, MILLIS_PER_SECOND, PERCENT_SCALE, PHASH_MIN_CONFIDENCE,
 };
+
+/// Conversion factor from frame count to millions of frames (`1_000_000.0`).
+const FRAMES_PER_MILLION_F64: f64 = 1_000_000.0;
 
 /// Bytes per mebibyte conversion factor for RAM footprint telemetry.
 pub const BYTES_PER_MIB: f64 = 1_048_576.0;
@@ -224,6 +228,18 @@ pub struct ExhaustiveMatrixReport {
     pub phash_techniques: Vec<PhashTechniqueMetrics>,
     pub ahash_coarse_to_fine_sweep: Vec<AhashTechniqueMetrics>,
     pub ahash_mih_comparison: Vec<AhashTechniqueMetrics>,
+    #[serde(default)]
+    pub dbahash_mmap_evaluation: Option<AhashTechniqueMetrics>,
+}
+
+/// Borrowed catalog bundle passed into [`run_matrix_benchmark_with_engine`].
+pub struct MatrixCatalogRefs<'a> {
+    /// Memory-mapped visual `.dbphash` catalog.
+    pub dbphash: &'a MmapDbphash,
+    /// In-memory dense `.ahash` catalog (empty when operating in large-scale `MmapDbahash` mode).
+    pub dense_catalog: &'a AHashCatalog,
+    /// Optional hybrid `AhashEngine` backing large-scale `MmapDbahash` evaluations (`> 150M` frames).
+    pub ahash_engine: Option<&'a dbsrt_index::AhashEngine>,
 }
 
 /// Pre-resolved ground-truth descriptor for one real video record.
@@ -417,18 +433,28 @@ fn derive_ground_truth_title(media_path: &str, media_stem: &str) -> String {
     parts.join(" ")
 }
 
-/// Builds normalized `(title|sX|eY)` membership sets for `dbphash` and `dense_catalog`.
+/// Inserts normalized acoustic membership keys for `media_name` into `ahash_keys`.
+fn insert_ahash_membership(ahash_keys: &mut HashSet<String>, media_name: &str) {
+    let (p, s) = format_catalog_membership_keys(media_name, (None, None));
+    if !p.is_empty() {
+        ahash_keys.insert(p);
+    }
+    if let Some(sec) = s {
+        ahash_keys.insert(sec);
+    }
+}
+
+/// Builds normalized `(title|sX|eY)` membership sets for `dbphash` and acoustic catalogs.
 fn build_catalog_membership_sets(
-    dbphash: &MmapDbphash,
-    dense_catalog: &AHashCatalog,
+    catalogs: &MatrixCatalogRefs<'_>,
 ) -> (HashSet<String>, HashSet<String>) {
     let mut phash_keys = HashSet::new();
-    for entry in dbphash.media_entries() {
+    for entry in catalogs.dbphash.media_entries() {
         let se = (
             Some(entry.season).filter(|&v| v > 0),
             Some(entry.episode).filter(|&v| v > 0),
         );
-        let (p, s) = format_catalog_membership_keys(dbphash.get_title(entry), se);
+        let (p, s) = format_catalog_membership_keys(catalogs.dbphash.get_title(entry), se);
         if !p.is_empty() {
             phash_keys.insert(p);
         }
@@ -437,13 +463,17 @@ fn build_catalog_membership_sets(
         }
     }
     let mut ahash_keys = HashSet::new();
-    for entry in &dense_catalog.entries {
-        let (p, s) = format_catalog_membership_keys(&entry.media_name, (None, None));
-        if !p.is_empty() {
-            ahash_keys.insert(p);
+    for entry in &catalogs.dense_catalog.entries {
+        insert_ahash_membership(&mut ahash_keys, &entry.media_name);
+    }
+    if let Some(engine) = catalogs.ahash_engine {
+        if let Some(reader) = engine.dbahash() {
+            for entry in reader.media_entries() {
+                insert_ahash_membership(&mut ahash_keys, reader.media_name(entry));
+            }
         }
-        if let Some(sec) = s {
-            ahash_keys.insert(sec);
+        for entry in &engine.delta_catalog().entries {
+            insert_ahash_membership(&mut ahash_keys, &entry.media_name);
         }
     }
     (phash_keys, ahash_keys)
@@ -453,8 +483,7 @@ fn build_catalog_membership_sets(
 ///
 /// # Arguments
 /// * `jsonl_path` - Path to JSONL file produced by `bench-scale-multimodal`.
-/// * `dbphash` - Loaded `.dbphash` visual catalog.
-/// * `dense_catalog` - Loaded `.ahash` acoustic catalog.
+/// * `catalogs` - Loaded visual and acoustic catalog references.
 ///
 /// # Returns
 /// `Result<Vec<PreparedVideoProbe>>` containing valid records with extracted window hashes.
@@ -469,10 +498,9 @@ fn build_catalog_membership_sets(
 /// Filters out `ERROR` records and resolves episode-exact catalog membership flags for each video.
 fn load_prepared_probes(
     jsonl_path: &Path,
-    dbphash: &MmapDbphash,
-    dense_catalog: &AHashCatalog,
+    catalogs: &MatrixCatalogRefs<'_>,
 ) -> Result<Vec<PreparedVideoProbe>> {
-    let (phash_keys, ahash_keys) = build_catalog_membership_sets(dbphash, dense_catalog);
+    let (phash_keys, ahash_keys) = build_catalog_membership_sets(catalogs);
     let file = File::open(jsonl_path).context("Open JSONL for matrix evaluation")?;
     let reader = BufReader::new(file);
     let mut probes = Vec::new();
@@ -1579,11 +1607,187 @@ fn search_ahash_mih16_direct(req: &AhashDirectSearchReq<'_>) -> Option<AHashCata
     verify_top_vote_clusters(req, v_map)
 }
 
-/// Evaluates the Coarse-to-Fine $K \in [1, 32]$ sweep and MIH-16 vs MIH-32 comparison.
-fn evaluate_ahash_matrices(
+/// Computes exact exhaustive $K=1$ offset in ms on `track_hashes` using `hint_shift` as early-exit seed.
+fn exact_k1_offset_ms_on_track(
+    track_hashes: &[u64],
+    audio_fps: f64,
+    query: &[u64],
+    hint_shift: usize,
+) -> Option<i64> {
+    let q_len = query.len();
+    if track_hashes.len() < q_len || q_len == 0 || audio_fps <= 0.0 {
+        return None;
+    }
+    let max_s = track_hashes.len() - q_len;
+    let seed = hint_shift.min(max_s);
+    let mut best_shift = seed;
+    let mut best_dist: u64 = query
+        .iter()
+        .zip(&track_hashes[seed..seed + q_len])
+        .map(|(&q, &r)| (q ^ r).count_ones() as u64)
+        .sum();
+
+    for s in 0..=max_s {
+        if s == seed {
+            continue;
+        }
+        let tie_left = s < best_shift;
+        if !tie_left && best_dist == 0 {
+            continue;
+        }
+        let limit = if tie_left { best_dist } else { best_dist - 1 };
+        let mut dist = 0u64;
+        let mut exceeded = false;
+        for (&q, &r) in query.iter().zip(&track_hashes[s..s + q_len]) {
+            dist += (q ^ r).count_ones() as u64;
+            if dist > limit {
+                exceeded = true;
+                break;
+            }
+        }
+        if !exceeded {
+            best_dist = dist;
+            best_shift = s;
+        }
+    }
+    Some(((best_shift as f64 / audio_fps) * MILLIS_PER_SECOND).round() as i64)
+}
+
+/// Backfills exact exhaustive $K=1$ drift metrics on matched `MmapDbahash` windows via Rayon.
+fn backfill_mmap_k1_drifts(
+    reader: &MmapDbahash,
+    probes: &[PreparedVideoProbe],
+    metrics: &mut AhashTechniqueMetrics,
+) {
+    let path_to_idx: HashMap<&str, usize> = reader
+        .media_entries()
+        .iter()
+        .enumerate()
+        .map(|(i, e)| (reader.file_path(e), i))
+        .collect();
+    let window_jobs: Vec<(usize, usize)> = probes
+        .iter()
+        .enumerate()
+        .flat_map(|(v_idx, p)| {
+            p.record
+                .ahash
+                .windows
+                .iter()
+                .enumerate()
+                .filter(|(_, w)| !w.query_hashes.is_empty())
+                .map(move |(w_idx, _)| (v_idx, w_idx))
+        })
+        .collect();
+
+    let drifts: Vec<i64> = window_jobs
+        .into_par_iter()
+        .filter_map(|(v_idx, w_idx)| {
+            let win = &probes[v_idx].record.ahash.windows[w_idx];
+            let fps = if win.audio_fps > 0.0 {
+                win.audio_fps
+            } else {
+                DEFAULT_AUDIO_FPS_VAL
+            };
+            let m = reader.search_fine(&FineSearchCriteria {
+                dense_query: &win.query_hashes,
+                dense_fps: fps,
+                max_distance: FINE_SEARCH_MAX_DISTANCE,
+            })?;
+            let entry_idx = *path_to_idx.get(m.file_path.as_str())?;
+            let hashes = reader.media_dense_hashes(entry_idx)?;
+            let ref_fps = reader.media_entries()[entry_idx].audio_fps();
+            let gt_ms = exact_k1_offset_ms_on_track(
+                hashes,
+                ref_fps,
+                &win.query_hashes,
+                m.ref_frame_offset,
+            )?;
+            Some((m.offset_ms - gt_ms).abs())
+        })
+        .collect();
+
+    if !drifts.is_empty() {
+        metrics.shift_drift_vs_k1_mean_ms = drifts.iter().sum::<i64>() as f64 / drifts.len() as f64;
+        metrics.shift_drift_vs_k1_p95_ms = percentile_i64(&drifts, PERCENTILE_P95);
+        metrics.shift_drift_vs_k1_max_ms = drifts.iter().copied().max().unwrap_or(0);
+        let ok_tight = drifts
+            .iter()
+            .filter(|&&d| d <= SHIFT_TOLERANCE_TIGHT_MS)
+            .count();
+        let ok_nom = drifts
+            .iter()
+            .filter(|&&d| d <= SHIFT_TOLERANCE_NOMINAL_MS)
+            .count();
+        metrics.shift_within_15ms_pct = (ok_tight as f64 / drifts.len() as f64) * PERCENT_SCALE;
+        metrics.shift_within_25ms_pct = (ok_nom as f64 / drifts.len() as f64) * PERCENT_SCALE;
+    }
+}
+
+/// Evaluates `MmapDbahash` directly when `dense_catalog` was skipped by the workstation RAM guard,
+/// then computes exact $K=1$ exhaustive drift on every matched window in parallel (`0 MiB` dense heap).
+fn evaluate_large_mmap_only(
     probes: &[PreparedVideoProbe],
     dense_catalog: &AHashCatalog,
-) -> (Vec<AhashTechniqueMetrics>, Vec<AhashTechniqueMetrics>) {
+    engine: &dbsrt_index::AhashEngine,
+) -> Option<AhashTechniqueMetrics> {
+    let reader = engine.dbahash()?;
+    let target_path = reader.path.clone();
+    println!(
+        "  -> Evaluating aHash MmapDbahash (C2F MIH-32) K={} from {:?}...",
+        reader.factor_k(),
+        target_path
+    );
+    let t_open = Instant::now();
+    let fresh_reader = MmapDbahash::open(&target_path).ok()?;
+    let open_ms = t_open.elapsed().as_secs_f64() * MILLIS_PER_SECOND;
+    let k = fresh_reader.factor_k();
+    let coarse_frames = fresh_reader.total_coarse_frames();
+    let mih_mapped_mb =
+        (coarse_frames * MIH32_TABLE_COUNT * MIH32_ENTRY_BYTES) as f64 / BYTES_PER_MIB;
+    let spec = AhashEvalSpec {
+        name: "aHash MmapDbahash (MIH-32) K=32",
+        factor_k: k,
+        coarse_fps: DEFAULT_AUDIO_FPS_VAL / k as f64,
+        dense_catalog,
+        index_frames: coarse_frames,
+        index_ram_mb: mih_mapped_mb,
+        index_build_ms: open_ms,
+    };
+
+    let mut k1_gt = HashMap::new();
+    let mut metrics = run_single_ahash_technique(&spec, probes, &mut k1_gt, |q, fps| {
+        fresh_reader.search_fine(&FineSearchCriteria {
+            dense_query: q,
+            dense_fps: fps,
+            max_distance: FINE_SEARCH_MAX_DISTANCE,
+        })
+    });
+    backfill_mmap_k1_drifts(&fresh_reader, probes, &mut metrics);
+    Some(metrics)
+}
+
+/// Evaluates the Coarse-to-Fine $K \in [1, 32]$ sweep, MIH-16 vs MIH-32, and `MmapDbahash`.
+fn evaluate_ahash_matrices(
+    probes: &[PreparedVideoProbe],
+    catalogs: &MatrixCatalogRefs<'_>,
+) -> (
+    Vec<AhashTechniqueMetrics>,
+    Vec<AhashTechniqueMetrics>,
+    Option<AhashTechniqueMetrics>,
+) {
+    let dense_catalog = catalogs.dense_catalog;
+    if dense_catalog.entries.is_empty() {
+        if let Some(engine) = catalogs.ahash_engine {
+            println!(
+                "  [RAM Guard] Skipping in-RAM dense aHash sweeps ({} frames > {} max ceiling); evaluating zero-copy MmapDbahash + exact K=1 drift...",
+                engine.total_frames(),
+                MAX_IN_RAM_DENSE_BENCH_FRAMES
+            );
+            let dbahash_eval = evaluate_large_mmap_only(probes, dense_catalog, engine);
+            return (Vec::new(), Vec::new(), dbahash_eval);
+        }
+    }
+
     let mut c2f_results = Vec::new();
     let mut k1_gt: HashMap<(usize, usize), (String, i64)> = HashMap::new();
 
@@ -1619,7 +1823,62 @@ fn evaluate_ahash_matrices(
     }
 
     let mih_results = evaluate_ahash_mih16_vs_mih32(probes, dense_catalog, &mut k1_gt);
-    (c2f_results, mih_results)
+    let dbahash_eval = evaluate_mmap_dbahash_technique(probes, dense_catalog, &mut k1_gt);
+    (c2f_results, mih_results, dbahash_eval)
+}
+
+/// Evaluates `MmapDbahash` (`0 MiB` dense heap, pre-sorted `MIH-32` `mmap`) over all real video probes.
+fn evaluate_mmap_dbahash_technique(
+    probes: &[PreparedVideoProbe],
+    dense_catalog: &AHashCatalog,
+    k1_gt: &mut HashMap<(usize, usize), (String, i64)>,
+) -> Option<AhashTechniqueMetrics> {
+    if dense_catalog.entries.is_empty() {
+        return None;
+    }
+    let default_path = Path::new(crate::constants::DEFAULT_DBAHASH_OUTPUT_PATH);
+    let mut temp_path: Option<std::path::PathBuf> = None;
+    let target_path = if default_path.exists() {
+        default_path.to_path_buf()
+    } else {
+        let p = std::env::temp_dir().join(format!("bench_matrix_{}.dbahash", std::process::id()));
+        let builder = DbahashBuilder::from_catalog(dense_catalog, DEFAULT_DBAHASH_FACTOR_K).ok()?;
+        builder.write_to_file(&p).ok()?;
+        temp_path = Some(p.clone());
+        p
+    };
+
+    println!(
+        "  -> Evaluating aHash MmapDbahash (C2F MIH-32) K={} from {:?}...",
+        DEFAULT_DBAHASH_FACTOR_K, target_path
+    );
+    let t_open = Instant::now();
+    let reader = MmapDbahash::open(&target_path).ok()?;
+    let open_ms = t_open.elapsed().as_secs_f64() * MILLIS_PER_SECOND;
+    let k = reader.factor_k();
+    let coarse_frames = reader.total_coarse_frames();
+    let mih_mapped_mb =
+        (coarse_frames * MIH32_TABLE_COUNT * MIH32_ENTRY_BYTES) as f64 / BYTES_PER_MIB;
+    let spec = AhashEvalSpec {
+        name: "aHash MmapDbahash (MIH-32) K=32",
+        factor_k: k,
+        coarse_fps: DEFAULT_AUDIO_FPS_VAL / k as f64,
+        dense_catalog,
+        index_frames: coarse_frames,
+        index_ram_mb: mih_mapped_mb,
+        index_build_ms: open_ms,
+    };
+    let metrics = run_single_ahash_technique(&spec, probes, k1_gt, |q, fps| {
+        reader.search_fine(&FineSearchCriteria {
+            dense_query: q,
+            dense_fps: fps,
+            max_distance: FINE_SEARCH_MAX_DISTANCE,
+        })
+    });
+    if let Some(p) = temp_path {
+        let _ = std::fs::remove_file(p);
+    }
+    Some(metrics)
 }
 
 /// Evaluates direct MIH-16 vs MIH-32 (Mono & Rayon) on Coarse ($K=16$) and Dense ($K=1$).
@@ -1807,23 +2066,46 @@ fn print_matrix_tables(report: &ExhaustiveMatrixReport) {
             m.shift_within_25ms_pct
         );
     }
-
-    println!("\n==========================================================================================================================================");
-    println!(" COMPARAISON DIRECTE aHash DENSE (95.3M FRAMES) : LINEAR O(N) vs MIH-16 vs MIH-32 (MONO & RAYON)");
-    println!("==========================================================================================================================================");
-    for m in &report.ahash_mih_comparison {
+    if let Some(m) = &report.dbahash_mmap_evaluation {
+        println!("------------------------------------------------------------------------------------------------------------------------------------------");
         println!(
-            "{:<34} | RAM: {:>7.1} MB | Build: {:>6.0} ms | WinMean: {:>7.2} ms | p95: {:>7.2} ms | 3W Rec: {:>5.1}% | 3W Prec: {:>5.1}%",
+            "{:<22} | {:>8.2} | {:>8.1} | {:>5.2} ms | {:>5.2} ms | {:>5.2} ms | {:>6.1}% | {:>6.1}% | {:>6.1}% | {:>6.1}b | {:>6.1}%",
             m.technique,
+            m.coarse_fps,
             m.index_ram_mb,
             m.index_build_ms,
             m.win_latency_mean_ms,
             m.win_latency_p95_ms,
+            m.win1_recall_indexed_pct,
             m.win3_recall_indexed_pct,
-            m.win3_precision_pct
+            m.win3_precision_pct,
+            m.mean_snr_bits,
+            m.shift_within_25ms_pct
         );
     }
-    println!("==========================================================================================================================================\n");
+
+    if !report.ahash_mih_comparison.is_empty() {
+        let frames_m = report.ahash_mih_comparison[0].index_frames as f64 / FRAMES_PER_MILLION_F64;
+        println!("\n==========================================================================================================================================");
+        println!(
+            " COMPARAISON DIRECTE aHash DENSE ({:.1}M FRAMES) : LINEAR O(N) vs MIH-16 vs MIH-32 (MONO & RAYON)",
+            frames_m
+        );
+        println!("==========================================================================================================================================");
+        for m in &report.ahash_mih_comparison {
+            println!(
+                "{:<34} | RAM: {:>7.1} MB | Build: {:>6.0} ms | WinMean: {:>7.2} ms | p95: {:>7.2} ms | 3W Rec: {:>5.1}% | 3W Prec: {:>5.1}%",
+                m.technique,
+                m.index_ram_mb,
+                m.index_build_ms,
+                m.win_latency_mean_ms,
+                m.win_latency_p95_ms,
+                m.win3_recall_indexed_pct,
+                m.win3_precision_pct
+            );
+        }
+        println!("==========================================================================================================================================\n");
+    }
 }
 
 /// Runs the exhaustive multi-technique matrix evaluation on extracted JSONL probes and writes JSON report.
@@ -1844,18 +2126,52 @@ fn print_matrix_tables(report: &ExhaustiveMatrixReport) {
 /// Never panics.
 ///
 /// # Data Flow & Invariants
-/// 1. Loads all valid `MediaScaleBenchmarkRecord` entries with persisted `query_hashes`.
-/// 2. Evaluates visual `pHash` configurations (`MIH-16` Mono/Rayon, `MIH-32` Mono/Rayon, `Linear`).
-/// 3. Evaluates 12 `CoarseToFineAHashIndex` configurations ($K \in [1, 32]$) + 5 direct `MIH-16`/`MIH-32`/`Linear` configurations.
-/// 4. Prints comparative tables and serializes the full report to `matrix_json_path`.
+/// Delegates to [`run_matrix_benchmark_with_engine`] with `ahash_engine = None`.
 pub fn run_matrix_benchmark(
     dbphash: &MmapDbphash,
     dense_catalog: &AHashCatalog,
     jsonl_path: &Path,
     matrix_json_path: &Path,
 ) -> Result<ExhaustiveMatrixReport> {
+    run_matrix_benchmark_with_engine(
+        &MatrixCatalogRefs {
+            dbphash,
+            dense_catalog,
+            ahash_engine: None,
+        },
+        jsonl_path,
+        matrix_json_path,
+    )
+}
+
+/// Runs the multi-technique matrix evaluation using either in-RAM `AHashCatalog` or zero-copy `AhashEngine`.
+///
+/// # Arguments
+/// * `catalogs` - [`MatrixCatalogRefs`] bundling visual `.dbphash` and acoustic (`AHashCatalog` / `AhashEngine`) catalogs.
+/// * `jsonl_path` - Path to JSONL file containing extracted multi-window `query_hashes`.
+/// * `matrix_json_path` - Destination path for the consolidated JSON matrix report.
+///
+/// # Returns
+/// `Result<ExhaustiveMatrixReport>` containing all evaluated metrics.
+///
+/// # Errors
+/// Fails if `jsonl_path` cannot be read or `matrix_json_path` cannot be written.
+///
+/// # Panics
+/// Never panics.
+///
+/// # Data Flow & Invariants
+/// 1. Loads all valid `MediaScaleBenchmarkRecord` entries with persisted `query_hashes`.
+/// 2. Evaluates visual `pHash` configurations (`MIH-16` Mono/Rayon, `MIH-32` Mono/Rayon, `Linear`).
+/// 3. Evaluates acoustic `aHash` configurations (`MmapDbahash` + exact $K=1$ drift on large archives, or full sweep on small archives).
+/// 4. Prints comparative tables and serializes the full report to `matrix_json_path`.
+pub fn run_matrix_benchmark_with_engine(
+    catalogs: &MatrixCatalogRefs<'_>,
+    jsonl_path: &Path,
+    matrix_json_path: &Path,
+) -> Result<ExhaustiveMatrixReport> {
     println!("\n=== STARTING EXHAUSTIVE MULTI-TECHNIQUE MATRIX EVALUATION ===");
-    let probes = load_prepared_probes(jsonl_path, dbphash, dense_catalog)?;
+    let probes = load_prepared_probes(jsonl_path, catalogs)?;
     let total_videos = probes.len();
     let total_windows: usize = probes.iter().map(|p| p.record.phash.windows.len()).sum();
     let synology_videos = probes
@@ -1874,8 +2190,8 @@ pub fn run_matrix_benchmark(
         total_videos, total_windows, synology_videos, freebox_videos, indexed_phash, indexed_ahash
     );
 
-    let phash_techniques = evaluate_phash_matrix(&probes, dbphash);
-    let (ahash_c2f, ahash_mih) = evaluate_ahash_matrices(&probes, dense_catalog);
+    let phash_techniques = evaluate_phash_matrix(&probes, catalogs.dbphash);
+    let (ahash_c2f, ahash_mih, dbahash_eval) = evaluate_ahash_matrices(&probes, catalogs);
 
     let report = ExhaustiveMatrixReport {
         total_real_videos: total_videos,
@@ -1887,6 +2203,7 @@ pub fn run_matrix_benchmark(
         phash_techniques,
         ahash_coarse_to_fine_sweep: ahash_c2f,
         ahash_mih_comparison: ahash_mih,
+        dbahash_mmap_evaluation: dbahash_eval,
     };
 
     print_matrix_tables(&report);
@@ -2065,6 +2382,7 @@ mod tests {
         assert_eq!(report.phash_techniques.len(), 7);
         assert_eq!(report.ahash_coarse_to_fine_sweep.len(), 12);
         assert_eq!(report.ahash_mih_comparison.len(), 5);
+        assert!(report.dbahash_mmap_evaluation.is_some());
         assert!(matrix_path.exists());
     }
 }

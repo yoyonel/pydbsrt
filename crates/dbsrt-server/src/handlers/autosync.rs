@@ -415,7 +415,7 @@ async fn identify_media_by_ahash_autosync(
     state: &Arc<AppState>,
     media_path: &Path,
 ) -> Option<(String, f64, AcousticAlignment)> {
-    if state.ahash_catalog.load().entries.is_empty() && state.remote_api.is_none() {
+    if state.ahash_engine.load().is_empty() && state.remote_api.is_none() {
         return None;
     }
     let _permit = state.heavy_task_semaphore.acquire().await.ok();
@@ -431,11 +431,11 @@ async fn identify_media_by_ahash_autosync(
     }
 
     let audio_fps = extracted.header.audio_fps();
-    let catalog = state.ahash_catalog.load_full();
-    if !catalog.entries.is_empty() && (!state.is_agent || state.remote_api.is_none()) {
+    let engine = state.ahash_engine.load_full();
+    if !engine.is_empty() && (!state.is_agent || state.remote_api.is_none()) {
         let hashes = extracted.hashes.clone();
         let matches = tokio::task::spawn_blocking(move || {
-            catalog.search(&AHashSearchCriteria::new(&hashes, audio_fps))
+            engine.search(&AHashSearchCriteria::new(&hashes, audio_fps))
         })
         .await
         .unwrap_or_default();
@@ -1220,6 +1220,7 @@ mod tests {
                 dbphash_path: None,
                 extra_phash_dirs: Vec::new(),
                 ahash_dir: Some(cat_dir),
+                dbahash_path: None,
             },
         ))
     }
