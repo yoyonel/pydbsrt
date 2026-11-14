@@ -19,7 +19,8 @@ use std::time::Duration;
 use crate::cli::PostgresArgs;
 use crate::commands::certify::detect_cli_subtitle_lang_status;
 use crate::commands::shared::{
-    find_or_build_ahash, find_or_build_phash_with_hwaccel, phash_file_name, PhashSidecar,
+    find_or_build_ahash, find_or_build_phash_with_hwaccel, parse_moviehash, phash_file_name,
+    resolve_moviehash, PhashSidecar,
 };
 use crate::constants::{
     DEFAULT_HTTP_TIMEOUT_SECS, DEFAULT_SERVER_URL, DEFAULT_SUBTITLES_DIR, DEFAULT_TMP_DIR,
@@ -361,6 +362,10 @@ pub struct MediaAddArgs {
     #[arg(long, alias = "dry-run")]
     pub skip_certify: bool,
 
+    /// Audio-only mode: extract .ahash fingerprint (requires --ahash-dir) and skip pHash, subtitle certification, and server ingest
+    #[arg(long)]
+    pub skip_phash: bool,
+
     /// Output execution summary in JSON format
     #[arg(long)]
     pub json: bool,
@@ -424,26 +429,6 @@ pub(crate) fn resolve_media_video_path(args: &MediaAddArgs) -> Result<&PathBuf> 
         bail!("Media video file not found: {:?}", video_path);
     }
     Ok(video_path)
-}
-
-/// Validates `--moviehash`: it becomes a file name, so 16 hexadecimal characters only.
-pub(crate) fn parse_moviehash(raw: &str) -> Result<String, String> {
-    if raw.len() == 16 && raw.bytes().all(|b| b.is_ascii_hexdigit()) {
-        Ok(raw.to_ascii_lowercase())
-    } else {
-        Err(format!("expected 16 hexadecimal characters, got {raw:?}"))
-    }
-}
-
-/// Moviehash naming the .phash: `--moviehash`, else computed on a local file; None for a stream without one.
-pub(crate) fn resolve_moviehash(explicit: Option<&str>, video_path: &Path) -> Option<String> {
-    if let Some(hash) = explicit {
-        return Some(hash.to_string());
-    }
-    if dbsrt_core::container::is_remote_stream_or_pipe(video_path) {
-        return None;
-    }
-    dbsrt_core::metadata::compute_opensubtitles_hash(video_path).ok()
 }
 
 /// Derives logical media stem name, respecting explicit `--media-name` overrides and remote stream URLs.
@@ -1257,32 +1242,37 @@ pub(crate) fn render_media_add_output(args: &MediaAddArgs, result: &MediaAddResu
 /// # Returns
 /// * `Result<MediaAddResult>` - Execution metrics and outcomes.
 ///
-/// Handles errors during .ahash extraction, treating missing audio streams as non-fatal.
+/// Handles errors during `.ahash` extraction, treating missing or ultra-short audio streams
+/// as non-fatal warnings so video ingestion can proceed.
 ///
 /// # Arguments
 /// * `err` - The underlying extraction error.
 /// * `json` - Suppresses terminal warnings when true.
 ///
 /// # Returns
-/// `Ok(None)` if the error indicates a missing audio stream, or `Err(err)` otherwise.
+/// `Ok(None)` if the error indicates a missing or empty audio stream, or `Err(err)` otherwise.
 ///
 /// # Errors
-/// Returns `Err` if the error was not a missing audio stream.
+/// Returns `Err` if the error was not caused by an absent or empty audio stream.
 ///
 /// # Panics
 /// Does not panic.
 ///
 /// # Data Flow & Invariants
-/// Inspects the error message for `"no audio stream"`. Logs a warning and returns `Ok(None)`
-/// if matched; propagates the original error otherwise.
+/// Inspects the formatted error chain (`{err:#}`) for `"no audio stream"`,
+/// `"No audio hashes could be extracted"`, or `"does not contain any stream"`.
+/// Logs a warning and returns `Ok(None)` if matched; propagates the original error otherwise.
 fn handle_ahash_extract_error(err: anyhow::Error, json: bool) -> Result<Option<String>> {
-    let msg = err.to_string();
-    if !msg.contains("no audio stream") {
+    let msg = format!("{err:#}");
+    let is_non_fatal_audio = msg.contains("no audio stream")
+        || msg.contains("No audio hashes could be extracted")
+        || msg.contains("does not contain any stream");
+    if !is_non_fatal_audio {
         return Err(err);
     }
     if !json {
         eprintln!(
-            "⚠️ Media has no audio stream, skipping .ahash generation: {}",
+            "⚠️ Media has no usable audio stream, skipping .ahash generation: {}",
             msg
         );
     }
@@ -1295,10 +1285,8 @@ fn handle_ahash_extract_error(err: anyhow::Error, json: bool) -> Result<Option<S
 /// and returns `Ok(None)` so video-only ingestion continues without error.
 ///
 /// # Arguments
+/// * `args` - `media:add` arguments (`--ahash-dir`, `--moviehash`, `--media-name`, `--json`).
 /// * `video_path` - Path or URI to the media file being ingested.
-/// * `ahash_dir` - Optional destination directory for `.ahash` files.
-/// * `moviehash` - Optional OpenSubtitles 16-hex moviehash for canonical naming.
-/// * `json` - Suppresses terminal progress messages when true.
 ///
 /// # Returns
 /// `Ok(Some(path_str))` if audio was extracted, `Ok(None)` if `--ahash-dir` was omitted
@@ -1311,23 +1299,26 @@ fn handle_ahash_extract_error(err: anyhow::Error, json: bool) -> Result<Option<S
 /// Does not panic.
 ///
 /// # Data Flow & Invariants
-/// When `ahash_dir` is `Some`, calls `find_or_build_ahash`. Catches missing audio stream errors
-/// gracefully via `handle_ahash_extract_error`.
-fn extract_optional_ahash(
-    video_path: &Path,
-    ahash_dir: Option<&Path>,
-    moviehash: Option<&str>,
-    json: bool,
-) -> Result<Option<String>> {
-    let Some(ahash_dir) = ahash_dir else {
+/// When `--ahash-dir` is set, calls `find_or_build_ahash` with the canonical media name, which
+/// also writes (or back-fills) the `<stem>.json` audio topology sidecar. Catches missing audio
+/// stream errors gracefully via `handle_ahash_extract_error`.
+fn extract_optional_ahash(args: &MediaAddArgs, video_path: &Path) -> Result<Option<String>> {
+    let Some(ahash_dir) = args.ahash_dir.as_deref() else {
         return Ok(None);
     };
+    let json = args.json;
+    let media_name = resolve_media_filename(args, video_path);
 
-    let (path, ahash_hashes, ahash_fps) =
-        match find_or_build_ahash(video_path, ahash_dir, moviehash) {
-            Ok(data) => data,
-            Err(err) => return handle_ahash_extract_error(err, json),
-        };
+    let resolved_moviehash = resolve_moviehash(args.moviehash.as_deref(), video_path);
+    let (path, ahash_hashes, ahash_fps) = match find_or_build_ahash(
+        video_path,
+        ahash_dir,
+        resolved_moviehash.as_deref(),
+        Some(&media_name),
+    ) {
+        Ok(data) => data,
+        Err(err) => return handle_ahash_extract_error(err, json),
+    };
 
     if !json {
         eprintln!(
@@ -1340,16 +1331,72 @@ fn extract_optional_ahash(
     Ok(Some(path.to_string_lossy().to_string()))
 }
 
+/// Executes audio-only ingestion (`--skip-phash`), bypassing video pHash decoding and SRT certification.
+///
+/// # Arguments
+/// * `args` - Parsed `media:add` CLI options (`--ahash-dir` required).
+/// * `video_path` - Validated local media path or remote stream URI.
+/// * `cleanup` - Shared SIGINT cleanup state to reset prior to returning.
+///
+/// # Returns
+/// `Ok(MediaAddResult)` populated with the extracted `ahash_path` (or `None` on silent video).
+///
 /// # Errors
-/// * Returns `Err` if input validation, pHash extraction, or certification fails.
+/// Returns `Err` when `--ahash-dir` is omitted or when FFmpeg audio extraction fails unexpectedly.
+///
+/// # Panics
+/// Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// 1. Enforces `--ahash-dir` presence so `--skip-phash` cannot silently turn into a no-op.
+/// 2. Delegates `.ahash` + `.json` sidecar generation to [`extract_optional_ahash`].
+/// 3. Clears `cleanup` trackers and renders structured JSON or human summary output.
+fn run_ahash_only_media_add(
+    args: &MediaAddArgs,
+    video_path: &Path,
+    cleanup: &CleanupState,
+) -> Result<MediaAddResult> {
+    if args.ahash_dir.is_none() {
+        bail!("--skip-phash requires --ahash-dir <DIR> to store extracted .ahash fingerprints");
+    }
+    let ahash_path = extract_optional_ahash(args, video_path)?;
+    cleanup.srts.lock().unwrap().clear();
+    *cleanup.phash.lock().unwrap() = None;
+
+    let result = MediaAddResult {
+        success: true,
+        video_path: dbsrt_core::display_input(video_path),
+        phash_path: String::new(),
+        ahash_path,
+        fps: args.fps.unwrap_or(0.0),
+        media_hash: String::new(),
+        certified_couplings: 0,
+        skipped_idempotent: 0,
+        server_ingested: false,
+        message: "aHash audio-only extraction completed (--skip-phash)".to_string(),
+    };
+    render_media_add_output(args, &result)?;
+    Ok(result)
+}
+
+/// Executes unified media addition: pHash extraction -> certification -> dynamic ingest.
+///
+/// # Arguments
+/// * `args` - Parsed CLI options and arguments.
+///
+/// # Returns
+/// * `Result<MediaAddResult>` - Execution metrics and outcomes.
+///
+/// # Errors
+/// * Returns `Err` if input validation, pHash/aHash extraction, or certification fails.
 ///
 /// # Panics
 /// * Guarantee: Never panics.
 ///
 /// # Data Flow & Invariants
 /// 1. Cleans up any existing global partial state.
-/// 2. Resolves media video path and plans subtitle pairing.
-/// 3. Extracts pHash frames and subtitles (concurrently if needed).
+/// 2. Resolves media video path; when `--skip-phash` is set, delegates to [`run_ahash_only_media_add`].
+/// 3. Plans subtitle pairing and extracts pHash frames and subtitles.
 /// 4. Extracts optional `.ahash` audio fingerprint if `--ahash-dir` is provided.
 /// 5. Handles early exit if `skip_certify` is active.
 /// 6. Certifies couplings in `couplings.json` registry with CAS idempotence.
@@ -1362,6 +1409,9 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
     cleanup.phash_done.store(false, Ordering::SeqCst);
 
     let video_path = resolve_media_video_path(args)?;
+    if args.skip_phash {
+        return run_ahash_only_media_add(args, video_path, &cleanup);
+    }
     let sub_job = plan_subtitle_job(args, video_path)?;
     let fps = detect_media_fps(video_path, args.fps);
 
@@ -1370,12 +1420,7 @@ pub async fn run_media_add(args: &MediaAddArgs) -> Result<MediaAddResult> {
 
     let media_hash = compute_media_phash_digest(&hashes);
 
-    let ahash_path = extract_optional_ahash(
-        video_path,
-        args.ahash_dir.as_deref(),
-        args.moviehash.as_deref(),
-        args.json,
-    )?;
+    let ahash_path = extract_optional_ahash(args, video_path)?;
 
     if !args.json {
         eprintln!(
@@ -1494,6 +1539,7 @@ mod tests {
             subtitles_dir: PathBuf::from("/tmp"),
             all_embedded: false,
             skip_certify: false,
+            skip_phash: false,
             hwaccel: "auto".to_string(),
             json: false,
             server_url: DEFAULT_SERVER_URL.to_string(),
@@ -1524,6 +1570,7 @@ mod tests {
             subtitles_dir: temp.path.join("subtitles"),
             all_embedded: false,
             skip_certify: false,
+            skip_phash: false,
             hwaccel: "auto".to_string(),
             json: false,
             server_url: DEFAULT_SERVER_URL.to_string(),
@@ -1560,6 +1607,7 @@ mod tests {
             subtitles_dir: temp.path.join("subtitles"),
             all_embedded: false,
             skip_certify: false,
+            skip_phash: false,
             hwaccel: "auto".to_string(),
             json: false,
             server_url: DEFAULT_SERVER_URL.to_string(),
@@ -1591,6 +1639,7 @@ mod tests {
             subtitles_dir: PathBuf::from("/tmp"),
             all_embedded: false,
             skip_certify: false,
+            skip_phash: false,
             hwaccel: "auto".to_string(),
             json: false,
             server_url: DEFAULT_SERVER_URL.to_string(),
@@ -1676,5 +1725,62 @@ mod tests {
             resolve_moviehash(None, &local).as_deref(),
             Some("e19d5212c9812cd6")
         );
+    }
+
+    #[tokio::test]
+    async fn test_media_add_skip_phash_requires_ahash_dir() {
+        let temp = TempTestDir::new("skip_phash_missing_dir");
+        let video = temp.path.join("sample.mp4");
+        File::create(&video).unwrap();
+
+        let args = MediaAddArgs {
+            video: Some(video),
+            video_pos: None,
+            media_name: None,
+            moviehash: None,
+            srt: None,
+            srt_pos: None,
+            lang: None,
+            fps: None,
+            phash_dir: temp.path.join("phash"),
+            ahash_dir: None,
+            subtitles_dir: temp.path.join("subtitles"),
+            all_embedded: false,
+            skip_certify: false,
+            skip_phash: true,
+            hwaccel: "auto".to_string(),
+            json: true,
+            server_url: DEFAULT_SERVER_URL.to_string(),
+            db: PostgresArgs::default(),
+        };
+
+        let err = run_media_add(&args).await.unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("--skip-phash requires --ahash-dir"),
+            "Unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn test_handle_ahash_extract_error_tolerates_short_and_streamless_audio() {
+        let short_err = anyhow::anyhow!("No audio hashes could be extracted from \"clip.mkv\"");
+        assert_eq!(handle_ahash_extract_error(short_err, true).unwrap(), None);
+
+        let streamless_err =
+            anyhow::anyhow!("FFmpeg failed: Output file does not contain any stream");
+        assert_eq!(
+            handle_ahash_extract_error(streamless_err, true).unwrap(),
+            None
+        );
+
+        let no_audio_err = anyhow::anyhow!("Media has no audio stream to extract: \"silent.mkv\"");
+        assert_eq!(
+            handle_ahash_extract_error(no_audio_err, true).unwrap(),
+            None
+        );
+
+        let fatal_err = anyhow::anyhow!("Permission denied writing .ahash file");
+        assert!(handle_ahash_extract_error(fatal_err, true).is_err());
     }
 }

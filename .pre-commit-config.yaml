@@ -37,7 +37,7 @@ repos:
 
       - id: complexipy
         name: complexipy cognitive complexity gate (scripts/*.py)
-        entry: uv run complexipy --quiet
+        entry: uv run complexipy --failed
         language: system
         files: ^(scripts/.*\.py|complexipy-snapshot\.json)$
         pass_filenames: false

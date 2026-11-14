@@ -24,7 +24,7 @@ async fn test_chaos_err04_readonly_directory_fallback() {
     let unique_id = std::process::id();
     let readonly_dir = tmp_root.join(format!("dbsrt_chaos_ro_{}", unique_id));
     let phash_dir = tmp_root.join(format!("dbsrt_chaos_phash_{}", unique_id));
-    let srt_dir = PathBuf::from("../../data/SRT");
+    let srt_dir = PathBuf::from("../../tests/data");
 
     let _ = std::fs::create_dir_all(&readonly_dir);
     let _ = std::fs::create_dir_all(&phash_dir);
@@ -57,7 +57,7 @@ async fn test_chaos_err04_readonly_directory_fallback() {
     let client = reqwest::Client::new();
     let base_url = format!("http://{}", addr);
 
-    let sample_srt_fixture = Path::new("../../data/SRT/big_buck_bunny_trailer_480p.en.srt");
+    let sample_srt_fixture = Path::new("../../tests/data/big_buck_bunny_trailer_480p.en.srt");
     let candidate_id = if sample_srt_fixture.exists() {
         sample_srt_fixture.to_str().unwrap().to_string()
     } else {
@@ -159,7 +159,7 @@ async fn test_chaos_err02_relay_timeout_bounded() {
 
     let tmp_root = std::env::temp_dir();
     let phash_dir = tmp_root.join(format!("dbsrt_chaos_timeout_{}", std::process::id()));
-    let srt_dir = PathBuf::from("../../data/SRT");
+    let srt_dir = PathBuf::from("../../tests/data");
     let _ = std::fs::create_dir_all(&phash_dir);
 
     let app = create_router(phash_dir.clone(), srt_dir.clone());
@@ -223,7 +223,7 @@ async fn test_chaos_err02_relay_timeout_bounded() {
 async fn test_chaos_err03_special_characters_and_quotes() {
     let tmp_root = std::env::temp_dir();
     let phash_dir = tmp_root.join(format!("dbsrt_chaos_quotes_{}", std::process::id()));
-    let srt_dir = PathBuf::from("../../data/SRT");
+    let srt_dir = PathBuf::from("../../tests/data");
     let _ = std::fs::create_dir_all(&phash_dir);
 
     let app = create_router(phash_dir.clone(), srt_dir.clone());

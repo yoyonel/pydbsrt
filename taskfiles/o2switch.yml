@@ -227,6 +227,11 @@ tasks:
     cmds:
       - ./scripts/infra/o2switch/o2switch_ctl.sh batch-all --mode ahash {{.CLI_ARGS}}
 
+  o2switch:ahash:backfill:
+    desc: Backfill missing or unverified multi-track .ahash JSON sidecars ON o2switch (passes --dry-run, --limit, --workers <= 4)
+    cmds:
+      - ./scripts/infra/o2switch/o2switch_ctl.sh ahash-backfill {{.CLI_ARGS}}
+
   o2switch:batch:status:
     desc: Check whether remote batch pHash worker is running on o2switch
     cmds:

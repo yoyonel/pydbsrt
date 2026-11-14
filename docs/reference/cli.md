@@ -59,6 +59,7 @@ dbsrt media:add <VIDEO_PATH> [SRT_PATH] [OPTIONS]
 - `--hwaccel <mode>` : Moteur d'accélération matérielle (`auto`, `vaapi`, `cuda`, `qsv`, `disabled`). Par défaut : `auto` (utilise le GPU matériel si présent, avec fallback CPU automatique).
 - `--force` : Forcer le recalcul et l'écrasement des empreintes existantes.
 - `--ahash-dir <DIR>` : Répertoire de destination pour l'extraction conjointe de l'empreinte acoustique `.ahash` (mode dual-hash). Si le média est muet ou dépourvu de flux audio, bascule automatiquement et silencieusement sur le calcul pHash visuel seul sans lever d'erreur.
+- `--skip-phash` : Mode audio seul (requiert `--ahash-dir <DIR>`) : extrait uniquement l'empreinte `.ahash` et son sidecar `.json` en ignorant le décodage vidéo pHash, la certification SRT et le rechargement serveur.
 - `--no-reload` : Désactiver l'appel de hot-reload vers `dbsrt-server`.
 
 ---
@@ -100,19 +101,40 @@ dbsrt export-phash --input <VIDEO_PATH> --output <PHASH_PATH> [OPTIONS]
 ---
 
 ### `export-ahash`
-Extrait les empreintes acoustiques spectrales Haitsma-Kalker `.ahash` v1.0 (en-tête 32 octets, banc 33 filtres Bark, 5512 Hz mono, trames 64-bit à 86.13 fps).
+Extrait les empreintes acoustiques spectrales Haitsma-Kalker `.ahash` v1.0 (en-tête 176 octets, banc 33 filtres logarithmiques, 5512 Hz mono, trames 64-bit à 86.125 fps).
 
 ```text
-dbsrt export-ahash --media <MEDIA_PATH> --output <AHASH_PATH> [OPTIONS]
+dbsrt export-ahash --media <MEDIA_PATH> [--output <AHASH_PATH>] [OPTIONS]
 ```
 
 - `--media <MEDIA_PATH>` (ou `-m`) : Chemin vers le fichier multimédia local ou URI de flux réseau (`ftp://`, `http://`).
-- `--output <AHASH_PATH>` (ou `-o`) : Chemin de destination du fichier binaire `.ahash`.
+- `--output <AHASH_PATH>` (ou `-o`) : Chemin de destination du fichier binaire `.ahash` (défaut : `/tmp/<moviehash_16hex>[.a<K>].<fps>fps.ahash` pour tout fichier local `>= 64 KiB` ou lorsque `--moviehash` est fourni, sinon repli sur `/tmp/<media>[.a<K>].<fps>fps.ahash`).
+- `--moviehash <HASH>` : MovieHash OpenSubtitles 16-hex optionnel (calculé automatiquement sur fichier local `>= 64 KiB` si omis).
 - `--sample-rate <HZ>` (ou `-r`) : Taux d'échantillonnage audio (défaut : `5512`).
-- `--hop-size <SAMPLES>` : Pas glissant en échantillons PCM (défaut : `64`, soit ~11.6 ms / 86.13 fps).
+- `--hop-size <SAMPLES>` : Pas glissant en échantillons PCM (défaut : `64`, soit ~11.6 ms / 86.125 fps).
 - `--start-sec <SEC>` : Décalage de départ en secondes (défaut : `0.0`).
 - `--duration <SEC>` : Durée maximale à extraire en secondes (défaut : totalité du flux).
-- `--json` : Émet les métadonnées et statistiques d'extraction au format JSON structuré sur stdout.
+- `--audio-track <K>` : Piste audio relative à décoder (`-map 0:a:<K>`). Omis : sélection automatique FFmpeg (identique bit-à-bit aux `.ahash` existants). Sans `--output` et si `K` diffère de la piste par défaut déduite, le nom par défaut porte le suffixe `.a<K>`.
+- **Sidecar** : un `<stem>.json` (`AhashSidecar` v1 : `media_name`, `moviehash`, piste décodée `selected_audio_stream` + inventaire `container_audio_streams`) est écrit atomiquement à côté du `.ahash`, voir [Formats de Fichiers § 1ter](formats-fichiers.md).
+
+---
+
+### `ahash:sidecar` (alias `ahash-sidecar`)
+Génère, vérifie ou met à niveau le sidecar JSON `<stem>.json` d'un fichier `.ahash` existant.
+
+```text
+dbsrt ahash:sidecar --ahash <AHASH_PATH> --media <MEDIA_PATH_OR_URL> [OPTIONS]
+```
+
+- `--ahash <AHASH_PATH>` : Fichier binaire `.ahash` existant.
+- `--media <MEDIA_PATH_OR_URL>` : Chemin local ou URI réseau (`ftp://`, `http(s)://`) ; identifiants FTP transmis exclusivement via variables d'environnement (`DBSRT_FTP_USER`/`DBSRT_FTP_PASSWORD`, repli `FTP_USER`/`FTP_PASSWORD`).
+- `--moviehash <HEX>` : MovieHash OpenSubtitles 16-hex (déduit automatiquement depuis `<hash>.<fps>fps.ahash` si omis).
+- `--media-name <STR>` : Nom canonique du média enregistré dans `<stem>.json` (défaut : nom issu de `--media`).
+- `--source-id <STR>` / `--source-rel-path <STR>` : Métadonnées optionnelles de provenance source.
+- `--no-verify` : Sur conteneur multi-pistes, utilise la règle par défaut FFmpeg sans sondage audio (`selection = inferred_backfill`).
+- `--force` : Force la réécriture même si `selection` vaut déjà `explicit`, `single_track` ou `verified_backfill`.
+- `--json` : Émet le compte-rendu structuré JSON sur stdout.
+- **Vérification multi-pistes** : si le conteneur comporte plusieurs pistes audio (sauf `--no-verify`), échantillonne `5.0s` à `t = 50%` (avec bornage sûr sous `12.0s`) par piste (`-map 0:a:<k>`) et sélectionne celle minimisant la distance de Hamming glissante dans un rayon local `±2.0s` (`<= 14.0` bits → `verified_backfill`, sinon `unknown`).
 
 ---
 
@@ -128,6 +150,29 @@ dbsrt bench-ahash [OPTIONS]
 - `--cross-media-trials <N>` : Nombre de paires inter-médias croisées pour mesurer le rejet de faux positifs (défaut : `500`).
 - `--max-distance <BITS>` : Seuil d'admissibilité de distance de Hamming maximale (défaut : `14.0`, optimal : `12.5`).
 - `--json-out <PATH>` : Chemin d'export télémétrique JSON complet des métriques (défaut : `data/reports/eval_ahash_matching.json`).
+
+---
+
+### `bench-scale-multimodal`
+Runner de benchmark multimodal à l'échelle (pHash Coarse + MIH-16 vs aHash Coarse-to-Fine $K=16$ + MIH-32) évaluant le consensus multi-fenêtres ($20\%, 50\%, 80\%$) et la concordance inter-modalités avec reprise sur crash JSONL.
+
+```text
+dbsrt bench-scale-multimodal [OPTIONS]
+```
+
+- `--dirs <DIR1,DIR2,...>` (ou `-d`) : Répertoires contenant les vidéos à scanner (repli local sûr sur `data/snippets` si omis).
+- `--dbphash <PATH>` : Catalogue visuel `.dbphash` (défaut : `data/catalog.dbphash`).
+- `--ahash-dir <DIR>` : Répertoire contenant les empreintes `.ahash` et sidecars `.json` (défaut : `data/__AHASH__`).
+- `--output <PATH>` (ou `-o`) : Fichier rapport JSONL en streaming (défaut : fichier horodaté sous `data/reports/` avec symlink `eval_scale_multimodal_multiwindow_latest.jsonl`).
+- `--status-json <PATH>` : Fichier JSON de télémétrie en direct (défaut : fichier horodaté sous `data/reports/` avec symlink `eval_scale_status_latest.json`).
+- `--factor-k <K>` : Facteur de décimation Coarse-to-Fine aHash (défaut : `16`, soit `5.38 fps`).
+- `--offsets <RATIOS>` : Ratios temporels des fenêtres d'évaluation séparés par virgule (défaut : `"0.2,0.5,0.8"`).
+- `--video-window-sec <SEC>` : Durée en secondes extraite par fenêtre visuelle `pHash` (défaut : `1.0`, ex: `2.0` pour ~48 trames permettant d'évaluer simultanément tranches `2.0s` et `1.0s`).
+- `--workers <N>` (ou `-j`) : Nombre de threads workers parallèles pour l'extraction multi-montages entrelacée en Phase 1 (défaut : `8`).
+- `--limit <N>` : Nombre maximal de médias à évaluer (`0` = illimité).
+- `--resume` : Reprend automatiquement en sautant les médias déjà présents dans `--output` hors statut `ERROR` (défaut : `true`).
+- `--matrix-json <PATH>` : Génère en Phase 2 le rapport JSON consolidé des 24 techniques (`pHash` MIH-16/MIH-32/Linear + `aHash` Coarse-to-Fine $K \in [1, 32]$ + `aHash Dense` MIH-16/MIH-32/Linear).
+- `--matrix-only` : Court-circuite l'extraction vidéo FFmpeg et rejoue uniquement la matrice comparative sur les `query_hashes` déjà persistés dans `--output`.
 
 ---
 

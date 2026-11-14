@@ -76,6 +76,18 @@ tags:
     </div>
   </div>
 
+  <div class="dbsrt-bento-card bento-teal">
+    <div class="bento-header">
+      <span class="bento-icon">🔬</span>
+      <span class="bento-badge">R&amp;D aHash vs pHash</span>
+    </div>
+    <h3>Analyse Comparative : MIH-16 vs MIH-32</h3>
+    <p>Étude approfondie de la divergence de comportement : pourquoi MIH-32 accélère aHash de 3 460x (2.1 ms) mais dégrade le recall pHash (30% d'échecs).</p>
+    <div class="bento-links">
+      <a href="2026-11-12-analyse-mih16-vs-mih32-ahash-phash/">→ Analyser le comportement MIH-16 vs MIH-32</a>
+    </div>
+  </div>
+
   <div class="dbsrt-bento-card bento-amber">
     <div class="bento-header">
       <span class="bento-icon">🔗</span>
@@ -157,6 +169,30 @@ tags:
     <p>Modèle relationnel PostgreSQL 17, double moteur d'accès transparent (psycopg2 vs psql CLI), audit des sidecars binaires et résilience de pagination.</p>
     <div class="bento-links">
       <a href="2026-11-09-reconciliation-actifs-medias-et-empreintes-phash/">→ Comprendre la réconciliation des actifs</a>
+    </div>
+  </div>
+
+  <div class="dbsrt-bento-card bento-teal">
+    <div class="bento-header">
+      <span class="bento-icon">🎯</span>
+      <span class="bento-badge">AUDIT MULTIMODAL</span>
+    </div>
+    <h3>Audit Forensique Benchmark Multimodal (5 346 Médias)</h3>
+    <p>Réconciliation au fichier près des 5 346 médias et 584 .ahash, réfutation VO/VF, preuve de l'angle mort modulo-16 Coarse-to-Fine et précision binaire.</p>
+    <div class="bento-links">
+      <a href="2026-11-13-audit-benchmark-multimodal-scale/">→ Consulter l'audit forensique multimodal</a>
+    </div>
+  </div>
+
+  <div class="dbsrt-bento-card bento-emerald">
+    <div class="bento-header">
+      <span class="bento-icon">📊</span>
+      <span class="bento-badge">MATRICE 3 180 VIDÉOS RÉELLES</span>
+    </div>
+    <h3>Benchmark Exhaustif : pHash, aHash C2F K=[1..32] &amp; MIH-16/32</h3>
+    <p>9 534 cuts sur 3 180 vraies vidéos (NAS + Freebox) : invariance C2F K=1..32 (90.8 % rappel, 68 MiB RAM, 100 % précision multi-fenêtres) et MIH-32 à 55 µs.</p>
+    <div class="bento-links">
+      <a href="2026-11-14-benchmark-exhaustif-multimodal-3180-videos-reelles-phash-ahash-c2f-mih/">→ Explorer la matrice 24 techniques</a>
     </div>
   </div>
 </div>

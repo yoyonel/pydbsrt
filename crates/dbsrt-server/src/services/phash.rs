@@ -321,7 +321,8 @@ pub fn extract_media_query_sample(
 ) -> (f64, Vec<u64>, Option<ExistingPhashData>) {
     let existing_phash = phash_dirs
         .iter()
-        .find_map(|dir| find_existing_phash(media_path, dir));
+        .find_map(|dir| find_existing_phash(media_path, dir))
+        .or_else(|| find_existing_phash(media_path, Path::new("")));
 
     let (target_fps, query_sample) = if let Some((_, ref hashes, fps)) = existing_phash {
         let min_safe_frame =

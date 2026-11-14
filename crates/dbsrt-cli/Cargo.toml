@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
+repository.workspace = true
 
 [lib]
 name = "dbsrt_cli"
@@ -31,4 +32,5 @@ sysinfo = "0.33"
 libc = "0.2"
 
 [dev-dependencies]
+tempfile = "3.17"
 insta = { version = "1.39", features = ["yaml"] }

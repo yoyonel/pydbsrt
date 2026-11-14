@@ -7,6 +7,12 @@ use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+/// Milliseconds per second (target start conversion).
+const MILLIS_PER_SECOND: f64 = 1000.0;
+
+/// Scale factor converting ratios (`0.0..=1.0`) into percentages (`0.0..=100.0`).
+pub const PERCENT_SCALE: f64 = 100.0;
+
 /// Default multi-window temporal ratios (20%, 50%, 80% along the media timeline).
 pub const DEFAULT_MULTI_WINDOW_RATIOS: [f64; 3] = [0.20, 0.50, 0.80];
 
@@ -191,7 +197,8 @@ pub fn evaluate_multi_window_consensus(
 
     let avg_confidence: f64 =
         matches.iter().map(|m| m.confidence).sum::<f64>() / matching_windows as f64;
-    let primary_shift = matches[0].estimated_shift_ms;
+    let primary_shift = matches[0].estimated_shift_ms
+        - (matches[0].target_start_sec * MILLIS_PER_SECOND).round() as i64;
 
     if matching_windows == 1 {
         // Single window match: cannot rule out shared intro/eyecatch/jingle
@@ -211,10 +218,10 @@ pub fn evaluate_multi_window_consensus(
 
     // Check shift coherence across all pairs of matching windows
     // Note: each window match carries its estimated_shift_ms (reference ts) and target_start_sec.
-    // The relative alignment shift is: relative_shift_ms = estimated_shift_ms - (target_start_sec * 1000).
+    // The relative alignment shift is: relative_shift_ms = estimated_shift_ms - (target_start_sec * MILLIS_PER_SECOND).
     let relative_shifts: Vec<i64> = matches
         .iter()
-        .map(|m| m.estimated_shift_ms - (m.target_start_sec * 1000.0).round() as i64)
+        .map(|m| m.estimated_shift_ms - (m.target_start_sec * MILLIS_PER_SECOND).round() as i64)
         .collect();
 
     let min_shift = relative_shifts.iter().copied().min().unwrap_or(0);
@@ -226,7 +233,7 @@ pub fn evaluate_multi_window_consensus(
         // Multi-window verified consensus
         let window_coverage = matching_windows as f64 / ctx.total_windows.max(1) as f64;
         let boost = if window_coverage >= 0.99 { 1.15 } else { 1.05 };
-        let conf = (avg_confidence * boost).clamp(0.0, 100.0);
+        let conf = (avg_confidence * boost).clamp(0.0, PERCENT_SCALE);
         let median_shift = relative_shifts[matching_windows / 2];
         (conf, median_shift)
     } else {
@@ -313,9 +320,10 @@ pub fn aggregate_multi_window_matches(
 
     results.sort_by(|a, b| {
         b.consensus_confidence
-            .partial_cmp(&a.consensus_confidence)
-            .unwrap_or(std::cmp::Ordering::Equal)
+            .total_cmp(&a.consensus_confidence)
             .then_with(|| b.matching_windows.cmp(&a.matching_windows))
+            .then_with(|| a.media_id.cmp(&b.media_id))
+            .then_with(|| a.clean_title.cmp(&b.clean_title))
     });
 
     results
@@ -351,6 +359,37 @@ mod tests {
         let short_starts = plan.compute_start_seconds(0.8);
         for s in short_starts {
             assert_eq!(s, 0.0);
+        }
+    }
+
+    #[test]
+    fn test_single_window_primary_shift_is_relative_to_window_start() {
+        const START_SEC: f64 = 100.0;
+        const POSITIVE_REF_MS: i64 = 102_500;
+        const NEGATIVE_REF_MS: i64 = 97_500;
+        const EXPECTED_SHIFT_MS: i64 = 2_500;
+        let ctx = ConsensusEvaluationContext {
+            media_id: 7,
+            clean_title: "Single Window Shift",
+            total_windows: 3,
+            tolerance_ms: MAX_SHIFT_DRIFT_TOLERANCE_MS,
+        };
+        for (ref_ms, expected) in [
+            (POSITIVE_REF_MS, EXPECTED_SHIFT_MS),
+            (NEGATIVE_REF_MS, -EXPECTED_SHIFT_MS),
+        ] {
+            let m = vec![WindowMatchItem {
+                window_idx: 0,
+                ratio: 0.5,
+                target_start_sec: START_SEC,
+                matching_cuts: 10,
+                matching_sparse: 10,
+                estimated_shift_ms: ref_ms,
+                confidence: 80.0,
+            }];
+            let c = evaluate_multi_window_consensus(&ctx, m);
+            assert_eq!(c.consensus_shift_ms, expected);
+            assert!(!c.is_temporally_coherent);
         }
     }
 
@@ -456,5 +495,60 @@ mod tests {
         assert_eq!(consensus.matching_windows, 2);
         assert!(!consensus.is_temporally_coherent);
         assert!(consensus.consensus_confidence <= 25.0);
+    }
+
+    #[test]
+    fn test_aggregate_multi_window_matches_deterministic_tie_breaking() {
+        let windows_a = vec![(
+            0usize,
+            0.5f64,
+            50.0f64,
+            vec![
+                (
+                    20u32,
+                    "Beta".to_string(),
+                    10usize,
+                    10usize,
+                    50_000i64,
+                    80.0f64,
+                ),
+                (
+                    10u32,
+                    "Alpha".to_string(),
+                    10usize,
+                    10usize,
+                    50_000i64,
+                    80.0f64,
+                ),
+            ],
+        )];
+        let windows_b = vec![(
+            0usize,
+            0.5f64,
+            50.0f64,
+            vec![
+                (
+                    10u32,
+                    "Alpha".to_string(),
+                    10usize,
+                    10usize,
+                    50_000i64,
+                    80.0f64,
+                ),
+                (
+                    20u32,
+                    "Beta".to_string(),
+                    10usize,
+                    10usize,
+                    50_000i64,
+                    80.0f64,
+                ),
+            ],
+        )];
+        let res_a = aggregate_multi_window_matches(3, windows_a, MAX_SHIFT_DRIFT_TOLERANCE_MS);
+        let res_b = aggregate_multi_window_matches(3, windows_b, MAX_SHIFT_DRIFT_TOLERANCE_MS);
+        assert_eq!(res_a, res_b);
+        assert_eq!(res_a[0].media_id, 10);
+        assert_eq!(res_a[1].media_id, 20);
     }
 }

@@ -45,18 +45,43 @@ class FakeConn:
 
 
 class FakeFtp:
-    def __init__(self, data: bytes) -> None:
+    def __init__(
+        self,
+        data: bytes,
+        paths: dict[str, bytes] | None = None,
+        reported_size: int | None = None,
+    ) -> None:
         self.data = data
+        self.paths = paths
+        self.reported_size = reported_size
         self.commands: list[tuple[str, int | None]] = []
         self.conns: list[FakeConn] = []
         self.closed = False
+        self.type_cmds: list[str] = []
 
     def close(self) -> None:
         self.closed = True
 
+    def voidcmd(self, cmd: str) -> str:
+        self.type_cmds.append(cmd)
+        return "200 Type set to I."
+
+    def size(self, path: str) -> int:
+        if self.reported_size is not None:
+            return self.reported_size
+        if self.paths is not None:
+            if path not in self.paths:
+                raise ftplib.error_perm("550 No such file.")
+            return len(self.paths[path])
+        return len(self.data)
+
     def transfercmd(self, cmd: str, rest: int | None = None) -> FakeConn:
         self.commands.append((cmd, rest))
-        conn = FakeConn(self.data[rest or 0 :])
+        payload = self.data
+        if self.paths is not None:
+            req_path = cmd.removeprefix("RETR ")
+            payload = self.paths.get(req_path, b"")
+        conn = FakeConn(payload[rest or 0 :])
         self.conns.append(conn)
         return conn
 
@@ -105,28 +130,38 @@ def test_ftp_moviehash_reads_head_and_tail_only(size: int, expected: str) -> Non
     opened, connect = sessions(FakeFtp, pattern(size))
     assert ftp_moviehash(connect, "/video/Raw Name.mkv", size) == expected
     assert [ftp.commands for ftp in opened] == [
+        [],
         [("RETR /video/Raw Name.mkv", 0)],
         [("RETR /video/Raw Name.mkv", size - MOVIEHASH_CHUNK_BYTES)],
     ]
+    assert all(f.type_cmds == ["TYPE I"] for f in opened)
     assert all(ftp.closed and all(conn.closed for conn in ftp.conns) for ftp in opened)
 
 
 def test_ftp_moviehash_survives_a_nas_that_drops_the_control_connection() -> None:
     opened, connect = sessions(DroppingFtp, pattern(200_000))
     assert ftp_moviehash(connect, "/video/x.mkv", 200_000) == "e19d5212c9812cd6"
-    assert len(opened) == 2 and all(ftp.closed for ftp in opened)
+    assert len(opened) == 3 and all(ftp.closed for ftp in opened)
+    assert all(f.type_cmds == ["TYPE I"] for f in opened)
 
 
 def test_ftp_moviehash_skips_files_under_one_chunk() -> None:
     opened, connect = sessions(FakeFtp, pattern(65_535))
     assert ftp_moviehash(connect, "/video/x.mkv", 65_535) is None
-    assert opened == []
+    assert len(opened) == 1 and opened[0].commands == []
+    assert all(f.type_cmds == ["TYPE I"] for f in opened)
 
 
 def test_ftp_moviehash_short_read_gives_no_hash() -> None:
-    # Listed size larger than what the server sends: a hash of the wrong bytes would name the wrong .phash
-    _, connect = sessions(FakeFtp, pattern(100_000))
+    # Server SIZE reports 200_000 but RETR stream truncates at 100_000: must reject rather than hash wrong bytes
+    opened: list[FakeFtp] = []
+
+    def connect() -> ftplib.FTP:
+        opened.append(FakeFtp(pattern(100_000), reported_size=200_000))
+        return cast(ftplib.FTP, opened[-1])
+
     assert ftp_moviehash(connect, "/video/x.mkv", 200_000) is None
+    assert all(f.type_cmds == ["TYPE I"] for f in opened)
 
 
 def _run_video(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, moviehash: str | None) -> list[str]:
@@ -152,6 +187,26 @@ def test_process_single_video_names_the_log_by_moviehash(tmp_path: Path, monkeyp
 def test_process_single_video_without_moviehash_keeps_the_stem(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     assert _run_video(tmp_path, monkeypatch, None) == ["Raw Name.log"]
     assert "--moviehash" not in (tmp_path / "logs" / "workers" / "Raw Name.log").read_text(encoding="utf-8")
+
+
+def test_process_single_video_truncates_and_hashes_overlong_stem_without_moviehash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(worker, "target_moviehash", lambda target, stream_base, env: None)
+    fake_dbsrt = tmp_path / "dbsrt"
+    fake_dbsrt.write_text('#!/bin/sh\nprintf "%s\\n" "$@"\n', encoding="utf-8")
+    fake_dbsrt.chmod(0o755)
+    overlong_name = ("Épisode_Très_Long_" * 20) + ".mkv"
+    target = VideoTarget(f"/tv/{overlong_name}", overlong_name, 200_000)
+    env = {"PATH": os.environ["PATH"]}
+    rec = worker.process_single_video(
+        target, "ftp://nas:21", str(fake_dbsrt), env, threading.Lock(), tmp_path / "ev.jsonl"
+    )
+    assert rec["success"] is True
+    logs = sorted(p.name for p in (tmp_path / "logs" / "workers").iterdir())
+    assert len(logs) == 1
+    assert len(logs[0].encode("utf-8")) < 200
 
 
 FREEBOX_TARGET = VideoTarget("/Disque_1_1/Vidéos/Raw Name.mkv", "Raw Name.mkv", 200_000)
@@ -194,9 +249,9 @@ def test_target_moviehash_reads_head_and_tail_through_the_freebox_gateway(freebo
 
 
 def test_target_moviehash_over_http_is_none_when_the_listed_size_is_wrong(freebox_gateway: str) -> None:
-    # A hash of the wrong bytes would name the wrong .phash
-    target = FREEBOX_TARGET._replace(size_bytes=300_000)
-    assert worker.target_moviehash(target, freebox_gateway, {}) is None
+    # Both oversized and undersized stale inventory sizes must be rejected via Content-Range /total validation
+    assert worker.target_moviehash(FREEBOX_TARGET._replace(size_bytes=300_000), freebox_gateway, {}) is None
+    assert worker.target_moviehash(FREEBOX_TARGET._replace(size_bytes=150_000), freebox_gateway, {}) is None
 
 
 def test_target_moviehash_over_http_is_none_when_the_server_ignores_range(rangeless_server: str) -> None:
@@ -209,3 +264,54 @@ def test_target_moviehash_is_none_when_the_nas_is_unreachable() -> None:
     # Port 1 on localhost refuses the connection: no hash, the worker falls back to the stem
     assert worker.target_moviehash(target, "ftp://127.0.0.1:1", {}) is None
     assert worker.target_moviehash(target, "http://127.0.0.1:1", {}) is None
+
+
+def test_ftp_moviehash_probes_size_when_zero_and_handles_nfd() -> None:
+    import unicodedata
+
+    data = pattern(200_000)
+    nfd_path = unicodedata.normalize("NFD", "/tvshow/Café/épisode.mkv")
+    nfc_path = unicodedata.normalize("NFC", "/tvshow/Café/épisode.mkv")
+    opened: list[FakeFtp] = []
+
+    def connect() -> ftplib.FTP:
+        opened.append(FakeFtp(data, paths={nfd_path: data}))
+        return cast(ftplib.FTP, opened[-1])
+
+    assert ftp_moviehash(connect, nfc_path, 0) == "e19d5212c9812cd6"
+    assert all(f.type_cmds == ["TYPE I"] for f in opened)
+    assert [ftp.commands for ftp in opened[1:]] == [
+        [(f"RETR {nfd_path}", 0)],
+        [(f"RETR {nfd_path}", 200_000 - MOVIEHASH_CHUNK_BYTES)],
+    ]
+
+    # Even when a non-zero stale size is passed, authoritative FTP SIZE + NFD fallback win
+    opened.clear()
+    assert ftp_moviehash(connect, nfc_path, 999_999) == "e19d5212c9812cd6"
+    assert all(f.type_cmds == ["TYPE I"] for f in opened)
+    assert [ftp.commands for ftp in opened[1:]] == [
+        [(f"RETR {nfd_path}", 0)],
+        [(f"RETR {nfd_path}", 200_000 - MOVIEHASH_CHUNK_BYTES)],
+    ]
+
+
+def test_strip_fps_token_preserves_years_and_episode_numbers() -> None:
+    assert worker.ahash_logical_stem("Blade.Runner.2049.24fps.ahash") == "Blade.Runner.2049"
+    assert worker.ahash_logical_stem("Blade.Runner.2049.86.1fps.ahash") == "Blade.Runner.2049"
+    assert worker.ahash_logical_stem("Show.S01.02.24fps.ahash") == "Show.S01.02"
+    assert worker.phash_media_stem("Blade.Runner.2049.mkv.23.976fps.phash") == "Blade.Runner.2049"
+
+
+def test_target_moviehash_over_http_probes_size_when_zero(freebox_gateway: str) -> None:
+    target = FREEBOX_TARGET._replace(size_bytes=0)
+    assert worker.target_moviehash(target, freebox_gateway, {}) == "e19d5212c9812cd6"
+
+
+@pytest.mark.parametrize(("size", "expected"), VECTORS)
+def test_compute_local_moviehash_matches_vectors(tmp_path: Path, size: int, expected: str) -> None:
+    p = tmp_path / "sample.mkv"
+    p.write_bytes(pattern(size))
+    assert worker.compute_local_moviehash(p) == expected
+    small = tmp_path / "small.mkv"
+    small.write_bytes(pattern(MOVIEHASH_CHUNK_BYTES - 1))
+    assert worker.compute_local_moviehash(small) is None

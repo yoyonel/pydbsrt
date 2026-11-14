@@ -635,6 +635,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sysinfo",
+ "tempfile",
  "tokio",
 ]
 
@@ -655,7 +656,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
- "thiserror",
+ "tempfile",
  "tokio",
 ]
 
@@ -684,13 +685,16 @@ dependencies = [
  "anyhow",
  "arc-swap",
  "axum",
+ "base64 0.22.1",
  "clap",
  "dbsrt-core",
  "dbsrt-index",
  "futures-util",
+ "rayon",
  "reqwest",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "tower-http",
  "tracing",
@@ -703,7 +707,6 @@ version = "0.1.0"
 dependencies = [
  "ratatui",
  "serde",
- "serde_json",
 ]
 
 [[package]]

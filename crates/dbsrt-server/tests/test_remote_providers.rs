@@ -83,6 +83,7 @@ async fn test_autosync_fallback_to_remote_provider_and_cache() {
         language: "fr".to_string(),
         phash_dir: Some(phash_dir.to_string_lossy().to_string()),
         subtitles_dir: Some(subtitles_dir.to_string_lossy().to_string()),
+        search_mode: None,
         search_distance: 16,
         nb_seconds: 1.0,
     };
@@ -170,6 +171,7 @@ async fn test_autosync_remote_fallback_not_found() {
         language: "es".to_string(),
         phash_dir: Some(phash_dir.to_string_lossy().to_string()),
         subtitles_dir: Some(subtitles_dir.to_string_lossy().to_string()),
+        search_mode: None,
         search_distance: 16,
         nb_seconds: 1.0,
     };

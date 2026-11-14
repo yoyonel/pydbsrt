@@ -6,8 +6,8 @@
 use anyhow::{bail, Context, Result};
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
-use std::time::Duration;
+use std::process::{Child, Command, ExitStatus, Stdio};
+use std::time::{Duration, Instant};
 
 use crate::ahash::{
     AhashFile, AhashHeader, HaitsmaKalkerExtractor, HaitsmaScratchpad, DEFAULT_FRAME_SIZE,
@@ -15,6 +15,7 @@ use crate::ahash::{
 };
 use crate::ffmpeg_input::{
     apply_ftp_credentials, display_input, ffmpeg_decode_threads, http_reconnect_args,
+    redact_secrets,
 };
 use crate::video::resolve_ffmpeg_cpu;
 
@@ -42,6 +43,12 @@ pub struct AudioExtractionOptions {
     pub duration_sec: Option<f64>,
     /// Optional path to custom FFmpeg binary.
     pub custom_ffmpeg: Option<PathBuf>,
+    /// Optional relative audio stream index (`k` in `0:a:k`) to decode.
+    ///
+    /// `None` keeps FFmpeg automatic stream selection (no `-map`), which preserves
+    /// bit-for-bit identity with every `.ahash` extracted before this option existed.
+    /// `Some(k)` injects `-map 0:a:<k>`.
+    pub audio_stream: Option<usize>,
 }
 
 impl Default for AudioExtractionOptions {
@@ -53,6 +60,7 @@ impl Default for AudioExtractionOptions {
             start_sec: 0.0,
             duration_sec: None,
             custom_ffmpeg: None,
+            audio_stream: None,
         }
     }
 }
@@ -73,7 +81,9 @@ impl Default for AudioExtractionOptions {
 /// 1. Resolves FFmpeg binary (custom or fallback CPU).
 /// 2. Injects quiet non-interactive flags (`-hide_banner`, `-nostats`, `-nostdin`).
 /// 3. Injects seeking flags (`-ss`) and duration limits (`-t`) if configured.
-/// 4. Configures audio downmix (`-vn`, `-ac 1`, `-ar <sample_rate>`, `-f f32le`, `-`).
+/// 4. Injects `-map 0:a:<k>` only when `options.audio_stream == Some(k)`; `None` keeps
+///    FFmpeg automatic audio selection (bit-identical with legacy `.ahash` files).
+/// 5. Configures audio downmix (`-vn`, `-ac 1`, `-ar <sample_rate>`, `-f f32le`, `-`).
 pub fn build_ffmpeg_audio_command(path: &Path, options: &AudioExtractionOptions) -> Command {
     let binary = options
         .custom_ffmpeg
@@ -81,7 +91,7 @@ pub fn build_ffmpeg_audio_command(path: &Path, options: &AudioExtractionOptions)
         .unwrap_or_else(resolve_ffmpeg_cpu);
 
     let mut cmd = Command::new(binary);
-    cmd.args(["-hide_banner", "-nostats", "-nostdin"]);
+    cmd.args(["-hide_banner", "-loglevel", "error", "-nostats", "-nostdin"]);
 
     let input_str = path.to_string_lossy();
     if input_str.starts_with("http://") || input_str.starts_with("https://") {
@@ -95,6 +105,10 @@ pub fn build_ffmpeg_audio_command(path: &Path, options: &AudioExtractionOptions)
     }
 
     cmd.args(["-i", &input_str]);
+
+    if let Some(audio_index) = options.audio_stream {
+        cmd.args(["-map", &format!("0:a:{audio_index}")]);
+    }
 
     if let Some(duration) = options.duration_sec {
         if duration > 0.0 {
@@ -155,14 +169,39 @@ pub fn extract_ahash(path: &Path, options: &AudioExtractionOptions) -> Result<Ah
         )
     })?;
 
-    let mut stdout = child
+    let stdout = child
         .stdout
         .take()
         .context("Failed to capture FFmpeg stdout pipe for audio stream")?;
+    let stderr = child.stderr.take();
 
-    let hashes = run_audio_sliding_window(&mut stdout, &extractor, &mut scratch, options)?;
+    let timeout = Duration::from_secs(DEFAULT_AUDIO_FFMPEG_TIMEOUT_SECS);
+    let hashes = std::thread::scope(|s| -> Result<Vec<u64>> {
+        let stderr_handle = s.spawn(move || {
+            let mut msg = String::new();
+            if let Some(mut err_pipe) = stderr {
+                let _ = err_pipe.read_to_string(&mut msg);
+            }
+            msg
+        });
 
-    wait_for_child(&mut child, path)?;
+        let mut stdout_pipe = stdout;
+        let window_res =
+            run_audio_sliding_window(&mut stdout_pipe, &extractor, &mut scratch, options);
+        drop(stdout_pipe);
+
+        if let Err(err) = window_res {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = stderr_handle.join();
+            return Err(err);
+        }
+
+        let status = poll_child_with_timeout(&mut child, path, timeout)?;
+        let stderr_msg = stderr_handle.join().unwrap_or_default();
+        validate_child_exit_status(status, path, &stderr_msg)?;
+        window_res
+    })?;
 
     let header = AhashHeader {
         version: 1,
@@ -295,60 +334,118 @@ fn read_f32_exact_or_eof<R: Read>(reader: &mut R, dest: &mut [f32]) -> Result<us
     Ok(samples_read)
 }
 
-/// Waits for FFmpeg child process termination and handles exit status.
+/// Formats a secret-redacted diagnostic message for a failed FFmpeg audio process.
 ///
 /// # Arguments
-/// * `child` - Mutable reference to child process.
-/// * `path` - Path for diagnostic context.
+/// * `code` - Process exit status code (or `-1` if terminated by signal).
+/// * `path` - Input media path or URI.
+/// * `stderr_msg` - Raw captured `stderr` payload from FFmpeg.
 ///
 /// # Returns
-/// `Ok(())` if exit code is successful or acceptable.
-///
-/// # Errors
-/// Returns `Err` if FFmpeg failed with error status or if the media lacks an audio stream.
+/// Sanitized human-readable failure string with URL userinfo and `-ftp-password` secrets masked.
 ///
 /// # Panics
 /// Guarantee: Never panics.
 ///
 /// # Data Flow & Invariants
-/// Reaps child process without leaving zombies and formats informative error messages.
-fn wait_for_child(child: &mut Child, path: &Path) -> Result<()> {
-    let mut stderr_msg = String::new();
-    if let Some(mut err_pipe) = child.stderr.take() {
-        let _ = err_pipe.read_to_string(&mut stderr_msg);
-    }
-
-    let status = child.wait().with_context(|| {
-        format!(
-            "Failed waiting for FFmpeg child process on {:?}",
+/// 1. Applies [`redact_secrets`] to `stderr_msg.trim()` before inspecting or formatting.
+/// 2. Preserves the `"Media has no audio stream to extract"` prefix when FFmpeg reports no output
+///    stream so downstream silent-media handlers classify it non-fatally.
+fn format_audio_child_error(code: i32, path: &Path, stderr_msg: &str) -> String {
+    let redacted = redact_secrets(stderr_msg.trim());
+    if redacted.contains("does not contain any stream") || redacted.contains("matches no streams") {
+        return format!(
+            "Media has no audio stream to extract: {:?}",
             display_input(path)
-        )
-    })?;
+        );
+    }
+    let detail = if redacted.is_empty() {
+        "unknown error"
+    } else {
+        redacted.as_str()
+    };
+    format!(
+        "FFmpeg audio extraction exited with status {} for {:?}: {}",
+        code,
+        display_input(path),
+        detail
+    )
+}
 
+/// Polls an FFmpeg child process until completion or kills and reaps it on timeout.
+///
+/// # Arguments
+/// * `child` - Mutable reference to the spawned child process.
+/// * `path` - Media path or URI for redacted error reporting.
+/// * `timeout` - Maximum allowed wall-clock duration before termination.
+///
+/// # Returns
+/// `Ok(ExitStatus)` once the child exits within `timeout`.
+///
+/// # Errors
+/// Returns `Err` if `try_wait` fails or if `timeout` elapses before process exit.
+///
+/// # Panics
+/// Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// Polls `child.try_wait()` at [`CHILD_POLL_INTERVAL`] steps; on timeout issues `kill()` followed
+/// by `wait()` so no zombie process or open pipe writer remains.
+fn poll_child_with_timeout(
+    child: &mut Child,
+    path: &Path,
+    timeout: Duration,
+) -> Result<ExitStatus> {
+    let start = Instant::now();
+    loop {
+        match child.try_wait().with_context(|| {
+            format!(
+                "Failed waiting for FFmpeg child process on {:?}",
+                display_input(path)
+            )
+        })? {
+            Some(status) => return Ok(status),
+            None if start.elapsed() >= timeout => {
+                let _ = child.kill();
+                let _ = child.wait();
+                bail!(
+                    "FFmpeg audio extraction timed out after {}s for {:?}",
+                    timeout.as_secs(),
+                    display_input(path)
+                );
+            }
+            None => std::thread::sleep(CHILD_POLL_INTERVAL),
+        }
+    }
+}
+
+/// Validates FFmpeg child exit status and formats secret-redacted diagnostics on failure.
+///
+/// # Arguments
+/// * `status` - Completed child process [`ExitStatus`].
+/// * `path` - Media path or URI for diagnostic context.
+/// * `stderr_msg` - Captured `stderr` output from the child process.
+///
+/// # Returns
+/// `Ok(())` when `status.success()` or exit code is `255` (early pipe termination).
+///
+/// # Errors
+/// Returns `Err` formatted via [`format_audio_child_error`] on non-zero failure exit codes.
+///
+/// # Panics
+/// Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// Treats exit code `255` as acceptable early termination and delegates all other failures to
+/// [`format_audio_child_error`].
+fn validate_child_exit_status(status: ExitStatus, path: &Path, stderr_msg: &str) -> Result<()> {
     if !status.success() {
         let code = status.code().unwrap_or(-1);
         // Exit code 255 typically indicates SIGINT / early pipe termination
         if code != 255 {
-            let detail = stderr_msg.trim();
-            if detail.contains("Output file does not contain any stream") {
-                bail!(
-                    "Media has no audio stream to extract: {:?}",
-                    display_input(path)
-                );
-            }
-            bail!(
-                "FFmpeg audio extraction exited with status {} for {:?}: {}",
-                code,
-                display_input(path),
-                if detail.is_empty() {
-                    "unknown error"
-                } else {
-                    detail
-                }
-            );
+            bail!("{}", format_audio_child_error(code, path, stderr_msg));
         }
     }
-
     Ok(())
 }
 
@@ -356,6 +453,38 @@ fn wait_for_child(child: &mut Child, path: &Path) -> Result<()> {
 mod tests {
     use super::*;
     use std::io::Cursor;
+
+    fn command_args(cmd: &Command) -> Vec<String> {
+        cmd.get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    #[test]
+    fn test_build_ffmpeg_audio_command_without_audio_stream_has_no_map() {
+        let opts = AudioExtractionOptions::default();
+        let args = command_args(&build_ffmpeg_audio_command(Path::new("in.mkv"), &opts));
+        assert!(!args.iter().any(|a| a == "-map"));
+        let loglevel_pos = args
+            .iter()
+            .position(|a| a == "-loglevel")
+            .expect("-loglevel present");
+        assert_eq!(args[loglevel_pos + 1], "error");
+        assert!(args.iter().any(|a| a == "-nostats"));
+    }
+
+    #[test]
+    fn test_build_ffmpeg_audio_command_with_audio_stream_maps_track() {
+        let opts = AudioExtractionOptions {
+            audio_stream: Some(2),
+            ..Default::default()
+        };
+        let args = command_args(&build_ffmpeg_audio_command(Path::new("in.mkv"), &opts));
+        let pos = args.iter().position(|a| a == "-map").expect("-map present");
+        assert_eq!(args[pos + 1], "0:a:2");
+        let input_pos = args.iter().position(|a| a == "-i").expect("-i present");
+        assert!(pos > input_pos, "-map must follow the input");
+    }
 
     #[test]
     fn test_run_audio_sliding_window_mock_data() {
@@ -383,5 +512,38 @@ mod tests {
         for &h in &hashes {
             assert_ne!(h, 0);
         }
+    }
+
+    #[test]
+    fn test_format_audio_child_error_redacts_secrets_and_userinfo() {
+        let path = Path::new("ftp://nas_user:top_s3cret@nas.local:21/show/ep01.mkv");
+        let stderr = "ffmpeg -ftp-password flag_s3cret -i ftp://nas_user:url_s3cret@nas.local:21/show/ep01.mkv: I/O error\n";
+        let msg = format_audio_child_error(1, path, stderr);
+        assert!(!msg.contains("top_s3cret"));
+        assert!(!msg.contains("flag_s3cret"));
+        assert!(!msg.contains("url_s3cret"));
+        assert!(msg.contains("ftp://nas_user:***@nas.local:21/show/ep01.mkv"));
+        assert!(msg.contains("-ftp-password ***"));
+
+        let silent = format_audio_child_error(1, path, "Output file does not contain any stream\n");
+        assert!(silent.contains("no audio stream"));
+        assert!(!silent.contains("top_s3cret"));
+    }
+
+    #[test]
+    fn test_poll_child_with_timeout_kills_stalled_process() {
+        let mut child = Command::new("sleep")
+            .arg("5")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn sleep");
+        let path = Path::new("ftp://nas_user:secret_pw@nas.local:21/show/stalled.mkv");
+        let err = poll_child_with_timeout(&mut child, path, Duration::from_millis(120))
+            .expect_err("stalled child must time out");
+        let msg = err.to_string();
+        assert!(msg.contains("timed out"));
+        assert!(!msg.contains("secret_pw"));
+        assert!(msg.contains("ftp://nas_user:***@nas.local:21/show/stalled.mkv"));
     }
 }

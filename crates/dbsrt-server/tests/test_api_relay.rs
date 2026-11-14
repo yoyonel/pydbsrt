@@ -12,21 +12,65 @@ async fn test_dual_process_remote_relay_e2e() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let repo_root = manifest_dir.parent().unwrap().parent().unwrap();
     let phash_dir = repo_root.join("data/__PHASH__");
-    let srt_dir = repo_root.join("data/SRT");
     let snippet_video = repo_root.join("data/snippets/Andor.S01E01.1080p.WEB.h264-KOGi_mid15s.mp4");
-    let couplings_file = srt_dir.join("couplings.json");
-    let has_andor_coupling = if couplings_file.exists() {
-        std::fs::read_to_string(&couplings_file)
-            .map(|s| s.contains("Andor"))
-            .unwrap_or(false)
-    } else {
-        false
-    };
 
-    if !phash_dir.exists() || !snippet_video.exists() || !has_andor_coupling {
-        eprintln!("Skipping test: test fixtures or Andor coupling not found");
+    let ref_andor_phash = phash_dir.join("Andor.S01E01.1080p.WEB.h264-KOGi.phash");
+    let snippet_andor_phash =
+        phash_dir.join("Andor.S01E01.1080p.WEB.h264-KOGi_mid15s.mp4.24.0fps.phash");
+
+    if !ref_andor_phash.exists() || !snippet_andor_phash.exists() || !snippet_video.exists() {
+        eprintln!("Skipping test: test fixtures not found");
         return;
     }
+
+    // Isolate remote and local phash/srt dirs to the single Andor fixture so the test
+    // neither scans 1,500+ loose .phash files, nor parses 39.4 MB couplings.json,
+    // nor spawns FFmpeg on 1080p H.264.
+    let remote_phash_tmp = tempfile::tempdir().expect("remote phash tempdir");
+    let remote_srt_tmp = tempfile::tempdir().expect("remote srt tempdir");
+    let local_phash_tmp = tempfile::tempdir().expect("local phash tempdir");
+    std::fs::copy(
+        &ref_andor_phash,
+        remote_phash_tmp
+            .path()
+            .join("Andor.S01E01.1080p.WEB.h264-KOGi.phash"),
+    )
+    .expect("copy ref Andor phash");
+    std::fs::copy(
+        &snippet_andor_phash,
+        local_phash_tmp
+            .path()
+            .join("Andor.S01E01.1080p.WEB.h264-KOGi_mid15s.mp4.24.0fps.phash"),
+    )
+    .expect("copy snippet Andor phash");
+
+    let srt_filename = "Andor.S01E01.1080p.WEB.h264-KOGi.fr.srt";
+    let srt_content = b"1\n00:19:27,000 --> 00:19:30,000\nAndor test cue\n\n";
+    let srt_path = remote_srt_tmp.path().join(srt_filename);
+    std::fs::write(&srt_path, srt_content).expect("write synthetic Andor srt");
+    let srt_hash = dbsrt_core::compute_bytes_digest_32(srt_content);
+    let mut reg = dbsrt_core::CouplingRegistry::default();
+    reg.upsert_coupling(
+        "andor_ref_hash_0000000000000000".to_string(),
+        "Andor.S01E01.1080p.WEB.h264-KOGi".to_string(),
+        "Andor.S01E01.1080p.WEB.h264-KOGi.phash".to_string(),
+        23.976,
+        56_412,
+        dbsrt_core::CertifiedSubtitleRecord {
+            subtitles_hash: srt_hash,
+            name: srt_filename.to_string(),
+            lang: "fr".to_string(),
+            lang_status: dbsrt_core::LangStatus::Confirmed("fr".to_string()),
+            srt_path: srt_path.to_string_lossy().to_string(),
+            certified: true,
+            cue_count: 1,
+            sub_frames: Vec::new(),
+        },
+    );
+    reg.save(&dbsrt_core::CouplingRegistry::default_path(
+        remote_srt_tmp.path(),
+    ))
+    .expect("save synthetic couplings.json");
 
     // SAFETY: Test setup before any async tasks or server instances spawn.
     unsafe {
@@ -34,18 +78,13 @@ async fn test_dual_process_remote_relay_e2e() {
     }
 
     // 1. Start Server B (Simulated Remote / o2switch / NAS)
-    let catalog_path = repo_root.join("data/catalog.dbphash");
     let remote_options = dbsrt_server::AppStateInitOptions {
-        dbphash_path: if catalog_path.exists() {
-            Some(catalog_path)
-        } else {
-            None
-        },
+        dbphash_path: None,
         ..Default::default()
     };
     let remote_state = AppState::with_options(
-        phash_dir.clone(),
-        srt_dir.clone(),
+        remote_phash_tmp.path().to_path_buf(),
+        remote_srt_tmp.path().to_path_buf(),
         Arc::new(OpenSubtitlesProvider::new(None)),
         remote_options,
     );
@@ -61,7 +100,7 @@ async fn test_dual_process_remote_relay_e2e() {
     });
 
     let mut local_state = AppState::new(
-        std::env::temp_dir(), // Empty local phash dir!
+        local_phash_tmp.path().to_path_buf(),
         std::env::temp_dir(), // Empty local srt dir!
         Arc::new(OpenSubtitlesProvider::new(None)),
         SubtitleCache::default(),
@@ -283,14 +322,14 @@ async fn test_remote_relay_api_key_header_forwarding() {
 
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let repo_root = manifest_dir.parent().unwrap().parent().unwrap();
-    let snippet_video = repo_root.join("data/snippets/Andor.S01E01.1080p.WEB.h264-KOGi_mid15s.mp4");
-    if !snippet_video.exists() {
+    let snippet_phash = repo_root.join("tests/data/big_buck_bunny_trailer_480p.phash");
+    if !snippet_phash.exists() {
         return;
     }
 
     let client = reqwest::Client::new();
     let req = SearchSubtitlesRequest {
-        media_path: snippet_video.to_string_lossy().to_string(),
+        media_path: snippet_phash.to_string_lossy().to_string(),
         language: "fr".to_string(),
         search_mode: Some("phash".to_string()),
         query_title: Some("Test".to_string()),

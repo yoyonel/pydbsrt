@@ -276,6 +276,7 @@ local function test_help_dialog()
     assert_true(S.input_table["help"] ~= nil, "Help widget displayed")
     local html = S.input_table["help"]:get_text()
     assert_true(html:find("Method 3: Search by pHash") ~= nil, "Help documents Method 3 pHash")
+    assert_true(html:find("Method 4: Search by aHash") ~= nil, "Help documents Method 4 aHash")
     assert_true(html:find("Method 1: Search by hash") ~= nil, "Help documents Method 1 hash")
     print("  [7/8] test_help_dialog: PASSED")
 end
@@ -451,12 +452,44 @@ local function test_fallback_reference_label_from_title_query()
     print("  [13/13] test_fallback_reference_label_from_title_query: PASSED")
 end
 
+local function test_search_by_ahash_populates_mainlist()
+    activate()
+
+    local sample_json = [[{
+        "matched_media": "Saint Seiya",
+        "total_candidates": 1,
+        "candidates": [
+            {
+                "source": "certified_synced",
+                "language": "fr",
+                "title": "Saint.Seiya.EP01.fr.srt [Synced +120ms]",
+                "candidate_id": "data/SRT/Saint.Seiya.EP01.fr.srt",
+                "shift_ms": 120.0,
+                "score": 0.98
+            }
+        ]
+    }]]
+
+    local full_http = string.format("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s", string.len(sample_json), sample_json)
+    mock_tcp_responses = { full_http }
+
+    mock_last_sent_payload = nil
+    S.search_by_ahash()
+
+    assert_true(mock_last_sent_payload ~= nil, "aHash search payload was transmitted")
+    assert_true(mock_last_sent_payload:find('"search_mode":"ahash"', 1, true) ~= nil, "Payload specifies search_mode ahash")
+    assert_eq(#S.candidates_store, 1, "Parsed aHash candidates count")
+    assert_eq(S.candidates_store[1].source, "certified_synced", "aHash candidate source")
+    print("  [14/14] test_search_by_ahash_populates_mainlist: PASSED")
+end
+
 -- Run all unit tests
 test_descriptor()
 test_parse_url()
 test_update_file_info()
 test_multi_chunk_http_socket_without_misc()
 test_search_by_phash_populates_mainlist()
+test_search_by_ahash_populates_mainlist()
 test_download_selection()
 test_help_dialog()
 test_offline_daemon_fails_gracefully()

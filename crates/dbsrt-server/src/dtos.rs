@@ -29,6 +29,10 @@ pub struct CatalogReloadResponse {
     pub cuts_entries: usize,
     pub sparse_entries: usize,
     pub certified_couplings: usize,
+    #[serde(default)]
+    pub ahash_medias: usize,
+    #[serde(default)]
+    pub ahash_frames: usize,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -46,6 +50,10 @@ pub struct CatalogStatusResponse {
     /// Medias whose frame count is unknown (catalog packed before it was stored): while > 0,
     /// `total_frames` is a lower bound
     pub medias_without_frame_count: usize,
+    #[serde(default)]
+    pub ahash_medias: usize,
+    #[serde(default)]
+    pub ahash_frames: usize,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -87,6 +95,7 @@ pub struct AutoSyncRequest {
     pub language: String,
     pub phash_dir: Option<String>,
     pub subtitles_dir: Option<String>,
+    pub search_mode: Option<String>,
     #[serde(default)]
     pub search_distance: u32,
     #[serde(default = "default_extract_duration")]
@@ -368,6 +377,8 @@ pub struct MetricsResponse {
     pub total_requests: u64,
     pub recognize_requests: u64,
     pub search_requests: u64,
+    #[serde(default)]
+    pub ahash_search_requests: u64,
     pub cache_hits: u64,
     pub remote_errors: u64,
     pub avg_latency_ms: f64,
@@ -733,4 +744,85 @@ pub struct SupervisorHeartbeatPayload {
     /// Recent log lines.
     #[serde(default)]
     pub recent_logs: Vec<String>,
+}
+
+fn default_ahash_limit() -> usize {
+    crate::constants::DEFAULT_AHASH_SEARCH_LIMIT
+}
+
+/// Request payload for acoustic fingerprint search (`POST /v1/search/ahash`).
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct AHashSearchRequest {
+    /// Raw sequence of 64-bit integer hashes.
+    pub hashes: Option<Vec<u64>>,
+    /// Hex-encoded string fingerprints (e.g. `["0x...", ...]`).
+    pub fingerprint: Option<Vec<String>>,
+    /// Base64-encoded raw little-endian bytes of 64-bit hashes.
+    pub ahash_bytes: Option<String>,
+    /// Sampling framerate of query fingerprint (default: 86.125).
+    pub audio_fps: Option<f64>,
+    /// Maximum allowed mean Hamming distance per frame (default: 14.0).
+    pub max_distance: Option<f64>,
+    /// Maximum number of top candidates to return (default: 5).
+    #[serde(default = "default_ahash_limit")]
+    pub limit: usize,
+    /// Optional specific target media name to filter/match.
+    pub media_name: Option<String>,
+}
+
+impl Default for AHashSearchRequest {
+    fn default() -> Self {
+        Self {
+            hashes: None,
+            fingerprint: None,
+            ahash_bytes: None,
+            audio_fps: None,
+            max_distance: None,
+            limit: default_ahash_limit(),
+            media_name: None,
+        }
+    }
+}
+
+/// Alias for `AHashSearchRequest` matching RFC specification nomenclature.
+pub type AHashSearchQuery = AHashSearchRequest;
+
+/// Single acoustic match candidate returned in `AHashSearchResponse`.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct AHashMatchCandidate {
+    /// Stem or clean title of the reference media.
+    pub media_name: String,
+    /// Path to the matched reference .ahash file.
+    pub file_path: String,
+    /// Optimal matching frame index in the reference stream.
+    pub ref_frame_offset: usize,
+    /// Estimated time offset in seconds in the reference media.
+    pub offset_sec: f64,
+    /// Estimated time offset in milliseconds.
+    pub offset_ms: i64,
+    /// Average Hamming distance across the query window.
+    pub mean_distance: f64,
+    /// Normalized match score (0.0 to 1.0).
+    pub score: f64,
+    /// SNR bits margin above random noise (32.0 bits).
+    pub snr_bits: f64,
+    /// Audio framerate of the reference media.
+    pub audio_fps: f64,
+}
+
+/// Response payload for acoustic fingerprint search (`POST /v1/search/ahash`).
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct AHashSearchResponse {
+    /// Flag indicating whether at least one candidate satisfied match thresholds.
+    pub success: bool,
+    /// Best match candidate if any satisfied criteria.
+    pub best_match: Option<AHashMatchCandidate>,
+    /// Top ranked match candidates up to requested limit.
+    pub candidates: Vec<AHashMatchCandidate>,
+    /// Total count of `.ahash` files evaluated in catalog.
+    pub total_catalog_files: usize,
+    /// Cumulative count of sub-fingerprint frames evaluated.
+    pub total_catalog_frames: usize,
+    /// Total execution duration in seconds.
+    pub elapsed_seconds: f64,
 }

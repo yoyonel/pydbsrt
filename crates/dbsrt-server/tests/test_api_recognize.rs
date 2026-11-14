@@ -8,7 +8,7 @@ async fn test_api_recognize_fingerprint_and_metrics() {
     let repo_root = manifest_dir.parent().unwrap().parent().unwrap();
     let bbb_phash = repo_root.join("tests/data/big_buck_bunny_trailer_480p.phash");
     let test_phash_dir = repo_root.join("tests/data");
-    let srt_dir = repo_root.join("data/SRT");
+    let srt_dir = repo_root.join("tests/data");
 
     let app = create_router(test_phash_dir.clone(), srt_dir.clone());
 

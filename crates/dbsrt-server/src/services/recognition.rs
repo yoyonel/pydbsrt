@@ -256,69 +256,109 @@ mod tests {
         assert_eq!(res_reader.0, None);
     }
 
-    #[test]
-    fn test_identify_media_all_engine_modes() {
-        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let repo_root = manifest_dir.parent().unwrap().parent().unwrap();
-        let real_video = repo_root.join("tests/data/big_buck_bunny_trailer_480p.mp4");
-        if !real_video.exists() {
-            return;
-        }
-        let phash_dirs = [
-            repo_root.join("data/__PHASH__"),
-            repo_root.join("tests/data"),
-        ];
-        let dbphash_path = repo_root.join("data/catalog.dbphash");
-        let reader = if dbphash_path.exists() {
-            MmapDbphash::open(&dbphash_path).ok()
-        } else {
-            None
+    fn build_synthetic_recognition_fixture(
+        dir: &Path,
+    ) -> (PathBuf, PathBuf, MmapDbphash, Vec<PathBuf>) {
+        use dbsrt_core::metadata::MediaMetadata;
+        use dbsrt_index::DbphashBuilder;
+
+        let make_hashes = |seed: u64, n: usize| -> Vec<u64> {
+            let mut x = seed;
+            (0..n)
+                .map(|_| {
+                    x = x
+                        .wrapping_mul(6_364_136_223_846_793_005)
+                        .wrapping_add(1_442_695_040_888_963_407);
+                    x ^ (x >> 29)
+                })
+                .collect()
         };
 
-        // Test blank frames filter (line 97)
-        let black_video = repo_root.join("data/black_frames.mp4");
-        if black_video.exists() {
-            let (matched_blank, _, _) = identify_media_by_phash_multi_routed(
-                &black_video,
-                &phash_dirs,
-                reader.as_ref(),
-                None,
-                1.0,
-                12,
-                None,
-            );
-            assert_eq!(matched_blank, None);
-        }
+        let hashes_bbb = make_hashes(0x1122_3344_5566_7788, 75);
+        let hashes_other = make_hashes(0x9988_7766_5544_3322, 75);
+        let hashes_blank = vec![0u64; 30];
 
-        // 1. Force linear mode
-        let (matched_lin, _, _) = identify_media_by_phash_multi_routed(
-            &real_video,
+        let target_phash = dir.join("big_buck_bunny_trailer_480p.25.000fps.phash");
+        let other_phash = dir.join("other_movie_sample.24.000fps.phash");
+        let blank_phash = dir.join("black_frames.25.000fps.phash");
+        dbsrt_core::write_phash_file(&target_phash, &hashes_bbb).expect("write target phash");
+        dbsrt_core::write_phash_file(&other_phash, &hashes_other).expect("write other phash");
+        dbsrt_core::write_phash_file(&blank_phash, &hashes_blank).expect("write blank phash");
+
+        let mut builder = DbphashBuilder::new();
+        let to_sparse = |hashes: &[u64], fps: f64| -> Vec<(u64, u32)> {
+            hashes
+                .iter()
+                .enumerate()
+                .map(|(idx, &h)| (h, ((idx as f64 / fps) * 1000.0) as u32))
+                .collect()
+        };
+        let meta_bbb = MediaMetadata::parse("Big.Buck.Bunny.Trailer.2008.480p.mp4");
+        let sparse_bbb = to_sparse(&hashes_bbb, 25.0);
+        let id_bbb = builder.add_media(&meta_bbb, 3_000, 25.0, &sparse_bbb[..10], &sparse_bbb);
+        builder.set_frame_count(id_bbb, hashes_bbb.len() as u64);
+
+        let meta_other = MediaMetadata::parse("Other.Movie.Sample.2021.1080p.mkv");
+        let sparse_other = to_sparse(&hashes_other, 24.0);
+        let id_other =
+            builder.add_media(&meta_other, 3_125, 24.0, &sparse_other[..10], &sparse_other);
+        builder.set_frame_count(id_other, hashes_other.len() as u64);
+
+        let dbphash_path = dir.join("catalog.dbphash");
+        builder
+            .write_to_file(&dbphash_path)
+            .expect("write synthetic catalog.dbphash");
+        let reader = MmapDbphash::open(&dbphash_path).expect("open synthetic catalog.dbphash");
+        (target_phash, blank_phash, reader, vec![dir.to_path_buf()])
+    }
+
+    #[test]
+    fn test_identify_media_all_engine_modes() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let (target_phash, blank_phash, reader, phash_dirs) =
+            build_synthetic_recognition_fixture(tmp.path());
+
+        // Test blank frames filter
+        let (matched_blank, _, _) = identify_media_by_phash_multi_routed(
+            &blank_phash,
             &phash_dirs,
-            reader.as_ref(),
+            Some(&reader),
+            None,
+            1.0,
+            12,
+            None,
+        );
+        assert_eq!(matched_blank, None);
+
+        // 1. Force linear mode (Tier 1 Flat Linear O(N))
+        let (matched_lin, _, _) = identify_media_by_phash_multi_routed(
+            &target_phash,
+            &phash_dirs,
+            Some(&reader),
             None,
             1.0,
             12,
             Some("linear"),
         );
-        let _ = matched_lin;
+        assert!(matched_lin.is_some());
 
-        // 2. Force mih mode
+        // 2. Force mih mode (Tier 1 RAM .dbphash MIH)
         let (matched_mih, _, _) = identify_media_by_phash_multi_routed(
-            &real_video,
+            &target_phash,
             &phash_dirs,
-            reader.as_ref(),
+            Some(&reader),
             None,
             1.0,
             12,
             Some("mih"),
         );
-        let _ = matched_mih;
+        assert!(matched_mih.is_some());
 
         // 3. Force postgres mode without config
         let (matched_pg_none, _, _) = identify_media_by_phash_multi_routed(
-            &real_video,
+            &target_phash,
             &phash_dirs,
-            reader.as_ref(),
+            Some(&reader),
             None,
             1.0,
             12,
@@ -330,9 +370,9 @@ mod tests {
         let dummy_cfg =
             DbConnectionConfig::new("127.0.0.1", 5433, "invalid", "invalid", "invalid_db");
         let (matched_pg_cfg, _, _) = identify_media_by_phash_multi_routed(
-            &real_video,
+            &target_phash,
             &phash_dirs,
-            reader.as_ref(),
+            Some(&reader),
             Some(&dummy_cfg),
             1.0,
             12,
@@ -340,9 +380,9 @@ mod tests {
         );
         assert_eq!(matched_pg_cfg, None);
 
-        // 5. Auto mode without dbphash reader (forces Tier 2 MmapLibrary from loose files!)
+        // 5. Auto mode without dbphash reader (forces Tier 2 MmapLibrary from synthetic loose files)
         let (matched_tier2, _, _) = identify_media_by_phash_multi_routed(
-            &real_video,
+            &target_phash,
             &phash_dirs,
             None,
             None,
@@ -350,6 +390,6 @@ mod tests {
             12,
             Some("auto"),
         );
-        let _ = matched_tier2;
+        assert!(matched_tier2.is_some());
     }
 }

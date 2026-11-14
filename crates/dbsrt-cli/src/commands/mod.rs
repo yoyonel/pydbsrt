@@ -1,7 +1,10 @@
 //! Modular CLI command handlers implementing Separation of Concerns (SoC).
 
+pub mod ahash_sidecar;
 pub mod bench;
 pub mod bench_ahash;
+pub mod bench_matrix;
+pub mod bench_scale;
 pub mod certify;
 pub mod export;
 pub mod export_ahash;
@@ -20,8 +23,10 @@ pub mod scan;
 pub mod shared;
 pub mod top;
 
+pub use ahash_sidecar::{run_ahash_sidecar, AhashSidecarArgs};
 pub use bench::{run_bench_cuts, run_bench_phash, run_bench_video, BenchCutsArgs, BenchVideoArgs};
 pub use bench_ahash::{run_bench_ahash, BenchAhashArgs};
+pub use bench_scale::{run_bench_scale_multimodal, BenchScaleMultimodalArgs};
 #[allow(deprecated)]
 pub use certify::{
     detect_cli_subtitle_lang, detect_cli_subtitle_lang_status, run_certify_coupling,

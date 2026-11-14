@@ -13,6 +13,7 @@ import argparse
 import atexit
 import contextlib
 import ftplib
+import hashlib
 import http.client
 import json
 import mmap
@@ -97,19 +98,21 @@ def _handle_uncaught_exception(exc_type: type, exc_value: BaseException, exc_tb:
         pass
 
 
-@atexit.register
 def _on_exit() -> None:
     _kill_active_children()
     msg = f"\nℹ️ [EXIT] Batch worker exiting at {time.strftime('%Y-%m-%d %H:%M:%S')}\n"
     print(msg, flush=True)
 
 
-sys.excepthook = _handle_uncaught_exception
-for _sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT, signal.SIGQUIT):
-    try:
-        signal.signal(_sig, _handle_signal)
-    except Exception:
-        pass
+def _install_process_handlers() -> None:
+    """Installs process-wide exit/signal handlers only when running as CLI worker."""
+    atexit.register(_on_exit)
+    sys.excepthook = _handle_uncaught_exception
+    for _sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT, signal.SIGQUIT):
+        try:
+            signal.signal(_sig, _handle_signal)
+        except Exception:
+            pass
 
 
 DEFAULT_DESIRED_WORKERS_PATH: Path = Path("run/desired_workers")
@@ -209,8 +212,29 @@ MAX_FAILED_ATTEMPTS: int = 3
 VIDEO_EXTENSIONS: Tuple[str, ...] = (".mkv", ".mp4", ".webm", ".avi")
 # MLSD entries that never hold library videos (Synology metadata, subtitle and placeholder folders)
 FTP_SKIPPED_NAMES: Tuple[str, ...] = (".", "..", "EMPTY_DIRS", "SRT", "@eaDir")
+MAX_FPS_INTEGER_DIGITS: int = 3
+MAX_FPS_FRACTION_DIGITS: int = 3
+MIN_FPS_TOKEN_VALUE: float = 1.0
+MAX_FPS_TOKEN_VALUE: float = 200.0
+AMBIGUOUS_INTEGER_FPS_TOKENS: frozenset[str] = frozenset({"24", "25", "30", "48", "50", "60"})
 PHASH_FPS_SUFFIX_RE = re.compile(r"\.\d+(\.\d+)?fps$")
 MOVIEHASH_RE = re.compile(r"[0-9a-f]{16}")
+MAX_LOG_STEM_BYTES: int = 120
+LOG_STEM_HASH_HEX_LEN: int = 12
+
+
+def safe_worker_log_stem(filename: str, moviehash: str | None = None) -> str:
+    """Returns a filesystem-safe, length-bounded log stem preventing ENAMETOOLONG (os error 36)."""
+    if moviehash and MOVIEHASH_RE.fullmatch(moviehash):
+        return moviehash
+    raw_stem = Path(filename).stem
+    safe_stem = raw_stem.replace("/", "_").replace("\x00", "") or "target"
+    encoded = safe_stem.encode("utf-8", errors="surrogateescape")
+    if len(encoded) <= MAX_LOG_STEM_BYTES:
+        return safe_stem
+    digest = hashlib.sha256(encoded).hexdigest()[:LOG_STEM_HASH_HEX_LEN]
+    prefix = encoded[:MAX_LOG_STEM_BYTES].decode("utf-8", errors="ignore").rstrip(" ._-")
+    return f"{prefix}_{digest}"
 
 
 def resolve_nas_password() -> str:
@@ -245,10 +269,49 @@ def load_certified_stems(couplings_file: Path) -> Set[str]:
     return stems
 
 
+def _is_valid_fps_int_part(token: str) -> bool:
+    return (
+        1 <= len(token) <= MAX_FPS_INTEGER_DIGITS and token.isdigit() and not (len(token) > 1 and token.startswith("0"))
+    )
+
+
+def strip_fps_token(without_ext: str) -> str:
+    """Strips a trailing `.<fps>fps` suffix without amputating release years or episode numbers."""
+    if not without_ext.endswith("fps"):
+        return without_ext
+    before_fps = without_ext[:-3]
+    last_dot = before_fps.rfind(".")
+    if last_dot < 0:
+        return without_ext
+    tail = before_fps[last_dot + 1 :]
+    prev_dot = before_fps.rfind(".", 0, last_dot)
+    if prev_dot >= 0:
+        int_part = before_fps[prev_dot + 1 : last_dot]
+        if (
+            _is_valid_fps_int_part(int_part)
+            and 1 <= len(tail) <= MAX_FPS_FRACTION_DIGITS
+            and tail.isdigit()
+            and tail not in AMBIGUOUS_INTEGER_FPS_TOKENS
+        ):
+            val = float(f"{int_part}.{tail}")
+            if MIN_FPS_TOKEN_VALUE <= val <= MAX_FPS_TOKEN_VALUE:
+                return before_fps[:prev_dot]
+    if _is_valid_fps_int_part(tail):
+        val = float(tail)
+        if MIN_FPS_TOKEN_VALUE <= val <= MAX_FPS_TOKEN_VALUE:
+            return before_fps[:last_dot]
+    return without_ext
+
+
+def ahash_logical_stem(ahash_name: str) -> str:
+    """Logical stem matching Rust `ahash_logical_stem`: strips `.ahash` and trailing `.<fps>fps`."""
+    return strip_fps_token(ahash_name.removesuffix(".ahash"))
+
+
 def phash_media_stem(phash_name: str) -> str:
     """Media stem of a .phash or .ahash file name: URL-decoded, without the extension, fps and video extension suffixes."""
     unquoted = urllib.parse.unquote(phash_name).removesuffix(".phash").removesuffix(".ahash")
-    raw_name = PHASH_FPS_SUFFIX_RE.sub("", unquoted)
+    raw_name = strip_fps_token(unquoted)
     for ext in VIDEO_EXTENSIONS:
         if raw_name.lower().endswith(ext):
             return raw_name[: -len(ext)]
@@ -260,6 +323,30 @@ def _file_size(path: Path) -> int:
         return path.stat().st_size
     except OSError:
         return 0
+
+
+def _valid_ahash_sidecar_media_name(ahash: Path) -> str | None:
+    """Reads `<stem>.json` beside `<stem>.<fps>fps.ahash` and returns `media_name` only for valid typed AhashSidecar files."""
+    sidecar = ahash.with_name(f"{ahash_logical_stem(ahash.name)}.json")
+    if _file_size(sidecar) <= 0:
+        return None
+    try:
+        payload = json.loads(sidecar.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    media_name = payload.get("media_name")
+    selection = payload.get("selection")
+    header = payload.get("header")
+    if (
+        not isinstance(media_name, str)
+        or not media_name.strip()
+        or not isinstance(selection, str)
+        or not isinstance(header, dict)
+    ):
+        return None
+    return media_name
 
 
 def _sidecar_media_name(phash: Path, fallback_dir: Path | str | None = None) -> str:
@@ -295,15 +382,16 @@ def load_existing_phash_stems(phash_dir: Path) -> Set[str]:
 
 
 def load_existing_ahash_stems(ahash_dir: Path) -> Set[str]:
-    """Loads all media stems with existing non-empty .ahash files on disk."""
+    """Loads media stems having BOTH a non-empty .ahash file and a valid typed `<stem>.json` sidecar."""
     stems: Set[str] = set()
     if ahash_dir.is_dir():
         for p in ahash_dir.glob("*.ahash"):
-            if _file_size(p) > 0:
-                stems.update((phash_media_stem(p.name), p.stem))
-                media_name = _sidecar_media_name(p, fallback_dir=DEFAULT_PHASH_DIR)
-                if media_name:
-                    stems.add(phash_media_stem(media_name))
+            if _file_size(p) <= 0:
+                continue
+            media_name = _valid_ahash_sidecar_media_name(p)
+            if not media_name:
+                continue
+            stems.update((phash_media_stem(p.name), p.stem, phash_media_stem(media_name)))
     return stems
 
 
@@ -320,7 +408,7 @@ def load_nas_ftp_index_targets(index_path: Path, base_dir: str) -> List[VideoTar
         for filename, rel in entries.items():
             clean_rel = rel.lstrip("/")
             if clean_base and clean_base != "all":
-                if not (clean_rel.startswith(clean_base + "/") or clean_rel.startswith(clean_base)):
+                if not (clean_rel.startswith(clean_base + "/") or clean_rel == clean_base):
                     continue
             targets.append(
                 VideoTarget(
@@ -408,22 +496,74 @@ def _walk_nas_videos_ftp(
 
 
 # OpenSubtitles moviehash: file size plus its 64 KiB head and tail summed as little-endian u64 words
-MOVIEHASH_CHUNK_BYTES = 65536
+MOVIEHASH_CHUNK_BYTES: int = 65536
+MOVIEHASH_WORD_BYTES: int = 8
+UINT64_MASK: int = 0xFFFFFFFFFFFFFFFF
+HTTP_RANGE_TIMEOUT_SECS: float = 15.0
+FTP_MOVIEHASH_TIMEOUT_SECS: float = 15.0
+HTTP_PARTIAL_CONTENT_STATUS: int = 206
 
 
 def moviehash_from_chunks(size: int, head: bytes, tail: bytes) -> str:
     """Same value as compute_opensubtitles_hash (dbsrt-core) for the same file."""
     total = size
     for block in (head, tail):
-        for i in range(0, len(block), 8):
-            total += int.from_bytes(block[i : i + 8], "little")
-    return f"{total & 0xFFFFFFFFFFFFFFFF:016x}"
+        for i in range(0, len(block), MOVIEHASH_WORD_BYTES):
+            total += int.from_bytes(block[i : i + MOVIEHASH_WORD_BYTES], "little")
+    return f"{total & UINT64_MASK:016x}"
+
+
+def compute_local_moviehash(path: Path) -> str | None:
+    """Computes OpenSubtitles 64-bit MovieHash from a local file without loading it in full."""
+    try:
+        size = path.stat().st_size
+        if size < MOVIEHASH_CHUNK_BYTES:
+            return None
+        with path.open("rb") as fh:
+            head = fh.read(MOVIEHASH_CHUNK_BYTES)
+            fh.seek(size - MOVIEHASH_CHUNK_BYTES)
+            tail = fh.read(MOVIEHASH_CHUNK_BYTES)
+    except OSError:
+        return None
+    if len(head) < MOVIEHASH_CHUNK_BYTES or len(tail) < MOVIEHASH_CHUNK_BYTES:
+        return None
+    return moviehash_from_chunks(size, head, tail)
+
+
+def _ftp_path_candidates(path: str) -> Tuple[str, ...]:
+    """Returns deduplicated raw/NFD/NFC FTP path candidates for Synology mixed encodings."""
+    candidates: List[str] = []
+    for variant in (path, unicodedata.normalize("NFD", path), unicodedata.normalize("NFC", path)):
+        if variant not in candidates:
+            candidates.append(variant)
+    return tuple(candidates)
+
+
+def _ftp_resolve_size_and_path(connect: Callable[[], ftplib.FTP], path: str) -> Tuple[str, int] | None:
+    """Queries remote file size in binary mode over FTP, handling NFC/NFD path normalization."""
+    ftp = connect()
+    try:
+        ftp.voidcmd("TYPE I")
+        for candidate in _ftp_path_candidates(path):
+            try:
+                size = ftp.size(candidate)
+            except ftplib.error_perm:
+                continue
+            if size is not None:
+                return candidate, int(size)
+        return None
+    except ftplib.all_errors:
+        return None
+    finally:
+        with contextlib.suppress(Exception):
+            ftp.close()
 
 
 def _ftp_read_at(connect: Callable[[], ftplib.FTP], path: str, offset: int) -> bytes:
-    """Reads MOVIEHASH_CHUNK_BYTES at `offset` in its own FTP session, then drops the rest of the transfer."""
+    """Reads MOVIEHASH_CHUNK_BYTES at `offset` in binary mode in its own FTP session, then drops the rest."""
     ftp = connect()
     try:
+        ftp.voidcmd("TYPE I")
         conn = ftp.transfercmd(f"RETR {path}", rest=offset)
         data = bytearray()
         try:
@@ -444,12 +584,47 @@ def _ftp_read_at(connect: Callable[[], ftplib.FTP], path: str, offset: int) -> b
             ftp.close()
 
 
-def _http_read_at(url: str, offset: int) -> bytes:
-    """Reads MOVIEHASH_CHUNK_BYTES at `offset` with a Range request; empty unless the server honours that range."""
+def _http_file_size(url: str) -> int | None:
+    """Resolves remote HTTP file size via HEAD Content-Length or 1-byte Range Content-Range."""
+    try:
+        head_req = urllib.request.Request(url, method="HEAD")
+        with urllib.request.urlopen(head_req, timeout=HTTP_RANGE_TIMEOUT_SECS) as resp:
+            content_len = resp.headers.get("Content-Length", "").strip()
+            if content_len.isdigit():
+                return int(content_len)
+    except (OSError, http.client.HTTPException):
+        pass
+    try:
+        probe_req = urllib.request.Request(url, headers={"Range": "bytes=0-0"})
+        with urllib.request.urlopen(probe_req, timeout=HTTP_RANGE_TIMEOUT_SECS) as resp:
+            if resp.status != HTTP_PARTIAL_CONTENT_STATUS:
+                return None
+            content_range = resp.headers.get("Content-Range", "")
+            total = content_range.rsplit("/", 1)[-1].strip()
+            return int(total) if total.isdigit() else None
+    except (OSError, http.client.HTTPException):
+        return None
+
+
+def _http_content_range_matches(content_range: str, offset: int, expected_total: int | None) -> bool:
+    """Validates `bytes <offset>-<end>/<total>` against requested offset and expected total file size."""
+    range_spec, sep, total_str = content_range.rpartition("/")
+    if sep != "/" or not range_spec.startswith(f"bytes {offset}-"):
+        return False
+    clean_total = total_str.strip()
+    if not clean_total.isdigit():
+        return False
+    return expected_total is None or int(clean_total) == expected_total
+
+
+def _http_read_at(url: str, offset: int, expected_total: int | None = None) -> bytes:
+    """Reads MOVIEHASH_CHUNK_BYTES at `offset` with a Range request; empty unless offset and `/total` match."""
     request = urllib.request.Request(url, headers={"Range": f"bytes={offset}-{offset + MOVIEHASH_CHUNK_BYTES - 1}"})
-    with urllib.request.urlopen(request, timeout=15) as resp:
-        # A 200 full body would hand the head back for the tail
-        if resp.status != 206 or not resp.headers.get("Content-Range", "").startswith(f"bytes {offset}-"):
+    with urllib.request.urlopen(request, timeout=HTTP_RANGE_TIMEOUT_SECS) as resp:
+        # Reject full-body 200 responses and stale inventory sizes disagreeing with `/total`
+        if resp.status != HTTP_PARTIAL_CONTENT_STATUS or not _http_content_range_matches(
+            resp.headers.get("Content-Range", ""), offset, expected_total
+        ):
             return b""
         return resp.read(MOVIEHASH_CHUNK_BYTES)
 
@@ -465,9 +640,14 @@ def ranged_moviehash(read_at: Callable[[int], bytes], size: int) -> str | None:
     return moviehash_from_chunks(size, head, tail)
 
 
-def ftp_moviehash(connect: Callable[[], ftplib.FTP], path: str, size: int) -> str | None:
-    """Moviehash of a NAS file read over FTP."""
-    return ranged_moviehash(lambda offset: _ftp_read_at(connect, path, offset), size)
+def ftp_moviehash(connect: Callable[[], ftplib.FTP], path: str, size: int = 0) -> str | None:
+    """Moviehash of a NAS file read over FTP; always resolves authoritative binary SIZE and NFD/NFC path."""
+    _ = size
+    resolved = _ftp_resolve_size_and_path(connect, path)
+    if resolved is None:
+        return None
+    resolved_path, actual_size = resolved
+    return ranged_moviehash(lambda offset: _ftp_read_at(connect, resolved_path, offset), actual_size)
 
 
 def target_moviehash(target: VideoTarget, stream_base: str, child_env: Dict[str, str]) -> str | None:
@@ -476,7 +656,8 @@ def target_moviehash(target: VideoTarget, stream_base: str, child_env: Dict[str,
     if url.scheme in ("http", "https"):
         media_url = build_stream_url(stream_base, target.rel_path)
         try:
-            return ranged_moviehash(lambda offset: _http_read_at(media_url, offset), target.size_bytes)
+            size = target.size_bytes if target.size_bytes > 0 else (_http_file_size(media_url) or 0)
+            return ranged_moviehash(lambda offset: _http_read_at(media_url, offset, expected_total=size), size)
         except (OSError, http.client.HTTPException):
             return None
     if url.scheme != "ftp" or not url.hostname:
@@ -486,7 +667,7 @@ def target_moviehash(target: VideoTarget, stream_base: str, child_env: Dict[str,
     def connect() -> ftplib.FTP:
         ftp = ftplib.FTP(encoding="utf-8")
         try:
-            ftp.connect(host, url.port or DEFAULT_FTP_PORT, timeout=15)
+            ftp.connect(host, url.port or DEFAULT_FTP_PORT, timeout=FTP_MOVIEHASH_TIMEOUT_SECS)
             ftp.login(child_env.get("DBSRT_FTP_USER", ""), child_env.get("DBSRT_FTP_PASSWORD", ""))
         except BaseException:
             ftp.close()
@@ -782,8 +963,7 @@ def process_single_video(
         dbsrt_bin,
         "media:add",
         build_stream_url(stream_base, target.rel_path),
-        "--media-name",
-        target.filename,
+        f"--media-name={target.filename}",
         "--hwaccel",
         "disabled",
         "--phash-dir",
@@ -801,8 +981,9 @@ def process_single_video(
     start_time = time.time()
     print(f"--> [DEBUG] Launching dbsrt for {target.filename}...", flush=True)
 
-    # The moviehash names the log: a 250+ byte media name cannot (os error 36)
-    log_path = Path("logs") / "workers" / f"{moviehash or Path(target.filename).stem}.log"
+    # The moviehash or truncated/hashed safe_stem names the log: a 250+ byte media name cannot (os error 36)
+    safe_stem = safe_worker_log_stem(target.filename, moviehash)
+    log_path = Path("logs") / "workers" / f"{safe_stem}.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     status = "ERROR"
     returncode: int | None = None
@@ -1242,6 +1423,7 @@ def _validate_nas_credentials(args: argparse.Namespace, nas_pass: str) -> bool:
 
 def main() -> int:
     """CLI Entry point for o2switch batch processing."""
+    _install_process_handlers()
     args = build_arg_parser().parse_args()
     dbsrt_bin = _resolve_dbsrt_bin()
 

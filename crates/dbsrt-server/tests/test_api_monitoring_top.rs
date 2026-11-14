@@ -73,7 +73,7 @@ async fn test_top_snapshot_success_cache_and_errors() {
     // failure to 500 instead of panicking or hanging.
     let phash_dir = std::env::temp_dir().join(format!("test_phash_top_{}", std::process::id()));
     let _ = std::fs::create_dir_all(&phash_dir);
-    let app = create_router(phash_dir.clone(), PathBuf::from("../../data/SRT"));
+    let app = create_router(phash_dir.clone(), phash_dir.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });

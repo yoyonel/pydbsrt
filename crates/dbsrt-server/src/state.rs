@@ -1,13 +1,14 @@
 //! Application state, database connection pooling, and telemetry metrics.
 
 use crate::constants::{
-    LOG_BUFFER_CAPACITY, SECONDS_PER_DAY, SECONDS_PER_HOUR, SECONDS_PER_MINUTE,
+    DEFAULT_HEAVY_TASK_PERMITS, LOG_BUFFER_CAPACITY, SECONDS_PER_DAY, SECONDS_PER_HOUR,
+    SECONDS_PER_MINUTE,
 };
 use crate::dtos::{CatalogCompactResponse, CatalogReloadResponse, CatalogStatusResponse};
 use anyhow::Result;
-use arc_swap::ArcSwapOption;
+use arc_swap::{ArcSwap, ArcSwapOption};
 use dbsrt_core::{CouplingRegistry, SubtitleCache, SubtitleProvider};
-use dbsrt_index::{DbClient, DeltaIndex, MmapDbphash, PhashEngine};
+use dbsrt_index::{AHashCatalog, DbClient, DeltaIndex, MmapDbphash, PhashEngine};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
@@ -127,6 +128,7 @@ pub struct ServerMetrics {
     pub total_requests: std::sync::atomic::AtomicU64,
     pub recognize_requests: std::sync::atomic::AtomicU64,
     pub search_requests: std::sync::atomic::AtomicU64,
+    pub ahash_search_requests: std::sync::atomic::AtomicU64,
     pub cache_hits: std::sync::atomic::AtomicU64,
     pub remote_errors: std::sync::atomic::AtomicU64,
     pub total_latency_us: std::sync::atomic::AtomicU64,
@@ -153,6 +155,8 @@ pub struct AppState {
     pub dbphash_path: Arc<std::sync::RwLock<Option<PathBuf>>>,
     pub dbphash_reader: Arc<ArcSwapOption<MmapDbphash>>,
     pub engine: Arc<std::sync::RwLock<PhashEngine>>,
+    pub ahash_dir: PathBuf,
+    pub ahash_catalog: Arc<ArcSwap<AHashCatalog>>,
     pub db_config: Option<DbConnectionConfig>,
     pub subtitles_dir: PathBuf,
     pub coupling_registry: Arc<std::sync::RwLock<CouplingRegistry>>,
@@ -170,6 +174,50 @@ pub struct AppState {
     pub compact_in_progress: Arc<std::sync::atomic::AtomicBool>,
     pub delta_index: Arc<std::sync::RwLock<DeltaIndex>>,
     pub latest_search: Arc<std::sync::RwLock<Option<crate::dtos::LatestSearchTelemetry>>>,
+    /// Concurrency semaphore bounding simultaneous heavy FFmpeg/catalog search tasks.
+    pub heavy_task_semaphore: Arc<tokio::sync::Semaphore>,
+}
+
+/// Sibling directory basename holding acoustic `.ahash` fingerprints next to `SRT/`.
+const AHASH_SIBLING_DIRNAME: &str = "__AHASH__";
+
+/// Canonical basename of the certified subtitles directory (`data/SRT`).
+const SRT_DIR_BASENAME: &str = "SRT";
+
+/// Ephemeral fallback path used when a caller passes `/tmp` as `subtitles_dir`.
+const TMP_EMPTY_AHASH_DIR: &str = "/tmp/__dbsrt_empty_ahash__";
+
+/// Derives the default `.ahash` directory relative to the caller-supplied `subtitles_dir`.
+///
+/// # Arguments
+/// * `caller_subtitles_dir` - Raw `subtitles_dir` passed by the caller before `/tmp` fallback.
+///
+/// # Returns
+/// Resolved `PathBuf` for `.ahash` fingerprints.
+///
+/// # Panics
+/// Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// * Production (`data/SRT`, `${DATA_DIR}/SRT`) resolves to sibling `data/__AHASH__` /
+///   `${DATA_DIR}/__AHASH__`.
+/// * Hermetic tests (`tmp_dir/SRT`, `work_dir`, `/tmp`) stay isolated inside their own
+///   scratch root instead of scanning the repository's 100M+ frame `data/__AHASH__` store.
+pub fn resolve_default_ahash_dir(caller_subtitles_dir: &Path) -> PathBuf {
+    if caller_subtitles_dir == Path::new("/tmp") {
+        return PathBuf::from(TMP_EMPTY_AHASH_DIR);
+    }
+    if caller_subtitles_dir
+        .file_name()
+        .is_some_and(|n| n == SRT_DIR_BASENAME)
+    {
+        return caller_subtitles_dir
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .map(|p| p.join(AHASH_SIBLING_DIRNAME))
+            .unwrap_or_else(|| PathBuf::from(crate::constants::DEFAULT_AHASH_DATA_DIR));
+    }
+    caller_subtitles_dir.join(AHASH_SIBLING_DIRNAME)
 }
 
 /// Optional configuration parameters for initializing [`AppState`].
@@ -179,6 +227,8 @@ pub struct AppStateInitOptions {
     pub dbphash_path: Option<PathBuf>,
     /// Additional search directories for loose `.phash` files.
     pub extra_phash_dirs: Vec<PathBuf>,
+    /// Explicit target `.ahash` directory containing audio fingerprints.
+    pub ahash_dir: Option<PathBuf>,
 }
 
 impl AppState {
@@ -221,43 +271,8 @@ impl AppState {
         provider: Arc<dyn SubtitleProvider>,
         options: AppStateInitOptions,
     ) -> Self {
-        let default_catalog = if Path::new("data/catalog.dbphash").exists() {
-            PathBuf::from("data/catalog.dbphash")
-        } else {
-            PathBuf::from("../../data/catalog.dbphash")
-        };
-        let initial_catalog_path = match options.dbphash_path {
-            Some(p) => Some(p),
-            None if default_catalog.exists() => Some(default_catalog),
-            None => None,
-        };
-
-        let mut extra_phash_dirs = options.extra_phash_dirs;
-        let default_repo_phash = if Path::new("data/__PHASH__").exists() {
-            PathBuf::from("data/__PHASH__")
-        } else {
-            PathBuf::from("../../data/__PHASH__")
-        };
-        if initial_catalog_path.is_none()
-            && default_repo_phash != phash_dir
-            && !extra_phash_dirs.contains(&default_repo_phash)
-            && default_repo_phash.exists()
-        {
-            extra_phash_dirs.push(default_repo_phash);
-        }
-
-        let default_srt = if Path::new("data/SRT").exists() {
-            PathBuf::from("data/SRT")
-        } else {
-            PathBuf::from("../../data/SRT")
-        };
-        let subtitles_dir = if (!subtitles_dir.exists() || subtitles_dir == Path::new("/tmp"))
-            && default_srt.exists()
-        {
-            default_srt
-        } else {
-            subtitles_dir
-        };
+        let initial_catalog_path = options.dbphash_path;
+        let extra_phash_dirs = options.extra_phash_dirs;
 
         let reg_path = CouplingRegistry::default_path(&subtitles_dir);
         let coupling_registry = Arc::new(std::sync::RwLock::new(
@@ -265,15 +280,27 @@ impl AppState {
         ));
 
         let mut all_dirs = Vec::new();
-        if phash_dir.exists() && phash_dir != Path::new("/tmp") {
-            all_dirs.push(phash_dir.clone());
+        if initial_catalog_path.is_none() {
+            if phash_dir.exists() && phash_dir != Path::new("/tmp") {
+                all_dirs.push(phash_dir.clone());
+            }
+            all_dirs.extend_from_slice(&extra_phash_dirs);
         }
-        all_dirs.extend_from_slice(&extra_phash_dirs);
 
         let initial_engine =
             PhashEngine::open(initial_catalog_path.as_deref(), &all_dirs).unwrap_or_default();
 
         let dbphash_reader = Arc::new(ArcSwapOption::new(initial_engine.dbphash_arc()));
+
+        let (ahash_dir, initial_ahash_catalog) = match options.ahash_dir {
+            Some(dir) => {
+                let cat =
+                    AHashCatalog::load_from_dir(&dir).unwrap_or_else(|_| AHashCatalog::empty());
+                (dir, cat)
+            }
+            None => (PathBuf::from(TMP_EMPTY_AHASH_DIR), AHashCatalog::empty()),
+        };
+        let ahash_catalog = Arc::new(ArcSwap::from_pointee(initial_ahash_catalog));
 
         Self {
             phash_dir,
@@ -281,6 +308,8 @@ impl AppState {
             dbphash_path: Arc::new(std::sync::RwLock::new(initial_catalog_path)),
             dbphash_reader,
             engine: Arc::new(std::sync::RwLock::new(initial_engine)),
+            ahash_dir,
+            ahash_catalog,
             db_config: None,
             subtitles_dir,
             coupling_registry,
@@ -299,6 +328,7 @@ impl AppState {
             compact_in_progress: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             delta_index: Arc::new(std::sync::RwLock::new(DeltaIndex::new())),
             latest_search: Arc::new(std::sync::RwLock::new(None)),
+            heavy_task_semaphore: Arc::new(tokio::sync::Semaphore::new(DEFAULT_HEAVY_TASK_PERMITS)),
         }
     }
 
@@ -360,6 +390,37 @@ impl AppState {
         if let Ok(reg) = CouplingRegistry::load_or_default(&reg_path) {
             if let Ok(mut lock) = self.coupling_registry.write() {
                 *lock = reg;
+            }
+        }
+    }
+
+    /// Loads and pre-warms the `.ahash` catalog during Phase 1 of [`Self::reload_catalog`].
+    ///
+    /// # Arguments
+    /// None (operates on `&self`).
+    ///
+    /// # Returns
+    /// `Some(Arc<AHashCatalog>)` with `mih32` pre-warmed when `load_from_dir` succeeds, or `None`
+    /// on I/O failure so the caller preserves the existing atomic catalog snapshot.
+    ///
+    /// # Panics
+    /// Guaranteed panic-free.
+    ///
+    /// # Data Flow & Invariants
+    /// Executes completely outside runtime locks before Phase 2 pointer swap.
+    fn prepare_ahash_reload(&self) -> Option<Arc<AHashCatalog>> {
+        match AHashCatalog::load_from_dir(&self.ahash_dir) {
+            Ok(cat) => Some(Arc::new(cat)),
+            Err(e) => {
+                self.push_log(
+                    "CATALOG",
+                    "WARN",
+                    format!(
+                        "Failed to reload aHash catalog from {:?}: {:#}; keeping existing snapshot",
+                        self.ahash_dir, e
+                    ),
+                );
+                None
             }
         }
     }
@@ -444,6 +505,8 @@ impl AppState {
             None
         };
 
+        let new_ahash_opt = self.prepare_ahash_reload();
+
         // --- Phase 2: Commit Atomically (cannot fail) ---
         let coupling_count = new_couplings
             .couplings
@@ -464,13 +527,20 @@ impl AppState {
             }
         }
 
+        if let Some(new_ahash) = new_ahash_opt {
+            self.ahash_catalog.store(new_ahash);
+        }
+        let current_ahash = self.ahash_catalog.load();
+        let ahash_medias = current_ahash.entries.len();
+        let ahash_frames = current_ahash.total_frames;
+
         let elapsed_ms = t0.elapsed().as_secs_f64() * 1000.0;
         self.push_log(
             "CATALOG",
             "INFO",
             format!(
-                "Reloaded in {:.2}ms: {} medias ({} cuts, {} sparse), {} loose files, {} certified couplings",
-                elapsed_ms, media_count, cuts_count, sparse_count, loose_file_count, coupling_count
+                "Reloaded in {:.2}ms: {} medias ({} cuts, {} sparse), {} loose files, {} certified couplings, {} ahash medias ({} frames)",
+                elapsed_ms, media_count, cuts_count, sparse_count, loose_file_count, coupling_count, ahash_medias, ahash_frames
             ),
         );
 
@@ -482,6 +552,8 @@ impl AppState {
             cuts_entries: cuts_count,
             sparse_entries: sparse_count,
             certified_couplings: coupling_count,
+            ahash_medias,
+            ahash_frames,
         })
     }
 
@@ -620,6 +692,10 @@ impl AppState {
             frame_counts.extend(delta.medias().iter().map(|m| m.frame_count));
         }
 
+        let ahash_cat = self.ahash_catalog.load();
+        let ahash_medias = ahash_cat.entries.len();
+        let ahash_frames = ahash_cat.total_frames;
+
         CatalogStatusResponse {
             base_medias,
             base_cuts,
@@ -631,6 +707,8 @@ impl AppState {
             total_medias: base_medias + delta_medias,
             total_frames: frame_counts.iter().flatten().sum(),
             medias_without_frame_count: frame_counts.iter().filter(|n| n.is_none()).count(),
+            ahash_medias,
+            ahash_frames,
         }
     }
 
@@ -782,5 +860,34 @@ impl AppState {
             delta_medias_flushed: flushed_count,
             message: format!("Successfully compacted into {}", target_path.display()),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_resolve_default_ahash_dir_production_and_isolation() {
+        assert_eq!(
+            resolve_default_ahash_dir(Path::new("data/SRT")),
+            PathBuf::from("data/__AHASH__")
+        );
+        assert_eq!(
+            resolve_default_ahash_dir(Path::new("/srv/dbsrt/data/SRT")),
+            PathBuf::from("/srv/dbsrt/data/__AHASH__")
+        );
+        assert_eq!(
+            resolve_default_ahash_dir(Path::new("/var/tmp/isolated_test/SRT")),
+            PathBuf::from("/var/tmp/isolated_test/__AHASH__")
+        );
+        assert_eq!(
+            resolve_default_ahash_dir(Path::new("/var/tmp/work_dir")),
+            PathBuf::from("/var/tmp/work_dir/__AHASH__")
+        );
+        assert_eq!(
+            resolve_default_ahash_dir(Path::new("/tmp")),
+            PathBuf::from(TMP_EMPTY_AHASH_DIR)
+        );
     }
 }

@@ -2,10 +2,11 @@ use anyhow::Result;
 use clap::Parser;
 use dbsrt_cli::cli::{Cli, Commands};
 use dbsrt_cli::commands::{
-    run_bench_ahash, run_bench_cuts, run_bench_phash, run_bench_video, run_certify_coupling,
-    run_export_ahash, run_export_phash, run_fetch_subtitles, run_import_phash, run_inspect_media,
-    run_match_trajectory, run_media_add, run_migrate, run_pack, run_recognize_media,
-    run_relabel_coupling, run_retarget_subtitles, run_scan_library, run_top,
+    run_ahash_sidecar, run_bench_ahash, run_bench_cuts, run_bench_phash, run_bench_video,
+    run_certify_coupling, run_export_ahash, run_export_phash, run_fetch_subtitles,
+    run_import_phash, run_inspect_media, run_match_trajectory, run_media_add, run_migrate,
+    run_pack, run_recognize_media, run_relabel_coupling, run_retarget_subtitles, run_scan_library,
+    run_top,
 };
 
 fn run_single_thread<F, R>(future: F) -> Result<R>
@@ -36,6 +37,10 @@ fn dispatch_benchmarks(cmd: Commands) -> Result<Option<Commands>> {
             run_bench_ahash(&args)?;
             Ok(None)
         }
+        Commands::BenchScaleMultimodal(args) => {
+            dbsrt_cli::commands::run_bench_scale_multimodal(args)?;
+            Ok(None)
+        }
         other => Ok(Some(other)),
     }
 }
@@ -60,6 +65,10 @@ fn dispatch_media(cmd: Commands) -> Result<Option<Commands>> {
         }
         Commands::ExportAhash(args) => {
             run_export_ahash(&args)?;
+            Ok(None)
+        }
+        Commands::AhashSidecar(args) => {
+            run_ahash_sidecar(&args)?;
             Ok(None)
         }
         Commands::ScanLibrary(args) => {

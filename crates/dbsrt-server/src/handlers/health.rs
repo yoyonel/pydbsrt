@@ -81,6 +81,10 @@ pub async fn metrics_handler(State(state): State<Arc<AppState>>) -> impl IntoRes
             .metrics
             .search_requests
             .load(std::sync::atomic::Ordering::Relaxed),
+        ahash_search_requests: state
+            .metrics
+            .ahash_search_requests
+            .load(std::sync::atomic::Ordering::Relaxed),
         cache_hits: state
             .metrics
             .cache_hits

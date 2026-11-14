@@ -9,6 +9,7 @@ use crate::dtos::{
     RecognizeRequest, RecognizeResponse, SearchSubtitlesRequest, SearchSubtitlesResponse,
     SearchTimingStats, SubtitleCandidate, SubtitleSource,
 };
+use crate::handlers::autosync::{extract_ahash_query_window, AcousticAlignment};
 use crate::services::catalog::{
     collect_subtitle_search_dirs, lookup_certified_couplings, normalize_lang_code,
     search_subtitles_in_catalog,
@@ -20,10 +21,143 @@ use crate::services::recognition::identify_media_by_phash_multi_routed;
 use crate::state::AppState;
 use axum::extract::State;
 use axum::Json;
+use dbsrt_core::ahash::AhashFile;
 use dbsrt_core::{inspect_container, probe_video, MediaMetadata};
+use dbsrt_index::AHashSearchCriteria;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
+
+/// Query start (seconds) of an `.ahash` sidecar: it fingerprints the media from its beginning.
+const AHASH_SIDECAR_QUERY_START_SECONDS: f64 = 0.0;
+
+struct RecognitionRoutingContext<'a> {
+    state: &'a Arc<AppState>,
+    payload: &'a SearchSubtitlesRequest,
+    media_path: &'a Path,
+    phash_dirs: &'a [PathBuf],
+}
+
+/// Outcome of the recognition routing stage.
+struct RoutedRecognition {
+    /// Recognized reference media, if any.
+    matched_media: Option<String>,
+    /// Recognition confidence (0.0 to 100.0).
+    phash_conf: f64,
+    /// Framerate of the target stream.
+    target_fps: f64,
+    /// Pre-existing pHash dataset of the target, if loaded.
+    existing_phash: Option<ExistingPhashData>,
+    /// Visual query sample extracted during relay, if any.
+    query_sample: Option<Vec<u64>>,
+    /// Exact acoustic subtitle shift (ms) `query_start_sec - ref_offset_sec`; set only when
+    /// the match came from the aHash catalog, `None` for pHash matches.
+    acoustic_shift_ms: Option<f64>,
+}
+
+/// Routes media recognition across aHash and pHash pipelines based on search mode.
+///
+/// # Arguments
+/// - `ctx`: Routing context (state, payload, media path, pHash directories).
+/// - `candidates`: Mutable candidate list (relay results).
+/// - `timing`: Mutable timing statistics.
+///
+/// # Returns
+/// [`RoutedRecognition`]; `acoustic_shift_ms` is populated for `ahash` mode and for the
+/// `ahash` fallback taken when pHash recognition failed.
+///
+/// # Panics
+/// Guaranteed panic-free.
+///
+/// # Data Flow & Invariants
+/// pHash results never carry an acoustic shift: their shift is computed later visually.
+async fn route_recognition_pipeline(
+    ctx: RecognitionRoutingContext<'_>,
+    candidates: &mut Vec<SubtitleCandidate>,
+    timing: &mut SearchTimingStats,
+) -> RoutedRecognition {
+    let mode = ctx.payload.search_mode.as_deref().unwrap_or("all");
+    let use_phash = mode == "phash" || mode == "all" || mode == "auto";
+    let use_ahash = mode == "ahash";
+
+    if use_ahash {
+        return execute_ahash_recognition(ctx.state, ctx.payload, ctx.media_path, timing)
+            .await
+            .into_routed();
+    }
+
+    let (m, conf, fps, ex, qs) = execute_phash_recognition(
+        ctx.state,
+        ctx.payload,
+        ctx.media_path,
+        ctx.phash_dirs,
+        use_phash,
+        candidates,
+        timing,
+    )
+    .await;
+    if m.is_none() && (mode == "all" || mode == "auto") && ctx.media_path.exists() {
+        return execute_ahash_recognition(ctx.state, ctx.payload, ctx.media_path, timing)
+            .await
+            .into_routed();
+    }
+    RoutedRecognition {
+        matched_media: m,
+        phash_conf: conf,
+        target_fps: fps,
+        existing_phash: ex,
+        query_sample: qs,
+        acoustic_shift_ms: None,
+    }
+}
+
+/// Logs the incoming search request (mode, language, media file name).
+///
+/// # Arguments
+/// - `state`: Application state owning the log ring buffer.
+/// - `mode`: Effective search mode.
+/// - `language`: Requested subtitle language code.
+/// - `media_path`: Target media path (only the file name is logged).
+///
+/// # Returns
+/// None.
+///
+/// # Panics
+/// Guaranteed panic-free.
+///
+/// # Data Flow & Invariants
+/// Pure side effect on the log buffer; no behavior depends on it.
+fn log_search_request(state: &AppState, mode: &str, language: &str, media_path: &Path) {
+    state.push_log(
+        "SEARCH",
+        "INFO",
+        format!(
+            "Request: mode='{}', lang='{}', media='{}'",
+            mode,
+            language,
+            media_path
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+        ),
+    );
+}
+
+/// Normalizes a media path that may arrive as a `file://` URI (POSIX `file:///path` or Windows `file:///C:/path`).
+pub(crate) fn normalize_media_path_uri(raw_path: &str) -> PathBuf {
+    let trimmed = raw_path.trim();
+    if let Some(after_triple) = trimmed.strip_prefix("file:///") {
+        let bytes = after_triple.as_bytes();
+        if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
+            return PathBuf::from(after_triple);
+        }
+        return PathBuf::from(format!("/{after_triple}"));
+    }
+    if let Some(after_scheme) = trimmed.strip_prefix("file://") {
+        return PathBuf::from(after_scheme);
+    }
+    PathBuf::from(trimmed)
+}
 
 /// Axum handler for `POST /v1/search`: discovers, matches, and ranks subtitles for a video.
 ///
@@ -55,7 +189,7 @@ pub async fn search_handler(
         .search_requests
         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
-    let media_path = PathBuf::from(&payload.media_path);
+    let media_path = normalize_media_path_uri(&payload.media_path);
     let include_sidecars = payload.subtitles_dir.is_none();
     let subtitles_dir = payload
         .subtitles_dir
@@ -67,42 +201,37 @@ pub async fn search_handler(
     let mut candidates: Vec<SubtitleCandidate> = Vec::new();
 
     let mode = payload.search_mode.as_deref().unwrap_or("all");
-    let use_phash = mode == "phash" || mode == "all" || mode == "auto";
 
-    state.push_log(
-        "SEARCH",
-        "INFO",
-        format!(
-            "Request: mode='{}', lang='{}', media='{}'",
-            mode,
-            payload.language,
-            media_path
-                .file_name()
-                .and_then(|s| s.to_str())
-                .unwrap_or("")
-        ),
-    );
+    log_search_request(&state, mode, &payload.language, &media_path);
 
     let mut timing = SearchTimingStats::default();
 
-    let (matched_media, phash_conf, target_fps, existing_phash, query_sample_opt) =
-        execute_phash_recognition(
-            &state,
-            &payload,
-            &media_path,
-            &phash_dirs,
-            use_phash,
-            &mut candidates,
-            &mut timing,
-        )
-        .await;
+    let RoutedRecognition {
+        matched_media,
+        phash_conf,
+        target_fps,
+        existing_phash,
+        query_sample: query_sample_opt,
+        acoustic_shift_ms,
+    } = route_recognition_pipeline(
+        RecognitionRoutingContext {
+            state: &state,
+            payload: &payload,
+            media_path: &media_path,
+            phash_dirs: &phash_dirs,
+        },
+        &mut candidates,
+        &mut timing,
+    )
+    .await;
 
     let (mut meta, moviehash, fingerprint_preview) = extract_target_metadata_and_preview(
         &media_path,
         query_sample_opt.as_deref(),
         existing_phash.as_ref(),
         &mut timing,
-    );
+    )
+    .await;
 
     let effective_season = payload.season.or(meta.season);
     let effective_episode = payload.episode.or(meta.episode);
@@ -112,22 +241,26 @@ pub async fn search_handler(
 
     if let Some(ref m_name) = matched_media {
         match_certified_couplings_and_shifts(
-            &state,
-            &media_path,
-            &subtitles_dir,
-            &phash_dirs,
-            m_name,
-            phash_conf,
-            target_fps,
-            &existing_phash,
-            effective_season,
-            effective_episode,
-            &payload.language,
+            &CertifiedMatchContext {
+                state: &state,
+                media_path: &media_path,
+                subtitles_dir: &subtitles_dir,
+                phash_dirs: &phash_dirs,
+                matched_media: m_name,
+                phash_conf,
+                target_fps,
+                existing_phash: &existing_phash,
+                acoustic_shift_ms,
+                effective_season,
+                effective_episode,
+                language: &payload.language,
+            },
             &mut candidates,
             &mut seen_catalog_paths,
             &mut seen_filenames,
             &mut timing,
-        );
+        )
+        .await;
     }
 
     if mode != "phash" && media_path.exists() {
@@ -136,7 +269,8 @@ pub async fn search_handler(
             &payload.language,
             &mut candidates,
             &mut timing,
-        );
+        )
+        .await;
     }
 
     let catalog_query_title = if mode == "phash" {
@@ -146,20 +280,23 @@ pub async fn search_handler(
     };
 
     search_disk_catalog_subtitles(
-        &media_path,
-        &subtitles_dir,
-        include_sidecars,
-        matched_media.as_deref(),
-        phash_conf,
-        effective_season,
-        effective_episode,
-        catalog_query_title,
-        &payload.language,
+        &DiskCatalogSearchContext {
+            media_path: &media_path,
+            subtitles_dir: &subtitles_dir,
+            include_sidecars,
+            matched_media: matched_media.as_deref(),
+            phash_conf,
+            is_ahash_match: acoustic_shift_ms.is_some(),
+            effective_season,
+            effective_episode,
+            catalog_query_title,
+            language: &payload.language,
+        },
         &mut candidates,
-        &mut seen_catalog_paths,
-        &mut seen_filenames,
+        (&mut seen_catalog_paths, &mut seen_filenames),
         &mut timing,
-    );
+    )
+    .await;
 
     fetch_remote_provider_and_filter(
         &state,
@@ -679,8 +816,36 @@ fn execute_local_phash_recognition(
 /// # Data Flow & Invariants
 /// If visual recognition is enabled and the media file exists, selects remote relay if configured,
 /// otherwise executes local multi-tier recognition if indexes or PostgreSQL are configured.
+/// Runs `execute_local_phash_recognition` on the blocking thread pool under a heavy-task permit.
+async fn run_local_phash_off_runtime(
+    state: &Arc<AppState>,
+    media_path: &Path,
+    phash_dirs: &[PathBuf],
+    payload: &SearchSubtitlesRequest,
+) -> (
+    (Option<String>, f64, f64, Option<ExistingPhashData>),
+    SearchTimingStats,
+) {
+    let _permit = state.heavy_task_semaphore.acquire().await.ok();
+    let st = Arc::clone(state);
+    let mp = media_path.to_path_buf();
+    let pdirs = phash_dirs.to_vec();
+    let eng = payload.index_engine.clone();
+    let mut local_timing = SearchTimingStats::default();
+    tokio::task::spawn_blocking(move || {
+        let r =
+            execute_local_phash_recognition(&st, &mp, &pdirs, eng.as_deref(), &mut local_timing);
+        (r, local_timing)
+    })
+    .await
+    .unwrap_or((
+        (None, 0.0, DEFAULT_FALLBACK_FPS, None),
+        SearchTimingStats::default(),
+    ))
+}
+
 async fn execute_phash_recognition(
-    state: &AppState,
+    state: &Arc<AppState>,
     payload: &SearchSubtitlesRequest,
     media_path: &Path,
     phash_dirs: &[PathBuf],
@@ -713,18 +878,210 @@ async fn execute_phash_recognition(
         || state.dbphash_path().is_some()
         || state.db_config.is_some()
     {
-        let (matched_media, phash_conf, target_fps, existing_phash) =
-            execute_local_phash_recognition(
-                state,
-                media_path,
-                phash_dirs,
-                payload.index_engine.as_deref(),
-                timing,
-            );
+        let (res, updated_timing) =
+            run_local_phash_off_runtime(state, media_path, phash_dirs, payload).await;
+        *timing = updated_timing;
+        let (matched_media, phash_conf, target_fps, existing_phash) = res;
         (matched_media, phash_conf, target_fps, existing_phash, None)
     } else {
         (None, 0.0, DEFAULT_FALLBACK_FPS, None, None)
     }
+}
+
+/// Outcome of the acoustic recognition stage.
+struct AhashRecognition {
+    /// Recognized reference media, if any.
+    matched_media: Option<String>,
+    /// Recognition confidence (0.0 to 100.0).
+    confidence: f64,
+    /// Probe position versus reference match offset, if a match was found.
+    alignment: Option<AcousticAlignment>,
+}
+
+impl AhashRecognition {
+    /// A recognition attempt that produced no match.
+    fn none() -> Self {
+        Self {
+            matched_media: None,
+            confidence: 0.0,
+            alignment: None,
+        }
+    }
+
+    /// Converts into the routing outcome (aHash has no pHash dataset nor visual sample).
+    fn into_routed(self) -> RoutedRecognition {
+        RoutedRecognition {
+            matched_media: self.matched_media,
+            phash_conf: self.confidence,
+            target_fps: DEFAULT_BASELINE_FPS,
+            existing_phash: None,
+            query_sample: None,
+            acoustic_shift_ms: self.alignment.map(|a| a.shift_ms()),
+        }
+    }
+}
+
+/// Extracts or reads the `.ahash` query window on a blocking thread.
+async fn extract_or_read_ahash_query(media_path: &Path) -> Option<(AhashFile, f64)> {
+    let is_ahash_file = media_path.extension().is_some_and(|e| e == "ahash");
+    let p = media_path.to_path_buf();
+    tokio::task::spawn_blocking(move || {
+        if is_ahash_file {
+            AhashFile::read_from_path(&p)
+                .ok()
+                .map(|f| (f, AHASH_SIDECAR_QUERY_START_SECONDS))
+        } else {
+            extract_ahash_query_window(&p)
+        }
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
+/// Queries the local in-memory `AHashCatalog` on the blocking thread pool.
+async fn try_local_ahash_catalog_match(
+    state: &AppState,
+    hashes: &[u64],
+    audio_fps: f64,
+    query_start_sec: f64,
+) -> Option<(AhashRecognition, String, f64)> {
+    let catalog = state.ahash_catalog.load_full();
+    if catalog.entries.is_empty() || (state.is_agent && state.remote_api.is_some()) {
+        return None;
+    }
+    let t_match = Instant::now();
+    let owned_hashes = hashes.to_vec();
+    let matches = tokio::task::spawn_blocking(move || {
+        catalog.search(&AHashSearchCriteria::new(&owned_hashes, audio_fps))
+    })
+    .await
+    .unwrap_or_default();
+    let match_ms = t_match.elapsed().as_secs_f64() * MILLIS_PER_SEC;
+    let best = matches.first()?;
+    let conf = best.score * 100.0;
+    let tier = format!("Tier aHash Catalog (SNR={:.1} bits)", best.snr_bits);
+    state.push_log(
+        "AHASH",
+        "INFO",
+        format!(
+            "✓ aHash match: '{}' (conf={:.1}%, SNR={:.1} bits, offset={:.2}s, query_start={:.2}s)",
+            best.media_name, conf, best.snr_bits, best.offset_sec, query_start_sec
+        ),
+    );
+    let rec = AhashRecognition {
+        matched_media: Some(best.media_name.clone()),
+        confidence: conf,
+        alignment: Some(AcousticAlignment {
+            query_start_sec,
+            ref_offset_sec: best.offset_sec,
+        }),
+    };
+    Some((rec, tier, match_ms))
+}
+
+/// Relays query hashes to `POST {remote_api}/v1/search/ahash` and formats timing telemetry.
+async fn try_remote_ahash_relay_match(
+    state: &AppState,
+    hashes: &[u64],
+    audio_fps: f64,
+    query_start_sec: f64,
+) -> Option<(AhashRecognition, String, f64, f64)> {
+    let remote_url = state.remote_api.as_deref()?;
+    let (resp, net_rtt_ms) = crate::handlers::search::ahash::relay_remote_ahash_search(
+        state, remote_url, hashes, audio_fps,
+    )
+    .await?;
+    let best = resp
+        .best_match
+        .or_else(|| resp.candidates.into_iter().next())?;
+    let conf = best.score * 100.0;
+    let server_ms = resp.elapsed_seconds * MILLIS_PER_SEC;
+    let wan_rtt_ms = (net_rtt_ms - server_ms).max(0.0);
+    let tier = format!(
+        "Remote Relay (Tier aHash SNR={:.1} bits via {})",
+        best.snr_bits, remote_url
+    );
+    state.push_log(
+        "RELAY",
+        "INFO",
+        format!(
+            "✓ Remote aHash match: '{}' (conf={:.1}%, SNR={:.1} bits, offset={:.2}s, RTT={:.1}ms)",
+            best.media_name, conf, best.snr_bits, best.offset_sec, net_rtt_ms
+        ),
+    );
+    let rec = AhashRecognition {
+        matched_media: Some(best.media_name),
+        confidence: conf,
+        alignment: Some(AcousticAlignment {
+            query_start_sec,
+            ref_offset_sec: best.offset_sec,
+        }),
+    };
+    Some((rec, tier, server_ms, wan_rtt_ms))
+}
+
+async fn execute_ahash_recognition(
+    state: &AppState,
+    _payload: &SearchSubtitlesRequest,
+    media_path: &Path,
+    timing: &mut SearchTimingStats,
+) -> AhashRecognition {
+    if !media_path.exists()
+        || (state.ahash_catalog.load().entries.is_empty() && state.remote_api.is_none())
+    {
+        return AhashRecognition::none();
+    }
+
+    let _permit = state.heavy_task_semaphore.acquire().await.ok();
+    let t0 = Instant::now();
+    let extracted = extract_or_read_ahash_query(media_path).await;
+    timing.ffmpeg_ms = t0.elapsed().as_secs_f64() * MILLIS_PER_SEC;
+
+    let (ahash_file, query_start_sec) = match extracted {
+        Some((f, start)) if f.hashes.len() >= dbsrt_index::MIN_QUERY_FRAMES => (f, start),
+        _ => {
+            state.push_log(
+                "AHASH",
+                "WARN",
+                format!(
+                    "Failed to extract audio fingerprint from {:?}",
+                    media_path.file_name()
+                ),
+            );
+            return AhashRecognition::none();
+        }
+    };
+
+    let audio_fps = ahash_file.header.audio_fps();
+    if let Some((rec, tier, match_ms)) =
+        try_local_ahash_catalog_match(state, &ahash_file.hashes, audio_fps, query_start_sec).await
+    {
+        timing.matching_tier = tier;
+        timing.phash_match_ms = match_ms;
+        timing.confidence_percent = rec.confidence;
+        return rec;
+    }
+
+    if let Some((rec, tier, server_ms, wan_rtt_ms)) =
+        try_remote_ahash_relay_match(state, &ahash_file.hashes, audio_fps, query_start_sec).await
+    {
+        timing.matching_tier = tier;
+        timing.phash_match_ms = server_ms;
+        timing.wan_rtt_ms = wan_rtt_ms;
+        timing.confidence_percent = rec.confidence;
+        return rec;
+    }
+
+    state.push_log(
+        "AHASH",
+        "INFO",
+        format!(
+            "aHash search: 0 matches found in catalog for {:?}",
+            media_path.file_name()
+        ),
+    );
+    AhashRecognition::none()
 }
 
 /// Extracts video container metadata, moviehash, and formats visual fingerprint previews.
@@ -745,9 +1102,9 @@ async fn execute_phash_recognition(
 /// Guaranteed panic-free.
 ///
 /// # Data Flow & Invariants
-/// Parses filename metadata or probes physical file for MovieHash, filters out uniform blank
-/// fingerprints to assemble a human-readable 8-sample hexadecimal preview for UI diagnostics.
-fn extract_target_metadata_and_preview(
+/// Parses filename metadata or probes physical file for MovieHash on blocking pool, filters out
+/// uniform blank fingerprints to assemble a human-readable 8-sample hexadecimal preview.
+async fn extract_target_metadata_and_preview(
     media_path: &Path,
     query_sample: Option<&[u64]>,
     existing_phash: Option<&ExistingPhashData>,
@@ -769,11 +1126,16 @@ fn extract_target_metadata_and_preview(
         );
         (meta, None)
     } else {
-        let meta = MediaMetadata::parse_from_path(media_path);
-        let mh = meta.moviehash.clone();
-        (meta, mh)
+        let p = media_path.to_path_buf();
+        tokio::task::spawn_blocking(move || {
+            let meta = MediaMetadata::parse_from_path(&p);
+            let mh = meta.moviehash.clone();
+            (meta, mh)
+        })
+        .await
+        .unwrap_or_else(|_| (MediaMetadata::parse(""), None))
     };
-    timing.moviehash_ms = t_meta.elapsed().as_secs_f64() * 1000.0;
+    timing.moviehash_ms = t_meta.elapsed().as_secs_f64() * MILLIS_PER_SEC;
 
     let fingerprint_preview = query_sample
         .or_else(|| existing_phash.map(|(_, hashes, _)| hashes.as_slice()))
@@ -802,20 +1164,164 @@ fn extract_target_metadata_and_preview(
     (meta, moviehash, fingerprint_preview)
 }
 
+/// Immutable inputs of [`match_certified_couplings_and_shifts`].
+struct CertifiedMatchContext<'a> {
+    /// Shared server state container.
+    state: &'a Arc<AppState>,
+    /// File path to the video stream being queried.
+    media_path: &'a Path,
+    /// Base directory holding local subtitle storage.
+    subtitles_dir: &'a Path,
+    /// Search directories holding cached pHash fingerprints.
+    phash_dirs: &'a [PathBuf],
+    /// Reference release stem identified by recognition.
+    matched_media: &'a str,
+    /// Recognition confidence score (0.0 to 100.0).
+    phash_conf: f64,
+    /// Framerate of the target video stream.
+    target_fps: f64,
+    /// Optional pre-existing pHash dataset of the target video.
+    existing_phash: &'a Option<ExistingPhashData>,
+    /// Exact acoustic shift (`query_start_sec - ref_offset_sec`) when recognized by aHash;
+    /// used directly instead of re-running visual pHash consensus.
+    acoustic_shift_ms: Option<f64>,
+    /// Target season filter constraint.
+    effective_season: Option<u32>,
+    /// Target episode filter constraint.
+    effective_episode: Option<u32>,
+    /// Target subtitle language code.
+    language: &'a str,
+}
+
+/// Builds the auto-synchronized (`certified_synced`) variant of a certified candidate.
+///
+/// # Arguments
+/// - `c`: Baseline certified candidate (shift 0 ms).
+/// - `shift_ms`: Computed shift in milliseconds.
+///
+/// # Returns
+/// Cloned candidate with `source = "certified_synced"`, the shift, and annotated title/details.
+///
+/// # Panics
+/// Guaranteed panic-free.
+///
+/// # Data Flow & Invariants
+/// Pure function; `c` is left untouched.
+fn build_synced_variant(c: &SubtitleCandidate, shift_ms: f64) -> SubtitleCandidate {
+    let mut c_synced = c.clone();
+    c_synced.source = "certified_synced".to_string();
+    c_synced.shift_ms = Some(shift_ms);
+    c_synced.title = format!("{} [Synced {:+.1}s]", c.title, shift_ms / MILLIS_PER_SEC);
+    if let Some(ref d) = c.details {
+        c_synced.details = Some(format!(
+            "{} (Synchronized: {:+.2}s visual shift)",
+            d,
+            shift_ms / MILLIS_PER_SEC
+        ));
+    }
+    c_synced
+}
+
+/// Records a certified candidate in the deduplication sets (raw and canonical catalog path).
+///
+/// # Arguments
+/// - `c`: Certified candidate.
+/// - `seen_catalog_paths`: Deduplication set tracking catalog paths.
+/// - `seen_filenames`: Deduplication set tracking lowercase subtitle filenames.
+///
+/// # Returns
+/// None.
+///
+/// # Panics
+/// Guaranteed panic-free.
+///
+/// # Data Flow & Invariants
+/// Inserts the candidate id, its canonicalized form when resolvable, and the lowercase title.
+fn register_certified_as_seen(
+    c: &SubtitleCandidate,
+    seen_catalog_paths: &mut std::collections::HashSet<String>,
+    seen_filenames: &mut std::collections::HashSet<String>,
+) {
+    if let Some(ref cid) = c.candidate_id {
+        seen_catalog_paths.insert(cid.clone());
+        if let Ok(canon) = Path::new(cid).canonicalize() {
+            seen_catalog_paths.insert(canon.to_string_lossy().to_string());
+        }
+    }
+    seen_filenames.insert(c.title.to_lowercase());
+}
+
+/// Fetches remote certified couplings from `{remote_url}/v1/couplings?summary=true` and caches them in memory.
+async fn fetch_and_cache_remote_couplings(state: &AppState, remote_url: &str) -> bool {
+    let url = format!(
+        "{}/v1/couplings?summary=true",
+        remote_url.trim_end_matches('/')
+    );
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_millis(
+            crate::constants::DEFAULT_RELAY_CONNECT_TIMEOUT_MS,
+        ))
+        .timeout(std::time::Duration::from_millis(
+            crate::constants::DEFAULT_RELAY_TIMEOUT_MS,
+        ))
+        .build()
+        .unwrap_or_default();
+    let mut req = client
+        .get(&url)
+        .header(reqwest::header::USER_AGENT, "dbsrt-agent/0.1.0");
+    if let Some(ref api_key) = state.remote_api_key {
+        req = req
+            .header("X-API-Key", api_key)
+            .header("Authorization", format!("Bearer {}", api_key));
+    }
+    let Ok(resp) = req.send().await else {
+        return false;
+    };
+    if !resp.status().is_success() {
+        return false;
+    }
+    let Ok(overview) = resp.json::<crate::dtos::CouplingsOverviewResponse>().await else {
+        return false;
+    };
+    let Ok(mut reg) = state.coupling_registry.write() else {
+        return false;
+    };
+    for c in overview.couplings {
+        for sub in c.subtitles {
+            reg.upsert_coupling(
+                c.media_hash.clone(),
+                c.media_name.clone(),
+                c.phash_filename.clone(),
+                c.fps,
+                c.frame_count,
+                sub,
+            );
+        }
+    }
+    true
+}
+
+/// Runs `lookup_certified_couplings` on the blocking thread pool.
+async fn run_lookup_certified_off_runtime(
+    ctx: &CertifiedMatchContext<'_>,
+) -> (Vec<SubtitleCandidate>, f64, f64, bool) {
+    let st = Arc::clone(ctx.state);
+    let sdir = ctx.subtitles_dir.to_path_buf();
+    let mname = ctx.matched_media.to_string();
+    let (s, e) = (ctx.effective_season, ctx.effective_episode);
+    let lang = ctx.language.to_string();
+    let conf = ctx.phash_conf;
+    tokio::task::spawn_blocking(move || {
+        lookup_certified_couplings(&st, &sdir, &mname, s, e, &lang, conf)
+    })
+    .await
+    .unwrap_or_else(|_| (Vec::new(), 0.0, 0.0, false))
+}
+
 /// Queries certified ground-truth subtitle couplings and computes visual shifts.
 ///
 /// # Arguments
-/// - `state`: Shared server state container (`AppState`).
-/// - `media_path`: File path to the video stream being queried.
-/// - `subtitles_dir`: Base directory holding local subtitle storage.
-/// - `phash_dirs`: Search directories holding cached pHash fingerprints.
-/// - `matched_media`: Reference release stem identified by visual recognition.
-/// - `phash_conf`: Recognition confidence score (0.0 to 100.0).
-/// - `target_fps`: Framerate of the target video stream.
-/// - `existing_phash`: Optional pre-existing pHash dataset of the target video.
-/// - `effective_season`: Target season filter constraint.
-/// - `effective_episode`: Target episode filter constraint.
-/// - `language`: Target subtitle language code.
+/// - `ctx`: Immutable inputs ([`CertifiedMatchContext`]).
 /// - `candidates`: Mutable vector to receive certified and retargeted candidates.
 /// - `seen_catalog_paths`: Deduplication set tracking catalog paths.
 /// - `seen_filenames`: Deduplication set tracking lowercase subtitle filenames.
@@ -831,122 +1337,114 @@ fn extract_target_metadata_and_preview(
 /// Guaranteed panic-free.
 ///
 /// # Data Flow & Invariants
-/// Queries PostgreSQL and couplings registry for certified pairings matching the reference release.
-/// For each certified subtitle, runs perceptual visual consensus (`compute_media_phash_shift_multi`)
-/// against target video frames. Emits baseline cue (shift 0ms) and, if shift exceeds threshold,
-/// an auto-synchronized candidate variant (`certified_synced`).
-#[allow(clippy::too_many_arguments)]
-fn match_certified_couplings_and_shifts(
-    state: &AppState,
-    media_path: &Path,
-    subtitles_dir: &Path,
-    phash_dirs: &[PathBuf],
-    matched_media: &str,
-    phash_conf: f64,
-    target_fps: f64,
-    existing_phash: &Option<ExistingPhashData>,
-    effective_season: Option<u32>,
-    effective_episode: Option<u32>,
-    language: &str,
+/// Queries PostgreSQL and couplings registry (syncing from remote `/v1/couplings?summary=true`
+/// in `--agent` mode when local registry has no match) for certified pairings matching the reference release.
+/// For each certified subtitle, uses `acoustic_shift_ms` when present; otherwise runs perceptual
+/// visual consensus (`compute_media_phash_shift_multi`) against target video frames on blocking pool.
+/// Resolves certified candidates locally and falls back to remote `/v1/couplings?summary=true` when empty.
+async fn resolve_certified_candidates_with_remote_fallback(
+    ctx: &CertifiedMatchContext<'_>,
+    timing: &mut SearchTimingStats,
+) -> Vec<SubtitleCandidate> {
+    let (mut cert_cands, pg_ms, json_ms, pg_cached) = run_lookup_certified_off_runtime(ctx).await;
+    if cert_cands.is_empty() {
+        if let Some(ref remote_url) = ctx.state.remote_api {
+            if fetch_and_cache_remote_couplings(ctx.state, remote_url).await {
+                let (reloaded, _, _, _) = run_lookup_certified_off_runtime(ctx).await;
+                cert_cands = reloaded;
+            }
+        }
+    }
+    timing.pg_lookup_ms = pg_ms;
+    timing.json_lookup_ms = json_ms;
+    timing.pg_cached = pg_cached;
+    cert_cands
+}
+
+/// Computes the temporal shift (ms) for a certified candidate on the blocking thread pool.
+async fn compute_certified_candidate_shift_ms(
+    ctx: &CertifiedMatchContext<'_>,
+    ref_stem: String,
+) -> f64 {
+    if let Some(shift_ms) = ctx.acoustic_shift_ms {
+        return shift_ms;
+    }
+    let mp = ctx.media_path.to_path_buf();
+    let pdirs = ctx.phash_dirs.to_vec();
+    let conf = ctx.phash_conf;
+    let fps = ctx.target_fps;
+    let ex = ctx.existing_phash.clone();
+    tokio::task::spawn_blocking(move || {
+        compute_media_phash_shift_multi(
+            &mp,
+            &pdirs,
+            &ref_stem,
+            conf,
+            fps,
+            &ex,
+            DEFAULT_SEARCH_DISTANCE,
+        )
+        .1
+    })
+    .await
+    .unwrap_or(0.0)
+}
+
+async fn match_certified_couplings_and_shifts(
+    ctx: &CertifiedMatchContext<'_>,
     candidates: &mut Vec<SubtitleCandidate>,
     seen_catalog_paths: &mut std::collections::HashSet<String>,
     seen_filenames: &mut std::collections::HashSet<String>,
     timing: &mut SearchTimingStats,
 ) {
-    if candidates.is_empty() && !state.is_agent {
-        let (cert_cands, pg_ms, json_ms, pg_cached) = lookup_certified_couplings(
-            state,
-            subtitles_dir,
-            matched_media,
-            effective_season,
-            effective_episode,
-            language,
-            phash_conf,
-        );
-        timing.pg_lookup_ms = pg_ms;
-        timing.json_lookup_ms = json_ms;
-        timing.pg_cached = pg_cached;
-
-        for mut c in cert_cands {
-            if let Some(ref cid) = c.candidate_id {
-                seen_catalog_paths.insert(cid.clone());
-                if let Ok(canon) = Path::new(cid).canonicalize() {
-                    seen_catalog_paths.insert(canon.to_string_lossy().to_string());
-                }
-            }
-            seen_filenames.insert(c.title.to_lowercase());
-
-            let ref_stem = c.release.as_deref().unwrap_or(matched_media);
-            let (_sf, computed_shift_ms, _sconf) = compute_media_phash_shift_multi(
-                media_path,
-                phash_dirs,
-                ref_stem,
-                phash_conf,
-                target_fps,
-                existing_phash,
-                DEFAULT_SEARCH_DISTANCE,
-            );
-
-            c.shift_ms = Some(0.0);
-            candidates.push(c.clone());
-
-            if computed_shift_ms.abs() > SIGNIFICANT_SHIFT_THRESHOLD_MS {
-                let mut c_synced = c.clone();
-                c_synced.source = "certified_synced".to_string();
-                c_synced.shift_ms = Some(computed_shift_ms);
-                c_synced.title = format!(
-                    "{} [Synced {:+.1}s]",
-                    c.title,
-                    computed_shift_ms / MILLIS_PER_SEC
-                );
-                if let Some(ref d) = c.details {
-                    c_synced.details = Some(format!(
-                        "{} (Synchronized: {:+.2}s visual shift)",
-                        d,
-                        computed_shift_ms / MILLIS_PER_SEC
-                    ));
-                }
-                candidates.push(c_synced);
-            }
-        }
-    } else {
+    if !candidates.is_empty() {
         for c in candidates.iter() {
             if let Some(ref cid) = c.candidate_id {
                 seen_catalog_paths.insert(cid.clone());
             }
             seen_filenames.insert(c.title.to_lowercase());
         }
+        return;
+    }
+
+    let cert_cands = resolve_certified_candidates_with_remote_fallback(ctx, timing).await;
+    for mut c in cert_cands {
+        register_certified_as_seen(&c, seen_catalog_paths, seen_filenames);
+        let ref_stem = c
+            .release
+            .as_deref()
+            .unwrap_or(ctx.matched_media)
+            .to_string();
+        let computed_shift_ms = compute_certified_candidate_shift_ms(ctx, ref_stem).await;
+
+        c.shift_ms = Some(0.0);
+        candidates.push(c.clone());
+
+        if computed_shift_ms.abs() > SIGNIFICANT_SHIFT_THRESHOLD_MS {
+            candidates.push(build_synced_variant(&c, computed_shift_ms));
+        }
     }
 }
 
-/// Inspects media container tracks and extracts embedded subtitles matching requested language.
-///
-/// # Arguments
-/// - `media_path`: File path to the video file.
-/// - `language`: Target subtitle language code.
-/// - `candidates`: Mutable vector to receive embedded subtitle candidates.
-/// - `timing`: Mutable search timing statistics to record container inspection latency.
-///
-/// # Returns
-/// None. Mutates candidates and timing in place.
-///
-/// # Errors
-/// None.
-///
-/// # Panics
-/// Guaranteed panic-free.
-///
-/// # Data Flow & Invariants
-/// Calls FFmpeg/container prober, normalizes stream language codes (ISO-639), matches against requested
-/// language code with fallback support for "auto" and "all", and adds candidate descriptors.
-fn extract_embedded_container_subtitles(
+/// Runs `inspect_container` on the blocking thread pool.
+async fn inspect_container_off_runtime(
+    media_path: &Path,
+) -> Option<dbsrt_core::ContainerInspection> {
+    let mp = media_path.to_path_buf();
+    tokio::task::spawn_blocking(move || inspect_container(&mp).ok())
+        .await
+        .ok()
+        .flatten()
+}
+
+async fn extract_embedded_container_subtitles(
     media_path: &Path,
     language: &str,
     candidates: &mut Vec<SubtitleCandidate>,
     timing: &mut SearchTimingStats,
 ) {
     let t_cont = Instant::now();
-    if let Ok(insp) = inspect_container(media_path) {
+    if let Some(insp) = inspect_container_off_runtime(media_path).await {
         let req_norm = normalize_lang_code(language);
         for stream in insp.subtitle_streams {
             let stream_lang = stream.language.as_deref().unwrap_or("und");
@@ -981,43 +1479,15 @@ fn extract_embedded_container_subtitles(
             }
         }
     }
-    timing.container_ms = t_cont.elapsed().as_secs_f64() * 1000.0;
+    timing.container_ms = t_cont.elapsed().as_secs_f64() * MILLIS_PER_SEC;
 }
 
 /// Discovers and scores local on-disk subtitle files across library and sidecar directories.
-///
-/// # Arguments
-/// - `media_path`: File path to the target video.
-/// - `subtitles_dir`: Base directory holding local subtitle storage.
-/// - `include_sidecars`: Boolean indicating whether adjacent directory search is enabled.
-/// - `matched_media`: Reference release stem identified by visual recognition.
-/// - `phash_conf`: Recognition confidence score.
-/// - `effective_season`: Target season filter constraint.
-/// - `effective_episode`: Target episode filter constraint.
-/// - `catalog_query_title`: Optional textual title query.
-/// - `language`: Target subtitle language code.
-/// - `candidates`: Mutable vector to receive catalog candidates.
-/// - `seen_catalog_paths`: Deduplication set tracking catalog paths.
-/// - `seen_filenames`: Deduplication set tracking lowercase subtitle filenames.
-/// - `timing`: Mutable search timing statistics to record disk search latency.
-///
-/// # Returns
-/// None. Mutates candidates and timing in place.
-///
-/// # Errors
-/// None.
-///
-/// # Panics
-/// Guaranteed panic-free.
-///
-/// # Data Flow & Invariants
-/// Iterates over candidate directories, applies fuzzy title matching and episodic token parsing,
-/// assigns heuristic bonuses for exact stem matches (+1000) or directory proximity (+500),
-/// deduplicates across paths and filenames, and sorts candidates by descending score.
 struct CatalogCandidateContext<'a> {
     file_stem: &'a str,
     matched_media: Option<&'a str>,
     phash_conf: f64,
+    is_ahash_match: bool,
     media_parent: Option<&'a Path>,
 }
 
@@ -1073,9 +1543,11 @@ fn build_disk_catalog_candidate(
             .map(String::from)
             .or_else(|| Some(ctx.file_stem.to_string()))
     };
+    let method_label = if ctx.is_ahash_match { "aHash" } else { "pHash" };
     let details = if !direct_match && ctx.matched_media.is_some() {
         format!(
-            "pHash matched '{}' ({:.0}% conf) — {}",
+            "{} matched '{}' ({:.0}% conf) — {}",
+            method_label,
             ctx.matched_media.unwrap_or_default(),
             ctx.phash_conf,
             path.display()
@@ -1097,86 +1569,131 @@ fn build_disk_catalog_candidate(
     )
 }
 
-#[allow(clippy::too_many_arguments)]
-fn search_disk_catalog_subtitles(
-    media_path: &Path,
-    subtitles_dir: &Path,
+/// Immutable inputs for [`search_disk_catalog_subtitles`].
+struct DiskCatalogSearchContext<'a> {
+    media_path: &'a Path,
+    subtitles_dir: &'a Path,
     include_sidecars: bool,
-    matched_media: Option<&str>,
+    matched_media: Option<&'a str>,
     phash_conf: f64,
+    is_ahash_match: bool,
     effective_season: Option<u32>,
     effective_episode: Option<u32>,
-    catalog_query_title: Option<&str>,
-    language: &str,
+    catalog_query_title: Option<&'a str>,
+    language: &'a str,
+}
+
+/// Scans on-disk subtitle directories on the blocking thread pool.
+async fn collect_disk_catalog_hits_off_runtime(
+    ctx: &DiskCatalogSearchContext<'_>,
+) -> Option<(
+    String,
+    Option<String>,
+    PathBuf,
+    Vec<(i32, PathBuf, PathBuf, String)>,
+)> {
+    let media_path = ctx.media_path.to_path_buf();
+    let subtitles_dir = ctx.subtitles_dir.to_path_buf();
+    let include_sidecars = ctx.include_sidecars;
+    let matched_media = ctx.matched_media.map(String::from);
+    let effective_season = ctx.effective_season;
+    let effective_episode = ctx.effective_episode;
+    let catalog_query_title = ctx.catalog_query_title.map(String::from);
+    let language = ctx.language.to_string();
+
+    tokio::task::spawn_blocking(move || {
+        let file_stem = media_path
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let mut stems = Vec::new();
+        if !file_stem.is_empty() {
+            stems.push(file_stem.clone());
+        }
+        if let Some(ref m) = matched_media {
+            if !stems.contains(m) {
+                stems.push(m.clone());
+            }
+        }
+        let search_dirs =
+            collect_subtitle_search_dirs(&subtitles_dir, &media_path, include_sidecars);
+        let mut hits = Vec::new();
+        for dir in &search_dirs {
+            for (score, path, resolved_lang) in search_subtitles_in_catalog(
+                dir,
+                &stems,
+                catalog_query_title.as_deref(),
+                effective_season,
+                effective_episode,
+                &language,
+            ) {
+                let canon_path = path.canonicalize().unwrap_or_else(|_| path.clone());
+                hits.push((score, path, canon_path, resolved_lang));
+            }
+        }
+        (file_stem, matched_media, media_path, hits)
+    })
+    .await
+    .ok()
+}
+
+async fn search_disk_catalog_subtitles(
+    ctx: &DiskCatalogSearchContext<'_>,
     candidates: &mut Vec<SubtitleCandidate>,
-    seen_catalog_paths: &mut std::collections::HashSet<String>,
-    seen_filenames: &mut std::collections::HashSet<String>,
+    seen: (
+        &mut std::collections::HashSet<String>,
+        &mut std::collections::HashSet<String>,
+    ),
     timing: &mut SearchTimingStats,
 ) {
     let t_disk = Instant::now();
-    let file_stem = media_path
-        .file_stem()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_default();
-    let mut stems = Vec::new();
-    if !file_stem.is_empty() {
-        stems.push(file_stem.clone());
-    }
-    if let Some(m) = matched_media {
-        if !stems.contains(&m.to_string()) {
-            stems.push(m.to_string());
-        }
-    }
-
-    let search_dirs = collect_subtitle_search_dirs(subtitles_dir, media_path, include_sidecars);
-    let mut catalog_results = Vec::new();
-    let ctx = CatalogCandidateContext {
-        file_stem: &file_stem,
-        matched_media,
-        phash_conf,
-        media_parent: media_path.parent(),
+    let Some((file_stem, matched_media_owned, media_path_owned, hits)) =
+        collect_disk_catalog_hits_off_runtime(ctx).await
+    else {
+        timing.disk_catalog_ms = t_disk.elapsed().as_secs_f64() * MILLIS_PER_SEC;
+        return;
     };
 
-    for dir in &search_dirs {
-        for (score, path, resolved_lang) in search_subtitles_in_catalog(
-            dir,
-            &stems,
-            catalog_query_title,
-            effective_season,
-            effective_episode,
-            language,
-        ) {
-            let path_str = path.to_string_lossy().to_string();
-            let canon_path = path.canonicalize().unwrap_or_else(|_| path.clone());
-            let canon_str = canon_path.to_string_lossy().to_string();
-            if !seen_catalog_paths.insert(canon_str.clone()) {
-                continue;
-            }
-            seen_catalog_paths.insert(path_str.clone());
+    let (seen_catalog_paths, seen_filenames) = seen;
+    let cand_ctx = CatalogCandidateContext {
+        file_stem: &file_stem,
+        matched_media: matched_media_owned.as_deref(),
+        phash_conf: ctx.phash_conf,
+        is_ahash_match: ctx.is_ahash_match,
+        media_parent: media_path_owned.parent(),
+    };
 
-            let cand_fname = path
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string();
-            if !seen_filenames.insert(cand_fname.to_lowercase()) {
-                continue;
-            }
-
-            catalog_results.push(build_disk_catalog_candidate(
-                &ctx,
-                &path,
-                resolved_lang,
-                score,
-            ));
+    let mut catalog_results = Vec::new();
+    for (score, path, canon_path, resolved_lang) in hits {
+        let path_str = path.to_string_lossy().to_string();
+        let canon_str = canon_path.to_string_lossy().to_string();
+        if !seen_catalog_paths.insert(canon_str) {
+            continue;
         }
+        seen_catalog_paths.insert(path_str);
+
+        let cand_fname = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        if !seen_filenames.insert(cand_fname.to_lowercase()) {
+            continue;
+        }
+
+        catalog_results.push(build_disk_catalog_candidate(
+            &cand_ctx,
+            &path,
+            resolved_lang,
+            score,
+        ));
     }
 
     catalog_results.sort_by_key(|a| std::cmp::Reverse(a.0));
     for (_, cand) in catalog_results {
         candidates.push(cand);
     }
-    timing.disk_catalog_ms = t_disk.elapsed().as_secs_f64() * 1000.0;
+    timing.disk_catalog_ms = t_disk.elapsed().as_secs_f64() * MILLIS_PER_SEC;
 }
 
 /// Queries external providers (OpenSubtitles) and enforces strict episodic consistency filters.
@@ -1468,7 +1985,6 @@ mod tests {
     }
     use dbsrt_core::{
         CertifiedMediaCoupling, CertifiedSubtitleRecord, LangStatus, MockSubtitleProvider,
-        SubtitleCache,
     };
     use std::path::PathBuf;
 
@@ -1521,7 +2037,7 @@ mod tests {
     fn test_app_state() -> Arc<AppState> {
         let root = get_repo_root();
         let phash_dir = root.join("tests/data");
-        let srt_dir = root.join("data/SRT");
+        let srt_dir = root.join("tests/data");
         let mock_provider = MockSubtitleProvider::new();
         mock_provider.add_candidate(
             "big buck bunny",
@@ -1551,13 +2067,16 @@ mod tests {
             },
             "1\n00:00:01,000 --> 00:00:04,000\nMock Agent Subtitle\n",
         );
-        let mut state = AppState::new(
+        let state = AppState::with_options(
             phash_dir,
             srt_dir,
             Arc::new(mock_provider),
-            SubtitleCache::default(),
+            crate::state::AppStateInitOptions {
+                dbphash_path: Some(PathBuf::from("/nonexistent_test_catalog.dbphash")),
+                extra_phash_dirs: Vec::new(),
+                ahash_dir: None,
+            },
         );
-        state.extra_phash_dirs.push(root.join("data/__PHASH__"));
         Arc::new(state)
     }
 
@@ -1872,5 +2391,159 @@ mod tests {
             "Mad.Max.1979.2160p.4K.BluRay.x265.10bit.AAC5.1-[YTS.MX]_mid15s",
             "L'été de kikujiro"
         ));
+    }
+
+    #[test]
+    fn test_normalize_media_path_uri_handles_windows_and_posix_file_schemes() {
+        assert_eq!(
+            normalize_media_path_uri("file:///C:/Videos/Movie.mkv"),
+            PathBuf::from("C:/Videos/Movie.mkv")
+        );
+        assert_eq!(
+            normalize_media_path_uri("file:///d:/Media/Show.mp4"),
+            PathBuf::from("d:/Media/Show.mp4")
+        );
+        assert_eq!(
+            normalize_media_path_uri("file:///var/media/Videos/clip.mkv"),
+            PathBuf::from("/var/media/Videos/clip.mkv")
+        );
+    }
+
+    fn build_mock_remote_router() -> axum::Router {
+        use crate::dtos::{
+            AHashMatchCandidate, AHashSearchRequest, AHashSearchResponse,
+            CouplingsOverviewResponse, StudioMediaCoupling,
+        };
+
+        axum::Router::new()
+            .route(
+                "/v1/search/ahash",
+                axum::routing::post(|Json(req): Json<AHashSearchRequest>| async move {
+                    assert!(
+                        req.ahash_bytes.is_some(),
+                        "agent relay must send base64 ahash_bytes"
+                    );
+                    let cand = AHashMatchCandidate {
+                        media_name: "Remote.Reference.Movie.2024".to_string(),
+                        file_path: "Remote.Reference.Movie.2024.86.1fps.ahash".to_string(),
+                        ref_frame_offset: 5166,
+                        offset_sec: 60.0,
+                        offset_ms: 60_000,
+                        mean_distance: 4.5,
+                        score: 0.93,
+                        snr_bits: 18.0,
+                        audio_fps: 86.1328125,
+                    };
+                    Json(AHashSearchResponse {
+                        success: true,
+                        best_match: Some(cand.clone()),
+                        candidates: vec![cand],
+                        total_catalog_files: 1,
+                        total_catalog_frames: 10000,
+                        elapsed_seconds: 0.002,
+                    })
+                }),
+            )
+            .route(
+                "/v1/couplings",
+                axum::routing::get(|| async move {
+                    let sub = CertifiedSubtitleRecord {
+                        name: "Remote.Reference.Movie.2024.fr.srt".to_string(),
+                        srt_path: "Remote.Reference.Movie.2024.fr.srt".to_string(),
+                        lang: "fr".to_string(),
+                        lang_status: LangStatus::Confirmed("fr".to_string()),
+                        subtitles_hash:
+                            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+                                .to_string(),
+                        certified: true,
+                        cue_count: 120,
+                        sub_frames: Vec::new(),
+                    };
+                    let coupling = StudioMediaCoupling {
+                        media_hash: "remote_media_hash_1".to_string(),
+                        media_name: "Remote.Reference.Movie.2024".to_string(),
+                        phash_filename: "Remote.Reference.Movie.2024.phash".to_string(),
+                        fps: 24.0,
+                        frame_count: 1000,
+                        in_postgres: false,
+                        subtitles: vec![sub],
+                    };
+                    Json(CouplingsOverviewResponse {
+                        postgres_connected: false,
+                        postgres_counts: None,
+                        local_registry_path: String::new(),
+                        indexed_phash_files: 1,
+                        couplings: vec![coupling],
+                        catalog_phashes: Vec::new(),
+                    })
+                }),
+            )
+    }
+
+    #[tokio::test]
+    async fn test_agent_mode_relays_ahash_and_resolves_remote_certified_couplings() {
+        use dbsrt_core::ahash::AhashHeader;
+
+        let mock_remote = build_mock_remote_router();
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, mock_remote).await.unwrap() });
+
+        let tmp = tempfile::tempdir().unwrap();
+        let ahash_sidecar = tmp.path().join("cut_from_60s.86.1fps.ahash");
+        let hashes: Vec<u64> = (0..32)
+            .map(|i| 0x1234_5678_9ABC_DEF0u64.wrapping_mul((i as u64) + 1))
+            .collect();
+        let (_, band_bounds) =
+            dbsrt_core::ahash::HaitsmaKalkerExtractor::compute_band_layout(5512, 2048);
+        let header = AhashHeader {
+            version: 1,
+            sample_rate: 5512,
+            frame_size: 2048,
+            hop_size: 64,
+            num_bands: 33,
+            spectral_lag: 2,
+            frame_count: hashes.len() as u64,
+            band_bounds,
+        };
+        AhashFile::write_to_path(&ahash_sidecar, &header, &hashes).unwrap();
+
+        let mut state = AppState::with_options(
+            tmp.path().to_path_buf(),
+            tmp.path().to_path_buf(),
+            Arc::new(MockSubtitleProvider::new()),
+            crate::state::AppStateInitOptions::default(),
+        );
+        state.is_agent = true;
+        state.remote_api = Some(format!("http://{addr}"));
+        let state = Arc::new(state);
+
+        let req = SearchSubtitlesRequest {
+            media_path: ahash_sidecar.to_string_lossy().to_string(),
+            language: "fr".to_string(),
+            search_mode: Some("ahash".to_string()),
+            query_title: None,
+            season: None,
+            episode: None,
+            subtitles_dir: Some(tmp.path().to_string_lossy().to_string()),
+            phash_dir: None,
+            index_engine: None,
+        };
+        let res = search_handler(State(state), Json(req)).await.0;
+        assert_eq!(
+            res.matched_media.as_deref(),
+            Some("Remote.Reference.Movie.2024")
+        );
+        assert!(
+            res.candidates.iter().any(|c| c.source == "certified"),
+            "agent must resolve remote certified candidate"
+        );
+        assert!(
+            res.candidates
+                .iter()
+                .any(|c| c.source == "certified_synced" && c.shift_ms == Some(-60_000.0)),
+            "agent must emit certified_synced candidate with -60000 ms shift"
+        );
     }
 }

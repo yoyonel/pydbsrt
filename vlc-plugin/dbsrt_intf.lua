@@ -66,12 +66,13 @@ local function run_sync()
         return
     end
     local uri = item:uri()
-    local path = vlc.strings.decode_uri(uri):gsub("^file://", "")
+    local path = vlc.strings.decode_uri(uri):gsub("^file:///([A-Za-z]:)", "%1"):gsub("^file://", "")
     vlc.msg.info("[dbsrt-intf] Active video: " .. path)
 
     -- Cas 1: Zero-subtitle client. Let server identify media & fetch catalog subtitle.
     local lang = os.getenv("DBSRT_LANG") or "auto"
-    vlc.msg.info("[dbsrt-intf] Requesting auto-sync for language: " .. lang)
+    local search_mode = os.getenv("DBSRT_SEARCH_MODE") or os.getenv("DBSRT_MODE") or "auto"
+    vlc.msg.info(string.format("[dbsrt-intf] Requesting auto-sync for language: %s (mode: %s)", lang, search_mode))
 
     -- Read dynamic discovery file
     local disc = io.open("/tmp/dbsrt-server.json", "r")
@@ -92,9 +93,10 @@ local function run_sync()
     end
 
     local payload = string.format(
-        '{"media_path":"%s","language":"%s","search_distance":0}',
+        '{"media_path":"%s","language":"%s","search_distance":0,"search_mode":"%s"}',
         json_escape(path),
-        json_escape(lang)
+        json_escape(lang),
+        json_escape(search_mode)
     )
 
     local req = "POST /v1/autosync HTTP/1.1\r\n"

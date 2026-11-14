@@ -8,8 +8,8 @@ async fn spawn_server(api_key_file: Option<PathBuf>) -> String {
     let phash_dir = std::env::temp_dir().join(format!("test_phash_auth_{}", std::process::id()));
     let _ = std::fs::create_dir_all(&phash_dir);
     let mut state = AppState::new(
+        phash_dir.clone(),
         phash_dir,
-        PathBuf::from("../../data/SRT"),
         Arc::new(OpenSubtitlesProvider::new(None)),
         SubtitleCache::default(),
     );

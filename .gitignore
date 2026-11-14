@@ -119,9 +119,8 @@ data/SRT/couplings.json
 data/SRT/*.lock
 couplings.json
 data/catalog.dbphash
-data/__PHASH__/
-data/__AHASH__/
 data/snippets/
+data/snippets_ahash/
 data/SRT/manifest.json
 data/SRT/metadata.json
 data/SRT/medias_metadata.sql
@@ -133,7 +132,6 @@ data/*.dbphash
 *.synced.srt
 
 # Coverage reports
-.coverage*
 coverage*.json
 
 # E2E VLC screenshots bulk archive (purged in Issue #26, 20 samples retained for docs)
@@ -143,7 +141,6 @@ docs/screenshots/e2e_vlc_all/*.webp
 !docs/screenshots/e2e_vlc_all/0020_*
 coverage*.xml
 coverage-summary.md
-htmlcov/
 target/llvm-cov/
 repomix-*.md
 

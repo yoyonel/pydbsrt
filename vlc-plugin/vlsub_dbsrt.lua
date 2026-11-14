@@ -13,9 +13,9 @@ function descriptor()
         version = app_version,
         author = "Lionel ATTY & Guillaume Le Maout",
         url = "https://github.com/yoyonel/pydbsrt",
-        shortdesc = "VLSub ISO + Search by pHash",
+        shortdesc = "VLSub ISO + Search by pHash/aHash",
         description = "<p>Standard VLSub interface with legacy hash, title/name search, "
-            .. "and visual frame-exact perceptual hash (pHash) search.</p>",
+            .. "visual perceptual hash (pHash), and acoustic fingerprint (aHash) search.</p>",
         capabilities = { "menu", "input-listener" }
     }
 end
@@ -53,6 +53,7 @@ local file_info = {
 local candidates_store = {}
 local last_matching_tier = nil
 local last_matched_ref = nil
+local last_recognition_method = "pHash"
 local input_table = {}
 local selected_lang_code = "fre"
 
@@ -112,14 +113,16 @@ local help_message = [[
   <h4><b>Usage:</b></h4>
   <p>1. Start your video in VLC.</p>
   <p>2. Select the desired subtitle language from the dropdown menu.</p>
-  <p>3. Choose one of the <b>three available search methods</b>:</p>
+  <p>3. Choose one of the <b>four available search methods</b>:</p>
   <ul>
     <li><b>Method 1: Search by hash</b><br/>
     Searches for subtitles using the standard 64-bit video file checksum (MovieHash). Recommended for exact file release matches.</li>
     <li><b>Method 2: Search by name</b><br/>
     Searches by video title, with optional Season and Episode numbers for TV shows.</li>
-    <li><b>Method 3: Search by pHash</b> <i>(Powered by dbsrt engine)</i><br/>
+    <li><b>Method 3: Search by pHash</b> <i>(Powered by dbsrt visual engine)</i><br/>
     Performs visual perceptual matching of the active video stream (DCT-II SIMD) against certified reference prints in the dbsrt catalog. Enables automatic frame-exact resynchronization across different releases (web-dl, bluray, hdtv).</li>
+    <li><b>Method 4: Search by aHash</b> <i>(Powered by dbsrt acoustic engine)</i><br/>
+    Performs acoustic spectral matching of the active audio stream (Haitsma-Kalker RFC v1.0) against certified reference prints in the dbsrt catalog. Robust against dark scenes, black intros, and releases with altered visuals.</li>
   </ul>
   <hr/>
   <h4><b>Downloading Subtitles:</b></h4>
@@ -406,7 +409,7 @@ function update_file_info()
         return false
     end
 
-    file_info.path = vlc.strings.decode_uri(file_info.uri):gsub("^file://", "")
+    file_info.path = vlc.strings.decode_uri(file_info.uri):gsub("^file:///([A-Za-z]:)", "%1"):gsub("^file://", "")
     file_info.filename = file_info.path:match("([^/\\]+)$") or file_info.path
 
     -- Strip extension from filename using last dot: ^(.+)%.([^%.]+)$
@@ -477,9 +480,10 @@ function interface_main()
     input_table["seasonNumber"] = dlg:add_text_input(file_info.season or "", 2, 3, 2, 1)
     dlg:add_button("Search by pHash", search_by_phash, 4, 3, 1, 1)
 
-    -- Row 4: Episode input
+    -- Row 4: Episode input + Search by aHash button (4th choice)
     dlg:add_label("Episode (series):", 1, 4, 1, 1)
     input_table["episodeNumber"] = dlg:add_text_input(file_info.episode or "", 2, 4, 2, 1)
+    dlg:add_button("Search by aHash", search_by_ahash, 4, 4, 1, 1)
 
     -- Row 5: Results List (Full width across all 4 columns)
     input_table["mainlist"] = dlg:add_list(1, 5, 4, 1)
@@ -681,8 +685,11 @@ function run_search(mode)
     end
 
     local is_relay = matching_tier and (string.find(matching_tier, "Remote Relay") ~= nil)
+    local is_ahash = (mode == "ahash") or (matching_tier ~= nil and string.find(matching_tier, "aHash") ~= nil)
+    local recognition_method = is_ahash and "aHash" or "pHash"
     last_matching_tier = matching_tier
     last_matched_ref = matched_media
+    last_recognition_method = recognition_method
 
     local origin_banner = is_relay and "CLOUD o2switch relay" or "LOCAL DAEMON"
     log_info("================================================================================")
@@ -691,8 +698,8 @@ function run_search(mode)
         matched_media or "none", confidence_str or "0.0", req_elapsed_ms)
     log_info("================================================================================")
 
-    log_info("[Search] Server response in %.2fms: matched_ref='%s', confidence=%s%%, visual shift=%sframes / %sms",
-        req_elapsed_ms, matched_media or "none", confidence_str or "0.0", shift_frames or "0", shift_ms_str or "0.0")
+    log_info("[Search] Server response in %.2fms: matched_ref='%s', confidence=%s%%, %s shift=%sframes / %sms",
+        req_elapsed_ms, matched_media or "none", confidence_str or "0.0", recognition_method, shift_frames or "0", shift_ms_str or "0.0")
 
     -- Extract & log fingerprints (MovieHash & pHash frames) in DEBUG mode
     local moviehash = string.match(body, '"moviehash":%s*"([^"]+)"')
@@ -769,6 +776,10 @@ function search_by_phash()
     run_search("phash")
 end
 
+function search_by_ahash()
+    run_search("ahash")
+end
+
 function search_by_hash()
     run_search("hash")
 end
@@ -787,10 +798,12 @@ function display_subtitles()
     end
 
     local is_relay = last_matching_tier and (string.find(last_matching_tier, "Remote Relay") ~= nil)
+    local is_ahash = (last_recognition_method == "aHash") or (last_matching_tier ~= nil and string.find(last_matching_tier, "aHash") ~= nil)
+    local cert_badge = is_ahash and "aHash certified" or "pHash certified"
     for idx, c in ipairs(candidates_store) do
         local source_tag = c.source:upper()
         if c.source == "certified" or c.source == "certified_synced" then
-            source_tag = is_relay and "[CLOUD o2switch] pHash certified" or "pHash certified"
+            source_tag = is_relay and ("[CLOUD o2switch] " .. cert_badge) or cert_badge
         elseif c.source == "container" then
             source_tag = "container"
         elseif c.source == "catalog" then
@@ -832,8 +845,8 @@ function download_selection()
     if candidate.shift_ms and math.abs(candidate.shift_ms) > 1.0 then
         is_resync = true
         shift_param = string.format("%.2f", candidate.shift_ms)
-        log_info("[Download] Visual resynchronization active: shift_ms=%+.2fms (%.2fs)",
-            candidate.shift_ms, candidate.shift_ms / MILLIS_PER_SEC)
+        log_info("[Download] %s resynchronization active: shift_ms=%+.2fms (%.2fs)",
+            last_recognition_method or "pHash", candidate.shift_ms, candidate.shift_ms / MILLIS_PER_SEC)
     else
         log_info("[Download] Standard 1:1 injection without shift (shift_ms=0.0)")
     end
@@ -910,6 +923,7 @@ if _G and _G._VLSub_test_hook then
         send_http_request = send_http_request,
         run_search = run_search,
         search_by_phash = search_by_phash,
+        search_by_ahash = search_by_ahash,
         search_by_hash = search_by_hash,
         search_by_name = search_by_name,
         download_selection = download_selection,

@@ -652,7 +652,26 @@ impl MmapDbphash {
         self.aggregate_matches(query_hashes, sparse_matches, cuts_matches)
     }
 
-    fn aggregate_matches(
+    /// Aggregates sparse frame and scene cut matches into consolidated media matches.
+    ///
+    /// # Arguments
+    /// * `query_hashes` - Sequence of 64-bit query perceptual hashes
+    /// * `sparse_matches` - Matched 1 fps candidate frames
+    /// * `cuts_matches` - Matched scene cut transitions
+    ///
+    /// # Returns
+    /// Ranked list of [`DbphashMediaMatch`] candidate records.
+    ///
+    /// # Errors
+    /// This function does not return `Result` and cannot error.
+    ///
+    /// # Panics
+    /// Does not panic.
+    ///
+    /// # Data Flow & Invariants
+    /// Groups candidates by `media_id`, evaluates time shift consensus, and calculates
+    /// confidence and bit error rates.
+    pub fn aggregate_matches(
         &self,
         query_hashes: &[u64],
         sparse_matches: Vec<DbphashCutMatch>,

@@ -158,3 +158,45 @@ pub const DEFAULT_SSE_INTERVAL_MS: u64 = 2_000;
 
 /// Keep-alive ping interval in seconds for SSE connections to prevent proxy timeouts.
 pub const DEFAULT_SSE_KEEPALIVE_SECS: u64 = 15;
+
+/// Default directory containing acoustic fingerprint `.ahash` files.
+pub const DEFAULT_AHASH_DATA_DIR: &str = "data/__AHASH__";
+
+/// Canonical sampling framerate for `.ahash` audio fingerprints (~86.125 fps).
+pub const DEFAULT_AHASH_FPS: f64 = 86.125;
+
+/// Default maximum allowed mean Hamming distance per frame for audio matching (out of 64 bits).
+pub const DEFAULT_AHASH_MAX_DISTANCE: f64 = 14.0;
+
+/// Default maximum number of acoustic match candidates returned.
+pub const DEFAULT_AHASH_SEARCH_LIMIT: usize = 5;
+
+/// Optimal empirical audio query window length in frames (~5.0 seconds at 86.125 fps).
+pub const OPTIMAL_AHASH_WINDOW_FRAMES: usize = 430;
+
+/// Default sample extraction duration in seconds for acoustic fingerprinting.
+pub const DEFAULT_AHASH_QUERY_DURATION_SECONDS: f64 = 5.0;
+
+/// Default narrative start offset in seconds for acoustic query sampling.
+pub const DEFAULT_AHASH_START_OFFSET_SECONDS: f64 = 60.0;
+
+/// Maximum HTTP request body size in bytes accepted by `POST /v1/search/ahash` (256 KiB).
+pub const MAX_AHASH_BODY_BYTES: usize = 256 * 1024;
+
+/// Maximum number of 64-bit sub-fingerprint frames accepted in a single `/v1/search/ahash` query (~95s at 86.125 fps).
+pub const MAX_AHASH_QUERY_FRAMES: usize = 8_192;
+
+/// Maximum candidate `limit` value accepted by `POST /v1/search/ahash`.
+pub const MAX_AHASH_SEARCH_LIMIT: usize = 50;
+
+/// Upper bound in bits for a 64-bit Hamming distance threshold.
+pub const MAX_AHASH_HAMMING_DISTANCE: f64 = 64.0;
+
+/// Byte width of one 64-bit little-endian sub-fingerprint hash.
+pub const AHASH_BYTES_PER_FRAME: usize = 8;
+
+/// Maximum concurrent heavy CPU / FFmpeg / catalog search tasks allowed on `dbsrt-server`.
+pub const DEFAULT_HEAVY_TASK_PERMITS: usize = 4;
+
+/// Maximum worker threads in the global Rayon pool on `dbsrt-server` (CloudLinux LVE NPROC guard).
+pub const DEFAULT_RAYON_WORKER_THREADS: usize = 4;

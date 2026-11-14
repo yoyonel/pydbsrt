@@ -139,9 +139,53 @@ tasks:
     cmds:
       - ./target/release/dbsrt export-ahash {{.CLI_ARGS}}
 
+  ahash:backfill-sidecars:
+    desc: Backfill missing/multi-track .ahash JSON sidecars locally using remote WAN streams (--dry-run, --limit N, --workers W<=4)
+    deps: [rs:build]
+    cmds:
+      - uv run --no-sync python scripts/ingestion/backfill_ahash_sidecars.py {{.CLI_ARGS}}
+
+  ahash:migrate-moviehash:
+    desc: Losslessly migrate legacy plaintext .ahash/.json files to <moviehash_16hex> naming (--dry-run, --limit N, --workers W<=4)
+    cmds:
+      - uv run --no-sync python scripts/ingestion/backfill_ahash_sidecars.py --migrate-to-moviehash {{.CLI_ARGS}}
+
   bench:ahash:matching:
     desc: Run exhaustive acoustic cross-correlation benchmark on .ahash files (Axe 1 temporal, Axe 2 discrimination, Axe 3 throughput)
     aliases: [bench:ahash]
     deps: [rs:build]
     cmds:
       - ./target/release/dbsrt bench-ahash {{.CLI_ARGS}}
+
+  bench:ahash:cuts:
+    desc: Benchmark acoustic aHash recognition and headless cvlc auto-sync on video cuts (100% offscreen)
+    cmds:
+      - uv run python scripts/benchmarks/bench_ahash_cuts.py {{.CLI_ARGS}}
+
+  bench:ahash:mih:matrix:
+    desc: Benchmark matrix comparing Linear Scan vs MIH-16 vs MIH-32 (Mono & Rayon) on aHash (106M) and pHash (2.7M)
+    cmds:
+      - cargo test --release --package dbsrt-index --test test_ahash_mih test_exhaustive_matrix_benchmark -- --ignored --nocapture
+
+  bench:ahash:coarse-to-fine:
+    desc: Benchmark coarse-to-fine aHash matching across downsampling factors K=1, 4, 8, 16, 31
+    cmds:
+      - cargo test --release --package dbsrt-index --test test_ahash_coarse_to_fine test_exhaustive_coarse_to_fine_benchmark -- --ignored --nocapture
+
+  bench:multimodal:scale:
+    desc: Run parallel multimodal multi-window scale & matrix benchmark (pHash + aHash) across local/LAN video libraries
+    deps: [rs:build]
+    cmds:
+      - ./target/release/dbsrt bench-scale-multimodal {{.CLI_ARGS}}
+
+  bench:multimodal:matrix:
+    desc: Evaluate full 24-technique matching matrix (pHash MIH-16/32/Linear + aHash C2F K=[1..32] + Dense MIH-16/32/Linear) on extracted JSONL probes
+    deps: [rs:build]
+    cmds:
+      - ./target/release/dbsrt bench-scale-multimodal --matrix-only {{.CLI_ARGS}}
+
+  eval:multimodal:audit:
+    desc: Parametric root-cause audit on missed modalities in scale benchmark (resolving failure taxonomies via local or remote streams)
+    deps: [rs:build]
+    cmds:
+      - uv run python scripts/benchmarks/audit_missed_modalities.py {{.CLI_ARGS}}

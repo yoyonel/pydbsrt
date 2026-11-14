@@ -21,6 +21,10 @@ pub const FFMPEG_THREADS_ENV: &str = "DBSRT_FFMPEG_THREADS";
 pub const FTP_USER_ENV: &str = "DBSRT_FTP_USER";
 /// Env var holding the FTP password for `ftp://` inputs without userinfo.
 pub const FTP_PASSWORD_ENV: &str = "DBSRT_FTP_PASSWORD";
+/// Standard fallback env var for FTP user when `DBSRT_FTP_USER` is unset.
+pub const FALLBACK_FTP_USER_ENV: &str = "FTP_USER";
+/// Standard fallback env var for FTP password when `DBSRT_FTP_PASSWORD` is unset.
+pub const FALLBACK_FTP_PASSWORD_ENV: &str = "FTP_PASSWORD";
 
 const FTP_SCHEME_PREFIX: &str = "ftp://";
 /// Reconnect (resuming with a Range request) when an `http(s)://` input drops mid-read, e.g.
@@ -44,6 +48,22 @@ pub fn ffmpeg_decode_threads() -> String {
 
 /// Builds `-ftp-user` / `-ftp-password` input options for an `ftp://` input that carries no
 /// userinfo. Returns no options for other inputs, URLs with userinfo, or an empty user.
+///
+/// # Arguments
+/// * `input` - Raw input filesystem path or network URI.
+/// * `user` - Optional FTP username.
+/// * `password` - Optional FTP password (omitted when `None` or empty).
+///
+/// # Returns
+/// Vector of FFmpeg CLI input option tokens (`-ftp-user`, `-ftp-password`), or empty `Vec`.
+///
+/// # Panics
+/// Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// 1. Accepts only `ftp://` URIs (case-insensitive) lacking inline `user@host` authority.
+/// 2. Rejects `None` or empty `user` values.
+/// 3. Appends `-ftp-password` only when `password` is `Some` and non-empty.
 pub fn ftp_credential_args(input: &str, user: Option<&str>, password: Option<&str>) -> Vec<String> {
     let Some(rest) = input
         .get(..FTP_SCHEME_PREFIX.len())
@@ -58,17 +78,58 @@ pub fn ftp_credential_args(input: &str, user: Option<&str>, password: Option<&st
         return Vec::new();
     };
     let mut args = vec!["-ftp-user".to_string(), user.to_string()];
-    if let Some(password) = password {
+    if let Some(password) = password.filter(|p| !p.is_empty()) {
         args.extend(["-ftp-password".to_string(), password.to_string()]);
     }
     args
 }
 
+/// Resolves the first non-empty string between a primary and fallback environment value.
+///
+/// # Arguments
+/// * `primary` - Primary environment variable value (`DBSRT_FTP_*`).
+/// * `fallback` - Fallback environment variable value (`FTP_*`).
+///
+/// # Returns
+/// `Some(String)` when at least one candidate is non-empty, else `None`.
+///
+/// # Panics
+/// Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// Filters out empty `""` strings on both primary and fallback candidates so unset/blank shell
+/// exports (`FTP_PASSWORD=""`) never emit empty `-ftp-password` flags.
+fn resolve_non_empty_env_pair(primary: Option<String>, fallback: Option<String>) -> Option<String> {
+    primary
+        .filter(|v| !v.is_empty())
+        .or_else(|| fallback.filter(|v| !v.is_empty()))
+}
+
 /// Appends FTP credential input options from `DBSRT_FTP_USER` / `DBSRT_FTP_PASSWORD`
 /// when `input` is an `ftp://` URL without userinfo. Must be called before the input argument.
+///
+/// # Arguments
+/// * `cmd` - Mutable FFmpeg/FFprobe `Command` builder prior to `-i <input>`.
+/// * `input` - Input media path or URI.
+///
+/// # Returns
+/// `()` (mutates `cmd` in place when applicable).
+///
+/// # Panics
+/// Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// Resolves `DBSRT_FTP_USER` -> `FTP_USER` and `DBSRT_FTP_PASSWORD` -> `FTP_PASSWORD`, discarding
+/// empty strings at both levels before delegating to [`ftp_credential_args`].
 pub fn apply_ftp_credentials(cmd: &mut Command, input: &Path) {
-    let user = std::env::var(FTP_USER_ENV).ok();
-    let password = std::env::var(FTP_PASSWORD_ENV).ok();
+    let user = resolve_non_empty_env_pair(
+        std::env::var(FTP_USER_ENV).ok(),
+        std::env::var(FALLBACK_FTP_USER_ENV).ok(),
+    );
+    let password = resolve_non_empty_env_pair(
+        std::env::var(FTP_PASSWORD_ENV).ok(),
+        std::env::var(FALLBACK_FTP_PASSWORD_ENV).ok(),
+    );
     cmd.args(ftp_credential_args(
         &input.to_string_lossy(),
         user.as_deref(),
@@ -382,6 +443,23 @@ mod tests {
         assert_eq!(
             ftp_credential_args("FTP://nas/dir@2024/x.mkv", Some("u"), None),
             ["-ftp-user", "u"]
+        );
+        // Empty fallback password must not emit -ftp-password "".
+        assert_eq!(
+            ftp_credential_args(url, Some("u"), Some("")),
+            ["-ftp-user", "u"]
+        );
+        assert_eq!(
+            resolve_non_empty_env_pair(Some(String::new()), Some(String::new())),
+            None
+        );
+        assert_eq!(
+            resolve_non_empty_env_pair(Some(String::new()), Some("fb".to_string())),
+            Some("fb".to_string())
+        );
+        assert_eq!(
+            resolve_non_empty_env_pair(Some("pri".to_string()), Some("fb".to_string())),
+            Some("pri".to_string())
         );
     }
 

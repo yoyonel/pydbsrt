@@ -1,6 +1,8 @@
 //! In-memory and memory-mapped search index for perceptual hashes.
 
+pub mod ahash;
 pub mod bktree;
+pub mod coarse_to_fine;
 pub mod db;
 pub mod dbphash;
 pub mod delta;
@@ -9,7 +11,15 @@ pub mod mih;
 pub mod mmap;
 pub mod trajectory_runner;
 
+pub use ahash::{
+    parse_ahash_media_name, AHashCatalog, AHashCatalogEntry, AHashCatalogMatch, AHashMih32Index,
+    AHashSearchCriteria, Mih32Entry, DEFAULT_AHASH_SEARCH_LIMIT, MIN_QUERY_FRAMES,
+};
 pub use bktree::{BkItem, BkTree};
+pub use coarse_to_fine::{
+    CoarseToFineAHashIndex, FineSearchCriteria, DEFAULT_COARSE_FACTOR_K, DEFAULT_FINE_MAX_DISTANCE,
+    DEFAULT_FINE_WINDOW_RADIUS_SEC,
+};
 pub use db::{
     parse_fps_from_phash_stem, validate_lang_code, DbClient, DbMatch, DbMediaRecord,
     DbSubtitleCoupling, COPY_BUFFER_FLUSH_THRESHOLD, COPY_BUFFER_INITIAL_CAPACITY,

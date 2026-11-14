@@ -208,10 +208,9 @@ impl CouplingRegistry {
         if !path.exists() {
             return Ok(Self::default());
         }
-        let file = fs::File::open(path)
-            .with_context(|| format!("Failed to open coupling registry at {:?}", path))?;
-        let reader = std::io::BufReader::new(file);
-        let reg: Self = serde_json::from_reader(reader)
+        let bytes = fs::read(path)
+            .with_context(|| format!("Failed to read coupling registry at {:?}", path))?;
+        let reg: Self = serde_json::from_slice(&bytes)
             .with_context(|| format!("Failed to parse coupling registry JSON at {:?}", path))?;
         Ok(reg)
     }

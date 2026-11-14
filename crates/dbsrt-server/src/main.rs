@@ -5,11 +5,11 @@ use clap::Parser;
 use dbsrt_core::OpenSubtitlesProvider;
 use dbsrt_server::constants::{
     DEFAULT_FILE_WATCH_DEBOUNCE_MS, DEFAULT_FILE_WATCH_INTERVAL_MS, DEFAULT_PG_ERROR_RETRY_SECS,
-    DEFAULT_PG_RECONNECT_INTERVAL_SECS,
+    DEFAULT_PG_RECONNECT_INTERVAL_SECS, DEFAULT_RAYON_WORKER_THREADS,
 };
 use dbsrt_server::{
-    bind_listener, create_router_with_state, remove_discovery_file, write_discovery_file, AppState,
-    AppStateInitOptions, DbConnectionConfig, DISCOVERY_FILE,
+    bind_listener, create_router_with_state, remove_discovery_file, resolve_default_ahash_dir,
+    write_discovery_file, AppState, AppStateInitOptions, DbConnectionConfig, DISCOVERY_FILE,
 };
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -50,6 +50,10 @@ pub struct ServerCli {
     /// Optional compiled .dbphash catalog file (env: DBSRT_DBPHASH)
     #[arg(long, env = "DBSRT_DBPHASH")]
     pub dbphash: Option<PathBuf>,
+
+    /// Optional directory storing .ahash acoustic fingerprint files (env: DBSRT_AHASH_DIR)
+    #[arg(long, env = "DBSRT_AHASH_DIR")]
+    pub ahash_dir: Option<PathBuf>,
 
     /// Optional PostgreSQL host (env: PSQL_IP). If omitted, runs in local Zero-DB mode.
     #[arg(long, env = "PSQL_IP")]
@@ -104,14 +108,22 @@ impl ServerCli {
         let db_config = self.db_host.map(|host| {
             DbConnectionConfig::new(host, self.db_port, self.db_user, self.db_pass, self.db_name)
         });
+        let dbphash_path = self.dbphash.or_else(|| {
+            (!self.agent && std::path::Path::new("data/catalog.dbphash").exists())
+                .then(|| PathBuf::from("data/catalog.dbphash"))
+        });
+        let ahash_dir = self
+            .ahash_dir
+            .or_else(|| (!self.agent).then(|| resolve_default_ahash_dir(&self.subtitles_dir)));
 
         let mut state = AppState::with_options(
             self.phash_dir,
             self.subtitles_dir,
             Arc::new(OpenSubtitlesProvider::new(None)),
             AppStateInitOptions {
-                dbphash_path: self.dbphash,
+                dbphash_path,
                 extra_phash_dirs: self.extra_phash_dirs,
+                ahash_dir,
             },
         );
         state.db_config = db_config;
@@ -339,6 +351,10 @@ where
 pub const DEFAULT_SERVER_WORKER_THREADS: usize = 4;
 
 fn main() -> Result<()> {
+    let _ = rayon::ThreadPoolBuilder::new()
+        .num_threads(DEFAULT_RAYON_WORKER_THREADS)
+        .build_global();
+
     tokio::runtime::Builder::new_multi_thread()
         .worker_threads(DEFAULT_SERVER_WORKER_THREADS)
         .enable_all()
@@ -404,6 +420,8 @@ mod tests {
             "/tmp/phash_extra",
             "--subtitles-dir",
             "data/SRT",
+            "--ahash-dir",
+            "/tmp/__dbsrt_empty_ahash__",
             "--dbphash",
             "/tmp/catalog.dbphash",
             "--db-host",
@@ -451,6 +469,8 @@ mod tests {
             sock.to_str().unwrap(),
             "--phash-dir",
             "/tmp/phash_primary",
+            "--ahash-dir",
+            "/tmp/__dbsrt_empty_ahash__",
         ])
         .expect("CLI must parse cleanly");
 

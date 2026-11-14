@@ -38,7 +38,9 @@ Cette page dresse le dictionnaire exhaustif de toutes les cibles d'orchestration
 | `task media:top:py` | `task media:top:py -- [--stats]` | Prototype historique Python Rich du moniteur TUI. |
 | `task coupling:certify` | `task coupling:certify` | Découvre et certifie en lot tous les fichiers `.phash` et `.srt` présents. |
 | `task coupling:relabel` | `task coupling:relabel -- --media <hash> [--sub <hash>] --lang <code>` | Modifie la langue ou la confiance d'un couplage existant. |
-| `task audio:export-ahash` | `task audio:export-ahash -- --media <input> --output <ahash>` | Extrait l'empreinte spectrale acoustique Haitsma-Kalker `.ahash` v1.0 via `dbsrt export-ahash`. |
+| `task audio:export-ahash` | `task audio:export-ahash -- --media <input> [--output <ahash>]` | Extrait l'empreinte spectrale acoustique Haitsma-Kalker `.ahash` v1.0 (`<moviehash_16hex>[.a<k>].86.1fps.ahash` + sidecar `<moviehash_16hex>[.a<k>].json`) via `dbsrt export-ahash`. |
+| `task ahash:backfill-sidecars` | `task ahash:backfill-sidecars -- [--dry-run] [--limit N] [--workers W]` | Rattrape et vérifie localement via flux WAN les sidecars JSON `<stem>.json` (`AhashSidecar` v1) de `data/__AHASH__/`. |
+| `task ahash:migrate-moviehash` | `task ahash:migrate-moviehash -- [--dry-run] [--limit N] [--workers W]` | Migre sans perte (0 FFT) les `.ahash`/`.json` nommés en clair vers la convention canonique `<moviehash_16hex>[.a<k>].86.1fps.ahash` + `<moviehash_16hex>[.a<k>].json` avec déduplication des doublons binaires. |
 
 ---
 
@@ -110,6 +112,12 @@ Cette page dresse le dictionnaire exhaustif de toutes les cibles d'orchestration
 | `task eval:nas-snippets` | Exécute la matrice d'évaluation quantitative sur l'ensemble des snippets NAS réels (`scripts/benchmarks/eval_exhaustive_nas_snippets.py`). |
 | `task eval:matching:multi-offset` | Benchmark de comparaison Mono-Fenêtre ($t=50\%$) vs Multi-Fenêtres Spatio-Temporel ($20\%, 50\%, 80\%$) sur corpus difficile (`scripts/benchmarks/eval_multi_offset_matching.py`). |
 | `task bench:ahash:matching` | Exécute l'évaluation métrologique exhaustive du matcher acoustique aHash (Axe 1 temporal, Axe 2 discrimination, Axe 3 débit) via `dbsrt bench-ahash`. (Alias : `task bench:ahash`). |
+| `task bench:ahash:cuts` | Exécute le benchmark de reconnaissance acoustique aHash et d'auto-synchronisation headless `cvlc` sur les extraits vidéo (`scripts/benchmarks/bench_ahash_cuts.py`). |
+| `task bench:ahash:mih:matrix` | Exécute la matrice comparative `Linear Scan` vs `MIH-16` vs `MIH-32` (Mono & Rayon) sur les catalogues aHash (106M trames à 86.125 fps) et pHash (2.7M trames). |
+| `task bench:ahash:coarse-to-fine` | Évalue l'index hiérarchique Coarse-to-Fine aHash à travers les facteurs de décimation $K \in \{1, 4, 8, 16, 31\}$. |
+| `task bench:multimodal:scale` | Exécute en parallèle (`--workers`) le benchmark multimodal multi-fenêtres et la matrice 24 techniques (pHash + aHash) sur les bibliothèques vidéo via `dbsrt bench-scale-multimodal`. |
+| `task bench:multimodal:matrix` | Rejoue hors-ligne la matrice comparative complète des 24 techniques (`pHash` MIH-16/32/Linear + `aHash` C2F $K \in [1, 32]$ + Dense MIH-16/32/Linear) à partir d'un journal JSONL existant (`--matrix-only`). |
+| `task eval:multimodal:audit` | Exécute l'audit forensique paramétrique des modalités manquées sur le rapport JSONL du benchmark multimodal (`scripts/benchmarks/audit_missed_modalities.py`). |
 | `task eval:cuts:audit` | Exécute l'audit complet de performance du pipeline sur l'ensemble des cuts vidéo (`scripts/ingestion/audit_cuts_pipeline.py`). |
 | `task eval:cuts:audit:rejected` | Exécute l'analyse forensique exhaustive des cuts rejetés et met à jour la documentation (`scripts/ingestion/audit_rejected_cuts.py`). |
 
@@ -167,6 +175,7 @@ Cette page dresse le dictionnaire exhaustif de toutes les cibles d'orchestration
 | `task o2switch:batch:movies` | Exécute l'ingestion par batch distante sur les films vierges (/video, supporte `--daemon`, `--fresh-only`, `--retry-failed`, `--max-extraction-secs`). |
 | `task o2switch:batch:all` | Exécute l'ingestion batch unifiée sur l'intégralité du corpus distant (/tvshow + /video). |
 | `task o2switch:batch:ahash:all` | Exécute l'extraction batch audio pure (`--mode ahash`) en streaming sur l'ensemble de la bibliothèque. |
+| `task o2switch:ahash:backfill` | Exécute `backfill_ahash_sidecars.py` sur `o2switch` (`--dry-run`, `--limit`, `--workers <= 4`) pour peupler/vérifier `~/dbsrt/data/__AHASH__/*.json`. |
 | `task o2switch:batch:status` | Vérifie l'état d'exécution du démon batch (PID, CPU, mémoire, progression détaillée de la file). |
 | `task o2switch:batch:pause` | Met en pause douce le batch distant sur o2switch (`run/batch_paused` : les jobs en cours finissent, aucun nouveau job dépilé). |
 | `task o2switch:batch:resume` | Reprend l'exécution du batch distant sur o2switch en supprimant `run/batch_paused`. |

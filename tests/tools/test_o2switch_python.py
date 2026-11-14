@@ -35,3 +35,16 @@ def test_the_audit_runs_on_o2switch_through_bin_python3() -> None:
     ctl = (ROOT / "scripts/infra/o2switch/o2switch_ctl.sh").read_text()
 
     assert "./bin/python3 -I scripts/o2switch_audit_remote.py" in ctl
+
+
+def test_ahash_backfill_syncs_worker_and_escapes_remote_path_and_pull_excludes_partials() -> None:
+    ctl = (ROOT / "scripts/infra/o2switch/o2switch_ctl.sh").read_text()
+
+    _, backfill_block = ctl.split("ahash-backfill)", 1)
+    assert "scripts/workers/o2switch_batch_worker.py" in backfill_block
+    assert r"PATH=\"\$HOME/${REMOTE_BASE}/bin:\$PATH\"" in backfill_block
+
+    pull_section = ctl.split("  pull-catalog)", 1)[1].split("  backup-nas)", 1)[0]
+    dir_rsyncs = [line for line in pull_section.splitlines() if "rsync " in line and '/" "' in line]
+    assert len(dir_rsyncs) == 5
+    assert all("--exclude '*.tmp.*'" in line and "--exclude '*.partial'" in line for line in dir_rsyncs)

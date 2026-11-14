@@ -4,10 +4,10 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use dbsrt_core::HwAccel;
 
 use crate::commands::{
-    BenchAhashArgs, BenchCutsArgs, BenchVideoArgs, CertifyCouplingArgs, ExportAhashArgs,
-    ExportPhashArgs, FetchSubtitlesArgs, ImportPhashArgs, InspectMediaArgs, MediaAddArgs,
-    MigrateArgs, PackArgs, RecognizeArgs, RelabelCouplingArgs, RetargetArgs, ScanLibraryArgs,
-    TopArgs,
+    AhashSidecarArgs, BenchAhashArgs, BenchCutsArgs, BenchVideoArgs, CertifyCouplingArgs,
+    ExportAhashArgs, ExportPhashArgs, FetchSubtitlesArgs, ImportPhashArgs, InspectMediaArgs,
+    MediaAddArgs, MigrateArgs, PackArgs, RecognizeArgs, RelabelCouplingArgs, RetargetArgs,
+    ScanLibraryArgs, TopArgs,
 };
 use crate::constants::{
     DEFAULT_BENCH_PHASH_COUNT, DEFAULT_POSTGRES_DB, DEFAULT_POSTGRES_PASS, DEFAULT_POSTGRES_PORT,
@@ -129,6 +129,10 @@ pub enum Commands {
     #[command(name = "export-ahash", visible_alias = "export:ahash")]
     ExportAhash(ExportAhashArgs),
 
+    /// Generate or verify the JSON sidecar (`<stem>.json`) for an existing .ahash fingerprint
+    #[command(name = "ahash:sidecar", visible_alias = "ahash-sidecar")]
+    AhashSidecar(AhashSidecarArgs),
+
     /// Zero-DB fast search across directory of .phash files via memory mapping
     ScanLibrary(ScanLibraryArgs),
 
@@ -169,6 +173,10 @@ pub enum Commands {
     /// Real-time full-frame TUI process monitor and media studio
     #[command(name = "top", visible_aliases = ["studio", "ops"])]
     Top(TopArgs),
+
+    /// Benchmark multimodal multi-window matching (pHash vs aHash) at massive scale
+    #[command(name = "bench-scale-multimodal", visible_aliases = ["bench:scale", "bench:multimodal:scale"])]
+    BenchScaleMultimodal(crate::commands::BenchScaleMultimodalArgs),
 }
 
 #[cfg(test)]
