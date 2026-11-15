@@ -21,6 +21,7 @@ Cette page dresse le dictionnaire exhaustif de toutes les cibles d'orchestration
 | `task dev` | `task up` | Démarre la pile complète de développement (Docker DB, compilation Rust, certification, daemon, plugin VLC, serveur MkDocs). |
 | `task down` | `task stop` | Arrête proprement l'ensemble des démons d'arrière-plan et conteneurs Docker. |
 | `task status` | - | Sonde d'intégrité unifiée affichant l'état des services HTTP et le décompte des entités SQL. |
+| `task status:cluster` | `task doctor`, `task cluster:status` | Sonde multi-nœuds parallèle (`local` + `rpi4` + `o2switch`) via `dbsrt doctor` : alertes actives, compteurs d'erreurs `1h`/`24h`/`72h`, fraîcheur d'index et parité `SHA-256` des scripts déployés (code retour `2` si alerte critique ou dérive). |
 | `task studio` | - | Démarre la base de données, applique les couplages et lance le Studio sur `http://127.0.0.1:8765/studio`. |
 | `task build` | `task rs:build` | Compile l'ensemble des crates du workspace Cargo en mode optimisé (`--release`). |
 | `task clean` | - | Purge tous les fichiers temporaires, caches de couverture et binaires sous `target/`. |

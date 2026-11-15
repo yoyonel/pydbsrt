@@ -70,7 +70,61 @@ Exposition des métriques au format Prometheus (`text/plain; version=0.0.4`).
 Retourne les dernières lignes du journal d'exécution en mémoire vive du serveur.
 
 ### `GET /monitoring` & `GET /top`
-Tableau de bord web interactif monopage (HTML5/CSS/JS), responsive pour smartphones (4G/5G) et ordinateurs. Affiche la progression globale de la file batch, les workers actifs, la télémétrie du superviseur RPi4 et le journal en direct.
+Tableau de bord web interactif monopage (HTML5/CSS/JS), responsive pour smartphones (4G/5G) et ordinateurs. Affiche en en-tête une **bannière d'alerte persistante** dès que `active_alerts_count > 0`, ainsi que la progression globale de la file batch, les workers actifs, la télémétrie du superviseur RPi4 et le journal en direct.
+
+### `GET /v1/monitoring/alerts`
+Hub centralisé d'alertes temps réel agrégeant l'état opérationnel local du nœud (`dbsrt-server`, `batch_worker`, `rpi4_supervisor`, `faultwatch`, `dataset`) en lecture bornée sans balayage complet des journaux.
+
+- **En-têtes de réponse** : `X-Server-Time-Ms: <epoch_ms>` pour la calibration d'horloge côté client.
+- **Sources inspectées** :
+  - `run/supervisor_status.json` (`state == "degraded"`, `launch_error_count > 0`, `failed_batch_types` non vide, battement de cœur `> 180 s`).
+  - `run/batch_aborted` (sentinelle d'arrêt d'urgence après échecs rapides consécutifs).
+  - `run/batch_queue.json` (`failed_targets > 0`).
+  - Signatures d'erreurs (`❌`, `ERROR`, `FATAL`, `CRITICAL`, `PANIC`, `Traceback`) dédupliquées sur les derniers `64 KiB` de `logs/batch_worker.log`, `logs/dbsrt-server.log` et `logs/rpi4_supervisor.log` avec compteurs glissants `1h` / `24h` / `72h` et masquage des identifiants FTP/HTTP (`***`).
+  - Médias placés sur liste noire (`>= 3` échecs consécutifs par `video_stem` dans `logs/batch_events.jsonl` ou `data/reports/batch_tvshow_nightly.jsonl`, lecture bornée `256 KiB`).
+  - Fautes et délais d'ordonnancement CloudLinux LVE dans `logs/faultwatch/*.jsonl` (`128 KiB` max, fenêtre `24h`).
+  - Fraîcheur de l'index `data/reports/nas_ftp_index.json` (alerte `warning` au-delà du TTL de `24h` / `86 400 s`).
+- **Réponse (`200 OK`)** :
+  ```json
+  {
+    "status": "critical",
+    "active_alerts_count": 2,
+    "alerts": [
+      {
+        "id": "batch_aborted",
+        "severity": "critical",
+        "component": "batch_worker",
+        "summary": "Fast-failure abort sentinel active (NAS unreachable)",
+        "count": 1,
+        "last_seen": "2026-11-15T16:10:00Z"
+      },
+      {
+        "id": "log_error:batch_worker:1",
+        "severity": "warning",
+        "component": "batch_worker",
+        "summary": "ERROR: connection reset by peer on ftp://***@nas:21",
+        "count": 4,
+        "last_seen": "2026-11-15T16:09:42Z",
+        "window_counts": { "h1": 2, "h24": 4, "h72": 4, "unparsed": 0 }
+      }
+    ],
+    "metrics": {
+      "supervisor_state": "degraded",
+      "supervisor_launch_errors": 2,
+      "supervisor_heartbeat_age_secs": 45,
+      "batch_aborted": true,
+      "failed_queue_targets": 1,
+      "blacklisted_media_count": 0,
+      "log_error_signatures": 1,
+      "log_errors_1h": 2,
+      "log_errors_24h": 4,
+      "log_errors_72h": 4,
+      "lve_fault_entries_24h": 0,
+      "nas_ftp_index_age_secs": 3600
+    },
+    "server_time_iso": "2026-11-15T16:10:05Z"
+  }
+  ```
 
 ### `GET /v1/monitoring/telemetry`
 Snapshot unifié en JSON de la télémétrie du serveur (statistiques système, file batch, workers d'extraction actifs, télémétrie et logs du superviseur RPi4, derniers événements terminés).
@@ -112,10 +166,11 @@ Flux continu Server-Sent Events (SSE, `text/event-stream`) poussant l'état cons
 - **Authentification** : en-têtes HTTP (`Authorization: Bearer <clé>`, `X-API-Key`) ou paramètres d'URL query `?token=<clé>` / `?key=<clé>` (requis pour l'`EventSource` natif du navigateur).
 - **Structure de l'événement** :
   - `event: state`
-  - `data: {"telemetry": {...}, "top": {...}, "pipeline": {...}}`
+  - `data: {"telemetry": {...}, "top": {...}, "pipeline": {...}, "alerts": {...}}`
     - `telemetry` : [`MonitoringTelemetryResponse`](#get-v1monitoringtelemetry) (système, file batch, workers, superviseur, audit).
     - `top` : [`dbsrt top` snapshot](#get-v1monitoringtop) paginé en `limit=0` (métriques chaudes uniquement, zéro surcoût de liste catalogue).
     - `pipeline` : chronométrie des 6 étapes du dernier matching exécuté (FFmpeg, WAN, MIH, SRT).
+    - `alerts` : [`MonitoringAlertsResponse`](#get-v1monitoringalerts) (statut consolidé, alertes actives triées par sévérité et compteurs glissants `1h` / `24h` / `72h`).
 - `200 OK` : flux persistant HTTP/1.1 ou HTTP/2 streaming.
 
 ### `POST /v1/supervisor/heartbeat`

@@ -5,9 +5,9 @@ use dbsrt_core::HwAccel;
 
 use crate::commands::{
     AhashSidecarArgs, BenchAhashArgs, BenchCutsArgs, BenchVideoArgs, CertifyCouplingArgs,
-    ExportAhashArgs, ExportPhashArgs, FetchSubtitlesArgs, ImportPhashArgs, InspectMediaArgs,
-    MediaAddArgs, MigrateArgs, PackAhashArgs, PackArgs, RecognizeArgs, RelabelCouplingArgs,
-    RetargetArgs, ScanLibraryArgs, TopArgs,
+    DoctorArgs, ExportAhashArgs, ExportPhashArgs, FetchSubtitlesArgs, ImportPhashArgs,
+    InspectMediaArgs, MediaAddArgs, MigrateArgs, PackAhashArgs, PackArgs, RecognizeArgs,
+    RelabelCouplingArgs, RetargetArgs, ScanLibraryArgs, TopArgs,
 };
 use crate::constants::{
     DEFAULT_BENCH_PHASH_COUNT, DEFAULT_POSTGRES_DB, DEFAULT_POSTGRES_PASS, DEFAULT_POSTGRES_PORT,
@@ -177,6 +177,10 @@ pub enum Commands {
     /// Real-time full-frame TUI process monitor and media studio
     #[command(name = "top", visible_aliases = ["studio", "ops"])]
     Top(TopArgs),
+
+    /// Multi-node cluster observability probe (errors, SHA-256 script parity, freshness across local/RPi4/o2switch)
+    #[command(name = "doctor", visible_alias = "status:cluster")]
+    Doctor(DoctorArgs),
 
     /// Benchmark multimodal multi-window matching (pHash vs aHash) at massive scale
     #[command(name = "bench-scale-multimodal", visible_aliases = ["bench:scale", "bench:multimodal:scale"])]

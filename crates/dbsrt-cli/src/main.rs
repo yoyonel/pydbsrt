@@ -3,7 +3,7 @@ use clap::Parser;
 use dbsrt_cli::cli::{Cli, Commands};
 use dbsrt_cli::commands::{
     run_ahash_sidecar, run_bench_ahash, run_bench_cuts, run_bench_phash, run_bench_video,
-    run_certify_coupling, run_export_ahash, run_export_phash, run_fetch_subtitles,
+    run_certify_coupling, run_doctor, run_export_ahash, run_export_phash, run_fetch_subtitles,
     run_import_phash, run_inspect_media, run_match_trajectory, run_media_add, run_migrate,
     run_pack, run_pack_ahash, run_recognize_media, run_relabel_coupling, run_retarget_subtitles,
     run_scan_library, run_top,
@@ -100,6 +100,12 @@ fn dispatch_ops(cmd: Commands) -> Result<()> {
         Commands::Migrate(args) => run_migrate(args)?,
         Commands::MediaAdd(args) => drop(run_single_thread(run_media_add(&args))?),
         Commands::Top(args) => run_top(&args)?,
+        Commands::Doctor(args) => {
+            let exit_code = run_doctor(&args)?;
+            if exit_code != 0 {
+                std::process::exit(exit_code);
+            }
+        }
         _ => unreachable!(),
     }
     Ok(())

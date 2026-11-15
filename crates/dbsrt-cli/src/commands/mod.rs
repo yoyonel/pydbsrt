@@ -6,6 +6,7 @@ pub mod bench_ahash;
 pub mod bench_matrix;
 pub mod bench_scale;
 pub mod certify;
+pub mod doctor;
 pub mod export;
 pub mod export_ahash;
 pub mod fetch;
@@ -32,6 +33,10 @@ pub use bench_scale::{run_bench_scale_multimodal, BenchScaleMultimodalArgs};
 pub use certify::{
     detect_cli_subtitle_lang, detect_cli_subtitle_lang_status, run_certify_coupling,
     CertifyCouplingArgs,
+};
+pub use doctor::{
+    evaluate_cluster_doctor, run_doctor, ClusterDoctorReport, DoctorArgs, DoctorSeverity,
+    ParityStatus, DOCTOR_EXIT_ALERT, DOCTOR_EXIT_OK,
 };
 pub use export::{run_export_phash, ExportPhashArgs};
 pub use export_ahash::{run_export_ahash, ExportAhashArgs};

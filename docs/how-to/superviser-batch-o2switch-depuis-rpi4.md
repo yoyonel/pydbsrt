@@ -231,6 +231,24 @@ task o2switch:batch:stop
 task o2switch:batch:tvshow -- --fresh-only --daemon   # ou o2switch:batch:movies
 ```
 
+### Diagnostic Multi-Nœuds & Détection des Dérives (`task status:cluster`)
+
+Pour auditer simultanément l'état des 3 nœuds (`local`, `rpi4`, `o2switch`) en moins de 3 secondes et détecter toute désynchronisation de scripts déployés :
+
+```bash
+# Vue tabulaire consolidée (alertes actives, erreurs 1h/24h/72h, parité SHA-256, fraîcheur index)
+task status:cluster
+
+# Sortie JSON structurée pour automatisation ou CI (code retour 2 si CRITICAL ou SHA256_DRIFT)
+task status:cluster -- --json
+
+# Sondage hors-ligne restreint au poste local uniquement
+task status:cluster -- --local-only
+```
+
+- **Parité `SHA-256` inter-nœuds** : `dbsrt doctor` compare les empreintes des 5 scripts critiques (`o2switch_batch_worker.py`, `batch_worker/cli.py`, `o2switch_ctl.sh`, `freebox_batch_ctl.sh`, `rpi4_o2switch_supervisor.py`). Si `SHA256_DRIFT` apparaît, réalignez les copies distantes via `task o2switch:sync` et `task rpi4:supervisor:install`.
+- **Hub d'alertes HTTP & Portail Web** : Chaque instance `dbsrt-server` expose `GET /v1/monitoring/alerts` (également poussé via SSE dans `GET /v1/monitoring/events`) et affiche automatiquement une bannière d'alerte persistante en haut de `/monitoring` dès qu'une anomalie (`batch_aborted`, superviseur `degraded`, médias blacklistés `>= 3`, fautes LVE `faultwatch` ou index `nas_ftp_index.json` périmé) est active.
+
 ---
 
 ## 🔐 Variables d'environnement
