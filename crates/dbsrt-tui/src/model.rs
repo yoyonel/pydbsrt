@@ -944,6 +944,8 @@ pub enum ViewPage {
     Trajectory,
     /// Full-frame inspection and cut-by-cut diagnostics of selected trajectory audit.
     TrajectoryInspection,
+    /// Full-frame multi-node cluster observability view (`[8/u]`).
+    Cluster,
     /// Full-frame contextual keybinding and operational cheat sheet (`[?]`).
     Help,
 }
@@ -960,11 +962,12 @@ pub enum HelpTab {
     MediaSources,
     System,
     Trajectory,
+    Cluster,
 }
 
 impl HelpTab {
     /// All help tabs in display order.
-    pub const ALL: [HelpTab; 8] = [
+    pub const ALL: [HelpTab; 9] = [
         HelpTab::General,
         HelpTab::ActiveJobs,
         HelpTab::StatsHistory,
@@ -973,6 +976,7 @@ impl HelpTab {
         HelpTab::MediaSources,
         HelpTab::System,
         HelpTab::Trajectory,
+        HelpTab::Cluster,
     ];
 
     /// Returns the tab title badge string.
@@ -986,6 +990,7 @@ impl HelpTab {
             HelpTab::MediaSources => "[5/s] Sources",
             HelpTab::System => "[6/y] Système",
             HelpTab::Trajectory => "[7/t] Trajectoires",
+            HelpTab::Cluster => "[8/u] Cluster",
         }
     }
 
@@ -999,14 +1004,15 @@ impl HelpTab {
             HelpTab::MediaBrowser => HelpTab::MediaSources,
             HelpTab::MediaSources => HelpTab::System,
             HelpTab::System => HelpTab::Trajectory,
-            HelpTab::Trajectory => HelpTab::General,
+            HelpTab::Trajectory => HelpTab::Cluster,
+            HelpTab::Cluster => HelpTab::General,
         }
     }
 
     /// Cycles to the previous contextual help tab.
     pub fn prev(&self) -> Self {
         match self {
-            HelpTab::General => HelpTab::Trajectory,
+            HelpTab::General => HelpTab::Cluster,
             HelpTab::ActiveJobs => HelpTab::General,
             HelpTab::StatsHistory => HelpTab::ActiveJobs,
             HelpTab::Completed => HelpTab::StatsHistory,
@@ -1014,6 +1020,7 @@ impl HelpTab {
             HelpTab::MediaSources => HelpTab::MediaBrowser,
             HelpTab::System => HelpTab::MediaSources,
             HelpTab::Trajectory => HelpTab::System,
+            HelpTab::Cluster => HelpTab::Trajectory,
         }
     }
 
@@ -1033,9 +1040,277 @@ impl HelpTab {
             ViewPage::MediaSources => HelpTab::MediaSources,
             ViewPage::System => HelpTab::System,
             ViewPage::Trajectory | ViewPage::TrajectoryInspection => HelpTab::Trajectory,
+            ViewPage::Cluster => HelpTab::Cluster,
             ViewPage::Help => HelpTab::General,
         }
     }
+}
+
+/// Multi-node cluster severity badge shared across `[8/u] Cluster` and header indicators.
+///
+/// # Data Flow & Invariants
+/// Ordered `Ok < Warning < Critical` so roll-ups preserve the worst observed condition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ClusterSeverity {
+    /// Healthy / nominal cluster or node state.
+    #[default]
+    Ok,
+    /// Non-blocking warning (stale dataset, unreachable remote node, historical errors).
+    Warning,
+    /// Critical alert (active batch abort, degraded supervisor, SHA-256 script drift).
+    Critical,
+}
+
+impl ClusterSeverity {
+    /// Returns the short uppercase badge displayed in TUI tables and headers.
+    ///
+    /// # Arguments
+    /// * `&self` - Severity enum variant.
+    ///
+    /// # Returns
+    /// `"OK"`, `"WARN"`, or `"CRIT"`.
+    ///
+    /// # Panics
+    /// Guaranteed panic-free.
+    ///
+    /// # Data Flow & Invariants
+    /// Pure constant lookup.
+    pub const fn badge(&self) -> &'static str {
+        match self {
+            Self::Ok => "OK",
+            Self::Warning => "WARN",
+            Self::Critical => "CRIT",
+        }
+    }
+}
+
+/// Cross-node SHA-256 script parity status displayed in `[8/u] Cluster`.
+///
+/// # Data Flow & Invariants
+/// Mirrors `dbsrt doctor` parity outcomes without introducing crate circular dependencies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum ClusterParityStatus {
+    /// All reachable nodes hold matching SHA-256 digests against `local`.
+    #[default]
+    #[serde(rename = "OK")]
+    Ok,
+    /// Diverging SHA-256 digest or missing mandatory deployed script detected.
+    #[serde(rename = "SHA256_DRIFT")]
+    Sha256Drift,
+    /// Remote parity skipped (`--local-only` or remotes unreachable) while `local` exists.
+    #[serde(rename = "LOCAL_ONLY")]
+    LocalOnly,
+}
+
+impl ClusterParityStatus {
+    /// Returns the short uppercase parity label rendered in the TUI matrix.
+    ///
+    /// # Arguments
+    /// * `&self` - Parity status enum variant.
+    ///
+    /// # Returns
+    /// `"OK"`, `"SHA256_DRIFT"`, or `"LOCAL_ONLY"`.
+    ///
+    /// # Panics
+    /// Guaranteed panic-free.
+    ///
+    /// # Data Flow & Invariants
+    /// Pure constant lookup.
+    pub const fn badge(&self) -> &'static str {
+        match self {
+            Self::Ok => "OK",
+            Self::Sha256Drift => "SHA256_DRIFT",
+            Self::LocalOnly => "LOCAL_ONLY",
+        }
+    }
+}
+
+/// Deduplicated log error signature surfaced inside `[8/u] Cluster`.
+///
+/// # Data Flow & Invariants
+/// Stores already-redacted representative error messages and rolling window counts.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClusterErrorSignature {
+    /// Redacted human-readable representative error line.
+    pub summary: String,
+    /// Occurrence count within the tracked log window (`72h` or bounded tail).
+    pub count: usize,
+    /// Latest ISO-8601 UTC timestamp if parseable.
+    #[serde(default)]
+    pub last_seen: Option<String>,
+    /// True when the signature carries critical markers or occurred within `1h`.
+    pub critical: bool,
+}
+
+/// Per-component log error summary (`dbsrt-server`, `batch_worker`, `rpi4_supervisor`).
+///
+/// # Data Flow & Invariants
+/// Enforces `h1 <= h24 <= h72` on timestamped log entries.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClusterComponentErrorSummary {
+    /// Component name.
+    pub component: String,
+    /// Errors within last 1 hour (`<= 3,600s`).
+    pub h1: usize,
+    /// Errors within last 24 hours (`<= 86,400s`).
+    pub h24: usize,
+    /// Errors within last 72 hours (`<= 259,200s`).
+    pub h72: usize,
+    /// Total error lines inside the bounded log tail.
+    pub tail_total: usize,
+    /// Top deduplicated error signatures.
+    #[serde(default)]
+    pub top_signatures: Vec<ClusterErrorSignature>,
+}
+
+/// Artifact or queue freshness badge for one cluster node.
+///
+/// # Data Flow & Invariants
+/// `stale` is true if and only if `exists` is true and `age_secs > ttl_secs`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClusterArtifactFreshness {
+    /// Artifact filename (`nas_ftp_index.json`, `batch_queue.json`, etc.).
+    pub name: String,
+    /// True when file exists on the probed node.
+    pub exists: bool,
+    /// Age in seconds since last modification when `exists` is true.
+    #[serde(default)]
+    pub age_secs: Option<u64>,
+    /// Configured staleness TTL threshold in seconds.
+    pub ttl_secs: u64,
+    /// True when age exceeds `ttl_secs`.
+    pub stale: bool,
+}
+
+/// Node-level health snapshot (`local`, `rpi4`, `o2switch`) displayed in `[8/u] Cluster`.
+///
+/// # Data Flow & Invariants
+/// Aggregates supervisor state, batch aborts, failed targets, blacklisted stems, LVE faults,
+/// rolling `1h`/`24h`/`72h` error counters, and probe transport latency.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClusterNodeSnapshot {
+    /// Canonical node identifier (`"local"`, `"rpi4"`, `"o2switch"`).
+    pub node: String,
+    /// Probed target host or local directory path.
+    pub target: String,
+    /// True when the probe reached and inspected the node.
+    pub reachable: bool,
+    /// True when skipped via local-only mode.
+    pub skipped: bool,
+    /// Probe wall-clock latency in milliseconds.
+    pub probe_ms: u64,
+    /// Rolled-up node health severity.
+    pub status: ClusterSeverity,
+    /// Transport/SSH diagnostic message when `reachable == false`.
+    #[serde(default)]
+    pub probe_error: Option<String>,
+    /// True/false when `dbsrt-server` daemon status was probed.
+    #[serde(default)]
+    pub daemon_running: Option<bool>,
+    /// Supervisor status (`healthy`, `degraded`, etc.) from `run/supervisor_status.json`.
+    #[serde(default)]
+    pub supervisor_state: Option<String>,
+    /// True when `run/batch_aborted` sentinel file is active.
+    pub batch_aborted: bool,
+    /// Failed target count in `run/batch_queue.json`.
+    pub failed_queue_targets: usize,
+    /// Distinct `video_stem` entries hitting `>= 3` consecutive failures.
+    pub blacklisted_stems: usize,
+    /// CloudLinux LVE throttle/fault lines observed over the last 24 hours.
+    pub lve_faults_24h: usize,
+    /// Aggregate 1-hour error count across all node components.
+    pub err_h1: usize,
+    /// Aggregate 24-hour error count across all node components.
+    pub err_h24: usize,
+    /// Aggregate 72-hour error count across all node components.
+    pub err_h72: usize,
+    /// Total error lines across component log tails.
+    pub err_tail_total: usize,
+    /// Per-component breakdown containing deduplicated error signatures.
+    #[serde(default)]
+    pub components: Vec<ClusterComponentErrorSummary>,
+    /// Freshness badges for tracked datasets and queues.
+    #[serde(default)]
+    pub freshness: Vec<ClusterArtifactFreshness>,
+}
+
+/// Cross-node SHA-256 parity row rendered in `[8/u] Cluster`.
+///
+/// # Data Flow & Invariants
+/// Tracks hexadecimal digests per node and explanatory drift diagnostics.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClusterScriptParity {
+    /// Canonical script filename.
+    pub script: String,
+    /// SHA-256 hex digest on `local`.
+    #[serde(default)]
+    pub local_sha256: Option<String>,
+    /// SHA-256 hex digest on `rpi4`.
+    #[serde(default)]
+    pub rpi4_sha256: Option<String>,
+    /// SHA-256 hex digest on `o2switch`.
+    #[serde(default)]
+    pub o2switch_sha256: Option<String>,
+    /// Evaluated parity outcome.
+    pub status: ClusterParityStatus,
+    /// Drift detail string when `status != Ok`.
+    #[serde(default)]
+    pub detail: Option<String>,
+}
+
+/// Individual alert row (`[CRIT]` or `[WARN]`) displayed in `[8/u] Cluster`.
+///
+/// # Data Flow & Invariants
+/// Sorted critical-first before rendering so urgent blockers stay immediately visible.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClusterAlertEntry {
+    /// Originating node (`"local"`, `"rpi4"`, `"o2switch"`, or `"parity"`).
+    pub node: String,
+    /// Alert severity.
+    pub severity: ClusterSeverity,
+    /// Component or parity rule identifier.
+    pub component: String,
+    /// Redacted human-readable description.
+    pub summary: String,
+}
+
+/// Complete multi-node cluster health snapshot rendered by `[8/u] Cluster`.
+///
+/// # Data Flow & Invariants
+/// Populated asynchronously by the `dbsrt doctor` background probe thread inside `dbsrt top`
+/// and updated deterministically whenever manual refresh (`[a]`) or periodic interval triggers.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClusterHealthTelemetry {
+    /// Rolled-up cluster severity.
+    pub status: ClusterSeverity,
+    /// Equivalent CLI exit code (`0` nominal/warn, `2` critical alert or SHA-256 drift).
+    pub exit_code: i32,
+    /// ISO-8601 UTC timestamp of latest probe completion.
+    pub checked_at_iso: String,
+    /// Parallel cluster probe elapsed duration in milliseconds.
+    pub elapsed_ms: u64,
+    /// Count of active critical alerts.
+    pub active_critical_count: usize,
+    /// Count of active warning alerts.
+    pub active_warning_count: usize,
+    /// Count of scripts flagged with `SHA256_DRIFT`.
+    pub sha256_drift_count: usize,
+    /// True when probe executed in local-only mode (e.g., on CloudLinux LVE or `--local-only`).
+    #[serde(default)]
+    pub local_only_probe: bool,
+    /// True while a manual/periodic background probe refresh is in flight.
+    #[serde(default)]
+    pub refreshing: bool,
+    /// Per-node probe snapshots (`local`, `rpi4`, `o2switch`).
+    #[serde(default)]
+    pub nodes: Vec<ClusterNodeSnapshot>,
+    /// Cross-node critical script SHA-256 parity rows.
+    #[serde(default)]
+    pub script_parity: Vec<ClusterScriptParity>,
+    /// Aggregated alerts across all nodes and script parity checks.
+    #[serde(default)]
+    pub alerts: Vec<ClusterAlertEntry>,
 }
 
 /// Volatile batch processing queue progress metrics.
@@ -1136,6 +1411,9 @@ pub struct SystemTelemetry {
     /// Name of currently active/selected trajectory audit file.
     #[serde(default)]
     pub active_trajectory_file: Option<String>,
+    /// Multi-node cluster observability snapshot (`dbsrt doctor` telemetry).
+    #[serde(default)]
+    pub cluster: Option<ClusterHealthTelemetry>,
 }
 
 impl SystemTelemetry {

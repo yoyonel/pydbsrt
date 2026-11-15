@@ -325,6 +325,15 @@ dbsrt top [OPTIONS]
      - **Mémoire & Stockage** : RAM vive (utilisée, totale, pourcentage), swap actif, et espace disque libre sur la partition de travail.
      - **Débits & Flux Réseau** : bande passante ingress (`Réseau Net RX` physique dédié ou `Réseau compte RX` isolé par compte sur CloudLinux LVE), débit d'ingestion pHash/aHash et volume global cumulé sur la session.
 
+8. **Onglet 7 : Audit des Trajectoires Spatiotemporelles (`[7]` ou `[t]`)** :
+   - Vue d'analyse multi-cuts et timeline sparkline évaluant l'alignement temporel monotone des empreintes denses `pHash`, avec inspection détaillée coupe par coupe (`[Enter]`) et sélection de campagne d'audit (`[F]`).
+
+9. **Onglet 8 : Observabilité Cluster Multi-Nœuds (`[8]` ou `[u]`)** :
+   - Intégration temps réel non-bloquante de la sonde `dbsrt doctor` (`local`, `rpi4`, `o2switch`, rafraîchissement automatique toutes les `30s` en arrière-plan ou immédiat via `[a]`, bascule automatique `--local-only` sur hôte partagé CloudLinux LVE).
+   - **Bandeau En-Tête & Onglet** : indicateur synthétique `Cluster: OK / WARN / CRIT` dans le header et coloration dynamique du badge `[8/u] Cluster`.
+   - **Matrice Santé des Nœuds** : état (`OK`, `WARN`, `CRIT`, `UNREACH`, `SKIP`), présence démon `dbsrt-server`, statut superviseur (`healthy` / `degraded`), sentinelle `run/batch_aborted` (`ABORT`), cibles en échec (`Q_FAIL`), stems blacklistés (`BLKLST`), throttling LVE 24h (`LVE24`), compteurs d'erreurs glissants `1h/24h/72h` et latence de sonde (`PROBE` ms).
+   - **Parité SHA-256 & Fraîcheur** : empreintes 12-hex comparées des scripts déployés (`OK`, `SHA256_DRIFT`, `LOCAL_ONLY`), fraîcheur des artefacts/files (`nas_ftp_index.json`, `freebox_batch_targets.json`, `supervisor_status.json`, `batch_queue.json`) et flux trié des alertes critiques/warnings ainsi que des signatures d'erreurs dédupliquées.
+
 #### Raccourcis Clavier
 
 - `[1]` : Afficher l'onglet des tâches en cours
@@ -333,13 +342,15 @@ dbsrt top [OPTIONS]
 - `[4]` / `[m]` : Afficher l'onglet de l'explorateur de médias multi-sources
 - `[5]` / `[s]` : Afficher l'onglet de gestion des sources de médias (ou `[s]` pour arrêter une tâche dans l'onglet 1)
 - `[6]` / `[y]` : Afficher la vue diagnostics système Fastfetch
-- `[Tab]` / `[Shift+Tab]` : Navigation circulaire bidirectionnelle entre les 6 onglets
+- `[7]` / `[t]` : Afficher l'audit des trajectoires spatiotemporelles
+- `[8]` / `[u]` : Afficher l'observabilité cluster multi-nœuds (`dbsrt doctor`)
+- `[Tab]` / `[Shift+Tab]` : Navigation circulaire bidirectionnelle entre les 8 onglets
 - `[↑]` / `[k]` : Déplacer le curseur vers le haut / élément précédent
 - `[↓]` / `[j]` : Déplacer le curseur vers le bas / élément suivant
-- `[PgUp]` / `[PgDn]` : Défilement rapide par page (onglets 1, 3, 4 et 5)
-- `[Home]` / `[End]` : Saut direct en début ou fin de liste (onglets 1, 3, 4 et 5)
+- `[PgUp]` / `[PgDn]` : Défilement rapide par page (onglets 1, 3, 4, 5, 6, 7 et 8)
+- `[Home]` / `[End]` : Saut direct en début ou fin de liste (onglets 1, 3, 4, 5, 6, 7 et 8)
 - `[Espace]` : Cocher / décocher un média (onglet 4) ou activer/désactiver une source (onglet 5)
-- `[a]` : Cocher / décocher tous les médias visibles (onglet 4) ou ajouter une source (onglet 5)
+- `[a]` : Cocher / décocher tous les médias visibles (onglet 4), ajouter une source (onglet 5) ou actualiser immédiatement la sonde cluster (onglet 8)
 - `[e]` : Éditer la source sélectionnée (onglet 5)
 - `[d]` : Supprimer la source sélectionnée (onglet 5)
 - `[r]` : Déclencher un rescan complet des sources (onglet 5)

@@ -288,3 +288,18 @@ pub const PROBE_WARMUP_ALLOWANCE_MS: u64 = 3500;
 
 /// Polling step in milliseconds when waiting for 2-tick delta completion in `dbsrt top --json`.
 pub const PROBE_POLL_STEP_MS: u64 = 50;
+
+/// Periodic background refresh interval in seconds for multi-node cluster observability (`dbsrt doctor`).
+pub const CLUSTER_REFRESH_INTERVAL_SECS: u64 = 30;
+
+/// Interruptible wake-up polling step in milliseconds inside the cluster probe worker thread.
+pub const CLUSTER_PROBE_POLL_STEP_MS: u64 = 250;
+
+/// Short prefix hex length displayed for SHA-256 script parity digests in `[8/u] Cluster`.
+pub const CLUSTER_SHA256_SHORT_LEN: usize = 12;
+
+/// Number of page scroll lines jumped by Home/End fallback when cluster telemetry is absent.
+pub const CLUSTER_END_SCROLL_FALLBACK_LINES: usize = 40;
+
+/// Additional margin lines added to estimated cluster content scroll end target.
+pub const CLUSTER_END_SCROLL_EXTRA_LINES: usize = 20;

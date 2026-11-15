@@ -2,6 +2,7 @@
 
 pub mod app;
 pub mod constants;
+pub mod doctor_bridge;
 pub mod host_info;
 pub mod model;
 pub mod process_ctl;
@@ -54,6 +55,17 @@ pub fn probe_telemetry_snapshot(refresh_ms: u64) -> Result<SystemTelemetry> {
         .any(|s| s.enabled && s.path.exists());
     initial_tel.is_remote_streaming = !has_local_sources
         && std::path::Path::new(constants::DEFAULT_SELECTED_BATCH_TARGETS_PATH).exists();
+
+    let doctor_report =
+        crate::commands::doctor::evaluate_cluster_doctor(&crate::commands::doctor::DoctorArgs {
+            local_only: true,
+            ..Default::default()
+        });
+    initial_tel.cluster = Some(doctor_bridge::cluster_telemetry_from_report(
+        &doctor_report,
+        true,
+        false,
+    ));
 
     let shared_state = Arc::new(RwLock::new(initial_tel));
     let gpu_state = Arc::new(RwLock::new(GpuTelemetry::default()));

@@ -6,7 +6,10 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 
-use crate::constants::{FEEDBACK_DISPLAY_DURATION_SECS, PAGE_SCROLL_STEP};
+use crate::constants::{
+    CLUSTER_END_SCROLL_EXTRA_LINES, CLUSTER_END_SCROLL_FALLBACK_LINES,
+    FEEDBACK_DISPLAY_DURATION_SECS, PAGE_SCROLL_STEP,
+};
 use crate::model::{
     compute_trajectory_indices, filter_active_jobs_with_search,
     filter_and_sort_completed_with_search, filter_and_sort_media_with_source_and_search,
@@ -96,6 +99,10 @@ pub trait TopActions {
         let _ = path;
         Ok(0)
     }
+    /// Triggers an immediate non-blocking refresh of the multi-node cluster probe (`[a]`).
+    fn refresh_cluster_doctor(&mut self) -> String {
+        "Actualisation sonde cluster déclenchée...".to_string()
+    }
 }
 
 /// State of the TUI interactive session and navigational cursor offsets.
@@ -119,6 +126,8 @@ pub struct AppState {
     pub source_modal: Option<SourceInputModalState>,
     /// Scroll line offset in System diagnostics view (`[6/y]`).
     pub system_scroll_index: usize,
+    /// Scroll line offset in Multi-Node Cluster observability view (`[8/u]`).
+    pub cluster_scroll_index: usize,
     /// Set of multi-selected candidate media paths tagged with Spacebar (`[Space]`).
     pub selected_media_paths: HashSet<PathBuf>,
     /// Active filter criterion in Media Browser (`[f]`).
@@ -230,6 +239,7 @@ impl AppState {
             ViewPage::CompletedMedia => self.completed_scroll_index = 0,
             ViewPage::MediaBrowser => self.media_scroll_index = 0,
             ViewPage::System => self.system_scroll_index = 0,
+            ViewPage::Cluster => self.cluster_scroll_index = 0,
             ViewPage::Trajectory => {
                 self.trajectory_scroll_index = 0;
                 self.trajectory_table_offset = 0;
@@ -432,6 +442,7 @@ impl AppState {
             trajectory_sort: self.trajectory_sort,
             trajectory_inspection_scroll: self.trajectory_inspection_scroll,
             trajectory_indices: &self.trajectory_visible_indices,
+            cluster_scroll_index: self.cluster_scroll_index,
             search_query: self.current_search_query(),
             search_active: self.search_active,
             help_tab: self.help_tab,
@@ -944,7 +955,8 @@ fn handle_esc_key_navigation(app: &mut AppState) -> bool {
             | ViewPage::MediaBrowser
             | ViewPage::MediaSources
             | ViewPage::System
-            | ViewPage::Trajectory => {
+            | ViewPage::Trajectory
+            | ViewPage::Cluster => {
                 app.view = ViewPage::ActiveJobs;
             }
         }
@@ -1011,7 +1023,8 @@ fn cycle_view_forward(app: &mut AppState) {
             ViewPage::MediaBrowser => ViewPage::MediaSources,
             ViewPage::MediaSources => ViewPage::System,
             ViewPage::System => ViewPage::Trajectory,
-            ViewPage::Trajectory
+            ViewPage::Trajectory => ViewPage::Cluster,
+            ViewPage::Cluster
             | ViewPage::JobInspection
             | ViewPage::MediaInspection
             | ViewPage::CompletedInspection
@@ -1028,7 +1041,8 @@ fn cycle_view_backward(app: &mut AppState) {
         app.help_scroll_index = 0;
     } else {
         app.view = match app.view {
-            ViewPage::ActiveJobs => ViewPage::Trajectory,
+            ViewPage::ActiveJobs => ViewPage::Cluster,
+            ViewPage::Cluster => ViewPage::Trajectory,
             ViewPage::Trajectory => ViewPage::System,
             ViewPage::System => ViewPage::MediaSources,
             ViewPage::MediaSources => ViewPage::MediaBrowser,
@@ -1088,6 +1102,9 @@ fn resolve_shortcut_target(code: KeyCode, current_view: ViewPage) -> Option<(Vie
         }
         KeyCode::Char('7') | KeyCode::Char('t') | KeyCode::Char('T') => {
             Some((ViewPage::Trajectory, HelpTab::Trajectory))
+        }
+        KeyCode::Char('8') | KeyCode::Char('u') | KeyCode::Char('U') => {
+            Some((ViewPage::Cluster, HelpTab::Cluster))
         }
         _ => None,
     }
@@ -1171,36 +1188,27 @@ fn handle_direct_view_shortcuts(code: KeyCode, app: &mut AppState) -> bool {
 /// paging (PageUp/PageDown by [`PAGE_SCROLL_STEP`]), and jump-to-boundary (Home/End).
 /// Scrolls one step upward across the active view.
 fn scroll_up(app: &mut AppState) {
-    match app.view {
-        ViewPage::ActiveJobs if app.selected_index > 0 => {
-            app.selected_index -= 1;
-        }
-        ViewPage::CompletedMedia if app.completed_scroll_index > 0 => {
-            app.completed_scroll_index -= 1;
-        }
-        ViewPage::MediaBrowser if app.media_scroll_index > 0 => {
-            app.media_scroll_index -= 1;
-        }
-        ViewPage::MediaSources if app.source_scroll_index > 0 => {
-            app.source_scroll_index -= 1;
-        }
-        ViewPage::System if app.system_scroll_index > 0 => {
-            app.system_scroll_index -= 1;
-        }
-        ViewPage::Trajectory if app.trajectory_scroll_index > 0 => {
+    if app.view == ViewPage::Trajectory {
+        if app.trajectory_scroll_index > 0 {
             app.trajectory_scroll_index -= 1;
             if app.trajectory_scroll_index < app.trajectory_table_offset {
                 app.trajectory_table_offset = app.trajectory_scroll_index;
             }
         }
-        ViewPage::TrajectoryInspection if app.trajectory_inspection_scroll > 0 => {
-            app.trajectory_inspection_scroll -= 1;
-        }
-        ViewPage::Help if app.help_scroll_index > 0 => {
-            app.help_scroll_index -= 1;
-        }
-        _ => {}
+        return;
     }
+    let target = match app.view {
+        ViewPage::ActiveJobs => &mut app.selected_index,
+        ViewPage::CompletedMedia => &mut app.completed_scroll_index,
+        ViewPage::MediaBrowser => &mut app.media_scroll_index,
+        ViewPage::MediaSources => &mut app.source_scroll_index,
+        ViewPage::System => &mut app.system_scroll_index,
+        ViewPage::Cluster => &mut app.cluster_scroll_index,
+        ViewPage::TrajectoryInspection => &mut app.trajectory_inspection_scroll,
+        ViewPage::Help => &mut app.help_scroll_index,
+        _ => return,
+    };
+    *target = target.saturating_sub(1);
 }
 
 fn handle_scroll_navigation_key_event(
@@ -1381,6 +1389,9 @@ fn scroll_down(app: &mut AppState, telemetry: &SystemTelemetry) {
         ViewPage::System => {
             app.system_scroll_index += 1;
         }
+        ViewPage::Cluster => {
+            app.cluster_scroll_index += 1;
+        }
         ViewPage::Trajectory => scroll_trajectory_down(app, telemetry),
         ViewPage::TrajectoryInspection => {
             app.trajectory_inspection_scroll += 1;
@@ -1410,6 +1421,9 @@ fn scroll_page_up(app: &mut AppState) {
         }
         ViewPage::System => {
             app.system_scroll_index = app.system_scroll_index.saturating_sub(PAGE_SCROLL_STEP);
+        }
+        ViewPage::Cluster => {
+            app.cluster_scroll_index = app.cluster_scroll_index.saturating_sub(PAGE_SCROLL_STEP);
         }
         ViewPage::Trajectory => {
             app.trajectory_scroll_index =
@@ -1464,6 +1478,9 @@ fn scroll_page_down(app: &mut AppState, telemetry: &SystemTelemetry) {
         ViewPage::System => {
             app.system_scroll_index += PAGE_SCROLL_STEP;
         }
+        ViewPage::Cluster => {
+            app.cluster_scroll_index += PAGE_SCROLL_STEP;
+        }
         ViewPage::Trajectory => scroll_trajectory_page_down(app, telemetry),
         ViewPage::TrajectoryInspection => {
             app.trajectory_inspection_scroll += PAGE_SCROLL_STEP;
@@ -1492,6 +1509,9 @@ fn scroll_home(app: &mut AppState) {
         }
         ViewPage::System => {
             app.system_scroll_index = 0;
+        }
+        ViewPage::Cluster => {
+            app.cluster_scroll_index = 0;
         }
         ViewPage::Trajectory => {
             app.trajectory_scroll_index = 0;
@@ -1526,6 +1546,19 @@ fn scroll_end(app: &mut AppState, telemetry: &SystemTelemetry) {
         }
         ViewPage::System => {
             app.system_scroll_index = 20;
+        }
+        ViewPage::Cluster => {
+            let est = telemetry
+                .cluster
+                .as_ref()
+                .map(|c| {
+                    c.nodes.len()
+                        + c.script_parity.len()
+                        + c.alerts.len()
+                        + CLUSTER_END_SCROLL_EXTRA_LINES
+                })
+                .unwrap_or(CLUSTER_END_SCROLL_FALLBACK_LINES);
+            app.cluster_scroll_index = est;
         }
         ViewPage::Trajectory => scroll_trajectory_end(app, telemetry),
         ViewPage::TrajectoryInspection => {
@@ -1590,6 +1623,9 @@ fn handle_view_specific_key_event(
         }
         ViewPage::TrajectoryInspection => {
             handle_trajectory_inspection_view_keys(code, app, telemetry);
+        }
+        ViewPage::Cluster => {
+            handle_cluster_view_keys(code, app, actions);
         }
     }
 }
@@ -2211,5 +2247,31 @@ fn handle_trajectory_inspection_view_keys(
             app.view = ViewPage::Trajectory;
         }
         _ => {}
+    }
+}
+
+/// Handles keypresses specific to the Multi-Node Cluster observability view (`[8/u]`).
+///
+/// # Arguments
+/// * `code` - Frontend-neutral key code.
+/// * `app` - Mutable UI session state.
+/// * `actions` - Host side-effect dispatcher triggering asynchronous cluster probe refreshes.
+///
+/// # Returns
+/// `()` — triggers immediate cluster probe refresh when `'a'`/`'A'` is pressed.
+///
+/// # Errors
+/// Infallible.
+///
+/// # Panics
+/// Guaranteed panic-free.
+///
+/// # Data Flow & Invariants
+/// Forwards `[a]`/`[A]` to [`TopActions::refresh_cluster_doctor`] and surfaces the resulting
+/// feedback toast without blocking the UI frame loop.
+fn handle_cluster_view_keys(code: KeyCode, app: &mut AppState, actions: &mut dyn TopActions) {
+    if matches!(code, KeyCode::Char('a') | KeyCode::Char('A')) {
+        let msg = actions.refresh_cluster_doctor();
+        app.set_feedback(msg);
     }
 }

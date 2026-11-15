@@ -8,7 +8,7 @@ use dbsrt_cli::commands::top::model::{HelpTab, ViewPage};
 
 use super::common::{mock_complete_telemetry, TestHarness};
 
-const PRIMARY_VIEWS: [ViewPage; 7] = [
+const PRIMARY_VIEWS: [ViewPage; 8] = [
     ViewPage::ActiveJobs,
     ViewPage::StatsHistory,
     ViewPage::CompletedMedia,
@@ -16,6 +16,7 @@ const PRIMARY_VIEWS: [ViewPage; 7] = [
     ViewPage::MediaSources,
     ViewPage::System,
     ViewPage::Trajectory,
+    ViewPage::Cluster,
 ];
 
 /// Verifies that pressing 's' from [1] Tâches (ActiveJobs) directly transitions to [5/s] Sources,
@@ -112,6 +113,8 @@ fn test_automaton_mnemonic_letter_jumps_and_toggles() {
         ('m', ViewPage::MediaBrowser),
         ('s', ViewPage::MediaSources),
         ('y', ViewPage::System),
+        ('t', ViewPage::Trajectory),
+        ('u', ViewPage::Cluster),
     ];
 
     for &from_view in &PRIMARY_VIEWS {
@@ -154,7 +157,7 @@ fn test_automaton_cyclic_tab_distance_all_pairs() {
         for (to_idx, &to_view) in PRIMARY_VIEWS.iter().enumerate() {
             // Forward cycling with Tab
             harness.app.view = from_view;
-            let forward_steps = (to_idx + 7 - from_idx) % 7;
+            let forward_steps = (to_idx + PRIMARY_VIEWS.len() - from_idx) % PRIMARY_VIEWS.len();
             for _ in 0..forward_steps {
                 harness.send_key(KeyCode::Tab);
             }
@@ -175,7 +178,7 @@ fn test_automaton_cyclic_tab_distance_all_pairs() {
 
             // Backward cycling with BackTab
             harness.app.view = from_view;
-            let backward_steps = (from_idx + 7 - to_idx) % 7;
+            let backward_steps = (from_idx + PRIMARY_VIEWS.len() - to_idx) % PRIMARY_VIEWS.len();
             for _ in 0..backward_steps {
                 harness.send_key(KeyCode::BackTab);
             }

@@ -59,7 +59,18 @@ use crate::commands::top::sampler::{
     toggle_media_source, trigger_media_sources_rescan, update_media_source,
 };
 use crate::commands::top::ui::render_ui;
-use crate::commands::top::{process_ctl, sampler};
+use crate::commands::top::{doctor_bridge, process_ctl, sampler};
+
+/// Thread-safe synchronization handles passed through the active TUI event loop.
+struct RuntimeHandles<'a> {
+    shared_state: &'a Arc<RwLock<SystemTelemetry>>,
+    cluster_refresh: Option<&'a Arc<AtomicBool>>,
+}
+
+/// Returns `true` when running on a CloudLinux LVE shared host (`uapi` present) so SSH probes are skipped.
+fn is_local_only_cluster_host() -> bool {
+    std::path::Path::new("/usr/bin/uapi").exists()
+}
 
 /// Sets up raw terminal mode, panic recovery hooks, spawns telemetry background threads,
 /// and runs the interactive TUI event loop until user exit (`[q]` or Ctrl-C).
@@ -160,12 +171,21 @@ pub fn run_top_app(refresh_interval_ms: u64) -> Result<()> {
     let shared_state = Arc::new(RwLock::new(initial_telemetry));
     let gpu_state = Arc::new(RwLock::new(GpuTelemetry::default()));
     let stop_flag = Arc::new(AtomicBool::new(false));
+    let cluster_refresh_flag = Arc::new(AtomicBool::new(false));
 
     // Spawn GPU monitor thread
     start_gpu_sampler(Arc::clone(&gpu_state), Arc::clone(&stop_flag));
 
     // Spawn non-blocking background multi-source media scanner thread
     start_media_sources_scanner(Arc::clone(&shared_state), Arc::clone(&stop_flag));
+
+    // Spawn non-blocking background multi-node cluster doctor probe thread
+    doctor_bridge::start_cluster_doctor_probe(
+        Arc::clone(&shared_state),
+        Arc::clone(&stop_flag),
+        Arc::clone(&cluster_refresh_flag),
+        is_local_only_cluster_host(),
+    );
 
     // Spawn system and process sampler thread
     {
@@ -178,8 +198,12 @@ pub fn run_top_app(refresh_interval_ms: u64) -> Result<()> {
     }
 
     let mut app = AppState::new();
+    let handles = RuntimeHandles {
+        shared_state: &shared_state,
+        cluster_refresh: Some(&cluster_refresh_flag),
+    };
 
-    let loop_res = event_loop(&mut terminal, &mut app, &shared_state);
+    let loop_res = event_loop(&mut terminal, &mut app, &handles);
 
     // Stop background workers
     stop_flag.store(true, Ordering::Relaxed);
@@ -270,7 +294,7 @@ fn poll_and_dispatch_key(
     timeout: Duration,
     app: &mut AppState,
     telemetry: &SystemTelemetry,
-    shared_state: &Arc<RwLock<SystemTelemetry>>,
+    handles: &RuntimeHandles<'_>,
 ) -> Result<bool> {
     if !event::poll(timeout)? {
         return Ok(false);
@@ -280,7 +304,11 @@ fn poll_and_dispatch_key(
             if is_redraw_key(&key) {
                 return Ok(true);
             }
-            handle_key_event_with_state(key.code, app, telemetry, Some(shared_state));
+            let mut actions = NativeActions {
+                shared_state: Some(handles.shared_state),
+                cluster_refresh: handles.cluster_refresh,
+            };
+            dbsrt_tui::app::handle_key_event(to_tui_key(key.code), app, telemetry, &mut actions);
         }
         Event::Resize(_, _) => return Ok(true),
         _ => {}
@@ -295,18 +323,18 @@ fn poll_and_dispatch_key(
 fn event_loop<B: ratatui::backend::Backend>(
     terminal: &mut Terminal<B>,
     app: &mut AppState,
-    shared_state: &Arc<RwLock<SystemTelemetry>>,
+    handles: &RuntimeHandles<'_>,
 ) -> Result<()> {
     let tick_rate = Duration::from_millis(DEFAULT_REFRESH_INTERVAL_MS);
     let mut last_tick = Instant::now();
 
     while !app.should_quit {
-        let telemetry = event_loop_step(terminal, app, shared_state)?;
+        let telemetry = event_loop_step(terminal, app, handles.shared_state)?;
         let timeout = tick_rate
             .checked_sub(last_tick.elapsed())
             .unwrap_or(Duration::from_millis(KEY_EVENT_POLL_TIMEOUT_MS));
 
-        if poll_and_dispatch_key(timeout, app, &telemetry, shared_state)? {
+        if poll_and_dispatch_key(timeout, app, &telemetry, handles)? {
             terminal.clear()?;
         }
 
@@ -336,7 +364,10 @@ pub fn handle_key_event_with_state(
     telemetry: &SystemTelemetry,
     shared_state: Option<&Arc<RwLock<SystemTelemetry>>>,
 ) {
-    let mut actions = NativeActions { shared_state };
+    let mut actions = NativeActions {
+        shared_state,
+        cluster_refresh: None,
+    };
     dbsrt_tui::app::handle_key_event(to_tui_key(code), app, telemetry, &mut actions);
 }
 
@@ -366,6 +397,7 @@ fn to_tui_key(code: KeyCode) -> dbsrt_tui::app::KeyCode {
 /// Native host side effects: process signals, JSON persistence and live telemetry sync.
 struct NativeActions<'a> {
     shared_state: Option<&'a Arc<RwLock<SystemTelemetry>>>,
+    cluster_refresh: Option<&'a Arc<AtomicBool>>,
 }
 
 impl TopActions for NativeActions<'_> {
@@ -511,6 +543,20 @@ impl TopActions for NativeActions<'_> {
     fn reload_remote_targets(&mut self, telemetry: &SystemTelemetry) -> String {
         let count = reload_remote_streaming_targets(telemetry, self.shared_state);
         format!("⟳ Cibles streaming réseau actualisées ({count} médias).")
+    }
+
+    fn refresh_cluster_doctor(&mut self) -> String {
+        if let Some(shared) = self.shared_state {
+            if let Ok(mut state) = shared.write() {
+                if let Some(cluster) = state.cluster.as_mut() {
+                    cluster.refreshing = true;
+                }
+            }
+        }
+        if let Some(flag) = self.cluster_refresh {
+            flag.store(true, Ordering::SeqCst);
+        }
+        "⟳ Actualisation sonde cluster multi-nœuds lancée en arrière-plan...".to_string()
     }
 }
 

@@ -204,6 +204,7 @@ fn test_negative_zero_rate_sanitization() {
         search_query: "",
         search_active: false,
         help_tab: HelpTab::General,
+        cluster_scroll_index: 0,
         help_scroll_index: 0,
         feedback_msg: None,
     };
@@ -372,6 +373,7 @@ fn test_ui_rendering_all_pages() {
         trajectory_data_rev: 0,
         trajectory_files: Vec::new(),
         active_trajectory_file: None,
+        cluster: None,
     };
 
     let empty_set = HashSet::new();
@@ -401,6 +403,7 @@ fn test_ui_rendering_all_pages() {
         search_query: "",
         search_active: false,
         help_tab: HelpTab::General,
+        cluster_scroll_index: 0,
         help_scroll_index: 0,
         feedback_msg: Some("Test Feedback Message"),
     };
@@ -433,6 +436,7 @@ fn test_ui_rendering_all_pages() {
         search_query: "",
         search_active: false,
         help_tab: HelpTab::General,
+        cluster_scroll_index: 0,
         help_scroll_index: 0,
         feedback_msg: None,
     };
@@ -463,6 +467,7 @@ fn test_ui_rendering_all_pages() {
         search_query: "",
         search_active: false,
         help_tab: HelpTab::General,
+        cluster_scroll_index: 0,
         help_scroll_index: 0,
         feedback_msg: None,
     };
@@ -494,6 +499,7 @@ fn test_ui_rendering_all_pages() {
         search_query: "",
         search_active: false,
         help_tab: HelpTab::General,
+        cluster_scroll_index: 0,
         help_scroll_index: 0,
         feedback_msg: None,
     };
@@ -524,6 +530,7 @@ fn test_ui_rendering_all_pages() {
         search_query: "",
         search_active: false,
         help_tab: HelpTab::General,
+        cluster_scroll_index: 0,
         help_scroll_index: 0,
         feedback_msg: None,
     };
@@ -554,6 +561,7 @@ fn test_ui_rendering_all_pages() {
         search_query: "",
         search_active: false,
         help_tab: HelpTab::General,
+        cluster_scroll_index: 0,
         help_scroll_index: 0,
         feedback_msg: None,
     };
@@ -584,6 +592,7 @@ fn test_ui_rendering_all_pages() {
         search_query: "",
         search_active: false,
         help_tab: HelpTab::General,
+        cluster_scroll_index: 0,
         help_scroll_index: 0,
         feedback_msg: None,
     };
@@ -616,6 +625,7 @@ fn test_ui_rendering_all_pages() {
         search_query: "",
         search_active: false,
         help_tab: HelpTab::General,
+        cluster_scroll_index: 0,
         help_scroll_index: 0,
         feedback_msg: None,
     };
@@ -646,6 +656,7 @@ fn test_ui_rendering_all_pages() {
         search_query: "",
         search_active: false,
         help_tab: HelpTab::General,
+        cluster_scroll_index: 0,
         help_scroll_index: 0,
         feedback_msg: None,
     };
@@ -678,6 +689,7 @@ fn test_ui_rendering_all_pages() {
         search_query: "",
         search_active: false,
         help_tab: HelpTab::General,
+        cluster_scroll_index: 0,
         help_scroll_index: 0,
         feedback_msg: None,
     };
@@ -707,6 +719,7 @@ fn test_ui_rendering_all_pages() {
         search_query: "",
         search_active: false,
         help_tab: HelpTab::General,
+        cluster_scroll_index: 0,
         help_scroll_index: 0,
         feedback_msg: None,
     };
@@ -737,6 +750,7 @@ fn test_ui_rendering_all_pages() {
         search_query: "",
         search_active: false,
         help_tab: HelpTab::General,
+        cluster_scroll_index: 0,
         help_scroll_index: 0,
         feedback_msg: None,
     };
@@ -769,6 +783,7 @@ fn test_ui_rendering_all_pages() {
         search_query: "",
         search_active: false,
         help_tab: HelpTab::General,
+        cluster_scroll_index: 0,
         help_scroll_index: 0,
         feedback_msg: None,
     };
@@ -799,6 +814,7 @@ fn test_ui_rendering_all_pages() {
         search_query: "",
         search_active: false,
         help_tab: HelpTab::General,
+        cluster_scroll_index: 0,
         help_scroll_index: 0,
         feedback_msg: None,
     };
@@ -1567,9 +1583,15 @@ fn test_app_state_new_tabs_and_scrolling() {
     assert_eq!(app.view, ViewPage::Trajectory);
 
     handle_key_event(KeyCode::Tab, &mut app, &tel);
+    assert_eq!(app.view, ViewPage::Cluster);
+
+    handle_key_event(KeyCode::Tab, &mut app, &tel);
     assert_eq!(app.view, ViewPage::ActiveJobs);
 
-    // BackTab cycling: ActiveJobs -> Trajectory -> System -> MediaSources -> MediaBrowser -> CompletedMedia -> StatsHistory -> ActiveJobs
+    // BackTab cycling: ActiveJobs -> Cluster -> Trajectory -> System -> MediaSources -> MediaBrowser -> CompletedMedia -> StatsHistory -> ActiveJobs
+    handle_key_event(KeyCode::BackTab, &mut app, &tel);
+    assert_eq!(app.view, ViewPage::Cluster);
+
     handle_key_event(KeyCode::BackTab, &mut app, &tel);
     assert_eq!(app.view, ViewPage::Trajectory);
 
@@ -3179,6 +3201,7 @@ fn test_e2e_contextual_help_navigation_and_glossary() {
         search_query: "",
         search_active: false,
         help_tab: HelpTab::Completed,
+        cluster_scroll_index: 0,
         help_scroll_index: 0,
         feedback_msg: None,
     };
@@ -3529,6 +3552,7 @@ fn test_system_page_render_and_shortcuts() {
         search_query: "",
         search_active: false,
         help_tab: app.help_tab,
+        cluster_scroll_index: app.cluster_scroll_index,
         help_scroll_index: app.help_scroll_index,
         feedback_msg: None,
     };
@@ -3593,6 +3617,7 @@ fn test_batch_queue_telemetry_rendered_in_header_and_table() {
         search_query: "",
         search_active: false,
         help_tab: app.help_tab,
+        cluster_scroll_index: app.cluster_scroll_index,
         help_scroll_index: app.help_scroll_index,
         feedback_msg: None,
     };
@@ -3784,6 +3809,7 @@ fn test_remote_streaming_media_browser_rendered_with_targets() {
         search_query: "",
         search_active: false,
         help_tab: app.help_tab,
+        cluster_scroll_index: app.cluster_scroll_index,
         help_scroll_index: app.help_scroll_index,
         feedback_msg: None,
     };
@@ -3954,6 +3980,7 @@ fn test_remote_streaming_sources_view_and_locked_keys() {
         search_query: "",
         search_active: false,
         help_tab: HelpTab::General,
+        cluster_scroll_index: 0,
         help_scroll_index: 0,
         feedback_msg: None,
     };
@@ -4169,6 +4196,7 @@ fn test_render_trajectory_views_and_navigation() {
         search_query: "",
         search_active: false,
         help_tab: HelpTab::General,
+        cluster_scroll_index: 0,
         help_scroll_index: 0,
         feedback_msg: None,
     };
@@ -4807,4 +4835,181 @@ fn test_cloudlinux_lve_account_rx_rate_and_header_label() {
     ]);
     assert!(target.is_none());
     assert_eq!(media, "Deux Fils (2018).mkv");
+}
+
+#[test]
+fn test_cluster_view_conversion_rendering_and_help_parity() {
+    use dbsrt_cli::commands::doctor::models::{
+        ArtifactFreshness, ClusterDoctorReport, ComponentLogReport, DedupErrorSignature,
+        DoctorSeverity, NodeAlert, NodeProbeReport, ParityStatus, ScriptParityEntry,
+        WindowErrorCounts,
+    };
+    use dbsrt_cli::commands::top::doctor_bridge::cluster_telemetry_from_report;
+    use std::collections::BTreeMap;
+
+    let report = ClusterDoctorReport {
+        status: DoctorSeverity::Critical,
+        exit_code: 2,
+        checked_at_iso: "2026-11-15T22:00:00Z".to_string(),
+        elapsed_ms: 512,
+        active_critical_count: 1,
+        active_warning_count: 1,
+        sha256_drift_count: 1,
+        nodes: vec![
+            NodeProbeReport {
+                node: "local".to_string(),
+                target: ".".to_string(),
+                reachable: true,
+                skipped: false,
+                probe_ms: 2,
+                status: DoctorSeverity::Critical,
+                probe_error: None,
+                daemon_running: Some(false),
+                supervisor_state: None,
+                batch_aborted: true,
+                failed_queue_targets: 0,
+                blacklisted_stems: 1,
+                lve_faults_24h: 0,
+                components: vec![ComponentLogReport {
+                    component: "batch_worker".to_string(),
+                    counts: WindowErrorCounts {
+                        h1: 2,
+                        h24: 4,
+                        h72: 4,
+                        tail_total: 4,
+                    },
+                    top_signatures: vec![DedupErrorSignature {
+                        summary: "50 consecutive failures".to_string(),
+                        count: 2,
+                        last_seen: Some("2026-11-15T21:55:00Z".to_string()),
+                        critical: true,
+                    }],
+                }],
+                freshness: vec![ArtifactFreshness {
+                    name: "nas_ftp_index.json".to_string(),
+                    exists: true,
+                    age_secs: Some(90_000),
+                    ttl_secs: 86_400,
+                    stale: true,
+                }],
+                alerts: vec![NodeAlert {
+                    id: "batch_aborted".to_string(),
+                    severity: DoctorSeverity::Critical,
+                    component: "batch_worker".to_string(),
+                    summary: "Batch aborted flag active".to_string(),
+                }],
+                script_hashes: BTreeMap::new(),
+            },
+            NodeProbeReport {
+                node: "rpi4".to_string(),
+                target: "rpi4".to_string(),
+                reachable: false,
+                skipped: false,
+                probe_ms: 300,
+                status: DoctorSeverity::Warning,
+                probe_error: Some("ssh timeout".to_string()),
+                daemon_running: None,
+                supervisor_state: None,
+                batch_aborted: false,
+                failed_queue_targets: 0,
+                blacklisted_stems: 0,
+                lve_faults_24h: 0,
+                components: vec![],
+                freshness: vec![],
+                alerts: vec![NodeAlert {
+                    id: "ssh_unreach".to_string(),
+                    severity: DoctorSeverity::Warning,
+                    component: "transport".to_string(),
+                    summary: "Host unreachable".to_string(),
+                }],
+                script_hashes: BTreeMap::new(),
+            },
+        ],
+        script_parity: vec![ScriptParityEntry {
+            script: "o2switch_ctl.sh".to_string(),
+            local_sha256: Some("bc5b127ea73e0000".to_string()),
+            rpi4_sha256: Some("4216c3d5a2ab0000".to_string()),
+            o2switch_sha256: None,
+            status: ParityStatus::Sha256Drift,
+            detail: Some("hash mismatch on rpi4".to_string()),
+        }],
+    };
+
+    let cluster_tel = cluster_telemetry_from_report(&report, false, false);
+    assert_eq!(cluster_tel.exit_code, 2);
+    assert_eq!(cluster_tel.sha256_drift_count, 1);
+    assert_eq!(cluster_tel.nodes[0].err_h1, 2);
+    assert_eq!(cluster_tel.nodes[0].err_h24, 4);
+    assert!(cluster_tel.alerts.iter().any(|a| a.node == "parity"));
+
+    let mut tel = SystemTelemetry {
+        cluster: Some(cluster_tel),
+        ..Default::default()
+    };
+    let mut app = AppState::new();
+    handle_key_event_with_state(KeyCode::Char('8'), &mut app, &tel, None);
+    assert_eq!(app.view, ViewPage::Cluster);
+
+    // Trigger manual refresh action toast via 'a'
+    handle_key_event_with_state(KeyCode::Char('a'), &mut app, &tel, None);
+    assert!(app.current_feedback().is_some());
+
+    // Render [8/u] Cluster and assert all doctor fields appear
+    let backend = ratatui::backend::TestBackend::new(160, 45);
+    let mut terminal = ratatui::Terminal::new(backend).unwrap();
+    let ctx = app.ui_context(&tel, None);
+    terminal.draw(|f| render_ui(f, &ctx)).unwrap();
+    let buf = format!("{:?}", terminal.backend().buffer());
+    for term in [
+        "Cluster: CRIT(1/1)",
+        "local",
+        "YES!",
+        "2/4/4",
+        "rpi4",
+        "UNREACH",
+        "o2switch_ctl.sh",
+        "SHA256_DRIFT",
+        "nas_ftp_index.json=1d(STALE)",
+        "Batch aborted flag active",
+        "50 consecutive failures",
+    ] {
+        assert!(buf.contains(term), "Cluster view missing {term}");
+    }
+
+    // Help view opened from Cluster maps to HelpTab::Cluster with full 1:1 column glossary
+    handle_key_event_with_state(KeyCode::Char('?'), &mut app, &tel, None);
+    assert_eq!(app.view, ViewPage::Help);
+    assert_eq!(app.help_tab, HelpTab::Cluster);
+    let ctx_help = app.ui_context(&tel, None);
+    terminal.draw(|f| render_ui(f, &ctx_help)).unwrap();
+    let buf_help = format!("{:?}", terminal.backend().buffer());
+    for term in [
+        "NODE",
+        "STATE",
+        "DAEMON",
+        "SUPERVISOR",
+        "ABORT",
+        "Q_FAIL",
+        "BLKLST",
+        "LVE24",
+        "ERR(1h/24/72)",
+        "PROBE",
+        "SHA256_DRIFT",
+        "UNREACH",
+    ] {
+        assert!(
+            buf_help.contains(term),
+            "HelpTab::Cluster missing 1:1 parity term: {term}"
+        );
+    }
+
+    // Exercise Cluster scroll & Home/End
+    app.view = ViewPage::Cluster;
+    tel.cluster.as_mut().unwrap().refreshing = true;
+    handle_key_event_with_state(KeyCode::Char('j'), &mut app, &tel, None);
+    assert_eq!(app.cluster_scroll_index, 1);
+    handle_key_event_with_state(KeyCode::End, &mut app, &tel, None);
+    assert!(app.cluster_scroll_index > 1);
+    handle_key_event_with_state(KeyCode::Home, &mut app, &tel, None);
+    assert_eq!(app.cluster_scroll_index, 0);
 }
