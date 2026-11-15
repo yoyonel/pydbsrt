@@ -133,3 +133,23 @@ Ajout de `launch_error_count` et du dictionnaire persistant par source `failed_b
 
 #### 5.4 Avantages, Inconvénients & Limites résiduelles
 Visibilité immédiate de toute régression d'un sous-pipeline optionnel sans sacrifier la continuité d'activité sur les autres bibliothèques. Ce mécanisme local au superviseur prépare l'agrégateur centralisé multi-nœuds spécifié dans l'Issue `#90`.
+
+---
+
+### 6. Dérive des Listes de Cibles selon la Machine Appelante & Défaut `--fresh-only`
+
+#### 6.1 Problématique & Mécanisme racine
+Deux divergences rendaient la sélection de cibles non déterministe d'un lancement à l'autre :
+
+1. `--fresh-only` valait `False` par défaut en CLI manuelle (`task o2switch:batch:*`), remettant l'intégralité du NAS (`2 534` vidéos) en file dès que le drapeau était omis.
+2. Lorsque `o2switch_ctl.sh` était invoqué depuis un poste disposant d'un montage CIFS local Synology, il exécutait `batch_media_add_tvshow.py` contre `data/__PHASH__` **local** (purgé depuis `#85`), générant un `selected_batch_targets.json` erroné qualifiant toute la médiathèque de vierge, alors qu'un appel depuis le `RPi4` ou en 4G évaluait l'état sur `o2switch`.
+
+#### 6.2 Conséquences concrètes
+- **Empiriquement prouvé** dans `logs/batch_worker.log` : alternance entre `Selected 0` (`RPi4`), `Selected 2534 (fresh_only=False)` (CLI sans flag), et `Selected 487` / `2535` (scan local PC contre disque local vide).
+
+#### 6.3 Solution / Invariant opéré
+1. Inversion sécurisée du défaut dans `batch_worker/cli.py` : `--fresh-only` est activé par défaut (`default=True`), tandis qu'un recalcul intégral exige explicitement `--force-all` (`--no-fresh-only`).
+2. Élimination du scan local `LOCAL_SCAN_DIR` dans `o2switch_ctl.sh` : `o2switch` demeure l'**unique source de vérité (`SSOT`)** comparant le parcours FTP trié lexicographiquement (`rel_path`) à ses répertoires `data/__PHASH__` et `data/__AHASH__`.
+
+#### 6.4 Avantages, Inconvénients & Limites résiduelles
+Un même appel `task o2switch:batch:movies` produit désormais **exactement la même liste triée** depuis le PC en Wi-Fi, le PC en 4G, ou le `RPi4`. L'affichage dans `dbsrt top` de la source active (`freebox`/`tvshow`/`movies`) et du calcul d'avancement des pipes audio `aHash` fait l'objet d'un ticket Rust dédié.

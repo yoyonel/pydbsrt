@@ -851,3 +851,59 @@ def test_script_updated_detects_package_submodule_mtime_change(monkeypatch: pyte
     assert not worker.script_updated()
     monkeypatch.setattr(worker, "SCRIPT_MTIME", worker.SCRIPT_MTIME - 10.0)
     assert worker.script_updated()
+
+
+def test_cli_defaults_to_fresh_only_and_supports_force_all(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """By default CLI skips already-indexed media without needing --fresh-only; --force-all reprocesses all."""
+    default_args = worker.build_arg_parser().parse_args([])
+    assert default_args.fresh_only is True
+
+    forced_args = worker.build_arg_parser().parse_args(["--force-all"])
+    assert forced_args.fresh_only is False
+
+    phash_dir = tmp_path / "phash"
+    ahash_dir = tmp_path / "ahash"
+    phash_dir.mkdir()
+    ahash_dir.mkdir()
+    (phash_dir / "done_movie.mkv.24.0fps.phash").write_bytes(b"\x01" * 16)
+    (ahash_dir / "0123456789abcdef.86.1fps.ahash").write_bytes(b"\x01" * 16)
+    (ahash_dir / "0123456789abcdef.json").write_text(
+        json.dumps({"media_name": "done_movie.mkv", "selection": "default", "header": {"version": 1}}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(worker, "DEFAULT_COUPLINGS_PATH", str(tmp_path / "couplings.json"))
+    monkeypatch.setattr(worker, "DEFAULT_PHASH_DIR", str(phash_dir))
+    monkeypatch.setattr(worker, "DEFAULT_EXCLUDE_PATH", str(tmp_path / "exclude.txt"))
+    monkeypatch.setattr(
+        worker,
+        "list_nas_videos_ftp",
+        lambda **_kw: [
+            VideoTarget("/video/z_pending.mkv", "z_pending.mkv", 100),
+            VideoTarget("/video/done_movie.mkv", "done_movie.mkv", 100),
+        ],
+    )
+
+    # Default invocation (no --fresh-only flag passed) must skip done_movie.mkv
+    args_default = worker.build_arg_parser().parse_args(
+        ["--ahash-dir", str(ahash_dir), "--targets-file", str(tmp_path / "none.json")]
+    )
+    selected_default = worker.select_targets(args_default, nas_pass="", events_log=tmp_path / "events.jsonl")
+    assert [t.filename for t in selected_default] == ["z_pending.mkv"]
+
+    # Explicit --force-all includes done_movie.mkv too
+    args_force = worker.build_arg_parser().parse_args(
+        ["--force-all", "--ahash-dir", str(ahash_dir), "--targets-file", str(tmp_path / "none.json")]
+    )
+    selected_force = worker.select_targets(args_force, nas_pass="", events_log=tmp_path / "events.jsonl")
+    assert [t.filename for t in selected_force] == ["z_pending.mkv", "done_movie.mkv"]
+
+
+def test_nas_ftp_index_targets_sorted_deterministically(tmp_path: Path):
+    """Repeated target discovery produces identical deterministic ordering regardless of dict order."""
+    idx_a = tmp_path / "idx_a.json"
+    idx_b = tmp_path / "idx_b.json"
+    idx_a.write_text(json.dumps({"index": {"z.mkv": "video/z.mkv", "a.mkv": "video/a.mkv"}}), encoding="utf-8")
+    idx_b.write_text(json.dumps({"index": {"a.mkv": "video/a.mkv", "z.mkv": "video/z.mkv"}}), encoding="utf-8")
+    assert worker.load_nas_ftp_index_targets(idx_a, "/video") == worker.load_nas_ftp_index_targets(idx_b, "/video")
+    assert [t.filename for t in worker.load_nas_ftp_index_targets(idx_a, "/video")] == ["a.mkv", "z.mkv"]

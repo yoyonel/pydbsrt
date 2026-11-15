@@ -55,7 +55,20 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="o2switch Remote Batch Processing Worker")
     parser.add_argument("--workers", type=int, default=DEFAULT_WORKERS, help="Parallel workers")
     parser.add_argument("--ftp-port", type=int, default=DEFAULT_FTP_PORT, help="NAS FTP port")
-    parser.add_argument("--fresh-only", action="store_true", help="Process only virgin unindexed videos")
+    parser.add_argument(
+        "--fresh-only",
+        dest="fresh_only",
+        action="store_true",
+        default=True,
+        help="Process only unindexed videos missing required fingerprints (default: enabled)",
+    )
+    parser.add_argument(
+        "--force-all",
+        "--no-fresh-only",
+        dest="fresh_only",
+        action="store_false",
+        help="Reprocess all discovered videos even when .phash/.ahash already exist",
+    )
     parser.add_argument("--retry-failed", action="store_true", help="Retry only videos whose last run failed")
     parser.add_argument(
         "--max-extraction-secs",
@@ -72,11 +85,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--mode", choices=["phash", "ahash", "both"], default="both", help="Batch processing mode")
     parser.add_argument("--ahash-dir", default=DEFAULT_AHASH_DIR, help="Directory storing .ahash fingerprints")
     parser.add_argument(
-        "--check",
-        "--dry-run",
-        dest="check",
-        action="store_true",
-        help="Inspect environment, binary, and directory availability without executing batch",
+        "--check", "--dry-run", dest="check", action="store_true", help="Inspect environment without executing batch"
     )
     return parser
 
@@ -228,29 +237,20 @@ def _run_ingestion_dispatch(
     args: argparse.Namespace,
 ) -> tuple[int, int, float]:
     ingest_fn = facade_attr("execute_dynamic_batch_ingestion", execute_dynamic_batch_ingestion)
+    kwargs = {
+        "targets": targets,
+        "stream_base": stream_base,
+        "dbsrt_bin": dbsrt_bin,
+        "child_env": child_env,
+        "events_log": events_log,
+        "max_extraction_secs": args.max_extraction_secs,
+        "initial_workers": args.workers,
+        "ahash_dir": args.ahash_dir,
+    }
     try:
-        return ingest_fn(
-            targets,
-            stream_base,
-            dbsrt_bin,
-            child_env,
-            events_log,
-            args.max_extraction_secs,
-            args.workers,
-            args.ahash_dir,
-            args.mode,
-        )
+        return ingest_fn(**kwargs, mode=args.mode)
     except TypeError:
-        return ingest_fn(  # type: ignore[call-arg]
-            targets,
-            stream_base,
-            dbsrt_bin,
-            child_env,
-            events_log,
-            args.max_extraction_secs,
-            args.workers,
-            args.ahash_dir,
-        )
+        return ingest_fn(**kwargs)  # type: ignore[call-arg]
 
 
 def main() -> int:

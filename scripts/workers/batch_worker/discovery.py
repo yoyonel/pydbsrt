@@ -59,6 +59,7 @@ def load_nas_ftp_index_targets(index_path: Path, base_dir: str) -> List[VideoTar
                     size_bytes=0,
                 )
             )
+        targets.sort(key=lambda item: item.rel_path)
         return targets
     except Exception as err:
         print(f"⚠️ Failed reading {index_path}: {err}", file=sys.stderr)
@@ -108,6 +109,7 @@ def _walk_nas_videos_ftp(
 
     with contextlib.suppress(Exception):
         ftp.quit()
+    results.sort(key=lambda item: item.rel_path)
     return results
 
 

@@ -668,39 +668,29 @@ REMOTE_SCRIPT
     check_ssh
     shift || true
     TARGET_TYPE="tvshow"
-    LOCAL_USER="${USER:-$(whoami)}"
-    LOCAL_SCAN_DIR="${NAS_TVSHOW_DIR:-/media/${LOCAL_USER}/Synology/tvshow}"
     REMOTE_NAS_BASE="/tvshow"
     if [[ "${ACTION}" == "batch-movies" ]]; then
       TARGET_TYPE="movies"
-      LOCAL_SCAN_DIR="${NAS_VIDEO_DIR:-/media/${LOCAL_USER}/Synology/video}"
       REMOTE_NAS_BASE="/video"
     elif [[ "${ACTION}" == "batch-all" ]]; then
       TARGET_TYPE="all"
-      LOCAL_SCAN_DIR=""
       REMOTE_NAS_BASE="all"
     fi
     TARGETS_FILE="data/reports/selected_batch_targets.json"
+    EXPLICIT_TARGETS_FILE=false
     DAEMON_MODE=false
     WORKER_ARGS=(--nas-base "${REMOTE_NAS_BASE}")
-    # Only the selection flags understood by batch_media_add_tvshow.py go to the local scan
-    SCAN_ARGS=()
     while [[ $# -gt 0 ]]; do
       case "$1" in
         --daemon | -d) DAEMON_MODE=true ;;
-        --fresh-only)
+        --targets-file)
+          EXPLICIT_TARGETS_FILE=true
+          WORKER_ARGS+=("$1" "${2:?--targets-file needs a path}")
+          shift
+          ;;
+        --targets-file=*)
+          EXPLICIT_TARGETS_FILE=true
           WORKER_ARGS+=("$1")
-          SCAN_ARGS+=("$1")
-          ;;
-        --mode)
-          WORKER_ARGS+=("$1" "${2:?--mode needs a value}")
-          SCAN_ARGS+=("$1" "$2")
-          shift
-          ;;
-        --limit)
-          WORKER_ARGS+=("$1" "${2:?--limit needs a value}")
-          SCAN_ARGS+=("$1" "$2")
-          shift
           ;;
         *) WORKER_ARGS+=("$1") ;;
       esac
@@ -715,22 +705,9 @@ REMOTE_SCRIPT
       rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${REPO_ROOT}/data/reports/nas_ftp_index.json" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/reports/"
     fi
 
-    # With a local NAS mount with files, select targets locally; otherwise the worker scans the NAS over FTP
-    if [[ -d "${LOCAL_SCAN_DIR}" && -n "$(find "${LOCAL_SCAN_DIR}" -mindepth 1 -print -quit 2>/dev/null)" ]]; then
-      echo "-> Resolving ${TARGET_TYPE} targets locally (${LOCAL_SCAN_DIR})..."
-      rm -f "${TARGETS_FILE}"
-      SCANNER_SCRIPT="${REPO_ROOT}/scripts/ingestion/batch_media_add_tvshow.py"
-      [[ -f "${SCANNER_SCRIPT}" ]] || SCANNER_SCRIPT="${SCRIPT_DIR}/batch_media_add_tvshow.py"
-      if ! uv run python "${SCANNER_SCRIPT}" --nas-root "${LOCAL_SCAN_DIR}" --save-targets-only \
-        --max-episodes-per-series 1000 "${SCAN_ARGS[@]}" >/dev/null; then
-        echo "❌ Local target scan failed (see error above)."
-        exit 1
-      fi
-      # The scanner writes nothing when there is nothing to do: send an explicit empty list
-      [[ -f "${TARGETS_FILE}" ]] || echo "[]" >"${TARGETS_FILE}"
-      echo "-> Transferring selected batch targets..."
-      rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${TARGETS_FILE}" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/reports/"
-    else
+    # o2switch holds the canonical .phash/.ahash SSOT (local PC data/__PHASH__ is purged):
+    # clear any stale selected_batch_targets.json unless --targets-file was explicitly supplied
+    if [[ "${EXPLICIT_TARGETS_FILE}" == "false" ]]; then
       # shellcheck disable=SC2029
       ssh "${O2SWITCH_HOST}" "rm -f $(printf '%q' "${REMOTE_BASE}/${TARGETS_FILE}")"
     fi
