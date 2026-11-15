@@ -37,7 +37,11 @@ DEFAULT_NAS_PHASH_BACKUP_DIR: str = "/mnt/synology/video/__PHASH__"
 DEFAULT_SUPERVISOR_STATUS_FILE: str = "run/supervisor_status.json"
 DEFAULT_SUPERVISOR_LOG_FILE: str = "logs/rpi4_supervisor.log"
 DEFAULT_RECENT_LOG_LINES_COUNT: int = 40
+MAX_LAUNCH_ERROR_CHARS: int = 240
+DEFAULT_BATCH_START_TIMEOUT_SECS: int = 120
 PID_FILE_PATH: str = "run/rpi4_supervisor.pid"
+
+_LAST_LAUNCH_ERROR: str | None = None
 
 
 def find_repo_root() -> Path:
@@ -238,22 +242,33 @@ def check_remote_batch_status(remote_host: str, remote_base: str) -> Dict[str, o
 
 def restart_remote_batch(remote_host: str, remote_base: str, workers: int, batch_type: str = "tvshow") -> bool:
     """Restarts remote batch ingestion of the given type with specified concurrency."""
+    global _LAST_LAUNCH_ERROR
     log(f"🔄 Launching remote {batch_type} batch on {remote_host} (concurrency: {workers} workers)...")
     if batch_type == "freebox":
         cmd = [FREEBOX_CTL_SCRIPT, "start", "--workers", str(workers)]
     else:
         cmd = [CTL_SCRIPT, f"batch-{batch_type}", "--workers", str(workers), "--fresh-only", "--daemon"]
     try:
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=120, env=_ctl_env(remote_host, remote_base))
+        res = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=DEFAULT_BATCH_START_TIMEOUT_SECS,
+            env=_ctl_env(remote_host, remote_base),
+        )
         success = res.returncode == 0 and (
             "Started persistent background" in res.stdout or "already running" in res.stdout
         )
         if success:
+            _LAST_LAUNCH_ERROR = None
             log(f"✓ Remote batch successfully started with {workers} workers.")
         else:
-            log(f"❌ Failed starting batch: {res.stderr or res.stdout}")
+            detail = (res.stderr or res.stdout or f"exit {res.returncode}").strip()
+            _LAST_LAUNCH_ERROR = detail[-MAX_LAUNCH_ERROR_CHARS:]
+            log(f"❌ Failed starting batch: {detail}")
         return success
     except Exception as err:
+        _LAST_LAUNCH_ERROR = str(err)[-MAX_LAUNCH_ERROR_CHARS:]
         log(f"❌ Exception starting remote batch: {err}")
         return False
 
@@ -354,6 +369,15 @@ class _LoopState:
     last_running: int = 0
     last_backup_iso: str | None = None
     last_sync_iso: str | None = None
+    launch_error_count: int = 0
+    failed_batch_types: Dict[str, str] = field(default_factory=dict)
+
+
+def _resolve_supervisor_health_state(status: Dict[str, object], loop: _LoopState) -> str:
+    """Returns 'degraded' when any rotated batch type failed to launch, avoiding silent healthy masking."""
+    if loop.failed_batch_types:
+        return "degraded"
+    return "healthy" if status.get("state") in ("running", "finished") else "warning"
 
 
 def read_recent_supervisor_logs(log_file: Path, max_lines: int = DEFAULT_RECENT_LOG_LINES_COUNT) -> List[str]:
@@ -385,7 +409,9 @@ def push_supervisor_telemetry_to_remote(
         "unix_ts": now_ts,
         "supervisor_host": "rpi4",
         "supervisor_pid": os.getpid(),
-        "state": "healthy" if status.get("state") in ("running", "finished") else "warning",
+        "state": _resolve_supervisor_health_state(status, loop),
+        "launch_error_count": loop.launch_error_count,
+        "failed_batch_types": dict(loop.failed_batch_types),
         "remote_batch": {
             "state": status.get("state"),
             "pid": status.get("pid"),
@@ -452,6 +478,15 @@ def _autoscale_step(remote_host: str, remote_base: str, status: Dict[str, object
         )
 
 
+def _record_launch_outcome(loop: _LoopState, batch_type: str, succeeded: bool) -> None:
+    """Updates degraded launch state per batch_type so optional-batch failures are never masked."""
+    if succeeded:
+        loop.failed_batch_types.pop(batch_type, None)
+        return
+    loop.launch_error_count += 1
+    loop.failed_batch_types[batch_type] = _LAST_LAUNCH_ERROR or f"Failed launching {batch_type}"
+
+
 def _relaunch_step(remote_host: str, remote_base: str, state: str, status: Dict[str, object], loop: _LoopState) -> None:
     """Stopped batch: relaunches it (or the other library) when decide_next_batch allows it."""
     next_type = decide_next_batch(state, str(status["type"]), time.time() - loop.last_launch_time)
@@ -460,9 +495,13 @@ def _relaunch_step(remote_host: str, remote_base: str, state: str, status: Dict[
         return
     cur_workers = get_remote_desired_workers(remote_host, remote_base)
     log(f"⚠️ Remote batch is {state} ({status['type']}). Launching {next_type} with {cur_workers} workers...")
-    if not restart_remote_batch(remote_host, remote_base, cur_workers, next_type) and next_type in OPTIONAL_BATCH_TYPES:
+    ok = restart_remote_batch(remote_host, remote_base, cur_workers, next_type)
+    _record_launch_outcome(loop, next_type, ok)
+    if not ok and next_type in OPTIONAL_BATCH_TYPES:
         # An unreachable home gateway must not leave o2switch idle: skip to the next library
-        restart_remote_batch(remote_host, remote_base, cur_workers, NEXT_BATCH_TYPE[next_type])
+        fallback_type = NEXT_BATCH_TYPE[next_type]
+        fallback_ok = restart_remote_batch(remote_host, remote_base, cur_workers, fallback_type)
+        _record_launch_outcome(loop, fallback_type, fallback_ok)
     loop.cpu_history.clear()
     loop.prev_sample = None
     loop.last_scale_time = loop.last_launch_time = time.time()

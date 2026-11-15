@@ -759,3 +759,95 @@ def test_load_nas_ftp_index_targets(tmp_path: Path):
 
     all_targets = worker.load_nas_ftp_index_targets(index_file, "")
     assert len(all_targets) == 3
+
+
+def test_list_nas_videos_ftp_bypasses_stale_or_fresh_only_index(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Regression B4: stale nas_ftp_index.json (>1h) or bypass_index_cache=True triggers live FTP MLSD."""
+    monkeypatch.setattr(worker, "REPO_ROOT", tmp_path)
+    index_file = tmp_path / worker.DEFAULT_FTP_INDEX_REL_PATH
+    index_file.parent.mkdir(parents=True, exist_ok=True)
+    index_file.write_text(json.dumps({"index": {"cached.mkv": "video/cached.mkv"}}), encoding="utf-8")
+
+    walk_calls: list[str] = []
+
+    def fake_walk(
+        nas_host: str, nas_user: str, nas_pass: str, base_dir: str, ftp_port: int, max_depth: int = 8
+    ) -> list[VideoTarget]:
+        walk_calls.append(base_dir)
+        return [VideoTarget(f"{base_dir}/live_new.mkv", "live_new.mkv", 42_000)]
+
+    monkeypatch.setattr(worker, "_walk_nas_videos_ftp", fake_walk)
+
+    # 1. Fresh index + bypass_index_cache=False -> served from cache without FTP walk
+    fresh_targets = worker.list_nas_videos_ftp("nas", "user", "pass", "/video", 21, bypass_index_cache=False)
+    assert [t.filename for t in fresh_targets] == ["cached.mkv"]
+    assert walk_calls == []
+
+    # 2. Fresh index + bypass_index_cache=True (--fresh-only) -> live FTP walk
+    bypassed = worker.list_nas_videos_ftp("nas", "user", "pass", "/video", 21, bypass_index_cache=True)
+    assert [t.filename for t in bypassed] == ["live_new.mkv"]
+    assert len(walk_calls) == 1
+
+    # 3. Stale index (2 hours old) + bypass_index_cache=False -> live FTP walk
+    stale_ts = time.time() - (worker.DEFAULT_FTP_INDEX_MAX_AGE_SECS * 2)
+    os.utime(index_file, (stale_ts, stale_ts))
+    assert not worker.is_ftp_index_fresh(index_file)
+    stale_targets = worker.list_nas_videos_ftp("nas", "user", "pass", "/video", 21, bypass_index_cache=False)
+    assert [t.filename for t in stale_targets] == ["live_new.mkv"]
+    assert len(walk_calls) == 2
+
+
+def test_build_media_add_cmd_honors_batch_mode():
+    """Regression B5: build_media_add_cmd forwards --skip-phash in ahash mode and omits --ahash-dir in phash mode."""
+    ahash_cmd = worker.build_media_add_cmd(
+        "dbsrt",
+        "http://host/v.mkv",
+        "v.mkv",
+        "data/__PHASH__",
+        "data/__AHASH__",
+        "data/SRT/extracted",
+        "0123456789abcdef",
+        "ahash",
+    )
+    assert "--skip-phash" in ahash_cmd
+    assert "--ahash-dir" in ahash_cmd
+    assert "--phash-dir" not in ahash_cmd
+
+    phash_cmd = worker.build_media_add_cmd(
+        "dbsrt", "http://host/v.mkv", "v.mkv", "data/__PHASH__", "data/__AHASH__", "data/SRT/extracted", None, "phash"
+    )
+    assert "--phash-dir" in phash_cmd
+    assert "--ahash-dir" not in phash_cmd
+    assert "--skip-phash" not in phash_cmd
+
+    both_cmd = worker.build_media_add_cmd(
+        "dbsrt",
+        "http://host/v.mkv",
+        "v.mkv",
+        "data/__PHASH__",
+        "data/__AHASH__",
+        "data/SRT/extracted",
+        "0123456789abcdef",
+        "both",
+    )
+    assert "--phash-dir" in both_cmd
+    assert "--ahash-dir" in both_cmd
+    assert "--skip-phash" not in both_cmd
+
+
+def test_build_stream_url_encodes_utf8_freebox_paths():
+    """HTTP stream URLs percent-encode UTF-8 accents, spaces, brackets, and registered marks into pure ASCII."""
+    rel = "/Disque_2/Téléchargements/Toy Story (1995) 2160p [English-French] [Dzrg Torrents®].mkv"
+    url = worker.build_stream_url("http://88.165.34.184:80", rel)
+    assert url.isascii()
+    assert "%C3%A9" in url
+    assert "%C2%AE" in url
+    assert "%5B" in url and "%5D" in url
+
+
+def test_script_updated_detects_package_submodule_mtime_change(monkeypatch: pytest.MonkeyPatch):
+    """Modular package hot-reload: changing SCRIPT_MTIME vs max(batch_worker/*.py mtime) triggers reload."""
+    monkeypatch.setattr(worker, "SCRIPT_PATH", worker.DEFAULT_FACADE_SCRIPT_PATH)
+    assert not worker.script_updated()
+    monkeypatch.setattr(worker, "SCRIPT_MTIME", worker.SCRIPT_MTIME - 10.0)
+    assert worker.script_updated()

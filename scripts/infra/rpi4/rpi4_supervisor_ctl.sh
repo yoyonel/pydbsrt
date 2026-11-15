@@ -64,6 +64,11 @@ run_systemctl() {
 sync_scripts() {
   rsync -az -e "ssh -o BatchMode=yes -o ConnectTimeout=${DEFAULT_CONNECT_TIMEOUT}" \
     "${SUPERVISOR_SCRIPTS[@]}" "${RPI_HOST}:${REMOTE_BASE}/scripts/"
+  if [[ -d "${REPO_ROOT}/scripts/workers/batch_worker" ]]; then
+    rsync -az --delete --exclude='__pycache__' \
+      -e "ssh -o BatchMode=yes -o ConnectTimeout=${DEFAULT_CONNECT_TIMEOUT}" \
+      "${REPO_ROOT}/scripts/workers/batch_worker/" "${RPI_HOST}:${REMOTE_BASE}/scripts/batch_worker/"
+  fi
 }
 
 case "${ACTION}" in

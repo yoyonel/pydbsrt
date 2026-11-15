@@ -173,6 +173,19 @@ rm -f "${PID_FILE}"
 REMOTE_SCRIPT
 }
 
+sync_remote_batch_worker() {
+  local worker_script="${REPO_ROOT}/scripts/workers/o2switch_batch_worker.py"
+  [[ -f "${worker_script}" ]] || worker_script="${SCRIPT_DIR}/o2switch_batch_worker.py"
+  local worker_pkg="${REPO_ROOT}/scripts/workers/batch_worker"
+  [[ -d "${worker_pkg}" ]] || worker_pkg="${SCRIPT_DIR}/batch_worker"
+  rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" --chmod=F755 \
+    "${worker_script}" "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/"
+  if [[ -d "${worker_pkg}" ]]; then
+    rsync -avz --delete --exclude='__pycache__' --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" \
+      "${worker_pkg}/" "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/batch_worker/"
+  fi
+}
+
 case "${ACTION}" in
   build)
     echo "=== Cross-compiling static standalone binaries (${TARGET_TRIPLE}) ==="
@@ -271,11 +284,7 @@ case "${ACTION}" in
     rsync -a --chmod=F755 "${REPO_ROOT}/deploy/o2switch/dbsrt_server_ctl.sh" "${O2SWITCH_HOST}:${REMOTE_BASE}/bin/"
 
     echo "-> Transferring batch worker and portal scripts..."
-    if [[ -f "${REPO_ROOT}/scripts/workers/o2switch_batch_worker.py" ]]; then
-      rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${REPO_ROOT}/scripts/workers/o2switch_batch_worker.py" "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/"
-      # shellcheck disable=SC2029
-      ssh "${O2SWITCH_HOST}" "chmod +x ${REMOTE_BASE}/scripts/o2switch_batch_worker.py"
-    fi
+    sync_remote_batch_worker
     if [[ -f "${REPO_ROOT}/scripts/ingestion/backfill_ahash_sidecars.py" ]]; then
       rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${REPO_ROOT}/scripts/ingestion/backfill_ahash_sidecars.py" "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/"
       # shellcheck disable=SC2029
@@ -699,12 +708,10 @@ REMOTE_SCRIPT
     done
 
     # shellcheck disable=SC2029
-    ssh "${O2SWITCH_HOST}" "cd $(printf '%q' "${REMOTE_BASE}") && mkdir -p scripts data/reports data/SRT data/__PHASH__ data/__AHASH__ run logs etc"
-    WORKER_SCRIPT="${REPO_ROOT}/scripts/workers/o2switch_batch_worker.py"
-    [[ -f "${WORKER_SCRIPT}" ]] || WORKER_SCRIPT="${SCRIPT_DIR}/o2switch_batch_worker.py"
-    rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" --chmod=F755 "${WORKER_SCRIPT}" "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/"
-    if [[ -f "${REPO_ROOT}/data/reports/nas_ftp_index.json" ]]; then
-      echo "-> Synchronizing cached NAS FTP index..."
+    ssh "${O2SWITCH_HOST}" "cd $(printf '%q' "${REMOTE_BASE}") && mkdir -p scripts/batch_worker data/reports data/SRT data/__PHASH__ data/__AHASH__ run logs etc"
+    sync_remote_batch_worker
+    if [[ -f "${REPO_ROOT}/data/reports/nas_ftp_index.json" ]] && [[ -n "$(find "${REPO_ROOT}/data/reports/nas_ftp_index.json" -mmin -60 2>/dev/null)" ]]; then
+      echo "-> Synchronizing fresh cached NAS FTP index (< 60 min)..."
       rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${REPO_ROOT}/data/reports/nas_ftp_index.json" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/reports/"
     fi
 
@@ -870,11 +877,11 @@ REMOTE_SCRIPT
     ;;
 
   batch-sync)
-    # Worker script only (sync also ships SRT and the public gateway); the next launch runs it
+    # Worker script + modular package only (sync also ships SRT and the public gateway); the next launch runs it
     check_ssh
     WORKER_SCRIPT="${REPO_ROOT}/scripts/workers/o2switch_batch_worker.py"
     [[ -f "${WORKER_SCRIPT}" ]] || WORKER_SCRIPT="${SCRIPT_DIR}/o2switch_batch_worker.py"
-    rsync -a --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" --chmod=F755 "${WORKER_SCRIPT}" "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/"
+    sync_remote_batch_worker
     echo "local  $(sha256sum "${WORKER_SCRIPT}" | cut -c1-16)"
     # shellcheck disable=SC2029
     echo "remote $(ssh "${O2SWITCH_HOST}" "sha256sum '${REMOTE_BASE}/scripts/o2switch_batch_worker.py'" | cut -c1-16)"
@@ -884,12 +891,11 @@ REMOTE_SCRIPT
     # Legacy .phash names to moviehash names; dry run unless --apply. Counts only (no media name)
     check_ssh
     shift || true
-    WORKER_SCRIPT="${REPO_ROOT}/scripts/workers/o2switch_batch_worker.py"
-    [[ -f "${WORKER_SCRIPT}" ]] || WORKER_SCRIPT="${SCRIPT_DIR}/o2switch_batch_worker.py"
     MIGRATE_SCRIPT="${REPO_ROOT}/scripts/workers/o2switch_phash_migrate.py"
     [[ -f "${MIGRATE_SCRIPT}" ]] || MIGRATE_SCRIPT="${SCRIPT_DIR}/o2switch_phash_migrate.py"
+    sync_remote_batch_worker
     rsync -a --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" --chmod=F755 \
-      "${WORKER_SCRIPT}" "${MIGRATE_SCRIPT}" "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/"
+      "${MIGRATE_SCRIPT}" "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/"
     # shellcheck disable=SC2029
     ssh "${O2SWITCH_HOST}" "cd $(printf '%q' "${REMOTE_BASE}") && ./bin/python3 -u scripts/o2switch_phash_migrate.py ${*:+$(printf '%q ' "$@")}"
     ;;
@@ -1110,6 +1116,10 @@ REMOTE_TRAJ_STATUS
       "${REPO_ROOT}/scripts/ingestion/backfill_ahash_sidecars.py" \
       "${REPO_ROOT}/scripts/workers/o2switch_batch_worker.py" \
       "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/"
+    if [[ -d "${REPO_ROOT}/scripts/workers/batch_worker" ]]; then
+      rsync -az --delete --exclude='__pycache__' --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" \
+        "${REPO_ROOT}/scripts/workers/batch_worker/" "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/batch_worker/"
+    fi
     echo "=== Running aHash sidecar backfill on ${O2SWITCH_HOST} ==="
     # shellcheck disable=SC2029
     ssh -o ServerAliveInterval=15 -o ServerAliveCountMax=3 "${O2SWITCH_HOST}" "cd $(printf '%q' "${REMOTE_BASE}") && PATH=\"\$HOME/${REMOTE_BASE}/bin:\$PATH\" RAYON_NUM_THREADS=2 ./bin/python3 -u scripts/backfill_ahash_sidecars.py $(printf '%q ' "${BACKFILL_ARGS[@]}")"
