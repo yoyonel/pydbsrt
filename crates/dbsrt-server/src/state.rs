@@ -717,6 +717,26 @@ impl AppState {
         base_count + delta_count + loose_count
     }
 
+    /// Returns the total number of distinct indexed acoustic (`aHash`) tracks across Base and Delta.
+    ///
+    /// # Arguments
+    /// None (`&self`).
+    ///
+    /// # Returns
+    /// Distinct acoustic track count (`MmapDbahash` base + unpacked `.ahash` delta entries).
+    ///
+    /// # Panics
+    /// Never panics (wait-free `ArcSwap::load`).
+    ///
+    /// # Data Flow & Invariants
+    /// - Executes in $\mathcal{O}(1)$ wait-free in-memory time via `self.ahash_engine.load().media_count()`
+    ///   with **zero** disk I/O or lock acquisitions.
+    /// - **Invariant (ADR-0007)**: Packed entries and `\0TWINS1\0` binary twins are never
+    ///   double-counted in the delta catalog.
+    pub fn indexed_ahash_count(&self) -> usize {
+        self.ahash_engine.load().media_count()
+    }
+
     /// Returns a comprehensive snapshot of the catalog state (Base + Delta + Couplings).
     pub fn catalog_status(&self) -> CatalogStatusResponse {
         let (base_medias, base_cuts, base_sparse) =

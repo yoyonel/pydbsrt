@@ -179,6 +179,7 @@ Cette page dresse le dictionnaire exhaustif de toutes les cibles d'orchestration
 | `task o2switch:batch:all` | Exécute l'ingestion batch unifiée sur l'intégralité du corpus distant (/tvshow + /video). |
 | `task o2switch:batch:ahash:all` | Exécute l'extraction batch audio pure (`--mode ahash`) en streaming sur l'ensemble de la bibliothèque. |
 | `task o2switch:ahash:backfill` | Exécute `backfill_ahash_sidecars.py` sur `o2switch` (`--dry-run`, `--limit`, `--workers <= 4`) pour peupler/vérifier `~/dbsrt/data/__AHASH__/*.json`. |
+| `task o2switch:pack-ahash` | Compile en 2 passes streaming `~/dbsrt/data/__AHASH__` vers `~/dbsrt/data/catalog.dbahash` sur `o2switch` (`nice -n 19`) puis déclenche un rechargement atomique `POST /v1/catalog/reload`. |
 | `task o2switch:batch:status` | Vérifie l'état d'exécution du démon batch (PID, CPU, mémoire, progression détaillée de la file). |
 | `task o2switch:batch:pause` | Met en pause douce le batch distant sur o2switch (`run/batch_paused` : les jobs en cours finissent, aucun nouveau job dépilé). |
 | `task o2switch:batch:resume` | Reprend l'exécution du batch distant sur o2switch en supprimant `run/batch_paused`. |

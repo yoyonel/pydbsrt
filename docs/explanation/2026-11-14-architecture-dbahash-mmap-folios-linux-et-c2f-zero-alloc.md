@@ -257,6 +257,32 @@ Implémenté dans `crates/dbsrt-index/src/dbahash/{format.rs, reader.rs}` (`advi
 
 ---
 
+### I.7. Piège de Rollback Inter-Releases sur `o2switch` : Injection `DBSRT_DBAHASH` par Environnement vs Drapeaux CLI (`argv`)
+
+#### 1. Problématique & Mécanisme racine
+
+Sur `o2switch`, le lanceur daemon partagé (`deploy/o2switch/dbsrt_server_ctl.sh`) et la passerelle PHP (`deploy/o2switch/index.php`) orchestrent le binaire pointé par le lien symbolique `~/dbsrt/bin/current/dbsrt-server`. Lors d'un `rollback` atomique (`o2switch_ctl.sh rollback`), `current` rebascule instantanément vers la release \(N-1\) conservée dans `~/dbsrt/releases/<prev_id>/`, **tandis que le lanceur `~/dbsrt/bin/dbsrt_server_ctl.sh` reste à la version \(N\)**. Si la release \(N\) introduit un nouveau drapeau en ligne de commande dans `argv` (ex. `--dbahash data/catalog.dbahash`), le parseur `clap` du binaire \(N-1\) (antérieur à `#81`) rejette l'argument inconnu avec `error: unexpected argument '--dbahash' found` et quitte immédiatement au démarrage.
+
+#### 2. Conséquences concrètes
+
+- **Empiriquement prouvé** : lors de la recette `task o2switch:e2e` en production sur `o2switch` (bascule entre la release `#79` `50b8c8f691e1fa85` et la release précédente `6d9c3b9946d3d74c`), le passage explicite de `--dbahash` et `--ahash-dir` dans `argv` faisait échouer l'étape `rollback` (`FAIL rollback exits 0`, timeout des 60 sondes de démarrage sur `127.0.0.1:8765`).
+
+#### 3. Solution / Invariant opéré
+
+- Dans `ServerCli` (`crates/dbsrt-server`), tous les chemins optionnels sont déclarés via `#[arg(long, env = "DBSRT_...")]` (`DBSRT_DBAHASH`, `DBSRT_AHASH_DIR`).
+- Les lanceurs `deploy/o2switch/dbsrt_server_ctl.sh` et `deploy/o2switch/index.php` injectent exclusivement **`DBSRT_DBAHASH="${DATA_DIR}/catalog.dbahash"`** et **`DBSRT_AHASH_DIR="${DATA_DIR}/__AHASH__"`** dans l'environnement du processus enfant, sans ajouter `--dbahash` ni `--ahash-dir` dans `argv`.
+- **Invariant verrouillé par test** : `tests/tools/test_dbsrt_server_ctl.py` inspecte simultanément `/proc/<pid>/environ` (présence obligatoire de `DBSRT_DBAHASH` et `DBSRT_AHASH_DIR`) et `/proc/<pid>/cmdline` (absence stricte de `--dbahash` pour garantir la compatibilité descendante inter-releases).
+
+#### 4. Avantages, Inconvénients & Limites résiduelles
+
+- **Avantages (Empiriquement prouvés)** :
+    - Toute release `#81+` consomme automatiquement `DBSRT_DBAHASH` et `DBSRT_AHASH_DIR` via `clap`, tandis que tout binaire historique antérieur ignore silencieusement les variables d'environnement non référencées : `task o2switch:e2e` valide le cycle complet `deploy -> rollback -> re-activate` sans coupure.
+    - En production `o2switch` sur les `2 490` pistes (`628 946 940` trames), le daemon démarre à `VmRSS = 27.1 MiB` (`RssAnon = 21.6 MiB`), culmine à **`VmRSS = 120.0 MiB`** après requête chaude `POST /v1/search/ahash` (**`-85.2 %` face aux `809 MiB` avant `#79`**) et répond en **`0.92 ms` moteur** (`1.65 ms` HTTP bout-en-bout).
+- **Inconvénients & Limite résiduelle** :
+    - `ps aux` n'affiche pas directement les variables d'environnement dans la colonne `COMMAND` ; le diagnostic opérationnel passe par `GET /v1/status` (`indexed_ahash_count: 2490` en `0.56 ms`), `GET /v1/catalog/status` ou `/proc/<pid>/environ`.
+
+---
+
 ## Partie II — Arbitrages Architecturaux Déductifs & Curseurs Paramétriques
 
 ---

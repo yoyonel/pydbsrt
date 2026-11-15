@@ -46,7 +46,7 @@ Sonde de vivacité (Liveness probe) pour reverse-proxies et orchestrateurs conte
   ```
 
 ### `GET /v1/status`
-Rapport d'état synthétique en temps constant $\mathcal{O}(1)$ (zéro balayage disque ni `mmap` synchrone via `AppState::indexed_media_count`, combinant base `.dbphash` + index delta RAM + éventuels `.phash` non empaquetés sans double comptage), nombre de sous-titres certifiés couplés et connectivité PostgreSQL 17.
+Rapport d'état synthétique en temps constant $\mathcal{O}(1)$ (zéro balayage disque ni `mmap` synchrone via `AppState::indexed_media_count` et `AppState::indexed_ahash_count`, combinant archives `mmap` `.dbphash` / `.dbahash` + index delta RAM sans double comptage), nombre de sous-titres certifiés couplés et connectivité PostgreSQL 17.
 **Réponse** :
   ```json
   {
@@ -57,6 +57,7 @@ Rapport d'état synthétique en temps constant $\mathcal{O}(1)$ (zéro balayage 
     "phash_dir": "data/__PHASH__",
     "subtitles_dir": "data/SRT",
     "indexed_phash_count": 4974,
+    "indexed_ahash_count": 2490,
     "certified_couplings_count": 2610,
     "postgres_connected": false
   }

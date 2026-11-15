@@ -351,3 +351,8 @@ tasks:
     desc: Join pulled fault watcher records with a pasted cPanel Resource Usage table (task ... -- <file>)
     cmds:
       - uv run --frozen python scripts/workers/o2switch_fault_watch.py correlate {{.CLI_ARGS}}
+
+  o2switch:pack-ahash:
+    desc: Compile data/__AHASH__ into data/catalog.dbahash on o2switch and trigger hot-reload
+    cmds:
+      - ./scripts/infra/o2switch/o2switch_ctl.sh pack-ahash {{.CLI_ARGS}}

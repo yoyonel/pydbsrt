@@ -124,6 +124,7 @@ pub struct HealthResponse {
     pub service: String,
 }
 
+/// Constant-time daemon status and indexed catalog summary returned by `GET /v1/status`.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct StatusResponse {
     pub status: String,
@@ -133,6 +134,8 @@ pub struct StatusResponse {
     pub phash_dir: String,
     pub subtitles_dir: String,
     pub indexed_phash_count: usize,
+    #[serde(default)]
+    pub indexed_ahash_count: usize,
     #[serde(default)]
     pub certified_couplings_count: usize,
     #[serde(default)]
