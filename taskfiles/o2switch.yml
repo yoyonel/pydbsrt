@@ -21,6 +21,21 @@ tasks:
     cmds:
       - ./scripts/infra/o2switch/o2switch_ctl.sh deploy
 
+  o2switch:stage:
+    desc: Stage pre-merge dbsrt + dbsrt-server into ~/dbsrt/preview on o2switch without touching prod current/bin or workers
+    cmds:
+      - ./scripts/infra/o2switch/o2switch_ctl.sh stage {{.CLI_ARGS}}
+
+  o2switch:canary:
+    desc: Validate staged preview dbsrt-server on isolated Unix socket against real o2switch datasets (zero prod impact)
+    cmds:
+      - ./scripts/infra/o2switch/o2switch_ctl.sh canary
+
+  o2switch:promote:
+    desc: Promote staged ~/dbsrt/preview release to active production on o2switch with healthcheck & auto-rollback
+    cmds:
+      - ./scripts/infra/o2switch/o2switch_ctl.sh promote
+
   o2switch:rollback:
     desc: Switch back to the previous o2switch release and restart the daemon on it
     cmds:
@@ -191,6 +206,12 @@ tasks:
     interactive: true
     cmds:
       - ./scripts/infra/o2switch/o2switch_ctl.sh top {{.CLI_ARGS}}
+
+  o2switch:top:preview:
+    desc: Launch interactive pre-merge staged dbsrt top TUI on o2switch (~/dbsrt/preview/dbsrt, prod untouched)
+    interactive: true
+    cmds:
+      - ./scripts/infra/o2switch/o2switch_ctl.sh top-preview {{.CLI_ARGS}}
 
   o2switch:pull-catalog:
     desc: Pull processed unified catalog.dbphash, SRT subtitles, and batch telemetry from o2switch

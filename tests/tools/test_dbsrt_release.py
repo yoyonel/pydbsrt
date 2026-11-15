@@ -246,3 +246,32 @@ def test_running_reports_the_release_a_daemon_executes(remote: Remote) -> None:
 
 def test_unknown_action_fails(remote: Remote) -> None:
     assert remote.run("bogus").returncode == 2
+
+
+def test_stage_sets_preview_without_touching_current_and_survives_prune(remote: Remote) -> None:
+    a = remote.release("A")
+    activate(remote, a)
+    b = remote.release("B")
+    activate(remote, b)
+    c = remote.release("C")
+    time.sleep(0.01)
+    remote.release("D")
+
+    staged = remote.run("stage", c)
+    assert staged.returncode == 0, staged.stdout + staged.stderr
+    assert remote.state()[:2] == (b, a)
+    assert remote.link("preview") == c
+    assert remote.serves("dbsrt").endswith("# dbsrt B\n")
+
+    listed = remote.run("list")
+    assert any(line.startswith(f"~ {c}") for line in listed.stdout.splitlines())
+
+    # Prune keep=2 retains current (b), previous (a), AND staged preview (c), pruning only d
+    pruned = remote.run("prune", "2")
+    assert pruned.returncode == 0, pruned.stdout + pruned.stderr
+    assert sorted(os.listdir(remote.base / "releases")) == sorted([a, b, c])
+
+    # Promoting c via activate clears preview link and switches current -> c, previous -> b
+    activate(remote, c)
+    assert remote.link("preview") is None
+    assert remote.state()[:2] == (c, b)

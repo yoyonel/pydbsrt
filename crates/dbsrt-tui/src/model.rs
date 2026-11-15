@@ -1149,6 +1149,31 @@ impl SystemTelemetry {
             _ => format!("{used:.2} GiB"),
         })
     }
+
+    /// Returns true when telemetry reflects a shared CloudLinux LVE / cPanel tenant container.
+    ///
+    /// # Arguments
+    /// * `&self` - Immutable telemetry snapshot reference.
+    ///
+    /// # Returns
+    /// `true` when an LVE memory/CPU quota or CloudLinux LVE kernel/OS is detected; else `false`.
+    ///
+    /// # Errors
+    /// None.
+    ///
+    /// # Panics
+    /// Guarantee: Never panics.
+    ///
+    /// # Data Flow & Invariants
+    /// On mutualized CloudLinux blades (`o2switch`), `/proc/net/dev` exposes the shared 10 GbE NIC
+    /// traffic of all co-tenants. Views and samplers use this predicate to label and compute
+    /// per-account remote stream ingress (`Réseau compte RX`) instead of host-wide NIC counters.
+    pub fn is_shared_lve_account(&self) -> bool {
+        self.account_ram_limit_gib.is_some()
+            || self.account_cpu_pct.is_some()
+            || self.host_info.os_name.contains("CloudLinux")
+            || self.host_info.kernel.contains(".lve.")
+    }
 }
 
 /// Active input field focus within the source configuration modal.

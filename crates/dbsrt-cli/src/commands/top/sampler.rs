@@ -2302,9 +2302,7 @@ pub fn run_telemetry_sampler_loop(
     stop_flag: Arc<AtomicBool>,
 ) {
     let mut system = System::new();
-    let mut networks = Networks::new_with_refreshed_list();
-    let mut last_net_instant = Instant::now();
-    let mut last_proc_rx: Option<(Instant, u64)> = None;
+    let mut net_sampler = NetRxSamplerState::new();
     let mut previous_io_samples: HashMap<u32, (Instant, u64)> = HashMap::new();
     /// Account RAM `(used, limit)` in GiB, and account CPU in percent of its LVE limit.
     type AccountUsage = (Option<(f64, Option<f64>)>, Option<f64>);
@@ -2372,13 +2370,13 @@ pub fn run_telemetry_sampler_loop(
             account = Some((now, (mem, cpu)));
         }
 
-        // Refresh physical network interface RX throughput
-        let (net_rx_mib_s, new_last_net) =
-            compute_net_rx_rate(&mut networks, now, last_net_instant, &mut last_proc_rx);
-        last_net_instant = new_last_net;
-
-        // 2. Discover active candidate processes
+        // 2. Discover active candidate processes and compute RX ingress (LVE account vs physical NIC)
         let (raw_candidates, ffmpeg_ppids) = collect_candidate_processes(&system);
+        let net_rx_mib_s = if is_shared_lve_tick(account, &shared_state) {
+            net_sampler.sample_lve_rx_mib_s(&raw_candidates, &ffmpeg_ppids, now)
+        } else {
+            net_sampler.sample_nic_rx_mib_s(now)
+        };
 
         let (active_jobs, new_previous_io) =
             process_candidate_jobs(raw_candidates, &ffmpeg_ppids, previous_io_samples, now);
@@ -2763,6 +2761,113 @@ fn compute_net_rx_rate(
     (0.0, now)
 }
 
+/// Stateful counters computing either dedicated physical NIC RX or CloudLinux LVE account stream RX.
+///
+/// # Data Flow & Invariants
+/// On dedicated machines (`local` PC, `RPi4`), delegates to `compute_net_rx_rate` (`/proc/net/dev`).
+/// On shared CloudLinux LVE blades (`o2switch`), `/proc/net/dev` exposes the shared 10 GbE NIC of
+/// all co-tenants; `sample_rx_mib_s` instead computes per-PID `/proc/<pid>/io` `rchar` deltas across
+/// active remote-streaming workers (`http://`, `https://`, `ftp://`, `ftps://`, `sftp://`), avoiding
+/// co-tenant cross-talk, loopback SSH tunnel double-counting, and PID churn spikes.
+struct NetRxSamplerState {
+    networks: Networks,
+    last_net_instant: Instant,
+    last_proc_rx: Option<(Instant, u64)>,
+    prev_stream_rchar: HashMap<u32, (Instant, u64)>,
+}
+
+impl NetRxSamplerState {
+    fn new() -> Self {
+        Self {
+            networks: Networks::new_with_refreshed_list(),
+            last_net_instant: Instant::now(),
+            last_proc_rx: None,
+            prev_stream_rchar: HashMap::new(),
+        }
+    }
+
+    fn sample_lve_rx_mib_s(
+        &mut self,
+        raw_candidates: &[RawCandidateProcess],
+        ffmpeg_ppids: &[u32],
+        now: Instant,
+    ) -> f64 {
+        let samples: Vec<(u32, u64)> = raw_candidates
+            .iter()
+            .filter(|c| !(c.is_dbsrt && ffmpeg_ppids.contains(&c.pid)))
+            .filter(|c| cmdline_has_remote_stream(&c.cmdline))
+            .map(|c| (c.pid, read_proc_io_bytes(c.pid)))
+            .collect();
+        compute_stream_rchar_delta_mib_s(&samples, &mut self.prev_stream_rchar, now)
+    }
+
+    fn sample_nic_rx_mib_s(&mut self, now: Instant) -> f64 {
+        let (rx, next_t) = compute_net_rx_rate(
+            &mut self.networks,
+            now,
+            self.last_net_instant,
+            &mut self.last_proc_rx,
+        );
+        self.last_net_instant = next_t;
+        rx
+    }
+}
+
+/// Checks whether the current sampler tick executes inside a shared CloudLinux LVE container.
+#[allow(clippy::type_complexity)]
+fn is_shared_lve_tick(
+    account: Option<(Instant, (Option<(f64, Option<f64>)>, Option<f64>))>,
+    shared_state: &Arc<RwLock<SystemTelemetry>>,
+) -> bool {
+    let has_quota = account
+        .is_some_and(|(_, (mem, cpu))| mem.and_then(|(_, limit)| limit).is_some() || cpu.is_some());
+    if has_quota {
+        return true;
+    }
+    shared_state.read().is_ok_and(|s| s.is_shared_lve_account())
+}
+
+/// Computes aggregate remote-stream ingress (`MiB/s`) from per-PID `rchar` counters across ticks.
+///
+/// # Arguments
+/// * `samples` - Active remote-streaming `(pid, rchar_bytes)` pairs at `now`.
+/// * `prev_rchar` - Mutable map of prior `(Instant, rchar_bytes)` per PID; dead PIDs are pruned.
+/// * `now` - Monotonic timestamp of the current tick.
+///
+/// # Returns
+/// Non-negative aggregate ingress rate in `MiB/s`.
+///
+/// # Errors
+/// None.
+///
+/// # Panics
+/// Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// Per-PID delta subtraction (`curr.saturating_sub(prev) / dt`) guarantees monotonic stability even
+/// as multi-gigabyte `ffmpeg` workers spawn or terminate mid-batch.
+pub fn compute_stream_rchar_delta_mib_s(
+    samples: &[(u32, u64)],
+    prev_rchar: &mut HashMap<u32, (Instant, u64)>,
+    now: Instant,
+) -> f64 {
+    let mut next_map = HashMap::with_capacity(samples.len());
+    let mut total_mib_s = 0.0;
+    for &(pid, curr_bytes) in samples {
+        if let Some(&(prev_t, prev_bytes)) = prev_rchar.get(&pid) {
+            let dt = now
+                .duration_since(prev_t)
+                .as_secs_f64()
+                .max(MIN_DELTA_TIME_FLOOR_SECS);
+            let delta = curr_bytes.saturating_sub(prev_bytes) as f64;
+            total_mib_s += (delta / BYTES_PER_MIB_F64) / dt;
+        }
+        next_map.insert(pid, (now, curr_bytes));
+    }
+    *prev_rchar = next_map;
+    sanitize_non_negative_rate(total_mib_s)
+}
+
 /// Builds the ffprobe command listing duration and stream codecs/tags for `probe_media_file`.
 fn build_probe_media_command(path: &Path) -> Command {
     let mut cmd = Command::new(dbsrt_core::video::resolve_ffprobe());
@@ -2827,15 +2932,34 @@ pub fn url_decode_simple(input: &str) -> String {
     String::from_utf8_lossy(&decoded).into_owned()
 }
 
-/// Processes raw detected candidate processes into typed telemetry jobs and updates delta IO samples.
-#[allow(clippy::type_complexity)]
-/// Extracts target video path and media name from process command-line arguments.
-fn extract_media_info(cmdline: &[String]) -> (Option<PathBuf>, String) {
+/// Extracts target video path and display media name from process command-line arguments.
+///
+/// # Arguments
+/// * `cmdline` - Process argv tokens read from `/proc/<pid>/cmdline`.
+///
+/// # Returns
+/// Tuple `(target_path, media_name)` with URL-decoded display label (falling back to `"Tâche Active"`).
+///
+/// # Errors
+/// Infallible.
+///
+/// # Panics
+/// Never panics.
+///
+/// # Data Flow & Invariants
+/// Supports both `--media-name <val>` and `--media-name=<val>` forms, stripping the flag prefix
+/// before matching container extensions (`.mkv`, `.mp4`, `.webm`, `.avi`) or `ffmpeg -i <input>`.
+pub fn extract_media_info(cmdline: &[String]) -> (Option<PathBuf>, String) {
     let mut target_path: Option<PathBuf> = None;
     let mut explicit_name: Option<String> = None;
     for (idx, arg) in cmdline.iter().enumerate() {
+        if let Some(val) = arg.strip_prefix("--media-name=") {
+            explicit_name = Some(val.to_string());
+            continue;
+        }
         if arg == "--media-name" && idx + 1 < cmdline.len() {
             explicit_name = Some(cmdline[idx + 1].clone());
+            continue;
         }
         if arg.ends_with(".mkv")
             || arg.ends_with(".mp4")

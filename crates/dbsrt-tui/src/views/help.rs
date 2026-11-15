@@ -333,7 +333,7 @@ pub fn build_help_system() -> Vec<Line<'static>> {
         Line::from("    • PROCESSEUR (CPU)       : Modèle commercial CPU, nombre de cœurs logiques/physiques et charge instantanée."),
         Line::from("    • ACCÉLÉRATION GPU       : Contrôleur graphique actif, moteur de décodage (VA-API/Intel Iris Xe, Broadcom VideoCore VI, ou CPU)."),
         Line::from("    • MÉMOIRE & STOCKAGE     : Consommation RAM hôte en GiB/pourcentage, sources actives déclarées."),
-        Line::from("    • DÉBITS & FLUX EN DIRECT: Bande passante réseau Net RX, débit pipe pHash et statut cumulé de session."),
+        Line::from("    • DÉBITS & FLUX EN DIRECT: Bande passante réseau Net RX (ou Réseau compte RX sur CloudLinux LVE), débit pipe pHash/aHash et statut cumulé de session."),
         Line::from(""),
         Line::from(Span::styled(
             "  Raccourcis Dédiés :",

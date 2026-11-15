@@ -4745,3 +4745,66 @@ fn test_help_active_jobs_1_to_1_parity_with_ahash_and_batch_type() {
         );
     }
 }
+
+#[test]
+fn test_cloudlinux_lve_account_rx_rate_and_header_label() {
+    use dbsrt_cli::commands::top::sampler::compute_stream_rchar_delta_mib_s;
+    use std::collections::HashMap;
+    use std::time::{Duration, Instant};
+
+    let mut prev = HashMap::new();
+    let t0 = Instant::now();
+    // Tick 0 warmup: records initial rchar per PID, returns 0.0
+    let r0 = compute_stream_rchar_delta_mib_s(
+        &[(101, 50 * 1_048_576), (102, 10 * 1_048_576)],
+        &mut prev,
+        t0,
+    );
+    assert_eq!(r0, 0.0);
+
+    // Tick 1 (+1.0s): PID 101 read +10 MiB, PID 102 exited, PID 103 spawned at 5 MiB -> exact 10.0 MiB/s
+    let t1 = t0 + Duration::from_secs(1);
+    let r1 = compute_stream_rchar_delta_mib_s(
+        &[(101, 60 * 1_048_576), (103, 5 * 1_048_576)],
+        &mut prev,
+        t1,
+    );
+    assert!((r1 - 10.0).abs() < 1e-6, "expected 10.0 MiB/s, got {r1}");
+    assert!(!prev.contains_key(&102), "exited PID must be purged");
+
+    // Verify header & system views render `Réseau compte RX` on CloudLinux LVE and `Réseau Net RX` on dedicated hosts
+    let backend = ratatui::backend::TestBackend::new(160, 45);
+    let mut terminal = ratatui::Terminal::new(backend).unwrap();
+    let mut tel = SystemTelemetry {
+        account_ram_limit_gib: Some(48.0),
+        account_cpu_pct: Some(12.0),
+        net_rx_mib_s: 15.2,
+        ..Default::default()
+    };
+    assert!(tel.is_shared_lve_account());
+    let mut app = AppState::new();
+    let ctx = app.ui_context(&tel, None);
+    terminal.draw(|f| render_ui(f, &ctx)).unwrap();
+    let buf_hdr = format!("{:?}", terminal.backend().buffer());
+    assert!(buf_hdr.contains("Réseau compte RX:"));
+    assert!(!buf_hdr.contains("Réseau Net RX:"));
+
+    app.view = ViewPage::System;
+    let ctx_sys = app.ui_context(&tel, None);
+    terminal.draw(|f| render_ui(f, &ctx_sys)).unwrap();
+    let buf_sys = format!("{:?}", terminal.backend().buffer());
+    assert!(buf_sys.contains("Réseau compte RX"));
+
+    tel.account_ram_limit_gib = None;
+    tel.account_cpu_pct = None;
+    assert!(!tel.is_shared_lve_account());
+
+    let (target, media) = dbsrt_cli::commands::top::sampler::extract_media_info(&[
+        "dbsrt".to_string(),
+        "media:add".to_string(),
+        "--media-name=Deux Fils (2018).mkv".to_string(),
+        "-".to_string(),
+    ]);
+    assert!(target.is_none());
+    assert_eq!(media, "Deux Fils (2018).mkv");
+}

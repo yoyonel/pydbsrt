@@ -227,6 +227,7 @@ nav:
       - Ingénierie, Profiling & Optimisation des Agent Skills: explanation/2026-11-14-methodologie-ingenierie-profiling-et-optimisation-agent-skills.md
       - Sauvegarde Multi-Tiers Hardlinks POSIX & Packs FTP Zéro-CIFS: explanation/2026-11-15-sauvegarde-multi-tiers-hardlinks-posix-et-packs-ftp-zero-cifs.md
       - Modularisation Batch Worker & Pièges Multi-Nœuds (RPi4/Freebox/o2switch): explanation/2026-11-15-modularisation-batch-worker-et-pieges-pipeline-multi-noeuds.md
+      - Télémétrie PCM aHash & Staging/Canary Pré-Merge (o2switch/RPi4): explanation/2026-11-15-telemetrie-ahash-pcm-et-staging-canary-pre-merge.md
   - 📊 Benchmarks & Preuves:
       - Campagnes Empiriques:
           - Recette E2E Exhaustive Portails o2switch (44 Routes / 39 Captures): history/2026-11-14-recette-exhaustive-portails-o2switch.md

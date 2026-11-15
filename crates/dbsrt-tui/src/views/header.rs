@@ -383,6 +383,12 @@ fn build_realtime_flow_line(tel: &SystemTelemetry) -> Line<'static> {
         tel.net_rx_mib_s
     };
 
+    let net_label = if tel.is_shared_lve_account() {
+        "Réseau compte RX: "
+    } else {
+        "Réseau Net RX: "
+    };
+
     let mut spans = vec![
         Span::styled(
             " ⚡ FLUX REEL  │ ",
@@ -390,7 +396,7 @@ fn build_realtime_flow_line(tel: &SystemTelemetry) -> Line<'static> {
                 .fg(Color::LightBlue)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("Réseau Net RX: ", Style::default().fg(Color::White)),
+        Span::styled(net_label, Style::default().fg(Color::White)),
         Span::styled(
             format!("{:>5.1} MB/s ", safe_net_rx),
             Style::default()
