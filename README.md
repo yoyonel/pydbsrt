@@ -251,8 +251,8 @@ flowchart TD
 
 | Crate | Responsabilités & Périmètre SoC |
 | :--- | :--- |
-| **[`crates/dbsrt-cli`](crates/dbsrt-cli/)** | **CLI Standalone & Dispatcher** : Point d'entrée de commande (`main.rs`), bibliothèque modulaire (`lib.rs`), sous-commandes dédiées dans `src/commands/` (`media_add`, `certify`, `export`, `import`, `recognize`, `retarget`, `scan`, `bench`, `migrate`). |
-| **[`crates/dbsrt-server`](crates/dbsrt-server/)** | **Serveur REST Axum & Backoffice** : Handlers HTTP modulaires (`health`, `lookup`, `metrics`, `search`, `studio`, `sync`), indexation mémoire MIH et interface web `dbsrt Studio`. |
+| **[`crates/dbsrt-cli`](crates/dbsrt-cli/)** | **CLI Standalone & Dispatcher** : Point d'entrée de commande (`main.rs`), bibliothèque modulaire (`lib.rs`), sous-commandes dédiées dans `src/commands/` (`media_add`, `certify`, `export`, `import`, `recognize`, `retarget`, `scan`, `bench`, `migrate`, `top`, `doctor`). |
+| **[`crates/dbsrt-server`](crates/dbsrt-server/)** | **Serveur REST Axum & Backoffice** : Handlers HTTP modulaires (`health`, `alerts`, `monitoring`, `lookup`, `metrics`, `search`, `studio`, `sync`), indexation mémoire MIH et interface web `dbsrt Studio`. |
 | **[`crates/dbsrt-index`](crates/dbsrt-index/)** | **Indexation & Persistance** : Modèle relationnel PostgreSQL 17 SP-GiST, gestionnaire de migrations versionnées Refinery (`embed_migrations!`), et moteur `mmap` Zero-DB (`.dbphash` / `.phash`). |
 | **[`crates/dbsrt-core`](crates/dbsrt-core/)** | **Primitives Algorithmiques** : Calcul d'empreintes perceptuelles 64-bit DCT pHash, décodage FFmpeg HWAccel/SW, détection d'encodages de sous-titres et distance de Hamming SIMD (`popcnt`). |
 
@@ -290,6 +290,7 @@ flowchart TD
 | `task dev` | Démarre toute la stack de développement en arrière-plan | `Taskfile.yml` |
 | `task down` | Arrête proprement tous les conteneurs et démons | `Taskfile.yml` |
 | `task status` | Tableau de bord de santé et compteurs relationnels PostgreSQL 17 | `Taskfile.yml` |
+| `task status:cluster` | Sonde multi-nœuds (`local` / `rpi4` / `o2switch`) : alertes, erreurs `1h`/`24h`/`72h` et parité `SHA-256` (`dbsrt doctor`) | `taskfiles/stack.yml` |
 | `task build` | Compile l'ensemble des binaires Rust en release | `Taskfile.yml` |
 | `task media:add` | Façade unifiée d'ingestion média (pHash, sidecar, certification, reload) | `taskfiles/stack.yml` |
 | `task audio:export-ahash` | Extrait une empreinte `.ahash` (`<moviehash_16hex>[.a<k>].86.1fps.ahash` + sidecar `.json`) | `taskfiles/eval.yml` |

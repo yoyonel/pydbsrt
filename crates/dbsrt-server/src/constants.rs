@@ -200,3 +200,57 @@ pub const DEFAULT_HEAVY_TASK_PERMITS: usize = 4;
 
 /// Maximum worker threads in the global Rayon pool on `dbsrt-server` (CloudLinux LVE NPROC guard).
 pub const DEFAULT_RAYON_WORKER_THREADS: usize = 4;
+
+/// Default relative path to the fast-failure batch abort sentinel file.
+pub const DEFAULT_BATCH_ABORTED_PATH: &str = "run/batch_aborted";
+
+/// Default relative path to the batch ingestion worker log file.
+pub const DEFAULT_BATCH_WORKER_LOG_PATH: &str = "logs/batch_worker.log";
+
+/// Default relative path to the `dbsrt-server` daemon log file.
+pub const DEFAULT_SERVER_LOG_PATH: &str = "logs/dbsrt-server.log";
+
+/// Default relative path to the RPi4 supervisor watchdog log file.
+pub const DEFAULT_SUPERVISOR_LOG_PATH: &str = "logs/rpi4_supervisor.log";
+
+/// Secondary relative path to volatile NDJSON batch execution events in `logs/`.
+pub const DEFAULT_ALT_BATCH_EVENTS_PATH: &str = "logs/batch_events.jsonl";
+
+/// Default relative directory containing CloudLinux LVE faultwatch NDJSON samples.
+pub const DEFAULT_FAULTWATCH_DIR: &str = "logs/faultwatch";
+
+/// Default relative path to the cached Synology NAS FTP media index JSON report.
+pub const DEFAULT_NAS_FTP_INDEX_PATH: &str = "data/reports/nas_ftp_index.json";
+
+/// Maximum trailing byte window (256 KiB) read per daemon/worker log file during alert scanning.
+pub const ALERTS_LOG_TAIL_BYTES: u64 = 256 * 1024;
+
+/// Maximum trailing byte window (4 MiB) read from NDJSON batch event logs for blacklist streak analysis.
+pub const ALERTS_EVENTS_TAIL_BYTES: u64 = 4 * 1024 * 1024;
+
+/// Maximum trailing byte window (256 KiB) read per faultwatch NDJSON file.
+pub const ALERTS_FAULTWATCH_TAIL_BYTES: u64 = 256 * 1024;
+
+/// Consecutive failure count per `video_stem` at or above which a media item is considered blacklisted.
+pub const BLACKLIST_CONSECUTIVE_FAILURES_THRESHOLD: usize = 3;
+
+/// Maximum age in seconds (24 hours) before `nas_ftp_index.json` is flagged as stale in monitoring alerts.
+pub const NAS_FTP_INDEX_STALE_TTL_SECS: u64 = 86_400;
+
+/// Rolling 1-hour alert aggregation window in seconds.
+pub const ALERT_WINDOW_1H_SECS: u64 = 3_600;
+
+/// Rolling 24-hour alert aggregation window in seconds.
+pub const ALERT_WINDOW_24H_SECS: u64 = 86_400;
+
+/// Rolling 72-hour alert aggregation window in seconds.
+pub const ALERT_WINDOW_72H_SECS: u64 = 259_200;
+
+/// Maximum character length of a single redacted alert summary message.
+pub const MAX_ALERT_SUMMARY_CHARS: usize = 220;
+
+/// Maximum number of deduplicated log error signatures emitted as individual alerts per log source.
+pub const MAX_DEDUP_LOG_ALERTS_PER_SOURCE: usize = 5;
+
+/// Scheduler run-queue delay threshold in milliseconds indicating CloudLinux LVE CPU throttling.
+pub const FAULTWATCH_RUN_DELAY_WARN_MS: f64 = 500.0;

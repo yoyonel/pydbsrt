@@ -725,6 +725,128 @@ pub struct MonitoringStreamState {
     /// Live daemon logs ring buffer.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub server_logs: Option<Vec<crate::state::ServerLogEntry>>,
+    /// Real-time centralized alerts snapshot (`GET /v1/monitoring/alerts`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alerts: Option<MonitoringAlertsResponse>,
+}
+
+/// Severity level of an active monitoring alert item.
+///
+/// # Data Flow & Invariants
+/// Serialized in lowercase (`"warning"` or `"critical"`) for REST API and web portal consumption.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "lowercase")]
+pub enum AlertSeverity {
+    /// Non-blocking operational degradation, stale cache, or historical error signature.
+    Warning,
+    /// Immediate operational failure, aborted batch, degraded supervisor, or recent error burst.
+    Critical,
+}
+
+/// Overall health roll-up status returned by `GET /v1/monitoring/alerts`.
+///
+/// # Data Flow & Invariants
+/// Derived monotonically from active alerts: `"critical"` if any alert is [`AlertSeverity::Critical`],
+/// `"warning"` if at least one [`AlertSeverity::Warning`] alert is active, otherwise `"ok"`.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum AlertHealthStatus {
+    /// Zero active alerts detected across local state and log tails.
+    Ok,
+    /// Only warning-severity alerts are active.
+    Warning,
+    /// One or more critical-severity alerts are active.
+    Critical,
+}
+
+/// Rolling temporal occurrence buckets for deduplicated log or faultwatch signatures.
+///
+/// # Data Flow & Invariants
+/// Monotonically non-decreasing across wider windows: `h1 <= h24 <= h72`.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct AlertWindowCounts {
+    /// Occurrences observed within the last 1 hour (`<= 3,600s`).
+    pub h1: usize,
+    /// Occurrences observed within the last 24 hours (`<= 86,400s`).
+    pub h24: usize,
+    /// Occurrences observed within the last 72 hours (`<= 259,200s`).
+    pub h72: usize,
+}
+
+/// Individual deduplicated alert surfaced by `GET /v1/monitoring/alerts`.
+///
+/// # Data Flow & Invariants
+/// Every `summary` string is passed through secret and URL userinfo redaction before serialization.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct MonitoringAlertItem {
+    /// Stable machine-readable alert identifier (e.g. `"batch_aborted"`, `"supervisor_degraded"`).
+    pub id: String,
+    /// Operational severity level (`"warning"` or `"critical"`).
+    pub severity: AlertSeverity,
+    /// Subsystem component originating the alert (`"supervisor"`, `"batch_worker"`, `"dbsrt-server"`, `"faultwatch"`, `"dataset"`).
+    pub component: String,
+    /// Human-readable redacted description of the alert or normalized error example.
+    pub summary: String,
+    /// Total occurrences observed in the bounded inspection window.
+    pub count: usize,
+    /// ISO-8601 UTC timestamp of the most recent occurrence when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_seen: Option<String>,
+    /// Rolling `1h` / `24h` / `72h` counts when timestamped events are available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_counts: Option<AlertWindowCounts>,
+}
+
+/// Aggregated quantitative metrics backing `GET /v1/monitoring/alerts`.
+///
+/// # Data Flow & Invariants
+/// Provides constant-schema numeric counters even when `active_alerts_count == 0`.
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
+pub struct MonitoringAlertsMetrics {
+    /// Current supervisor state label (`"healthy"`, `"degraded"`, `"warning"`, `"offline"`, `"absent"`).
+    pub supervisor_state: String,
+    /// Cumulative batch launch failures reported by `supervisor_status.json`.
+    pub supervisor_launch_errors: u64,
+    /// Age in seconds of the last supervisor heartbeat if `supervisor_status.json` is present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supervisor_heartbeat_age_secs: Option<u64>,
+    /// True when the `run/batch_aborted` fast-failure sentinel file exists.
+    pub batch_aborted: bool,
+    /// Failed target count reported by `run/batch_queue.json`.
+    pub failed_queue_targets: usize,
+    /// Count of distinct `video_stem` entries with `>= 3` consecutive failures.
+    pub blacklisted_media_count: usize,
+    /// Count of distinct active error signatures across daemon, worker, and supervisor logs.
+    pub log_error_signatures: usize,
+    /// Total timestamped error log lines within the last 1 hour.
+    pub log_errors_1h: usize,
+    /// Total timestamped error log lines within the last 24 hours.
+    pub log_errors_24h: usize,
+    /// Total timestamped error log lines within the last 72 hours.
+    pub log_errors_72h: usize,
+    /// Count of CloudLinux LVE fault/saturation records observed in `logs/faultwatch/` within 24h.
+    pub lve_fault_entries_24h: usize,
+    /// Age in seconds of `data/reports/nas_ftp_index.json` when the file exists on disk.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nas_ftp_index_age_secs: Option<u64>,
+}
+
+/// Structured response payload returned by `GET /v1/monitoring/alerts`.
+///
+/// # Data Flow & Invariants
+/// `active_alerts_count` always equals `alerts.len()`. Alerts are sorted critical-first.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct MonitoringAlertsResponse {
+    /// Roll-up node alert status (`"ok"`, `"warning"`, `"critical"`).
+    pub status: AlertHealthStatus,
+    /// Number of active alerts in `alerts`.
+    pub active_alerts_count: usize,
+    /// Ordered list of active alerts (critical severity first).
+    pub alerts: Vec<MonitoringAlertItem>,
+    /// Underlying health and error metrics summary.
+    pub metrics: MonitoringAlertsMetrics,
+    /// Server wall-clock timestamp in ISO-8601 UTC (`YYYY-MM-DDTHH:MM:SSZ`).
+    pub server_time_iso: String,
 }
 
 /// Incoming heartbeat payload pushed by RPi4 supervisor agent.

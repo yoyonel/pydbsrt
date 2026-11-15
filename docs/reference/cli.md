@@ -30,9 +30,9 @@ dbsrt [OPTIONS] <SOUS_COMMANDE> [ARGUMENTS...]
 
 | Code | Signification |
 | :---: | :--- |
-| `0` | Succès de l'opération. |
+| `0` | Succès de l'opération (ou cluster sain / avertissements non bloquants sous `dbsrt doctor`). |
 | `1` | Erreur d'entrée/sortie, fichier introuvable ou erreur de parsing. |
-| `2` | Erreur de validation d'argument ou syntaxe CLI invalide. |
+| `2` | Erreur de validation d'argument CLI, ou alerte active `CRITICAL` / dérive `SHA256_DRIFT` détectée par `dbsrt doctor`. |
 | `3` | Échec de connexion réseau ou base de données. |
 
 <div class="asciinema-wrapper">
@@ -356,6 +356,32 @@ dbsrt top [OPTIONS]
 - `[Esc]` / `[Backspace]` : Revenir à l'onglet précédent ou à la liste principale (ou quitter depuis l'onglet 1)
 - `[?]` : Afficher / masquer la page d'aide
 - `[q]` : Quitter le moniteur TUI
+
+---
+
+### `doctor` (alias `status:cluster`)
+Sonde de diagnostic multi-nœuds en parallèle (`local`, `rpi4`, `o2switch`) agrégeant les compteurs d'erreurs glissants (`1h` / `24h` / `72h`), les alertes actives, la fraîcheur des index/files et la parité cryptographique `SHA-256` des scripts déployés.
+
+```text
+dbsrt doctor [OPTIONS]
+```
+
+- `--json` : Émet le rapport complet structuré (`ClusterDoctorReport`) au format JSON sur `stdout`.
+- `--local-only` : Sonde uniquement l'espace de travail local et ignore les sondes SSH vers `rpi4` et `o2switch` (`SKIPPED`).
+- `--rpi4-host <HOST>` : Alias SSH ou `user@host` de l'appliance Raspberry Pi 4 (défaut : `rpi4`).
+- `--o2switch-host <HOST>` : Alias SSH ou `user@host` du nœud CloudLinux o2switch (défaut : `o2switch`).
+- `--timeout-secs <SECS>` : Délai d'expiration maximal par nœud en secondes (défaut : `5`, minimum : `1`).
+
+#### Contrôles Exécutés en Parallèle (`std::thread::scope`)
+
+1. **Compteurs d'erreurs & signatures dédupliquées (`1h` / `24h` / `72h`)** :
+   - Analyse bornée de la queue des journaux (`64 KiB` par fichier) sur `logs/dbsrt-server.log`, `logs/batch_worker.log` et `logs/rpi4_supervisor.log` avec masquage systématique des secrets FTP/HTTP (`***`).
+   - Détection du marqueur d'arrêt d'urgence `run/batch_aborted`, de l'état dégradé dans `run/supervisor_status.json` (`state == "degraded"`, `launch_error_count > 0`, `failed_batch_types`), des cibles en échec dans `run/batch_queue.json`, des médias sur liste noire (`>= 3` échecs consécutifs par `video_stem`) et des saturations CloudLinux LVE dans `logs/faultwatch/*.jsonl`.
+2. **Parité `SHA-256` inter-nœuds des 5 scripts critiques** :
+   - Compare les empreintes `SHA-256` entre le dépôt `local` (`scripts/workers/*`, `scripts/infra/*`), `rpi4:~/dbsrt/scripts/` et `o2switch:~/dbsrt/scripts/` sur : `o2switch_batch_worker.py`, `batch_worker/cli.py`, `o2switch_ctl.sh`, `freebox_batch_ctl.sh` et `rpi4_o2switch_supervisor.py`.
+   - Toute divergence de hash entre deux nœuds joignables lève immédiatement le statut `SHA256_DRIFT` et le code de sortie `2`.
+3. **Fraîcheur des artefacts & files** :
+   - Vérifie l'âge de `data/reports/nas_ftp_index.json` (TTL `24h`), `data/reports/freebox_batch_targets.json` (TTL `7j`), `run/supervisor_status.json` (TTL `180s`) et `run/batch_queue.json` (TTL `24h`).
 
 ---
 

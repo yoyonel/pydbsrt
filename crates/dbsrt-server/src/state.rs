@@ -181,6 +181,8 @@ pub struct AppState {
     pub latest_search: Arc<std::sync::RwLock<Option<crate::dtos::LatestSearchTelemetry>>>,
     /// Concurrency semaphore bounding simultaneous heavy FFmpeg/catalog search tasks.
     pub heavy_task_semaphore: Arc<tokio::sync::Semaphore>,
+    /// Optional root directory override for monitoring state/log files (hermetic testing).
+    pub monitoring_root: Option<PathBuf>,
 }
 
 /// Sibling directory basename holding acoustic `.ahash` fingerprints next to `SRT/`.
@@ -373,7 +375,27 @@ impl AppState {
             delta_index: Arc::new(std::sync::RwLock::new(DeltaIndex::new())),
             latest_search: Arc::new(std::sync::RwLock::new(None)),
             heavy_task_semaphore: Arc::new(tokio::sync::Semaphore::new(DEFAULT_HEAVY_TASK_PERMITS)),
+            monitoring_root: None,
         }
+    }
+
+    /// Configures an isolated root directory for monitoring and alert state resolution.
+    ///
+    /// # Arguments
+    /// * `root` - Base filesystem directory containing `run/`, `logs/`, and `data/reports/`.
+    ///
+    /// # Returns
+    /// Updated [`AppState`] instance with `monitoring_root` set to `Some(root)`.
+    ///
+    /// # Panics
+    /// Never panics.
+    ///
+    /// # Data Flow & Invariants
+    /// When `monitoring_root` is set, `/v1/monitoring/alerts` resolves all relative runtime paths
+    /// strictly beneath `root` without falling back to `$HOME/dbsrt` or workspace files.
+    pub fn with_monitoring_root(mut self, root: PathBuf) -> Self {
+        self.monitoring_root = Some(root);
+        self
     }
 
     /// Records the latest search query timing breakdown for real-time dashboard telemetry.

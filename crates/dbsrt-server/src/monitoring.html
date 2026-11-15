@@ -496,6 +496,48 @@
       flex-direction: column;
       gap: 12px;
     }
+
+    /* Persistent Real-Time Alerts Hub Banner (GET /v1/monitoring/alerts) */
+    .alerts-banner {
+      display: none;
+      border-radius: 8px;
+      padding: 10px 14px;
+      margin-bottom: 14px;
+      border: 1px solid var(--warning);
+      background: rgba(210, 153, 34, 0.12);
+      font-family: var(--font-mono);
+      font-size: 0.78rem;
+    }
+    .alerts-banner.critical {
+      border-color: var(--danger);
+      background: rgba(248, 81, 73, 0.14);
+    }
+    .alerts-banner-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 6px;
+      font-weight: 700;
+      color: #fff;
+    }
+    .alerts-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .alert-row {
+      display: flex;
+      align-items: baseline;
+      flex-wrap: wrap;
+      gap: 8px;
+      line-height: 1.4;
+    }
+    .alert-comp {
+      color: var(--accent-hover);
+      font-weight: 700;
+    }
   </style>
 </head>
 <body>
@@ -506,6 +548,7 @@
       <h1>📡 dbsrt Monitor</h1>
       <span id="node-badge" class="badge badge-blue">o2switch</span>
       <span id="health-badge" class="badge badge-online">Actif</span>
+      <span id="alerts-header-badge" class="badge badge-offline" style="display: none;"></span>
       <span id="audit-badge" class="badge badge-blue" style="display: none;"></span>
     </div>
     <div class="header-controls">
@@ -514,6 +557,15 @@
       <button class="btn" id="btn-auth" title="Changer de clé">🔑</button>
     </div>
   </header>
+
+  <!-- Persistent Real-Time Alerts Banner (rendered when active_alerts_count > 0) -->
+  <section id="alerts-banner" class="alerts-banner" role="alert" aria-live="polite">
+    <div class="alerts-banner-head">
+      <span id="alerts-banner-title">⚠️ Alertes Actives</span>
+      <span id="alerts-banner-meta" class="top-dim"></span>
+    </div>
+    <div id="alerts-banner-list" class="alerts-list"></div>
+  </section>
 
   <nav class="views-nav" id="views-nav">
     <a href="#overview">Vue d'ensemble</a>
@@ -1219,6 +1271,9 @@
           if (payload.pipeline) {
             renderPipelineTelemetry(payload.pipeline);
           }
+          if (payload.alerts) {
+            renderAlertsBanner(payload.alerts);
+          }
           renderFreshness();
         } catch (err) {
           console.warn('Erreur parsing SSE state:', err);
@@ -1682,8 +1737,68 @@
       }
     }
 
+    async function fetchAlerts() {
+      try {
+        const resp = await fetch(apiEndpoint('v1/monitoring/alerts'), { headers: getAuthHeaders() });
+        if (resp.status === 401 || resp.status === 403 || !resp.ok) return;
+        const data = await resp.json();
+        renderAlertsBanner(data);
+      } catch (err) {
+        console.warn('Erreur alertes:', err);
+      }
+    }
+
+    function renderAlertsBanner(data) {
+      const banner = document.getElementById('alerts-banner');
+      const hdrBadge = document.getElementById('alerts-header-badge');
+      const titleEl = document.getElementById('alerts-banner-title');
+      const metaEl = document.getElementById('alerts-banner-meta');
+      const listEl = document.getElementById('alerts-banner-list');
+      if (!banner || !listEl) return;
+
+      const count = data && Number(data.active_alerts_count) > 0 ? Number(data.active_alerts_count) : 0;
+      const items = (data && Array.isArray(data.alerts)) ? data.alerts : [];
+      if (count === 0 || items.length === 0) {
+        banner.style.display = 'none';
+        banner.classList.remove('critical');
+        listEl.innerHTML = '';
+        if (hdrBadge) hdrBadge.style.display = 'none';
+        return;
+      }
+
+      const isCritical = data.status === 'critical' || items.some(a => a.severity === 'critical');
+      banner.classList.toggle('critical', isCritical);
+      banner.style.display = 'block';
+
+      if (hdrBadge) {
+        hdrBadge.style.display = '';
+        hdrBadge.className = 'badge ' + (isCritical ? 'badge-offline' : 'badge-warn');
+        hdrBadge.textContent = `${count} alerte${count > 1 ? 's' : ''}`;
+      }
+      if (titleEl) {
+        titleEl.textContent = (isCritical ? '🚨 Alertes Critiques Actives (' : '⚠️ Alertes Actives (') + count + ')';
+      }
+      if (metaEl) {
+        const m = data.metrics || {};
+        metaEl.textContent = `err 1h:${m.log_errors_1h || 0} · 24h:${m.log_errors_24h || 0} · blacklist:${m.blacklisted_media_count || 0}`;
+      }
+      listEl.innerHTML = items.map(a => {
+        const sevCls = a.severity === 'critical' ? 'badge-offline' : 'badge-warn';
+        const sevLbl = a.severity === 'critical' ? 'CRITIQUE' : 'ALERTE';
+        const win = a.window_counts ? ` (1h:${a.window_counts.h1} · 24h:${a.window_counts.h24} · 72h:${a.window_counts.h72})` : (a.count > 1 ? ` (×${a.count})` : '');
+        const seen = a.last_seen ? `<span class="top-dim">· ${escapeHtml(a.last_seen)}</span>` : '';
+        return `<div class="alert-row">
+          <span class="badge ${sevCls}">${sevLbl}</span>
+          <span class="alert-comp">[${escapeHtml(a.component || 'system')}]</span>
+          <span>${escapeHtml(a.summary || '')}${escapeHtml(win)}</span>
+          ${seen}
+        </div>`;
+      }).join('');
+    }
+
     function refreshAll() {
       fetchTelemetry();
+      fetchAlerts();
       fetchTop(false);
     }
 
@@ -2526,6 +2641,7 @@
 
     // Initial load (showView fetches the top snapshot of the view)
     fetchTelemetry();
+    fetchAlerts();
     showView();
     initPipelineSnippets();
     initSse();

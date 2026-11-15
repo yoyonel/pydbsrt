@@ -1,5 +1,6 @@
 //! Axum HTTP handler endpoints.
 
+pub mod alerts;
 pub mod autosync;
 pub mod catalog_handlers;
 pub mod health;
@@ -7,6 +8,7 @@ pub mod monitoring;
 pub mod search;
 pub mod studio;
 
+pub use alerts::*;
 pub use autosync::*;
 pub use catalog_handlers::*;
 pub use health::*;

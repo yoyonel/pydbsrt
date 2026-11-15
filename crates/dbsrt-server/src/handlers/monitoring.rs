@@ -1132,6 +1132,10 @@ pub async fn sample_monitoring_stream_state(state: &AppState) -> MonitoringStrea
         .read()
         .map(|b| b.iter().cloned().collect::<Vec<_>>())
         .ok();
+    let alerts_cfg = crate::handlers::alerts::MonitoringAlertsConfig::from_state(state);
+    let alerts = Some(crate::handlers::alerts::collect_monitoring_alerts(
+        &alerts_cfg,
+    ));
 
     MonitoringStreamState {
         sent_at_ms,
@@ -1140,6 +1144,7 @@ pub async fn sample_monitoring_stream_state(state: &AppState) -> MonitoringStrea
         pipeline,
         server_metrics,
         server_logs,
+        alerts,
     }
 }
 
