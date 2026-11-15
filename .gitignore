@@ -119,6 +119,7 @@ data/SRT/couplings.json
 data/SRT/*.lock
 couplings.json
 data/catalog.dbphash
+data/catalog.dbahash
 data/snippets/
 data/snippets_ahash/
 data/SRT/manifest.json
@@ -127,7 +128,9 @@ data/SRT/medias_metadata.sql
 *.phash
 *.ahash
 *.dbphash
+*.dbahash
 data/*.dbphash
+data/*.dbahash
 *.auto.synced.srt
 *.synced.srt
 

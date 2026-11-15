@@ -160,7 +160,7 @@ Recherche de sous-titres et reconnaissance multimodale (pHash visuel et/ou aHash
   ```
 
 ### `POST /v1/search/ahash`
-Recherche acoustique par cross-corrélation temporelle d'empreintes sub-fingerprint Haitsma-Kalker (`.ahash` v1.0) indexées en mémoire (`MIH-32` + repli linéaire borné à `MAX_LINEAR_FALLBACK_FRAMES = 500_000` trames, exécuté dans `tokio::task::spawn_blocking` sous sémaphore de tâches lourdes).
+Recherche acoustique par cross-corrélation temporelle d'empreintes sub-fingerprint Haitsma-Kalker (`.ahash` v1.0) via `AhashEngine` : interrogation prioritaire de l'archive projetée par `mmap` `data/catalog.dbahash` (`MmapDbahash` Coarse-to-Fine $K=32$ `MIH-32` + fenêtre fine locale `±16` trames à zéro allocation tas) combinée au delta incrémental `AHashCatalog` pour les nouveaux fichiers `.ahash` non encore empaquetés (repli linéaire borné à `MAX_LINEAR_FALLBACK_FRAMES = 500_000` trames, exécuté dans `tokio::task::spawn_blocking` sous sémaphore de tâches lourdes).
 Supporte nativement la fenêtre optimale empirique ($W = 5.0\text{ s}$, 430 trames à `86.125 fps`) ainsi que 3 formats d'encodage du flux d'entrée (`hashes`, `fingerprint` hex ou `ahash_bytes` base64).
 
 **Garde-fous et validation d'entrée (`400 Bad Request` / `413 Payload Too Large`)** :
@@ -303,7 +303,7 @@ Retourne les intervalles d'ancrage temporels trames clés \( \leftrightarrow \) 
 Enregistre un nouveau couplage certifié dans la base de données.
 
 ### `POST /v1/catalog/reload` (alias `/v1/reload`)
-Déclenche le rechargement à chaud atomique (zéro coupure de service) des index visuels (`.dbphash` + Delta) et du catalogue acoustique (`AHashCatalog` sous `data/__AHASH__/`) en mémoire vive.
+Déclenche le rechargement à chaud atomique (zéro coupure de service via `ArcSwap`) des index visuels (`.dbphash` + Delta) et du moteur acoustique `AhashEngine` (`data/catalog.dbahash` via `MmapDbahash` + delta incrémental des seuls `.ahash` non empaquetés sous `data/__AHASH__/`) en mémoire vive. Une surveillance automatique débouncée du fichier `catalog.dbahash` sur disque déclenche également ce rechargement dès qu'un `task ahash:pack` se termine.
 **Réponse** :
   ```json
   {

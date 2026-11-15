@@ -9,7 +9,8 @@ use dbsrt_server::constants::{
 };
 use dbsrt_server::{
     bind_listener, create_router_with_state, remove_discovery_file, resolve_default_ahash_dir,
-    write_discovery_file, AppState, AppStateInitOptions, DbConnectionConfig, DISCOVERY_FILE,
+    resolve_default_dbahash_path, write_discovery_file, AppState, AppStateInitOptions,
+    DbConnectionConfig, DISCOVERY_FILE,
 };
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -50,6 +51,10 @@ pub struct ServerCli {
     /// Optional compiled .dbphash catalog file (env: DBSRT_DBPHASH)
     #[arg(long, env = "DBSRT_DBPHASH")]
     pub dbphash: Option<PathBuf>,
+
+    /// Optional compiled .dbahash acoustic archive file (env: DBSRT_DBAHASH)
+    #[arg(long, env = "DBSRT_DBAHASH")]
+    pub dbahash: Option<PathBuf>,
 
     /// Optional directory storing .ahash acoustic fingerprint files (env: DBSRT_AHASH_DIR)
     #[arg(long, env = "DBSRT_AHASH_DIR")]
@@ -115,6 +120,11 @@ impl ServerCli {
         let ahash_dir = self
             .ahash_dir
             .or_else(|| (!self.agent).then(|| resolve_default_ahash_dir(&self.subtitles_dir)));
+        let dbahash_path = self.dbahash.or_else(|| {
+            (!self.agent)
+                .then(|| ahash_dir.as_deref().and_then(resolve_default_dbahash_path))
+                .flatten()
+        });
 
         let mut state = AppState::with_options(
             self.phash_dir,
@@ -124,6 +134,7 @@ impl ServerCli {
                 dbphash_path,
                 extra_phash_dirs: self.extra_phash_dirs,
                 ahash_dir,
+                dbahash_path,
             },
         );
         state.db_config = db_config;
@@ -217,58 +228,22 @@ where
         });
     }
 
-    // Pillar 3: File Watcher with Debounce & Stable Size for catalog.dbphash
-    let state_file_watch = state_arc.clone();
-    tokio::spawn(async move {
-        let watch_path = state_file_watch
-            .dbphash_path()
-            .unwrap_or_else(|| PathBuf::from("data/catalog.dbphash"));
-        let mut last_mtime = None;
-        let mut last_size = None;
-        let mut check_interval = tokio::time::interval(std::time::Duration::from_millis(
-            DEFAULT_FILE_WATCH_INTERVAL_MS,
-        ));
-
-        loop {
-            check_interval.tick().await;
-            if watch_path.exists() {
-                if let Ok(meta) = std::fs::metadata(&watch_path) {
-                    let size = meta.len();
-                    if size >= std::mem::size_of::<dbsrt_index::DbphashHeader>() as u64 {
-                        if let Ok(mtime) = meta.modified() {
-                            if let (Some(prev_mtime), Some(_)) = (last_mtime, last_size) {
-                                if mtime > prev_mtime {
-                                    // Debounce to ensure rsync or external packer has finished writing
-                                    tokio::time::sleep(std::time::Duration::from_millis(
-                                        DEFAULT_FILE_WATCH_DEBOUNCE_MS,
-                                    ))
-                                    .await;
-
-                                    // Verify file size is stable before triggering reload
-                                    if let Ok(meta2) = std::fs::metadata(&watch_path) {
-                                        if meta2.len() == size {
-                                            info!(
-                                                "Detected stable modified catalog file on disk ({}, {} bytes), triggering hot-reload...",
-                                                watch_path.display(),
-                                                size
-                                            );
-                                            let st = state_file_watch.clone();
-                                            let _ = tokio::task::spawn_blocking(move || {
-                                                st.reload_catalog()
-                                            })
-                                            .await;
-                                        }
-                                    }
-                                }
-                            }
-                            last_mtime = Some(mtime);
-                            last_size = Some(size);
-                        }
-                    }
-                }
-            }
-        }
-    });
+    // Pillar 3: File Watchers with Debounce & Stable Size for catalog.dbphash & catalog.dbahash
+    let dbphash_watch = state_arc
+        .dbphash_path()
+        .unwrap_or_else(|| PathBuf::from("data/catalog.dbphash"));
+    spawn_catalog_file_watcher(
+        state_arc.clone(),
+        dbphash_watch,
+        std::mem::size_of::<dbsrt_index::DbphashHeader>() as u64,
+    );
+    if let Some(dbahash_watch) = state_arc.dbahash_path() {
+        spawn_catalog_file_watcher(
+            state_arc.clone(),
+            dbahash_watch,
+            dbsrt_index::DBAHASH_HEADER_BYTES as u64,
+        );
+    }
 
     // Pillar 3: PostgreSQL LISTEN / NOTIFY event listener (dbsrt_events)
     if let Some(ref db_config) = state_arc.db_config {
@@ -344,6 +319,55 @@ where
 
     bound.serve(app, shutdown).await?;
     Ok(())
+}
+
+/// Polls `watch_path` once and triggers an atomic `reload_catalog` when its mtime advances stably.
+async fn poll_catalog_file_once(
+    state: &Arc<AppState>,
+    watch_path: &std::path::Path,
+    min_header_bytes: u64,
+    last_mtime: &mut Option<std::time::SystemTime>,
+) {
+    let Ok(meta) = std::fs::metadata(watch_path) else {
+        return;
+    };
+    let size = meta.len();
+    if size < min_header_bytes {
+        return;
+    }
+    let Ok(mtime) = meta.modified() else {
+        return;
+    };
+    if last_mtime.is_some_and(|prev| mtime > prev) {
+        tokio::time::sleep(std::time::Duration::from_millis(
+            DEFAULT_FILE_WATCH_DEBOUNCE_MS,
+        ))
+        .await;
+        if std::fs::metadata(watch_path).is_ok_and(|m2| m2.len() == size) {
+            info!(
+                "Detected stable modified catalog on disk ({}, {} bytes), triggering hot-reload...",
+                watch_path.display(),
+                size
+            );
+            let st = state.clone();
+            let _ = tokio::task::spawn_blocking(move || st.reload_catalog()).await;
+        }
+    }
+    *last_mtime = Some(mtime);
+}
+
+/// Spawns a debounced background file watcher triggering atomic hot-reload on modified binary catalogs.
+fn spawn_catalog_file_watcher(state: Arc<AppState>, watch_path: PathBuf, min_header_bytes: u64) {
+    tokio::spawn(async move {
+        let mut last_mtime = None;
+        let mut check_interval = tokio::time::interval(std::time::Duration::from_millis(
+            DEFAULT_FILE_WATCH_INTERVAL_MS,
+        ));
+        loop {
+            check_interval.tick().await;
+            poll_catalog_file_once(&state, &watch_path, min_header_bytes, &mut last_mtime).await;
+        }
+    });
 }
 
 /// Maximum worker threads allocated for the asynchronous HTTP runtime.

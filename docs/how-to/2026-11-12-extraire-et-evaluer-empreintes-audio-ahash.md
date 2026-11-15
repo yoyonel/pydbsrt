@@ -80,6 +80,10 @@ task ahash:backfill-sidecars -- --limit 100 --workers 4
 
 # Migrer sans perte (0 recalcul FFT) d'anciens fichiers nommés en clair vers <moviehash_16hex>
 task ahash:migrate-moviehash -- --dry-run
+
+# Compiler l'archive binaire mmap zero-copy data/catalog.dbahash (.dbahash v1, K=32 + MIH-32 pré-trié)
+# Élimine les ~727 MiB de Vec<u64> en RAM tas (ouverture < 50 ms, RSS démon < 100 MiB)
+task ahash:pack
 ```
 
 ---
@@ -195,5 +199,5 @@ L'extension VLC `vlsub_dbsrt.lua` intègre le bouton **Search by aHash** situé 
 1. Ouvrez votre vidéo dans VLC et lancez l'extension via **Vue > VLSub (dbsrt Enhanced)**.
 2. Cliquez sur le bouton **Search by aHash**.
 3. Le plugin soumet la requête au démon local (`POST /v1/search` avec `"search_mode": "ahash"`).
-4. Le serveur extrait 5.0 secondes d'audio (430 trames à `86.125 fps`, 5512 Hz mono), génère l'empreinte aHash de la requête et interroge le catalogue audio en mémoire (`AHashCatalog`) ou relaie `ahash_bytes` vers le serveur maître en mode `--agent`.
+4. Le serveur extrait 5.0 secondes d'audio (430 trames à `86.125 fps`, 5512 Hz mono), génère l'empreinte aHash de la requête et interroge le moteur audio hybride `AhashEngine` (`data/catalog.dbahash` projeté par `mmap` + delta incrémental `AHashCatalog`), ou relaie `ahash_bytes` vers le serveur maître en mode `--agent`.
 5. Les sous-titres certifiés associés au média reconnu s'affichent dans la liste des résultats avec l'offset calculé en millisecondes.

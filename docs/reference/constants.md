@@ -79,6 +79,18 @@ Ce document recense les constantes opérationnelles, temporelles et algorithmiqu
 | :--- | :--- | :--- | :--- |
 | `DBPHASH_MAGIC` | `[u8; 8] = *b"DBSRT\x02\x00\x00"` | `crates/dbsrt-index/src/dbphash.rs` | Magic number d'en-tête du format binaire compact `.dbphash` (v2). |
 | `DBPHASH_VERSION` | `u16 = 2` | `crates/dbsrt-index/src/dbphash.rs` | Version active du schéma binaire compact. |
+| `DBAHASH_MAGIC` | `[u8; 8] = *b"DBAHASH\0"` | `crates/dbsrt-index/src/dbahash/format.rs` | Signature fixe de l'archive binaire audio `.dbahash` v1 projetée par `mmap`. |
+| `DBAHASH_VERSION` | `u16 = 1` | `crates/dbsrt-index/src/dbahash/format.rs` | Version active du schéma binaire `.dbahash`. |
+| `DBAHASH_SECTION_ALIGN` | `u64 = 64` | `crates/dbsrt-index/src/dbahash/format.rs` | Alignement matériel sur une ligne de cache L1 CPU (`64 octets`) de chaque section `.dbahash`. |
+| `DEFAULT_DBAHASH_FACTOR_K` | `usize = 32` | `crates/dbsrt-index/src/dbahash/format.rs` | Facteur de décimation Coarse-to-Fine nominal (`86.125 -> 2.69 fps`) intégré dans `catalog.dbahash`. |
+| `DBAHASH_TWIN_TRAILER_MAGIC` | `[u8; 8] = *b"\0TWINS1\0"` | `crates/dbsrt-index/src/dbahash/format.rs` | Signature de la remorque d'alias de jumeaux binaires annexée à `strings_table` pour le fast-skip $\mathcal{O}(1)$ au boot. |
+| `TWIN_TRAILER_COUNT_BYTES` | `usize = 4` | `crates/dbsrt-index/src/dbahash/format.rs` | Taille en octets du compteur `u32` d'enregistrements de jumeaux suivant `DBAHASH_TWIN_TRAILER_MAGIC`. |
+| `TWIN_TRAILER_RECORD_HEADER_BYTES` | `usize = 6` | `crates/dbsrt-index/src/dbahash/format.rs` | Taille en octets de l'en-tête `(dense_frame_count: u32, filename_len: u16)` d'un alias de jumeau. |
+| `DEFAULT_FINE_WINDOW_RADIUS_FRAMES` | `usize = 16` | `crates/dbsrt-index/src/coarse_to_fine.rs` | Demi-fenêtre locale de raffinement fin (`±16` trames denses, `~185.8 ms`) encadrant un décalage de phase $\le K/2$. |
+| `MAX_MIH_SLICE_CANDIDATES` | `usize = 1_024` | `crates/dbsrt-index/src/coarse_to_fine.rs` | Plafond de cardinalité d'un bucket `MIH-32` au-delà duquel la tranche (silence / bourdonnement basse fréquence) est ignorée. |
+| `PRIMARY_COARSE_CLUSTER_VOTES` | `u32 = 2` | `crates/dbsrt-index/src/coarse_to_fine.rs` | Seuil de votes grossiers requis pour filtrer les collisions aléatoires isolées sur requêtes $\ge 4K$ trames. |
+| `MAX_SINGLE_VOTE_FALLBACK_CANDIDATES` | `usize = 2` | `crates/dbsrt-index/src/coarse_to_fine.rs` | Nombre maximal de candidats à `1` vote inspectés en repli si la passe primaire ne certifie aucun match. |
+| `MAX_IN_RAM_DENSE_BENCH_FRAMES` | `u64 = 150_000_000` | `crates/dbsrt-cli/src/commands/bench_scale.rs` | Plafond de trames denses au-delà duquel `bench-scale-multimodal` bascule en mode `MmapDbahash` zéro-copie pour éviter tout OOM station. |
 | `NUM_TABLES` | `usize = 4` | `crates/dbsrt-index/src/mih.rs` | Nombre de sous-tables de hachage pour le Multi-Index Hashing (4 morceaux de 16 bits). |
 | `BUCKETS_PER_TABLE` | `usize = 65_536` | `crates/dbsrt-index/src/mih.rs` | Capacité d'adressage direct de chaque sous-table MIH (\(2^{16}\) entrées). |
 | `COPY_BUFFER_INITIAL_CAPACITY` | `usize = 64 * 1024` | `crates/dbsrt-index/src/db.rs` | Taille mémoire initiale du buffer d'ingestion streaming PostgreSQL `COPY`. |

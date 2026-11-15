@@ -4,6 +4,7 @@ pub mod ahash;
 pub mod bktree;
 pub mod coarse_to_fine;
 pub mod db;
+pub mod dbahash;
 pub mod dbphash;
 pub mod delta;
 pub mod engine;
@@ -12,13 +13,14 @@ pub mod mmap;
 pub mod trajectory_runner;
 
 pub use ahash::{
-    parse_ahash_media_name, AHashCatalog, AHashCatalogEntry, AHashCatalogMatch, AHashMih32Index,
-    AHashSearchCriteria, Mih32Entry, DEFAULT_AHASH_SEARCH_LIMIT, MIN_QUERY_FRAMES,
+    lookup_mih32_slice, parse_ahash_media_name, AHashCatalog, AHashCatalogEntry, AHashCatalogMatch,
+    AHashMih32Index, AHashSearchCriteria, Mih32Entry, DEFAULT_AHASH_SEARCH_LIMIT, MIN_QUERY_FRAMES,
 };
 pub use bktree::{BkItem, BkTree};
 pub use coarse_to_fine::{
-    CoarseToFineAHashIndex, FineSearchCriteria, DEFAULT_COARSE_FACTOR_K, DEFAULT_FINE_MAX_DISTANCE,
-    DEFAULT_FINE_WINDOW_RADIUS_SEC,
+    CoarseCluster, CoarseSearchScratchpad, CoarseToFineAHashIndex, FineSearchCriteria,
+    DEFAULT_COARSE_FACTOR_K, DEFAULT_FINE_MAX_DISTANCE, DEFAULT_FINE_WINDOW_RADIUS_FRAMES,
+    DEFAULT_FINE_WINDOW_RADIUS_SEC, MAX_MIH_SLICE_CANDIDATES, PRIMARY_COARSE_CLUSTER_VOTES,
 };
 pub use db::{
     parse_fps_from_phash_stem, validate_lang_code, DbClient, DbMatch, DbMediaRecord,
@@ -26,6 +28,12 @@ pub use db::{
     DB_CONNECT_TIMEOUT_SECONDS, DEFAULT_BASELINE_FPS, DEFAULT_LANG_CODE,
     DEFAULT_POSTGRES_PORT_CUSTOM, DEFAULT_POSTGRES_PORT_STANDARD, MAX_LANG_CODE_LEN,
     MIN_LANG_CODE_LEN, NTSC_FILM_FPS, PAL_FPS,
+};
+pub use dbahash::{
+    pack_ahash_directories, AhashEngine, DbahashBuilder, DbahashHeader, DbahashMediaEntry,
+    DbahashPackOptions, DbahashPackStats, DbahashTrackInput, MmapDbahash,
+    DBAHASH_FLAG_HAS_COARSE_MIH32, DBAHASH_HEADER_BYTES, DBAHASH_MAGIC, DBAHASH_MEDIA_ENTRY_BYTES,
+    DBAHASH_SECTION_ALIGN, DBAHASH_VERSION, DEFAULT_DBAHASH_FACTOR_K,
 };
 pub use dbphash::{
     rank_media_matches, DbphashBuilder, DbphashCutEntry, DbphashCutMatch, DbphashHeader,

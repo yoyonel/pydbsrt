@@ -54,3 +54,25 @@ def test_moviehash_phash_without_sidecar_never_matches_a_legacy_file(tmp_path: P
 
     assert counts == {"moviehash": 0, "legacy_twin": 0, "identical": 0, "differs": 0, "removed": 0}
     assert legacy.exists()
+
+
+def test_apply_removes_byte_identical_legacy_ahash_twin_and_sidecar(tmp_path: Path) -> None:
+    moviehash_ahash = _phash(tmp_path, f"{MOVIEHASH}.86.1fps.ahash", b"\xaa" * 32)
+    _sidecar(tmp_path, MOVIEHASH, "The.Office.S04E12.mkv")
+    legacy_ahash = _phash(tmp_path, "The.Office.S04E12.mkv.86.1fps.ahash", b"\xaa" * 32)
+    legacy_json = _phash(tmp_path, "The.Office.S04E12.mkv.json", b'{"media_name":"The.Office.S04E12.mkv"}')
+
+    moviehash_a1 = _phash(tmp_path, f"{MOVIEHASH}.a1.86.1fps.ahash", b"\xbb" * 32)
+    (tmp_path / f"{MOVIEHASH}.a1.json").write_text(json.dumps({"media_name": "The.Office.S04E12.mkv"}))
+    legacy_a1_ahash = _phash(tmp_path, "The.Office.S04E12.mkv.a1.86.1fps.ahash", b"\xbb" * 32)
+    legacy_a1_json = _phash(tmp_path, "The.Office.S04E12.mkv.a1.json", b'{"media_name":"The.Office.S04E12.mkv"}')
+
+    counts = dedupe_legacy_twins(tmp_path, apply=True)
+
+    assert counts == {"moviehash": 2, "legacy_twin": 2, "identical": 2, "differs": 0, "removed": 2}
+    assert moviehash_ahash.exists()
+    assert moviehash_a1.exists()
+    assert not legacy_ahash.exists()
+    assert not legacy_json.exists()
+    assert not legacy_a1_ahash.exists()
+    assert not legacy_a1_json.exists()

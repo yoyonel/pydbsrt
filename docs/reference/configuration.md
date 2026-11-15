@@ -41,6 +41,7 @@ Ces variables peuvent être définies dans votre environnement shell ou dans un 
 - `DBSRT_PHASH_DIR` (défaut : `/tmp`) : Répertoire par défaut de lecture/écriture des fichiers d'empreintes unitaire `.phash`.
 - `DBSRT_SUBTITLES_DIR` (défaut : `data/SRT`) : Répertoire de stockage des fichiers de sous-titres `.srt`.
 - `DBSRT_DBPHASH` (défaut : *vide*) : Chemin optionnel vers le fichier d'archive haute densité `.dbphash` pré-compilé.
+- `DBSRT_DBAHASH` (défaut : `data/catalog.dbahash` si `DBSRT_AHASH_DIR` pointe vers `.../data/__AHASH__`) : Chemin optionnel vers l'archive acoustique haute densité `.dbahash` v1 projetée par `mmap` (`MmapDbahash`). Équivalent de `--dbahash`.
 - `DBSRT_REMOTE_API` (défaut : *vide*) : URL d'un serveur distant `dbsrt-server` pour le mode relais Cloud/o2switch.
 - `DBSRT_AGENT` (défaut : *faux*) : Active le mode agent client allégé sans hébergement de base locale.
 - `DBSRT_API_KEY_FILE` (défaut : *vide*) : Fichier de clés API (une par ligne, `#` ignoré). Si défini, toutes les routes sauf `/health` et `/v1/health` exigent `Authorization: Bearer` ou `X-API-Key`. Équivalent de `--api-key-file`.

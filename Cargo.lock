@@ -667,6 +667,7 @@ dependencies = [
  "anyhow",
  "bytemuck",
  "dbsrt-core",
+ "libc",
  "memmap2",
  "postgres",
  "rayon",

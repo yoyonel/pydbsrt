@@ -8,7 +8,9 @@ use crate::dtos::{CatalogCompactResponse, CatalogReloadResponse, CatalogStatusRe
 use anyhow::Result;
 use arc_swap::{ArcSwap, ArcSwapOption};
 use dbsrt_core::{CouplingRegistry, SubtitleCache, SubtitleProvider};
-use dbsrt_index::{AHashCatalog, DbClient, DeltaIndex, MmapDbphash, PhashEngine};
+use dbsrt_index::{
+    AHashCatalog, AhashEngine, DbClient, DeltaIndex, MmapDbahash, MmapDbphash, PhashEngine,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
@@ -156,7 +158,10 @@ pub struct AppState {
     pub dbphash_reader: Arc<ArcSwapOption<MmapDbphash>>,
     pub engine: Arc<std::sync::RwLock<PhashEngine>>,
     pub ahash_dir: PathBuf,
+    pub dbahash_path: Arc<std::sync::RwLock<Option<PathBuf>>>,
+    pub dbahash_reader: Arc<ArcSwapOption<MmapDbahash>>,
     pub ahash_catalog: Arc<ArcSwap<AHashCatalog>>,
+    pub ahash_engine: Arc<ArcSwap<AhashEngine>>,
     pub db_config: Option<DbConnectionConfig>,
     pub subtitles_dir: PathBuf,
     pub coupling_registry: Arc<std::sync::RwLock<CouplingRegistry>>,
@@ -220,6 +225,39 @@ pub fn resolve_default_ahash_dir(caller_subtitles_dir: &Path) -> PathBuf {
     caller_subtitles_dir.join(AHASH_SIBLING_DIRNAME)
 }
 
+/// Canonical basename of the compiled `.dbahash` v1 archive (`data/catalog.dbahash`).
+const DBAHASH_ARCHIVE_BASENAME: &str = "catalog.dbahash";
+
+/// Derives the default `catalog.dbahash` archive path from the resolved `ahash_dir`.
+///
+/// # Arguments
+/// * `ahash_dir` - Resolved `.ahash` directory path.
+///
+/// # Returns
+/// `Some(<parent>/catalog.dbahash)` when `ahash_dir` ends with `__AHASH__`; `None` for ephemeral test paths.
+///
+/// # Panics
+/// Never panics.
+///
+/// # Data Flow & Invariants
+/// - Maps `data/__AHASH__` -> `data/catalog.dbahash` and `/srv/dbsrt/data/__AHASH__` -> `/srv/dbsrt/data/catalog.dbahash`.
+/// - **Invariant (ADR-0007)**: Returns `None` for non-`__AHASH__` directories (`/tmp/...`, `TempDir`) so
+///   hermetic integration tests never accidentally map the developer workspace's `data/catalog.dbahash`.
+pub fn resolve_default_dbahash_path(ahash_dir: &Path) -> Option<PathBuf> {
+    if !ahash_dir
+        .file_name()
+        .is_some_and(|n| n == AHASH_SIBLING_DIRNAME)
+    {
+        return None;
+    }
+    let parent = ahash_dir
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("data"));
+    Some(parent.join(DBAHASH_ARCHIVE_BASENAME))
+}
+
 /// Optional configuration parameters for initializing [`AppState`].
 #[derive(Debug, Clone, Default)]
 pub struct AppStateInitOptions {
@@ -229,6 +267,8 @@ pub struct AppStateInitOptions {
     pub extra_phash_dirs: Vec<PathBuf>,
     /// Explicit target `.ahash` directory containing audio fingerprints.
     pub ahash_dir: Option<PathBuf>,
+    /// Explicit target `.dbahash` v1 memory-mapped acoustic archive file path.
+    pub dbahash_path: Option<PathBuf>,
 }
 
 impl AppState {
@@ -292,15 +332,16 @@ impl AppState {
 
         let dbphash_reader = Arc::new(ArcSwapOption::new(initial_engine.dbphash_arc()));
 
-        let (ahash_dir, initial_ahash_catalog) = match options.ahash_dir {
-            Some(dir) => {
-                let cat =
-                    AHashCatalog::load_from_dir(&dir).unwrap_or_else(|_| AHashCatalog::empty());
-                (dir, cat)
-            }
-            None => (PathBuf::from(TMP_EMPTY_AHASH_DIR), AHashCatalog::empty()),
-        };
-        let ahash_catalog = Arc::new(ArcSwap::from_pointee(initial_ahash_catalog));
+        let initial_dbahash_path = options.dbahash_path;
+        let ahash_dir = options
+            .ahash_dir
+            .unwrap_or_else(|| PathBuf::from(TMP_EMPTY_AHASH_DIR));
+        let initial_ahash_engine =
+            AhashEngine::open(initial_dbahash_path.as_deref(), Some(ahash_dir.as_path()))
+                .unwrap_or_else(|_| AhashEngine::empty());
+        let dbahash_reader = Arc::new(ArcSwapOption::new(initial_ahash_engine.dbahash_arc()));
+        let ahash_catalog = Arc::new(ArcSwap::new(initial_ahash_engine.delta_catalog_arc()));
+        let ahash_engine = Arc::new(ArcSwap::from_pointee(initial_ahash_engine));
 
         Self {
             phash_dir,
@@ -309,7 +350,10 @@ impl AppState {
             dbphash_reader,
             engine: Arc::new(std::sync::RwLock::new(initial_engine)),
             ahash_dir,
+            dbahash_path: Arc::new(std::sync::RwLock::new(initial_dbahash_path)),
+            dbahash_reader,
             ahash_catalog,
+            ahash_engine,
             db_config: None,
             subtitles_dir,
             coupling_registry,
@@ -361,6 +405,23 @@ impl AppState {
         self.dbphash_path.read().ok().and_then(|p| p.clone())
     }
 
+    /// Returns the current active `MmapDbahash` handle (wait-free, zero-lock).
+    pub fn dbahash_reader(&self) -> Option<Arc<MmapDbahash>> {
+        self.dbahash_reader.load_full()
+    }
+
+    /// Returns the active `catalog.dbahash` path if configured.
+    pub fn dbahash_path(&self) -> Option<PathBuf> {
+        self.dbahash_path.read().ok().and_then(|p| p.clone())
+    }
+
+    /// Updates the configured `catalog.dbahash` path for subsequent reloads.
+    pub fn set_dbahash_path(&self, path: Option<PathBuf>) {
+        if let Ok(mut lock) = self.dbahash_path.write() {
+            *lock = path;
+        }
+    }
+
     pub fn push_log(&self, tag: &str, level: &str, message: impl Into<String>) {
         if let Ok(mut buf) = self.log_buffer.write() {
             if buf.len() >= LOG_BUFFER_CAPACITY {
@@ -394,30 +455,31 @@ impl AppState {
         }
     }
 
-    /// Loads and pre-warms the `.ahash` catalog during Phase 1 of [`Self::reload_catalog`].
+    /// Opens `MmapDbahash` (if configured) and incremental unpacked `.ahash` deltas during Phase 1 of reload.
     ///
     /// # Arguments
     /// None (operates on `&self`).
     ///
     /// # Returns
-    /// `Some(Arc<AHashCatalog>)` with `mih32` pre-warmed when `load_from_dir` succeeds, or `None`
-    /// on I/O failure so the caller preserves the existing atomic catalog snapshot.
+    /// `Some(Arc<AhashEngine>)` when `AhashEngine::open` succeeds, or `None` on I/O/corruption failure
+    /// so the caller preserves the existing atomic engine snapshot.
     ///
     /// # Panics
     /// Guaranteed panic-free.
     ///
     /// # Data Flow & Invariants
-    /// Executes completely outside runtime locks before Phase 2 pointer swap.
-    fn prepare_ahash_reload(&self) -> Option<Arc<AHashCatalog>> {
-        match AHashCatalog::load_from_dir(&self.ahash_dir) {
-            Ok(cat) => Some(Arc::new(cat)),
+    /// Executes completely outside runtime locks before Phase 2 `ArcSwap` pointer swap.
+    fn prepare_ahash_reload(&self) -> Option<Arc<AhashEngine>> {
+        let dbahash_target = self.dbahash_path();
+        match AhashEngine::open(dbahash_target.as_deref(), Some(&self.ahash_dir)) {
+            Ok(eng) => Some(Arc::new(eng)),
             Err(e) => {
                 self.push_log(
                     "CATALOG",
                     "WARN",
                     format!(
-                        "Failed to reload aHash catalog from {:?}: {:#}; keeping existing snapshot",
-                        self.ahash_dir, e
+                        "Failed to reload aHash engine (dbahash={:?}, dir={:?}): {:#}; keeping existing snapshot",
+                        dbahash_target, self.ahash_dir, e
                     ),
                 );
                 None
@@ -528,11 +590,13 @@ impl AppState {
         }
 
         if let Some(new_ahash) = new_ahash_opt {
-            self.ahash_catalog.store(new_ahash);
+            self.dbahash_reader.store(new_ahash.dbahash_arc());
+            self.ahash_catalog.store(new_ahash.delta_catalog_arc());
+            self.ahash_engine.store(new_ahash);
         }
-        let current_ahash = self.ahash_catalog.load();
-        let ahash_medias = current_ahash.entries.len();
-        let ahash_frames = current_ahash.total_frames;
+        let current_ahash = self.ahash_engine.load();
+        let ahash_medias = current_ahash.media_count();
+        let ahash_frames = current_ahash.total_frames();
 
         let elapsed_ms = t0.elapsed().as_secs_f64() * 1000.0;
         self.push_log(
@@ -692,9 +756,9 @@ impl AppState {
             frame_counts.extend(delta.medias().iter().map(|m| m.frame_count));
         }
 
-        let ahash_cat = self.ahash_catalog.load();
-        let ahash_medias = ahash_cat.entries.len();
-        let ahash_frames = ahash_cat.total_frames;
+        let ahash_eng = self.ahash_engine.load();
+        let ahash_medias = ahash_eng.media_count();
+        let ahash_frames = ahash_eng.total_frames();
 
         CatalogStatusResponse {
             base_medias,

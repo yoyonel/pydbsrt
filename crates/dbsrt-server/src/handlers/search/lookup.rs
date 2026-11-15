@@ -939,21 +939,21 @@ async fn extract_or_read_ahash_query(media_path: &Path) -> Option<(AhashFile, f6
     .flatten()
 }
 
-/// Queries the local in-memory `AHashCatalog` on the blocking thread pool.
+/// Queries the local `AhashEngine` (`MmapDbahash` + unpacked loose delta) on the blocking thread pool.
 async fn try_local_ahash_catalog_match(
     state: &AppState,
     hashes: &[u64],
     audio_fps: f64,
     query_start_sec: f64,
 ) -> Option<(AhashRecognition, String, f64)> {
-    let catalog = state.ahash_catalog.load_full();
-    if catalog.entries.is_empty() || (state.is_agent && state.remote_api.is_some()) {
+    let engine = state.ahash_engine.load_full();
+    if engine.is_empty() || (state.is_agent && state.remote_api.is_some()) {
         return None;
     }
     let t_match = Instant::now();
     let owned_hashes = hashes.to_vec();
     let matches = tokio::task::spawn_blocking(move || {
-        catalog.search(&AHashSearchCriteria::new(&owned_hashes, audio_fps))
+        engine.search(&AHashSearchCriteria::new(&owned_hashes, audio_fps))
     })
     .await
     .unwrap_or_default();
@@ -1027,8 +1027,7 @@ async fn execute_ahash_recognition(
     media_path: &Path,
     timing: &mut SearchTimingStats,
 ) -> AhashRecognition {
-    if !media_path.exists()
-        || (state.ahash_catalog.load().entries.is_empty() && state.remote_api.is_none())
+    if !media_path.exists() || (state.ahash_engine.load().is_empty() && state.remote_api.is_none())
     {
         return AhashRecognition::none();
     }
@@ -2075,6 +2074,7 @@ mod tests {
                 dbphash_path: Some(PathBuf::from("/nonexistent_test_catalog.dbphash")),
                 extra_phash_dirs: Vec::new(),
                 ahash_dir: None,
+                dbahash_path: None,
             },
         );
         Arc::new(state)

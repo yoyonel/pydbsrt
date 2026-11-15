@@ -219,6 +219,8 @@ nav:
       - Analyse MIH-16 vs MIH-32 & Coarse-to-Fine (aHash/pHash): explanation/2026-11-12-analyse-mih16-vs-mih32-ahash-phash.md
       - Audit Forensique Benchmark Multimodal (5 346 Médias): explanation/2026-11-13-audit-benchmark-multimodal-scale.md
       - Benchmark Exhaustif 3 180 Vidéos Réelles (pHash/aHash C2F/MIH): explanation/2026-11-14-benchmark-exhaustif-multimodal-3180-videos-reelles-phash-ahash-c2f-mih.md
+      - Architecture .dbahash v1 mmap, Folios Linux & C2F Zéro-Alloc: explanation/2026-11-14-architecture-dbahash-mmap-folios-linux-et-c2f-zero-alloc.md
+      - Synthèse aHash vs pHash & Loi d'Échelle (5k -> 1M Pistes): explanation/2026-11-14-synthese-comparative-ahash-vs-phash-et-loi-echelle-millions-pistes.md
       - Post-Mortem INC-2026-11-12-01 (Auto-Heal Batch o2switch): explanation/2026-11-12-post-mortem-inc-2026-11-12-01-blocage-auto-heal-batch-o2switch.md
   - 📊 Benchmarks & Preuves:
       - Campagnes Empiriques:
@@ -241,15 +243,17 @@ nav:
           - Fork VLSub & Démo 1080p: history/2026-10-18-vlsub-fork-and-restoration.md
   - 🗺️ Roadmap & Archives:
       - Feuilles de Route & Décisions (ADR):
+          - Registre des Décisions d'Architecture (ADR): decisions/index.md
           - Feuille de Route Post-Merge develop (5 Projets v0.2+): history/2026-10-21-feuille-de-route-post-merge-develop-et-decoupage-projets.md
           - Feuille de Route & Échelle (1920-2026): history/2026-10-15-deep-dive-modernization-and-scaling-roadmap.md
           - Modernization Blueprint (UV/Taskfile): history/2026-10-15-modernization-blueprint.md
-          - ADR Détection Encodage Sous-Titres: decisions/2026-10-25-subtitle-encoding-detection.md
-          - ADR Cas Limites Façade Ingestion: decisions/2026-10-25-media-add-edge-cases.md
-          - ADR Transport Freebox vers o2switch: decisions/2026-10-30-transport-freebox-nat-gateway-http.md
-          - ADR dbsrt-server sur Socket Unix (o2switch): decisions/2026-10-31-dbsrt-server-unix-socket-o2switch.md
-          - ADR Moviehash comme Identifiant Canonique: decisions/2026-10-31-phash-identifiant-moviehash.md
-          - ADR Banc Continu de Reconnaissance: decisions/2026-10-31-banc-continu-reconnaissance.md
+          - ADR-0001 Détection Encodage Sous-Titres: decisions/2026-10-25-subtitle-encoding-detection.md
+          - ADR-0002 Cas Limites Façade Ingestion: decisions/2026-10-25-media-add-edge-cases.md
+          - ADR-0003 Transport Freebox vers o2switch: decisions/2026-10-30-transport-freebox-nat-gateway-http.md
+          - ADR-0004 dbsrt-server sur Socket Unix (o2switch): decisions/2026-10-31-dbsrt-server-unix-socket-o2switch.md
+          - ADR-0005 Moviehash comme Identifiant Canonique: decisions/2026-10-31-phash-identifiant-moviehash.md
+          - ADR-0006 Banc Continu de Reconnaissance: decisions/2026-10-31-banc-continu-reconnaissance.md
+          - ADR-0007 Archive mmap .dbahash v1 & Moteur Hybride: decisions/2026-11-14-dbahash-v1-mmap-and-hybrid-ahash-engine.md
       - Archives & Rapports Techniques:
           - Intégration Daemon Axum & VLC: history/2026-10-15-vlc-integration-daemon-and-plugins.md
           - Mécanique E2E Search by pHash: history/2026-10-18-e2e-phash-search-mechanics-and-roadmap.md

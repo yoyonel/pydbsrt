@@ -41,6 +41,7 @@ Toute nouvelle fonctionnalité (Pull Request) doit obligatoirement être accompa
 | **Nouveau sous-système complexe** | 1. Tutoriel pas à pas d'initiation dans `docs/tutorials/`<br/>2. Document d'architecture et compromis dans `docs/explanation/`<br/>3. Recettes pratiques d'exploitation dans `docs/how-to/` |
 | **Évolution du schéma SQL ou des tables** | 1. Mise à jour des tables dans `docs/reference/schema-postgresql.md`<br/>2. Complétion de `docs/how-to/migrer-schema-postgresql.md` |
 | **Nouvelle cible Taskfile** | 1. Déclaration dans `docs/reference/taskfile.md`<br/>2. Synchronisation dans `README.md` |
+| **Décision d'architecture structurante ou piège bas-niveau résolu** | 1. Décision normative dans `docs/decisions/YYYY-MM-DD-<slug>.md` + ligne dans `docs/decisions/index.md` (`ADR-XXXX`)<br/>2. Journal d'Ingénierie à 4 sous-blocs dans `docs/explanation/YYYY-MM-DD-<slug>.md`<br/>3. Ancre `Invariant (ADR-XXXX):` dans `# Data Flow & Invariants` du code Rust |
 
 ---
 
@@ -159,6 +160,43 @@ tags:
 ## L'Architecture Retenue
 <Diagrammes, formules mathématiques, comparaisons alternatives>.
 ```
+
+### Gabarit 5 : Décision d'Architecture (`ADR`) + Journal d'Ingénierie (`A + C`)
+
+Pour les choix structurants (`docs/decisions/YYYY-MM-DD-<slug>.md`, référencé dans `docs/decisions/index.md`) :
+
+```markdown
+---
+title: "ADR-XXXX : <Titre Court de la Décision>"
+tags:
+  - adr
+  - decisions
+---
+
+# ADR-XXXX : <Titre Court de la Décision>
+
+- **ID** : `ADR-XXXX`
+- **Date** : YYYY-MM-DD
+- **Statut** : Accepté
+- **Périmètre** : `crates/...`
+
+## 1. Contexte & Contraintes
+<Contraintes mesurées justifiant la décision>.
+
+## 2. Options Évaluées
+1. **Option 1** : Rejetée (<motif chiffré>).
+2. **Option 2** : Retenue (<gain chiffré>).
+
+## 3. Décision & Conséquences
+<Contrat retenu, gains empiriques, limites résiduelles, sites et tests>.
+```
+
+Et dans le Journal d'Ingénierie associé (`docs/explanation/YYYY-MM-DD-<slug>.md`), documenter chaque piège technique résolu selon les **4 sous-blocs obligatoires** :
+
+1. **Problématique & Mécanisme racine** (OS, CPU, math, concurrence),
+2. **Conséquences concrètes** (**Empirique** vs **Hermétique**),
+3. **Solution / Invariant opéré** (avec rappel `Invariant (ADR-XXXX):` dans `# Data Flow & Invariants`),
+4. **Avantages, Inconvénients & Limites résiduelles**.
 
 ---
 

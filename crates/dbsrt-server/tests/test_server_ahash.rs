@@ -53,6 +53,7 @@ async fn test_server_ahash_validation_and_errors() {
             dbphash_path: None,
             extra_phash_dirs: Vec::new(),
             ahash_dir: Some(dir.path().to_path_buf()),
+            dbahash_path: None,
         },
     );
 
@@ -97,6 +98,7 @@ async fn test_server_ahash_end_to_end_search_and_encodings() {
             dbphash_path: None,
             extra_phash_dirs: Vec::new(),
             ahash_dir: Some(dir.path().to_path_buf()),
+            dbahash_path: None,
         },
     );
 
@@ -213,6 +215,7 @@ async fn test_server_ahash_catalog_status_and_reload() {
             dbphash_path: None,
             extra_phash_dirs: Vec::new(),
             ahash_dir: Some(dir.path().to_path_buf()),
+            dbahash_path: None,
         },
     );
 
@@ -357,6 +360,7 @@ async fn test_search_ahash_mode_propagates_acoustic_shift_to_certified_synced() 
             dbphash_path: None,
             extra_phash_dirs: Vec::new(),
             ahash_dir: Some(catalog_dir.path().to_path_buf()),
+            dbahash_path: None,
         },
     );
     let app = create_router_with_state(state);
@@ -409,4 +413,120 @@ async fn test_search_ahash_mode_propagates_acoustic_shift_to_certified_synced() 
         (got - expected_shift_ms).abs() < SYNC_SHIFT_EPSILON_MS,
         "acoustic shift lost: got {got}, expected {expected_shift_ms}"
     );
+}
+
+#[tokio::test]
+async fn test_server_mmap_dbahash_priority_and_incremental_delta_reload() {
+    use dbsrt_index::{pack_ahash_directories, DbahashPackOptions, DEFAULT_DBAHASH_FACTOR_K};
+
+    let root = tempdir().expect("tempdir");
+    let ahash_dir = root.path().join("__AHASH__");
+    std::fs::create_dir_all(&ahash_dir).expect("mkdir");
+    let dbahash_path = root.path().join("catalog.dbahash");
+
+    let packed_a = write_mock_ahash(&ahash_dir, "packed_alpha", 1_200, 0x1111_AAAA_2222_BBBB);
+    let packed_b = write_mock_ahash(&ahash_dir, "packed_beta", 1_200, 0x3333_CCCC_4444_DDDD);
+
+    let stats = pack_ahash_directories(&DbahashPackOptions {
+        ahash_dirs: vec![ahash_dir.clone()],
+        output_path: dbahash_path.clone(),
+        factor_k: DEFAULT_DBAHASH_FACTOR_K,
+        embed_coarse_mih32: true,
+    })
+    .expect("pack catalog.dbahash");
+    assert_eq!(stats.packed_tracks, 2);
+
+    let state = AppState::with_options(
+        root.path().to_path_buf(),
+        root.path().to_path_buf(),
+        Arc::new(OpenSubtitlesProvider::new(None)),
+        AppStateInitOptions {
+            dbphash_path: None,
+            extra_phash_dirs: Vec::new(),
+            ahash_dir: Some(ahash_dir.clone()),
+            dbahash_path: Some(dbahash_path),
+        },
+    );
+
+    // Already-packed files in __AHASH__/ must NOT be duplicated in the heap delta catalog.
+    assert!(state.dbahash_reader().is_some());
+    assert_eq!(state.ahash_catalog.load().entries.len(), 0);
+
+    let app = create_router_with_state(state.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind ephemeral");
+    let addr: SocketAddr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    let client = reqwest::Client::new();
+    let base_url = format!("http://{}", addr);
+
+    let st1: CatalogStatusResponse = client
+        .get(format!("{}/v1/catalog/status", base_url))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(st1.ahash_medias, 2);
+    assert_eq!(st1.ahash_frames, 2_400);
+
+    let hit_a: AHashSearchResponse = client
+        .post(format!("{}/v1/search/ahash", base_url))
+        .json(&AHashSearchRequest {
+            hashes: Some(packed_a[300..730].to_vec()),
+            ..Default::default()
+        })
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(hit_a.success);
+    assert_eq!(
+        hit_a.best_match.as_ref().unwrap().media_name,
+        "packed_alpha"
+    );
+    assert_eq!(hit_a.best_match.as_ref().unwrap().ref_frame_offset, 300);
+
+    // Drop a brand-new loose .ahash file and trigger POST /v1/catalog/reload.
+    let delta_c = write_mock_ahash(&ahash_dir, "delta_gamma", 1_000, 0x7777_EEEE_8888_FFFF);
+    let reload: CatalogReloadResponse = client
+        .post(format!("{}/v1/catalog/reload", base_url))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(reload.ahash_medias, 3);
+    assert_eq!(reload.ahash_frames, 3_400);
+    assert_eq!(state.ahash_catalog.load().entries.len(), 1);
+
+    for (expected_name, slice, expected_offset) in [
+        ("delta_gamma", &delta_c[150..580], 150usize),
+        ("packed_beta", &packed_b[410..840], 410usize),
+    ] {
+        let resp: AHashSearchResponse = client
+            .post(format!("{}/v1/search/ahash", base_url))
+            .json(&AHashSearchRequest {
+                hashes: Some(slice.to_vec()),
+                ..Default::default()
+            })
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert!(resp.success);
+        let best = resp.best_match.expect("match");
+        assert_eq!(best.media_name, expected_name);
+        assert_eq!(best.ref_frame_offset, expected_offset);
+    }
 }

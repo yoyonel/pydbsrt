@@ -23,8 +23,18 @@ def find_repo_root() -> Path:
 REPO_ROOT = find_repo_root()
 
 
+def _resolve_moviehash_sidecar(fp_file: Path, head: str, rest: str) -> Path:
+    """Resolves `<head>.a<k>.json` for multi-track `.ahash`, falling back to `<head>.json`."""
+    sub_head, _, _ = rest.partition(".")
+    if len(sub_head) >= 2 and sub_head[0] == "a" and sub_head[1:].isdigit():
+        track_sidecar = fp_file.with_name(f"{head}.{sub_head}.json")
+        if track_sidecar.is_file():
+            return track_sidecar
+    return fp_file.with_name(f"{head}.json")
+
+
 def phash_logical_name(phash: Path) -> str:
-    """<media_name>.<fps>fps.phash for a <moviehash>.<fps>fps.phash with its <moviehash>.json sidecar, else the file name.
+    """<media_name>.<fps>fps.(p|a)hash for a <moviehash>... file with its sidecar, else the file name.
 
     Same rule as dbsrt_core::phash_logical_name.
     """
@@ -32,7 +42,8 @@ def phash_logical_name(phash: Path) -> str:
     if len(head) != 16 or any(c not in "0123456789abcdefABCDEF" for c in head):
         return phash.name
     try:
-        media_name = json.loads(phash.with_name(f"{head}.json").read_text(encoding="utf-8")).get("media_name")
+        sidecar = _resolve_moviehash_sidecar(phash, head, rest)
+        media_name = json.loads(sidecar.read_text(encoding="utf-8")).get("media_name")
     except (OSError, ValueError, AttributeError):
         return phash.name
     return f"{media_name}.{rest}" if isinstance(media_name, str) and media_name else phash.name

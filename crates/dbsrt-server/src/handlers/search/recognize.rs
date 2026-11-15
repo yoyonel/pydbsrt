@@ -540,6 +540,7 @@ mod tests {
                 dbphash_path: Some(PathBuf::from("/nonexistent_test_catalog.dbphash")),
                 extra_phash_dirs: Vec::new(),
                 ahash_dir: None,
+                dbahash_path: None,
             },
         ))
     }
