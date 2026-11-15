@@ -30,6 +30,9 @@ const FTP_SCHEME_PREFIX: &str = "ftp://";
 /// Reconnect (resuming with a Range request) when an `http(s)://` input drops mid-read, e.g.
 /// during a gateway restart: up to this many seconds of backoff before giving up.
 pub const HTTP_RECONNECT_DELAY_MAX_SECS: &str = "60";
+/// Socket I/O read/write timeout (`30s` in microseconds) for FFmpeg/FFprobe `http(s)://` inputs.
+/// Breaks silent half-open TCP stalls inside `recv()/poll()` so `-reconnect` can recover cleanly.
+pub const HTTP_RW_TIMEOUT_USECS: &str = "30000000";
 const SCHEME_SEPARATOR: &str = "://";
 const REDACTED_SECRET: &str = "***";
 const FTP_PASSWORD_FLAG: &str = "-ftp-password";
@@ -137,7 +140,23 @@ pub fn apply_ftp_credentials(cmd: &mut Command, input: &Path) {
     ));
 }
 
-/// Builds the reconnect input options for an `http(s)://` input, none for other inputs.
+/// Builds the reconnect and socket I/O timeout input options for an `http(s)://` input.
+///
+/// # Arguments
+/// * `input` - Raw input path or URL (case-insensitive `http://` / `https://` check).
+///
+/// # Returns
+/// Static FFmpeg/FFprobe option tokens (`-reconnect`, `-reconnect_on_network_error`,
+/// `-reconnect_delay_max`, `-rw_timeout`) for HTTP(S) streams, or empty `Vec`.
+///
+/// # Panics
+/// Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// 1. Matches `http://` / `https://` case-insensitively on the first 8 bytes.
+/// 2. Always emits `-reconnect 1` first followed by `-reconnect_on_network_error 1`,
+///    `-reconnect_delay_max`, and `-rw_timeout` so silent TCP stalls fail fast and trigger
+///    HTTP Range reconnection instead of blocking indefinitely in kernel socket wait.
 pub fn http_reconnect_args(input: &str) -> Vec<&'static str> {
     let lower = input.get(..8).unwrap_or(input).to_ascii_lowercase();
     if !(lower.starts_with("http://") || lower.starts_with("https://")) {
@@ -150,7 +169,30 @@ pub fn http_reconnect_args(input: &str) -> Vec<&'static str> {
         "1",
         "-reconnect_delay_max",
         HTTP_RECONNECT_DELAY_MAX_SECS,
+        "-rw_timeout",
+        HTTP_RW_TIMEOUT_USECS,
     ]
+}
+
+/// Applies all protocol-specific network input options (`ftp://` credentials and `http(s)://`
+/// reconnect + socket `-rw_timeout`) prior to `-i <input>` or the trailing input URL argument.
+///
+/// # Arguments
+/// * `cmd` - Mutable FFmpeg/FFprobe `Command` builder positioned before its input argument.
+/// * `input` - Input media filesystem path or network URI.
+///
+/// # Returns
+/// `()` (mutates `cmd` in place).
+///
+/// # Panics
+/// Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// Composes [`apply_ftp_credentials`] and [`http_reconnect_args`] in one call site so every
+/// FFmpeg and FFprobe invocation handles silent HTTP half-open drops uniformly.
+pub fn apply_network_input_options(cmd: &mut Command, input: &Path) {
+    apply_ftp_credentials(cmd, input);
+    cmd.args(http_reconnect_args(&input.to_string_lossy()));
 }
 
 /// Masks the password of every `scheme://user:password@host` occurrence as `user:***@host`.
@@ -361,6 +403,11 @@ mod tests {
         let args = http_reconnect_args("http://host/Disque_1/movie.mkv");
         assert_eq!(&args[..2], ["-reconnect", "1"]);
         assert!(args.contains(&"-reconnect_on_network_error"));
+        let rw_pos = args
+            .iter()
+            .position(|a| *a == "-rw_timeout")
+            .expect("-rw_timeout missing");
+        assert_eq!(args[rw_pos + 1], HTTP_RW_TIMEOUT_USECS);
         assert_eq!(http_reconnect_args("HTTPS://host/movie.mkv"), args);
         for input in [
             "ftp://host/movie.mkv",
@@ -371,6 +418,81 @@ mod tests {
         ] {
             assert!(http_reconnect_args(input).is_empty(), "{input}");
         }
+    }
+
+    #[test]
+    fn test_apply_network_input_options_injects_http_timeout() {
+        let mut cmd = Command::new("ffprobe");
+        apply_network_input_options(&mut cmd, Path::new("http://nas.example/movie.mkv"));
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert!(args.contains(&"-rw_timeout".to_string()));
+        assert!(args.contains(&HTTP_RW_TIMEOUT_USECS.to_string()));
+        assert!(args.contains(&"-reconnect".to_string()));
+    }
+
+    #[test]
+    fn test_ffmpeg_rw_timeout_unblocks_silent_tcp_socket() {
+        if Command::new("ffmpeg").arg("-version").output().is_err() {
+            return;
+        }
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        use std::thread;
+        use std::time::{Duration, Instant};
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind ephemeral port");
+        let addr = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            for _ in 0..2 {
+                let Ok((mut stream, _)) = listener.accept() else {
+                    break;
+                };
+                let mut buf = [0u8; 512];
+                let _ = stream.read(&mut buf);
+                let _ = stream.write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: video/x-matroska\r\nContent-Length: 1000000\r\n\r\n",
+                );
+                thread::sleep(Duration::from_secs(4));
+            }
+        });
+
+        let start = Instant::now();
+        let out = Command::new("ffmpeg")
+            .args([
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-nostats",
+                "-nostdin",
+                "-reconnect",
+                "1",
+                "-reconnect_on_network_error",
+                "1",
+                "-reconnect_delay_max",
+                "1",
+                "-reconnect_delay_total_max",
+                "1",
+                "-rw_timeout",
+                "200000",
+                "-i",
+                &format!("http://{addr}/stalled.mkv"),
+                "-f",
+                "null",
+                "-",
+            ])
+            .output()
+            .expect("spawn ffmpeg");
+        let elapsed = start.elapsed();
+        drop(server);
+
+        assert!(!out.status.success(), "silent HTTP stream should fail");
+        assert!(
+            elapsed < Duration::from_secs(3),
+            "ffmpeg hung for {elapsed:?} despite -rw_timeout"
+        );
     }
 
     #[test]

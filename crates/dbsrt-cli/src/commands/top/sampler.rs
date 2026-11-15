@@ -2882,7 +2882,7 @@ fn build_probe_media_command(path: &Path) -> Command {
             "-of",
             "json",
         ]);
-    dbsrt_core::apply_ftp_credentials(&mut cmd, path);
+    dbsrt_core::apply_network_input_options(&mut cmd, path);
     cmd.arg(path);
     cmd
 }

@@ -187,7 +187,7 @@ fn extract_subtitle_tracks_batch(
     let mut cmd = std::process::Command::new(dbsrt_core::video::resolve_ffmpeg_cpu());
     cmd.args(["-v", "error", "-y", "-threads"])
         .arg(dbsrt_core::ffmpeg_decode_threads());
-    dbsrt_core::apply_ftp_credentials(&mut cmd, video_path);
+    dbsrt_core::apply_network_input_options(&mut cmd, video_path);
     cmd.arg("-i").arg(video_path);
     for (idx, _lang, dest) in candidates {
         let map_arg = format!("0:s:{}", idx);

@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::ffmpeg_input::{
-    apply_ftp_credentials, display_input, ffmpeg_decode_threads, redact_secrets,
+    apply_network_input_options, display_input, ffmpeg_decode_threads, redact_secrets,
 };
 use crate::media_pairing::parse_language_code;
 
@@ -209,7 +209,7 @@ pub fn inspect_container<P: AsRef<Path>>(path: P) -> Result<ContainerInspection>
     let ffprobe_bin = crate::video::resolve_ffprobe();
     let mut cmd = Command::new(ffprobe_bin);
     cmd.args(["-threads", &ffmpeg_decode_threads()]);
-    apply_ftp_credentials(&mut cmd, p);
+    apply_network_input_options(&mut cmd, p);
     let output = cmd
         .args([
             "-v",
@@ -300,7 +300,7 @@ pub fn inspect_audio_streams<P: AsRef<Path>>(path: P) -> Result<AudioContainerIn
     let ffprobe_bin = crate::video::resolve_ffprobe();
     let mut cmd = Command::new(ffprobe_bin);
     cmd.args(["-threads", &ffmpeg_decode_threads()]);
-    apply_ftp_credentials(&mut cmd, p);
+    apply_network_input_options(&mut cmd, p);
     let output = cmd
         .args([
             "-v",
@@ -383,7 +383,7 @@ pub fn extract_embedded_subtitle<P: AsRef<Path>>(
     let ffmpeg_bin = crate::video::resolve_ffmpeg_cpu();
     let mut cmd = Command::new(ffmpeg_bin);
     cmd.args(["-v", "error", "-y", "-threads", &ffmpeg_decode_threads()]);
-    apply_ftp_credentials(&mut cmd, p);
+    apply_network_input_options(&mut cmd, p);
     let output = cmd
         .arg("-i")
         .arg(p)

@@ -14,8 +14,7 @@ use crate::ahash::{
     DEFAULT_HOP_SIZE, DEFAULT_SAMPLE_RATE, DEFAULT_SPECTRAL_LAG, NUM_SPECTRAL_BANDS,
 };
 use crate::ffmpeg_input::{
-    apply_ftp_credentials, display_input, ffmpeg_decode_threads, http_reconnect_args,
-    redact_secrets,
+    apply_network_input_options, display_input, ffmpeg_decode_threads, redact_secrets,
 };
 use crate::video::resolve_ffmpeg_cpu;
 
@@ -94,11 +93,7 @@ pub fn build_ffmpeg_audio_command(path: &Path, options: &AudioExtractionOptions)
     cmd.args(["-hide_banner", "-loglevel", "error", "-nostats", "-nostdin"]);
 
     let input_str = path.to_string_lossy();
-    if input_str.starts_with("http://") || input_str.starts_with("https://") {
-        cmd.args(http_reconnect_args(&input_str));
-    }
-
-    apply_ftp_credentials(&mut cmd, path);
+    apply_network_input_options(&mut cmd, path);
 
     if options.start_sec > 0.0 {
         cmd.args(["-ss", &format!("{:.3}", options.start_sec)]);
@@ -484,6 +479,22 @@ mod tests {
         assert_eq!(args[pos + 1], "0:a:2");
         let input_pos = args.iter().position(|a| a == "-i").expect("-i present");
         assert!(pos > input_pos, "-map must follow the input");
+    }
+
+    #[test]
+    fn test_build_ffmpeg_audio_command_http_injects_rw_timeout() {
+        let opts = AudioExtractionOptions::default();
+        let args = command_args(&build_ffmpeg_audio_command(
+            Path::new("http://nas.example/movie.mkv"),
+            &opts,
+        ));
+        let input_pos = args.iter().position(|a| a == "-i").expect("-i present");
+        let rw_pos = args
+            .iter()
+            .position(|a| a == "-rw_timeout")
+            .expect("-rw_timeout present");
+        assert!(rw_pos < input_pos);
+        assert!(args[..input_pos].contains(&"-reconnect".to_string()));
     }
 
     #[test]

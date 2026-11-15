@@ -23,6 +23,7 @@ from scripts.workers.o2switch_batch_worker import (
     abort_batch,
     build_child_env,
     build_stream_url,
+    get_process_group_activity,
     get_process_group_cpu_ticks,
     load_blacklisted_stems,
     load_certified_stems,
@@ -907,3 +908,92 @@ def test_nas_ftp_index_targets_sorted_deterministically(tmp_path: Path):
     idx_b.write_text(json.dumps({"index": {"a.mkv": "video/a.mkv", "z.mkv": "video/z.mkv"}}), encoding="utf-8")
     assert worker.load_nas_ftp_index_targets(idx_a, "/video") == worker.load_nas_ftp_index_targets(idx_b, "/video")
     assert [t.filename for t in worker.load_nas_ftp_index_targets(idx_a, "/video")] == ["a.mkv", "z.mkv"]
+
+
+def test_get_process_group_activity_sums_ticks_and_io_bytes(tmp_path: Path):
+    """Sums CPU ticks from stat and rchar+wchar from io for matching PGID, defaulting io to 0 when absent."""
+    (tmp_path / "100").mkdir()
+    (tmp_path / "100" / "stat").write_text("100 (dbsrt) S 1 100 100 0 0 0 0 0 0 0 7 3 0 0", encoding="utf-8")
+    (tmp_path / "100" / "io").write_text("rchar: 1200\nwchar: 800\nsyscr: 5\n", encoding="utf-8")
+
+    (tmp_path / "101").mkdir()
+    (tmp_path / "101" / "stat").write_text("101 (ffmpeg) S 100 100 100 0 0 0 0 0 0 0 20 5 0 0", encoding="utf-8")
+    # Simulate unreadable / missing /proc/101/io -> io contribution = 0 without failing
+
+    (tmp_path / "200").mkdir()
+    (tmp_path / "200" / "stat").write_text("200 (other) R 1 200 200 0 0 0 0 0 0 0 99 99 0 0", encoding="utf-8")
+    (tmp_path / "200" / "io").write_text("rchar: 999999\nwchar: 999999\n", encoding="utf-8")
+
+    assert get_process_group_activity(100, proc_root=tmp_path) == (35, 2000)
+    assert get_process_group_cpu_ticks(100, proc_root=tmp_path) == 35
+
+
+def test_watch_child_kills_keepalive_tick_drift_without_io_progress(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Regression: 4-5 ticks/min idle socket keepalive drift must not reset stall_duration indefinitely."""
+
+    class _DummyProc:
+        pid = 424242
+        returncode = None
+
+        def __init__(self) -> None:
+            self.killed = False
+
+        def poll(self) -> int | None:
+            return -signal.SIGKILL if self.killed else None
+
+        def wait(self, timeout: float | None = None) -> int:
+            return -signal.SIGKILL if self.killed else 0
+
+    proc = _DummyProc()
+    polls = iter([(100, 5000), (101, 5000), (102, 5000), (103, 5000), (104, 5000), (105, 5000)])
+    monkeypatch.setattr(worker, "WATCHDOG_POLL_INTERVAL_SECS", 0.0)
+    monkeypatch.setattr(worker, "get_process_group_activity", lambda _pgid: next(polls))
+    monkeypatch.setattr(
+        "scripts.workers.batch_worker.runner.os.killpg",
+        lambda _pgid, _sig: setattr(proc, "killed", True),
+    )
+
+    log_path = tmp_path / "worker.log"
+    with open(log_path, "w", encoding="utf-8") as out_f:
+        status = worker._watch_child(
+            proc, out_f, start_time=time.time(), max_extraction_secs=7200, stall_timeout_secs=3
+        )
+
+    assert status == "STALLED"
+    assert proc.killed
+    assert "zero I/O and CPU progress" in log_path.read_text(encoding="utf-8")
+
+
+def test_watch_child_keeps_alive_on_io_progress_or_real_cpu_and_reanchors_on_subchild_exit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Active I/O bytes or >= STALL_MIN_CPU_TICKS_DELTA resets stall timer, including after subchild exit."""
+
+    class _FinishingProc:
+        pid = 515151
+        returncode = 0
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def poll(self):
+            self.calls += 1
+            return 0 if self.calls > 5 else None
+
+        def wait(self, timeout=None):
+            return 0
+
+    proc = _FinishingProc()
+    # 1: active I/O; 2: same I/O + +60 CPU ticks (pure CPU phase);
+    # 3: subchild exited so ticks dropped 65->5; 4: 0 I/O + +50 ticks -> re-anchored CPU resets stall!
+    samples = iter([(5, 1000), (5, 2000), (65, 2000), (5, 2000), (55, 2000)])
+    monkeypatch.setattr(worker, "WATCHDOG_POLL_INTERVAL_SECS", 0.0)
+    monkeypatch.setattr(worker, "get_process_group_activity", lambda _pgid: next(samples))
+
+    log_path = tmp_path / "active.log"
+    with open(log_path, "w", encoding="utf-8") as out_f:
+        status = worker._watch_child(
+            proc, out_f, start_time=time.time(), max_extraction_secs=7200, stall_timeout_secs=2
+        )
+
+    assert status == "COMPLETED"
