@@ -8,11 +8,48 @@ use ratatui::{
     Frame,
 };
 
-use crate::constants::{BYTES_PER_MIB_F64, MAX_MEDIA_NAME_DISPLAY_CHARS};
+use crate::constants::{
+    BYTES_PER_MIB_F64, MAX_MEDIA_NAME_DISPLAY_CHARS, MIN_DISPLAY_HASHING_FPS,
+    MIN_DISPLAY_REALTIME_FACTOR, SECONDS_PER_HOUR, SECONDS_PER_MINUTE,
+};
 use crate::model::{
     default_progress_bar, filter_active_jobs_with_search, format_duration, ActiveJobTelemetry,
+    StreamKind,
 };
 use crate::ui::UiContext;
+
+/// Builds the active jobs panel title, surfacing active pipeline type (`pHash` vs `aHash`) and `batch_type`.
+fn format_active_jobs_title(ctx: &UiContext, visible_count: usize, total_count: usize) -> String {
+    let has_audio = ctx
+        .telemetry
+        .active_jobs
+        .iter()
+        .any(ActiveJobTelemetry::is_ahash_audio);
+    let has_video = ctx
+        .telemetry
+        .active_jobs
+        .iter()
+        .any(|j| j.stream_kind() == StreamKind::VideoPhash);
+    let mode_label = match (has_video, has_audio) {
+        (false, true) => "DÉCODAGE & AHASH AUDIO TEMPS RÉEL",
+        (true, true) => "DÉCODAGE PHASH & AHASH TEMPS RÉEL",
+        _ => "DÉCODAGE & PHASH TEMPS RÉEL",
+    };
+    if ctx.telemetry.batch_queue.total_targets > 0 {
+        let queue_prefix = match ctx.telemetry.batch_queue.batch_type.as_deref() {
+            Some(kind) if !kind.is_empty() => format!("File [{kind}]"),
+            _ => "File".to_string(),
+        };
+        format!(
+            " TÂCHES EN COURS ({mode_label}) [{visible_count}/{total_count} actifs │ {queue_prefix}: {}/{} traités, {} restants (dont {total_count} en cours)] ",
+            ctx.telemetry.batch_queue.completed_targets,
+            ctx.telemetry.batch_queue.total_targets,
+            ctx.telemetry.batch_queue.remaining_targets,
+        )
+    } else {
+        format!(" TÂCHES EN COURS ({mode_label}) [{visible_count}/{total_count}] ")
+    }
+}
 
 /// Renders the fullframe table of active decoding/pHash jobs.
 ///
@@ -40,16 +77,7 @@ pub fn render_active_jobs_page(frame: &mut Frame, area: Rect, ctx: &UiContext) {
 
     let total_count = ctx.telemetry.active_jobs.len();
     let visible_count = jobs.len();
-    let title = if ctx.telemetry.batch_queue.total_targets > 0 {
-        format!(
-            " TÂCHES EN COURS (DÉCODAGE & PHASH TEMPS RÉEL) [{visible_count}/{total_count} actifs │ File: {}/{} traités, {} restants (dont {total_count} en cours)] ",
-            ctx.telemetry.batch_queue.completed_targets,
-            ctx.telemetry.batch_queue.total_targets,
-            ctx.telemetry.batch_queue.remaining_targets,
-        )
-    } else {
-        format!(" TÂCHES EN COURS (DÉCODAGE & PHASH TEMPS RÉEL) [{visible_count}/{total_count}] ")
-    };
+    let title = format_active_jobs_title(ctx, visible_count, total_count);
 
     let block = Block::default()
         .borders(Borders::ALL)
@@ -217,6 +245,68 @@ fn render_empty_jobs_placeholder(frame: &mut Frame, area: Rect, search_query: &s
     frame.render_widget(p, area);
 }
 
+/// Formats compact media runtime (`1h17`, `42m`, `25s`) fitting inside the 34-col progression cell.
+fn format_compact_media_clock(secs: f64) -> String {
+    let total = secs.max(0.0).round() as u64;
+    if total >= SECONDS_PER_HOUR {
+        let h = total / SECONDS_PER_HOUR;
+        let m = (total % SECONDS_PER_HOUR) / SECONDS_PER_MINUTE;
+        format!("{h}h{m:02}")
+    } else if total >= SECONDS_PER_MINUTE {
+        format!("{}m", total / SECONDS_PER_MINUTE)
+    } else {
+        format!("{total}s")
+    }
+}
+
+/// Formats the `PROGRESSION` and `DÉBIT VFS` cells according to `StreamKind` (`aHash` vs `pHash`).
+fn format_job_progress_and_rate(job: &ActiveJobTelemetry) -> (String, String) {
+    if job.is_ahash_audio() {
+        let pcm_bps = job.ahash_pcm_bytes_per_sec();
+        let decoded_secs = if pcm_bps > 0.0 {
+            job.read_bytes as f64 / pcm_bps
+        } else {
+            0.0
+        };
+        let prog_text = if job.total_bytes > 0 && pcm_bps > 0.0 {
+            let total_secs = job.total_bytes as f64 / pcm_bps;
+            let prog_bar = default_progress_bar(job.progress_ratio);
+            format!(
+                "{prog_bar} {}/{}",
+                format_compact_media_clock(decoded_secs),
+                format_compact_media_clock(total_secs)
+            )
+        } else {
+            format!(
+                "[░░░░░░░░░░░░░░]  --.-% ({})",
+                format_compact_media_clock(decoded_secs)
+            )
+        };
+        let rt = job.ahash_realtime_factor();
+        let rate_display = if rt >= MIN_DISPLAY_REALTIME_FACTOR {
+            format!("{rt:>5.1}x RT")
+        } else {
+            format!("{:>5.2} MB/s", job.current_rate_mib_s)
+        };
+        return (prog_text, rate_display);
+    }
+
+    let prog_bar = default_progress_bar(job.progress_ratio);
+    let mb_read = job.read_bytes as f64 / BYTES_PER_MIB_F64;
+    let mb_total = job.total_bytes as f64 / BYTES_PER_MIB_F64;
+    let prog_text = if mb_read < 10.0 && mb_read > 0.0 {
+        format!("{prog_bar} ({mb_read:.1}/{mb_total:.0} MB)")
+    } else {
+        format!("{prog_bar} ({mb_read:.0}/{mb_total:.0} MB)")
+    };
+    let rate_display = if job.hashing_fps > MIN_DISPLAY_HASHING_FPS {
+        format!("{:>4.0} fps", job.hashing_fps)
+    } else {
+        format!("{:>5.1} MB/s", job.current_rate_mib_s)
+    };
+    (prog_text, rate_display)
+}
+
 /// Builds a single table row representing an active job with colored metrics.
 fn build_job_row(job: &ActiveJobTelemetry, idx: usize, selected_index: usize) -> Row<'static> {
     let is_selected = idx == selected_index;
@@ -243,7 +333,11 @@ fn build_job_row(job: &ActiveJobTelemetry, idx: usize, selected_index: usize) ->
             + "...";
     }
 
-    let engine_style = if job.engine.contains("GPU") {
+    let engine_style = if job.is_ahash_audio() {
+        Style::default()
+            .fg(Color::LightCyan)
+            .add_modifier(Modifier::BOLD)
+    } else if job.engine.contains("GPU") {
         Style::default()
             .fg(Color::LightGreen)
             .add_modifier(Modifier::BOLD)
@@ -257,25 +351,11 @@ fn build_job_row(job: &ActiveJobTelemetry, idx: usize, selected_index: usize) ->
         Style::default().fg(Color::LightYellow)
     };
 
-    let prog_bar = default_progress_bar(job.progress_ratio);
-    let mb_read = job.read_bytes as f64 / BYTES_PER_MIB_F64;
-    let mb_total = job.total_bytes as f64 / BYTES_PER_MIB_F64;
-    let prog_text = if mb_read < 10.0 && mb_read > 0.0 {
-        format!("{prog_bar} ({mb_read:.1}/{mb_total:.0} MB)")
-    } else {
-        format!("{prog_bar} ({mb_read:.0}/{mb_total:.0} MB)")
-    };
-
+    let (prog_text, rate_display) = format_job_progress_and_rate(job);
     let eta_text = job
         .eta_secs
         .map(format_duration)
         .unwrap_or_else(|| "N/A".to_string());
-
-    let rate_display = if job.hashing_fps > 0.5 {
-        format!("{:>4.0} fps", job.hashing_fps)
-    } else {
-        format!("{:>5.1} MB/s", job.current_rate_mib_s)
-    };
 
     let row_cells = vec![
         Cell::from(Line::from(vec![cursor_span, status_icon])),
@@ -378,12 +458,30 @@ pub fn inspect_job_details(job: &ActiveJobTelemetry) -> Vec<String> {
         job.cpu_percent,
         job.ram_rss_mib
     ));
-    lines.push(format!(
-        "Progression: {:>5.1}% │ Lus: {:>6.1} MB / Total: {:>6.1} MB",
-        job.progress_ratio * 100.0,
-        job.read_bytes as f64 / crate::constants::BYTES_PER_MIB_F64,
-        job.total_bytes as f64 / crate::constants::BYTES_PER_MIB_F64
-    ));
+    if job.is_ahash_audio() {
+        let pcm_bps = job.ahash_pcm_bytes_per_sec().max(1.0);
+        let decoded_secs = job.read_bytes as f64 / pcm_bps;
+        let total_secs = job.total_bytes as f64 / pcm_bps;
+        lines.push(format!(
+            "Progression audio: {:>5.1}% │ Audio décodé: {} / {} │ Vitesse: {:.1}x RT ({:.0} fps spectraux)",
+            job.progress_ratio * 100.0,
+            crate::model::format_duration(decoded_secs),
+            if job.total_bytes > 0 {
+                crate::model::format_duration(total_secs)
+            } else {
+                "N/A".to_string()
+            },
+            job.ahash_realtime_factor(),
+            job.hashing_fps,
+        ));
+    } else {
+        lines.push(format!(
+            "Progression: {:>5.1}% │ Lus: {:>6.1} MB / Total: {:>6.1} MB",
+            job.progress_ratio * 100.0,
+            job.read_bytes as f64 / crate::constants::BYTES_PER_MIB_F64,
+            job.total_bytes as f64 / crate::constants::BYTES_PER_MIB_F64
+        ));
+    }
 
     if let Some(eta) = job.eta_secs {
         lines.push(format!(
@@ -397,6 +495,9 @@ pub fn inspect_job_details(job: &ActiveJobTelemetry) -> Vec<String> {
     if let Some(ref reason) = job.engine_reason {
         lines.push(format!("  • Moteur sélectionné : {}", job.engine));
         lines.push(format!("  • Diagnostic matériel: {reason}"));
+    } else if job.is_ahash_audio() {
+        lines.push("  • Moteur sélectionné : aHash Audio".to_string());
+        lines.push("  • Opération active   : Extraction acoustique Haitsma-Kalker (.ahash, PCM mono f32le 5512 Hz, -vn sans décodage vidéo).".to_string());
     } else if job.engine.contains("Hi10P") {
         lines.push(format!("  • Moteur sélectionné : {}", job.engine));
         lines.push(
