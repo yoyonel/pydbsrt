@@ -17,6 +17,7 @@ use crate::{
     },
     views::{
         active_jobs::{render_active_jobs_page, render_inspection_page},
+        cluster::render_cluster_page,
         completed::render_completed_page,
         completed_inspection::render_completed_inspection_page,
         footer::render_footer,
@@ -54,6 +55,7 @@ pub struct UiContext<'a> {
     pub trajectory_sort: TrajectorySort,
     pub trajectory_inspection_scroll: usize,
     pub trajectory_indices: &'a [usize],
+    pub cluster_scroll_index: usize,
     pub search_query: &'a str,
     pub search_active: bool,
     pub help_tab: HelpTab,
@@ -97,6 +99,7 @@ pub fn render_ui(frame: &mut Frame, ctx: &UiContext) {
         ViewPage::CompletedInspection => render_completed_inspection_page(frame, chunks[1], ctx),
         ViewPage::Trajectory => render_trajectory_page(frame, chunks[1], ctx),
         ViewPage::TrajectoryInspection => render_trajectory_inspection_page(frame, chunks[1], ctx),
+        ViewPage::Cluster => render_cluster_page(frame, chunks[1], ctx),
         ViewPage::Help => render_help_page(frame, chunks[1], ctx),
     }
 

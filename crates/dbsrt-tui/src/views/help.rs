@@ -18,7 +18,7 @@ use crate::{constants::HELP_TAB_HEADER_HEIGHT, model::HelpTab, ui::UiContext};
 /// * `ctx` - Active UI rendering context containing selected help tab and scroll index.
 ///
 /// # Data Flow & Invariants
-/// Renders the top tab bar showing all 6 help categories and the scrollable content paragraph.
+/// Renders the top tab bar showing all 9 help categories and the scrollable content paragraph.
 pub fn render_help_page(frame: &mut Frame, area: Rect, ctx: &UiContext) {
     let block = Block::default()
         .borders(Borders::ALL)
@@ -52,6 +52,7 @@ pub fn render_help_page(frame: &mut Frame, area: Rect, ctx: &UiContext) {
         HelpTab::MediaSources => build_help_media_sources(),
         HelpTab::System => build_help_system(),
         HelpTab::Trajectory => build_help_trajectory(),
+        HelpTab::Cluster => build_help_cluster(),
     };
 
     let p = Paragraph::new(lines)
@@ -84,7 +85,7 @@ pub fn render_help_tab_bar(frame: &mut Frame, area: Rect, ctx: &UiContext) {
     }
 
     let nav_hint = Line::from(vec![Span::styled(
-        "  [0-5] ou [Tab/Shift+Tab / ←/→] Naviguer entre onglets d'aide  │  [↑/↓/k/j/PgUp/PgDn] Défiler  │  [Esc/?] Revenir à la vue précédente",
+        "  [0-8] ou [Tab/Shift+Tab / ←/→] Naviguer entre onglets d'aide  │  [↑/↓/k/j/PgUp/PgDn] Défiler  │  [Esc/?] Revenir à la vue précédente",
         Style::default().fg(Color::DarkGray),
     )]);
 
@@ -109,6 +110,9 @@ pub fn build_help_general() -> Vec<Line<'static>> {
         Line::from("    [3] ou [r]     : Onglet DERNIERS TRAITEMENTS COMPLÉTÉS & CERTIFIÉS (journal, statuts, diagnostics FAIL)"),
         Line::from("    [4] ou [m]     : Onglet EXPLORATEUR DE MÉDIAS MULTI-SOURCES (inventaire, sélection batch)"),
         Line::from("    [5] ou [s]     : Onglet GESTION DES SOURCES DE MÉDIAS (CRUD répertoires vidéo, rescan)"),
+        Line::from("    [6] ou [y]     : Onglet INFORMATIONS SYSTÈME & MATÉRIEL (vue Fastfetch CPU/GPU/RAM)"),
+        Line::from("    [7] ou [t]     : Onglet AUDIT DES TRAJECTOIRES SPATIOTEMPORELLES (consensus multi-cuts)"),
+        Line::from("    [8] ou [u]     : Onglet OBSERVABILITÉ CLUSTER MULTI-NŒUDS (sonde dbsrt doctor local/rpi4/o2switch)"),
         Line::from("    [Tab/BackTab]  : Naviguer circulairement entre les onglets"),
         Line::from("    [?]            : Ouvrir cette aide contextuelle (positionnée automatiquement sur la vue courante)"),
         Line::from("    [q]            : Quitter le moniteur TUI"),
@@ -387,5 +391,56 @@ pub fn build_help_trajectory() -> Vec<Line<'static>> {
         Line::from("    [F]                : Ouvrir la boîte de dialogue pour filtrer et sélectionner une campagne d'audit."),
         Line::from("    [/]                : Activer la recherche floue multi-tokens en direct."),
         Line::from("    [?]                : Afficher / Masquer cette aide contextuelle."),
+    ]
+}
+
+/// Builds Multi-Node Cluster Observability help content lines (`[8/u] Cluster`).
+///
+/// # Returns
+/// Styled [`Vec<Line<'static>>`] exhaustively documenting cluster columns, severities, and actions.
+///
+/// # Panics
+/// Guaranteed panic-free.
+///
+/// # Data Flow & Invariants
+/// Maintains strict 1:1 parity with `views/cluster.rs` headers, status badges, and shortcuts.
+pub fn build_help_cluster() -> Vec<Line<'static>> {
+    vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            "  🩺 ONGLET [8/u] OBSERVABILITÉ CLUSTER MULTI-NŒUDS (dbsrt doctor)",
+            Style::default().fg(Color::LightGreen).add_modifier(Modifier::BOLD),
+        )),
+        Line::from("  Supervision asynchrone et non-bloquante de la santé multi-nœuds (local, rpi4, o2switch),"),
+        Line::from("  de la parité SHA-256 des scripts déployés, de la fraîcheur des datasets et des signatures d'erreurs."),
+        Line::from(""),
+        Line::from(Span::styled("  Matrice Santé des Nœuds :", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))),
+        Line::from("    • NODE         : Identifiant canonique du nœud sondé (local, rpi4, o2switch)."),
+        Line::from("    • STATE        : État de santé synthétique du nœud :"),
+        Line::from("                     - OK      : [NOMINAL] Aucun incident critique ni avertissement actif."),
+        Line::from("                     - WARN    : [AVERTISSEMENT] Index obsolète (STALE), échec batch isolé ou erreur historique."),
+        Line::from("                     - CRIT    : [CRITIQUE] Batch avorté (ABORT), superviseur dégradé ou erreur log 1h / fatale."),
+        Line::from("                     - UNREACH : [INJOIGNABLE] Échec de transport SSH ou délai dépassé."),
+        Line::from("                     - SKIP    : [IGNORÉ] Nœud distant ignoré en mode local-only (ex: hôte CloudLinux LVE)."),
+        Line::from("    • DAEMON       : État du démon dbsrt-server observé sur le nœud (up, down ou -)."),
+        Line::from("    • SUPERVISOR   : État lu dans run/supervisor_status.json (ex: healthy, degraded ou -)."),
+        Line::from("    • ABORT        : Présence du drapeau sentinelle run/batch_aborted (YES! en critique, no sinon)."),
+        Line::from("    • Q_FAIL       : Nombre de cibles en échec dans run/batch_queue.json."),
+        Line::from("    • BLKLST       : Nombre de video_stem distincts blacklistés (>= 3 échecs consécutifs)."),
+        Line::from("    • LVE24        : Nombre de fautes/throttling CloudLinux LVE observées sur 24h dans logs/faultwatch/."),
+        Line::from("    • ERR(1h/24/72): Compteurs glissants d'erreurs logs agrégés sur 1 heure, 24 heures et 72 heures."),
+        Line::from("    • PROBE        : Latence réseau/locale de la sonde en millisecondes."),
+        Line::from(""),
+        Line::from(Span::styled("  Parité Scripts, Fraîcheur & Alertes :", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))),
+        Line::from("    • SCRIPT / LOCAL / RPI4 / O2SWITCH : Préfixes SHA-256 (12 hex) des scripts critiques déployés."),
+        Line::from("    • PARITY       : OK (empreintes identiques), SHA256_DRIFT (divergence critique, code sortie 2), LOCAL_ONLY."),
+        Line::from("    • FRAÎCHEUR    : Âge vs TTL des artefacts (nas_ftp_index.json, freebox_batch_targets.json, etc.) : ok, STALE ou absent."),
+        Line::from("    • ALERTES      : Flux trié critique-d'abord ([CRIT] / [WARN]) suivi des signatures d'erreurs logs dédupliquées."),
+        Line::from(""),
+        Line::from(Span::styled("  Commandes & Raccourcis :", Style::default().fg(Color::LightGreen).add_modifier(Modifier::BOLD))),
+        Line::from("    [8] ou [u]     : Basculer vers l'onglet Cluster / Revenir aux Tâches actives."),
+        Line::from("    [a]            : Actualiser immédiatement la sonde cluster en arrière-plan (sans figer le TUI)."),
+        Line::from("    [↑/k] / [↓/j]  : Défiler ligne par ligne ; [PgUp/PgDn] par page ; [Home/End] début / fin."),
+        Line::from("    [?]            : Afficher / Masquer cette aide contextuelle."),
     ]
 }

@@ -17,8 +17,8 @@ use crate::constants::{
 };
 use crate::host_info::HostSystemInfo;
 use crate::model::{
-    format_duration, format_progress_bar, ActiveJobTelemetry, BatchQueueTelemetry, GpuTelemetry,
-    StreamKind, SystemTelemetry,
+    format_duration, format_progress_bar, ActiveJobTelemetry, BatchQueueTelemetry,
+    ClusterHealthTelemetry, ClusterSeverity, GpuTelemetry, StreamKind, SystemTelemetry,
 };
 use crate::views::widgets::get_current_time_str;
 
@@ -72,6 +72,25 @@ pub fn render_header(frame: &mut Frame, area: Rect, tel: &SystemTelemetry) {
 
     let p = Paragraph::new(vec![line1, line2, line3, line4]).block(header_block);
     frame.render_widget(p, area);
+}
+
+/// Formats the header cluster badge showing overall `dbsrt doctor` severity and active alert count.
+fn format_cluster_header_badge(cluster: &ClusterHealthTelemetry) -> Span<'static> {
+    let (label, fg) = match cluster.status {
+        ClusterSeverity::Ok => ("Cluster: OK".to_string(), Color::LightGreen),
+        ClusterSeverity::Warning => (
+            format!("Cluster: WARN({})", cluster.active_warning_count),
+            Color::Yellow,
+        ),
+        ClusterSeverity::Critical => (
+            format!(
+                "Cluster: CRIT({}/{})",
+                cluster.active_critical_count, cluster.sha256_drift_count
+            ),
+            Color::Red,
+        ),
+    };
+    Span::styled(label, Style::default().fg(fg).add_modifier(Modifier::BOLD))
 }
 
 /// Formats the header batch queue badge, surfacing `batch_type` when present (`Batch [freebox]: ...`).
@@ -202,6 +221,11 @@ fn build_host_telemetry_line(tel: &SystemTelemetry) -> Line<'static> {
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
         ));
+    }
+
+    if let Some(cluster) = &tel.cluster {
+        spans.push(Span::raw(" │ "));
+        spans.push(format_cluster_header_badge(cluster));
     }
 
     Line::from(spans)

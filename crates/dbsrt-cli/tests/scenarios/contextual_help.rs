@@ -62,6 +62,21 @@ fn test_scenario_contextual_help_calling_parity_and_glossary() {
                 "DISPONIBLES",
             ],
         ),
+        (
+            ViewPage::Cluster,
+            KeyCode::Char('8'),
+            HelpTab::Cluster,
+            vec![
+                "NODE",
+                "STATE",
+                "SUPERVISOR",
+                "ABORT",
+                "Q_FAIL",
+                "BLKLST",
+                "PARITY",
+                "SHA256_DRIFT",
+            ],
+        ),
     ];
 
     for (calling_view, view_key, expected_tab, expected_terms) in views_and_glossary {
@@ -113,6 +128,9 @@ fn test_scenario_help_tab_cycling_and_scrolling() {
     assert_eq!(harness.app.help_tab, HelpTab::Trajectory);
 
     harness.send_key(KeyCode::Tab);
+    assert_eq!(harness.app.help_tab, HelpTab::Cluster);
+
+    harness.send_key(KeyCode::Tab);
     assert_eq!(harness.app.help_tab, HelpTab::General);
 
     harness.send_key(KeyCode::Tab);
@@ -123,9 +141,15 @@ fn test_scenario_help_tab_cycling_and_scrolling() {
     assert_eq!(harness.app.help_tab, HelpTab::General);
 
     harness.send_key(KeyCode::BackTab);
+    assert_eq!(harness.app.help_tab, HelpTab::Cluster);
+
+    harness.send_key(KeyCode::BackTab);
     assert_eq!(harness.app.help_tab, HelpTab::Trajectory);
 
-    // Direct jump keys: '0', '1', '2', '3', '4', '5', '6', '7'
+    // Direct jump keys: '0'..'8'
+    harness.send_key(KeyCode::Char('8'));
+    assert_eq!(harness.app.help_tab, HelpTab::Cluster);
+
     harness.send_key(KeyCode::Char('7'));
     assert_eq!(harness.app.help_tab, HelpTab::Trajectory);
 

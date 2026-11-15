@@ -8,7 +8,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::model::ViewPage;
+use crate::model::{ClusterSeverity, ViewPage};
 use crate::ui::UiContext;
 
 /// Renders the bottom status and keybinding bar.
@@ -47,7 +47,8 @@ pub fn render_footer(frame: &mut Frame, area: Rect, ctx: &UiContext) {
         lines.push(Line::from(""));
     }
 
-    let mut footer_spans = build_tab_bar_spans(ctx.view);
+    let cluster_sev = ctx.telemetry.cluster.as_ref().map(|c| c.status);
+    let mut footer_spans = build_tab_bar_spans(ctx.view, cluster_sev);
     footer_spans.push(Span::raw(" │ "));
 
     let shortcuts = build_shortcuts_text(ctx);
@@ -65,7 +66,10 @@ pub fn render_footer(frame: &mut Frame, area: Rect, ctx: &UiContext) {
 }
 
 /// Builds navigation tab badge spans with distinct colors for the active view.
-fn build_tab_bar_spans(current_view: ViewPage) -> Vec<Span<'static>> {
+fn build_tab_bar_spans(
+    current_view: ViewPage,
+    cluster_severity: Option<ClusterSeverity>,
+) -> Vec<Span<'static>> {
     let tab_jobs_style = if current_view == ViewPage::ActiveJobs {
         Style::default()
             .fg(Color::Black)
@@ -131,6 +135,24 @@ fn build_tab_bar_spans(current_view: ViewPage) -> Vec<Span<'static>> {
             Style::default().fg(Color::DarkGray)
         };
 
+    let tab_cluster_style = if current_view == ViewPage::Cluster {
+        let bg = match cluster_severity {
+            Some(ClusterSeverity::Critical) => Color::Red,
+            Some(ClusterSeverity::Warning) => Color::Yellow,
+            _ => Color::LightGreen,
+        };
+        Style::default()
+            .fg(Color::Black)
+            .bg(bg)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        match cluster_severity {
+            Some(ClusterSeverity::Critical) => Style::default().fg(Color::Red),
+            Some(ClusterSeverity::Warning) => Style::default().fg(Color::Yellow),
+            _ => Style::default().fg(Color::DarkGray),
+        }
+    };
+
     vec![
         Span::raw(" "),
         Span::styled(" [1] Tâches ", tab_jobs_style),
@@ -146,6 +168,8 @@ fn build_tab_bar_spans(current_view: ViewPage) -> Vec<Span<'static>> {
         Span::styled(" [6/y] Système ", tab_system_style),
         Span::raw(" "),
         Span::styled(" [7/t] Trajectoires ", tab_trajectory_style),
+        Span::raw(" "),
+        Span::styled(" [8/u] Cluster ", tab_cluster_style),
     ]
 }
 
@@ -180,8 +204,11 @@ fn build_shortcuts_text(ctx: &UiContext) -> &'static str {
         }
         ViewPage::System => "[↑/k] Défiler  [?] Aide  [q] Quitter",
         ViewPage::Trajectory => build_trajectory_shortcuts(ctx),
+        ViewPage::Cluster => {
+            "[↑/k/↓/j/PgUp/PgDn] Défiler  [a] Actualiser Sonde  [?] Aide  [q] Quitter"
+        }
         ViewPage::Help => {
-            "[0-7/Tab] Onglet Aide  [↑/↓/k/j] Défiler  [Esc/Backspace/?] Revenir  [q] Quitter"
+            "[0-8/Tab] Onglet Aide  [↑/↓/k/j] Défiler  [Esc/Backspace/?] Revenir  [q] Quitter"
         }
     }
 }
