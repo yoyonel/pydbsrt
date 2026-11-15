@@ -84,7 +84,12 @@ DEFAULT_NAS_USER: str = os.getenv("NAS_USER") or _CONFIG_ENV.get("NAS_USER", "")
 DEFAULT_NAS_BASE: str = "/tvshow"
 DEFAULT_FTP_PORT: int = 21
 DEFAULT_FFMPEG_THREADS: str = "2"
-DEFAULT_STALL_TIMEOUT_SECS: int = 60
+# Exceeds FFmpeg -rw_timeout (30s) + -reconnect_delay_max (60s) so transient drops recover
+# seamlessly while silent half-open TCP stalls are killed in 3 min instead of 7200s.
+DEFAULT_STALL_TIMEOUT_SECS: int = 180
+# Minimum cumulative CPU ticks (~0.5s CPU) required to count as non-I/O progress; filters out
+# 4-5 ticks/min idle socket keepalive/poll noise that bypassed the old != tick check.
+STALL_MIN_CPU_TICKS_DELTA: int = 50
 DEFAULT_MAX_EXTRACTION_SECS: int = 1800
 
 # Artifact & State Paths

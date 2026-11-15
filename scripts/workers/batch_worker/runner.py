@@ -14,7 +14,7 @@ import time
 import traceback
 import urllib.parse
 from pathlib import Path
-from typing import Dict, List, Set, TextIO
+from typing import Dict, List, Protocol, Set, TextIO
 
 from ._facade import facade_attr
 from .models import (
@@ -25,11 +25,12 @@ from .models import (
     DEFAULT_PHASH_DIR,
     DEFAULT_STALL_TIMEOUT_SECS,
     DEFAULT_SUBTITLES_DIR,
+    STALL_MIN_CPU_TICKS_DELTA,
     WATCHDOG_POLL_INTERVAL_SECS,
     VideoTarget,
 )
 from .moviehash_io import build_stream_url, target_moviehash
-from .telemetry import _event_record, get_process_group_cpu_ticks, safe_worker_log_stem
+from .telemetry import _event_record, get_process_group_activity, safe_worker_log_stem
 
 ACTIVE_CHILD_PGIDS: Set[int] = set()
 ACTIVE_CHILD_LOCK = threading.Lock()
@@ -147,7 +148,21 @@ def build_media_add_cmd(
     return cmd
 
 
-def _kill_child(proc: subprocess.Popen[bytes], out_f: TextIO, reason: str) -> None:
+class _WatchableProcess(Protocol):
+    """Minimal process-group contract monitored by `_watch_child` and `_kill_child`."""
+
+    @property
+    def pid(self) -> int: ...
+
+    @property
+    def returncode(self) -> int | None: ...
+
+    def poll(self) -> int | None: ...
+
+    def wait(self, timeout: float | None = None) -> int: ...
+
+
+def _kill_child(proc: _WatchableProcess, out_f: TextIO, reason: str) -> None:
     out_f.write(f"\n❌ [WATCHDOG] Killed process: {reason}.\n")
     out_f.flush()
     with contextlib.suppress(ProcessLookupError):
@@ -155,17 +170,34 @@ def _kill_child(proc: subprocess.Popen[bytes], out_f: TextIO, reason: str) -> No
     proc.wait()
 
 
-def _watch_child(proc: subprocess.Popen[bytes], out_f: TextIO, start_time: float, max_extraction_secs: int) -> str:
-    """Monitors a `dbsrt` child process group for CPU stall (`60s`) or wall timeout."""
-    last_cpu_ticks = 0
+def _watch_child(
+    proc: _WatchableProcess,
+    out_f: TextIO,
+    start_time: float,
+    max_extraction_secs: int,
+    stall_timeout_secs: int = DEFAULT_STALL_TIMEOUT_SECS,
+) -> str:
+    """Monitors a `dbsrt` child process group for real I/O or CPU stall (`180s`) or wall timeout."""
+    get_activity_fn = facade_attr("get_process_group_activity", get_process_group_activity)
+    anchor_ticks = 0
+    anchor_io_bytes = 0
     stall_duration = 0
     while (returncode := proc.poll()) is None:
-        time.sleep(WATCHDOG_POLL_INTERVAL_SECS)
-        cur_cpu_ticks = get_process_group_cpu_ticks(proc.pid)
-        stall_duration = 0 if cur_cpu_ticks != last_cpu_ticks else stall_duration + 1
-        last_cpu_ticks = cur_cpu_ticks
-        if stall_duration >= DEFAULT_STALL_TIMEOUT_SECS:
-            _kill_child(proc, out_f, f"zero progress / activity for {stall_duration}s (Stall Detector)")
+        time.sleep(facade_attr("WATCHDOG_POLL_INTERVAL_SECS", WATCHDOG_POLL_INTERVAL_SECS))
+        cur_ticks, cur_io_bytes = get_activity_fn(proc.pid)
+        if cur_ticks < anchor_ticks:
+            # Subprocess exited inside PGID (e.g. ffprobe -> ffmpeg): re-anchor monotonically
+            anchor_ticks = cur_ticks
+        io_progressed = cur_io_bytes != anchor_io_bytes
+        cpu_progressed = (cur_ticks - anchor_ticks) >= STALL_MIN_CPU_TICKS_DELTA
+        if io_progressed or cpu_progressed:
+            anchor_ticks = cur_ticks
+            anchor_io_bytes = cur_io_bytes
+            stall_duration = 0
+        else:
+            stall_duration += 1
+        if stall_duration >= stall_timeout_secs:
+            _kill_child(proc, out_f, f"zero I/O and CPU progress for {stall_duration}s (Stall Detector)")
             return "STALLED"
         if time.time() - start_time >= max_extraction_secs:
             _kill_child(proc, out_f, f"exceeded max duration of {max_extraction_secs}s")

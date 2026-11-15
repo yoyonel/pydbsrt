@@ -9,7 +9,7 @@ import sys
 import time
 import urllib.parse
 from pathlib import Path
-from typing import Dict, List, Sequence
+from typing import Dict, List, Sequence, Tuple
 
 from ._facade import facade_attr
 from .models import (
@@ -29,6 +29,7 @@ PROC_STAT_MIN_FIELDS_AFTER_COMM: int = 13
 PROC_STAT_PGRP_INDEX: int = 2
 PROC_STAT_UTIME_INDEX: int = 11
 PROC_STAT_STIME_INDEX: int = 12
+PROC_IO_CHAR_KEYS: Tuple[str, ...] = ("rchar:", "wchar:")
 
 
 def safe_worker_log_stem(filename: str, moviehash: str | None = None) -> str:
@@ -79,9 +80,27 @@ def write_batch_queue_state(
         print(f"⚠️ Failed writing {DEFAULT_BATCH_QUEUE_PATH}: {err}", file=sys.stderr)
 
 
-def get_process_group_cpu_ticks(pgid: int, proc_root: Path = Path("/proc")) -> int:
-    """Sums user + system CPU ticks of every live process in process group `pgid`."""
+def _read_process_io_bytes(io_path: Path) -> int:
+    """Sums `rchar + wchar` bytes from a Linux `/proc/<pid>/io` file (0 when unavailable)."""
+    try:
+        content = io_path.read_text(encoding="utf-8")
+    except OSError:
+        return 0
+    total = 0
+    for line in content.splitlines():
+        parts = line.split()
+        if len(parts) == 2 and parts[0] in PROC_IO_CHAR_KEYS:
+            try:
+                total += int(parts[1])
+            except ValueError:
+                continue
+    return total
+
+
+def get_process_group_activity(pgid: int, proc_root: Path = Path("/proc")) -> Tuple[int, int]:
+    """Returns `(cpu_ticks, io_bytes)` summed across every live process in group `pgid`."""
     total_ticks = 0
+    total_io_bytes = 0
     for stat_path in proc_root.glob("[0-9]*/stat"):
         try:
             content = stat_path.read_text(encoding="utf-8")
@@ -91,9 +110,15 @@ def get_process_group_cpu_ticks(pgid: int, proc_root: Path = Path("/proc")) -> i
         try:
             if len(fields) >= PROC_STAT_MIN_FIELDS_AFTER_COMM and int(fields[PROC_STAT_PGRP_INDEX]) == pgid:
                 total_ticks += int(fields[PROC_STAT_UTIME_INDEX]) + int(fields[PROC_STAT_STIME_INDEX])
+                total_io_bytes += _read_process_io_bytes(stat_path.with_name("io"))
         except ValueError:
             continue
-    return total_ticks
+    return total_ticks, total_io_bytes
+
+
+def get_process_group_cpu_ticks(pgid: int, proc_root: Path = Path("/proc")) -> int:
+    """Sums user + system CPU ticks of every live process in process group `pgid`."""
+    return get_process_group_activity(pgid, proc_root)[0]
 
 
 def redact_nas(text: str, host: str, password: str) -> str:
@@ -184,6 +209,7 @@ def abort_batch(remaining_targets: List[VideoTarget], reason: str) -> None:
 __all__: Sequence[str] = [
     "_event_record",
     "abort_batch",
+    "get_process_group_activity",
     "get_process_group_cpu_ticks",
     "next_fast_failure_streak",
     "redact_nas",

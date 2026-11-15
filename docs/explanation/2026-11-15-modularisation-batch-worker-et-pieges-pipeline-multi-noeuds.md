@@ -153,3 +153,25 @@ Deux divergences rendaient la sélection de cibles non déterministe d'un lancem
 
 #### 6.4 Avantages, Inconvénients & Limites résiduelles
 Un même appel `task o2switch:batch:movies` produit désormais **exactement la même liste triée** depuis le PC en Wi-Fi, le PC en 4G, ou le `RPi4`. L'affichage dans `dbsrt top` de la source active (`freebox`/`tvshow`/`movies`) et du calcul d'avancement des pipes audio `aHash` fait l'objet d'un ticket Rust dédié.
+
+---
+
+### 7. Sockets HTTP Half-Open Muets (`-rw_timeout` absent) & Dérive CPU `4 ticks/min` Contournant le Stall Detector (**Issue #97**)
+
+#### 7.1 Problématique & Mécanisme racine
+Deux insuffisances combinées bloquaient silencieusement les workers batch HTTP sur `o2switch` :
+
+1. **Côté FFmpeg/FFprobe (`crates/dbsrt-core/src/ffmpeg_input.rs`)** : `http_reconnect_args` passait `-reconnect 1 -reconnect_on_network_error 1 -reconnect_delay_max 60`, mais aucun `-rw_timeout`. Lorsqu'un flux HTTP `yoyonel.synology.me:80` coupe sans `RST`/`EOF`, le socket TCP reste `ESTABLISHED` (`tx_queue=0, rx_queue=0`) et `ffmpeg` demeure bloqué indéfiniment dans `recv()/poll()` sans déclencher `-reconnect`. Par ailleurs, les appels `ffprobe` (`video.rs`, `container.rs`, `sampler.rs`) et l'extraction de sous-titres (`container.rs`, `media_add.rs`) n'injectaient pas ces options réseau HTTP.
+2. **Côté Watchdog Python (`scripts/workers/batch_worker/runner.py`)** : `_watch_child` réinitialisait `stall_duration = 0` sur simple condition `cur_cpu_ticks != last_cpu_ticks`. Or un `ffmpeg` figé en attente réseau génère malgré tout `4–5 ticks CPU/min` (timers/keepalive), remettant le compteur à zéro toutes les ~15 s.
+
+#### 7.2 Conséquences concrètes
+- **Empiriquement prouvé** le `2026-11-15` en production sur `o2switch` (`4` slots sur `5` figés entre `01:47` et `01:55` depuis `21:12`) : mesure `/proc/<pid>/io` & `/proc/<pid>/stat` sur `60 s` (`23:06:25 -> 23:07:25`) montrant `wchar` strictement immobile à `+0 octet` (`52 430 432`, `27 921 288`, `17 902 208`, `34 386 584`) avec `+4 à +5 ticks CPU`, monopolisant `80 %` de la capacité batch jusqu'au timeout global `DEFAULT_MAX_EXTRACTION_SECS = 7200` (`2 h`).
+- **Hermétiquement & empiriquement vérifié** après correctif : test `test_ffmpeg_rw_timeout_unblocks_silent_tcp_socket` sur binaire `ffmpeg` réel connecté à un `TcpListener` muet (sortie en `< 1 s` avec `-rw_timeout`), et suite unitaire `_watch_child` confirmant le kill `STALLED` malgré la dérive `4 ticks/min`.
+
+#### 7.3 Solution / Invariant opéré
+1. **Rust (`ffmpeg_input.rs` + unifications)** : ajout de `HTTP_RW_TIMEOUT_USECS = "30000000"` (`30 s`) dans `http_reconnect_args` et centralisation via `apply_network_input_options(&mut Command, &Path)` sur l'ensemble des appels `ffmpeg` et `ffprobe` (`video.rs`, `audio.rs`, `container.rs`, `media_add.rs`, `sampler.rs`).
+2. **Python (`models.py`, `telemetry.py`, `runner.py`)** : ajout de `get_process_group_activity(pgid, proc_root)` combinant `cpu_ticks` (`/proc/<pid>/stat`) et `io_bytes = rchar + wchar` (`/proc/<pid>/io`). `_watch_child` n'efface `stall_duration` que si `cur_io_bytes != anchor_io_bytes` **ou** `(cur_ticks - anchor_ticks) >= STALL_MIN_CPU_TICKS_DELTA` (`50` ticks), avec `DEFAULT_STALL_TIMEOUT_SECS = 180` (`3 min` > fenêtre `30 s` `-rw_timeout` + `60 s` `-reconnect_delay_max`) et ré-ancrage si un sous-processus enfant se termine.
+
+#### 7.4 Avantages, Inconvénients & Limites résiduelles
+- **Avantages** : reprise réseau transparente sous `30 s` lors de micro-coupures HTTP, et libération des slots définitivement figés en **`3 min`** au lieu de **`2 h`** (`40×` plus rapide), tout en conservant `7200 s` pour les films UHD 2160p légitimes lents (`I/O` actif continu).
+- **Limites résiduelles** : la surveillance fine des octets `rchar + wchar` repose sur `/proc/<pid>/io` (disponible sur Linux/`o2switch`) ; en cas d'absence de `/proc/<pid>/io`, seul le seuil CPU `STALL_MIN_CPU_TICKS_DELTA` s'applique. Si le serveur NAS/Freebox est lui-même durablement bloqué sur un fichier, FFmpeg réessaiera puis cèdera au bout de `180 s`.

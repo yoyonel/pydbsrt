@@ -29,8 +29,8 @@ pub const NTSC_FILM_FPS: f64 = 23.976;
 
 pub use crate::ffmpeg_input::DEFAULT_FFMPEG_DECODE_THREADS;
 use crate::ffmpeg_input::{
-    apply_ftp_credentials, display_input, ffmpeg_decode_threads, http_reconnect_args,
-    redact_secrets, redact_url_userinfo,
+    apply_network_input_options, display_input, ffmpeg_decode_threads, redact_secrets,
+    redact_url_userinfo,
 };
 use crate::job_progress::{create_job_guard, maybe_update_progress};
 
@@ -327,7 +327,7 @@ fn build_ffprobe_command(path: &Path, ffprobe_bin: &str) -> Command {
         "-of",
         "json",
     ]);
-    apply_ftp_credentials(&mut cmd, path);
+    apply_network_input_options(&mut cmd, path);
     cmd.arg(path);
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
     cmd
@@ -607,7 +607,7 @@ pub fn probe_keyframe_timestamps(
         cmd.args(["-read_intervals", &interval]);
     }
 
-    apply_ftp_credentials(&mut cmd, path);
+    apply_network_input_options(&mut cmd, path);
     cmd.arg(path);
 
     let output = cmd.output().with_context(|| {
@@ -770,8 +770,7 @@ fn build_ffmpeg_extraction_command(
 
     let threads = ffmpeg_decode_threads();
     cmd.args(["-threads", &threads]);
-    apply_ftp_credentials(&mut cmd, path);
-    cmd.args(http_reconnect_args(&path.to_string_lossy()));
+    apply_network_input_options(&mut cmd, path);
     cmd.arg("-i").arg(path);
 
     if options.output_seek_sec > 0.0 {
@@ -1337,6 +1336,21 @@ mod tests {
         let reconnect_pos = args.iter().position(|a| a == "-reconnect").unwrap();
         assert!(reconnect_pos < input_pos);
         assert!(args[..input_pos].contains(&"-reconnect_on_network_error".to_string()));
+        assert!(args[..input_pos].contains(&"-rw_timeout".to_string()));
+    }
+
+    #[test]
+    fn test_ffprobe_command_http_reconnect_precedes_input() {
+        let url = "http://nas.example/Disque_1/movie.mkv";
+        let cmd = build_ffprobe_command(Path::new(url), "ffprobe");
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        let url_pos = args.iter().position(|a| a == url).unwrap();
+        let rw_pos = args.iter().position(|a| a == "-rw_timeout").unwrap();
+        assert!(rw_pos < url_pos);
+        assert!(args[..url_pos].contains(&"-reconnect".to_string()));
     }
 
     #[test]
