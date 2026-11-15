@@ -1,34 +1,69 @@
 //! Telemetry, health, status, metrics and logs endpoints.
+//!
+//! Exposes lightweight liveness (`/health`, `/v1/health`), constant-time server status
+//! (`/v1/status`), atomic request telemetry (`/v1/metrics`), and in-memory log buffer
+//! snapshots (`/v1/logs`).
 
 use crate::dtos::{HealthResponse, MetricsResponse, StatusResponse};
 use crate::state::{AppState, ServerLogsResponse};
 use axum::extract::State;
 use axum::response::IntoResponse;
 use axum::Json;
-use dbsrt_index::{MmapDbphash, MmapLibrary};
 use std::sync::Arc;
 
+/// Canonical service identifier emitted in health and status telemetry payloads.
+const SERVICE_NAME: &str = "dbsrt-server";
+
+/// Nominal operational status label emitted by health, status, and metrics endpoints.
+const STATUS_OK: &str = "ok";
+
+/// Microseconds-to-milliseconds conversion factor (`1 ms = 1,000 µs`).
+const MICROS_PER_MILLISECOND: f64 = 1_000.0;
+
+/// Handles `GET /health` and `GET /v1/health` liveness probes.
+///
+/// # Arguments
+/// None.
+///
+/// # Returns
+/// HTTP `200 OK` JSON [`HealthResponse`] containing `status: "ok"`, Cargo package version,
+/// and canonical service name.
+///
+/// # Panics
+/// Never panics.
+///
+/// # Data Flow & Invariants
+/// Executes in constant time with zero lock acquisitions, zero disk I/O, and zero database probes.
 pub async fn health_handler() -> impl IntoResponse {
     Json(HealthResponse {
-        status: "ok".to_string(),
+        status: STATUS_OK.to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
-        service: "dbsrt-server".to_string(),
+        service: SERVICE_NAME.to_string(),
     })
 }
 
+/// Handles `GET /v1/status` daemon status and index summary probes.
+///
+/// # Arguments
+/// * `State(state)` - Shared [`AppState`] reference holding pre-loaded catalog readers,
+///   delta index, coupling registry, and optional PostgreSQL configuration.
+///
+/// # Returns
+/// HTTP `200 OK` JSON [`StatusResponse`] reporting uptime, configured directories,
+/// distinct indexed visual media count, certified subtitle couplings count, and PostgreSQL
+/// connectivity.
+///
+/// # Panics
+/// Never panics (gracefully defaults to `0` if an internal `RwLock` is poisoned).
+///
+/// # Data Flow & Invariants
+/// - Queries [`AppState::indexed_media_count`] (`base + delta + loose`) in $\mathcal{O}(1)$
+///   in-memory time with **zero** filesystem directory scans or ad-hoc `mmap` allocations.
+/// - Preserves [`AppState::with_options`]'s anti-bloat invariant: when a compiled
+///   `catalog.dbphash` archive is loaded, loose `.phash` files under `phash_dir` are neither
+///   re-mapped on Tokio worker threads nor double-counted on top of `dbphash_reader`.
 pub async fn status_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let dirs = state.effective_phash_dirs(None);
-    let mut indexed_phash_count = MmapLibrary::from_directories(&dirs)
-        .map(|lib| lib.file_count())
-        .unwrap_or(0);
-    let reader_guard = state.dbphash_reader.load();
-    if let Some(ref reader) = *reader_guard {
-        indexed_phash_count += reader.media_entries().len();
-    } else if let Some(ref dbphash) = state.dbphash_path() {
-        if let Ok(reader) = MmapDbphash::open(dbphash) {
-            indexed_phash_count += reader.media_entries().len();
-        }
-    }
+    let indexed_phash_count = state.indexed_media_count();
 
     let certified_couplings_count = state
         .coupling_registry
@@ -42,9 +77,9 @@ pub async fn status_handler(State(state): State<Arc<AppState>>) -> impl IntoResp
         .is_some_and(|cfg| cfg.with_client(|_| Ok(())).is_ok());
 
     Json(StatusResponse {
-        status: "ok".to_string(),
+        status: STATUS_OK.to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
-        service: "dbsrt-server".to_string(),
+        service: SERVICE_NAME.to_string(),
         uptime_seconds: state.start_time.elapsed().as_secs(),
         phash_dir: state.phash_dir.to_string_lossy().to_string(),
         subtitles_dir: state.subtitles_dir.to_string_lossy().to_string(),
@@ -54,6 +89,20 @@ pub async fn status_handler(State(state): State<Arc<AppState>>) -> impl IntoResp
     })
 }
 
+/// Handles `GET /v1/metrics` atomic request and latency counters.
+///
+/// # Arguments
+/// * `State(state)` - Shared [`AppState`] reference holding lock-free atomic [`ServerMetrics`](crate::state::ServerMetrics).
+///
+/// # Returns
+/// HTTP `200 OK` JSON [`MetricsResponse`] with cumulative request counts and mean latency in milliseconds.
+///
+/// # Panics
+/// Never panics (`total == 0` guards against division by zero).
+///
+/// # Data Flow & Invariants
+/// Reads `Relaxed` atomic counters without locks or allocations and converts cumulative microseconds
+/// to milliseconds via [`MICROS_PER_MILLISECOND`].
 pub async fn metrics_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let total = state
         .metrics
@@ -64,13 +113,13 @@ pub async fn metrics_handler(State(state): State<Arc<AppState>>) -> impl IntoRes
         .total_latency_us
         .load(std::sync::atomic::Ordering::Relaxed);
     let avg_latency_ms = if total > 0 {
-        (total_us as f64 / total as f64) / 1000.0
+        (total_us as f64 / total as f64) / MICROS_PER_MILLISECOND
     } else {
         0.0
     };
 
     Json(MetricsResponse {
-        status: "ok".to_string(),
+        status: STATUS_OK.to_string(),
         uptime_seconds: state.start_time.elapsed().as_secs(),
         total_requests: total,
         recognize_requests: state
@@ -97,6 +146,19 @@ pub async fn metrics_handler(State(state): State<Arc<AppState>>) -> impl IntoRes
     })
 }
 
+/// Handles `GET /v1/logs` ring-buffer log retrieval.
+///
+/// # Arguments
+/// * `State(state)` - Shared [`AppState`] reference holding the bounded `log_buffer`.
+///
+/// # Returns
+/// HTTP `200 OK` JSON [`ServerLogsResponse`] containing buffered [`ServerLogEntry`](crate::state::ServerLogEntry) items.
+///
+/// # Panics
+/// Never panics (returns an empty vector if the lock is poisoned).
+///
+/// # Data Flow & Invariants
+/// Clones at most `LOG_BUFFER_CAPACITY` entries under a short-lived shared read lock.
 pub async fn logs_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let logs = state
         .log_buffer
@@ -107,4 +169,76 @@ pub async fn logs_handler(State(state): State<Arc<AppState>>) -> impl IntoRespon
         count: logs.len(),
         logs,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::AppStateInitOptions;
+    use axum::body::to_bytes;
+    use dbsrt_core::{MediaMetadata, MediaType, OpenSubtitlesProvider};
+    use dbsrt_index::DbphashBuilder;
+
+    const TEST_BODY_LIMIT_BYTES: usize = 65_536;
+    const TEST_DURATION_MS: u64 = 120_000;
+    const TEST_FPS: f64 = 24.0;
+    const TEST_HASH_A: u64 = 0x0123_4567_89ab_cdef;
+    const TEST_HASH_B: u64 = 0xfedc_ba98_7654_3210;
+
+    #[tokio::test]
+    async fn status_handler_uses_o1_indexed_count_without_double_counting_loose_files() {
+        let tmp_dir =
+            std::env::temp_dir().join(format!("dbsrt_health_status_test_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+        let phash_dir = tmp_dir.join("loose_phash");
+        let srt_dir = tmp_dir.join("srt");
+        let dbphash_path = tmp_dir.join("catalog.dbphash");
+        std::fs::create_dir_all(&phash_dir).expect("create phash_dir");
+        std::fs::create_dir_all(&srt_dir).expect("create srt_dir");
+
+        dbsrt_core::write_phash_file(
+            &phash_dir.join("Loose.Movie.2024.24.0fps.phash"),
+            &[TEST_HASH_A, TEST_HASH_B],
+        )
+        .expect("write loose phash");
+
+        let mut builder = DbphashBuilder::new();
+        let meta = MediaMetadata {
+            raw_title: "Packed.Movie.2024.mkv".to_string(),
+            clean_title: "Packed Movie".to_string(),
+            media_type: MediaType::Movie,
+            year: Some(2024),
+            season: None,
+            episode: None,
+            resolution: Some("1080p".to_string()),
+            source: None,
+            release_group: None,
+            moviehash: None,
+        };
+        let frames = [(TEST_HASH_A, 0u32), (TEST_HASH_B, 1_000u32)];
+        builder.add_media(&meta, TEST_DURATION_MS, TEST_FPS, &frames, &frames);
+        builder.write_to_file(&dbphash_path).expect("write dbphash");
+
+        let state = Arc::new(AppState::with_options(
+            phash_dir,
+            srt_dir,
+            Arc::new(OpenSubtitlesProvider::new(None)),
+            AppStateInitOptions {
+                dbphash_path: Some(dbphash_path),
+                extra_phash_dirs: Vec::new(),
+                ahash_dir: None,
+                dbahash_path: None,
+            },
+        ));
+
+        let resp = status_handler(State(state.clone())).await.into_response();
+        let bytes = to_bytes(resp.into_body(), TEST_BODY_LIMIT_BYTES)
+            .await
+            .expect("body bytes");
+        let parsed: StatusResponse = serde_json::from_slice(&bytes).expect("valid StatusResponse");
+        assert_eq!(parsed.status, STATUS_OK);
+        assert_eq!(parsed.indexed_phash_count, 1);
+        assert_eq!(parsed.indexed_phash_count, state.indexed_media_count());
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
 }

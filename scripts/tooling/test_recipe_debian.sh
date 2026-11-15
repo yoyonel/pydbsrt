@@ -117,7 +117,10 @@ echo -e "${COLOR_BOLD}=== [Recipe Test] 3. Copying binaries & deployment scripts
 docker exec -u "${TEST_USER_NAME}" "${CONTAINER_NAME}" mkdir -p \
   "/home/${TEST_USER_NAME}/pydbsrt/target/release" \
   "/home/${TEST_USER_NAME}/pydbsrt/vlc-plugin" \
-  "/home/${TEST_USER_NAME}/pydbsrt/scripts/infra/local"
+  "/home/${TEST_USER_NAME}/pydbsrt/scripts/infra/local" \
+  "/home/${TEST_USER_NAME}/pydbsrt/data/__PHASH__" \
+  "/home/${TEST_USER_NAME}/pydbsrt/data/SRT"
+docker exec -u "${TEST_USER_NAME}" "${CONTAINER_NAME}" touch "/home/${TEST_USER_NAME}/pydbsrt/data/catalog.dbphash"
 
 docker cp "${REPO_ROOT}/target/release/dbsrt-server" "${CONTAINER_NAME}:/home/${TEST_USER_NAME}/pydbsrt/target/release/dbsrt-server"
 docker cp "${REPO_ROOT}/vlc-plugin/vlsub_dbsrt.lua" "${CONTAINER_NAME}:/home/${TEST_USER_NAME}/pydbsrt/vlc-plugin/vlsub_dbsrt.lua"
@@ -167,6 +170,10 @@ if [[ "${AGENT_ARGV}" != *"--remote-api ${TEST_REMOTE_API}"* || "${AGENT_ARGV}" 
   echo -e "${COLOR_RED}❌ Agent argv lacks the remote API or exposes the key.${COLOR_RESET}" >&2
   exit 1
 fi
+if [[ "${AGENT_ARGV}" != *"--phash-dir /tmp --subtitles-dir /tmp"* || "${AGENT_ARGV}" == *"catalog.dbphash"* ]]; then
+  echo -e "${COLOR_RED}❌ Agent argv mounted local catalogs instead of frugal zero-catalog relay: ${AGENT_ARGV}${COLOR_RESET}" >&2
+  exit 1
+fi
 # The key must not be inherited by the agent's children (ffmpeg): credential, not env var
 if docker exec "${CONTAINER_NAME}" sh -c "tr '\\0' '\\n' </proc/${AGENT_PID}/environ" | grep -q "${TEST_API_KEY}"; then
   echo -e "${COLOR_RED}❌ Agent environment exposes the key.${COLOR_RESET}" >&2
@@ -193,6 +200,24 @@ if [[ "${REBOOT_STATE}" != "active" ]]; then
   exit 1
 fi
 echo -e "${COLOR_GREEN}✓ Service survived simulated host reboot and resumed automatically.${COLOR_RESET}"
+
+echo -e "${COLOR_BOLD}=== [Recipe Test] 6b. Verifying frugal on-demand mode (0 MiB idle) ===${COLOR_RESET}"
+docker exec \
+  -u "${TEST_USER_NAME}" \
+  -w "/home/${TEST_USER_NAME}/pydbsrt" \
+  -e "XDG_RUNTIME_DIR=/run/user/${TEST_USER_ID}" \
+  -e "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/${TEST_USER_ID}/bus" \
+  "${CONTAINER_NAME}" \
+  ./scripts/infra/local/install_debian.sh on-demand
+if docker exec -u "${TEST_USER_NAME}" -e "XDG_RUNTIME_DIR=/run/user/${TEST_USER_ID}" "${CONTAINER_NAME}" systemctl --user is-active dbsrt-agent.service >/dev/null 2>&1; then
+  echo -e "${COLOR_RED}❌ Service remained active in on-demand mode!${COLOR_RESET}" >&2
+  exit 1
+fi
+if docker exec -u "${TEST_USER_NAME}" -e "XDG_RUNTIME_DIR=/run/user/${TEST_USER_ID}" "${CONTAINER_NAME}" systemctl --user is-enabled dbsrt-agent.service >/dev/null 2>&1; then
+  echo -e "${COLOR_RED}❌ Service remained enabled at boot in on-demand mode!${COLOR_RESET}" >&2
+  exit 1
+fi
+echo -e "${COLOR_GREEN}✓ On-demand mode verified (inactive & disabled at boot -> 0 MiB idle RAM).${COLOR_RESET}"
 
 echo -e "${COLOR_BOLD}=== [Recipe Test] 7. Testing clean uninstallation ===${COLOR_RESET}"
 docker exec \

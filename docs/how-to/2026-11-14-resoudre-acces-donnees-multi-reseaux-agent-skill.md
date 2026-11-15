@@ -142,7 +142,7 @@ task data:seed-worktree
 task data:status
 ```
 
-Le rapport distingue immédiatement `packed_catalog` (`UP_TO_DATE` ou `STALE_LOCAL` avec `delta_bytes`, `delta_medias` et `sync_cmd` prête à lancer) et les corpus incrémentaux (`phash_corpus` : ex. `local: 4580`, `o2switch: 4974`, `rpi4: 5400` ; `ahash_corpus` : `local: 2503`, `o2switch: 2548`, `rpi4: 0`).
+Le rapport distingue immédiatement `packed_catalog` (`catalog.dbphash`), `packed_ahash_catalog` (`catalog.dbahash` v1 — `UP_TO_DATE` ou `STALE_LOCAL` avec `delta_bytes`, `delta_medias` et `sync_cmd` prête à lancer) et les corpus incrémentaux (`phash_corpus` : ex. `local: 4580`, `o2switch: 4974`, `rpi4: 5400` ; `ahash_corpus` : `local: 2503`, `o2switch: 2548`, `rpi4: 0`).
 
 ---
 

@@ -16,6 +16,8 @@ from scripts.data_access.constants import (
     CACHE_MAX_STALE_SECONDS,
     CACHE_SCHEMA_VERSION,
     CORP_VPN_HIJACK_CIDR,
+    DBAHASH_HEADER_PREFIX_FORMAT,
+    DBAHASH_MAGIC_PREFIX,
     DBPHASH_HEADER_PREFIX_FORMAT,
     DBPHASH_MAGIC_PREFIX,
     EXIT_OK,
@@ -26,10 +28,12 @@ from scripts.data_access.constants import (
 )
 from scripts.data_access.prober import (
     _atomic_write_cache,
+    _evaluate_ahash_catalog_freshness,
     _evaluate_catalog_freshness,
     _evaluate_corpus_counts,
     _fetch_o2switch_https_snapshot,
     _parse_remote_snapshot,
+    _read_dbahash_media_count,
     _read_dbphash_media_count,
     _try_load_valid_cache,
     probe_http_json_gateway,
@@ -162,10 +166,17 @@ def test_dbphash_header_and_stale_freshness_evaluation(tmp_path: Path) -> None:
     cat_file.write_bytes(header + b"\x00" * 112)
     assert _read_dbphash_media_count(cat_file) == 3089
 
+    acat_file = tmp_path / "catalog.dbahash"
+    aheader = struct.pack(DBAHASH_HEADER_PREFIX_FORMAT, DBAHASH_MAGIC_PREFIX, 1, 1, 32, 2490)
+    acat_file.write_bytes(aheader + b"\x00" * 108)
+    assert _read_dbahash_media_count(acat_file) == 2490
+
     snap = _parse_remote_snapshot(
         "o2switch",
-        "cat=395529096:1794618913:4974\nphash=4974:2504\nahash=2548:2548\ncouplings=41263950:1794262595\n",
+        "cat=395529096:1794618913:4974\nacat=5503776992:1794689460:2490\nphash=4974:2504\nahash=2548:2548\ncouplings=41263950:1794262595\n",
     )
+    assert snap["catalog_dbahash"]["media_count"] == 2490
+    assert snap["catalog_dbahash"]["size_bytes"] == 5503776992
     nodes = {
         "local": {
             "catalog_dbphash": {
@@ -175,10 +186,18 @@ def test_dbphash_header_and_stale_freshness_evaluation(tmp_path: Path) -> None:
                 "mtime_epoch": 1794432635,
                 "media_count": 3089,
             },
+            "catalog_dbahash": {
+                "exists": True,
+                "path": str(acat_file),
+                "size_bytes": 5503776992,
+                "mtime_epoch": 1794689460,
+                "media_count": 2490,
+            },
             "ahash_files": {"count": 538},
         },
         "rpi4": {
             "catalog_dbphash": dict(snap["catalog_dbphash"], path="rpi4:~/dbsrt/data/catalog.dbphash"),
+            "catalog_dbahash": {"exists": False, "size_bytes": 0, "mtime_epoch": 0, "media_count": 0},
             "ahash_files": {"count": 0},
         },
         "o2switch": snap,
@@ -187,6 +206,11 @@ def test_dbphash_header_and_stale_freshness_evaluation(tmp_path: Path) -> None:
     assert cat_eval["status"] == "STALE_LOCAL"
     assert cat_eval["delta_medias"] == 1885
     assert "rpi4:~/dbsrt/data/catalog.dbphash" in str(cat_eval["sync_cmd"])
+
+    acat_eval = _evaluate_ahash_catalog_freshness(nodes, {"ssh_o2switch": {"accessible": True}})
+    assert acat_eval["status"] == "UP_TO_DATE"
+    assert acat_eval["authoritative_node"] == "o2switch"
+    assert acat_eval["delta_medias"] == 0
 
     ahash_eval = _evaluate_corpus_counts(nodes, "ahash_files")
     assert ahash_eval["status"] == "PARTIAL_LOCAL"
@@ -262,16 +286,19 @@ def test_resolve_freebox_three_disks_and_snippet_couplings(tmp_path: Path) -> No
 def test_seed_worktree_and_cache_invalidation(tmp_path: Path) -> None:
     """Tests worktree dataset symlinking and /proc/net/route cache invalidation."""
     ws = _make_fake_workspace(tmp_path, is_worktree=True)
+    (ws.common_repo / "data" / "catalog.dbahash").write_bytes(b"DBAHASH\x00")
     (ws.common_repo / "data" / "SRT" / "couplings.json").write_text("{}", encoding="utf-8")
 
     preview = seed_worktree_datasets(ws, dry_run=True)
     assert preview["status"] == "dry_run"
     assert "data/snippets" in preview["created"]
+    assert "data/catalog.dbahash" in preview["created"]
     assert not (ws.active_repo / "data" / "snippets").exists()
 
     applied = seed_worktree_datasets(ws, dry_run=False)
     assert applied["status"] == "seeded"
     assert (ws.active_repo / "data" / "snippets").is_symlink()
+    assert (ws.active_repo / "data" / "catalog.dbahash").is_symlink()
     assert (ws.active_repo / "data" / "SRT" / "couplings.json").is_symlink()
 
     cache_file = tmp_path / "cache.json"
@@ -336,8 +363,10 @@ def test_batch_query_token_boundary_and_deterministic_evaluator(tmp_path: Path) 
 
 
 def test_cli_simulated_profile_and_skill_validator() -> None:
-    """Verifies CLI --simulate-profile execution and workspace skill validation gate."""
+    """Verifies CLI --simulate-profile execution, <8.5KB query ceiling, and workspace skill validation gate."""
     assert normalize_family_id("catalog.dbphash") == "packed-catalog"
+    assert normalize_family_id("catalog.dbahash") == "packed-ahash-catalog"
+    assert normalize_family_id("dbahash") == "packed-ahash-catalog"
     assert normalize_release_stem("Andor.S01E03.1080p.WEB.h264-KOGi_mid15s.mp4") == "andor.s01e03.1080p.web.h264-kogi"
 
     buf = io.StringIO()
@@ -347,6 +376,15 @@ def test_cli_simulated_profile_and_skill_validator() -> None:
     parsed = json.loads(buf.getvalue())
     assert parsed["network"]["profile"] == "work_vpn"
     assert parsed["network"]["cifs_safe_to_stat"] is False
+    assert "packed_ahash_catalog" in parsed["freshness"]
+
+    q_buf = io.StringIO()
+    with patch("sys.stdout", q_buf):
+        q_rc = cli_main(["query", "--simulate-profile", "work_vpn", "freebox", "dbahash", "catalog"])
+    assert q_rc == EXIT_OK
+    raw_q_out = q_buf.getvalue()
+    assert len(raw_q_out.encode("utf-8")) < 8500
+    assert max(len(line) for line in raw_q_out.splitlines()) < 5000
 
     repo_root = Path(__file__).resolve().parents[2]
     skill_dir = repo_root / ".agents" / "skills" / "pydbsrt-data-access"

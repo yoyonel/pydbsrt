@@ -84,7 +84,8 @@ Cette page dresse le dictionnaire exhaustif de toutes les cibles d'orchestration
 | :--- | :--- |
 | `task vlc:install-plugin` | Installe les scripts d'extension Lua dans le profil local VLC. |
 | `task vlc:open` | Ouvre VLC avec les paramètres de journalisation et de debug activés. |
-| `task client:linux:install` | Installe l'agent client `dbsrt` et configure le service systemd utilisateur. |
+| `task client:linux:install` | Installe l'agent client `dbsrt` en mode relais frugal zéro-catalogue (`--on-demand` optionnel pour `0 MiB` au repos, `--with-local-catalog` sur demande explicite) et configure l'unité systemd utilisateur. |
+| `task client:linux:on-demand` | Arrête `dbsrt-agent.service` et désactive son lancement automatique au démarrage (`0 MiB` RAM au repos jusqu'à `task client:linux:start`). |
 | `task client:linux:status` | Affiche le statut du service systemd `dbsrt-agent`. |
 | `task client:linux:logs` | Affiche les logs en direct du service client Linux via `journalctl`. |
 | `task target:status` | Inspecte le mode actif du démon pour VLC (Local Zero-DB, Cloud o2switch ou RPi4). |

@@ -36,7 +36,7 @@
       3. Actionable proposals for next steps calibrated for the session (1 hour, half-day, or full day roadmap).
     - Explicitly confirm or switch to the target branch/issue before touching any code.
   - **Concurrent Session Isolation**: If an AGY session is already running on the repository, developers/agents MUST spawn an isolated Git worktree for the specific branch/task.
-  - **Mandatory Git Worktree Data Seeding**: Whenever branching into or running from an isolated Git worktree, MUST systematically repatriate/symlink all unversioned binary datasets and test fixtures from the parent repository (`data/catalog.dbphash`, `data/snippets/`, `data/__PHASH__/`, `data/reports/batch_*.jsonl`, `data/SRT/couplings.json`) BEFORE starting dev daemons or running benchmarks, preventing zero-data illusions and cold start failures.
+  - **Mandatory Git Worktree Data Seeding**: Whenever branching into or running from an isolated Git worktree, MUST systematically repatriate/symlink all unversioned binary datasets and test fixtures from the parent repository (`data/catalog.dbphash`, `data/catalog.dbahash`, `data/snippets/`, `data/snippets_ahash/`, `data/__PHASH__/`, `data/__AHASH__/`, `data/reports/`, `data/SRT/couplings.json` via `task data:seed-worktree`) BEFORE starting dev daemons or running benchmarks, preventing zero-data illusions and cold start failures.
   - **Worktree Post-Merge Cleanup**: Worktrees must be cleanly removed (`git worktree remove`) immediately upon PR merge.
 ## Continuous Documentation, Diátaxis & README Synchronization
 - **Mandatory Diátaxis 4-Quadrant Architecture**: All documentation in `docs/` MUST strictly comply with the Diátaxis framework (https://diataxis.fr/):

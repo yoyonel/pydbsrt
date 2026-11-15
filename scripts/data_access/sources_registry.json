@@ -320,6 +320,38 @@
       ]
     },
     {
+      "id": "packed-ahash-catalog",
+      "category": "internal_artifact",
+      "name": "Zero-DB Packed Acoustic Archive (catalog.dbahash v1)",
+      "desync_tier": "evolving_corpus",
+      "description": "Memory-mapped DBAHASH v1 acoustic archive (MIH-32 Coarse-to-Fine K=32 + cold dense hashes) compiled via task ahash:pack and mirrored to o2switch.",
+      "local_rel_path": "data/catalog.dbahash",
+      "remote_rel_path": "dbsrt/data/catalog.dbahash",
+      "channels": [
+        {
+          "id": "workstation_fs",
+          "protocol": "local_fs",
+          "target": "{effective_data_dir}/catalog.dbahash",
+          "probe_key": "local_fs",
+          "profiles": ["home_lan", "nomad_wan", "work_vpn"]
+        },
+        {
+          "id": "ssh_o2switch",
+          "protocol": "ssh",
+          "target": "o2switch:~/dbsrt/data/catalog.dbahash",
+          "probe_key": "ssh_o2switch",
+          "profiles": ["home_lan", "work_vpn"]
+        },
+        {
+          "id": "https_o2switch_search",
+          "protocol": "https_api",
+          "target": "{o2switch_url}/v1/search/ahash",
+          "probe_key": "https_o2switch",
+          "profiles": ["nomad_wan", "work_vpn", "home_lan"]
+        }
+      ]
+    },
+    {
       "id": "certified-couplings",
       "category": "internal_artifact",
       "name": "Certified Ground-Truth Subtitle Couplings (SRT/couplings.json)",

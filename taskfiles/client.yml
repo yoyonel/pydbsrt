@@ -22,6 +22,11 @@ tasks:
     cmds:
       - ./scripts/infra/local/install_debian.sh stop
 
+  client:linux:on-demand:
+    desc: Stop dbsrt-agent and disable auto-start at boot (0 MiB idle RAM until started)
+    cmds:
+      - ./scripts/infra/local/install_debian.sh on-demand
+
   client:linux:restart:
     desc: Restart dbsrt-agent user systemd service
     cmds:

@@ -63,6 +63,8 @@ FAMILY_ALIASES: dict[str, str] = {
     "catalog": "packed-catalog",
     "catalog.dbphash": "packed-catalog",
     "dbphash": "packed-catalog",
+    "catalog.dbahash": "packed-ahash-catalog",
+    "dbahash": "packed-ahash-catalog",
     "couplings": "certified-couplings",
     "couplings.json": "certified-couplings",
     "srt": "certified-couplings",
@@ -170,6 +172,12 @@ def _collect_family_warnings(family_id: str, status_payload: dict[str, Any]) -> 
         warnings.append(
             f"STALE_LOCAL: local catalog.dbphash lags {cat_f['authoritative_node']} by "
             f"{cat_f.get('delta_medias', 0)} medias ({cat_f.get('delta_bytes', 0)} bytes)."
+        )
+    ah_cat_f = fresh.get("packed_ahash_catalog", {})
+    if family_id == "packed-ahash-catalog" and ah_cat_f.get("status") not in (None, "UP_TO_DATE"):
+        warnings.append(
+            f"{ah_cat_f['status']}: local catalog.dbahash vs {ah_cat_f.get('authoritative_node', 'local')} "
+            f"(delta_medias={ah_cat_f.get('delta_medias', 0)}, delta_bytes={ah_cat_f.get('delta_bytes', 0)})."
         )
     if family_id == "ahash-files" and fresh["ahash_corpus"]["status"] != "UP_TO_DATE":
         ah_f = fresh["ahash_corpus"]
@@ -380,7 +388,7 @@ def resolve_data_family(
         lan_gw = probed.get("lan_http_freebox", {})
         if lan_gw.get("mounted_shares"):
             result["gateway_mounted_shares_live"] = lan_gw["mounted_shares"]
-    if canonical in ("packed-catalog", "phash-files", "ahash-files", "certified-couplings"):
+    if canonical in ("packed-catalog", "packed-ahash-catalog", "phash-files", "ahash-files", "certified-couplings"):
         result["cross_node_freshness"] = status_payload["freshness"]
 
     query_res = _run_family_query(ws, status_payload, canonical, query)
@@ -576,7 +584,7 @@ def _select_rsync_source_node(canonical: str, status_payload: dict[str, Any]) ->
     rpi_ok = bool(chans.get("ssh_rpi4", {}).get("accessible"))
     o2_ok = bool(chans.get("ssh_o2switch", {}).get("accessible"))
 
-    if canonical == "ahash-files":
+    if canonical in ("ahash-files", "packed-ahash-catalog"):
         return "o2switch" if o2_ok else None
     if canonical in ("packed-catalog", "phash-files", "certified-couplings", "reports-and-inventories"):
         if rpi_ok:
