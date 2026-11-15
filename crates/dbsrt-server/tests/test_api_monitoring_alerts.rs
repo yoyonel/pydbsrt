@@ -208,3 +208,41 @@ fn test_collect_alerts_log_dedup_blacklist_faultwatch_and_staleness() {
         .iter()
         .any(|a| a.id == "nas_ftp_index_stale"));
 }
+
+#[test]
+fn test_batch_worker_multisession_undated_scoping_debug_ignore_and_faultwatch_jsonl_only() {
+    let root = TempDir::new().unwrap();
+    let logs_dir = root.path().join("logs");
+    let fw_dir = logs_dir.join("faultwatch");
+    std::fs::create_dir_all(&fw_dir).unwrap();
+
+    // Multi-session append-only batch_worker.log: historical session had undated ❌ + [DEBUG],
+    // latest session after `=== [1/4]` is clean except for a benign `[DEBUG] dbsrt ERROR` trace.
+    let worker_log = "\
+=== [1/4] Scanning local catalogs and couplings ===\n\
+❌ [WATCHDOG] historical timeout in previous batch run\n\
+❌ [35 FAILED] old media target\n\
+=== [1/4] Scanning local catalogs and couplings ===\n\
+--> [DEBUG] dbsrt ERROR (returncode 1): benign diagnostic probe\n\
+✅ [1/466] Freebox episode indexed\n";
+    std::fs::write(logs_dir.join("batch_worker.log"), worker_log).unwrap();
+
+    // Plain-text watch.log inside logs/faultwatch/ must NOT be counted as LVE JSONL faults
+    std::fs::write(
+        fw_dir.join("watch.log"),
+        "plain text daemon startup banner line 1\nline 2\n",
+    )
+    .unwrap();
+
+    let now_ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let resp = collect_monitoring_alerts(&MonitoringAlertsConfig {
+        root_dir: Some(root.path().to_path_buf()),
+        now_unix_secs: now_ts,
+    });
+    assert_eq!(resp.status, AlertHealthStatus::Ok);
+    assert_eq!(resp.active_alerts_count, 0);
+    assert_eq!(resp.metrics.lve_fault_entries_24h, 0);
+}

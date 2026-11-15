@@ -50,6 +50,20 @@ fn evaluate_single_script(
     let o2_sha = o2switch.script_hashes.get(spec.canonical_name).cloned();
 
     let Some(ref expected) = local_sha else {
+        let is_standalone_optional = !rpi4.reachable
+            && !o2switch.reachable
+            && !local.script_hashes.is_empty()
+            && !(spec.required_on_rpi4 && spec.required_on_o2switch);
+        if is_standalone_optional {
+            return ScriptParityEntry {
+                script: spec.canonical_name.to_string(),
+                local_sha256: None,
+                rpi4_sha256: None,
+                o2switch_sha256: None,
+                status: ParityStatus::LocalOnly,
+                detail: Some("optional script not deployed on standalone tier".to_string()),
+            };
+        }
         return ScriptParityEntry {
             script: spec.canonical_name.to_string(),
             local_sha256: None,

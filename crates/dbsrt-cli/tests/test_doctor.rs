@@ -325,7 +325,13 @@ fn test_probe_directory_large_tails_faultwatch_and_unreachable_ssh() {
     .unwrap();
     std::fs::write(reports_dir.join("nas_ftp_index.json"), "{}").unwrap();
 
-    let snap = probe_directory(dir.path(), 1_793_352_000);
+    // Note:probe_directory filters faultwatch `.jsonl` by real filesystem mtime <= 48h, so pass current epoch
+    let now_real = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    std::fs::write(fw_dir.join("watch.log"), "plain text non-jsonl log\n").unwrap();
+    let snap = probe_directory(dir.path(), now_real);
     assert_eq!(snap.script_hashes.len(), TRACKED_SCRIPTS.len());
     assert!(snap
         .artifact_mtimes
@@ -336,6 +342,11 @@ fn test_probe_directory_large_tails_faultwatch_and_unreachable_ssh() {
         .unwrap_or("")
         .contains("TORN_HEADER_WITHOUT_NEWLINE_AT_START"));
     assert!(snap.faultwatch_tail.is_some());
+    assert!(!snap
+        .faultwatch_tail
+        .as_deref()
+        .unwrap_or("")
+        .contains("plain text non-jsonl"));
     assert_eq!(snap.batch_events_tails.len(), 1);
 
     // Unreachable SSH target degrades gracefully to Warning without panicking
@@ -474,7 +485,7 @@ fn test_analyzer_logs_windows_faultwatch_streaks_and_timestamps() {
     let rep = analyze_node_snapshot(NodeRole::O2switch, "o2".to_string(), 15, snap);
     assert_eq!(rep.status, DoctorSeverity::Critical);
     assert_eq!(rep.blacklisted_stems, 1);
-    assert_eq!(rep.lve_faults_24h, 3);
+    assert_eq!(rep.lve_faults_24h, 2);
     let srv_comp = rep
         .components
         .iter()
@@ -488,4 +499,32 @@ fn test_analyzer_logs_windows_faultwatch_streaks_and_timestamps() {
         .top_signatures
         .iter()
         .any(|s| s.summary.ends_with('…')));
+}
+
+#[test]
+fn test_doctor_multisession_worker_log_and_standalone_o2switch_local_only() {
+    let o2_dir = TempDir::new().unwrap();
+    // Seed only worker scripts (include_rpi_only = false), mimicking ~/dbsrt on o2switch
+    seed_tracked_scripts(o2_dir.path(), false, false);
+    let logs_dir = o2_dir.path().join("logs");
+    std::fs::create_dir_all(&logs_dir).unwrap();
+    std::fs::write(
+        logs_dir.join("batch_worker.log"),
+        "=== [1/4] Scanning local catalogs ===\n\
+         ❌ historical undated failure\n\
+         === [1/4] Scanning local catalogs ===\n\
+         --> [DEBUG] dbsrt ERROR (returncode 1): debug trace\n\
+         ✅ nominal progress\n",
+    )
+    .unwrap();
+
+    let rep = evaluate_cluster_doctor(&DoctorArgs {
+        json: true,
+        local_only: true,
+        local_root: Some(o2_dir.path().to_path_buf()),
+        ..DoctorArgs::default()
+    });
+    assert_eq!(rep.exit_code, DOCTOR_EXIT_OK);
+    assert_eq!(rep.sha256_drift_count, 0);
+    assert_eq!(rep.status, DoctorSeverity::Ok);
 }

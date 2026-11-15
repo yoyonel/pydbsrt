@@ -69,6 +69,9 @@ const DOY_MONTH_BIAS: u32 = 2;
 /// Linear day-of-year denominator (`5`).
 const DOY_MONTH_DIVISOR: u32 = 5;
 
+/// Banner prefix marking the start of a new `batch_worker` execution session in `batch_worker.log`.
+const BATCH_SESSION_START_MARKER: &str = "=== [1/";
+
 /// Reads at most `max_bytes` from the end of `path`, discarding any truncated leading line.
 ///
 /// # Arguments
@@ -239,11 +242,11 @@ fn skip_timestamp_suffix(after_sec: &str, bracketed: bool) -> &str {
 /// Never panics.
 ///
 /// # Data Flow & Invariants
-/// Flags `❌`, non-graceful `🛑`, `FATAL`, and standalone `ERROR` tokens while ignoring benign
-/// zero-error status counters (`errors=0`, `error: null`) and graceful `SIGTERM`/`SIGINT` stops
-/// (`Received signal ... Stopping`).
+/// Flags `❌`, non-graceful `🛑`, `FATAL`, and standalone `ERROR` tokens while ignoring `[DEBUG]`
+/// diagnostic traces, benign zero-error status counters (`errors=0`, `error: null`), and graceful
+/// `SIGTERM`/`SIGINT` stops (`Received signal ... Stopping`).
 pub fn classify_error_line(body: &str) -> (bool, bool) {
-    if body.contains("Received signal") && body.contains("Stopping") {
+    if body.contains("[DEBUG]") || (body.contains("Received signal") && body.contains("Stopping")) {
         return (false, false);
     }
     if body.contains("🛑") || has_ascii_word(body, "FATAL") {
@@ -358,27 +361,37 @@ pub struct LogScanOutcome {
 /// Never panics.
 ///
 /// # Data Flow & Invariants
-/// Un-timestamped continuation lines inherit the most recent timestamp seen earlier in the tail.
-/// Signatures whose latest timestamp is older than `72h` are treated as historical and excluded
-/// from active alerts.
+/// Un-timestamped continuation lines inherit the most recent timestamp seen earlier in the same
+/// batch session. For `batch_worker` append-only logs spanning multiple runs (`=== [1/...`),
+/// undated lines from completed historical sessions prior to the latest session banner are ignored,
+/// while timestamped lines are aged against `1h`/`24h`/`72h` windows.
 pub fn scan_log_file_alerts(path: &Path, component: &str, now_unix_secs: u64) -> LogScanOutcome {
     let Some(tail) = read_file_tail_utf8(path, ALERTS_LOG_TAIL_BYTES) else {
         return LogScanOutcome::default();
     };
+    let latest_session = count_batch_sessions(component, &tail);
+    let mut current_session = 0usize;
     let mut buckets: BTreeMap<String, SignatureBucket> = BTreeMap::new();
     let mut totals = AlertWindowCounts::default();
     let mut inherited_ts: Option<u64> = None;
 
     for raw_line in tail.lines() {
+        if latest_session > 0 && raw_line.contains(BATCH_SESSION_START_MARKER) {
+            current_session += 1;
+            inherited_ts = None;
+        }
         let (parsed_ts, body) = split_leading_timestamp(raw_line);
         if let Some(ts) = parsed_ts {
             inherited_ts = Some(ts);
+        }
+        let effective_ts = parsed_ts.or(inherited_ts);
+        if effective_ts.is_none() && current_session < latest_session {
+            continue;
         }
         let (is_err, is_fatal) = classify_error_line(body);
         if !is_err || body.is_empty() {
             continue;
         }
-        let effective_ts = parsed_ts.or(inherited_ts);
         record_signature_hit(
             &mut buckets,
             &mut totals,
@@ -389,6 +402,16 @@ pub fn scan_log_file_alerts(path: &Path, component: &str, now_unix_secs: u64) ->
 
     let alerts = build_alerts_from_buckets(buckets, component);
     LogScanOutcome { alerts, totals }
+}
+
+/// Counts `BATCH_SESSION_START_MARKER` banners when scanning `batch_worker` multi-session logs.
+fn count_batch_sessions(component: &str, tail: &str) -> usize {
+    if component != "batch_worker" {
+        return 0;
+    }
+    tail.lines()
+        .filter(|line| line.contains(BATCH_SESSION_START_MARKER))
+        .count()
 }
 
 /// Updates the signature bucket map and aggregate window counters for a single matched error line.
@@ -461,7 +484,7 @@ fn build_alerts_from_buckets(
         .take(MAX_DEDUP_LOG_ALERTS_PER_SOURCE)
         .enumerate()
         .map(|(idx, b)| {
-            let severity = if b.is_fatal || !b.has_timestamp || b.windows.h1 > 0 {
+            let severity = if b.is_fatal || b.windows.h1 > 0 {
                 AlertSeverity::Critical
             } else {
                 AlertSeverity::Warning

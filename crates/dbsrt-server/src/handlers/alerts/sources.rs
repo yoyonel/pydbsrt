@@ -358,7 +358,7 @@ pub fn check_faultwatch_alert(
     let mut paths: Vec<_> = entries
         .flatten()
         .map(|e| e.path())
-        .filter(|p| p.is_file())
+        .filter(|p| p.is_file() && p.extension().and_then(|e| e.to_str()) == Some("jsonl"))
         .collect();
     paths.sort();
 
@@ -376,7 +376,7 @@ pub fn check_faultwatch_alert(
         };
         scan_faultwatch_tail(
             &tail,
-            (now_unix_secs, mtime),
+            now_unix_secs,
             (&mut count_24h, &mut hard_faults, &mut last_seen),
         );
     }
@@ -403,13 +403,12 @@ pub fn check_faultwatch_alert(
     (count_24h, Some(alert))
 }
 
-/// Evaluates lines from a single `faultwatch` file and updates 24h counters.
+/// Evaluates lines from a single `faultwatch` JSONL file and updates 24h counters.
 fn scan_faultwatch_tail(
     tail: &str,
-    clocks: (u64, Option<u64>),
+    now_unix_secs: u64,
     acc: (&mut usize, &mut bool, &mut Option<String>),
 ) {
-    let (now_unix_secs, file_mtime) = clocks;
     let (count_24h, hard_faults, last_seen) = acc;
 
     for line in tail.lines() {
@@ -417,8 +416,7 @@ fn scan_faultwatch_tail(
         if trimmed.is_empty() {
             continue;
         }
-        let Some((is_hard, ts_iso)) = classify_faultwatch_line(trimmed, now_unix_secs, file_mtime)
-        else {
+        let Some((is_hard, ts_iso)) = classify_faultwatch_line(trimmed, now_unix_secs) else {
             continue;
         };
         *count_24h += 1;
@@ -429,18 +427,10 @@ fn scan_faultwatch_tail(
     }
 }
 
-/// Classifies one trimmed `faultwatch` line (JSON or plain text) into `Some((is_hard_fault, last_seen_iso))`.
-fn classify_faultwatch_line(
-    trimmed: &str,
-    now_unix_secs: u64,
-    file_mtime: Option<u64>,
-) -> Option<(bool, Option<String>)> {
-    if let Ok(val) = serde_json::from_str::<serde_json::Value>(trimmed) {
-        return evaluate_faultwatch_json(&val, now_unix_secs);
-    }
-    let recent =
-        file_mtime.is_none_or(|mt| now_unix_secs.saturating_sub(mt) <= ALERT_WINDOW_24H_SECS);
-    recent.then(|| (false, file_mtime.map(format_unix_to_iso)))
+/// Classifies one trimmed `faultwatch` JSONL record into `Some((is_hard_fault, last_seen_iso))`.
+fn classify_faultwatch_line(trimmed: &str, now_unix_secs: u64) -> Option<(bool, Option<String>)> {
+    let val = serde_json::from_str::<serde_json::Value>(trimmed).ok()?;
+    evaluate_faultwatch_json(&val, now_unix_secs)
 }
 
 /// Checks whether a single `faultwatch` JSON record represents a recent (`<= 24h`) LVE fault/throttle.

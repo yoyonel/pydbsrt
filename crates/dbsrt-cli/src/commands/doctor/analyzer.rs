@@ -72,6 +72,9 @@ const DOY_DIV: u32 = 5;
 /// Minute-level ISO prefix length before trailing `'Z'` (`YYYY-MM-DDTHH:MM`).
 const MINUTE_ISO_STEM_LEN: usize = 16;
 
+/// Banner prefix marking the start of a new `batch_worker` execution session in `batch_worker.log`.
+const BATCH_SESSION_START_MARKER: &str = "=== [1/";
+
 /// Transport-agnostic raw files, hashes, mtimes, and log tails collected from one node.
 ///
 /// # Data Flow & Invariants
@@ -432,10 +435,10 @@ fn evaluate_faultwatch(
     count
 }
 
-/// Checks whether a single `faultwatch` line represents an LVE saturation or fault within 24h.
+/// Checks whether a single `faultwatch` JSONL line represents an LVE saturation or fault within 24h.
 fn is_active_faultwatch_line(line: &str, now_unix_secs: u64) -> Option<bool> {
     let Ok(val) = serde_json::from_str::<serde_json::Value>(line) else {
-        return Some(false);
+        return None;
     };
     if let Some(m_str) = val
         .get("minute")
@@ -497,14 +500,24 @@ fn analyze_component_log(
             ..Default::default()
         };
     };
+    let latest_session = count_batch_sessions(component, tail);
+    let mut current_session = 0usize;
     let mut totals = WindowErrorCounts::default();
     let mut buckets: BTreeMap<String, LogBucket> = BTreeMap::new();
     let mut last_ts: Option<u64> = None;
 
     for line in tail.lines() {
+        if latest_session > 0 && line.contains(BATCH_SESSION_START_MARKER) {
+            current_session += 1;
+            last_ts = None;
+        }
         let (ts_opt, body) = parse_leading_timestamp(line);
         if ts_opt.is_some() {
             last_ts = ts_opt;
+        }
+        let eff_ts = ts_opt.or(last_ts);
+        if eff_ts.is_none() && current_session < latest_session {
+            continue;
         }
         let (is_err, is_fatal) = is_error_line(body);
         if !is_err || body.is_empty() {
@@ -515,7 +528,7 @@ fn analyze_component_log(
             &mut buckets,
             &mut totals,
             (body, is_fatal),
-            (ts_opt.or(last_ts), now_unix_secs),
+            (eff_ts, now_unix_secs),
         );
     }
 
@@ -525,6 +538,16 @@ fn analyze_component_log(
         counts: totals,
         top_signatures,
     }
+}
+
+/// Counts `BATCH_SESSION_START_MARKER` banners when scanning `batch_worker` multi-session logs.
+fn count_batch_sessions(component: &str, tail: &str) -> usize {
+    if component != "batch_worker" {
+        return 0;
+    }
+    tail.lines()
+        .filter(|line| line.contains(BATCH_SESSION_START_MARKER))
+        .count()
 }
 
 /// Updates signature bucket and window totals for one error log line.
@@ -588,7 +611,7 @@ fn finalize_signatures(
         .take(MAX_TOP_SIGNATURES_PER_COMPONENT)
         .enumerate()
         .map(|(i, b)| {
-            let critical = b.fatal || !b.has_ts || b.counts.h1 > 0;
+            let critical = b.fatal || b.counts.h1 > 0;
             let count = if b.has_ts { b.counts.h72 } else { b.tail_total };
             alerts.push(NodeAlert {
                 id: format!("log_{}_{}", component.replace('-', "_"), i + 1),
@@ -738,9 +761,9 @@ fn strip_ts_remainder(rem: &str, bracketed: bool) -> &str {
     rest
 }
 
-/// Classifies a log line into `(is_error, is_fatal)`, ignoring graceful signal shutdowns.
+/// Classifies a log line into `(is_error, is_fatal)`, ignoring `[DEBUG]` traces and graceful shutdowns.
 fn is_error_line(body: &str) -> (bool, bool) {
-    if body.contains("Received signal") && body.contains("Stopping") {
+    if body.contains("[DEBUG]") || (body.contains("Received signal") && body.contains("Stopping")) {
         return (false, false);
     }
     if body.contains("🛑") || contains_word(body, "FATAL") {

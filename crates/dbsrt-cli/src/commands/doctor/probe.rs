@@ -11,7 +11,7 @@ use crate::commands::doctor::constants::{
     DEFAULT_REMOTE_BASE_DIR, DOCTOR_EVENTS_TAIL_BYTES, DOCTOR_FAULTWATCH_TAIL_BYTES,
     DOCTOR_FAULTWATCH_TAIL_LINES, DOCTOR_LOG_TAIL_BYTES, MIN_SSH_CONNECT_TIMEOUT_SECS,
     SHA256_FULL_HEX_LEN, SSH_POLL_INTERVAL_MS, TAIL_TRUNCATION_MARGIN_BYTES,
-    TRACKED_FRESHNESS_ARTIFACTS, TRACKED_SCRIPTS,
+    TRACKED_FRESHNESS_ARTIFACTS, TRACKED_SCRIPTS, WINDOW_24H_SECS,
 };
 use crate::commands::doctor::models::{DoctorSeverity, NodeAlert, NodeProbeReport, NodeRole};
 use sha2::{Digest, Sha256};
@@ -231,7 +231,7 @@ pub fn probe_directory(root: &Path, now_unix_secs: u64) -> RawNodeSnapshot {
             DOCTOR_LOG_TAIL_BYTES,
         ),
         batch_events_tails: events_tails,
-        faultwatch_tail: read_local_faultwatch_dir(&root.join("logs/faultwatch")),
+        faultwatch_tail: read_local_faultwatch_dir(&root.join("logs/faultwatch"), now_unix_secs),
     }
 }
 
@@ -278,17 +278,22 @@ fn read_local_tail(path: &Path, max_bytes: u64) -> Option<String> {
     Some(String::from_utf8_lossy(slice).into_owned())
 }
 
-/// Concatenates bounded tails from files inside `logs/faultwatch/`.
-fn read_local_faultwatch_dir(dir: &Path) -> Option<String> {
+/// Concatenates bounded tails from recent `.jsonl` files inside `logs/faultwatch/`.
+fn read_local_faultwatch_dir(dir: &Path, now_unix_secs: u64) -> Option<String> {
     let entries = fs::read_dir(dir).ok()?;
     let mut paths: Vec<PathBuf> = entries
         .flatten()
         .map(|e| e.path())
-        .filter(|p| p.is_file())
+        .filter(|p| p.is_file() && p.extension().and_then(|e| e.to_str()) == Some("jsonl"))
         .collect();
     paths.sort();
     let mut combined = String::new();
     for p in paths {
+        if read_mtime_secs(&p)
+            .is_some_and(|mt| now_unix_secs.saturating_sub(mt) > WINDOW_24H_SECS * 2)
+        {
+            continue;
+        }
         if let Some(tail) = read_local_tail(&p, DOCTOR_FAULTWATCH_TAIL_BYTES) {
             combined.push_str(&tail);
             combined.push('\n');
