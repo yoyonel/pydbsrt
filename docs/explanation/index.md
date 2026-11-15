@@ -225,10 +225,23 @@ tags:
       <span class="bento-icon">🏛️</span>
       <span class="bento-badge">GOUVERNANCE &amp; ADR</span>
     </div>
-    <h3>Registre des Décisions d'Architecture (ADR-0001 à ADR-0007)</h3>
-    <p>Catalogue chronologique des contrats structurants retenus, alternatives rejetées et invariants bidirectionnels ancrés dans les docstrings Rust.</p>
+    <h3>Registre des Décisions d'Architecture (ADR-0001 à ADR-0008)</h3>
+    <p>Catalogue chronologique des contrats structurants retenus, alternatives rejetées et invariants bidirectionnels ancrés dans les docstrings.</p>
     <div class="bento-links">
       <a href="../decisions/">→ Consulter le registre des ADR</a>
+    </div>
+  </div>
+
+  <div class="dbsrt-bento-card bento-cyan">
+    <div class="bento-header">
+      <span class="bento-icon">🛡️</span>
+      <span class="bento-badge">PERSISTANCE &amp; BACKUP 3-2-1</span>
+    </div>
+    <h3>Sauvegarde Multi-Tiers : Hardlinks POSIX &amp; Streaming PAX TAR Zéro-CIFS</h3>
+    <p>Déduplication o2switch + Synology FTP sans montage CIFS noyau, manifestes SHA-256, streaming TAR à 0 octet local et quorum d'éviction zéro-perte.</p>
+    <div class="bento-links">
+      <a href="2026-11-15-sauvegarde-multi-tiers-hardlinks-posix-et-packs-ftp-zero-cifs/">→ Lire le journal d'ingénierie Backup</a>
+      <a href="../how-to/2026-11-15-sauvegarder-versionner-et-restaurer-datasets-multi-tiers/">→ Guide pratique backup &amp; restore</a>
     </div>
   </div>
 

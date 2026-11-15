@@ -255,8 +255,14 @@ Voir [Comment résoudre instantanément les accès aux données multi-réseaux](
 | `task data:inspect` | Inspecte les flux `ffprobe` (codec, résolution, fps, pistes audio/sous-titres) et les empreintes/couplages associés d'un conteneur Freebox, Synology ou local (exécution locale sûre ou rebond HTTPS `:443` `o2switch` en 4G/VPN). |
 | `task data:fetch` | Rapatrie un catalogue binaire ou un corpus d'empreintes depuis le nœud autoritaire joignable (supporte `--dry-run`). |
 | `task data:seed-worktree` | Crée dans un `git worktree` isolé les liens symboliques vers les datasets non versionnés du dépôt parent. |
+| `task data:manifest` | Calcule (ou réutilise en `<1 s` via cache incrémental) le manifeste signé `SHA-256` et les condensats `tree_sha256` des datasets locaux. |
+| `task data:backup` | Crée un snapshot versionné dédupliqué multi-tiers sur Cloud `o2switch` (hardlinks POSIX) et `Synology NAS` (packs PAX TAR en streaming FTP sans montage CIFS). |
+| `task data:snapshots` | Liste l'historique des snapshots publiés et signés sur l'ensemble des tiers de sauvegarde joignables. |
+| `task data:verify` | Vérifie la signature cryptographique `SHA-256` des manifestes et l'intégrité des fichiers/packs distants (`--check-hashes` pour relecture complète). |
+| `task data:evict` | Évince sans risque des datasets locaux (`--dry-run` par défaut, `--apply` pour supprimer) uniquement après preuve de parité `SHA-256` sur $\ge 2$ réplicas distants. |
+| `task data:restore` | Restaure un dataset ou fichier précis depuis le réplica vérifié le plus rapide (NAS LAN Gigabit $\rightarrow$ Cloud `o2switch`) avec contrôle `SHA-256`. |
 | `task skills:list` | Liste tous les Agent Skills découverts sous `.agents/skills/`. |
 | `task skills:validate` | Valide tous les Agent Skills (`agentskills validate`, liens relatifs, zéro chemin local, `trigger_evals.json`, `--check`). |
-| `task skills:test` | Exécute la validation complète des skills et la suite `pytest` du résolveur SSOT (`tests/tools/test_data_access.py`). |
+| `task skills:test` | Exécute la validation complète des skills et les suites `pytest` SSOT & Backup (`tests/tools/test_data_access.py`, `tests/tools/test_data_backup.py`). |
 | `task skills:eval-benchmark` | Évalue de façon 100 % déterministe (zéro LLM) la justesse (`16/16`) et le découpage temporel des transcriptions JSONL de benchmark. |
 | `task skills:profile` | Profile seconde par seconde toute transcription JSONL d'Agent Skill et signale automatiquement les anomalies (`OUTPUT_TXT_SPILL_10KB`, `RTK_TEE_TRUNCATION`, `THINKING_LOOP_SPIKE`, `PARALLEL_TOOL_STAMPEDE`). |

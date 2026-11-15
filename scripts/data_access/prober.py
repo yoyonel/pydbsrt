@@ -20,6 +20,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from scripts.data_access.backup_manifest import inspect_local_backup_health
 from scripts.data_access.constants import (
     AGENT_HTTP_USER_AGENT,
     CACHE_DIR_MODE,
@@ -844,6 +845,7 @@ def _build_fresh_status_payload(
         "network": net,
         "channels": channels,
         "freshness": freshness,
+        "backup_state": inspect_local_backup_health(ws.effective_data_dir),
     }
 
 
@@ -864,6 +866,7 @@ def collect_data_access_status(
     if not force_refresh:
         cached = _try_load_valid_cache(cache_path, route_digest, str(ws.active_repo), CACHE_MAX_STALE_SECONDS)
         if cached is not None:
+            cached["backup_state"] = inspect_local_backup_health(ws.effective_data_dir)
             cached["cache"]["lookup_ms"] = round((time.perf_counter() - t0) * MILLIS_PER_SEC, 2)
             if cached["cache"].get("stale_revalidating"):
                 _spawn_background_refresh(ws.active_repo)
@@ -875,6 +878,7 @@ def collect_data_access_status(
         if not force_refresh:
             after_lock = _try_load_valid_cache(cache_path, route_digest, str(ws.active_repo), ttl_secs)
             if after_lock is not None:
+                after_lock["backup_state"] = inspect_local_backup_health(ws.effective_data_dir)
                 after_lock["cache"]["lookup_ms"] = round((time.perf_counter() - t0) * MILLIS_PER_SEC, 2)
                 return after_lock
         payload = _build_fresh_status_payload(ws, route_digest, None, ttl_secs, t0)

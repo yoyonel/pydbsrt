@@ -225,6 +225,16 @@ task db:portal
 task portal:e2e
 ```
 
+### 6. Sauvegarde Multi-Tiers Versionnée (`SHA-256`) & Éviction Locale
+```bash
+# Sauvegarde dédupliquée des datasets vers Cloud o2switch + Synology NAS (zéro CIFS)
+task data:backup
+
+# Vérifie l'intégrité distante et simule la libération d'espace disque local
+task data:verify
+task data:evict -- catalog.dbahash snippets
+```
+
 ---
 
 ## 🏛️ Architecture Modulaire & SoC (Rust Workspace)
