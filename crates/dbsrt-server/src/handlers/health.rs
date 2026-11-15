@@ -46,24 +46,26 @@ pub async fn health_handler() -> impl IntoResponse {
 ///
 /// # Arguments
 /// * `State(state)` - Shared [`AppState`] reference holding pre-loaded catalog readers,
-///   delta index, coupling registry, and optional PostgreSQL configuration.
+///   delta index, acoustic `AhashEngine`, coupling registry, and optional PostgreSQL configuration.
 ///
 /// # Returns
 /// HTTP `200 OK` JSON [`StatusResponse`] reporting uptime, configured directories,
-/// distinct indexed visual media count, certified subtitle couplings count, and PostgreSQL
-/// connectivity.
+/// distinct indexed visual (`pHash`) and acoustic (`aHash`) media counts, certified subtitle
+/// couplings count, and PostgreSQL connectivity.
 ///
 /// # Panics
 /// Never panics (gracefully defaults to `0` if an internal `RwLock` is poisoned).
 ///
 /// # Data Flow & Invariants
-/// - Queries [`AppState::indexed_media_count`] (`base + delta + loose`) in $\mathcal{O}(1)$
+/// - Queries [`AppState::indexed_media_count`] (`base + delta + loose`) and
+///   [`AppState::indexed_ahash_count`] (`MmapDbahash` base + delta) in $\mathcal{O}(1)$
 ///   in-memory time with **zero** filesystem directory scans or ad-hoc `mmap` allocations.
-/// - Preserves [`AppState::with_options`]'s anti-bloat invariant: when a compiled
-///   `catalog.dbphash` archive is loaded, loose `.phash` files under `phash_dir` are neither
-///   re-mapped on Tokio worker threads nor double-counted on top of `dbphash_reader`.
+/// - Preserves [`AppState::with_options`]'s anti-bloat invariant: when compiled
+///   `catalog.dbphash` / `catalog.dbahash` archives are loaded, loose files already packed
+///   into base archives are neither re-mapped on Tokio worker threads nor double-counted.
 pub async fn status_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let indexed_phash_count = state.indexed_media_count();
+    let indexed_ahash_count = state.indexed_ahash_count();
 
     let certified_couplings_count = state
         .coupling_registry
@@ -84,6 +86,7 @@ pub async fn status_handler(State(state): State<Arc<AppState>>) -> impl IntoResp
         phash_dir: state.phash_dir.to_string_lossy().to_string(),
         subtitles_dir: state.subtitles_dir.to_string_lossy().to_string(),
         indexed_phash_count,
+        indexed_ahash_count,
         certified_couplings_count,
         postgres_connected,
     })
@@ -176,6 +179,7 @@ mod tests {
     use super::*;
     use crate::state::AppStateInitOptions;
     use axum::body::to_bytes;
+    use dbsrt_core::ahash::{AhashFile, AhashHeader, HaitsmaKalkerExtractor};
     use dbsrt_core::{MediaMetadata, MediaType, OpenSubtitlesProvider};
     use dbsrt_index::DbphashBuilder;
 
@@ -184,6 +188,12 @@ mod tests {
     const TEST_FPS: f64 = 24.0;
     const TEST_HASH_A: u64 = 0x0123_4567_89ab_cdef;
     const TEST_HASH_B: u64 = 0xfedc_ba98_7654_3210;
+    const TEST_AHASH_SAMPLE_RATE: u32 = 5_512;
+    const TEST_AHASH_FRAME_SIZE: usize = 2_048;
+    const TEST_AHASH_HOP_SIZE: u16 = 64;
+    const TEST_AHASH_NUM_BANDS: u8 = 33;
+    const TEST_AHASH_SPECTRAL_LAG: u8 = 2;
+    const TEST_AHASH_FRAME_COUNT: usize = 64;
 
     #[tokio::test]
     async fn status_handler_uses_o1_indexed_count_without_double_counting_loose_files() {
@@ -191,9 +201,11 @@ mod tests {
             std::env::temp_dir().join(format!("dbsrt_health_status_test_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp_dir);
         let phash_dir = tmp_dir.join("loose_phash");
+        let ahash_dir = tmp_dir.join("ahash");
         let srt_dir = tmp_dir.join("srt");
         let dbphash_path = tmp_dir.join("catalog.dbphash");
         std::fs::create_dir_all(&phash_dir).expect("create phash_dir");
+        std::fs::create_dir_all(&ahash_dir).expect("create ahash_dir");
         std::fs::create_dir_all(&srt_dir).expect("create srt_dir");
 
         dbsrt_core::write_phash_file(
@@ -201,6 +213,30 @@ mod tests {
             &[TEST_HASH_A, TEST_HASH_B],
         )
         .expect("write loose phash");
+
+        let (_bins, band_bounds) = HaitsmaKalkerExtractor::compute_band_layout(
+            TEST_AHASH_SAMPLE_RATE,
+            TEST_AHASH_FRAME_SIZE,
+        );
+        let ahash_frames: Vec<u64> = (0..TEST_AHASH_FRAME_COUNT)
+            .map(|i| TEST_HASH_A.wrapping_add(i as u64))
+            .collect();
+        let ahash_header = AhashHeader {
+            version: 1,
+            sample_rate: TEST_AHASH_SAMPLE_RATE,
+            frame_size: TEST_AHASH_FRAME_SIZE as u16,
+            hop_size: TEST_AHASH_HOP_SIZE,
+            num_bands: TEST_AHASH_NUM_BANDS,
+            spectral_lag: TEST_AHASH_SPECTRAL_LAG,
+            frame_count: ahash_frames.len() as u64,
+            band_bounds,
+        };
+        AhashFile::write_to_path(
+            &ahash_dir.join("0123456789abcdef.86.1fps.ahash"),
+            &ahash_header,
+            &ahash_frames,
+        )
+        .expect("write test ahash");
 
         let mut builder = DbphashBuilder::new();
         let meta = MediaMetadata {
@@ -226,7 +262,7 @@ mod tests {
             AppStateInitOptions {
                 dbphash_path: Some(dbphash_path),
                 extra_phash_dirs: Vec::new(),
-                ahash_dir: None,
+                ahash_dir: Some(ahash_dir),
                 dbahash_path: None,
             },
         ));
@@ -239,6 +275,8 @@ mod tests {
         assert_eq!(parsed.status, STATUS_OK);
         assert_eq!(parsed.indexed_phash_count, 1);
         assert_eq!(parsed.indexed_phash_count, state.indexed_media_count());
+        assert_eq!(parsed.indexed_ahash_count, 1);
+        assert_eq!(parsed.indexed_ahash_count, state.indexed_ahash_count());
         let _ = std::fs::remove_dir_all(&tmp_dir);
     }
 }

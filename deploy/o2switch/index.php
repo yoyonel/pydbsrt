@@ -242,6 +242,8 @@ function spawn_daemon(string $homeDir): bool
         $baseDir = escapeshellarg($homeDir . '/dbsrt');
         $bin = escapeshellarg($homeDir . '/dbsrt/bin/dbsrt-server');
         $catalog = escapeshellarg($homeDir . '/dbsrt/data/catalog.dbphash');
+        $ahashCatalog = escapeshellarg($homeDir . '/dbsrt/data/catalog.dbahash');
+        $ahashDir = escapeshellarg($homeDir . '/dbsrt/data/__AHASH__');
         $srtDir = escapeshellarg($homeDir . '/dbsrt/data/SRT');
         $phashDir = escapeshellarg($homeDir . '/dbsrt/run/empty_phash');
         $log = escapeshellarg($homeDir . '/dbsrt/logs/dbsrt-server.log');
@@ -249,11 +251,15 @@ function spawn_daemon(string $homeDir): bool
         $keyFile = escapeshellarg($homeDir . SECRET_KEY_REL_PATH);
         $socket = escapeshellarg($homeDir . UPSTREAM_SOCKET_REL_PATH);
 
+        // Pass DBSRT_DBAHASH and DBSRT_AHASH_DIR via env so rollback to an older release binary
+        // never aborts on unknown CLI flags.
         // Redirect the whole backgrounded subshell, then exec: no shell is left holding exec()'s
         // stdout pipe, which would block this request until PHP kills it
         exec(sprintf(
-            '(cd %s && exec setsid %s --unix-socket %s --dbphash %s --subtitles-dir %s --phash-dir %s --api-key-file %s) </dev/null >> %s 2>&1 &',
+            '(cd %s && DBSRT_DBAHASH=%s DBSRT_AHASH_DIR=%s exec setsid %s --unix-socket %s --dbphash %s --subtitles-dir %s --phash-dir %s --api-key-file %s) </dev/null >> %s 2>&1 &',
             $baseDir,
+            $ahashCatalog,
+            $ahashDir,
             $bin,
             $socket,
             $catalog,

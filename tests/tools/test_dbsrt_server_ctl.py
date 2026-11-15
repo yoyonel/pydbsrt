@@ -175,6 +175,17 @@ def test_start_clears_stop_marker_and_is_idempotent(remote: Remote) -> None:
     assert remote.pids() == pids
     assert not remote.marker.exists()
 
+    cmdline = Path(f"/proc/{pids[0]}/cmdline").read_bytes().decode("utf-8", errors="replace").split("\0")
+    assert "--dbahash" not in cmdline, "CLI flags added in newer releases must travel via env for rollback safety"
+    environ_kv = dict(
+        entry.split("=", 1)
+        for entry in Path(f"/proc/{pids[0]}/environ").read_bytes().decode("utf-8", errors="replace").split("\0")
+        if "=" in entry
+    )
+    assert environ_kv.get("DBSRT_DBAHASH") == str(remote.base / "data" / "catalog.dbahash")
+    assert environ_kv.get("DBSRT_AHASH_DIR") == str(remote.base / "data" / "__AHASH__")
+    assert (remote.base / "data" / "__AHASH__").is_dir()
+
 
 @pytest.mark.parametrize(
     ("stopped", "running", "code", "needle"),

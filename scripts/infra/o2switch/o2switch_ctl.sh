@@ -323,8 +323,11 @@ case "${ACTION}" in
     printf '%s %s\n' "$(git -C "${REPO_ROOT}" describe --always --dirty --abbrev=12)" "$(git -C "${REPO_ROOT}" rev-parse --abbrev-ref HEAD)" >"${STAGE}/BUILD"
     echo "=== Deploying release ${RELEASE_ID} ($(cat "${STAGE}/BUILD")) to ${O2SWITCH_HOST} ==="
     # shellcheck disable=SC2029
-    ssh "${O2SWITCH_HOST}" "mkdir -p ${REMOTE_BASE}/releases ${REMOTE_BASE}/bin"
+    ssh "${O2SWITCH_HOST}" "mkdir -p ${REMOTE_BASE}/releases ${REMOTE_BASE}/bin ${REMOTE_PUBLIC_HTML}"
     rsync -a --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${STAGE}/" "${O2SWITCH_HOST}:${REMOTE_BASE}/releases/${RELEASE_ID}/"
+    if [[ -f "${REPO_ROOT}/deploy/o2switch/index.php" ]]; then
+      rsync -az --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${REPO_ROOT}/deploy/o2switch/index.php" "${O2SWITCH_HOST}:${REMOTE_PUBLIC_HTML}/index.php"
+    fi
     remote_release activate "${RELEASE_ID}"
     # restart repacks the catalog with the new dbsrt, then health-checks the new daemon
     if ! restart_on_current_release; then
@@ -1112,8 +1115,20 @@ REMOTE_TRAJ_STATUS
     ssh -o ServerAliveInterval=15 -o ServerAliveCountMax=3 "${O2SWITCH_HOST}" "cd $(printf '%q' "${REMOTE_BASE}") && PATH=\"\$HOME/${REMOTE_BASE}/bin:\$PATH\" RAYON_NUM_THREADS=2 ./bin/python3 -u scripts/backfill_ahash_sidecars.py $(printf '%q ' "${BACKFILL_ARGS[@]}")"
     ;;
 
+  pack-ahash)
+    check_ssh
+    PACK_ARGS=("${@:2}")
+    echo "=== Packing catalog.dbahash on ${O2SWITCH_HOST} (ADR-0007 streaming 2-pass) ==="
+    # shellcheck disable=SC2029
+    ssh -o ServerAliveInterval=15 -o ServerAliveCountMax=3 "${O2SWITCH_HOST}" \
+      "cd $(printf '%q' "${REMOTE_BASE}") && RAYON_NUM_THREADS=2 nice -n 19 ./bin/dbsrt pack-ahash -a data/__AHASH__ -o data/catalog.dbahash $(printf '%q ' "${PACK_ARGS[@]}")"
+    echo "-> Triggering atomic hot-reload on unix:${SERVER_SOCKET} (if daemon is active)..."
+    # shellcheck disable=SC2029
+    ssh "${O2SWITCH_HOST}" "${REMOTE_AUTH_HEADER} | curl -s -f -X POST -H @- --unix-socket ${SERVER_SOCKET} http://localhost/v1/catalog/reload || true" | jq . 2>/dev/null || true
+    ;;
+
   *)
-    echo "Usage: $0 {build|test-local|sync|deploy|rollback|releases|start|stop|restart|status|logs|demo|setup-cron|remove-cron|rotate-key|rotate-readonly-key|monitoring|top|pull-catalog|backup-nas|batch-tvshow|batch-movies|batch-all|batch-status|batch-summary|batch-sync|batch-pause|batch-resume|batch-workers|batch-stop|batch-logs|faultwatch|audit|trajectory|ahash-backfill}"
+    echo "Usage: $0 {build|test-local|sync|deploy|rollback|releases|start|stop|restart|status|logs|demo|setup-cron|remove-cron|rotate-key|rotate-readonly-key|monitoring|top|pull-catalog|backup-nas|batch-tvshow|batch-movies|batch-all|batch-status|batch-summary|batch-sync|batch-pause|batch-resume|batch-workers|batch-stop|batch-logs|faultwatch|audit|trajectory|ahash-backfill|pack-ahash}"
     exit 1
     ;;
 esac

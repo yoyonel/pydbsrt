@@ -39,12 +39,16 @@ lock_or_fail() {
 # Caller holds SPAWN_LOCK on fd 9: the daemon must not inherit it, or it would hold the lock
 # for its whole life and block every later spawn and stop
 spawn() {
-  mkdir -p "${BASE}/run/empty_phash" "${BASE}/logs"
+  mkdir -p "${BASE}/run/empty_phash" "${DATA_DIR}/__AHASH__" "${BASE}/logs"
+  # Pass DBSRT_DBAHASH and DBSRT_AHASH_DIR via environment instead of CLI flags so `rollback`
+  # to a pre-MmapDbahash release never fails clap unknown-argument parsing.
   # Background a simple command: a backgrounded `cd && ...` list keeps a bash fork alive that
   # holds the caller's stdout (an SSH session or a test pipe would never close)
   (
     cd "${BASE}" || exit 1
-    setsid "${BIN}" --unix-socket "${SOCKET}" \
+    DBSRT_DBAHASH="${DATA_DIR}/catalog.dbahash" \
+      DBSRT_AHASH_DIR="${DATA_DIR}/__AHASH__" \
+      setsid "${BIN}" --unix-socket "${SOCKET}" \
       --dbphash "${DATA_DIR}/catalog.dbphash" \
       --subtitles-dir "${DATA_DIR}/SRT" \
       --phash-dir "${BASE}/run/empty_phash" \
