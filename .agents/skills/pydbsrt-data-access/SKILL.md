@@ -3,7 +3,7 @@ name: pydbsrt-data-access
 description: >-
   Resolves, searches, and inspects pydbsrt media containers (Synology NAS video/tvshow, all 3
   Freebox Server disks, local MP4 snippets) and internal datasets (.phash, .ahash by human title
-  or hex moviehash, catalog.dbphash, couplings.json, PostgreSQL, batch reports) across Home Wi-Fi,
+  or hex moviehash, catalog.dbphash, catalog.dbahash, couplings.json, PostgreSQL, batch reports) across Home Wi-Fi,
   4G/5G hotspot, Work VPN, RPi4, and Cloud o2switch. Use immediately whenever a task locates,
   searches, inspects ffprobe streams/codecs/tracks, counts, checks freshness, syncs, or fetches
   project media, hashes, catalogs, couplings, or worktree datasets. Do NOT use for pure Rust
@@ -36,7 +36,7 @@ Always use `dbsrt_data.py` **in ONE batched `query` call** (plus ONE `inspect` c
 
 3. **Other single-purpose verbs** (`status` | `resolve` | `fetch` | `seed-worktree`):
    - Global overview only: `python3 .agents/skills/pydbsrt-data-access/scripts/dbsrt_data.py status`
-   - Fetch/sync corpus or unit file: `python3 .agents/skills/pydbsrt-data-access/scripts/dbsrt_data.py fetch <catalog|ahash|phash|couplings|reports> [item] [--dry-run]`
+   - Fetch/sync corpus or unit file: `python3 .agents/skills/pydbsrt-data-access/scripts/dbsrt_data.py fetch <catalog|dbahash|ahash|phash|couplings|reports> [item] [--dry-run]`
    - Seed git worktree symlinks: `python3 .agents/skills/pydbsrt-data-access/scripts/dbsrt_data.py seed-worktree`
 
 ## Strict Execution & Terse Reporting Discipline (Zero Wasted Turns)

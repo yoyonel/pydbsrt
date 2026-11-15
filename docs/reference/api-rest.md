@@ -46,19 +46,19 @@ Sonde de vivacité (Liveness probe) pour reverse-proxies et orchestrateurs conte
   ```
 
 ### `GET /v1/status`
-Rapport de santé complet du démon, état de la connexion PostgreSQL 17 et décompte des médias.
+Rapport d'état synthétique en temps constant $\mathcal{O}(1)$ (zéro balayage disque ni `mmap` synchrone via `AppState::indexed_media_count`, combinant base `.dbphash` + index delta RAM + éventuels `.phash` non empaquetés sans double comptage), nombre de sous-titres certifiés couplés et connectivité PostgreSQL 17.
 **Réponse** :
   ```json
   {
-    "status": "healthy",
+    "status": "ok",
+    "version": "0.1.0",
+    "service": "dbsrt-server",
     "uptime_seconds": 3600,
-    "database": {
-      "connected": true,
-      "medias_count": 21,
-      "frames_count": 52400,
-      "subtitles_count": 21
-    },
-    "memory_rss_bytes": 48234496
+    "phash_dir": "data/__PHASH__",
+    "subtitles_dir": "data/SRT",
+    "indexed_phash_count": 4974,
+    "certified_couplings_count": 2610,
+    "postgres_connected": false
   }
   ```
 

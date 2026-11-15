@@ -30,6 +30,9 @@ from scripts.data_access.constants import (
     CACHE_MAX_STALE_SECONDS,
     CACHE_SCHEMA_VERSION,
     CACHE_TTL_SECONDS,
+    DBAHASH_HEADER_PREFIX_BYTES,
+    DBAHASH_HEADER_PREFIX_FORMAT,
+    DBAHASH_MAGIC_PREFIX,
     DBPHASH_HEADER_PREFIX_BYTES,
     DBPHASH_HEADER_PREFIX_FORMAT,
     DBPHASH_MAGIC_PREFIX,
@@ -70,13 +73,15 @@ REMOTE_SNAPSHOT_POSIX_SH: str = (
     'd="$HOME/dbsrt/data"; '
     "cs=$(stat -c '%s:%Y' \"$d/catalog.dbphash\" 2>/dev/null || echo '0:0'); "
     "cm=$(od -An -j 12 -N 4 -t u4 \"$d/catalog.dbphash\" 2>/dev/null | tr -d ' ' || echo '0'); "
+    "acs=$(stat -c '%s:%Y' \"$d/catalog.dbahash\" 2>/dev/null || echo '0:0'); "
+    "acm=$(od -An -j 16 -N 4 -t u4 \"$d/catalog.dbahash\" 2>/dev/null | tr -d ' ' || echo '0'); "
     "pc=$(find \"$d/__PHASH__\" -maxdepth 1 -name '*.phash' 2>/dev/null | wc -l | tr -d ' '); "
     "pj=$(find \"$d/__PHASH__\" -maxdepth 1 -name '*.json' 2>/dev/null | wc -l | tr -d ' '); "
     "ac=$(find \"$d/__AHASH__\" -maxdepth 1 -name '*.ahash' 2>/dev/null | wc -l | tr -d ' '); "
     "aj=$(find \"$d/__AHASH__\" -maxdepth 1 -name '*.json' 2>/dev/null | wc -l | tr -d ' '); "
     "ks=$(stat -c '%s:%Y' \"$d/SRT/couplings.json\" 2>/dev/null || echo '0:0'); "
-    'printf "cat=%s:%s\\nphash=%s:%s\\nahash=%s:%s\\ncouplings=%s\\n" '
-    '"$cs" "$cm" "$pc" "$pj" "$ac" "$aj" "$ks"'
+    'printf "cat=%s:%s\\nacat=%s:%s\\nphash=%s:%s\\nahash=%s:%s\\ncouplings=%s\\n" '
+    '"$cs" "$cm" "$acs" "$acm" "$pc" "$pj" "$ac" "$aj" "$ks"'
 )
 
 
@@ -203,6 +208,15 @@ def _parse_pair(raw: str) -> tuple[int, int]:
     return first, second
 
 
+def _parse_triple(raw: str) -> tuple[int, int, int]:
+    """Parses 'size:mtime:count' integer triples safely."""
+    parts = raw.split(":")
+    first = int(parts[0]) if parts and parts[0].isdigit() else 0
+    second = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+    third = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 0
+    return first, second, third
+
+
 def _parse_remote_snapshot(node: str, stdout: str) -> dict[str, Any]:
     """Parses the key=value output of REMOTE_SNAPSHOT_POSIX_SH."""
     kv: dict[str, str] = {}
@@ -211,10 +225,8 @@ def _parse_remote_snapshot(node: str, stdout: str) -> dict[str, Any]:
             k, v = line.split("=", 1)
             kv[k.strip()] = v.strip()
 
-    cat_parts = kv.get("cat", "0:0:0").split(":")
-    cat_size = int(cat_parts[0]) if cat_parts and cat_parts[0].isdigit() else 0
-    cat_mtime = int(cat_parts[1]) if len(cat_parts) > 1 and cat_parts[1].isdigit() else 0
-    cat_medias = int(cat_parts[2]) if len(cat_parts) > 2 and cat_parts[2].isdigit() else 0
+    cat_size, cat_mtime, cat_medias = _parse_triple(kv.get("cat", "0:0:0"))
+    acat_size, acat_mtime, acat_medias = _parse_triple(kv.get("acat", "0:0:0"))
 
     phash_cnt, phash_json = _parse_pair(kv.get("phash", "0:0"))
     ahash_cnt, ahash_json = _parse_pair(kv.get("ahash", "0:0"))
@@ -230,6 +242,14 @@ def _parse_remote_snapshot(node: str, stdout: str) -> dict[str, Any]:
             "mtime_epoch": cat_mtime,
             "mtime_iso": _format_epoch_iso(cat_mtime),
             "media_count": cat_medias,
+        },
+        "catalog_dbahash": {
+            "exists": acat_size > 0,
+            "path": f"{node}:~/dbsrt/data/catalog.dbahash",
+            "size_bytes": acat_size,
+            "mtime_epoch": acat_mtime,
+            "mtime_iso": _format_epoch_iso(acat_mtime),
+            "media_count": acat_medias,
         },
         "phash_files": {"count": phash_cnt, "sidecar_json_count": phash_json, "path": f"{node}:~/dbsrt/data/__PHASH__"},
         "ahash_files": {"count": ahash_cnt, "sidecar_json_count": ahash_json, "path": f"{node}:~/dbsrt/data/__AHASH__"},
@@ -360,6 +380,19 @@ def _read_dbphash_media_count(cat_path: Path) -> int:
         return 0
 
 
+def _read_dbahash_media_count(cat_path: Path) -> int:
+    """Reads the 32-bit media_count field from the 20-byte DBAHASH v1 header in O(1) (zero cold page faults)."""
+    try:
+        with open(cat_path, "rb") as handle:
+            raw = handle.read(DBAHASH_HEADER_PREFIX_BYTES)
+        if len(raw) < DBAHASH_HEADER_PREFIX_BYTES:
+            return 0
+        magic, _ver, _flags, _factor_k, media_cnt = struct.unpack(DBAHASH_HEADER_PREFIX_FORMAT, raw)
+        return int(media_cnt) if magic == DBAHASH_MAGIC_PREFIX else 0
+    except OSError:
+        return 0
+
+
 def _count_ext_pair(folder: Path, primary_ext: str) -> tuple[int, int]:
     """Counts primary files and .json sidecars in a local directory via single scandir pass."""
     if not folder.is_dir():
@@ -386,6 +419,7 @@ def inspect_worktree_direct_counts(active_repo: Path) -> dict[str, Any]:
     return {
         "data_dir": str(wt_data),
         "catalog_dbphash_present": (wt_data / "catalog.dbphash").exists(),
+        "catalog_dbahash_present": (wt_data / "catalog.dbahash").exists(),
         "couplings_json_present": (wt_data / "SRT" / "couplings.json").exists(),
         "ahash_count": ahash_cnt,
         "phash_count": phash_cnt,
@@ -398,6 +432,9 @@ def inspect_local_dataset_snapshot(ws: WorkspaceContext) -> dict[str, Any]:
     data_dir = ws.effective_data_dir
     cat_path = data_dir / "catalog.dbphash"
     cat_stat = cat_path.stat() if cat_path.is_file() else None
+
+    acat_path = data_dir / "catalog.dbahash"
+    acat_stat = acat_path.stat() if acat_path.is_file() else None
 
     coup_path = data_dir / "SRT" / "couplings.json"
     coup_stat = coup_path.stat() if coup_path.is_file() else None
@@ -418,6 +455,14 @@ def inspect_local_dataset_snapshot(ws: WorkspaceContext) -> dict[str, Any]:
             "mtime_epoch": int(cat_stat.st_mtime) if cat_stat else 0,
             "mtime_iso": _format_epoch_iso(cat_stat.st_mtime) if cat_stat else None,
             "media_count": _read_dbphash_media_count(cat_path) if cat_stat else 0,
+        },
+        "catalog_dbahash": {
+            "exists": acat_stat is not None,
+            "path": str(acat_path),
+            "size_bytes": acat_stat.st_size if acat_stat else 0,
+            "mtime_epoch": int(acat_stat.st_mtime) if acat_stat else 0,
+            "mtime_iso": _format_epoch_iso(acat_stat.st_mtime) if acat_stat else None,
+            "media_count": _read_dbahash_media_count(acat_path) if acat_stat else 0,
         },
         "phash_files": {"count": phash_cnt, "sidecar_json_count": phash_json, "path": str(data_dir / "__PHASH__")},
         "ahash_files": {"count": ahash_cnt, "sidecar_json_count": ahash_json, "path": str(data_dir / "__AHASH__")},
@@ -473,7 +518,52 @@ def _evaluate_catalog_freshness(nodes: dict[str, dict[str, Any]], channels: dict
     status = "MISSING_LOCAL" if not local_cat["exists"] else ("STALE_LOCAL" if is_stale else "UP_TO_DATE")
     sync_cmd = _build_catalog_sync_command(channels, nodes, local_cat["path"]) if status != "UP_TO_DATE" else None
     delta_secs = (best_cat["mtime_epoch"] - local_cat["mtime_epoch"]) if best_cat["mtime_epoch"] > 0 else 0
+    return {
+        "status": status,
+        "authoritative_node": best_node,
+        "delta_bytes": best_cat["size_bytes"] - local_cat["size_bytes"],
+        "delta_medias": best_cat["media_count"] - local_cat["media_count"],
+        "delta_seconds": delta_secs,
+        "sync_cmd": sync_cmd,
+    }
 
+
+def _build_ahash_sync_command(channels: dict[str, Any], local_path: str) -> str:
+    """Synthesizes the recommended catalog.dbahash synchronization command for the active network."""
+    if channels.get("ssh_o2switch", {}).get("accessible"):
+        return f"rsync -az --partial o2switch:~/dbsrt/data/catalog.dbahash {local_path}"
+    return "SSH :22 filtered on current network; use HTTPS /v1/search/ahash API or whitelisted IP"
+
+
+def _evaluate_ahash_catalog_freshness(nodes: dict[str, dict[str, Any]], channels: dict[str, Any]) -> dict[str, Any]:
+    """Compares local catalog.dbahash against remote nodes (o2switch) and synthesizes sync guidance."""
+    empty_cat = {"exists": False, "size_bytes": 0, "mtime_epoch": 0, "media_count": 0, "path": ""}
+    local_cat = nodes["local"].get("catalog_dbahash", empty_cat)
+    candidates = [
+        (name, snap["catalog_dbahash"])
+        for name, snap in nodes.items()
+        if name != "local" and snap and snap.get("catalog_dbahash", {}).get("exists")
+    ]
+    if not candidates:
+        status = "LOCAL_ONLY_UNVERIFIED" if local_cat["exists"] else "MISSING_LOCAL"
+        return {"status": status, "authoritative_node": "local", "delta_bytes": 0, "delta_medias": 0, "sync_cmd": None}
+
+    best_node, best_cat = max(
+        candidates,
+        key=lambda item: (item[1]["media_count"], item[1]["size_bytes"], item[1]["mtime_epoch"]),
+    )
+    mtime_stale = (
+        best_cat["mtime_epoch"] > 0
+        and best_cat["mtime_epoch"] > local_cat["mtime_epoch"] + STALE_MTIME_TOLERANCE_SECONDS
+    )
+    is_stale = (
+        best_cat["media_count"] > local_cat["media_count"]
+        or best_cat["size_bytes"] > local_cat["size_bytes"]
+        or mtime_stale
+    )
+    status = "MISSING_LOCAL" if not local_cat["exists"] else ("STALE_LOCAL" if is_stale else "UP_TO_DATE")
+    sync_cmd = _build_ahash_sync_command(channels, local_cat["path"]) if status != "UP_TO_DATE" else None
+    delta_secs = (best_cat["mtime_epoch"] - local_cat["mtime_epoch"]) if best_cat["mtime_epoch"] > 0 else 0
     return {
         "status": status,
         "authoritative_node": best_node,
@@ -721,6 +811,7 @@ def _build_fresh_status_payload(
 
     freshness = {
         "packed_catalog": _evaluate_catalog_freshness(nodes, channels),
+        "packed_ahash_catalog": _evaluate_ahash_catalog_freshness(nodes, channels),
         "phash_corpus": _evaluate_corpus_counts(nodes, "phash_files"),
         "ahash_corpus": _evaluate_corpus_counts(nodes, "ahash_files"),
         "nodes": nodes,

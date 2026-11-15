@@ -80,7 +80,7 @@ VALID_ARTIFACT_KINDS: tuple[str, ...] = ("phash", "ahash", "couplings")
 CONTROL_CHAR_PATTERN: str = r"[\x00-\x1f\x7f]"
 
 # --- Cache & Freshness Thresholds ---
-CACHE_SCHEMA_VERSION: int = 2
+CACHE_SCHEMA_VERSION: int = 3
 CACHE_TTL_SECONDS: float = 300.0
 CACHE_MAX_STALE_SECONDS: float = 86400.0
 STALE_MTIME_TOLERANCE_SECONDS: float = 60.0
@@ -126,6 +126,12 @@ DBPHASH_MEDIA_COUNT_BYTE_OFFSET: int = 12
 DBPHASH_MEDIA_COUNT_BYTE_LEN: int = 4
 DBPHASH_MAGIC_PREFIX: bytes = b"DBSRT"
 
+DBAHASH_HEADER_PREFIX_FORMAT: str = "<8sHHII"
+DBAHASH_HEADER_PREFIX_BYTES: int = 20
+DBAHASH_MEDIA_COUNT_BYTE_OFFSET: int = 16
+DBAHASH_MEDIA_COUNT_BYTE_LEN: int = 4
+DBAHASH_MAGIC_PREFIX: bytes = b"DBAHASH\x00"
+
 AGENT_HTTP_USER_AGENT: str = "dbsrt-agent/0.1.0"
 DEFAULT_O2SWITCH_API_KEY_PASS_ENTRY: str = "services/pydbsrt/o2switch_api_key"
 DEFAULT_FREEBOX_PASS_ENTRY: str = "services/freebox/ftp_pass"
@@ -133,6 +139,7 @@ DEFAULT_FREEBOX_PASS_ENTRY: str = "services/freebox/ftp_pass"
 # --- Worktree Seedable Dataset Paths (Relative to Repository Root) ---
 WORKTREE_SEED_TARGETS: tuple[str, ...] = (
     "data/catalog.dbphash",
+    "data/catalog.dbahash",
     "data/snippets",
     "data/snippets_ahash",
     "data/__PHASH__",
