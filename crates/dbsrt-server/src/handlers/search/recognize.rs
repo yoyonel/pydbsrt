@@ -7,7 +7,8 @@ use crate::constants::{
 use crate::dtos::{RecognizeRequest, RecognizeResponse, SubtitleCandidate};
 use crate::services::catalog::lookup_certified_couplings;
 use crate::services::phash::{
-    calculate_sequence_shift_argmin, norm_alnum, parse_fingerprint_hashes,
+    calculate_sequence_shift_argmin, extract_media_query_sample, norm_alnum,
+    parse_fingerprint_hashes,
 };
 use crate::state::AppState;
 use axum::extract::State;
@@ -357,28 +358,87 @@ pub fn recognize_from_fingerprint(
     }
 }
 
-/// Probes a video file on disk, extracts sample visual frames, and matches using MmapLibrary.
+/// Midpoint divisor used to sample frames around 50% of video duration.
+const SAMPLE_MIDPOINT_DIVISOR: f64 = 2.0;
+
+/// Extension identifying pre-computed binary perceptual hash files.
+const PHASH_FILE_EXTENSION: &str = "phash";
+
+/// Extracts a query sample and FPS from either a `.phash` binary or a video container on disk.
 ///
 /// # Arguments
-/// * `media_path` - Path to target video file.
-/// * `payload` - Recognize request options (nb_seconds, search_distance).
-/// * `phash_dirs` - Configured directories storing .phash files.
+/// * `media_path` - Existing `.phash` or video container path on disk.
+/// * `nb_seconds` - Sample window duration in seconds.
 ///
 /// # Returns
-/// * `Result<RecognizeResponse, (StatusCode, String)>` - Recognition result (`timer_seconds` is filled by `recognize_handler`) or HTTP error tuple.
+/// * `Result<(Vec<u64>, f64), (StatusCode, String)>` - Sampled 64-bit hashes and detected FPS.
 ///
 /// # Errors
-/// * Returns `Err(StatusCode::BAD_REQUEST)` if media file does not exist.
-/// * Returns `Err(StatusCode::INTERNAL_SERVER_ERROR)` if FFmpeg probe/extraction fails or library cannot be opened.
+/// * Returns `Err(StatusCode::BAD_REQUEST)` if a `.phash` file is unreadable/corrupted.
+/// * Returns `Err(StatusCode::INTERNAL_SERVER_ERROR)` if FFmpeg probing or frame extraction fails.
 ///
 /// # Panics
 /// * Guarantee: Never panics.
 ///
 /// # Data Flow & Invariants
-/// 1. Probes video duration and fps using `probe_video`.
-/// 2. Extracts frames around middle of file using `extract_frames_phash`.
-/// 3. Queries `MmapLibrary` across `phash_dirs`.
+/// 1. For `.phash` files, validates binary readability via [`read_phash_file`] and selects a
+///    dynamic narrative window via [`extract_media_query_sample`].
+/// 2. For video containers, probes duration/FPS via [`probe_video`] and decodes midpoint frames.
+fn sample_hashes_from_disk_target(
+    media_path: &Path,
+    nb_seconds: f64,
+) -> Result<(Vec<u64>, f64), (StatusCode, String)> {
+    if media_path.extension().and_then(|e| e.to_str()) == Some(PHASH_FILE_EXTENSION) {
+        let full_hashes =
+            read_phash_file(media_path).map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+        let parent_dir = media_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .to_path_buf();
+        let (fps, sample, _) = extract_media_query_sample(media_path, &[parent_dir], nb_seconds);
+        let effective = if sample.is_empty() {
+            full_hashes
+        } else {
+            sample
+        };
+        return Ok((effective, fps));
+    }
+
+    let meta =
+        probe_video(media_path).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let start_sec = (meta.duration / SAMPLE_MIDPOINT_DIVISOR).floor();
+    let nb_frames = ((nb_seconds * meta.fps).round() as usize).max(1);
+    let hashes = extract_frames_phash(media_path, start_sec, nb_frames)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok((hashes, meta.fps))
+}
+
+/// Probes a video or `.phash` file on disk and matches across all configured index tiers.
+///
+/// # Arguments
+/// * `state` - Shared `AppState` providing Tier 1 `.dbphash`, Tier 1-Delta, and Tier 3 PostgreSQL.
+/// * `media_path` - Path to target video container or `.phash` file.
+/// * `payload` - Recognize request options (`nb_seconds`, `search_distance`, `language`).
+/// * `phash_dirs` - Configured directories storing loose `.phash` files (Tier 2).
+///
+/// # Returns
+/// * `Result<RecognizeResponse, (StatusCode, String)>` - Multi-tier recognition result (`timer_seconds` filled by caller).
+///
+/// # Errors
+/// * Returns `Err(StatusCode::BAD_REQUEST)` if media file does not exist or `.phash` is invalid.
+/// * Returns `Err(StatusCode::INTERNAL_SERVER_ERROR)` if FFmpeg probe/extraction fails on a video.
+///
+/// # Panics
+/// * Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// 1. Verifies `media_path` exists on disk.
+/// 2. Extracts dynamic perceptual hash sample via [`sample_hashes_from_disk_target`].
+/// 3. Delegates matching and certified coupling resolution to [`recognize_from_fingerprint`]
+///    so Tier 1 RAM `catalog.dbphash`, Tier 1-Delta, Tier 2 `MmapLibrary`, and Tier 3 PostgreSQL
+///    are all queried consistently even when `--phash-dir` uses `empty_phash`.
 pub fn recognize_from_media_file(
+    state: &AppState,
     media_path: &Path,
     payload: &RecognizeRequest,
     phash_dirs: &[PathBuf],
@@ -390,72 +450,20 @@ pub fn recognize_from_media_file(
         ));
     }
 
-    let meta =
-        probe_video(media_path).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    let start_sec = (meta.duration / 2.0).floor();
-    let nb_frames = (payload.nb_seconds * meta.fps).round() as usize;
-
-    let hashes = extract_frames_phash(media_path, start_sec, nb_frames)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
     let media_name_search = media_path
         .file_stem()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_default();
 
-    if hashes.is_empty() || hashes.iter().all(|&h| dbsrt_core::is_blank_phash(h)) {
-        return Ok(RecognizeResponse {
-            found: false,
-            media_name_search,
-            media_match: None,
-            season: None,
-            episode: None,
-            nb_offsets_match: 0,
-            confidence: 0.0,
-            tier: None,
-            shift_frames: None,
-            shift_ms: None,
-            candidates: None,
-            timer_seconds: 0.0,
-        });
+    let (hashes, detected_fps) = sample_hashes_from_disk_target(media_path, payload.nb_seconds)?;
+    let mut effective_payload = payload.clone();
+    if effective_payload.fps.is_none() {
+        effective_payload.fps = Some(detected_fps);
     }
 
-    let library = MmapLibrary::from_directories(phash_dirs)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-    let matches = library.recognize(&hashes, payload.search_distance);
-
-    if let Some(top) = matches.first() {
-        Ok(RecognizeResponse {
-            found: true,
-            media_name_search,
-            media_match: Some(top.media_name.clone()),
-            season: None,
-            episode: None,
-            nb_offsets_match: top.nb_offsets_match,
-            confidence: top.confidence,
-            tier: Some("Tier 2 (MmapLibrary Zero-DB Files)".to_string()),
-            shift_frames: None,
-            shift_ms: None,
-            candidates: None,
-            timer_seconds: 0.0,
-        })
-    } else {
-        Ok(RecognizeResponse {
-            found: false,
-            media_name_search,
-            media_match: None,
-            season: None,
-            episode: None,
-            nb_offsets_match: 0,
-            confidence: 0.0,
-            tier: None,
-            shift_frames: None,
-            shift_ms: None,
-            candidates: None,
-            timer_seconds: 0.0,
-        })
-    }
+    let mut resp = recognize_from_fingerprint(state, &hashes, &effective_payload, phash_dirs);
+    resp.media_name_search = media_name_search;
+    Ok(resp)
 }
 
 /// Axum handler for `POST /v1/recognize`: identifies a video release by its visual pHash fingerprint.
@@ -503,7 +511,7 @@ pub async fn recognize_handler(
             ))
         } else {
             let media_path = PathBuf::from(&payload.media_path);
-            recognize_from_media_file(&media_path, &payload, &phash_dirs)
+            recognize_from_media_file(&state_bg, &media_path, &payload, &phash_dirs)
         }
     })
     .await
@@ -815,5 +823,51 @@ mod tests {
             "fixture: Tier 1 is empty, got {tier}"
         );
         assert_eq!((season, episode), (Some(1), Some(2)));
+    }
+
+    #[tokio::test]
+    async fn test_recognize_phash_media_path_matches_tier1_with_empty_phash_dir() {
+        let dir = std::env::temp_dir().join(format!("dbsrt_rec_phash_{}", std::process::id()));
+        let empty_dir = dir.join("empty_phash");
+        std::fs::create_dir_all(&empty_dir).unwrap();
+        let frames = episode_frames(7, 300);
+        let phash_file = dir.join("Andor.S01E07.1080p.25.000fps.phash");
+        dbsrt_core::write_phash_file(&phash_file, &frames).unwrap();
+
+        let state = Arc::new(AppState::with_options(
+            empty_dir.clone(),
+            dir.clone(),
+            Arc::new(OpenSubtitlesProvider::new(None)),
+            crate::state::AppStateInitOptions {
+                dbphash_path: Some(dir.join("isolated_nonexistent.dbphash")),
+                extra_phash_dirs: Vec::new(),
+                ahash_dir: None,
+                dbahash_path: None,
+            },
+        ));
+        state.delta_index.write().unwrap().ingest_raw_frames(
+            "Andor.S01E07.1080p.mkv",
+            &frames,
+            25.0,
+        );
+
+        let req = RecognizeRequest {
+            media_path: phash_file.to_string_lossy().to_string(),
+            query_fingerprint: None,
+            fps: None,
+            language: Some("fr".to_string()),
+            client_version: None,
+            search_distance: 6,
+            nb_seconds: 2.0,
+            phash_dir: Some(empty_dir.to_string_lossy().to_string()),
+        };
+        let Json(resp) = recognize_handler(State(state), Json(req)).await.unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+
+        assert!(
+            resp.found,
+            "expected .phash media_path to match Tier 1-Delta"
+        );
+        assert!(resp.confidence >= MIN_PHASH_RECOGNITION_CONFIDENCE_PERCENT);
     }
 }

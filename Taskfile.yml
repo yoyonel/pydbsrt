@@ -48,6 +48,9 @@ includes:
   demo:
     taskfile: ./taskfiles/demo.yml
     flatten: true
+  skills:
+    taskfile: ./taskfiles/skills.yml
+    flatten: true
   legacy:
     taskfile: ./taskfiles/legacy.yml
     flatten: true

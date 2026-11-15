@@ -284,6 +284,9 @@ case "${ACTION}" in
     if [[ -f "${REPO_ROOT}/scripts/portal_server.py" ]]; then
       rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${REPO_ROOT}/scripts/portal_server.py" "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/"
     fi
+    if [[ -d "${REPO_ROOT}/scripts/data_access" ]]; then
+      rsync -avz --exclude='__pycache__' --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${REPO_ROOT}/scripts/data_access/" "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/data_access/"
+    fi
     if [[ -f "${REPO_ROOT}/scripts/static/sources.html" ]]; then
       rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${REPO_ROOT}/scripts/static/sources.html" "${O2SWITCH_HOST}:${REMOTE_BASE}/web/sources.html"
     fi
@@ -291,10 +294,10 @@ case "${ACTION}" in
     echo "-> Transferring Zero-DB catalog and SRT store (bwlimit ${DEFAULT_RSYNC_BWLIMIT_KBPS} KB/s)..."
     # The remote catalog is packed on o2switch at start: the local one only seeds a fresh host
     if [[ -f "${REPO_ROOT}/data/catalog.dbphash" ]]; then
-      rsync -avz --progress --ignore-existing --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${REPO_ROOT}/data/catalog.dbphash" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/"
+      rsync -avzL --progress --ignore-existing --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${REPO_ROOT}/data/catalog.dbphash" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/"
     fi
     if [[ -d "${REPO_ROOT}/data/SRT" ]]; then
-      rsync -avz --progress --update --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${REPO_ROOT}/data/SRT/" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/SRT/"
+      rsync -avzL --progress --update --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${REPO_ROOT}/data/SRT/" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/SRT/"
     fi
 
     echo "-> Deploying reverse-proxy gateway (index.php + .htaccess)..."

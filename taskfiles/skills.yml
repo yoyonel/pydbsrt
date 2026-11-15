@@ -1,0 +1,59 @@
+version: '3'
+
+tasks:
+  skills:list:
+    desc: List all workspace Agent Skills discovered under .agents/skills/
+    cmds:
+      - uv run --no-sync python scripts/tooling/validate_skills.py --list
+
+  skills:validate:
+    desc: Validate all workspace Agent Skills (agentskills spec, links, zero local paths, trigger evals, --check)
+    aliases: [skills:lint, skills:check]
+    cmds:
+      - uv run --no-sync python scripts/tooling/validate_skills.py
+
+  skills:test:
+    desc: Run full validation and unit test suite for workspace Agent Skills and SSOT helpers
+    cmds:
+      - task: skills:validate
+      - uv run --no-sync pytest tests/tools/test_data_access.py
+
+  skills:eval-benchmark:
+    desc: Deterministically grade and time subagent A/B benchmark JSONL transcripts (zero LLM)
+    cmds:
+      - uv run --no-sync python scripts/benchmarks/eval_skill_data_access.py {{.CLI_ARGS}}
+
+  skills:profile:
+    desc: Profile any Agent Skill subagent JSONL transcript second-by-second and flag bottlenecks
+    cmds:
+      - uv run --no-sync python scripts/benchmarks/profile_skill_transcript.py {{.CLI_ARGS}}
+
+  data:status:
+    desc: Inspect active network profile, safe channels, and cross-node dataset freshness (SSOT)
+    cmds:
+      - uv run --no-sync python scripts/data_access/cli.py status {{.CLI_ARGS}}
+
+  data:resolve:
+    desc: Resolve optimal access channel and optional item/coupling query for a data family
+    cmds:
+      - uv run --no-sync python scripts/data_access/cli.py resolve {{.CLI_ARGS}}
+
+  data:query:
+    desc: Resolve multiple 'family[:search]' targets and cross-node freshness in a single batched call
+    cmds:
+      - uv run --no-sync python scripts/data_access/cli.py query {{.CLI_ARGS}}
+
+  data:inspect:
+    desc: Inspect ffprobe streams and cross-referenced hashes/couplings for a local, Synology, or Freebox container
+    cmds:
+      - uv run --no-sync python scripts/data_access/cli.py inspect {{.CLI_ARGS}}
+
+  data:fetch:
+    desc: Fetch or synchronize a stale dataset or unit file from the authoritative reachable node
+    cmds:
+      - uv run --no-sync python scripts/data_access/cli.py fetch {{.CLI_ARGS}}
+
+  data:seed-worktree:
+    desc: Symlink unversioned binary datasets from parent repository into an isolated git worktree
+    cmds:
+      - uv run --no-sync python scripts/data_access/cli.py seed-worktree {{.CLI_ARGS}}

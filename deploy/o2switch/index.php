@@ -295,6 +295,7 @@ function render_login_page(?string $errorMessage = null): void
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="theme-color" content="#0d1117">
+  <link rel="icon" href="/dbsrt/favicon.ico">
   <title>Connexion ── dbsrt Monitor Cloud</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -416,8 +417,14 @@ if (is_ip_rate_limited($rateLimitFile, $clientIp)) {
     ]);
 }
 
-// Handle Logout
+// Handle Logout & Public Favicon (never penalize IP auth rate-limiter on browser icon probes)
 $requestUri = $_SERVER['REQUEST_URI'] ?? '/';
+$rawReqPath = parse_url($requestUri, PHP_URL_PATH) ?? '/';
+if (str_ends_with($rawReqPath, '/favicon.ico')) {
+    header('Content-Type: image/svg+xml');
+    echo "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎬</text></svg>";
+    exit;
+}
 if (str_contains($requestUri, '/logout')) {
     setcookie(AUTH_COOKIE_NAME, '', ['expires' => time() - 3600, 'path' => '/']);
     header('Location: monitoring');
@@ -477,7 +484,7 @@ if ($path === '/' || $path === '') {
 
 // Read-only keys (web-top QR, shared dashboards) only reach monitoring GETs
 $isReadOnly = !check_key_match($matchedKey, $masterKeys);
-$readOnlyPathAllowed = in_array($path, ['/monitoring', '/top', '/health', '/v1/health', '/sources', '/sources.html', '/api/sources', '/api/probe', '/api/files', '/api/file/details', '/api/assets', '/api/asset/details', '/api/phashes', '/api/phash/details', '/api/trajectory/files', '/api/trajectories', '/api/trajectory/details'], true)
+$readOnlyPathAllowed = in_array($path, ['/monitoring', '/top', '/health', '/v1/health', '/sources', '/sources.html', '/api/sources', '/api/probe', '/api/files', '/api/file/details', '/api/assets', '/api/asset/details', '/api/phashes', '/api/phash/details', '/api/artifact/download', '/api/trajectory/files', '/api/trajectories', '/api/trajectory/details'], true)
     || str_starts_with($path, '/v1/monitoring/');
 if ($isReadOnly && (!in_array($method, ['GET', 'HEAD'], true) || !$readOnlyPathAllowed)) {
     send_json_error(403, ['error' => 'Forbidden: read-only key']);
@@ -499,6 +506,94 @@ if ($path === '/sources' || $path === '/sources.html') {
         exit;
     }
     send_json_error(404, ['error' => 'sources.html not deployed in ~/dbsrt/web/']);
+}
+
+// 3.2b Zero-Spawn Authenticated Binary Artifact Download (.phash, .ahash, sidecar .json, couplings.json)
+if ($path === '/api/artifact/download') {
+    if (!in_array($method, ['GET', 'HEAD'], true)) {
+        send_json_error(405, ['error' => 'Method Not Allowed']);
+    }
+    $kind = strtolower(trim(is_string($_GET['kind'] ?? null) ? $_GET['kind'] : ''));
+    $rawFile = trim(is_string($_GET['file'] ?? null) ? $_GET['file'] : '');
+    if (!in_array($kind, ['phash', 'ahash', 'couplings'], true)) {
+        send_json_error(400, ['error' => 'invalid_kind', 'kind' => $kind]);
+    }
+
+    if ($kind === 'couplings') {
+        $effFile = $rawFile !== '' ? $rawFile : 'couplings.json';
+        if ($effFile !== 'couplings.json') {
+            send_json_error(400, ['error' => 'invalid_filename', 'file' => $rawFile]);
+        }
+        $baseDir = realpath($homeDir . '/dbsrt/data/SRT');
+        $candidates = [$effFile];
+    } else {
+        $lowerFile = strtolower($rawFile);
+        $validExt = $kind === 'phash'
+            ? (str_ends_with($lowerFile, '.phash') || str_ends_with($lowerFile, '.json'))
+            : (str_ends_with($lowerFile, '.ahash') || str_ends_with($lowerFile, '.json'));
+        $hasUnsafeToken = $rawFile === ''
+            || $rawFile === '.'
+            || $rawFile === '..'
+            || str_contains($rawFile, '/')
+            || str_contains($rawFile, '\\')
+            || preg_match('/[\x00-\x1f\x7f]/', $rawFile) === 1
+            || basename($rawFile) !== $rawFile
+            || !$validExt;
+        if ($hasUnsafeToken) {
+            send_json_error(400, ['error' => 'invalid_filename', 'file' => $rawFile]);
+        }
+        $effFile = $rawFile;
+        $subFolder = $kind === 'phash' ? '__PHASH__' : '__AHASH__';
+        $baseDir = realpath($homeDir . '/dbsrt/data/' . $subFolder);
+        $candidates = [$effFile];
+        if (class_exists('Normalizer')) {
+            $nfc = Normalizer::normalize($effFile, Normalizer::FORM_C);
+            $nfd = Normalizer::normalize($effFile, Normalizer::FORM_D);
+            if (is_string($nfc) && $nfc !== '') {
+                $candidates[] = $nfc;
+            }
+            if (is_string($nfd) && $nfd !== '') {
+                $candidates[] = $nfd;
+            }
+            $candidates = array_values(array_unique($candidates));
+        }
+    }
+
+    $resolvedFile = false;
+    if ($baseDir !== false) {
+        foreach ($candidates as $candName) {
+            $tryPath = realpath($baseDir . '/' . $candName);
+            if ($tryPath !== false && dirname($tryPath) === $baseDir && is_file($tryPath)) {
+                $resolvedFile = $tryPath;
+                break;
+            }
+        }
+    }
+    if ($baseDir === false || $resolvedFile === false) {
+        send_json_error(404, ['error' => 'artifact_not_found', 'kind' => $kind, 'file' => $effFile]);
+    }
+
+    $sha256 = hash_file('sha256', $resolvedFile);
+    $fileSize = filesize($resolvedFile);
+    $actualBase = basename($resolvedFile);
+    $asciiFallback = (string)preg_replace('/[^A-Za-z0-9._-]/', '_', $actualBase);
+    $utf8Encoded = rawurlencode($actualBase);
+    while (ob_get_level() > 0) {
+        ob_end_clean();
+    }
+    header('Content-Type: application/octet-stream');
+    if ($fileSize !== false) {
+        header('Content-Length: ' . (string)$fileSize);
+    }
+    header('Content-Disposition: attachment; filename="' . $asciiFallback . '"; filename*=UTF-8\'\'' . $utf8Encoded);
+    if ($sha256 !== false) {
+        header('X-Checksum-SHA256: ' . $sha256);
+    }
+    header('Access-Control-Allow-Origin: *');
+    if ($method !== 'HEAD') {
+        readfile($resolvedFile);
+    }
+    exit;
 }
 
 if (in_array($path, ['/api/sources', '/api/probe', '/api/files', '/api/file/details', '/api/assets', '/api/asset/details', '/api/phashes', '/api/phash/details', '/api/trajectory/files', '/api/trajectories', '/api/trajectory/details'], true)) {
@@ -573,8 +668,13 @@ if (in_array($path, ['/api/sources', '/api/probe', '/api/files', '/api/file/deta
             $cmd .= ' --search ' . escapeshellarg($search);
         }
     } elseif ($path === '/api/phash/details') {
-        $mhash = preg_replace('/[^a-zA-Z0-9_.% -]/', '', (string)($_GET['moviehash'] ?? ($_GET['file'] ?? '')));
-        $cmd = escapeshellcmd($pythonBin) . ' ' . escapeshellarg($script) . ' --phash-moviehash ' . escapeshellarg($mhash);
+        $fileParam = preg_replace('/[\x00-\x1F\x7F]/', '', (string)($_GET['file'] ?? ''));
+        $hashParam = preg_replace('/[^a-zA-Z0-9_-]/', '', (string)($_GET['moviehash'] ?? ''));
+        $primaryIdent = $fileParam !== '' ? $fileParam : $hashParam;
+        $cmd = escapeshellcmd($pythonBin) . ' ' . escapeshellarg($script) . ' --phash-moviehash ' . escapeshellarg($primaryIdent);
+        if ($fileParam !== '' && $hashParam !== '') {
+            $cmd .= ' --phash-fallback ' . escapeshellarg($hashParam);
+        }
     } elseif ($path === '/api/trajectory/files') {
         $cmd = escapeshellcmd($pythonBin) . ' ' . escapeshellarg($script) . ' --trajectory-files';
     } elseif ($path === '/api/trajectories') {

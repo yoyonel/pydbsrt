@@ -1,0 +1,434 @@
+{
+  "schema_version": 1,
+  "description": "Declarative Single Source of Truth (SSOT) registry of pydbsrt media sources and internal data families.",
+  "freebox_disks": [
+    {
+      "id": "disque1",
+      "smb_share": "Disque 1",
+      "mount_folder": "Disque_1",
+      "indexed_subdir": "Téléchargements",
+      "local_cifs_path": "{local_media_root}/Freebox/Disque_1",
+      "rpi4_cifs_path": "/mnt/freebox/Disque_1",
+      "lan_gateway_url": "http://{rpi4_lan_host}:18089/Disque_1/Téléchargements/",
+      "wan_gateway_url": "http://{nas_wan_host}:80/Disque_1/Téléchargements/",
+      "portal_ui_declared": true
+    },
+    {
+      "id": "disque2",
+      "smb_share": "Disque 2",
+      "mount_folder": "Disque_2",
+      "indexed_subdir": "Téléchargements",
+      "local_cifs_path": "{local_media_root}/Freebox/Disque_2",
+      "rpi4_cifs_path": "/mnt/freebox/Disque_2",
+      "lan_gateway_url": "http://{rpi4_lan_host}:18089/Disque_2/Téléchargements/",
+      "wan_gateway_url": "http://{nas_wan_host}:80/Disque_2/Téléchargements/",
+      "portal_ui_declared": true
+    },
+    {
+      "id": "disque1_1",
+      "smb_share": "Disque 1 1",
+      "mount_folder": "Disque_1_1",
+      "indexed_subdir": "Vidéos",
+      "local_cifs_path": "{local_media_root}/Freebox/Disque_1_1",
+      "rpi4_cifs_path": "/mnt/freebox/Disque_1_1",
+      "lan_gateway_url": "http://{rpi4_lan_host}:18089/Disque_1_1/Vidéos/",
+      "wan_gateway_url": "http://{nas_wan_host}:80/Disque_1_1/Vidéos/",
+      "portal_ui_declared": true,
+      "note": "Mounted on local workstation and RPi4 (/mnt/freebox/Disque_1_1), served by rpi4_freebox_gateway.py, and declared via SSOT in portal_server.py."
+    }
+  ],
+  "families": [
+    {
+      "id": "synology-video",
+      "category": "media_source",
+      "name": "Synology NAS Movies & Videos",
+      "desync_tier": "immutable_unit",
+      "listing_tier": "live_state",
+      "description": "Feature films and Remux 4K/1080p containers (.mkv, .mp4, .avi) hosted on Synology NAS /video share.",
+      "channels": [
+        {
+          "id": "cifs",
+          "protocol": "local_cifs",
+          "target": "{local_media_root}/Synology/video",
+          "probe_key": "local_cifs",
+          "profiles": ["home_lan"]
+        },
+        {
+          "id": "lan_ftp",
+          "protocol": "ftp",
+          "target": "ftp://{nas_user}@{nas_lan_host}:21/video",
+          "probe_key": "lan_ftp_synology",
+          "profiles": ["home_lan", "rpi4"]
+        },
+        {
+          "id": "wan_ftp",
+          "protocol": "ftp",
+          "target": "ftp://{nas_user}@{nas_wan_host}:21/video",
+          "probe_key": "wan_ftp_synology",
+          "profiles": ["nomad_wan", "work_vpn", "o2switch", "home_lan"]
+        },
+        {
+          "id": "o2switch_https_bounce",
+          "protocol": "https_api",
+          "target": "{o2switch_url}/api/files?source=synology-video&profile=wan_ftp",
+          "probe_key": "https_o2switch",
+          "profiles": ["nomad_wan", "work_vpn", "home_lan"]
+        }
+      ]
+    },
+    {
+      "id": "synology-tvshow",
+      "category": "media_source",
+      "name": "Synology NAS TV Shows",
+      "desync_tier": "immutable_unit",
+      "listing_tier": "live_state",
+      "description": "Multi-season TV series containers hosted on Synology NAS /tvshow share.",
+      "channels": [
+        {
+          "id": "cifs",
+          "protocol": "local_cifs",
+          "target": "{local_media_root}/Synology/tvshow",
+          "probe_key": "local_cifs",
+          "profiles": ["home_lan"]
+        },
+        {
+          "id": "lan_ftp",
+          "protocol": "ftp",
+          "target": "ftp://{nas_user}@{nas_lan_host}:21/tvshow",
+          "probe_key": "lan_ftp_synology",
+          "profiles": ["home_lan", "rpi4"]
+        },
+        {
+          "id": "wan_ftp",
+          "protocol": "ftp",
+          "target": "ftp://{nas_user}@{nas_wan_host}:21/tvshow",
+          "probe_key": "wan_ftp_synology",
+          "profiles": ["nomad_wan", "work_vpn", "o2switch", "home_lan"]
+        },
+        {
+          "id": "o2switch_https_bounce",
+          "protocol": "https_api",
+          "target": "{o2switch_url}/api/files?source=synology-tvshow&profile=wan_ftp",
+          "probe_key": "https_o2switch",
+          "profiles": ["nomad_wan", "work_vpn", "home_lan"]
+        }
+      ]
+    },
+    {
+      "id": "freebox-disks",
+      "category": "media_source",
+      "name": "Freebox Server Attached Disks (3 Volumes)",
+      "desync_tier": "immutable_unit",
+      "listing_tier": "live_state",
+      "description": "Three USB/internal disks attached to Freebox Server (Disque_1, Disque_2, Disque_1_1). Direct WAN HTTP :80 is IP-filtered to o2switch only.",
+      "channels": [
+        {
+          "id": "cifs_all_3_disks",
+          "protocol": "local_cifs",
+          "target": "{local_media_root}/Freebox/{{Disque_1,Disque_2,Disque_1_1}}",
+          "probe_key": "local_cifs",
+          "profiles": ["home_lan"]
+        },
+        {
+          "id": "lan_http_gateway",
+          "protocol": "http_gateway",
+          "target": "http://{rpi4_lan_host}:18089/health",
+          "probe_key": "lan_http_freebox",
+          "profiles": ["home_lan", "rpi4"]
+        },
+        {
+          "id": "rpi4_cifs_ssh",
+          "protocol": "ssh",
+          "target": "rpi4:/mnt/freebox/{{Disque_1,Disque_2,Disque_1_1}}",
+          "probe_key": "ssh_rpi4",
+          "profiles": ["home_lan", "rpi4"]
+        },
+        {
+          "id": "o2switch_https_bounce",
+          "protocol": "https_api",
+          "target": "{o2switch_url}/api/files?source=freebox-disks&profile=wan_http",
+          "probe_key": "https_o2switch",
+          "profiles": ["nomad_wan", "work_vpn", "home_lan"]
+        },
+        {
+          "id": "wan_http_o2switch_only",
+          "protocol": "http_gateway",
+          "target": "http://{nas_wan_host}:80/health",
+          "probe_key": "wan_http_freebox_direct",
+          "profiles": ["o2switch"]
+        }
+      ]
+    },
+    {
+      "id": "local-snippets",
+      "category": "media_source",
+      "name": "Local Video Test Snippets (15s-60s)",
+      "desync_tier": "immutable_unit",
+      "description": "Local MP4 benchmark video cuts (e.g. *_mid15s.mp4) and companion .srt/.phash files stored on the workstation.",
+      "local_rel_path": "data/snippets",
+      "channels": [
+        {
+          "id": "workstation_fs",
+          "protocol": "local_fs",
+          "target": "{effective_data_dir}/snippets",
+          "probe_key": "local_fs",
+          "profiles": ["home_lan", "nomad_wan", "work_vpn"]
+        }
+      ]
+    },
+    {
+      "id": "snippets-ahash",
+      "category": "internal_artifact",
+      "name": "Local Audio Fingerprint Snippets (.ahash)",
+      "desync_tier": "immutable_unit",
+      "description": "Dedicated directory for snippet-level audio fingerprints on workstation.",
+      "local_rel_path": "data/snippets_ahash",
+      "channels": [
+        {
+          "id": "workstation_fs",
+          "protocol": "local_fs",
+          "target": "{effective_data_dir}/snippets_ahash",
+          "probe_key": "local_fs",
+          "profiles": ["home_lan", "nomad_wan", "work_vpn"]
+        }
+      ]
+    },
+    {
+      "id": "phash-files",
+      "category": "internal_artifact",
+      "name": "Visual Perceptual Hash Corpus (__PHASH__/*.phash)",
+      "desync_tier": "evolving_corpus",
+      "unit_tier": "immutable_unit",
+      "description": "64-bit DCT visual frame fingerprints (.phash) and metadata sidecars (.json). Largest corpus is on rpi4 and o2switch.",
+      "local_rel_path": "data/__PHASH__",
+      "remote_rel_path": "dbsrt/data/__PHASH__",
+      "channels": [
+        {
+          "id": "workstation_fs",
+          "protocol": "local_fs",
+          "target": "{effective_data_dir}/__PHASH__",
+          "probe_key": "local_fs",
+          "profiles": ["home_lan", "nomad_wan", "work_vpn"]
+        },
+        {
+          "id": "ssh_rpi4",
+          "protocol": "ssh",
+          "target": "rpi4:~/dbsrt/data/__PHASH__",
+          "probe_key": "ssh_rpi4",
+          "profiles": ["home_lan"]
+        },
+        {
+          "id": "ssh_o2switch",
+          "protocol": "ssh",
+          "target": "o2switch:~/dbsrt/data/__PHASH__",
+          "probe_key": "ssh_o2switch",
+          "profiles": ["home_lan", "work_vpn"]
+        },
+        {
+          "id": "https_o2switch_meta",
+          "protocol": "https_api",
+          "target": "{o2switch_url}/api/phashes",
+          "probe_key": "https_o2switch",
+          "profiles": ["nomad_wan", "work_vpn", "home_lan"]
+        },
+        {
+          "id": "https_o2switch_download",
+          "protocol": "https_api",
+          "target": "{o2switch_url}/api/artifact/download?kind=phash&file=<filename>",
+          "probe_key": "https_o2switch",
+          "profiles": ["nomad_wan", "work_vpn", "home_lan"]
+        }
+      ]
+    },
+    {
+      "id": "ahash-files",
+      "category": "internal_artifact",
+      "name": "Audio Chromaprint/Sub-band Hash Corpus (__AHASH__/*.ahash)",
+      "desync_tier": "evolving_corpus",
+      "unit_tier": "immutable_unit",
+      "description": "Audio perceptual fingerprint files (.ahash + .json). Primary cloud extraction runs on o2switch (rpi4 does not store __AHASH__).",
+      "local_rel_path": "data/__AHASH__",
+      "remote_rel_path": "dbsrt/data/__AHASH__",
+      "channels": [
+        {
+          "id": "ssh_o2switch",
+          "protocol": "ssh",
+          "target": "o2switch:~/dbsrt/data/__AHASH__",
+          "probe_key": "ssh_o2switch",
+          "profiles": ["home_lan", "work_vpn"]
+        },
+        {
+          "id": "workstation_fs",
+          "protocol": "local_fs",
+          "target": "{effective_data_dir}/__AHASH__",
+          "probe_key": "local_fs",
+          "profiles": ["home_lan", "nomad_wan", "work_vpn"]
+        },
+        {
+          "id": "https_o2switch_download",
+          "protocol": "https_api",
+          "target": "{o2switch_url}/api/artifact/download?kind=ahash&file=<filename>",
+          "probe_key": "https_o2switch",
+          "profiles": ["nomad_wan", "work_vpn", "home_lan"]
+        },
+        {
+          "id": "https_o2switch_search",
+          "protocol": "https_api",
+          "target": "{o2switch_url}/v1/search/ahash",
+          "probe_key": "https_o2switch",
+          "profiles": ["nomad_wan", "work_vpn", "home_lan"]
+        }
+      ]
+    },
+    {
+      "id": "packed-catalog",
+      "category": "internal_artifact",
+      "name": "Zero-DB Packed MIH Binary Catalog (catalog.dbphash)",
+      "desync_tier": "evolving_corpus",
+      "description": "Memory-mapped DBSRT v2 binary index compiled nightly on o2switch and mirrored to rpi4. Always check STALE_LOCAL before benchmarking.",
+      "local_rel_path": "data/catalog.dbphash",
+      "remote_rel_path": "dbsrt/data/catalog.dbphash",
+      "channels": [
+        {
+          "id": "workstation_fs",
+          "protocol": "local_fs",
+          "target": "{effective_data_dir}/catalog.dbphash",
+          "probe_key": "local_fs",
+          "profiles": ["home_lan", "nomad_wan", "work_vpn"]
+        },
+        {
+          "id": "ssh_rpi4",
+          "protocol": "ssh",
+          "target": "rpi4:~/dbsrt/data/catalog.dbphash",
+          "probe_key": "ssh_rpi4",
+          "profiles": ["home_lan"]
+        },
+        {
+          "id": "ssh_o2switch",
+          "protocol": "ssh",
+          "target": "o2switch:~/dbsrt/data/catalog.dbphash",
+          "probe_key": "ssh_o2switch",
+          "profiles": ["home_lan", "work_vpn"]
+        },
+        {
+          "id": "https_o2switch_recognize",
+          "protocol": "https_api",
+          "target": "{o2switch_url}/v1/recognize",
+          "probe_key": "https_o2switch",
+          "profiles": ["nomad_wan", "work_vpn", "home_lan"]
+        }
+      ]
+    },
+    {
+      "id": "certified-couplings",
+      "category": "internal_artifact",
+      "name": "Certified Ground-Truth Subtitle Couplings (SRT/couplings.json)",
+      "desync_tier": "evolving_corpus",
+      "description": "Zero-DB relational registry mapping certified reference video timelines to verified multi-language .srt files.",
+      "local_rel_path": "data/SRT/couplings.json",
+      "remote_rel_path": "dbsrt/data/SRT/couplings.json",
+      "channels": [
+        {
+          "id": "workstation_fs",
+          "protocol": "local_fs",
+          "target": "{effective_data_dir}/SRT/couplings.json",
+          "probe_key": "local_fs",
+          "profiles": ["home_lan", "nomad_wan", "work_vpn"]
+        },
+        {
+          "id": "ssh_rpi4",
+          "protocol": "ssh",
+          "target": "rpi4:~/dbsrt/data/SRT/couplings.json",
+          "probe_key": "ssh_rpi4",
+          "profiles": ["home_lan"]
+        },
+        {
+          "id": "ssh_o2switch",
+          "protocol": "ssh",
+          "target": "o2switch:~/dbsrt/data/SRT/couplings.json",
+          "probe_key": "ssh_o2switch",
+          "profiles": ["home_lan", "work_vpn"]
+        },
+        {
+          "id": "https_o2switch_download",
+          "protocol": "https_api",
+          "target": "{o2switch_url}/api/artifact/download?kind=couplings&file=couplings.json",
+          "probe_key": "https_o2switch",
+          "profiles": ["nomad_wan", "work_vpn", "home_lan"]
+        }
+      ]
+    },
+    {
+      "id": "postgresql-db",
+      "category": "live_service",
+      "name": "PostgreSQL 17 Relational & SP-GiST BK-Tree Database",
+      "desync_tier": "live_state",
+      "description": "Relational database (medias, frames, subtitles, sub_frames). Local Docker runs on :5433; RPi4 appliance runs on :5432.",
+      "channels": [
+        {
+          "id": "pg_local_docker",
+          "protocol": "postgresql",
+          "target": "postgresql://docker:***@127.0.0.1:5433/bktreedb",
+          "probe_key": "pg_local",
+          "profiles": ["home_lan", "nomad_wan", "work_vpn"]
+        },
+        {
+          "id": "pg_rpi4_lan",
+          "protocol": "postgresql",
+          "target": "postgresql://docker:***@{rpi4_lan_host}:5432/bktreedb",
+          "probe_key": "pg_rpi4",
+          "profiles": ["home_lan", "rpi4"]
+        }
+      ]
+    },
+    {
+      "id": "reports-and-inventories",
+      "category": "internal_artifact",
+      "name": "Batch Ingestion Reports & Trajectory Audits (data/reports/)",
+      "desync_tier": "evolving_corpus",
+      "description": "JSONL batch worker telemetry, trajectory audit trails, and NAS inventory snapshots.",
+      "local_rel_path": "data/reports",
+      "remote_rel_path": "dbsrt/data/reports",
+      "channels": [
+        {
+          "id": "workstation_fs",
+          "protocol": "local_fs",
+          "target": "{effective_data_dir}/reports",
+          "probe_key": "local_fs",
+          "profiles": ["home_lan", "nomad_wan", "work_vpn"]
+        },
+        {
+          "id": "ssh_o2switch",
+          "protocol": "ssh",
+          "target": "o2switch:~/dbsrt/data/reports",
+          "probe_key": "ssh_o2switch",
+          "profiles": ["home_lan", "work_vpn"]
+        },
+        {
+          "id": "https_o2switch_trajectories",
+          "protocol": "https_api",
+          "target": "{o2switch_url}/api/trajectories",
+          "probe_key": "https_o2switch",
+          "profiles": ["nomad_wan", "work_vpn", "home_lan"]
+        }
+      ]
+    },
+    {
+      "id": "test-fixtures",
+      "category": "internal_artifact",
+      "name": "Versioned Hermetic Test Fixtures (tests/data/ & data/*.mp4)",
+      "desync_tier": "immutable_unit",
+      "description": "Git-versioned deterministic media and subtitle fixtures always present in every checkout and worktree.",
+      "local_rel_path": "tests/data",
+      "channels": [
+        {
+          "id": "repo_fs",
+          "protocol": "local_fs",
+          "target": "{repo_root}/tests/data",
+          "probe_key": "local_fs",
+          "profiles": ["home_lan", "nomad_wan", "work_vpn", "rpi4", "o2switch"]
+        }
+      ]
+    }
+  ]
+}

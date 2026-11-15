@@ -1,6 +1,11 @@
-use dbsrt_server::{create_router, MetricsResponse, RecognizeRequest, RecognizeResponse};
+use dbsrt_core::OpenSubtitlesProvider;
+use dbsrt_server::{
+    create_router_with_state, AppState, AppStateInitOptions, MetricsResponse, RecognizeRequest,
+    RecognizeResponse,
+};
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 #[tokio::test]
 async fn test_api_recognize_fingerprint_and_metrics() {
@@ -10,7 +15,18 @@ async fn test_api_recognize_fingerprint_and_metrics() {
     let test_phash_dir = repo_root.join("tests/data");
     let srt_dir = repo_root.join("tests/data");
 
-    let app = create_router(test_phash_dir.clone(), srt_dir.clone());
+    let state = AppState::with_options(
+        test_phash_dir.clone(),
+        srt_dir.clone(),
+        Arc::new(OpenSubtitlesProvider::new(None)),
+        AppStateInitOptions {
+            dbphash_path: Some(test_phash_dir.join("isolated_nonexistent.dbphash")),
+            extra_phash_dirs: Vec::new(),
+            ahash_dir: None,
+            dbahash_path: None,
+        },
+    );
+    let app = create_router_with_state(state);
 
     // Bind on ephemeral port
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")

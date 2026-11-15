@@ -1,0 +1,118 @@
+{
+  "skill_name": "pydbsrt-data-access",
+  "schema_version": 1,
+  "positive_triggers": [
+    {
+      "id": "pos-01-ahash-counts",
+      "prompt": "Combien de fichiers .ahash existent sur local, rpi4 et o2switch, et où se trouve la source la plus complète ?",
+      "should_trigger": true
+    },
+    {
+      "id": "pos-02-catalog-freshness",
+      "prompt": "Vérifie si notre fichier data/catalog.dbphash local est bien à jour par rapport aux serveurs distants avant de lancer le benchmark.",
+      "should_trigger": true
+    },
+    {
+      "id": "pos-03-freebox-disks",
+      "prompt": "Liste tous les disques Freebox disponibles dans le projet et comment accéder aux vidéos dessus.",
+      "should_trigger": true
+    },
+    {
+      "id": "pos-04-nomad-4g-nas",
+      "prompt": "Je suis en partage de connexion 4G/5G hors de chez moi, comment je peux lister ou récupérer un épisode sur le NAS Synology sans bloquer le terminal ?",
+      "should_trigger": true
+    },
+    {
+      "id": "pos-05-work-vpn-cifs-hang",
+      "prompt": "Je suis au bureau avec le VPN actif et ls /media/ descend dans le vide, comment accéder aux données du projet proprement ?",
+      "should_trigger": true
+    },
+    {
+      "id": "pos-06-snippet-coupling",
+      "prompt": "Trouve un extrait vidéo Andor dans snippets et vérifie s'il possède un couplage certifié dans couplings.json.",
+      "should_trigger": true
+    },
+    {
+      "id": "pos-07-worktree-empty-data",
+      "prompt": "Je viens de créer un git worktree isolé et le dossier data/ ne contient ni catalog.dbphash ni snippets, comment initialiser les accès ?",
+      "should_trigger": true
+    },
+    {
+      "id": "pos-08-postgresql-endpoint",
+      "prompt": "Quelle instance PostgreSQL (locale Docker ou RPi4) est actuellement active et joignable sur mon réseau ?",
+      "should_trigger": true
+    },
+    {
+      "id": "pos-09-fetch-phash",
+      "prompt": "Rapatrie le dernier catalog.dbphash depuis le noeud distant le plus rapide vers mon poste.",
+      "should_trigger": true
+    },
+    {
+      "id": "pos-10-reports-location",
+      "prompt": "Où sont stockés les rapports batch_*.jsonl et les audits de trajectoires entre mon poste et o2switch ?",
+      "should_trigger": true
+    },
+    {
+      "id": "pos-11-ahash-human-title",
+      "prompt": "Trouve le fichier .ahash (et son moviehash hexadécimal + durée) correspondant au documentaire 'Hôpital, la république en panne'.",
+      "should_trigger": true
+    },
+    {
+      "id": "pos-12-remote-ffprobe-inspect",
+      "prompt": "Donne la résolution vidéo, le codec audio et les sous-titres intégrés du film Boîte Noire stocké sur les disques Freebox.",
+      "should_trigger": true
+    }
+  ],
+  "negative_triggers": [
+    {
+      "id": "neg-01-rust-mih-algorithm",
+      "prompt": "Explique le découpage en 4 sous-blocs de 16 bits de l'algorithme Multi-Index Hashing dans crates/dbsrt-index/src/mih.rs.",
+      "should_trigger": false
+    },
+    {
+      "id": "neg-02-lua-dialog-layout",
+      "prompt": "Ajuste le libellé du bouton Rechercher dans l'extension Lua vlc-plugin/vlsub_dbsrt.lua.",
+      "should_trigger": false
+    },
+    {
+      "id": "neg-03-tui-help-tab",
+      "prompt": "Ajoute le raccourci clavier '?' dans l'onglet HelpTab de dbsrt top côté Rust.",
+      "should_trigger": false
+    },
+    {
+      "id": "neg-04-mkdocs-mermaid-css",
+      "prompt": "Corrige le style CSS du zoom Mermaid dans la documentation MkDocs Material.",
+      "should_trigger": false
+    },
+    {
+      "id": "neg-05-srt-parser-shift",
+      "prompt": "Écris un test unitaire Rust pour la fonction d'application d'offset temporel en millisecondes sur une cue SubRip.",
+      "should_trigger": false
+    },
+    {
+      "id": "neg-06-rust-clippy-refactor",
+      "prompt": "Réduis la complexité cyclomatique d'une fonction dans crates/dbsrt-core pour passer sous le seuil de 20.",
+      "should_trigger": false
+    },
+    {
+      "id": "neg-07-git-commit-format",
+      "prompt": "Propose un message de commit Conventional Commits pour ce refactoring Rust.",
+      "should_trigger": false
+    },
+    {
+      "id": "neg-08-dct-math-formula",
+      "prompt": "Démontre pourquoi la DCT 2D 32x32 conserve les basses fréquences dans les 64 premiers coefficients.",
+      "should_trigger": false
+    },
+    {
+      "id": "neg-09-github-issue-labels",
+      "prompt": "Quels labels GitHub faut-il attacher à une Pull Request de refactoring Rust selon GEMINI.md ?",
+      "should_trigger": false
+    },
+    {
+      "id": "neg-10-spgist-c-extension",
+      "prompt": "Comment est implémentée la distance de Hamming bit-à-bit dans l'extension C PostgreSQL spgist_hamming ?",
+      "should_trigger": false
+    }
+  ]
+}

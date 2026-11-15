@@ -89,15 +89,25 @@ def test_list_source_files_snippets() -> None:
         assert "watchmen" in item["name"].lower()
 
 
-def test_list_source_files_freebox_gateway() -> None:
-    """Tests listing files from Freebox targets catalog over HTTP gateway profile."""
-    targets_file = Path("data/reports/freebox_batch_targets.json")
-    if not targets_file.is_file():
-        pytest.skip("freebox_batch_targets.json not present")
+def test_list_source_files_freebox_gateway(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tests listing files from Freebox targets catalog over HTTP gateway profile across all 3 disks."""
+    reports_dir = tmp_path / "data" / "reports"
+    reports_dir.mkdir(parents=True)
+    sample_targets = [
+        {
+            "path": f"Disque_1_1/Vidéos/Film_{idx:03d}.1080p.mkv",
+            "filename": f"Film_{idx:03d}.1080p.mkv",
+            "size_bytes": 1_500_000_000 + idx,
+        }
+        for idx in range(120)
+    ]
+    (reports_dir / "freebox_batch_targets.json").write_text(json.dumps(sample_targets), encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DBSRT_PORTAL_CACHE_DIR", str(tmp_path / "cache"))
 
     res = list_source_files("freebox-disks", "lan_http", page=1, limit=5, force=True)
     assert res["status"] == "ok"
-    assert res["total_items"] > 100
+    assert res["total_items"] == 120
     assert len(res["items"]) == 5
     assert res["items"][0]["size_bytes"] > 0
     assert not res["items"][0]["is_dir"]
@@ -165,6 +175,12 @@ def test_get_sources_metadata() -> None:
 
     fbx = next(s for s in meta["sources"] if s["id"] == "freebox-disks")
     fbx_profiles = {p["id"]: p for p in fbx["profiles"]}
+    for local_disk_id in ("disque1", "disque2", "disque1_1"):
+        assert local_disk_id in fbx_profiles
+        assert fbx_profiles[local_disk_id]["envs"] == ["local"]
+    for rpi4_disk_id in ("rpi4_disque1", "rpi4_disque2", "rpi4_disque1_1"):
+        assert rpi4_disk_id in fbx_profiles
+        assert fbx_profiles[rpi4_disk_id]["envs"] == ["rpi4"]
     assert "lan_ftp" in fbx_profiles
     assert fbx_profiles["lan_ftp"]["envs"] == ["local", "rpi4"]
     assert "lan_http" in fbx_profiles
@@ -297,13 +313,26 @@ def test_portal_http_api_endpoints() -> None:
                 assert phashes_data["summary"]["catalog_count"] > 0
             assert len(phashes_data["items"]) <= 5
 
-        # 4d. GET /api/phash/details (Microscopic inspection & Path Traversal Prevention)
+        # 4d. GET /api/phash/details & /api/artifact/download (Microscopic inspection, Binary Stream & Traversal Guard)
         with pytest.raises(urllib.error.HTTPError) as exc_info:
             urllib.request.urlopen(f"{base_url}/api/phash/details?moviehash=../../etc/passwd", timeout=5)
         assert exc_info.value.code == 404
 
+        with pytest.raises(urllib.error.HTTPError) as dl_trav_exc:
+            urllib.request.urlopen(f"{base_url}/api/artifact/download?kind=phash&file=../../etc/passwd", timeout=5)
+        assert dl_trav_exc.value.code == 400
+
         sample_phash = Path("data/__PHASH__/002835455e305309.24.0fps.phash")
         if sample_phash.is_file():
+            import hashlib
+
+            dl_url = f"{base_url}/api/artifact/download?kind=phash&file={sample_phash.name}"
+            with urllib.request.urlopen(dl_url, timeout=5) as dl_resp:
+                assert dl_resp.status == 200
+                dl_bytes = dl_resp.read()
+                assert dl_bytes == sample_phash.read_bytes()
+                assert dl_resp.headers.get("X-Checksum-SHA256") == hashlib.sha256(dl_bytes).hexdigest()
+
             detail_url = f"{base_url}/api/phash/details?moviehash=002835455e305309"
             with urllib.request.urlopen(detail_url, timeout=5) as resp:
                 assert resp.status == 200
@@ -394,3 +423,143 @@ def test_trajectory_kpi_coverage_clamped_and_file_filtering() -> None:
     kpis = _compute_trajectory_kpi(mock_records)
     assert 0.0 <= kpis["catalog_coverage_pct"] <= 100.0
     assert kpis["unique_catalog_covered"] <= kpis["catalog_total"]
+
+
+def test_portal_cifs_hang_guard_and_gateway_html_rejection(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Verifies CIFS D-state hang guard off Home LAN, Disque_1_1 SSOT resolution, and WAN HTML rejection."""
+    from unittest.mock import MagicMock
+
+    import scripts.portal_server as ps
+
+    monkeypatch.setattr(ps, "_is_cifs_safe_to_stat", lambda: False)
+    monkeypatch.setattr(ps.os, "scandir", lambda _p: (_ for _ in ()).throw(AssertionError("scandir must not run!")))
+    blocked = ps.probe_local_fs_profile("Montage CIFS Disque 1 1", str(tmp_path), is_cifs=True)
+    assert blocked["accessible"] is False
+    assert blocked["status"] == "offline"
+    assert "anti-gel SMB" in blocked["reason"]
+
+    is_loc, is_ftp, resolved_p, _, _ = ps._resolve_freebox_endpoint("disque1_1", "Vidéos/film.mkv")
+    assert is_loc is True and is_ftp is False
+    assert resolved_p.endswith("Freebox/Disque_1_1/Vidéos/film.mkv")
+
+    html_resp = MagicMock()
+    html_resp.headers.get_content_type.return_value = "text/html"
+    html_resp.read.return_value = b"<html>Synology Web Station</html>"
+    html_resp.__enter__.return_value = html_resp
+    monkeypatch.setattr(ps.urllib.request, "urlopen", lambda *_a, **_kw: html_resp)
+    bad_gw = ps.probe_http_gateway_profile("Passerelle HTTP WAN", "http://nas.example.test:80/health")
+    assert bad_gw["accessible"] is False
+    assert bad_gw["status"] == "offline"
+    assert "non-JSON" in bad_gw["reason"]
+
+
+def test_freebox_gateway_zero_false_positive_and_live_catalog(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Verifies gateway probe returns empty/inaccessible when 0 media exist and lists live /catalog."""
+    import scripts.portal_server as ps
+    from scripts.infra.rpi4.rpi4_freebox_gateway import FreeboxRangeHTTPHandler
+
+    monkeypatch.setenv("DBSRT_PORTAL_CACHE_DIR", str(tmp_path / "cache"))
+    empty_root = tmp_path / "empty_fbx"
+    for share in ("Disque_1", "Disque_2", "Disque_1_1"):
+        (empty_root / share).mkdir(parents=True)
+
+    class EmptyGatewayHandler(FreeboxRangeHTTPHandler):
+        server_root = empty_root
+
+    srv_empty = http.server.ThreadingHTTPServer(("127.0.0.1", 0), EmptyGatewayHandler)
+    port_empty = srv_empty.server_address[1]
+    threading.Thread(target=srv_empty.serve_forever, daemon=True).start()
+    try:
+        probe_empty = ps.probe_http_gateway_profile(
+            "Passerelle HTTP WAN", f"http://127.0.0.1:{port_empty}/health?force=1"
+        )
+        assert probe_empty["accessible"] is False
+        assert probe_empty["status"] == "empty"
+        assert probe_empty["files_count"] == 0
+    finally:
+        srv_empty.shutdown()
+        srv_empty.server_close()
+
+    # Now populate 2 eligible videos and 1 excluded personal video
+    vid_dir = empty_root / "Disque_1_1" / "Vidéos"
+    photos_dir = empty_root / "Disque_1_1" / "Photos"
+    vid_dir.mkdir(parents=True)
+    photos_dir.mkdir(parents=True)
+    (vid_dir / "Joker (2019)[2160p].mkv").write_bytes(b"\x00" * 128)
+    (vid_dir / "Cruauté.2024.1080p.mp4").write_bytes(b"\x00" * 256)
+    (photos_dir / "Private.mp4").write_bytes(b"\x00" * 512)
+
+    srv_live = http.server.ThreadingHTTPServer(("127.0.0.1", 0), EmptyGatewayHandler)
+    port_live = srv_live.server_address[1]
+    threading.Thread(target=srv_live.serve_forever, daemon=True).start()
+    try:
+        live_health = f"http://127.0.0.1:{port_live}/health?force=1"
+        probe_live = ps.probe_http_gateway_profile("Passerelle HTTP WAN", live_health)
+        assert probe_live["accessible"] is True
+        assert probe_live["status"] == "online"
+        assert probe_live["files_count"] == 2
+
+        monkeypatch.setattr(ps, "DEFAULT_GATEWAY_WAN_URL", f"http://127.0.0.1:{port_live}/health")
+        listed = ps.list_source_files("freebox-disks", "wan_http", page=1, limit=25, force=True)
+        assert listed["status"] == "ok"
+        assert listed["total_items"] == 2
+        assert {it["name"] for it in listed["items"]} == {"Joker (2019)[2160p].mkv", "Cruauté.2024.1080p.mp4"}
+    finally:
+        srv_live.shutdown()
+        srv_live.server_close()
+
+
+def test_phash_resolution_unicode_percent_and_no_substring_collision(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Ensures pHash sidecar matching avoids substring collisions and resolves Unicode/percent names."""
+    import struct
+    import unicodedata
+
+    import scripts.portal_server as ps
+
+    sidecars = {
+        "0ce0eae17be4ec9a": {"media_name": "28.mkv"},
+        "abcdef0123456789": {"media_name": "Cruauté (2019) [1080p].mkv"},
+    }
+    idx = ps._build_sidecar_name_index(sidecars)
+    assert ps._resolve_phash_moviehash("28 Semaines Plus Tard (2007).24.0fps.phash", sidecars, idx) is None
+    assert (
+        ps._resolve_phash_moviehash(
+            unicodedata.normalize("NFD", "Cruauté (2019) [1080p].mkv.23.98fps.phash"), sidecars, idx
+        )
+        == "abcdef0123456789"
+    )
+
+    phash_dir = tmp_path / "data" / "__PHASH__"
+    phash_dir.mkdir(parents=True)
+    sample_hashes = struct.pack(">4Q", 0x0F0F0F0F0F0F0F0F, 0xF0F0F0F0F0F0F0F0, 0xAAAAAAAAAAAAAAAA, 0x5555555555555555)
+    long_pct_name = ("%20".join(["The", "Dark", "Knight"] * 9)) + ".23.98fps.phash"
+    unicode_name = "01 Cruauté [1080p] (VOSTFR) l'épée....23.98fps.phash"
+    (phash_dir / long_pct_name).write_bytes(sample_hashes)
+    (phash_dir / unicode_name).write_bytes(sample_hashes)
+
+    monkeypatch.chdir(tmp_path)
+    res_long = ps.inspect_phash_microscopic(long_pct_name)
+    assert res_long["status"] == "ok"
+    assert res_long["frame_count"] == 4
+
+    res_oversized = ps.inspect_phash_microscopic(("A" * 350) + ".phash")
+    assert res_oversized["status"] == "not_found"
+
+    res_nfd = ps.inspect_phash_microscopic(unicodedata.normalize("NFD", unicode_name))
+    assert res_nfd["status"] == "ok"
+    assert res_nfd["frame_count"] == 4
+
+
+def test_ftp_and_portal_excludes_system_and_fingerprint_dirs() -> None:
+    """Ensures #recycle, __PHASH__, __AHASH__, @eaDir, and dotfiles are filtered from FTP/Explorer."""
+    import scripts.portal_server as ps
+
+    for excluded in ("__PHASH__", "__AHASH__", "#recycle", "@eaDir", ".Trash-1000", ".hidden"):
+        assert ps._is_excluded_portal_entry(excluded) is True
+        assert ps._parse_mlsd_item(excluded, {"type": "dir"}, "") is None
+        assert ps._parse_nlst_item(excluded, "") is None
+
+    valid_dir = ps._parse_mlsd_item("Andor", {"type": "dir"}, "")
+    assert valid_dir is not None and valid_dir["is_dir"] is True and valid_dir["name"] == "Andor"

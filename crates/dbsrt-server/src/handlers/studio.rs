@@ -12,18 +12,250 @@ use axum::Json;
 use dbsrt_core::{CertifiedMediaCoupling, CouplingRegistry, SubFrameAnchor};
 use dbsrt_index::parse_fps_from_phash_stem;
 use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+/// Byte width of a single 64-bit DCT-II perceptual hash frame in `.phash` files.
+const BYTES_PER_PHASH_FRAME: u64 = 8;
+
+/// Fixed-point scaling factor used by `DbphashMediaEntry::fps_x1000`.
+const FPS_X1000_SCALE: f64 = 1000.0;
+
+/// Canonical sibling directory name storing raw `.phash` binaries alongside `catalog.dbphash`.
+const RAW_PHASH_SUBDIR: &str = "__PHASH__";
+
+/// File extension of raw perceptual hash fingerprint streams.
+const PHASH_FILE_EXT: &str = "phash";
+
+/// Serves the embedded single-page `dbsrt Studio` HTML backoffice.
+///
+/// # Arguments
+/// None.
+///
+/// # Returns
+/// Static UTF-8 HTML document wrapping `studio.html`.
+///
+/// # Errors
+/// Infallible handler.
+///
+/// # Panics
+/// Never panics.
+///
+/// # Data Flow & Invariants
+/// Returns the compile-time embedded `studio.html` payload without disk I/O.
 pub async fn studio_ui_handler() -> Html<&'static str> {
     Html(include_str!("../studio.html"))
 }
 
+/// Resolves candidate `.phash` directories for Studio catalog listing without loading `MmapLibrary`.
+///
+/// # Arguments
+/// * `state` - Shared `AppState` holding configured `phash_dir`, `dbphash_path`, and `subtitles_dir`.
+///
+/// # Returns
+/// Deduplicated vector of existing `.phash` directories, including sibling `__PHASH__` folders
+/// adjacent to `catalog.dbphash` or `subtitles_dir` when `--phash-dir` points to `empty_phash`.
+///
+/// # Panics
+/// Never panics.
+///
+/// # Data Flow & Invariants
+/// Starts from `state.effective_phash_dirs(None)` and appends sibling `__PHASH__` directories
+/// strictly for lightweight `read_dir` metadata enumeration (zero RAM MIH allocation).
+fn studio_phash_scan_dirs(state: &AppState) -> Vec<PathBuf> {
+    let mut dirs = state.effective_phash_dirs(None);
+    let db_sibling = state
+        .dbphash_path()
+        .and_then(|p| p.parent().map(|d| d.join(RAW_PHASH_SUBDIR)));
+    let srt_sibling = state
+        .subtitles_dir
+        .parent()
+        .map(|d| d.join(RAW_PHASH_SUBDIR));
+
+    for cand in [db_sibling, srt_sibling].into_iter().flatten() {
+        if cand.is_dir() && !dirs.contains(&cand) {
+            dirs.push(cand);
+        }
+    }
+    dirs
+}
+
+/// Builds a [`StudioPhashEntry`] from a single filesystem path if it is a `.phash` file.
+///
+/// # Arguments
+/// * `path` - Filesystem entry path to inspect.
+/// * `certified_names` - Lookup set of certified `media_name` and `phash_filename` identifiers.
+///
+/// # Returns
+/// `Some(StudioPhashEntry)` when `path` ends with `.phash`, otherwise `None`.
+///
+/// # Panics
+/// Never panics.
+///
+/// # Data Flow & Invariants
+/// Reads inode size via `std::fs::metadata` without mapping file contents into memory.
+fn build_phash_entry_from_path(
+    path: &Path,
+    certified_names: &HashSet<String>,
+) -> Option<StudioPhashEntry> {
+    if path.extension().and_then(|e| e.to_str()) != Some(PHASH_FILE_EXT) {
+        return None;
+    }
+    let filename = path.file_name()?.to_string_lossy().to_string();
+    let size_bytes = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    let frame_count = (size_bytes / BYTES_PER_PHASH_FRAME) as usize;
+    let media_name = dbsrt_core::phash_media_name(path);
+    let fps = parse_fps_from_phash_stem(&media_name);
+    let is_certified = certified_names.contains(&media_name) || certified_names.contains(&filename);
+    Some(StudioPhashEntry {
+        filename,
+        media_name,
+        fps,
+        frame_count,
+        size_bytes,
+        is_certified,
+    })
+}
+
+/// Appends `.phash` entries from a single directory into `out` when not yet seen in `seen_files`.
+///
+/// # Arguments
+/// * `dir` - Directory path to scan via `std::fs::read_dir`.
+/// * `certified_names` - Lookup set of certified media names and filenames.
+/// * `seen_files` - Mutable deduplication set of `.phash` filenames.
+/// * `out` - Output vector accumulating [`StudioPhashEntry`] records.
+///
+/// # Panics
+/// Never panics.
+///
+/// # Data Flow & Invariants
+/// Skips unreadable directories and non-`.phash` entries without mapping files into memory.
+fn append_dir_phash_entries(
+    dir: &Path,
+    certified_names: &HashSet<String>,
+    seen_files: &mut HashSet<String>,
+    out: &mut Vec<StudioPhashEntry>,
+) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for item in entries
+        .flatten()
+        .filter_map(|e| build_phash_entry_from_path(&e.path(), certified_names))
+    {
+        if seen_files.insert(item.filename.clone()) {
+            out.push(item);
+        }
+    }
+}
+
+/// Synthesizes [`StudioPhashEntry`] items from `MmapDbphash` when no loose `.phash` files exist.
+///
+/// # Arguments
+/// * `reader` - Memory-mapped `catalog.dbphash` reader.
+/// * `certified_names` - Lookup set of certified media names and filenames.
+/// * `out` - Output vector accumulating synthesized [`StudioPhashEntry`] records.
+///
+/// # Panics
+/// Never panics.
+///
+/// # Data Flow & Invariants
+/// Reads zero-copy media table descriptors and string table titles from `MmapDbphash`.
+fn append_dbphash_fallback_entries(
+    reader: &dbsrt_index::MmapDbphash,
+    certified_names: &HashSet<String>,
+    out: &mut Vec<StudioPhashEntry>,
+) {
+    for entry in reader.media_entries() {
+        let media_name = reader.get_title(entry).to_string();
+        let filename = format!("{media_name}.{PHASH_FILE_EXT}");
+        let frame_u64 = entry.known_frame_count().unwrap_or(0);
+        let is_certified =
+            certified_names.contains(&media_name) || certified_names.contains(&filename);
+        out.push(StudioPhashEntry {
+            filename,
+            media_name,
+            fps: f64::from(entry.fps_x1000) / FPS_X1000_SCALE,
+            frame_count: frame_u64 as usize,
+            size_bytes: frame_u64 * BYTES_PER_PHASH_FRAME,
+            is_certified,
+        });
+    }
+}
+
+/// Populates Studio `.phash` catalog entries from disk metadata or falls back to `MmapDbphash`.
+///
+/// # Arguments
+/// * `state` - Shared `AppState` providing `dbphash_reader` and directory paths.
+/// * `certified_names` - Set of certified media names and `.phash` filenames.
+///
+/// # Returns
+/// Tuple `(indexed_phash_files, catalog_phashes)` sorted certified-first then lexicographically.
+///
+/// # Panics
+/// Never panics.
+///
+/// # Data Flow & Invariants
+/// 1. Enumerates `.phash` files across [`studio_phash_scan_dirs`] deduplicated by filename.
+/// 2. If no loose `.phash` files exist on disk (e.g. appliance mode with only `catalog.dbphash`),
+///    synthesizes entries directly from `MmapDbphash::media_entries()`.
+fn collect_studio_catalog_phashes(
+    state: &AppState,
+    certified_names: &HashSet<String>,
+) -> (usize, Vec<StudioPhashEntry>) {
+    let mut catalog_phashes = Vec::new();
+    let mut seen_files = HashSet::new();
+
+    for dir in studio_phash_scan_dirs(state) {
+        append_dir_phash_entries(&dir, certified_names, &mut seen_files, &mut catalog_phashes);
+    }
+
+    let reader_guard = state.dbphash_reader.load();
+    let base_dbphash_count = reader_guard
+        .as_ref()
+        .map(|r| r.media_entries().len())
+        .unwrap_or(0);
+
+    if catalog_phashes.is_empty() {
+        if let Some(ref reader) = *reader_guard {
+            append_dbphash_fallback_entries(reader, certified_names, &mut catalog_phashes);
+        }
+    }
+
+    catalog_phashes.sort_by(|a, b| {
+        b.is_certified
+            .cmp(&a.is_certified)
+            .then_with(|| a.media_name.cmp(&b.media_name))
+    });
+
+    let indexed_phash_files = catalog_phashes.len().max(base_dbphash_count);
+    (indexed_phash_files, catalog_phashes)
+}
+
+/// Returns the Studio relational overview (`GET /v1/couplings`), combining PostgreSQL counts,
+/// certified couplings, and the `.phash` catalog inventory.
+///
+/// # Arguments
+/// * `state` - Shared daemon `AppState`.
+/// * `query` - Optional `summary=true` flag omitting bulky `sub_frames` vectors from initial payload.
+///
+/// # Returns
+/// JSON [`CouplingsOverviewResponse`] with PostgreSQL status, certified couplings, and `.phash` list.
+///
+/// # Errors
+/// Degrades gracefully to Zero-DB JSON mode if PostgreSQL is offline or unconfigured.
+///
+/// # Panics
+/// Never panics.
+///
+/// # Data Flow & Invariants
+/// Reads `CouplingRegistry`, optionally enriches with PostgreSQL table counts, and resolves the
+/// `.phash` catalog via [`collect_studio_catalog_phashes`] even when `--phash-dir` uses `empty_phash`.
 pub async fn couplings_handler(
     State(state): State<Arc<AppState>>,
     Query(query): Query<CouplingsQuery>,
 ) -> Json<CouplingsOverviewResponse> {
     let summary_only = query.summary.unwrap_or(false);
-    let dirs = state.effective_phash_dirs(None);
     let reg_path = CouplingRegistry::default_path(&state.subtitles_dir);
     let reg = state
         .coupling_registry
@@ -95,46 +327,8 @@ pub async fn couplings_handler(
         .flat_map(|c| [c.media_name.clone(), c.phash_filename.clone()])
         .collect();
 
-    let mut catalog_phashes = Vec::new();
-    let mut seen_files = HashSet::new();
-    for dir in &dirs {
-        if let Ok(entries) = std::fs::read_dir(dir) {
-            for entry in entries.flatten() {
-                let p = entry.path();
-                if p.extension().and_then(|e| e.to_str()) == Some("phash") {
-                    let fname = p
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                        .to_string();
-                    if !seen_files.insert(fname.clone()) {
-                        continue;
-                    }
-                    let size_bytes = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
-                    let frame_count = (size_bytes / 8) as usize;
-                    let media_name = dbsrt_core::phash_media_name(&p);
-                    let fps = parse_fps_from_phash_stem(&media_name);
-                    let is_certified =
-                        certified_names.contains(&media_name) || certified_names.contains(&fname);
-                    catalog_phashes.push(StudioPhashEntry {
-                        filename: fname,
-                        media_name,
-                        fps,
-                        frame_count,
-                        size_bytes,
-                        is_certified,
-                    });
-                }
-            }
-        }
-    }
-    catalog_phashes.sort_by(|a, b| {
-        b.is_certified
-            .cmp(&a.is_certified)
-            .then_with(|| a.media_name.cmp(&b.media_name))
-    });
-
-    let indexed_phash_files = catalog_phashes.len();
+    let (indexed_phash_files, catalog_phashes) =
+        collect_studio_catalog_phashes(&state, &certified_names);
 
     Json(CouplingsOverviewResponse {
         postgres_connected,
@@ -279,4 +473,47 @@ pub async fn sub_frames_handler(
         selected_cue,
         items,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dbsrt_core::{OpenSubtitlesProvider, SubtitleCache};
+
+    #[tokio::test]
+    async fn test_couplings_handler_discovers_sibling_phash_dir_when_empty_phash_used() {
+        let tmp_root =
+            std::env::temp_dir().join(format!("dbsrt_studio_test_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp_root);
+        let empty_phash = tmp_root.join("run").join("empty_phash");
+        let raw_phash = tmp_root.join("data").join("__PHASH__");
+        let srt_dir = tmp_root.join("data").join("SRT");
+        std::fs::create_dir_all(&empty_phash).expect("mkdir empty_phash");
+        std::fs::create_dir_all(&raw_phash).expect("mkdir raw_phash");
+        std::fs::create_dir_all(&srt_dir).expect("mkdir srt_dir");
+
+        let sample = raw_phash.join("Andor.S01E01.1080p.phash");
+        std::fs::write(&sample, vec![0_u8; 64]).expect("write phash");
+
+        let state = Arc::new(AppState::new(
+            empty_phash,
+            srt_dir,
+            Arc::new(OpenSubtitlesProvider::new(None)),
+            SubtitleCache::default(),
+        ));
+        let Json(resp) = couplings_handler(
+            State(state),
+            Query(CouplingsQuery {
+                summary: Some(true),
+            }),
+        )
+        .await;
+        let _ = std::fs::remove_dir_all(&tmp_root);
+
+        assert!(resp.indexed_phash_files >= 1);
+        assert!(resp
+            .catalog_phashes
+            .iter()
+            .any(|it| it.filename == "Andor.S01E01.1080p.phash" && it.frame_count == 8));
+    }
 }

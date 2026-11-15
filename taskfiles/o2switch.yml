@@ -56,6 +56,11 @@ tasks:
     cmds:
       - uv run python scripts/e2e/o2switch_e2e.py --reset-golden
 
+  o2switch:recette:web:
+    desc: Exhaustive Playwright E2E recette of all web portals & 43 routes on https://2026-pydbsrt.fr/dbsrt (1080p PNGs + H.264 MP4s)
+    cmds:
+      - uv run --with playwright python scripts/e2e/e2e_o2switch_exhaustive_recette.py {{.CLI_ARGS}}
+
   o2switch:audit:start:
     desc: "Start the catalog self-recognition audit detached ON o2switch (RUN, SECONDS=10, CUTS=1); the PC can disconnect"
     summary: |

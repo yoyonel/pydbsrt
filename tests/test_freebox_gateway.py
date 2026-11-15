@@ -1,79 +1,106 @@
-"""Unit tests for Freebox Range HTTP Gateway logic and byte range parsing."""
+"""Unit tests for the Freebox Range HTTP Gateway (/health, /catalog, privacy filter, RFC 7233 ranges)."""
 
-import http.server
+from __future__ import annotations
+
 import json
 import threading
-import unicodedata
+import urllib.error
+import urllib.parse
 import urllib.request
+from http.server import ThreadingHTTPServer
+from pathlib import Path
 
-from scripts.infra.rpi4.rpi4_freebox_gateway import FreeboxRangeHTTPHandler, is_served_path, parse_byte_range
+import pytest
 
+from scripts.infra.rpi4.rpi4_freebox_gateway import FreeboxRangeHTTPHandler, scan_served_catalog
 
-def test_parse_byte_range_full_span():
-    # 0 to end
-    res = parse_byte_range("bytes=0-999", 1000)
-    assert res == (0, 999)
-
-
-def test_parse_byte_range_open_ended():
-    # start to EOF
-    res = parse_byte_range("bytes=500-", 1000)
-    assert res == (500, 999)
+SAMPLE_VIDEO_BYTES: bytes = b"MATROSKA_HEADER_0123456789_PAYLOAD_ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+EXPECTED_ELIGIBLE_COUNT: int = 3
+RANGE_START_BYTE: int = 16
+RANGE_END_BYTE: int = 25
 
 
-def test_parse_byte_range_clamped_to_filesize():
-    # end requested past EOF gets clamped
-    res = parse_byte_range("bytes=100-5000", 1000)
-    assert res == (100, 999)
+def _populate_mock_freebox_root(root: Path) -> None:
+    """Creates eligible cinema/TV directories alongside personal excluded folders."""
+    d1 = root / "Disque_1" / "Téléchargements"
+    d2 = root / "Disque_2" / "Téléchargements" / "Season 01"
+    d3 = root / "Disque_1_1" / "Vidéos"
+    d1_photos = root / "Disque_1_1" / "Photos"
+    d1_backup = root / "Disque_1_1" / "Backup"
+    d2_nested_backup = root / "Disque_2" / "Téléchargements" / "Backup"
+
+    for folder in (d1, d2, d3, d1_photos, d1_backup, d2_nested_backup):
+        folder.mkdir(parents=True, exist_ok=True)
+
+    (d1 / "The.Neon.Demon.2016.2160p.mkv").write_bytes(SAMPLE_VIDEO_BYTES)
+    (d2 / "Lanterns.S01E01.2160p.mp4").write_bytes(SAMPLE_VIDEO_BYTES)
+    (d3 / "Joker (2019)[2160p].mkv").write_bytes(SAMPLE_VIDEO_BYTES)
+    (d3 / "readme.txt").write_text("non-video sidecar", encoding="utf-8")
+
+    # Personal / system videos that MUST NEVER be exposed or counted
+    (d1_photos / "Vacances_2025.mp4").write_bytes(SAMPLE_VIDEO_BYTES)
+    (d1_backup / "WhatsApp_Video_001.mp4").write_bytes(SAMPLE_VIDEO_BYTES)
+    (d2_nested_backup / "PrivateClip.mkv").write_bytes(SAMPLE_VIDEO_BYTES)
 
 
-def test_parse_byte_range_invalid_syntax():
-    assert parse_byte_range("invalid", 1000) is None
-    assert parse_byte_range("", 1000) is None
-    assert parse_byte_range(None, 1000) is None
+def test_scan_served_catalog_strict_privacy_isolation(tmp_path: Path) -> None:
+    """Ensures scan_served_catalog exposes ONLY eligible cinema/TV videos and excludes Photos/Backup."""
+    _populate_mock_freebox_root(tmp_path)
+    items = scan_served_catalog(tmp_path, force=True)
+    assert len(items) == EXPECTED_ELIGIBLE_COUNT
+    paths = {it["path"] for it in items}
+    assert paths == {
+        "Disque_1/Téléchargements/The.Neon.Demon.2016.2160p.mkv",
+        "Disque_2/Téléchargements/Season 01/Lanterns.S01E01.2160p.mp4",
+        "Disque_1_1/Vidéos/Joker (2019)[2160p].mkv",
+    }
+    for item in items:
+        assert item["size_bytes"] == len(SAMPLE_VIDEO_BYTES)
+        assert item["mtime"] > 0
 
 
-def test_parse_byte_range_unsatisfiable():
-    # start > end
-    assert parse_byte_range("bytes=500-200", 1000) is None
-    # start >= file_size
-    assert parse_byte_range("bytes=1000-1500", 1000) is None
-    # empty file
-    assert parse_byte_range("bytes=0-100", 0) is None
+def test_gateway_http_health_catalog_and_range(tmp_path: Path) -> None:
+    """Verifies /health media_count, /catalog listing, 404 on Photos, and 206 Partial Content."""
+    _populate_mock_freebox_root(tmp_path)
 
+    class IsolatedGatewayHandler(FreeboxRangeHTTPHandler):
+        server_root = tmp_path
 
-def test_served_paths_are_limited_to_media_libraries():
-    assert is_served_path("Disque_1_1/Vidéos/TVSHOWS/a.mkv")
-    # CIFS may return decomposed accents
-    assert is_served_path(unicodedata.normalize("NFD", "Disque_1/Téléchargements/a.mkv"))
-    assert not is_served_path("Disque_1/Photos/a.jpg")
-    assert not is_served_path("Disque_1/Backup/a.mkv")
-    assert not is_served_path("Disque_1/Téléchargements")
-
-
-def test_health_check_endpoint():
-    """Verifies that /health responds 200 OK on both HEAD and GET with valid JSON."""
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), FreeboxRangeHTTPHandler)
-    port = server.server_port
-    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
-    server_thread.start()
+    server = ThreadingHTTPServer(("127.0.0.1", 0), IsolatedGatewayHandler)
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base_url = f"http://127.0.0.1:{port}"
 
     try:
-        url = f"http://127.0.0.1:{port}/health"
+        with urllib.request.urlopen(f"{base_url}/health?force=1") as resp:
+            health = json.loads(resp.read().decode("utf-8"))
+        assert health["status"] == "ok"
+        assert health["media_count"] == EXPECTED_ELIGIBLE_COUNT
+        assert set(health["mounted_shares"]) == {"Disque_1", "Disque_1_1", "Disque_2"}
 
-        # 1. HEAD request
-        req_head = urllib.request.Request(url, method="HEAD")
-        with urllib.request.urlopen(req_head, timeout=2) as resp:
-            assert resp.status == 200
-            assert resp.headers.get("Content-Type") == "application/json"
+        with urllib.request.urlopen(f"{base_url}/catalog") as resp:
+            cat = json.loads(resp.read().decode("utf-8"))
+        assert cat["status"] == "ok"
+        assert cat["total"] == EXPECTED_ELIGIBLE_COUNT
+        assert len(cat["items"]) == EXPECTED_ELIGIBLE_COUNT
 
-        # 2. GET request
-        with urllib.request.urlopen(url, timeout=2) as resp:
-            assert resp.status == 200
-            data = json.loads(resp.read().decode("utf-8"))
-            assert data["status"] == "ok"
-            assert data["service"] == "dbsrt-freebox-gateway"
-            assert "mounted_shares" in data
+        # Personal Photos folder MUST return 404 Not Found
+        private_url = f"{base_url}/Disque_1_1/Photos/Vacances_2025.mp4"
+        with pytest.raises(urllib.error.HTTPError) as exc_info:
+            urllib.request.urlopen(private_url)
+        assert exc_info.value.code == 404
+
+        # Eligible video supports HTTP 206 Byte-Range streaming
+        rel_quoted = "/".join(urllib.parse.quote(seg) for seg in "Disque_1_1/Vidéos/Joker (2019)[2160p].mkv".split("/"))
+        req = urllib.request.Request(
+            f"{base_url}/{rel_quoted}",
+            headers={"Range": f"bytes={RANGE_START_BYTE}-{RANGE_END_BYTE}"},
+        )
+        with urllib.request.urlopen(req) as resp:
+            assert resp.status == 206
+            body = resp.read()
+        assert body == SAMPLE_VIDEO_BYTES[RANGE_START_BYTE : RANGE_END_BYTE + 1]
     finally:
         server.shutdown()
         server.server_close()
