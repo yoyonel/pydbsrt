@@ -21,12 +21,48 @@ use crate::commands::doctor::models::{
 };
 use crate::commands::doctor::{evaluate_cluster_doctor, DoctorArgs};
 
+/// Synchronization primitives coalescing manual and periodic `dbsrt doctor` probes.
+///
+/// # Data Flow & Invariants
+/// Ensures at most one cluster probe executes at any time (`in_flight`) and collapses any
+/// manual `[a]` request arriving mid-probe into that active run rather than firing a duplicate pass.
+#[derive(Debug, Default)]
+pub struct ClusterProbeControl {
+    /// Set by UI `[a]` key when no probe is currently active.
+    pub refresh_requested: AtomicBool,
+    /// `true` while [`evaluate_cluster_doctor`] is actively probing nodes.
+    pub in_flight: AtomicBool,
+}
+
+impl ClusterProbeControl {
+    /// Attempts to schedule a manual refresh; returns `false` if a probe is already in flight.
+    ///
+    /// # Arguments
+    /// * `&self` - Shared probe control struct.
+    ///
+    /// # Returns
+    /// `true` when queued for immediate wakeup, `false` when coalesced into an in-flight probe.
+    ///
+    /// # Panics
+    /// Never panics.
+    ///
+    /// # Data Flow & Invariants
+    /// Lock-free atomic check avoids queuing duplicate back-to-back multi-node SSH probes.
+    pub fn request_manual_refresh(&self) -> bool {
+        if self.in_flight.load(Ordering::SeqCst) {
+            return false;
+        }
+        self.refresh_requested.store(true, Ordering::SeqCst);
+        true
+    }
+}
+
 /// Spawns the non-blocking background cluster doctor probing thread for `dbsrt top`.
 ///
 /// # Arguments
 /// * `shared_state` - Thread-safe handle to live UI telemetry updated upon each probe completion.
 /// * `stop_flag` - Shared atomic shutdown flag polled at [`CLUSTER_PROBE_POLL_STEP_MS`] granularity.
-/// * `refresh_requested` - Manual wake-up signal set when operator triggers `[a]` in `[8/u] Cluster`.
+/// * `control` - Shared coalescing control (`in_flight` guard + manual wake-up flag).
 /// * `local_only` - When `true` (e.g., on CloudLinux shared LVE hosting), skips outbound SSH probes.
 ///
 /// # Returns
@@ -40,16 +76,16 @@ use crate::commands::doctor::{evaluate_cluster_doctor, DoctorArgs};
 ///
 /// # Data Flow & Invariants
 /// 1. Runs an initial cluster probe immediately upon TUI launch.
-/// 2. Sleeps in bounded [`CLUSTER_PROBE_POLL_STEP_MS`] slices up to [`CLUSTER_REFRESH_INTERVAL_SECS`].
-/// 3. Wakes early whenever `stop_flag` becomes `true` or `refresh_requested` swaps from `true`.
+/// 2. Coalesces any `[a]` refresh pressed during an active probe into that running pass.
+/// 3. Sleeps in bounded [`CLUSTER_PROBE_POLL_STEP_MS`] slices up to [`CLUSTER_REFRESH_INTERVAL_SECS`].
 pub fn start_cluster_doctor_probe(
     shared_state: Arc<RwLock<SystemTelemetry>>,
     stop_flag: Arc<AtomicBool>,
-    refresh_requested: Arc<AtomicBool>,
+    control: Arc<ClusterProbeControl>,
     local_only: bool,
 ) {
     std::thread::spawn(move || {
-        run_cluster_doctor_probe_loop(&shared_state, &stop_flag, &refresh_requested, local_only);
+        run_cluster_doctor_probe_loop(&shared_state, &stop_flag, &control, local_only);
     });
 }
 
@@ -57,13 +93,14 @@ pub fn start_cluster_doctor_probe(
 fn run_cluster_doctor_probe_loop(
     shared_state: &Arc<RwLock<SystemTelemetry>>,
     stop_flag: &Arc<AtomicBool>,
-    refresh_requested: &Arc<AtomicBool>,
+    control: &ClusterProbeControl,
     local_only: bool,
 ) {
     let refresh_interval = Duration::from_secs(CLUSTER_REFRESH_INTERVAL_SECS);
     let poll_step = Duration::from_millis(CLUSTER_PROBE_POLL_STEP_MS);
 
     while !stop_flag.load(Ordering::Relaxed) {
+        control.in_flight.store(true, Ordering::SeqCst);
         mark_cluster_refreshing(shared_state, true);
         let args = DoctorArgs {
             local_only,
@@ -74,8 +111,10 @@ fn run_cluster_doctor_probe_loop(
         if let Ok(mut state) = shared_state.write() {
             state.cluster = Some(snapshot);
         }
+        control.refresh_requested.store(false, Ordering::SeqCst);
+        control.in_flight.store(false, Ordering::SeqCst);
 
-        wait_until_next_cluster_probe(refresh_interval, poll_step, stop_flag, refresh_requested);
+        wait_until_next_cluster_probe(refresh_interval, poll_step, stop_flag, control);
     }
 }
 
@@ -84,11 +123,13 @@ fn wait_until_next_cluster_probe(
     refresh_interval: Duration,
     poll_step: Duration,
     stop_flag: &AtomicBool,
-    refresh_requested: &AtomicBool,
+    control: &ClusterProbeControl,
 ) {
     let wait_started = Instant::now();
     while wait_started.elapsed() < refresh_interval {
-        if stop_flag.load(Ordering::Relaxed) || refresh_requested.swap(false, Ordering::SeqCst) {
+        if stop_flag.load(Ordering::Relaxed)
+            || control.refresh_requested.swap(false, Ordering::SeqCst)
+        {
             break;
         }
         std::thread::sleep(poll_step);
@@ -274,4 +315,52 @@ fn collect_cluster_alerts(
     }
     alerts.sort_by_key(|a| std::cmp::Reverse(a.severity));
     alerts
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_start_cluster_doctor_probe_populates_and_stops_cleanly() {
+        let shared = Arc::new(RwLock::new(SystemTelemetry::default()));
+        let stop_flag = Arc::new(AtomicBool::new(false));
+        let control = Arc::new(ClusterProbeControl::default());
+
+        start_cluster_doctor_probe(
+            Arc::clone(&shared),
+            Arc::clone(&stop_flag),
+            Arc::clone(&control),
+            true,
+        );
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline {
+            if shared.read().is_ok_and(|s| s.cluster.is_some()) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        let has_cluster = shared.read().unwrap().cluster.is_some();
+        assert!(
+            has_cluster,
+            "background probe must populate local cluster telemetry"
+        );
+        mark_cluster_refreshing(&shared, true);
+        assert!(shared.read().unwrap().cluster.as_ref().unwrap().refreshing);
+        stop_flag.store(true, Ordering::Relaxed);
+    }
+
+    #[test]
+    fn test_cluster_probe_control_coalesces_when_in_flight() {
+        let control = ClusterProbeControl::default();
+        control.in_flight.store(true, Ordering::SeqCst);
+        assert!(!control.request_manual_refresh());
+        assert!(!control.refresh_requested.load(Ordering::SeqCst));
+
+        control.in_flight.store(false, Ordering::SeqCst);
+        assert!(control.request_manual_refresh());
+        assert!(control.refresh_requested.load(Ordering::SeqCst));
+    }
 }
