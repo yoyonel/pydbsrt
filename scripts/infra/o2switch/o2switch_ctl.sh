@@ -638,29 +638,15 @@ REMOTE_SCRIPT
     ;;
 
   backup-nas)
-    check_ssh
     shift || true
-    echo "=== Backing up raw .phash fingerprints from ${O2SWITCH_HOST} to NAS/persistent storage ==="
     TARGET_DIR="${1:-}"
     if [[ -z "${TARGET_DIR}" ]]; then
-      user_name="${USER:-$(whoami)}"
-      candidates=(
-        "${NAS_BACKUP_DIR:-}"
-        "/media/${user_name}/Synology/phash_backup"
-        "/media/${user_name}/Synology/__PHASH__"
-        "${HOME}/__SYNOLOGY__/__PHASH__"
-        "data/__PHASH__"
-      )
-      for c in "${candidates[@]}"; do
-        if [[ -n "${c}" && -d "${c}" ]]; then
-          TARGET_DIR="${c}"
-          break
-        fi
-      done
-      TARGET_DIR="${TARGET_DIR:-data/__PHASH__}"
+      echo "=== Delegating NAS backup to versioned SHA-256 Synology FTP vault (Issue #86) ==="
+      exec python3 "${REPO_ROOT}/scripts/data_access/backup_cli.py" backup --target synology_nas "$@"
     fi
+    check_ssh
     mkdir -p "${TARGET_DIR}"
-    echo "-> Backing up to ${TARGET_DIR}..."
+    echo "-> Backing up raw .phash fingerprints from ${O2SWITCH_HOST} to ${TARGET_DIR}..."
     rsync -avz --progress --ignore-existing --exclude '*.tmp' --exclude '*.tmp.*' --exclude '*.partial' --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/__PHASH__/" "${TARGET_DIR}/" || true
     python3 "${REPO_ROOT}/scripts/ingestion/phash_dedupe.py" "${TARGET_DIR}" --apply || true
     echo "✓ Backup of raw .phash fingerprints completed to ${TARGET_DIR}."

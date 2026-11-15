@@ -42,6 +42,7 @@ tags:
 
 ### 🐘 Base de Données & Persistance
 * [Comment migrer le schéma PostgreSQL avec Refinery](migrer-schema-postgresql.md) : Appliquer des migrations versionnées, auditer l'historique et créer de nouvelles tables.
+* [Sauvegarder, versionner, évincer et restaurer les datasets multi-tiers (`o2switch` & `Synology NAS`)](2026-11-15-sauvegarder-versionner-et-restaurer-datasets-multi-tiers.md) : Créer des snapshots immuables signés `SHA-256`, libérer de l'espace disque local sans risque (`task data:evict`) et restaurer à une date précise (`task data:restore`).
 
 ### 📊 Observabilité, Surveillance & Fiabilité
 * [Comment surveiller la stack avec Prometheus & Grafana](surveiller-stack-telemetrie.md) : Accéder aux métriques temps réel, surveiller les latences d'interrogation et la mémoire vive.

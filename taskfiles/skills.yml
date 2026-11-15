@@ -16,7 +16,7 @@ tasks:
     desc: Run full validation and unit test suite for workspace Agent Skills and SSOT helpers
     cmds:
       - task: skills:validate
-      - uv run --no-sync pytest tests/tools/test_data_access.py
+      - uv run --no-sync pytest tests/tools/test_data_access.py tests/tools/test_data_backup.py
 
   skills:eval-benchmark:
     desc: Deterministically grade and time subagent A/B benchmark JSONL transcripts (zero LLM)
@@ -57,3 +57,33 @@ tasks:
     desc: Symlink unversioned binary datasets from parent repository into an isolated git worktree
     cmds:
       - uv run --no-sync python scripts/data_access/cli.py seed-worktree {{.CLI_ARGS}}
+
+  data:manifest:
+    desc: Compute signed SHA-256 dataset manifest and tree hashes across local data/
+    cmds:
+      - uv run --no-sync python scripts/data_access/backup_cli.py manifest {{.CLI_ARGS}}
+
+  data:backup:
+    desc: Execute deduplicated multi-tier dataset backup to o2switch Cloud and Synology NAS
+    cmds:
+      - uv run --no-sync python scripts/data_access/backup_cli.py backup {{.CLI_ARGS}}
+
+  data:snapshots:
+    desc: List committed versioned dataset snapshots across o2switch and Synology NAS
+    cmds:
+      - uv run --no-sync python scripts/data_access/backup_cli.py snapshots {{.CLI_ARGS}}
+
+  data:verify:
+    desc: Verify cryptographic SHA-256 manifest signatures and pack/blob parity on backup tiers
+    cmds:
+      - uv run --no-sync python scripts/data_access/backup_cli.py verify {{.CLI_ARGS}}
+
+  data:evict:
+    desc: Safely evict local datasets after remote SHA-256 parity check (dry-run unless -- --apply)
+    cmds:
+      - uv run --no-sync python scripts/data_access/backup_cli.py evict {{.CLI_ARGS}}
+
+  data:restore:
+    desc: Restore evicted or historical datasets/files from fastest verified tier with SHA-256 check
+    cmds:
+      - uv run --no-sync python scripts/data_access/backup_cli.py restore {{.CLI_ARGS}}

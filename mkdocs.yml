@@ -154,6 +154,7 @@ nav:
       - Diagnostiquer Sources Médias Multi-Environnements: how-to/2026-11-09-diagnostiquer-sources-medias-multi-environnements.md
       - Auditer Actifs Médias & Intégrité pHash (PostgreSQL): how-to/2026-11-09-auditer-actifs-medias-et-integrite-phash-postgresql.md
       - Utiliser les Agent Skills par l'Exemple & Preuves Flash: how-to/2026-11-14-resoudre-acces-donnees-multi-reseaux-agent-skill.md
+      - Sauvegarder, Versionner & Restaurer Datasets Multi-Tiers: how-to/2026-11-15-sauvegarder-versionner-et-restaurer-datasets-multi-tiers.md
   - 📖 Référence Technique:
       - Index des Spécifications: reference/index.md
       - CLI Standalone Rust (dbsrt): reference/cli.md
@@ -224,6 +225,7 @@ nav:
       - Synthèse aHash vs pHash & Loi d'Échelle (5k -> 1M Pistes): explanation/2026-11-14-synthese-comparative-ahash-vs-phash-et-loi-echelle-millions-pistes.md
       - Post-Mortem INC-2026-11-12-01 (Auto-Heal Batch o2switch): explanation/2026-11-12-post-mortem-inc-2026-11-12-01-blocage-auto-heal-batch-o2switch.md
       - Ingénierie, Profiling & Optimisation des Agent Skills: explanation/2026-11-14-methodologie-ingenierie-profiling-et-optimisation-agent-skills.md
+      - Sauvegarde Multi-Tiers Hardlinks POSIX & Packs FTP Zéro-CIFS: explanation/2026-11-15-sauvegarde-multi-tiers-hardlinks-posix-et-packs-ftp-zero-cifs.md
   - 📊 Benchmarks & Preuves:
       - Campagnes Empiriques:
           - Recette E2E Exhaustive Portails o2switch (44 Routes / 39 Captures): history/2026-11-14-recette-exhaustive-portails-o2switch.md
@@ -257,6 +259,7 @@ nav:
           - ADR-0005 Moviehash comme Identifiant Canonique: decisions/2026-10-31-phash-identifiant-moviehash.md
           - ADR-0006 Banc Continu de Reconnaissance: decisions/2026-10-31-banc-continu-reconnaissance.md
           - ADR-0007 Archive mmap .dbahash v1 & Moteur Hybride: decisions/2026-11-14-dbahash-v1-mmap-and-hybrid-ahash-engine.md
+          - ADR-0008 Persistance Multi-Tiers & Manifestes SHA-256: decisions/2026-11-15-multi-tier-deduplicated-dataset-backups.md
       - Archives & Rapports Techniques:
           - Intégration Daemon Axum & VLC: history/2026-10-15-vlc-integration-daemon-and-plugins.md
           - Mécanique E2E Search by pHash: history/2026-10-18-e2e-phash-search-mechanics-and-roadmap.md

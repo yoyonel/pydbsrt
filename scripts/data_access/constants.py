@@ -148,6 +148,57 @@ WORKTREE_SEED_TARGETS: tuple[str, ...] = (
     "data/SRT/couplings.json",
 )
 
+# --- Multi-Tier Versioned Dataset Backup & Eviction Constants (Issue #86) ---
+BACKUP_MANIFEST_SCHEMA_VERSION: int = 1
+BACKUP_HASH_CACHE_VERSION: int = 1
+BACKUP_HASH_CACHE_FILENAME: str = "backup_hash_cache_v1.json"
+LATEST_BACKUP_CACHE_FILENAME: str = "latest_backup_summary_v1.json"
+EVICTED_MANIFEST_FILENAME: str = ".evicted_manifest.json"
+BACKUP_HASH_READ_CHUNK_BYTES: int = 1024 * 1024
+FTP_TRANSFER_CHUNK_BYTES: int = 256 * 1024
+FTP_DATA_TIMEOUT_SECS: float = 120.0
+RSYNC_BACKUP_BWLIMIT_KBPS: int = 20000
+RSYNC_BACKUP_TIMEOUT_SECS: float = 3600.0
+REMOTE_VAULT_AGENT_TIMEOUT_SECS: float = 600.0
+PACK_TREE_HASH_PREFIX_LEN: int = 16
+GIT_SHORT_SHA_LEN: int = 7
+TAR_BLOCK_BYTES: int = 512
+TAR_EOF_BLOCKS_COUNT: int = 2
+TAR_DEFAULT_FILE_MODE: int = 0o644
+DEFAULT_MIN_EVICT_REPLICAS: int = 2
+O2SWITCH_REMOTE_PYTHON: str = "/opt/alt/python313/bin/python3"
+REMOTE_O2SWITCH_BACKUPS_REL: str = "dbsrt/backups"
+REMOTE_O2SWITCH_SCRIPTS_REL: str = "dbsrt/scripts"
+DEFAULT_SYNOLOGY_FTP_BACKUP_ROOT: str = "/home/pydbsrt-backups"
+
+BACKUP_TRANSIENT_SUFFIXES: tuple[str, ...] = (
+    ".tmp",
+    ".partial",
+    ".part",
+    ".swp",
+    ".lock",
+)
+BACKUP_EXCLUDED_DIR_NAMES: tuple[str, ...] = (
+    "__pycache__",
+    ".pytest_cache",
+    ".restore_tmp",
+)
+
+# Ordered tuple of (dataset_id, relative_path_under_data, is_single_file)
+BACKUP_DATASET_SPECS: tuple[tuple[str, str, bool], ...] = (
+    ("catalog_dbphash", "catalog.dbphash", True),
+    ("catalog_dbahash", "catalog.dbahash", True),
+    ("phash_corpus", "__PHASH__", False),
+    ("ahash_corpus", "__AHASH__", False),
+    ("srt_store", "SRT", False),
+    ("snippets", "snippets", False),
+    ("snippets_ahash", "snippets_ahash", False),
+    ("reports", "reports", False),
+    ("benchmarks", "benchmarks", False),
+    ("seed", "seed", False),
+    ("quarantine_phash", "__QUARANTINE_PHASH__", False),
+)
+
 # --- Snippet Suffixes Stripped When Matching Parent Reference Couplings ---
 SNIPPET_STEM_SUFFIXES: tuple[str, ...] = (
     "_mid15s",

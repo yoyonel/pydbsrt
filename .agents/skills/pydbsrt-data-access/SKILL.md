@@ -34,10 +34,11 @@ Always use `dbsrt_data.py` **in ONE batched `query` call** (plus ONE `inspect` c
    ```
    - Accepts either an exact relative `path` or a search title; runs local/LAN `ffprobe` when safe, or delegates transparently to `o2switch` HTTPS `:443` (`/api/file/details`) when on 4G/5G or Corporate VPN. Returns `video` (`codec`, `width`, `height`, `fps`), `duration_sec`, `audio_streams`, `subtitle_languages` / `subtitle_streams`, and `artifacts`.
 
-3. **Other single-purpose verbs** (`status` | `resolve` | `fetch` | `seed-worktree`):
-   - Global overview only: `python3 .agents/skills/pydbsrt-data-access/scripts/dbsrt_data.py status`
+3. **Other single-purpose verbs** (`status` | `resolve` | `fetch` | `seed-worktree` & `backup_cli.py`):
+   - Global overview (includes `backup_state` & `evicted_datasets`): `python3 .agents/skills/pydbsrt-data-access/scripts/dbsrt_data.py status`
    - Fetch/sync corpus or unit file: `python3 .agents/skills/pydbsrt-data-access/scripts/dbsrt_data.py fetch <catalog|dbahash|ahash|phash|couplings|reports> [item] [--dry-run]`
    - Seed git worktree symlinks: `python3 .agents/skills/pydbsrt-data-access/scripts/dbsrt_data.py seed-worktree`
+   - Versioned multi-tier `SHA-256` snapshots (`o2switch` + `synology_nas`): `python3 scripts/data_access/backup_cli.py <manifest|backup|snapshots|verify|evict|restore>` (`task data:backup`, `task data:evict`, `task data:restore`)
 
 ## Strict Execution & Terse Reporting Discipline (Zero Wasted Turns)
 
