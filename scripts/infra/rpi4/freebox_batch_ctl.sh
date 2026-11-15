@@ -10,6 +10,7 @@ DEFAULT_REMOTE_BASE="dbsrt"
 DEFAULT_GATEWAY_WAN_PORT=80
 DEFAULT_PROBE_PATH="/Disque_1/"
 DEFAULT_WORKERS=5
+DEFAULT_BATCH_MODE="both"
 # 2160p files (10-25 GB) stream at 2-6 MB/s through the Freebox upload: 30 min is too short
 DEFAULT_MAX_EXTRACTION_SECS=7200
 DEFAULT_TARGETS_FILE="data/reports/freebox_batch_targets.json"
@@ -85,13 +86,35 @@ scan_and_sync_targets() {
     limit_arg=(--limit "$2")
   fi
 
+  local scanner_script="${REPO_ROOT}/scripts/ingestion/scan_freebox_targets.py"
+  [[ -f "${scanner_script}" ]] || scanner_script="${SCRIPT_DIR}/scan_freebox_targets.py"
+  if [[ ! -f "${scanner_script}" ]]; then
+    echo "❌ Freebox target scanner not found (${scanner_script})." >&2
+    exit 1
+  fi
+
   echo "=== Scanning eligible Freebox cinema & TV targets (excluding Photos/ and Backup/) ==="
-  python3 "${REPO_ROOT}/scripts/ingestion/scan_freebox_targets.py" "${limit_arg[@]}"
+  python3 "${scanner_script}" "${limit_arg[@]}"
 
   echo "=== Transferring targets catalog to ${O2SWITCH_HOST} ==="
   # shellcheck disable=SC2029
   ssh "${O2SWITCH_HOST}" "mkdir -p ${REMOTE_BASE}/data/reports"
   rsync -avz "${REPO_ROOT}/${DEFAULT_TARGETS_FILE}" "${O2SWITCH_HOST}:${REMOTE_BASE}/${DEFAULT_TARGETS_FILE}"
+}
+
+sync_worker_to_o2switch() {
+  local worker_script="${REPO_ROOT}/scripts/workers/o2switch_batch_worker.py"
+  [[ -f "${worker_script}" ]] || worker_script="${SCRIPT_DIR}/o2switch_batch_worker.py"
+  local worker_pkg="${REPO_ROOT}/scripts/workers/batch_worker"
+  [[ -d "${worker_pkg}" ]] || worker_pkg="${SCRIPT_DIR}/batch_worker"
+
+  echo "=== Synchronizing modular batch worker to ${O2SWITCH_HOST} ==="
+  # shellcheck disable=SC2029
+  ssh "${O2SWITCH_HOST}" "mkdir -p ${REMOTE_BASE}/scripts/batch_worker"
+  rsync -az --chmod=F755 "${worker_script}" "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/"
+  if [[ -d "${worker_pkg}" ]]; then
+    rsync -az --delete --exclude='__pycache__' "${worker_pkg}/" "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/batch_worker/"
+  fi
 }
 
 start_batch() {
@@ -102,6 +125,7 @@ start_batch() {
   local workers="${DEFAULT_WORKERS}"
   local limit=""
   local max_secs="${DEFAULT_MAX_EXTRACTION_SECS}"
+  local mode="${DEFAULT_BATCH_MODE}"
   shift || true
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -117,6 +141,10 @@ start_batch() {
         max_secs="${2:?--max-extraction-secs requires seconds}"
         shift
         ;;
+      --mode)
+        mode="${2:?--mode requires phash|ahash|both}"
+        shift
+        ;;
     esac
     shift
   done
@@ -126,16 +154,18 @@ start_batch() {
   else
     scan_and_sync_targets
   fi
+  sync_worker_to_o2switch
 
-  echo "=== Launching Freebox batch worker daemon on ${O2SWITCH_HOST} ==="
+  echo "=== Launching Freebox batch worker daemon on ${O2SWITCH_HOST} (mode=${mode}) ==="
   # shellcheck disable=SC2029
-  ssh "${O2SWITCH_HOST}" "bash -s -- '${REMOTE_BASE}' '${stream_base}' '${DEFAULT_TARGETS_FILE}' '${workers}' '${limit}' '${max_secs}'" <<'REMOTE_BATCH'
+  ssh "${O2SWITCH_HOST}" "bash -s -- '${REMOTE_BASE}' '${stream_base}' '${DEFAULT_TARGETS_FILE}' '${workers}' '${limit}' '${max_secs}' '${mode}'" <<'REMOTE_BATCH'
 BASE="$1"
 STREAM_BASE="$2"
 TARGETS_FILE="$3"
 WORKERS="$4"
 LIMIT="$5"
 MAX_SECS="$6"
+MODE="$7"
 
 cd "${BASE}"
 PID_FILE="run/batch_worker.pid"
@@ -159,7 +189,7 @@ rm -f run/batch_stopped run/batch_aborted run/batch_queue.json
 export PATH="$HOME/${BASE}/bin:$PATH"
 export RAYON_NUM_THREADS=2
 
-EXTRA_ARGS=()
+EXTRA_ARGS=(--mode "${MODE}")
 if [[ -n "${LIMIT}" ]]; then
   EXTRA_ARGS+=(--limit "${LIMIT}")
 fi

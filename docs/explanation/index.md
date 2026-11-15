@@ -257,4 +257,16 @@ tags:
       <a href="../how-to/2026-11-14-resoudre-acces-donnees-multi-reseaux-agent-skill/">→ Guide par l'exemple &amp; preuves flash</a>
     </div>
   </div>
+
+  <div class="dbsrt-bento-card bento-rose">
+    <div class="bento-header">
+      <span class="bento-icon">🛠️</span>
+      <span class="bento-badge">BATCH WORKER &amp; MULTI-NŒUDS</span>
+    </div>
+    <h3>Modularisation SoC du Batch Worker &amp; Pièges Multi-Nœuds</h3>
+    <p>Découpe du monolithe o2switch_batch_worker.py en sous-modules stdlib ≤ 285 LOC et résolution de 5 régressions silencieuses RPi4 ↔ Freebox ↔ o2switch.</p>
+    <div class="bento-links">
+      <a href="2026-11-15-modularisation-batch-worker-et-pieges-pipeline-multi-noeuds/">→ Lire le journal d'ingénierie Batch &amp; RPi4</a>
+    </div>
+  </div>
 </div>

@@ -10,6 +10,8 @@ from scripts.infra.rpi4.rpi4_o2switch_supervisor import (
     AUTOSCALE_MAX_WORKERS,
     AUTOSCALE_MIN_WORKERS,
     RELAUNCH_BACKOFF_SECS,
+    _LoopState,
+    _relaunch_step,
     check_remote_batch_status,
     compute_lve_cpu_pct,
     decide_next_batch,
@@ -18,6 +20,7 @@ from scripts.infra.rpi4.rpi4_o2switch_supervisor import (
     get_remote_running_jobs,
     parse_proc_cpu_seconds,
     pull_remote_catalog,
+    push_supervisor_telemetry_to_remote,
     restart_remote_batch,
     set_remote_desired_workers,
     supervisor_loop,
@@ -182,6 +185,7 @@ def _run_one_iteration(state: str, batch_type: str = "tvshow") -> MagicMock:
         patch("scripts.infra.rpi4.rpi4_o2switch_supervisor.get_remote_running_jobs", return_value=None),
         patch("scripts.infra.rpi4.rpi4_o2switch_supervisor.restart_remote_batch") as mock_restart,
         patch("scripts.infra.rpi4.rpi4_o2switch_supervisor.pull_remote_catalog") as mock_pull,
+        patch("scripts.infra.rpi4.rpi4_o2switch_supervisor.push_supervisor_telemetry_to_remote", return_value=True),
         patch("scripts.infra.rpi4.rpi4_o2switch_supervisor.time.sleep", side_effect=KeyboardInterrupt),
     ):
         with pytest.raises(KeyboardInterrupt):
@@ -203,3 +207,46 @@ def test_supervisor_loop_switches_library_when_drained():
 def test_supervisor_loop_does_not_restart(state):
     """Manual stops and failed probes must never trigger a restart."""
     _run_one_iteration(state).assert_not_called()
+
+
+def test_optional_batch_failure_marks_supervisor_degraded_until_recovered(tmp_path):
+    """Regression: failed freebox launch falls back to tvshow AND marks supervisor_status.json degraded."""
+    import json
+
+    loop = _LoopState()
+    status = {"state": "finished", "pid": None, "type": "movies"}
+    log_file = tmp_path / "supervisor.log"
+    log_file.write_text("[2026-11-15] ❌ Failed starting batch: Errno 2\n", encoding="utf-8")
+
+    with (
+        patch("scripts.infra.rpi4.rpi4_o2switch_supervisor.get_remote_desired_workers", return_value=4),
+        patch(
+            "scripts.infra.rpi4.rpi4_o2switch_supervisor.restart_remote_batch",
+            side_effect=[False, True],
+        ),
+    ):
+        _relaunch_step("o2switch", "dbsrt", "finished", status, loop)
+
+    assert loop.launch_error_count == 1
+    assert "freebox" in loop.failed_batch_types
+    assert "tvshow" not in loop.failed_batch_types
+
+    with patch("subprocess.run", return_value=_completed()) as mock_ssh:
+        assert push_supervisor_telemetry_to_remote("o2switch", "dbsrt", loop, status, log_file) is True
+        pushed = json.loads(mock_ssh.call_args.kwargs["input"])
+        assert pushed["state"] == "degraded"
+        assert pushed["launch_error_count"] == 1
+        assert "freebox" in pushed["failed_batch_types"]
+
+    # Subsequent freebox recovery clears degraded state back to healthy
+    loop.last_launch_time = 0.0
+    with (
+        patch("scripts.infra.rpi4.rpi4_o2switch_supervisor.get_remote_desired_workers", return_value=4),
+        patch("scripts.infra.rpi4.rpi4_o2switch_supervisor.restart_remote_batch", return_value=True),
+    ):
+        _relaunch_step("o2switch", "dbsrt", "finished", status, loop)
+    assert loop.failed_batch_types == {}
+    with patch("subprocess.run", return_value=_completed()) as mock_ssh:
+        push_supervisor_telemetry_to_remote("o2switch", "dbsrt", loop, status, log_file)
+        pushed_recovered = json.loads(mock_ssh.call_args.kwargs["input"])
+        assert pushed_recovered["state"] == "healthy"

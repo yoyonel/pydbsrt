@@ -48,3 +48,13 @@ def test_ahash_backfill_syncs_worker_and_escapes_remote_path_and_pull_excludes_p
     dir_rsyncs = [line for line in pull_section.splitlines() if "rsync " in line and '/" "' in line]
     assert len(dir_rsyncs) == 5
     assert all("--exclude '*.tmp.*'" in line and "--exclude '*.partial'" in line for line in dir_rsyncs)
+
+
+def test_batch_commands_evaluate_ssot_on_o2switch_never_local_pc_phash() -> None:
+    """Regression: local PC data/__PHASH__ is purged (#85), so batch-* must never run local batch_media_add_tvshow.py."""
+    ctl = (ROOT / "scripts/infra/o2switch/o2switch_ctl.sh").read_text()
+    batch_block = ctl.split("batch-tvshow | batch-movies | batch-all)", 1)[1].split("  batch-status)", 1)[0]
+
+    assert "batch_media_add_tvshow.py" not in batch_block
+    assert "LOCAL_SCAN_DIR" not in batch_block
+    assert "sync_remote_batch_worker" in batch_block

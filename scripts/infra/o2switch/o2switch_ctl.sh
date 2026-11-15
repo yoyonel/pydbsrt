@@ -173,6 +173,19 @@ rm -f "${PID_FILE}"
 REMOTE_SCRIPT
 }
 
+sync_remote_batch_worker() {
+  local worker_script="${REPO_ROOT}/scripts/workers/o2switch_batch_worker.py"
+  [[ -f "${worker_script}" ]] || worker_script="${SCRIPT_DIR}/o2switch_batch_worker.py"
+  local worker_pkg="${REPO_ROOT}/scripts/workers/batch_worker"
+  [[ -d "${worker_pkg}" ]] || worker_pkg="${SCRIPT_DIR}/batch_worker"
+  rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" --chmod=F755 \
+    "${worker_script}" "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/"
+  if [[ -d "${worker_pkg}" ]]; then
+    rsync -avz --delete --exclude='__pycache__' --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" \
+      "${worker_pkg}/" "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/batch_worker/"
+  fi
+}
+
 case "${ACTION}" in
   build)
     echo "=== Cross-compiling static standalone binaries (${TARGET_TRIPLE}) ==="
@@ -271,11 +284,7 @@ case "${ACTION}" in
     rsync -a --chmod=F755 "${REPO_ROOT}/deploy/o2switch/dbsrt_server_ctl.sh" "${O2SWITCH_HOST}:${REMOTE_BASE}/bin/"
 
     echo "-> Transferring batch worker and portal scripts..."
-    if [[ -f "${REPO_ROOT}/scripts/workers/o2switch_batch_worker.py" ]]; then
-      rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${REPO_ROOT}/scripts/workers/o2switch_batch_worker.py" "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/"
-      # shellcheck disable=SC2029
-      ssh "${O2SWITCH_HOST}" "chmod +x ${REMOTE_BASE}/scripts/o2switch_batch_worker.py"
-    fi
+    sync_remote_batch_worker
     if [[ -f "${REPO_ROOT}/scripts/ingestion/backfill_ahash_sidecars.py" ]]; then
       rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${REPO_ROOT}/scripts/ingestion/backfill_ahash_sidecars.py" "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/"
       # shellcheck disable=SC2029
@@ -659,39 +668,29 @@ REMOTE_SCRIPT
     check_ssh
     shift || true
     TARGET_TYPE="tvshow"
-    LOCAL_USER="${USER:-$(whoami)}"
-    LOCAL_SCAN_DIR="${NAS_TVSHOW_DIR:-/media/${LOCAL_USER}/Synology/tvshow}"
     REMOTE_NAS_BASE="/tvshow"
     if [[ "${ACTION}" == "batch-movies" ]]; then
       TARGET_TYPE="movies"
-      LOCAL_SCAN_DIR="${NAS_VIDEO_DIR:-/media/${LOCAL_USER}/Synology/video}"
       REMOTE_NAS_BASE="/video"
     elif [[ "${ACTION}" == "batch-all" ]]; then
       TARGET_TYPE="all"
-      LOCAL_SCAN_DIR=""
       REMOTE_NAS_BASE="all"
     fi
     TARGETS_FILE="data/reports/selected_batch_targets.json"
+    EXPLICIT_TARGETS_FILE=false
     DAEMON_MODE=false
     WORKER_ARGS=(--nas-base "${REMOTE_NAS_BASE}")
-    # Only the selection flags understood by batch_media_add_tvshow.py go to the local scan
-    SCAN_ARGS=()
     while [[ $# -gt 0 ]]; do
       case "$1" in
         --daemon | -d) DAEMON_MODE=true ;;
-        --fresh-only)
+        --targets-file)
+          EXPLICIT_TARGETS_FILE=true
+          WORKER_ARGS+=("$1" "${2:?--targets-file needs a path}")
+          shift
+          ;;
+        --targets-file=*)
+          EXPLICIT_TARGETS_FILE=true
           WORKER_ARGS+=("$1")
-          SCAN_ARGS+=("$1")
-          ;;
-        --mode)
-          WORKER_ARGS+=("$1" "${2:?--mode needs a value}")
-          SCAN_ARGS+=("$1" "$2")
-          shift
-          ;;
-        --limit)
-          WORKER_ARGS+=("$1" "${2:?--limit needs a value}")
-          SCAN_ARGS+=("$1" "$2")
-          shift
           ;;
         *) WORKER_ARGS+=("$1") ;;
       esac
@@ -699,31 +698,16 @@ REMOTE_SCRIPT
     done
 
     # shellcheck disable=SC2029
-    ssh "${O2SWITCH_HOST}" "cd $(printf '%q' "${REMOTE_BASE}") && mkdir -p scripts data/reports data/SRT data/__PHASH__ data/__AHASH__ run logs etc"
-    WORKER_SCRIPT="${REPO_ROOT}/scripts/workers/o2switch_batch_worker.py"
-    [[ -f "${WORKER_SCRIPT}" ]] || WORKER_SCRIPT="${SCRIPT_DIR}/o2switch_batch_worker.py"
-    rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" --chmod=F755 "${WORKER_SCRIPT}" "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/"
-    if [[ -f "${REPO_ROOT}/data/reports/nas_ftp_index.json" ]]; then
-      echo "-> Synchronizing cached NAS FTP index..."
+    ssh "${O2SWITCH_HOST}" "cd $(printf '%q' "${REMOTE_BASE}") && mkdir -p scripts/batch_worker data/reports data/SRT data/__PHASH__ data/__AHASH__ run logs etc"
+    sync_remote_batch_worker
+    if [[ -f "${REPO_ROOT}/data/reports/nas_ftp_index.json" ]] && [[ -n "$(find "${REPO_ROOT}/data/reports/nas_ftp_index.json" -mmin -60 2>/dev/null)" ]]; then
+      echo "-> Synchronizing fresh cached NAS FTP index (< 60 min)..."
       rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${REPO_ROOT}/data/reports/nas_ftp_index.json" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/reports/"
     fi
 
-    # With a local NAS mount with files, select targets locally; otherwise the worker scans the NAS over FTP
-    if [[ -d "${LOCAL_SCAN_DIR}" && -n "$(find "${LOCAL_SCAN_DIR}" -mindepth 1 -print -quit 2>/dev/null)" ]]; then
-      echo "-> Resolving ${TARGET_TYPE} targets locally (${LOCAL_SCAN_DIR})..."
-      rm -f "${TARGETS_FILE}"
-      SCANNER_SCRIPT="${REPO_ROOT}/scripts/ingestion/batch_media_add_tvshow.py"
-      [[ -f "${SCANNER_SCRIPT}" ]] || SCANNER_SCRIPT="${SCRIPT_DIR}/batch_media_add_tvshow.py"
-      if ! uv run python "${SCANNER_SCRIPT}" --nas-root "${LOCAL_SCAN_DIR}" --save-targets-only \
-        --max-episodes-per-series 1000 "${SCAN_ARGS[@]}" >/dev/null; then
-        echo "❌ Local target scan failed (see error above)."
-        exit 1
-      fi
-      # The scanner writes nothing when there is nothing to do: send an explicit empty list
-      [[ -f "${TARGETS_FILE}" ]] || echo "[]" >"${TARGETS_FILE}"
-      echo "-> Transferring selected batch targets..."
-      rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${TARGETS_FILE}" "${O2SWITCH_HOST}:${REMOTE_BASE}/data/reports/"
-    else
+    # o2switch holds the canonical .phash/.ahash SSOT (local PC data/__PHASH__ is purged):
+    # clear any stale selected_batch_targets.json unless --targets-file was explicitly supplied
+    if [[ "${EXPLICIT_TARGETS_FILE}" == "false" ]]; then
       # shellcheck disable=SC2029
       ssh "${O2SWITCH_HOST}" "rm -f $(printf '%q' "${REMOTE_BASE}/${TARGETS_FILE}")"
     fi
@@ -870,11 +854,11 @@ REMOTE_SCRIPT
     ;;
 
   batch-sync)
-    # Worker script only (sync also ships SRT and the public gateway); the next launch runs it
+    # Worker script + modular package only (sync also ships SRT and the public gateway); the next launch runs it
     check_ssh
     WORKER_SCRIPT="${REPO_ROOT}/scripts/workers/o2switch_batch_worker.py"
     [[ -f "${WORKER_SCRIPT}" ]] || WORKER_SCRIPT="${SCRIPT_DIR}/o2switch_batch_worker.py"
-    rsync -a --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" --chmod=F755 "${WORKER_SCRIPT}" "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/"
+    sync_remote_batch_worker
     echo "local  $(sha256sum "${WORKER_SCRIPT}" | cut -c1-16)"
     # shellcheck disable=SC2029
     echo "remote $(ssh "${O2SWITCH_HOST}" "sha256sum '${REMOTE_BASE}/scripts/o2switch_batch_worker.py'" | cut -c1-16)"
@@ -884,12 +868,11 @@ REMOTE_SCRIPT
     # Legacy .phash names to moviehash names; dry run unless --apply. Counts only (no media name)
     check_ssh
     shift || true
-    WORKER_SCRIPT="${REPO_ROOT}/scripts/workers/o2switch_batch_worker.py"
-    [[ -f "${WORKER_SCRIPT}" ]] || WORKER_SCRIPT="${SCRIPT_DIR}/o2switch_batch_worker.py"
     MIGRATE_SCRIPT="${REPO_ROOT}/scripts/workers/o2switch_phash_migrate.py"
     [[ -f "${MIGRATE_SCRIPT}" ]] || MIGRATE_SCRIPT="${SCRIPT_DIR}/o2switch_phash_migrate.py"
+    sync_remote_batch_worker
     rsync -a --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" --chmod=F755 \
-      "${WORKER_SCRIPT}" "${MIGRATE_SCRIPT}" "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/"
+      "${MIGRATE_SCRIPT}" "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/"
     # shellcheck disable=SC2029
     ssh "${O2SWITCH_HOST}" "cd $(printf '%q' "${REMOTE_BASE}") && ./bin/python3 -u scripts/o2switch_phash_migrate.py ${*:+$(printf '%q ' "$@")}"
     ;;
@@ -1110,6 +1093,10 @@ REMOTE_TRAJ_STATUS
       "${REPO_ROOT}/scripts/ingestion/backfill_ahash_sidecars.py" \
       "${REPO_ROOT}/scripts/workers/o2switch_batch_worker.py" \
       "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/"
+    if [[ -d "${REPO_ROOT}/scripts/workers/batch_worker" ]]; then
+      rsync -az --delete --exclude='__pycache__' --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" \
+        "${REPO_ROOT}/scripts/workers/batch_worker/" "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/batch_worker/"
+    fi
     echo "=== Running aHash sidecar backfill on ${O2SWITCH_HOST} ==="
     # shellcheck disable=SC2029
     ssh -o ServerAliveInterval=15 -o ServerAliveCountMax=3 "${O2SWITCH_HOST}" "cd $(printf '%q' "${REMOTE_BASE}") && PATH=\"\$HOME/${REMOTE_BASE}/bin:\$PATH\" RAYON_NUM_THREADS=2 ./bin/python3 -u scripts/backfill_ahash_sidecars.py $(printf '%q ' "${BACKFILL_ARGS[@]}")"
