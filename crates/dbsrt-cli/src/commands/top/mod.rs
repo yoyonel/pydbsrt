@@ -34,7 +34,10 @@ pub fn probe_telemetry_snapshot(refresh_ms: u64) -> Result<SystemTelemetry> {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, RwLock};
 
-    let interval = refresh_ms.clamp(200, 1000);
+    let interval = refresh_ms.clamp(
+        constants::PROBE_MIN_INTERVAL_MS,
+        constants::PROBE_MAX_INTERVAL_MS,
+    );
     let mut initial_tel = SystemTelemetry::default();
     let mut sys = sysinfo::System::new();
     sys.refresh_cpu_specifics(sysinfo::CpuRefreshKind::everything());
@@ -64,8 +67,21 @@ pub fn probe_telemetry_snapshot(refresh_ms: u64) -> Result<SystemTelemetry> {
         sampler::run_telemetry_sampler_loop(shared, gpu, interval, stop);
     });
 
-    // Sleep for 2 sampling intervals + margin to guarantee delta rate calculation
-    std::thread::sleep(std::time::Duration::from_millis(interval * 2 + 50));
+    // Wait for 2 completed sampling intervals (accounting for tick-0 /proc warmup) for non-zero delta rates
+    let deadline = std::time::Instant::now()
+        + std::time::Duration::from_millis(interval * 2 + constants::PROBE_WARMUP_ALLOWANCE_MS);
+    std::thread::sleep(std::time::Duration::from_millis(interval * 2));
+    while std::time::Instant::now() < deadline {
+        let ready = shared_state.read().is_ok_and(|s| {
+            !s.active_jobs.is_empty() && s.active_jobs.iter().any(|j| j.current_rate_mib_s > 0.0)
+        });
+        if ready {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(
+            constants::PROBE_POLL_STEP_MS,
+        ));
+    }
     stop_flag.store(true, Ordering::Relaxed);
     let _ = handle.join();
 

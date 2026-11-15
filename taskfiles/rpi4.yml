@@ -113,10 +113,26 @@ tasks:
     cmds:
       - ./scripts/infra/rpi4/rpi4_cli.sh deploy
 
+  rpi4:stage:
+    desc: Stage pre-merge ARM64 dbsrt + dbsrt-server into ~/.local/lib/dbsrt-preview on RPi4 (prod untouched)
+    cmds:
+      - ./scripts/infra/rpi4/rpi4_cli.sh stage {{.CLI_ARGS}}
+
+  rpi4:canary:
+    desc: Validate staged preview dbsrt-server on isolated RPi4 localhost port (:18765, zero prod impact)
+    cmds:
+      - ./scripts/infra/rpi4/rpi4_cli.sh canary
+
   rpi4:top:
     desc: Launch interactive dbsrt top TUI session on Raspberry Pi 4 via SSH
     cmds:
       - ./scripts/infra/rpi4/rpi4_cli.sh top {{.CLI_ARGS}}
+
+  rpi4:top:preview:
+    desc: Launch interactive pre-merge staged dbsrt top TUI on Raspberry Pi 4 (prod ~/.local/bin untouched)
+    interactive: true
+    cmds:
+      - ./scripts/infra/rpi4/rpi4_cli.sh top-preview {{.CLI_ARGS}}
 
   rpi4:server:deploy:
     desc: Deploy standalone ARM64 dbsrt-server binary to Raspberry Pi 4 and configure systemd user service

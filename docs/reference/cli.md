@@ -278,13 +278,13 @@ dbsrt top [OPTIONS]
 #### Structure de l'Interface Full-Frame
 
 1. **Bannière d'En-Tête Système Multi-Lignes (Style Fastfetch Dynamique)** :
-   - Ligne 1 : Horloge temps réel (`HH:MM:SS`), nom d'hôte (`🖥️ hostname`), distribution OS et architecture (`Debian 13 x86_64`, `CloudLinux 8`, etc.), nombre de workers actifs, progression de la file batch active (`Batch: X/Y (Z%)` si un batch est en cours), pourcentage CPU global hôte, mémoire vive consommée / totale (`RAM: X.X/Y.Y GiB`).
+   - Ligne 1 : Horloge temps réel (`HH:MM:SS`), nom d'hôte (`🖥️ hostname`), distribution OS et architecture (`Debian 13 x86_64`, `CloudLinux 8`, etc.), nombre de workers actifs, progression et source active de la file batch (`Batch [<source>]: X/Y (Z%)` où `<source>` provient de `run/batch_type` : `freebox`, `tvshow`, `movies`, `all`), pourcentage CPU global hôte, mémoire vive consommée / totale (`RAM: X.X/Y.Y GiB`).
    - Ligne 2 : Modèle et nombre de cœurs processeur (`🧠 CPU: <modèle> (N cœurs)`), modèle de carte graphique ou accélérateur détecté (`🎮 GPU: <modèle>`) avec télémesures de décodage matériel en direct (`intel_gpu_top` : `Décodage: X.X% [bar]`, Render/3D, fréquence `MHz`, puissance `W`) ou mention transparente du mode actif (`Mode CPU Multithread` ou `Non détecté`).
-   - Ligne 3 : Débits réseau et pipe : Instantané réseau ingress physique (`Net RX`), débit de traitement du pipe de hachage (`Pipe pHash`), ainsi que le débit cumulé global de la session courante (`X.X MB/s` sur `Y.Y GiB` en `XhYYm` sur `N` flux).
+   - Ligne 3 : Débits réseau et pipe : Instantané réseau ingress (`Réseau Net RX` sur machine dédiée via `/proc/net/dev`, ou `Réseau compte RX` sur conteneur mutualisé CloudLinux LVE via le delta `rchar` `/proc/<pid>/io` des workers HTTP/FTP du compte uniquement, isolé de la carte 10 GbE partagée de l'hébergeur), débit de traitement du pipe actif (`Pipe pHash` en `MB/s` + `fps`, `Pipe aHash` en `MB/s` + multiple temps réel `x RT`, ou `Pipe pHash+aHash`), ainsi que le débit cumulé global de la session courante (`X.X MB/s` sur `Y.Y GiB` en `XhYYm` sur `N` flux).
 
 2. **Onglet 1 : Tâches en Cours (`[1]`)** :
-   - Table interactive des processus actifs (`dbsrt` et `ffmpeg`), moteurs d'exécution (`GPU VA-API`, `CPU Software`, `Sub Extraction`), débits instantanés, barres de progression textuelles, ETA et consommation mémoire/CPU.
-   - En-tête dynamique contextuel : affiche le décompte des tâches actives et la progression globale de la file de traitement (`[X/Y actifs │ File: C/T traités, R en attente]`).
+   - Table interactive des processus actifs (`dbsrt` et `ffmpeg`), moteurs d'exécution (`GPU VA-API`, `CPU Software`, `CPU Hi10P`, `aHash Audio`, `Sub Extraction`), débits instantanés (`fps` / `MB/s` pour flux vidéo `pHash` ; multiple temps réel `x RT` pour flux audio `aHash` PCM mono `f32le` $5\,512\text{ Hz}$), barres de progression (`MB lus / MB total` pour vidéo vs `durée décodée / durée totale` pour `aHash Audio`, sans jamais diviser le flux PCM par le poids du conteneur `.mkv`), ETA et consommation mémoire/CPU.
+   - En-tête dynamique contextuel : affiche le pipeline actif (`DÉCODAGE & PHASH` vs `DÉCODAGE & AHASH AUDIO` vs `PHASH & AHASH`), le décompte des workers et la file active (`[X/Y actifs │ File [<source>]: C/T traités, R restants]`).
 
 3. **Onglet 2 : Historique & Statistiques Réelles (`[2]` ou `[h]`)** :
    - Tableau de distribution statistique descriptive (Min, Médiane, Moyenne, 90e percentile P90, Max, Écart-type $\sigma$) sur les décodages intégraux pHash (durée > 60s) : débits effectifs (`MB/s`), durées de traitement (`minutes`), tailles des fichiers (`GiB`) et couplings de sous-titres certifiés.
@@ -323,7 +323,7 @@ dbsrt top [OPTIONS]
      - **Processeur (CPU)** : modèle CPU commercial complet, topologie (cœurs physiques + logiques), fréquence d'horloge et jauge de charge.
      - **Accélération Matérielle (GPU)** : périphérique détecté, pilote/moteur actif (`Intel Iris Xe Graphics`, `VA-API iHD`), statut et barres d'activité matérielle.
      - **Mémoire & Stockage** : RAM vive (utilisée, totale, pourcentage), swap actif, et espace disque libre sur la partition de travail.
-     - **Débits & Flux Réseau** : bande passante ingress (`Net RX`), débit d'ingestion pHash et volume global cumulé sur la session.
+     - **Débits & Flux Réseau** : bande passante ingress (`Réseau Net RX` physique dédié ou `Réseau compte RX` isolé par compte sur CloudLinux LVE), débit d'ingestion pHash/aHash et volume global cumulé sur la session.
 
 #### Raccourcis Clavier
 

@@ -28,8 +28,9 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use crate::constants::{
-    BYTES_PER_GIB_F64, CIVIL_DAYS_PER_400_YEARS, CIVIL_EPOCH_DAYS_OFFSET, MAX_PROGRESS_CAP,
-    MAX_SANITY_DURATION_SECS, MIN_FULL_DECODE_DURATION_SECS, MIN_WALL_DURATION_NON_CACHE_SECS,
+    AHASH_PCM_BYTES_PER_SAMPLE, AHASH_PCM_SAMPLE_RATE_HZ, BYTES_PER_GIB_F64, BYTES_PER_MIB_F64,
+    CIVIL_DAYS_PER_400_YEARS, CIVIL_EPOCH_DAYS_OFFSET, MAX_PROGRESS_CAP, MAX_SANITY_DURATION_SECS,
+    MIN_ELAPSED_FLOOR_SECS, MIN_FULL_DECODE_DURATION_SECS, MIN_WALL_DURATION_NON_CACHE_SECS,
     P90_PERCENTILE_FACTOR, PROGRESS_BAR_CHAR_WIDTH, SECONDS_PER_DAY, SECONDS_PER_HOUR,
     SECONDS_PER_MINUTE,
 };
@@ -97,7 +98,204 @@ pub struct ActiveJobTelemetry {
     pub cmdline: Vec<String>,
 }
 
+/// Active media processing pipeline category for a worker process.
+///
+/// # Data Flow & Invariants
+/// Distinguishes 32x32 grayscale video `pHash` pipes from mono `f32le` PCM audio `aHash`
+/// pipes (`-vn -ac 1 -ar 5512 -f f32le -`) and lightweight subtitle demuxing (`-f srt`),
+/// preventing `dbsrt top` from dividing `22_048 B/s` PCM audio output by full `.mkv` container sizes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StreamKind {
+    /// Visual 32x32 grayscale video frame decoding for `pHash` extraction (`1024 B/frame`).
+    #[default]
+    VideoPhash,
+    /// Mono `f32le` PCM audio decoding (`-vn`) for Haitsma-Kalker `.ahash` extraction (`22_048 B/s`).
+    AudioAhash,
+    /// Text subtitle stream demuxing (`-f srt` / `0:s:`) with zero video/audio decode.
+    SubtitleExtract,
+}
+
+/// Extracts the value immediately following `flag` inside a tokenized command-line slice.
+fn cmdline_flag_value<'a>(cmdline: &'a [String], flag: &str) -> Option<&'a str> {
+    cmdline
+        .windows(2)
+        .find(|pair| pair[0] == flag)
+        .map(|pair| pair[1].as_str())
+}
+
+/// Classifies the active media processing pipeline from its command line and engine label.
+///
+/// # Arguments
+/// * `cmdline` - Tokenized process command line from `/proc/<pid>/cmdline`.
+/// * `engine` - Detected engine moniker (e.g. `"aHash Audio"`, `"GPU (VA-API)"`, `"Sub Extraction"`).
+///
+/// # Returns
+/// [`StreamKind`] variant describing the active pipe semantics.
+///
+/// # Errors
+/// Infallible.
+///
+/// # Panics
+/// Never panics.
+///
+/// # Data Flow & Invariants
+/// 1. Matches `AudioAhash` when `engine` contains `"aHash"` or `cmdline` combines `-vn` with `-f f32le`.
+/// 2. Matches `SubtitleExtract` when `engine` contains `"Sub"`, `-f srt`, or `0:s:` stream mapping.
+/// 3. Defaults to `VideoPhash` for all visual decoding pipelines.
+pub fn detect_stream_kind(cmdline: &[String], engine: &str) -> StreamKind {
+    let has_vn = cmdline.iter().any(|arg| arg == "-vn");
+    let fmt = cmdline_flag_value(cmdline, "-f");
+    if engine.contains("aHash") || (has_vn && fmt == Some("f32le")) {
+        return StreamKind::AudioAhash;
+    }
+    if engine.contains("Sub")
+        || fmt == Some("srt")
+        || cmdline.iter().any(|arg| arg.contains("0:s:"))
+    {
+        return StreamKind::SubtitleExtract;
+    }
+    StreamKind::VideoPhash
+}
+
+/// Parses the `-ar <sample_rate>` audio sampling frequency in Hz from an FFmpeg command line.
+///
+/// # Arguments
+/// * `cmdline` - Tokenized FFmpeg command line.
+///
+/// # Returns
+/// Positive sample rate in Hz, or [`AHASH_PCM_SAMPLE_RATE_HZ`] (`5512.0`) if absent/invalid.
+///
+/// # Errors
+/// Infallible.
+///
+/// # Panics
+/// Never panics.
+///
+/// # Data Flow & Invariants
+/// Scans adjacent pairs for `"-ar"` and validates a finite positive float.
+pub fn parse_ahash_sample_rate_hz(cmdline: &[String]) -> f64 {
+    cmdline_flag_value(cmdline, "-ar")
+        .and_then(|val| val.parse::<f64>().ok())
+        .filter(|rate| rate.is_finite() && *rate > 0.0)
+        .unwrap_or(AHASH_PCM_SAMPLE_RATE_HZ)
+}
+
+/// Parses an explicit `-t <duration_secs>` ceiling from an FFmpeg command line when present.
+///
+/// # Arguments
+/// * `cmdline` - Tokenized FFmpeg command line.
+///
+/// # Returns
+/// `Some(seconds)` if a finite positive `-t` limit is present, `None` otherwise.
+///
+/// # Errors
+/// Infallible.
+///
+/// # Panics
+/// Never panics.
+///
+/// # Data Flow & Invariants
+/// Allows bounded sample extractions (`-t 900`) to compute exact 0-100% progress and ETA.
+pub fn parse_ffmpeg_duration_limit_secs(cmdline: &[String]) -> Option<f64> {
+    cmdline_flag_value(cmdline, "-t")
+        .and_then(|val| val.parse::<f64>().ok())
+        .filter(|secs| secs.is_finite() && *secs > 0.0)
+}
+
 impl ActiveJobTelemetry {
+    /// Classifies whether this active process is a visual `pHash`, acoustic `aHash`, or subtitle job.
+    ///
+    /// # Arguments
+    /// None (operates on `&self`).
+    ///
+    /// # Returns
+    /// [`StreamKind`] derived from `self.cmdline` and `self.engine`.
+    ///
+    /// # Errors
+    /// Infallible.
+    ///
+    /// # Panics
+    /// Never panics.
+    ///
+    /// # Data Flow & Invariants
+    /// Delegates to [`detect_stream_kind`] with zero heap allocation.
+    pub fn stream_kind(&self) -> StreamKind {
+        detect_stream_kind(&self.cmdline, &self.engine)
+    }
+
+    /// Returns `true` when this job is an acoustic `.ahash` mono PCM audio pipe (`-vn ... -f f32le`).
+    ///
+    /// # Arguments
+    /// None.
+    ///
+    /// # Returns
+    /// `true` for [`StreamKind::AudioAhash`], `false` otherwise.
+    ///
+    /// # Errors
+    /// Infallible.
+    ///
+    /// # Panics
+    /// Never panics.
+    ///
+    /// # Data Flow & Invariants
+    /// Pure predicate over [`Self::stream_kind`].
+    pub fn is_ahash_audio(&self) -> bool {
+        self.stream_kind() == StreamKind::AudioAhash
+    }
+
+    /// Expected uncompressed PCM stdout throughput in bytes per decoded media second (`sample_rate * 4`).
+    ///
+    /// # Arguments
+    /// None.
+    ///
+    /// # Returns
+    /// PCM byte rate per media second (e.g. `22_048.0` at `5512 Hz` `f32le`).
+    ///
+    /// # Errors
+    /// Infallible.
+    ///
+    /// # Panics
+    /// Never panics.
+    ///
+    /// # Data Flow & Invariants
+    /// Multiplies [`parse_ahash_sample_rate_hz`] by [`AHASH_PCM_BYTES_PER_SAMPLE`].
+    pub fn ahash_pcm_bytes_per_sec(&self) -> f64 {
+        parse_ahash_sample_rate_hz(&self.cmdline) * AHASH_PCM_BYTES_PER_SAMPLE
+    }
+
+    /// Computes the audio decoding speed as a multiple of real-time playback (`1.0x RT` = `22_048 B/s`).
+    ///
+    /// # Arguments
+    /// None.
+    ///
+    /// # Returns
+    /// Real-time speed multiplier (e.g. `11.5` means decoding `11.5` media seconds per wall second).
+    ///
+    /// # Errors
+    /// Infallible.
+    ///
+    /// # Panics
+    /// Never panics.
+    ///
+    /// # Data Flow & Invariants
+    /// Uses instantaneous delta throughput (`current_rate_mib_s`) when available, falling back to
+    /// cumulative average (`read_bytes / elapsed_secs`) on the initial tick before delta warm-up.
+    pub fn ahash_realtime_factor(&self) -> f64 {
+        let pcm_bps = self.ahash_pcm_bytes_per_sec();
+        if pcm_bps <= 0.0 {
+            return 0.0;
+        }
+        if self.current_rate_mib_s > 0.0 {
+            return (self.current_rate_mib_s * BYTES_PER_MIB_F64) / pcm_bps;
+        }
+        if self.read_bytes > 0 {
+            let elapsed = self.elapsed_secs.max(MIN_ELAPSED_FLOOR_SECS);
+            return (self.read_bytes as f64 / pcm_bps) / elapsed;
+        }
+        0.0
+    }
+
     /// Checks whether the active job matches an interactive search query.
     ///
     /// # Arguments
@@ -867,6 +1065,9 @@ pub struct BatchQueueTelemetry {
     /// Desired concurrent worker processes requested by operator (via `run/desired_workers`).
     #[serde(default)]
     pub desired_workers: Option<usize>,
+    /// Active batch library source identifier from `run/batch_type` (`"freebox"`, `"tvshow"`, `"movies"`, `"all"`).
+    #[serde(default)]
+    pub batch_type: Option<String>,
     /// ISO 8601 UTC timestamp of last status update.
     pub updated_at: String,
 }
@@ -947,6 +1148,31 @@ impl SystemTelemetry {
             }
             _ => format!("{used:.2} GiB"),
         })
+    }
+
+    /// Returns true when telemetry reflects a shared CloudLinux LVE / cPanel tenant container.
+    ///
+    /// # Arguments
+    /// * `&self` - Immutable telemetry snapshot reference.
+    ///
+    /// # Returns
+    /// `true` when an LVE memory/CPU quota or CloudLinux LVE kernel/OS is detected; else `false`.
+    ///
+    /// # Errors
+    /// None.
+    ///
+    /// # Panics
+    /// Guarantee: Never panics.
+    ///
+    /// # Data Flow & Invariants
+    /// On mutualized CloudLinux blades (`o2switch`), `/proc/net/dev` exposes the shared 10 GbE NIC
+    /// traffic of all co-tenants. Views and samplers use this predicate to label and compute
+    /// per-account remote stream ingress (`Réseau compte RX`) instead of host-wide NIC counters.
+    pub fn is_shared_lve_account(&self) -> bool {
+        self.account_ram_limit_gib.is_some()
+            || self.account_cpu_pct.is_some()
+            || self.host_info.os_name.contains("CloudLinux")
+            || self.host_info.kernel.contains(".lve.")
     }
 }
 

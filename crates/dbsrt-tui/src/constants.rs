@@ -228,3 +228,63 @@ pub const RAW_FRAME_BYTES: f64 = 1024.0;
 
 /// Default baseline duration in seconds for streaming TV show episodes (45 minutes).
 pub const DEFAULT_STREAM_EPISODE_DURATION_SECS: f64 = 2700.0;
+
+/// Volatile lifecycle file storing active batch source identifier (`freebox`, `tvshow`, `movies`, `all`).
+pub const DEFAULT_BATCH_TYPE_PATH: &str = "run/batch_type";
+
+/// Default path to Freebox HTTP streaming target manifest JSON file.
+pub const DEFAULT_FREEBOX_BATCH_TARGETS_PATH: &str = "data/reports/freebox_batch_targets.json";
+
+/// Default path to active batch worker execution telemetry NDJSON log.
+pub const DEFAULT_WORKER_EVENTS_LOG_PATH: &str = "logs/batch_events.jsonl";
+
+/// Default mono audio sampling frequency in Hz for Haitsma-Kalker `.ahash` FFmpeg pipes (`-ar 5512`).
+pub const AHASH_PCM_SAMPLE_RATE_HZ: f64 = 5512.0;
+
+/// Number of bytes per 32-bit little-endian float PCM sample (`-f f32le`).
+pub const AHASH_PCM_BYTES_PER_SAMPLE: f64 = 4.0;
+
+/// Uncompressed mono `f32le` PCM throughput in bytes per decoded media second (`5512 Hz * 4 B = 22_048 B/s`).
+pub const AHASH_PCM_BYTES_PER_SEC: f64 = AHASH_PCM_SAMPLE_RATE_HZ * AHASH_PCM_BYTES_PER_SAMPLE;
+
+/// Default sliding-window hop size in samples between consecutive Haitsma-Kalker spectral frames.
+pub const AHASH_DEFAULT_HOP_SAMPLES: f64 = 64.0;
+
+/// Raw PCM stdout bytes per Haitsma-Kalker spectral hop (`64 samples * 4 B = 256 B`, `86.125 fps` @ `1x RT`).
+pub const AHASH_PCM_HOP_BYTES: f64 = AHASH_DEFAULT_HOP_SAMPLES * AHASH_PCM_BYTES_PER_SAMPLE;
+
+/// Size in bytes of one 64-bit visual `pHash` entry inside a `.phash` binary file.
+pub const PHASH_BYTES_PER_FRAME: u64 = 8;
+
+/// Minimum refresh interval in seconds when re-scanning `data/__PHASH__` for newly written media durations.
+pub const DURATION_CACHE_REFRESH_TTL_SECS: u64 = 10;
+
+/// Minimum valid frame rate in FPS accepted when parsing `.<fps>fps.phash` filenames.
+pub const MIN_VALID_PHASH_FPS: f64 = 1.0;
+
+/// Maximum valid frame rate in FPS accepted when parsing `.<fps>fps.phash` filenames.
+pub const MAX_VALID_PHASH_FPS: f64 = 240.0;
+
+/// Maximum ASCII digit count for the integer part of an FPS token (rejects 4-digit release years like `2022`).
+pub const MAX_FPS_INT_DIGITS: usize = 3;
+
+/// Maximum ASCII digit count for the fractional part of an FPS token (e.g. `23.976024`).
+pub const MAX_FPS_FRAC_DIGITS: usize = 6;
+
+/// Minimum FPS threshold above which `DÉBIT VFS` displays frame rate instead of MB/s for video jobs.
+pub const MIN_DISPLAY_HASHING_FPS: f64 = 0.5;
+
+/// Minimum real-time multiplier threshold above which `DÉBIT VFS` displays `x RT` speed for `aHash` jobs.
+pub const MIN_DISPLAY_REALTIME_FACTOR: f64 = 0.05;
+
+/// Minimum clamp bound in milliseconds for `dbsrt top --json` non-interactive sampling interval.
+pub const PROBE_MIN_INTERVAL_MS: u64 = 200;
+
+/// Maximum clamp bound in milliseconds for `dbsrt top --json` non-interactive sampling interval.
+pub const PROBE_MAX_INTERVAL_MS: u64 = 1000;
+
+/// Warmup budget in milliseconds covering initial `/proc` PSS + history scan during `dbsrt top --json`.
+pub const PROBE_WARMUP_ALLOWANCE_MS: u64 = 3500;
+
+/// Polling step in milliseconds when waiting for 2-tick delta completion in `dbsrt top --json`.
+pub const PROBE_POLL_STEP_MS: u64 = 50;

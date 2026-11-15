@@ -148,7 +148,10 @@ Cette page dresse le dictionnaire exhaustif de toutes les cibles d'orchestration
 | `task rpi4:cli:build` | Cross-compile le binaire standalone ARM64 `dbsrt` avec parité Debian Bullseye GLIBC 2.31. |
 | `task rpi4:cli:test` | Valide localement sur l'hôte le binaire ARM64 sous Debian Bullseye via émulation QEMU binfmt. |
 | `task rpi4:cli:deploy` | Déploie le binaire standalone ARM64 `dbsrt` vers `~/.local/bin/dbsrt` sur le Raspberry Pi 4 via SSH. |
+| `task rpi4:stage` | Dépose les binaires ARM64 pré-merge (`dbsrt` + `dbsrt-server`) dans `~/.local/lib/dbsrt-preview` sur le RPi4 sans modifier `~/.local/bin` ni redémarrer le démon actif. |
+| `task rpi4:canary` | Valide `dbsrt-server` pré-merge sur un port local isolé (`127.0.0.1:18765`) face au catalogue réel du RPi4 (zéro impact prod). |
 | `task rpi4:top` | Lance une session interactive SSH de `dbsrt top` directement sur le Raspberry Pi 4. |
+| `task rpi4:top:preview` | Lance une session interactive SSH du `dbsrt top` pré-merge (`~/.local/lib/dbsrt-preview/dbsrt`) sur le Raspberry Pi 4. |
 | `task rpi4:server:deploy` | Déploie le binaire standalone ARM64 `dbsrt-server` et configure le service systemd utilisateur. |
 | `task rpi4:server:start` | Démarre le service systemd utilisateur `dbsrt-server` sur le Raspberry Pi 4. |
 | `task rpi4:server:stop` | Arrête le service systemd utilisateur `dbsrt-server` sur le Raspberry Pi 4. |
@@ -174,6 +177,12 @@ Cette page dresse le dictionnaire exhaustif de toutes les cibles d'orchestration
 | `task o2switch:build` | Cross-compile les exécutables statiques autonomes `x86_64-unknown-linux-musl` (`dbsrt`, `dbsrt-server`) et applique `strip`. |
 | `task o2switch:test-local` | Valide empiriquement le binaire musl en mode Zero-DB localement sur le port `8769`. |
 | `task o2switch:sync` | Synchronise les binaires statiques, la passerelle `index.php` + `.htaccess` et les sous-titres (`--update`) par rsync. Le catalogue `catalog.dbphash` local n'est envoyé que s'il manque sur o2switch : le catalogue distant est recompacté sur place. |
+| `task o2switch:deploy` | Compile, dépose une release signée `SHA256SUMS`, bascule atomiquement `current`, redémarre `dbsrt-server` et effectue un rollback automatique en cas d'échec `/v1/health`. |
+| `task o2switch:stage` | Dépose les binaires pré-merge dans `~/dbsrt/releases/<id>` et pointe `~/dbsrt/preview` dessus sans toucher à `current`, `bin/` ni aux workers batch actifs. |
+| `task o2switch:canary` | Démarre `~/dbsrt/preview/dbsrt-server` sur un socket Unix isolé (`run/dbsrt-canary.sock`) contre les vrais catalogues d'o2switch, sonde `/v1/health` + `/v1/status` puis arrête proprement le canari. |
+| `task o2switch:promote` | Promeut atomiquement la release pré-validée `~/dbsrt/preview` en production (`current`) avec contrôle `/v1/health` et auto-rollback. |
+| `task o2switch:releases` | Liste les releases présentes sur o2switch (`*` active, `-` précédente, `~` preview) ainsi que la release exécutée par le démon actif. |
+| `task o2switch:rollback` | Restaure atomiquement la release précédente (`previous`) et redémarre le démon dessus. |
 | `task o2switch:batch:tvshow` | Exécute l'ingestion par batch distante sur les séries vierges (/tvshow, supporte `--daemon`, `--fresh-only`, `--retry-failed`, `--max-extraction-secs`). |
 | `task o2switch:batch:movies` | Exécute l'ingestion par batch distante sur les films vierges (/video, supporte `--daemon`, `--fresh-only`, `--retry-failed`, `--max-extraction-secs`). |
 | `task o2switch:batch:all` | Exécute l'ingestion batch unifiée sur l'intégralité du corpus distant (/tvshow + /video). |
@@ -197,6 +206,7 @@ Cette page dresse le dictionnaire exhaustif de toutes les cibles d'orchestration
 | `task o2switch:trajectory:pull` | Rapatrie les résultats d'audit (`audit/*.jsonl`) depuis o2switch vers `data/reports/audit/`. |
 | `task o2switch:monitoring` | Affiche l'URL publique du tableau de bord web et le lien direct d'authentification mobile 4G/5G. |
 | `task o2switch:top` | Ouvre le moniteur TUI plein écran en direct sur o2switch via SSH (`ssh -t`). |
+| `task o2switch:top:preview` | Ouvre le moniteur TUI pré-merge (`~/dbsrt/preview/dbsrt top`) en direct sur o2switch sans modifier le binaire de production `~/dbsrt/bin/dbsrt`. |
 | `task o2switch:pull-catalog` | Rapatrie le catalogue compilé `catalog.dbphash`, les sous-titres SRT et journaux depuis o2switch vers le stockage local / appliance. |
 | `task o2switch:backup-nas` | Rapatrie les empreintes brutes unitaires `.phash` depuis o2switch vers le NAS Synology / stockage persistant de sauvegarde. |
 | `task o2switch:start` | Démarre le démon en arrière-plan sans root sur o2switch et attend la validation de la sonde `/v1/health`. |

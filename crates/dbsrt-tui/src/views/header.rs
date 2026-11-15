@@ -17,7 +17,8 @@ use crate::constants::{
 };
 use crate::host_info::HostSystemInfo;
 use crate::model::{
-    format_duration, format_progress_bar, ActiveJobTelemetry, GpuTelemetry, SystemTelemetry,
+    format_duration, format_progress_bar, ActiveJobTelemetry, BatchQueueTelemetry, GpuTelemetry,
+    StreamKind, SystemTelemetry,
 };
 use crate::views::widgets::get_current_time_str;
 
@@ -71,6 +72,18 @@ pub fn render_header(frame: &mut Frame, area: Rect, tel: &SystemTelemetry) {
 
     let p = Paragraph::new(vec![line1, line2, line3, line4]).block(header_block);
     frame.render_widget(p, area);
+}
+
+/// Formats the header batch queue badge, surfacing `batch_type` when present (`Batch [freebox]: ...`).
+fn format_batch_queue_badge(queue: &BatchQueueTelemetry) -> String {
+    let prefix = match queue.batch_type.as_deref() {
+        Some(kind) if !kind.is_empty() => format!("Batch [{kind}]"),
+        _ => "Batch".to_string(),
+    };
+    format!(
+        "{prefix}: {}/{} ({:.0}%) ",
+        queue.completed_targets, queue.total_targets, queue.progress_pct
+    )
 }
 
 /// Builds Line 1: Node hostname, OS/arch, active workers count, host CPU%, and RAM GiB.
@@ -141,12 +154,7 @@ fn build_host_telemetry_line(tel: &SystemTelemetry) -> Line<'static> {
 
     if tel.batch_queue.total_targets > 0 {
         spans.push(Span::styled(
-            format!(
-                "Batch: {}/{} ({:.0}%) ",
-                tel.batch_queue.completed_targets,
-                tel.batch_queue.total_targets,
-                tel.batch_queue.progress_pct
-            ),
+            format_batch_queue_badge(&tel.batch_queue),
             Style::default()
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
@@ -294,19 +302,75 @@ fn is_streaming_active(jobs: &[ActiveJobTelemetry]) -> bool {
         })
 }
 
-/// Builds Line 3: Real-time network RX throughput and pHash pipe processing rate.
+/// Builds the right-hand pipe throughput spans (`Pipe pHash`, `Pipe aHash`, or `Pipe pHash+aHash`).
+fn build_pipe_flow_spans(jobs: &[ActiveJobTelemetry], safe_total_rate: f64) -> Vec<Span<'static>> {
+    let has_video = jobs
+        .iter()
+        .any(|j| j.stream_kind() == StreamKind::VideoPhash);
+    let has_audio = jobs.iter().any(ActiveJobTelemetry::is_ahash_audio);
+    let total_video_fps: f64 = jobs
+        .iter()
+        .filter(|j| j.stream_kind() == StreamKind::VideoPhash)
+        .map(|j| j.hashing_fps)
+        .sum();
+    let total_audio_rt: f64 = jobs
+        .iter()
+        .filter(|j| j.is_ahash_audio())
+        .map(ActiveJobTelemetry::ahash_realtime_factor)
+        .sum();
+    let rate_style = Style::default()
+        .fg(Color::Magenta)
+        .add_modifier(Modifier::BOLD);
+
+    if has_audio && !has_video {
+        return vec![
+            Span::styled("Pipe aHash: ", Style::default().fg(Color::White)),
+            Span::styled(format!("{safe_total_rate:>5.2} MB/s "), rate_style),
+            Span::styled(
+                format!("({total_audio_rt:.1}x RT)"),
+                Style::default().fg(Color::LightCyan),
+            ),
+        ];
+    }
+    if has_audio && has_video {
+        return vec![
+            Span::styled("Pipe pHash+aHash: ", Style::default().fg(Color::White)),
+            Span::styled(format!("{safe_total_rate:>5.1} MB/s "), rate_style),
+            Span::styled(
+                format!("({total_video_fps:.0} fps + {total_audio_rt:.1}x RT)"),
+                Style::default().fg(Color::Yellow),
+            ),
+        ];
+    }
+    if is_streaming_active(jobs) {
+        return vec![
+            Span::styled("Pipe pHash: ", Style::default().fg(Color::White)),
+            Span::styled(format!("{safe_total_rate:>5.1} MB/s "), rate_style),
+            Span::styled(
+                format!("({total_video_fps:.0} fps)"),
+                Style::default().fg(Color::Yellow),
+            ),
+        ];
+    }
+    vec![
+        Span::styled("Pipe pHash: ", Style::default().fg(Color::White)),
+        Span::styled(format!("{safe_total_rate:>5.1} MB/s"), rate_style),
+    ]
+}
+
+/// Builds Line 3: Real-time network RX throughput and pHash/aHash pipe processing rate.
 ///
 /// # Arguments
 /// * `tel` - System telemetry snapshot reference.
 ///
 /// # Returns
-/// Formatted [`Line`] containing network RX rate and pHash pipe bandwidth.
+/// Formatted [`Line`] containing network RX rate and active pipe bandwidth.
 ///
 /// # Panics
 /// Panic-free.
 ///
 /// # Data Flow & Invariants
-/// Differentiates remote streaming (with FPS) from local/CIFS ingest pipelines.
+/// Differentiates acoustic `aHash` PCM pipes (`x RT`), mixed `pHash+aHash`, and video `pHash` pipes.
 fn build_realtime_flow_line(tel: &SystemTelemetry) -> Line<'static> {
     let safe_total_rate = if tel.total_rate_mib_s <= 0.0 {
         0.0
@@ -319,6 +383,12 @@ fn build_realtime_flow_line(tel: &SystemTelemetry) -> Line<'static> {
         tel.net_rx_mib_s
     };
 
+    let net_label = if tel.is_shared_lve_account() {
+        "Réseau compte RX: "
+    } else {
+        "Réseau Net RX: "
+    };
+
     let mut spans = vec![
         Span::styled(
             " ⚡ FLUX REEL  │ ",
@@ -326,7 +396,7 @@ fn build_realtime_flow_line(tel: &SystemTelemetry) -> Line<'static> {
                 .fg(Color::LightBlue)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("Réseau Net RX: ", Style::default().fg(Color::White)),
+        Span::styled(net_label, Style::default().fg(Color::White)),
         Span::styled(
             format!("{:>5.1} MB/s ", safe_net_rx),
             Style::default()
@@ -339,33 +409,7 @@ fn build_realtime_flow_line(tel: &SystemTelemetry) -> Line<'static> {
         ),
         Span::styled("  ──►  ", Style::default().fg(Color::DarkGray)),
     ];
-
-    if is_streaming_active(&tel.active_jobs) {
-        let total_fps: f64 = tel.active_jobs.iter().map(|j| j.hashing_fps).sum();
-        spans.extend(vec![
-            Span::styled("Pipe pHash: ", Style::default().fg(Color::White)),
-            Span::styled(
-                format!("{:>5.1} MB/s ", safe_total_rate),
-                Style::default()
-                    .fg(Color::Magenta)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                format!("({:.0} fps)", total_fps),
-                Style::default().fg(Color::Yellow),
-            ),
-        ]);
-    } else {
-        spans.extend(vec![
-            Span::styled("Pipe pHash: ", Style::default().fg(Color::White)),
-            Span::styled(
-                format!("{:>5.1} MB/s", safe_total_rate),
-                Style::default()
-                    .fg(Color::Magenta)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]);
-    }
+    spans.extend(build_pipe_flow_spans(&tel.active_jobs, safe_total_rate));
 
     Line::from(spans)
 }

@@ -9,6 +9,7 @@ DEFAULT_REMOTE_PUBLIC_HTML="public_html/dbsrt"
 # Remote scripts run through ${REMOTE_BASE}/bin/python3, linked here by sync: the bare python3 is the system 3.6
 O2SWITCH_PYTHON="/opt/alt/python313/bin/python3"
 DEFAULT_SERVER_SOCKET_REL="run/dbsrt-server.sock"
+DEFAULT_CANARY_SOCKET_REL="run/dbsrt-canary.sock"
 DEFAULT_LOCAL_TEST_PORT=8769
 DEFAULT_HEALTHCHECK_MAX_RETRIES=20
 DEFAULT_HEALTHCHECK_SLEEP_SEC=0.5
@@ -352,6 +353,125 @@ case "${ACTION}" in
     echo "✓ Release ${RELEASE_ID} deployed and serving."
     ;;
 
+  stage)
+    check_ssh
+    SKIP_BUILD=false
+    for arg in "${@:2}"; do
+      [[ "${arg}" == "--skip-build" ]] && SKIP_BUILD=true
+    done
+    if [[ "${SKIP_BUILD}" != "true" || ! -f "${SERVER_BIN}" || ! -f "${CLI_BIN}" ]]; then
+      "$0" build
+    fi
+    STAGE="$(mktemp -d)"
+    trap 'rm -rf "${STAGE}"' EXIT
+    cp "${SERVER_BIN}" "${CLI_BIN}" "${STAGE}/"
+    (cd "${STAGE}" && sha256sum dbsrt-server dbsrt >SHA256SUMS)
+    RELEASE_ID="$(sha256sum "${STAGE}/SHA256SUMS" | cut -c1-16)"
+    printf '%s %s\n' "$(git -C "${REPO_ROOT}" describe --always --dirty --abbrev=12)" "$(git -C "${REPO_ROOT}" rev-parse --abbrev-ref HEAD)" >"${STAGE}/BUILD"
+    echo "=== Staging pre-merge release ${RELEASE_ID} ($(cat "${STAGE}/BUILD")) to ${O2SWITCH_HOST}:~/${REMOTE_BASE}/preview ==="
+    # shellcheck disable=SC2029
+    ssh "${O2SWITCH_HOST}" "mkdir -p ${REMOTE_BASE}/releases ${REMOTE_BASE}/bin"
+    rsync -a --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${STAGE}/" "${O2SWITCH_HOST}:${REMOTE_BASE}/releases/${RELEASE_ID}/"
+    remote_release stage "${RELEASE_ID}"
+    echo "  • Interactive TUI preview : task o2switch:top:preview"
+    echo "  • Canary server validation: task o2switch:canary"
+    echo "  • Promote to production   : task o2switch:promote"
+    ;;
+
+  promote)
+    check_ssh
+    # shellcheck disable=SC2029
+    PREVIEW_ID="$(ssh "${O2SWITCH_HOST}" "[[ -L ${REMOTE_BASE}/preview ]] && basename \"\$(readlink ${REMOTE_BASE}/preview)\" || true")"
+    if [[ -z "${PREVIEW_ID}" ]]; then
+      echo "❌ No staged preview release on ${O2SWITCH_HOST}. Run 'task o2switch:stage' first."
+      exit 1
+    fi
+    echo "=== Promoting staged preview release ${PREVIEW_ID} to active production on ${O2SWITCH_HOST} ==="
+    if [[ -f "${REPO_ROOT}/deploy/o2switch/index.php" ]]; then
+      rsync -az --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${REPO_ROOT}/deploy/o2switch/index.php" "${O2SWITCH_HOST}:${REMOTE_PUBLIC_HTML}/index.php"
+    fi
+    remote_release activate "${PREVIEW_ID}"
+    if ! restart_on_current_release; then
+      echo "❌ Promoted release ${PREVIEW_ID} failed healthcheck: rolling back."
+      if remote_release rollback && restart_on_current_release; then
+        echo "✓ Previous release restored and serving."
+      else
+        echo "❌ Rollback failed too: check 'task o2switch:releases' and 'task o2switch:logs'."
+      fi
+      exit 1
+    fi
+    remote_release prune "${DEFAULT_RELEASES_KEEP}"
+    echo "✓ Release ${PREVIEW_ID} promoted and serving."
+    ;;
+
+  canary)
+    check_ssh
+    # shellcheck disable=SC2029
+    if ! ssh "${O2SWITCH_HOST}" "test -x ${REMOTE_BASE}/preview/dbsrt-server"; then
+      echo "No staged preview binary on ${O2SWITCH_HOST}; staging current workspace first..."
+      "$0" stage
+    fi
+    CANARY_SOCKET="${REMOTE_BASE}/${DEFAULT_CANARY_SOCKET_REL}"
+    echo "=== Running isolated canary check against real o2switch datasets (${CANARY_SOCKET}) ==="
+    # shellcheck disable=SC2029
+    ssh "${O2SWITCH_HOST}" "bash -s -- $(printf '%q ' "${REMOTE_BASE}" "${DEFAULT_CANARY_SOCKET_REL}" "${DEFAULT_HEALTHCHECK_MAX_RETRIES}" "${DEFAULT_HEALTHCHECK_SLEEP_SEC}")" <<'REMOTE_CANARY'
+set -euo pipefail
+BASE="$1"
+SOCK_REL="$2"
+MAX_RETRIES="$3"
+SLEEP_SEC="$4"
+cd "$HOME/${BASE}"
+SOCK="$HOME/${BASE}/${SOCK_REL}"
+CANARY_LOG="$(mktemp)"
+rm -f "${SOCK}"
+mkdir -p run/empty_phash
+RAYON_NUM_THREADS=2 \
+  DBSRT_DBAHASH="$HOME/${BASE}/data/catalog.dbahash" \
+  DBSRT_AHASH_DIR="$HOME/${BASE}/data/__AHASH__" \
+  ./preview/dbsrt-server \
+    --unix-socket "${SOCK}" \
+    --dbphash "$HOME/${BASE}/data/catalog.dbphash" \
+    --subtitles-dir "$HOME/${BASE}/data/SRT" \
+    --phash-dir "$HOME/${BASE}/run/empty_phash" </dev/null >"${CANARY_LOG}" 2>&1 &
+CPID=$!
+cleanup() {
+  kill -INT "${CPID}" 2>/dev/null || true
+  for _ in 1 2 3; do
+    kill -0 "${CPID}" 2>/dev/null || break
+    sleep 0.2
+  done
+  kill -KILL "${CPID}" 2>/dev/null || true
+  wait "${CPID}" 2>/dev/null || true
+  rm -f "${SOCK}" "${CANARY_LOG}"
+}
+trap cleanup EXIT
+
+HEALTHY=false
+for _ in $(seq 1 "${MAX_RETRIES}"); do
+  if curl -s -f --unix-socket "${SOCK}" http://localhost/v1/health >/dev/null 2>&1; then
+    HEALTHY=true
+    break
+  fi
+  sleep "${SLEEP_SEC}"
+done
+if [[ "${HEALTHY}" != "true" ]]; then
+  echo "❌ Canary dbsrt-server failed healthcheck:"
+  cat "${CANARY_LOG}"
+  exit 1
+fi
+echo "✓ Canary /v1/health OK (isolated socket, prod daemon untouched)."
+echo "--- Canary /v1/status ---"
+curl -s -f --unix-socket "${SOCK}" http://localhost/v1/status
+echo ""
+if ALERTS_JSON="$(curl -s -f --unix-socket "${SOCK}" http://localhost/v1/monitoring/alerts 2>/dev/null)"; then
+  echo "--- Canary /v1/monitoring/alerts ---"
+  printf '%s\n' "${ALERTS_JSON}"
+fi
+echo "--- Canary dbsrt --version ---"
+./preview/dbsrt --version
+REMOTE_CANARY
+    ;;
+
   rollback)
     check_ssh
     echo "=== Rolling back to the previous release on ${O2SWITCH_HOST} ==="
@@ -365,7 +485,7 @@ case "${ACTION}" in
 
   releases)
     check_ssh
-    echo "=== Releases on ${O2SWITCH_HOST} (* current, - previous) ==="
+    echo "=== Releases on ${O2SWITCH_HOST} (* current, - previous, ~ preview) ==="
     remote_release list
     echo "Running daemon(s): $(remote_release running "${SERVER_SOCKET}" | paste -sd ' ')"
     ;;
@@ -605,6 +725,19 @@ REMOTE_SCRIPT
     echo "=== Connecting to live dbsrt top TUI on ${O2SWITCH_HOST} ==="
     # shellcheck disable=SC2029
     ssh -tt "${O2SWITCH_HOST}" "cd ${REMOTE_BASE} && PATH=\"\$HOME/${REMOTE_BASE}/bin:\$PATH\" RAYON_NUM_THREADS=2 ./bin/dbsrt top ${*:+$(printf '%q ' "$@")}"
+    ;;
+
+  top-preview)
+    check_ssh
+    shift || true
+    # shellcheck disable=SC2029
+    if ! ssh "${O2SWITCH_HOST}" "test -x ${REMOTE_BASE}/preview/dbsrt"; then
+      echo "No staged preview binary on ${O2SWITCH_HOST}; staging current workspace first..."
+      "$0" stage
+    fi
+    echo "=== Connecting to STAGED PREVIEW dbsrt top TUI on ${O2SWITCH_HOST} (prod bin/ untouched) ==="
+    # shellcheck disable=SC2029
+    ssh -tt "${O2SWITCH_HOST}" "cd ${REMOTE_BASE} && PATH=\"\$HOME/${REMOTE_BASE}/bin:\$PATH\" RAYON_NUM_THREADS=2 ./preview/dbsrt top ${*:+$(printf '%q ' "$@")}"
     ;;
 
   pull-catalog)
@@ -1115,7 +1248,7 @@ REMOTE_TRAJ_STATUS
     ;;
 
   *)
-    echo "Usage: $0 {build|test-local|sync|deploy|rollback|releases|start|stop|restart|status|logs|demo|setup-cron|remove-cron|rotate-key|rotate-readonly-key|monitoring|top|pull-catalog|backup-nas|batch-tvshow|batch-movies|batch-all|batch-status|batch-summary|batch-sync|batch-pause|batch-resume|batch-workers|batch-stop|batch-logs|faultwatch|audit|trajectory|ahash-backfill|pack-ahash}"
+    echo "Usage: $0 {build|test-local|sync|deploy|stage|promote|canary|rollback|releases|start|stop|restart|status|logs|demo|setup-cron|remove-cron|rotate-key|rotate-readonly-key|monitoring|top|top-preview|pull-catalog|backup-nas|batch-tvshow|batch-movies|batch-all|batch-status|batch-summary|batch-sync|batch-pause|batch-resume|batch-workers|batch-stop|batch-logs|faultwatch|audit|trajectory|ahash-backfill|pack-ahash}"
     exit 1
     ;;
 esac

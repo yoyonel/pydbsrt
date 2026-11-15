@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Remote-side releases of the dbsrt binaries on o2switch: activate | rollback | list | running | prune.
+# Remote-side releases of the dbsrt binaries on o2switch: activate | stage | rollback | list | running | prune.
 # Run by scripts/o2switch_ctl.sh over SSH (deployed to ~/dbsrt/bin/).
 # Layout: releases/<id>/{dbsrt-server,dbsrt,SHA256SUMS}, current -> releases/<id>, previous -> the
-# release active before, bin/<binary> -> ../current/<binary>. One rename of `current` switches both
-# binaries at once; a running daemon keeps its inode until restarted.
+# release active before, preview -> staged pre-merge release, bin/<binary> -> ../current/<binary>.
+# One rename of `current` switches both binaries at once; `stage` updates `preview` without touching `current`/`bin/`.
 # usage: dbsrt_release.sh <action> [base_dir] [id|keep|socket]   (relative paths resolve from $HOME)
 set -euo pipefail
 
@@ -82,10 +82,21 @@ case "${ACTION}" in
       switch_link "${BASE}/current" "releases/${ARG}"
       [[ -z "${OLD}" ]] || switch_link "${BASE}/previous" "releases/${OLD}"
     fi
+    if [[ "$(link_id preview)" == "${ARG}" ]]; then
+      rm -f "${BASE}/preview"
+    fi
     link_bins
     # prune keeps the most recently activated releases
     touch "${BASE}/releases/${ARG}"
     echo "✓ Release ${ARG} active (previous: ${OLD:-none}). Restart the daemon to serve it."
+    ;;
+
+  stage)
+    check_release "${ARG}"
+    CUR_ID="$(link_id current)"
+    switch_link "${BASE}/preview" "releases/${ARG}"
+    touch "${BASE}/releases/${ARG}"
+    echo "✓ Release ${ARG} staged at preview/ (prod current=${CUR_ID:-none} untouched)."
     ;;
 
   rollback)
@@ -103,8 +114,10 @@ case "${ACTION}" in
   list)
     CUR="$(link_id current)"
     PREV="$(link_id previous)"
+    PREVIEW="$(link_id preview)"
     for id in $(releases_newest_first); do
       MARK=" "
+      [[ "${id}" == "${PREVIEW}" ]] && MARK="~"
       [[ "${id}" == "${PREV}" ]] && MARK="-"
       [[ "${id}" == "${CUR}" ]] && MARK="*"
       echo "${MARK} ${id} $(cat "${BASE}/releases/${id}/BUILD" 2>/dev/null || true)"
@@ -129,10 +142,11 @@ case "${ACTION}" in
     [[ "${ARG}" =~ ^[0-9]+$ && "${ARG}" -ge 2 ]] || fail "prune keeps at least 2 releases, got '${ARG}'."
     CUR="$(link_id current)"
     PREV="$(link_id previous)"
+    PREVIEW="$(link_id preview)"
     KEPT=0
     for id in $(releases_newest_first); do
-      if [[ "${id}" == "${CUR}" || "${id}" == "${PREV}" || "${KEPT}" -lt $((ARG - 2)) ]]; then
-        [[ "${id}" == "${CUR}" || "${id}" == "${PREV}" ]] || KEPT=$((KEPT + 1))
+      if [[ "${id}" == "${CUR}" || "${id}" == "${PREV}" || "${id}" == "${PREVIEW}" || "${KEPT}" -lt $((ARG - 2)) ]]; then
+        [[ "${id}" == "${CUR}" || "${id}" == "${PREV}" || "${id}" == "${PREVIEW}" ]] || KEPT=$((KEPT + 1))
         continue
       fi
       rm -rf "${BASE:?}/releases/${id}"
@@ -141,7 +155,7 @@ case "${ACTION}" in
     ;;
 
   *)
-    echo "usage: $0 <activate|rollback|list|running|prune> [base_dir] [id|socket|keep]" >&2
+    echo "usage: $0 <activate|stage|rollback|list|running|prune> [base_dir] [id|socket|keep]" >&2
     exit 2
     ;;
 esac

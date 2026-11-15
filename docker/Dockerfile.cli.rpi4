@@ -33,7 +33,8 @@ ENV CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/src/target \
-    cargo build --release --target aarch64-unknown-linux-gnu --bin dbsrt --bin dbsrt-server \
+    find crates -name '*.rs' -exec touch {} + \
+    && cargo build --release --target aarch64-unknown-linux-gnu --bin dbsrt --bin dbsrt-server \
     && mkdir -p /out \
     && cp /src/target/aarch64-unknown-linux-gnu/release/dbsrt /out/dbsrt \
     && cp /src/target/aarch64-unknown-linux-gnu/release/dbsrt-server /out/dbsrt-server

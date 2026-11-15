@@ -15,21 +15,25 @@ use sysinfo::{
 };
 
 use crate::commands::top::constants::{
-    BYTES_PER_GIB_F64, BYTES_PER_MIB_F64, DEFAULT_BATCH_EVENTS_PATH, DEFAULT_COUPLINGS_PATH,
-    DEFAULT_COUPLING_BASELINE_FPS, DEFAULT_HISTORY_SEED_PATH, DEFAULT_MEDIA_CACHE_PATH,
-    DEFAULT_MEDIA_SCAN_INTERVAL_SECS, DEFAULT_MEDIA_SOURCES_PATH, DEFAULT_NAS_TVSHOW_PATH,
-    DEFAULT_PHASH_DIR, DEFAULT_SELECTED_BATCH_REPORT_PATH, DEFAULT_SELECTED_BATCH_TARGETS_PATH,
-    DEFAULT_SOURCE_ID_TVSHOW, DEFAULT_SOURCE_NAME_TVSHOW, DEFAULT_STREAM_EPISODE_DURATION_SECS,
-    DEFAULT_TRAJECTORY_AUDIT_DIR, FALLBACK_TRAJECTORY_AUDIT_DIR, MAX_MEDIA_SCAN_LIMIT,
-    MAX_SELECTED_BATCH_WORKERS, MIN_DELTA_TIME_FLOOR_SECS, MIN_PROGRESS_THRESHOLD,
-    NAS_TVSHOW_DIR_ENV, PROC_NET_DEV_HEADER_LINES, PROC_NET_DEV_PATH, RAW_FRAME_BYTES,
-    SCAN_STREAMING_CHUNK_SIZE, SESSION_WINDOW_SECS,
+    AHASH_PCM_BYTES_PER_SAMPLE, AHASH_PCM_HOP_BYTES, BYTES_PER_GIB_F64, BYTES_PER_MIB_F64,
+    DEFAULT_BATCH_EVENTS_PATH, DEFAULT_BATCH_TYPE_PATH, DEFAULT_COUPLINGS_PATH,
+    DEFAULT_COUPLING_BASELINE_FPS, DEFAULT_FREEBOX_BATCH_TARGETS_PATH, DEFAULT_HISTORY_SEED_PATH,
+    DEFAULT_MEDIA_CACHE_PATH, DEFAULT_MEDIA_SCAN_INTERVAL_SECS, DEFAULT_MEDIA_SOURCES_PATH,
+    DEFAULT_NAS_TVSHOW_PATH, DEFAULT_PHASH_DIR, DEFAULT_SELECTED_BATCH_REPORT_PATH,
+    DEFAULT_SELECTED_BATCH_TARGETS_PATH, DEFAULT_SOURCE_ID_TVSHOW, DEFAULT_SOURCE_NAME_TVSHOW,
+    DEFAULT_STREAM_EPISODE_DURATION_SECS, DEFAULT_TRAJECTORY_AUDIT_DIR,
+    DEFAULT_WORKER_EVENTS_LOG_PATH, DURATION_CACHE_REFRESH_TTL_SECS, FALLBACK_TRAJECTORY_AUDIT_DIR,
+    MAX_FPS_FRAC_DIGITS, MAX_FPS_INT_DIGITS, MAX_MEDIA_SCAN_LIMIT, MAX_SELECTED_BATCH_WORKERS,
+    MAX_VALID_PHASH_FPS, MIN_DELTA_TIME_FLOOR_SECS, MIN_PROGRESS_THRESHOLD, MIN_VALID_PHASH_FPS,
+    NAS_TVSHOW_DIR_ENV, PHASH_BYTES_PER_FRAME, PROC_NET_DEV_HEADER_LINES, PROC_NET_DEV_PATH,
+    RAW_FRAME_BYTES, SCAN_STREAMING_CHUNK_SIZE, SESSION_WINDOW_SECS,
 };
 use crate::commands::top::model::{
-    calculate_overall_stats, format_unix_to_iso, parse_iso_to_unix_secs, ActiveJobTelemetry,
+    calculate_overall_stats, detect_stream_kind, format_unix_to_iso, parse_ahash_sample_rate_hz,
+    parse_ffmpeg_duration_limit_secs, parse_iso_to_unix_secs, ActiveJobTelemetry,
     BatchQueueTelemetry, DiscoveredMediaItem, GpuTelemetry, HistoricalRecord, IngestionStatus,
-    MediaSourceConfig, MediaSubtrackInfo, PhashFingerprintInfo, SessionThroughput, SystemTelemetry,
-    TrajectoryAuditItem,
+    MediaSourceConfig, MediaSubtrackInfo, PhashFingerprintInfo, SessionThroughput, StreamKind,
+    SystemTelemetry, TrajectoryAuditItem,
 };
 
 /// Shared handle for background GPU monitoring process.
@@ -40,6 +44,12 @@ static STEM_SIZE_CACHE: Mutex<Option<HashMap<String, u64>>> = Mutex::new(None);
 
 /// Global video codec cache by stem to eliminate blocking CIFS network metadata calls.
 static STEM_CODEC_CACHE: Mutex<Option<HashMap<String, String>>> = Mutex::new(None);
+
+/// Cached media duration state `(last_phash_scan, stem -> duration_secs)`.
+type DurationCacheState = (Option<Instant>, HashMap<String, f64>);
+
+/// Global media duration cache `(last_phash_scan, stem -> duration_secs)` for `O(1)` aHash progress/ETA.
+static STEM_DURATION_CACHE: Mutex<Option<DurationCacheState>> = Mutex::new(None);
 
 /// Resolves the path to the events NDJSON log, falling back to history seed when live report is absent.
 ///
@@ -148,37 +158,281 @@ fn load_batch_target_sizes(path: &Path, map: &mut HashMap<String, u64>) {
     }
 }
 
+/// Extracts the valid frame rate (FPS) from a `.phash` filename (`<name_or_hash>.<int>.<frac>fps.phash`).
+///
+/// # Arguments
+/// * `file_name` - Basename of a `.phash` file (e.g. `"0123456789abcdef.24.0fps.phash"`).
+///
+/// # Returns
+/// `Some(fps)` when within `[MIN_VALID_PHASH_FPS, MAX_VALID_PHASH_FPS]`, or `None` when absent/invalid.
+///
+/// # Errors
+/// None.
+///
+/// # Panics
+/// Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// Strips `.phash` and `fps`, splits `<int>.<frac>` bounded by [`MAX_FPS_INT_DIGITS`] and
+/// [`MAX_FPS_FRAC_DIGITS`], and validates against `[MIN_VALID_PHASH_FPS, MAX_VALID_PHASH_FPS]`.
+pub fn parse_fps_from_phash_filename(file_name: &str) -> Option<f64> {
+    let before_fps = file_name.strip_suffix(".phash")?.strip_suffix("fps")?;
+    let (before_frac, frac) = before_fps.rsplit_once('.')?;
+    if frac.is_empty()
+        || frac.len() > MAX_FPS_FRAC_DIGITS
+        || !frac.bytes().all(|b| b.is_ascii_digit())
+    {
+        return None;
+    }
+    let (_, int_part) = before_frac.rsplit_once('.')?;
+    if int_part.is_empty()
+        || int_part.len() > MAX_FPS_INT_DIGITS
+        || !int_part.bytes().all(|b| b.is_ascii_digit())
+    {
+        return None;
+    }
+    let fps = format!("{int_part}.{frac}").parse::<f64>().ok()?;
+    (MIN_VALID_PHASH_FPS..=MAX_VALID_PHASH_FPS)
+        .contains(&fps)
+        .then_some(fps)
+}
+
+/// Populates media duration in seconds (`frame_count / fps`) from `.phash` files and sidecars in `phash_dir`.
+///
+/// # Arguments
+/// * `phash_dir` - Directory containing `<moviehash_or_stem>.<fps>fps.phash` files.
+/// * `map` - Mutable target `stem -> duration_secs` map.
+///
+/// # Returns
+/// Nothing. Mutates `map` in place.
+///
+/// # Errors
+/// None (unreadable entries are skipped).
+///
+/// # Panics
+/// Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// 1. Iterates `.phash` files in `phash_dir`.
+/// 2. Computes `frames = file_len / PHASH_BYTES_PER_FRAME` and parses `fps` from filename.
+/// 3. Resolves canonical media name via [`dbsrt_core::phash_media_name`] (reading `<moviehash>.json` sidecar),
+///    URL-decodes and strips extension/fps via [`phash_media_stem`], and stores `frames / fps`.
+fn parse_single_phash_duration(path: &Path) -> Option<(String, f64)> {
+    if path.extension().is_none_or(|ext| ext != "phash") {
+        return None;
+    }
+    let file_name = path.file_name()?.to_str()?;
+    let fps = parse_fps_from_phash_filename(file_name)?;
+    let frames = fs::metadata(path).ok()?.len() / PHASH_BYTES_PER_FRAME;
+    if frames == 0 {
+        return None;
+    }
+    let dur_secs = frames as f64 / fps;
+    let resolved_name = url_decode_simple(&dbsrt_core::phash_media_name(path));
+    let stem = phash_media_stem(&resolved_name).to_string();
+    (!stem.is_empty() && dur_secs > 0.0).then_some((stem, dur_secs))
+}
+
+pub fn load_phash_durations_from_dir(phash_dir: &Path, map: &mut HashMap<String, f64>) {
+    let Ok(entries) = fs::read_dir(phash_dir) else {
+        return;
+    };
+    let paths: Vec<PathBuf> = entries.flatten().map(|e| e.path()).collect();
+    let pairs: Vec<(String, f64)> = paths
+        .into_par_iter()
+        .filter_map(|p| parse_single_phash_duration(&p))
+        .collect();
+    for (stem, dur_secs) in pairs {
+        map.insert(stem, dur_secs);
+    }
+}
+
+/// Populates media durations from `data/SRT/couplings.json` (`frame_count / fps`).
+fn load_couplings_durations(couplings_path: &Path, map: &mut HashMap<String, f64>) {
+    let Ok(content) = fs::read_to_string(couplings_path) else {
+        return;
+    };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&content) else {
+        return;
+    };
+    let Some(arr) = v.get("couplings").and_then(|c| c.as_array()) else {
+        return;
+    };
+    for item in arr {
+        let Some(media_name) = item.get("media_name").and_then(|m| m.as_str()) else {
+            continue;
+        };
+        let frames = item
+            .get("frame_count")
+            .and_then(|f| f.as_f64())
+            .unwrap_or(0.0);
+        let fps = item
+            .get("fps")
+            .and_then(|f| f.as_f64())
+            .unwrap_or(DEFAULT_COUPLING_BASELINE_FPS);
+        if frames > 0.0 && fps > 0.0 {
+            let stem = phash_media_stem(&url_decode_simple(media_name)).to_string();
+            map.entry(stem).or_insert(frames / fps);
+        }
+    }
+}
+
+/// Reads `media_browser_cache.json` directly without triggering a `data/__PHASH__/` directory scan.
+fn read_raw_media_cache_items(cache_path: &Path) -> Vec<DiscoveredMediaItem> {
+    let Ok(content) = fs::read_to_string(cache_path) else {
+        return Vec::new();
+    };
+    serde_json::from_str::<Vec<DiscoveredMediaItem>>(&content).unwrap_or_default()
+}
+
+/// Builds a fresh `stem -> duration_secs` map including a parallel `data/__PHASH__/` sidecar scan.
+fn build_default_duration_map() -> HashMap<String, f64> {
+    let mut dur_map = HashMap::new();
+    load_phash_durations_from_dir(Path::new(DEFAULT_PHASH_DIR), &mut dur_map);
+    load_couplings_durations(Path::new(DEFAULT_COUPLINGS_PATH), &mut dur_map);
+    for item in read_raw_media_cache_items(Path::new(DEFAULT_MEDIA_CACHE_PATH)) {
+        if let Some(dur) = item.duration_secs.filter(|&d| d > 0.0) {
+            dur_map.entry(item.stem).or_insert(dur);
+        }
+    }
+    dur_map
+}
+
+/// Pre-populates [`STEM_SIZE_CACHE`], [`STEM_CODEC_CACHE`], and [`STEM_DURATION_CACHE`] from single-file manifests.
+///
+/// # Arguments
+/// None.
+///
+/// # Returns
+/// Nothing. Updates global in-memory caches in `< 5 ms` without scanning `data/__PHASH__/`.
+///
+/// # Errors
+/// None.
+///
+/// # Panics
+/// Panics only if a global cache mutex is poisoned.
+///
+/// # Data Flow & Invariants
+/// **Invariant**: Never walks `data/__PHASH__/` synchronously during startup so `dbsrt top --json`
+/// enters its first sampling tick immediately; `data/__PHASH__/` is scanned lazily via Rayon only when
+/// an active `AudioAhash` job misses in `couplings.json` and `media_browser_cache.json`.
 pub fn preload_stem_size_cache() {
     let mut map = HashMap::new();
     let events_file = resolve_events_log_path();
     if events_file.exists() {
         load_events_log_sizes(&events_file, &mut map);
     }
-
-    let batch_targets_file = Path::new("data/reports/selected_batch_targets.json");
-    if batch_targets_file.exists() {
-        load_batch_target_sizes(batch_targets_file, &mut map);
+    let worker_events = Path::new(DEFAULT_WORKER_EVENTS_LOG_PATH);
+    if worker_events.exists() {
+        load_events_log_sizes(worker_events, &mut map);
     }
 
-    let mut codec_map = HashMap::new();
-    let media_cache_file = Path::new(DEFAULT_MEDIA_CACHE_PATH);
-    if media_cache_file.exists() {
-        let cached = load_media_cache(media_cache_file);
-        for (stem, item) in cached {
-            if item.size_bytes > 0 {
-                map.entry(stem.clone()).or_insert(item.size_bytes);
-            }
-            if let Some(codec) = item.video_codec {
-                codec_map.insert(stem, codec);
-            }
+    for targets_rel in [
+        DEFAULT_SELECTED_BATCH_TARGETS_PATH,
+        DEFAULT_FREEBOX_BATCH_TARGETS_PATH,
+    ] {
+        let targets_file = Path::new(targets_rel);
+        if targets_file.exists() {
+            load_batch_target_sizes(targets_file, &mut map);
         }
     }
 
-    let mut lock = STEM_SIZE_CACHE.lock().unwrap();
-    *lock = Some(map);
+    let mut codec_map = HashMap::new();
+    let mut dur_map = HashMap::new();
+    load_couplings_durations(Path::new(DEFAULT_COUPLINGS_PATH), &mut dur_map);
+    for item in read_raw_media_cache_items(Path::new(DEFAULT_MEDIA_CACHE_PATH)) {
+        if item.size_bytes > 0 {
+            map.entry(item.stem.clone()).or_insert(item.size_bytes);
+        }
+        if let Some(dur) = item.duration_secs.filter(|&d| d > 0.0) {
+            dur_map.entry(item.stem.clone()).or_insert(dur);
+        }
+        if let Some(codec) = item.video_codec {
+            codec_map.insert(item.stem, codec);
+        }
+    }
 
-    let mut c_lock = STEM_CODEC_CACHE.lock().unwrap();
-    *c_lock = Some(codec_map);
+    *STEM_SIZE_CACHE.lock().unwrap() = Some(map);
+    *STEM_CODEC_CACHE.lock().unwrap() = Some(codec_map);
+    *STEM_DURATION_CACHE.lock().unwrap() = Some((None, dur_map));
+}
+
+/// Registers a known media duration (seconds) and optional container size into the in-memory caches.
+///
+/// # Arguments
+/// * `media_name` - Media stem or filename.
+/// * `duration_secs` - Positive media duration in seconds.
+/// * `size_bytes` - Optional container file size in bytes (`> 0` inserts into [`STEM_SIZE_CACHE`]).
+///
+/// # Returns
+/// Nothing.
+///
+/// # Errors
+/// None.
+///
+/// # Panics
+/// Panics only if a cache mutex is poisoned.
+///
+/// # Data Flow & Invariants
+/// Normalizes `media_name` via [`phash_media_stem`] so both `"Title.mkv"` and `"Title"` hit in `O(1)`.
+pub fn register_cached_media_metadata(
+    media_name: &str,
+    duration_secs: Option<f64>,
+    size_bytes: Option<u64>,
+) {
+    let stem = phash_media_stem(media_name).to_string();
+    if let Some(dur) = duration_secs.filter(|&d| d > 0.0) {
+        let mut lock = STEM_DURATION_CACHE.lock().unwrap();
+        let (_, map) = lock.get_or_insert_with(|| (None, HashMap::new()));
+        map.insert(stem.clone(), dur);
+    }
+    if let Some(sz) = size_bytes.filter(|&s| s > 0) {
+        let mut lock = STEM_SIZE_CACHE.lock().unwrap();
+        let map = lock.get_or_insert_with(HashMap::new);
+        map.insert(stem, sz);
+    }
+}
+
+/// Resolves cached media duration in seconds without triggering blocking network/ffprobe calls.
+///
+/// # Arguments
+/// * `media_name` - Media stem or filename extracted from active worker cmdline.
+///
+/// # Returns
+/// `Some(duration_secs)` if known in local `.phash` sidecars, `couplings.json`, or media cache; else `None`.
+///
+/// # Errors
+/// None.
+///
+/// # Panics
+/// Panics only if [`STEM_DURATION_CACHE`] mutex is poisoned.
+///
+/// # Data Flow & Invariants
+/// Looks up `phash_media_stem(media_name)` in [`STEM_DURATION_CACHE`]. On cache miss, lazily scans
+/// `data/__PHASH__/` via Rayon at most once every [`DURATION_CACHE_REFRESH_TTL_SECS`] seconds.
+fn lookup_or_should_refresh_duration(key: &str) -> Result<f64, bool> {
+    let lock = STEM_DURATION_CACHE.lock().unwrap();
+    let Some((last_scan, ref map)) = *lock else {
+        return Err(true);
+    };
+    if let Some(&dur) = map.get(key) {
+        return Ok(dur);
+    }
+    Err(last_scan.is_none_or(|at| at.elapsed().as_secs() >= DURATION_CACHE_REFRESH_TTL_SECS))
+}
+
+pub fn get_media_duration_secs(media_name: &str) -> Option<f64> {
+    let key = phash_media_stem(media_name);
+    match lookup_or_should_refresh_duration(key) {
+        Ok(dur) => Some(dur),
+        Err(true) => {
+            let refreshed = build_default_duration_map();
+            let found = refreshed.get(key).copied();
+            *STEM_DURATION_CACHE.lock().unwrap() = Some((Some(Instant::now()), refreshed));
+            found
+        }
+        Err(false) => None,
+    }
 }
 
 /// Retrieves the cached video codecmoniker for a given media stem.
@@ -380,6 +634,37 @@ fn parse_proc_io_val(line: &str) -> Option<u64> {
     } else {
         None
     }
+}
+
+/// Parses cumulative stdout/file `wchar:` bytes from a `/proc/<pid>/io` payload.
+///
+/// # Arguments
+/// * `proc_io_body` - Raw contents of `/proc/<pid>/io`.
+///
+/// # Returns
+/// `Some(wchar_bytes)` when `wchar:` line is present and valid `u64`; else `None`.
+///
+/// # Errors
+/// None.
+///
+/// # Panics
+/// Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// Used by `StreamKind::AudioAhash` to read exact uncompressed PCM bytes written to stdout
+/// (`decoded_secs * 22_048 B/s`), unaffected by compressed `.mkv` `rchar` input bytes on local disks.
+pub fn parse_proc_wchar_bytes(proc_io_body: &str) -> Option<u64> {
+    proc_io_body
+        .lines()
+        .find_map(|line| line.strip_prefix("wchar:"))
+        .and_then(|rest| rest.split_whitespace().next())
+        .and_then(|val| val.parse::<u64>().ok())
+}
+
+/// Reads cumulative `wchar` bytes from `/proc/{pid}/io` (`None` if unreadable or non-Linux).
+pub fn read_proc_wchar_bytes(pid: u32) -> Option<u64> {
+    let body = fs::read_to_string(format!("/proc/{pid}/io")).ok()?;
+    parse_proc_wchar_bytes(&body)
 }
 
 /// Cumulative read bytes. Returns `0` if `/proc/[pid]/io` is missing or access is denied.
@@ -1939,6 +2224,18 @@ fn update_discovered_media_status(
     }
 }
 
+/// True when `arg0` is a shell/SSH wrapper (`bash -c "ffmpeg ..."`), preventing phantom `"Tâche Active"` rows.
+fn is_shell_or_ssh_wrapper(arg0: &str) -> bool {
+    let exe = Path::new(arg0)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(arg0);
+    matches!(
+        exe,
+        "sh" | "bash" | "zsh" | "dash" | "fish" | "ssh" | "sudo" | "timeout" | "nohup"
+    )
+}
+
 /// Discovers and filters active dbsrt and ffmpeg candidate processes from sysinfo.
 fn collect_candidate_processes(system: &System) -> (Vec<RawCandidateProcess>, Vec<u32>) {
     let mut ffmpeg_ppids = Vec::new();
@@ -1950,12 +2247,13 @@ fn collect_candidate_processes(system: &System) -> (Vec<RawCandidateProcess>, Ve
             .iter()
             .map(|s| s.to_string_lossy().to_string())
             .collect();
-        if cmdline.is_empty() {
+        if cmdline.is_empty() || is_shell_or_ssh_wrapper(&cmdline[0]) {
             continue;
         }
 
         let cmd_str = cmdline.join(" ");
-        let is_dbsrt = cmd_str.contains("dbsrt") && cmd_str.contains("media:add");
+        let is_dbsrt = cmd_str.contains("dbsrt")
+            && (cmd_str.contains("media:add") || cmd_str.contains("media-add"));
         let is_ffmpeg =
             cmd_str.contains("ffmpeg") && (cmd_str.contains("-i") || cmd_str.contains("-f"));
 
@@ -2004,9 +2302,7 @@ pub fn run_telemetry_sampler_loop(
     stop_flag: Arc<AtomicBool>,
 ) {
     let mut system = System::new();
-    let mut networks = Networks::new_with_refreshed_list();
-    let mut last_net_instant = Instant::now();
-    let mut last_proc_rx: Option<(Instant, u64)> = None;
+    let mut net_sampler = NetRxSamplerState::new();
     let mut previous_io_samples: HashMap<u32, (Instant, u64)> = HashMap::new();
     /// Account RAM `(used, limit)` in GiB, and account CPU in percent of its LVE limit.
     type AccountUsage = (Option<(f64, Option<f64>)>, Option<f64>);
@@ -2074,13 +2370,13 @@ pub fn run_telemetry_sampler_loop(
             account = Some((now, (mem, cpu)));
         }
 
-        // Refresh physical network interface RX throughput
-        let (net_rx_mib_s, new_last_net) =
-            compute_net_rx_rate(&mut networks, now, last_net_instant, &mut last_proc_rx);
-        last_net_instant = new_last_net;
-
-        // 2. Discover active candidate processes
+        // 2. Discover active candidate processes and compute RX ingress (LVE account vs physical NIC)
         let (raw_candidates, ffmpeg_ppids) = collect_candidate_processes(&system);
+        let net_rx_mib_s = if is_shared_lve_tick(account, &shared_state) {
+            net_sampler.sample_lve_rx_mib_s(&raw_candidates, &ffmpeg_ppids, now)
+        } else {
+            net_sampler.sample_nic_rx_mib_s(now)
+        };
 
         let (active_jobs, new_previous_io) =
             process_candidate_jobs(raw_candidates, &ffmpeg_ppids, previous_io_samples, now);
@@ -2218,6 +2514,28 @@ fn load_batch_queue_from_json(path: &Path) -> Option<BatchQueueTelemetry> {
     serde_json::from_str::<BatchQueueTelemetry>(&content).ok()
 }
 
+/// Reads the active batch library source identifier (`freebox`, `tvshow`, `movies`, `all`) from `path`.
+///
+/// # Arguments
+/// * `path` - Path to `run/batch_type`.
+///
+/// # Returns
+/// `Some(trimmed_type)` when non-empty; else `None`.
+///
+/// # Errors
+/// None.
+///
+/// # Panics
+/// Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// Reads plain text written by `o2switch_ctl.sh` / `freebox_batch_ctl.sh` and strips trailing newlines.
+pub fn read_batch_type_from(path: &Path) -> Option<String> {
+    let raw = fs::read_to_string(path).ok()?;
+    let trimmed = raw.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
 /// Fallback reconstruction of batch queue metrics from target manifest and events log.
 fn load_batch_queue_from_manifest(targets_path: &Path) -> Option<BatchQueueTelemetry> {
     let content = fs::read_to_string(targets_path).ok()?;
@@ -2241,6 +2559,7 @@ fn load_batch_queue_from_manifest(targets_path: &Path) -> Option<BatchQueueTelem
         is_active: false,
         is_paused: false,
         desired_workers: None,
+        batch_type: None,
         updated_at: String::new(),
     })
 }
@@ -2251,20 +2570,22 @@ fn load_batch_queue_from_manifest(targets_path: &Path) -> Option<BatchQueueTelem
 /// * `active_workers` - Count of parallel decoding workers actively running.
 ///
 /// # Returns
-/// Instantiated [`BatchQueueTelemetry`] structure.
+/// Instantiated [`BatchQueueTelemetry`] structure enriched with `run/batch_type`.
 ///
 /// # Panics
 /// Panic-free.
 ///
 /// # Data Flow & Invariants
-/// 1. Reads `run/batch_queue.json` written by batch worker daemon.
-/// 2. If missing, attempts fallback count from `data/reports/selected_batch_targets.json`.
-/// 3. Returns default empty struct if no active queue manifest is detected.
+/// 1. Reads `run/batch_type` (`DEFAULT_BATCH_TYPE_PATH`) if present.
+/// 2. Reads `run/batch_queue.json` written by batch worker daemon.
+/// 3. If missing, attempts fallback count from `selected_batch_targets.json` or `freebox_batch_targets.json`.
+/// 4. Returns default empty struct if no active queue manifest is detected.
 pub fn sample_batch_queue(active_workers: usize) -> BatchQueueTelemetry {
     let is_paused = Path::new("run/batch_paused").is_file();
     let desired_workers = fs::read_to_string("run/desired_workers")
         .ok()
         .and_then(|s| s.trim().parse::<usize>().ok());
+    let disk_batch_type = read_batch_type_from(Path::new(DEFAULT_BATCH_TYPE_PATH));
 
     let queue_path = Path::new("run/batch_queue.json");
     if let Some(mut data) = load_batch_queue_from_json(queue_path) {
@@ -2274,21 +2595,31 @@ pub fn sample_batch_queue(active_workers: usize) -> BatchQueueTelemetry {
         }
         data.is_paused = is_paused;
         data.desired_workers = desired_workers;
+        if data.batch_type.as_deref().is_none_or(str::is_empty) {
+            data.batch_type = disk_batch_type;
+        }
         return data;
     }
 
-    let targets_path = Path::new("data/reports/selected_batch_targets.json");
-    if let Some(mut data) = load_batch_queue_from_manifest(targets_path) {
-        data.active_workers = active_workers;
-        data.is_active = active_workers > 0 && data.remaining_targets > 0;
-        data.is_paused = is_paused;
-        data.desired_workers = desired_workers;
-        return data;
+    for rel in [
+        DEFAULT_SELECTED_BATCH_TARGETS_PATH,
+        DEFAULT_FREEBOX_BATCH_TARGETS_PATH,
+    ] {
+        let targets_path = Path::new(rel);
+        if let Some(mut data) = load_batch_queue_from_manifest(targets_path) {
+            data.active_workers = active_workers;
+            data.is_active = active_workers > 0 && data.remaining_targets > 0;
+            data.is_paused = is_paused;
+            data.desired_workers = desired_workers;
+            data.batch_type = disk_batch_type;
+            return data;
+        }
     }
 
     BatchQueueTelemetry {
         is_paused,
         desired_workers,
+        batch_type: disk_batch_type,
         ..Default::default()
     }
 }
@@ -2430,6 +2761,113 @@ fn compute_net_rx_rate(
     (0.0, now)
 }
 
+/// Stateful counters computing either dedicated physical NIC RX or CloudLinux LVE account stream RX.
+///
+/// # Data Flow & Invariants
+/// On dedicated machines (`local` PC, `RPi4`), delegates to `compute_net_rx_rate` (`/proc/net/dev`).
+/// On shared CloudLinux LVE blades (`o2switch`), `/proc/net/dev` exposes the shared 10 GbE NIC of
+/// all co-tenants; `sample_rx_mib_s` instead computes per-PID `/proc/<pid>/io` `rchar` deltas across
+/// active remote-streaming workers (`http://`, `https://`, `ftp://`, `ftps://`, `sftp://`), avoiding
+/// co-tenant cross-talk, loopback SSH tunnel double-counting, and PID churn spikes.
+struct NetRxSamplerState {
+    networks: Networks,
+    last_net_instant: Instant,
+    last_proc_rx: Option<(Instant, u64)>,
+    prev_stream_rchar: HashMap<u32, (Instant, u64)>,
+}
+
+impl NetRxSamplerState {
+    fn new() -> Self {
+        Self {
+            networks: Networks::new_with_refreshed_list(),
+            last_net_instant: Instant::now(),
+            last_proc_rx: None,
+            prev_stream_rchar: HashMap::new(),
+        }
+    }
+
+    fn sample_lve_rx_mib_s(
+        &mut self,
+        raw_candidates: &[RawCandidateProcess],
+        ffmpeg_ppids: &[u32],
+        now: Instant,
+    ) -> f64 {
+        let samples: Vec<(u32, u64)> = raw_candidates
+            .iter()
+            .filter(|c| !(c.is_dbsrt && ffmpeg_ppids.contains(&c.pid)))
+            .filter(|c| cmdline_has_remote_stream(&c.cmdline))
+            .map(|c| (c.pid, read_proc_io_bytes(c.pid)))
+            .collect();
+        compute_stream_rchar_delta_mib_s(&samples, &mut self.prev_stream_rchar, now)
+    }
+
+    fn sample_nic_rx_mib_s(&mut self, now: Instant) -> f64 {
+        let (rx, next_t) = compute_net_rx_rate(
+            &mut self.networks,
+            now,
+            self.last_net_instant,
+            &mut self.last_proc_rx,
+        );
+        self.last_net_instant = next_t;
+        rx
+    }
+}
+
+/// Checks whether the current sampler tick executes inside a shared CloudLinux LVE container.
+#[allow(clippy::type_complexity)]
+fn is_shared_lve_tick(
+    account: Option<(Instant, (Option<(f64, Option<f64>)>, Option<f64>))>,
+    shared_state: &Arc<RwLock<SystemTelemetry>>,
+) -> bool {
+    let has_quota = account
+        .is_some_and(|(_, (mem, cpu))| mem.and_then(|(_, limit)| limit).is_some() || cpu.is_some());
+    if has_quota {
+        return true;
+    }
+    shared_state.read().is_ok_and(|s| s.is_shared_lve_account())
+}
+
+/// Computes aggregate remote-stream ingress (`MiB/s`) from per-PID `rchar` counters across ticks.
+///
+/// # Arguments
+/// * `samples` - Active remote-streaming `(pid, rchar_bytes)` pairs at `now`.
+/// * `prev_rchar` - Mutable map of prior `(Instant, rchar_bytes)` per PID; dead PIDs are pruned.
+/// * `now` - Monotonic timestamp of the current tick.
+///
+/// # Returns
+/// Non-negative aggregate ingress rate in `MiB/s`.
+///
+/// # Errors
+/// None.
+///
+/// # Panics
+/// Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// Per-PID delta subtraction (`curr.saturating_sub(prev) / dt`) guarantees monotonic stability even
+/// as multi-gigabyte `ffmpeg` workers spawn or terminate mid-batch.
+pub fn compute_stream_rchar_delta_mib_s(
+    samples: &[(u32, u64)],
+    prev_rchar: &mut HashMap<u32, (Instant, u64)>,
+    now: Instant,
+) -> f64 {
+    let mut next_map = HashMap::with_capacity(samples.len());
+    let mut total_mib_s = 0.0;
+    for &(pid, curr_bytes) in samples {
+        if let Some(&(prev_t, prev_bytes)) = prev_rchar.get(&pid) {
+            let dt = now
+                .duration_since(prev_t)
+                .as_secs_f64()
+                .max(MIN_DELTA_TIME_FLOOR_SECS);
+            let delta = curr_bytes.saturating_sub(prev_bytes) as f64;
+            total_mib_s += (delta / BYTES_PER_MIB_F64) / dt;
+        }
+        next_map.insert(pid, (now, curr_bytes));
+    }
+    *prev_rchar = next_map;
+    sanitize_non_negative_rate(total_mib_s)
+}
+
 /// Builds the ffprobe command listing duration and stream codecs/tags for `probe_media_file`.
 fn build_probe_media_command(path: &Path) -> Command {
     let mut cmd = Command::new(dbsrt_core::video::resolve_ffprobe());
@@ -2494,15 +2932,34 @@ pub fn url_decode_simple(input: &str) -> String {
     String::from_utf8_lossy(&decoded).into_owned()
 }
 
-/// Processes raw detected candidate processes into typed telemetry jobs and updates delta IO samples.
-#[allow(clippy::type_complexity)]
-/// Extracts target video path and media name from process command-line arguments.
-fn extract_media_info(cmdline: &[String]) -> (Option<PathBuf>, String) {
+/// Extracts target video path and display media name from process command-line arguments.
+///
+/// # Arguments
+/// * `cmdline` - Process argv tokens read from `/proc/<pid>/cmdline`.
+///
+/// # Returns
+/// Tuple `(target_path, media_name)` with URL-decoded display label (falling back to `"Tâche Active"`).
+///
+/// # Errors
+/// Infallible.
+///
+/// # Panics
+/// Never panics.
+///
+/// # Data Flow & Invariants
+/// Supports both `--media-name <val>` and `--media-name=<val>` forms, stripping the flag prefix
+/// before matching container extensions (`.mkv`, `.mp4`, `.webm`, `.avi`) or `ffmpeg -i <input>`.
+pub fn extract_media_info(cmdline: &[String]) -> (Option<PathBuf>, String) {
     let mut target_path: Option<PathBuf> = None;
     let mut explicit_name: Option<String> = None;
     for (idx, arg) in cmdline.iter().enumerate() {
+        if let Some(val) = arg.strip_prefix("--media-name=") {
+            explicit_name = Some(val.to_string());
+            continue;
+        }
         if arg == "--media-name" && idx + 1 < cmdline.len() {
             explicit_name = Some(cmdline[idx + 1].clone());
+            continue;
         }
         if arg.ends_with(".mkv")
             || arg.ends_with(".mp4")
@@ -2557,10 +3014,30 @@ pub fn cmdline_has_remote_stream(cmdline: &[String]) -> bool {
 
 /// Detects the decoding engine and diagnostic reason for an active process candidate.
 fn detect_candidate_engine(
+    stream_kind: StreamKind,
     cmd_str: &str,
     is_dbsrt: bool,
     is_hi10p: bool,
 ) -> (String, Option<String>) {
+    if stream_kind == StreamKind::AudioAhash {
+        return (
+            "aHash Audio".to_string(),
+            Some(
+                "Extraction d'empreinte acoustique Haitsma-Kalker (.ahash, PCM mono f32le 5512 Hz, -vn sans décodage vidéo)."
+                    .to_string(),
+            ),
+        );
+    }
+    if stream_kind == StreamKind::SubtitleExtract {
+        return (
+            "Sub Extraction".to_string(),
+            Some(
+                "Extraction de flux sous-titre texte/SRT (démultiplexage rapide, aucun décodage vidéo)."
+                    .to_string(),
+            ),
+        );
+    }
+
     let has_vaapi = has_vaapi_render_node();
     if is_dbsrt {
         if cmd_str.contains("--hwaccel disabled")
@@ -2581,11 +3058,6 @@ fn detect_candidate_engine(
         } else {
             ("GPU (VA-API)".to_string(), Some(vaapi_engine_reason()))
         }
-    } else if cmd_str.contains("-f srt") || cmd_str.contains("0:s:") {
-        (
-            "Sub Extraction".to_string(),
-            Some("Extraction de flux sous-titre texte/SRT (démultiplexage rapide, aucun décodage vidéo).".to_string()),
-        )
     } else if cmd_str.contains("-hwaccel vaapi") {
         ("GPU (VA-API)".to_string(), Some(vaapi_engine_reason()))
     } else if is_hi10p {
@@ -2618,6 +3090,132 @@ pub struct RawCandidateProcess {
     pub run_time_secs: u64,
 }
 
+/// Input parameters bundling kernel I/O counters and cached media metadata for a single active job.
+pub struct JobIoInputs<'a> {
+    pub stream_kind: StreamKind,
+    pub cmdline: &'a [String],
+    pub raw_io_bytes: u64,
+    pub raw_wchar_bytes: Option<u64>,
+    pub container_size_bytes: u64,
+    pub media_duration_secs: Option<f64>,
+    pub ipc_progress: Option<JobProgressPayload>,
+    pub prev_sample: Option<(Instant, u64)>,
+    pub now: Instant,
+    pub elapsed_secs: f64,
+}
+
+/// Normalized progress, rate, and ETA metrics computed for an active job.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ComputedJobMetrics {
+    pub read_bytes: u64,
+    pub total_bytes: u64,
+    pub progress_ratio: f64,
+    pub current_rate_mib_s: f64,
+    pub hashing_fps: f64,
+    pub eta_secs: Option<f64>,
+}
+
+/// Computes normalized byte progress, instant throughput, hashing cadence, and ETA for a job.
+///
+/// # Arguments
+/// * `inputs` - Bundled kernel I/O counters, stream classification, and cached duration/size metadata.
+///
+/// # Returns
+/// Deterministic [`ComputedJobMetrics`] aligned to the active [`StreamKind`].
+///
+/// # Errors
+/// None.
+///
+/// # Panics
+/// Guarantee: Never panics.
+///
+/// # Data Flow & Invariants
+/// - **Audio aHash (`StreamKind::AudioAhash`)**:
+///   1. Reads uncompressed PCM output bytes from `ipc_progress` (`frames * AHASH_PCM_HOP_BYTES`)
+///      or `raw_wchar_bytes` (`wchar` in `/proc/<pid>/io`), never compressed `.mkv` `rchar`.
+///   2. Computes `total_bytes = duration_secs * (sample_rate_hz * AHASH_PCM_BYTES_PER_SAMPLE)` from
+///      explicit `-t <secs>`, `ipc_progress.total_frames`, or `media_duration_secs`.
+///   3. **Invariant**: `container_size_bytes` is NEVER used as denominator for `AudioAhash`
+///      (preventing `0.9%` / `ETA 14h13m` distortion on multi-gigabyte containers).
+/// - **Video pHash (`StreamKind::VideoPhash` / `SubtitleExtract`)**:
+///   Preserves `RAW_FRAME_BYTES` / container-size progression and `fps` delta calculation.
+pub fn compute_job_io_metrics(inputs: &JobIoInputs<'_>) -> ComputedJobMetrics {
+    let (read_bytes, total_bytes, frame_unit_bytes) =
+        if inputs.stream_kind == StreamKind::AudioAhash {
+            let pcm_bps = parse_ahash_sample_rate_hz(inputs.cmdline) * AHASH_PCM_BYTES_PER_SAMPLE;
+            let read_b = match inputs.ipc_progress {
+                Some(ref p) => (p.frames as f64 * AHASH_PCM_HOP_BYTES) as u64,
+                None => inputs.raw_wchar_bytes.unwrap_or(inputs.raw_io_bytes),
+            };
+            let dur_secs = parse_ffmpeg_duration_limit_secs(inputs.cmdline)
+                .or_else(|| {
+                    inputs
+                        .ipc_progress
+                        .as_ref()
+                        .and_then(|p| p.total_frames)
+                        .filter(|_| pcm_bps > 0.0)
+                        .map(|tf| (tf as f64 * AHASH_PCM_HOP_BYTES) / pcm_bps)
+                })
+                .or(inputs.media_duration_secs);
+            let total_b = dur_secs
+                .filter(|&d| d > 0.0 && pcm_bps > 0.0)
+                .map(|d| (d * pcm_bps).round() as u64)
+                .unwrap_or(0);
+            (read_b, total_b, AHASH_PCM_HOP_BYTES)
+        } else {
+            let mut total_b = inputs.container_size_bytes;
+            let mut read_b = inputs.raw_io_bytes;
+            let is_streaming = cmdline_has_remote_stream(inputs.cmdline);
+            if let Some(ref progress) = inputs.ipc_progress {
+                read_b = (progress.frames as f64 * RAW_FRAME_BYTES) as u64;
+                if let Some(total_f) = progress.total_frames {
+                    total_b = (total_f as f64 * RAW_FRAME_BYTES) as u64;
+                } else if is_streaming && total_b == 0 {
+                    let fps = progress.fps.unwrap_or(DEFAULT_COUPLING_BASELINE_FPS);
+                    total_b = (DEFAULT_STREAM_EPISODE_DURATION_SECS * fps * RAW_FRAME_BYTES) as u64;
+                }
+            } else if is_streaming && total_b == 0 {
+                total_b = (DEFAULT_STREAM_EPISODE_DURATION_SECS
+                    * DEFAULT_COUPLING_BASELINE_FPS
+                    * RAW_FRAME_BYTES) as u64;
+            }
+            (read_b, total_b, RAW_FRAME_BYTES)
+        };
+
+    let (current_rate_mib_s, hashing_fps) = match inputs.prev_sample {
+        Some((prev_t, prev_b)) => {
+            let dt = inputs
+                .now
+                .duration_since(prev_t)
+                .as_secs_f64()
+                .max(MIN_DELTA_TIME_FLOOR_SECS);
+            let db = read_bytes.saturating_sub(prev_b) as f64;
+            ((db / BYTES_PER_MIB_F64) / dt, (db / frame_unit_bytes) / dt)
+        }
+        None => (0.0, 0.0),
+    };
+
+    let mut progress_ratio = 0.0;
+    let mut eta_secs = None;
+    if total_bytes > 0 {
+        progress_ratio = (read_bytes as f64 / total_bytes as f64).clamp(0.0, 1.0);
+        let avg_rate = (read_bytes as f64 / BYTES_PER_MIB_F64) / inputs.elapsed_secs.max(1.0);
+        if progress_ratio > MIN_PROGRESS_THRESHOLD && avg_rate > 0.0 {
+            let remaining = total_bytes.saturating_sub(read_bytes) as f64;
+            eta_secs = Some((remaining / BYTES_PER_MIB_F64) / avg_rate);
+        }
+    }
+
+    ComputedJobMetrics {
+        read_bytes,
+        total_bytes,
+        progress_ratio,
+        current_rate_mib_s,
+        hashing_fps,
+        eta_secs,
+    }
+}
+
 pub fn process_candidate_jobs(
     raw_candidates: Vec<RawCandidateProcess>,
     ffmpeg_ppids: &[u32],
@@ -2633,9 +3231,8 @@ pub fn process_candidate_jobs(
             continue;
         }
 
-        // Identify media path and name
         let (target_path, media_name) = extract_media_info(&candidate.cmdline);
-
+        let stream_kind = detect_stream_kind(&candidate.cmdline, "");
         let is_hi10p = candidate.cmd_str.contains("Hi10P")
             || target_path.as_ref().is_some_and(|p| {
                 p.to_string_lossy().contains("Hi10P")
@@ -2643,57 +3240,37 @@ pub fn process_candidate_jobs(
             })
             || get_file_codec(&media_name).is_some_and(|c| c.contains("Hi10P"));
 
-        let (engine, engine_reason) =
-            detect_candidate_engine(&candidate.cmd_str, candidate.is_dbsrt, is_hi10p);
+        let (engine, engine_reason) = detect_candidate_engine(
+            stream_kind,
+            &candidate.cmd_str,
+            candidate.is_dbsrt,
+            is_hi10p,
+        );
 
         let elapsed = (candidate.run_time_secs as f64).max(1.0);
-        let mut total_bytes = get_file_size(&media_name, target_path.as_deref());
-        let mut read_bytes = read_proc_io_bytes(candidate.pid);
-        let mut hashing_fps = 0.0;
-
-        let is_streaming = cmdline_has_remote_stream(&candidate.cmdline);
-
-        if let Some(progress) = read_job_progress_file(candidate.pid) {
-            read_bytes = (progress.frames as f64 * RAW_FRAME_BYTES) as u64;
-            if let Some(total_f) = progress.total_frames {
-                total_bytes = (total_f as f64 * RAW_FRAME_BYTES) as u64;
-            } else if is_streaming && total_bytes == 0 {
-                let fps = progress.fps.unwrap_or(DEFAULT_COUPLING_BASELINE_FPS);
-                total_bytes = (DEFAULT_STREAM_EPISODE_DURATION_SECS * fps * RAW_FRAME_BYTES) as u64;
-            }
-        } else if is_streaming && total_bytes == 0 {
-            total_bytes = (DEFAULT_STREAM_EPISODE_DURATION_SECS
-                * DEFAULT_COUPLING_BASELINE_FPS
-                * RAW_FRAME_BYTES) as u64;
-        }
-
-        // Compute rate strictly via delta; first tick is 0.0 to prevent artificial spikes
-        let current_rate_mib_s =
-            if let Some(&(prev_t, prev_b)) = previous_io_samples.get(&candidate.pid) {
-                let dt = now
-                    .duration_since(prev_t)
-                    .as_secs_f64()
-                    .max(MIN_DELTA_TIME_FLOOR_SECS);
-                let db = read_bytes.saturating_sub(prev_b) as f64;
-                hashing_fps = (db / RAW_FRAME_BYTES) / dt;
-                (db / BYTES_PER_MIB_F64) / dt
+        let is_audio = stream_kind == StreamKind::AudioAhash;
+        let metrics = compute_job_io_metrics(&JobIoInputs {
+            stream_kind,
+            cmdline: &candidate.cmdline,
+            raw_io_bytes: read_proc_io_bytes(candidate.pid),
+            raw_wchar_bytes: is_audio
+                .then(|| read_proc_wchar_bytes(candidate.pid))
+                .flatten(),
+            container_size_bytes: if is_audio {
+                0
             } else {
-                0.0
-            };
+                get_file_size(&media_name, target_path.as_deref())
+            },
+            media_duration_secs: is_audio
+                .then(|| get_media_duration_secs(&media_name))
+                .flatten(),
+            ipc_progress: read_job_progress_file(candidate.pid),
+            prev_sample: previous_io_samples.get(&candidate.pid).copied(),
+            now,
+            elapsed_secs: elapsed,
+        });
 
-        active_pids.insert(candidate.pid, (now, read_bytes));
-
-        // Compute progression ratio and ETA
-        let mut ratio = 0.0;
-        let mut eta_secs = None;
-        if total_bytes > 0 {
-            ratio = (read_bytes as f64 / total_bytes as f64).clamp(0.0, 1.0);
-            let avg_rate = (read_bytes as f64 / BYTES_PER_MIB_F64) / elapsed;
-            if ratio > MIN_PROGRESS_THRESHOLD && avg_rate > 0.0 {
-                let remaining = total_bytes.saturating_sub(read_bytes) as f64;
-                eta_secs = Some((remaining / BYTES_PER_MIB_F64) / avg_rate);
-            }
-        }
+        active_pids.insert(candidate.pid, (now, metrics.read_bytes));
 
         let ram_rss_mib = candidate.mem_bytes as f64 / BYTES_PER_MIB_F64;
         let status = if crate::commands::top::process_ctl::check_if_stopped(candidate.pid) {
@@ -2708,12 +3285,12 @@ pub fn process_candidate_jobs(
             engine,
             engine_reason,
             elapsed_secs: elapsed,
-            read_bytes,
-            total_bytes,
-            progress_ratio: ratio,
-            current_rate_mib_s,
-            hashing_fps,
-            eta_secs,
+            read_bytes: metrics.read_bytes,
+            total_bytes: metrics.total_bytes,
+            progress_ratio: metrics.progress_ratio,
+            current_rate_mib_s: metrics.current_rate_mib_s,
+            hashing_fps: metrics.hashing_fps,
+            eta_secs: metrics.eta_secs,
             cpu_percent: candidate.cpu_pct,
             ram_rss_mib,
             status,

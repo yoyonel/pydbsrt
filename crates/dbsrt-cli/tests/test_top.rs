@@ -3562,6 +3562,7 @@ fn test_batch_queue_telemetry_rendered_in_header_and_table() {
             is_active: true,
             is_paused: false,
             desired_workers: Some(4),
+            batch_type: None,
             updated_at: "2026-10-29T07:45:00Z".to_string(),
         },
         ..Default::default()
@@ -4473,4 +4474,337 @@ fn test_render_trajectory_file_modal() {
     assert!(buf.contains("SÉLECTION DU FICHIER D'AUDIT"));
     assert!(buf.contains("trajectory_overnight.jsonl"));
     assert!(buf.contains("[ACTIF]"));
+}
+
+#[test]
+fn test_ahash_audio_pipe_progress_eta_never_uses_mkv_container_size() {
+    use dbsrt_cli::commands::top::model::{detect_stream_kind, StreamKind};
+    use dbsrt_cli::commands::top::sampler::{
+        compute_job_io_metrics, parse_proc_wchar_bytes, JobIoInputs,
+    };
+    use std::time::{Duration, Instant};
+
+    let cmdline = vec![
+        "ffmpeg".to_string(),
+        "-hide_banner".to_string(),
+        "-i".to_string(),
+        "ftp://freebox:***@88.174.115.230:56821/Freebox/Vid%C3%A9os/Films/Pacifiction%20(2022)%5B1080p.H264%5D%5BE-AC3%5D.mkv".to_string(),
+        "-vn".to_string(),
+        "-ac".to_string(),
+        "1".to_string(),
+        "-ar".to_string(),
+        "5512".to_string(),
+        "-f".to_string(),
+        "f32le".to_string(),
+        "-".to_string(),
+    ];
+    assert_eq!(detect_stream_kind(&cmdline, ""), StreamKind::AudioAhash);
+
+    // Exact /proc/<pid>/io sample format from o2switch live worker:
+    let proc_io =
+        "rchar: 4833\nwchar: 102760448\nsyscr: 12\nsyscw: 1970\nread_bytes: 0\nwrite_bytes: 0\n";
+    let wchar = parse_proc_wchar_bytes(proc_io).expect("wchar parsed");
+    assert_eq!(wchar, 102_760_448); // ~98.0 MiB PCM = 4660.76s (1h17m40s) of 5512 Hz f32le audio
+
+    let prev_t = Instant::now();
+    let now = prev_t + Duration::from_secs(1);
+    let prev_wchar = wchar - 220_480; // 10.0x real-time delta (220,480 B/s = 10 * 22,048 B/s)
+    let mkv_container_bytes: u64 = 11_510 * 1_048_576; // 11.51 GiB .mkv container!
+    let movie_duration_secs = 9_900.0; // 2h45m (Pacifiction runtime)
+
+    let metrics = compute_job_io_metrics(&JobIoInputs {
+        stream_kind: StreamKind::AudioAhash,
+        cmdline: &cmdline,
+        raw_io_bytes: mkv_container_bytes / 2, // Even if rchar were huge on local disk, wchar wins!
+        raw_wchar_bytes: Some(wchar),
+        container_size_bytes: mkv_container_bytes,
+        media_duration_secs: Some(movie_duration_secs),
+        ipc_progress: None,
+        prev_sample: Some((prev_t, prev_wchar)),
+        now,
+        elapsed_secs: 420.0,
+    });
+
+    // Total PCM bytes must be 9,900s * 22,048 B/s = 218,275,200 B (~208.16 MiB), NEVER 11.51 GiB!
+    assert_eq!(metrics.total_bytes, 218_275_200);
+    assert_eq!(metrics.read_bytes, 102_760_448);
+    // Progress is ~47.08% (NOT 0.9%!)
+    assert!(
+        (metrics.progress_ratio - 0.4708).abs() < 0.01,
+        "expected ~47.1%, got {}",
+        metrics.progress_ratio
+    );
+    // ETA is ~472s (~7m52s), NOT 14h13m (51,180s)!
+    let eta = metrics.eta_secs.expect("ETA computed");
+    assert!(
+        (400.0..600.0).contains(&eta),
+        "expected ETA ~472s, got {eta}s"
+    );
+
+    // Render ActiveJobs table and InspectJob view to verify end-to-end visual display
+    let job = ActiveJobTelemetry {
+        pid: 2457345,
+        media_name: "Pacifiction (2022)[1080p.H264][E-AC3]".to_string(),
+        engine: "aHash Audio".to_string(),
+        engine_reason: Some(
+            "Extraction d'empreinte acoustique Haitsma-Kalker (.ahash, PCM mono f32le 5512 Hz, -vn sans décodage vidéo).".to_string(),
+        ),
+        elapsed_secs: 420.0,
+        read_bytes: metrics.read_bytes,
+        total_bytes: metrics.total_bytes,
+        progress_ratio: metrics.progress_ratio,
+        current_rate_mib_s: metrics.current_rate_mib_s,
+        hashing_fps: metrics.hashing_fps,
+        eta_secs: metrics.eta_secs,
+        cpu_percent: 22.9,
+        ram_rss_mib: 28.0,
+        status: "RUNNING".to_string(),
+        cmdline,
+    };
+    assert!((job.ahash_realtime_factor() - 10.0).abs() < 0.05);
+
+    let tel = SystemTelemetry {
+        total_rate_mib_s: metrics.current_rate_mib_s,
+        active_jobs: vec![job],
+        ..Default::default()
+    };
+
+    let backend = ratatui::backend::TestBackend::new(165, 35);
+    let mut terminal = ratatui::Terminal::new(backend).unwrap();
+    let mut app = AppState::new();
+    app.view = ViewPage::ActiveJobs;
+    let ctx = app.ui_context(&tel, None);
+    terminal.draw(|f| render_ui(f, &ctx)).unwrap();
+    let buf = format!("{:?}", terminal.backend().buffer());
+
+    assert!(buf.contains("DÉCODAGE & AHASH AUDIO TEMPS RÉEL"));
+    assert!(buf.contains("Pipe aHash:"));
+    assert!(buf.contains("(10.0x RT)"));
+    assert!(buf.contains("aHash Audio"));
+    assert!(buf.contains("1h17/2h45"));
+    assert!(buf.contains("10.0x RT"));
+    assert!(!buf.contains("11510"));
+    assert!(!buf.contains("14h13m"));
+
+    // Inspect view also surfaces aHash PCM diagnostics
+    app.view = ViewPage::JobInspection;
+    let inspect_ctx = app.ui_context(&tel, None);
+    terminal.draw(|f| render_ui(f, &inspect_ctx)).unwrap();
+    let inspect_buf = format!("{:?}", terminal.backend().buffer());
+    assert!(inspect_buf.contains("Progression audio:"));
+    assert!(inspect_buf.contains("Audio décodé: 1h17m / 2h45m"));
+    assert!(inspect_buf.contains("Vitesse: 10.0x RT"));
+}
+
+#[test]
+fn test_ahash_unknown_duration_shows_honest_na_instead_of_mkv_size() {
+    use dbsrt_cli::commands::top::model::StreamKind;
+    use dbsrt_cli::commands::top::sampler::{compute_job_io_metrics, JobIoInputs};
+    use std::time::Instant;
+
+    let cmdline = vec![
+        "ffmpeg".to_string(),
+        "-i".to_string(),
+        "ftp://host/Unknown.Movie.mkv".to_string(),
+        "-vn".to_string(),
+        "-f".to_string(),
+        "f32le".to_string(),
+        "-".to_string(),
+    ];
+    let now = Instant::now();
+    let metrics = compute_job_io_metrics(&JobIoInputs {
+        stream_kind: StreamKind::AudioAhash,
+        cmdline: &cmdline,
+        raw_io_bytes: 50_000_000,
+        raw_wchar_bytes: Some(22_048 * 600), // 10m00s decoded
+        container_size_bytes: 12 * 1_073_741_824, // 12 GiB MKV must be ignored!
+        media_duration_secs: None,
+        ipc_progress: None,
+        prev_sample: None,
+        now,
+        elapsed_secs: 60.0,
+    });
+
+    assert_eq!(metrics.total_bytes, 0);
+    assert_eq!(metrics.progress_ratio, 0.0);
+    assert_eq!(metrics.eta_secs, None);
+}
+
+#[test]
+fn test_load_phash_durations_from_dir_with_sidecar_and_fps_parsing() {
+    use dbsrt_cli::commands::top::sampler::{
+        load_phash_durations_from_dir, parse_fps_from_phash_filename,
+    };
+    use std::collections::HashMap;
+
+    assert_eq!(
+        parse_fps_from_phash_filename("0123456789abcdef.24.0fps.phash"),
+        Some(24.0)
+    );
+    assert_eq!(
+        parse_fps_from_phash_filename("Old Name.mkv.23.976fps.phash"),
+        Some(23.976)
+    );
+    assert_eq!(parse_fps_from_phash_filename("NoFps.phash"), None);
+    assert_eq!(parse_fps_from_phash_filename("Bad.999.0fps.phash"), None);
+
+    let tmp_dir =
+        std::env::temp_dir().join(format!("pydbsrt_phash_dur_test_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+    std::fs::create_dir_all(&tmp_dir).unwrap();
+
+    // 2,400 frames @ 24.0 fps => exact 100.0 seconds, with moviehash sidecar JSON
+    let phash_path = tmp_dir.join("0123456789abcdef.24.0fps.phash");
+    std::fs::write(&phash_path, vec![0u8; 2_400 * 8]).unwrap();
+    std::fs::write(
+        tmp_dir.join("0123456789abcdef.json"),
+        r#"{"media_name":"Pacifiction (2022)[1080p.H264][E-AC3].mkv"}"#,
+    )
+    .unwrap();
+
+    let mut map = HashMap::new();
+    load_phash_durations_from_dir(&tmp_dir, &mut map);
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+
+    let dur = map
+        .get("Pacifiction (2022)[1080p.H264][E-AC3]")
+        .copied()
+        .expect("resolved stem from moviehash sidecar");
+    assert!((dur - 100.0).abs() < 1e-6);
+}
+
+#[test]
+fn test_batch_type_badge_rendered_in_header_and_queue_title() {
+    use dbsrt_cli::commands::top::model::BatchQueueTelemetry;
+    use dbsrt_cli::commands::top::sampler::read_batch_type_from;
+
+    let tmp_file = std::env::temp_dir().join(format!("pydbsrt_batch_type_{}", std::process::id()));
+    std::fs::write(&tmp_file, "freebox\n").unwrap();
+    assert_eq!(read_batch_type_from(&tmp_file).as_deref(), Some("freebox"));
+    let _ = std::fs::remove_dir_all(&tmp_file);
+    let _ = std::fs::remove_file(&tmp_file);
+
+    let backend = ratatui::backend::TestBackend::new(160, 35);
+    let mut terminal = ratatui::Terminal::new(backend).unwrap();
+    let tel = SystemTelemetry {
+        batch_queue: BatchQueueTelemetry {
+            total_targets: 539,
+            completed_targets: 37,
+            failed_targets: 0,
+            remaining_targets: 502,
+            progress_pct: 6.9,
+            active_workers: 5,
+            is_active: true,
+            is_paused: false,
+            desired_workers: Some(5),
+            batch_type: Some("freebox".to_string()),
+            updated_at: "2026-11-15T15:09:47Z".to_string(),
+        },
+        ..Default::default()
+    };
+
+    let app = AppState::new();
+    let ctx = app.ui_context(&tel, None);
+    terminal.draw(|f| render_ui(f, &ctx)).unwrap();
+    let buf = format!("{:?}", terminal.backend().buffer());
+
+    assert!(buf.contains("Batch [freebox]: 37/539 (7%)"));
+    assert!(buf.contains("File [freebox]: 37/539 traités"));
+}
+
+#[test]
+fn test_help_active_jobs_1_to_1_parity_with_ahash_and_batch_type() {
+    use dbsrt_cli::commands::top::model::HelpTab;
+
+    let backend = ratatui::backend::TestBackend::new(240, 45);
+    let mut terminal = ratatui::Terminal::new(backend).unwrap();
+    let tel = SystemTelemetry::default();
+    let mut app = AppState::new();
+    app.view = ViewPage::Help;
+    app.help_tab = HelpTab::ActiveJobs;
+
+    let ctx = app.ui_context(&tel, None);
+    terminal.draw(|f| render_ui(f, &ctx)).unwrap();
+    let buf = format!("{:?}", terminal.backend().buffer());
+
+    for term in [
+        "PID",
+        "MOTEUR",
+        "aHash Audio",
+        "Batch [<source>]",
+        "File [<source>]",
+        "PROGRESSION",
+        "DÉBIT VFS",
+        "x RT",
+        "Pipe aHash",
+        "ETA",
+    ] {
+        assert!(
+            buf.contains(term),
+            "HelpTab::ActiveJobs missing mandatory 1:1 parity term: {term}"
+        );
+    }
+}
+
+#[test]
+fn test_cloudlinux_lve_account_rx_rate_and_header_label() {
+    use dbsrt_cli::commands::top::sampler::compute_stream_rchar_delta_mib_s;
+    use std::collections::HashMap;
+    use std::time::{Duration, Instant};
+
+    let mut prev = HashMap::new();
+    let t0 = Instant::now();
+    // Tick 0 warmup: records initial rchar per PID, returns 0.0
+    let r0 = compute_stream_rchar_delta_mib_s(
+        &[(101, 50 * 1_048_576), (102, 10 * 1_048_576)],
+        &mut prev,
+        t0,
+    );
+    assert_eq!(r0, 0.0);
+
+    // Tick 1 (+1.0s): PID 101 read +10 MiB, PID 102 exited, PID 103 spawned at 5 MiB -> exact 10.0 MiB/s
+    let t1 = t0 + Duration::from_secs(1);
+    let r1 = compute_stream_rchar_delta_mib_s(
+        &[(101, 60 * 1_048_576), (103, 5 * 1_048_576)],
+        &mut prev,
+        t1,
+    );
+    assert!((r1 - 10.0).abs() < 1e-6, "expected 10.0 MiB/s, got {r1}");
+    assert!(!prev.contains_key(&102), "exited PID must be purged");
+
+    // Verify header & system views render `Réseau compte RX` on CloudLinux LVE and `Réseau Net RX` on dedicated hosts
+    let backend = ratatui::backend::TestBackend::new(160, 45);
+    let mut terminal = ratatui::Terminal::new(backend).unwrap();
+    let mut tel = SystemTelemetry {
+        account_ram_limit_gib: Some(48.0),
+        account_cpu_pct: Some(12.0),
+        net_rx_mib_s: 15.2,
+        ..Default::default()
+    };
+    assert!(tel.is_shared_lve_account());
+    let mut app = AppState::new();
+    let ctx = app.ui_context(&tel, None);
+    terminal.draw(|f| render_ui(f, &ctx)).unwrap();
+    let buf_hdr = format!("{:?}", terminal.backend().buffer());
+    assert!(buf_hdr.contains("Réseau compte RX:"));
+    assert!(!buf_hdr.contains("Réseau Net RX:"));
+
+    app.view = ViewPage::System;
+    let ctx_sys = app.ui_context(&tel, None);
+    terminal.draw(|f| render_ui(f, &ctx_sys)).unwrap();
+    let buf_sys = format!("{:?}", terminal.backend().buffer());
+    assert!(buf_sys.contains("Réseau compte RX"));
+
+    tel.account_ram_limit_gib = None;
+    tel.account_cpu_pct = None;
+    assert!(!tel.is_shared_lve_account());
+
+    let (target, media) = dbsrt_cli::commands::top::sampler::extract_media_info(&[
+        "dbsrt".to_string(),
+        "media:add".to_string(),
+        "--media-name=Deux Fils (2018).mkv".to_string(),
+        "-".to_string(),
+    ]);
+    assert!(target.is_none());
+    assert_eq!(media, "Deux Fils (2018).mkv");
 }

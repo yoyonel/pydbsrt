@@ -264,7 +264,12 @@ fn build_right_column_lines(tel: &SystemTelemetry) -> Vec<Line<'static>> {
         tel.net_rx_mib_s,
         tel.net_rx_mib_s * BITS_PER_BYTE_F64
     );
-    lines.push(build_tree_line("Réseau Net RX", &net_str, false));
+    let net_label = if tel.is_shared_lve_account() {
+        "Réseau compte RX"
+    } else {
+        "Réseau Net RX"
+    };
+    lines.push(build_tree_line(net_label, &net_str, false));
     let pipe_str = format!("{:>5.1} MB/s", tel.total_rate_mib_s);
     lines.push(build_tree_line("Débit Pipe pHash", &pipe_str, false));
     let workers_str = format!("{} actifs", tel.active_jobs.len());
