@@ -1,11 +1,18 @@
 use clap::Parser;
 use dbsrt_cli::cli::{Cli, Commands};
-use dbsrt_cli::commands::doctor::constants::TRACKED_SCRIPTS;
-use dbsrt_cli::commands::doctor::probe::parse_ssh_probe_sections;
+use dbsrt_cli::commands::doctor::analyzer::{
+    analyze_node_snapshot, format_unix_iso, parse_leading_timestamp, RawNodeSnapshot,
+};
+use dbsrt_cli::commands::doctor::constants::{DOCTOR_LOG_TAIL_BYTES, TRACKED_SCRIPTS};
+use dbsrt_cli::commands::doctor::models::NodeRole;
+use dbsrt_cli::commands::doctor::probe::{
+    parse_ssh_probe_sections, probe_directory, probe_node, NodeProbeTarget,
+};
 use dbsrt_cli::commands::{
     evaluate_cluster_doctor, ClusterDoctorReport, DoctorArgs, DoctorSeverity, ParityStatus,
     DOCTOR_EXIT_ALERT, DOCTOR_EXIT_OK,
 };
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::Command;
 use tempfile::TempDir;
@@ -234,4 +241,251 @@ fn test_parse_ssh_probe_sections_roundtrip() {
         Some(&1_793_350_000)
     );
     assert!(snap.batch_aborted_text.is_some());
+}
+
+#[test]
+fn test_parse_ssh_probe_sections_truncation_and_edge_cases() {
+    let valid_h1 = "B".repeat(64);
+    let oversized_server_log = format!(
+        "PARTIAL_TORN_LINE\n{}",
+        "2026-10-30T08:50:00Z INFO ok\n".repeat(2500)
+    );
+    assert!(oversized_server_log.len() as u64 > DOCTOR_LOG_TAIL_BYTES);
+
+    let raw = format!(
+        "noise before sections\n\
+         ___DBSRT_DOC_SEC:NOW___\nnot_a_number\n\
+         ___DBSRT_DOC_SEC:DAEMON___\n0\n\
+         ___DBSRT_DOC_SEC:SHA256___\n\
+         short_hash scripts/o2switch_batch_worker.py\n\
+         only_one_col\n\
+         {valid_h1}  *scripts/batch_worker/cli.py\n\
+         {valid_h1}  scripts/untracked_helper.py\n\
+         ___DBSRT_DOC_SEC:STAT___\n\
+         malformed_stat_line\n\
+         bad_num|run/batch_queue.json\n\
+         1793350100|run/supervisor_status.json\n\
+         ___DBSRT_DOC_SEC:SUPERVISOR___\n  {{\"state\":\"healthy\"}}  \n\
+         ___DBSRT_DOC_SEC:QUEUE___\n   \n\
+         ___DBSRT_DOC_SEC:LOG_SERVER___\n{oversized_server_log}\n\
+         ___DBSRT_DOC_SEC:LOG_WORKER___\n   \n\
+         ___DBSRT_DOC_SEC:EVENTS_ALT___\n{{\"video_stem\":\"s1\",\"status\":\"OK\"}}\n\
+         ___DBSRT_DOC_SEC:FAULTWATCH___\n{{\"faults\":1}}\n"
+    );
+
+    let snap = parse_ssh_probe_sections(&raw, 1_793_352_000);
+    assert_eq!(snap.now_unix_secs, 1_793_352_000);
+    assert_eq!(snap.daemon_running, Some(false));
+    assert_eq!(
+        snap.script_hashes
+            .get("batch_worker/cli.py")
+            .map(String::as_str),
+        Some(valid_h1.to_ascii_lowercase().as_str())
+    );
+    assert_eq!(snap.script_hashes.len(), 1);
+    assert_eq!(
+        snap.artifact_mtimes.get("run/supervisor_status.json"),
+        Some(&1_793_350_100)
+    );
+    assert!(snap.supervisor_json.is_some());
+    assert!(snap.batch_queue_json.is_none());
+    assert!(snap.worker_log_tail.is_none());
+    let srv_tail = snap.server_log_tail.expect("truncated server log");
+    assert!(!srv_tail.contains("PARTIAL_TORN_LINE"));
+    assert_eq!(snap.batch_events_tails.len(), 1);
+    assert!(snap.faultwatch_tail.is_some());
+}
+
+#[test]
+fn test_probe_directory_large_tails_faultwatch_and_unreachable_ssh() {
+    let dir = TempDir::new().unwrap();
+    seed_tracked_scripts(dir.path(), false, true);
+
+    let logs_dir = dir.path().join("logs");
+    let fw_dir = logs_dir.join("faultwatch");
+    let reports_dir = dir.path().join("data/reports");
+    std::fs::create_dir_all(&fw_dir).unwrap();
+    std::fs::create_dir_all(&reports_dir).unwrap();
+
+    let big_log = format!(
+        "TORN_HEADER_WITHOUT_NEWLINE_AT_START\n{}",
+        "[2026-10-30 08:59:00] ERROR repeated disk glitch\n".repeat(2000)
+    );
+    assert!(big_log.len() as u64 > DOCTOR_LOG_TAIL_BYTES);
+    std::fs::write(logs_dir.join("dbsrt-server.log"), big_log).unwrap();
+    std::fs::write(
+        fw_dir.join("2026-10-30.jsonl"),
+        "{\"minute\":\"2026-10-30T08:55Z\",\"secs_over_100\":4}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        reports_dir.join("batch_tvshow_nightly.jsonl"),
+        "{\"video_stem\":\"ep99\",\"status\":\"OK\"}\n",
+    )
+    .unwrap();
+    std::fs::write(reports_dir.join("nas_ftp_index.json"), "{}").unwrap();
+
+    let snap = probe_directory(dir.path(), 1_793_352_000);
+    assert_eq!(snap.script_hashes.len(), TRACKED_SCRIPTS.len());
+    assert!(snap
+        .artifact_mtimes
+        .contains_key("data/reports/nas_ftp_index.json"));
+    assert!(!snap
+        .server_log_tail
+        .as_deref()
+        .unwrap_or("")
+        .contains("TORN_HEADER_WITHOUT_NEWLINE_AT_START"));
+    assert!(snap.faultwatch_tail.is_some());
+    assert_eq!(snap.batch_events_tails.len(), 1);
+
+    // Unreachable SSH target degrades gracefully to Warning without panicking
+    let ssh_rep = probe_node(
+        NodeRole::Rpi4,
+        &NodeProbeTarget::SshHost {
+            host: "ssh://127.0.0.1:1".to_string(),
+            remote_base: String::new(),
+        },
+        1,
+        1_793_352_000,
+    );
+    assert!(!ssh_rep.reachable);
+    assert!(!ssh_rep.skipped);
+    assert_eq!(ssh_rep.status, DoctorSeverity::Warning);
+    assert!(ssh_rep.alerts.iter().any(|a| a.id == "node_unreachable"));
+}
+
+#[test]
+fn test_analyzer_supervisor_queue_aborted_and_freshness_variants() {
+    let now = 1_793_352_000_u64;
+
+    // 1. Corrupted supervisor JSON + empty batch_aborted + corrupted queue + stale nas_ftp_index
+    let mut mtimes = BTreeMap::new();
+    mtimes.insert("data/reports/nas_ftp_index.json".to_string(), now - 180_000);
+    let snap_corrupt = RawNodeSnapshot {
+        now_unix_secs: now,
+        supervisor_json: Some("{broken_json".to_string()),
+        batch_aborted_text: Some("   ".to_string()),
+        batch_queue_json: Some("{bad".to_string()),
+        artifact_mtimes: mtimes,
+        ..Default::default()
+    };
+    let rep1 = analyze_node_snapshot(NodeRole::Rpi4, "pi".to_string(), 12, snap_corrupt);
+    assert_eq!(rep1.supervisor_state.as_deref(), Some("corrupted"));
+    assert!(rep1.batch_aborted);
+    assert_eq!(rep1.failed_queue_targets, 0);
+    assert!(rep1.alerts.iter().any(|a| a.id == "supervisor_corrupted"));
+    assert!(rep1.alerts.iter().any(|a| a.id == "stale_nas_ftp_index"));
+
+    // 2. Degraded supervisor with failed_batch_types, stale heartbeat, and failed queue targets
+    let sup_deg = format!(
+        "{{\"state\":\"degraded\",\"launch_error_count\":2,\"unix_ts\":{},\"failed_batch_types\":{{\"freebox\":\"timeout\"}}}}",
+        now - 600
+    );
+    let snap_deg = RawNodeSnapshot {
+        now_unix_secs: now,
+        supervisor_json: Some(sup_deg),
+        batch_queue_json: Some("{\"failed_targets\":3,\"total_targets\":20}".to_string()),
+        ..Default::default()
+    };
+    let rep2 = analyze_node_snapshot(NodeRole::Rpi4, "pi".to_string(), 8, snap_deg);
+    assert_eq!(rep2.failed_queue_targets, 3);
+    assert!(rep2.alerts.iter().any(|a| a.id == "supervisor_degraded"));
+    assert!(rep2.alerts.iter().any(|a| a.id == "supervisor_stale"));
+    assert!(rep2.alerts.iter().any(|a| a.id == "batch_queue_failed"));
+
+    // 3. Supervisor with launch_error_count > 0 and empty failed_batch_types
+    let snap_launch = RawNodeSnapshot {
+        now_unix_secs: now,
+        supervisor_json: Some("{\"state\":\"healthy\",\"launch_error_count\":1}".to_string()),
+        ..Default::default()
+    };
+    let rep3 = analyze_node_snapshot(NodeRole::Rpi4, "pi".to_string(), 5, snap_launch);
+    assert!(rep3.alerts.iter().any(|a| a.id == "supervisor_degraded"));
+}
+
+#[test]
+fn test_analyzer_logs_windows_faultwatch_streaks_and_timestamps() {
+    // 2026-10-30T12:00:00Z -> compute exact epoch via parse_leading_timestamp
+    let (Some(now), rest) = parse_leading_timestamp("2026-10-30T12:00:00Z boot") else {
+        panic!("expected valid timestamp");
+    };
+    assert_eq!(rest, "boot");
+    assert_eq!(format_unix_iso(now), "2026-10-30T12:00:00Z");
+
+    // Timestamp edge cases: bracketed, fractional+Z, tz offset, invalid dates
+    assert!(parse_leading_timestamp("[2026-10-30 11:30:00] msg")
+        .0
+        .is_some());
+    assert!(parse_leading_timestamp("2026-02-15T11:30:00.987Z msg")
+        .0
+        .is_some());
+    assert!(parse_leading_timestamp("2026-10-30T11:30:00+01:00 msg")
+        .0
+        .is_some());
+    assert!(parse_leading_timestamp("short").0.is_none());
+    assert!(parse_leading_timestamp("2026/10/30 11:30:00 bad sep")
+        .0
+        .is_none());
+    assert!(parse_leading_timestamp("2026-99-30 11:30:00 bad month")
+        .0
+        .is_none());
+    assert!(parse_leading_timestamp("2026-10-30 99:00:00 bad hour")
+        .0
+        .is_none());
+
+    let ts_30m = format_unix_iso(now - 1_800);
+    let ts_10h = format_unix_iso(now - 36_000);
+    let ts_48h = format_unix_iso(now - 172_800);
+    let ts_96h = format_unix_iso(now - 345_600);
+    let long_tail_msg = "x".repeat(220);
+
+    let server_log = format!(
+        "{ts_30m} ERROR Received signal SIGTERM, Stopping gracefully\n\
+         {ts_96h} ERROR ancient expired error\n\
+         {ts_48h} 🛑 fatal panic in worker 99\n\
+         {ts_10h} ERROR timeout on request 42 {long_tail_msg}\n\
+         continuation ERROR without own timestamp\n"
+    );
+    let faultwatch = "\n\
+         not_json_faultwatch_line\n\
+         {\"minute\":\"2026-10-25T08:00Z\",\"faults\":5}\n\
+         {\"minute\":\"2026-10-30T11:55Z\",\"faults\":0,\"secs_over_100\":0,\"run_delay_ms_max\":10.0}\n\
+         {\"minute\":\"2026-10-30T11:56Z\",\"run_delay_ms_max\":650.0}\n\
+         {\"minute\":\"2026-10-30T11:57Z\",\"faults\":2}\n"
+        .to_string();
+    let events = "\n\
+        not_json\n\
+        {\"no_stem\":1}\n\
+        {\"video_stem\":\"\",\"status\":\"FAILED\"}\n\
+        {\"video_stem\":\"flaky\",\"status\":\"FAILED\"}\n\
+        {\"video_stem\":\"flaky\",\"status\":\"OK\"}\n\
+        {\"video_stem\":\"dead\",\"status\":\"FAILED\"}\n\
+        {\"video_stem\":\"dead\",\"status\":\"ERROR\"}\n\
+        {\"video_stem\":\"dead\",\"success\":false}\n"
+        .to_string();
+
+    let snap = RawNodeSnapshot {
+        now_unix_secs: now,
+        server_log_tail: Some(server_log),
+        faultwatch_tail: Some(faultwatch),
+        batch_events_tails: vec![events],
+        ..Default::default()
+    };
+    let rep = analyze_node_snapshot(NodeRole::O2switch, "o2".to_string(), 15, snap);
+    assert_eq!(rep.status, DoctorSeverity::Critical);
+    assert_eq!(rep.blacklisted_stems, 1);
+    assert_eq!(rep.lve_faults_24h, 3);
+    let srv_comp = rep
+        .components
+        .iter()
+        .find(|c| c.component == "dbsrt-server")
+        .unwrap();
+    assert_eq!(srv_comp.counts.h1, 0);
+    assert_eq!(srv_comp.counts.h24, 2);
+    assert_eq!(srv_comp.counts.h72, 3);
+    assert!(srv_comp.top_signatures.iter().any(|s| s.critical));
+    assert!(srv_comp
+        .top_signatures
+        .iter()
+        .any(|s| s.summary.ends_with('…')));
 }
