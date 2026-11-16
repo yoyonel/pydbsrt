@@ -5,6 +5,7 @@ from __future__ import annotations
 import http.server
 import json
 import runpy
+import struct
 import subprocess
 import sys
 import threading
@@ -20,7 +21,7 @@ from pydbsrt.portal import cache as portal_cache
 from pydbsrt.portal import cli as portal_cli
 from pydbsrt.portal import config as portal_config
 from pydbsrt.portal import server as portal_server
-from pydbsrt.portal.models import AssetsQueryCriteria
+from pydbsrt.portal.models import AssetsQueryCriteria, PhashesQueryCriteria, TrajectoriesQueryCriteria
 from pydbsrt.portal.services import (
     assets_service,
     ffprobe_service,
@@ -648,3 +649,219 @@ def test_http_server_routes_cli_and_main_module(monkeypatch: pytest.MonkeyPatch,
 
     monkeypatch.setattr(sys, "argv", ["pydbsrt.portal", "--metadata"])
     runpy.run_module("pydbsrt.portal", run_name="__main__")
+
+
+def test_http_sources_routes_hermetic(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Covers 100% of routes/sources.py hermetically without relying on local data/snippets."""
+    snip_dir = tmp_path / "data" / "snippets"
+    snip_dir.mkdir(parents=True)
+    (snip_dir / "clip.mp4").write_bytes(b"\x00" * 64)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DBSRT_PORTAL_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(portal_cache, "_LISTING_CACHE", {})
+    monkeypatch.setattr(portal_cache, "_DETAILS_CACHE", {})
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), portal_server.PortalRequestHandler)
+    port = server.server_port
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base_url = f"http://127.0.0.1:{port}"
+    try:
+        with urllib.request.urlopen(f"{base_url}/api/sources", timeout=5) as resp:
+            assert resp.status == 200 and len(json.loads(resp.read().decode())["sources"]) >= 4
+
+        with urllib.request.urlopen(f"{base_url}/api/probe?source=local-snippets&profile=local", timeout=5) as resp:
+            probe_data = json.loads(resp.read().decode())
+            assert resp.status == 200 and probe_data["status"] == "online"
+
+        with urllib.request.urlopen(
+            f"{base_url}/api/files?source=local-snippets&profile=local&page=1&limit=5&force=1", timeout=5
+        ) as resp:
+            files_data = json.loads(resp.read().decode())
+            assert resp.status == 200 and files_data["total_items"] == 1
+
+        with urllib.request.urlopen(
+            f"{base_url}/api/file/details?source=local-snippets&profile=local&path=clip.mp4&force=1", timeout=5
+        ) as resp:
+            det_data = json.loads(resp.read().decode())
+            assert resp.status == 200 and det_data["name"] == "clip.mp4"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_phash_reconciliation_hermetic_tripartite(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Hermetically tests binary catalog.dbphash, sidecars, PG psycopg2/CLI mocks, and /api/phashes."""
+    phash_dir = tmp_path / "data" / "__PHASH__"
+    phash_dir.mkdir(parents=True)
+    raw_bytes = struct.pack(">8Q", *[0x0F0F0F0F0F0F0F0F + i for i in range(8)])
+    (phash_dir / "002835455e305309.24.0fps.phash").write_bytes(raw_bytes)
+    (phash_dir / "002835455e305309.json").write_text(
+        json.dumps({"moviehash": "002835455e305309", "media_name": "Dune (2021).mkv"}), encoding="utf-8"
+    )
+    (phash_dir / "UncompiledClip.25.0fps.phash").write_bytes(raw_bytes[:32])
+    (phash_dir / "bad_sidecar.json").write_text("{not-json", encoding="utf-8")
+
+    # Build minimal valid catalog.dbphash binary (128B header + 3x64B entries + string table)
+    titles = [b"Dune", b"Uncompiled", b"Orphan"]
+    string_table = b"".join(titles)
+    offsets = [0, len(titles[0]), len(titles[0]) + len(titles[1])]
+    off_media = portal_config.CATALOG_DBPHASH_HEADER_SIZE
+    off_str = off_media + 3 * portal_config.CATALOG_DBPHASH_ENTRY_SIZE
+    header = struct.pack(
+        portal_config.CATALOG_DBPHASH_HEADER_FORMAT,
+        b"DBSRT\x00\x00\x00",
+        1,
+        0,
+        3,
+        12,
+        24,
+        off_media,
+        0,
+        0,
+        off_str,
+        len(string_table),
+        0,
+        b"\x00" * 48,
+    )
+    entries = b"".join(
+        struct.pack(
+            portal_config.CATALOG_DBPHASH_ENTRY_FORMAT,
+            idx + 1,
+            0,
+            1,
+            2021,
+            0,
+            0,
+            12000,
+            24000,
+            offsets[idx],
+            len(titles[idx]),
+            4,
+            0,
+            8,
+            0,
+            8,
+        )
+        for idx in range(3)
+    )
+    (tmp_path / "data" / "catalog.dbphash").write_bytes(header + entries + string_table)
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(portal_cache, "_PHASHES_AUDIT_CACHE", None)
+
+    # 1. Mock psycopg2 connection path
+    fake_cur = MagicMock()
+    fake_cur.fetchone.side_effect = [{"total": 1}, {"fc": 8}]
+    fake_cur.fetchall.return_value = [
+        {
+            "id": 10,
+            "name": "Dune (2021).mkv",
+            "clean_title": "Dune",
+            "moviehash": "002835455e305309",
+            "phash_path": "002835455e305309.24.0fps.phash",
+            "frame_count": 8,
+            "fps": 24.0,
+            "phash_status": "complete",
+        }
+    ]
+    fake_conn = MagicMock()
+    fake_conn.cursor.return_value = fake_cur
+    monkeypatch.setattr(phash_reconciliation, "_connect_pg", lambda: fake_conn)
+
+    items, summary = phash_reconciliation.get_phash_tripartite_summary()
+    assert summary["raw_count"] == 2
+    assert summary["catalog_count"] == 3
+    assert summary["aligned_3_3"] == 1
+    assert summary["missing_pg"] == 1
+    assert summary["orphan_catalog"] == 1
+    assert len(items) == 3
+
+    # Cached L1 hit
+    items2, _ = phash_reconciliation.get_phash_tripartite_summary()
+    assert len(items2) == 3
+
+    filtered = phash_reconciliation.query_phashes_list(
+        PhashesQueryCriteria(status_filter="aligned_3_3", search_q="Dune", sort_by="title_asc")
+    )
+    assert filtered["total_items"] == 1 and filtered["items"][0]["pg_media_id"] == 10
+
+    # 2. CLI fallback lookup + HTTP /api/phashes
+    monkeypatch.setattr(phash_reconciliation, "_connect_pg", lambda: None)
+    monkeypatch.setattr(
+        phash_reconciliation,
+        "_query_pg_cli",
+        lambda sql: (
+            "1"
+            if "count(*)" in sql or "information_schema" in sql
+            else json.dumps([{"id": 10, "name": "Dune (2021).mkv", "moviehash": "002835455e305309"}])
+        ),
+    )
+    medias, cnt, fc = phash_reconciliation._query_pg_medias_lookup()
+    assert cnt == 1 and fc == 1 and "002835455e305309" in medias
+
+    from pydbsrt.portal.routes import phashes as phashes_route
+
+    monkeypatch.setattr(phashes_route, "REPO_ROOT", tmp_path)
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), portal_server.PortalRequestHandler)
+    port = server.server_port
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/api/phashes?filter=orphan_catalog&limit=5", timeout=5
+        ) as r:
+            pdata = json.loads(r.read().decode())
+            assert r.status == 200 and pdata["total_items"] == 1
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/api/phash/details?moviehash=002835455e305309", timeout=5
+        ) as r_det:
+            assert r_det.status == 200 and json.loads(r_det.read().decode())["frame_count"] == 8
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/api/artifact/download?kind=phash&file=002835455e305309.24.0fps.phash", timeout=5
+        ) as r_dl:
+            assert r_dl.status == 200 and r_dl.read() == raw_bytes
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_trajectory_and_microscopy_hermetic(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Hermetically covers trajectory_service, routes/trajectories, and phash_microscopy without repo data/."""
+    audit_dir = tmp_path / "data" / "reports" / "audit"
+    audit_dir.mkdir(parents=True)
+    jsonl_file = audit_dir / "sample_traj.jsonl"
+    rec = {
+        "target_media": "abcdef0123456789.24.0fps.phash",
+        "target_path": str(tmp_path / "data" / "__PHASH__" / "abcdef0123456789.24.0fps.phash"),
+        "duration_sec": 10.0,
+        "cuts_count": 1,
+        "matched_cuts_count": 1,
+        "consensus_media_id": 1,
+        "consensus_title": "TestFilm",
+        "is_temporally_coherent": True,
+        "total_elapsed_seconds": 0.05,
+        "cuts": [{"start_sec": 1.0, "winner_media_id": 1, "winner_score": 0.9, "winner_coverage_ratio": 1.0}],
+    }
+    jsonl_file.write_text(json.dumps(rec) + "\n", encoding="utf-8")
+
+    phash_dir = tmp_path / "data" / "__PHASH__"
+    phash_dir.mkdir(parents=True)
+    (phash_dir / "abcdef0123456789.24.0fps.phash").write_bytes(struct.pack(">4Q", 1, 2, 3, 4))
+    (phash_dir / "abcdef0123456789.json").write_text(
+        json.dumps({"moviehash": "abcdef0123456789", "phash_file": "abcdef0123456789.24.0fps.phash"}), encoding="utf-8"
+    )
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(trajectory_service, "_TRAJECTORY_FILE_CACHE", {})
+    files = trajectory_service.list_trajectory_audit_files()
+    assert len(files) == 1
+    q_res = trajectory_service.query_trajectory_records(TrajectoriesQueryCriteria(file_name="sample_traj.jsonl"))
+    assert q_res["total_items"] == 1
+    det = trajectory_service.get_trajectory_record_detail("sample_traj.jsonl", "abcdef0123456789.24.0fps.phash")
+    assert det["status"] == "ok"
+    assert trajectory_service.get_trajectory_record_detail("sample_traj.jsonl", "missing")["status"] == "not_found"
+
+    # Microscopic prefix + sidecar resolution
+    mic = phash_microscopy.inspect_phash_microscopic("abcdef0123456789")
+    assert mic["status"] == "ok" and mic["frame_count"] == 4
