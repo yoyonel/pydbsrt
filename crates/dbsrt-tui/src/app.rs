@@ -103,6 +103,19 @@ pub trait TopActions {
     fn refresh_cluster_doctor(&mut self) -> String {
         "Actualisation sonde cluster déclenchée...".to_string()
     }
+    /// Queries remote SSOT media sources (`freebox`, `video`, `tvshow`, `snippets`) asynchronously (`[W]`).
+    fn query_remote_media_ssot(&mut self, query: &str) -> String {
+        let _ = query;
+        "Recherche SSOT distante indisponible dans ce mode.".to_string()
+    }
+    /// Triggers non-blocking remote `ffprobe` enrichment for a candidate lacking metadata.
+    fn inspect_remote_media_ssot(
+        &mut self,
+        item: &crate::model::DiscoveredMediaItem,
+    ) -> Option<String> {
+        let _ = item;
+        None
+    }
 }
 
 /// State of the TUI interactive session and navigational cursor offsets.
@@ -485,7 +498,7 @@ pub fn handle_key_event(
     if handle_modal_key_event(code, app, telemetry, actions) {
         return;
     }
-    if handle_search_active_key_event(code, app) {
+    if dispatch_active_search_key(code, app, telemetry, actions) {
         return;
     }
     if handle_global_navigation_key_event(code, app) {
@@ -813,6 +826,29 @@ fn handle_modal_key_event(
 /// Intercepts Esc (cancel query & deactivate), Enter (validate query & deactivate),
 /// Backspace (pop character), and Char (append character). Viewport scroll index
 /// is reset to 0 on any query buffer mutation.
+/// Wraps `handle_search_active_key_event` and triggers remote SSOT search on `Enter` in remote mode.
+fn dispatch_active_search_key(
+    code: KeyCode,
+    app: &mut AppState,
+    telemetry: &SystemTelemetry,
+    actions: &mut dyn TopActions,
+) -> bool {
+    let was_searching = app.search_active;
+    if !handle_search_active_key_event(code, app) {
+        return false;
+    }
+    if was_searching
+        && code == KeyCode::Enter
+        && app.view == ViewPage::MediaBrowser
+        && !app.media_search.trim().is_empty()
+        && (telemetry.is_remote_streaming || telemetry.discovered_media.is_empty())
+    {
+        let q = app.media_search.clone();
+        app.set_feedback(actions.query_remote_media_ssot(&q));
+    }
+    true
+}
+
 fn handle_search_active_key_event(code: KeyCode, app: &mut AppState) -> bool {
     if !app.search_active {
         return false;
@@ -2023,6 +2059,25 @@ fn handle_media_browser_batch_keys(
 /// 'o'/'O' sort cycling, 'S' (capital) source filter cycling, 's' (lowercase) jump to MediaSources,
 /// 'b'/'B' batch launch, 'x'/'X' batch kill, 'd'/Delete (removal from memory and disk cache),
 /// Enter/'l'/'i'/'I' (inspection toggle), and 'r'/'R' (jump to CompletedMedia).
+/// Switches from `MediaBrowser` to `MediaInspection` and launches remote `ffprobe` if needed.
+fn open_media_inspection(
+    app: &mut AppState,
+    telemetry: &SystemTelemetry,
+    actions: &mut dyn TopActions,
+) {
+    let visible = app.visible_media(&telemetry.discovered_media, &telemetry.media_sources);
+    let Some(item) = visible.get(app.media_scroll_index) else {
+        app.view = ViewPage::MediaInspection;
+        return;
+    };
+    if item.duration_secs.is_none() || item.video_codec.is_none() {
+        if let Some(msg) = actions.inspect_remote_media_ssot(item) {
+            app.set_feedback(msg);
+        }
+    }
+    app.view = ViewPage::MediaInspection;
+}
+
 fn handle_media_browser_view_keys(
     code: KeyCode,
     app: &mut AppState,
@@ -2045,10 +2100,14 @@ fn handle_media_browser_view_keys(
     match code {
         KeyCode::Enter | KeyCode::Char('l') | KeyCode::Char('i') | KeyCode::Char('I') => {
             if app.view == ViewPage::MediaBrowser {
-                app.view = ViewPage::MediaInspection;
+                open_media_inspection(app, telemetry, actions);
             } else if app.view == ViewPage::MediaInspection {
                 app.view = ViewPage::MediaBrowser;
             }
+        }
+        KeyCode::Char('w') | KeyCode::Char('W') if app.view == ViewPage::MediaBrowser => {
+            let msg = actions.query_remote_media_ssot(&app.media_search);
+            app.set_feedback(msg);
         }
         KeyCode::Char('r') | KeyCode::Char('R') => {
             app.view = ViewPage::CompletedMedia;

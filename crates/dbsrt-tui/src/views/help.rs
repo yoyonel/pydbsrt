@@ -273,7 +273,8 @@ pub fn build_help_media_browser() -> Vec<Line<'static>> {
         Line::from("    [S]            : Filtrer par source d'origine : cycle entre [ACTIVES], [TOUTES] et chaque source spécifique."),
         Line::from("    [o]            : Trier par critère : NOM (A-Z), TAILLE, DURÉE, STATUT, SOUS-TITRES."),
         Line::from("    [d] / [Suppr]  : Supprimer le(s) média(s) sélectionné(s) du catalogue persistant."),
-        Line::from("    [Enter] / [i]  : Ouvrir la fiche d'inspection détaillée du média candidat."),
+        Line::from("    [w] / [W]      : Recherche SSOT distante asynchrone (Freebox 3 disques, Synology video/tvshow, Snippets) sur le motif [/]."),
+        Line::from("    [Enter] / [i]  : Ouvrir la fiche d'inspection détaillée du média candidat (enrichissement ffprobe distant automatique si requis)."),
         Line::from("    [x] / [X]      : Arrêt propre (SIGTERM) ou forcé (SIGKILL) de tout le batch."),
     ]
 }
@@ -435,6 +436,8 @@ pub fn build_help_cluster() -> Vec<Line<'static>> {
         Line::from("    • SCRIPT / LOCAL / RPI4 / O2SWITCH : Préfixes SHA-256 (12 hex) des scripts critiques déployés."),
         Line::from("    • PARITY       : OK (empreintes identiques), SHA256_DRIFT (divergence critique, code sortie 2), LOCAL_ONLY."),
         Line::from("    • FRAÎCHEUR    : Âge vs TTL des artefacts (nas_ftp_index.json, freebox_batch_targets.json, etc.) : ok, STALE ou absent."),
+        Line::from("    • TOPOLOGIE SSOT & CORPUS : Profil réseau poste (home_lan/work_vpn/nomad_wan), garde-fou CIFS (SAFE vs BLOQUÉ VPN/WAN),"),
+        Line::from("                   canaux actifs (https_o2switch, wan_ftp, ssh_o2switch), deltas catalog.dbphash/dbahash/.phash/.ahash et Backups."),
         Line::from("    • ALERTES      : Flux trié critique-d'abord ([CRIT] / [WARN]) suivi des signatures d'erreurs logs dédupliquées."),
         Line::from(""),
         Line::from(Span::styled("  Commandes & Raccourcis :", Style::default().fg(Color::LightGreen).add_modifier(Modifier::BOLD))),

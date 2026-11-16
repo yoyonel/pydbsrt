@@ -175,3 +175,17 @@ fn test_scenario_help_tab_cycling_and_scrolling() {
     harness.send_key(KeyCode::Esc);
     assert_eq!(harness.app.view, ViewPage::ActiveJobs);
 }
+
+#[test]
+fn test_scenario_help_scrolled_ssot_and_remote_search_glossary() {
+    let mut harness = TestHarness::new(240, 45, mock_complete_telemetry());
+    harness.send_key(KeyCode::Char('4'));
+    harness.send_key(KeyCode::Char('?'));
+    harness.send_key(KeyCode::PageDown);
+    harness.assert_buffer_contains("[w] / [W]");
+    harness.assert_buffer_contains("ffprobe distant");
+
+    harness.send_key(KeyCode::Char('8'));
+    harness.send_key(KeyCode::PageDown);
+    harness.assert_buffer_contains("TOPOLOGIE SSOT & CORPUS");
+}

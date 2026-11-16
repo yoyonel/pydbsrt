@@ -109,12 +109,31 @@ pub fn build_media_identity_lines(
         "☐ NON COCHÉ"
     };
 
-    let is_accessible = item.path.exists();
+    let is_remote_ssot = item.source_id.as_deref().is_some_and(|sid| {
+        sources
+            .iter()
+            .any(|s| s.id == sid && s.path.to_string_lossy().starts_with("ssot://"))
+    });
+    let is_accessible = if is_remote_ssot {
+        item.source_id.as_deref() == Some("snippets")
+            && std::path::Path::new("data/snippets")
+                .join(&item.path)
+                .is_file()
+    } else {
+        item.path.exists()
+    };
     let access_span = if is_accessible {
         Span::styled(
             "✓ ACCESSIBLE (Fichier présent sur le disque)",
             Style::default()
                 .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+        )
+    } else if is_remote_ssot {
+        Span::styled(
+            "🌐 DISTANT (SSOT o2switch HTTPS / Freebox-Synology)",
+            Style::default()
+                .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         )
     } else {
