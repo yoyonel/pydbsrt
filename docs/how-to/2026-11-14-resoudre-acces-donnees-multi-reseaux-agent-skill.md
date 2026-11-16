@@ -171,10 +171,11 @@ task data:status -- --force-refresh
 # 2. Recherche groupée multi-sources en 1 seul appel dédupliqué (sidecars, Freebox 3 disques, Synology, snippets)
 task data:query -- "ahash:Hopital la republique en panne" "freebox:Boite Noire" "tvshow:Locke and Key S01E01"
 
-# 3. Inspection ffprobe unifiée (locale en LAN domestique, rebond HTTPS :443 o2switch en 4G/5G et VPN)
+# 3. Inspection ffprobe unifiée (locale pour snippets / LAN domestique, rebond HTTPS :443 o2switch en 4G/5G et VPN)
 task data:inspect -- freebox "Boite Noire"
 task data:inspect -- video "Belfast"
 task data:inspect -- tvshow "Locke and Key S01E01"
+task data:inspect -- snippets "Andor S01E01"
 
 # 4. Synchronisation / téléchargement depuis le nœud autoritaire joignable (SSH/rsync ou fallback HTTPS :443)
 task data:fetch -- catalog --dry-run

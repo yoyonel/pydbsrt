@@ -35,23 +35,47 @@ from scripts.data_access.topology import (  # noqa: E402
 )
 
 
-def _build_parser() -> argparse.ArgumentParser:
-    """Constructs the CLI parser accepting global flags in any position."""
+def _build_common_parser(suppress_defaults: bool) -> argparse.ArgumentParser:
+    """Builds shared global flags; subparsers use SUPPRESS so pre-command flags are preserved."""
     common = argparse.ArgumentParser(add_help=False)
-    common.add_argument("--force-refresh", action="store_true", help="Bypass cached topology/probe state.")
+    bool_default: Any = argparse.SUPPRESS if suppress_defaults else False
+    str_default: Any = argparse.SUPPRESS if suppress_defaults else ""
+    prof_default: Any = argparse.SUPPRESS if suppress_defaults else None
+    common.add_argument(
+        "--force-refresh",
+        action="store_true",
+        default=bool_default,
+        help="Bypass cached topology/probe state.",
+    )
     common.add_argument(
         "--simulate-profile",
         choices=VALID_SIMULATED_PROFILES,
-        default=None,
+        default=prof_default,
         help="Simulate a specific network profile hermetically (zero network/CIFS calls).",
     )
-    common.add_argument("--compact", action="store_true", help="Emit single-line compact JSON.")
-    common.add_argument("--repo", default="", help="Optional path inside target repo or worktree.")
+    common.add_argument(
+        "--compact",
+        action="store_true",
+        default=bool_default,
+        help="Emit single-line compact JSON.",
+    )
+    common.add_argument(
+        "--repo",
+        default=str_default,
+        help="Optional path inside target repo or worktree.",
+    )
+    return common
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    """Constructs the CLI parser accepting global flags in any position."""
+    root_common = _build_common_parser(suppress_defaults=False)
+    sub_common = _build_common_parser(suppress_defaults=True)
 
     parser = argparse.ArgumentParser(
         prog="dbsrt_data.py",
         description="Deterministic SSOT Data & Media Access Resolver for pydbsrt.",
-        parents=[common],
+        parents=[root_common],
     )
     parser.add_argument(
         "--check",
@@ -60,9 +84,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     sub = parser.add_subparsers(dest="command")
-    sub.add_parser("status", parents=[common], help="Inspect network situation, channels, and cross-node freshness.")
+    sub.add_parser(
+        "status", parents=[sub_common], help="Inspect network situation, channels, and cross-node freshness."
+    )
 
-    p_res = sub.add_parser("resolve", parents=[common], help="Resolve optimal access channel and query items.")
+    p_res = sub.add_parser("resolve", parents=[sub_common], help="Resolve optimal access channel and query items.")
     p_res.add_argument(
         "family", help="Family ID or alias (all, ahash, phash, catalog, freebox, video, tvshow, snippets...)."
     )
@@ -70,7 +96,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_batch = sub.add_parser(
         "query",
-        parents=[common],
+        parents=[sub_common],
         help="Resolve multiple 'family[:search]' targets + global freshness in ONE deduplicated call.",
     )
     p_batch.add_argument(
@@ -81,19 +107,21 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_insp = sub.add_parser(
         "inspect",
-        parents=[common],
+        parents=[sub_common],
         help="Inspect ffprobe streams (codec, resolution, duration, tracks) of a local/NAS/Freebox container.",
     )
     p_insp.add_argument("family", help="Media source family (freebox, video, tvshow, snippets).")
     p_insp.add_argument("target", nargs="+", help="Relative container path or search query.")
 
-    p_fetch = sub.add_parser("fetch", parents=[common], help="Fetch dataset or unit file from authoritative node.")
+    p_fetch = sub.add_parser("fetch", parents=[sub_common], help="Fetch dataset or unit file from authoritative node.")
     p_fetch.add_argument("family", help="Target family (catalog, ahash, phash, couplings, reports).")
     p_fetch.add_argument("item", nargs="?", default="", help="Optional unit filename inside corpus.")
     p_fetch.add_argument("--dest", default="", help="Optional destination path override.")
     p_fetch.add_argument("--dry-run", action="store_true", help="Print transfer command without executing.")
 
-    p_seed = sub.add_parser("seed-worktree", parents=[common], help="Symlink unversioned datasets from parent repo.")
+    p_seed = sub.add_parser(
+        "seed-worktree", parents=[sub_common], help="Symlink unversioned datasets from parent repo."
+    )
     p_seed.add_argument("--dry-run", action="store_true", help="Preview symlinks without creating them.")
     return parser
 
