@@ -166,16 +166,19 @@ Toutes les capacités du skill sont invocables directement par l'humain via `Tas
 ```bash
 # 1. Diagnostic global (< 0,2 s à chaud) : profil réseau, sûreté CIFS, fraîcheur local / rpi4 / o2switch
 task data:status
+task data:ui                          # Rendu tableaux Rich lisible par un humain (--human)
 task data:status -- --force-refresh
 
 # 2. Recherche groupée multi-sources en 1 seul appel dédupliqué (sidecars, Freebox 3 disques, Synology, snippets)
 task data:query -- "ahash:Hopital la republique en panne" "freebox:Boite Noire" "tvshow:Locke and Key S01E01"
+task data:query -- --human "freebox:Boite Noire" "video:Matrix"
 
 # 3. Inspection ffprobe unifiée (locale pour snippets / LAN domestique, rebond HTTPS :443 o2switch en 4G/5G et VPN)
 task data:inspect -- freebox "Boite Noire"
 task data:inspect -- video "Belfast"
 task data:inspect -- tvshow "Locke and Key S01E01"
 task data:inspect -- snippets "Andor S01E01"
+task data:inspect -- --human tvshow "Andor S01E01"
 
 # 4. Synchronisation / téléchargement depuis le nœud autoritaire joignable (SSH/rsync ou fallback HTTPS :443)
 task data:fetch -- catalog --dry-run
@@ -188,6 +191,40 @@ task data:seed-worktree
 # 6. Tester en conditions réelles le comportement nomade 4G/5G (0 CIFS, 0 LAN, 0 SSH :22) depuis le poste fixe
 DBSRT_FORCE_LIVE_PROFILE=nomad_wan task data:inspect -- freebox "Arcane S01E01"
 ```
+
+---
+
+## 3bis. Exploitation Humaine Visuelle : Tableaux `Rich` & TUI `dbsrt top`
+
+La sortie JSON brute (`< 8,5 Ko`) est optimisée pour les agents IA. Pour un opérateur humain en terminal (notamment hors LAN maison sous `work_vpn` ou `nomad_wan`), deux interfaces dédiées consomment exactement les mêmes données SSOT :
+
+### A. Tableaux CLI `Rich` (`task data:ui` & `--human`)
+
+```bash
+# Tableau de bord complet : profil réseau, état canaux (OK/GUARD/SKIP/OFF), deltas corpus & sauvegardes
+task data:ui
+task data:status -- --human --force-refresh
+
+# Recherche multi-sources formatée en tableau lisible
+task data:query -- --human "freebox:Matrix" "video:Matrix" "tvshow:Andor S01E01" "ahash:Matrix"
+
+# Fiche ffprobe lisible (vidéo, pistes audio, sous-titres FR/EN, empreintes & couplage SRT)
+task data:inspect -- --human freebox "Matrix"
+```
+
+### B. Intégration Native dans le TUI `task top` (`dbsrt top`)
+
+> **Important (binaire de travail vs binaire global)** : lancez toujours **`task top`** (`./target/release/dbsrt top`, compilé depuis le workspace courant) plutôt qu'un éventuel ancien binaire installé dans `~/.local/bin/dbsrt`.
+
+1. **Onglet `[8]` / `[u]` — Topologie Poste, Canaux & Corpus (SSOT)** :
+   - En parallèle des sondes SSH `local` / `rpi4` / `o2switch`, l'onglet `[8/u]` affiche automatiquement la section **`TOPOLOGIE POSTE, CANAUX & CORPUS (SSOT)`** :
+     - `Réseau` (`work_vpn` / `home_lan` / `nomad_wan`) et état du garde-fou **`CIFS`** (`SAFE` vs `BLOQUÉ`).
+     - Canaux actifs et latences (`https_o2switch`, `wan_ftp_synology`, `ssh_o2switch`, `local_cifs(GUARD)`).
+     - Deltas entre le poste local et `o2switch` (`catalog.dbphash`, `catalog.dbahash`, `Corpus .phash`, `Corpus .ahash`) ainsi que l'état des sauvegardes (`BACKED_UP` + dernier snapshot).
+2. **Onglet `[4]` / `[m]` — Recherche & Inspection Distante Freebox / Synology (`[w]`)** :
+   - En mode hors-LAN (`cifs_safe_to_stat = false`), `dbsrt top` ne fait aucun `stat()` sur `/media/$USER/...` (zéro blocage noyau SMB).
+   - **Recherche multi-sources** : tapez **`/`**, saisissez un motif (ex: `Matrix`), puis validez avec **`Entrée`** (déclenchement automatique en mode distant) ou appuyez sur **`[w]`**. Après `1–3 s`, le tableau se peuple avec les résultats **`[freebox]`**, **`[video]`**, **`[tvshow]`** et **`[snippets]`**.
+   - **Inspection `ffprobe` distante** : sélectionnez un média distant et appuyez sur **`Entrée`** (ou `[i]`). La fiche passe en statut `🌐 DISTANT (SSOT o2switch HTTPS / Freebox-Synology)` et enrichit automatiquement en arrière-plan la durée, le codec vidéo et la liste des pistes audio/sous-titres.
 
 ---
 
