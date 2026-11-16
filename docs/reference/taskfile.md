@@ -262,6 +262,7 @@ Voir [Comment résoudre instantanément les accès aux données multi-réseaux](
 | Commande | Description |
 | :--- | :--- |
 | `task data:status` | Inspecte en `<2 ms` (cache chaud SWR) le profil réseau actif, la sûreté CIFS et la fraîcheur inter-nœuds (`local`, `rpi4`, `o2switch`). |
+| `task data:ui` | Tableau de bord humain Rich (canaux réseau, deltas corpus `local`/`rpi4`/`o2switch`, sauvegardes) équivalent à `task data:status -- --human`. |
 | `task data:resolve` | Résout le canal optimal pour l'une des 12 familles de données (ou `all`) et croise optionnellement les requêtes avec `couplings.json`. |
 | `task data:query` | Résout plusieurs cibles `family[:search]` (recherche de conteneurs `freebox`/`video`/`tvshow`, titres humains sidecars `.ahash`/`.phash`, extraits `snippets`, `couplings.json`) et la fraîcheur globale en un unique appel JSON dédupliqué. |
 | `task data:inspect` | Inspecte les flux `ffprobe` (codec, résolution, fps, pistes audio/sous-titres) et les empreintes/couplages associés d'un conteneur Freebox, Synology ou local (exécution locale sûre ou rebond HTTPS `:443` `o2switch` en 4G/VPN). |

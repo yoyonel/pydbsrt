@@ -2015,6 +2015,7 @@ fn load_and_publish_remote_batch_state(
     if !ctx.batch_targets_path.exists() {
         if let Ok(mut state) = shared_state.write() {
             state.is_scanning = false;
+            state.is_remote_streaming = true;
         }
         return;
     }
@@ -2054,7 +2055,9 @@ fn load_and_publish_remote_batch_state(
     }
 
     if let Ok(mut state) = shared_state.write() {
-        state.discovered_media = remote_items;
+        if !remote_items.is_empty() {
+            state.discovered_media = remote_items;
+        }
         state.is_scanning = false;
         state.is_remote_streaming = true;
         merge_scanned_source_metrics(&mut state.media_sources, &updated_sources);
@@ -2102,7 +2105,9 @@ fn execute_sources_scan_cycle(
     publish: &mut impl FnMut(&[DiscoveredMediaItem], &[MediaSourceConfig], bool),
 ) {
     let sources = load_media_sources(ctx.sources_path);
-    let has_local = sources.iter().any(|s| s.enabled && s.path.exists());
+    let cifs_safe =
+        crate::commands::top::data_access_bridge::cached_cifs_safe_to_stat().unwrap_or(true);
+    let has_local = cifs_safe && sources.iter().any(|s| s.enabled && s.path.exists());
 
     if has_local {
         run_local_sources_scan(&sources, ctx, shared_state, publish);

@@ -2,6 +2,7 @@
 
 pub mod app;
 pub mod constants;
+pub mod data_access_bridge;
 pub mod doctor_bridge;
 pub mod host_info;
 pub mod model;
@@ -49,10 +50,12 @@ pub fn probe_telemetry_snapshot(refresh_ms: u64) -> Result<SystemTelemetry> {
 
     let sources_path = std::path::PathBuf::from(constants::DEFAULT_MEDIA_SOURCES_PATH);
     initial_tel.media_sources = sampler::load_media_sources(&sources_path);
-    let has_local_sources = initial_tel
-        .media_sources
-        .iter()
-        .any(|s| s.enabled && s.path.exists());
+    let cifs_safe = data_access_bridge::cached_cifs_safe_to_stat().unwrap_or(true);
+    let has_local_sources = cifs_safe
+        && initial_tel
+            .media_sources
+            .iter()
+            .any(|s| s.enabled && s.path.exists());
     initial_tel.is_remote_streaming = !has_local_sources
         && std::path::Path::new(constants::DEFAULT_SELECTED_BATCH_TARGETS_PATH).exists();
 

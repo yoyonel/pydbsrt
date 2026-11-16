@@ -233,4 +233,77 @@ fn test_scenario_media_browser_empty_state_handling() {
     harness.send_key(KeyCode::Home);
     harness.send_key(KeyCode::End);
     assert_eq!(harness.app.media_scroll_index, 0);
+
+    // Triggering remote SSOT search ('w') shows toast without panicking
+    harness.send_key(KeyCode::Char('w'));
+    assert!(harness.feedback_text().is_some());
+}
+
+#[test]
+fn test_scenario_cluster_renders_ssot_data_topology_and_corpus_deltas() {
+    use dbsrt_cli::commands::top::model::{
+        ClusterChannelBadge, ClusterCorpusEntry, ClusterDataTopology, ClusterHealthTelemetry,
+        ClusterSeverity,
+    };
+
+    let mut tel = mock_complete_telemetry();
+    tel.cluster = Some(ClusterHealthTelemetry {
+        status: ClusterSeverity::Ok,
+        exit_code: 0,
+        checked_at_iso: "2026-11-16T09:00:00Z".to_string(),
+        elapsed_ms: 120,
+        active_critical_count: 0,
+        active_warning_count: 0,
+        sha256_drift_count: 0,
+        local_only_probe: false,
+        refreshing: false,
+        nodes: vec![],
+        script_parity: vec![],
+        alerts: vec![],
+        data_topology: Some(ClusterDataTopology {
+            network_profile: "work_vpn".to_string(),
+            host_env: "workstation".to_string(),
+            cifs_safe_to_stat: false,
+            channels: vec![
+                ClusterChannelBadge {
+                    id: "https_o2switch".to_string(),
+                    label: "HTTPS o2switch".to_string(),
+                    accessible: true,
+                    latency_ms: 85.0,
+                    state_tag: "OK".to_string(),
+                    error: None,
+                },
+                ClusterChannelBadge {
+                    id: "local_cifs".to_string(),
+                    label: "Local CIFS".to_string(),
+                    accessible: false,
+                    latency_ms: 0.0,
+                    state_tag: "GUARD".to_string(),
+                    error: Some("blocked_by_stale_cifs_hang_guard".to_string()),
+                },
+            ],
+            corpus: vec![ClusterCorpusEntry {
+                label: "catalog.dbphash".to_string(),
+                local_summary: "4974 (377MiB)".to_string(),
+                remote_summary: "4982 (379MiB)".to_string(),
+                status: "STALE_LOCAL".to_string(),
+                delta_summary: "+8 médias".to_string(),
+            }],
+            backup_status: Some("BACKED_UP".to_string()),
+            backup_snapshot: Some("20261115T113737Z_fe26d89".to_string()),
+            backup_replicas: vec!["o2switch".to_string(), "synology_nas".to_string()],
+            evicted_count: 0,
+        }),
+    });
+
+    let mut harness = TestHarness::new(240, 45, tel);
+    harness.send_key(KeyCode::Char('8'));
+    assert_eq!(harness.app.view, ViewPage::Cluster);
+    harness.assert_buffer_contains("TOPOLOGIE POSTE, CANAUX & CORPUS (SSOT)");
+    harness.assert_buffer_contains("work_vpn");
+    harness.assert_buffer_contains("BLOQUÉ (Garde-fou VPN/WAN)");
+    harness.assert_buffer_contains("https_o2switch(85ms)");
+    harness.assert_buffer_contains("catalog.dbphash");
+    harness.assert_buffer_contains("+8 médias");
+    harness.assert_buffer_contains("BACKED_UP");
 }

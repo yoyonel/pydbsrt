@@ -15,8 +15,9 @@ use ratatui::{
 use crate::{
     constants::{CLUSTER_SHA256_SHORT_LEN, SECONDS_PER_DAY, SECONDS_PER_HOUR, SECONDS_PER_MINUTE},
     model::{
-        ClusterAlertEntry, ClusterArtifactFreshness, ClusterHealthTelemetry, ClusterNodeSnapshot,
-        ClusterParityStatus, ClusterScriptParity, ClusterSeverity,
+        ClusterAlertEntry, ClusterArtifactFreshness, ClusterChannelBadge, ClusterCorpusEntry,
+        ClusterDataTopology, ClusterHealthTelemetry, ClusterNodeSnapshot, ClusterParityStatus,
+        ClusterScriptParity, ClusterSeverity,
     },
     ui::UiContext,
 };
@@ -139,6 +140,9 @@ fn build_cluster_lines(cluster: &ClusterHealthTelemetry) -> Vec<Line<'static>> {
     append_nodes_table(&mut lines, &cluster.nodes);
     append_parity_table(&mut lines, &cluster.script_parity);
     append_freshness_section(&mut lines, &cluster.nodes);
+    if let Some(topo) = &cluster.data_topology {
+        append_data_topology_section(&mut lines, topo);
+    }
     append_alerts_and_signatures(&mut lines, cluster);
     lines
 }
@@ -583,4 +587,137 @@ fn append_component_signatures(
         )));
     }
     comp.top_signatures.len()
+}
+
+/// Appends workstation network topology, SSOT channel states, corpus deltas, and backup summary.
+///
+/// # Arguments
+/// * `lines` - Mutable output line buffer.
+/// * `topo` - Evaluated [`ClusterDataTopology`] snapshot from `dbsrt_data.py status`.
+///
+/// # Panics
+/// Never panics.
+///
+/// # Data Flow & Invariants
+/// Surfaces `cifs_safe_to_stat`, non-skipped channel latencies, corpus deltas, and `backup_state`.
+fn append_data_topology_section(lines: &mut Vec<Line<'static>>, topo: &ClusterDataTopology) {
+    lines.push(Line::from(Span::styled(
+        "  TOPOLOGIE POSTE, CANAUX & CORPUS (SSOT)",
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+    )));
+
+    let cifs_span = if topo.cifs_safe_to_stat {
+        Span::styled(
+            "SAFE (Home LAN)",
+            Style::default()
+                .fg(Color::LightGreen)
+                .add_modifier(Modifier::BOLD),
+        )
+    } else {
+        Span::styled(
+            "BLOQUÉ (Garde-fou VPN/WAN)",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )
+    };
+    let backup_txt = format_backup_summary(topo);
+
+    lines.push(Line::from(vec![
+        Span::raw(format!(
+            "  Réseau : {} ({}) │ CIFS : ",
+            topo.network_profile, topo.host_env
+        )),
+        cifs_span,
+        Span::raw(format!(" │ Backups : {backup_txt}")),
+    ]));
+
+    append_channel_badges_line(lines, &topo.channels);
+    for entry in &topo.corpus {
+        lines.push(format_corpus_line(entry));
+    }
+    lines.push(Line::from(""));
+}
+
+/// Formats multi-tier backup state and latest snapshot suffix.
+fn format_backup_summary(topo: &ClusterDataTopology) -> String {
+    let status = topo.backup_status.as_deref().unwrap_or("UNKNOWN");
+    let snap = topo.backup_snapshot.as_deref().unwrap_or("-");
+    let reps = if topo.backup_replicas.is_empty() {
+        "-".to_string()
+    } else {
+        topo.backup_replicas.join(",")
+    };
+    format!("{status} ({snap} • {reps} • evict:{})", topo.evicted_count)
+}
+
+/// Appends compact channel availability spans grouped on a single readable line.
+fn append_channel_badges_line(lines: &mut Vec<Line<'static>>, channels: &[ClusterChannelBadge]) {
+    if channels.is_empty() {
+        return;
+    }
+    let mut spans = vec![Span::styled(
+        "  Canaux : ",
+        Style::default()
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD),
+    )];
+    let mut shown = 0usize;
+    for ch in channels.iter().filter(|c| c.state_tag != "SKIP") {
+        if shown > 0 {
+            spans.push(Span::styled(" │ ", Style::default().fg(Color::DarkGray)));
+        }
+        let color = if ch.accessible {
+            Color::LightGreen
+        } else if ch.state_tag == "GUARD" {
+            Color::Yellow
+        } else {
+            Color::Red
+        };
+        let lat = if ch.accessible {
+            format!("{:.0}ms", ch.latency_ms)
+        } else {
+            ch.state_tag.clone()
+        };
+        spans.push(Span::styled(
+            format!("{}({})", ch.id, lat),
+            Style::default().fg(color),
+        ));
+        shown += 1;
+    }
+    if shown > 0 {
+        lines.push(Line::from(spans));
+    }
+}
+
+/// Formats one corpus comparison row (`local` vs `remote` + status badge).
+fn format_corpus_line(entry: &ClusterCorpusEntry) -> Line<'static> {
+    let color = match entry.status.as_str() {
+        "UP_TO_DATE" => Color::LightGreen,
+        "STALE_LOCAL" | "PARTIAL_LOCAL" => Color::Yellow,
+        _ => Color::Red,
+    };
+    let delta = if entry.delta_summary.is_empty() {
+        String::new()
+    } else {
+        format!(" • {}", entry.delta_summary)
+    };
+    Line::from(vec![
+        Span::styled(
+            format!("  {:<15}: ", entry.label),
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(format!(
+            "local={} vs distant={} ",
+            entry.local_summary, entry.remote_summary
+        )),
+        Span::styled(
+            format!("[{}{delta}]", entry.status),
+            Style::default().fg(color),
+        ),
+    ])
 }

@@ -1275,12 +1275,83 @@ pub struct ClusterAlertEntry {
     pub summary: String,
 }
 
+/// Network channel accessibility badge reported by the SSOT data-access prober.
+///
+/// # Data Flow & Invariants
+/// Populated asynchronously from `dbsrt_data.py status --compact` when available.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ClusterChannelBadge {
+    /// Canonical channel key (`"https_o2switch"`, `"wan_ftp_synology"`, etc.).
+    pub id: String,
+    /// Human-readable channel name.
+    pub label: String,
+    /// True when the channel probe succeeded.
+    pub accessible: bool,
+    /// Measured probe round-trip latency in milliseconds.
+    pub latency_ms: f64,
+    /// Short status tag (`"OK"`, `"SKIP"`, `"GUARD"`, or `"OFF"`).
+    pub state_tag: String,
+    /// Optional error or diagnostic reason when not accessible.
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+/// Cross-node corpus freshness comparison entry surfaced by SSOT data-access status.
+///
+/// # Data Flow & Invariants
+/// Compares local workstation counts against authoritative remote nodes (`o2switch`, `rpi4`).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ClusterCorpusEntry {
+    /// Dataset label (`"catalog.dbphash"`, `"catalog.dbahash"`, `".phash"`, `".ahash"`).
+    pub label: String,
+    /// Compact local workstation count/size summary.
+    pub local_summary: String,
+    /// Compact authoritative remote node count/size summary.
+    pub remote_summary: String,
+    /// Freshness status (`"UP_TO_DATE"`, `"STALE_LOCAL"`, `"PARTIAL_LOCAL"`).
+    pub status: String,
+    /// Human-readable delta description (`"+8 medias"`, `"-402 fichiers"`, or `"synchro"`).
+    pub delta_summary: String,
+}
+
+/// Workstation network topology, safe-CIFS status, corpus deltas, and multi-tier backup state.
+///
+/// # Data Flow & Invariants
+/// Guards against CIFS D-state hangs off Home LAN via `cifs_safe_to_stat`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ClusterDataTopology {
+    /// Detected workstation network profile (`"home_lan"`, `"work_vpn"`, `"nomad_wan"`, etc.).
+    pub network_profile: String,
+    /// Detected host environment (`"workstation"`, `"o2switch"`, `"rpi4"`).
+    pub host_env: String,
+    /// True strictly when direct `/media/$USER/...` CIFS `stat()` calls are safe.
+    pub cifs_safe_to_stat: bool,
+    /// Probed access channels with latency and availability status.
+    #[serde(default)]
+    pub channels: Vec<ClusterChannelBadge>,
+    /// Cross-node corpus and catalog freshness rows.
+    #[serde(default)]
+    pub corpus: Vec<ClusterCorpusEntry>,
+    /// Multi-tier backup status (`"BACKED_UP"`, `"DRIFT_DETECTED"`, etc.).
+    #[serde(default)]
+    pub backup_status: Option<String>,
+    /// Latest committed backup snapshot identifier.
+    #[serde(default)]
+    pub backup_snapshot: Option<String>,
+    /// Verified replica tier names (`["o2switch", "synology_nas"]`).
+    #[serde(default)]
+    pub backup_replicas: Vec<String>,
+    /// Number of datasets currently evicted locally.
+    #[serde(default)]
+    pub evicted_count: usize,
+}
+
 /// Complete multi-node cluster health snapshot rendered by `[8/u] Cluster`.
 ///
 /// # Data Flow & Invariants
 /// Populated asynchronously by the `dbsrt doctor` background probe thread inside `dbsrt top`
 /// and updated deterministically whenever manual refresh (`[a]`) or periodic interval triggers.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ClusterHealthTelemetry {
     /// Rolled-up cluster severity.
     pub status: ClusterSeverity,
@@ -1311,6 +1382,9 @@ pub struct ClusterHealthTelemetry {
     /// Aggregated alerts across all nodes and script parity checks.
     #[serde(default)]
     pub alerts: Vec<ClusterAlertEntry>,
+    /// Optional workstation network topology, corpus deltas, and multi-tier backup summary (SSOT).
+    #[serde(default)]
+    pub data_topology: Option<ClusterDataTopology>,
 }
 
 /// Volatile batch processing queue progress metrics.

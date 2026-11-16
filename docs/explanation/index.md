@@ -269,4 +269,16 @@ tags:
       <a href="2026-11-15-modularisation-batch-worker-et-pieges-pipeline-multi-noeuds/">→ Lire le journal d'ingénierie Batch &amp; RPi4</a>
     </div>
   </div>
+
+  <div class="dbsrt-bento-card bento-cyan">
+    <div class="bento-header">
+      <span class="bento-icon">🌐</span>
+      <span class="bento-badge">TUI NOMADE &amp; SSOT</span>
+    </div>
+    <h3>Intégration SSOT Multi-Réseaux, Mode Humain &amp; TUI</h3>
+    <p>Import paresseux stdlib-first (--human), garde-fou CIFS dans dbsrt top, recherche Freebox/Synology [w] et capture PTY tmux en conditions work_vpn.</p>
+    <div class="bento-links">
+      <a href="2026-11-16-integration-ssot-donnees-et-tui-nomade/">→ Lire le journal d'ingénierie SSOT &amp; TUI</a>
+    </div>
+  </div>
 </div>

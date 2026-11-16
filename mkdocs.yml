@@ -229,6 +229,7 @@ nav:
       - Modularisation Batch Worker & Pièges Multi-Nœuds (RPi4/Freebox/o2switch): explanation/2026-11-15-modularisation-batch-worker-et-pieges-pipeline-multi-noeuds.md
       - Télémétrie PCM aHash & Staging/Canary Pré-Merge (o2switch/RPi4): explanation/2026-11-15-telemetrie-ahash-pcm-et-staging-canary-pre-merge.md
       - Observabilité Distribuée, Hub d'Alertes & dbsrt doctor: explanation/2026-11-15-observabilite-distribuee-alertes-et-doctor-cluster.md
+      - Intégration SSOT Données, Mode Humain & TUI Nomade: explanation/2026-11-16-integration-ssot-donnees-et-tui-nomade.md
   - 📊 Benchmarks & Preuves:
       - Campagnes Empiriques:
           - Recette E2E Exhaustive Portails o2switch (44 Routes / 39 Captures): history/2026-11-14-recette-exhaustive-portails-o2switch.md

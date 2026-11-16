@@ -297,7 +297,10 @@ dbsrt top [OPTIONS]
 
 5. **Onglet 4 : Explorateur de Médias Multi-Sources (`[4]` ou `[m]`)** :
    - Catalogue unifié de tous les répertoires sources configurés et actifs, présentant l'inventaire des fichiers vidéo, source d'origine, tailles, durées estimées, codecs vidéo détectés (`hevc`, `h264`, `h264 Hi10P`, etc.), présence et langues des pistes de sous-titres intégrées, ainsi que le cycle de vie d'ingestion (`VIERGE`, `EN COURS`, `COMPLÉTÉ`, `HACHÉ SEUL`).
-   - **Mode Nœud Distant Streaming (Zéro-NVMe / Cloud)** : Sur un nœud sans répertoire local monté (ex: worker o2switch opérant en streaming réseau pur), l'explorateur est alimenté automatiquement par le registre des cibles du batch en cours (`data/reports/selected_batch_targets.json`). Les scans disques locaux périodiques sont automatiquement neutralisés pour éliminer tout clignotement ou latence I/O inutile.
+   - **Mode Nœud Distant Streaming (Zéro-NVMe / Cloud) & Mode Nomade SSOT (`work_vpn` / `nomad_wan`)** :
+     - Sur un nœud sans répertoire local monté, l'explorateur préserve les cibles `data/reports/selected_batch_targets.json` sans déclencher de scan CIFS lorsque `cifs_safe_to_stat = false`.
+     - **`[w]` / `[W]` (ou validation `[/] + motif + Entrée` en mode distant)** : lance une recherche SSOT asynchrone non-bloquante via `scripts/data_access/cli.py query` sur Freebox 3 disques (`[freebox]`), Synology (`[video]`, `[tvshow]`) et extraits locaux (`[snippets]`).
+     - **Inspection distante (`[Enter]` / `[i]`)** : si le média distant n'a pas encore de durée, codec ou pistes sous-titres, déclenche automatiquement `inspect --compact` en arrière-plan (`🌐 DISTANT (SSOT o2switch HTTPS / Freebox-Synology)`).
    - Filtrage dynamique cyclique (`[f]`) : `TOUS`, `VIERGES SEULS`, `EN COURS`, `COMPLÉTÉS`, `HACHÉS SEULS`, `AVEC SOUS-TITRES`, `SANS SOUS-TITRES`.
    - Tri multicritère cyclique (`[o]`) : `NOM (A-Z)`, `TAILLE`, `DURÉE`, `STATUT`, `SOUS-TITRES`.
    - Sélection multiple par case à cocher : touche `[Espace]` pour cocher/décocher le média pointé, touche `[a]` pour tout cocher/décocher.
@@ -333,6 +336,7 @@ dbsrt top [OPTIONS]
    - **Bandeau En-Tête & Onglet** : indicateur synthétique `Cluster: OK / WARN / CRIT` dans le header et coloration dynamique du badge `[8/u] Cluster`.
    - **Matrice Santé des Nœuds** : état (`OK`, `WARN`, `CRIT`, `UNREACH`, `SKIP`), présence démon `dbsrt-server`, statut superviseur (`healthy` / `degraded`), sentinelle `run/batch_aborted` (`ABORT`), cibles en échec (`Q_FAIL`), stems blacklistés (`BLKLST`), throttling LVE 24h (`LVE24`), compteurs d'erreurs glissants `1h/24h/72h` et latence de sonde (`PROBE` ms).
    - **Parité SHA-256 & Fraîcheur** : empreintes 12-hex comparées des scripts déployés (`OK`, `SHA256_DRIFT`, `LOCAL_ONLY`), fraîcheur des artefacts/files (`nas_ftp_index.json`, `freebox_batch_targets.json`, `supervisor_status.json`, `batch_queue.json`) et flux trié des alertes critiques/warnings ainsi que des signatures d'erreurs dédupliquées.
+   - **Topologie Poste, Canaux & Corpus (SSOT)** : bloc asynchrone issu de `dbsrt_data.py status` affichant le profil réseau détecté (`home_lan`, `work_vpn`, `nomad_wan`), l'état du garde-fou CIFS (`SAFE` vs `BLOQUÉ`), les canaux joignables et latences (`https_o2switch`, `wan_ftp_synology`, `ssh_o2switch`, `GUARD`/`OFF`), les compteurs & deltas corpus (`catalog.dbphash`, `catalog.dbahash`, `.phash`, `.ahash`) et le statut multi-tiers des sauvegardes (`BACKED_UP`).
 
 #### Raccourcis Clavier
 
@@ -358,6 +362,7 @@ dbsrt top [OPTIONS]
 - `[o]` : Changer le critère de tri (onglets 3 et 4)
 - `[b]` : Lancer l'ingestion batch sur les médias cochés (onglet 4)
 - `[S]` : Filtrer les médias par source d'origine (cyclique : toutes -> source 1 -> source 2...) (onglet 4)
+- `[w]` / `[W]` : Lancer une recherche SSOT distante asynchrone (Freebox 3 disques, Synology, Snippets) sur le motif `[/]` (onglet 4)
 - `[p]` : Mettre en pause ou reprendre le processus sélectionné (SIGSTOP / SIGCONT) (onglet 1)
 - `[s]` : Arrêter proprement le processus sélectionné (SIGTERM) (onglet 1)
 - `[K]` : Tuer immédiatement le processus sélectionné (SIGKILL en inspection) (onglet 1)

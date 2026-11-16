@@ -136,10 +136,12 @@ pub fn run_top_app(refresh_interval_ms: u64) -> Result<()> {
     let initial_sources = load_media_sources(&media_sources_path);
     let host_info = crate::commands::top::host_info::detect_host_system_info_with_sys(&initial_sys);
 
-    let has_local_sources = initial_sources.iter().any(|s| s.enabled && s.path.exists());
+    let cifs_safe = super::data_access_bridge::cached_cifs_safe_to_stat().unwrap_or(true);
+    let has_local_sources =
+        cifs_safe && initial_sources.iter().any(|s| s.enabled && s.path.exists());
     let initial_is_scanning = has_local_sources;
-    let is_remote_streaming =
-        !has_local_sources && std::path::Path::new(DEFAULT_SELECTED_BATCH_TARGETS_PATH).exists();
+    let is_remote_streaming = !has_local_sources
+        && (!cifs_safe || std::path::Path::new(DEFAULT_SELECTED_BATCH_TARGETS_PATH).exists());
 
     let trajectory_files = sampler::discover_trajectory_audit_files();
     let (initial_traj_file, initial_traj_records) = if let Some(first) = trajectory_files.first() {
@@ -560,6 +562,27 @@ impl TopActions for NativeActions<'_> {
             }
         }
         "⟳ Actualisation sonde cluster multi-nœuds lancée en arrière-plan...".to_string()
+    }
+
+    fn query_remote_media_ssot(&mut self, query: &str) -> String {
+        let Some(shared) = self.shared_state else {
+            return "Shared state inaccessible.".to_string();
+        };
+        crate::commands::top::data_access_bridge::spawn_remote_media_query(
+            query.to_string(),
+            Arc::clone(shared),
+        )
+    }
+
+    fn inspect_remote_media_ssot(
+        &mut self,
+        item: &dbsrt_tui::model::DiscoveredMediaItem,
+    ) -> Option<String> {
+        let shared = self.shared_state?;
+        crate::commands::top::data_access_bridge::spawn_remote_media_inspect(
+            item,
+            Arc::clone(shared),
+        )
     }
 }
 

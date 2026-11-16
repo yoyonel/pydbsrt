@@ -193,6 +193,7 @@ fn test_snapshot_cluster_view() {
             component: "batch_worker".to_string(),
             summary: "Batch queue has 1/466 failed target(s)".to_string(),
         }],
+        data_topology: None,
     });
     let mut harness = TestHarness::new(SNAPSHOT_WIDTH, SNAPSHOT_HEIGHT, tel);
     harness.app.view = ViewPage::Cluster;

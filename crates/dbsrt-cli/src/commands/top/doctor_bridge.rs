@@ -107,14 +107,31 @@ fn run_cluster_doctor_probe_loop(
             ..Default::default()
         };
         let report = evaluate_cluster_doctor(&args);
-        let snapshot = cluster_telemetry_from_report(&report, local_only, false);
+        let mut snapshot = cluster_telemetry_from_report(&report, local_only, false);
         if let Ok(mut state) = shared_state.write() {
+            snapshot.data_topology = state.cluster.as_ref().and_then(|c| c.data_topology.clone());
             state.cluster = Some(snapshot);
+        }
+        if !local_only {
+            refresh_data_topology_into_state(shared_state);
         }
         control.refresh_requested.store(false, Ordering::SeqCst);
         control.in_flight.store(false, Ordering::SeqCst);
 
         wait_until_next_cluster_probe(refresh_interval, poll_step, stop_flag, control);
+    }
+}
+
+/// Probes workstation SSOT data-access topology and stores it on `state.cluster`.
+fn refresh_data_topology_into_state(shared_state: &Arc<RwLock<SystemTelemetry>>) {
+    let Some(topo) = crate::commands::top::data_access_bridge::probe_data_access_topology() else {
+        return;
+    };
+    let Ok(mut state) = shared_state.write() else {
+        return;
+    };
+    if let Some(cluster) = state.cluster.as_mut() {
+        cluster.data_topology = Some(topo);
     }
 }
 
@@ -190,6 +207,7 @@ pub fn cluster_telemetry_from_report(
         nodes,
         script_parity,
         alerts,
+        data_topology: None,
     }
 }
 

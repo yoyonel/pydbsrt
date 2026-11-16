@@ -248,6 +248,14 @@ pub fn render_media_browser_toolbar(frame: &mut Frame, area: Rect, ctx: &UiConte
         ));
     }
 
+    if ctx.telemetry.is_remote_streaming || ctx.telemetry.discovered_media.is_empty() {
+        bar_spans.push(Span::raw("   "));
+        bar_spans.push(Span::styled(
+            "[w] Distant SSOT",
+            Style::default().fg(Color::Cyan),
+        ));
+    }
+
     bar_spans.push(Span::raw("   "));
     bar_spans.push(Span::styled(
         " Sélection: ",
@@ -282,10 +290,10 @@ pub fn render_media_browser_toolbar(frame: &mut Frame, area: Rect, ctx: &UiConte
 pub fn render_empty_media_browser_placeholder(frame: &mut Frame, area: Rect, search_query: &str) {
     let msg_detail = if !search_query.is_empty() {
         format!(
-            "Aucun média ne correspond à la recherche \"{search_query}\". Appuyez sur [Échap] pour réinitialiser."
+            "Aucun média local pour \"{search_query}\". Appuyez sur [w] pour rechercher sur Freebox/Synology/Snippets (ou [Échap] pour effacer)."
         )
     } else {
-        "Appuyez sur [f] pour modifier le filtre ou vérifiez la liaison NAS Synology.".to_string()
+        "Tapez [/] + motif puis [Entrée]/[w] pour rechercher sur Freebox/Synology/Snippets, ou [f] pour modifier le filtre.".to_string()
     };
     let empty_msg = vec![
         Line::from(""),
