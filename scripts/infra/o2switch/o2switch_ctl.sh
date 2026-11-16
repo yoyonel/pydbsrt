@@ -279,7 +279,7 @@ case "${ACTION}" in
     check_ssh
     echo "=== Synchronizing standalone stack to ${O2SWITCH_HOST} ==="
     # shellcheck disable=SC2029
-    ssh "${O2SWITCH_HOST}" "mkdir -p ${REMOTE_BASE}/bin ${REMOTE_BASE}/data ${REMOTE_BASE}/run ${REMOTE_BASE}/logs ${REMOTE_PUBLIC_HTML} ${REMOTE_BASE}/scripts ${REMOTE_BASE}/web && ln -sfn ${O2SWITCH_PYTHON} ${REMOTE_BASE}/bin/python3"
+    ssh "${O2SWITCH_HOST}" "mkdir -p ${REMOTE_BASE}/bin ${REMOTE_BASE}/data ${REMOTE_BASE}/run ${REMOTE_BASE}/logs ${REMOTE_PUBLIC_HTML} ${REMOTE_BASE}/scripts ${REMOTE_BASE}/src/pydbsrt ${REMOTE_BASE}/web && ln -sfn ${O2SWITCH_PYTHON} ${REMOTE_BASE}/bin/python3"
 
     # Binaries ship as releases (deploy): copying over bin/ would replace the release links
     rsync -a --chmod=F755 "${REPO_ROOT}/deploy/o2switch/dbsrt_server_ctl.sh" "${O2SWITCH_HOST}:${REMOTE_BASE}/bin/"
@@ -294,11 +294,15 @@ case "${ACTION}" in
     if [[ -f "${REPO_ROOT}/scripts/portal_server.py" ]]; then
       rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${REPO_ROOT}/scripts/portal_server.py" "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/"
     fi
+    if [[ -d "${REPO_ROOT}/src/pydbsrt/portal" ]]; then
+      rsync -avz --exclude='__pycache__' --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${REPO_ROOT}/src/pydbsrt/__init__.py" "${O2SWITCH_HOST}:${REMOTE_BASE}/src/pydbsrt/"
+      rsync -avz --exclude='__pycache__' --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${REPO_ROOT}/src/pydbsrt/portal/" "${O2SWITCH_HOST}:${REMOTE_BASE}/src/pydbsrt/portal/"
+    fi
     if [[ -d "${REPO_ROOT}/scripts/data_access" ]]; then
       rsync -avz --exclude='__pycache__' --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${REPO_ROOT}/scripts/data_access/" "${O2SWITCH_HOST}:${REMOTE_BASE}/scripts/data_access/"
     fi
-    if [[ -f "${REPO_ROOT}/scripts/static/sources.html" ]]; then
-      rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${REPO_ROOT}/scripts/static/sources.html" "${O2SWITCH_HOST}:${REMOTE_BASE}/web/sources.html"
+    if [[ -f "${REPO_ROOT}/src/pydbsrt/portal/static/sources.html" ]]; then
+      rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${REPO_ROOT}/src/pydbsrt/portal/static/sources.html" "${O2SWITCH_HOST}:${REMOTE_BASE}/web/sources.html"
     fi
 
     echo "-> Transferring Zero-DB catalog and SRT store (bwlimit ${DEFAULT_RSYNC_BWLIMIT_KBPS} KB/s)..."

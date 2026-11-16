@@ -113,7 +113,10 @@ def validate_json_file(path: Path) -> list[str]:
 def main() -> int:
     root = Path(__file__).resolve().parent.parent
     html_files = sorted(
-        set(list((root / "crates").rglob("*.html")) + list((root / "scripts" / "static").rglob("*.html")))
+        set(
+            list((root / "crates").rglob("*.html"))
+            + list((root.parent / "src" / "pydbsrt" / "portal" / "static").rglob("*.html"))
+        )
     )
     json_files = [p for p in (root / "data").rglob("*.json") if ".venv" not in p.parts and "target" not in p.parts]
 

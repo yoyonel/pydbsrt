@@ -136,7 +136,7 @@ ignore = [
 [tool.complexipy]
 # Cognitive complexity gate on scripts/; legacy debt is frozen in complexipy-snapshot.json
 # (a new or worsened function fails, a fixed one shrinks the snapshot)
-paths = ["scripts"]
+paths = ["scripts", "src/pydbsrt/portal"]
 max-complexity-allowed = 15
 
 [tool.ruff.lint.isort]
