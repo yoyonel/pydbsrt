@@ -158,19 +158,19 @@ tasks:
       - uv run python scripts/tooling/report_type_errors.py
 
   test:portal:e2e:
-    desc: Run Playwright E2E browser suite with route coverage and V8 CDP profiling (local daemon)
-    aliases: [portal:e2e]
+    desc: "[Rust :8765] Run Playwright E2E browser suite for dbsrt-server (/monitoring, /studio, /top) with V8 CDP profiling"
+    aliases: [server:e2e]
     cmds:
       - uv run --with playwright python scripts/e2e/e2e_portal_playwright.py {{.CLI_ARGS}}
 
   test:portal:e2e:cloud:
-    desc: Run Playwright E2E browser suite against deployed o2switch Cloud instance
-    aliases: [portal:e2e:cloud]
+    desc: "[Rust o2switch] Run Playwright E2E browser suite against deployed dbsrt-server on o2switch"
+    aliases: [server:e2e:cloud]
     cmds:
       - uv run --with playwright python scripts/e2e/e2e_portal_playwright.py --cloud {{.CLI_ARGS}}
 
   test:sources:e2e:
-    desc: Run Playwright E2E browser suite for Media Sources & Master-Detail Explorer
-    aliases: [sources:e2e]
+    desc: "[Python :8780] Run self-contained Playwright E2E explorer suite for MediaSources Portal"
+    deps: [db:up]
     cmds:
-      - uv run --with playwright python scripts/e2e/e2e_sources_explorer.py {{.CLI_ARGS}}
+      - bash scripts/e2e/run_sources_e2e.sh --explorer-only {{.CLI_ARGS}}
