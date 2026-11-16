@@ -50,13 +50,18 @@ def _test_sources_and_explorer(page: Any) -> None:
     window_scrollable = page.evaluate("() => document.documentElement.scrollHeight > window.innerHeight")
     assert not window_scrollable, "Page window must not have an outer vertical scrollbar in Explorer view"
 
-    # Test search query
+    # Test search query dynamically using the first listed item
+    first_item_text = page.locator("[id^='item-']").first.inner_text().strip()
+    search_token = next(
+        (tok for tok in first_item_text.replace(".", " ").replace("_", " ").split() if len(tok) >= 3),
+        first_item_text[:6],
+    )
     search_input = page.locator("input[x-model='explorerQuery']")
-    search_input.fill("Watchmen")
-    page.wait_for_selector("text=Watchmen", timeout=DEFAULT_TIMEOUT_MS)
+    search_input.fill(search_token)
+    page.wait_for_selector(f"[id^='item-']:has-text('{search_token}')", timeout=DEFAULT_TIMEOUT_MS)
 
     # Test detail card
-    file_item = page.locator("[id^='item-']:has-text('Watchmen')").first
+    file_item = page.locator(f"[id^='item-']:has-text('{search_token}')").first
     file_item.click()
     page.wait_for_selector("text=Caractéristiques Multimédia", timeout=DEFAULT_TIMEOUT_MS)
 
