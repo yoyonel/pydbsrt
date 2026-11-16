@@ -2,13 +2,15 @@
 //! Validates ERR-02 (network relay timeout bounding), ERR-03 (special characters & UTF-8 paths),
 //! and ERR-04 (automatic cache directory fallback when media directory is read-only).
 
+use dbsrt_core::{OpenSubtitlesProvider, SubtitleCache};
 use dbsrt_server::{
-    create_router, DownloadSubtitleRequest, DownloadSubtitleResponse, SearchSubtitlesRequest,
-    SearchSubtitlesResponse,
+    create_router, create_router_with_state, AppState, DownloadSubtitleRequest,
+    DownloadSubtitleResponse, SearchSubtitlesRequest, SearchSubtitlesResponse,
 };
 use std::net::SocketAddr;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 const READONLY_DIR_PERMS_MODE: u32 = 0o555;
@@ -154,15 +156,20 @@ async fn test_chaos_err02_relay_timeout_bounded() {
         axum::serve(relay_listener, hanging_relay).await.unwrap();
     });
 
-    // 2. Set DBSRT_REMOTE_URL to point to hanging relay
-    std::env::set_var("DBSRT_REMOTE_URL", format!("http://{}", relay_addr));
-
+    // 2. Inject hanging relay URL directly on AppState (no process-global env mutation)
     let tmp_root = std::env::temp_dir();
     let phash_dir = tmp_root.join(format!("dbsrt_chaos_timeout_{}", std::process::id()));
     let srt_dir = PathBuf::from("../../tests/data");
     let _ = std::fs::create_dir_all(&phash_dir);
 
-    let app = create_router(phash_dir.clone(), srt_dir.clone());
+    let mut state = AppState::new(
+        phash_dir.clone(),
+        srt_dir.clone(),
+        Arc::new(OpenSubtitlesProvider::new(None)),
+        SubtitleCache::default(),
+    );
+    state.remote_api = Some(format!("http://{}", relay_addr));
+    let app = create_router_with_state(state);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("Failed to bind daemon listener");
@@ -196,9 +203,6 @@ async fn test_chaos_err02_relay_timeout_bounded() {
         .expect("POST /v1/search must complete");
 
     let elapsed = start_t.elapsed();
-
-    // Reset env var
-    std::env::remove_var("DBSRT_REMOTE_URL");
 
     assert!(res.status().is_success());
     let search_res: SearchSubtitlesResponse =

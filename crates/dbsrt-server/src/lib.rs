@@ -23,7 +23,44 @@ use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 
+/// Persists server discovery metadata to the default [`DISCOVERY_FILE`] path.
+///
+/// # Arguments
+/// * `addr` - Bound TCP socket address advertised to local clients.
+///
+/// # Returns
+/// `Ok(())` once the JSON metadata file has been written.
+///
+/// # Errors
+/// Returns an error if serialization or filesystem writing fails.
+///
+/// # Panics
+/// Does not panic.
+///
+/// # Data Flow & Invariants
+/// Delegates directly to [`write_discovery_file_to`] using [`DISCOVERY_FILE`].
 pub fn write_discovery_file(addr: SocketAddr) -> Result<()> {
+    write_discovery_file_to(std::path::Path::new(DISCOVERY_FILE), addr)
+}
+
+/// Persists server discovery metadata as JSON at an explicit filesystem path.
+///
+/// # Arguments
+/// * `path` - Target file path for discovery JSON metadata.
+/// * `addr` - Bound TCP socket address advertised to local clients.
+///
+/// # Returns
+/// `Ok(())` once the JSON metadata file has been written.
+///
+/// # Errors
+/// Returns an error if serialization or filesystem writing fails.
+///
+/// # Panics
+/// Does not panic.
+///
+/// # Data Flow & Invariants
+/// Writes `host`, `port`, `url`, `pid`, and `version` fields atomically via `std::fs::write`.
+pub fn write_discovery_file_to(path: &std::path::Path, addr: SocketAddr) -> Result<()> {
     let payload = serde_json::json!({
         "host": addr.ip().to_string(),
         "port": addr.port(),
@@ -31,13 +68,49 @@ pub fn write_discovery_file(addr: SocketAddr) -> Result<()> {
         "pid": std::process::id(),
         "version": env!("CARGO_PKG_VERSION")
     });
-    std::fs::write(DISCOVERY_FILE, serde_json::to_string_pretty(&payload)?)
-        .with_context(|| format!("Failed to write discovery file {:?}", DISCOVERY_FILE))?;
+    std::fs::write(path, serde_json::to_string_pretty(&payload)?)
+        .with_context(|| format!("Failed to write discovery file {}", path.display()))?;
     Ok(())
 }
 
+/// Removes the default [`DISCOVERY_FILE`] if present.
+///
+/// # Arguments
+/// None.
+///
+/// # Returns
+/// `()` (removal errors are ignored during shutdown cleanup).
+///
+/// # Errors
+/// Does not return errors.
+///
+/// # Panics
+/// Does not panic.
+///
+/// # Data Flow & Invariants
+/// Delegates to [`remove_discovery_file_at`] targeting [`DISCOVERY_FILE`].
 pub fn remove_discovery_file() {
-    let _ = std::fs::remove_file(DISCOVERY_FILE);
+    remove_discovery_file_at(std::path::Path::new(DISCOVERY_FILE));
+}
+
+/// Removes an explicit discovery metadata file if present.
+///
+/// # Arguments
+/// * `path` - Discovery JSON file path to delete.
+///
+/// # Returns
+/// `()` (missing-file or permission errors are ignored).
+///
+/// # Errors
+/// Does not return errors.
+///
+/// # Panics
+/// Does not panic.
+///
+/// # Data Flow & Invariants
+/// Best-effort `std::fs::remove_file` used during graceful shutdown or isolated tests.
+pub fn remove_discovery_file_at(path: &std::path::Path) {
+    let _ = std::fs::remove_file(path);
 }
 
 pub async fn bind_listener(
@@ -378,14 +451,19 @@ mod tests {
 
     #[test]
     fn test_discovery_file_lifecycle() {
+        let dir = std::env::temp_dir().join(format!("dbsrt_discovery_test_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let discovery_path = dir.join("dbsrt-server.json");
+
         let addr = "127.0.0.1:9999".parse().unwrap();
-        write_discovery_file(addr).expect("write discovery file");
-        assert!(std::path::Path::new(DISCOVERY_FILE).exists());
-        let content = std::fs::read_to_string(DISCOVERY_FILE).unwrap();
+        write_discovery_file_to(&discovery_path, addr).expect("write discovery file");
+        assert!(discovery_path.exists());
+        let content = std::fs::read_to_string(&discovery_path).unwrap();
         assert!(content.contains("9999"));
         assert!(content.contains("version"));
-        remove_discovery_file();
-        assert!(!std::path::Path::new(DISCOVERY_FILE).exists());
+        remove_discovery_file_at(&discovery_path);
+        assert!(!discovery_path.exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
