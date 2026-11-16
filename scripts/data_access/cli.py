@@ -60,6 +60,12 @@ def _build_common_parser(suppress_defaults: bool) -> argparse.ArgumentParser:
         help="Emit single-line compact JSON.",
     )
     common.add_argument(
+        "--human",
+        action="store_true",
+        default=bool_default,
+        help="Render Rich human-readable tables instead of raw JSON.",
+    )
+    common.add_argument(
         "--repo",
         default=str_default,
         help="Optional path inside target repo or worktree.",
@@ -167,7 +173,12 @@ def _handle_resolve_cmd(args: argparse.Namespace, ws: Any, status_payload: dict[
     """Executes single-family resolve subcommand."""
     q_str = " ".join(args.query) if isinstance(args.query, list) else str(args.query)
     resolved = resolve_data_family(ws, status_payload, args.family, query=q_str)
-    _emit_json(resolved, args.compact)
+    if getattr(args, "human", False):
+        from scripts.data_access.human_view import render_human_generic
+
+        render_human_generic(f"🔎 Resolve: {args.family}", resolved)
+    else:
+        _emit_json(resolved, args.compact)
     return EXIT_USAGE_ERROR if "error" in resolved else EXIT_OK
 
 
@@ -175,11 +186,57 @@ def _handle_inspect_cmd(args: argparse.Namespace, ws: Any, status_payload: dict[
     """Executes container ffprobe inspect subcommand."""
     tgt_str = " ".join(args.target) if isinstance(args.target, list) else str(args.target)
     inspected = inspect_family_container(ws, status_payload, args.family, tgt_str)
-    if args.compact:
+    if getattr(args, "human", False):
+        from scripts.data_access.human_view import render_human_inspect
+
+        render_human_inspect(inspected)
+    elif args.compact:
         _emit_json(inspected, True)
     else:
         _emit_compact_lines_json(inspected)
     return EXIT_OK if inspected.get("ok") else EXIT_UNAVAILABLE
+
+
+def _handle_status_cmd(args: argparse.Namespace, status_payload: dict[str, Any]) -> int:
+    """Emits status payload as Rich human dashboard or JSON."""
+    if getattr(args, "human", False):
+        from scripts.data_access.human_view import render_human_status
+
+        render_human_status(status_payload)
+    else:
+        _emit_json(status_payload, args.compact)
+    return EXIT_OK
+
+
+def _handle_query_cmd(args: argparse.Namespace, ws: Any, status_payload: dict[str, Any]) -> int:
+    """Executes batched multi-family query subcommand."""
+    batched = resolve_batch_specs(ws, status_payload, args.specs)
+    if getattr(args, "human", False):
+        from scripts.data_access.human_view import render_human_query
+
+        render_human_query(batched)
+    else:
+        _emit_compact_lines_json(batched)
+    return EXIT_USAGE_ERROR if any("error" in v for v in batched["results"].values()) else EXIT_OK
+
+
+def _handle_fetch_cmd(args: argparse.Namespace, ws: Any, status_payload: dict[str, Any]) -> int:
+    """Executes dataset/artifact fetch subcommand."""
+    fetched = build_or_run_fetch(
+        ws,
+        status_payload,
+        args.family,
+        item=args.item,
+        dest_override=args.dest,
+        dry_run=args.dry_run,
+    )
+    if getattr(args, "human", False):
+        from scripts.data_access.human_view import render_human_generic
+
+        render_human_generic(f"⬇️ Fetch: {args.family}", fetched)
+    else:
+        _emit_json(fetched, args.compact)
+    return EXIT_OK if fetched.get("ok") else EXIT_UNAVAILABLE
 
 
 def _dispatch_probed_command(
@@ -189,27 +246,15 @@ def _dispatch_probed_command(
 ) -> int:
     """Dispatches status, resolve, query, inspect, or fetch subcommands."""
     if args.command == "status":
-        _emit_json(status_payload, args.compact)
-        return EXIT_OK
+        return _handle_status_cmd(args, status_payload)
     if args.command == "resolve":
         return _handle_resolve_cmd(args, ws, status_payload)
     if args.command == "query":
-        batched = resolve_batch_specs(ws, status_payload, args.specs)
-        _emit_compact_lines_json(batched)
-        return EXIT_USAGE_ERROR if any("error" in v for v in batched["results"].values()) else EXIT_OK
+        return _handle_query_cmd(args, ws, status_payload)
     if args.command == "inspect":
         return _handle_inspect_cmd(args, ws, status_payload)
     if args.command == "fetch":
-        fetched = build_or_run_fetch(
-            ws,
-            status_payload,
-            args.family,
-            item=args.item,
-            dest_override=args.dest,
-            dry_run=args.dry_run,
-        )
-        _emit_json(fetched, args.compact)
-        return EXIT_OK if fetched.get("ok") else EXIT_UNAVAILABLE
+        return _handle_fetch_cmd(args, ws, status_payload)
     return EXIT_USAGE_ERROR
 
 

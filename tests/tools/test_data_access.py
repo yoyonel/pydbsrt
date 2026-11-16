@@ -849,3 +849,92 @@ def test_media_search_fallbacks_and_inspect_snippets_title(tmp_path: Path, monke
     assert insp["via"] == "local_fs_ffprobe"
     assert missing["ok"] is False
     assert missing["error"] == "container_not_found"
+
+
+def test_cli_human_rendering_modes_across_subcommands(tmp_path: Path, monkeypatch: object) -> None:
+    """Verifies --human Rich tables/panels across status, query, inspect, and error paths."""
+    from rich.console import Console
+
+    from scripts.data_access.human_view import render_human_inspect, render_human_query
+
+    buf_status = io.StringIO()
+    with patch("sys.stdout", buf_status):
+        rc = cli_main(["--human", "--simulate-profile", "work_vpn", "status"])
+    assert rc == EXIT_OK
+    status_out = buf_status.getvalue()
+    assert "work_vpn" in status_out
+    assert "catalog.dbphash" in status_out
+    assert "Sauvegardes" in status_out
+
+    q_buf = io.StringIO()
+    q_console = Console(file=q_buf, force_terminal=False, width=120)
+    render_human_query(
+        {
+            "network": {"profile": "work_vpn", "host_env": "workstation", "cifs_safe_to_stat": False},
+            "workspace": {"active_repo": "/repo", "is_worktree": False},
+            "cache": {"hit": True, "age_seconds": 1.0, "lookup_ms": 0.5},
+            "freshness": {"packed_catalog": {"status": "UP_TO_DATE"}, "packed_ahash_catalog": {"status": "UP_TO_DATE"}},
+            "results": {
+                "ahash:Matrix": {
+                    "recommended_channel": {"id": "ssh_o2switch"},
+                    "query_result": {
+                        "via_channel": "local_fs",
+                        "matches": [
+                            {
+                                "media_name": "the.matrix.resurrections.2021.mkv",
+                                "size_bytes": 6114728,
+                                "duration_sec": 8874.5,
+                                "moviehash": "9e77f28615b063db",
+                                "phash_file": "9e77f28615b063db.24.0fps.phash",
+                                "ahash_file": "9e77f28615b063db.86.1fps.ahash",
+                                "coupled_srt": True,
+                                "coupled_subtitles_count": 2,
+                            }
+                        ],
+                    },
+                }
+            },
+        },
+        console=q_console,
+    )
+    q_out = q_buf.getvalue()
+    assert "the.matrix.resurrections.2021.mkv" in q_out
+    assert "SRT(2)" in q_out
+
+    i_buf = io.StringIO()
+    i_console = Console(file=i_buf, force_terminal=False, width=120)
+    render_human_inspect(
+        {
+            "ok": True,
+            "family": "synology-tvshow",
+            "via": "o2switch_https_api",
+            "path": "Andor/Andor.S01E01.mkv",
+            "size_bytes": 1985633052,
+            "duration_sec": 2350.59,
+            "video": {"codec": "h264", "width": 1920, "height": 1080, "fps": "24/1", "pix_fmt": "yuv420p"},
+            "audio_streams": [{"index": 1, "codec": "eac3", "channel_layout": "5.1", "language": "eng", "title": ""}],
+            "subtitle_streams": [{"index": 2, "codec": "subrip", "language": "fre", "forced": False, "title": "FR"}],
+            "subtitle_streams_count": 1,
+            "subtitle_languages": "fre",
+            "artifacts": {
+                "moviehash": "498032c4b01cbc0c",
+                "phash_file": "x.phash",
+                "coupled_srt": True,
+                "coupled_subtitles_count": 21,
+            },
+        },
+        console=i_console,
+    )
+    render_human_inspect(
+        {"ok": False, "family": "freebox-disks", "query": "Unknown", "error": "container_not_found"}, console=i_console
+    )
+    i_out = i_buf.getvalue()
+    assert "Andor/Andor.S01E01.mkv" in i_out
+    assert "container_not_found" in i_out
+
+    monkeypatch.setenv("HOME", str(tmp_path))  # type: ignore[attr-defined]
+    res_buf = io.StringIO()
+    with patch("sys.stdout", res_buf):
+        rc_res = cli_main(["resolve", "--human", "--simulate-profile", "work_vpn", "freebox"])
+    assert rc_res == EXIT_OK
+    assert "freebox-disks" in res_buf.getvalue()

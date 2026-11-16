@@ -33,6 +33,11 @@ tasks:
     cmds:
       - uv run --no-sync python scripts/data_access/cli.py status {{.CLI_ARGS}}
 
+  data:ui:
+    desc: Human-readable Rich dashboard of network channels, corpus deltas, and backups
+    cmds:
+      - uv run --no-sync python scripts/data_access/cli.py status --human {{.CLI_ARGS}}
+
   data:resolve:
     desc: Resolve optimal access channel and optional item/coupling query for a data family
     cmds:
