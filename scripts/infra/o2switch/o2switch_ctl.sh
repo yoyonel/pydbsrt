@@ -476,6 +476,21 @@ echo "--- Canary dbsrt --version ---"
 REMOTE_CANARY
     ;;
 
+  canary-portal)
+    check_ssh
+    PREVIEW_PORTAL_REL="${REMOTE_BASE}/preview_portal"
+    echo "=== Staging & smoke-testing Python Portal in isolated ${PREVIEW_PORTAL_REL} (zero prod impact) ==="
+    # shellcheck disable=SC2029
+    ssh "${O2SWITCH_HOST}" "rm -rf ${PREVIEW_PORTAL_REL} && mkdir -p ${PREVIEW_PORTAL_REL}/scripts/infra/o2switch ${PREVIEW_PORTAL_REL}/src/pydbsrt && ln -sfn \$HOME/${REMOTE_BASE}/data ${PREVIEW_PORTAL_REL}/data && ln -sfn \$HOME/${REMOTE_BASE}/etc ${PREVIEW_PORTAL_REL}/etc"
+    rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${REPO_ROOT}/scripts/portal_server.py" "${O2SWITCH_HOST}:${PREVIEW_PORTAL_REL}/scripts/"
+    rsync -avz --exclude='__pycache__' --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${REPO_ROOT}/scripts/data_access/" "${O2SWITCH_HOST}:${PREVIEW_PORTAL_REL}/scripts/data_access/"
+    rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${REPO_ROOT}/scripts/infra/o2switch/portal_smoke_check.py" "${O2SWITCH_HOST}:${PREVIEW_PORTAL_REL}/scripts/infra/o2switch/"
+    rsync -avz --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${REPO_ROOT}/src/pydbsrt/__init__.py" "${O2SWITCH_HOST}:${PREVIEW_PORTAL_REL}/src/pydbsrt/"
+    rsync -avz --exclude='__pycache__' --bwlimit="${DEFAULT_RSYNC_BWLIMIT_KBPS}" "${REPO_ROOT}/src/pydbsrt/portal/" "${O2SWITCH_HOST}:${PREVIEW_PORTAL_REL}/src/pydbsrt/portal/"
+    # shellcheck disable=SC2029
+    ssh "${O2SWITCH_HOST}" "trap 'rm -rf ${PREVIEW_PORTAL_REL}' EXIT && ${REMOTE_BASE}/bin/python3 ${PREVIEW_PORTAL_REL}/scripts/infra/o2switch/portal_smoke_check.py"
+    ;;
+
   rollback)
     check_ssh
     echo "=== Rolling back to the previous release on ${O2SWITCH_HOST} ==="
@@ -1252,7 +1267,7 @@ REMOTE_TRAJ_STATUS
     ;;
 
   *)
-    echo "Usage: $0 {build|test-local|sync|deploy|stage|promote|canary|rollback|releases|start|stop|restart|status|logs|demo|setup-cron|remove-cron|rotate-key|rotate-readonly-key|monitoring|top|top-preview|pull-catalog|backup-nas|batch-tvshow|batch-movies|batch-all|batch-status|batch-summary|batch-sync|batch-pause|batch-resume|batch-workers|batch-stop|batch-logs|faultwatch|audit|trajectory|ahash-backfill|pack-ahash}"
+    echo "Usage: $0 {build|test-local|sync|deploy|stage|promote|canary|canary-portal|rollback|releases|start|stop|restart|status|logs|demo|setup-cron|remove-cron|rotate-key|rotate-readonly-key|monitoring|top|top-preview|pull-catalog|backup-nas|batch-tvshow|batch-movies|batch-all|batch-status|batch-summary|batch-sync|batch-pause|batch-resume|batch-workers|batch-stop|batch-logs|faultwatch|audit|trajectory|ahash-backfill|pack-ahash}"
     exit 1
     ;;
 esac

@@ -182,6 +182,7 @@ Cette page dresse le dictionnaire exhaustif de toutes les cibles d'orchestration
 | `task o2switch:deploy` | Compile, dépose une release signée `SHA256SUMS`, bascule atomiquement `current`, redémarre `dbsrt-server` et effectue un rollback automatique en cas d'échec `/v1/health`. |
 | `task o2switch:stage` | Dépose les binaires pré-merge dans `~/dbsrt/releases/<id>` et pointe `~/dbsrt/preview` dessus sans toucher à `current`, `bin/` ni aux workers batch actifs. |
 | `task o2switch:canary` | Démarre `~/dbsrt/preview/dbsrt-server` sur un socket Unix isolé (`run/dbsrt-canary.sock`) contre les vrais catalogues d'o2switch, sonde `/v1/health` + `/v1/status` puis arrête proprement le canari. |
+| `task o2switch:canary:portal` | Smoke-test pré-merge du portail Python (`src/pydbsrt/portal/` + shim `scripts/portal_server.py`) dans `~/dbsrt/preview_portal` sur o2switch (Zero-Pip, PostgreSQL `:5432`, zéro impact prod). |
 | `task o2switch:promote` | Promeut atomiquement la release pré-validée `~/dbsrt/preview` en production (`current`) avec contrôle `/v1/health` et auto-rollback. |
 | `task o2switch:releases` | Liste les releases présentes sur o2switch (`*` active, `-` précédente, `~` preview) ainsi que la release exécutée par le démon actif. |
 | `task o2switch:rollback` | Restaure atomiquement la release précédente (`previous`) et redémarre le démon dessus. |
