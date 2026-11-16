@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ftplib
 import json
 import os
 import re
@@ -23,11 +24,13 @@ from scripts.data_access.constants import (
     EXCLUDED_MEDIA_DIRS,
     FREEBOX_GATEWAY_PORT,
     FREEBOX_INDEXED_PREFIXES,
+    FTP_DEFAULT_PORT,
+    FTP_LIST_TIMEOUT_SECS,
     HTTP_GATEWAY_TIMEOUT_SECS,
     HTTP_STATUS_OK,
-    HTTPS_API_TIMEOUT_SECS,
     HTTPS_INSPECT_TIMEOUT_SECS,
     HTTPS_JSON_MAX_BYTES,
+    HTTPS_PORTAL_LIST_TIMEOUT_SECS,
     LOCAL_FFPROBE_TIMEOUT_SECS,
     MAX_INSPECT_SUBTITLE_STREAMS,
     MAX_MEDIA_QUERY_MATCHES,
@@ -49,6 +52,7 @@ from scripts.data_access.sidecar_index import (
 from scripts.data_access.topology import (
     RuntimeEndpoints,
     WorkspaceContext,
+    lookup_pass_secret,
     resolve_o2switch_api_key,
     resolve_runtime_endpoints,
     run_bounded_cmd,
@@ -170,7 +174,7 @@ def _portal_query_first_page(ctx: MediaSearchContext, source_id: str, query_str:
     if not api_key:
         return None
     url = _portal_build_files_url(ctx, source_id, "", (query_str, 1))
-    return _http_get_json(url, HTTPS_API_TIMEOUT_SECS, api_key=api_key)
+    return _http_get_json(url, HTTPS_PORTAL_LIST_TIMEOUT_SECS, api_key=api_key)
 
 
 def _portal_list_subdir_page(
@@ -184,7 +188,7 @@ def _portal_list_subdir_page(
     if not api_key:
         return None
     url = _portal_build_files_url(ctx, source_id, subdir, ("", page))
-    return _http_get_json(url, HTTPS_API_TIMEOUT_SECS, api_key=api_key)
+    return _http_get_json(url, HTTPS_PORTAL_LIST_TIMEOUT_SECS, api_key=api_key)
 
 
 def _fetch_portal_full_subdir(ctx: MediaSearchContext, source_id: str, subdir: str) -> list[dict[str, Any]]:
@@ -238,8 +242,73 @@ def _scan_local_cifs_subdir(base_root: Path, rel_subdir: str) -> list[dict[str, 
     return out
 
 
+def _resolve_ftp_channel(ctx: MediaSearchContext) -> tuple[str, str] | None:
+    """Returns (via_label, ftp_host) for accessible LAN or WAN Synology FTP, else None."""
+    chans = ctx.status_payload.get("channels", {})
+    if chans.get("lan_ftp_synology", {}).get("accessible"):
+        return "lan_ftp", ctx.endpoints.nas_lan_host
+    if chans.get("wan_ftp_synology", {}).get("accessible"):
+        return "wan_ftp", ctx.endpoints.nas_wan_host
+    return None
+
+
+def _parse_ftp_mlsd_entries(mlsd_rows: Any, clean_sub: str) -> list[dict[str, Any]]:
+    """Normalizes FTP MLSD rows into media-search entry dicts, filtering hidden/non-video items."""
+    items: list[dict[str, Any]] = []
+    for name, facts in mlsd_rows:
+        if name in (".", "..") or name.startswith(".") or name.lower() in EXCLUDED_DIR_SET:
+            continue
+        is_dir = facts.get("type") == "dir"
+        if not is_dir and Path(name).suffix.lower() not in SUPPORTED_VIDEO_EXTS:
+            continue
+        rel_p = f"{clean_sub}/{name}".lstrip("/") if clean_sub else name
+        items.append(
+            {
+                "name": unicodedata.normalize("NFC", name),
+                "path": unicodedata.normalize("NFC", rel_p),
+                "is_dir": is_dir,
+                "size_bytes": 0 if is_dir else int(facts.get("size") or 0),
+            }
+        )
+    return items
+
+
+def _list_synology_ftp_subdir(ctx: MediaSearchContext, source_id: str, subdir: str) -> tuple[str, list[dict[str, Any]]]:
+    """Lists a Synology share subdirectory over LAN/WAN FTP MLSD when HTTPS bounce is unavailable."""
+    resolved = _resolve_ftp_channel(ctx)
+    if resolved is None:
+        return "unavailable", []
+
+    via, host = resolved
+    share_sub = "video" if source_id == "synology-video" else "tvshow"
+    clean_sub = subdir.strip("/")
+    remote_dir = f"/{share_sub}/{clean_sub}" if clean_sub else f"/{share_sub}"
+    cache_key = f"ftp:{host}:{remote_dir}"
+    cached = _read_listing_cache(cache_key)
+    if cached is not None:
+        return via, cached
+
+    nas_pass = lookup_pass_secret(ctx.ws.env_vars, "NAS_PASS", ctx.endpoints.nas_pass_entry)
+    if not host or "<" in host or not nas_pass:
+        return "unavailable", []
+
+    try:
+        ftp = ftplib.FTP(timeout=FTP_LIST_TIMEOUT_SECS)
+        ftp.connect(host, FTP_DEFAULT_PORT, timeout=FTP_LIST_TIMEOUT_SECS)
+        ftp.login(ctx.endpoints.nas_user, nas_pass)
+        ftp.set_pasv(True)
+        out = _parse_ftp_mlsd_entries(ftp.mlsd(remote_dir), clean_sub)
+        ftp.quit()
+    except (ftplib.Error, OSError, EOFError, ValueError):
+        return "unavailable", []
+
+    if out:
+        _write_listing_cache(cache_key, out)
+    return via, out
+
+
 def _list_synology_subdir(ctx: MediaSearchContext, source_id: str, subdir: str) -> tuple[str, list[dict[str, Any]]]:
-    """Lists a Synology share subdirectory via safe local CIFS or remote HTTPS o2switch."""
+    """Lists a Synology share subdirectory via safe CIFS, HTTPS o2switch bounce, or direct FTP."""
     share_sub = "video" if source_id == "synology-video" else "tvshow"
     if _is_cifs_accessible_and_safe(ctx.status_payload):
         cifs_root = Path(ctx.endpoints.local_media_root) / "Synology" / share_sub
@@ -248,8 +317,11 @@ def _list_synology_subdir(ctx: MediaSearchContext, source_id: str, subdir: str) 
             return "local_cifs", items
 
     if ctx.status_payload.get("channels", {}).get("https_o2switch", {}).get("accessible"):
-        return "o2switch_https_bounce", _fetch_portal_full_subdir(ctx, source_id, subdir)
-    return "unavailable", []
+        portal_items = _fetch_portal_full_subdir(ctx, source_id, subdir)
+        if portal_items:
+            return "o2switch_https_bounce", portal_items
+
+    return _list_synology_ftp_subdir(ctx, source_id, subdir)
 
 
 def _extract_series_folder_query(query: str) -> str:
@@ -400,7 +472,9 @@ def _collect_freebox_items(ctx: MediaSearchContext, query: str) -> tuple[str, li
     if chans.get("https_o2switch", {}).get("accessible"):
         fast = _portal_query_first_page(ctx, "freebox-disks", query)
         fast_items = fast.get("items", []) if isinstance(fast, dict) and fast.get("status") == "ok" else []
-        return "o2switch_https_bounce", fast_items or _fetch_portal_full_subdir(ctx, "freebox-disks", "")
+        portal_items = fast_items or _fetch_portal_full_subdir(ctx, "freebox-disks", "")
+        if portal_items:
+            return "o2switch_https_bounce", portal_items
 
     offline = _load_offline_freebox_targets(ctx.ws.effective_data_dir)
     return ("offline_batch_targets_json", offline) if offline else ("unavailable", [])
@@ -723,6 +797,24 @@ def _probe_with_folder_fallback(
     return clean_path, probed
 
 
+def _resolve_local_snippet_target(data_dir: Path, clean_path: str) -> tuple[str, int] | None:
+    """Resolves exact snippet filename or title/substring query under data/snippets/."""
+    snippets_dir = data_dir / "snippets"
+    if not snippets_dir.is_dir():
+        return None
+    if clean_path and (snippets_dir / clean_path).is_file():
+        return clean_path, 0
+    entries = [
+        {"filename": e.name}
+        for e in os.scandir(snippets_dir)
+        if e.is_file() and Path(e.name).suffix.lower() in SUPPORTED_VIDEO_EXTS
+    ]
+    total_cnt, hits = filter_and_rank_entries(entries, clean_path, ("filename",), limit=MAX_MEDIA_QUERY_MATCHES)
+    if not hits:
+        return None
+    return str(hits[0]["filename"]), max(0, total_cnt - 1)
+
+
 def inspect_media_container(
     ws: WorkspaceContext,
     status_payload: dict[str, Any],
@@ -742,7 +834,12 @@ def inspect_media_container(
 
     clean_path = _strip_known_mount_prefix(ctx, family_id, path_or_query)
     other_matches = 0
-    if family_id != "local-snippets" and _needs_path_autoresolve(family_id, clean_path):
+    if family_id == "local-snippets":
+        resolved_snip = _resolve_local_snippet_target(ctx.ws.effective_data_dir, clean_path)
+        if resolved_snip is None:
+            return {"ok": False, "family": family_id, "query": path_or_query, "error": "container_not_found"}
+        clean_path, other_matches = resolved_snip
+    elif _needs_path_autoresolve(family_id, clean_path):
         search_res = search_media_containers(ws, status_payload, family_id, clean_path)
         hits = search_res.get("matches", [])
         if not hits:

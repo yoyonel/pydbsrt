@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 
 from scripts.benchmarks.eval_skill_data_access import grade_response_text
 from scripts.benchmarks.profile_skill_transcript import profile_transcript
+from scripts.data_access.cli import _build_parser
 from scripts.data_access.cli import main as cli_main
 from scripts.data_access.constants import (
     CACHE_MAX_STALE_SECONDS,
@@ -22,6 +23,7 @@ from scripts.data_access.constants import (
     DBPHASH_MAGIC_PREFIX,
     EXIT_OK,
     HOME_SUBNET_CIDR,
+    HTTPS_TRANSIENT_CACHE_TTL_SECONDS,
     NET_HOME_LAN,
     NET_NOMAD_WAN,
     NET_WORK_VPN,
@@ -38,6 +40,7 @@ from scripts.data_access.prober import (
     _try_load_valid_cache,
     probe_http_json_gateway,
     probe_local_cifs_safe,
+    probe_o2switch_https,
 )
 from scripts.data_access.resolver import (
     build_or_run_fetch,
@@ -698,3 +701,151 @@ def test_o2switch_https_freshness_snapshot_when_ssh_blocked() -> None:
     assert snap["transport"] == "https_api"
     assert snap["catalog_dbphash"]["media_count"] == 4974
     assert snap["phash_files"]["count"] == 4974
+
+
+def test_cli_global_flags_preserved_before_and_after_subcommand() -> None:
+    """Verifies --force-refresh/--compact/--simulate-profile work identically before or after subcommand."""
+    parser = _build_parser()
+    before = parser.parse_args(["--force-refresh", "--compact", "--simulate-profile", "work_vpn", "query", "freebox"])
+    after = parser.parse_args(["query", "--force-refresh", "--compact", "--simulate-profile", "work_vpn", "freebox"])
+    for ns in (before, after):
+        assert ns.force_refresh is True
+        assert ns.compact is True
+        assert ns.simulate_profile == "work_vpn"
+        assert ns.specs == ["freebox"]
+
+    buf = io.StringIO()
+    with patch("sys.stdout", buf):
+        rc = cli_main(["--compact", "--simulate-profile", "work_vpn", "status"])
+    assert rc == EXIT_OK
+    assert json.loads(buf.getvalue())["network"]["profile"] == "work_vpn"
+
+
+def test_https_probe_retry_and_transient_cache_ttl(tmp_path: Path) -> None:
+    """Verifies transient HTTPS retry succeeds and transient failures expire rapidly from cache."""
+    import urllib.error
+
+    ok_resp = _mock_json_response({"status": "ok"})
+    with (
+        patch("time.sleep"),
+        patch("urllib.request.urlopen", side_effect=[urllib.error.URLError("timed out"), ok_resp]) as mock_open,
+    ):
+        res = probe_o2switch_https("https://portal.example.test/dbsrt", "secret")
+    assert res["accessible"] is True
+    assert mock_open.call_count == 2
+
+    http_401 = urllib.error.HTTPError("https://portal.example.test/dbsrt/v1/health", 401, "Unauthorized", {}, None)  # type: ignore[arg-type]
+    with patch("urllib.request.urlopen", side_effect=http_401) as mock_auth_err:
+        err_res = probe_o2switch_https("https://portal.example.test/dbsrt", "bad-secret")
+    assert err_res["accessible"] is False
+    assert err_res["error"] == "HTTP_401"
+    assert mock_auth_err.call_count == 1
+
+    cache_file = tmp_path / "transient_cache.json"
+    now = time.time()
+    _atomic_write_cache(
+        cache_file,
+        {
+            "schema_version": CACHE_SCHEMA_VERSION,
+            "created_at_epoch": now - (HTTPS_TRANSIENT_CACHE_TTL_SECONDS + 5.0),
+            "route_digest": "digest_a",
+            "workspace": {"active_repo": "/repo"},
+            "network": {"simulated": False},
+            "channels": {"https_o2switch": {"accessible": False, "error": "URLError"}},
+        },
+    )
+    assert _try_load_valid_cache(cache_file, "digest_a", "/repo", CACHE_MAX_STALE_SECONDS) is None
+
+    _atomic_write_cache(
+        cache_file,
+        {
+            "schema_version": CACHE_SCHEMA_VERSION,
+            "created_at_epoch": now - (HTTPS_TRANSIENT_CACHE_TTL_SECONDS + 5.0),
+            "route_digest": "digest_a",
+            "workspace": {"active_repo": "/repo"},
+            "network": {"simulated": False},
+            "channels": {"https_o2switch": {"accessible": False, "error": "HTTP_401"}},
+        },
+    )
+    assert _try_load_valid_cache(cache_file, "digest_a", "/repo", CACHE_MAX_STALE_SECONDS) is not None
+
+
+def test_media_search_fallbacks_and_inspect_snippets_title(tmp_path: Path, monkeypatch: object) -> None:
+    """Verifies Freebox offline fallback, Synology WAN FTP MLSD fallback, and snippets title inspect."""
+    import urllib.error
+
+    monkeypatch.setenv("DBSRT_DATA_ACCESS_CACHE", str(tmp_path / "cache" / "status.json"))  # type: ignore[attr-defined]
+    ws = _make_fake_workspace(tmp_path, is_worktree=False)
+    ws.env_vars["DBSRT_API_KEY"] = "test-key"
+    ws.env_vars["NAS_PASS"] = "ftp-secret"
+    (ws.effective_data_dir / "SRT" / "couplings.json").write_text('{"couplings": []}', encoding="utf-8")
+    (ws.effective_data_dir / "reports").mkdir(parents=True, exist_ok=True)
+    (ws.effective_data_dir / "reports" / "freebox_batch_targets.json").write_text(
+        json.dumps(
+            [
+                {
+                    "filename": "The Matrix (1999).mkv",
+                    "path": "Disque_2/Téléchargements/The Matrix (1999).mkv",
+                    "size_bytes": 123456,
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    snip_name = "the.matrix.resurrections.2021.1080p.web.h264-naisu_mid15s.mp4"
+    (ws.effective_data_dir / "snippets" / snip_name).write_bytes(b"fake_mp4")
+
+    status_https_fail = {
+        "cache": {"hit": True},
+        "workspace": {"effective_data_dir": str(ws.effective_data_dir), "unseeded_items": []},
+        "network": {"host_env": "workstation", "profile": NET_WORK_VPN, "cifs_safe_to_stat": False},
+        "channels": {
+            "local_fs": {"accessible": True},
+            "local_cifs": {"accessible": False},
+            "https_o2switch": {"accessible": True},
+            "wan_ftp_synology": {"accessible": True},
+        },
+        "freshness": {"packed_catalog": {"status": "UP_TO_DATE"}, "ahash_corpus": {"status": "UP_TO_DATE"}},
+    }
+
+    fake_ftp = MagicMock()
+    fake_ftp.mlsd.return_value = [
+        (".", {"type": "cdir"}),
+        ("the.matrix.resurrections.2021.1080p.mkv", {"type": "file", "size": "9961333294"}),
+    ]
+
+    with (
+        patch("urllib.request.urlopen", side_effect=urllib.error.URLError("timeout")),
+        patch("ftplib.FTP", return_value=fake_ftp),
+    ):
+        batched = resolve_batch_specs(ws, status_https_fail, ["freebox:Matrix", "video:Matrix"])
+
+    fb_res = batched["results"]["freebox:Matrix"]["query_result"]
+    assert fb_res["via_channel"] == "offline_batch_targets_json"
+    assert fb_res["matches_count"] == 1
+
+    vid_res = batched["results"]["video:Matrix"]["query_result"]
+    assert vid_res["via_channel"] == "wan_ftp"
+    assert vid_res["matches_count"] == 1
+    assert vid_res["matches"][0]["filename"] == "the.matrix.resurrections.2021.1080p.mkv"
+
+    fake_ffprobe_json = json.dumps(
+        {
+            "format": {"duration": "14.97", "size": "1797090", "format_name": "mov,mp4", "bit_rate": "960157"},
+            "streams": [
+                {"codec_type": "video", "codec_name": "h264", "width": 1130, "height": 480, "r_frame_rate": "24/1"}
+            ],
+        }
+    )
+    with (
+        patch("shutil.which", return_value="/usr/bin/ffprobe"),
+        patch("scripts.data_access.media_search.run_bounded_cmd", return_value=(0, fake_ffprobe_json, "")),
+    ):
+        insp = inspect_family_container(ws, status_https_fail, "snippets", "the.matrix.resurrections")
+        missing = inspect_family_container(ws, status_https_fail, "snippets", "nonexistent_title_xyz")
+    assert insp["ok"] is True
+    assert insp["filename"] == snip_name
+    assert insp["via"] == "local_fs_ffprobe"
+    assert missing["ok"] is False
+    assert missing["error"] == "container_not_found"

@@ -46,6 +46,10 @@ from scripts.data_access.constants import (
     HTTP_READ_MAX_BYTES,
     HTTP_STATUS_OK,
     HTTPS_API_TIMEOUT_SECS,
+    HTTPS_NON_TRANSIENT_ERRORS,
+    HTTPS_PROBE_MAX_ATTEMPTS,
+    HTTPS_PROBE_RETRY_BACKOFF_SECS,
+    HTTPS_TRANSIENT_CACHE_TTL_SECONDS,
     MAX_PROBE_WORKERS,
     MILLIS_PER_SEC,
     PG_LOCAL_PORT,
@@ -265,32 +269,48 @@ def _parse_remote_snapshot(node: str, stdout: str) -> dict[str, Any]:
 
 
 def probe_o2switch_https(base_url: str, api_key: str) -> dict[str, Any]:
-    """Probes authenticated HTTPS :443 API on o2switch without triggering Tiger Protect WAF."""
-    t0 = time.perf_counter()
+    """Probes authenticated HTTPS :443 API on o2switch with bounded transient retry."""
     if not base_url or not api_key:
         return {"label": "HTTPS o2switch API", "accessible": False, "latency_ms": 0.0, "error": "missing_api_key"}
-    req = urllib.request.Request(
-        f"{base_url}/v1/health",
-        headers={"X-API-Key": api_key, "Accept": "application/json", "User-Agent": AGENT_HTTP_USER_AGENT},
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=HTTPS_API_TIMEOUT_SECS) as resp:
-            ctype = resp.headers.get_content_type()
-            body = resp.read(HTTP_READ_MAX_BYTES).decode("utf-8", errors="replace")
+    last_exc: Exception | None = None
+    t0 = time.perf_counter()
+    for attempt in range(HTTPS_PROBE_MAX_ATTEMPTS):
+        req = urllib.request.Request(
+            f"{base_url}/v1/health",
+            headers={"X-API-Key": api_key, "Accept": "application/json", "User-Agent": AGENT_HTTP_USER_AGENT},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=HTTPS_API_TIMEOUT_SECS) as resp:
+                ctype = resp.headers.get_content_type()
+                body = resp.read(HTTP_READ_MAX_BYTES).decode("utf-8", errors="replace")
+                dt_ms = round((time.perf_counter() - t0) * MILLIS_PER_SEC, 1)
+                ok = resp.status == HTTP_STATUS_OK and ctype == "application/json" and '"ok"' in body
+                return {
+                    "label": "HTTPS o2switch API",
+                    "accessible": ok,
+                    "latency_ms": dt_ms,
+                    "http_status": resp.status,
+                }
+        except urllib.error.HTTPError as exc:
             dt_ms = round((time.perf_counter() - t0) * MILLIS_PER_SEC, 1)
-            ok = resp.status == HTTP_STATUS_OK and ctype == "application/json" and '"ok"' in body
-            return {"label": "HTTPS o2switch API", "accessible": ok, "latency_ms": dt_ms, "http_status": resp.status}
-    except urllib.error.HTTPError as exc:
-        dt_ms = round((time.perf_counter() - t0) * MILLIS_PER_SEC, 1)
-        return {"label": "HTTPS o2switch API", "accessible": False, "latency_ms": dt_ms, "error": f"HTTP_{exc.code}"}
-    except Exception as exc:  # noqa: BLE001
-        dt_ms = round((time.perf_counter() - t0) * MILLIS_PER_SEC, 1)
-        return {
-            "label": "HTTPS o2switch API",
-            "accessible": False,
-            "latency_ms": dt_ms,
-            "error": exc.__class__.__name__,
-        }
+            return {
+                "label": "HTTPS o2switch API",
+                "accessible": False,
+                "latency_ms": dt_ms,
+                "error": f"HTTP_{exc.code}",
+            }
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            if attempt + 1 < HTTPS_PROBE_MAX_ATTEMPTS:
+                time.sleep(HTTPS_PROBE_RETRY_BACKOFF_SECS)
+    dt_ms = round((time.perf_counter() - t0) * MILLIS_PER_SEC, 1)
+    err_name = last_exc.__class__.__name__ if last_exc is not None else "URLError"
+    return {
+        "label": "HTTPS o2switch API",
+        "accessible": False,
+        "latency_ms": dt_ms,
+        "error": err_name,
+    }
 
 
 def _fetch_o2switch_https_snapshot(base_url: str, api_key: str) -> dict[str, Any] | None:
@@ -736,6 +756,17 @@ def _populate_simulated_channels(profile: str, channels: dict[str, Any]) -> dict
     return channels
 
 
+def _has_transient_https_failure(payload: dict[str, Any]) -> bool:
+    """True when cached o2switch HTTPS probe failed transiently and should not poison long-lived cache."""
+    if payload.get("network", {}).get("simulated"):
+        return False
+    https_info = payload.get("channels", {}).get("https_o2switch")
+    if not isinstance(https_info, dict) or https_info.get("accessible"):
+        return False
+    err = str(https_info.get("error") or "")
+    return bool(err) and err not in HTTPS_NON_TRANSIENT_ERRORS
+
+
 def _try_load_valid_cache(
     cache_path: Path,
     route_digest: str,
@@ -756,7 +787,10 @@ def _try_load_valid_cache(
     if payload.get("workspace", {}).get("active_repo") != active_repo_str:
         return None
     age = time.time() - float(payload.get("created_at_epoch", 0.0))
-    if age < 0 or age > max_age_secs:
+    effective_max = (
+        min(max_age_secs, HTTPS_TRANSIENT_CACHE_TTL_SECONDS) if _has_transient_https_failure(payload) else max_age_secs
+    )
+    if age < 0 or age > effective_max:
         return None
     payload["cache"] = {
         "hit": True,
