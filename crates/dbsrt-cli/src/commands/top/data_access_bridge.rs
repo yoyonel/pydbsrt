@@ -7,8 +7,12 @@
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
+
+/// Monotonic sequence counter preventing stale overlapping `[w]` queries from polluting UI state.
+static REMOTE_QUERY_SEQ: AtomicU64 = AtomicU64::new(0);
 
 use dbsrt_tui::model::{
     ClusterChannelBadge, ClusterCorpusEntry, ClusterDataTopology, DiscoveredMediaItem,
@@ -99,6 +103,7 @@ pub fn spawn_remote_media_query(
         return "Saisissez d'abord un mot-clé avec [/] puis [W] pour rechercher à distance."
             .to_string();
     }
+    let seq = REMOTE_QUERY_SEQ.fetch_add(1, Ordering::SeqCst) + 1;
     let toast = format!("🔍 Recherche SSOT distante lancée pour '{trimmed}'...");
     std::thread::spawn(move || {
         let specs = [
@@ -116,9 +121,12 @@ pub fn spawn_remote_media_query(
             &specs[3],
         ];
         if let Ok(raw) = run_data_access_cli(&args) {
+            if REMOTE_QUERY_SEQ.load(Ordering::SeqCst) != seq {
+                return;
+            }
             if let Ok(val) = serde_json::from_str::<Value>(&raw) {
                 let items = parse_query_items_from_json(&val);
-                merge_remote_items_into_telemetry(&shared_state, items);
+                let _ = apply_remote_items_if_current(&shared_state, items, seq, &REMOTE_QUERY_SEQ);
             }
         }
     });
@@ -575,28 +583,82 @@ pub fn apply_inspect_json_to_item(item: &mut DiscoveredMediaItem, val: &Value) -
     true
 }
 
+/// Merges remote SSOT items into `shared_state` only when `seq` matches the latest `latest_seq`.
+///
+/// # Arguments
+/// * `shared_state` - Thread-safe handle to live TUI telemetry state.
+/// * `new_items` - Parsed remote hits from `dbsrt_data.py query`.
+/// * `seq` - Monotonic query sequence id of the completing worker.
+/// * `latest_seq` - Shared atomic sequence holding the most recently triggered query id.
+///
+/// # Returns
+/// `true` when items were applied, `false` when discarded as a stale overlapping query.
+///
+/// # Panics
+/// Never panics.
+///
+/// # Data Flow & Invariants
+/// Discards stale responses from earlier `[w]`/`[/]` searches and preserves already-fetched
+/// `ffprobe` metadata (`duration_secs`, `video_codec`, `subtitles`) across repeat merges.
+fn apply_remote_items_if_current(
+    shared_state: &Arc<RwLock<SystemTelemetry>>,
+    new_items: Vec<DiscoveredMediaItem>,
+    seq: u64,
+    latest_seq: &AtomicU64,
+) -> bool {
+    if latest_seq.load(Ordering::SeqCst) != seq {
+        return false;
+    }
+    merge_remote_items_into_telemetry(shared_state, new_items);
+    true
+}
+
 /// Merges remote SSOT items into `shared_state` and ensures virtual remote sources are enabled.
 fn merge_remote_items_into_telemetry(
     shared_state: &Arc<RwLock<SystemTelemetry>>,
     new_items: Vec<DiscoveredMediaItem>,
 ) {
-    if let Ok(mut state) = shared_state.write() {
-        for item in new_items {
-            if let Some(src_id) = item.source_id.as_deref() {
-                ensure_virtual_remote_source(&mut state.media_sources, src_id);
-            }
-            if let Some(existing) = state
-                .discovered_media
-                .iter_mut()
-                .find(|m| m.path == item.path)
-            {
-                *existing = item;
-            } else {
-                state.discovered_media.push(item);
-            }
+    let Ok(mut state) = shared_state.write() else {
+        return;
+    };
+    for item in new_items {
+        if let Some(src_id) = item.source_id.as_deref() {
+            ensure_virtual_remote_source(&mut state.media_sources, src_id);
         }
-        state.is_remote_streaming = true;
+        upsert_remote_media_item(&mut state.discovered_media, item);
     }
+    state.is_remote_streaming = true;
+}
+
+/// Inserts or updates a remote [`DiscoveredMediaItem`] while keeping prior `ffprobe` enrichment.
+///
+/// # Arguments
+/// * `items` - Mutable media inventory slice to update.
+/// * `incoming` - Newly resolved remote query item.
+///
+/// # Returns
+/// Nothing.
+///
+/// # Panics
+/// Never panics.
+///
+/// # Data Flow & Invariants
+/// Preserves `duration_secs`, `video_codec`, and `subtitles` on matching `path` entries when the
+/// incoming `query` item lacks inspection metadata.
+fn upsert_remote_media_item(
+    items: &mut Vec<DiscoveredMediaItem>,
+    mut incoming: DiscoveredMediaItem,
+) {
+    let Some(existing) = items.iter_mut().find(|m| m.path == incoming.path) else {
+        items.push(incoming);
+        return;
+    };
+    incoming.duration_secs = incoming.duration_secs.or(existing.duration_secs);
+    incoming.video_codec = incoming.video_codec.or_else(|| existing.video_codec.take());
+    if incoming.subtitles.is_empty() && !existing.subtitles.is_empty() {
+        incoming.subtitles = std::mem::take(&mut existing.subtitles);
+    }
+    *existing = incoming;
 }
 
 /// Registers an in-memory enabled [`MediaSourceConfig`] for remote SSOT query results.
@@ -691,5 +753,81 @@ mod tests {
         assert_eq!(items[0].video_codec.as_deref(), Some("h264"));
         assert_eq!(items[0].duration_secs, Some(2350.59));
         assert_eq!(items[0].subtitles.len(), 1);
+    }
+
+    #[test]
+    fn test_apply_remote_items_discards_stale_seq_and_preserves_ffprobe_fields() {
+        let shared = Arc::new(RwLock::new(SystemTelemetry::default()));
+        let seq_counter = AtomicU64::new(2);
+
+        let stale_item = DiscoveredMediaItem {
+            path: PathBuf::from("Old/Movie.mkv"),
+            stem: "Movie".to_string(),
+            size_bytes: 100,
+            duration_secs: None,
+            video_codec: None,
+            subtitles: Vec::new(),
+            phash: None,
+            source_id: Some("freebox".to_string()),
+            status: IngestionStatus::Virgin,
+        };
+        assert!(!apply_remote_items_if_current(
+            &shared,
+            vec![stale_item],
+            1,
+            &seq_counter,
+        ));
+        assert!(shared.read().unwrap().discovered_media.is_empty());
+
+        let enriched = DiscoveredMediaItem {
+            path: PathBuf::from("The Matrix/Matrix.mkv"),
+            stem: "Matrix".to_string(),
+            size_bytes: 2048,
+            duration_secs: Some(8160.0),
+            video_codec: Some("hevc".to_string()),
+            subtitles: vec![MediaSubtrackInfo {
+                index: 2,
+                lang: "fre".to_string(),
+                codec: "subrip".to_string(),
+                title: "Forced".to_string(),
+            }],
+            phash: None,
+            source_id: Some("freebox".to_string()),
+            status: IngestionStatus::Virgin,
+        };
+        assert!(apply_remote_items_if_current(
+            &shared,
+            vec![enriched],
+            2,
+            &seq_counter,
+        ));
+
+        let bare_requery = DiscoveredMediaItem {
+            path: PathBuf::from("The Matrix/Matrix.mkv"),
+            stem: "Matrix".to_string(),
+            size_bytes: 2048,
+            duration_secs: None,
+            video_codec: None,
+            subtitles: Vec::new(),
+            phash: None,
+            source_id: Some("freebox".to_string()),
+            status: IngestionStatus::Completed,
+        };
+        assert!(apply_remote_items_if_current(
+            &shared,
+            vec![bare_requery],
+            2,
+            &seq_counter,
+        ));
+
+        let guard = shared.read().unwrap();
+        assert_eq!(guard.discovered_media.len(), 1);
+        assert_eq!(guard.discovered_media[0].status, IngestionStatus::Completed);
+        assert_eq!(guard.discovered_media[0].duration_secs, Some(8160.0));
+        assert_eq!(
+            guard.discovered_media[0].video_codec.as_deref(),
+            Some("hevc")
+        );
+        assert_eq!(guard.discovered_media[0].subtitles.len(), 1);
     }
 }
