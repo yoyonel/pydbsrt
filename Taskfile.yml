@@ -119,12 +119,21 @@ tasks:
       - task: test:rs
       - uv run pytest tests/tools/
 
-  portal:e2e:
-    desc: Run Playwright E2E browser tests across all portal views and trajectory reports
+  sources:e2e:
+    desc: "[Python :8780] Run self-contained Playwright E2E browser tests across all MediaSources portal views (auto-boots daemon if needed)"
+    aliases: [portal:e2e]
+    deps: [db:up]
     cmds:
-      - uv run --with playwright python scripts/e2e/e2e_sources_explorer.py
-      - uv run --with playwright python scripts/e2e/e2e_trajectories_formal.py
-      - uv run --with playwright python scripts/e2e/e2e_portal_exhaustive.py
+      - bash scripts/e2e/run_sources_e2e.sh
+
+  sources:check:
+    desc: "[Python :8780] Run full #72 validation suite (pytest + >=80% coverage + Playwright E2E + ruff + complexipy + pyright)"
+    cmds:
+      - uv run pytest --cov=src/pydbsrt/portal --cov-fail-under=80 tests/test_portal_server.py tests/test_portal_modules.py
+      - task: sources:e2e
+      - uv run ruff check src/pydbsrt/portal scripts/portal_server.py tests/test_portal_server.py tests/test_portal_modules.py
+      - uv run complexipy src/pydbsrt/portal scripts/portal_server.py
+      - uv run pyright src/pydbsrt/portal scripts/portal_server.py tests/test_portal_server.py tests/test_portal_modules.py
 
   clean:
     desc: Unified purge of caches, coverage, and target/ build artifacts

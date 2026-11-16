@@ -109,8 +109,9 @@ Cette page dresse le dictionnaire exhaustif de toutes les cibles d'orchestration
 | `task test` | Exécute l'intégralité des suites de tests unitaires et intégration (Rust + Python). |
 | `task test:rs` | Exécute la suite de tests Cargo du workspace Rust. |
 | `task test:scenarios` | Exécute la suite de scénarios TUI déclaratifs headless (`test_scenarios.rs`) en moins de 0.5s. (Alias : `task test:tui`). |
-| `task portal:e2e` | Exécute la suite de tests Playwright E2E du portail multimédia sur l'ensemble des 4 vues (Sources, Actifs, pHash, Trajectoires) avec assertion zéro erreur console. |
-| `task test:portal:e2e` | Exécute la suite de tests Playwright E2E automatisée du portail de monitoring avec enregistrement vidéo et couverture V8 JS. |
+| `task sources:e2e` | `[Python :8780]` Exécute la suite auto-portante Playwright E2E du portail MediaSources (`sources.html`, 4 vues) en démarrant/arrêtant `:8780` automatiquement. (Alias : `task portal:e2e`). |
+| `task sources:check` | `[Python :8780]` Suite complète du portail MediaSources (`pytest` + couverture ≥ 80 % + `sources:e2e` + `ruff` + `complexipy` + `pyright`). |
+| `task test:portal:e2e` | `[Rust :8765]` Exécute la suite Playwright E2E du daemon `dbsrt-server` (`/monitoring`, `/studio`, `/top`) avec vidéo et couverture V8 JS. (Alias : `task server:e2e`). |
 | `task test:infra` | Exécute le harnais de tests d'infrastructure et chaos testing. |
 | `task eval:nas-snippets` | Exécute la matrice d'évaluation quantitative sur l'ensemble des snippets NAS réels (`scripts/benchmarks/eval_exhaustive_nas_snippets.py`). |
 | `task eval:matching:multi-offset` | Benchmark de comparaison Mono-Fenêtre ($t=50\%$) vs Multi-Fenêtres Spatio-Temporel ($20\%, 50\%, 80\%$) sur corpus difficile (`scripts/benchmarks/eval_multi_offset_matching.py`). |
@@ -181,6 +182,7 @@ Cette page dresse le dictionnaire exhaustif de toutes les cibles d'orchestration
 | `task o2switch:deploy` | Compile, dépose une release signée `SHA256SUMS`, bascule atomiquement `current`, redémarre `dbsrt-server` et effectue un rollback automatique en cas d'échec `/v1/health`. |
 | `task o2switch:stage` | Dépose les binaires pré-merge dans `~/dbsrt/releases/<id>` et pointe `~/dbsrt/preview` dessus sans toucher à `current`, `bin/` ni aux workers batch actifs. |
 | `task o2switch:canary` | Démarre `~/dbsrt/preview/dbsrt-server` sur un socket Unix isolé (`run/dbsrt-canary.sock`) contre les vrais catalogues d'o2switch, sonde `/v1/health` + `/v1/status` puis arrête proprement le canari. |
+| `task o2switch:canary:portal` | Smoke-test pré-merge du portail Python (`src/pydbsrt/portal/` + shim `scripts/portal_server.py`) dans `~/dbsrt/preview_portal` sur o2switch (Zero-Pip, PostgreSQL `:5432`, zéro impact prod). |
 | `task o2switch:promote` | Promeut atomiquement la release pré-validée `~/dbsrt/preview` en production (`current`) avec contrôle `/v1/health` et auto-rollback. |
 | `task o2switch:releases` | Liste les releases présentes sur o2switch (`*` active, `-` précédente, `~` preview) ainsi que la release exécutée par le démon actif. |
 | `task o2switch:rollback` | Restaure atomiquement la release précédente (`previous`) et redémarre le démon dessus. |

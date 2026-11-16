@@ -31,6 +31,11 @@ tasks:
     cmds:
       - ./scripts/infra/o2switch/o2switch_ctl.sh canary
 
+  o2switch:canary:portal:
+    desc: Smoke-test Python Portal (src/pydbsrt/portal + shim) in isolated ~/dbsrt/preview_portal on o2switch (Zero-Pip, zero prod impact)
+    cmds:
+      - ./scripts/infra/o2switch/o2switch_ctl.sh canary-portal
+
   o2switch:promote:
     desc: Promote staged ~/dbsrt/preview release to active production on o2switch with healthcheck & auto-rollback
     cmds:

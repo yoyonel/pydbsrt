@@ -429,11 +429,17 @@ def test_portal_cifs_hang_guard_and_gateway_html_rejection(monkeypatch: pytest.M
     """Verifies CIFS D-state hang guard off Home LAN, Disque_1_1 SSOT resolution, and WAN HTML rejection."""
     from unittest.mock import MagicMock
 
+    import pydbsrt.portal as portal_pkg
     import scripts.portal_server as ps
+    from pydbsrt.portal.services import probe_service, secrets_env
 
-    monkeypatch.setattr(ps, "_is_cifs_safe_to_stat", lambda: False)
-    monkeypatch.setattr(ps.os, "scandir", lambda _p: (_ for _ in ()).throw(AssertionError("scandir must not run!")))
-    blocked = ps.probe_local_fs_profile("Montage CIFS Disque 1 1", str(tmp_path), is_cifs=True)
+    assert ps.probe_local_fs_profile is portal_pkg.probe_local_fs_profile
+
+    monkeypatch.setattr(secrets_env, "_is_cifs_safe_to_stat", lambda: False)
+    monkeypatch.setattr(
+        probe_service.os, "scandir", lambda _p: (_ for _ in ()).throw(AssertionError("scandir must not run!"))
+    )
+    blocked = portal_pkg.probe_local_fs_profile("Montage CIFS Disque 1 1", str(tmp_path), is_cifs=True)
     assert blocked["accessible"] is False
     assert blocked["status"] == "offline"
     assert "anti-gel SMB" in blocked["reason"]
@@ -446,7 +452,7 @@ def test_portal_cifs_hang_guard_and_gateway_html_rejection(monkeypatch: pytest.M
     html_resp.headers.get_content_type.return_value = "text/html"
     html_resp.read.return_value = b"<html>Synology Web Station</html>"
     html_resp.__enter__.return_value = html_resp
-    monkeypatch.setattr(ps.urllib.request, "urlopen", lambda *_a, **_kw: html_resp)
+    monkeypatch.setattr(probe_service.urllib.request, "urlopen", lambda *_a, **_kw: html_resp)
     bad_gw = ps.probe_http_gateway_profile("Passerelle HTTP WAN", "http://nas.example.test:80/health")
     assert bad_gw["accessible"] is False
     assert bad_gw["status"] == "offline"
@@ -455,7 +461,9 @@ def test_portal_cifs_hang_guard_and_gateway_html_rejection(monkeypatch: pytest.M
 
 def test_freebox_gateway_zero_false_positive_and_live_catalog(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Verifies gateway probe returns empty/inaccessible when 0 media exist and lists live /catalog."""
+    import pydbsrt.portal as portal_pkg
     import scripts.portal_server as ps
+    from pydbsrt.portal import config as portal_config
     from scripts.infra.rpi4.rpi4_freebox_gateway import FreeboxRangeHTTPHandler
 
     monkeypatch.setenv("DBSRT_PORTAL_CACHE_DIR", str(tmp_path / "cache"))
@@ -494,12 +502,12 @@ def test_freebox_gateway_zero_false_positive_and_live_catalog(monkeypatch: pytes
     threading.Thread(target=srv_live.serve_forever, daemon=True).start()
     try:
         live_health = f"http://127.0.0.1:{port_live}/health?force=1"
-        probe_live = ps.probe_http_gateway_profile("Passerelle HTTP WAN", live_health)
+        probe_live = portal_pkg.probe_http_gateway_profile("Passerelle HTTP WAN", live_health)
         assert probe_live["accessible"] is True
         assert probe_live["status"] == "online"
         assert probe_live["files_count"] == 2
 
-        monkeypatch.setattr(ps, "DEFAULT_GATEWAY_WAN_URL", f"http://127.0.0.1:{port_live}/health")
+        monkeypatch.setattr(portal_config, "DEFAULT_GATEWAY_WAN_URL", f"http://127.0.0.1:{port_live}/health")
         listed = ps.list_source_files("freebox-disks", "wan_http", page=1, limit=25, force=True)
         assert listed["status"] == "ok"
         assert listed["total_items"] == 2

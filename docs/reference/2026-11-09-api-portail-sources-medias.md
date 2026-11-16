@@ -10,7 +10,7 @@ tags:
 
 # 📖 Spécification API REST & CLI du Portail Sources Médias
 
-Cette référence technique décrit les spécifications formelles des points d'accès HTTP et du mode CLI exposés par le serveur léger de portail multimédia (`scripts/portal_server.py`).
+Cette référence technique décrit les spécifications formelles des points d'accès HTTP et du mode CLI exposés par le package applicatif de portail multimédia (`src/pydbsrt/portal/`, invocable via `python3 -m pydbsrt.portal` ou via la façade rétrocompatible `scripts/portal_server.py`).
 
 ---
 
@@ -718,9 +718,9 @@ Déclenche l'évaluation synchrone à la demande du tracking spatiotemporel sur 
 
 ---
 
-## 3. Options CLI du Démon (`scripts/portal_server.py`)
+## 3. Options CLI du Démon (`python3 -m pydbsrt.portal` / `scripts/portal_server.py`)
 
-Le script supporte à la fois le mode serveur HTTP daemonisé et l'exécution unitaire en ligne de commande pour scripts ou cron jobs :
+Le package `src/pydbsrt/portal/` (et son shim rétrocompatible `scripts/portal_server.py`) supporte à la fois le mode serveur HTTP daemonisé et l'exécution unitaire en ligne de commande pour scripts ou cron jobs :
 
 ```bash
 usage: portal_server.py [-h] [--port PORT] [--metadata] [--probe SOURCE PROFILE]
