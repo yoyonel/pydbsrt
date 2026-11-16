@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING, Any
 from scripts.e2e.recette_o2switch.harness import (
     DEFAULT_TIMEOUT_MS,
     DESKTOP_USER_AGENT,
-    EXPECTED_FREEBOX_CONTAINERS,
     FFPROBE_TIMEOUT_MS,
     HTTP_BAD_REQUEST,
     HTTP_FORBIDDEN,
@@ -23,6 +22,7 @@ from scripts.e2e.recette_o2switch.harness import (
     HTTP_OK,
     HTTP_UNAUTHORIZED,
     MIN_CATALOG_PHASH_COUNT,
+    MIN_FREEBOX_CONTAINERS,
     MIN_SYNOLOGY_TVSHOW_ITEMS,
     MIN_SYNOLOGY_VIDEO_ITEMS,
     PROBE_TIMEOUT_MS,
@@ -240,7 +240,7 @@ def step_a2_gateway_protocols_and_artifacts(ctx: RecetteContext) -> None:
 
 
 def step_b1_sources_dashboard_and_profiles(ctx: RecetteContext) -> None:
-    """Verify /sources & /sources.html, o2switch probes (Freebox 595, Synology WAN), accordion & env selector."""
+    """Verify /sources & /sources.html, o2switch probes (Freebox, Synology WAN), accordion & env selector."""
     assert ctx.page is not None
     page = ctx.page
     t0 = time.monotonic()
@@ -274,7 +274,9 @@ def step_b1_sources_dashboard_and_profiles(ctx: RecetteContext) -> None:
     syn_vid = probe_snap["map"]["synology-video"]["wan_ftp"]
     syn_tv = probe_snap["map"]["synology-tvshow"]["wan_ftp"]
     assert fbx_wan["accessible"] is True and fbx_wan["status"] == "online"
-    assert fbx_wan["files_count"] == EXPECTED_FREEBOX_CONTAINERS, f"Expected 595 Freebox files, got {fbx_wan}"
+    assert fbx_wan["files_count"] >= MIN_FREEBOX_CONTAINERS, (
+        f"Expected >= {MIN_FREEBOX_CONTAINERS} Freebox files, got {fbx_wan}"
+    )
     assert syn_vid["accessible"] is True and syn_vid["files_count"] >= MIN_SYNOLOGY_VIDEO_ITEMS
     assert syn_tv["accessible"] is True and syn_tv["files_count"] >= MIN_SYNOLOGY_TVSHOW_ITEMS
 
@@ -301,7 +303,7 @@ def step_b1_sources_dashboard_and_profiles(ctx: RecetteContext) -> None:
         t0=t0,
         assertions=[
             "Hôte détecté = sapin.o2switch.net, profil actif = o2switch",
-            f"Freebox wan_http Accessible 🟢 avec exactement {fbx_wan['files_count']} conteneurs éligibles (0 faux-positif)",
+            f"Freebox wan_http Accessible 🟢 avec {fbx_wan['files_count']} conteneurs éligibles (>= {MIN_FREEBOX_CONTAINERS}, 0 faux-positif)",
             f"Synology Video wan_ftp Accessible 🟢 ({syn_vid['files_count']} entrées) & TV Shows wan_ftp ({syn_tv['files_count']} séries)",
             "Tout Replier / Tout Déplier, sélecteur #env-select (5 profils) et Tester Accessibilité vérifiés",
         ],

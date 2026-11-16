@@ -29,15 +29,18 @@ async def test_search_phash_stream(conn, aio_insert_phash_into_db, phash_from_me
     ] == list(range(nb_frames_inserted))
 
 
+DETERMINISTIC_BIT_FLIP_SEED = 42
+
+
 @pytest.mark.asyncio
 async def test_search_phash_stream_with_one_bit_revert(conn, aio_insert_phash_into_db, phash_from_media: Path):
     binary_img_hash_file = phash_from_media
 
     # get the first phash frame
     int64_first_phash = next(gen_signed_int64_hash(binary_img_hash_file.open("rb")))
-    # revert one (random) bit of the bits array
+    # revert one deterministic bit of the bits array
     imghash_first_phash = signed_int64_to_imghash(int64_first_phash)
-    rand_row, rand_col = random.sample(range(0, 8), 2)
+    rand_row, rand_col = random.Random(DETERMINISTIC_BIT_FLIP_SEED).sample(range(0, 8), 2)
     imghash_first_phash.hash[rand_row, rand_col] = not imghash_first_phash.hash[rand_row, rand_col]
     int64_first_phash = imghash_to_signed_int64(imghash_first_phash)
     # search this new phash (with one reverse bit) with search distance to zero (exact matching)

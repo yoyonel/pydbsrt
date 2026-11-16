@@ -142,6 +142,20 @@ def test_stop_when_nothing_runs_still_sets_marker(remote: Remote) -> None:
     assert remote.marker.exists()
 
 
+WATCHDOG_POLL_TIMEOUT_SEC = 5.0
+WATCHDOG_POLL_INTERVAL_SEC = 0.05
+
+
+def _wait_for_pid_count(remote: Remote, expected: int) -> list[int]:
+    """Poll remote.pids() until the expected count is observed or the bounded timeout expires."""
+    deadline = time.monotonic() + WATCHDOG_POLL_TIMEOUT_SEC
+    pids = remote.pids()
+    while len(pids) != expected and time.monotonic() < deadline:
+        time.sleep(WATCHDOG_POLL_INTERVAL_SEC)
+        pids = remote.pids()
+    return pids
+
+
 @pytest.mark.parametrize(
     ("stopped", "running", "expected"),
     [(False, 0, 1), (False, 1, 1), (True, 0, 0)],
@@ -153,10 +167,9 @@ def test_watchdog(remote: Remote, stopped: bool, running: int, expected: int) ->
     before = [remote.spawn_foreign() for _ in range(running)]
 
     out = remote.ctl("watchdog")
-    time.sleep(0.5)
+    pids = _wait_for_pid_count(remote, expected)
 
     assert out.returncode == 0, out.stdout + out.stderr
-    pids = remote.pids()
     assert len(pids) == expected
     if running:
         assert pids == sorted(before)

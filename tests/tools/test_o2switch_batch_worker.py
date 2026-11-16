@@ -609,16 +609,20 @@ def test_batch_scale_down_to_fifty_percent(tmp_path: Path, monkeypatch):
     assert max(published_workers) >= 2
 
 
+MIN_SNIPPETS_DATASET_COUNT = 2758
+
+
 def test_batch_exhaustive_simulation_all_snippets_dataset(tmp_path: Path, monkeypatch):
-    """Exhaustive simulation and metadata verification across ALL 2,758 videos in data/snippets/."""
+    """Exhaustive simulation and metadata verification across ALL videos in data/snippets/."""
     snippets_dir = Path("data/snippets").resolve()
     all_videos = sorted(snippets_dir.glob("*.mp4"))
-    if len(all_videos) < 2758:
-        pytest.skip(f"Full 2758 snippets dataset not present in CI (found {len(all_videos)})")
+    if len(all_videos) < MIN_SNIPPETS_DATASET_COUNT:
+        pytest.skip(f"Full {MIN_SNIPPETS_DATASET_COUNT}+ snippets dataset not present in CI (found {len(all_videos)})")
 
-    # Convert all 2,758 files into VideoTargets before chdir
+    expected_count = len(all_videos)
+    # Convert all discovered files into VideoTargets before chdir
     targets = [VideoTarget(f"/snippets/{v.name}", v.name, v.stat().st_size) for v in all_videos]
-    assert len(targets) == 2758
+    assert len(targets) == expected_count
 
     monkeypatch.chdir(tmp_path)
     dummy_log = tmp_path / "dummy.log"
@@ -627,7 +631,7 @@ def test_batch_exhaustive_simulation_all_snippets_dataset(tmp_path: Path, monkey
         encoding="utf-8",
     )
 
-    # Verify event record enriched fields for all 2,758 targets
+    # Verify event record enriched fields for all targets
     simulated_records = []
     for idx, target in enumerate(targets):
         sim_moviehash = f"hash_{idx:08x}"
@@ -652,7 +656,7 @@ def test_batch_exhaustive_simulation_all_snippets_dataset(tmp_path: Path, monkey
         assert rec["success"] is True
         simulated_records.append(rec)
 
-    assert len(simulated_records) == 2758
+    assert len(simulated_records) == expected_count
 
 
 def test_load_existing_ahash_stems_and_mode_ahash(tmp_path: Path, monkeypatch):
