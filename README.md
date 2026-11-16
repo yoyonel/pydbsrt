@@ -76,7 +76,7 @@ Interface web bicanale (`http://127.0.0.1:8765/studio`) permettant de confronter
 - **Portail Web Multi-Environnements & Audit de Consensus Spatiotemporel (`task db:portal` / `:8780`)** :
   - **4 Vues Opérationnelles** : Sources Physiques (NAS/Freebox/Local), Actifs Médias (PostgreSQL 17), Microscopie pHash (sismographe, dynamique inter-trames, coupes d'entropie), et Trajectoires Spatiotemporelles (consensus multi-coupures).
   - **Audit de Consensus Spatiotemporel** : Exploration des rapports d'audit batch, KPIs bornés de couverture catalogue ($\le 100\%$), défilement horizontal natif, résolution des identifiants hash binaires et navigation modale bidirectionnelle fluide avec raccourcis clavier (`Échap`).
-  - **Recette E2E Automatisée** : Validation continue par Playwright (`task portal:e2e`).
+  - **Recette E2E Automatisée** : Validation continue par Playwright (`task sources:e2e` / `task portal:e2e`, suite complète `task sources:check`).
 - **Composante Acoustique aHash (Haitsma-Kalker) & Matching Sub-Seconde** :
   - Extraction d'empreintes spectro-temporelles à \(86.125\text{ fps}\) (\(5\,512.5\text{ Hz} / 64\), 33 sous-bandes d'énergie logarithmiques) via FFT réelle.
   - Format binaire standardisé `.ahash` v1.0 avec en-tête aligné 176 octets, nommage canonique OpenSubtitles `<moviehash_16hex>[.a<k>].86.1fps.ahash` et sidecar typé `<moviehash_16hex>[.a<k>].json` (`AhashSidecar` v1 : titre canonique, piste audio décodée et topologie multi-pistes du conteneur).
@@ -219,10 +219,10 @@ task doc:check
 ### 5. Démarrage du Portail Web d'Exploration & Audit
 ```bash
 # Lance le portail unifié multi-environnements sur http://127.0.0.1:8780
-task db:portal
+task db:portal   # alias : task sources:serve
 
-# Exécute la suite complète de recette E2E Playwright (tous rapports de trajectoires & onglets)
-task portal:e2e
+# Exécute la suite auto-portante E2E Playwright (tous rapports de trajectoires & onglets)
+task sources:e2e # alias : task portal:e2e (ou task sources:check pour pytest + >=80% cov + E2E + lint)
 ```
 
 ### 6. Sauvegarde Multi-Tiers Versionnée (`SHA-256`) & Éviction Locale
@@ -303,8 +303,9 @@ flowchart TD
 | `task catalog:verify` | Audit programmatique d'intégrité du catalogue (dbphash, couplings, PostgreSQL, phash) | `taskfiles/stack.yml` |
 | `task demo:vlc` | Démonstration interactive VLC avec extension VLSub bonifiée | `taskfiles/demo.yml` |
 | `task demo:studio` | Démarre l'interface web dbsrt Studio (`:8765/studio`) | `taskfiles/demo.yml` |
-| `task db:portal` | Démarre le portail web interactif (:8780) d'exploration et d'audit | `taskfiles/db.yml` |
-| `task portal:e2e` | Exécute la suite formelle de recette E2E Playwright du portail web | `Taskfile.yml` |
+| `task db:portal` | `[Python :8780]` Démarre le portail web interactif d'exploration et d'audit (`task sources:serve`) | `taskfiles/db.yml` |
+| `task sources:e2e` | `[Python :8780]` Exécute la suite auto-portante Playwright E2E du portail MediaSources (`task portal:e2e`) | `Taskfile.yml` |
+| `task sources:check` | `[Python :8780]` Validation complète (`pytest` + cov ≥ 80 % + E2E + `ruff` + `complexipy` + `pyright`) | `Taskfile.yml` |
 | `task lint` | Exécute l'ensemble des 9 linters polyglottes | `taskfiles/quality.yml` |
 | `task test:rs` | Exécute la suite complète de tests Rust | `taskfiles/quality.yml` |
 | `task ci:local` | Suite rapide de vérification pré-push (< 10 secondes) | `taskfiles/quality.yml` |

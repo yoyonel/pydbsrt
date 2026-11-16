@@ -76,7 +76,7 @@ Tester des accès réseau distants (FTP avec négociation TLS/credentials, ou pa
 sequenceDiagram
     autonumber
     actor User as Navigateur Web
-    participant Server as scripts/portal_server.py
+    participant Server as src/pydbsrt/portal/ (ou shim portal_server.py)
     participant Remote as NAS FTP / Gateway HTTP
 
     Note over User,Server: Étape 1 : Chargement Initial Instantané (< 1 ms)

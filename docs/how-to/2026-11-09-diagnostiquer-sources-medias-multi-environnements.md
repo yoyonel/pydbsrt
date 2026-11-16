@@ -113,7 +113,7 @@ Le portail multimédia intègre un gestionnaire d'état de navigation et un mote
 
 ## 🔍 Vérification en Ligne de Commande (Mode Headless)
 
-Il est possible de tester unitairement une sonde ou d'explorer les fichiers sans ouvrir de navigateur :
+Il est possible de tester unitairement une sonde ou d'explorer les fichiers sans ouvrir de navigateur (via `python3 -m pydbsrt.portal` ou la façade rétrocompatible `scripts/portal_server.py`) :
 
 ```bash
 # Tester le flux FTP WAN du NAS Synology
@@ -139,9 +139,12 @@ python3 scripts/portal_server.py --metadata
 Pour valider l'intégrité de l'ensemble des interactions (4 onglets, modales, zoom sismographe, touches Échap, retour trajectoire) et interdire toute erreur console JavaScript (`Alpine Expression Error`, `ReferenceError`, etc.) :
 
 ```bash
-# Validation locale complète (3 suites E2E)
-task portal:e2e
+# Validation locale auto-portante (boote :8780 si absent + 3 suites E2E)
+task sources:e2e   # alias : task portal:e2e
+
+# Suite complète #72 (pytest >= 80 % + E2E Playwright + ruff + complexipy + pyright)
+task sources:check
 
 # Validation directe sur le cloud o2switch
-uv run --with playwright python scripts/e2e_portal_exhaustive.py --url "https://2026-pydbsrt.fr/dbsrt/sources?token=<VOTRE_CLE_API>"
+uv run --with playwright python scripts/e2e/e2e_portal_exhaustive.py --url "https://2026-pydbsrt.fr/dbsrt/sources?token=<VOTRE_CLE_API>"
 ```

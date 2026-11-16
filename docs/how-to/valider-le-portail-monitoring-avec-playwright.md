@@ -35,16 +35,18 @@ task server:status
 
 La suite propose deux cibles déclaratives dans le Taskfile :
 
-### Cible 1 : Validation locale (Daemon dbsrt-server)
+### Cible 1 : Validation locale (Daemon Rust `dbsrt-server` sur `:8765`)
 
 ```bash
-task test:portal:e2e
+task test:portal:e2e   # alias : task server:e2e
 ```
+
+*(Note : pour le portail Python MediaSources sur `:8780`, utilisez `task sources:e2e` ou `task sources:check`.)*
 
 ### Cible 2 : Validation Cloud réelle (o2switch cPanel Gateway)
 
 ```bash
-task test:portal:e2e:cloud
+task test:portal:e2e:cloud   # alias : task server:e2e:cloud
 ```
 
 ### Cible 3 : Recette E2E Exhaustive 4 Portails en Production (`https://2026-pydbsrt.fr/dbsrt`)
